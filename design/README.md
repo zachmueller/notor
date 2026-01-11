@@ -1,0 +1,1 @@
+Creating this placeholder directory to begin thinking through the design of Notor. Symlinking this within my Obsidian vault to facilitate directly iterating on the design in one place during my normal day-to-day activities.
