@@ -3,8 +3,9 @@ The plan here is to articulate the full vision of what I want Notor to become (a
 ## Key components
 
 - [Chat panel](#Chat-panel)
-- [Agents](#Agents)
 - [Editor behavior](#Editor-behavior)
+- [Workflows](#Workflows)
+- [Agents](#Agents)
 - [Misc](#Misc)
 
 ## Chat panel
@@ -29,6 +30,12 @@ Chat settings:
 
 - Optional behavior (default to on) for Notor to open up notes it's editing in the Obsidian UI, like how Cline opens up files in the IDE it's modifying
 - 
+
+## Workflows
+
+- Allow users (via Obsidian plugin settings UI) to choose a Notor root directory within their vault that serves as the central place within which they can add things like workflows (under `{notor_dir}/workflows/`)
+- Within these workflow notes, somehow leverage frontmatter properties to help drive various things. Need to ponder more here on what could be useful, but simple examples would be dynamically loading the workflow based on some triggers detailed in the frontmatter.
+- Within the workflow notes themselves, allow users to use a `<include_notes>` XML tag that allows them to feed in the contents of any number of notes (or note sections) as the workflow gets injected into the context window. Need to contemplate whether it makes sense to load them directly into where the workflow's content gets pasted vs having the notes show up as "attached" files in the context window. Maybe that can be a parameter users can choose via some XML attributes.
 
 ## Agents
 
