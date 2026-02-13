@@ -1,13 +1,16 @@
 import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
 import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import {logger} from "./utils/logger";
 
-// Remember to rename these classes and interfaces!
+const log = logger("Main");
 
 export default class MyPlugin extends Plugin {
 	settings: MyPluginSettings;
 
 	async onload() {
+		log.info("Plugin loading", { version: this.manifest.version });
 		await this.loadSettings();
+		log.debug("Settings loaded", { settings: this.settings });
 
 		// This creates an icon in the left ribbon.
 		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
@@ -71,6 +74,7 @@ export default class MyPlugin extends Plugin {
 	}
 
 	onunload() {
+		log.info("Plugin unloading");
 	}
 
 	async loadSettings() {

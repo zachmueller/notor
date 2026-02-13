@@ -1,6 +1,12 @@
 import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from 'node:module';
+import { copyFileSync, mkdirSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const buildDir = resolve(__dirname, 'build');
 
 const banner =
 `/*
@@ -37,13 +43,31 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
-	outfile: "main.js",
+	outfile: "build/main.js",
 	minify: prod,
 });
 
+/**
+ * Copy manifest.json and styles.css into build/ so the build directory
+ * contains all artifacts Obsidian needs to load the plugin.
+ */
+function copyPluginAssets() {
+	mkdirSync(buildDir, { recursive: true });
+	copyFileSync(resolve(__dirname, 'manifest.json'), resolve(buildDir, 'manifest.json'));
+	try {
+		copyFileSync(resolve(__dirname, 'styles.css'), resolve(buildDir, 'styles.css'));
+	} catch {
+		// styles.css is optional
+	}
+	console.log('[build] Copied manifest.json and styles.css to build/');
+}
+
 if (prod) {
 	await context.rebuild();
+	copyPluginAssets();
 	process.exit(0);
 } else {
+	// In dev/watch mode, also copy assets once at startup
+	copyPluginAssets();
 	await context.watch();
 }

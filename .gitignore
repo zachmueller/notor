@@ -8,8 +8,9 @@
 # npm
 node_modules
 
-# Don't include the compiled main.js file in the repo.
+# Don't include build artifacts in the repo.
 # They should be uploaded to GitHub releases instead.
+build/
 main.js
 
 # Exclude sourcemaps
@@ -20,3 +21,10 @@ data.json
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
+
+# E2E testing artifacts
+e2e/results/
+e2e/test-vault/
+e2e/dist/
+test-results/
+playwright-report/
