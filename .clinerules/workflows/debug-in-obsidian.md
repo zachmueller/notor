@@ -1,14 +1,6 @@
 # Debug plugin in Obsidian
 
-This workflow builds the Notor plugin, launches it inside the real Obsidian app, captures structured logs via Playwright + CDP, and iteratively fixes any errors found.
-
-## Prerequisites
-
-Before running this workflow, ensure the test vault has been set up at least once:
-```bash
-npm run e2e:setup-vault
-```
-This creates `e2e/test-vault/` with the plugin symlinked to `build/`.
+This workflow builds the an Obsidian plugin, launches it inside the real Obsidian app, captures structured logs via Playwright + CDP, and iteratively fixes any errors found.
 
 ## Step 1: Build and capture logs
 
