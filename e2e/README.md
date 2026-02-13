@@ -62,6 +62,8 @@ log.info("Something happened", { key: "value" });
 
 Obsidian is an Electron app (Chromium-based). Launching it with `--remote-debugging-port=9222` exposes a Chrome DevTools Protocol endpoint that Playwright can connect to.
 
+**Vault isolation**: The launcher temporarily modifies Obsidian's global config (`obsidian.json`) so that *only* the test vault is marked as open. This prevents your personal/main vault from opening during E2E runs. The original config is backed up before launch and automatically restored after shutdown — even if the process crashes.
+
 ### 3. Playwright captures logs
 
 Playwright connects to the running Obsidian via `chromium.connectOverCDP()`, attaches to the page's console events, and filters for `[NOTOR_LOG]` entries. These are parsed and written to JSONL files.

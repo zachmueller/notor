@@ -13,13 +13,17 @@
  */
 
 import { execSync, spawn, type ChildProcess } from "node:child_process";
-import { platform } from "node:os";
+import { platform, homedir } from "node:os";
 import * as http from "node:http";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 export interface ObsidianProcess {
 	process: ChildProcess;
 	wsEndpoint: string;
 	cdpPort: number;
+	/** Path to the backup of obsidian.json (if vault config was modified) */
+	configBackupPath?: string;
 }
 
 export interface LaunchOptions {
@@ -115,6 +119,85 @@ async function waitForCDP(port: number, timeout: number): Promise<string> {
 }
 
 /**
+ * Resolve the path to Obsidian's global config file (obsidian.json).
+ * This file controls which vaults are open on launch.
+ */
+function getObsidianConfigPath(): string {
+	const os = platform();
+	switch (os) {
+		case "darwin":
+			return path.join(homedir(), "Library", "Application Support", "obsidian", "obsidian.json");
+		case "win32":
+			return path.join(process.env.APPDATA || path.join(homedir(), "AppData", "Roaming"), "obsidian", "obsidian.json");
+		case "linux":
+			return path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "obsidian", "obsidian.json");
+		default:
+			throw new Error(`Unsupported platform: ${os}`);
+	}
+}
+
+/**
+ * Modify Obsidian's global config so only the specified vault opens on launch.
+ * Backs up the original config and returns the backup path for later restoration.
+ */
+function setOpenVault(vaultPath: string): string | undefined {
+	const configPath = getObsidianConfigPath();
+	if (!fs.existsSync(configPath)) {
+		console.log("[launcher] obsidian.json not found — skipping vault config override");
+		return undefined;
+	}
+
+	const backupPath = configPath + ".e2e-backup";
+	const raw = fs.readFileSync(configPath, "utf8");
+	fs.writeFileSync(backupPath, raw);
+	console.log(`[launcher] Backed up obsidian.json → ${backupPath}`);
+
+	const config = JSON.parse(raw) as {
+		vaults: Record<string, { path: string; ts?: number; open?: boolean }>;
+		[key: string]: unknown;
+	};
+
+	const resolvedVaultPath = path.resolve(vaultPath);
+	let foundTestVault = false;
+
+	for (const [id, vault] of Object.entries(config.vaults)) {
+		if (path.resolve(vault.path) === resolvedVaultPath) {
+			// Mark the test vault as open
+			config.vaults[id] = { ...vault, open: true, ts: Date.now() };
+			foundTestVault = true;
+		} else {
+			// Close all other vaults
+			const { open, ...rest } = vault;
+			config.vaults[id] = rest;
+		}
+	}
+
+	// If the test vault isn't registered yet, add it
+	if (!foundTestVault) {
+		const id = Math.random().toString(16).slice(2, 18);
+		config.vaults[id] = { path: resolvedVaultPath, ts: Date.now(), open: true };
+		console.log(`[launcher] Registered test vault in obsidian.json (id: ${id})`);
+	}
+
+	fs.writeFileSync(configPath, JSON.stringify(config));
+	console.log(`[launcher] Set only vault "${resolvedVaultPath}" to open`);
+
+	return backupPath;
+}
+
+/**
+ * Restore the original obsidian.json from backup.
+ */
+function restoreObsidianConfig(backupPath: string): void {
+	const configPath = getObsidianConfigPath();
+	if (fs.existsSync(backupPath)) {
+		fs.copyFileSync(backupPath, configPath);
+		fs.unlinkSync(backupPath);
+		console.log("[launcher] Restored original obsidian.json");
+	}
+}
+
+/**
  * Launch Obsidian with remote debugging enabled and wait for CDP to be ready.
  */
 export async function launchObsidian(options: LaunchOptions): Promise<ObsidianProcess> {
@@ -122,9 +205,11 @@ export async function launchObsidian(options: LaunchOptions): Promise<ObsidianPr
 	const cdpPort = options.cdpPort ?? 9222;
 	const timeout = options.timeout ?? 30_000;
 
+	// Configure Obsidian to open only the test vault
+	const configBackupPath = setOpenVault(options.vaultPath);
+
 	const args = [
 		`--remote-debugging-port=${cdpPort}`,
-		`--vault=${options.vaultPath}`,  // Obsidian CLI flag to open specific vault
 		...(options.extraArgs ?? []),
 	];
 
@@ -166,6 +251,7 @@ export async function launchObsidian(options: LaunchOptions): Promise<ObsidianPr
 		process: child,
 		wsEndpoint,
 		cdpPort,
+		configBackupPath,
 	};
 }
 
@@ -173,7 +259,13 @@ export async function launchObsidian(options: LaunchOptions): Promise<ObsidianPr
  * Gracefully shut down an Obsidian process.
  */
 export async function closeObsidian(obsidian: ObsidianProcess): Promise<void> {
-	if (obsidian.process.killed) return;
+	if (obsidian.process.killed) {
+		// Still restore config even if process was already killed
+		if (obsidian.configBackupPath) {
+			restoreObsidianConfig(obsidian.configBackupPath);
+		}
+		return;
+	}
 
 	console.log("[launcher] Shutting down Obsidian...");
 
@@ -195,6 +287,11 @@ export async function closeObsidian(obsidian: ObsidianProcess): Promise<void> {
 			resolve();
 		});
 	});
+
+	// Restore the original vault config
+	if (obsidian.configBackupPath) {
+		restoreObsidianConfig(obsidian.configBackupPath);
+	}
 
 	console.log("[launcher] Obsidian shut down");
 }
