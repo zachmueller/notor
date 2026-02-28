@@ -13,11 +13,11 @@ Notor is an Obsidian community plugin that brings AI-powered assistance directly
 
 ## Document index
 
-| Document | Contents |
-|---|---|
-| [Roadmap](roadmap.md) | Phased implementation plan from foundation through advanced features |
-| [UX](ux.md) | Chat panel, editor behavior, diff preview, transparency, and UI patterns |
-| [Tools](tools.md) | Built-in tool definitions, shell access, and custom MCP tool extensibility |
+| Document                        | Contents                                                                           |
+| ------------------------------- | ---------------------------------------------------------------------------------- |
+| [Roadmap](roadmap.md)           | Phased implementation plan from foundation through advanced features               |
+| [UX](ux.md)                     | Chat panel, editor behavior, diff preview, transparency, and UI patterns           |
+| [Tools](tools.md)               | Built-in tool definitions, shell access, and custom MCP tool extensibility         |
 | [Architecture](architecture.md) | LLM providers, personas, workflows, agents, hooks, context management, checkpoints |
 
 ## Scope note

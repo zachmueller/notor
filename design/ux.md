@@ -112,10 +112,43 @@ Every tool call in the conversation is rendered inline with:
 
 ## System prompt
 
-- A built-in default system prompt ships with Notor, designed to shape core behaviors for note editing assistance.
-- Users have complete control to view, modify, or replace the system prompt via settings.
-- **Vault-level instruction files** (Phase 2): `.notor-rules.md` files placed in vault folders are automatically discovered and injected into context when operating on notes in that folder tree. Similar to Cline's `AGENTS.md` convention.
-- **Persona system prompts** (Phase 4): each persona carries its own system prompt that replaces or extends the default.
+### Global system prompt
+
+- A built-in default system prompt ships with Notor internally (in plugin code), designed to shape core behaviors for note editing assistance.
+- In **Settings → Notor**, a "Customize system prompt" action writes the default system prompt to `{notor_dir}/system-prompt.md`, where users can edit it directly in Obsidian's editor.
+- **Resolution order**: if `{notor_dir}/system-prompt.md` exists, the plugin uses its body content (stripping frontmatter if present) as the base system prompt. Otherwise, the internal default is used.
+- This file is a regular Markdown note — not hidden — so it appears in the file explorer and is fully editable like any vault note.
+
+### Vault-level instruction files (Phase 2)
+
+Centrally stored Markdown files under `{notor_dir}/rules/` that are conditionally injected into context based on frontmatter trigger properties.
+
+- **Location**: all rule files live under `{notor_dir}/rules/` (not scattered across vault folders).
+- **Trigger properties** (in each rule file's frontmatter):
+  | Property | Example | Behavior |
+  |---|---|---|
+  | `notor-always-include` | `true` | Always inject this file's content into context |
+  | `notor-directory-include` | `Research/` | Inject when any note in the context window has a path under the specified directory |
+  | `notor-tag-include` | `llm` | Inject when any note in the context window has the specified tag |
+- Multiple trigger properties can coexist on the same file (OR logic — any matching trigger causes inclusion).
+- Additional trigger types may be added over time.
+- The file body (after stripping frontmatter) is the instruction content injected into the system prompt / context.
+
+### Persona system prompts (Phase 4)
+
+- Each persona is defined by a `system-prompt.md` file under `{notor_dir}/personas/{persona_name}/`.
+- The file body (stripping frontmatter) is the persona's system prompt.
+- Frontmatter properties configure persona behavior:
+  ```yaml
+  ---
+  notor-skip-global-prompt: false   # If true, the global system prompt is NOT included; only this persona's prompt is used. Default: false (global prompt is prepended).
+  notor-preferred-provider: ""      # Optional: override default LLM provider
+  notor-preferred-model: ""         # Optional: override default model
+  ---
+  ```
+- When `notor-skip-global-prompt` is `false` (default), the global system prompt is included first, followed by the persona's system prompt.
+- Persona files are regular Markdown notes, fully editable in Obsidian's editor.
+- The persona directory may be expanded over time to hold additional configuration files (e.g., tool access rules).
 
 ---
 
@@ -123,10 +156,8 @@ Every tool call in the conversation is rendered inline with:
 
 Automatically included context with each message (no manual attachment required):
 
-- **Active note**: path and content of the currently open note in the editor
-- **Vault structure**: summary of folder/note hierarchy
-- **Current selection**: any text currently selected in the editor
-- **Recently opened notes**: list of recently accessed notes for recency context
+- **Open note paths**: file paths of all notes currently open in the Obsidian workspace (all leaf/tab views, including pinned tabs and split panes). Only paths are included — full note contents are NOT automatically injected.
+- **Vault structure**: top-level directory listing only (folder names at the vault root). Does NOT include individual file names in the root directory or recursive subdirectory contents, since many Obsidian users store most notes directly in the root.
 - Users can configure which auto-context sources are active.
 
 ---

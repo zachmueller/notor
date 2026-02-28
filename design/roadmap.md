@@ -17,7 +17,7 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **API key and endpoint management**: secure storage of credentials, per-provider configuration
 - **Model selection**: choose model variant within a given provider
 - **Basic chat panel UI**: side panel with message input, send button, streaming response display
-- **System prompt configuration**: editable default system prompt with custom override capability
+- **System prompt configuration**: built-in default system prompt, with "Customize system prompt" action that writes the default to `{notor_dir}/system-prompt.md` for user editing. Plugin uses the file if present, otherwise falls back to the internal default.
 - **Streaming responses**: token-by-token display as LLM generates output
 
 ## Phase 1 — Core note operations (MVP)
@@ -43,14 +43,14 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **Token and cost tracking**: display token consumption and estimated cost per message and per conversation
 - **Chat history logging**: persist full conversation history in JSONL format to a configurable location (within or outside the vault, but structured to not clutter the file explorer)
 - **Note metadata operations**: dedicated support for frontmatter read/write, tag management, alias operations — beyond raw text manipulation
-- **Vault-level instruction files**: `.notor-rules.md` (or similar convention) files in vault folders that automatically inject context to shape AI behavior for notes in that area of the vault
+- **Vault-level instruction files**: centrally stored Markdown files under `{notor_dir}/rules/` with frontmatter trigger properties (`notor-always-include`, `notor-directory-include`, `notor-tag-include`) that conditionally inject instruction content into context
 
 ## Phase 3 — Context & intelligence
 
 *Make the AI smarter about what's in the vault.*
 
 - **File/note attachment in chat**: file picker supporting vault notes (with `[[wikilink]]` auto-completion and section header references to attach partial content) and files outside the vault
-- **Auto-context injection**: automatically provide the active note's content/path, vault structure summary, recently opened notes, and current text selection with each message
+- **Auto-context injection**: automatically provide open note paths (all leaf/tab views) and top-level vault directory listing with each message (no full note contents or file listings auto-injected)
 - **Auto-compaction**: configurable, deterministic context window management — trigger summarization at the plugin level, pass summary as new conversation starting point
 - **Shell command execution**: cross-platform command execution tool with configurable restrictions in Plan vs Act mode
 - **Hooks — LLM interaction hooks**: hooks tied to the LLM chat lifecycle (e.g., after-completion, pre-send, on-tool-call) for automating follow-up actions
@@ -62,7 +62,7 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **Notor root directory**: user-configured directory within the vault (`{notor_dir}/`) serving as the central location for workflows, personas, and configuration
 - **Workflow notes**: workflow definitions stored as notes under `{notor_dir}/workflows/`, with frontmatter properties driving behavior (triggers, scheduling, conditions)
 - **`<include_notes>` tag**: within workflow notes, dynamically inject note contents (or note sections) into the context window, with control over inline vs attached presentation
-- **Basic persona system**: named bundles of (system prompt + model preference + auto-approve settings), selectable from the chat panel
+- **Basic persona system**: file-based personas stored under `{notor_dir}/personas/{persona_name}/system-prompt.md`, with frontmatter for config (model preference, skip-global-prompt flag), selectable from the chat panel
 - **Per-persona auto-approve overrides**: persona-level auto-approve settings that override global defaults when a persona is active
 - **Hooks — vault event hooks**: hooks tied to vault events (on-note-open, on-save, on-tag-change, on-schedule) for triggering workflows or LLM interactions
 

@@ -72,16 +72,34 @@ Message:
   4. The transition is visible in the chat UI (a "context compacted" marker).
 - The compaction trigger threshold is configurable (e.g., compact at 80% of context limit).
 
+### System prompt assembly
+
+Before sending each user message to the LLM, the plugin assembles the system prompt from multiple sources:
+
+1. **Global system prompt**: if `{notor_dir}/system-prompt.md` exists, use its body content (stripping frontmatter). Otherwise, use the built-in default system prompt from plugin code.
+2. **Persona system prompt** (Phase 4): if a persona is active, append (or replace, if `notor-skip-global-prompt: true`) the persona's `system-prompt.md` from `{notor_dir}/personas/{persona_name}/`.
+3. **Vault-level instruction files** (Phase 2): scan `{notor_dir}/rules/` and inject any rule files whose frontmatter triggers match current context conditions (see trigger properties below).
+
+#### Vault-level rule trigger evaluation (Phase 2)
+
+For each Markdown file under `{notor_dir}/rules/`, the plugin evaluates frontmatter trigger properties:
+
+| Property | Match condition |
+|---|---|
+| `notor-always-include: true` | Always included |
+| `notor-directory-include: <path>` | Included when any note in the context window has a path under the specified directory |
+| `notor-tag-include: <tag>` | Included when any note in the context window has the specified tag |
+
+- Multiple trigger properties on the same file use OR logic (any match causes inclusion).
+- The file body (after stripping frontmatter) is the injected instruction content.
+- Additional trigger types may be added over time.
+
 ### Auto-context injection (Phase 3)
 
-Before sending each user message to the LLM, the plugin automatically assembles context:
+In addition to the system prompt, the plugin automatically injects contextual information with each message:
 
-1. **System prompt**: base system prompt (default or custom).
-2. **Vault instruction files**: any `.notor-rules.md` files in the active note's folder ancestry (Phase 2).
-3. **Active note**: path and content of the currently focused note.
-4. **Vault structure**: abbreviated folder/file listing.
-5. **Current selection**: any text selected in the editor.
-6. **Recently opened notes**: list of recent note paths.
+1. **Open note paths**: file paths of all notes currently open in the Obsidian workspace (all leaf/tab views, including pinned tabs and split panes). Only paths are included — full note contents are NOT automatically injected.
+2. **Vault structure**: top-level directory listing only (folder names at the vault root). Does NOT include individual file names in the root directory or recursive subdirectory contents.
 
 Each source can be individually enabled/disabled in settings.
 
@@ -117,30 +135,34 @@ LLM Response → Parse tool calls → Tool Dispatcher → [Auto-approve check] �
 
 A persona is a named configuration bundle that shapes the AI's behavior.
 
-### Basic persona (Phase 4)
+### Storage and structure
 
-```
-Persona:
-  - name: string
-  - system_prompt: string (replaces or extends the default)
-  - preferred_provider: string (optional — override default provider)
-  - preferred_model: string (optional — override default model)
-  - auto_approve_overrides: Map<tool_name, boolean> (optional — override global auto-approve per tool)
-```
+- Each persona is a directory under `{notor_dir}/personas/{persona_name}/`.
+- The persona is defined by a `system-prompt.md` file in that directory:
+  - **Body content** (after stripping frontmatter) is the persona's system prompt.
+  - **Frontmatter properties** configure persona behavior:
+    ```yaml
+    ---
+    notor-skip-global-prompt: false   # If true, only this persona's prompt is used (global prompt excluded). Default: false.
+    notor-preferred-provider: ""      # Optional: override default LLM provider
+    notor-preferred-model: ""         # Optional: override default model
+    ---
+    ```
+- Persona files are regular Markdown notes, fully editable in Obsidian's editor.
+- The plugin discovers personas by scanning `{notor_dir}/personas/` for subdirectories containing `system-prompt.md`.
+
+### Behavior
 
 - Personas are selectable from the chat panel.
 - When a persona is active, its settings take precedence over global defaults.
 - Settings not explicitly defined on the persona fall back to global defaults.
+- When `notor-skip-global-prompt` is `false` (default), the global system prompt is included first, followed by the persona's system prompt.
 
 ### Extended persona (Phase 5)
 
 - **Tool access restrictions**: whitelist or blacklist specific tools for the persona.
 - **Vault scope**: restrict the persona to operate only within certain vault folders.
-
-### Storage
-
-- Personas are stored in plugin settings (accessible via **Settings → Notor**).
-- Future option: store persona definitions as notes in `{notor_dir}/personas/` for vault-portable configuration.
+- The persona directory may be expanded over time to hold additional configuration files (e.g., tool access rules, auto-approve overrides).
 
 ---
 
