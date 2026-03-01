@@ -158,6 +158,7 @@ Automatically included context with each message (no manual attachment required)
 
 - **Open note paths**: file paths of all notes currently open in the Obsidian workspace (all leaf/tab views, including pinned tabs and split panes). Only paths are included — full note contents are NOT automatically injected.
 - **Vault structure**: top-level directory listing only (folder names at the vault root). Does NOT include individual file names in the root directory or recursive subdirectory contents, since many Obsidian users store most notes directly in the root.
+- **Operating system**: the user's OS platform (macOS, Windows, Linux) so the LLM can generate platform-appropriate shell commands and tailor OS-specific guidance.
 - Users can configure which auto-context sources are active.
 
 ---

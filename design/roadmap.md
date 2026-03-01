@@ -80,6 +80,20 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 
 ---
 
+## Research tasks
+
+The following research items must be completed before their respective implementation phases can begin. Each item should produce findings documented in the `design/` directory.
+
+### Pre-Phase 1 (blocking MVP)
+
+- **Obsidian vault API and frontmatter handling**: investigate how Obsidian's vault API (`vault.create`, `vault.modify`, `vault.read`) handles file writes — specifically whether writes overwrite the entire file including frontmatter, or whether the API provides any frontmatter-aware methods. Determine the safest approach for `write_note` to avoid silently destroying frontmatter when the LLM hasn't read it. This directly affects the parameter design of `write_note` and `replace_in_note`. See [Tools — write_note](tools.md#write_note).
+
+### Pre-Phase 5 (blocking custom MCP tools)
+
+- **MCP server integration from Obsidian plugins**: research how an Obsidian plugin (running in Electron) can discover and communicate with locally-running MCP servers. Key areas: supported transport mechanisms (stdio, HTTP/SSE, WebSocket), spawning/managing local MCP server processes from within the plugin sandbox, Electron/Node.js API constraints, and existing community patterns or libraries for MCP in Electron apps. This determines the technical approach for the custom MCP tools settings UI and runtime. See [Tools — Custom MCP tools](tools.md#custom-mcp-tools-phase-5).
+
+---
+
 ## Dependency notes
 
 - Phase 1 depends on Phase 0 (needs LLM integration and chat UI to test tools).

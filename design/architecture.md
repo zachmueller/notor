@@ -100,6 +100,7 @@ In addition to the system prompt, the plugin automatically injects contextual in
 
 1. **Open note paths**: file paths of all notes currently open in the Obsidian workspace (all leaf/tab views, including pinned tabs and split panes). Only paths are included — full note contents are NOT automatically injected.
 2. **Vault structure**: top-level directory listing only (folder names at the vault root). Does NOT include individual file names in the root directory or recursive subdirectory contents.
+3. **Operating system**: the user's OS platform (macOS, Windows, Linux) so the LLM can generate platform-appropriate commands for `execute_command` and tailor any OS-specific guidance.
 
 Each source can be individually enabled/disabled in settings.
 

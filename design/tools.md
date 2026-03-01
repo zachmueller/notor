@@ -42,6 +42,10 @@ Create a new note or overwrite an existing note's entire content.
 - Triggers a checkpoint snapshot before writing (Phase 2).
 - **Mode**: write (Act only).
 
+> **⚠️ Research required: frontmatter handling**
+>
+> Obsidian notes are plain Markdown files where frontmatter is stored as YAML at the top of the file. Before specifying the final parameter interface for `write_note`, we need to research how Obsidian's vault API handles writes — specifically whether it overwrites the entire file (including frontmatter) or only the body content. The key risk: if the LLM has not read the frontmatter of an existing note (e.g., `include_frontmatter` was `false` on `read_note`), a full-file write could silently destroy existing frontmatter. This research must be completed before creating implementation specifications. See [Roadmap — Research tasks](roadmap.md#research-tasks).
+
 ### `replace_in_note`
 
 Make targeted edits within a note using SEARCH/REPLACE blocks. This is the primary tool for surgical note editing — modifying specific sections without rewriting the entire note.
@@ -82,9 +86,13 @@ List the folder and note structure of the vault or a subdirectory.
 |---|---|---|---|---|
 | `path` | string | no | vault root | Directory to list (relative to vault root) |
 | `recursive` | boolean | no | `false` | Whether to list contents recursively |
+| `limit` | number | no | `50` | Maximum number of items to return |
+| `offset` | number | no | `0` | Number of items to skip (for pagination) |
+| `sort_by` | string | no | `last_modified` | Sort order: `last_modified` (newest first) or `alphabetical` |
 
 - Returns a structured list of files and folders.
 - Indicates file type (note, image, attachment, etc.) and basic metadata (size, modified date).
+- Results are paginated to handle vaults where users keep large numbers of notes in a single directory (commonly the vault root). The response includes `total_count` so the caller knows how many items exist and can request additional pages via `offset`.
 - **Mode**: read-only (available in Plan and Act).
 
 ### `execute_command` (Phase 3)
@@ -99,6 +107,7 @@ Execute a shell command on the user's system.
 - Cross-platform compatible (must work on macOS, Windows, Linux).
 - Output (stdout + stderr) returned to the AI.
 - Configurable restrictions: users can block specific commands or patterns in Plan mode and/or Act mode.
+- **OS context**: the user's operating system (macOS, Windows, Linux) is injected into the auto-context so the LLM can generate platform-appropriate commands. See [Architecture — Auto-context injection](architecture.md#auto-context-injection-phase-3).
 - **Mode**: write (Act only by default, configurable).
 
 ---
@@ -157,15 +166,19 @@ Add or remove tags on a note (operating on frontmatter `tags` property).
 
 Beyond the built-in tools, Notor should support user-defined tools via the Model Context Protocol (MCP).
 
-### Open questions
+### Resolved decisions
 
-- **Execution model**: can some custom tools run directly within Obsidian (in-process), or must all custom tools be externally hosted MCP servers? Running in-process is simpler for users but has security and stability implications.
-- **Discovery and configuration**: how do users register custom MCP servers? Likely via Notor settings, pointing to a server URL or local process.
-- **Tool schema**: MCP defines a standard tool schema (name, description, input JSON schema). Custom tools should follow this convention so the AI can discover and use them the same way as built-in tools.
-- **Trust**: custom tools bypass the built-in safety guarantees. Need clear documentation and appropriate warnings.
+- **Execution model**: for now, all user-created tools are hosted externally as MCP servers. A future capability to enable user-created tools running directly within Obsidian (in-process) may be explored later, but is out of scope for the initial implementation.
+- **Discovery and configuration**: users register and configure custom MCP servers within the Obsidian Settings UI for the Notor plugin (e.g., server URL or local process command).
+- **Tool schema**: custom tools follow the standard MCP tool schema conventions (name, description, input JSON schema) so the AI can discover and use them the same way as built-in tools.
+- **Trust**: custom tools bypass the built-in safety guarantees. Clear documentation and appropriate warnings are required in the settings UI and in user-facing docs.
 
 ### Design direction
 
 - Built-in tools are implemented natively in the plugin (not as MCP servers).
 - Custom tools connect via MCP protocol to external servers.
 - The tool dispatch layer should be uniform — the AI sees both built-in and custom tools the same way, and auto-approve / Plan-Act restrictions apply equally.
+
+> **⚠️ Research required: MCP integration in Obsidian**
+>
+> We need to research the practical options for how an Obsidian plugin can discover and communicate with locally-running MCP servers. Key questions include: transport mechanisms (stdio, HTTP/SSE, WebSocket), how to spawn/manage local MCP server processes from within the Obsidian plugin sandbox, and any Electron/Node.js API constraints that affect connectivity. This research should be completed before creating implementation specifications for Phase 5. See [Roadmap — Research tasks](roadmap.md#research-tasks).
