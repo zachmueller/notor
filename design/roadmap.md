@@ -10,14 +10,15 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 
 - **Plugin architecture**: settings framework, lifecycle management, logging (partially complete)
 - **LLM provider integration**: abstraction layer supporting multiple providers
-  - AWS Bedrock (priority for initial development)
+  - Local LLM via OpenAI-compatible API (Ollama, LM Studio, etc.) — **default provider**. Expects the LLM is hosted by a separate application on the user's machine; Notor connects to it via HTTP API, not by hosting the model itself.
+  - AWS Bedrock
   - Anthropic API (direct)
   - OpenAI API (direct)
   - Provider-agnostic interface so additional providers can be added later
-- **API key and endpoint management**: secure storage of credentials, per-provider configuration
+- **Credential and secret management**: credentials stored via Obsidian's built-in secrets manager API (added in recent Obsidian releases), with per-provider configuration for API keys, endpoints, and regions
 - **Model selection**: choose model variant within a given provider
 - **Basic chat panel UI**: side panel with message input, send button, streaming response display
-- **System prompt configuration**: built-in default system prompt, with "Customize system prompt" action that writes the default to `{notor_dir}/system-prompt.md` for user editing. Plugin uses the file if present, otherwise falls back to the internal default.
+- **System prompt configuration**: built-in default system prompt, with "Customize system prompt" action that writes the default to `{notor_dir}/system-prompt.md` for user editing. Plugin uses the file if present, otherwise falls back to the internal default. The default system prompt should be purpose-built for note writing and knowledge management contexts.
 - **Streaming responses**: token-by-token display as LLM generates output
 
 ## Phase 1 — Core note operations (MVP)
@@ -60,7 +61,7 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 *Structured, reusable AI interactions.*
 
 - **Notor root directory**: user-configured directory within the vault (`{notor_dir}/`) serving as the central location for workflows, personas, and configuration
-- **Workflow notes**: workflow definitions stored as notes under `{notor_dir}/workflows/`, with frontmatter properties driving behavior (triggers, scheduling, conditions)
+- **Workflow notes**: workflow definitions stored as notes under `{notor_dir}/workflows/`, with frontmatter properties driving behavior (triggers, scheduling, conditions, persona assignment via `notor-workflow-persona`)
 - **`<include_notes>` tag**: within workflow notes, dynamically inject note contents (or note sections) into the context window, with control over inline vs attached presentation
 - **Basic persona system**: file-based personas stored under `{notor_dir}/personas/{persona_name}/system-prompt.md`, with frontmatter for config (model preference, skip-global-prompt flag), selectable from the chat panel
 - **Per-persona auto-approve overrides**: persona-level auto-approve settings that override global defaults when a persona is active
@@ -71,6 +72,7 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 *Power features for advanced users.*
 
 - **Multi-agent parallel execution**: multiple concurrent AI context windows, with UI to switch between active agent workstreams
+- **Agent monitor panel**: a dedicated Obsidian panel (separate from the main chat panel) providing an at-a-glance dashboard of all running agents — status, current task, progress. Clicking on an agent opens its conversation in the main Notor chat panel with full chat capabilities (stop, redirect, review history, etc.). Users can position the monitor panel alongside the chat panel for concurrent visibility.
 - **Background agents**: persistent agents operating within Obsidian on user-defined tasks (e.g., continuous research, finding connections between notes, monitoring for patterns)
 - **Extended persona capabilities**: per-persona tool access restrictions and vault scope limitations
 - **Browser capabilities**: web browsing for AI research, ideally integrated with Obsidian Web Viewer so browsing is visible in the editor
@@ -82,15 +84,21 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 
 ## Research tasks
 
-The following research items must be completed before their respective implementation phases can begin. Each item should produce findings documented in the `design/` directory.
+The following research items must be completed before their respective implementation phases can begin. Each item should produce findings documented under `design/research/`.
+
+### Pre-Phase 0 (blocking foundation)
+
+- **Obsidian secrets manager API**: deep dive into Obsidian's built-in secrets manager functionality (added in recent Obsidian releases). Determine the API surface — how plugins store, retrieve, and delete secrets; any per-platform behavior differences; limitations on secret size or format; and how this integrates with the plugin settings lifecycle. This directly affects how Notor manages LLM provider credentials (API keys, access tokens, endpoints). Output: `design/research/obsidian-secrets-manager.md`.
+
+- **System prompt design — learning from Cline**: review Cline's system prompt architecture and components (role definition, tool instructions, behavioral constraints, output formatting, context injection patterns). Analyze which patterns are transferable to a note writing and knowledge management context vs. a software development context. Identify what a well-crafted default system prompt for Notor should include (e.g., note editing conventions, vault-aware behaviors, Markdown formatting standards, safety guardrails). Output: `design/research/system-prompt-design.md`.
 
 ### Pre-Phase 1 (blocking MVP)
 
-- **Obsidian vault API and frontmatter handling**: investigate how Obsidian's vault API (`vault.create`, `vault.modify`, `vault.read`) handles file writes — specifically whether writes overwrite the entire file including frontmatter, or whether the API provides any frontmatter-aware methods. Determine the safest approach for `write_note` to avoid silently destroying frontmatter when the LLM hasn't read it. This directly affects the parameter design of `write_note` and `replace_in_note`. See [Tools — write_note](tools.md#write_note).
+- **Obsidian vault API and frontmatter handling**: investigate how Obsidian's vault API (`vault.create`, `vault.modify`, `vault.read`) handles file writes — specifically whether writes overwrite the entire file including frontmatter, or whether the API provides any frontmatter-aware methods. Determine the safest approach for `write_note` to avoid silently destroying frontmatter when the LLM hasn't read it. This directly affects the parameter design of `write_note` and `replace_in_note`. See [Tools — write_note](tools.md#write_note). Output: `design/research/obsidian-vault-api-frontmatter.md`.
 
 ### Pre-Phase 5 (blocking custom MCP tools)
 
-- **MCP server integration from Obsidian plugins**: research how an Obsidian plugin (running in Electron) can discover and communicate with locally-running MCP servers. Key areas: supported transport mechanisms (stdio, HTTP/SSE, WebSocket), spawning/managing local MCP server processes from within the plugin sandbox, Electron/Node.js API constraints, and existing community patterns or libraries for MCP in Electron apps. This determines the technical approach for the custom MCP tools settings UI and runtime. See [Tools — Custom MCP tools](tools.md#custom-mcp-tools-phase-5).
+- **MCP server integration from Obsidian plugins**: research how an Obsidian plugin (running in Electron) can discover and communicate with locally-running MCP servers. Key areas: supported transport mechanisms (stdio, HTTP/SSE, WebSocket), spawning/managing local MCP server processes from within the plugin sandbox, Electron/Node.js API constraints, and existing community patterns or libraries for MCP in Electron apps. This determines the technical approach for the custom MCP tools settings UI and runtime. See [Tools — Custom MCP tools](tools.md#custom-mcp-tools-phase-5). Output: `design/research/mcp-server-integration.md`.
 
 ---
 

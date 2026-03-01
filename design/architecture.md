@@ -22,16 +22,17 @@ LLMProvider interface:
 
 | Provider | Transport | Auth | Notes |
 |---|---|---|---|
-| **AWS Bedrock** | AWS SDK / HTTP | IAM credentials or access keys | Priority for initial development |
+| **Local LLM (OpenAI-compatible)** | HTTP API | None (or optional API key) | **Default provider.** Connects to locally-hosted LLMs via OpenAI-compatible API (Ollama, LM Studio, etc.). The LLM is hosted by a separate application on the user's machine; Notor connects via HTTP, not by hosting the model itself. Default endpoint: `http://localhost:11434/v1` (Ollama). |
+| **AWS Bedrock** | AWS SDK / HTTP | IAM credentials or access keys | Cloud provider |
 | **Anthropic** | HTTP API | API key | Direct Claude API access |
 | **OpenAI** | HTTP API | API key | GPT models + compatible endpoints |
 
-The interface should be extensible so additional providers (Azure OpenAI, Google Vertex, local models via Ollama/LM Studio, etc.) can be added later without changing the core chat system.
+The interface should be extensible so additional providers (Azure OpenAI, Google Vertex, etc.) can be added later without changing the core chat system.
 
 ### Configuration
 
 - Per-provider settings: endpoint URL (if customizable), authentication credentials, region (for Bedrock).
-- Credentials stored via Obsidian's plugin data storage (encrypted at rest by the OS).
+- **Credential storage**: credentials (API keys, access tokens) stored via **Obsidian's built-in secrets manager API** — not in plain-text plugin data. The secrets manager provides secure, OS-level encrypted storage. See [Roadmap — Research: Obsidian secrets manager API](roadmap.md#pre-phase-0-blocking-foundation) for the pre-implementation research task.
 - Model selection: each provider exposes available models. Users select the active model from the chat panel or settings.
 - Per-model cost configuration: optional token pricing (input/output per 1K tokens) for cost tracking.
 
@@ -177,10 +178,10 @@ Workflows are reusable, structured prompting sequences stored as notes in the va
 - **Frontmatter properties** drive workflow behavior:
   ```yaml
   ---
-  notor_workflow: true
-  trigger: manual           # manual | on-note-open | on-save | scheduled
-  schedule: "0 9 * * *"    # cron expression (if trigger is scheduled)
-  persona: "researcher"     # optional: use a specific persona
+  notor-workflow: true
+  notor-trigger: manual           # manual | on-note-open | on-save | scheduled
+  notor-schedule: "0 9 * * *"    # cron expression (if notor-trigger is scheduled)
+  notor-workflow-persona: "researcher"  # optional: automatically switch to this persona when running the workflow
   ---
   ```
 - **Body content** is the prompt template, which can include:
@@ -264,6 +265,15 @@ Custom-built checkpoint system for rollback safety.
 - Multiple AI conversations can run in parallel, each with its own context window.
 - The chat panel provides a tab or switcher to move between active agent workstreams.
 - Each agent's context is stored as a separate conversation file (building on the chat history persistence from Phase 2).
+
+### Agent monitor panel
+
+- A **dedicated Obsidian panel** (separate leaf view from the main Notor chat panel) providing an at-a-glance dashboard of all running agents.
+- Displays per-agent: status (running / paused / completed / errored), current task description, and progress indicators.
+- Users can position the monitor panel independently — e.g., alongside the chat panel for concurrent visibility.
+- **Clicking on an agent** in the monitor panel opens that agent's full conversation in the main Notor chat panel, with all standard chat capabilities (stop the agent, send messages to redirect, review history, etc.).
+- The monitor panel updates in real time as agents progress.
+- See [UX — Agent monitor panel](ux.md#agent-monitor-panel-phase-5) for UI details.
 
 ### Background agents
 

@@ -163,6 +163,65 @@ Automatically included context with each message (no manual attachment required)
 
 ---
 
+## Workflows (Phase 4)
+
+Workflows are reusable, structured AI interactions defined as notes in the vault. See [Architecture — Workflows](architecture.md#workflows-phase-4) for the data model and frontmatter schema.
+
+### Workflow execution
+
+- Workflows are triggered manually (from a command palette action, or a future UI affordance) or automatically via hooks (on-note-open, on-save, on-schedule, etc.).
+- When a workflow is triggered, its body content is assembled as the prompt — with any `<include_notes>` tags resolved to inject note contents — and sent to the LLM.
+- The workflow execution appears as a conversation in the main Notor chat panel, with full transparency (tool calls, results, streaming responses).
+
+### Automatic persona switching via `notor-workflow-persona`
+
+- Workflow notes support a `notor-workflow-persona` frontmatter property that specifies which persona to automatically activate when the workflow runs.
+- When present, the plugin switches to the named persona before executing the workflow prompt. This means the persona's system prompt, model preferences, and auto-approve settings all take effect for the duration of the workflow.
+- This is **optional** — if `notor-workflow-persona` is omitted, the workflow runs with whatever persona is currently active (or no persona / global defaults).
+- Use case: a "Daily review" workflow can specify `notor-workflow-persona: "organizer"` so that it always runs with the organizer persona's system prompt and model, regardless of which persona the user had selected in the chat panel.
+- After the workflow completes, the persona selection reverts to whatever was active before the workflow was triggered (the switch is scoped to the workflow execution, not persistent).
+
+### Workflow frontmatter properties
+
+All Notor-specific frontmatter properties use the `notor-` prefix to avoid conflicts with other plugins:
+
+| Property | Type | Required | Description |
+|---|---|---|---|
+| `notor-workflow` | boolean | yes | Must be `true` to identify the note as a workflow |
+| `notor-trigger` | string | yes | Trigger type: `manual`, `on-note-open`, `on-save`, `scheduled` |
+| `notor-schedule` | string | no | Cron expression (required if `notor-trigger` is `scheduled`) |
+| `notor-workflow-persona` | string | no | Persona name to automatically switch to when running this workflow |
+
+---
+
+## Agent monitor panel (Phase 5)
+
+A dedicated Obsidian panel (separate leaf view) for monitoring all running agents at a glance. This panel is distinct from the main Notor chat panel, allowing users to position them independently for concurrent visibility.
+
+### Layout
+
+- The monitor panel displays a **list of all active agents**, each as a card or row showing:
+  - **Agent name / task description**: brief label identifying what the agent is doing
+  - **Status badge**: running, paused, completed, errored
+  - **Progress indicator**: current activity or last action taken (e.g., "Reading Research/Topic A.md", "Waiting for approval")
+  - **Resource usage**: token count consumed, elapsed time
+- Agents are sorted by status (running first, then paused, then completed/errored).
+
+### Interaction
+
+- **Click an agent** to open its full conversation in the main Notor chat panel. This navigates the chat panel to that agent's context with all standard capabilities: view the conversation history, send messages, stop the agent, redirect its work, approve/reject tool calls, etc.
+- **Quick actions** available directly from the monitor panel (without opening the full conversation):
+  - **Pause / Resume**: temporarily halt an agent's execution
+  - **Stop**: terminate the agent
+- The monitor panel updates in real time as agents progress (new tool calls, status changes, completions).
+
+### Opening the monitor panel
+
+- Accessible via the Obsidian command palette (e.g., "Notor: Open agent monitor") and optionally from a button in the main chat panel header.
+- The panel is an Obsidian leaf view, so users can drag it to any position in the workspace (sidebar, bottom panel, split pane, etc.).
+
+---
+
 ## Notifications and feedback
 
 - Use Obsidian's native `Notice` system for transient feedback (e.g., "Note saved", "Checkpoint created").
