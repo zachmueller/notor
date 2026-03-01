@@ -23,7 +23,7 @@ LLMProvider interface:
 | Provider | Transport | Auth | Notes |
 |---|---|---|---|
 | **Local LLM (OpenAI-compatible)** | HTTP API | None (or optional API key) | **Default provider.** Connects to locally-hosted LLMs via OpenAI-compatible API (Ollama, LM Studio, etc.). The LLM is hosted by a separate application on the user's machine; Notor connects via HTTP, not by hosting the model itself. Default endpoint: `http://localhost:11434/v1` (Ollama). |
-| **AWS Bedrock** | AWS SDK / HTTP | IAM credentials or access keys | Cloud provider |
+| **AWS Bedrock** | AWS SDK / HTTP | AWS profile (SDK credential chain) | Cloud provider. Supports named profiles from `~/.aws/config` and `~/.aws/credentials`, including SSO sessions, assumed roles, and static IAM keys. |
 | **Anthropic** | HTTP API | API key | Direct Claude API access |
 | **OpenAI** | HTTP API | API key | GPT models + compatible endpoints |
 
@@ -31,7 +31,7 @@ The interface should be extensible so additional providers (Azure OpenAI, Google
 
 ### Configuration
 
-- Per-provider settings: endpoint URL (if customizable), authentication credentials, region (for Bedrock).
+- Per-provider settings: endpoint URL (if customizable), authentication credentials, region (for Bedrock), AWS profile name (for Bedrock — defaults to the `default` profile if not specified, following the same convention as the `aws` CLI).
 - **Credential storage**: credentials (API keys, access tokens) stored via **Obsidian's built-in secrets manager API** — not in plain-text plugin data. The secrets manager provides secure, OS-level encrypted storage. See [Roadmap — Research: Obsidian secrets manager API](roadmap.md#pre-phase-0-blocking-foundation) for the pre-implementation research task.
 - Model selection: each provider exposes available models. Users select the active model from the chat panel or settings.
 - Per-model cost configuration: optional token pricing (input/output per 1K tokens) for cost tracking.
@@ -81,6 +81,8 @@ Before sending each user message to the LLM, the plugin assembles the system pro
 2. **Persona system prompt** (Phase 4): if a persona is active, append (or replace, if `notor-skip-global-prompt: true`) the persona's `system-prompt.md` from `{notor_dir}/personas/{persona_name}/`.
 3. **Vault-level instruction files** (Phase 2): scan `{notor_dir}/rules/` and inject any rule files whose frontmatter triggers match current context conditions (see trigger properties below).
 
+Steps 1–3 each support `<include_notes>` tags (see below) to dynamically inject note contents. In system prompt and rule file contexts, only `mode="inline"` is supported (the `mode` attribute is ignored; content is always inlined directly into the prompt text).
+
 #### Vault-level rule trigger evaluation (Phase 2)
 
 For each Markdown file under `{notor_dir}/rules/`, the plugin evaluates frontmatter trigger properties:
@@ -94,6 +96,7 @@ For each Markdown file under `{notor_dir}/rules/`, the plugin evaluates frontmat
 - Multiple trigger properties on the same file use OR logic (any match causes inclusion).
 - The file body (after stripping frontmatter) is the injected instruction content.
 - Additional trigger types may be added over time.
+- Rule file bodies support `<include_notes>` tags to dynamically inject note contents (inline mode only — see system prompt assembly above).
 
 ### Auto-context injection (Phase 3)
 
@@ -162,7 +165,7 @@ A persona is a named configuration bundle that shapes the AI's behavior.
 
 ### Extended persona (Phase 5)
 
-- **Tool access restrictions**: whitelist or blacklist specific tools for the persona.
+- **Tool access restrictions**: approve-list or block-list specific tools for the persona.
 - **Vault scope**: restrict the persona to operate only within certain vault folders.
 - The persona directory may be expanded over time to hold additional configuration files (e.g., tool access rules, auto-approve overrides).
 
@@ -190,7 +193,7 @@ Workflows are reusable, structured prompting sequences stored as notes in the va
 
 ### `<include_notes>` tag
 
-Inject note contents into the workflow prompt at execution time:
+Inject note contents dynamically at execution time. Used in workflow note bodies, system prompts (global and persona), and vault-level rule files.
 
 ```markdown
 <include_notes path="Research/Topic A.md" section="Summary" mode="inline" />
@@ -202,6 +205,10 @@ Inject note contents into the workflow prompt at execution time:
 | `path` | yes | Vault path to the note (supports `[[wikilink]]` syntax) |
 | `section` | no | Specific section header to extract (omit for full note) |
 | `mode` | no | `inline` (paste content directly into prompt) or `attached` (include as a separate attached file in context). Default: `inline` |
+
+**Context-specific behavior:**
+- **Workflow notes**: both `inline` and `attached` modes are supported.
+- **System prompts** (global and persona) **and vault-level rule files**: only `inline` mode is supported. The `mode` attribute is ignored; content is always inlined directly into the prompt text.
 
 ---
 
@@ -252,7 +259,8 @@ Custom-built checkpoint system for rollback safety.
 
 ### Storage
 
-- Checkpoint data stored in plugin data (not in the vault as visible notes).
+- Checkpoint data stored in the plugin directory (`.obsidian/plugins/notor/checkpoints/` by default), not in the vault as visible notes.
+- The storage location is configurable via settings, but defaults to the plugin directory.
 - Retention policy: configurable max checkpoint age or count to prevent unbounded growth.
 - Implementation details (storage format, indexing, efficient diffing) to be specified in a dedicated spec.
 
@@ -301,8 +309,9 @@ Custom-built checkpoint system for rollback safety.
 
 ### Storage location
 
-- Defaults to `{notor_dir}/history/` within the vault (or a configurable path outside the vault).
-- If stored within the vault, the directory should be excluded from Obsidian's search and file explorer (via `.obsidian` configuration or a similar mechanism).
+- Defaults to `.obsidian/plugins/notor/history/` (inside the plugin directory).
+- Configurable via settings to any vault-relative path (e.g., `notor-history/`). The path is always relative to the vault root.
+- JSONL files are not recognized by Obsidian as notes, so they do not appear in the file explorer or search results regardless of storage location.
 
 ### Retention
 

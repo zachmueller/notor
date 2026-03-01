@@ -11,11 +11,11 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **Plugin architecture**: settings framework, lifecycle management, logging (partially complete)
 - **LLM provider integration**: abstraction layer supporting multiple providers
   - Local LLM via OpenAI-compatible API (Ollama, LM Studio, etc.) — **default provider**. Expects the LLM is hosted by a separate application on the user's machine; Notor connects to it via HTTP API, not by hosting the model itself.
-  - AWS Bedrock
+  - AWS Bedrock (with named AWS profile support for SSO, assumed roles, and credential chain resolution)
   - Anthropic API (direct)
   - OpenAI API (direct)
   - Provider-agnostic interface so additional providers can be added later
-- **Credential and secret management**: credentials stored via Obsidian's built-in secrets manager API (added in recent Obsidian releases), with per-provider configuration for API keys, endpoints, and regions
+- **Credential and secret management**: credentials stored via Obsidian's built-in secrets manager API (added in recent Obsidian releases), with per-provider configuration for API keys, endpoints, regions, and AWS profile names
 - **Model selection**: choose model variant within a given provider
 - **Basic chat panel UI**: side panel with message input, send button, streaming response display
 - **System prompt configuration**: built-in default system prompt, with "Customize system prompt" action that writes the default to `{notor_dir}/system-prompt.md` for user editing. Plugin uses the file if present, otherwise falls back to the internal default. The default system prompt should be purpose-built for note writing and knowledge management contexts.
@@ -40,9 +40,9 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 
 *Build user confidence before adding power features.*
 
-- **Checkpoints / rollback**: custom-built checkpoint system allowing users to snapshot and restore note state at any point during a conversation
+- **Checkpoints / rollback**: custom-built checkpoint system allowing users to snapshot and restore note state at any point during a conversation. Stored in the plugin directory (`.obsidian/plugins/notor/checkpoints/`) by default, with configurable storage location.
 - **Token and cost tracking**: display token consumption and estimated cost per message and per conversation
-- **Chat history logging**: persist full conversation history in JSONL format to a configurable location (within or outside the vault, but structured to not clutter the file explorer)
+- **Chat history logging**: persist full conversation history in JSONL format. Defaults to `.obsidian/plugins/notor/history/`, configurable to any vault-relative path. JSONL files are not recognized by Obsidian as notes, so they don't appear in the file explorer.
 - **Note metadata operations**: dedicated support for frontmatter read/write, tag management, alias operations — beyond raw text manipulation
 - **Vault-level instruction files**: centrally stored Markdown files under `{notor_dir}/rules/` with frontmatter trigger properties (`notor-always-include`, `notor-directory-include`, `notor-tag-include`) that conditionally inject instruction content into context
 
@@ -62,7 +62,7 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 
 - **Notor root directory**: user-configured directory within the vault (`{notor_dir}/`) serving as the central location for workflows, personas, and configuration
 - **Workflow notes**: workflow definitions stored as notes under `{notor_dir}/workflows/`, with frontmatter properties driving behavior (triggers, scheduling, conditions, persona assignment via `notor-workflow-persona`)
-- **`<include_notes>` tag**: within workflow notes, dynamically inject note contents (or note sections) into the context window, with control over inline vs attached presentation
+- **`<include_notes>` tag**: dynamically inject note contents (or note sections) into context. Supported in workflow notes (inline and attached modes), system prompts (global and persona), and vault-level rule files (inline mode only).
 - **Basic persona system**: file-based personas stored under `{notor_dir}/personas/{persona_name}/system-prompt.md`, with frontmatter for config (model preference, skip-global-prompt flag), selectable from the chat panel
 - **Per-persona auto-approve overrides**: persona-level auto-approve settings that override global defaults when a persona is active
 - **Hooks — vault event hooks**: hooks tied to vault events (on-note-open, on-save, on-tag-change, on-schedule) for triggering workflows or LLM interactions

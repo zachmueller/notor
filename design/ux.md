@@ -77,6 +77,7 @@ Available from the gear icon or inline typable syntax:
 ### Checkpoints (Phase 2)
 
 - Before applying any write operation, automatically snapshot the affected note(s).
+- Checkpoint data stored in the plugin directory (`.obsidian/plugins/notor/checkpoints/` by default). The storage location is configurable via settings.
 - Checkpoints are accessible from the chat panel — each conversation has a timeline of checkpoints.
 - Users can preview a checkpoint (see the note state at that point) and restore to it.
 - Custom-built mechanism (not git-dependent), details to be specified in a dedicated spec.
@@ -104,8 +105,9 @@ Every tool call in the conversation is rendered inline with:
 ### Chat history logging (Phase 2)
 
 - Full conversation history persisted in JSONL format.
-- Configurable storage location (defaults to `{notor_dir}/history/` or a path outside the vault).
-- Structured to not appear in Obsidian's file explorer (either stored outside the vault, or in a hidden/ignored location).
+- Defaults to `.obsidian/plugins/notor/history/` (inside the plugin directory).
+- Configurable via settings to any vault-relative path. The path is always relative to the vault root.
+- JSONL files are not recognized by Obsidian as notes, so they do not appear in the file explorer or search results regardless of storage location.
 - Configurable retention limits: cap by total size (MB) or age (days).
 
 ---
@@ -133,11 +135,13 @@ Centrally stored Markdown files under `{notor_dir}/rules/` that are conditionall
 - Multiple trigger properties can coexist on the same file (OR logic — any matching trigger causes inclusion).
 - Additional trigger types may be added over time.
 - The file body (after stripping frontmatter) is the instruction content injected into the system prompt / context.
+- Rule file bodies support `<include_notes>` tags for dynamically injecting note contents (inline mode only — see [Architecture — `<include_notes>` tag](architecture.md#include_notes-tag)).
 
 ### Persona system prompts (Phase 4)
 
 - Each persona is defined by a `system-prompt.md` file under `{notor_dir}/personas/{persona_name}/`.
 - The file body (stripping frontmatter) is the persona's system prompt.
+- Both global and persona system prompts support `<include_notes>` tags for dynamically injecting note contents (inline mode only — see [Architecture — `<include_notes>` tag](architecture.md#include_notes-tag)).
 - Frontmatter properties configure persona behavior:
   ```yaml
   ---
