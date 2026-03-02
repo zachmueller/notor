@@ -53,6 +53,7 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **File/note attachment in chat**: file picker supporting vault notes (with `[[wikilink]]` auto-completion and section header references to attach partial content) and files outside the vault
 - **Auto-context injection**: automatically provide open note paths (all leaf/tab views) and top-level vault directory listing with each message (no full note contents or file listings auto-injected)
 - **Auto-compaction**: configurable, deterministic context window management — trigger summarization at the plugin level, pass summary as new conversation starting point
+- **Web-to-Markdown fetching (`fetch_webpage`)**: built-in tool that fetches a webpage by URL and converts its HTML to Markdown using Turndown (bundled into the plugin) for token-efficient consumption in the LLM context window. Includes a user-configurable domain denylist for blocking untrusted sources. Returns converted Markdown content in the tool result (does not write to notes directly). Read-only tool, available in both Plan and Act modes.
 - **Shell command execution**: cross-platform command execution tool with configurable restrictions in Plan vs Act mode
 - **Hooks — LLM interaction hooks**: hooks tied to the LLM chat lifecycle (e.g., after-completion, pre-send, on-tool-call) for automating follow-up actions
 
@@ -77,7 +78,7 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **Extended persona capabilities**: per-persona tool access restrictions and vault scope limitations
 - **Browser capabilities**: web browsing for AI research, ideally integrated with Obsidian Web Viewer so browsing is visible in the editor
 - **External file access**: ability to read/attach files outside the vault
-- **Custom MCP tool support**: user-defined MCP tools beyond the built-in set (exploring both externally-run and Obsidian-native execution)
+- **Custom MCP tool support**: user-defined MCP tools beyond the built-in set (exploring both externally-run and Obsidian-native execution). Includes optional read/write classification per MCP tool for Plan/Act enforcement, and Plan/Act state signaling to MCP servers.
 - **Agent resource limits**: configurable caps on chat history retention (by size or age), concurrency limits for parallel agents
 
 ---
@@ -99,6 +100,8 @@ The following research items must be completed before their respective implement
 ### Pre-Phase 5 (blocking custom MCP tools)
 
 - **MCP server integration from Obsidian plugins**: research how an Obsidian plugin (running in Electron) can discover and communicate with locally-running MCP servers. Key areas: supported transport mechanisms (stdio, HTTP/SSE, WebSocket), spawning/managing local MCP server processes from within the plugin sandbox, Electron/Node.js API constraints, and existing community patterns or libraries for MCP in Electron apps. This determines the technical approach for the custom MCP tools settings UI and runtime. See [Tools — Custom MCP tools](tools.md#custom-mcp-tools-phase-5). Output: `design/research/mcp-server-integration.md`.
+
+- **Plan/Act state signaling mechanism for MCP tools**: research how to communicate Notor's current Plan/Act mode state to MCP tool servers so they can make cooperative decisions about write-type actions. Potential approaches include: passing mode as an extra parameter or metadata field in each tool invocation, providing it as part of MCP server initialization/configuration context, or defining a custom MCP protocol extension (e.g., a capability or queryable resource). The right approach may depend on MCP protocol conventions and what MCP server implementations can realistically consume. Findings should be incorporated into the MCP integration research output. See [Tools — MCP tool classification and Plan/Act awareness](tools.md#mcp-tool-classification-and-planact-awareness). Output: findings incorporated into `design/research/mcp-server-integration.md`.
 
 ---
 

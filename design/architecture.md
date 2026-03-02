@@ -124,15 +124,25 @@ LLM Response → Parse tool calls → Tool Dispatcher → [Auto-approve check] �
 
 1. Parse the LLM's response for tool call requests.
 2. Look up the tool in the registry (built-in + custom MCP tools).
-3. Check **Plan/Act mode**: if in Plan mode and the tool is classified as write, reject with an error message returned to the LLM.
-4. Check **auto-approve** settings (global → persona override): if auto-approved, execute immediately. If not, present the approval UI in the chat panel and wait for user response.
-5. Execute the tool and return the result to the LLM for the next response turn.
+3. Check **Plan/Act mode**: if in Plan mode and the tool is classified as write, reject with an error message returned to the LLM. This applies equally to built-in tools and custom MCP tools that have been classified as write in their configuration (see [Tools — MCP tool classification](tools.md#mcp-tool-classification-and-planact-awareness)).
+4. For MCP tool invocations, include the current Plan/Act mode state in the tool call so the MCP server can make its own decisions about write-type actions (see [Tools — Plan/Act state signaling](tools.md#mcp-tool-classification-and-planact-awareness)).
+5. Check **tool-specific restrictions**: for `fetch_webpage`, check the domain denylist before executing. For `execute_command`, check configured command restrictions.
+6. Check **auto-approve** settings (global → persona override): if auto-approved, execute immediately. If not, present the approval UI in the chat panel and wait for user response.
+7. Execute the tool and return the result to the LLM for the next response turn.
 
 ### Tool registry
 
 - Built-in tools are registered at plugin load time.
-- Custom MCP tools (Phase 5) are registered from configuration, with schema discovery via MCP protocol.
+- Custom MCP tools (Phase 5) are registered from configuration, with schema discovery via MCP protocol. Each MCP tool can optionally be classified as read-only or write for Plan/Act enforcement.
 - All tools share a uniform interface: `{ name, description, inputSchema, execute(params) → result }`.
+
+### Domain denylist (Phase 3)
+
+A user-configurable list of domains and sub-domains that the `fetch_webpage` tool is blocked from accessing. When the tool is invoked with a URL matching a denylisted domain, the request is rejected and an error is returned to the LLM indicating the domain is blocked by the user.
+
+- Configured in **Settings → Notor** (see [UX — Settings](ux.md)).
+- Matching is domain-based: denylisting `example.com` blocks all pages under `example.com` and its sub-domains (e.g., `sub.example.com`).
+- The denylist is intended for users to mark sources they consider untrustworthy. It is not a security mechanism — it is a user preference control.
 
 ---
 

@@ -226,6 +226,27 @@ A dedicated Obsidian panel (separate leaf view) for monitoring all running agent
 
 ---
 
+## Settings
+
+Plugin settings are managed in **Settings → Notor** within Obsidian's settings UI.
+
+### Domain denylist (Phase 3)
+
+A user-configurable list of domains and sub-domains that the `fetch_webpage` tool is blocked from accessing.
+
+- Users add or remove domains via a list editor in the settings UI.
+- Denylisting `example.com` blocks all pages under `example.com` and its sub-domains (e.g., `sub.example.com`).
+- When the LLM attempts to fetch a denylisted domain, the tool returns an error indicating the domain is blocked by the user.
+- This is a user preference control for marking sources they consider untrustworthy — not a security mechanism.
+
+### MCP tool classification (Phase 5)
+
+- When registering custom MCP tools, each tool can optionally be classified as read-only or write.
+- Write-classified MCP tools are blocked in Plan mode, consistent with built-in tool behavior.
+- See [Tools — MCP tool classification](tools.md#mcp-tool-classification-and-planact-awareness) for details.
+
+---
+
 ## Notifications and feedback
 
 - Use Obsidian's native `Notice` system for transient feedback (e.g., "Note saved", "Checkpoint created").

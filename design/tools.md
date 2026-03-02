@@ -95,6 +95,25 @@ List the folder and note structure of the vault or a subdirectory.
 - Results are paginated to handle vaults where users keep large numbers of notes in a single directory (commonly the vault root). The response includes `total_count` so the caller knows how many items exist and can request additional pages via `offset`.
 - **Mode**: read-only (available in Plan and Act).
 
+### `fetch_webpage` (Phase 3)
+
+Fetch a webpage and convert its HTML content to Markdown for efficient consumption in the LLM context window.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `url` | string | yes | — | URL of the webpage to fetch |
+
+- Fetches the page HTML via HTTP request, then converts to Markdown using [Turndown](https://github.com/mixmark-io/turndown) (bundled directly into the plugin).
+- Returns the converted Markdown content in the tool result. Does **not** write to a note — the user can direct the LLM to save the content to a note if desired.
+- No truncation or pagination of the returned content.
+- **Domain denylist**: users can configure a denylist of domains/sub-domains in **Settings → Notor**. Requests to denylisted domains return an error indicating the domain is blocked by the user. This allows users to mark sources they consider untrustworthy.
+- The initial implementation uses raw Turndown conversion. Content extraction quality (e.g., stripping navigation, ads, boilerplate via a readability library) may be improved in future iterations.
+- **Mode**: read-only (available in Plan and Act).
+
+> **Design note: Turndown bundling**
+>
+> Turndown (~14KB minified) is bundled directly into the Notor plugin as a JavaScript/TypeScript dependency. If future iterations require content extraction (e.g., Mozilla's Readability.js ~40KB), that can also be bundled without significant impact on plugin size.
+
 ### `execute_command` (Phase 3)
 
 Execute a shell command on the user's system.
@@ -158,6 +177,7 @@ Add or remove tags on a note (operating on frontmatter `tags` property).
 | `read_frontmatter` | read | ✓ | ✓ | 2 |
 | `update_frontmatter` | write | ✗ | ✓ | 2 |
 | `manage_tags` | write | ✗ | ✓ | 2 |
+| `fetch_webpage` | read | ✓ | ✓ | 3 |
 | `execute_command` | write | ✗ | ✓ | 3 |
 
 ---
@@ -178,6 +198,16 @@ Beyond the built-in tools, Notor should support user-defined tools via the Model
 - Built-in tools are implemented natively in the plugin (not as MCP servers).
 - Custom tools connect via MCP protocol to external servers.
 - The tool dispatch layer should be uniform — the AI sees both built-in and custom tools the same way, and auto-approve / Plan-Act restrictions apply equally.
+
+### MCP tool classification and Plan/Act awareness
+
+- **Read/write classification**: each custom MCP tool can optionally be classified as read-only or write in its Notor configuration. This classification is used to enforce Plan/Act restrictions the same way as built-in tools (write-classified MCP tools are blocked in Plan mode).
+- **Plan/Act state signaling**: beyond Notor's own enforcement of read/write restrictions, the current Plan/Act mode state should be communicated to MCP tool servers so they can make their own decisions about whether to take write-type actions. The trust model is cooperative — MCP servers are trusted to respect the signal, and Notor does not attempt to externally verify compliance. Users are responsible for understanding the behavior of their configured MCP tools.
+- The signal is a simple binary: `plan` or `act`. Additional context (auto-approve settings, active persona, etc.) is not included in the initial implementation.
+
+> **⚠️ Research required: Plan/Act state signaling mechanism for MCP tools**
+>
+> The specific mechanism for communicating Plan/Act state to MCP servers needs research and experimentation. Potential approaches include: passing the mode as an extra parameter or metadata field in each tool invocation, providing it as part of MCP server initialization/configuration context, or defining a custom MCP protocol extension (e.g., a capability or queryable resource). The right approach may depend on MCP protocol conventions and what MCP server implementations can realistically consume. This research should be conducted alongside the broader MCP integration research. See [Roadmap — Research tasks](roadmap.md#research-tasks). Output: findings incorporated into `design/research/mcp-server-integration.md`.
 
 > **⚠️ Research required: MCP integration in Obsidian**
 >
