@@ -3,7 +3,7 @@
 	"name": "Notor",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "AI-powered assistant for Obsidian.",
+	"description": "A transparent, extensible, autonomous-capable AI assistant for note taking and knowledge management",
 	"author": "Zach Mueller",
 	"authorUrl": "https://github.com/zachmueller",
 	"isDesktopOnly": false
