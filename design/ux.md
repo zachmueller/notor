@@ -35,7 +35,7 @@ Available from the gear icon or inline typable syntax:
 
 ### Plan vs Act mode
 
-- Toggle in the chat panel header.
+- Toggle located next to the send button in the chat input area.
 - **Plan mode**: AI can use read-only tools (`read_note`, `search_vault`, `list_vault`) but cannot use write tools (`write_note`, `replace_in_note`, shell commands). Enforced at the tool dispatch level.
 - **Act mode**: all tools available, subject to auto-approve settings.
 - The toggle state is visible and clearly labeled so the user always knows which mode is active.
@@ -117,8 +117,8 @@ Every tool call in the conversation is rendered inline with:
 ### Global system prompt
 
 - A built-in default system prompt ships with Notor internally (in plugin code), designed to shape core behaviors for note editing assistance.
-- In **Settings → Notor**, a "Customize system prompt" action writes the default system prompt to `{notor_dir}/system-prompt.md`, where users can edit it directly in Obsidian's editor.
-- **Resolution order**: if `{notor_dir}/system-prompt.md` exists, the plugin uses its body content (stripping frontmatter if present) as the base system prompt. Otherwise, the internal default is used.
+- In **Settings → Notor**, a "Customize system prompt" action writes the default system prompt to `{notor_dir}/prompts/core-system-prompt.md`, where users can edit it directly in Obsidian's editor.
+- **Resolution order**: if `{notor_dir}/prompts/core-system-prompt.md` exists, the plugin uses its body content (stripping frontmatter if present) as the base system prompt. Otherwise, the internal default is used.
 - This file is a regular Markdown note — not hidden — so it appears in the file explorer and is fully editable like any vault note.
 
 ### Vault-level instruction files (Phase 2)

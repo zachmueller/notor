@@ -34,7 +34,7 @@ This specification covers three roadmap phases that together form the MVP:
 - As a user, I want to see exactly what the AI is reading, searching, and modifying so that I always know what's happening in my vault.
 - As a user, I want to preview proposed changes as a diff before they're applied so that I can accept or reject each change.
 - As a cautious user, I want a Plan mode that restricts the AI to read-only operations so that I can explore ideas without risk of unintended edits.
-- As a user who trusts certain operations, I want to auto-approve specific tools so that I'm not prompted for every read operation.
+- As a user who trusts certain operations, I want to auto-approve specific tools so that I'm not prompted for every operation.
 
 ### Trust, safety & observability (Phase 2)
 
@@ -104,8 +104,8 @@ This specification covers three roadmap phases that together form the MVP:
 
 **Acceptance criteria:**
 - Notor ships with an internal default system prompt tailored for note writing and knowledge management assistance.
-- A "Customize system prompt" action in settings writes the default prompt to `{notor_dir}/system-prompt.md` for user editing.
-- If `{notor_dir}/system-prompt.md` exists, the plugin uses its body content (stripping any frontmatter) as the system prompt. Otherwise, the internal default is used.
+- A "Customize system prompt" action in settings writes the default prompt to `{notor_dir}/prompts/core-system-prompt.md` for user editing.
+- If `{notor_dir}/prompts/core-system-prompt.md` exists, the plugin uses its body content (stripping any frontmatter) as the system prompt. Otherwise, the internal default is used.
 - The system prompt file is a regular Markdown note visible in the vault's file explorer and editable like any other note.
 
 ### FR-7: `read_note` tool
@@ -190,7 +190,7 @@ This specification covers three roadmap phases that together form the MVP:
 **Description:** A mode toggle that restricts tool access — Plan mode allows read-only operations; Act mode allows all operations.
 
 **Acceptance criteria:**
-- A visible toggle in the chat panel header clearly displays the current mode.
+- A visible toggle located next to the send button in the chat input area clearly displays the current mode.
 - In Plan mode, the AI can use read-only tools (`read_note`, `search_vault`, `list_vault`, and later `read_frontmatter`) but write tools (`write_note`, `replace_in_note`, and later `update_frontmatter`, `manage_tags`) are blocked at the tool dispatch level.
 - In Act mode, all tools are available subject to auto-approve settings.
 - When a write tool is invoked in Plan mode, the tool dispatch returns an error message to the AI indicating the tool is unavailable in Plan mode.
@@ -272,6 +272,7 @@ This specification covers three roadmap phases that together form the MVP:
 **Acceptance criteria:**
 - Accepts a vault-relative path, an optional set of key-value pairs to add/update, and an optional list of keys to remove.
 - Modifies only the specified frontmatter properties; leaves all other frontmatter keys and the note body unchanged.
+- Uses Obsidian's vault API and metadata/frontmatter APIs to perform updates (not raw text manipulation).
 - Triggers a checkpoint snapshot before applying.
 - If the note has no frontmatter and `set` is provided, creates a frontmatter section.
 - Classified as write — available in Act mode only.
@@ -283,6 +284,7 @@ This specification covers three roadmap phases that together form the MVP:
 **Acceptance criteria:**
 - Accepts a vault-relative path, an optional list of tags to add, and an optional list of tags to remove.
 - Operates on the `tags` frontmatter property specifically.
+- Uses Obsidian's vault API and metadata/frontmatter APIs to perform tag updates (not raw text manipulation).
 - Does not duplicate tags that already exist when adding.
 - Gracefully handles removal of tags that don't exist (no error).
 - Triggers a checkpoint snapshot before applying.
