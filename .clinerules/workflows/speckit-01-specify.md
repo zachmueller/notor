@@ -18,22 +18,7 @@ Run this workflow with a feature description to:
 
 ## Workflow Steps
 
-### Step 1: Determine Feature Context
-
-Identify the type of feature work to determine branching and spec location strategy:
-
-**Ask user to classify the feature:**
-
-1. **Library feature** - Adding/modifying functionality in a shared library (`src/awsds/`, `src/gyara/`, `src/magicarp/`)
-2. **Script enhancement** - Improving utility scripts under `scripts/`
-3. **Workstream work** - Analysis, modeling, or research as part of a science workstream
-
-**Based on classification, determine:**
-- Branch naming pattern (see `.clinerules/workflows/git-branching.md`)
-- Spec location
-- Directory structure
-
-### Step 2: Generate Feature Name and Branch
+### Step 1: Generate Feature Name and Branch
 
 Create a concise feature name from the description:
 
@@ -41,48 +26,31 @@ Create a concise feature name from the description:
 - Preserve technical terms and acronyms (OAuth2, API, JWT, etc.)
 - Keep it descriptive but concise (2-4 words)
 - Use kebab-case format
+- Branch naming convention: `feature/{feature-name}` or `feat/{feature-name}`
+- If the user provides a branch name, use it; otherwise, generate one from the description
 
 **Examples:**
-- "I want to add user authentication" → "user-auth"
-- "Implement OAuth2 integration for the API" → "oauth2-api-integration"
-- "Create a dashboard for analytics" → "analytics-dashboard"
-- "Fix payment processing timeout bug" → "fix-payment-timeout"
+- "I want to add user authentication" → `feature/user-auth`
+- "Implement OAuth2 integration for the API" → `feature/oauth2-api-integration`
+- "Create a dashboard for analytics" → `feature/analytics-dashboard`
+- "Fix payment processing timeout bug" → `feature/fix-payment-timeout`
 
-### Step 3: Create Branch and Directory Structure
+### Step 2: Create Branch and Directory Structure
 
-Follow the branching strategy defined in `.clinerules/workflows/git-branching.md` to create your feature branch based on your feature type from Step 1:
+Create the feature branch and set up the spec directory:
 
-**Branch formats and spec locations:**
-- **Library features:** Branch `src/{library-name}/{feature-name}` → Specs in `specs/{library-name}/{feature-name}/`
-- **Script enhancements:** Branch `scripts/{subdirectory}/{feature-name}` → Specs in `scripts/{subdirectory}/specs/{feature-name}/`
-- **Workstream work:** Use existing workstream branch `sci/{workstream-id}` → Specs in `sci/{category}/{workstream-id}/specs/`
-- **MCP tool specs:** Branch `mcp/{mcp-server}/{function-name}/{feature-name}` → Specs in `specs/mcp/{mcp-server}/{function-name}/{feature-name}/`
-- **Cline workflow specs:** Branch `cline/workflows/{workflow-name}` → Specs in `specs/cline/workflows/{workflow-name}/`
-
-**See [git-branching.md](.clinerules/workflows/git-branching.md) for:**
-- Detailed branch creation commands
-- Branch naming conventions and examples
-- When to branch from `mainline` vs current branch
-- Trade-offs of mixing library changes with workstream contexts
-- Branch lifecycle and consolidation practices
-
-**After creating your branch, set up the spec directory:**
 ```bash
+# Create and switch to feature branch
+git checkout -b feature/{feature-name}
+
 # Create spec directory structure
-mkdir -p "{spec-dir}/checklists"
-touch "{spec-dir}/spec.md"
+mkdir -p "specs/{feature-name}/checklists"
+touch "specs/{feature-name}/spec.md"
 ```
 
-> **Spec Directory Reference**
-> 
-> Based on your feature context above, your spec directory (`{spec-dir}`) is:
-> - **Library features:** `specs/{library-name}/{feature-name}/`
-> - **Script enhancements:** `scripts/{subdirectory}/specs/{feature-name}/`
-> - **Workstream work:** `sci/{category}/{workstream-id}/specs/`
-> 
-> In subsequent steps, `{spec-dir}` refers to this location.
+All specifications live under `specs/{feature-name}/` in the repository root.
 
-### Step 4: Use Specification Template Structure
+### Step 3: Use Specification Template Structure
 
 Use the following template structure for consistent specification format:
 
@@ -154,7 +122,7 @@ Measurable, technology-agnostic outcomes:
 Explicitly excluded features or requirements for this iteration.
 ```
 
-### Step 5: Generate Specification Content
+### Step 4: Generate Specification Content
 
 Fill the template with concrete details derived from the feature description:
 
@@ -175,11 +143,11 @@ Fill the template with concrete details derived from the feature description:
 - Prioritize: scope > security/privacy > UX > technical details
 - Make informed guesses based on context and industry standards
 
-### Step 6: Specification Quality Validation
+### Step 5: Specification Quality Validation
 
 After writing the initial spec, validate against quality criteria:
 
-**Create Quality Checklist:** Generate `{spec-dir}/checklists/requirements.md`:
+**Create Quality Checklist:** Generate `specs/{feature-name}/checklists/requirements.md`:
 
 ```markdown
 # Specification Quality Checklist: [FEATURE NAME]
@@ -221,7 +189,7 @@ Items marked incomplete require spec updates before `clarify` or `plan` workflow
 3. Update spec to address issues (max 3 iterations)
 4. Handle `[NEEDS CLARIFICATION]` markers
 
-### Step 7: Handle Clarification Markers
+### Step 6: Handle Clarification Markers
 
 If `[NEEDS CLARIFICATION]` markers remain:
 
@@ -252,13 +220,13 @@ If `[NEEDS CLARIFICATION]` markers remain:
 5. Update spec by replacing markers with selected answers
 6. Re-run validation
 
-### Step 8: Finalize and Report
+### Step 7: Finalize and Report
 
 After validation passes:
 
 **Commit Changes:**
 
-Follow the commit standards defined in `.clinerules/git.md` to commit the created specification files. The commit should include all files in the `{spec-dir}` directory.
+Follow the commit standards defined in `.clinerules/git.md` to commit the created specification files. The commit should include all files in the `specs/{feature-name}/` directory.
 
 **Report completion with:**
 
@@ -298,29 +266,27 @@ Success criteria must be:
 
 ### Common Reasonable Defaults
 
-Don't ask about these - use industry standards:
+Don't ask about these — use sensible defaults:
 
-- Data retention: Standard practices for the domain
-- Performance targets: Standard web/mobile expectations
-- Error handling: User-friendly messages with fallbacks
-- Authentication: Session-based or OAuth2 for web apps
-- Integration patterns: RESTful APIs unless specified
+- Local-first operation; no network calls unless needed for LLM API requests
+- Obsidian API patterns (`this.addCommand`, `this.registerEvent`, etc.)
+- Settings persisted via `loadData()` / `saveData()`
+- User-facing text in sentence case per Obsidian style guide
+- Error handling: user-friendly notices with graceful fallbacks
+- Data retention: standard practices for the domain
 
 ## Dependencies
 
 - Git repository initialized
+- Node.js and npm installed
+- Obsidian development environment set up (see `AGENTS.md` for build and install instructions)
 
 ## Outputs
 
-- New feature branch (format depends on feature context - see Step 3)
-- Specification file: `{spec-dir}/spec.md`
-- Quality checklist: `{spec-dir}/checklists/requirements.md`
+- New feature branch: `feature/{feature-name}`
+- Specification file: `specs/{feature-name}/spec.md`
+- Quality checklist: `specs/{feature-name}/checklists/requirements.md`
 - Git commit with initial specification
-
-**Spec directory mapping:**
-- **Library features:** `specs/{library-name}/{feature-name}/`
-- **Script enhancements:** `scripts/{subdirectory}/specs/{feature-name}/`
-- **Workstream work:** `sci/{category}/{workstream-id}/specs/`
 
 ## Next Steps
 
