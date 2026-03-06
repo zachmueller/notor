@@ -1,7 +1,7 @@
 # Research: LLM Provider Model List APIs
 
 **Research Task:** R-4
-**Status:** Complete (2026-06-03)
+**Status:** Updated (2026-07-03) — Bedrock section revised to use inference profiles
 **Blocks:** Phase 0 (model selection — FR-3)
 **Plan:** [specs/01-mvp/plan.md](../../specs/01-mvp/plan.md)
 **Contract:** [specs/01-mvp/contracts/llm-provider.md](../../specs/01-mvp/contracts/llm-provider.md)
@@ -13,6 +13,8 @@
 All four supported providers (OpenAI, Anthropic, AWS Bedrock, local OpenAI-compatible) expose model list APIs. However, the metadata available per model varies significantly — none of the cloud APIs return context window size or pricing in their list endpoints. Notor must maintain a supplementary metadata table for context window and pricing information, keyed by model ID.
 
 Analysis of the Cline codebase (Section 5) confirms this is the **industry-standard approach**: Cline uses hardcoded static metadata tables for all direct API providers, user-provided settings for local models, and sane defaults (128k) for unknown models. No production AI tool dynamically fetches context window sizes from OpenAI, Anthropic, or Bedrock APIs — they all maintain static lookup tables.
+
+**Bedrock update (2026-07-03):** The original design used `ListFoundationModels` as the model discovery API for Bedrock. This has been superseded by `ListInferenceProfiles`. See Section 3 for the full updated analysis and the rationale for switching.
 
 ---
 
@@ -172,9 +174,239 @@ GET https://api.anthropic.com/v1/models
 
 ---
 
-## 3. AWS Bedrock
+## 3. AWS Bedrock — Inference Profiles (Updated 2026-07-03)
 
-### SDK Call
+> **Note:** The original design (2026-06-03) used `ListFoundationModels` for Bedrock model discovery. This section supersedes that approach. The `ListFoundationModels` analysis is preserved in [Section 3b](#3b-deprecated-listfoundationmodels-original-approach) for historical reference.
+
+### 3a. Recommended Approach: `ListInferenceProfiles`
+
+#### Why Inference Profiles Instead of Foundation Models
+
+AWS introduced **system-defined cross-region inference profiles** in mid-2024 and has progressively shifted toward them as the recommended model invocation mechanism. The key differences:
+
+| Aspect | `ListFoundationModels` | `ListInferenceProfiles` (SYSTEM_DEFINED) |
+|---|---|---|
+| **Model coverage** | Foundation models available in a single region | Cross-region profiles (newer models may only appear here) |
+| **Model IDs for invocation** | `anthropic.claude-sonnet-4-20250514-v1:0` | `us.anthropic.claude-sonnet-4-20250514-v1:0` |
+| **Resilience** | Single-region; fails if that region is degraded | Auto-routes across 2–5 regions |
+| **Latest models** | May lag; some new models added only to profiles | Includes newest Anthropic, Amazon Nova, Llama 4, etc. |
+| **Human-readable names** | `modelName` field present | `inferenceProfileName` field present |
+| **Descriptions** | None | `description` field (e.g., "Routes requests to ... in us-east-1 and us-west-2.") |
+| **IAM permission** | `bedrock:ListFoundationModels` | `bedrock:ListInferenceProfiles` |
+| **Non-text models** | Requires `byOutputModality=TEXT` filter | Requires client-side filtering |
+
+**Critical finding:** Several newer models (including `us.anthropic.claude-opus-4-6-v1`, `us.anthropic.claude-sonnet-4-6`, the Llama 4 series, and Amazon Nova Premier) appear **only** in `ListInferenceProfiles` and not reliably in `ListFoundationModels` for all regions. Using `ListFoundationModels` alone would cause Notor to show an incomplete or stale model list.
+
+The inference profile ID (e.g., `us.anthropic.claude-sonnet-4-20250514-v1:0`) is the value that should be passed as `modelId` to the Converse API — AWS now recommends using inference profile IDs over bare foundation model IDs for all standard invocations.
+
+#### SDK Call
+
+```typescript
+import { BedrockClient, ListInferenceProfilesCommand } from "@aws-sdk/client-bedrock";
+
+const client = new BedrockClient({ region: "us-east-1" });
+const response = await client.send(new ListInferenceProfilesCommand({
+  typeEquals: "SYSTEM_DEFINED",
+}));
+```
+
+#### HTTP Equivalent
+
+```
+GET /inference-profiles?typeEquals=SYSTEM_DEFINED
+```
+
+#### Authentication
+
+- **AWS SDK credential chain:** Named profile (`fromIni({ profile })`), environment variables, direct keys (`fromCredentials({ accessKeyId, secretAccessKey })`), or instance role.
+- **Required IAM permission:** `bedrock:ListInferenceProfiles`
+- This is a **read-only** permission — separate from `bedrock:InvokeModel`.
+- Note: if the existing IAM policy only grants `bedrock:ListFoundationModels`, it must be updated to also include `bedrock:ListInferenceProfiles`.
+
+#### Request — Query Parameters
+
+| Parameter | Type | Valid Values | Description |
+|---|---|---|---|
+| `typeEquals` | string | `SYSTEM_DEFINED`, `APPLICATION` | Filter by profile type. Use `SYSTEM_DEFINED` for AWS-managed cross-region profiles. |
+
+**Pagination:** `ListInferenceProfiles` is a paginated operation. Use `nextToken` / `maxResults` parameters to iterate if needed (in practice, all SYSTEM_DEFINED profiles for a region fit in a single page).
+
+#### Response Format
+
+```json
+{
+  "inferenceProfileSummaries": [
+    {
+      "inferenceProfileName": "US Claude Sonnet 4",
+      "description": "Routes requests to Claude Sonnet 4 in us-east-1, us-east-2 and us-west-2.",
+      "createdAt": "2025-05-14T00:00:00+00:00",
+      "updatedAt": "2025-05-28T00:00:00+00:00",
+      "inferenceProfileArn": "arn:aws:bedrock:us-east-1:639628476385:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0",
+      "models": [
+        {
+          "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0"
+        },
+        {
+          "modelArn": "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0"
+        },
+        {
+          "modelArn": "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0"
+        }
+      ],
+      "inferenceProfileId": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+      "status": "ACTIVE",
+      "type": "SYSTEM_DEFINED"
+    },
+    {
+      "inferenceProfileName": "Global Anthropic Claude Opus 4.6",
+      "description": "Routes requests to Anthropic Claude Opus 4.6 globally across all supported AWS Regions.",
+      "createdAt": "2026-02-03T19:06:46.193626+00:00",
+      "updatedAt": "2026-03-05T22:14:18.607230+00:00",
+      "inferenceProfileArn": "arn:aws:bedrock:us-east-1:639628476385:inference-profile/global.anthropic.claude-opus-4-6-v1",
+      "models": [
+        {
+          "modelArn": "arn:aws:bedrock:::foundation-model/anthropic.claude-opus-4-6-v1"
+        },
+        {
+          "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-opus-4-6-v1"
+        }
+      ],
+      "inferenceProfileId": "global.anthropic.claude-opus-4-6-v1",
+      "status": "ACTIVE",
+      "type": "SYSTEM_DEFINED"
+    }
+  ],
+  "nextToken": null
+}
+```
+
+#### Response Fields (per `InferenceProfileSummary`)
+
+| Field | Type | Description |
+|---|---|---|
+| `inferenceProfileId` | string | **Use this as `modelId` in Converse API calls.** E.g., `us.anthropic.claude-sonnet-4-20250514-v1:0` |
+| `inferenceProfileName` | string | Human-readable name (e.g., `"US Claude Sonnet 4"`) |
+| `description` | string | Routing description (e.g., `"Routes requests to ... in us-east-1 and us-west-2."`) |
+| `inferenceProfileArn` | string | Full ARN; can also be used as `modelId` |
+| `models` | object[] | List of underlying foundation model ARNs this profile routes to |
+| `models[].modelArn` | string | ARN of a constituent foundation model |
+| `status` | string | `"ACTIVE"` when ready to use |
+| `type` | string | `"SYSTEM_DEFINED"` (AWS-managed) or `"APPLICATION"` (user-created) |
+| `createdAt` | timestamp | ISO 8601 creation timestamp |
+| `updatedAt` | timestamp | ISO 8601 last-updated timestamp |
+
+#### Inference Profile ID Format and Geographic Prefixes
+
+System-defined inference profiles use a **geographic prefix** to indicate the routing region group:
+
+| Prefix | Region Group | Example |
+|---|---|---|
+| `us.` | US regions (us-east-1, us-east-2, us-west-2) | `us.anthropic.claude-sonnet-4-20250514-v1:0` |
+| `eu.` | EU regions (eu-west-1, eu-west-3, eu-central-1) | `eu.anthropic.claude-sonnet-4-20250514-v1:0` |
+| `apac.` | APAC regions (ap-southeast-1, ap-northeast-1, etc.) | `apac.anthropic.claude-3-5-sonnet-20240620-v1:0` |
+| `global.` | Global (routes across US + other regions) | `global.anthropic.claude-opus-4-6-v1` |
+
+**When querying from a given region**, the API returns profiles relevant to that region:
+- Querying `us-east-1` → returns `us.*` and `global.*` profiles (59 total as of 2026-07)
+- Querying `eu-west-1` → returns `eu.*` and `global.*` profiles (30 total as of 2026-07)
+- Querying `ap-southeast-1` → returns `apac.*` and `global.*` profiles (17 total as of 2026-07)
+
+**Practical implication:** When displaying models to the user, the `inferenceProfileId` (e.g., `us.anthropic.claude-sonnet-4-20250514-v1:0`) is the value passed directly to the Converse API as `modelId`. No transformation needed.
+
+#### Real Data Sample (us-east-1, July 2026)
+
+Subset of relevant chat-capable profiles returned from `us-east-1`:
+
+| `inferenceProfileId` | `inferenceProfileName` |
+|---|---|
+| `us.anthropic.claude-opus-4-6-v1` | US Anthropic Claude Opus 4.6 |
+| `global.anthropic.claude-opus-4-6-v1` | Global Anthropic Claude Opus 4.6 |
+| `us.anthropic.claude-sonnet-4-6` | US Anthropic Claude Sonnet 4.6 |
+| `global.anthropic.claude-sonnet-4-6` | Global Anthropic Claude Sonnet 4.6 |
+| `us.anthropic.claude-sonnet-4-5-20250929-v1:0` | US Anthropic Claude Sonnet 4.5 |
+| `global.anthropic.claude-sonnet-4-5-20250929-v1:0` | Global Claude Sonnet 4.5 |
+| `us.anthropic.claude-haiku-4-5-20251001-v1:0` | US Anthropic Claude Haiku 4.5 |
+| `global.anthropic.claude-haiku-4-5-20251001-v1:0` | Global Anthropic Claude Haiku 4.5 |
+| `us.anthropic.claude-sonnet-4-20250514-v1:0` | US Claude Sonnet 4 |
+| `global.anthropic.claude-sonnet-4-20250514-v1:0` | Global Claude Sonnet 4 |
+| `us.anthropic.claude-opus-4-20250514-v1:0` | US Claude Opus 4 |
+| `us.anthropic.claude-3-7-sonnet-20250219-v1:0` | US Anthropic Claude 3.7 Sonnet |
+| `us.anthropic.claude-3-5-sonnet-20241022-v2:0` | US Anthropic Claude 3.5 Sonnet v2 |
+| `us.anthropic.claude-3-5-haiku-20241022-v1:0` | US Anthropic Claude 3.5 Haiku |
+| `us.amazon.nova-premier-v1:0` | US Nova Premier |
+| `us.amazon.nova-pro-v1:0` | US Nova Pro |
+| `us.amazon.nova-lite-v1:0` | US Nova Lite |
+| `us.amazon.nova-micro-v1:0` | US Nova Micro |
+| `global.amazon.nova-2-lite-v1:0` | GLOBAL Amazon Nova 2 Lite |
+| `us.meta.llama4-maverick-17b-instruct-v1:0` | US Llama 4 Maverick 17B Instruct |
+| `us.meta.llama4-scout-17b-instruct-v1:0` | US Llama 4 Scout 17B Instruct |
+| `us.deepseek.r1-v1:0` | US DeepSeek-R1 |
+
+#### Client-Side Filtering for Chat Models
+
+`ListInferenceProfiles` returns all profile types including image generation and embedding models. Filter client-side by excluding known non-chat provider prefixes in the profile ID:
+
+```typescript
+const NON_CHAT_ID_PATTERNS = [
+  /stability\./,         // Stable Diffusion image models
+  /twelvelabs\./,        // Video/multimodal embedding models
+  /cohere\.embed/,       // Embedding-only models
+];
+
+function isChatProfile(profileId: string): boolean {
+  return !NON_CHAT_ID_PATTERNS.some(pattern => pattern.test(profileId));
+}
+```
+
+Alternatively, filter by inferring provider from the ID segment (everything between the geographic prefix and the version suffix):
+
+```typescript
+const CHAT_PROVIDERS = ["anthropic", "amazon.nova", "meta", "deepseek", "mistral", "writer"];
+```
+
+#### Errors
+
+| Error | HTTP Code | Description |
+|---|---|---|
+| `AccessDeniedException` | 403 | Missing `bedrock:ListInferenceProfiles` IAM permission |
+| `ThrottlingException` | 429 | Rate limit exceeded |
+| `ValidationException` | 400 | Invalid parameter (e.g., unknown `typeEquals` value) |
+| `InternalServerException` | 500 | AWS service error |
+
+#### IAM Permission Update Required
+
+The original design required only `bedrock:ListFoundationModels`. The updated implementation requires:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "bedrock:ListInferenceProfiles",
+    "bedrock:InvokeModelWithResponseStream"
+  ],
+  "Resource": "*"
+}
+```
+
+`bedrock:ListFoundationModels` is no longer needed and can be removed, though keeping it is harmless.
+
+#### Notable Characteristics
+
+- **Better model coverage** — newer models are added to inference profiles first or exclusively.
+- **Built-in cross-region resilience** — automatic failover across 2–5 underlying regions.
+- **Human-readable names and descriptions** provided in the response.
+- **Profile IDs are the correct `modelId` for Converse API** — no mapping or transformation step needed.
+- **No context window size** in response (same limitation as `ListFoundationModels`).
+- **No pricing information** in response.
+- **Paginated** but in practice all SYSTEM_DEFINED profiles fit on one page.
+
+---
+
+### 3b. Deprecated: `ListFoundationModels` (Original Approach)
+
+> **Status:** Superseded by `ListInferenceProfiles`. Preserved here for historical reference.
+
+The original implementation used:
 
 ```typescript
 import { BedrockClient, ListFoundationModelsCommand } from "@aws-sdk/client-bedrock";
@@ -182,115 +414,19 @@ import { BedrockClient, ListFoundationModelsCommand } from "@aws-sdk/client-bedr
 const client = new BedrockClient({ region: "us-east-1" });
 const response = await client.send(new ListFoundationModelsCommand({
   byOutputModality: "TEXT",
-  byInferenceType: "ON_DEMAND"
+  byInferenceType: "ON_DEMAND",
 }));
 ```
 
-### HTTP Equivalent
+**Why this was replaced:**
 
-```
-GET /foundation-models?byOutputModality=TEXT&byInferenceType=ON_DEMAND
-```
+1. **Incomplete model list.** Newer models (Claude Sonnet 4.6, Opus 4.6, Llama 4, Nova Premier, DeepSeek R1) appear in inference profiles only, or appear in `ListFoundationModels` with different/bare IDs that differ from what inference profiles expose. A user selecting from `ListFoundationModels` may end up passing a bare model ID (e.g., `anthropic.claude-opus-4-6-v1`) that works but bypasses cross-region routing.
 
-### Authentication
+2. **Wrong model IDs for invocation.** AWS now recommends using inference profile IDs (e.g., `us.anthropic.claude-sonnet-4-20250514-v1:0`) rather than bare foundation model IDs in Converse API calls. Listing foundation models returns the bare IDs, requiring a separate mapping step to get the inference profile equivalent.
 
-- **AWS SDK credential chain:** Named profile (`fromIni({ profile })`), environment variables, direct keys (`fromCredentials({ accessKeyId, secretAccessKey })`), or instance role.
-- **Required IAM permission:** `bedrock:ListFoundationModels`
-- This is a **read-only** permission — separate from `bedrock:InvokeModel` which is needed to actually use models.
+3. **No cross-region benefit.** Foundation model IDs route to a single region. Inference profile IDs route to the nearest available region across 2–5 options, improving availability.
 
-### Request — URI Filter Parameters
-
-| Parameter | Type | Valid Values | Description |
-|---|---|---|---|
-| `byCustomizationType` | string | `FINE_TUNING`, `CONTINUED_PRE_TRAINING`, `DISTILLATION` | Filter by customization support |
-| `byInferenceType` | string | `ON_DEMAND`, `PROVISIONED` | Filter by inference type |
-| `byOutputModality` | string | `TEXT`, `IMAGE`, `EMBEDDING` | Filter by output type |
-| `byProvider` | string | Pattern: `[A-Za-z0-9- ]{1,63}` | Filter by model provider (e.g., `"Anthropic"`, `"Amazon"`, `"Meta"`) |
-
-### Response Format
-
-```json
-{
-  "modelSummaries": [
-    {
-      "modelId": "anthropic.claude-sonnet-4-20250514-v1:0",
-      "modelName": "Claude Sonnet 4",
-      "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0",
-      "providerName": "Anthropic",
-      "inputModalities": ["TEXT", "IMAGE"],
-      "outputModalities": ["TEXT"],
-      "responseStreamingSupported": true,
-      "customizationsSupported": [],
-      "inferenceTypesSupported": ["ON_DEMAND"],
-      "modelLifecycle": {
-        "status": "ACTIVE"
-      }
-    },
-    {
-      "modelId": "amazon.nova-pro-v1:0",
-      "modelName": "Amazon Nova Pro",
-      "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
-      "providerName": "Amazon",
-      "inputModalities": ["TEXT", "IMAGE"],
-      "outputModalities": ["TEXT"],
-      "responseStreamingSupported": true,
-      "customizationsSupported": ["FINE_TUNING"],
-      "inferenceTypesSupported": ["ON_DEMAND"],
-      "modelLifecycle": {
-        "status": "ACTIVE"
-      }
-    }
-  ]
-}
-```
-
-### Response Fields (per `FoundationModelSummary`)
-
-| Field | Type | Description |
-|---|---|---|
-| `modelId` | string | Model identifier for API calls (e.g., `anthropic.claude-sonnet-4-20250514-v1:0`) |
-| `modelName` | string | Human-readable model name (e.g., `"Claude Sonnet 4"`) |
-| `modelArn` | string | ARN for IAM policy references |
-| `providerName` | string | Model provider name (e.g., `"Anthropic"`, `"Amazon"`, `"Meta"`) |
-| `inputModalities` | string[] | Supported input types: `TEXT`, `IMAGE` |
-| `outputModalities` | string[] | Supported output types: `TEXT`, `IMAGE`, `EMBEDDING` |
-| `responseStreamingSupported` | boolean | Whether the model supports streaming responses |
-| `customizationsSupported` | string[] | Supported customization types |
-| `inferenceTypesSupported` | string[] | `ON_DEMAND`, `PROVISIONED` |
-| `modelLifecycle.status` | string | Lifecycle status: `ACTIVE`, `LEGACY` |
-
-### Errors
-
-| Error | HTTP Code | Description |
-|---|---|---|
-| `AccessDeniedException` | 403 | Missing IAM permissions |
-| `ThrottlingException` | 429 | Rate limit exceeded |
-| `ValidationException` | 400 | Invalid filter parameters |
-| `InternalServerException` | 500 | AWS service error |
-
-### Region Dependency
-
-- **Model availability varies by AWS region.** The list is region-specific.
-- The query is made against the region configured on the Bedrock client.
-- For Notor, we query the user's configured region. If the user wants models from multiple regions, they would need to configure separate provider entries.
-
-### Model Access vs. Model Availability
-
-- **`ListFoundationModels` returns all foundation models available in the region**, including models the user has NOT explicitly enabled/subscribed to.
-- To check which models the user has actually enabled, a separate `ListModelAccess` or similar call would be needed. However, for the dropdown this distinction is less critical — if the user selects a model they haven't enabled, the `InvokeModel` call will fail with a clear error, which we can surface.
-
-### Cross-Region Inference
-
-- Cross-region inference profiles use different model IDs (inference profile ARNs).
-- For MVP, we do not need to handle cross-region inference — users should configure the region where their models are accessible.
-
-### Notable Characteristics
-
-- **Richest metadata** of all providers: model name, provider, modalities, streaming support, lifecycle status.
-- **Server-side filtering** by output modality and provider — can filter to `TEXT` output models only.
-- **No context window size** in response.
-- **No pricing information** in response.
-- **`modelLifecycle.status`** allows filtering out `LEGACY` models.
+The original `ListFoundationModels` response format and fields are documented in the June 2026 version of this file in git history.
 
 ---
 
@@ -629,14 +765,23 @@ interface ModelInfo {
 
 **Field mapping by provider:**
 
-| ModelInfo Field | OpenAI | Anthropic | Bedrock | Local |
+| ModelInfo Field | OpenAI | Anthropic | Bedrock (Inference Profiles) | Local |
 |---|---|---|---|---|
-| `id` | `data[].id` | `data[].id` | `modelSummaries[].modelId` | `data[].id` |
-| `display_name` | `data[].id` (no display name) | `data[].display_name` | `modelSummaries[].modelName` | `data[].id` (no display name) |
+| `id` | `data[].id` | `data[].id` | `inferenceProfileSummaries[].inferenceProfileId` | `data[].id` |
+| `display_name` | `data[].id` (no display name) | `data[].display_name` | `inferenceProfileSummaries[].inferenceProfileName` | `data[].id` (no display name) |
 | `context_window` | ❌ Not available | ❌ Not available | ❌ Not available | ❌ Not available |
 | `input_price_per_1k` | ❌ Not available | ❌ Not available | ❌ Not available | N/A (free) |
 | `output_price_per_1k` | ❌ Not available | ❌ Not available | ❌ Not available | N/A (free) |
-| `provider` | `"openai"` (hardcoded) | `"anthropic"` (hardcoded) | `modelSummaries[].providerName` | `"local"` (hardcoded) |
+| `provider` | `"openai"` (hardcoded) | `"anthropic"` (hardcoded) | derived from `inferenceProfileId` prefix | `"local"` (hardcoded) |
+
+**Deriving `provider` from a Bedrock inference profile ID:**
+
+The `inferenceProfileId` encodes both the geographic scope and the provider in its structure: `{geo}.{provider}.{model-name}-{version}`. For example:
+- `us.anthropic.claude-sonnet-4-20250514-v1:0` → provider `"Anthropic"`
+- `us.amazon.nova-pro-v1:0` → provider `"Amazon"`
+- `us.meta.llama4-maverick-17b-instruct-v1:0` → provider `"Meta"`
+
+Extract the provider segment by splitting on `.` and capitalizing the second element.
 
 ### 6b. Supplementary Metadata Table
 
@@ -653,19 +798,29 @@ const MODEL_METADATA: Record<string, { context_window?: number; input_price_per_
 
   // Anthropic
   "claude-opus-4-6": { context_window: 200000, input_price_per_1k: 0.015, output_price_per_1k: 0.075 },
-  "claude-sonnet-4-5-20250514": { context_window: 200000, input_price_per_1k: 0.003, output_price_per_1k: 0.015 },
+  "claude-sonnet-4-6": { context_window: 200000, input_price_per_1k: 0.003, output_price_per_1k: 0.015 },
+  "claude-sonnet-4-5-20250929": { context_window: 200000, input_price_per_1k: 0.003, output_price_per_1k: 0.015 },
   "claude-sonnet-4-20250514": { context_window: 200000, input_price_per_1k: 0.003, output_price_per_1k: 0.015 },
-  "claude-haiku-3-5-20241022": { context_window: 200000, input_price_per_1k: 0.0008, output_price_per_1k: 0.004 },
+  "claude-haiku-4-5-20251001": { context_window: 200000, input_price_per_1k: 0.0008, output_price_per_1k: 0.004 },
 
-  // Bedrock (Anthropic models have different IDs on Bedrock)
-  "anthropic.claude-sonnet-4-20250514-v1:0": { context_window: 200000, input_price_per_1k: 0.003, output_price_per_1k: 0.015 },
-  "amazon.nova-pro-v1:0": { context_window: 300000, input_price_per_1k: 0.0008, output_price_per_1k: 0.0032 },
+  // Bedrock — inference profile IDs (geographic prefix + bare model ID)
+  // US profiles
+  "us.anthropic.claude-opus-4-6-v1": { context_window: 200000, input_price_per_1k: 0.015, output_price_per_1k: 0.075 },
+  "us.anthropic.claude-sonnet-4-6": { context_window: 200000, input_price_per_1k: 0.003, output_price_per_1k: 0.015 },
+  "us.anthropic.claude-sonnet-4-5-20250929-v1:0": { context_window: 200000, input_price_per_1k: 0.003, output_price_per_1k: 0.015 },
+  "us.anthropic.claude-sonnet-4-20250514-v1:0": { context_window: 200000, input_price_per_1k: 0.003, output_price_per_1k: 0.015 },
+  "us.anthropic.claude-haiku-4-5-20251001-v1:0": { context_window: 200000, input_price_per_1k: 0.0008, output_price_per_1k: 0.004 },
+  "us.amazon.nova-premier-v1:0": { context_window: 1000000, input_price_per_1k: 0.0025, output_price_per_1k: 0.0125 },
+  "us.amazon.nova-pro-v1:0": { context_window: 300000, input_price_per_1k: 0.0008, output_price_per_1k: 0.0032 },
+  // Global profiles
+  "global.anthropic.claude-opus-4-6-v1": { context_window: 200000, input_price_per_1k: 0.015, output_price_per_1k: 0.075 },
+  "global.anthropic.claude-sonnet-4-6": { context_window: 200000, input_price_per_1k: 0.003, output_price_per_1k: 0.015 },
 };
 ```
 
 **Key design decisions:**
 
-1. **Lookup by exact model ID** — the table maps provider-specific model IDs to metadata.
+1. **Lookup by exact inference profile ID** — the table maps provider-specific inference profile IDs to metadata. EU and APAC variants of the same model share the same pricing but must be keyed separately if needed (or strip the geographic prefix for lookup).
 2. **Graceful degradation** — unknown models display `null` for context window and pricing (the UI shows "Unknown" or omits the field).
 3. **Updatable without code changes** — this table should be defined as a data file (JSON or TypeScript const) that can be updated in plugin releases without changing logic.
 4. **Pricing is approximate** — prices change; this is for informational display only, not billing.
@@ -678,7 +833,7 @@ Each provider needs different filtering to show only chat-capable models:
 |---|---|
 | **OpenAI** | Client-side: filter by model ID prefix (`gpt-`, `o1-`, `o3-`, `o4-`, `chatgpt-`) or maintain an allowlist |
 | **Anthropic** | No filtering needed — all models returned are chat-capable |
-| **Bedrock** | Server-side: use `byOutputModality=TEXT`; client-side: additionally filter out embedding-only models, filter `modelLifecycle.status === "ACTIVE"` |
+| **Bedrock** | Client-side: exclude non-chat providers by ID pattern (stability, twelvelabs, cohere.embed); filter `status === "ACTIVE"` |
 | **Local** | No filtering needed — all local models are usable for chat |
 
 ### 6d. Caching Strategy
@@ -742,7 +897,7 @@ When model list fetch fails, per FR-3:
 
 **Free-text fallback details:**
 - Replace the dropdown with a text input field.
-- Show provider-specific placeholder text (e.g., `"gpt-4o"` for OpenAI, `"claude-sonnet-4-5-20250514"` for Anthropic).
+- Show provider-specific placeholder text (e.g., `"gpt-4o"` for OpenAI, `"claude-sonnet-4-5-20250929"` for Anthropic, `"us.anthropic.claude-sonnet-4-20250514-v1:0"` for Bedrock).
 - Validate the entered model ID is non-empty before saving.
 - Optionally show a "Retry" button to re-attempt model list fetch.
 
@@ -762,7 +917,7 @@ When model list fetch fails, per FR-3:
 1. **Use each provider's official list endpoint** for model discovery:
    - OpenAI: `GET /v1/models`
    - Anthropic: `GET /v1/models` with pagination
-   - Bedrock: `ListFoundationModelsCommand` with `byOutputModality=TEXT`
+   - Bedrock: `ListInferenceProfilesCommand` with `typeEquals: "SYSTEM_DEFINED"` (replaces `ListFoundationModelsCommand`)
    - Local: `GET {base_url}/v1/models`
 
 2. **Maintain a static metadata table** for context window sizes and pricing, keyed by model ID. This is the only practical way to provide this information since no provider includes it in their list API.
@@ -779,7 +934,7 @@ When model list fetch fails, per FR-3:
 |---|---|
 | **OpenAI** | Simplest implementation. No pagination needed. Must filter aggressively (returns 100+ models including embeddings, whisper, dall-e, etc.). |
 | **Anthropic** | Must implement cursor-based pagination (`after_id` / `has_more`). Provides `display_name`. Relatively small model list. |
-| **Bedrock** | Uses AWS SDK (not HTTP fetch). Server-side filtering available. Returns `providerName` which is useful for display. Must handle different model ID format. |
+| **Bedrock** | Uses AWS SDK (not HTTP fetch). Use `ListInferenceProfilesCommand` with `typeEquals: "SYSTEM_DEFINED"`. Returns `inferenceProfileId` as the model ID (use directly in Converse API). Must update IAM policy to include `bedrock:ListInferenceProfiles`. Client-side filter for chat models. |
 | **Local** | Must handle connection failures gracefully (server not running). No pagination or auth needed. Simplest error path. |
 
 ### Risks and Limitations
@@ -788,7 +943,7 @@ When model list fetch fails, per FR-3:
 
 2. **OpenAI model filtering:** Without capability flags, the prefix-based filter may include non-chat models or miss new chat models. Mitigated by: maintaining a regularly updated allowlist or using generous prefix matching.
 
-3. **Bedrock model access:** `ListFoundationModels` returns models the user may not have enabled. Users may select a model and get an access error on first use. Mitigated by: clear error messages directing users to enable the model in the AWS console.
+3. **Bedrock model coverage with inference profiles:** `ListInferenceProfiles` returns system-defined profiles relevant to the user's configured region. A user in the EU region will see `eu.*` and `global.*` profiles but not `us.*` profiles — this is correct behavior. Users in AP regions see a smaller profile set. The static metadata table must cover all geographic variants. Mitigated by: keying metadata by the geographic-prefixed ID, and ensuring the table covers `us.`, `eu.`, `apac.`, and `global.` variants of popular models.
 
 4. **Local server availability:** Local servers may not be running when the user opens settings. Mitigated by: connection timeout (3-5 seconds), clear error message, and free-text fallback.
 
@@ -799,6 +954,8 @@ When model list fetch fails, per FR-3:
 - [OpenAI — List Models](https://developers.openai.com/api/reference/resources/models/methods/list/)
 - [Anthropic — List Models](https://platform.claude.com/docs/en/api/models/list)
 - [Anthropic — Get a Model](https://platform.claude.com/docs/en/api/models/get)
-- [AWS Bedrock — ListFoundationModels](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_ListFoundationModels.html)
+- [AWS Bedrock — ListInferenceProfiles](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_ListInferenceProfiles.html)
+- [AWS Bedrock — Cross-region inference](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html)
+- [AWS Bedrock — ListFoundationModels (deprecated for this use case)](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_ListFoundationModels.html)
 - [Ollama — API Documentation](https://github.com/ollama/ollama/blob/main/docs/api.md)
 - [LM Studio — OpenAI Compatibility](https://lmstudio.ai/docs)
