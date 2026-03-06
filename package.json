@@ -12,7 +12,8 @@
 		"e2e": "npx playwright test --config=e2e/playwright.config.ts",
 		"e2e:run": "npx tsx e2e/run-and-collect.ts",
 		"e2e:run:quick": "npx tsx e2e/run-and-collect.ts --duration 10",
-		"e2e:setup-vault": "npx tsx e2e/scripts/setup-vault.ts"
+		"e2e:setup-vault": "npx tsx e2e/scripts/setup-vault.ts",
+		"e2e:tools": "npx tsx e2e/scripts/tool-interaction-test.ts"
 	},
 	"keywords": [],
 	"license": "0-BSD",
