@@ -68,8 +68,10 @@ export class NoteOpener {
 				this.app.workspace.setActiveLeaf(existingLeaf, { focus: false });
 				log.debug("Activated existing leaf", { notePath });
 			} else {
-				// Open in a new leaf (background, don't steal focus from chat panel)
-				await this.app.workspace.openLinkText(notePath, "", false);
+				// Open in a new leaf (background, don't steal focus from chat panel).
+				// Pass newLeaf=true so Obsidian creates a fresh tab rather than
+				// replacing whatever the user currently has open in the active leaf.
+				await this.app.workspace.openLinkText(notePath, "", true);
 				log.debug("Opened note in new leaf", { notePath });
 			}
 		} catch (e) {
