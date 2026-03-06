@@ -537,11 +537,19 @@ export default class NotorPlugin extends Plugin {
 		// Available models
 		view.setGetAvailableModels(() => {
 			const activeType = providerRegistry.getActiveType();
-			// Return cached models synchronously (stale-while-revalidate)
+			// Return cached models synchronously (stale-while-revalidate).
+			// The cache is populated when refreshModels() is called (e.g. via
+			// the refresh button in the settings popover). If no cache exists yet,
+			// fall back to the single configured model_id so the UI always shows
+			// something useful.
 			try {
-				// Trigger background refresh if needed; return cached synchronously
+				const cached = providerRegistry.getCachedModels(activeType);
+				if (cached.length > 0) {
+					return cached;
+				}
+				// Trigger a background fetch so the next popover open will have data
 				providerRegistry.getModels(activeType).catch(() => {});
-				// Return what's cached (may be empty if not yet fetched)
+				// Fall back to configured model_id
 				const config = providerRegistry.getConfig(activeType);
 				if (config?.model_id) {
 					return [{ id: config.model_id, display_name: config.model_id }];

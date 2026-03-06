@@ -244,6 +244,17 @@ export class ProviderRegistry {
 		}
 	}
 
+	/**
+	 * Return the currently cached model list for a provider synchronously.
+	 * Returns an empty array if no cache is available yet.
+	 *
+	 * Useful for populating UI synchronously without triggering async fetches.
+	 */
+	getCachedModels(type?: LLMProviderType): ModelInfo[] {
+		const providerType = type ?? this.activeType;
+		return this.modelCaches.get(providerType)?.models ?? [];
+	}
+
 	// -----------------------------------------------------------------------
 	// Internal helpers
 	// -----------------------------------------------------------------------

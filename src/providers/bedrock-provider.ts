@@ -213,11 +213,19 @@ export class BedrockProvider implements LLMProvider {
 		return this.bedrockClient;
 	}
 
+	/**
+	 * Track which content block indices contain tool use blocks so that
+	 * contentBlockStop events are only emitted as tool_call_end for tool blocks.
+	 */
+	private activeToolBlockIndices = new Set<number>();
+
 	async *sendMessage(
 		messages: ChatMessage[],
 		tools: ToolDefinition[],
 		options: SendMessageOptions
 	): AsyncIterable<StreamChunk> {
+		// Clear tool block index tracker for each new request
+		this.activeToolBlockIndices.clear();
 		const client = this.getRuntimeClient();
 		const { system, messages: bedrockMessages } =
 			toBedrockMessages(messages);
@@ -253,8 +261,13 @@ export class BedrockProvider implements LLMProvider {
 			if (options.abort_signal?.aborted) {
 				return;
 			}
-			const errMsg = e instanceof Error ? e.message : String(e);
-			const errName = e instanceof Error ? e.name : "";
+			// AWS SDK exceptions may have a non-string message property; safely coerce.
+			const errMsg = e instanceof Error
+				? (typeof e.message === "string" ? e.message : JSON.stringify(e.message))
+				: (typeof e === "object" && e !== null && "message" in e)
+					? String((e as { message: unknown }).message)
+					: String(e);
+			const errName = e instanceof Error ? e.name : (typeof e === "object" && e !== null && "name" in e ? String((e as { name: unknown }).name) : "");
 
 			if (
 				errName === "AccessDeniedException" ||
@@ -341,6 +354,9 @@ export class BedrockProvider implements LLMProvider {
 		if (event.contentBlockStart) {
 			const start = event.contentBlockStart.start;
 			if (start?.toolUse) {
+				const blockIndex = event.contentBlockStart.contentBlockIndex ?? -1;
+				// Track this block as a tool-use block
+				this.activeToolBlockIndices.add(blockIndex);
 				yield {
 					type: "tool_call_start",
 					id: start.toolUse.toolUseId ?? "",
@@ -364,11 +380,15 @@ export class BedrockProvider implements LLMProvider {
 		}
 
 		if (event.contentBlockStop) {
-			// Content block ended — could be text or tool use
-			yield {
-				type: "tool_call_end",
-				id: event.contentBlockStop.contentBlockIndex?.toString() ?? "0",
-			};
+			const blockIndex = event.contentBlockStop.contentBlockIndex ?? -1;
+			// Only emit tool_call_end for blocks that were actually tool-use blocks
+			if (this.activeToolBlockIndices.has(blockIndex)) {
+				this.activeToolBlockIndices.delete(blockIndex);
+				yield {
+					type: "tool_call_end",
+					id: blockIndex.toString(),
+				};
+			}
 		}
 
 		if (event.metadata) {

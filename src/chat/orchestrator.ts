@@ -351,7 +351,12 @@ export class ChatOrchestrator {
 					});
 				}
 			} else if (result.type === "error") {
-				this.view?.showError(result.error);
+				const errStr = typeof result.error === "string"
+					? result.error
+					: (result.error as unknown) instanceof Error
+						? (result.error as unknown as Error).message
+						: JSON.stringify(result.error);
+				this.view?.showError(errStr);
 			}
 		}
 	}
