@@ -77,7 +77,7 @@ Message:
 
 Before sending each user message to the LLM, the plugin assembles the system prompt from multiple sources:
 
-1. **Global system prompt**: if `{notor_dir}/system-prompt.md` exists, use its body content (stripping frontmatter). Otherwise, use the built-in default system prompt from plugin code.
+1. **Global system prompt**: if `{notor_dir}/prompts/core-system-prompt.md` exists, use its body content (stripping frontmatter). Otherwise, use the built-in default system prompt from plugin code.
 2. **Persona system prompt** (Phase 4): if a persona is active, append (or replace, if `notor-skip-global-prompt: true`) the persona's `system-prompt.md` from `{notor_dir}/personas/{persona_name}/`.
 3. **Vault-level instruction files** (Phase 2): scan `{notor_dir}/rules/` and inject any rule files whose frontmatter triggers match current context conditions (see trigger properties below).
 

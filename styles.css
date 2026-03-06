@@ -1,8 +1,1113 @@
-/*
+/* ==========================================================================
+   Notor Chat Panel Styles
+   ========================================================================== */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+/* Utility */
+.notor-hidden {
+	display: none !important;
+}
 
-If your plugin does not need CSS, delete this file.
+/* ==========================================================================
+   Chat Container
+   ========================================================================== */
 
-*/
+.notor-chat-container {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+	font-size: var(--font-ui-small);
+}
+
+/* ==========================================================================
+   Header
+   ========================================================================== */
+
+.notor-chat-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+	position: relative;
+}
+
+.notor-chat-header-title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.notor-chat-title {
+	font-weight: var(--font-semibold);
+	font-size: var(--font-ui-medium);
+}
+
+.notor-chat-header-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
+.notor-chat-header-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 4px;
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.notor-chat-header-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+/* ==========================================================================
+   Settings Popover (CHAT-008)
+   ========================================================================== */
+
+.notor-settings-popover {
+	position: absolute;
+	top: 100%;
+	right: 0;
+	z-index: var(--layer-popover);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-s);
+	padding: 12px;
+	min-width: 240px;
+	max-width: 300px;
+}
+
+.notor-settings-section {
+	margin-bottom: 12px;
+}
+
+.notor-settings-section:last-of-type {
+	margin-bottom: 8px;
+}
+
+.notor-settings-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-bottom: 4px;
+	font-weight: var(--font-medium);
+}
+
+.notor-settings-label-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 4px;
+}
+
+.notor-settings-select,
+.notor-settings-input {
+	width: 100%;
+	padding: 4px 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+}
+
+.notor-settings-refresh-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 2px 6px;
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.notor-settings-refresh-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.notor-settings-link {
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 8px;
+	text-align: center;
+}
+
+.notor-settings-full-link {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-accent);
+	cursor: pointer;
+}
+
+.notor-settings-full-link:hover {
+	text-decoration: underline;
+}
+
+.notor-model-select-wrapper {
+	margin-top: 4px;
+}
+
+/* ==========================================================================
+   Conversation List
+   ========================================================================== */
+
+.notor-conversation-list {
+	flex: 1;
+	overflow-y: auto;
+	padding: 8px;
+}
+
+.notor-conversation-list-empty {
+	padding: 24px;
+	text-align: center;
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.notor-conversation-list-item {
+	padding: 8px 10px;
+	border-radius: var(--radius-s);
+	cursor: pointer;
+	margin-bottom: 2px;
+}
+
+.notor-conversation-list-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.notor-conversation-list-title {
+	font-weight: var(--font-medium);
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.notor-conversation-list-meta {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	margin-top: 2px;
+}
+
+.notor-conversation-list-preview {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-top: 2px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* ==========================================================================
+   Message List
+   ========================================================================== */
+
+.notor-message-list {
+	flex: 1;
+	overflow-y: auto;
+	padding: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+/* ==========================================================================
+   Messages
+   ========================================================================== */
+
+.notor-message {
+	max-width: 100%;
+	padding: 8px 12px;
+	border-radius: var(--radius-m);
+	line-height: 1.5;
+}
+
+.notor-message-user {
+	background: var(--background-modifier-hover);
+	align-self: flex-end;
+	border-bottom-right-radius: var(--radius-s);
+}
+
+.notor-message-assistant {
+	background: var(--background-secondary);
+	align-self: flex-start;
+	border-bottom-left-radius: var(--radius-s);
+}
+
+.notor-message-content {
+	font-size: var(--font-text-size);
+}
+
+.notor-message-content p:first-child {
+	margin-top: 0;
+}
+
+.notor-message-content p:last-child {
+	margin-bottom: 0;
+}
+
+.notor-message-tokens {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	margin-top: 6px;
+	text-align: right;
+}
+
+/* ==========================================================================
+   Tool Calls
+   ========================================================================== */
+
+.notor-tool-call {
+	background: var(--background-secondary-alt);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: 8px 12px;
+	font-size: var(--font-ui-small);
+}
+
+.notor-tool-call-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.notor-tool-call-name {
+	font-weight: var(--font-semibold);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-normal);
+}
+
+.notor-tool-call-status {
+	font-size: var(--font-ui-smaller);
+	padding: 1px 6px;
+	border-radius: var(--radius-s);
+	font-weight: var(--font-medium);
+}
+
+.notor-tool-status-pending {
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+.notor-tool-status-approved {
+	background: var(--color-blue);
+	color: var(--text-on-accent);
+}
+
+.notor-tool-status-success {
+	background: var(--color-green);
+	color: var(--text-on-accent);
+}
+
+.notor-tool-status-error {
+	background: var(--color-red);
+	color: var(--text-on-accent);
+}
+
+.notor-tool-status-rejected {
+	background: var(--color-orange);
+	color: var(--text-on-accent);
+}
+
+.notor-tool-call-toggle {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: pointer;
+	margin-top: 4px;
+	user-select: none;
+}
+
+.notor-tool-call-toggle:hover {
+	color: var(--text-normal);
+}
+
+.notor-tool-call-params pre,
+.notor-tool-result-full pre {
+	margin: 4px 0;
+	padding: 6px 8px;
+	background: var(--background-primary);
+	border-radius: var(--radius-s);
+	overflow-x: auto;
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-tool-call-params code,
+.notor-tool-result-full code {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+}
+
+/* ==========================================================================
+   Tool Results
+   ========================================================================== */
+
+.notor-tool-result {
+	padding: 4px 12px;
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-tool-result-summary {
+	padding: 4px 0;
+}
+
+.notor-tool-result-success {
+	color: var(--text-success);
+}
+
+.notor-tool-result-error {
+	color: var(--text-error);
+}
+
+/* ==========================================================================
+   Approval UI
+   ========================================================================== */
+
+.notor-approval-prompt {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 0;
+	margin-top: 6px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.notor-approval-text {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	flex: 1;
+}
+
+.notor-approval-buttons {
+	display: flex;
+	gap: 6px;
+}
+
+.notor-approve-btn,
+.notor-reject-btn {
+	padding: 4px 12px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.notor-approve-btn {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.notor-approve-btn:hover {
+	background: var(--interactive-accent-hover);
+}
+
+.notor-reject-btn {
+	background: var(--background-primary);
+	color: var(--text-muted);
+}
+
+.notor-reject-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+/* ==========================================================================
+   Loading Indicator
+   ========================================================================== */
+
+.notor-loading-indicator {
+	padding: 8px 12px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	flex-shrink: 0;
+}
+
+.notor-loading-dots span {
+	animation: notor-blink 1.4s infinite both;
+}
+
+.notor-loading-dots span:nth-child(2) {
+	animation-delay: 0.2s;
+}
+
+.notor-loading-dots span:nth-child(3) {
+	animation-delay: 0.4s;
+}
+
+@keyframes notor-blink {
+	0%, 80%, 100% {
+		opacity: 0;
+	}
+	40% {
+		opacity: 1;
+	}
+}
+
+/* ==========================================================================
+   Token Footer
+   ========================================================================== */
+
+.notor-token-footer {
+	padding: 4px 12px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	text-align: center;
+	border-top: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Truncation Warning
+   ========================================================================== */
+
+.notor-truncation-warning {
+	padding: 6px 10px;
+	background: var(--background-modifier-message);
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-warning);
+	text-align: center;
+}
+
+/* ==========================================================================
+   Chat Error
+   ========================================================================== */
+
+.notor-chat-error {
+	padding: 8px 12px;
+	background: var(--background-modifier-error);
+	border-radius: var(--radius-m);
+	font-size: var(--font-ui-small);
+	color: var(--text-error);
+}
+
+/* ==========================================================================
+   Input Area
+   ========================================================================== */
+
+.notor-input-area {
+	display: flex;
+	align-items: flex-end;
+	gap: 6px;
+	padding: 8px 12px;
+	border-top: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+}
+
+.notor-input-wrapper {
+	flex: 1;
+	min-width: 0;
+}
+
+.notor-text-input {
+	width: 100%;
+	min-height: 32px;
+	max-height: 200px;
+	padding: 6px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-text-size);
+	font-family: var(--font-interface);
+	resize: none;
+	overflow-y: auto;
+	line-height: 1.4;
+}
+
+.notor-text-input:focus {
+	border-color: var(--interactive-accent);
+	outline: none;
+}
+
+.notor-text-input:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.notor-input-buttons {
+	display: flex;
+	gap: 4px;
+	align-items: center;
+}
+
+.notor-send-btn,
+.notor-stop-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border-radius: var(--radius-s);
+	border: none;
+	cursor: pointer;
+	padding: 0;
+}
+
+.notor-send-btn {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.notor-send-btn:hover {
+	background: var(--interactive-accent-hover);
+}
+
+.notor-stop-btn {
+	background: var(--color-red);
+	color: var(--text-on-accent);
+}
+
+.notor-stop-btn:hover {
+	opacity: 0.85;
+}
+
+/* ==========================================================================
+   Mode Toggle (CHAT-009)
+   ========================================================================== */
+
+.notor-mode-toggle {
+	padding: 4px 10px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	cursor: pointer;
+	border: 1px solid transparent;
+	white-space: nowrap;
+	user-select: none;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.notor-mode-plan {
+	background: var(--color-blue);
+	color: var(--text-on-accent);
+	border-color: var(--color-blue);
+}
+
+.notor-mode-plan:hover {
+	opacity: 0.85;
+}
+
+.notor-mode-act {
+	background: var(--color-orange);
+	color: var(--text-on-accent);
+	border-color: var(--color-orange);
+}
+
+.notor-mode-act:hover {
+	opacity: 0.85;
+}
+
+/* ==========================================================================
+   Diff Preview (DIFF-002)
+   ========================================================================== */
+
+.notor-diff-preview {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	font-size: var(--font-ui-small);
+	overflow: visible;
+	margin: 4px 0;
+}
+
+.notor-diff-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 6px 10px;
+	background: var(--background-secondary-alt);
+	border-bottom: 1px solid var(--background-modifier-border);
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.notor-diff-title {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	font-weight: var(--font-medium);
+	min-width: 0;
+}
+
+.notor-diff-icon {
+	color: var(--text-accent);
+	flex-shrink: 0;
+}
+
+.notor-diff-path {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.notor-diff-block-count {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.notor-diff-stats {
+	display: flex;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+.notor-diff-stat-added {
+	color: var(--color-green);
+	font-weight: var(--font-semibold);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-diff-stat-deleted {
+	color: var(--color-red);
+	font-weight: var(--font-semibold);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-diff-toggle {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: pointer;
+	user-select: none;
+	flex-shrink: 0;
+}
+
+.notor-diff-toggle:hover {
+	color: var(--text-normal);
+}
+
+/* Diff table */
+
+.notor-diff-body {
+	overflow-x: auto;
+	max-height: 400px;
+	overflow-y: auto;
+}
+
+.notor-diff-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-diff-line {
+	line-height: 1.4;
+}
+
+.notor-diff-line-added {
+	background: rgba(var(--color-green-rgb, 68, 207, 110), 0.12);
+}
+
+.notor-diff-line-deleted {
+	background: rgba(var(--color-red-rgb, 220, 53, 69), 0.12);
+}
+
+.notor-diff-line-unchanged {
+	background: transparent;
+}
+
+.notor-diff-line-num {
+	width: 36px;
+	min-width: 36px;
+	padding: 1px 6px;
+	text-align: right;
+	color: var(--text-faint);
+	font-family: var(--font-monospace);
+	user-select: none;
+	border-right: 1px solid var(--background-modifier-border);
+	vertical-align: top;
+}
+
+.notor-diff-line-gutter {
+	width: 18px;
+	min-width: 18px;
+	padding: 1px 4px;
+	text-align: center;
+	font-family: var(--font-monospace);
+	user-select: none;
+	vertical-align: top;
+}
+
+.notor-diff-line-added .notor-diff-line-gutter {
+	color: var(--color-green);
+}
+
+.notor-diff-line-deleted .notor-diff-line-gutter {
+	color: var(--color-red);
+}
+
+.notor-diff-line-content {
+	padding: 1px 8px;
+	white-space: pre-wrap;
+	word-break: break-all;
+	vertical-align: top;
+}
+
+.notor-diff-line-content code {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	background: none;
+	padding: 0;
+}
+
+.notor-diff-separator-row td {
+	padding: 2px 6px;
+	color: var(--text-faint);
+	background: var(--background-modifier-hover);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-diff-empty {
+	padding: 8px 12px;
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+/* Actions row */
+
+.notor-diff-actions {
+	display: flex;
+	gap: 6px;
+	padding: 8px 10px;
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary-alt);
+	flex-wrap: wrap;
+}
+
+.notor-diff-accept-btn,
+.notor-diff-reject-btn,
+.notor-diff-apply-btn {
+	padding: 4px 12px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.notor-diff-accept-btn {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.notor-diff-accept-btn:hover {
+	background: var(--interactive-accent-hover);
+}
+
+.notor-diff-reject-btn {
+	background: var(--background-primary);
+	color: var(--text-muted);
+}
+
+.notor-diff-reject-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.notor-diff-apply-btn {
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	font-weight: var(--font-medium);
+}
+
+.notor-diff-apply-btn:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* Status line */
+
+.notor-diff-status {
+	padding: 6px 10px;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+}
+
+.notor-diff-status-applied {
+	color: var(--text-success, var(--color-green));
+	background: var(--background-modifier-success, rgba(68, 207, 110, 0.1));
+}
+
+.notor-diff-status-rejected {
+	color: var(--text-muted);
+	background: var(--background-modifier-hover);
+}
+
+/* Per-block diff sections (replace_in_note) */
+
+.notor-diff-blocks {
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.notor-diff-block {
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.notor-diff-block:last-child {
+	border-bottom: none;
+}
+
+.notor-diff-block--rejected {
+	opacity: 0.5;
+}
+
+.notor-diff-block-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 10px;
+	background: var(--background-secondary-alt);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.notor-diff-block-label {
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	color: var(--text-muted);
+	flex: 1;
+}
+
+.notor-diff-block-badge {
+	font-size: var(--font-ui-smaller);
+	padding: 1px 5px;
+	border-radius: var(--radius-s);
+}
+
+.notor-diff-badge-delete {
+	background: rgba(var(--color-red-rgb, 220, 53, 69), 0.15);
+	color: var(--color-red);
+}
+
+.notor-diff-block-toggle {
+	padding: 2px 8px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.notor-diff-block-accepted {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.notor-diff-block-accepted:hover {
+	background: var(--interactive-accent-hover);
+}
+
+.notor-diff-block-rejected {
+	background: var(--background-primary);
+	color: var(--text-muted);
+}
+
+.notor-diff-block-rejected:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.notor-diff-block-body {
+	overflow-x: auto;
+}
+
+/* ==========================================================================
+   Settings Tab — Connection Test Status (SET-001)
+   ========================================================================== */
+
+.notor-connection-status {
+	margin: 0 0 8px 0;
+	padding: 6px 10px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-small);
+}
+
+.notor-connection-status--pending {
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+.notor-connection-status--success {
+	background: var(--background-modifier-success, rgba(68, 207, 110, 0.15));
+	color: var(--text-success, var(--color-green));
+}
+
+.notor-connection-status--error {
+	background: var(--background-modifier-error, rgba(220, 53, 69, 0.15));
+	color: var(--text-error, var(--color-red));
+}
+
+/* ==========================================================================
+   Checkpoints (CP-003)
+   ========================================================================== */
+
+.notor-checkpoints-section {
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 10px;
+	margin-top: 4px;
+}
+
+.notor-checkpoint-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	max-height: 200px;
+	overflow-y: auto;
+	margin-top: 4px;
+}
+
+.notor-checkpoint-empty {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	font-style: italic;
+	padding: 6px 2px;
+}
+
+.notor-checkpoint-item {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 6px 8px;
+	background: var(--background-secondary);
+}
+
+.notor-checkpoint-meta {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-bottom: 6px;
+}
+
+.notor-checkpoint-time {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.notor-checkpoint-desc {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	word-break: break-word;
+}
+
+.notor-checkpoint-actions {
+	display: flex;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+
+.notor-checkpoint-btn {
+	padding: 3px 8px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-muted);
+}
+
+.notor-checkpoint-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.notor-checkpoint-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.notor-checkpoint-restore-btn {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.notor-checkpoint-restore-btn:hover {
+	background: var(--interactive-accent-hover);
+	color: var(--text-on-accent);
+}
+
+.notor-checkpoint-restore-btn:disabled {
+	opacity: 0.6;
+}
+
+/* ==========================================================================
+   Checkpoint modal (preview + diff)
+   ========================================================================== */
+
+.notor-checkpoint-modal .modal-content {
+	padding: 16px;
+}
+
+.notor-checkpoint-modal h2 {
+	font-size: var(--font-ui-medium);
+	margin-bottom: 12px;
+	word-break: break-word;
+}
+
+.notor-checkpoint-modal-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-weight: var(--font-semibold);
+	margin: 0 0 6px 0;
+}
+
+.notor-checkpoint-modal-content {
+	max-height: 400px;
+	overflow: auto;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 10px 12px;
+	margin: 0;
+}
+
+.notor-checkpoint-modal-content code {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	background: none;
+	padding: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.notor-checkpoint-modal-diff {
+	max-height: 400px;
+	overflow: auto;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 8px;
+	margin: 0;
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-diff-line {
+	line-height: 1.5;
+	font-family: var(--font-monospace);
+	white-space: pre-wrap;
+	word-break: break-all;
+	padding: 0 4px;
+}
+
+.notor-diff-unchanged {
+	color: var(--text-muted);
+}
+
+.notor-diff-added {
+	background: rgba(68, 207, 110, 0.15);
+	color: var(--color-green);
+}
+
+.notor-diff-removed {
+	background: rgba(220, 53, 69, 0.12);
+	color: var(--color-red);
+}

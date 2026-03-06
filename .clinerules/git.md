@@ -5,13 +5,17 @@
 **MANDATORY:** After completing ANY task that modifies files, Cline must immediately commit the changes before responding to the user.
 
 ### Commit Process
-1. **Add AI-modified files using appropriate method:**
+
+> **⚠️ CRITICAL: Each git step below MUST be its own separate `execute_command` call.**
+> Never chain git commands together with `&&` or `;`. In particular, **`git commit` must ALWAYS run as its own standalone command**, never combined with `git add`, `git status`, or any other command. Chaining causes multi-line commit messages to be truncated or mis-parsed.
+
+1. **Check status first:** `git status --porcelain` (separate command) to identify what changed and ensure only intended changes are staged
+2. **Add AI-modified files using appropriate method:** (separate command)
    - **For modifications/additions only:** `git add <specific-files>`
    - **For deletions:** `git rm <deleted-files>` or `git rm -r <deleted-directories>`
    - **For mixed operations:** Use both approaches - `git add` for modifications/additions, `git rm` for deletions
-   - **Always verify with `git status --porcelain` first** to identify what changed and ensure only intended changes are staged
-2. **Commit with descriptive message:** `git commit -m "{commit_message}"`
-3. **Include in commit message:**
+3. **Commit with descriptive message (separate command — never chained):** `git commit -m "{commit_message}"`
+4. **Include in commit message:**
    - Brief summary of what was accomplished
    - Key changes made to each file (explicitly listing deletions, modifications, and additions)
    - Context for why changes were needed

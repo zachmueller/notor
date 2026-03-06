@@ -18,7 +18,7 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **Credential and secret management**: credentials stored via Obsidian's built-in secrets manager API (added in recent Obsidian releases), with per-provider configuration for API keys, endpoints, regions, and AWS profile names
 - **Model selection**: choose model variant within a given provider
 - **Basic chat panel UI**: side panel with message input, send button, streaming response display
-- **System prompt configuration**: built-in default system prompt, with "Customize system prompt" action that writes the default to `{notor_dir}/system-prompt.md` for user editing. Plugin uses the file if present, otherwise falls back to the internal default. The default system prompt should be purpose-built for note writing and knowledge management contexts.
+- **System prompt configuration**: built-in default system prompt, with "Customize system prompt" action that writes the default to `{notor_dir}/prompts/core-system-prompt.md` for user editing. Plugin uses the file if present, otherwise falls back to the internal default. The default system prompt should be purpose-built for note writing and knowledge management contexts.
 - **Streaming responses**: token-by-token display as LLM generates output
 
 ## Phase 1 — Core note operations (MVP)
