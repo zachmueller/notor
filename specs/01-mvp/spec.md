@@ -73,7 +73,9 @@ This specification covers three roadmap phases that together form the MVP:
 **Description:** Users can choose which model variant to use within a given provider.
 
 **Acceptance criteria:**
-- The settings and chat panel expose available models for the active provider.
+- The settings and chat panel expose available models for the active provider via a dropdown populated by querying the provider's model list API (e.g., `/v1/models` for OpenAI-compatible and local providers; equivalent endpoints for Anthropic and Bedrock).
+- If the model list API is unavailable or returns an error, the dropdown falls back to a free-text input field where the user can type or paste any model ID.
+- A refresh button allows re-fetching the model list on demand.
 - The user can switch models without restarting the plugin or starting a new conversation.
 - The selected model is persisted across plugin reloads.
 
@@ -93,6 +95,7 @@ This specification covers three roadmap phases that together form the MVP:
 - A "New conversation" button is available to start a fresh conversation.
 - A conversation list/selector allows browsing and switching between existing conversations.
 - The conversation list shows conversations ordered by most recent activity.
+- When the conversation approaches the active model's context window limit, a visible warning is displayed and the oldest messages are truncated (keeping the system prompt and most recent messages) to fit within the limit. The full conversation history is still retained in the persisted JSONL log; only the context sent to the LLM is trimmed.
 
 ### FR-5: Streaming responses
 
@@ -235,7 +238,7 @@ This specification covers three roadmap phases that together form the MVP:
 - Users can compare (diff) the current note state against a checkpoint.
 - Checkpoint data is stored in the plugin directory (`.obsidian/plugins/notor/checkpoints/` by default), not as visible vault notes.
 - The storage location is configurable via settings.
-- A retention policy (configurable max age or count) prevents unbounded checkpoint growth.
+- A retention policy (configurable max age or count) prevents unbounded checkpoint growth. Defaults: max 100 checkpoints per conversation, 30-day retention.
 - The checkpoint system is custom-built (not git-dependent).
 
 ### FR-18: Token and cost tracking
@@ -259,7 +262,7 @@ This specification covers three roadmap phases that together form the MVP:
 - Default storage location is `.obsidian/plugins/notor/history/` (inside the plugin directory).
 - The storage path is configurable to any vault-relative path.
 - JSONL files do not appear in Obsidian's file explorer or search results (they are not recognized as notes).
-- Configurable retention limits: maximum total size (MB) and/or maximum age (days). Oldest conversations are pruned when limits are exceeded.
+- Configurable retention limits: maximum total size (MB) and/or maximum age (days). Oldest conversations are pruned when limits are exceeded. Defaults: 500 MB total size, 90-day retention.
 - Users can start new conversations via the chat panel's "New conversation" button.
 - Users can switch between past conversations via a conversation list in the chat panel.
 - The conversation list displays conversations ordered by most recent activity with a timestamp and preview (e.g., first user message).
@@ -345,6 +348,7 @@ This specification covers three roadmap phases that together form the MVP:
 
 **Acceptance criteria:**
 - Write operations that fail partway through do not leave notes in a corrupted state (atomic writes where possible).
+- Before applying any write tool, the note's current content is compared against the content the AI last read via `read_note`. If the note has been modified since the AI's last read (by the user or another process), the write operation fails with a stale-content error, and the AI is informed to re-read the note before retrying. This prevents silently overwriting user edits.
 - `replace_in_note` is fully atomic: if any search block fails to match, no changes are applied.
 - Checkpoints ensure every write operation can be rolled back.
 - Plugin unload cleanly removes all registered listeners, intervals, and DOM elements — no resource leaks.
@@ -424,11 +428,27 @@ This specification covers three roadmap phases that together form the MVP:
 2. `search_vault` returns zero matches.
 3. The AI reports that no matching notes were found and suggests alternative search terms or offers to create a new note on the topic.
 
+### Edge case: Concurrent user edit (stale content)
+
+1. The user is editing `Research/Climate.md` in the Obsidian editor.
+2. The AI, having previously read the note, proposes a `replace_in_note` change.
+3. When the user approves (or auto-approve triggers), Notor detects the note content has changed since the AI's last read.
+4. The write operation fails with a stale-content error. The AI is informed and re-reads the note to get the updated content.
+5. The AI proposes a new change based on the current content.
+
 ### Edge case: Replace with no match
 
 1. The AI invokes `replace_in_note` with a search string that doesn't match any text in the note.
 2. The entire operation fails with no changes applied.
 3. An error is returned to the AI, which reports the mismatch to the user.
+
+### Edge case: Context window overflow
+
+1. User has a long conversation that approaches the model's context window limit.
+2. The chat panel displays a warning indicating that older messages will be trimmed from the AI's context.
+3. The oldest messages are dropped from the context sent to the LLM, while the system prompt and recent messages are preserved.
+4. The full conversation remains visible in the chat panel and persisted in the JSONL log — only the LLM context is trimmed.
+5. The user can start a new conversation for a clean context if preferred.
 
 ### Edge case: Provider connection failure
 
@@ -501,6 +521,10 @@ This specification covers three roadmap phases that together form the MVP:
 - Q: How should AWS Bedrock credentials work — AWS profile delegation, direct keys in secrets manager, or both? → A: Support both. Users can either specify an AWS profile name (delegating to the AWS SDK credential chain: `~/.aws/credentials`, env vars, SSO, etc.) or store AWS access key ID + secret access key directly in Obsidian's secrets manager. User chooses which approach per their setup.
 - Q: What constitutes a note being "in context" for vault-level rule trigger evaluation? → A: Notes the AI has read or modified via tools during the current conversation. Rule triggers are evaluated against tool-accessed notes, not open editor tabs.
 - Q: What happens when the user sends a message while the AI is still responding or a tool approval is pending? → A: Block input + cancel button. The send button is disabled while the AI is active (streaming or awaiting tool approval). A "Stop" button allows the user to cancel the current response. Input is re-enabled after the response completes or is cancelled.
+- Q: What should happen when the conversation approaches or exceeds the model's context window limit (auto-compaction is deferred to Phase 3)? → A: Warn + truncate oldest. Show a visible warning that context is being trimmed, then drop the oldest messages (keeping system prompt and recent messages) to fit within the context window. The user can start a new conversation if they prefer a clean slate.
+- Q: What should the default retention limits be for checkpoints and chat history? → A: Moderate defaults. Checkpoints: max 100 per conversation, 30-day retention. Chat history: 500 MB total size, 90-day retention. All limits are user-configurable in settings.
+- Q: How should the model list be populated for each provider? → A: Dynamic fetch. Query each provider's model list API (e.g., `/v1/models` for OpenAI-compatible, Anthropic, and local providers; equivalent for Bedrock) and populate a dropdown. Fall back to a free-text model ID field if the fetch fails or returns empty.
+- Q: What happens if the user edits a note in the Obsidian editor while the AI proposes or applies changes to the same note? → A: Stale-content check. Before applying any write operation, compare the note's current content against what the AI last read. If the note has changed since the AI's last read, fail the operation and return an error to the AI indicating the note was modified externally, prompting it to re-read before retrying.
 
 ## Assumptions
 
