@@ -46,6 +46,7 @@ export class NotorChatView extends ItemView {
 	private isResponding = false;
 	private abortController: AbortController | null = null;
 	private showConversationList = false;
+	private lastToolCallEl: HTMLElement | null = null;
 
 	// Settings popover state
 	private settingsPopoverEl?: HTMLElement;
@@ -454,6 +455,14 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Get the most recently rendered tool call element.
+	 * Used by the approval callback in main.ts to attach the approval prompt.
+	 */
+	getLastToolCallEl(): HTMLElement | null {
+		return this.lastToolCallEl;
+	}
+
+	/**
 	 * Render a tool call inline in the message list.
 	 */
 	renderToolCall(message: Message): HTMLElement {
@@ -486,6 +495,7 @@ export class NotorChatView extends ItemView {
 				: "▼ Parameters";
 		});
 
+		this.lastToolCallEl = toolEl;
 		this.scrollToBottom();
 		return toolEl;
 	}

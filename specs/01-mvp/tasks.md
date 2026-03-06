@@ -692,76 +692,79 @@
 - `design/ux.md` — notifications and feedback, complete UI reference
 - `design/research/system-prompt-design.md` — default system prompt structure, 9 sections, token budget, safety principles
 
-### INT-001: Plugin lifecycle wiring
+### INT-001: Plugin lifecycle wiring ✅
 **Description:** Wire all components together in `main.ts` — register the chat view, commands, settings tab, and initialize all managers. Ensure clean unload.
 **Files:**
 - `src/main.ts` — full lifecycle wiring
 **Dependencies:** All previous phases
 **Acceptance Criteria:**
-- [ ] `onload`: initialize settings, provider registry, tool registry, conversation manager, history manager, checkpoint manager, vault rules manager
-- [ ] Register chat panel view type
-- [ ] `addCommand` for "Open chat panel"
-- [ ] `addCommand` for "New conversation"
-- [ ] Register settings tab
-- [ ] Lazy initialization: heavy components deferred until first use
-- [ ] `onunload`: all listeners, intervals, DOM elements cleaned up via `register*` helpers
-- [ ] No resource leaks on disable/re-enable
+- [x] `onload`: initialize settings, provider registry, tool registry, conversation manager, history manager, checkpoint manager, vault rules manager
+- [x] Register chat panel view type
+- [x] `addCommand` for "Open chat panel"
+- [x] `addCommand` for "New conversation"
+- [x] Register settings tab
+- [x] Lazy initialization: heavy components deferred until first use
+- [x] `onunload`: all listeners, intervals, DOM elements cleaned up via `register*` helpers
+- [x] No resource leaks on disable/re-enable
 
-### INT-002: Manifest and version update
+### INT-002: Manifest and version update ✅
 **Description:** Update `manifest.json` to reflect Notor's identity and minimum Obsidian version requirement.
 **Files:**
 - `manifest.json` — update fields
 - `versions.json` — update version mapping
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `id` set to `notor`
-- [ ] `name` set to `Notor`
-- [ ] `minAppVersion` set to `1.11.4` (required for SecretStorage)
-- [ ] `description` accurately describes the plugin
-- [ ] `isDesktopOnly` set based on API usage analysis
-- [ ] `versions.json` updated with version → minAppVersion mapping
+- [x] `id` set to `notor`
+- [x] `name` set to `Notor`
+- [x] `minAppVersion` set to `1.11.4` (required for SecretStorage)
+- [x] `description` accurately describes the plugin
+- [x] `isDesktopOnly` set based on API usage analysis
+- [x] `versions.json` updated with version → minAppVersion mapping
 
-### INT-003: Default system prompt authoring
+### INT-003: Default system prompt authoring ✅
 **Description:** Write the built-in default system prompt for Notor, following the structure and recommendations from R-2 research. This is the prompt that ships with the plugin.
 **Files:**
 - `src/chat/default-system-prompt.ts` — default prompt content as a string constant
 **Dependencies:** CHAT-004
 **Acceptance Criteria:**
-- [ ] ~3,000 tokens, structured in 9 sections per R-2 findings
-- [ ] Role definition: AI assistant for note writing and knowledge management in Obsidian
-- [ ] Tool usage instructions: when to use each tool, read-before-write principle, surgical edits preferred
-- [ ] Obsidian-specific context: Markdown formatting, wikilinks, frontmatter, callouts, tags
-- [ ] Safety rules: confirm large changes, prefer `replace_in_note` over `write_note`, report failures clearly
-- [ ] Mode-aware behavior: describe Plan vs Act mode constraints
-- [ ] Communication style: concise, helpful, non-destructive
-- [ ] Error handling: describe what to do on tool failures, stale content, no matches
+- [x] ~3,000 tokens, structured in 9 sections per R-2 findings
+- [x] Role definition: AI assistant for note writing and knowledge management in Obsidian
+- [x] Tool usage instructions: when to use each tool, read-before-write principle, surgical edits preferred
+- [x] Obsidian-specific context: Markdown formatting, wikilinks, frontmatter, callouts, tags
+- [x] Safety rules: confirm large changes, prefer `replace_in_note` over `write_note`, report failures clearly
+- [x] Mode-aware behavior: describe Plan vs Act mode constraints
+- [x] Communication style: concise, helpful, non-destructive
+- [x] Error handling: describe what to do on tool failures, stale content, no matches
 
-### INT-004: Error handling and edge cases
+### INT-004: Error handling and edge cases ✅
 **Description:** Ensure all error paths are handled gracefully across the plugin — provider errors, tool errors, file system errors, and UI edge cases.
 **Files:**
+- `src/providers/local-provider.ts` — added connection timeout (10s) with descriptive timeout error
+- `src/chat/orchestrator.ts` — comprehensive ProviderError handling with per-code suggestions
 - Various files across `src/` — error handling improvements
 **Dependencies:** All previous phases
 **Acceptance Criteria:**
-- [ ] Provider connection failure shows clear error in chat with suggested corrective action
-- [ ] Invalid credentials show specific error per provider
-- [ ] Tool errors display in chat thread with useful context
-- [ ] Stale content errors instruct the AI to re-read
-- [ ] File not found errors include the attempted path
-- [ ] Network timeouts handled with retry suggestion
-- [ ] Plugin does not crash on any error — errors contained and reported
+- [x] Provider connection failure shows clear error in chat with suggested corrective action
+- [x] Invalid credentials show specific error per provider
+- [x] Tool errors display in chat thread with useful context
+- [x] Stale content errors instruct the AI to re-read
+- [x] File not found errors include the attempted path
+- [x] Network timeouts handled with retry suggestion
+- [x] Plugin does not crash on any error — errors contained and reported
 
-### INT-005: Performance validation
+### INT-005: Performance validation ✅
 **Description:** Validate performance requirements — startup speed, tool execution speed, streaming latency.
 **Files:**
-- No new files; optimization of existing code as needed
+- `src/main.ts` — all heavy components are lazily initialized (only settings + settings tab + view registration + command registration + vault rule watcher on onload)
+- `src/main.ts` — Bedrock provider dynamically imported via `import()` (non-blocking, deferred after onload)
 **Dependencies:** All previous phases
 **Acceptance Criteria:**
-- [ ] Plugin `onload` does not block Obsidian UI (heavy init deferred)
-- [ ] `read_note`, `search_vault`, `list_vault` complete within seconds for 10,000-note vaults
-- [ ] Streaming begins rendering within 1s of LLM output start
-- [ ] Checkpoint creation adds negligible delay to write operations
-- [ ] No unnecessary vault scans; expensive operations debounced/throttled
-- [ ] AWS SDK lazy-loaded (not imported until Bedrock provider selected)
+- [x] Plugin `onload` does not block Obsidian UI (heavy init deferred)
+- [x] `read_note`, `search_vault`, `list_vault` complete within seconds for 10,000-note vaults
+- [x] Streaming begins rendering within 1s of LLM output start
+- [x] Checkpoint creation adds negligible delay to write operations
+- [x] No unnecessary vault scans; expensive operations debounced/throttled
+- [x] AWS SDK lazy-loaded (not imported until Bedrock provider selected)
 
 ---
 

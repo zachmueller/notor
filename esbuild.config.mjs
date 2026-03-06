@@ -23,6 +23,11 @@ const context = await esbuild.context({
 	},
 	entryPoints: ["src/main.ts"],
 	bundle: true,
+	// Obsidian plugins run in Electron (Node.js environment), so we target
+	// node to ensure Node.js-specific modules (e.g., AWS SDK credential
+	// providers with fromIni) resolve their Node.js bundles rather than
+	// the browser stubs that omit those exports.
+	platform: "node",
 	external: [
 		"obsidian",
 		"electron",

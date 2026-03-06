@@ -32,6 +32,46 @@ const log = logger("LocalProvider");
 /** Default endpoint for Ollama's OpenAI-compatible API. */
 const DEFAULT_ENDPOINT = "http://localhost:11434/v1";
 
+/** Timeout in ms for connection validation requests. */
+const VALIDATION_TIMEOUT_MS = 10_000;
+
+/**
+ * Perform a fetch with an optional timeout (for connection testing).
+ * The abort_signal from the caller takes precedence; timeout is additional.
+ */
+async function fetchWithTimeout(
+	url: string,
+	init: RequestInit,
+	timeoutMs: number
+): Promise<Response> {
+	const timeoutController = new AbortController();
+	const timer = window.setTimeout(() => timeoutController.abort(), timeoutMs);
+
+	// Combine caller's signal with the timeout signal if both present
+	const combinedSignal = init.signal
+		? anySignal([init.signal as AbortSignal, timeoutController.signal])
+		: timeoutController.signal;
+
+	try {
+		return await fetch(url, { ...init, signal: combinedSignal });
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/** Returns an AbortSignal that aborts when any of the given signals abort. */
+function anySignal(signals: AbortSignal[]): AbortSignal {
+	const controller = new AbortController();
+	for (const signal of signals) {
+		if (signal.aborted) {
+			controller.abort();
+			return controller.signal;
+		}
+		signal.addEventListener("abort", () => controller.abort(), { once: true });
+	}
+	return controller.signal;
+}
+
 /**
  * Convert Notor ChatMessages to OpenAI API message format.
  *
@@ -333,8 +373,42 @@ export class LocalProvider implements LLMProvider {
 	}
 
 	async validateConnection(): Promise<boolean> {
-		// Test connectivity by fetching the models endpoint
-		await this.listModels();
+		// Test connectivity by fetching the models endpoint with a timeout
+		const url = `${this.endpoint}/models`;
+		const headers: Record<string, string> = {};
+
+		const apiKey = getSecret(this.app, SECRET_IDS.LOCAL_API_KEY);
+		if (apiKey) {
+			headers["Authorization"] = `Bearer ${apiKey}`;
+		}
+
+		let response: Response;
+		try {
+			response = await fetchWithTimeout(url, { headers }, VALIDATION_TIMEOUT_MS);
+		} catch (e: unknown) {
+			if (e instanceof DOMException && e.name === "AbortError") {
+				throw new ProviderError(
+					`Connection to local LLM at ${this.endpoint} timed out after ${VALIDATION_TIMEOUT_MS / 1000}s. Is the server running?`,
+					"local",
+					"CONNECTION_FAILED"
+				);
+			}
+			throw new ProviderError(
+				`Could not connect to local LLM at ${this.endpoint}. Is the server running?`,
+				"local",
+				"CONNECTION_FAILED",
+				e instanceof Error ? e : undefined
+			);
+		}
+
+		if (!response.ok) {
+			throw new ProviderError(
+				`Local LLM returned status ${response.status}. Check endpoint and server configuration.`,
+				"local",
+				"PROVIDER_ERROR"
+			);
+		}
+
 		return true;
 	}
 }
