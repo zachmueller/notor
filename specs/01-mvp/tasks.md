@@ -201,149 +201,149 @@
 - `design/architecture.md` — conversation structure, context window management, system prompt assembly, tool dispatch
 - `design/research/system-prompt-design.md` — prompt structure, transferable patterns, token budget, safety principles
 
-### CHAT-001: Conversation manager
+### CHAT-001: Conversation manager ✅
 **Description:** Implement the core conversation management logic — creating, loading, switching, and persisting conversations. Manages the in-memory conversation state and message history.
 **Files:**
 - `src/chat/conversation.ts` — `ConversationManager` class
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Create new conversation with UUID, timestamps, provider/model info
-- [ ] Add messages to conversation (user, assistant, tool_call, tool_result)
-- [ ] Track cumulative input/output tokens and estimated cost
-- [ ] Track conversation mode (plan/act)
-- [ ] Auto-generate conversation title from first user message
-- [ ] Provide ordered message list for sending to LLM
-- [ ] In-memory state management for active conversation
+- [x] Create new conversation with UUID, timestamps, provider/model info
+- [x] Add messages to conversation (user, assistant, tool_call, tool_result)
+- [x] Track cumulative input/output tokens and estimated cost
+- [x] Track conversation mode (plan/act)
+- [x] Auto-generate conversation title from first user message
+- [x] Provide ordered message list for sending to LLM
+- [x] In-memory state management for active conversation
 
-### CHAT-002: JSONL history persistence
+### CHAT-002: JSONL history persistence ✅
 **Description:** Implement JSONL-based conversation persistence — writing messages as they occur (append-only) and loading full conversations from disk.
 **Files:**
 - `src/chat/history.ts` — `HistoryManager` class
 **Dependencies:** CHAT-001
 **Acceptance Criteria:**
-- [ ] Each conversation stored as `{timestamp}_{id}.jsonl` in history directory
-- [ ] Messages appended line-by-line as they occur (not batched)
-- [ ] Load conversation by reading and parsing all lines from JSONL file
-- [ ] List conversations with metadata (id, title, updated_at, first message preview)
-- [ ] Conversations ordered by most recent activity
-- [ ] Configurable storage path (default: `.obsidian/plugins/notor/history/`)
-- [ ] Retention policy enforced: prune by max size (500 MB default) and max age (90 days default)
-- [ ] JSONL files not recognized as Obsidian notes (correct file extension handling)
+- [x] Each conversation stored as `{timestamp}_{id}.jsonl` in history directory
+- [x] Messages appended line-by-line as they occur (not batched)
+- [x] Load conversation by reading and parsing all lines from JSONL file
+- [x] List conversations with metadata (id, title, updated_at, first message preview)
+- [x] Conversations ordered by most recent activity
+- [x] Configurable storage path (default: `.obsidian/plugins/notor/history/`)
+- [x] Retention policy enforced: prune by max size (500 MB default) and max age (90 days default)
+- [x] JSONL files not recognized as Obsidian notes (correct file extension handling)
 
-### CHAT-003: Context window management
+### CHAT-003: Context window management ✅
 **Description:** Implement context window tracking and truncation. Monitor cumulative tokens against the active model's context limit; truncate oldest messages when approaching the limit while preserving the system prompt and recent messages.
 **Files:**
 - `src/chat/context.ts` — `ContextManager` class
 **Dependencies:** CHAT-001, ENV-004, PROV-006
 **Acceptance Criteria:**
-- [ ] Track cumulative token count across all messages in a conversation
-- [ ] Look up context window limit from static model metadata
-- [ ] When approaching limit (configurable threshold, e.g., 90%), mark oldest non-system messages as `truncated: true`
-- [ ] Truncated messages excluded from the array sent to the LLM but retained in JSONL log and UI
-- [ ] System prompt always preserved (never truncated)
-- [ ] Visible warning displayed when truncation occurs
-- [ ] Messages are assembled in correct order for LLM: system → (non-truncated) user/assistant/tool messages
+- [x] Track cumulative token count across all messages in a conversation
+- [x] Look up context window limit from static model metadata
+- [x] When approaching limit (configurable threshold, e.g., 90%), mark oldest non-system messages as `truncated: true`
+- [x] Truncated messages excluded from the array sent to the LLM but retained in JSONL log and UI
+- [x] System prompt always preserved (never truncated)
+- [x] Visible warning displayed when truncation occurs
+- [x] Messages are assembled in correct order for LLM: system → (non-truncated) user/assistant/tool messages
 
-### CHAT-004: System prompt assembly
+### CHAT-004: System prompt assembly ✅
 **Description:** Build the system prompt from the built-in default, user customization file, and (Phase 2) vault-level rules. Tool definitions are generated from the tool registry.
 **Files:**
 - `src/chat/system-prompt.ts` — `SystemPromptBuilder` class
 **Dependencies:** CHAT-001
 **Acceptance Criteria:**
-- [ ] Built-in default system prompt (~3,000 tokens, 9 sections as per R-2 findings) embedded in plugin code
-- [ ] If `{notor_dir}/prompts/core-system-prompt.md` exists, use its body (strip frontmatter) instead
-- [ ] "Customize system prompt" action writes default to the file for editing
-- [ ] Tool definitions section auto-generated from the tool registry (single source of truth)
-- [ ] Hard ceiling of 8,000 tokens for total system prompt
-- [ ] System prompt includes mode-aware instructions (Plan vs Act)
+- [x] Built-in default system prompt (~3,000 tokens, 9 sections as per R-2 findings) embedded in plugin code
+- [x] If `{notor_dir}/prompts/core-system-prompt.md` exists, use its body (strip frontmatter) instead
+- [x] "Customize system prompt" action writes default to the file for editing
+- [x] Tool definitions section auto-generated from the tool registry (single source of truth)
+- [x] Hard ceiling of 8,000 tokens for total system prompt
+- [x] System prompt includes mode-aware instructions (Plan vs Act)
 
-### CHAT-005: Tool dispatcher
+### CHAT-005: Tool dispatcher ✅
 **Description:** Central dispatcher that sits between LLM response parsing and tool execution. Enforces Plan/Act mode, auto-approve settings, and routes to the correct tool implementation.
 **Files:**
 - `src/chat/dispatcher.ts` — `ToolDispatcher` class
 **Dependencies:** CHAT-001, PROV-001
 **Acceptance Criteria:**
-- [ ] Parse tool call requests from LLM `StreamChunk` events (tool_call_start/delta/end)
-- [ ] Look up tool in registry by name
-- [ ] Return error to LLM if tool not found
-- [ ] Block write tools in Plan mode with descriptive error message
-- [ ] Check auto-approve settings; if not auto-approved, delegate to approval UI and await response
-- [ ] Handle rejection: return rejection message to LLM
-- [ ] Execute tool and return result to LLM for next turn
-- [ ] Emit events for UI rendering (tool call started, result received, status changes)
+- [x] Parse tool call requests from LLM `StreamChunk` events (tool_call_start/delta/end)
+- [x] Look up tool in registry by name
+- [x] Return error to LLM if tool not found
+- [x] Block write tools in Plan mode with descriptive error message
+- [x] Check auto-approve settings; if not auto-approved, delegate to approval UI and await response
+- [x] Handle rejection: return rejection message to LLM
+- [x] Execute tool and return result to LLM for next turn
+- [x] Emit events for UI rendering (tool call started, result received, status changes)
 
-### CHAT-006: Stale content tracker
+### CHAT-006: Stale content tracker ✅
 **Description:** Track the last-read content for each note path within a conversation to detect concurrent edits before write operations.
 **Files:**
 - `src/chat/stale-tracker.ts` — `StaleContentTracker` class
 **Dependencies:** CHAT-001
 **Acceptance Criteria:**
-- [ ] After each `read_note` call, store `{ note_path, last_read_content, last_read_timestamp }` in memory
-- [ ] Before any write tool executes, compare note's current content against last-read content
-- [ ] If content differs, fail with stale-content error and instruct AI to re-read
-- [ ] Tracker is scoped per conversation (cleared on new conversation)
-- [ ] Handles notes that were never read (no stale check for new notes)
+- [x] After each `read_note` call, store `{ note_path, last_read_content, last_read_timestamp }` in memory
+- [x] Before any write tool executes, compare note's current content against last-read content
+- [x] If content differs, fail with stale-content error and instruct AI to re-read
+- [x] Tracker is scoped per conversation (cleared on new conversation)
+- [x] Handles notes that were never read (no stale check for new notes)
 
-### CHAT-007: Chat panel view (basic)
+### CHAT-007: Chat panel view (basic) ✅
 **Description:** Implement the Obsidian `ItemView` for the chat panel — the primary UI surface. This task covers the panel shell, message display, input area, send/stop buttons, and conversation switching.
 **Files:**
 - `src/ui/chat-view.ts` — `NotorChatView` extends `ItemView`
 - `styles.css` — chat panel styles
 **Dependencies:** CHAT-001, CHAT-002
 **Acceptance Criteria:**
-- [ ] Registered as an Obsidian leaf view, positionable on any side
-- [ ] Text input area at the bottom with send button
-- [ ] Enter sends message; Shift+Enter inserts newline
-- [ ] Send button disabled while AI is responding; Stop button shown instead
-- [ ] Stop button aborts the current LLM request via AbortController
-- [ ] User and assistant messages visually distinct
-- [ ] Assistant messages render as Markdown
-- [ ] Streaming responses render token-by-token as chunks arrive
-- [ ] Loading/typing indicator while response in progress
-- [ ] "New conversation" button creates a fresh conversation
-- [ ] Conversation list/selector shows past conversations ordered by recent activity
-- [ ] Settings gear button in panel header
+- [x] Registered as an Obsidian leaf view, positionable on any side
+- [x] Text input area at the bottom with send button
+- [x] Enter sends message; Shift+Enter inserts newline
+- [x] Send button disabled while AI is responding; Stop button shown instead
+- [x] Stop button aborts the current LLM request via AbortController
+- [x] User and assistant messages visually distinct
+- [x] Assistant messages render as Markdown
+- [x] Streaming responses render token-by-token as chunks arrive
+- [x] Loading/typing indicator while response in progress
+- [x] "New conversation" button creates a fresh conversation
+- [x] Conversation list/selector shows past conversations ordered by recent activity
+- [x] Settings gear button in panel header
 
-### CHAT-008: Chat settings quick-access
+### CHAT-008: Chat settings quick-access ✅
 **Description:** Implement the quick-access settings accessible from the chat panel header gear icon — provider selection, model selection, and mode toggle.
 **Files:**
 - `src/ui/chat-view.ts` — extend with settings popover/dropdown
 **Dependencies:** CHAT-007, PROV-001
 **Acceptance Criteria:**
-- [ ] Provider dropdown populated from configured providers
-- [ ] Model dropdown populated from cached model list (with refresh button)
-- [ ] Falls back to free-text model ID input when model list unavailable
-- [ ] Switching provider/model takes effect immediately (no restart needed)
-- [ ] Selected provider and model persisted across plugin reloads
+- [x] Provider dropdown populated from configured providers
+- [x] Model dropdown populated from cached model list (with refresh button)
+- [x] Falls back to free-text model ID input when model list unavailable
+- [x] Switching provider/model takes effect immediately (no restart needed)
+- [x] Selected provider and model persisted across plugin reloads
 
-### CHAT-009: Plan/Act mode toggle
+### CHAT-009: Plan/Act mode toggle ✅
 **Description:** Implement the Plan/Act mode toggle in the chat input area with visual state indication.
 **Files:**
 - `src/ui/chat-view.ts` — mode toggle component
 - `styles.css` — mode toggle styles
 **Dependencies:** CHAT-007
 **Acceptance Criteria:**
-- [ ] Toggle located next to the send button
-- [ ] Current mode clearly labeled and visually distinct (Plan = blue/read-only feel, Act = orange/active feel)
-- [ ] Default mode is Plan (safety-first per NFR-5)
-- [ ] Mode persists within session
-- [ ] Mode change updates the conversation state and dispatcher behavior
+- [x] Toggle located next to the send button
+- [x] Current mode clearly labeled and visually distinct (Plan = blue/read-only feel, Act = orange/active feel)
+- [x] Default mode is Plan (safety-first per NFR-5)
+- [x] Mode persists within session
+- [x] Mode change updates the conversation state and dispatcher behavior
 
-### CHAT-010: LLM message send/receive loop
+### CHAT-010: LLM message send/receive loop ✅
 **Description:** Wire together the conversation manager, context manager, system prompt builder, provider, and dispatcher into the complete send/receive loop. This is the core orchestration that makes the chat functional.
 **Files:**
 - `src/chat/orchestrator.ts` — `ChatOrchestrator` class
 **Dependencies:** CHAT-001, CHAT-003, CHAT-004, CHAT-005, PROV-001
 **Acceptance Criteria:**
-- [ ] On user message: assemble system prompt, append user message, build context window, send to active provider
-- [ ] Stream response chunks to UI in real time
-- [ ] Parse tool calls from stream; route through dispatcher
-- [ ] After tool execution, send tool result back to LLM for next turn
-- [ ] Loop continues until LLM produces a final text response (no more tool calls)
-- [ ] Track input/output tokens from `message_end` chunks
-- [ ] Update conversation cost estimate based on model pricing
-- [ ] Handle errors gracefully: display in chat, don't crash
-- [ ] Support cancellation via abort signal (Stop button)
+- [x] On user message: assemble system prompt, append user message, build context window, send to active provider
+- [x] Stream response chunks to UI in real time
+- [x] Parse tool calls from stream; route through dispatcher
+- [x] After tool execution, send tool result back to LLM for next turn
+- [x] Loop continues until LLM produces a final text response (no more tool calls)
+- [x] Track input/output tokens from `message_end` chunks
+- [x] Update conversation cost estimate based on model pricing
+- [x] Handle errors gracefully: display in chat, don't crash
+- [x] Support cancellation via abort signal (Stop button)
 
 ---
 
