@@ -606,3 +606,29 @@
 .notor-mode-act:hover {
 	opacity: 0.85;
 }
+
+/* ==========================================================================
+   Settings Tab — Connection Test Status (SET-001)
+   ========================================================================== */
+
+.notor-connection-status {
+	margin: 0 0 8px 0;
+	padding: 6px 10px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-small);
+}
+
+.notor-connection-status--pending {
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+.notor-connection-status--success {
+	background: var(--background-modifier-success, rgba(68, 207, 110, 0.15));
+	color: var(--text-success, var(--color-green));
+}
+
+.notor-connection-status--error {
+	background: var(--background-modifier-error, rgba(220, 53, 69, 0.15));
+	color: var(--text-error, var(--color-red));
+}

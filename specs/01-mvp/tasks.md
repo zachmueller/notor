@@ -356,34 +356,37 @@
 - `design/architecture.md` — provider configuration, credential storage
 - `design/research/obsidian-secrets-manager.md` — SecretComponent UI via `Setting.addComponent()`, key naming
 
-### SET-001: Provider configuration settings
+### SET-001: Provider configuration settings ✅
 **Description:** Build the full Settings → Notor tab with provider configuration — endpoint, credentials, region, auth method for each provider type.
 **Files:**
 - `src/settings.ts` — `NotorSettingTab` implementation
+- `src/providers/registry-factory.ts` — provider registry factory for connection testing
+- `src/obsidian-augments.d.ts` — added `SecretComponent` and `Setting.addComponent` type augmentations
 **Dependencies:** ENV-001, ENV-003, PROV-001
 **Acceptance Criteria:**
-- [ ] Section per provider type (Local, Anthropic, OpenAI, AWS Bedrock)
-- [ ] Local: endpoint URL text field (default `http://localhost:11434/v1`), optional API key via `SecretComponent`
-- [ ] Anthropic: API key via `SecretComponent`
-- [ ] OpenAI: API key via `SecretComponent`, optional custom endpoint
-- [ ] Bedrock: region dropdown, auth method toggle (profile name text field OR access key ID + secret access key via `SecretComponent`), profile defaults to `default`
-- [ ] Active provider selection
-- [ ] "Test connection" button per provider that calls `validateConnection()`
-- [ ] Success/error feedback displayed inline
+- [x] Section per provider type (Local, Anthropic, OpenAI, AWS Bedrock)
+- [x] Local: endpoint URL text field (default `http://localhost:11434/v1`), optional API key via `SecretComponent`
+- [x] Anthropic: API key via `SecretComponent`
+- [x] OpenAI: API key via `SecretComponent`, optional custom endpoint
+- [x] Bedrock: region dropdown, auth method toggle (profile name text field OR access key ID + secret access key via `SecretComponent`), profile defaults to `default`
+- [x] Active provider selection
+- [x] "Test connection" button per provider that calls `validateConnection()` (Bedrock shows informational note instead — AWS SDK is Node.js-only and cannot be bundled in the settings test helper)
+- [x] Success/error feedback displayed inline
 
-### SET-002: General settings
+### SET-002: General settings ✅
 **Description:** Implement remaining settings: notor directory, auto-approve toggles, open-notes-on-access toggle, history/checkpoint paths and retention.
 **Files:**
 - `src/settings.ts` — extend `NotorSettingTab`
+- `styles.css` — connection status styles
 **Dependencies:** SET-001
 **Acceptance Criteria:**
-- [ ] `notor_dir` path setting (default `notor/`)
-- [ ] Per-tool auto-approve toggles with sensible defaults (read=on, write=off)
-- [ ] Open notes on access toggle (default on)
-- [ ] History storage path, max size, max age settings
-- [ ] Checkpoint storage path, max per conversation, max age settings
-- [ ] Model pricing configuration (per-model input/output per 1K tokens)
-- [ ] All settings save immediately via `saveSettings()`
+- [x] `notor_dir` path setting (default `notor/`)
+- [x] Per-tool auto-approve toggles with sensible defaults (read=on, write=off)
+- [x] Open notes on access toggle (default on)
+- [x] History storage path, max size, max age settings
+- [x] Checkpoint storage path, max per conversation, max age settings
+- [x] Model pricing configuration (per-model input/output per 1K tokens)
+- [x] All settings save immediately via `saveSettings()`
 
 ---
 
