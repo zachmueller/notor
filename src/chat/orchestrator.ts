@@ -107,10 +107,18 @@ export class ChatOrchestrator {
 		const providerConfig = this.providerRegistry.getConfig(providerType);
 		const modelId = providerConfig?.model_id ?? "";
 
+		// Preserve the current in-session mode when creating a new conversation
+		// so that toggling Plan/Act and then starting a new conversation keeps
+		// the user's chosen mode. Only fall back to the saved setting when no
+		// conversation has been started yet (initial load).
+		const currentMode = this.conversationManager.hasActiveConversation()
+			? this.conversationManager.getMode()
+			: this.settings.mode;
+
 		const conversation = this.conversationManager.createConversation(
 			providerType,
 			modelId,
-			this.settings.mode
+			currentMode
 		);
 
 		await this.historyManager.createConversationFile(conversation);
@@ -257,6 +265,11 @@ export class ChatOrchestrator {
 			this.view?.setRespondingState(true);
 			const abortController = this.view?.createAbortController() ?? new AbortController();
 
+			// Eagerly create the assistant placeholder so the DOM element exists
+			// the moment we enter responding state. This ensures the element is
+			// present even if the abort fires before any text_delta chunks arrive.
+			const eagerContentEl = this.view?.createAssistantMessagePlaceholder();
+
 			const provider = this.providerRegistry.getActiveProvider();
 			const options: SendMessageOptions = {
 				model: this.getActiveModelId(),
@@ -265,8 +278,8 @@ export class ChatOrchestrator {
 
 			const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
 
-			// 7. Process stream
-			const result = await this.processStream(stream, abortController);
+			// 7. Process stream (pass in the already-created placeholder)
+			const result = await this.processStream(stream, abortController, eagerContentEl);
 
 			// 8. Handle result
 			if (result.type === "text") {
@@ -347,12 +360,28 @@ export class ChatOrchestrator {
 				// Continue the loop — send tool result back to LLM
 				continueLoop = true;
 			} else if (result.type === "cancelled") {
-				// User cancelled — add partial message if any
-				if (result.text) {
-					this.conversationManager.addMessage({
-						role: "assistant",
-						content: result.text + "\n\n*[Response cancelled]*",
-					});
+				// User cancelled — always render an assistant message so the
+				// .notor-message-assistant element exists in the DOM (the E2E
+				// test asserts this even when the abort fires before any text
+				// chunks have arrived).
+				const cancelledContent = result.text
+					? result.text + "\n\n*[Response cancelled]*"
+					: "*[Response cancelled]*";
+
+				const cancelledMsg = this.conversationManager.addMessage({
+					role: "assistant",
+					content: cancelledContent,
+				});
+
+				if (result.contentEl) {
+					// We already have a streaming placeholder — finalize it
+					await this.view?.finalizeAssistantMessage(result.contentEl, cancelledMsg);
+				} else {
+					// No placeholder yet — create one and finalize immediately
+					const el = this.view?.createAssistantMessagePlaceholder();
+					if (el) {
+						await this.view?.finalizeAssistantMessage(el, cancelledMsg);
+					}
 				}
 			} else if (result.type === "error") {
 				const errStr = typeof result.error === "string"
@@ -372,12 +401,15 @@ export class ChatOrchestrator {
 	/** Result type for stream processing. */
 	private async processStream(
 		stream: AsyncIterable<StreamChunk>,
-		abortController: AbortController
+		abortController: AbortController,
+		eagerContentEl?: HTMLElement
 	): Promise<StreamResult> {
 		let textContent = "";
 		let inputTokens = 0;
 		let outputTokens = 0;
-		let contentEl: HTMLElement | undefined;
+		// Use the eagerly-created placeholder if provided; first text_delta
+		// will use it rather than creating a second element.
+		let contentEl: HTMLElement | undefined = eagerContentEl;
 
 		// Tool call accumulation
 		let currentToolCallId = "";
@@ -393,11 +425,13 @@ export class ChatOrchestrator {
 						text: textContent,
 						inputTokens,
 						outputTokens,
+						contentEl,
 					};
 				}
 
 				switch (chunk.type) {
 					case "text_delta":
+						// contentEl may already be set from the eager placeholder
 						if (!contentEl) {
 							contentEl = this.view?.createAssistantMessagePlaceholder();
 						}
@@ -476,6 +510,7 @@ export class ChatOrchestrator {
 					text: textContent,
 					inputTokens,
 					outputTokens,
+					contentEl,
 				};
 			}
 			throw e;
@@ -665,5 +700,5 @@ export class ChatOrchestrator {
 type StreamResult =
 	| { type: "text"; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "tool_call"; toolCallId: string; toolName: string; parameters: Record<string, unknown>; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "cancelled"; text: string; inputTokens: number; outputTokens: number }
+	| { type: "cancelled"; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "error"; error: string; text: string; inputTokens: number; outputTokens: number };
