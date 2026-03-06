@@ -73,7 +73,7 @@ This specification covers three roadmap phases that together form the MVP:
 **Description:** Users can choose which model variant to use within a given provider.
 
 **Acceptance criteria:**
-- The settings and chat panel expose available models for the active provider via a dropdown populated by querying the provider's model list API (e.g., `/v1/models` for OpenAI-compatible and local providers; equivalent endpoints for Anthropic and Bedrock).
+- The settings and chat panel expose available models for the active provider via a dropdown populated by querying the provider's model list API (e.g., `/v1/models` for OpenAI-compatible and local providers; `GET /v1/models` with cursor-based pagination for Anthropic; `ListInferenceProfilesCommand` with `typeEquals: "SYSTEM_DEFINED"` for AWS Bedrock).
 - If the model list API is unavailable or returns an error, the dropdown falls back to a free-text input field where the user can type or paste any model ID.
 - A refresh button allows re-fetching the model list on demand.
 - The user can switch models without restarting the plugin or starting a new conversation.
@@ -523,7 +523,7 @@ This specification covers three roadmap phases that together form the MVP:
 - Q: What happens when the user sends a message while the AI is still responding or a tool approval is pending? → A: Block input + cancel button. The send button is disabled while the AI is active (streaming or awaiting tool approval). A "Stop" button allows the user to cancel the current response. Input is re-enabled after the response completes or is cancelled.
 - Q: What should happen when the conversation approaches or exceeds the model's context window limit (auto-compaction is deferred to Phase 3)? → A: Warn + truncate oldest. Show a visible warning that context is being trimmed, then drop the oldest messages (keeping system prompt and recent messages) to fit within the context window. The user can start a new conversation if they prefer a clean slate.
 - Q: What should the default retention limits be for checkpoints and chat history? → A: Moderate defaults. Checkpoints: max 100 per conversation, 30-day retention. Chat history: 500 MB total size, 90-day retention. All limits are user-configurable in settings.
-- Q: How should the model list be populated for each provider? → A: Dynamic fetch. Query each provider's model list API (e.g., `/v1/models` for OpenAI-compatible, Anthropic, and local providers; equivalent for Bedrock) and populate a dropdown. Fall back to a free-text model ID field if the fetch fails or returns empty.
+- Q: How should the model list be populated for each provider? → A: Dynamic fetch. Query each provider's model list API (e.g., `/v1/models` for OpenAI-compatible, Anthropic, and local providers; `ListInferenceProfiles` with `typeEquals: "SYSTEM_DEFINED"` for Bedrock) and populate a dropdown. Fall back to a free-text model ID field if the fetch fails or returns empty.
 - Q: What happens if the user edits a note in the Obsidian editor while the AI proposes or applies changes to the same note? → A: Stale-content check. Before applying any write operation, compare the note's current content against what the AI last read. If the note has changed since the AI's last read, fail the operation and return an error to the AI indicating the note was modified externally, prompting it to re-read before retrying.
 
 ## Assumptions

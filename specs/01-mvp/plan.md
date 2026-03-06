@@ -34,7 +34,7 @@
 - **Obsidian vault API:** File read/write/create/modify, `vault.process` for atomic read-modify-write, metadata cache, `fileManager.processFrontMatter` for safe frontmatter editing, `getFrontMatterInfo` for frontmatter boundary parsing
 - **Obsidian workspace API:** Leaf views, editor navigation, active file tracking
 - **Obsidian secrets manager API:** `SecretStorage` — `setSecret(id, secret)`, `getSecret(id)`, `listSecrets()`; `SecretComponent` for settings UI via `Setting.addComponent()`
-- **LLM provider HTTP APIs:** OpenAI-compatible `/v1/chat/completions`, `/v1/models`; Anthropic `/v1/messages`; AWS Bedrock `InvokeModelWithResponseStream`, `ListFoundationModels`
+- **LLM provider HTTP APIs:** OpenAI-compatible `/v1/chat/completions`, `/v1/models`; Anthropic `/v1/messages`; AWS Bedrock `InvokeModelWithResponseStream`, `ListInferenceProfiles`
 - **AWS SDK v3:** `@aws-sdk/client-bedrock-runtime`, `@aws-sdk/client-bedrock`, `@aws-sdk/credential-providers`
 
 ---
@@ -65,7 +65,7 @@ Cline's ~8K–10K token prompt analyzed; 8 patterns transfer to Notor (structure
 
 #### R-4: LLM provider model list APIs ✅
 
-All four providers expose model list APIs. No provider returns context window or pricing — a static metadata table (keyed by model ID) is required, following Cline's proven pattern. OpenAI requires client-side filtering (100+ models); Anthropic uses cursor-based pagination; Bedrock supports server-side `byOutputModality=TEXT` filtering. Cache model lists in memory (5-min TTL, stale-while-revalidate); fall back to free-text input on failure.
+All four providers expose model list APIs. No provider returns context window or pricing — a static metadata table (keyed by model ID) is required, following Cline's proven pattern. OpenAI requires client-side filtering (100+ models); Anthropic uses cursor-based pagination; Bedrock uses `ListInferenceProfiles` with `typeEquals: "SYSTEM_DEFINED"` (returns cross-region inference profile IDs that are passed directly to the Converse API as `modelId`; newer models such as Claude Sonnet 4.6 and Llama 4 appear only in inference profiles, not in `ListFoundationModels`). Cache model lists in memory (5-min TTL, stale-while-revalidate); fall back to free-text input on failure.
 
 **Output:** [`design/research/llm-model-list-apis.md`](../../design/research/llm-model-list-apis.md)
 
@@ -125,7 +125,7 @@ Developer onboarding guide is in [quickstart.md](quickstart.md).
 | Plugin architecture | — | Settings framework, lifecycle management, logging (partially complete in `src/`) |
 | LLM provider abstraction | FR-1 | `LLMProvider` interface + implementations for local, Bedrock, Anthropic, OpenAI |
 | Credential management | FR-2 | `SecretStorage` integration via `app.secretStorage`; settings store secret *names* (e.g., `notor-openai-api-key`), actual values retrieved via `getSecret(name)` at runtime; `SecretComponent` UI for settings tab via `Setting.addComponent()` |
-| Model selection | FR-3 | Dynamic fetch from provider list APIs (`/v1/models`, `ListFoundationModels`); static metadata table for context window/pricing (keyed by model ID); 5-min in-memory cache with stale-while-revalidate; free-text fallback on fetch failure; client-side filtering for OpenAI, cursor pagination for Anthropic |
+| Model selection | FR-3 | Dynamic fetch from provider list APIs (`/v1/models` for OpenAI/Anthropic/local, `ListInferenceProfiles` with `typeEquals: "SYSTEM_DEFINED"` for Bedrock); static metadata table for context window/pricing (keyed by inference profile ID for Bedrock, model ID for other providers); 5-min in-memory cache with stale-while-revalidate; free-text fallback on fetch failure; client-side filtering for OpenAI (chat models only), cursor pagination for Anthropic, client-side chat-model filtering for Bedrock |
 | Chat panel UI | FR-4 | Side panel leaf view, message input, send/stop, conversation list, settings gear |
 | Streaming responses | FR-5 | Token-by-token rendering, Markdown formatting, loading indicator |
 | System prompt | FR-6 | Built-in default (~3,000 tokens, 9 sections) + customizable `{notor_dir}/prompts/core-system-prompt.md`; tool definitions generated from tool registry; vault-level rules (FR-23) appended dynamically; hard ceiling 8,000 tokens |
@@ -197,14 +197,14 @@ Developer onboarding guide is in [quickstart.md](quickstart.md).
 | **~~Secrets manager API insufficient or platform-inconsistent~~** | ~~High~~ | ~~Medium~~ | **Resolved (R-1):** `SecretStorage` is sufficient. No fallback needed. Requires `minAppVersion` 1.11.4. Only limitation: no delete API (use empty string workaround). |
 | **AWS SDK v3 bundle size too large** | Medium — could slow plugin load | Medium | Tree-shake aggressively; lazy-load Bedrock provider only when selected |
 | **~~Vault API frontmatter handling destroys metadata~~** | ~~High~~ | ~~Medium~~ | **Resolved (R-3):** `vault.process` provides atomic operations for `replace_in_note`. `write_note` uses read-before-write frontmatter merge. `processFrontMatter` available for Phase 2 metadata tools. |
-| **~~Model list APIs inconsistent across providers~~** | ~~Low~~ | ~~High~~ | **Resolved (R-4):** All four providers have list APIs. Differences are manageable (client-side filtering for OpenAI, pagination for Anthropic, server-side filtering for Bedrock). Static metadata table needed for context window/pricing (no provider returns these). |
+| **~~Model list APIs inconsistent across providers~~** | ~~Low~~ | ~~High~~ | **Resolved (R-4):** All four providers have list APIs. Differences are manageable (client-side filtering for OpenAI, pagination for Anthropic, `ListInferenceProfiles` with `typeEquals: "SYSTEM_DEFINED"` for Bedrock). Static metadata table needed for context window/pricing (no provider returns these). Bedrock metadata table keyed by inference profile ID (e.g., `us.anthropic.claude-sonnet-4-20250514-v1:0`). |
 | **Streaming incompatibility across providers** | Medium — degraded UX | Low | Buffering adapter for non-streaming providers |
 | **Context window management complexity** | Medium — poor UX for long conversations | Medium | Simple truncation for MVP; auto-compaction deferred to Phase 3 |
 
 ### Dependencies and Assumptions
 
 - **External dependencies:** `obsidian` types, AWS SDK v3 (for Bedrock), no other runtime dependencies
-- **Technical assumptions:** `minAppVersion` set to `1.11.4` (required for `SecretStorage` — confirmed by R-1); JSONL files in plugin directory are not indexed as notes; `vault.process` provides atomic read-modify-write (confirmed by R-3); no provider returns context window or pricing in model list APIs (confirmed by R-4) — static metadata table required
+- **Technical assumptions:** `minAppVersion` set to `1.11.4` (required for `SecretStorage` — confirmed by R-1); JSONL files in plugin directory are not indexed as notes; `vault.process` provides atomic read-modify-write (confirmed by R-3); no provider returns context window or pricing in model list APIs (confirmed by R-4) — static metadata table required; Bedrock model listing uses `ListInferenceProfiles` (not `ListFoundationModels`) — inference profile IDs (e.g., `us.anthropic.claude-sonnet-4-20250514-v1:0`) are used directly as `modelId` in Converse API calls; IAM policy must include `bedrock:ListInferenceProfiles`
 - **Business assumptions:** Users have a working LLM provider before using Notor; default local endpoint is `http://localhost:11434/v1` (Ollama)
 
 ---
