@@ -5,6 +5,8 @@
 **Specification:** [spec.md](spec.md)
 **Status:** Planning
 
+> **⚠️ MANDATORY: Before starting implementation work on any phase, you MUST read ALL reference files listed for that phase into context.** These reference files contain critical design decisions, API contracts, data models, and research findings that directly inform the implementation. Skipping this step risks building against outdated assumptions or missing key requirements. Each phase section below lists its required reference files — load every one of them before writing any code for that phase.
+
 ## Task Summary
 
 **Total Tasks:** 48
@@ -15,6 +17,14 @@
 ---
 
 ## Phase 0: Setup & Environment
+
+**Reference files (read ALL before starting this phase):**
+- `specs/01-mvp/spec.md` — full MVP specification, NFRs, settings defaults
+- `specs/01-mvp/data-model.md` — entity definitions, Plugin Settings table, JSONL schema, all type interfaces
+- `specs/01-mvp/plan.md` — architecture decisions, technology stack rationale
+- `specs/01-mvp/quickstart.md` — project structure, planned source structure, code conventions
+- `design/architecture.md` — LLM provider layer, credential storage, message structure
+- `design/research/obsidian-secrets-manager.md` — SecretStorage API surface, minAppVersion requirements
 
 ### ENV-001: Project restructure and settings foundation
 **Description:** Replace sample plugin scaffolding with Notor's settings interface, types, and module structure. Remove sample modal, ribbon icon, status bar, and placeholder commands from `main.ts`. Create the settings interface from the data model with all MVP settings fields and defaults.
@@ -71,6 +81,14 @@
 ---
 
 ## Phase 1: LLM Provider Layer
+
+**Reference files (read ALL before starting this phase):**
+- `specs/01-mvp/contracts/llm-provider.md` — LLMProvider interface, StreamChunk types, ChatMessage, ProviderError, provider-specific mapping, error handling contract, buffering adapter
+- `specs/01-mvp/plan.md` — provider architecture decisions, integration points, AWS SDK rationale
+- `specs/01-mvp/data-model.md` — LLMProviderConfig entity, ModelInfo entity, default provider configurations
+- `design/architecture.md` — provider abstraction, supported providers, streaming, configuration
+- `design/research/llm-model-list-apis.md` — model list API endpoints, response formats, caching strategy, static metadata table pattern (Cline analysis)
+- `design/research/obsidian-secrets-manager.md` — SecretStorage API for credential retrieval
 
 ### PROV-001: LLM provider interface and registry
 **Description:** Define the `LLMProvider` interface and create a provider registry that manages provider instances. The registry is the single point of access for the active provider throughout the plugin.
@@ -173,6 +191,14 @@
 ---
 
 ## Phase 2: Chat System & UI
+
+**Reference files (read ALL before starting this phase):**
+- `specs/01-mvp/spec.md` — FR-4 (chat panel), FR-5 (streaming), FR-6 (system prompt), FR-14 (Plan/Act), FR-15 (auto-approve), FR-16 (tool transparency), FR-19 (chat history)
+- `specs/01-mvp/data-model.md` — Conversation entity, Message entity, ToolCall/ToolResult, JSONL schema, Stale Content Check, Plugin Settings
+- `specs/01-mvp/contracts/tool-schemas.md` — tool dispatch contract, dispatch flow, diff preview flow
+- `design/ux.md` — chat panel layout, message display, streaming, Plan/Act mode, auto-approve, editor behavior
+- `design/architecture.md` — conversation structure, context window management, system prompt assembly, tool dispatch
+- `design/research/system-prompt-design.md` — prompt structure, transferable patterns, token budget, safety principles
 
 ### CHAT-001: Conversation manager
 **Description:** Implement the core conversation management logic — creating, loading, switching, and persisting conversations. Manages the in-memory conversation state and message history.
@@ -322,6 +348,13 @@
 
 ## Phase 3: Settings UI
 
+**Reference files (read ALL before starting this phase):**
+- `specs/01-mvp/spec.md` — FR-1 (provider integration), FR-2 (credential management), FR-3 (model selection), FR-15 (auto-approve)
+- `specs/01-mvp/data-model.md` — LLMProviderConfig entity, Plugin Settings table, auto-approve defaults
+- `design/ux.md` — settings layout, auto-approve configuration
+- `design/architecture.md` — provider configuration, credential storage
+- `design/research/obsidian-secrets-manager.md` — SecretComponent UI via `Setting.addComponent()`, key naming
+
 ### SET-001: Provider configuration settings
 **Description:** Build the full Settings → Notor tab with provider configuration — endpoint, credentials, region, auth method for each provider type.
 **Files:**
@@ -354,6 +387,14 @@
 ---
 
 ## Phase 4: Tool Implementations
+
+**Reference files (read ALL before starting this phase):**
+- `specs/01-mvp/contracts/tool-schemas.md` — JSON Schema definitions for all tools, result formats, error cases, pre-execution checks
+- `specs/01-mvp/spec.md` — FR-7 through FR-13 (tool FRs), FR-16 (tool transparency), NFR-3 (reliability/data safety)
+- `specs/01-mvp/data-model.md` — ToolCall/ToolResult entities, Stale Content Check
+- `design/tools.md` — tool design principles, built-in tool specs, tool classification table
+- `design/ux.md` — tool call display, diff preview, editor behavior, approval UI
+- `design/research/obsidian-vault-api-frontmatter.md` — vault.read, vault.create, vault.modify, vault.process, getFrontMatterInfo, frontmatter preservation strategy
 
 ### TOOL-001: Tool interface and registry
 **Description:** Define the tool interface and create the tool registry that manages all built-in tools. The registry provides tool lookup, schema generation for LLM context, and mode classification.
@@ -486,6 +527,11 @@
 
 ## Phase 5: Diff Preview & Change Approval
 
+**Reference files (read ALL before starting this phase):**
+- `specs/01-mvp/spec.md` — FR-12 (diff preview and change approval)
+- `specs/01-mvp/contracts/tool-schemas.md` — diff preview flow (section at end of document)
+- `design/ux.md` — diff preview and change approval UI patterns, per-change accept/reject, auto-approve collapsed diff behavior
+
 ### DIFF-001: Diff generation
 **Description:** Generate before/after diffs for write tool operations. Compute the diff data structure used by the diff preview UI.
 **Files:**
@@ -515,6 +561,15 @@
 ---
 
 ## Phase 6: Trust, Safety & Observability (Phase 2 FRs)
+
+**Reference files (read ALL before starting this phase):**
+- `specs/01-mvp/spec.md` — FR-17 (checkpoints), FR-18 (token/cost tracking), FR-19 (chat history), FR-20 (read_frontmatter), FR-21 (update_frontmatter), FR-22 (manage_tags), FR-23 (vault-level rules)
+- `specs/01-mvp/data-model.md` — Checkpoint entity (fields, persistence, retention), VaultRule entity (triggers, evaluation), Message token/cost fields
+- `specs/01-mvp/contracts/tool-schemas.md` — Phase 2 tool schemas (read_frontmatter, update_frontmatter, manage_tags)
+- `design/architecture.md` — checkpoints behavior/storage/operations, vault-level rule trigger evaluation, system prompt assembly with rules
+- `design/ux.md` — checkpoints UI, token/cost tracking display, vault-level instruction files, system prompt with rules
+- `design/tools.md` — note metadata tools (read_frontmatter, update_frontmatter, manage_tags)
+- `design/research/obsidian-vault-api-frontmatter.md` — fileManager.processFrontMatter API, metadataCache.getFileCache for frontmatter reads
 
 ### CP-001: Checkpoint creation
 **Description:** Implement automatic checkpoint creation before write operations. Snapshot the affected note's current content.
@@ -624,6 +679,14 @@
 ---
 
 ## Phase 7: Integration & Polish
+
+**Reference files (read ALL before starting this phase):**
+- `specs/01-mvp/spec.md` — all FRs and NFRs (final validation), success criteria, user scenarios and edge cases
+- `specs/01-mvp/plan.md` — full implementation plan, risk assessment, performance requirements
+- `specs/01-mvp/quickstart.md` — planned source structure, manual testing checklist, code conventions
+- `design/architecture.md` — full architecture reference for lifecycle wiring
+- `design/ux.md` — notifications and feedback, complete UI reference
+- `design/research/system-prompt-design.md` — default system prompt structure, 9 sections, token budget, safety principles
 
 ### INT-001: Plugin lifecycle wiring
 **Description:** Wire all components together in `main.ts` — register the chat view, commands, settings tab, and initialize all managers. Ensure clean unload.
