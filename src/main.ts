@@ -444,7 +444,18 @@ export default class NotorPlugin extends Plugin {
 			const vaultRuleManager = this.getVaultRuleManager();
 			vaultRuleManager.clearAccessedNotes();
 
-			orchestrator.newConversation().then(() => {
+			// Reload settings from disk so any external changes to data.json
+			// (e.g. E2E tests injecting auto-approve configs) are picked up
+			// before the new conversation starts.
+			this.loadSettings().then(() => {
+				// Propagate refreshed auto-approve settings to the dispatcher
+				toolDispatcher.setAutoApprove(this.settings.auto_approve);
+				if (this._orchestrator) {
+					this._orchestrator.updateSettings(this.settings);
+				}
+
+				return orchestrator.newConversation();
+			}).then(() => {
 				const convManager = orchestrator.getConversationManager();
 				const conv = convManager.getActiveConversation();
 				if (conv) {
@@ -586,12 +597,18 @@ export default class NotorPlugin extends Plugin {
 		});
 
 		// Wire approval callback for tool dispatcher
-		toolDispatcher.setApprovalCallback(async (_toolCall) => {
+		toolDispatcher.setApprovalCallback(async (toolCall) => {
 			// Find the most recent tool call element in the view for the approval UI.
 			// The view tracks the last rendered tool call element via getLastToolCallEl().
 			const toolCallEl = view.getLastToolCallEl();
 			if (toolCallEl) {
-				return view.renderApprovalPrompt(toolCallEl);
+				// For write_note and replace_in_note, render a full diff preview.
+				// For all other tools, use the plain approve/reject prompt.
+				return view.renderDiffApprovalPrompt(
+					toolCallEl,
+					toolCall.tool_name,
+					toolCall.parameters ?? {}
+				);
 			}
 			// Fallback: auto-approve if no UI element available
 			log.warn("No tool call element for approval prompt, auto-approving");

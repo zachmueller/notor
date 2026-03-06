@@ -615,7 +615,7 @@
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	font-size: var(--font-ui-small);
-	overflow: hidden;
+	overflow: visible;
 	margin: 4px 0;
 }
 

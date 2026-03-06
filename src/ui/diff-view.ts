@@ -77,7 +77,9 @@ export function renderWriteNoteDiffPreview(
 	const diffResult = computeWriteNoteDiff(notePath, beforeContent, afterContent);
 
 	return new Promise((resolve) => {
-		const wrapperEl = container.createDiv({ cls: "notor-diff-preview" });
+		// notor-diff-view alias allows E2E selectors and approval-UI detection
+		// to find the diff container with a stable class name.
+		const wrapperEl = container.createDiv({ cls: "notor-diff-preview notor-diff-view" });
 
 		// Header
 		const headerEl = wrapperEl.createDiv({ cls: "notor-diff-header" });
@@ -132,14 +134,21 @@ export function renderWriteNoteDiffPreview(
 			// Bulk action buttons
 			const actionsEl = wrapperEl.createDiv({ cls: "notor-diff-actions" });
 
+			// Include notor-approve-btn / notor-reject-btn aliases so E2E selectors
+			// and the existing approval-UI detection code can find these buttons.
 			const acceptBtn = actionsEl.createEl("button", {
-				cls: "notor-diff-accept-btn",
+				cls: "notor-diff-accept-btn notor-approve-btn",
 				text: diffResult.isNewFile ? "Create file" : "Accept all",
 			});
 
 			const rejectBtn = actionsEl.createEl("button", {
-				cls: "notor-diff-reject-btn",
+				cls: "notor-diff-reject-btn notor-reject-btn",
 				text: "Reject",
+			});
+
+			// Scroll the action buttons into view so Playwright can click them.
+			requestAnimationFrame(() => {
+				actionsEl.scrollIntoView({ behavior: "instant", block: "nearest" });
 			});
 
 			acceptBtn.addEventListener("click", () => {
@@ -183,7 +192,9 @@ export function renderReplaceInNoteDiffPreview(
 	const diffResult = computeReplaceInNoteDiff(notePath, noteContent, changeBlocks);
 
 	return new Promise((resolve) => {
-		const wrapperEl = container.createDiv({ cls: "notor-diff-preview" });
+		// notor-diff-view alias allows E2E selectors and approval-UI detection
+		// to find the diff container with a stable class name.
+		const wrapperEl = container.createDiv({ cls: "notor-diff-preview notor-diff-view" });
 
 		// Header
 		const headerEl = wrapperEl.createDiv({ cls: "notor-diff-header" });
@@ -279,39 +290,38 @@ export function renderReplaceInNoteDiffPreview(
 		// Bulk action buttons
 		const actionsEl = wrapperEl.createDiv({ cls: "notor-diff-actions" });
 
+		// Include notor-approve-btn / notor-reject-btn aliases so E2E selectors
+		// can detect the approval UI via the stable class names.
+		// "Accept all" immediately applies all blocks and resolves (no separate
+		// Apply click needed), which also makes E2E automation straightforward.
 		const acceptAllBtn = actionsEl.createEl("button", {
-			cls: "notor-diff-accept-btn",
+			cls: "notor-diff-accept-btn notor-approve-btn",
 			text: "Accept all",
 		});
 
+		// "Reject all" immediately rejects all blocks and resolves.
 		const rejectAllBtn = actionsEl.createEl("button", {
-			cls: "notor-diff-reject-btn",
+			cls: "notor-diff-reject-btn notor-reject-btn",
 			text: "Reject all",
 		});
 
-		const applyBtn = actionsEl.createEl("button", {
-			cls: "notor-diff-apply-btn",
-			text: "Apply",
+		// "Apply" applies the current per-block state (used after toggling
+		// individual blocks); only shown when there are multiple blocks.
+		let applyBtn: HTMLButtonElement | null = null;
+		if (diffResult.blocks.length > 1) {
+			applyBtn = actionsEl.createEl("button", {
+				cls: "notor-diff-apply-btn",
+				text: "Apply",
+			});
+		}
+
+		// Scroll the action buttons into view so Playwright can click them.
+		requestAnimationFrame(() => {
+			actionsEl.scrollIntoView({ behavior: "instant", block: "nearest" });
 		});
 
-		// Accept all
-		acceptAllBtn.addEventListener("click", () => {
-			for (let i = 0; i < diffResult.blocks.length; i++) {
-				blockAccepted.set(i, true);
-			}
-			updateAllBlockUI(blocksContainerEl, blockAccepted);
-		});
-
-		// Reject all
-		rejectAllBtn.addEventListener("click", () => {
-			for (let i = 0; i < diffResult.blocks.length; i++) {
-				blockAccepted.set(i, false);
-			}
-			updateAllBlockUI(blocksContainerEl, blockAccepted);
-		});
-
-		// Apply: resolve with current acceptance state
-		applyBtn.addEventListener("click", () => {
+		/** Resolve with the current blockAccepted state. */
+		const resolveWithCurrentState = () => {
 			actionsEl.remove();
 
 			const acceptedIndexes = new Set<number>();
@@ -334,9 +344,29 @@ export function renderReplaceInNoteDiffPreview(
 				statusMsg += `, ${rejectedCount} rejected`;
 			}
 			renderAppliedStatus(wrapperEl, statusMsg);
-
 			resolve({ accepted: true, finalContent, acceptedBlockIndexes: acceptedIndexes });
+		};
+
+		// Accept all: mark all accepted then apply immediately.
+		acceptAllBtn.addEventListener("click", () => {
+			for (let i = 0; i < diffResult.blocks.length; i++) {
+				blockAccepted.set(i, true);
+			}
+			updateAllBlockUI(blocksContainerEl, blockAccepted);
+			resolveWithCurrentState();
 		});
+
+		// Reject all: mark all rejected then apply immediately.
+		rejectAllBtn.addEventListener("click", () => {
+			for (let i = 0; i < diffResult.blocks.length; i++) {
+				blockAccepted.set(i, false);
+			}
+			updateAllBlockUI(blocksContainerEl, blockAccepted);
+			resolveWithCurrentState();
+		});
+
+		// Apply: resolve with the current per-block acceptance state.
+		applyBtn?.addEventListener("click", resolveWithCurrentState);
 	});
 }
 
@@ -407,7 +437,18 @@ function renderFileDiffLines(container: HTMLElement, diff: FileDiff): void {
  * Render a single diff line as a table row.
  */
 function renderDiffLine(tbody: HTMLElement, line: DiffLine): void {
-	const rowEl = tbody.createEl("tr", { cls: `notor-diff-line notor-diff-line-${line.type}` });
+	// Build class list — include both the verbose `notor-diff-line-{type}` names
+	// and the short aliases (`notor-diff-add`, `notor-diff-del`) so that E2E
+	// selectors and CSS rules can target either form.
+	const typeAlias =
+		line.type === "added" ? "notor-diff-add" :
+		line.type === "deleted" ? "notor-diff-del" : "";
+	const rowCls = [
+		"notor-diff-line",
+		`notor-diff-line-${line.type}`,
+		...(typeAlias ? [typeAlias] : []),
+	].join(" ");
+	const rowEl = tbody.createEl("tr", { cls: rowCls });
 
 	// Before line number
 	const beforeNumEl = rowEl.createEl("td", { cls: "notor-diff-line-num notor-diff-line-num-before" });

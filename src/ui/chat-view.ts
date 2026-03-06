@@ -13,6 +13,10 @@ import type NotorPlugin from "../main";
 import type { ConversationMode, Message, LLMProviderType, ModelInfo, Checkpoint } from "../types";
 import type { ConversationListEntry } from "../chat/history";
 import { logger } from "../utils/logger";
+import {
+	renderWriteNoteDiffPreview,
+	renderReplaceInNoteDiffPreview,
+} from "./diff-view";
 
 const log = logger("ChatView");
 
@@ -581,6 +585,98 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Render a diff-based approval prompt for write tool calls.
+	 *
+	 * For `write_note` and `replace_in_note`, reads the current file content
+	 * and renders a full diff preview with approve/reject controls. For all
+	 * other tools falls back to the plain approval prompt.
+	 *
+	 * @param toolCallEl  - The tool call card element to render into.
+	 * @param toolName    - The name of the tool being called.
+	 * @param parameters  - The tool parameters (path, content / changes).
+	 * @returns Promise resolving to "approved" or "rejected".
+	 */
+	async renderDiffApprovalPrompt(
+		toolCallEl: HTMLElement,
+		toolName: string,
+		parameters: Record<string, unknown>
+	): Promise<"approved" | "rejected"> {
+		const notePath = parameters["path"] as string | undefined;
+
+		if (!notePath) {
+			return this.renderApprovalPrompt(toolCallEl);
+		}
+
+		if (toolName === "write_note") {
+			const afterContent = (parameters["content"] as string | undefined) ?? "";
+
+			// Read current file content (empty string for new files)
+			let beforeContent = "";
+			try {
+				const file = this.app.vault.getFileByPath(notePath);
+				if (file) {
+					beforeContent = await this.app.vault.read(file as import("obsidian").TFile);
+				}
+			} catch {
+				// New file — beforeContent stays empty
+			}
+
+			// Start rendering the diff, then keep scrolling so the action
+			// buttons stay visible while the user decides.
+			const decisionPromise = renderWriteNoteDiffPreview(
+				this.messageListEl,
+				notePath,
+				beforeContent,
+				afterContent,
+				/*autoApproved=*/ false
+			);
+			// Poll-scroll: keep the bottom visible while approval is pending.
+			const scrollTimer = window.setInterval(() => this.scrollToBottom(), 100);
+			const decision = await decisionPromise;
+			window.clearInterval(scrollTimer);
+			return decision.accepted ? "approved" : "rejected";
+		}
+
+		if (toolName === "replace_in_note") {
+			const changeBlocks = (parameters["changes"] as Array<{ search: string; replace: string }> | undefined) ?? [];
+
+			// Read current note content
+			let noteContent = "";
+			try {
+				const file = this.app.vault.getFileByPath(notePath);
+				if (file) {
+					noteContent = await this.app.vault.read(file as import("obsidian").TFile);
+				}
+			} catch {
+				// Fall back to plain prompt if file unreadable
+				return this.renderApprovalPrompt(toolCallEl);
+			}
+
+			if (!noteContent) {
+				return this.renderApprovalPrompt(toolCallEl);
+			}
+
+			// Start rendering the diff, then keep scrolling so the action
+			// buttons stay visible while the user decides.
+			const decisionPromise = renderReplaceInNoteDiffPreview(
+				this.messageListEl,
+				notePath,
+				noteContent,
+				changeBlocks,
+				/*autoApproved=*/ false
+			);
+			// Poll-scroll: keep the bottom visible while approval is pending.
+			const scrollTimer = window.setInterval(() => this.scrollToBottom(), 100);
+			const decision = await decisionPromise;
+			window.clearInterval(scrollTimer);
+			return decision.accepted ? "approved" : "rejected";
+		}
+
+		// Other tools: use the plain approval prompt
+		return this.renderApprovalPrompt(toolCallEl);
+	}
+
+	/**
 	 * Update the token/cost footer for the conversation.
 	 */
 	updateTokenFooter(
@@ -929,7 +1025,7 @@ export class NotorChatView extends ItemView {
 	// Helpers
 	// -----------------------------------------------------------------------
 
-	private scrollToBottom(): void {
+	scrollToBottom(): void {
 		this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
 	}
 
