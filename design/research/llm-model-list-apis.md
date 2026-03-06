@@ -12,6 +12,8 @@
 
 All four supported providers (OpenAI, Anthropic, AWS Bedrock, local OpenAI-compatible) expose model list APIs. However, the metadata available per model varies significantly — none of the cloud APIs return context window size or pricing in their list endpoints. Notor must maintain a supplementary metadata table for context window and pricing information, keyed by model ID.
 
+Analysis of the Cline codebase (Section 5) confirms this is the **industry-standard approach**: Cline uses hardcoded static metadata tables for all direct API providers, user-provided settings for local models, and sane defaults (128k) for unknown models. No production AI tool dynamically fetches context window sizes from OpenAI, Anthropic, or Bedrock APIs — they all maintain static lookup tables.
+
 ---
 
 ## 1. OpenAI API
@@ -408,9 +410,209 @@ Common error scenarios:
 
 ---
 
-## 5. Cross-Provider Analysis
+## 5. Reference Architecture: Cline's Approach to Context Window Sizes
 
-### 5a. Unified Model Representation
+**Source:** Cline codebase (`../cline/`), reviewed 2026-06-03
+
+Cline (an AI coding assistant for VS Code) solves the same problem Notor faces — none of the direct cloud APIs return context window sizes. Cline's approach provides a proven, battle-tested pattern we should replicate.
+
+### 5a. Architecture Overview
+
+Cline uses a **three-tier strategy** for model metadata:
+
+| Tier | Source | Context Window | Pricing | Used For |
+|---|---|---|---|---|
+| **1. Hardcoded static tables** | `shared/api.ts` | ✅ Yes | ✅ Yes | Direct API providers (Anthropic, OpenAI, Bedrock) |
+| **2. Dynamic API fetching** | Provider-specific APIs | ✅ Yes (some) | ✅ Yes (some) | Aggregator providers (OpenRouter) |
+| **3. User-provided settings** | Plugin settings UI | ✅ User-specified | N/A | Local providers (Ollama, LM Studio) |
+
+### 5b. Tier 1: Hardcoded Static Metadata Tables (Primary Strategy)
+
+This is Cline's **primary mechanism** and covers the majority of providers. In `shared/api.ts`, Cline defines typed `Record<string, ModelInfo>` objects keyed by model ID — one per provider:
+
+```typescript
+// Cline's ModelInfo interface (shared/api.ts)
+export interface ModelInfo {
+  name?: string;
+  maxTokens?: number;        // max output tokens
+  contextWindow?: number;    // context window size
+  supportsImages?: boolean;
+  supportsPromptCache: boolean;
+  supportsReasoning?: boolean;
+  inputPrice?: number;       // price per million tokens
+  outputPrice?: number;      // price per million tokens
+  cacheWritesPrice?: number;
+  cacheReadsPrice?: number;
+  description?: string;
+  // ... additional fields
+}
+```
+
+Each provider has its own hardcoded table:
+
+| Provider | Table Variable | Example Model Count |
+|---|---|---|
+| Anthropic | `anthropicModels` | ~15 models |
+| OpenAI Native | `openAiNativeModels` | ~20 models |
+| Bedrock | `bedrockModels` | ~30 models |
+| Vertex AI | `vertexModels` | ~30 models |
+| DeepSeek | `deepSeekModels` | 2 models |
+| Mistral | `mistralModels` | ~15 models |
+| Gemini | `geminiModels` | ~15 models |
+
+**How `getModel()` works for direct API providers:**
+
+```typescript
+// Anthropic handler — representative of all direct API providers
+getModel(): { id: AnthropicModelId; info: ModelInfo } {
+  const modelId = this.options.apiModelId;
+  if (modelId && modelId in anthropicModels) {
+    const id = modelId as AnthropicModelId;
+    return { id, info: anthropicModels[id] };
+  }
+  return {
+    id: anthropicDefaultModelId,
+    info: anthropicModels[anthropicDefaultModelId],
+  };
+}
+```
+
+The model ID (selected by the user or configured in settings) is used as a key to look up the full metadata from the static table. If the model ID isn't found, it falls back to the provider's default model.
+
+**Key insight:** Cline does **not** call any model list API to get context window sizes. The `GET /v1/models` endpoints (OpenAI, Anthropic) are not used for metadata — they're only used for populating the model selection dropdown. The metadata (context window, pricing) comes entirely from the hardcoded tables.
+
+### 5c. Tier 2: Dynamic API Fetching (OpenRouter)
+
+OpenRouter is an **aggregator** that proxies requests to multiple providers, and its API **does** return context window sizes and pricing. Cline leverages this:
+
+```typescript
+// From refreshOpenRouterModels.ts
+interface OpenRouterRawModelInfo {
+  id: string;
+  name: string;
+  description: string | null;
+  context_length: number | null;          // ← Context window!
+  top_provider: {
+    max_completion_tokens: number | null;  // ← Max output tokens!
+    context_length: number | null;
+    is_moderated: boolean | null;
+  } | null;
+  pricing: {
+    prompt: string;                        // ← Input price!
+    completion: string;                    // ← Output price!
+    input_cache_read: string;
+    input_cache_write: string;
+    // ...
+  } | null;
+  // ...
+}
+```
+
+Cline fetches `GET https://openrouter.ai/api/v1/models`, parses the response, and maps it to its internal `ModelInfo` format:
+
+```typescript
+const modelInfo: ModelInfo = {
+  name: rawModel.name,
+  maxTokens: rawModel.top_provider?.max_completion_tokens ?? 0,
+  contextWindow: rawModel.context_length ?? 0,     // Direct from API
+  inputPrice: parsePrice(rawModel.pricing?.prompt),  // Direct from API
+  outputPrice: parsePrice(rawModel.pricing?.completion),
+  // ...
+};
+```
+
+However, even with dynamic fetching, Cline **overrides certain values** with hardcoded data for specific models (e.g., forcing Anthropic models to 200k context window instead of 1M to reduce costs, adding cache pricing that OpenRouter doesn't report).
+
+**Caching:** OpenRouter model data is cached in-memory via `StateManager` and persisted to a JSON file on disk (`openrouter_models.json`) for offline fallback.
+
+### 5d. Tier 3: User-Provided Settings (Local Providers)
+
+For local providers, the context window is unknowable at the API level, so Cline relies on user configuration:
+
+**Ollama:**
+```typescript
+// Default context window, overridable via settings
+const DEFAULT_CONTEXT_WINDOW = 32768;
+
+getModel(): { id: string; info: ModelInfo } {
+  return {
+    id: this.options.ollamaModelId || "",
+    info: {
+      ...openAiModelInfoSaneDefaults,
+      contextWindow: Number(this.options.ollamaApiOptionsCtxNum), // User setting
+    },
+  };
+}
+```
+
+**LM Studio:**
+```typescript
+getModel(): { id: string; info: ModelInfo } {
+  const info = { ...openAiModelInfoSaneDefaults }; // Default: 128_000
+  const maxTokens = Number(this.options.lmStudioMaxTokens);
+  if (!Number.isNaN(maxTokens)) {
+    info.contextWindow = maxTokens; // User-provided override
+  }
+  return { id: this.options.lmStudioModelId || "", info };
+}
+```
+
+**Sane defaults** when no user configuration is provided:
+```typescript
+export const openAiModelInfoSaneDefaults: OpenAiCompatibleModelInfo = {
+  maxTokens: -1,
+  contextWindow: 128_000,  // Conservative default for unknown models
+  supportsImages: true,
+  supportsPromptCache: false,
+  inputPrice: 0,
+  outputPrice: 0,
+};
+```
+
+### 5e. How Context Window Sizes Are Used
+
+Cline uses context window sizes for several critical functions:
+
+1. **Context truncation:** When token usage approaches the context window, Cline truncates conversation history (`context-window-utils.ts`):
+   ```typescript
+   export function getContextWindowInfo(api: ApiHandler) {
+     let contextWindow = api.getModel().info.contextWindow || 128_000;
+     let maxAllowedSize: number;
+     switch (contextWindow) {
+       case 64_000:  maxAllowedSize = contextWindow - 27_000; break;
+       case 128_000: maxAllowedSize = contextWindow - 30_000; break;
+       case 200_000: maxAllowedSize = contextWindow - 40_000; break;
+       default:      maxAllowedSize = Math.max(contextWindow - 40_000, contextWindow * 0.8); break;
+     }
+     return { contextWindow, maxAllowedSize };
+   }
+   ```
+
+2. **Auto-condensation:** Triggers context summarization when usage exceeds a threshold (e.g., 75% of context window).
+
+3. **Usage display:** Shows `"X / YK tokens used (Z%)"` in the UI.
+
+4. **Error detection:** Detects context window exceeded errors from API responses.
+
+### 5f. Key Takeaways for Notor
+
+1. **Hardcoded static tables are the industry-standard approach.** Cline — a major, widely-used AI tool — uses this exact pattern for all direct API providers. No dynamic fetching of context window sizes from OpenAI, Anthropic, or Bedrock APIs.
+
+2. **The static table approach works well in practice.** Context windows change infrequently (typically only when new model versions are released), so staleness is manageable.
+
+3. **Graceful degradation is essential.** Unknown models fall back to sane defaults (128k context window). The system continues to work even with missing metadata.
+
+4. **User-provided values for local models.** Local providers cannot report context window sizes, so a settings field (with a sensible default) is the correct approach.
+
+5. **Keep metadata in a data file, not scattered across code.** Cline keeps all model metadata centralized in `shared/api.ts`, making updates straightforward.
+
+6. **Prices are stored per million tokens** (not per 1K as in our current `ModelInfo`). This is Cline's convention; we should pick one and be consistent.
+
+---
+
+## 6. Cross-Provider Analysis
+
+### 6a. Unified Model Representation
 
 Based on our `ModelInfo` interface from [llm-provider.md](../../specs/01-mvp/contracts/llm-provider.md):
 
@@ -436,7 +638,7 @@ interface ModelInfo {
 | `output_price_per_1k` | ❌ Not available | ❌ Not available | ❌ Not available | N/A (free) |
 | `provider` | `"openai"` (hardcoded) | `"anthropic"` (hardcoded) | `modelSummaries[].providerName` | `"local"` (hardcoded) |
 
-### 5b. Supplementary Metadata Table
+### 6b. Supplementary Metadata Table
 
 Since **no provider returns context window or pricing** in their list API, Notor must maintain a built-in metadata lookup table for well-known models:
 
@@ -468,7 +670,7 @@ const MODEL_METADATA: Record<string, { context_window?: number; input_price_per_
 3. **Updatable without code changes** — this table should be defined as a data file (JSON or TypeScript const) that can be updated in plugin releases without changing logic.
 4. **Pricing is approximate** — prices change; this is for informational display only, not billing.
 
-### 5c. Client-Side Filtering Strategy
+### 6c. Client-Side Filtering Strategy
 
 Each provider needs different filtering to show only chat-capable models:
 
@@ -479,7 +681,7 @@ Each provider needs different filtering to show only chat-capable models:
 | **Bedrock** | Server-side: use `byOutputModality=TEXT`; client-side: additionally filter out embedding-only models, filter `modelLifecycle.status === "ACTIVE"` |
 | **Local** | No filtering needed — all local models are usable for chat |
 
-### 5d. Caching Strategy
+### 6d. Caching Strategy
 
 **Recommended approach:**
 
@@ -526,7 +728,7 @@ class CachedModelFetcher {
 }
 ```
 
-### 5e. Fallback Behavior
+### 6e. Fallback Behavior
 
 When model list fetch fails, per FR-3:
 
@@ -544,7 +746,7 @@ When model list fetch fails, per FR-3:
 - Validate the entered model ID is non-empty before saving.
 - Optionally show a "Retry" button to re-attempt model list fetch.
 
-### 5f. Model Switching Mid-Conversation
+### 6f. Model Switching Mid-Conversation
 
 - **Yes, the model can be changed mid-conversation** without issues from an API perspective — each `sendMessage` call includes the `model` parameter independently.
 - The conversation history format is compatible across models within the same provider.
@@ -553,7 +755,7 @@ When model list fetch fails, per FR-3:
 
 ---
 
-## 6. Recommendations
+## 7. Recommendations
 
 ### Implementation Approach
 
@@ -592,7 +794,7 @@ When model list fetch fails, per FR-3:
 
 ---
 
-## 7. References
+## 8. References
 
 - [OpenAI — List Models](https://developers.openai.com/api/reference/resources/models/methods/list/)
 - [Anthropic — List Models](https://platform.claude.com/docs/en/api/models/list)

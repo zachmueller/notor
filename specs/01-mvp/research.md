@@ -208,12 +208,18 @@ FR-3 requires that the model selection dropdown be populated by dynamically quer
 
 - **All four providers expose model list APIs** — OpenAI (`GET /v1/models`), Anthropic (`GET /v1/models`), Bedrock (`ListFoundationModels`), Local (`GET {base_url}/v1/models`)
 - **No provider returns context window or pricing** in their list endpoint — a supplementary static metadata table is required, keyed by model ID
+- **Cline codebase analysis confirms this is the industry-standard approach** — Cline uses hardcoded static metadata tables (`Record<string, ModelInfo>` keyed by model ID) for all direct API providers (Anthropic, OpenAI, Bedrock). Context window sizes and pricing are never fetched dynamically from these providers. See Section 5 of the output document for the full analysis.
+- **Cline's three-tier strategy for model metadata:**
+  1. **Hardcoded static tables** for direct API providers (Anthropic, OpenAI, Bedrock) — one `Record<string, ModelInfo>` per provider containing `contextWindow`, `maxTokens`, `inputPrice`, `outputPrice`, etc.
+  2. **Dynamic API fetching** for aggregator providers (OpenRouter returns `context_length` and `pricing` in its `/api/v1/models` response)
+  3. **User-provided settings** for local providers (Ollama defaults to 32k, LM Studio defaults to 128k; both allow user override via settings)
+- **Graceful degradation for unknown models:** Cline falls back to sane defaults (`contextWindow: 128_000`) when a model ID is not found in the static table. The system continues to work — context management just uses the default value.
 - **Anthropic provides `display_name`**; Bedrock provides `modelName` and `providerName`; OpenAI and local return only `id`
 - **OpenAI requires client-side filtering** (returns 100+ models including embeddings, images, etc.); Bedrock supports server-side filtering by `byOutputModality=TEXT`
 - **Anthropic requires cursor-based pagination** (`after_id` / `has_more`); other providers return all results in one response
 - **Bedrock `ListFoundationModels` returns all models in the region**, including those the user hasn't enabled — selection of an unenabled model will fail at invocation time with a clear error
 - **Local providers may not be running** — must handle `ECONNREFUSED` gracefully with free-text fallback
-- **Recommendation:** Cache model lists in memory (5-min TTL, stale-while-revalidate), fall back to free-text input on failure, maintain a static metadata table for context window/pricing
+- **Recommendation:** Cache model lists in memory (5-min TTL, stale-while-revalidate), fall back to free-text input on failure, maintain a static metadata table for context window/pricing following Cline's proven pattern. For local providers, add a "Context window" setting with a sensible default (128k).
 
 ---
 
