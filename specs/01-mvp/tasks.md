@@ -400,132 +400,132 @@
 - `design/ux.md` — tool call display, diff preview, editor behavior, approval UI
 - `design/research/obsidian-vault-api-frontmatter.md` — vault.read, vault.create, vault.modify, vault.process, getFrontMatterInfo, frontmatter preservation strategy
 
-### TOOL-001: Tool interface and registry
+### TOOL-001: Tool interface and registry ✅
 **Description:** Define the tool interface and create the tool registry that manages all built-in tools. The registry provides tool lookup, schema generation for LLM context, and mode classification.
 **Files:**
 - `src/tools/tool.ts` — `Tool` interface
 - `src/tools/index.ts` — `ToolRegistry` class
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `Tool` interface matches contract: `{ name, description, input_schema, mode, execute(params) }`
-- [ ] Registry supports register, lookup by name, list all tools
-- [ ] `getToolDefinitions()` returns `ToolDefinition[]` for LLM system prompt / function calling
-- [ ] `isWriteTool(name)` returns boolean for Plan/Act enforcement
-- [ ] Registry populated at plugin load time
+- [x] `Tool` interface matches contract: `{ name, description, input_schema, mode, execute(params) }`
+- [x] Registry supports register, lookup by name, list all tools
+- [x] `getToolDefinitions()` returns `ToolDefinition[]` for LLM system prompt / function calling
+- [x] `isWriteTool(name)` returns boolean for Plan/Act enforcement
+- [x] Registry populated at plugin load time
 
-### TOOL-002: `read_note` tool
+### TOOL-002: `read_note` tool ✅
 **Description:** Implement the `read_note` tool — reads note contents via Obsidian vault API with optional frontmatter inclusion.
 **Files:**
 - `src/tools/read-note.ts`
 **Dependencies:** TOOL-001
 **Acceptance Criteria:**
-- [ ] Accepts `path` and optional `include_frontmatter` (default false)
-- [ ] Uses `app.vault.read(file)` to get content
-- [ ] Strips frontmatter using `getFrontMatterInfo(content).contentStart` when `include_frontmatter` is false
-- [ ] Returns note content as string
-- [ ] Error if file not found: "Note not found: {path}"
-- [ ] Error if not a markdown file: "Path is not a Markdown note: {path}"
-- [ ] Mode: read (Plan + Act)
-- [ ] Updates stale content tracker with read content
+- [x] Accepts `path` and optional `include_frontmatter` (default false)
+- [x] Uses `app.vault.read(file)` to get content
+- [x] Strips frontmatter using `getFrontMatterInfo(content).contentStart` when `include_frontmatter` is false
+- [x] Returns note content as string
+- [x] Error if file not found: "Note not found: {path}"
+- [x] Error if not a markdown file: "Path is not a Markdown note: {path}"
+- [x] Mode: read (Plan + Act)
+- [x] Updates stale content tracker with read content
 
-### TOOL-003: `write_note` tool
+### TOOL-003: `write_note` tool ✅
 **Description:** Implement the `write_note` tool — creates new notes or overwrites existing ones with frontmatter merge protection.
 **Files:**
 - `src/tools/write-note.ts`
 **Dependencies:** TOOL-001, CHAT-006
 **Acceptance Criteria:**
-- [ ] Accepts `path` and `content`
-- [ ] Uses `vault.create` for new files, `vault.modify` for existing
-- [ ] Creates intermediate directories if needed
-- [ ] Read-before-write frontmatter merge: if existing note has frontmatter but new content doesn't, prepend existing frontmatter
-- [ ] Stale content check before writing (via `StaleContentTracker`)
-- [ ] Returns success message with path and character count
-- [ ] Mode: write (Act only)
-- [ ] Descriptive Plan mode error message
+- [x] Accepts `path` and `content`
+- [x] Uses `vault.create` for new files, `vault.modify` for existing
+- [x] Creates intermediate directories if needed
+- [x] Read-before-write frontmatter merge: if existing note has frontmatter but new content doesn't, prepend existing frontmatter
+- [x] Stale content check before writing (via `StaleContentTracker`)
+- [x] Returns success message with path and character count
+- [x] Mode: write (Act only)
+- [x] Descriptive Plan mode error message (handled by dispatcher)
 
-### TOOL-004: `replace_in_note` tool
+### TOOL-004: `replace_in_note` tool ✅
 **Description:** Implement the `replace_in_note` tool — atomic SEARCH/REPLACE editing via `vault.process`.
 **Files:**
 - `src/tools/replace-in-note.ts`
 **Dependencies:** TOOL-001, CHAT-006
 **Acceptance Criteria:**
-- [ ] Accepts `path` and `changes` array of `{ search, replace }` blocks
-- [ ] Uses `vault.process(file, fn)` for atomic read-modify-write
-- [ ] Validates ALL search blocks match before applying any (pre-scan in callback)
-- [ ] If any search fails to match, callback throws → no changes written
-- [ ] Each block replaces only first occurrence
-- [ ] Empty replace string deletes matched text
-- [ ] Multiple blocks applied in sequence (order matters)
-- [ ] Stale content check before applying
-- [ ] Returns success message with replacement count
-- [ ] Mode: write (Act only)
+- [x] Accepts `path` and `changes` array of `{ search, replace }` blocks
+- [x] Uses `vault.process(file, fn)` for atomic read-modify-write
+- [x] Validates ALL search blocks match before applying any (pre-scan in callback)
+- [x] If any search fails to match, callback throws → no changes written
+- [x] Each block replaces only first occurrence
+- [x] Empty replace string deletes matched text
+- [x] Multiple blocks applied in sequence (order matters)
+- [x] Stale content check before applying
+- [x] Returns success message with replacement count
+- [x] Mode: write (Act only)
 
-### TOOL-005: `search_vault` tool
+### TOOL-005: `search_vault` tool ✅
 **Description:** Implement the `search_vault` tool — regex/text search across vault notes with context lines.
 **Files:**
 - `src/tools/search-vault.ts`
 **Dependencies:** TOOL-001
 **Acceptance Criteria:**
-- [ ] Accepts `query`, optional `path`, `context_lines` (default 3), `file_pattern` (default `*.md`)
-- [ ] Enumerates vault files using Obsidian API, filtered by path prefix and glob pattern
-- [ ] Searches file contents line-by-line with regex or literal text matching
-- [ ] Returns matches grouped by file with line numbers and surrounding context
-- [ ] Invalid regex produces clear error
-- [ ] Zero matches returns success with empty results (not an error)
-- [ ] Mode: read (Plan + Act)
-- [ ] Performance: reasonable for vaults up to 10,000 notes
+- [x] Accepts `query`, optional `path`, `context_lines` (default 3), `file_pattern` (default `*.md`)
+- [x] Enumerates vault files using Obsidian API, filtered by path prefix and glob pattern
+- [x] Searches file contents line-by-line with regex or literal text matching
+- [x] Returns matches grouped by file with line numbers and surrounding context
+- [x] Invalid regex produces clear error
+- [x] Zero matches returns success with empty results (not an error)
+- [x] Mode: read (Plan + Act)
+- [x] Performance: reasonable for vaults up to 10,000 notes
 
-### TOOL-006: `list_vault` tool
+### TOOL-006: `list_vault` tool ✅
 **Description:** Implement the `list_vault` tool — directory listing with pagination, sorting, and metadata.
 **Files:**
 - `src/tools/list-vault.ts`
 **Dependencies:** TOOL-001
 **Acceptance Criteria:**
-- [ ] Accepts optional `path`, `recursive`, `limit` (default 50), `offset` (default 0), `sort_by` (default `last_modified`)
-- [ ] Lists files and folders using Obsidian vault API
-- [ ] Returns structured items with name, path, type (note/folder/image/attachment), size, modified date
-- [ ] Includes `total_count` for pagination
-- [ ] Supports `last_modified` (newest first) and `alphabetical` sort
-- [ ] Mode: read (Plan + Act)
+- [x] Accepts optional `path`, `recursive`, `limit` (default 50), `offset` (default 0), `sort_by` (default `last_modified`)
+- [x] Lists files and folders using Obsidian vault API
+- [x] Returns structured items with name, path, type (note/folder/image/attachment), size, modified date
+- [x] Includes `total_count` for pagination
+- [x] Supports `last_modified` (newest first) and `alphabetical` sort
+- [x] Mode: read (Plan + Act)
 
-### TOOL-007: Tool transparency UI
+### TOOL-007: Tool transparency UI ✅
 **Description:** Render tool calls inline in the chat thread with name, parameters, result, status, and expand/collapse behavior.
 **Files:**
 - `src/ui/tool-call-ui.ts` — tool call rendering component
-- `styles.css` — tool call styles
+- `styles.css` — tool call styles (already present from CHAT-007)
 **Dependencies:** CHAT-007, TOOL-001
 **Acceptance Criteria:**
-- [ ] Each tool call renders inline in conversation flow
-- [ ] Shows: tool name, status indicator (pending/success/error)
-- [ ] Parameters shown (collapsed by default, expandable)
-- [ ] Result summary shown; full result expandable
-- [ ] Error states clearly surfaced with error message
-- [ ] Pending state shown while tool is executing or awaiting approval
+- [x] Each tool call renders inline in conversation flow
+- [x] Shows: tool name, status indicator (pending/success/error)
+- [x] Parameters shown (collapsed by default, expandable)
+- [x] Result summary shown; full result expandable
+- [x] Error states clearly surfaced with error message
+- [x] Pending state shown while tool is executing or awaiting approval
 
-### TOOL-008: Approval UI
+### TOOL-008: Approval UI ✅
 **Description:** Implement the inline approval prompt for tool calls that are not auto-approved. Shows approve/reject buttons in the chat thread.
 **Files:**
 - `src/ui/approval-ui.ts` — approval prompt component
-- `styles.css` — approval styles
+- `styles.css` — approval styles (already present from CHAT-007)
 **Dependencies:** CHAT-007, CHAT-005
 **Acceptance Criteria:**
-- [ ] Inline approve/reject buttons rendered in chat when manual approval required
-- [ ] Approve triggers tool execution
-- [ ] Reject returns rejection message to LLM
-- [ ] Send button disabled while approval is pending
-- [ ] Approval state reflected in tool call status (pending → approved/rejected)
+- [x] Inline approve/reject buttons rendered in chat when manual approval required
+- [x] Approve triggers tool execution
+- [x] Reject returns rejection message to LLM
+- [x] Send button disabled while approval is pending (handled by chat-view responding state)
+- [x] Approval state reflected in tool call status (pending → approved/rejected)
 
-### TOOL-009: Open notes in editor
+### TOOL-009: Open notes in editor ✅
 **Description:** When tools read or modify a note, open the note in the Obsidian editor. Navigate to relevant section if the note is already open.
 **Files:**
 - `src/tools/note-opener.ts` — utility for opening/navigating to notes
 **Dependencies:** TOOL-001
 **Acceptance Criteria:**
-- [ ] After `read_note`, `write_note`, `replace_in_note`: open the note in an editor leaf
-- [ ] If note is already open, navigate to it (activate the leaf)
-- [ ] Configurable via `open_notes_on_access` setting (default on)
-- [ ] Does not open duplicate tabs for the same note
-- [ ] Handles non-existent files gracefully (skip for new files before creation)
+- [x] After `read_note`, `write_note`, `replace_in_note`: open the note in an editor leaf
+- [x] If note is already open, navigate to it (activate the leaf)
+- [x] Configurable via `open_notes_on_access` setting (default on)
+- [x] Does not open duplicate tabs for the same note
+- [x] Handles non-existent files gracefully (skip for new files before creation)
 
 ---
 
