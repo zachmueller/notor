@@ -8,11 +8,12 @@ This document consolidates all research tasks that must be completed before thei
 
 ---
 
-## R-1: Obsidian Secrets Manager API
+## R-1: Obsidian Secrets Manager API ✅
 
+**Status:** Complete (2026-06-03)
 **Blocks:** Phase 0 (credential management — FR-2)
 **Priority:** Critical
-**Output:** `design/research/obsidian-secrets-manager.md`
+**Output:** [`design/research/obsidian-secrets-manager.md`](../../design/research/obsidian-secrets-manager.md)
 
 ### Context
 
@@ -31,10 +32,19 @@ Notor stores LLM provider credentials (API keys, access tokens) using Obsidian's
 
 ### Success Criteria
 
-- Complete API documentation with method signatures and usage examples
-- Platform behavior matrix (macOS, Windows, Linux, iOS, Android)
-- Confirmed minimum Obsidian version requirement
-- Clear recommendation on whether to proceed with secrets manager or adopt an alternative
+- [x] Complete API documentation with method signatures and usage examples
+- [x] Platform behavior matrix (macOS, Windows, Linux, iOS, Android)
+- [x] Confirmed minimum Obsidian version requirement
+- [x] Clear recommendation on whether to proceed with secrets manager or adopt an alternative
+
+### Key Findings
+
+- **API:** `SecretStorage` class with `setSecret(id, secret)`, `getSecret(id)`, `listSecrets()` — all synchronous, string-only
+- **No delete method** — use `setSecret(id, "")` as workaround
+- **Shared namespace** — secrets are global across plugins; settings store secret *names*, not values
+- **`minAppVersion` must be bumped** from `0.15.0` to `1.11.4`
+- **Recommendation:** Proceed with `SecretStorage`; no fallback needed
+- **UI:** Use `SecretComponent` via `Setting.addComponent()` in settings tab
 
 ---
 
