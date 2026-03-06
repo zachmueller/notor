@@ -94,11 +94,12 @@ Notor needs a well-crafted default system prompt that shapes AI behavior for not
 
 ---
 
-## R-3: Obsidian Vault API and Frontmatter Handling
+## R-3: Obsidian Vault API and Frontmatter Handling ✅
 
+**Status:** Complete (2026-06-03)
 **Blocks:** Phase 1 (`write_note` — FR-8, `replace_in_note` — FR-9)
 **Priority:** High
-**Output:** `design/research/obsidian-vault-api-frontmatter.md`
+**Output:** [`design/research/obsidian-vault-api-frontmatter.md`](../../design/research/obsidian-vault-api-frontmatter.md)
 
 ### Context
 
@@ -121,10 +122,21 @@ Obsidian notes are plain Markdown files where YAML frontmatter is stored at the 
 
 ### Success Criteria
 
-- Complete documentation of vault API write behavior with frontmatter
-- Recommended implementation strategy for `write_note` and `replace_in_note`
-- Confirmed approach for Phase 2 frontmatter tools (`update_frontmatter`, `manage_tags`)
-- Code examples demonstrating safe write patterns
+- [x] Complete documentation of vault API write behavior with frontmatter
+- [x] Recommended implementation strategy for `write_note` and `replace_in_note`
+- [x] Confirmed approach for Phase 2 frontmatter tools (`update_frontmatter`, `manage_tags`)
+- [x] Code examples demonstrating safe write patterns
+
+### Key Findings
+
+- **`vault.create`/`vault.modify`/`vault.read` are not frontmatter-aware** — they operate on raw file strings. Frontmatter is just the beginning of the string.
+- **`vault.process(file, fn)` (since 1.1.0)** provides atomic read-modify-write — ideal for `replace_in_note` (callback throws → no changes written)
+- **`fileManager.processFrontMatter(file, fn)` (since 1.4.4)** provides atomic frontmatter-only editing with body preservation — ideal for Phase 2 tools (`update_frontmatter`, `manage_tags`)
+- **`getFrontMatterInfo(content)`** utility parses frontmatter boundaries from a string — used to implement `include_frontmatter` stripping and frontmatter preservation
+- **`metadataCache.getFileCache(file)?.frontmatter`** provides parsed frontmatter as a JS object without disk I/O — ideal for `read_frontmatter`
+- **Frontmatter preservation strategy for `write_note`:** Read-before-write with merge — if existing file has frontmatter but LLM content doesn't, prepend existing frontmatter block. `replace_in_note` inherently preserves frontmatter (unmatched content untouched).
+- **No `minAppVersion` bump needed** — all required APIs available well below 1.11.4 (already set by R-1)
+- **Recommendation:** Proceed with `vault.process` for `replace_in_note`, `vault.create`/`vault.modify` with frontmatter merge for `write_note`, `processFrontMatter` for Phase 2 tools
 
 ---
 
