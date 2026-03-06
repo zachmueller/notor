@@ -1,0 +1,411 @@
+# Phase 3 — Context & intelligence
+
+**Created:** 2026-07-03
+**Status:** Draft
+**Branch:** feature/02-context-intelligence
+
+## Overview
+
+Phase 3 extends Notor's core MVP with features that make the AI meaningfully smarter about the user's vault and the broader web. Building on the chat infrastructure, tool dispatch, and trust mechanisms from Phases 0–2, this phase introduces four capabilities: letting users manually attach notes and files to a conversation, automatically surfacing ambient workspace context with every message, managing the context window gracefully over long sessions, and giving the AI the ability to fetch and consume web content. It also adds two power-user features — shell command execution and LLM lifecycle hooks — that open the door to richer automation. Together these features close the gap between a capable AI editor and a genuinely context-aware knowledge work partner.
+
+This specification covers Phase 3 of the roadmap:
+
+- **File/note attachment in chat**: manual attachment of vault notes (with section-level granularity) and external files via a chat input control.
+- **Auto-context injection**: ambient workspace signals (open note paths, top-level vault structure, OS platform) automatically included with every message, individually configurable.
+- **Auto-compaction**: deterministic, plugin-managed context window summarization that preserves continuity when approaching the token limit.
+- **`fetch_webpage` tool**: fetch a URL, convert its HTML to Markdown, and return the result to the AI — with a user-configurable domain denylist.
+- **`execute_command` tool**: run cross-platform shell commands from within the AI conversation, with configurable restrictions by mode.
+- **LLM interaction hooks**: event-driven callbacks tied to the chat lifecycle (`pre-send`, `on-tool-call`, `after-completion`) for automating follow-up actions.
+
+## User stories
+
+### File and note attachment
+
+- As a note writer, I want to attach a specific note to my message so that the AI has the exact content it needs without me asking it to read the file.
+- As a researcher, I want to attach only a section of a long note so that I give the AI focused context without bloating the conversation.
+- As a user, I want to attach a file from outside my vault so that the AI can help me work with content that lives elsewhere on my machine.
+- As a user, I want to see which notes and files I've attached before sending so that I can review and remove any accidental attachments.
+
+### Auto-context injection
+
+- As a user, I want the AI to know which notes I have open so that it can reference or act on my current workspace without me specifying paths.
+- As a user, I want the AI to see the top-level structure of my vault so that it can navigate and suggest relevant directories without a full listing.
+- As a user who runs shell commands, I want the AI to know my operating system so that it generates platform-appropriate commands without asking.
+- As a user, I want to control which ambient context sources are active so that I can tailor what information is automatically shared with the AI.
+
+### Auto-compaction
+
+- As a user having a long research conversation, I want the context to be automatically summarized when it fills up so that I don't have to manually restart and re-explain my goal.
+- As a user, I want to see a clear marker in the chat when context compaction occurs so that I understand why the AI's memory of early conversation may be condensed.
+- As a user, I want to configure when compaction triggers so that I can balance context depth against token cost.
+
+### Web fetching
+
+- As a researcher, I want to ask the AI to fetch and summarize a webpage so that I can bring external content into my notes workflow without leaving Obsidian.
+- As a user, I want the AI to convert the fetched page to Markdown so that the content fits naturally in my vault and consumes fewer tokens.
+- As a privacy-conscious user, I want to block specific domains from being fetched so that the AI cannot retrieve content from sources I consider untrustworthy.
+
+### Shell commands
+
+- As a technical user, I want the AI to run shell commands on my system so that it can automate tasks like running scripts, processing files, or checking system state.
+- As a cautious user, I want shell command execution to be restricted to Act mode by default so that I am not surprised by commands running when I'm in a read-only workflow.
+
+### LLM interaction hooks
+
+- As a power user, I want to run an action automatically after the AI finishes responding so that I can chain workflows or trigger follow-up tasks without manual intervention.
+- As a user, I want a hook that fires before each message is sent so that I can inject additional context or validate the input programmatically.
+- As a user, I want a hook that fires on every tool call so that I can log or audit AI actions in my vault.
+
+## Functional requirements
+
+### FR-1: Note attachment via file picker
+
+**Description:** Users can attach vault notes to a chat message using a file picker with Obsidian-native autocomplete.
+
+**Acceptance criteria:**
+- An attachment button in the chat input area opens a vault file picker.
+- The picker supports `[[wikilink]]` autocomplete for vault notes.
+- Multiple notes can be attached to a single message.
+- Section references (`[[Note#Section Header]]`) are supported: when a section reference is used, only the content of that section (from the heading to the next heading of equal or higher level) is included in the attachment, not the full note.
+- Attached notes appear as labeled chips/tags in the input area before the message is sent.
+- The user can remove individual attachments before sending.
+- Attached note contents are included in the user message sent to the LLM.
+- Attachments are shown in the chat thread as labeled references after sending.
+
+### FR-2: External file attachment
+
+**Description:** Users can attach files from outside the vault to a chat message.
+
+**Acceptance criteria:**
+- The attachment control (same button as FR-1) allows selecting files from the local filesystem outside the vault.
+- Attached external files are read and included in the user message context.
+- External files are labeled as such in the attachment chips so the user can distinguish them from vault notes.
+- File size limits apply: files larger than a configurable maximum (default: 1 MB) are rejected with a user-facing error.
+
+### FR-3: Auto-context — open note paths
+
+**Description:** The paths of all currently open notes in the Obsidian workspace are automatically included with each message sent to the LLM.
+
+**Acceptance criteria:**
+- Before each message is sent, the plugin collects the file paths of all notes open in any leaf/tab view in the Obsidian workspace (including pinned tabs and split panes).
+- Only file paths are included — full note contents are not automatically injected.
+- The auto-context is injected into the message context (not the system prompt) so it reflects the workspace state at the time of sending.
+- This source can be individually enabled or disabled in **Settings → Notor**.
+- When disabled, no open note paths are injected.
+
+### FR-4: Auto-context — vault structure
+
+**Description:** The top-level directory listing of the vault is automatically included with each message.
+
+**Acceptance criteria:**
+- The top-level folder names at the vault root are included in the auto-context.
+- Individual file names at the root level are not included (only folder names).
+- Recursive subdirectory contents are not included.
+- This source can be individually enabled or disabled in **Settings → Notor**.
+- When disabled, no vault structure is injected.
+
+### FR-5: Auto-context — operating system
+
+**Description:** The user's operating system platform is automatically included with each message.
+
+**Acceptance criteria:**
+- The OS platform (macOS, Windows, or Linux) is included in the auto-context.
+- This enables the LLM to generate platform-appropriate shell commands and tailor OS-specific guidance.
+- This source can be individually enabled or disabled in **Settings → Notor**.
+- When disabled, no OS information is injected.
+
+### FR-6: Auto-compaction
+
+**Description:** When the conversation approaches the active model's context window limit, the plugin automatically summarizes the conversation and continues in a new, condensed context window.
+
+**Acceptance criteria:**
+- A compaction threshold (configurable, default: 80% of the model's context window token limit) triggers the auto-compaction process.
+- When the threshold is crossed before sending a user message, the plugin sends a summarization request to the LLM with the accumulated conversation.
+- The LLM returns a condensed summary of the conversation so far.
+- The plugin begins a new context window with the summary as the opening context message, followed by the current user message.
+- A visible "Context compacted" marker appears in the chat UI at the point where compaction occurred, clearly indicating that earlier conversation history has been condensed.
+- The full un-compacted conversation history is still accessible in the persisted JSONL log; compaction only affects what is sent to the LLM.
+- Compaction can be triggered manually by the user via a button or command.
+- The compaction threshold is configurable per-conversation and globally in **Settings → Notor**.
+- If the summarization request itself fails, the plugin falls back to the existing truncation behavior (dropping oldest messages) and surfaces an error notice.
+
+### FR-7: `fetch_webpage` tool
+
+**Description:** Fetch a webpage by URL and return its content as Markdown for use in the conversation.
+
+**Acceptance criteria:**
+- Accepts a single `url` parameter.
+- Fetches the page HTML via HTTP GET request.
+- Converts the HTML to Markdown using the Turndown library bundled into the plugin.
+- Returns the converted Markdown content in the tool result. Does not write to a note.
+- If the URL is unreachable or returns a non-200 HTTP status, returns a clear error to the LLM (including the HTTP status code).
+- If the domain matches a configured denylist entry, the request is rejected and a user-configurable error message is returned to the LLM indicating the domain is blocked.
+- No content truncation or pagination is applied to the returned Markdown.
+- Classified as read-only — available in both Plan and Act modes.
+
+### FR-8: Domain denylist for `fetch_webpage`
+
+**Description:** A user-configurable list of blocked domains that `fetch_webpage` cannot access.
+
+**Acceptance criteria:**
+- Users can add and remove domain entries in **Settings → Notor** via a list editor.
+- Denylisting a domain (e.g., `example.com`) blocks all pages under that domain and all its sub-domains (e.g., `sub.example.com`).
+- Matching is domain-based, not path-based: the full domain and sub-domains are blocked, regardless of URL path.
+- When a blocked domain is requested, the tool returns an error to the LLM indicating the domain is blocked by the user, without making a network request.
+- The denylist is empty by default.
+- The denylist is a user preference control, not a security mechanism.
+
+### FR-9: `execute_command` tool
+
+**Description:** Execute a shell command on the user's system and return the output to the AI.
+
+**Acceptance criteria:**
+- Accepts a `command` string and an optional `working_directory` (defaults to vault root).
+- Executes the command in a shell appropriate for the user's OS (bash/zsh on macOS/Linux, cmd/PowerShell on Windows).
+- Returns combined stdout and stderr output to the LLM.
+- Classified as write — available in Act mode only by default, configurable.
+- Requires user approval unless auto-approved (write tool default: approval required).
+- A configurable per-command timeout (default: 30 seconds) terminates long-running commands and returns a timeout error.
+- The working directory must be within the vault or a user-specified allow-list of paths; requests outside allowed paths are rejected.
+
+### FR-10: LLM interaction hooks — `pre-send`
+
+**Description:** A hook that fires before each user message is sent to the LLM.
+
+**Acceptance criteria:**
+- The `pre-send` hook is triggered after the user submits a message but before it is dispatched to the LLM provider.
+- Hooks can be configured to run a workflow, send additional context to inject, or invoke a specific built-in action.
+- A `pre-send` hook can add content to the outgoing message context (e.g., inject a note summary or a timestamp).
+- If a hook fails, the message is still sent and the hook failure is logged and surfaced as a non-blocking notice.
+- Hooks are configured in **Settings → Notor** and/or via workflow frontmatter.
+- The hook configuration is persisted across plugin reloads.
+
+### FR-11: LLM interaction hooks — `on-tool-call`
+
+**Description:** A hook that fires each time the LLM requests a tool invocation.
+
+**Acceptance criteria:**
+- The `on-tool-call` hook is triggered after the tool call is parsed but before the auto-approve check and tool execution.
+- The hook receives the tool name and parameters as context.
+- Use cases include: logging each tool call to a vault note, triggering an audit workflow, or implementing custom approval logic.
+- Hook execution is non-blocking with respect to the tool dispatch pipeline: if a hook fails, tool execution proceeds and the failure is surfaced as a notice.
+- Configured in **Settings → Notor** and/or workflow frontmatter, persisted across reloads.
+
+### FR-12: LLM interaction hooks — `after-completion`
+
+**Description:** A hook that fires after the LLM finishes a complete response turn.
+
+**Acceptance criteria:**
+- The `after-completion` hook is triggered after the LLM's full response (including any tool call cycles) is complete and the response is displayed in the chat panel.
+- Use cases include: auto-saving the conversation summary to a note, triggering a follow-up workflow, or appending a log entry.
+- The hook receives the completed conversation turn as context (user message + assistant response + any tool calls/results).
+- Hook failures are non-blocking: the conversation continues and failures are surfaced as notices.
+- Configured in **Settings → Notor** and/or workflow frontmatter, persisted across reloads.
+
+## Non-functional requirements
+
+### NFR-1: Performance
+
+**Description:** Phase 3 features must not degrade the responsiveness of the chat panel or Obsidian editor.
+
+**Acceptance criteria:**
+- Auto-context injection (open note paths, vault structure, OS) adds no perceptible latency to message dispatch — context collection completes in under 100 ms for typical vault sizes.
+- `fetch_webpage` has a configurable request timeout (default: 15 seconds) after which the request is cancelled and an error returned to the LLM.
+- Auto-compaction summarization is transparent to the user: the "Context compacted" marker appears and the conversation continues without manual intervention.
+- Hook execution is asynchronous and does not block the chat pipeline. Slow hooks time out independently and do not stall message flow.
+
+### NFR-2: Security and privacy
+
+**Description:** Phase 3 introduces the first outbound network calls (web fetching) and system-level access (shell commands). These must be handled with appropriate safeguards.
+
+**Acceptance criteria:**
+- `fetch_webpage` only makes network requests to user-initiated URLs (LLM-requested during an active conversation). No background or automatic web requests.
+- `execute_command` only executes commands the LLM has explicitly requested and the user has approved (or auto-approved). No background command execution.
+- The domain denylist provides users a mechanism to block untrusted sources from `fetch_webpage`.
+- `execute_command` working directory is restricted to the vault or a user-configured allow-list; commands cannot be directed to arbitrary filesystem paths outside this scope.
+- No auto-context data (open note paths, vault structure) is transmitted to any party other than the configured LLM provider.
+- Hooks cannot initiate network calls, filesystem writes, or shell commands outside the normal Notor tool and LLM pipeline.
+
+### NFR-3: Usability and transparency
+
+**Description:** New Phase 3 capabilities are discoverable, clearly surfaced in the chat UI, and safe by default.
+
+**Acceptance criteria:**
+- The attachment control in the chat input area is visually discoverable without requiring documentation to find.
+- Auto-context injection is on by default for all three sources; users can disable individual sources in settings.
+- The "Context compacted" marker in the chat clearly communicates that earlier conversation history has been condensed, with a brief explanation visible on hover or expand.
+- `execute_command` follows the same tool call transparency pattern as all other tools: the command and output are shown inline in the chat thread.
+- Auto-approve defaults: `fetch_webpage` defaults to auto-approved (read-only); `execute_command` defaults to approval required (write).
+- `execute_command` is restricted to Act mode by default.
+
+### NFR-4: Reliability
+
+**Description:** Failures in Phase 3 features are handled gracefully and do not disrupt the core chat or vault operations.
+
+**Acceptance criteria:**
+- `fetch_webpage` failures (network error, timeout, blocked domain, non-200 response) return structured error messages to the LLM rather than crashing or hanging.
+- `execute_command` failures (non-zero exit code, timeout, restricted path) return the exit code and any stderr output to the LLM.
+- Auto-compaction failure falls back to truncation (existing MVP behavior) and notifies the user via a notice.
+- Hook failures are non-blocking; they log the failure and surface a notice but do not interrupt the conversation.
+- Attachment of oversized files returns a clear user-facing error and does not attempt to send the oversized content.
+
+## User scenarios & testing
+
+### Primary flow: Attach a note section and ask about it
+
+1. User opens the Notor chat panel.
+2. User clicks the attachment button and types `[[Research/Climate#Key Findings]]` into the picker.
+3. The "Key Findings" section of `Research/Climate.md` appears as an attachment chip in the input area.
+4. User types: "Summarize the key findings and suggest three follow-up research questions."
+5. The message is sent with the section content embedded. The AI responds with a summary and three questions.
+6. No `read_note` tool call is needed — the content was already provided via attachment.
+
+### Primary flow: AI fetches a webpage and saves content to a note
+
+1. User types: "Fetch https://example.com/article and create a note at Research/Article.md with the key points."
+2. The AI invokes `fetch_webpage` with the URL. The tool call appears inline showing the URL and a result summary (e.g., "Fetched 4,200 characters of Markdown").
+3. The AI processes the Markdown and invokes `write_note` to create the note.
+4. A diff preview appears; user approves. The note is created and opened in the editor.
+
+### Primary flow: Long research session with auto-compaction
+
+1. User has a multi-hour research conversation that approaches the context window limit.
+2. The plugin detects the threshold has been crossed before the next message dispatch.
+3. A summarization request is sent; the LLM returns a condensed summary.
+4. A "Context compacted" marker appears in the chat UI with the timestamp.
+5. The conversation continues seamlessly. The full history remains in the JSONL log.
+
+### Primary flow: Shell command assistance
+
+1. User asks: "List all Markdown files in my vault modified in the last 7 days."
+2. The AI invokes `execute_command` with an appropriate `find` or `Get-ChildItem` command based on the auto-injected OS context.
+3. An approval prompt appears (auto-approve is off by default for `execute_command`). User approves.
+4. The command output is returned to the AI, which formats the results into a readable list.
+
+### Primary flow: After-completion hook saves a conversation summary
+
+1. User has configured an `after-completion` hook that appends a one-sentence summary of each AI turn to `notor/logs/session.md`.
+2. After the AI's response completes, the hook fires automatically.
+3. The hook invokes `replace_in_note` (or `write_note`) to append the summary line.
+4. The note is updated silently; a success notice is briefly shown.
+
+### Alternative flow: Blocked domain fetch
+
+1. The AI attempts to invoke `fetch_webpage` with a URL from a domain the user has denylisted.
+2. The tool returns an error to the AI: "Domain example-tracker.com is blocked by your denylist."
+3. The AI informs the user and asks if they want to try an alternative source.
+
+### Alternative flow: Execute command in Plan mode
+
+1. User is in Plan mode and asks: "Run `ls -la` in my vault root."
+2. The AI attempts to invoke `execute_command`.
+3. The tool dispatch blocks the call and returns an error: write tools are unavailable in Plan mode.
+4. The AI informs the user and suggests switching to Act mode.
+
+### Alternative flow: Compaction summarization fails
+
+1. The conversation approaches the context limit; auto-compaction triggers.
+2. The summarization request to the LLM times out or fails.
+3. The plugin falls back to the existing truncation strategy (dropping oldest messages).
+4. A user notice appears: "Context compaction failed; oldest messages were trimmed instead."
+5. The user's message is still sent using the truncated context.
+
+### Edge case: Attachment of oversized file
+
+1. User attempts to attach a 5 MB PDF from outside the vault.
+2. The plugin checks the file size against the configurable limit (default: 1 MB).
+3. The attachment is rejected with a user-facing error: "File exceeds the maximum attachment size (1 MB)."
+4. The file does not appear in the attachment chips and is not sent.
+
+### Edge case: Auto-context with no open notes
+
+1. User sends a message with no notes open in the workspace.
+2. The open note paths auto-context source contributes an empty list (or is omitted from the injected context).
+3. No error occurs; the message is sent normally with vault structure and OS context still included.
+
+### Edge case: Section reference to non-existent heading
+
+1. User attaches `[[Research/Climate#Nonexistent Section]]`.
+2. The plugin cannot find the heading in the note.
+3. An error is surfaced in the attachment chips: "Section 'Nonexistent Section' not found in Research/Climate.md."
+4. The attachment is not added until the user corrects the reference.
+
+### Edge case: `execute_command` working directory outside allowed paths
+
+1. The AI proposes `execute_command` with `working_directory: "/etc"`.
+2. The plugin checks the path against the vault root and any configured allow-list.
+3. The tool execution is rejected with a message to the AI: "Working directory is outside the allowed paths."
+4. The AI informs the user and asks for an alternative.
+
+### Edge case: Hook failure does not block message
+
+1. User has an `after-completion` hook configured that calls a workflow.
+2. The workflow fails (e.g., references a non-existent note).
+3. The failure is caught; a brief notice is shown: "After-completion hook failed: <reason>."
+4. The chat conversation is unaffected and continues normally.
+
+## Success criteria
+
+1. **Users can provide explicit context without tool calls** — attaching a note or note section delivers its content directly to the LLM, visibly reflected in the chat UI, without requiring a `read_note` invocation.
+2. **The AI is ambient-context-aware by default** — every message includes the user's current workspace state (open notes, vault structure, OS) without any manual effort, and each source can be individually disabled.
+3. **Long sessions remain productive** — conversations that exceed the context window do not abruptly terminate or require manual restart; auto-compaction preserves continuity, and the full history is always retained in the JSONL log.
+4. **The AI can retrieve and work with external web content** — users can direct the AI to fetch a URL and the returned Markdown content integrates naturally into the conversation and note editing workflow.
+5. **Shell commands can be executed through the AI conversation** — with approval required by default, commands run in the user's environment and output is returned to the AI, enabling automation beyond vault operations.
+6. **LLM lifecycle hooks enable automation** — users can configure at least one hook type (`pre-send`, `on-tool-call`, `after-completion`) that fires reliably, executes its configured action, and does not interrupt the conversation on failure.
+7. **Phase 3 features are safe and transparent** — `fetch_webpage` and `execute_command` are surfaced in the chat thread with the same transparency as all other tools; no background network or system calls occur without user-visible AI-initiated requests.
+
+## Key entities
+
+### Attachment
+- Belongs to a user message.
+- Has a type: vault note, vault note section, or external file.
+- For vault notes: stores the vault-relative path and optional section reference.
+- For external files: stores the filename and file content at the time of attachment.
+- Content is embedded into the message context at send time.
+
+### AutoContextSource
+- Enumeration of injectable ambient context sources: open note paths, vault structure, OS platform.
+- Each source has an enabled/disabled state persisted in settings.
+- Sources are evaluated and assembled immediately before each message dispatch.
+
+### CompactionRecord
+- Recorded in the JSONL conversation log when an auto-compaction event occurs.
+- Stores the timestamp, the token count at compaction, and the summary generated by the LLM.
+- Displayed as a "Context compacted" marker in the chat UI.
+
+### Hook
+- A configured callback tied to a lifecycle event: `pre-send`, `on-tool-call`, or `after-completion`.
+- Has a trigger event and an action (run workflow, inject context, append to note, etc.).
+- Persisted in plugin settings.
+- Execution is asynchronous and non-blocking.
+
+### DomainDenylistEntry
+- A single domain string in the user-configured denylist for `fetch_webpage`.
+- Matching applies to the domain and all its sub-domains.
+- Persisted in plugin settings.
+
+## Assumptions
+
+- The LLM provider in use supports the summarization prompt format required for auto-compaction. All providers supported in Phase 0 are assumed capable of producing a coherent summary from a conversation history.
+- The Turndown library (~14 KB minified) can be bundled into the plugin without significant size impact. If a readability extraction layer is needed in the future (e.g., Mozilla Readability.js), it can be added without breaking the interface.
+- `execute_command` uses Node.js `child_process` APIs available in Obsidian's Electron environment. If mobile compatibility is required, this tool must be gated behind desktop-only detection.
+- Section header attachment (`[[Note#Section]]`) follows Obsidian's standard heading anchor format. Ambiguous or duplicated heading names are resolved by taking the first match.
+- The per-model context window token limit (needed for auto-compaction threshold calculation) is sourced from the model metadata already tracked in Phase 0/1 provider configuration. For models where this metadata is unavailable, auto-compaction falls back to the MVP truncation behavior.
+- Hooks in Phase 3 are limited to built-in action types (run workflow, inject context, append to note). User-defined hook scripts or arbitrary code execution are deferred to a later phase.
+
+## Out of scope
+
+The following are explicitly excluded from Phase 3 and deferred to later phases:
+
+- **Personas** (Phase 4): per-persona auto-approve overrides are not in scope; all Phase 3 features use global settings.
+- **Workflows** (Phase 4): while hooks can trigger workflows by name, the workflow definition system itself is Phase 4.
+- **`<include_notes>` tag** (Phase 4): dynamic note injection via inline tags in system prompts or workflow bodies.
+- **Vault event hooks** (Phase 4): on-note-open, on-save, on-tag-change, on-schedule triggers are Phase 4.
+- **Content extraction / readability filtering for `fetch_webpage`**: the initial implementation returns raw Turndown conversion without stripping navigation, ads, or boilerplate.
+- **Pagination of `fetch_webpage` output**: no truncation or chunking of fetched content.
+- **Background or scheduled auto-fetch**: `fetch_webpage` is only invoked by an explicit LLM tool call during an active conversation.
+- **Multi-agent and background agents** (Phase 5).
+- **Custom MCP tools** (Phase 5).
+- **Browser capabilities / Obsidian Web Viewer integration** (Phase 5).
+- **External file access beyond attachment** (Phase 5): external files can be attached to messages, but the AI cannot autonomously read external files via a tool call.
+- **Hook-driven code execution**: hooks cannot run arbitrary user scripts; they trigger built-in Notor actions only.
