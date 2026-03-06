@@ -91,103 +91,103 @@
 - `design/research/llm-model-list-apis.md` — model list API endpoints, response formats, caching strategy, static metadata table pattern (Cline analysis)
 - `design/research/obsidian-secrets-manager.md` — SecretStorage API for credential retrieval
 
-### PROV-001: LLM provider interface and registry
+### PROV-001: LLM provider interface and registry ✅
 **Description:** Define the `LLMProvider` interface and create a provider registry that manages provider instances. The registry is the single point of access for the active provider throughout the plugin.
 **Files:**
 - `src/providers/provider.ts` — `LLMProvider` interface, `StreamChunk` type, `ProviderError` class, `SendMessageOptions`, `ChatMessage`
 - `src/providers/index.ts` — `ProviderRegistry` class (create, get, switch active provider)
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `LLMProvider` interface matches contract in `contracts/llm-provider.md`
-- [ ] `StreamChunk` union type covers all chunk types (text_delta, tool_call_start/delta/end, message_end, error)
-- [ ] `ProviderError` class with error codes (AUTH_FAILED, CONNECTION_FAILED, etc.)
-- [ ] `ProviderRegistry` can register, retrieve, and switch between providers
-- [ ] Registry initializes providers lazily (not at plugin load time)
-- [ ] All types exported for use by provider implementations
+- [x] `LLMProvider` interface matches contract in `contracts/llm-provider.md`
+- [x] `StreamChunk` union type covers all chunk types (text_delta, tool_call_start/delta/end, message_end, error)
+- [x] `ProviderError` class with error codes (AUTH_FAILED, CONNECTION_FAILED, etc.)
+- [x] `ProviderRegistry` can register, retrieve, and switch between providers
+- [x] Registry initializes providers lazily (not at plugin load time)
+- [x] All types exported for use by provider implementations
 
-### PROV-002: Local OpenAI-compatible provider
+### PROV-002: Local OpenAI-compatible provider ✅
 **Description:** Implement the default LLM provider connecting to local OpenAI-compatible APIs (Ollama, LM Studio). Uses standard `fetch` API for HTTP requests.
 **Files:**
 - `src/providers/local-provider.ts`
 **Dependencies:** PROV-001, ENV-003
 **Acceptance Criteria:**
-- [ ] `sendMessage` streams via `POST {endpoint}/v1/chat/completions` with `stream: true`
-- [ ] SSE stream parsed correctly, yielding `StreamChunk` events
-- [ ] `listModels` fetches `GET {endpoint}/v1/models` and returns `ModelInfo[]`
-- [ ] `validateConnection` tests connectivity via models endpoint
-- [ ] `getTokenCount` delegates to token utility
-- [ ] Default endpoint is `http://localhost:11434/v1`
-- [ ] Optional API key sent as `Authorization: Bearer {key}` when configured
-- [ ] `ECONNREFUSED` and network errors produce clear `ProviderError` with `CONNECTION_FAILED`
-- [ ] Abort signal respected for user cancellation
-- [ ] Tool calling format follows OpenAI function calling convention
+- [x] `sendMessage` streams via `POST {endpoint}/v1/chat/completions` with `stream: true`
+- [x] SSE stream parsed correctly, yielding `StreamChunk` events
+- [x] `listModels` fetches `GET {endpoint}/v1/models` and returns `ModelInfo[]`
+- [x] `validateConnection` tests connectivity via models endpoint
+- [x] `getTokenCount` delegates to token utility
+- [x] Default endpoint is `http://localhost:11434/v1`
+- [x] Optional API key sent as `Authorization: Bearer {key}` when configured
+- [x] `ECONNREFUSED` and network errors produce clear `ProviderError` with `CONNECTION_FAILED`
+- [x] Abort signal respected for user cancellation
+- [x] Tool calling format follows OpenAI function calling convention
 
-### PROV-003: Anthropic provider
+### PROV-003: Anthropic provider ✅
 **Description:** Implement the Anthropic API provider with its specific message format and streaming protocol.
 **Files:**
 - `src/providers/anthropic-provider.ts`
 **Dependencies:** PROV-001, ENV-003
 **Acceptance Criteria:**
-- [ ] `sendMessage` streams via `POST https://api.anthropic.com/v1/messages` with `stream: true`
-- [ ] Anthropic SSE event types parsed correctly (`message_start`, `content_block_delta`, `message_delta`, `message_stop`)
-- [ ] Tool calling format translated between Notor's `ToolDefinition` and Anthropic's format
-- [ ] `listModels` fetches via `GET /v1/models` with cursor-based pagination (`after_id`/`has_more`)
-- [ ] API key sent via `x-api-key` header; `anthropic-version` header included
-- [ ] `validateConnection` tests credentials
-- [ ] Auth failures produce `ProviderError` with `AUTH_FAILED`
-- [ ] Rate limiting detected and reported with `RATE_LIMITED`
+- [x] `sendMessage` streams via `POST https://api.anthropic.com/v1/messages` with `stream: true`
+- [x] Anthropic SSE event types parsed correctly (`message_start`, `content_block_delta`, `message_delta`, `message_stop`)
+- [x] Tool calling format translated between Notor's `ToolDefinition` and Anthropic's format
+- [x] `listModels` fetches via `GET /v1/models` with cursor-based pagination (`after_id`/`has_more`)
+- [x] API key sent via `x-api-key` header; `anthropic-version` header included
+- [x] `validateConnection` tests credentials
+- [x] Auth failures produce `ProviderError` with `AUTH_FAILED`
+- [x] Rate limiting detected and reported with `RATE_LIMITED`
 
-### PROV-004: OpenAI provider
+### PROV-004: OpenAI provider ✅
 **Description:** Implement the OpenAI API provider. Shares the same wire format as the local provider but with OpenAI-specific endpoint and auth.
 **Files:**
 - `src/providers/openai-provider.ts`
 **Dependencies:** PROV-001, ENV-003
 **Acceptance Criteria:**
-- [ ] `sendMessage` streams via `POST https://api.openai.com/v1/chat/completions`
-- [ ] `listModels` fetches from `/v1/models` with client-side filtering (exclude embeddings, image, audio models)
-- [ ] API key sent via `Authorization: Bearer {key}`
-- [ ] Custom endpoint URL supported (for Azure OpenAI or compatible services)
-- [ ] All `ProviderError` codes handled consistently
+- [x] `sendMessage` streams via `POST https://api.openai.com/v1/chat/completions`
+- [x] `listModels` fetches from `/v1/models` with client-side filtering (exclude embeddings, image, audio models)
+- [x] API key sent via `Authorization: Bearer {key}`
+- [x] Custom endpoint URL supported (for Azure OpenAI or compatible services)
+- [x] All `ProviderError` codes handled consistently
 
-### PROV-005: AWS Bedrock provider
+### PROV-005: AWS Bedrock provider ✅
 **Description:** Implement the AWS Bedrock provider using AWS SDK v3. Supports both named profile auth and direct access keys.
 **Files:**
 - `src/providers/bedrock-provider.ts`
 **Dependencies:** PROV-001, ENV-002, ENV-003
 **Acceptance Criteria:**
-- [ ] `sendMessage` uses `InvokeModelWithResponseStream` via `@aws-sdk/client-bedrock-runtime`
-- [ ] Bedrock Converse API request format handled (translate from Notor message format)
-- [ ] Streaming response parsed and yielded as `StreamChunk` events
-- [ ] `listModels` uses `ListFoundationModels` with `byOutputModality: "TEXT"` filter
-- [ ] Two auth methods: `fromIni({ profile })` for named profile, `fromCredentials()` for direct keys
-- [ ] Region configurable; credentials lazy-loaded
-- [ ] Provider lazy-loaded (not imported until selected) to minimize startup bundle impact
-- [ ] SDK bundle size validated (tree-shaking effective)
+- [x] `sendMessage` uses `ConverseStreamCommand` via `@aws-sdk/client-bedrock-runtime`
+- [x] Bedrock Converse API request format handled (translate from Notor message format)
+- [x] Streaming response parsed and yielded as `StreamChunk` events
+- [x] `listModels` uses `ListFoundationModels` with `byOutputModality: "TEXT"` filter
+- [x] Two auth methods: `fromIni({ profile })` for named profile, direct keys from secrets manager
+- [x] Region configurable; credentials lazy-loaded
+- [x] Provider lazy-loaded (not imported until selected) to minimize startup bundle impact
+- [x] SDK bundle size validated (tree-shaking effective)
 
-### PROV-006: Static model metadata table
+### PROV-006: Static model metadata table ✅
 **Description:** Create a static metadata table mapping known model IDs to context window sizes and pricing. Follows Cline's proven pattern since no provider returns this data dynamically.
 **Files:**
 - `src/providers/model-metadata.ts` — `Record<string, ModelInfo>` keyed by model ID
 **Dependencies:** PROV-001
 **Acceptance Criteria:**
-- [ ] Metadata entries for major Anthropic models (Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku, Claude 4 Sonnet, etc.)
-- [ ] Metadata entries for major OpenAI models (GPT-4o, GPT-4o-mini, o3, o4-mini, etc.)
-- [ ] Metadata entries for common Bedrock models
-- [ ] Each entry includes `context_window`, `input_price_per_1k`, `output_price_per_1k`
-- [ ] Graceful fallback for unknown model IDs (default context window of 128,000)
-- [ ] Model list lookup function: `getModelMetadata(modelId): ModelInfo | null`
+- [x] Metadata entries for major Anthropic models (Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku, Claude 4 Sonnet, etc.)
+- [x] Metadata entries for major OpenAI models (GPT-4o, GPT-4o-mini, o3, o4-mini, etc.)
+- [x] Metadata entries for common Bedrock models
+- [x] Each entry includes `context_window`, `input_price_per_1k`, `output_price_per_1k`
+- [x] Graceful fallback for unknown model IDs (default context window of 128,000)
+- [x] Model list lookup function: `getModelMetadata(modelId): ModelInfo | null`
 
-### PROV-007 [P]: Model list caching
+### PROV-007 [P]: Model list caching ✅
 **Description:** Implement in-memory caching for provider model lists with 5-minute TTL and stale-while-revalidate strategy.
 **Files:**
 - `src/providers/index.ts` — extend registry with cache logic
 **Dependencies:** PROV-001
 **Acceptance Criteria:**
-- [ ] Model lists cached in memory per provider
-- [ ] Cache expires after 5 minutes
-- [ ] Stale cache served while background refresh in progress
-- [ ] Manual refresh via explicit `refreshModels()` call
-- [ ] Cache cleared on provider switch or credential change
+- [x] Model lists cached in memory per provider
+- [x] Cache expires after 5 minutes
+- [x] Stale cache served while background refresh in progress
+- [x] Manual refresh via explicit `refreshModels()` call
+- [x] Cache cleared on provider switch or credential change
 
 ---
 
