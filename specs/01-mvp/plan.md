@@ -11,7 +11,7 @@
 - **Platform:** Obsidian community plugin (TypeScript → esbuild → `main.js`)
 - **UI framework:** Obsidian native APIs — `ItemView` for chat panel, `PluginSettingTab` for settings, `Modal` for diffs/checkpoints
 - **LLM integration:** Provider-agnostic abstraction layer (`LLMProvider` interface) with four initial implementations: local OpenAI-compatible (default), AWS Bedrock, Anthropic API, OpenAI API
-- **Credential storage:** Obsidian's built-in secrets manager API (requires pre-implementation research — see Phase 0 research)
+- **Credential storage:** Obsidian's `SecretStorage` API (`app.secretStorage`) — synchronous, string-only secret store with `setSecret`/`getSecret`/`listSecrets`. Settings store secret *names*; actual credentials retrieved at runtime. Requires `minAppVersion` ≥ 1.11.4.
 - **Data persistence:** JSONL for chat history, JSON for checkpoints, Obsidian `loadData`/`saveData` for settings
 - **Bundler:** esbuild (already configured)
 - **Package manager:** npm (already configured)
@@ -27,13 +27,13 @@
 | JSONL for chat history | Append-only format, one object per line; efficient for streaming writes; easy to parse line-by-line | SQLite, single JSON file | No random-access queries (acceptable for MVP); avoids native module dependency |
 | Custom checkpoint system (not git) | Spec requires git-independence; simpler for users who don't use git | Git-based snapshots | Must implement our own storage/retention; but avoids git dependency and works on mobile |
 | AWS SDK v3 for Bedrock | Required for credential chain resolution (SSO, assumed roles, named profiles) | Raw HTTP with SigV4 signing | Adds ~50-100KB to bundle; but handles credential complexity correctly |
-| Obsidian secrets manager for credentials | Spec requirement (NFR-2); OS-level encrypted storage | Plain-text in plugin data | Requires research into API surface and platform differences |
+| Obsidian secrets manager for credentials | Spec requirement (NFR-2); OS-level encrypted storage via `SecretStorage` class (since 1.11.4) | Plain-text in plugin data | Requires `minAppVersion` bump to 1.11.4; no delete API (use empty string); shared namespace across plugins |
 
 ### Integration Points
 
-- **Obsidian vault API:** File read/write/create/modify, metadata cache, frontmatter processing
+- **Obsidian vault API:** File read/write/create/modify, `vault.process` for atomic read-modify-write, metadata cache, `fileManager.processFrontMatter` for safe frontmatter editing, `getFrontMatterInfo` for frontmatter boundary parsing
 - **Obsidian workspace API:** Leaf views, editor navigation, active file tracking
-- **Obsidian secrets manager API:** Credential storage/retrieval (requires research)
+- **Obsidian secrets manager API:** `SecretStorage` — `setSecret(id, secret)`, `getSecret(id)`, `listSecrets()`; `SecretComponent` for settings UI via `Setting.addComponent()`
 - **LLM provider HTTP APIs:** OpenAI-compatible `/v1/chat/completions`, `/v1/models`; Anthropic `/v1/messages`; AWS Bedrock `InvokeModelWithResponseStream`, `ListFoundationModels`
 - **AWS SDK v3:** `@aws-sdk/client-bedrock-runtime`, `@aws-sdk/client-bedrock`, `@aws-sdk/credential-providers`
 
@@ -41,33 +41,33 @@
 
 ## Phase 0: Research & Architecture
 
-### Research Tasks
+### Research Tasks ✅
 
-Four research tasks must be completed before implementation can begin. Full details are in [research.md](research.md).
+All four research tasks are complete. Full details and questions are in [research.md](research.md); findings are in the output files linked below.
 
-#### R-1: Obsidian secrets manager API (blocking Phase 0)
+#### R-1: Obsidian secrets manager API ✅
 
-Research Obsidian's built-in secrets manager: API surface, per-platform behavior, limitations, and integration with plugin lifecycle. Directly affects credential management implementation.
+`SecretStorage` class confirmed (since 1.11.4): synchronous `setSecret`/`getSecret`/`listSecrets`, string-only, shared namespace. No delete API (use empty string). Settings store secret *names*, not values. `SecretComponent` available for settings UI. No fallback needed — require `minAppVersion` ≥ 1.11.4.
 
-**Output:** `design/research/obsidian-secrets-manager.md`
+**Output:** [`design/research/obsidian-secrets-manager.md`](../../design/research/obsidian-secrets-manager.md)
 
-#### R-2: System prompt design — learning from Cline (blocking Phase 0)
+#### R-2: System prompt design ✅
 
-Review Cline's system prompt architecture and identify patterns transferable to note writing/knowledge management. Define what the default Notor system prompt should include.
+Cline's ~8K–10K token prompt analyzed; 8 patterns transfer to Notor (structured tool docs, editing strategy, mode-aware behavior, step-by-step reasoning, safety rules, context injection, error handling, communication style). Recommended base prompt ~3,000 tokens (9 sections), hard ceiling 8,000 tokens. Tool definitions should be generated from the tool registry (single source of truth).
 
-**Output:** `design/research/system-prompt-design.md`
+**Output:** [`design/research/system-prompt-design.md`](../../design/research/system-prompt-design.md)
 
-#### R-3: Obsidian vault API and frontmatter handling (blocking Phase 1)
+#### R-3: Obsidian vault API and frontmatter handling ✅
 
-Investigate how `vault.create`, `vault.modify`, `vault.read` handle frontmatter. Determine the safest approach for `write_note` to avoid destroying frontmatter when the LLM hasn't read it.
+`vault.create`/`vault.modify`/`vault.read` are not frontmatter-aware. `vault.process` (since 1.1.0) provides atomic read-modify-write for `replace_in_note`. `fileManager.processFrontMatter` (since 1.4.4) provides atomic frontmatter-only editing for Phase 2 tools. `write_note` uses read-before-write with frontmatter merge. All APIs available below 1.11.4.
 
-**Output:** `design/research/obsidian-vault-api-frontmatter.md`
+**Output:** [`design/research/obsidian-vault-api-frontmatter.md`](../../design/research/obsidian-vault-api-frontmatter.md)
 
-#### R-4: LLM provider model list APIs (blocking Phase 0)
+#### R-4: LLM provider model list APIs ✅
 
-Investigate the actual APIs available on OpenAI, Anthropic, and AWS Bedrock for dynamically fetching available model lists. Determine how to populate the model dropdown using dynamic fetch, including authentication requirements, response formats, filtering criteria, and fallback behavior.
+All four providers expose model list APIs. No provider returns context window or pricing — a static metadata table (keyed by model ID) is required, following Cline's proven pattern. OpenAI requires client-side filtering (100+ models); Anthropic uses cursor-based pagination; Bedrock supports server-side `byOutputModality=TEXT` filtering. Cache model lists in memory (5-min TTL, stale-while-revalidate); fall back to free-text input on failure.
 
-**Output:** `design/research/llm-model-list-apis.md`
+**Output:** [`design/research/llm-model-list-apis.md`](../../design/research/llm-model-list-apis.md)
 
 ### Architecture Investigation
 
@@ -75,12 +75,12 @@ Investigate the actual APIs available on OpenAI, Anthropic, and AWS Bedrock for 
 - **Security analysis:** Zero telemetry. Network requests only to user-configured LLM endpoints. Credentials in secrets manager only. No remote code execution.
 - **Deployment strategy:** `main.js` + `manifest.json` + `styles.css` copied to vault plugin directory. Dev mode via `npm run dev` (esbuild watch).
 
-### Research Deliverables
+### Research Deliverables ✅
 
-- `design/research/obsidian-secrets-manager.md` — Secrets manager API findings
-- `design/research/system-prompt-design.md` — System prompt architecture analysis
-- `design/research/obsidian-vault-api-frontmatter.md` — Vault API frontmatter behavior
-- `design/research/llm-model-list-apis.md` — Model list API investigation across providers
+- [`design/research/obsidian-secrets-manager.md`](../../design/research/obsidian-secrets-manager.md) — Secrets manager API findings
+- [`design/research/system-prompt-design.md`](../../design/research/system-prompt-design.md) — System prompt architecture analysis
+- [`design/research/obsidian-vault-api-frontmatter.md`](../../design/research/obsidian-vault-api-frontmatter.md) — Vault API frontmatter behavior
+- [`design/research/llm-model-list-apis.md`](../../design/research/llm-model-list-apis.md) — Model list API investigation across providers
 
 ---
 
@@ -124,11 +124,11 @@ Developer onboarding guide is in [quickstart.md](quickstart.md).
 |---|---|---|
 | Plugin architecture | — | Settings framework, lifecycle management, logging (partially complete in `src/`) |
 | LLM provider abstraction | FR-1 | `LLMProvider` interface + implementations for local, Bedrock, Anthropic, OpenAI |
-| Credential management | FR-2 | Secrets manager integration, per-provider credential config in settings |
-| Model selection | FR-3 | Dynamic model list fetch with dropdown, free-text fallback, refresh button |
+| Credential management | FR-2 | `SecretStorage` integration via `app.secretStorage`; settings store secret *names* (e.g., `notor-openai-api-key`), actual values retrieved via `getSecret(name)` at runtime; `SecretComponent` UI for settings tab via `Setting.addComponent()` |
+| Model selection | FR-3 | Dynamic fetch from provider list APIs (`/v1/models`, `ListFoundationModels`); static metadata table for context window/pricing (keyed by model ID); 5-min in-memory cache with stale-while-revalidate; free-text fallback on fetch failure; client-side filtering for OpenAI, cursor pagination for Anthropic |
 | Chat panel UI | FR-4 | Side panel leaf view, message input, send/stop, conversation list, settings gear |
 | Streaming responses | FR-5 | Token-by-token rendering, Markdown formatting, loading indicator |
-| System prompt | FR-6 | Built-in default + customizable `{notor_dir}/prompts/core-system-prompt.md` |
+| System prompt | FR-6 | Built-in default (~3,000 tokens, 9 sections) + customizable `{notor_dir}/prompts/core-system-prompt.md`; tool definitions generated from tool registry; vault-level rules (FR-23) appended dynamically; hard ceiling 8,000 tokens |
 
 ### Phase 1 — Core Note Operations
 
@@ -136,9 +136,9 @@ Developer onboarding guide is in [quickstart.md](quickstart.md).
 
 | Component | FRs Covered | Description |
 |---|---|---|
-| `read_note` tool | FR-7 | Read note content via vault API, optional frontmatter inclusion |
-| `write_note` tool | FR-8 | Create/overwrite notes via vault API, directory creation |
-| `replace_in_note` tool | FR-9 | SEARCH/REPLACE surgical editing, atomic operation |
+| `read_note` tool | FR-7 | Read via `vault.read(file)`; strip frontmatter using `getFrontMatterInfo(content).contentStart` when `include_frontmatter` is false |
+| `write_note` tool | FR-8 | `vault.create` for new files, `vault.modify` for existing; read-before-write frontmatter merge (prepend existing frontmatter when LLM content lacks it) |
+| `replace_in_note` tool | FR-9 | Implemented via `vault.process(file, fn)` for atomic all-or-nothing edits; callback throws on match failure → no changes written |
 | `search_vault` tool | FR-10 | Regex/text search with context lines, file glob filtering |
 | `list_vault` tool | FR-11 | Directory listing with pagination, sorting, metadata |
 | Diff preview UI | FR-12 | Before/after diff display, per-change accept/reject, bulk actions |
@@ -156,9 +156,9 @@ Developer onboarding guide is in [quickstart.md](quickstart.md).
 | Checkpoints/rollback | FR-17 | Auto-snapshot before writes, timeline UI, preview/restore/diff |
 | Token & cost tracking | FR-18 | Per-message and per-conversation token counts, configurable pricing |
 | Chat history logging | FR-19 | JSONL persistence, conversation list, retention policy |
-| `read_frontmatter` tool | FR-20 | Structured frontmatter read |
-| `update_frontmatter` tool | FR-21 | Targeted frontmatter property updates |
-| `manage_tags` tool | FR-22 | Tag add/remove via frontmatter |
+| `read_frontmatter` tool | FR-20 | Read via `metadataCache.getFileCache(file)?.frontmatter` (parsed JS object, no disk I/O); strip `position` property before returning |
+| `update_frontmatter` tool | FR-21 | Implemented via `fileManager.processFrontMatter(file, fn)` — atomic frontmatter-only editing with body preservation |
+| `manage_tags` tool | FR-22 | Implemented via `fileManager.processFrontMatter(file, fn)` — manipulate `frontmatter.tags` array; handles deduplication and missing-tag removal |
 | Vault-level rules | FR-23 | Rule files with trigger properties, conditional injection |
 
 ---
@@ -194,17 +194,17 @@ Developer onboarding guide is in [quickstart.md](quickstart.md).
 
 | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|
-| **Secrets manager API insufficient or platform-inconsistent** | High — credential storage is a core requirement | Medium | R-1 research; fallback to encrypted file storage if API is too limited |
+| **~~Secrets manager API insufficient or platform-inconsistent~~** | ~~High~~ | ~~Medium~~ | **Resolved (R-1):** `SecretStorage` is sufficient. No fallback needed. Requires `minAppVersion` 1.11.4. Only limitation: no delete API (use empty string workaround). |
 | **AWS SDK v3 bundle size too large** | Medium — could slow plugin load | Medium | Tree-shake aggressively; lazy-load Bedrock provider only when selected |
-| **Vault API frontmatter handling destroys metadata** | High — data loss on write operations | Medium | R-3 research; implement frontmatter preservation layer in `write_note` |
-| **Model list APIs inconsistent across providers** | Low — degraded UX only | High | R-4 research; free-text fallback always available |
+| **~~Vault API frontmatter handling destroys metadata~~** | ~~High~~ | ~~Medium~~ | **Resolved (R-3):** `vault.process` provides atomic operations for `replace_in_note`. `write_note` uses read-before-write frontmatter merge. `processFrontMatter` available for Phase 2 metadata tools. |
+| **~~Model list APIs inconsistent across providers~~** | ~~Low~~ | ~~High~~ | **Resolved (R-4):** All four providers have list APIs. Differences are manageable (client-side filtering for OpenAI, pagination for Anthropic, server-side filtering for Bedrock). Static metadata table needed for context window/pricing (no provider returns these). |
 | **Streaming incompatibility across providers** | Medium — degraded UX | Low | Buffering adapter for non-streaming providers |
 | **Context window management complexity** | Medium — poor UX for long conversations | Medium | Simple truncation for MVP; auto-compaction deferred to Phase 3 |
 
 ### Dependencies and Assumptions
 
 - **External dependencies:** `obsidian` types, AWS SDK v3 (for Bedrock), no other runtime dependencies
-- **Technical assumptions:** Obsidian secrets manager API is available in `minAppVersion` 0.15.0 (must verify in R-1); JSONL files in plugin directory are not indexed as notes; vault API provides reliable atomic writes
+- **Technical assumptions:** `minAppVersion` set to `1.11.4` (required for `SecretStorage` — confirmed by R-1); JSONL files in plugin directory are not indexed as notes; `vault.process` provides atomic read-modify-write (confirmed by R-3); no provider returns context window or pricing in model list APIs (confirmed by R-4) — static metadata table required
 - **Business assumptions:** Users have a working LLM provider before using Notor; default local endpoint is `http://localhost:11434/v1` (Ollama)
 
 ---
