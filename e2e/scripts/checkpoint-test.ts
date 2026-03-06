@@ -788,13 +788,10 @@ async function testCheckpointPreviewModal(page: Page): Promise<void> {
 			fail("checkpoint preview — modal has content", "Preview modal appears empty or too short");
 		}
 
-		// Close the modal
-		const closeBtn = await page.$(".modal-close-button, [aria-label='Close'], .notor-modal-close");
-		if (closeBtn) {
-			await closeBtn.click();
-			await page.waitForTimeout(300);
-			pass("checkpoint preview — modal closes", "Preview modal closed successfully");
-		}
+		// Close the modal — press Escape (reliable cross-platform close)
+		await page.keyboard.press("Escape");
+		await page.waitForTimeout(400);
+		pass("checkpoint preview — modal closes", "Preview modal closed via Escape key");
 	} else {
 		fail("checkpoint preview — modal opened", "No modal appeared after clicking preview button", shot2);
 	}

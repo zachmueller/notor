@@ -939,9 +939,9 @@ export class NotorChatView extends ItemView {
 
 		// Preview button
 		const previewBtn = actions.createEl("button", {
-			cls: "notor-checkpoint-btn",
+			cls: "notor-checkpoint-btn notor-checkpoint-preview-btn",
 			text: "Preview",
-			attr: { "aria-label": "Preview checkpoint content" },
+			attr: { "aria-label": "Preview checkpoint" },
 		});
 		previewBtn.addEventListener("click", () => {
 			this.showCheckpointPreviewModal(cp);
