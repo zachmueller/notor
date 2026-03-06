@@ -15,6 +15,7 @@ import type { App } from "obsidian";
 import type { Tool, ToolResult } from "./tool";
 import type { StaleContentTracker } from "../chat/stale-tracker";
 import type { NoteOpener } from "./note-opener";
+import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { logger } from "../utils/logger";
 
 const log = logger("WriteNoteTool");
@@ -58,7 +59,8 @@ export class WriteNoteTool implements Tool {
 	constructor(
 		private readonly app: App,
 		private readonly staleTracker: StaleContentTracker,
-		private readonly noteOpener?: NoteOpener
+		private readonly noteOpener?: NoteOpener,
+		private readonly checkpointManager?: CheckpointManager
 	) {}
 
 	async execute(params: Record<string, unknown>): Promise<ToolResult> {
@@ -122,7 +124,7 @@ export class WriteNoteTool implements Tool {
 			// Read current content for stale check and frontmatter merge
 			const currentContent = await this.app.vault.read(existingFile);
 
-			// Stale content check
+			// Stale content check (before checkpoint — no point snapshotting if stale)
 			const staleResult = this.staleTracker.check(path, currentContent);
 			if (staleResult.isStale) {
 				return {
@@ -134,6 +136,9 @@ export class WriteNoteTool implements Tool {
 						"Re-read the note with read_note before retrying.",
 				};
 			}
+
+			// Checkpoint: snapshot existing content before overwriting
+			await this.checkpointManager?.createCheckpoint(path, this.name, "");
 
 			// Frontmatter preservation: if existing note has frontmatter but
 			// new content doesn't, prepend the existing frontmatter block.

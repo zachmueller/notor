@@ -21,6 +21,7 @@ import type { ToolDispatcher } from "./dispatcher";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings, ModelPricing } from "../settings";
+import type { VaultRuleManager } from "../rules/vault-rules";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatOrchestrator");
@@ -50,7 +51,8 @@ export class ChatOrchestrator {
 		private readonly dispatcher: ToolDispatcher,
 		private readonly historyManager: HistoryManager,
 		private settings: NotorSettings,
-		private view?: NotorChatView
+		private view?: NotorChatView,
+		private readonly vaultRuleManager?: VaultRuleManager
 	) {
 		this.conversationManager = new ConversationManager(settings.mode);
 		this.contextManager = new ContextManager();
@@ -153,17 +155,20 @@ export class ChatOrchestrator {
 	// Send/receive loop
 	// -----------------------------------------------------------------------
 
+	/** Get the vault rule manager. */
+	getVaultRuleManager(): VaultRuleManager | undefined {
+		return this.vaultRuleManager;
+	}
+
 	/**
 	 * Handle a user message — the main entry point for the send/receive loop.
 	 *
 	 * @param content - User message text
 	 * @param toolDefinitions - Available tool definitions
-	 * @param vaultRuleContent - Pre-evaluated vault rule content
 	 */
 	async handleUserMessage(
 		content: string,
-		toolDefinitions: ToolDefinition[],
-		vaultRuleContent?: string
+		toolDefinitions: ToolDefinition[]
 	): Promise<void> {
 		// Ensure we have an active conversation
 		if (!this.conversationManager.hasActiveConversation()) {
@@ -180,9 +185,9 @@ export class ChatOrchestrator {
 
 		this.view?.renderUserMessage(userMessage);
 
-		// Start the response loop
+		// Start the response loop (vault rules evaluated dynamically inside)
 		try {
-			await this.responseLoop(toolDefinitions, mode, vaultRuleContent);
+			await this.responseLoop(toolDefinitions, mode);
 		} catch (e) {
 			this.handleError(e);
 		} finally {
@@ -193,25 +198,33 @@ export class ChatOrchestrator {
 	/**
 	 * The main response loop — sends messages to the LLM and processes
 	 * the response. Loops when tool calls are made.
+	 *
+	 * Vault rules are re-evaluated before each LLM turn so that rules
+	 * triggered by notes accessed in earlier tool calls take effect
+	 * on the next message sent to the LLM.
 	 */
 	private async responseLoop(
 		toolDefinitions: ToolDefinition[],
-		mode: ConversationMode,
-		vaultRuleContent?: string
+		mode: ConversationMode
 	): Promise<void> {
 		let continueLoop = true;
 
 		while (continueLoop) {
 			continueLoop = false;
 
-			// 1. Assemble system prompt
+			// 1. Evaluate vault rules (re-evaluated each turn after tool calls)
+			const vaultRuleContent = this.vaultRuleManager
+				? await this.vaultRuleManager.getActiveRuleContent()
+				: undefined;
+
+			// 2. Assemble system prompt
 			const systemPrompt = await this.systemPromptBuilder.assemble(
 				mode,
 				toolDefinitions,
 				vaultRuleContent
 			);
 
-			// 2. Build messages for LLM
+			// 3. Build messages for LLM
 			const allMessages = this.conversationManager.getMessages();
 
 			// Ensure system message is first
@@ -227,7 +240,7 @@ export class ChatOrchestrator {
 				});
 			}
 
-			// 3. Assemble context window (truncate if needed)
+			// 4. Assemble context window (truncate if needed)
 			const contextResult = this.contextManager.assembleContextWindow(
 				allMessages,
 				this.getActiveModelId()
@@ -237,10 +250,10 @@ export class ChatOrchestrator {
 				this.view?.showTruncationWarning(contextResult.truncatedCount);
 			}
 
-			// 4. Convert to ChatMessage format for provider
+			// 5. Convert to ChatMessage format for provider
 			const chatMessages = this.toChatMessages(contextResult.messages, systemPrompt);
 
-			// 5. Send to LLM
+			// 6. Send to LLM
 			this.view?.setRespondingState(true);
 			const abortController = this.view?.createAbortController() ?? new AbortController();
 
@@ -252,10 +265,10 @@ export class ChatOrchestrator {
 
 			const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
 
-			// 6. Process stream
+			// 7. Process stream
 			const result = await this.processStream(stream, abortController);
 
-			// 7. Handle result
+			// 8. Handle result
 			if (result.type === "text") {
 				// Final text response — loop ends
 				const assistantMessage = this.conversationManager.addMessage({
@@ -300,6 +313,12 @@ export class ChatOrchestrator {
 					mode,
 					toolCallMessage.id
 				);
+
+				// Record note access for vault rule re-evaluation
+				const notePath = result.parameters["path"] as string | undefined;
+				if (notePath && this.vaultRuleManager) {
+					this.vaultRuleManager.recordNoteAccess(notePath);
+				}
 
 				// Add tool result message
 				const toolResultMessage = this.conversationManager.addMessage({

@@ -8,9 +8,9 @@
  * @see design/ux.md — chat panel layout, message display
  */
 
-import { ItemView, MarkdownRenderer, Notice, type WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownRenderer, Modal, Notice, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
-import type { ConversationMode, Message, LLMProviderType, ModelInfo } from "../types";
+import type { ConversationMode, Message, LLMProviderType, ModelInfo, Checkpoint } from "../types";
 import type { ConversationListEntry } from "../chat/history";
 import { logger } from "../utils/logger";
 
@@ -65,6 +65,11 @@ export class NotorChatView extends ItemView {
 	private getAvailableModels?: () => ModelInfo[];
 	private getCurrentProvider?: () => LLMProviderType;
 	private getCurrentModel?: () => string;
+
+	// Checkpoint callbacks
+	private onListCheckpoints?: () => Promise<Checkpoint[]>;
+	private onRestoreCheckpoint?: (checkpointId: string) => Promise<boolean>;
+	private onGetCurrentContent?: (notePath: string) => Promise<string | null>;
 
 	constructor(leaf: WorkspaceLeaf, plugin: NotorPlugin) {
 		super(leaf);
@@ -137,6 +142,18 @@ export class NotorChatView extends ItemView {
 
 	setGetCurrentModel(callback: () => string): void {
 		this.getCurrentModel = callback;
+	}
+
+	setOnListCheckpoints(callback: () => Promise<Checkpoint[]>): void {
+		this.onListCheckpoints = callback;
+	}
+
+	setOnRestoreCheckpoint(callback: (checkpointId: string) => Promise<boolean>): void {
+		this.onRestoreCheckpoint = callback;
+	}
+
+	setOnGetCurrentContent(callback: (notePath: string) => Promise<string | null>): void {
+		this.onGetCurrentContent = callback;
 	}
 
 	/**
@@ -707,6 +724,9 @@ export class NotorChatView extends ItemView {
 
 		this.buildModelSelect(modelSection);
 
+		// Checkpoints section
+		this.buildCheckpointsSection(this.settingsPopoverEl);
+
 		// Full settings link
 		const fullSettingsLink = this.settingsPopoverEl.createDiv({ cls: "notor-settings-link" });
 		fullSettingsLink.createEl("a", { text: "Open full settings", cls: "notor-settings-full-link" });
@@ -759,6 +779,128 @@ export class NotorChatView extends ItemView {
 		}
 	}
 
+	private buildCheckpointsSection(container: HTMLElement): void {
+		const section = container.createDiv({ cls: "notor-settings-section notor-checkpoints-section" });
+		const header = section.createDiv({ cls: "notor-settings-label-row" });
+		header.createDiv({ cls: "notor-settings-label", text: "Checkpoints" });
+
+		const refreshBtn = header.createEl("button", {
+			cls: "notor-settings-refresh-btn clickable-icon",
+			attr: { "aria-label": "Refresh checkpoint list" },
+		});
+		refreshBtn.textContent = "↻";
+
+		const listEl = section.createDiv({ cls: "notor-checkpoint-list" });
+		listEl.textContent = "Loading…";
+
+		const loadCheckpoints = async () => {
+			listEl.empty();
+			listEl.textContent = "Loading…";
+			try {
+				const checkpoints = (await this.onListCheckpoints?.()) ?? [];
+				listEl.empty();
+				if (checkpoints.length === 0) {
+					listEl.createDiv({
+						cls: "notor-checkpoint-empty",
+						text: "No checkpoints yet",
+					});
+					return;
+				}
+				for (const cp of checkpoints) {
+					this.renderCheckpointItem(listEl, cp);
+				}
+			} catch {
+				listEl.empty();
+				listEl.createDiv({ cls: "notor-checkpoint-empty", text: "Failed to load checkpoints" });
+			}
+		};
+
+		refreshBtn.addEventListener("click", () => loadCheckpoints());
+
+		// Load immediately when the section is created
+		loadCheckpoints();
+	}
+
+	private renderCheckpointItem(container: HTMLElement, cp: Checkpoint): void {
+		const item = container.createDiv({ cls: "notor-checkpoint-item" });
+
+		const meta = item.createDiv({ cls: "notor-checkpoint-meta" });
+		const date = new Date(cp.timestamp);
+		meta.createSpan({ cls: "notor-checkpoint-time", text: this.formatRelativeTime(date) });
+		meta.createSpan({ cls: "notor-checkpoint-desc", text: cp.description });
+
+		const actions = item.createDiv({ cls: "notor-checkpoint-actions" });
+
+		// Preview button
+		const previewBtn = actions.createEl("button", {
+			cls: "notor-checkpoint-btn",
+			text: "Preview",
+			attr: { "aria-label": "Preview checkpoint content" },
+		});
+		previewBtn.addEventListener("click", () => {
+			this.showCheckpointPreviewModal(cp);
+		});
+
+		// Compare button (only if the note currently exists)
+		const compareBtn = actions.createEl("button", {
+			cls: "notor-checkpoint-btn",
+			text: "Compare",
+			attr: { "aria-label": "Compare checkpoint with current note" },
+		});
+		compareBtn.addEventListener("click", async () => {
+			const current = await this.onGetCurrentContent?.(cp.note_path);
+			if (current == null) {
+				new Notice(`Note not found: ${cp.note_path}`);
+				return;
+			}
+			this.showCheckpointDiffModal(cp, current);
+		});
+
+		// Restore button
+		const restoreBtn = actions.createEl("button", {
+			cls: "notor-checkpoint-btn notor-checkpoint-restore-btn",
+			text: "Restore",
+			attr: { "aria-label": "Restore note to this checkpoint" },
+		});
+		restoreBtn.addEventListener("click", async () => {
+			restoreBtn.disabled = true;
+			restoreBtn.textContent = "Restoring…";
+			try {
+				const ok = await this.onRestoreCheckpoint?.(cp.id);
+				if (ok) {
+					new Notice(`Restored ${cp.note_path} to checkpoint from ${this.formatRelativeTime(new Date(cp.timestamp))}`);
+				} else {
+					new Notice(`Failed to restore checkpoint`);
+				}
+			} catch {
+				new Notice(`Failed to restore checkpoint`);
+			} finally {
+				restoreBtn.disabled = false;
+				restoreBtn.textContent = "Restore";
+			}
+		});
+	}
+
+	private showCheckpointPreviewModal(cp: Checkpoint): void {
+		const modal = new CheckpointModal(
+			this.app,
+			`Checkpoint: ${cp.description}`,
+			cp.content,
+			null
+		);
+		modal.open();
+	}
+
+	private showCheckpointDiffModal(cp: Checkpoint, current: string): void {
+		const modal = new CheckpointModal(
+			this.app,
+			`Compare: ${cp.description}`,
+			cp.content,
+			current
+		);
+		modal.open();
+	}
+
 	private refreshModelSelect(): void {
 		if (!this.settingsPopoverEl) return;
 		const modelSection = this.settingsPopoverEl.querySelectorAll(".notor-settings-section")[1];
@@ -793,5 +935,130 @@ export class NotorChatView extends ItemView {
 		if (hours < 24) return `${hours}h ago`;
 		if (days < 7) return `${days}d ago`;
 		return date.toLocaleDateString();
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Checkpoint preview / diff modal
+// ---------------------------------------------------------------------------
+
+/**
+ * Modal for previewing checkpoint content or comparing it against current
+ * note content.
+ *
+ * When `currentContent` is null: shows checkpoint content only (preview).
+ * When `currentContent` is provided: shows a side-by-side diff (compare).
+ */
+class CheckpointModal extends Modal {
+	constructor(
+		app: import("obsidian").App,
+		private readonly title: string,
+		private readonly checkpointContent: string,
+		private readonly currentContent: string | null
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.addClass("notor-checkpoint-modal");
+
+		contentEl.createEl("h2", { text: this.title });
+
+		if (this.currentContent === null) {
+			// Preview mode: show checkpoint content
+			this.renderContentBlock(contentEl, "Checkpoint content", this.checkpointContent);
+		} else {
+			// Compare mode: show inline diff
+			this.renderDiff(contentEl, this.checkpointContent, this.currentContent);
+		}
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+
+	private renderContentBlock(container: HTMLElement, label: string, content: string): void {
+		container.createEl("p", { cls: "notor-checkpoint-modal-label", text: label });
+		const pre = container.createEl("pre", { cls: "notor-checkpoint-modal-content" });
+		pre.createEl("code", { text: content });
+	}
+
+	/**
+	 * Render a simple line-by-line diff between checkpoint and current content.
+	 *
+	 * Lines only in checkpoint: shown with "-" prefix (deletion, red).
+	 * Lines only in current: shown with "+" prefix (addition, green).
+	 * Lines in both: shown unchanged.
+	 */
+	private renderDiff(
+		container: HTMLElement,
+		checkpointContent: string,
+		currentContent: string
+	): void {
+		container.createEl("p", {
+			cls: "notor-checkpoint-modal-label",
+			text: "− Checkpoint  /  + Current",
+		});
+
+		const diffEl = container.createEl("pre", { cls: "notor-checkpoint-modal-diff" });
+
+		const checkpointLines = checkpointContent.split("\n");
+		const currentLines = currentContent.split("\n");
+
+		// Simple LCS-based diff
+		const diff = this.computeDiff(checkpointLines, currentLines);
+
+		for (const entry of diff) {
+			const lineEl = diffEl.createEl("div", { cls: `notor-diff-line notor-diff-${entry.type}` });
+			const prefix = entry.type === "removed" ? "- " : entry.type === "added" ? "+ " : "  ";
+			lineEl.textContent = prefix + entry.text;
+		}
+	}
+
+	/** Very simple O(n²) diff for modest-length notes. */
+	private computeDiff(
+		a: string[],
+		b: string[]
+	): Array<{ type: "unchanged" | "removed" | "added"; text: string }> {
+		const result: Array<{ type: "unchanged" | "removed" | "added"; text: string }> = [];
+
+		// Build LCS table
+		const m = a.length;
+		const n = b.length;
+		const lcs: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+		for (let i = 1; i <= m; i++) {
+			for (let j = 1; j <= n; j++) {
+				if (a[i - 1] === b[j - 1]) {
+					lcs[i]![j] = lcs[i - 1]![j - 1]! + 1;
+				} else {
+					lcs[i]![j] = Math.max(lcs[i - 1]![j]!, lcs[i]![j - 1]!);
+				}
+			}
+		}
+
+		// Backtrack to produce diff
+		let i = m;
+		let j = n;
+		const entries: Array<{ type: "unchanged" | "removed" | "added"; text: string }> = [];
+
+		while (i > 0 || j > 0) {
+			if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+				entries.push({ type: "unchanged", text: a[i - 1]! });
+				i--;
+				j--;
+			} else if (j > 0 && (i === 0 || lcs[i]![j - 1]! >= lcs[i - 1]![j]!)) {
+				entries.push({ type: "added", text: b[j - 1]! });
+				j--;
+			} else {
+				entries.push({ type: "removed", text: a[i - 1]! });
+				i--;
+			}
+		}
+
+		entries.reverse();
+		return entries;
 	}
 }

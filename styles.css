@@ -946,3 +946,168 @@
 	background: var(--background-modifier-error, rgba(220, 53, 69, 0.15));
 	color: var(--text-error, var(--color-red));
 }
+
+/* ==========================================================================
+   Checkpoints (CP-003)
+   ========================================================================== */
+
+.notor-checkpoints-section {
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 10px;
+	margin-top: 4px;
+}
+
+.notor-checkpoint-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	max-height: 200px;
+	overflow-y: auto;
+	margin-top: 4px;
+}
+
+.notor-checkpoint-empty {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	font-style: italic;
+	padding: 6px 2px;
+}
+
+.notor-checkpoint-item {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 6px 8px;
+	background: var(--background-secondary);
+}
+
+.notor-checkpoint-meta {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-bottom: 6px;
+}
+
+.notor-checkpoint-time {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.notor-checkpoint-desc {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	word-break: break-word;
+}
+
+.notor-checkpoint-actions {
+	display: flex;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+
+.notor-checkpoint-btn {
+	padding: 3px 8px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-muted);
+}
+
+.notor-checkpoint-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.notor-checkpoint-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.notor-checkpoint-restore-btn {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.notor-checkpoint-restore-btn:hover {
+	background: var(--interactive-accent-hover);
+	color: var(--text-on-accent);
+}
+
+.notor-checkpoint-restore-btn:disabled {
+	opacity: 0.6;
+}
+
+/* ==========================================================================
+   Checkpoint modal (preview + diff)
+   ========================================================================== */
+
+.notor-checkpoint-modal .modal-content {
+	padding: 16px;
+}
+
+.notor-checkpoint-modal h2 {
+	font-size: var(--font-ui-medium);
+	margin-bottom: 12px;
+	word-break: break-word;
+}
+
+.notor-checkpoint-modal-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-weight: var(--font-semibold);
+	margin: 0 0 6px 0;
+}
+
+.notor-checkpoint-modal-content {
+	max-height: 400px;
+	overflow: auto;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 10px 12px;
+	margin: 0;
+}
+
+.notor-checkpoint-modal-content code {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	background: none;
+	padding: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.notor-checkpoint-modal-diff {
+	max-height: 400px;
+	overflow: auto;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 8px;
+	margin: 0;
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-diff-line {
+	line-height: 1.5;
+	font-family: var(--font-monospace);
+	white-space: pre-wrap;
+	word-break: break-all;
+	padding: 0 4px;
+}
+
+.notor-diff-unchanged {
+	color: var(--text-muted);
+}
+
+.notor-diff-added {
+	background: rgba(68, 207, 110, 0.15);
+	color: var(--color-green);
+}
+
+.notor-diff-removed {
+	background: rgba(220, 53, 69, 0.12);
+	color: var(--color-red);
+}

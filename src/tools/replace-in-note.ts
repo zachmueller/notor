@@ -14,6 +14,7 @@ import type { App } from "obsidian";
 import type { Tool, ToolResult } from "./tool";
 import type { StaleContentTracker } from "../chat/stale-tracker";
 import type { NoteOpener } from "./note-opener";
+import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { logger } from "../utils/logger";
 
 const log = logger("ReplaceInNoteTool");
@@ -85,7 +86,8 @@ export class ReplaceInNoteTool implements Tool {
 	constructor(
 		private readonly app: App,
 		private readonly staleTracker: StaleContentTracker,
-		private readonly noteOpener?: NoteOpener
+		private readonly noteOpener?: NoteOpener,
+		private readonly checkpointManager?: CheckpointManager
 	) {}
 
 	async execute(params: Record<string, unknown>): Promise<ToolResult> {
@@ -179,6 +181,9 @@ export class ReplaceInNoteTool implements Tool {
 					"Re-read the note with read_note before retrying.",
 			};
 		}
+
+		// Checkpoint: snapshot existing content before applying changes
+		await this.checkpointManager?.createCheckpoint(path, this.name, "");
 
 		// Apply changes atomically via vault.process
 		// If any search block doesn't match, the callback throws and

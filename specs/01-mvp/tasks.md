@@ -575,110 +575,110 @@
 - `design/tools.md` — note metadata tools (read_frontmatter, update_frontmatter, manage_tags)
 - `design/research/obsidian-vault-api-frontmatter.md` — fileManager.processFrontMatter API, metadataCache.getFileCache for frontmatter reads
 
-### CP-001: Checkpoint creation
+### CP-001: Checkpoint creation ✅
 **Description:** Implement automatic checkpoint creation before write operations. Snapshot the affected note's current content.
 **Files:**
 - `src/checkpoints/checkpoint.ts` — `CheckpointManager` class
 **Dependencies:** CHAT-001, TOOL-003, TOOL-004
 **Acceptance Criteria:**
-- [ ] Before `write_note`, `replace_in_note`, `update_frontmatter`, `manage_tags`: snapshot note content
-- [ ] Checkpoint includes: id (UUID), conversation_id, note_path, content, timestamp, description, tool_name, message_id
-- [ ] Description auto-generated (e.g., "Before replace_in_note on Daily/2026-03-01.md")
-- [ ] Checkpoints scoped to conversation
-- [ ] Checkpoint creation does not noticeably delay the write operation
+- [x] Before `write_note`, `replace_in_note`, `update_frontmatter`, `manage_tags`: snapshot note content
+- [x] Checkpoint includes: id (UUID), conversation_id, note_path, content, timestamp, description, tool_name, message_id
+- [x] Description auto-generated (e.g., "Before replace_in_note on Daily/2026-03-01.md")
+- [x] Checkpoints scoped to conversation
+- [x] Checkpoint creation does not noticeably delay the write operation
 
-### CP-002: Checkpoint storage
+### CP-002: Checkpoint storage ✅
 **Description:** Persist checkpoints as JSON files organized by conversation. Implement retention policy enforcement.
 **Files:**
 - `src/checkpoints/storage.ts` — `CheckpointStorage` class
 **Dependencies:** CP-001
 **Acceptance Criteria:**
-- [ ] Checkpoints stored as `{conversation_id}/{checkpoint_id}.json`
-- [ ] Default path: `.obsidian/plugins/notor/checkpoints/`; configurable
-- [ ] Load checkpoints for a conversation (list with metadata)
-- [ ] Retention policy: max 100 per conversation, 30-day max age (both configurable)
-- [ ] Oldest checkpoints pruned when limits exceeded
-- [ ] Pruning runs lazily (on checkpoint creation, not on a timer)
+- [x] Checkpoints stored as `{conversation_id}/{checkpoint_id}.json`
+- [x] Default path: `.obsidian/plugins/notor/checkpoints/`; configurable
+- [x] Load checkpoints for a conversation (list with metadata)
+- [x] Retention policy: max 100 per conversation, 30-day max age (both configurable)
+- [x] Oldest checkpoints pruned when limits exceeded
+- [x] Pruning runs lazily (on checkpoint creation, not on a timer)
 
-### CP-003: Checkpoint UI
-**Description:** Add checkpoint timeline to the chat panel with preview, restore, and compare operations.
+### CP-003: Checkpoint UI ✅
+**Description:** Add checkpoint timeline to the chat panel (via the settings gear popover) with preview, restore, and compare operations.
 **Files:**
-- `src/ui/checkpoint-ui.ts` — checkpoint timeline component
-- `styles.css` — checkpoint timeline styles
+- `src/ui/chat-view.ts` — checkpoint section in settings popover + `CheckpointModal` class
+- `styles.css` — checkpoint timeline and modal styles
 **Dependencies:** CP-002, CHAT-007
 **Acceptance Criteria:**
-- [ ] Timeline accessible from chat panel per conversation
-- [ ] Each checkpoint shows timestamp, description, and affected note path
-- [ ] Preview: view checkpoint content in a modal without restoring
-- [ ] Restore: replace note's current content with checkpoint content (creates a new checkpoint of current state first)
-- [ ] Compare: show diff between checkpoint content and note's current content
-- [ ] Timeline ordered chronologically (newest first)
+- [x] Timeline accessible from chat panel per conversation (via gear icon → Checkpoints section)
+- [x] Each checkpoint shows timestamp, description, and affected note path
+- [x] Preview: view checkpoint content in a modal without restoring
+- [x] Restore: replace note's current content with checkpoint content (creates a new checkpoint of current state first)
+- [x] Compare: show diff between checkpoint content and note's current content
+- [x] Timeline ordered chronologically (newest first)
 
-### TOKEN-001: Token and cost tracking
+### TOKEN-001: Token and cost tracking ✅
 **Description:** Display token consumption and estimated cost per message and per conversation in the chat panel.
 **Files:**
-- `src/ui/chat-view.ts` — extend with token/cost annotations
+- `src/ui/chat-view.ts` — token/cost annotations on assistant messages and conversation footer
 - `styles.css` — token display styles
 **Dependencies:** CHAT-007, CHAT-010, PROV-006
 **Acceptance Criteria:**
-- [ ] Each assistant message displays input + output token count
-- [ ] Conversation footer shows cumulative token count and estimated cost
-- [ ] Cost estimated from model pricing in settings (per 1K input/output tokens)
-- [ ] If no pricing configured, token counts shown but cost omitted
-- [ ] Token info is subtle/non-intrusive (small font, muted color)
+- [x] Each assistant message displays input + output token count
+- [x] Conversation footer shows cumulative token count and estimated cost
+- [x] Cost estimated from model pricing in settings (per 1K input/output tokens)
+- [x] If no pricing configured, token counts shown but cost omitted
+- [x] Token info is subtle/non-intrusive (small font, muted color)
 
-### META-001: `read_frontmatter` tool
+### META-001: `read_frontmatter` tool ✅
 **Description:** Implement the `read_frontmatter` tool — reads parsed YAML frontmatter as structured key-value data using Obsidian's metadata cache.
 **Files:**
 - `src/tools/read-frontmatter.ts`
 **Dependencies:** TOOL-001
 **Acceptance Criteria:**
-- [ ] Accepts `path` parameter
-- [ ] Uses `metadataCache.getFileCache(file)?.frontmatter` for parsed data (no disk I/O)
-- [ ] Strips internal `position` property before returning
-- [ ] Returns empty object `{}` if note has no frontmatter (not an error)
-- [ ] Error if file not found
-- [ ] Mode: read (Plan + Act)
+- [x] Accepts `path` parameter
+- [x] Uses `metadataCache.getFileCache(file)?.frontmatter` for parsed data (no disk I/O)
+- [x] Strips internal `position` property before returning
+- [x] Returns empty object `{}` if note has no frontmatter (not an error)
+- [x] Error if file not found
+- [x] Mode: read (Plan + Act)
 
-### META-002: `update_frontmatter` tool
+### META-002: `update_frontmatter` tool ✅
 **Description:** Implement the `update_frontmatter` tool — add, modify, or remove specific frontmatter properties using `fileManager.processFrontMatter`.
 **Files:**
 - `src/tools/update-frontmatter.ts`
 **Dependencies:** TOOL-001, CP-001
 **Acceptance Criteria:**
-- [ ] Accepts `path`, optional `set` (key-value pairs), optional `remove` (array of keys)
-- [ ] Uses `fileManager.processFrontMatter(file, fn)` for atomic frontmatter-only edits
-- [ ] Body content preserved — only frontmatter modified
-- [ ] Creates frontmatter section if note has none and `set` is provided
-- [ ] Checkpoint created before modifying
-- [ ] Mode: write (Act only)
+- [x] Accepts `path`, optional `set` (key-value pairs), optional `remove` (array of keys)
+- [x] Uses `fileManager.processFrontMatter(file, fn)` for atomic frontmatter-only edits
+- [x] Body content preserved — only frontmatter modified
+- [x] Creates frontmatter section if note has none and `set` is provided
+- [x] Checkpoint created before modifying
+- [x] Mode: write (Act only)
 
-### META-003: `manage_tags` tool
+### META-003: `manage_tags` tool ✅
 **Description:** Implement the `manage_tags` tool — add or remove tags via the frontmatter `tags` property.
 **Files:**
 - `src/tools/manage-tags.ts`
 **Dependencies:** TOOL-001, CP-001
 **Acceptance Criteria:**
-- [ ] Accepts `path`, optional `add` (array), optional `remove` (array)
-- [ ] Uses `fileManager.processFrontMatter(file, fn)` to manipulate `frontmatter.tags`
-- [ ] Does not duplicate tags that already exist when adding
-- [ ] Gracefully handles removal of tags that don't exist (no error)
-- [ ] Checkpoint created before modifying
-- [ ] Mode: write (Act only)
+- [x] Accepts `path`, optional `add` (array), optional `remove` (array)
+- [x] Uses `fileManager.processFrontMatter(file, fn)` to manipulate `frontmatter.tags`
+- [x] Does not duplicate tags that already exist when adding
+- [x] Gracefully handles removal of tags that don't exist (no error)
+- [x] Checkpoint created before modifying
+- [x] Mode: write (Act only)
 
-### RULES-001: Vault-level instruction files
+### RULES-001: Vault-level instruction files ✅
 **Description:** Implement vault-level rule file scanning, trigger evaluation, and dynamic injection into the system prompt.
 **Files:**
 - `src/rules/vault-rules.ts` — `VaultRuleManager` class
 **Dependencies:** CHAT-004
 **Acceptance Criteria:**
-- [ ] Scan `{notor_dir}/rules/` for Markdown files at plugin load and on file changes
-- [ ] Parse frontmatter trigger properties: `notor-always-include`, `notor-directory-include`, `notor-tag-include`
-- [ ] Multiple triggers on same file use OR logic
-- [ ] Track notes accessed by tools in current conversation
-- [ ] Re-evaluate rules after each tool call that accesses a note
-- [ ] Inject matching rule body content (stripped frontmatter) into system prompt
-- [ ] Rule files are regular vault notes (visible, editable)
+- [x] Scan `{notor_dir}/rules/` for Markdown files at plugin load and on file changes
+- [x] Parse frontmatter trigger properties: `notor-always-include`, `notor-directory-include`, `notor-tag-include`
+- [x] Multiple triggers on same file use OR logic
+- [x] Track notes accessed by tools in current conversation
+- [x] Re-evaluate rules after each tool call that accesses a note
+- [x] Inject matching rule body content (stripped frontmatter) into system prompt
+- [x] Rule files are regular vault notes (visible, editable)
 
 ---
 
