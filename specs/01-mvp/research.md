@@ -140,11 +140,12 @@ Obsidian notes are plain Markdown files where YAML frontmatter is stored at the 
 
 ---
 
-## R-4: LLM Provider Model List APIs
+## R-4: LLM Provider Model List APIs ✅
 
+**Status:** Complete (2026-06-03)
 **Blocks:** Phase 0 (model selection — FR-3)
 **Priority:** High
-**Output:** `design/research/llm-model-list-apis.md`
+**Output:** [`design/research/llm-model-list-apis.md`](../../design/research/llm-model-list-apis.md)
 
 ### Context
 
@@ -196,12 +197,23 @@ FR-3 requires that the model selection dropdown be populated by dynamically quer
 
 ### Success Criteria
 
-- Documented API endpoint, authentication, and response format for each provider
-- Sample response payloads for each provider
-- Recommended unified model representation for the UI dropdown
-- Caching and refresh strategy
-- Fallback behavior specification
-- Identification of any provider-specific quirks or limitations
+- [x] Documented API endpoint, authentication, and response format for each provider
+- [x] Sample response payloads for each provider
+- [x] Recommended unified model representation for the UI dropdown
+- [x] Caching and refresh strategy
+- [x] Fallback behavior specification
+- [x] Identification of any provider-specific quirks or limitations
+
+### Key Findings
+
+- **All four providers expose model list APIs** — OpenAI (`GET /v1/models`), Anthropic (`GET /v1/models`), Bedrock (`ListFoundationModels`), Local (`GET {base_url}/v1/models`)
+- **No provider returns context window or pricing** in their list endpoint — a supplementary static metadata table is required, keyed by model ID
+- **Anthropic provides `display_name`**; Bedrock provides `modelName` and `providerName`; OpenAI and local return only `id`
+- **OpenAI requires client-side filtering** (returns 100+ models including embeddings, images, etc.); Bedrock supports server-side filtering by `byOutputModality=TEXT`
+- **Anthropic requires cursor-based pagination** (`after_id` / `has_more`); other providers return all results in one response
+- **Bedrock `ListFoundationModels` returns all models in the region**, including those the user hasn't enabled — selection of an unenabled model will fail at invocation time with a clear error
+- **Local providers may not be running** — must handle `ECONNREFUSED` gracefully with free-text fallback
+- **Recommendation:** Cache model lists in memory (5-min TTL, stale-while-revalidate), fall back to free-text input on failure, maintain a static metadata table for context window/pricing
 
 ---
 
