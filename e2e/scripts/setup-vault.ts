@@ -137,6 +137,15 @@ if (fs.existsSync(pluginDir)) {
 	console.log(`  Symlinked: ${pluginDir} → ${BUILD_DIR}`);
 }
 
+// Clear plugin history to ensure a clean test state each time
+const historyDir = path.join(BUILD_DIR, "history");
+if (fs.existsSync(historyDir)) {
+	fs.rmSync(historyDir, { recursive: true, force: true });
+	console.log("\nCleared plugin history (build/history/) for clean test state.");
+} else {
+	console.log("\nNo plugin history to clear.");
+}
+
 // Create a sample note in the vault
 const sampleNote = path.join(VAULT_PATH, "Test Note.md");
 if (!fs.existsSync(sampleNote)) {
