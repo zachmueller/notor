@@ -48,11 +48,12 @@ Notor stores LLM provider credentials (API keys, access tokens) using Obsidian's
 
 ---
 
-## R-2: System Prompt Design — Learning from Cline
+## R-2: System Prompt Design — Learning from Cline ✅
 
+**Status:** Complete (2026-06-03)
 **Blocks:** Phase 0 (system prompt — FR-6)
 **Priority:** Critical
-**Output:** `design/research/system-prompt-design.md`
+**Output:** [`design/research/system-prompt-design.md`](../../design/research/system-prompt-design.md)
 
 ### Context
 
@@ -75,10 +76,21 @@ Notor needs a well-crafted default system prompt that shapes AI behavior for not
 
 ### Success Criteria
 
-- Analysis of Cline's system prompt with transferable/non-transferable classification
-- Draft structure for Notor's default system prompt (section outline with descriptions)
-- Specific recommended prompt text for tool usage instructions
-- Size estimate and token budget recommendation
+- [x] Analysis of Cline's system prompt with transferable/non-transferable classification
+- [x] Draft structure for Notor's default system prompt (section outline with descriptions)
+- [x] Specific recommended prompt text for tool usage instructions
+- [x] Size estimate and token budget recommendation
+
+### Key Findings
+
+- **Cline's prompt is ~8,000–10,000 tokens**, organized into 9 major sections; ~60% is tool documentation
+- **8 patterns transfer directly** to Notor: structured tool docs, strategic editing guidance, mode-aware behavior, step-by-step reasoning, safety/confirmation rules, context injection, error handling, communication style
+- **6 patterns are non-transferable** (code-specific): code formatting, project scaffolding, terminal strategy, browser protocol, IDE context, git workflow
+- **Notor-specific additions needed:** Obsidian syntax reference (wikilinks, callouts, frontmatter), note editing safety principles (surgical edits, read-before-write, frontmatter awareness), vault-aware behavior
+- **Recommended base prompt: ~3,000 tokens** (9 sections), max ~5,100 with vault-level rules; hard ceiling 8,000 tokens
+- **Three core safety principles:** read before write, surgical over wholesale, transparent failures
+- **Tool definitions should be generated from the tool registry** (single source of truth), not hardcoded in prompt text
+- **Recommendation:** Proceed with Cline's structured architecture, adapted for note writing domain
 
 ---
 
