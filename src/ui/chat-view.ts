@@ -8,7 +8,7 @@
  * @see design/ux.md — chat panel layout, message display
  */
 
-import { ItemView, MarkdownRenderer, Modal, Notice, type WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownRenderer, Modal, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
 import type { ConversationMode, Message, LLMProviderType, ModelInfo, Checkpoint } from "../types";
 import type { ConversationListEntry } from "../chat/history";
@@ -320,7 +320,7 @@ export class NotorChatView extends ItemView {
 			cls: "notor-stop-btn notor-hidden",
 			attr: { "aria-label": "Stop response" },
 		});
-		this.stopButtonEl.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>';
+		setIcon(this.stopButtonEl, "octagon-pause");
 		this.stopButtonEl.addEventListener("click", () => this.handleStop());
 	}
 
