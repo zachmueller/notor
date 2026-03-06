@@ -37,6 +37,14 @@ export interface ConversationListEntry {
  * File naming: `{timestamp}_{id}.jsonl`
  */
 export class HistoryManager {
+	/**
+	 * Per-file write queue. All mutations to a given JSONL file are
+	 * serialized through a promise chain stored here, keyed by the
+	 * vault-relative file path. This prevents read-modify-write races
+	 * between concurrent appendMessage / updateConversationHeader calls.
+	 */
+	private readonly writeQueues = new Map<string, Promise<void>>();
+
 	constructor(
 		private readonly vault: Vault,
 		private historyPath: string,
@@ -59,6 +67,33 @@ export class HistoryManager {
 	// Write operations
 	// -----------------------------------------------------------------------
 
+	// -----------------------------------------------------------------------
+	// Write queue helpers
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Enqueue a write operation for a specific file path.
+	 *
+	 * All callers that write to the same file are serialized through this
+	 * queue so that concurrent read-modify-write operations never interleave.
+	 */
+	private enqueueWrite(filePath: string, operation: () => Promise<void>): Promise<void> {
+		const current = this.writeQueues.get(filePath) ?? Promise.resolve();
+		const next = current.then(operation, operation); // always advance even on error
+		this.writeQueues.set(filePath, next);
+		// Prevent unbounded memory growth: remove the entry once the chain settles
+		next.finally(() => {
+			if (this.writeQueues.get(filePath) === next) {
+				this.writeQueues.delete(filePath);
+			}
+		});
+		return next;
+	}
+
+	// -----------------------------------------------------------------------
+	// Write operations
+	// -----------------------------------------------------------------------
+
 	/**
 	 * Create a new JSONL file for a conversation.
 	 *
@@ -66,21 +101,23 @@ export class HistoryManager {
 	 */
 	async createConversationFile(conversation: Conversation): Promise<void> {
 		const filename = this.getFilename(conversation);
-		const path = this.getFilePath(filename);
+		const filePath = this.getFilePath(filename);
 
 		await this.ensureDirectory();
 
-		const headerLine = JSON.stringify({
-			_type: "conversation",
-			...conversation,
-		});
+		return this.enqueueWrite(filePath, async () => {
+			const headerLine = JSON.stringify({
+				_type: "conversation",
+				...conversation,
+			});
 
-		// Use adapter for direct file access (JSONL files are not vault notes)
-		await this.vault.adapter.write(path, headerLine + "\n");
+			// Use adapter for direct file access (JSONL files are not vault notes)
+			await this.vault.adapter.write(filePath, headerLine + "\n");
 
-		log.info("Created conversation file", {
-			id: conversation.id,
-			path,
+			log.info("Created conversation file", {
+				id: conversation.id,
+				path: filePath,
+			});
 		});
 	}
 
@@ -91,23 +128,27 @@ export class HistoryManager {
 	 */
 	async appendMessage(conversation: Conversation, message: Message): Promise<void> {
 		const filename = this.getFilename(conversation);
-		const path = this.getFilePath(filename);
+		const filePath = this.getFilePath(filename);
 
 		const line = JSON.stringify({
 			_type: "message",
 			...message,
 		});
 
-		try {
-			const existing = await this.vault.adapter.read(path);
-			await this.vault.adapter.write(path, existing + line + "\n");
-		} catch {
-			// File doesn't exist yet — create it with header + message
-			log.warn("Conversation file not found, creating", { path });
-			await this.createConversationFile(conversation);
-			const existing = await this.vault.adapter.read(path);
-			await this.vault.adapter.write(path, existing + line + "\n");
-		}
+		return this.enqueueWrite(filePath, async () => {
+			try {
+				const existing = await this.vault.adapter.read(filePath);
+				await this.vault.adapter.write(filePath, existing + line + "\n");
+			} catch {
+				// File doesn't exist yet — create it with header + message
+				log.warn("Conversation file not found, creating", { path: filePath });
+				const headerLine = JSON.stringify({
+					_type: "conversation",
+					...conversation,
+				});
+				await this.vault.adapter.write(filePath, headerLine + "\n" + line + "\n");
+			}
+		});
 	}
 
 	/**
@@ -117,25 +158,27 @@ export class HistoryManager {
 	 */
 	async updateConversationHeader(conversation: Conversation): Promise<void> {
 		const filename = this.getFilename(conversation);
-		const path = this.getFilePath(filename);
+		const filePath = this.getFilePath(filename);
 
-		try {
-			const content = await this.vault.adapter.read(path);
-			const lines = content.split("\n");
+		return this.enqueueWrite(filePath, async () => {
+			try {
+				const content = await this.vault.adapter.read(filePath);
+				const lines = content.split("\n");
 
-			// Replace the first line (header)
-			lines[0] = JSON.stringify({
-				_type: "conversation",
-				...conversation,
-			});
+				// Replace the first line (header)
+				lines[0] = JSON.stringify({
+					_type: "conversation",
+					...conversation,
+				});
 
-			await this.vault.adapter.write(path, lines.join("\n"));
-		} catch (e) {
-			log.warn("Failed to update conversation header", {
-				id: conversation.id,
-				error: String(e),
-			});
-		}
+				await this.vault.adapter.write(filePath, lines.join("\n"));
+			} catch (e) {
+				log.warn("Failed to update conversation header", {
+					id: conversation.id,
+					error: String(e),
+				});
+			}
+		});
 	}
 
 	// -----------------------------------------------------------------------

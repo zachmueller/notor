@@ -467,6 +467,11 @@ export default class NotorPlugin extends Plugin {
 			});
 		});
 
+		// Open conversation list — refresh from disk
+		view.setOnOpenConversationList(() => {
+			return historyManager.listConversations();
+		});
+
 		// Switch conversation
 		view.setOnSwitchConversation((filename: string) => {
 			orchestrator.switchConversation(filename).then(() => {

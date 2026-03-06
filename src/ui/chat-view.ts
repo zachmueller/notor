@@ -61,6 +61,7 @@ export class NotorChatView extends ItemView {
 	private onStopResponse?: () => void;
 	private onNewConversation?: () => void;
 	private onSwitchConversation?: (filename: string) => void;
+	private onOpenConversationList?: () => Promise<ConversationListEntry[]>;
 	private onModeToggle?: (mode: ConversationMode) => void;
 	private onSettingsOpen?: () => void;
 	private onProviderChange?: (providerId: LLMProviderType) => void;
@@ -111,6 +112,10 @@ export class NotorChatView extends ItemView {
 
 	setOnSwitchConversation(callback: (filename: string) => void): void {
 		this.onSwitchConversation = callback;
+	}
+
+	setOnOpenConversationList(callback: () => Promise<ConversationListEntry[]>): void {
+		this.onOpenConversationList = callback;
 	}
 
 	setOnModeToggle(callback: (mode: ConversationMode) => void): void {
@@ -358,6 +363,14 @@ export class NotorChatView extends ItemView {
 		if (this.showConversationList) {
 			this.conversationListEl.removeClass("notor-hidden");
 			this.messageListEl.addClass("notor-hidden");
+			// Refresh the list from disk every time the panel opens
+			if (this.onOpenConversationList) {
+				this.onOpenConversationList().then((entries) => {
+					this.renderConversationList(entries);
+				}).catch((e) => {
+					log.error("Failed to load conversation list", { error: String(e) });
+				});
+			}
 		} else {
 			this.conversationListEl.addClass("notor-hidden");
 			this.messageListEl.removeClass("notor-hidden");
