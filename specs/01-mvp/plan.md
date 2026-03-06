@@ -168,10 +168,10 @@ Developer onboarding guide is in [quickstart.md](quickstart.md).
 ### Technical Completeness Check
 
 - [x] Technology choices made and documented (TypeScript, esbuild, Obsidian APIs, JSONL, custom checkpoints)
-- [ ] Secrets manager API researched and validated (R-1)
-- [ ] System prompt design patterns identified (R-2)
-- [ ] Vault API frontmatter behavior understood (R-3)
-- [ ] Model list API behavior across providers documented (R-4)
+- [x] Secrets manager API researched and validated (R-1)
+- [x] System prompt design patterns identified (R-2)
+- [x] Vault API frontmatter behavior understood (R-3)
+- [x] Model list API behavior across providers documented (R-4)
 - [x] Data model covers all functional requirements (see data-model.md)
 - [x] Tool schemas defined for all tools (see contracts/)
 - [x] Security requirements addressed (NFR-2: no telemetry, secrets manager, no external calls)
@@ -184,7 +184,7 @@ Developer onboarding guide is in [quickstart.md](quickstart.md).
 - [x] Security model matches threat analysis (credentials encrypted, no telemetry, vault-scoped access)
 - [x] Data model supports all business rules (stale-content checks, atomic replace, checkpoint scoping)
 - [x] API design follows established patterns (JSON Schema tool definitions, JSONL persistence)
-- [ ] All research deliverables complete
+- [x] All research deliverables complete
 
 ---
 
@@ -218,14 +218,14 @@ Developer onboarding guide is in [quickstart.md](quickstart.md).
 - [x] Development environment and tooling defined
 - [x] Quality standards and testing approach specified (e2e framework exists)
 - [x] Integration requirements and dependencies clear
-- [ ] All research completed and documented (4 tasks remain)
+- [x] All research completed and documented
 
 ### Implementation Prerequisites
 
-- [ ] R-1: Obsidian secrets manager API research complete
-- [ ] R-2: System prompt design research complete
-- [ ] R-3: Obsidian vault API frontmatter research complete
-- [ ] R-4: LLM provider model list APIs research complete
+- [x] R-1: Obsidian secrets manager API research complete
+- [x] R-2: System prompt design research complete
+- [x] R-3: Obsidian vault API frontmatter research complete
+- [x] R-4: LLM provider model list APIs research complete
 - [x] Development environment requirements specified (see quickstart.md)
 - [x] Third-party integrations planned (AWS SDK, LLM HTTP APIs)
 - [x] Quality assurance approach defined (e2e tests with Playwright)

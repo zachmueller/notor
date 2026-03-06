@@ -2,7 +2,7 @@
 
 **Created:** 2026-06-03
 **Plan:** [specs/01-mvp/plan.md](plan.md)
-**Status:** Not started
+**Status:** Complete
 
 This document consolidates all research tasks that must be completed before their respective implementation phases can begin. Each task should produce findings documented in the specified output file under `design/research/`.
 
@@ -237,8 +237,8 @@ Research tasks should be executed in this order based on dependency chains:
 
 Each research task is complete when:
 
-- [ ] All questions answered with evidence (code examples, API documentation, or experimental results)
-- [ ] Output document written to the specified path under `design/research/`
-- [ ] Clear recommendation provided for implementation approach
-- [ ] Any risks or limitations identified and documented
-- [ ] Minimum Obsidian version requirements confirmed (if applicable)
+- [x] All questions answered with evidence (code examples, API documentation, or experimental results)
+- [x] Output document written to the specified path under `design/research/`
+- [x] Clear recommendation provided for implementation approach
+- [x] Any risks or limitations identified and documented
+- [x] Minimum Obsidian version requirements confirmed (if applicable)
