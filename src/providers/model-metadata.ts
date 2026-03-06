@@ -10,7 +10,11 @@
  *
  * Pricing is per 1K tokens (input/output).
  *
- * @see design/research/llm-model-list-apis.md — Section 5 (Cline analysis)
+ * Bedrock entries use inference profile IDs (e.g. us.anthropic.*, eu.anthropic.*)
+ * rather than bare foundation model IDs (e.g. anthropic.*). These are the correct
+ * modelId values for the Converse API and are what ListInferenceProfiles returns.
+ *
+ * @see design/research/llm-model-list-apis.md — Section 6b (metadata table)
  * @see specs/01-mvp/data-model.md — ModelInfo entity
  */
 
@@ -36,19 +40,37 @@ interface ModelMetadataEntry {
  * Sources:
  * - Anthropic: https://docs.anthropic.com/en/docs/about-claude/models
  * - OpenAI: https://platform.openai.com/docs/models
- * - AWS Bedrock: https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html
+ * - AWS Bedrock inference profiles: https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html
  *
- * Prices as of June 2026. May be outdated — for informational display only.
+ * Prices as of July 2026. May be outdated — for informational display only.
  */
 const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 	// -----------------------------------------------------------------------
 	// Anthropic models (direct API)
 	// -----------------------------------------------------------------------
-	"claude-opus-4-20250918": {
+	"claude-opus-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
 		output_price_per_1k: 0.075,
-		display_name: "Claude Opus 4",
+		display_name: "Claude Opus 4.6",
+	},
+	"claude-sonnet-4-6": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "Claude Sonnet 4.6",
+	},
+	"claude-sonnet-4-5-20250929": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "Claude Sonnet 4.5",
+	},
+	"claude-haiku-4-5-20251001": {
+		context_window: 200_000,
+		input_price_per_1k: 0.0008,
+		output_price_per_1k: 0.004,
+		display_name: "Claude Haiku 4.5",
 	},
 	"claude-sonnet-4-20250514": {
 		context_window: 200_000,
@@ -56,29 +78,35 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		output_price_per_1k: 0.015,
 		display_name: "Claude Sonnet 4",
 	},
-	"claude-sonnet-4-5-20250514": {
+	"claude-opus-4-20250514": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		display_name: "Claude Opus 4",
+	},
+	"claude-3-7-sonnet-20250219": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "Claude Sonnet 4.5",
-	},
-	"claude-haiku-3-5-20241022": {
-		context_window: 200_000,
-		input_price_per_1k: 0.0008,
-		output_price_per_1k: 0.004,
-		display_name: "Claude 3.5 Haiku",
+		display_name: "Claude 3.7 Sonnet",
 	},
 	"claude-3-5-sonnet-20241022": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "Claude 3.5 Sonnet",
+		display_name: "Claude 3.5 Sonnet v2",
 	},
 	"claude-3-5-sonnet-20240620": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "Claude 3.5 Sonnet (June)",
+		display_name: "Claude 3.5 Sonnet",
+	},
+	"claude-3-5-haiku-20241022": {
+		context_window: 200_000,
+		input_price_per_1k: 0.0008,
+		output_price_per_1k: 0.004,
+		display_name: "Claude 3.5 Haiku",
 	},
 	"claude-3-opus-20240229": {
 		context_window: 200_000,
@@ -176,99 +204,315 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 	},
 
 	// -----------------------------------------------------------------------
-	// AWS Bedrock models (Anthropic on Bedrock)
+	// AWS Bedrock — Anthropic inference profiles
+	//
+	// Keyed by inferenceProfileId as returned by ListInferenceProfiles and
+	// passed directly to the Converse API as modelId.
+	// Covers us., eu., apac., and global. geographic prefixes.
 	// -----------------------------------------------------------------------
-	"anthropic.claude-opus-4-20250918-v1:0": {
+
+	// Claude Opus 4.6
+	"us.anthropic.claude-opus-4-6-v1": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
 		output_price_per_1k: 0.075,
-		display_name: "Claude Opus 4 (Bedrock)",
+		display_name: "US Claude Opus 4.6 (Bedrock)",
 	},
-	"anthropic.claude-sonnet-4-20250514-v1:0": {
+	"global.anthropic.claude-opus-4-6-v1": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		display_name: "Global Claude Opus 4.6 (Bedrock)",
+	},
+
+	// Claude Sonnet 4.6
+	"us.anthropic.claude-sonnet-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "Claude Sonnet 4 (Bedrock)",
+		display_name: "US Claude Sonnet 4.6 (Bedrock)",
 	},
-	"anthropic.claude-sonnet-4-5-20250514-v1:0": {
+	"eu.anthropic.claude-sonnet-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "Claude Sonnet 4.5 (Bedrock)",
+		display_name: "EU Claude Sonnet 4.6 (Bedrock)",
 	},
-	"anthropic.claude-3-5-sonnet-20241022-v2:0": {
+	"apac.anthropic.claude-sonnet-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "Claude 3.5 Sonnet v2 (Bedrock)",
+		display_name: "APAC Claude Sonnet 4.6 (Bedrock)",
 	},
-	"anthropic.claude-3-5-sonnet-20240620-v1:0": {
+	"global.anthropic.claude-sonnet-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "Claude 3.5 Sonnet (Bedrock)",
+		display_name: "Global Claude Sonnet 4.6 (Bedrock)",
 	},
-	"anthropic.claude-3-5-haiku-20241022-v1:0": {
+
+	// Claude Sonnet 4.5
+	"us.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "US Claude Sonnet 4.5 (Bedrock)",
+	},
+	"eu.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "EU Claude Sonnet 4.5 (Bedrock)",
+	},
+	"apac.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "APAC Claude Sonnet 4.5 (Bedrock)",
+	},
+	"global.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "Global Claude Sonnet 4.5 (Bedrock)",
+	},
+
+	// Claude Haiku 4.5
+	"us.anthropic.claude-haiku-4-5-20251001-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.004,
-		display_name: "Claude 3.5 Haiku (Bedrock)",
+		display_name: "US Claude Haiku 4.5 (Bedrock)",
 	},
-	"anthropic.claude-3-opus-20240229-v1:0": {
+	"eu.anthropic.claude-haiku-4-5-20251001-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.0008,
+		output_price_per_1k: 0.004,
+		display_name: "EU Claude Haiku 4.5 (Bedrock)",
+	},
+	"apac.anthropic.claude-haiku-4-5-20251001-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.0008,
+		output_price_per_1k: 0.004,
+		display_name: "APAC Claude Haiku 4.5 (Bedrock)",
+	},
+	"global.anthropic.claude-haiku-4-5-20251001-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.0008,
+		output_price_per_1k: 0.004,
+		display_name: "Global Claude Haiku 4.5 (Bedrock)",
+	},
+
+	// Claude Sonnet 4
+	"us.anthropic.claude-sonnet-4-20250514-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "US Claude Sonnet 4 (Bedrock)",
+	},
+	"eu.anthropic.claude-sonnet-4-20250514-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "EU Claude Sonnet 4 (Bedrock)",
+	},
+	"apac.anthropic.claude-sonnet-4-20250514-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "APAC Claude Sonnet 4 (Bedrock)",
+	},
+	"global.anthropic.claude-sonnet-4-20250514-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "Global Claude Sonnet 4 (Bedrock)",
+	},
+
+	// Claude Opus 4
+	"us.anthropic.claude-opus-4-20250514-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
 		output_price_per_1k: 0.075,
-		display_name: "Claude 3 Opus (Bedrock)",
+		display_name: "US Claude Opus 4 (Bedrock)",
 	},
-	"anthropic.claude-3-haiku-20240307-v1:0": {
+	"eu.anthropic.claude-opus-4-20250514-v1:0": {
 		context_window: 200_000,
-		input_price_per_1k: 0.00025,
-		output_price_per_1k: 0.00125,
-		display_name: "Claude 3 Haiku (Bedrock)",
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		display_name: "EU Claude Opus 4 (Bedrock)",
+	},
+	"global.anthropic.claude-opus-4-20250514-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		display_name: "Global Claude Opus 4 (Bedrock)",
+	},
+
+	// Claude 3.7 Sonnet
+	"us.anthropic.claude-3-7-sonnet-20250219-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "US Claude 3.7 Sonnet (Bedrock)",
+	},
+	"eu.anthropic.claude-3-7-sonnet-20250219-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "EU Claude 3.7 Sonnet (Bedrock)",
+	},
+	"apac.anthropic.claude-3-7-sonnet-20250219-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "APAC Claude 3.7 Sonnet (Bedrock)",
+	},
+
+	// Claude 3.5 Sonnet v2
+	"us.anthropic.claude-3-5-sonnet-20241022-v2:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "US Claude 3.5 Sonnet v2 (Bedrock)",
+	},
+	"eu.anthropic.claude-3-5-sonnet-20241022-v2:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "EU Claude 3.5 Sonnet v2 (Bedrock)",
+	},
+	"apac.anthropic.claude-3-5-sonnet-20241022-v2:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "APAC Claude 3.5 Sonnet v2 (Bedrock)",
+	},
+
+	// Claude 3.5 Haiku
+	"us.anthropic.claude-3-5-haiku-20241022-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.0008,
+		output_price_per_1k: 0.004,
+		display_name: "US Claude 3.5 Haiku (Bedrock)",
+	},
+	"eu.anthropic.claude-3-5-haiku-20241022-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.0008,
+		output_price_per_1k: 0.004,
+		display_name: "EU Claude 3.5 Haiku (Bedrock)",
+	},
+	"apac.anthropic.claude-3-5-haiku-20241022-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.0008,
+		output_price_per_1k: 0.004,
+		display_name: "APAC Claude 3.5 Haiku (Bedrock)",
 	},
 
 	// -----------------------------------------------------------------------
-	// AWS Bedrock models (Amazon)
+	// AWS Bedrock — Amazon Nova inference profiles
 	// -----------------------------------------------------------------------
-	"amazon.nova-pro-v1:0": {
+
+	// Nova Premier
+	"us.amazon.nova-premier-v1:0": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.0025,
+		output_price_per_1k: 0.0125,
+		display_name: "US Nova Premier (Bedrock)",
+	},
+
+	// Nova Pro
+	"us.amazon.nova-pro-v1:0": {
 		context_window: 300_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.0032,
-		display_name: "Amazon Nova Pro",
+		display_name: "US Nova Pro (Bedrock)",
 	},
-	"amazon.nova-lite-v1:0": {
+	"eu.amazon.nova-pro-v1:0": {
+		context_window: 300_000,
+		input_price_per_1k: 0.0008,
+		output_price_per_1k: 0.0032,
+		display_name: "EU Nova Pro (Bedrock)",
+	},
+	"apac.amazon.nova-pro-v1:0": {
+		context_window: 300_000,
+		input_price_per_1k: 0.0008,
+		output_price_per_1k: 0.0032,
+		display_name: "APAC Nova Pro (Bedrock)",
+	},
+
+	// Nova Lite
+	"us.amazon.nova-lite-v1:0": {
 		context_window: 300_000,
 		input_price_per_1k: 0.00006,
 		output_price_per_1k: 0.00024,
-		display_name: "Amazon Nova Lite",
+		display_name: "US Nova Lite (Bedrock)",
 	},
-	"amazon.nova-micro-v1:0": {
+	"eu.amazon.nova-lite-v1:0": {
+		context_window: 300_000,
+		input_price_per_1k: 0.00006,
+		output_price_per_1k: 0.00024,
+		display_name: "EU Nova Lite (Bedrock)",
+	},
+	"apac.amazon.nova-lite-v1:0": {
+		context_window: 300_000,
+		input_price_per_1k: 0.00006,
+		output_price_per_1k: 0.00024,
+		display_name: "APAC Nova Lite (Bedrock)",
+	},
+
+	// Nova Micro
+	"us.amazon.nova-micro-v1:0": {
 		context_window: 128_000,
 		input_price_per_1k: 0.000035,
 		output_price_per_1k: 0.00014,
-		display_name: "Amazon Nova Micro",
+		display_name: "US Nova Micro (Bedrock)",
+	},
+	"eu.amazon.nova-micro-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.000035,
+		output_price_per_1k: 0.00014,
+		display_name: "EU Nova Micro (Bedrock)",
+	},
+	"apac.amazon.nova-micro-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.000035,
+		output_price_per_1k: 0.00014,
+		display_name: "APAC Nova Micro (Bedrock)",
+	},
+
+	// Nova 2 Lite (global only as of July 2026)
+	"global.amazon.nova-2-lite-v1:0": {
+		context_window: 300_000,
+		input_price_per_1k: 0.00006,
+		output_price_per_1k: 0.00024,
+		display_name: "Global Nova 2 Lite (Bedrock)",
 	},
 
 	// -----------------------------------------------------------------------
-	// AWS Bedrock models (Meta)
+	// AWS Bedrock — Meta Llama 4 inference profiles
 	// -----------------------------------------------------------------------
-	"meta.llama3-1-405b-instruct-v1:0": {
+	"us.meta.llama4-maverick-17b-instruct-v1:0": {
 		context_window: 128_000,
-		input_price_per_1k: 0.00532,
-		output_price_per_1k: 0.016,
-		display_name: "Llama 3.1 405B (Bedrock)",
+		input_price_per_1k: 0.00024,
+		output_price_per_1k: 0.00024,
+		display_name: "US Llama 4 Maverick 17B (Bedrock)",
 	},
-	"meta.llama3-1-70b-instruct-v1:0": {
+	"us.meta.llama4-scout-17b-instruct-v1:0": {
 		context_window: 128_000,
-		input_price_per_1k: 0.00099,
-		output_price_per_1k: 0.00099,
-		display_name: "Llama 3.1 70B (Bedrock)",
+		input_price_per_1k: 0.00017,
+		output_price_per_1k: 0.00017,
+		display_name: "US Llama 4 Scout 17B (Bedrock)",
 	},
-	"meta.llama3-1-8b-instruct-v1:0": {
-		context_window: 128_000,
-		input_price_per_1k: 0.00022,
-		output_price_per_1k: 0.00022,
-		display_name: "Llama 3.1 8B (Bedrock)",
+
+	// -----------------------------------------------------------------------
+	// AWS Bedrock — DeepSeek inference profiles
+	// -----------------------------------------------------------------------
+	"us.deepseek.r1-v1:0": {
+		context_window: 64_000,
+		input_price_per_1k: 0.00135,
+		output_price_per_1k: 0.0054,
+		display_name: "US DeepSeek R1 (Bedrock)",
 	},
 };
 

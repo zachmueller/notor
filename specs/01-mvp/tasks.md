@@ -189,7 +189,7 @@
 - [x] Manual refresh via explicit `refreshModels()` call
 - [x] Cache cleared on provider switch or credential change
 
-### PROV-008: Bedrock inference profiles migration ☐
+### PROV-008: Bedrock inference profiles migration ✅
 **Description:** Replace the existing `ListFoundationModels` implementation in the Bedrock provider with `ListInferenceProfilesCommand`, and update the static metadata table to use inference profile IDs. This is a targeted bug-fix/upgrade — the `sendMessage` path and all auth logic remain unchanged; only model listing and metadata lookup are affected.
 
 **Context:** The original PROV-005 implementation used `ListFoundationModelsCommand` with `byOutputModality: "TEXT"`. Per updated research (R-4, 2026-07-03), newer models (Claude Sonnet 4.6, Opus 4.6, Llama 4, Nova Premier, DeepSeek R1) appear only in inference profiles, not in `ListFoundationModels`. Additionally, inference profile IDs (e.g., `us.anthropic.claude-sonnet-4-20250514-v1:0`) are the correct `modelId` values for Converse API calls — passing bare foundation model IDs still works but bypasses cross-region routing.
@@ -202,17 +202,17 @@
 **Reference files:** `design/research/llm-model-list-apis.md` — Section 3a (ListInferenceProfiles), Section 3b (deprecated ListFoundationModels), Section 6a (field mapping), Section 6b (metadata table with inference profile IDs)
 
 **Acceptance Criteria:**
-- [ ] `listModels` uses `ListInferenceProfilesCommand({ typeEquals: "SYSTEM_DEFINED" })` from `@aws-sdk/client-bedrock`
-- [ ] Returns `inferenceProfileId` as the model `id` field (e.g., `us.anthropic.claude-sonnet-4-20250514-v1:0`) — this value is passed directly to the Converse API as `modelId`
-- [ ] Returns `inferenceProfileName` as the model `display_name` field (e.g., `"US Claude Sonnet 4"`)
-- [ ] Client-side filtering excludes non-chat profiles: filter out `stability.*`, `twelvelabs.*`, `cohere.embed*` provider prefixes; include only profiles with `status === "ACTIVE"`
-- [ ] Handles `AccessDeniedException` (403) with a clear error message noting `bedrock:ListInferenceProfiles` IAM permission is required
-- [ ] Handles pagination via `nextToken` (in practice a single page suffices for SYSTEM_DEFINED profiles)
-- [ ] Static metadata table in `model-metadata.ts` re-keyed to inference profile IDs — entries for `us.*`, `eu.*`, `apac.*`, and `global.*` prefixes for all popular models referenced in the research doc's metadata table (Section 6b)
-- [ ] Old bare foundation model ID entries for Bedrock (e.g., `anthropic.claude-sonnet-4-20250514-v1:0`) removed from metadata table
-- [ ] `getModelMetadata` lookup continues to work correctly for inference profile IDs
-- [ ] IAM note added to Bedrock settings section in `src/settings.ts` or README: policy must include `bedrock:ListInferenceProfiles` (not just `bedrock:ListFoundationModels`)
-- [ ] Existing `sendMessage` / `ConverseStreamCommand` path unchanged — inference profile IDs already work as `modelId` values in Converse API
+- [x] `listModels` uses `ListInferenceProfilesCommand({ typeEquals: "SYSTEM_DEFINED" })` from `@aws-sdk/client-bedrock`
+- [x] Returns `inferenceProfileId` as the model `id` field (e.g., `us.anthropic.claude-sonnet-4-20250514-v1:0`) — this value is passed directly to the Converse API as `modelId`
+- [x] Returns `inferenceProfileName` as the model `display_name` field (e.g., `"US Claude Sonnet 4"`)
+- [x] Client-side filtering excludes non-chat profiles: filter out `stability.*`, `twelvelabs.*`, `cohere.embed*` provider prefixes; include only profiles with `status === "ACTIVE"`
+- [x] Handles `AccessDeniedException` (403) with a clear error message noting `bedrock:ListInferenceProfiles` IAM permission is required
+- [x] Handles pagination via `nextToken` (in practice a single page suffices for SYSTEM_DEFINED profiles)
+- [x] Static metadata table in `model-metadata.ts` re-keyed to inference profile IDs — entries for `us.*`, `eu.*`, `apac.*`, and `global.*` prefixes for all popular models referenced in the research doc's metadata table (Section 6b)
+- [x] Old bare foundation model ID entries for Bedrock (e.g., `anthropic.claude-sonnet-4-20250514-v1:0`) removed from metadata table
+- [x] `getModelMetadata` lookup continues to work correctly for inference profile IDs
+- [x] IAM note added to Bedrock settings section in `src/settings.ts` or README: policy must include `bedrock:ListInferenceProfiles` (not just `bedrock:ListFoundationModels`)
+- [x] Existing `sendMessage` / `ConverseStreamCommand` path unchanged — inference profile IDs already work as `modelId` values in Converse API
 
 ---
 

@@ -2,8 +2,8 @@
  * AWS Bedrock provider.
  *
  * Implements the LLMProvider interface using AWS SDK v3. Uses the
- * Bedrock Converse API for message sending and ListFoundationModels
- * for model discovery.
+ * Bedrock Converse API for message sending and ListInferenceProfiles
+ * for model discovery (system-defined cross-region profiles).
  *
  * Supports two auth methods:
  * - Named profile: fromIni({ profile }) — uses ~/.aws/config + credentials
@@ -12,8 +12,12 @@
  * This module is lazy-loaded (not imported until Bedrock is selected)
  * to minimize startup bundle impact.
  *
+ * Required IAM permissions:
+ * - bedrock:InvokeModelWithResponseStream (for sendMessage)
+ * - bedrock:ListInferenceProfiles (for listModels)
+ *
  * @see specs/01-mvp/contracts/llm-provider.md — AWS Bedrock mapping
- * @see design/research/llm-model-list-apis.md — Section 3
+ * @see design/research/llm-model-list-apis.md — Section 3a (ListInferenceProfiles)
  */
 
 import type { App } from "obsidian";
@@ -45,7 +49,8 @@ import type {
 } from "@aws-sdk/client-bedrock-runtime";
 import {
 	BedrockClient,
-	ListFoundationModelsCommand,
+	ListInferenceProfilesCommand,
+	type ListInferenceProfilesCommandOutput,
 } from "@aws-sdk/client-bedrock";
 import { fromIni } from "@aws-sdk/credential-providers";
 
@@ -441,53 +446,99 @@ export class BedrockProvider implements LLMProvider {
 		}
 	}
 
-	async listModels(): Promise<ModelInfo[]> {
+	/**
+	 * Fetch a single page of inference profiles, throwing a normalized
+	 * ProviderError on any SDK error.
+	 */
+	private async fetchInferenceProfilesPage(
+		token: string | undefined
+	): Promise<ListInferenceProfilesCommandOutput> {
 		const client = this.getBedrockClient();
-
-		let response;
 		try {
-			response = await client.send(
-				new ListFoundationModelsCommand({
-					byOutputModality: "TEXT",
-					byInferenceType: "ON_DEMAND",
+			// BedrockClient.send() returns ServiceOutputTypes (a broad union type).
+			// We cast via unknown to the concrete output type we know this command returns.
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const rawResult: any = await client.send(
+				new ListInferenceProfilesCommand({
+					typeEquals: "SYSTEM_DEFINED",
+					...(token ? { nextToken: token } : {}),
 				})
 			);
+			return rawResult as ListInferenceProfilesCommandOutput;
 		} catch (e: unknown) {
 			const errMsg = e instanceof Error ? e.message : String(e);
-			const errName = e instanceof Error ? e.name : "";
+			const errName =
+				e instanceof Error
+					? e.name
+					: typeof e === "object" && e !== null && "name" in e
+						? String((e as { name: unknown }).name)
+						: "";
 
 			if (
 				errName === "AccessDeniedException" ||
-				errMsg.includes("not authorized")
+				errMsg.includes("not authorized") ||
+				errMsg.includes("Access Denied")
 			) {
 				throw new ProviderError(
-					"AWS Bedrock access denied. Check your IAM permissions (bedrock:ListFoundationModels).",
+					"AWS Bedrock access denied. The bedrock:ListInferenceProfiles " +
+						"IAM permission is required. Check your IAM policy and ensure " +
+						"it includes bedrock:ListInferenceProfiles.",
 					"bedrock",
 					"AUTH_FAILED",
 					e instanceof Error ? e : undefined
 				);
 			}
 			throw new ProviderError(
-				`Failed to list Bedrock models: ${errMsg}`,
+				`Failed to list Bedrock inference profiles: ${errMsg}`,
 				"bedrock",
 				"PROVIDER_ERROR",
 				e instanceof Error ? e : undefined
 			);
 		}
+	}
 
-		const models: ModelInfo[] = (response.modelSummaries ?? [])
-			.filter((m) => m.modelLifecycle?.status === "ACTIVE")
-			.map((m) => ({
-				id: m.modelId ?? "",
-				display_name: m.modelName ?? m.modelId ?? "",
-				context_window: null,
-				input_price_per_1k: null,
-				output_price_per_1k: null,
-				provider: m.providerName ?? "bedrock",
-			}))
-			.filter((m) => m.id !== "");
+	async listModels(): Promise<ModelInfo[]> {
+		/** Profile ID patterns for known non-chat providers to exclude. */
+		const NON_CHAT_ID_PATTERNS = [
+			/^[^.]+\.stability\./,   // Stable Diffusion image models
+			/^[^.]+\.twelvelabs\./,  // Video/multimodal embedding models
+			/^[^.]+\.cohere\.embed/, // Embedding-only models
+		];
 
-		return models;
+		const allProfiles: ModelInfo[] = [];
+		let nextToken: string | undefined;
+
+		do {
+			const response = await this.fetchInferenceProfilesPage(nextToken);
+
+			for (const profile of response.inferenceProfileSummaries ?? []) {
+				const profileId = profile.inferenceProfileId ?? "";
+				if (!profileId) continue;
+				if (profile.status !== "ACTIVE") continue;
+				if (NON_CHAT_ID_PATTERNS.some((p) => p.test(profileId))) continue;
+
+				// Derive the provider display name from the profile ID segment
+				// Format: {geo}.{provider}.{model-name}-{version}
+				const parts = profileId.split(".");
+				const providerRaw = parts.length >= 2 ? parts[1] : undefined;
+				const providerSegment = providerRaw
+					? providerRaw.charAt(0).toUpperCase() + providerRaw.slice(1)
+					: "Bedrock";
+
+				allProfiles.push({
+					id: profileId,
+					display_name: profile.inferenceProfileName ?? profileId,
+					context_window: null,
+					input_price_per_1k: null,
+					output_price_per_1k: null,
+					provider: providerSegment,
+				});
+			}
+
+			nextToken = response.nextToken ?? undefined;
+		} while (nextToken);
+
+		return allProfiles;
 	}
 
 	getTokenCount(text: string): number {

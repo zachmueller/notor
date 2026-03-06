@@ -418,6 +418,16 @@ export class NotorSettingTab extends PluginSettingTab {
 	private renderBedrockProviderSection(containerEl: HTMLElement): void {
 		containerEl.createEl("h2", { text: "AWS Bedrock" });
 
+		// IAM policy note
+		containerEl.createEl("p", {
+			text:
+				"Required IAM permissions: bedrock:InvokeModelWithResponseStream " +
+				"(for sending messages) and bedrock:ListInferenceProfiles " +
+				"(for listing available models). " +
+				"bedrock:ListFoundationModels is no longer needed.",
+			cls: "setting-item-description",
+		});
+
 		const getBedrockProvider = () => getProvider(this.plugin.settings, "bedrock");
 
 		// Region dropdown
