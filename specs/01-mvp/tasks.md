@@ -26,7 +26,7 @@
 - `design/architecture.md` — LLM provider layer, credential storage, message structure
 - `design/research/obsidian-secrets-manager.md` — SecretStorage API surface, minAppVersion requirements
 
-### ENV-001: Project restructure and settings foundation
+### ENV-001: Project restructure and settings foundation ✅
 **Description:** Replace sample plugin scaffolding with Notor's settings interface, types, and module structure. Remove sample modal, ribbon icon, status bar, and placeholder commands from `main.ts`. Create the settings interface from the data model with all MVP settings fields and defaults.
 **Files:**
 - `src/main.ts` — strip to minimal lifecycle shell
@@ -34,15 +34,15 @@
 - `src/types.ts` — shared TypeScript interfaces (Conversation, Message, ToolCall, ToolResult, Checkpoint, ModelInfo, etc.)
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `main.ts` contains only `onload`/`onunload` with settings loading and setting tab registration
-- [ ] All sample code (SampleModal, ribbon icon, status bar, sample commands, click listener, interval) removed
-- [ ] `NotorSettings` interface matches data model (all fields from Plugin Settings table in data-model.md)
-- [ ] `DEFAULT_SETTINGS` matches specified defaults (plan mode, local provider, auto-approve read tools, etc.)
-- [ ] `src/types.ts` contains all shared entity interfaces from data-model.md
-- [ ] Plugin class renamed from `MyPlugin` to `NotorPlugin`
-- [ ] Plugin builds without errors (`npm run build`)
+- [x] `main.ts` contains only `onload`/`onunload` with settings loading and setting tab registration
+- [x] All sample code (SampleModal, ribbon icon, status bar, sample commands, click listener, interval) removed
+- [x] `NotorSettings` interface matches data model (all fields from Plugin Settings table in data-model.md)
+- [x] `DEFAULT_SETTINGS` matches specified defaults (plan mode, local provider, auto-approve read tools, etc.)
+- [x] `src/types.ts` contains all shared entity interfaces from data-model.md
+- [x] Plugin class renamed from `MyPlugin` to `NotorPlugin`
+- [x] Plugin builds without errors (`npm run build`)
 
-### ENV-002: Install AWS SDK dependencies
+### ENV-002: Install AWS SDK dependencies ✅
 **Description:** Add AWS SDK v3 packages for Bedrock provider support. These are the only external runtime dependencies beyond Obsidian types.
 **Files:**
 - `package.json` — add dependencies
@@ -50,33 +50,34 @@
 - `esbuild.config.mjs` — verify AWS SDK packages are bundled correctly
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `@aws-sdk/client-bedrock-runtime`, `@aws-sdk/client-bedrock`, `@aws-sdk/credential-providers` installed
-- [ ] esbuild bundles AWS SDK without errors
-- [ ] Built `main.js` size is reasonable (check tree-shaking effectiveness)
+- [x] `@aws-sdk/client-bedrock-runtime`, `@aws-sdk/client-bedrock`, `@aws-sdk/credential-providers` installed
+- [x] esbuild bundles AWS SDK without errors
+- [x] Built `main.js` size is reasonable (check tree-shaking effectiveness)
 - [ ] Plugin still loads in Obsidian after adding dependencies
 
-### ENV-003: Secrets manager utility
+### ENV-003: Secrets manager utility ✅
 **Description:** Create a wrapper around Obsidian's `SecretStorage` API (`app.secretStorage`) for credential management. Implements get/set/clear operations with consistent key naming.
 **Files:**
 - `src/utils/secrets.ts` — SecretStorage wrapper
+- `src/obsidian-augments.d.ts` — type augmentations for SecretStorage API (not yet in published type definitions)
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `getSecret(id)` retrieves a secret by name
-- [ ] `setSecret(id, value)` stores a secret
-- [ ] `clearSecret(id)` uses `setSecret(id, "")` workaround (no delete API)
-- [ ] Key naming convention established (e.g., `notor-openai-api-key`, `notor-anthropic-api-key`)
-- [ ] Wrapper handles missing secrets gracefully (returns null/undefined, no throw)
+- [x] `getSecret(id)` retrieves a secret by name
+- [x] `setSecret(id, value)` stores a secret
+- [x] `clearSecret(id)` uses `setSecret(id, "")` workaround (no delete API)
+- [x] Key naming convention established (e.g., `notor-openai-api-key`, `notor-anthropic-api-key`)
+- [x] Wrapper handles missing secrets gracefully (returns null/undefined, no throw)
 
-### ENV-004: Token counting utility
+### ENV-004: Token counting utility ✅
 **Description:** Implement token estimation for context window tracking and cost calculation. Use a lightweight approach suitable for bundling (character-based estimation or bundled tiktoken-lite).
 **Files:**
 - `src/utils/tokens.ts` — token counting functions
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `estimateTokenCount(text): number` provides a reasonable token estimate
-- [ ] Works without external API calls (client-side only)
-- [ ] Accuracy is sufficient for context window tracking (within ~10% of actual)
-- [ ] Minimal bundle size impact
+- [x] `estimateTokenCount(text): number` provides a reasonable token estimate
+- [x] Works without external API calls (client-side only)
+- [x] Accuracy is sufficient for context window tracking (within ~10% of actual)
+- [x] Minimal bundle size impact
 
 ---
 
