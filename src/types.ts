@@ -77,6 +77,12 @@ export type ToolCallStatus = "pending" | "approved" | "rejected" | "success" | "
 
 /** Structured record of a tool invocation requested by the LLM. */
 export interface ToolCall {
+	/**
+	 * Provider-assigned tool call identifier (e.g., Bedrock `toolUseId`).
+	 * Stored so the provider can correctly correlate tool results to calls
+	 * when the conversation history is replayed on subsequent LLM turns.
+	 */
+	id?: string;
 	/** Name of the tool being invoked. */
 	tool_name: string;
 	/** Tool parameters as key-value pairs. */
@@ -97,6 +103,12 @@ export interface ToolResult {
 	error?: string | null;
 	/** Execution time in milliseconds. */
 	duration_ms?: number;
+	/**
+	 * Provider-assigned tool call ID this result responds to.
+	 * Must match the `id` on the corresponding `ToolCall` so that
+	 * providers like Bedrock can validate the conversation history.
+	 */
+	tool_call_id?: string;
 }
 
 // ---------------------------------------------------------------------------

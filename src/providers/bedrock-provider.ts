@@ -214,10 +214,11 @@ export class BedrockProvider implements LLMProvider {
 	}
 
 	/**
-	 * Track which content block indices contain tool use blocks so that
-	 * contentBlockStop events are only emitted as tool_call_end for tool blocks.
+	 * Map content block index → provider toolUseId for active tool-use blocks.
+	 * Used so that contentBlockStop can emit tool_call_end with the correct
+	 * provider-assigned ID (required by Bedrock for toolResult correlation).
 	 */
-	private activeToolBlockIndices = new Set<number>();
+	private activeToolBlockIndices = new Map<number, string>();
 
 	async *sendMessage(
 		messages: ChatMessage[],
@@ -225,7 +226,7 @@ export class BedrockProvider implements LLMProvider {
 		options: SendMessageOptions
 	): AsyncIterable<StreamChunk> {
 		// Clear tool block index tracker for each new request
-		this.activeToolBlockIndices.clear();
+		this.activeToolBlockIndices = new Map<number, string>();
 		const client = this.getRuntimeClient();
 		const { system, messages: bedrockMessages } =
 			toBedrockMessages(messages);
@@ -355,11 +356,12 @@ export class BedrockProvider implements LLMProvider {
 			const start = event.contentBlockStart.start;
 			if (start?.toolUse) {
 				const blockIndex = event.contentBlockStart.contentBlockIndex ?? -1;
-				// Track this block as a tool-use block
-				this.activeToolBlockIndices.add(blockIndex);
+				const toolUseId = start.toolUse.toolUseId ?? "";
+				// Map block index → provider toolUseId so tool_call_end can emit the right ID
+				this.activeToolBlockIndices.set(blockIndex, toolUseId);
 				yield {
 					type: "tool_call_start",
-					id: start.toolUse.toolUseId ?? "",
+					id: toolUseId,
 					tool_name: start.toolUse.name ?? "",
 				};
 			}
@@ -382,11 +384,12 @@ export class BedrockProvider implements LLMProvider {
 		if (event.contentBlockStop) {
 			const blockIndex = event.contentBlockStop.contentBlockIndex ?? -1;
 			// Only emit tool_call_end for blocks that were actually tool-use blocks
-			if (this.activeToolBlockIndices.has(blockIndex)) {
+			const toolUseId = this.activeToolBlockIndices.get(blockIndex);
+			if (toolUseId !== undefined) {
 				this.activeToolBlockIndices.delete(blockIndex);
 				yield {
 					type: "tool_call_end",
-					id: blockIndex.toString(),
+					id: toolUseId,
 				};
 			}
 		}

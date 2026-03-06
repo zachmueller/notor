@@ -298,6 +298,7 @@ export class ChatOrchestrator {
 					role: "tool_call",
 					content: "",
 					tool_call: {
+						id: result.toolCallId,
 						tool_name: result.toolName,
 						parameters: result.parameters,
 						status: "pending",
@@ -313,6 +314,9 @@ export class ChatOrchestrator {
 					mode,
 					toolCallMessage.id
 				);
+
+				// Propagate the provider tool call ID so the result can be correlated
+				toolResult.tool_call_id = result.toolCallId;
 
 				// Record note access for vault rule re-evaluation
 				const notePath = result.parameters["path"] as string | undefined;
@@ -441,6 +445,7 @@ export class ChatOrchestrator {
 						// But return tool call for dispatch
 						return {
 							type: "tool_call",
+							toolCallId: currentToolCallId,
 							toolName: currentToolName,
 							parameters,
 							text: textContent,
@@ -524,7 +529,9 @@ export class ChatOrchestrator {
 							role: "tool_call",
 							content: "",
 							tool_call: {
-								id: msg.id,
+								// Use the provider-assigned ID (e.g., Bedrock toolUseId) when
+								// available; fall back to the message UUID for other providers.
+								id: msg.tool_call.id ?? msg.id,
 								tool_name: msg.tool_call.tool_name,
 								parameters: msg.tool_call.parameters,
 							},
@@ -542,7 +549,8 @@ export class ChatOrchestrator {
 							role: "tool_result",
 							content: "",
 							tool_result: {
-								tool_call_id: msg.id,
+								// Must match the tool_call.id used above for the same call.
+								tool_call_id: msg.tool_result.tool_call_id ?? msg.id,
 								tool_name: msg.tool_result.tool_name,
 								result: resultStr,
 								is_error: !msg.tool_result.success,
@@ -656,6 +664,6 @@ export class ChatOrchestrator {
 /** Internal result type for stream processing. */
 type StreamResult =
 	| { type: "text"; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "tool_call"; toolName: string; parameters: Record<string, unknown>; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "tool_call"; toolCallId: string; toolName: string; parameters: Record<string, unknown>; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "cancelled"; text: string; inputTokens: number; outputTokens: number }
 	| { type: "error"; error: string; text: string; inputTokens: number; outputTokens: number };
