@@ -536,31 +536,31 @@
 - `specs/01-mvp/contracts/tool-schemas.md` — diff preview flow (section at end of document)
 - `design/ux.md` — diff preview and change approval UI patterns, per-change accept/reject, auto-approve collapsed diff behavior
 
-### DIFF-001: Diff generation
+### DIFF-001: Diff generation ✅
 **Description:** Generate before/after diffs for write tool operations. Compute the diff data structure used by the diff preview UI.
 **Files:**
 - `src/ui/diff-engine.ts` — diff computation utility
 **Dependencies:** TOOL-003, TOOL-004
 **Acceptance Criteria:**
-- [ ] Generate line-by-line diff between before/after content
-- [ ] Support diff for `write_note` (old content vs new content; empty "before" for new files)
-- [ ] Support diff for `replace_in_note` (per-change diffs for each SEARCH/REPLACE block)
-- [ ] Identify additions, deletions, and unchanged lines
-- [ ] Output structured diff data for rendering
+- [x] Generate line-by-line diff between before/after content
+- [x] Support diff for `write_note` (old content vs new content; empty "before" for new files)
+- [x] Support diff for `replace_in_note` (per-change diffs for each SEARCH/REPLACE block)
+- [x] Identify additions, deletions, and unchanged lines
+- [x] Output structured diff data for rendering
 
-### DIFF-002: Diff preview UI
+### DIFF-002: Diff preview UI ✅
 **Description:** Render diff previews in the chat panel for write tool operations. Support per-change accept/reject and bulk actions.
 **Files:**
 - `src/ui/diff-view.ts` — diff preview component
 - `styles.css` — diff styles
 **Dependencies:** DIFF-001, CHAT-007
 **Acceptance Criteria:**
-- [ ] Before/after content displayed with highlighted additions (green) and deletions (red)
-- [ ] For `replace_in_note` with multiple blocks: per-change accept/reject controls
-- [ ] "Accept all" / "Reject all" buttons for bulk approval
-- [ ] When auto-approve is on: changes applied immediately, collapsed diff shown in chat thread
-- [ ] When manual approval: diff shown expanded, tool execution blocked until user decides
-- [ ] Partial accept: only accepted changes applied; result reflects what was actually applied
+- [x] Before/after content displayed with highlighted additions (green) and deletions (red)
+- [x] For `replace_in_note` with multiple blocks: per-change accept/reject controls
+- [x] "Accept all" / "Reject all" buttons for bulk approval
+- [x] When auto-approve is on: changes applied immediately, collapsed diff shown in chat thread
+- [x] When manual approval: diff shown expanded, tool execution blocked until user decides
+- [x] Partial accept: only accepted changes applied; result reflects what was actually applied
 
 ---
 
