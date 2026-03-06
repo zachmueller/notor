@@ -53,7 +53,7 @@ This specification covers three roadmap phases that together form the MVP:
 
 **Acceptance criteria:**
 - Users can configure and switch between at least four provider types: local OpenAI-compatible API (default), AWS Bedrock, Anthropic API, and OpenAI API.
-- Each provider has its own configuration surface: endpoint URL (for local), API key (for Anthropic/OpenAI), AWS profile name and region (for Bedrock).
+- Each provider has its own configuration surface: endpoint URL (for local), API key (for Anthropic/OpenAI), AWS region and credential method for Bedrock (see FR-2).
 - The active provider and model can be changed from the chat panel without navigating to settings.
 - If a provider is unreachable or credentials are invalid, the user receives a clear error message in the chat panel.
 - The provider interface is extensible so that additional providers can be added in the future without changing the core chat system.
@@ -64,7 +64,8 @@ This specification covers three roadmap phases that together form the MVP:
 
 **Acceptance criteria:**
 - API keys, access tokens, and other sensitive credentials are stored via Obsidian's secrets manager — not in plain-text plugin data files.
-- Per-provider credential configuration is available in settings (API keys for Anthropic/OpenAI, AWS profile name for Bedrock, optional API key for local provider).
+- Per-provider credential configuration is available in settings (API keys for Anthropic/OpenAI, optional API key for local provider).
+- AWS Bedrock supports two credential methods (user chooses one): (a) AWS profile name — delegates to the AWS SDK credential chain (`~/.aws/credentials`, environment variables, SSO, etc.); (b) direct access key ID + secret access key stored in Obsidian's secrets manager. The selected region is stored as a non-secret setting.
 - Credentials can be updated or removed from settings at any time.
 
 ### FR-3: Model selection
@@ -84,9 +85,14 @@ This specification covers three roadmap phases that together form the MVP:
 - The chat panel is an Obsidian leaf view that can be positioned on any side of the workspace.
 - A text input area at the bottom accepts user messages, with a send button.
 - Enter sends the message; Shift+Enter inserts a new line.
+- While the AI is responding (streaming or awaiting tool approval), the send button is disabled and a "Stop" button is displayed to cancel the current response.
+- After the response completes or is cancelled, the send button is re-enabled.
 - A settings button (gear icon) in the panel header provides quick access to provider, model, and (in future) persona selection.
-- The panel displays the full conversation history for the current session.
+- The panel displays the full conversation history for the current conversation.
 - User messages and AI responses are visually distinct.
+- A "New conversation" button is available to start a fresh conversation.
+- A conversation list/selector allows browsing and switching between existing conversations.
+- The conversation list shows conversations ordered by most recent activity.
 
 ### FR-5: Streaming responses
 
@@ -254,6 +260,10 @@ This specification covers three roadmap phases that together form the MVP:
 - The storage path is configurable to any vault-relative path.
 - JSONL files do not appear in Obsidian's file explorer or search results (they are not recognized as notes).
 - Configurable retention limits: maximum total size (MB) and/or maximum age (days). Oldest conversations are pruned when limits are exceeded.
+- Users can start new conversations via the chat panel's "New conversation" button.
+- Users can switch between past conversations via a conversation list in the chat panel.
+- The conversation list displays conversations ordered by most recent activity with a timestamp and preview (e.g., first user message).
+- Conversation rename, search, delete, and pin features are deferred beyond MVP.
 
 ### FR-20: `read_frontmatter` tool
 
@@ -298,9 +308,10 @@ This specification covers three roadmap phases that together form the MVP:
 - Rule files are stored under `{notor_dir}/rules/` as regular Markdown notes.
 - Each rule file uses frontmatter trigger properties to control when its content is injected:
   - `notor-always-include: true` — always injected.
-  - `notor-directory-include: <path>` — injected when any note in the context window has a path under the specified directory.
-  - `notor-tag-include: <tag>` — injected when any note in the context window has the specified tag.
+  - `notor-directory-include: <path>` — injected when any note accessed by tools in the current conversation has a path under the specified directory.
+  - `notor-tag-include: <tag>` — injected when any note accessed by tools in the current conversation has the specified tag.
 - Multiple trigger properties on the same file use OR logic (any match causes inclusion).
+- "In context" is defined as notes the AI has read or modified via tools during the current conversation. Rule triggers are re-evaluated after each tool call that accesses a note.
 - The file body (after stripping frontmatter) is the injected instruction content, appended to the system prompt.
 - Rule files are regular Markdown notes — visible in the file explorer and editable like any vault note.
 
@@ -481,6 +492,16 @@ This specification covers three roadmap phases that together form the MVP:
 - Has frontmatter trigger properties controlling when it is injected.
 - Body content is injected into the system prompt when conditions are met.
 
+## Clarifications
+
+### Session 2026-06-03
+
+- Q: What should the default `{notor_dir}` path be? → A: `notor/` — a visible top-level vault folder (no dot prefix), so users can easily find and edit plugin-managed files like system prompts and rules.
+- Q: What is the conversation lifecycle in the MVP — can users manage multiple conversations? → A: New conversation button + simple conversation list in chat panel. Users can start a new conversation, switch between existing ones, and browse past conversations. No rename, search, or pin features in MVP.
+- Q: How should AWS Bedrock credentials work — AWS profile delegation, direct keys in secrets manager, or both? → A: Support both. Users can either specify an AWS profile name (delegating to the AWS SDK credential chain: `~/.aws/credentials`, env vars, SSO, etc.) or store AWS access key ID + secret access key directly in Obsidian's secrets manager. User chooses which approach per their setup.
+- Q: What constitutes a note being "in context" for vault-level rule trigger evaluation? → A: Notes the AI has read or modified via tools during the current conversation. Rule triggers are evaluated against tool-accessed notes, not open editor tabs.
+- Q: What happens when the user sends a message while the AI is still responding or a tool approval is pending? → A: Block input + cancel button. The send button is disabled while the AI is active (streaming or awaiting tool approval). A "Stop" button allows the user to cancel the current response. Input is re-enabled after the response completes or is cancelled.
+
 ## Assumptions
 
 - Users have a working LLM provider available (local or cloud) before using Notor. The plugin does not host or download models.
@@ -488,7 +509,7 @@ This specification covers three roadmap phases that together form the MVP:
 - Obsidian's vault API provides reliable file read/write operations. The behavior of vault API writes with respect to frontmatter must be researched before finalizing `write_note` implementation. (Pre-implementation research required — see roadmap.)
 - The default local provider endpoint is `http://localhost:11434/v1` (Ollama convention). Users with different setups must configure the endpoint manually.
 - JSONL files stored in the plugin directory or vault are not indexed by Obsidian as notes.
-- The `{notor_dir}` path is user-configurable (with a sensible default) and serves as the root for system prompt, rules, and future persona/workflow storage.
+- The `{notor_dir}` path defaults to `notor/` at the vault root (a visible, non-dot-prefixed folder). It is user-configurable and serves as the root for system prompt, rules, and future persona/workflow storage.
 
 ## Out of scope
 
