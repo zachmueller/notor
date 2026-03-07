@@ -55,7 +55,7 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **Auto-compaction**: configurable, deterministic context window management — trigger summarization at the plugin level, pass summary as new conversation starting point
 - **Web-to-Markdown fetching (`fetch_webpage`)**: built-in tool that fetches a webpage by URL and converts its HTML to Markdown using Turndown (bundled into the plugin) for token-efficient consumption in the LLM context window. Includes a user-configurable domain denylist for blocking untrusted sources. Returns converted Markdown content in the tool result (does not write to notes directly). Read-only tool, available in both Plan and Act modes.
 - **Shell command execution**: cross-platform command execution tool with configurable restrictions in Plan vs Act mode
-- **Hooks — LLM interaction hooks**: hooks tied to the LLM chat lifecycle (e.g., after-completion, pre-send, on-tool-call) for automating follow-up actions
+- **Hooks — LLM interaction hooks**: event-driven callbacks tied to four points in the LLM chat lifecycle — `pre-send` (before message dispatch), `on-tool-call` (after approval, before execution), `on-tool-result` (after execution, before result returned to LLM), and `after-completion` (after the full response turn). The sole Phase 3 hook action is **execute a shell command**; hook shell commands are approved at configuration time (no per-execution prompt). `pre-send` hook stdout is sent to the LLM as a separate collapsible message, not merged into the user's message bubble. Hook configuration via workflow frontmatter is deferred to Phase 4.
 
 ## Phase 4 — Workflows & personas
 

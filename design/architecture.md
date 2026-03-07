@@ -75,11 +75,12 @@ Message:
 
 ### System prompt assembly
 
-Before sending each user message to the LLM, the plugin assembles the system prompt from multiple sources:
+Before every LLM API call (including tool-result round-trips within a single turn), the plugin assembles the system prompt from multiple sources:
 
 1. **Global system prompt**: if `{notor_dir}/prompts/core-system-prompt.md` exists, use its body content (stripping frontmatter). Otherwise, use the built-in default system prompt from plugin code.
 2. **Persona system prompt** (Phase 4): if a persona is active, append (or replace, if `notor-skip-global-prompt: true`) the persona's `system-prompt.md` from `{notor_dir}/personas/{persona_name}/`.
 3. **Vault-level instruction files** (Phase 2): scan `{notor_dir}/rules/` and inject any rule files whose frontmatter triggers match current context conditions (see trigger properties below).
+4. **Workspace context** (Phase 3): the dynamic `<auto-context>` XML block (see Auto-context injection below) is appended as a `## Workspace context` section. This is rebuilt from scratch before every LLM API call so it always reflects the latest workspace state — open tabs, vault structure, and OS are never stale.
 
 Steps 1–3 each support `<include_notes>` tags (see below) to dynamically inject note contents. In system prompt and rule file contexts, only `mode="inline"` is supported (the `mode` attribute is ignored; content is always inlined directly into the prompt text).
 
@@ -100,13 +101,15 @@ For each Markdown file under `{notor_dir}/rules/`, the plugin evaluates frontmat
 
 ### Auto-context injection (Phase 3)
 
-In addition to the system prompt, the plugin automatically injects contextual information with each message:
+The plugin automatically injects contextual information into the **system prompt** (not the user message) before every LLM API call. This keeps the user's chat bubble clean and avoids accumulating duplicate context blocks in the conversation history.
 
-1. **Open note paths**: file paths of all notes currently open in the Obsidian workspace (all leaf/tab views, including pinned tabs and split panes). Only paths are included — full note contents are NOT automatically injected.
-2. **Vault structure**: top-level directory listing only (folder names at the vault root). Does NOT include individual file names in the root directory or recursive subdirectory contents.
+The auto-context is assembled into an `<auto-context>` XML block and appended to the system prompt as a `## Workspace context` section. Three sources are supported:
+
+1. **Open note paths**: file paths of all notes currently open in the Obsidian workspace. All tabs are enumerated via `workspace.iterateAllLeaves()` (which covers pinned tabs, split panes, stacked tabs, and lazily-initialised tabs that have never been clicked). For each leaf, `leaf.view.getState().file` is used as a fallback for unactivated tabs where `view.file` is not yet populated. The currently active note is annotated with ` (active)` — e.g., `Research/Climate.md (active)`. Active note detection uses a two-stage approach: `getActiveViewOfType(MarkdownView)` first (when a markdown tab is focused), then a cached `_lastActiveMarkdownPath` updated by an `active-leaf-change` event listener (handles the case where the chat panel has focus). Full note contents are NOT automatically injected — only paths.
+2. **Vault structure**: top-level folder names at the vault root. Each folder is listed on its own line with a trailing `/` (e.g., `Research/`, `Daily/`). Individual file names at the root level and recursive subdirectory contents are not included.
 3. **Operating system**: the user's OS platform (macOS, Windows, Linux) so the LLM can generate platform-appropriate commands for `execute_command` and tailor any OS-specific guidance.
 
-Each source can be individually enabled/disabled in settings.
+Each source can be individually enabled/disabled in settings. If all sources are disabled, no `<auto-context>` block or `## Workspace context` section is added to the system prompt. The block is **ephemeral** — it is not stored per-message in the JSONL conversation log.
 
 ---
 
@@ -231,8 +234,9 @@ Hooks allow automated actions to be triggered by events in the LLM interaction l
 | Hook | Trigger | Use case examples |
 |---|---|---|
 | `pre-send` | Before a user message is sent to the LLM | Inject additional context, validate input |
-| `on-tool-call` | When the LLM requests a tool invocation | Logging, custom approval logic |
-| `after-completion` | After the LLM finishes its response turn | Auto-save conversation, trigger follow-up actions, chain workflows |
+| `on-tool-call` | After tool approval, immediately before tool execution | Logging, auditing AI actions |
+| `on-tool-result` | After tool execution, before result is returned to the LLM | Logging tool outputs, auditing tool behavior |
+| `after-completion` | After the LLM finishes its full response turn (including all tool cycles) | Auto-save conversation, trigger follow-up actions |
 
 ### Vault event hooks (Phase 4)
 
@@ -245,9 +249,14 @@ Hooks allow automated actions to be triggered by events in the LLM interaction l
 
 ### Hook implementation
 
-- Hooks are registered via plugin settings or within workflow frontmatter.
-- Each hook specifies an action: run a workflow, send a prompt to the LLM, or invoke a specific tool.
-- Hooks respect auto-approve settings — a hook that triggers a write operation still requires approval unless auto-approved.
+- In Phase 3, hooks are registered via **Settings → Notor** only. Hook configuration via workflow frontmatter is deferred to Phase 4.
+- The sole Phase 3 hook action is **execute a shell command**. "Run a workflow" and other action types are deferred to Phase 4.
+- Hook shell commands are **approved at configuration time** — configuring the hook in Settings constitutes implicit user approval. No per-execution approval prompt is shown when a hook fires.
+- **`pre-send` hooks** are fully awaited (sequentially, in configuration order) before the message is dispatched to the LLM. If a hook produces stdout, that output is sent as a **separate `user` message** in the conversation (distinct from the user's typed message, marked `is_hook_injection: true` in the JSONL log). In the chat UI, hook output is rendered as a collapsible element (`.notor-hook-injection`) — it is never merged into the user's typed message bubble.
+- **`on-tool-call`, `on-tool-result`, and `after-completion` hooks** are non-blocking fire-and-forget: they execute sequentially but do not stall the conversation pipeline. The `on-tool-call` hook fires only for tool calls that will actually run (rejected tool calls do not trigger it).
+- All hook events share a single global timeout (default: 10 seconds, configurable in **Settings → Notor**). When any hook exceeds the timeout, the shell process is terminated and a non-blocking notice is surfaced.
+- Failures for any hook event are non-blocking: a notice is surfaced but the conversation continues. Individual hook failures do not prevent subsequent hooks in the same event from executing.
+- Hook shell commands run with `cwd` set to the vault root and are subject to the same working directory allow-list as the `execute_command` tool.
 
 ---
 
