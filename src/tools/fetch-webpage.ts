@@ -15,6 +15,8 @@
 
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
+import { requestUrl } from "obsidian";
+import type { App } from "obsidian";
 import type { Tool, ToolResult } from "./tool";
 import type { NotorSettings } from "../settings";
 import { logger } from "../utils/logger";
@@ -164,7 +166,10 @@ export class FetchWebpageTool implements Tool {
 		required: ["url"],
 	};
 
-	constructor(private readonly settings: NotorSettings) {}
+	constructor(
+		private readonly app: App,
+		private readonly settings: NotorSettings
+	) {}
 
 	async execute(params: Record<string, unknown>): Promise<ToolResult> {
 		const url = params["url"] as string;
@@ -228,33 +233,19 @@ export class FetchWebpageTool implements Tool {
 			maxDownloadMb: this.settings.fetch_webpage_max_download_mb,
 		});
 
-		let response: Response;
+		let body: string;
+		let mimeType: string;
 		try {
-			response = await this.fetchWithRedirects(
+			const fetchResult = await this.fetchWithObsidian(
 				url,
 				timeoutMs,
 				maxDownloadBytes
 			);
+			body = fetchResult.body;
+			mimeType = fetchResult.mimeType;
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);
 			log.warn("Fetch failed", { url, error: message });
-			return {
-				tool_name: this.name,
-				success: false,
-				result: "",
-				error: message,
-			};
-		}
-
-		// Step 5: Content-type routing
-		const contentType = response.headers.get("content-type") ?? "";
-		const mimeType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
-
-		let body: string;
-		try {
-			body = await this.readBodyWithSizeCap(response, maxDownloadBytes);
-		} catch (e) {
-			const message = e instanceof Error ? e.message : String(e);
 			return {
 				tool_name: this.name,
 				success: false,
@@ -287,7 +278,7 @@ export class FetchWebpageTool implements Tool {
 				tool_name: this.name,
 				success: false,
 				result: "",
-				error: `Content type '${mimeType || contentType}' is not supported. Only text/html, text/*, and application/json are supported.`,
+				error: `Content type '${mimeType}' is not supported. Only text/html, text/*, and application/json are supported.`,
 			};
 		}
 
@@ -328,138 +319,73 @@ export class FetchWebpageTool implements Tool {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Fetch a URL with manual redirect following and timeout.
+	 * Fetch a URL using Obsidian's `requestUrl()` API.
 	 *
-	 * Uses `redirect: "manual"` to count redirect hops and enforce
-	 * the maximum (5). Uses `AbortSignal.timeout()` for request timeout.
+	 * `requestUrl()` executes in Obsidian's main process rather than the
+	 * renderer, which means it bypasses Electron's CORS enforcement. This
+	 * is required for fetching URLs from sites that don't set
+	 * `Access-Control-Allow-Origin: *` (e.g. Wikipedia).
+	 *
+	 * Enforces the download size cap via the Content-Length header (when
+	 * present) and by checking the decoded body length after receipt.
+	 * Note: `requestUrl()` buffers the full response before returning, so
+	 * streaming mid-download cancellation is not possible — we reject
+	 * after the fact if the body exceeds the cap.
 	 */
-	private async fetchWithRedirects(
+	private async fetchWithObsidian(
 		url: string,
 		timeoutMs: number,
 		maxDownloadBytes: number
-	): Promise<Response> {
-		let currentUrl = url;
-		let redirectCount = 0;
-
-		while (redirectCount <= MAX_REDIRECTS) {
-			let response: Response;
-			try {
-				response = await fetch(currentUrl, {
-					method: "GET",
-					headers: {
-						"User-Agent": USER_AGENT,
-					},
-					redirect: "manual",
-					signal: AbortSignal.timeout(timeoutMs),
-				});
-			} catch (e) {
-				if (e instanceof DOMException && e.name === "TimeoutError") {
-					throw new Error(
-						`Request timed out after ${Math.round(timeoutMs / 1000)} seconds.`
-					);
-				}
-				if (e instanceof DOMException && e.name === "AbortError") {
-					throw new Error(
-						`Request timed out after ${Math.round(timeoutMs / 1000)} seconds.`
-					);
-				}
-				throw new Error(
-					`Failed to fetch URL: ${e instanceof Error ? e.message : String(e)}`
-				);
-			}
-
-			// Handle redirects (3xx status codes)
-			if (
-				response.status >= 300 &&
-				response.status < 400 &&
-				response.headers.get("location")
-			) {
-				redirectCount++;
-				if (redirectCount > MAX_REDIRECTS) {
-					throw new Error(
-						`Too many redirects (exceeded ${MAX_REDIRECTS} hops).`
-					);
-				}
-				const location = response.headers.get("location")!;
-				// Resolve relative redirects
-				currentUrl = new URL(location, currentUrl).href;
-				continue;
-			}
-
-			// Check for non-success status
-			if (!response.ok) {
-				throw new Error(
-					`HTTP request failed with status ${response.status}: ${response.statusText}`
-				);
-			}
-
-			// Check Content-Length header if available
-			const contentLength = response.headers.get("content-length");
-			if (contentLength) {
-				const size = parseInt(contentLength, 10);
-				if (!isNaN(size) && size > maxDownloadBytes) {
-					throw new Error(
-						`Response body too large: download aborted at ${this.settings.fetch_webpage_max_download_mb} MB.`
-					);
-				}
-			}
-
-			return response;
-		}
-
-		throw new Error(
-			`Too many redirects (exceeded ${MAX_REDIRECTS} hops).`
-		);
-	}
-
-	/**
-	 * Read the response body as text, enforcing the download size cap.
-	 *
-	 * Reads the body in chunks to monitor cumulative size and abort
-	 * early if the cap is exceeded.
-	 */
-	private async readBodyWithSizeCap(
-		response: Response,
-		maxBytes: number
-	): Promise<string> {
-		// If the body is not streamable, fall back to text()
-		if (!response.body) {
-			const text = await response.text();
-			if (new Blob([text]).size > maxBytes) {
-				throw new Error(
-					`Response body too large: download aborted at ${this.settings.fetch_webpage_max_download_mb} MB.`
-				);
-			}
-			return text;
-		}
-
-		const reader = response.body.getReader();
-		const decoder = new TextDecoder("utf-8");
-		const chunks: string[] = [];
-		let totalBytes = 0;
+	): Promise<{ body: string; mimeType: string }> {
+		let response: Awaited<ReturnType<typeof requestUrl>>;
 
 		try {
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
+			// requestUrl does not natively support a timeout; we race against
+			// a manual timer.
+			const timeoutPromise = new Promise<never>((_, reject) =>
+				setTimeout(
+					() =>
+						reject(
+							new Error(
+								`Request timed out after ${Math.round(timeoutMs / 1000)} seconds.`
+							)
+						),
+					timeoutMs
+				)
+			);
 
-				totalBytes += value.byteLength;
-				if (totalBytes > maxBytes) {
-					reader.cancel();
-					throw new Error(
-						`Response body too large: download aborted at ${this.settings.fetch_webpage_max_download_mb} MB.`
-					);
-				}
-
-				chunks.push(decoder.decode(value, { stream: true }));
-			}
-		} finally {
-			reader.releaseLock();
+			response = await Promise.race([
+				requestUrl({
+					url,
+					method: "GET",
+					headers: { "User-Agent": USER_AGENT },
+					throw: false, // handle non-2xx ourselves
+				}),
+				timeoutPromise,
+			]);
+		} catch (e) {
+			throw new Error(
+				`Failed to fetch URL: ${e instanceof Error ? e.message : String(e)}`
+			);
 		}
 
-		// Flush any remaining bytes in the decoder
-		chunks.push(decoder.decode());
+		if (response.status < 200 || response.status >= 300) {
+			throw new Error(
+				`HTTP request failed with status ${response.status}.`
+			);
+		}
 
-		return chunks.join("");
+		// Check size via body byte length
+		const bodyBytes = new TextEncoder().encode(response.text).length;
+		if (bodyBytes > maxDownloadBytes) {
+			throw new Error(
+				`Response body too large: download aborted at ${this.settings.fetch_webpage_max_download_mb} MB.`
+			);
+		}
+
+		const contentType = response.headers["content-type"] ?? "";
+		const mimeType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+
+		return { body: response.text, mimeType };
 	}
 }

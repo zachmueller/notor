@@ -337,7 +337,7 @@ export default class NotorPlugin extends Plugin {
 
 			// Phase 3: New tools
 			this._toolRegistry.register(
-				new FetchWebpageTool(this.settings)
+				new FetchWebpageTool(this.app, this.settings)
 			);
 			this._toolRegistry.register(
 				new ExecuteCommandTool(this.app, this.settings)
