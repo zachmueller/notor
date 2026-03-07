@@ -145,65 +145,65 @@
 **Files:** `src/context/auto-context.ts`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `collectOpenNotePaths(app: App): string[]` function implemented
-- [ ] Enumerates all leaves via `workspace.getLeavesOfType("markdown")`
-- [ ] Extracts vault-relative file paths from each leaf's view
-- [ ] Handles pinned tabs and split panes
-- [ ] Returns empty array if no notes are open (no error)
-- [ ] Completes in <100 ms for typical workspaces
+- [x] `collectOpenNotePaths(app: App): string[]` function implemented
+- [x] Enumerates all leaves via `workspace.getLeavesOfType("markdown")`
+- [x] Extracts vault-relative file paths from each leaf's view
+- [x] Handles pinned tabs and split panes
+- [x] Returns empty array if no notes are open (no error)
+- [x] Completes in <100 ms for typical workspaces
 
 ### CTX-002 [P]: Vault structure collector
 **Description:** Implement the auto-context source that lists top-level folder names at the vault root.
 **Files:** `src/context/auto-context.ts`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `collectVaultStructure(app: App): string[]` function implemented
-- [ ] Lists only folder names at vault root via `vault.getRoot().children`
-- [ ] Filters to `TFolder` instances only (no files)
-- [ ] Returns empty array if vault root has no folders
+- [x] `collectVaultStructure(app: App): string[]` function implemented
+- [x] Lists only folder names at vault root via `vault.getRoot().children`
+- [x] Filters to `TFolder` instances only (no files)
+- [x] Returns empty array if vault root has no folders
 
 ### CTX-003 [P]: OS platform detector
 **Description:** Implement the auto-context source that reports the user's operating system.
 **Files:** `src/context/auto-context.ts`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `detectOS(): string` function implemented
-- [ ] Maps `process.platform` to human-readable name: `darwin` → `macOS`, `win32` → `Windows`, `linux` → `Linux`
-- [ ] Returns a sensible fallback string for unexpected platform values
+- [x] `detectOS(): string` function implemented
+- [x] Maps `process.platform` to human-readable name: `darwin` → `macOS`, `win32` → `Windows`, `linux` → `Linux`
+- [x] Returns a sensible fallback string for unexpected platform values
 
 ### CTX-004: Auto-context XML assembly
 **Description:** Combine enabled auto-context sources into the `<auto-context>` XML block per the contract specification.
 **Files:** `src/context/auto-context.ts`
 **Dependencies:** CTX-001, CTX-002, CTX-003, FOUND-001
 **Acceptance Criteria:**
-- [ ] `buildAutoContextBlock(app: App, settings: Settings): string | null` function implemented
-- [ ] Reads per-source enable/disable state from settings
-- [ ] Includes `<open-notes>` tag with newline-separated paths when enabled
-- [ ] Includes `<vault-structure>` tag with comma-separated folder names when enabled
-- [ ] Includes `<os>` tag with platform name when enabled
-- [ ] Omits tags for disabled sources
-- [ ] Returns `null` if all sources are disabled (no `<auto-context>` block emitted)
-- [ ] Output matches the XML format defined in contracts/tool-schemas.md
+- [x] `buildAutoContextBlock(app: App, settings: Settings): string | null` function implemented
+- [x] Reads per-source enable/disable state from settings
+- [x] Includes `<open-notes>` tag with newline-separated paths when enabled
+- [x] Includes `<vault-structure>` tag with comma-separated folder names when enabled
+- [x] Includes `<os>` tag with platform name when enabled
+- [x] Omits tags for disabled sources
+- [x] Returns `null` if all sources are disabled (no `<auto-context>` block emitted)
+- [x] Output matches the XML format defined in contracts/tool-schemas.md
 
 ### CTX-005: Auto-context settings UI
 **Description:** Add per-source enable/disable toggles to the Settings → Notor tab for auto-context injection.
 **Files:** `src/settings.ts` (settings tab rendering)
 **Dependencies:** FOUND-001, CTX-004
 **Acceptance Criteria:**
-- [ ] Three toggle controls added under an "Auto-context" section heading
-- [ ] Labels: "Include open note paths", "Include vault structure", "Include operating system"
-- [ ] All default to enabled
-- [ ] Changes persist via `saveData` immediately on toggle
+- [x] Three toggle controls added under an "Auto-context" section heading
+- [x] Labels: "Include open note paths", "Include vault structure", "Include operating system"
+- [x] All default to enabled
+- [x] Changes persist via `saveData` immediately on toggle
 
 ### CTX-006: Auto-context integration with chat dispatch
 **Description:** Wire the auto-context assembly into the existing chat message dispatch path so the `<auto-context>` block is prepended to every user message sent to the LLM.
 **Files:** `src/chat/orchestrator.ts` (or equivalent dispatch module), `src/context/message-assembler.ts`
 **Dependencies:** CTX-004, FOUND-004
 **Acceptance Criteria:**
-- [ ] Before each message dispatch, `buildAutoContextBlock()` is called and result passed to `assembleUserMessage()`
-- [ ] Auto-context data is logged in the JSONL history as part of the message's `auto_context` field
-- [ ] No perceptible latency added to message dispatch (<100 ms)
-- [ ] When all sources are disabled, no `<auto-context>` block appears in the assembled message
+- [x] Before each message dispatch, `buildAutoContextBlock()` is called and result passed to `assembleUserMessage()`
+- [x] Auto-context data is logged in the JSONL history as part of the message's `auto_context` field
+- [x] No perceptible latency added to message dispatch (<100 ms)
+- [x] When all sources are disabled, no `<auto-context>` block appears in the assembled message
 
 ---
 

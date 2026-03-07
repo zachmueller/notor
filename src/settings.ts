@@ -407,6 +407,11 @@ export class NotorSettingTab extends PluginSettingTab {
 		this.renderBedrockProviderSection(containerEl);
 
 		// -----------------------------------------------------------------------
+		// Phase 3: Auto-context settings (CTX-005)
+		// -----------------------------------------------------------------------
+		this.renderAutoContextSection(containerEl);
+
+		// -----------------------------------------------------------------------
 		// SET-002: General settings
 		// -----------------------------------------------------------------------
 		this.renderGeneralSection(containerEl);
@@ -442,6 +447,62 @@ export class NotorSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
+	}
+
+	// =========================================================================
+	// Phase 3: Auto-context settings (CTX-005)
+	// =========================================================================
+
+	private renderAutoContextSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Auto-context" });
+		containerEl.createEl("p", {
+			text:
+				"Ambient workspace signals automatically included with every message sent to the AI. " +
+				"Each source can be individually enabled or disabled.",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Include open note paths")
+			.setDesc(
+				"Include the vault-relative paths of all currently open notes so the AI knows your active workspace."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.auto_context_open_notes)
+					.onChange(async (value) => {
+						this.plugin.settings.auto_context_open_notes = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Include vault structure")
+			.setDesc(
+				"Include the top-level folder names in your vault so the AI can navigate and suggest directories."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.auto_context_vault_structure)
+					.onChange(async (value) => {
+						this.plugin.settings.auto_context_vault_structure = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Include operating system")
+			.setDesc(
+				"Include your OS platform (macOS, Windows, Linux) so the AI generates platform-appropriate commands."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.auto_context_os)
+					.onChange(async (value) => {
+						this.plugin.settings.auto_context_os = value;
+						await this.plugin.saveSettings();
+					})
+			);
 	}
 
 	// =========================================================================

@@ -66,6 +66,8 @@ export interface Message {
 	tool_result?: ToolResult | null;
 	/** Whether this message was truncated from the LLM context window. */
 	truncated?: boolean;
+	/** Auto-context metadata logged for user messages (Phase 3). */
+	auto_context?: string | null;
 }
 
 // ---------------------------------------------------------------------------

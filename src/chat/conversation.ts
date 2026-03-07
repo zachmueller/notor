@@ -153,6 +153,7 @@ export class ConversationManager {
 		cost_estimate?: number | null;
 		tool_call?: ToolCall | null;
 		tool_result?: ToolResult | null;
+		auto_context?: string | null;
 	}): Message {
 		if (!this.activeConversation) {
 			throw new Error("No active conversation. Create or load one first.");
@@ -170,6 +171,7 @@ export class ConversationManager {
 			tool_call: params.tool_call ?? null,
 			tool_result: params.tool_result ?? null,
 			truncated: false,
+			auto_context: params.auto_context ?? null,
 		};
 
 		this.messages.push(message);

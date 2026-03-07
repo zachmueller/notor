@@ -22,6 +22,8 @@ import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings, ModelPricing } from "../settings";
 import type { VaultRuleManager } from "../rules/vault-rules";
+import { buildAutoContextBlock } from "../context/auto-context";
+import { assembleUserMessage } from "../context/message-assembler";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatOrchestrator");
@@ -185,10 +187,21 @@ export class ChatOrchestrator {
 
 		const mode = this.conversationManager.getMode();
 
-		// Add user message
+		// Phase 3 (CTX-006): Build auto-context block from enabled sources
+		const autoContext = buildAutoContextBlock(this.app, this.settings);
+
+		// Assemble the full message content: auto-context → user text
+		// (attachments and hook injections will be added in later phases)
+		const assembledContent = assembleUserMessage({
+			autoContext: autoContext ?? undefined,
+			userText: content,
+		});
+
+		// Add user message with assembled content
 		const userMessage = this.conversationManager.addMessage({
 			role: "user",
-			content,
+			content: assembledContent,
+			auto_context: autoContext,
 		});
 
 		this.view?.renderUserMessage(userMessage);
