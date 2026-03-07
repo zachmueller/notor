@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ 0, Medium: ~~5~~ 4, Low: 3)
+- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ 0, Medium: ~~5~~ ~~4~~ 3, Low: 3)
 - **Coverage:** 100% of functional requirements (FR-24 through FR-36) mapped to tasks
 - **Readiness:** READY FOR IMPLEMENTATION — all critical and high-severity issues resolved
 
@@ -25,7 +25,7 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 | I1 | Inconsistency | ~~HIGH~~ | tasks.md phase numbering vs plan.md feature groups | tasks.md phases renamed to "Steps" to avoid collision with spec-level "Phase 3" label | ✅ RESOLVED |
 | C2 | Coverage | ~~MEDIUM~~ | spec.md FR-29, tasks.md | Manual compaction trigger (button/command) mentioned in FR-29 AC but only noted parenthetically in COMP-002/COMP-004; no standalone task for command registration | ✅ RESOLVED |
 | I2 | Inconsistency | ~~MEDIUM~~ | spec.md NFR-7, tasks.md | NFR-7 states hook shell commands use same working directory restrictions as `execute_command`; HOOK-002 ACs now enforce vault root cwd + allow-list | ✅ RESOLVED |
-| U1 | Underspecification | MEDIUM | spec.md FR-32, plan.md, tasks.md | `execute_command` working directory resolution for relative paths is not specified in spec.md; only tasks.md TOOL-014 mentions "relative → resolve from vault root" | Open |
+| U1 | Underspecification | ~~MEDIUM~~ | spec.md FR-32, plan.md, tasks.md | `execute_command` working directory resolution for relative paths is not specified in spec.md; only tasks.md TOOL-014 mentions "relative → resolve from vault root" | ✅ RESOLVED |
 | C3 | Coverage | ~~MEDIUM~~ | spec.md key entities § Hook, tasks.md HOOK-002 | Spec states hook shell commands use same runtime and path restrictions as `execute_command`; HOOK-002 ACs now include working directory allow-list enforcement | ✅ RESOLVED |
 | D1 | Duplication | MEDIUM | spec.md FR-24 AC + Clarifications | The attachment chip-only display rule appears in FR-24 AC and again in the Clarifications section as a Q&A; minor redundancy | No action needed |
 | I3 | Inconsistency | MEDIUM | data-model.md § Attachment, spec.md FR-25 | data-model.md stores `path` as "original absolute file path at attach time" for external files; `path` exposes absolute paths in JSONL logs | Open |
@@ -49,7 +49,7 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 | FR-29: Auto-compaction | COMP-001, COMP-002, COMP-003, COMP-004, COMP-005 | ✓ Complete | COMP-004 AC now includes explicit `addCommand()` registration for `compact-context` |
 | FR-30: `fetch_webpage` tool | TOOL-010, TOOL-011, TOOL-012, ENV-005 | ✓ Complete | |
 | FR-31: Domain denylist | TOOL-011, TOOL-013 | ✓ Complete | |
-| FR-32: `execute_command` tool | TOOL-014, TOOL-015, TOOL-016 | ✓ Complete | Relative working directory resolution only in tasks, not spec |
+| FR-32: `execute_command` tool | TOOL-014, TOOL-015, TOOL-016 | ✓ Complete | Working directory resolution (relative, absolute, default) now codified in spec.md Clarifications |
 | FR-33: Hooks — `pre-send` | HOOK-001, HOOK-002, HOOK-003, HOOK-004, HOOK-006 | ✓ Complete | |
 | FR-34: Hooks — `on-tool-call` | HOOK-001, HOOK-002, HOOK-003, HOOK-005, HOOK-006 | ✓ Complete | |
 | FR-35: Hooks — `on-tool-result` | HOOK-001, HOOK-002, HOOK-003, HOOK-005, HOOK-006 | ✓ Complete | |
@@ -159,12 +159,13 @@ The reordering itself was valid (plan.md § Recommended Implementation Order sug
 
 ---
 
-### U1 — Working directory resolution for relative paths underspecified (MEDIUM)
+### U1 — Working directory resolution for relative paths underspecified ~~(MEDIUM)~~ ✅ RESOLVED
 
 **Location:** spec.md FR-32, tasks.md TOOL-014
-**Detail:** spec.md FR-32 states `working_directory` "defaults to vault root" but does not specify how relative paths should be resolved. tasks.md TOOL-014 adds "relative → resolve from vault root" in its AC, which is a reasonable implementation choice but introduces specification beyond what's in spec.md. This means the tasks document is making a design decision that should be in the spec.
+**Status:** ✅ **RESOLVED** — 2026-07-03
+**Resolution:** Added a Q&A clarification to spec.md § Clarifications: "Q: How are relative and absolute `working_directory` paths resolved for `execute_command`? A: Relative paths are resolved from the vault root (e.g., `scripts/build` → `<vault root>/scripts/build`). Absolute paths are used as-is. In both cases, the resolved path must pass the working directory allow-list check (vault root or user-configured allowed paths) before execution proceeds. When `working_directory` is omitted or empty, it defaults to the vault root." This codifies the behavior already present in tasks.md TOOL-014 AC and covers the three cases (empty/omitted, relative, absolute) with explicit resolution semantics.
 
-**Recommendation:** Add a clarification to spec.md FR-32 (or the Clarifications section): "Q: How are relative `working_directory` paths resolved? A: Relative paths are resolved from the vault root."
+**Original detail:** spec.md FR-32 states `working_directory` "defaults to vault root" but does not specify how relative paths should be resolved. tasks.md TOOL-014 adds "relative → resolve from vault root" in its AC, which is a reasonable implementation choice but introduces specification beyond what's in spec.md. This means the tasks document is making a design decision that should be in the spec.
 
 ---
 
@@ -249,7 +250,7 @@ The reordering itself was valid (plan.md § Recommended Implementation Order sug
 
 **~~Recommended (Medium):~~**
 4. ~~**C2** — Add explicit AC or subtask in COMP-004 for registering the manual compaction command via `addCommand()`.~~ ✅ **RESOLVED** — 2026-07-03
-5. **U1** — Add clarification to spec.md FR-32 for relative working directory resolution semantics.
+5. ~~**U1** — Add clarification to spec.md FR-32 for relative working directory resolution semantics.~~ ✅ **RESOLVED** — 2026-07-03
 6. **I3** — Add documentation note to data-model.md about external file absolute path persistence in JSONL logs.
 
 **Optional (Low):**
