@@ -8,11 +8,11 @@
 
 ## Executive Summary
 
-- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ 0, Medium: 5, Low: 3)
+- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ 0, Medium: ~~5~~ 4, Low: 3)
 - **Coverage:** 100% of functional requirements (FR-24 through FR-36) mapped to tasks
 - **Readiness:** READY FOR IMPLEMENTATION — all critical and high-severity issues resolved
 
-The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. ~~One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`) — **resolved 2026-07-03**.~~ ~~Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing.~~ ~~One high-severity finding remains (missing hook path restriction AC).~~ All high-severity findings resolved. Five medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
+The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. ~~One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`) — **resolved 2026-07-03**.~~ ~~Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing.~~ ~~One high-severity finding remains (missing hook path restriction AC).~~ All high-severity findings resolved. ~~Five~~ Four medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
 
 ---
 
@@ -23,7 +23,7 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 | N1 | Inconsistency | ~~CRITICAL~~ | All 02-context-intelligence docs vs 01-mvp docs | FR/NFR/ENV/TOOL IDs renumbered to be globally unique | ✅ RESOLVED |
 | C1 | Coverage | HIGH | spec.md FR-24, tasks.md | `[[` shortcut in chat input not covered by a dedicated acceptance criterion in ATT-005 | Open |
 | I1 | Inconsistency | ~~HIGH~~ | tasks.md phase numbering vs plan.md feature groups | tasks.md phases renamed to "Steps" to avoid collision with spec-level "Phase 3" label | ✅ RESOLVED |
-| C2 | Coverage | MEDIUM | spec.md FR-29, tasks.md | Manual compaction trigger (button/command) mentioned in FR-29 AC but only noted parenthetically in COMP-002/COMP-004; no standalone task for command registration | Open |
+| C2 | Coverage | ~~MEDIUM~~ | spec.md FR-29, tasks.md | Manual compaction trigger (button/command) mentioned in FR-29 AC but only noted parenthetically in COMP-002/COMP-004; no standalone task for command registration | ✅ RESOLVED |
 | I2 | Inconsistency | ~~MEDIUM~~ | spec.md NFR-7, tasks.md | NFR-7 states hook shell commands use same working directory restrictions as `execute_command`; HOOK-002 ACs now enforce vault root cwd + allow-list | ✅ RESOLVED |
 | U1 | Underspecification | MEDIUM | spec.md FR-32, plan.md, tasks.md | `execute_command` working directory resolution for relative paths is not specified in spec.md; only tasks.md TOOL-014 mentions "relative → resolve from vault root" | Open |
 | C3 | Coverage | ~~MEDIUM~~ | spec.md key entities § Hook, tasks.md HOOK-002 | Spec states hook shell commands use same runtime and path restrictions as `execute_command`; HOOK-002 ACs now include working directory allow-list enforcement | ✅ RESOLVED |
@@ -46,7 +46,7 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 | FR-26: Auto-context — open note paths | CTX-001, CTX-004, CTX-005, CTX-006 | ✓ Complete | |
 | FR-27: Auto-context — vault structure | CTX-002, CTX-004, CTX-005, CTX-006 | ✓ Complete | |
 | FR-28: Auto-context — OS | CTX-003, CTX-004, CTX-005, CTX-006 | ✓ Complete | |
-| FR-29: Auto-compaction | COMP-001, COMP-002, COMP-003, COMP-004, COMP-005 | ✓ Adequate | Manual trigger mentioned but no dedicated command registration task |
+| FR-29: Auto-compaction | COMP-001, COMP-002, COMP-003, COMP-004, COMP-005 | ✓ Complete | COMP-004 AC now includes explicit `addCommand()` registration for `compact-context` |
 | FR-30: `fetch_webpage` tool | TOOL-010, TOOL-011, TOOL-012, ENV-005 | ✓ Complete | |
 | FR-31: Domain denylist | TOOL-011, TOOL-013 | ✓ Complete | |
 | FR-32: `execute_command` tool | TOOL-014, TOOL-015, TOOL-016 | ✓ Complete | Relative working directory resolution only in tasks, not spec |
@@ -140,12 +140,13 @@ The reordering itself was valid (plan.md § Recommended Implementation Order sug
 
 ---
 
-### C2 — Manual compaction trigger lacks dedicated task (MEDIUM)
+### C2 — Manual compaction trigger lacks dedicated task ~~(MEDIUM)~~ ✅ RESOLVED
 
 **Location:** spec.md FR-29 AC ("Compaction can be triggered manually by the user via a button or command"), tasks.md COMP-002/COMP-004
-**Detail:** COMP-002 mentions "Compaction can be triggered manually via a command or button" in its AC, and COMP-004 mentions "Manual compaction trigger available via command palette." However, there is no task specifically for registering the command in the plugin's `addCommand()` lifecycle. This could be overlooked during implementation since it's buried inside two different task ACs rather than being its own task or a clear sub-step.
+**Status:** ✅ **RESOLVED** — 2026-07-03
+**Resolution:** Added an explicit AC bullet to COMP-004 in tasks.md: "`compact-context` command registered via `this.addCommand()` in `main.ts` with a stable command ID; command name displayed as 'Compact context' in the palette." This complements the existing AC bullet about manual compaction trigger availability and ensures the `addCommand()` registration is not overlooked during implementation.
 
-**Recommendation:** Add an explicit AC to COMP-004 (or a subtask) for: "Register `notor:compact-context` (or similar) via `this.addCommand()` in `main.ts` with a stable command ID."
+**Original detail:** COMP-002 mentions "Compaction can be triggered manually via a command or button" in its AC, and COMP-004 mentions "Manual compaction trigger available via command palette." However, there was no task specifically for registering the command in the plugin's `addCommand()` lifecycle. This could be overlooked during implementation since it was buried inside two different task ACs rather than being its own task or a clear sub-step.
 
 ---
 
@@ -246,8 +247,8 @@ The reordering itself was valid (plan.md § Recommended Implementation Order sug
 **~~Immediate (High):~~**
 3. ~~**I2/C3** — Add acceptance criteria to HOOK-002 in tasks.md requiring working directory allow-list enforcement for hook shell commands, per spec.md NFR-7.~~ ✅ **RESOLVED** — 2026-07-03
 
-**Recommended (Medium):**
-4. **C2** — Add explicit AC or subtask in COMP-004 for registering the manual compaction command via `addCommand()`.
+**~~Recommended (Medium):~~**
+4. ~~**C2** — Add explicit AC or subtask in COMP-004 for registering the manual compaction command via `addCommand()`.~~ ✅ **RESOLVED** — 2026-07-03
 5. **U1** — Add clarification to spec.md FR-32 for relative working directory resolution semantics.
 6. **I3** — Add documentation note to data-model.md about external file absolute path persistence in JSONL logs.
 

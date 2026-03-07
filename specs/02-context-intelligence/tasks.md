@@ -508,6 +508,7 @@
 - [ ] Marker shows timestamp and token count at compaction on hover or expand
 - [ ] LLM-generated summary text is NOT displayed in the UI (retained in JSONL only)
 - [ ] Manual compaction trigger available via command palette ("Notor: Compact context") and/or button
+- [ ] `compact-context` command registered via `this.addCommand()` in `main.ts` with a stable command ID; command name displayed as "Compact context" in the palette
 
 ### COMP-005: Compaction integration with chat dispatch
 **Description:** Wire the compaction threshold check into the message dispatch and tool-result round-trip paths so compaction fires automatically when needed.
