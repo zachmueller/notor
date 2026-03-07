@@ -297,224 +297,237 @@ export class ChatOrchestrator {
 		let continueLoop = true;
 		const vaultRootPath = this.getVaultRootPath();
 
-		while (continueLoop) {
-			continueLoop = false;
+		try {
+			while (continueLoop) {
+				continueLoop = false;
 
-			// 0. Phase 3 (COMP-005): Check compaction threshold before each LLM call
-			await this.checkAndPerformCompaction();
+				// 0. Phase 3 (COMP-005): Check compaction threshold before each LLM call
+				await this.checkAndPerformCompaction();
 
-			// 1. Evaluate vault rules (re-evaluated each turn after tool calls)
-			const vaultRuleContent = this.vaultRuleManager
-				? await this.vaultRuleManager.getActiveRuleContent()
-				: undefined;
+				// 1. Evaluate vault rules (re-evaluated each turn after tool calls)
+				const vaultRuleContent = this.vaultRuleManager
+					? await this.vaultRuleManager.getActiveRuleContent()
+					: undefined;
 
-			// 2. Assemble system prompt
-			const systemPrompt = await this.systemPromptBuilder.assemble(
-				mode,
-				toolDefinitions,
-				vaultRuleContent
-			);
-
-			// 3. Build messages for LLM
-			const allMessages = this.conversationManager.getMessages();
-
-			// Ensure system message is first
-			const hasSystemMessage = allMessages.some((m) => m.role === "system");
-			if (!hasSystemMessage) {
-				// Add system message (not persisted as a separate message, just in context)
-				allMessages.unshift({
-					id: "system",
-					conversation_id: this.conversationManager.getActiveConversation()!.id,
-					role: "system",
-					content: systemPrompt,
-					timestamp: new Date().toISOString(),
-				});
-			}
-
-			// 4. Assemble context window (truncate if needed)
-			const contextResult = this.contextManager.assembleContextWindow(
-				allMessages,
-				this.getActiveModelId()
-			);
-
-			if (contextResult.wasTruncated) {
-				this.view?.showTruncationWarning(contextResult.truncatedCount);
-			}
-
-			// 5. Convert to ChatMessage format for provider
-			const chatMessages = this.toChatMessages(contextResult.messages, systemPrompt);
-
-			// 6. Send to LLM
-			this.view?.setRespondingState(true);
-			const abortController = this.view?.createAbortController() ?? new AbortController();
-
-			// Eagerly create the assistant placeholder so the DOM element exists
-			// the moment we enter responding state. This ensures the element is
-			// present even if the abort fires before any text_delta chunks arrive.
-			const eagerContentEl = this.view?.createAssistantMessagePlaceholder();
-
-			const provider = this.providerRegistry.getActiveProvider();
-			const options: SendMessageOptions = {
-				model: this.getActiveModelId(),
-				abort_signal: abortController.signal,
-			};
-
-			const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
-
-			// 7. Process stream (pass in the already-created placeholder)
-			const result = await this.processStream(stream, abortController, eagerContentEl);
-
-			// 8. Handle result
-			if (result.type === "text") {
-				// Final text response — loop ends
-				const assistantMessage = this.conversationManager.addMessage({
-					role: "assistant",
-					content: result.text,
-					input_tokens: result.inputTokens,
-					output_tokens: result.outputTokens,
-					cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens),
-				});
-
-				if (result.contentEl) {
-					await this.view?.finalizeAssistantMessage(result.contentEl, assistantMessage);
-				}
-
-				// Update token footer
-				const conv = this.conversationManager.getActiveConversation();
-				if (conv) {
-					this.view?.updateTokenFooter(
-						conv.total_input_tokens,
-						conv.total_output_tokens,
-						conv.estimated_cost
-					);
-				}
-			} else if (result.type === "tool_call") {
-				// Tool call — dispatch and loop
-				const toolCallMessage = this.conversationManager.addMessage({
-					role: "tool_call",
-					content: "",
-					tool_call: {
-						id: result.toolCallId,
-						tool_name: result.toolName,
-						parameters: result.parameters,
-						status: "pending",
-					},
-				});
-
-				const toolCallEl = this.view?.renderToolCall(toolCallMessage);
-
-				// Phase 3 (HOOK-005): Fire on_tool_call hooks after approval, before execution
-				const currentConv = this.conversationManager.getActiveConversation();
-				if (currentConv && vaultRootPath) {
-					const { dispatchOnToolCall } = await import("../hooks/hook-events");
-					dispatchOnToolCall(
-						{
-							conversationId: currentConv.id,
-							timestamp: new Date().toISOString(),
-							toolName: result.toolName,
-							toolParams: result.parameters,
-						},
-						this.settings,
-						vaultRootPath
-					);
-				}
-
-				// Dispatch through the tool dispatcher
-				const toolResult = await this.dispatcher.dispatch(
-					result.toolName,
-					result.parameters,
+				// 2. Assemble system prompt
+				const systemPrompt = await this.systemPromptBuilder.assemble(
 					mode,
-					toolCallMessage.id
+					toolDefinitions,
+					vaultRuleContent
 				);
 
-				// Propagate the provider tool call ID so the result can be correlated
-				toolResult.tool_call_id = result.toolCallId;
+				// 3. Build messages for LLM
+				const allMessages = this.conversationManager.getMessages();
 
-				// Record note access for vault rule re-evaluation
-				const notePath = result.parameters["path"] as string | undefined;
-				if (notePath && this.vaultRuleManager) {
-					this.vaultRuleManager.recordNoteAccess(notePath);
+				// Ensure system message is first
+				const hasSystemMessage = allMessages.some((m) => m.role === "system");
+				if (!hasSystemMessage) {
+					// Add system message (not persisted as a separate message, just in context)
+					allMessages.unshift({
+						id: "system",
+						conversation_id: this.conversationManager.getActiveConversation()!.id,
+						role: "system",
+						content: systemPrompt,
+						timestamp: new Date().toISOString(),
+					});
 				}
 
-				// Add tool result message
-				const toolResultMessage = this.conversationManager.addMessage({
-					role: "tool_result",
-					content: "",
-					tool_result: toolResult,
-				});
+				// 4. Assemble context window (truncate if needed)
+				const contextResult = this.contextManager.assembleContextWindow(
+					allMessages,
+					this.getActiveModelId()
+				);
 
-				this.view?.renderToolResult(toolResultMessage);
-
-				// Phase 3 (HOOK-005): Fire on_tool_result hooks after execution
-				const convForToolResult = this.conversationManager.getActiveConversation();
-				if (convForToolResult && vaultRootPath) {
-					const { dispatchOnToolResult } = await import("../hooks/hook-events");
-					const toolResultStr = typeof toolResult.result === "string"
-						? toolResult.result
-						: JSON.stringify(toolResult.result);
-					dispatchOnToolResult(
-						{
-							conversationId: convForToolResult.id,
-							timestamp: new Date().toISOString(),
-							toolName: result.toolName,
-							toolParams: result.parameters,
-							toolResult: toolResultStr,
-							toolStatus: toolResult.success ? "success" : "error",
-						},
-						this.settings,
-						vaultRootPath
-					);
+				if (contextResult.wasTruncated) {
+					this.view?.showTruncationWarning(contextResult.truncatedCount);
 				}
 
-				// Track tokens from message_end if available
-				if (result.inputTokens || result.outputTokens) {
-					this.conversationManager.addMessage({
+				// 5. Convert to ChatMessage format for provider
+				const chatMessages = this.toChatMessages(contextResult.messages, systemPrompt);
+
+				// 6. Send to LLM
+				this.view?.setRespondingState(true);
+				const abortController = this.view?.createAbortController() ?? new AbortController();
+
+				// Eagerly create the assistant placeholder so the DOM element exists
+				// the moment we enter responding state. This ensures the element is
+				// present even if the abort fires before any text_delta chunks arrive.
+				const eagerContentEl = this.view?.createAssistantMessagePlaceholder();
+
+				const provider = this.providerRegistry.getActiveProvider();
+				const options: SendMessageOptions = {
+					model: this.getActiveModelId(),
+					abort_signal: abortController.signal,
+				};
+
+				const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
+
+				// 7. Process stream (pass in the already-created placeholder)
+				const result = await this.processStream(stream, abortController, eagerContentEl);
+
+				// 8. Handle result
+				if (result.type === "text") {
+					// Final text response — loop ends
+					const assistantMessage = this.conversationManager.addMessage({
 						role: "assistant",
-						content: result.text || "",
+						content: result.text,
 						input_tokens: result.inputTokens,
 						output_tokens: result.outputTokens,
 						cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens),
 					});
-				}
 
-				// Continue the loop — send tool result back to LLM
-				continueLoop = true;
-			} else if (result.type === "cancelled") {
-				// User cancelled — always render an assistant message so the
-				// .notor-message-assistant element exists in the DOM (the E2E
-				// test asserts this even when the abort fires before any text
-				// chunks have arrived).
-				const cancelledContent = result.text
-					? result.text + "\n\n*[Response cancelled]*"
-					: "*[Response cancelled]*";
-
-				const cancelledMsg = this.conversationManager.addMessage({
-					role: "assistant",
-					content: cancelledContent,
-				});
-
-				if (result.contentEl) {
-					// We already have a streaming placeholder — finalize it
-					await this.view?.finalizeAssistantMessage(result.contentEl, cancelledMsg);
-				} else {
-					// No placeholder yet — create one and finalize immediately
-					const el = this.view?.createAssistantMessagePlaceholder();
-					if (el) {
-						await this.view?.finalizeAssistantMessage(el, cancelledMsg);
+					if (result.contentEl) {
+						await this.view?.finalizeAssistantMessage(result.contentEl, assistantMessage);
 					}
-				}
-			} else if (result.type === "error") {
-				const errStr = typeof result.error === "string"
-					? result.error
-					: (result.error as unknown) instanceof Error
-						? (result.error as unknown as Error).message
-						: JSON.stringify(result.error);
-				this.view?.showError(errStr);
-			}
-		}
 
-		// Phase 3 (HOOK-005): Fire after_completion hooks when response loop ends
+					// Update token footer
+					const conv = this.conversationManager.getActiveConversation();
+					if (conv) {
+						this.view?.updateTokenFooter(
+							conv.total_input_tokens,
+							conv.total_output_tokens,
+							conv.estimated_cost
+						);
+					}
+				} else if (result.type === "tool_call") {
+					// Tool call — dispatch and loop
+					const toolCallMessage = this.conversationManager.addMessage({
+						role: "tool_call",
+						content: "",
+						tool_call: {
+							id: result.toolCallId,
+							tool_name: result.toolName,
+							parameters: result.parameters,
+							status: "pending",
+						},
+					});
+
+					const toolCallEl = this.view?.renderToolCall(toolCallMessage);
+
+					// Phase 3 (HOOK-005): Fire on_tool_call hooks after approval, before execution
+					const currentConv = this.conversationManager.getActiveConversation();
+					if (currentConv && vaultRootPath) {
+						const { dispatchOnToolCall } = await import("../hooks/hook-events");
+						dispatchOnToolCall(
+							{
+								conversationId: currentConv.id,
+								timestamp: new Date().toISOString(),
+								toolName: result.toolName,
+								toolParams: result.parameters,
+							},
+							this.settings,
+							vaultRootPath
+						);
+					}
+
+					// Dispatch through the tool dispatcher
+					const toolResult = await this.dispatcher.dispatch(
+						result.toolName,
+						result.parameters,
+						mode,
+						toolCallMessage.id
+					);
+
+					// Propagate the provider tool call ID so the result can be correlated
+					toolResult.tool_call_id = result.toolCallId;
+
+					// Record note access for vault rule re-evaluation
+					const notePath = result.parameters["path"] as string | undefined;
+					if (notePath && this.vaultRuleManager) {
+						this.vaultRuleManager.recordNoteAccess(notePath);
+					}
+
+					// Add tool result message
+					const toolResultMessage = this.conversationManager.addMessage({
+						role: "tool_result",
+						content: "",
+						tool_result: toolResult,
+					});
+
+					this.view?.renderToolResult(toolResultMessage);
+
+					// Phase 3 (HOOK-005): Fire on_tool_result hooks after execution
+					const convForToolResult = this.conversationManager.getActiveConversation();
+					if (convForToolResult && vaultRootPath) {
+						const { dispatchOnToolResult } = await import("../hooks/hook-events");
+						const toolResultStr = typeof toolResult.result === "string"
+							? toolResult.result
+							: JSON.stringify(toolResult.result);
+						dispatchOnToolResult(
+							{
+								conversationId: convForToolResult.id,
+								timestamp: new Date().toISOString(),
+								toolName: result.toolName,
+								toolParams: result.parameters,
+								toolResult: toolResultStr,
+								toolStatus: toolResult.success ? "success" : "error",
+							},
+							this.settings,
+							vaultRootPath
+						);
+					}
+
+					// Track tokens from message_end if available
+					if (result.inputTokens || result.outputTokens) {
+						this.conversationManager.addMessage({
+							role: "assistant",
+							content: result.text || "",
+							input_tokens: result.inputTokens,
+							output_tokens: result.outputTokens,
+							cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens),
+						});
+					}
+
+					// Continue the loop — send tool result back to LLM
+					continueLoop = true;
+				} else if (result.type === "cancelled") {
+					// User cancelled — always render an assistant message so the
+					// .notor-message-assistant element exists in the DOM (the E2E
+					// test asserts this even when the abort fires before any text
+					// chunks have arrived).
+					const cancelledContent = result.text
+						? result.text + "\n\n*[Response cancelled]*"
+						: "*[Response cancelled]*";
+
+					const cancelledMsg = this.conversationManager.addMessage({
+						role: "assistant",
+						content: cancelledContent,
+					});
+
+					if (result.contentEl) {
+						// We already have a streaming placeholder — finalize it
+						await this.view?.finalizeAssistantMessage(result.contentEl, cancelledMsg);
+					} else {
+						// No placeholder yet — create one and finalize immediately
+						const el = this.view?.createAssistantMessagePlaceholder();
+						if (el) {
+							await this.view?.finalizeAssistantMessage(el, cancelledMsg);
+						}
+					}
+				} else if (result.type === "error") {
+					const errStr = typeof result.error === "string"
+						? result.error
+						: (result.error as unknown) instanceof Error
+							? (result.error as unknown as Error).message
+							: JSON.stringify(result.error);
+					this.view?.showError(errStr);
+				}
+			}
+		} finally {
+			// Phase 3 (HOOK-005): Fire after_completion hooks when response loop ends.
+			// The finally block ensures hooks fire even when a provider exception
+			// escapes the loop. Hooks are fire-and-forget so they never suppress errors.
+			this.dispatchAfterCompletionHooks();
+		}
+	}
+
+	/**
+	 * Dispatch after_completion hooks. Called from responseLoopWithHooks so the
+	 * hooks always fire regardless of how the loop terminates.
+	 */
+	private dispatchAfterCompletionHooks(): void {
 		const convForCompletion = this.conversationManager.getActiveConversation();
+		const vaultRootPath = this.getVaultRootPath();
 		if (convForCompletion && vaultRootPath) {
 			dispatchAfterCompletion(
 				{
