@@ -434,6 +434,16 @@ export class NotorSettingTab extends PluginSettingTab {
 		this.renderExecuteCommandSection(containerEl);
 
 		// -----------------------------------------------------------------------
+		// Phase 3: Hooks settings (HOOK-006)
+		// -----------------------------------------------------------------------
+		this.renderHooksSection(containerEl);
+
+		// -----------------------------------------------------------------------
+		// Phase 3: Compaction settings (COMP-003)
+		// -----------------------------------------------------------------------
+		this.renderCompactionSection(containerEl);
+
+		// -----------------------------------------------------------------------
 		// SET-002: General settings
 		// -----------------------------------------------------------------------
 		this.renderGeneralSection(containerEl);
@@ -1090,6 +1100,225 @@ export class NotorSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 					this.display();
 				})
+			);
+	}
+
+	// =========================================================================
+	// Phase 3: Hooks settings (HOOK-006)
+	// =========================================================================
+
+	private renderHooksSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Hooks" });
+		containerEl.createEl("p", {
+			text:
+				"Shell commands that run at specific points in the AI conversation lifecycle. " +
+				"Pre-send hooks can inject context into messages. Desktop only.",
+			cls: "setting-item-description",
+		});
+
+		// Global hook settings
+		new Setting(containerEl)
+			.setName("Hook timeout (seconds)")
+			.setDesc("Maximum time a hook command can run before being terminated.")
+			.addText((text) =>
+				text
+					.setPlaceholder("10")
+					.setValue(String(this.plugin.settings.hook_timeout))
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.hook_timeout = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Environment variable truncation (chars)")
+			.setDesc(
+				"Maximum character length for NOTOR_* environment variables passed to hooks. " +
+				"Values exceeding this are truncated with a marker."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("10000")
+					.setValue(String(this.plugin.settings.hook_env_truncation_chars))
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.hook_env_truncation_chars = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		// Per-event hook lists
+		const eventLabels: Record<string, { title: string; desc: string }> = {
+			pre_send: {
+				title: "Pre-send hooks",
+				desc: "Run before each message is sent to the AI. Stdout is captured and included in the message context.",
+			},
+			on_tool_call: {
+				title: "On tool call hooks",
+				desc: "Run after a tool call is approved, before execution. Fire-and-forget.",
+			},
+			on_tool_result: {
+				title: "On tool result hooks",
+				desc: "Run after a tool finishes execution, before the result returns to the AI. Fire-and-forget.",
+			},
+			after_completion: {
+				title: "After completion hooks",
+				desc: "Run after the AI's full response turn completes. Fire-and-forget.",
+			},
+		};
+
+		for (const [event, meta] of Object.entries(eventLabels)) {
+			const eventKey = event as keyof HookConfig;
+			containerEl.createEl("h3", { text: meta.title });
+			containerEl.createEl("p", { text: meta.desc, cls: "setting-item-description" });
+
+			const hooks = this.plugin.settings.hooks[eventKey];
+
+			// Render existing hooks
+			for (let i = 0; i < hooks.length; i++) {
+				const hook = hooks[i];
+				if (!hook) continue;
+
+				const setting = new Setting(containerEl)
+					.setName(hook.label || hook.command.substring(0, 60))
+					.setDesc(hook.label ? hook.command.substring(0, 80) : "");
+
+				// Enabled toggle
+				setting.addToggle((toggle) =>
+					toggle.setValue(hook.enabled).onChange(async (value) => {
+						hook.enabled = value;
+						await this.plugin.saveSettings();
+					})
+				);
+
+				// Move up
+				if (i > 0) {
+					setting.addButton((btn) =>
+						btn.setButtonText("↑").onClick(async () => {
+							hooks.splice(i, 1);
+							hooks.splice(i - 1, 0, hook);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+					);
+				}
+
+				// Move down
+				if (i < hooks.length - 1) {
+					setting.addButton((btn) =>
+						btn.setButtonText("↓").onClick(async () => {
+							hooks.splice(i, 1);
+							hooks.splice(i + 1, 0, hook);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+					);
+				}
+
+				// Delete
+				setting.addButton((btn) =>
+					btn
+						.setButtonText("Remove")
+						.setWarning()
+						.onClick(async () => {
+							hooks.splice(i, 1);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+				);
+			}
+
+			// Add new hook
+			let newCommand = "";
+			let newLabel = "";
+			const addSetting = new Setting(containerEl)
+				.setName("Add hook")
+				.setDesc("Shell command to execute.");
+
+			addSetting.addText((text) => {
+				text.setPlaceholder("Shell command").onChange((v) => {
+					newCommand = v.trim();
+				});
+			});
+			addSetting.addText((text) => {
+				text.setPlaceholder("Label (optional)").onChange((v) => {
+					newLabel = v.trim();
+				});
+				text.inputEl.style.width = "120px";
+			});
+			addSetting.addButton((btn) =>
+				btn.setButtonText("Add").onClick(async () => {
+					if (!newCommand) {
+						new Notice("Enter a shell command for the hook.");
+						return;
+					}
+					const newHook: Hook = {
+						id: crypto.randomUUID?.() ?? Date.now().toString(36),
+						event: eventKey,
+						command: newCommand,
+						label: newLabel,
+						enabled: true,
+					};
+					this.plugin.settings.hooks[eventKey].push(newHook);
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			);
+		}
+	}
+
+	// =========================================================================
+	// Phase 3: Compaction settings (COMP-003)
+	// =========================================================================
+
+	private renderCompactionSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Context compaction" });
+		containerEl.createEl("p", {
+			text:
+				"When a conversation approaches the model's context window limit, " +
+				"Notor can automatically summarize the conversation to reclaim space. " +
+				"You can also trigger compaction manually via the command palette (Notor: Compact context).",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Compaction threshold")
+			.setDesc(
+				"Fraction of the model's context window (0.0–1.0) that triggers auto-compaction. " +
+				"For example, 0.8 means compaction fires when 80% of the context window is used."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("0.8")
+					.setValue(String(this.plugin.settings.compaction_threshold))
+					.onChange(async (value) => {
+						const parsed = parseFloat(value);
+						if (!isNaN(parsed) && parsed > 0 && parsed <= 1) {
+							this.plugin.settings.compaction_threshold = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Custom compaction prompt")
+			.setDesc(
+				"Override the built-in compaction system prompt. " +
+				"Leave empty to use the default prompt that produces concise, faithful summaries."
+			)
+			.addTextArea((text) =>
+				text
+					.setPlaceholder("(using default prompt)")
+					.setValue(this.plugin.settings.compaction_prompt_override)
+					.onChange(async (value) => {
+						this.plugin.settings.compaction_prompt_override = value;
+						await this.plugin.saveSettings();
+					})
 			);
 	}
 

@@ -8,7 +8,7 @@
  * @see design/architecture.md — message and context management
  */
 
-import type { App } from "obsidian";
+import { type App, Notice } from "obsidian";
 import type { ConversationMode, Message } from "../types";
 import type { ChatMessage, ToolDefinition, StreamChunk, SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
@@ -26,6 +26,10 @@ import { buildAutoContextBlock } from "../context/auto-context";
 import { assembleUserMessage } from "../context/message-assembler";
 import type { Attachment } from "../context/attachment";
 import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment";
+import { dispatchPreSend, dispatchAfterCompletion } from "../hooks/hook-events";
+import { shouldCompact, performCompaction, estimateConversationTokens } from "../context/compaction";
+import type { CompactionRecord } from "../context/compaction";
+import { showCompactingIndicator, showCompactionMarker } from "../ui/compaction-marker";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatOrchestrator");
@@ -215,11 +219,32 @@ export class ChatOrchestrator {
 			attachmentsBlock = buildAttachmentsBlock(resolvedAttachments);
 		}
 
-		// Assemble the full message content: auto-context → attachments → user text
-		// (hook injections will be added in later phases)
+		// Phase 3 (HOOK-004): Dispatch pre-send hooks and capture stdout
+		let hookInjections: string[] | undefined;
+		const conv = this.conversationManager.getActiveConversation();
+		if (conv) {
+			const vaultRootPath = this.getVaultRootPath();
+			if (vaultRootPath) {
+				hookInjections = await dispatchPreSend(
+					{
+						conversationId: conv.id,
+						timestamp: new Date().toISOString(),
+					},
+					this.settings,
+					vaultRootPath
+				);
+				// Filter empty results
+				if (hookInjections && hookInjections.length === 0) {
+					hookInjections = undefined;
+				}
+			}
+		}
+
+		// Assemble the full message content: auto-context → attachments → hooks → user text
 		const assembledContent = assembleUserMessage({
 			autoContext: autoContext ?? undefined,
 			attachments: attachmentsBlock ?? undefined,
+			hookInjections,
 			userText: content,
 		});
 
@@ -242,6 +267,7 @@ export class ChatOrchestrator {
 			content: assembledContent,
 			auto_context: autoContext,
 			attachments: attachmentMetadata,
+			hook_injections: hookInjections,
 		});
 
 		this.view?.renderUserMessage(userMessage);
@@ -269,9 +295,13 @@ export class ChatOrchestrator {
 		mode: ConversationMode
 	): Promise<void> {
 		let continueLoop = true;
+		const vaultRootPath = this.getVaultRootPath();
 
 		while (continueLoop) {
 			continueLoop = false;
+
+			// 0. Phase 3 (COMP-005): Check compaction threshold before each LLM call
+			await this.checkAndPerformCompaction();
 
 			// 1. Evaluate vault rules (re-evaluated each turn after tool calls)
 			const vaultRuleContent = this.vaultRuleManager
@@ -373,6 +403,22 @@ export class ChatOrchestrator {
 
 				const toolCallEl = this.view?.renderToolCall(toolCallMessage);
 
+				// Phase 3 (HOOK-005): Fire on_tool_call hooks after approval, before execution
+				const currentConv = this.conversationManager.getActiveConversation();
+				if (currentConv && vaultRootPath) {
+					const { dispatchOnToolCall } = await import("../hooks/hook-events");
+					dispatchOnToolCall(
+						{
+							conversationId: currentConv.id,
+							timestamp: new Date().toISOString(),
+							toolName: result.toolName,
+							toolParams: result.parameters,
+						},
+						this.settings,
+						vaultRootPath
+					);
+				}
+
 				// Dispatch through the tool dispatcher
 				const toolResult = await this.dispatcher.dispatch(
 					result.toolName,
@@ -398,6 +444,27 @@ export class ChatOrchestrator {
 				});
 
 				this.view?.renderToolResult(toolResultMessage);
+
+				// Phase 3 (HOOK-005): Fire on_tool_result hooks after execution
+				const convForToolResult = this.conversationManager.getActiveConversation();
+				if (convForToolResult && vaultRootPath) {
+					const { dispatchOnToolResult } = await import("../hooks/hook-events");
+					const toolResultStr = typeof toolResult.result === "string"
+						? toolResult.result
+						: JSON.stringify(toolResult.result);
+					dispatchOnToolResult(
+						{
+							conversationId: convForToolResult.id,
+							timestamp: new Date().toISOString(),
+							toolName: result.toolName,
+							toolParams: result.parameters,
+							toolResult: toolResultStr,
+							toolStatus: toolResult.success ? "success" : "error",
+						},
+						this.settings,
+						vaultRootPath
+					);
+				}
 
 				// Track tokens from message_end if available
 				if (result.inputTokens || result.outputTokens) {
@@ -444,6 +511,181 @@ export class ChatOrchestrator {
 						: JSON.stringify(result.error);
 				this.view?.showError(errStr);
 			}
+		}
+
+		// Phase 3 (HOOK-005): Fire after_completion hooks when response loop ends
+		const convForCompletion = this.conversationManager.getActiveConversation();
+		if (convForCompletion && vaultRootPath) {
+			dispatchAfterCompletion(
+				{
+					conversationId: convForCompletion.id,
+					timestamp: new Date().toISOString(),
+				},
+				this.settings,
+				vaultRootPath
+			);
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Compaction (COMP-005)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Check compaction threshold and perform compaction if needed.
+	 *
+	 * Called before every LLM API call (user messages and tool-result round-trips).
+	 * When threshold is crossed, sends conversation to LLM for summarization,
+	 * constructs new context window, and logs the compaction record.
+	 */
+	private async checkAndPerformCompaction(): Promise<void> {
+		const conv = this.conversationManager.getActiveConversation();
+		if (!conv) return;
+
+		const messages = this.conversationManager.getMessages();
+		const modelId = this.getActiveModelId();
+
+		if (!shouldCompact(messages, this.settings, modelId)) {
+			return;
+		}
+
+		// Show compacting indicator in chat UI
+		const messagesContainer = this.view?.getMessagesContainer?.();
+		let indicator: HTMLElement | null = null;
+		if (messagesContainer) {
+			indicator = showCompactingIndicator(messagesContainer);
+		}
+
+		log.info("Auto-compaction triggered", {
+			conversationId: conv.id,
+			messageCount: messages.length,
+		});
+
+		try {
+			const provider = this.providerRegistry.getActiveProvider();
+			const result = await performCompaction(
+				messages,
+				provider,
+				this.settings,
+				modelId,
+				conv.id,
+				"automatic"
+			);
+
+			if (result.success && result.newMessages && result.record) {
+				// Replace conversation messages with compacted context
+				this.conversationManager.replaceMessages(result.newMessages);
+
+				// Log compaction record to JSONL
+				await this.historyManager.appendMessage(conv, {
+					id: result.record.id,
+					conversation_id: conv.id,
+					role: "system",
+					content: JSON.stringify(result.record),
+					timestamp: result.record.timestamp,
+				} as Message);
+
+				// Show permanent marker
+				if (messagesContainer) {
+					showCompactionMarker(
+						messagesContainer,
+						indicator,
+						result.record.timestamp,
+						result.record.token_count_at_compaction
+					);
+				} else {
+					indicator?.remove();
+				}
+
+				new Notice("Context compacted successfully");
+				log.info("Auto-compaction complete", {
+					conversationId: conv.id,
+					summaryTokens: result.summaryTokens,
+				});
+			} else {
+				// Compaction failed — fall back to existing truncation
+				indicator?.remove();
+				const errMsg = result.error ?? "Unknown compaction error";
+				log.warn("Compaction failed, falling back to truncation", { error: errMsg });
+				new Notice(`Context compaction failed: ${errMsg}. Falling back to truncation.`);
+			}
+		} catch (e) {
+			indicator?.remove();
+			const errorMsg = e instanceof Error ? e.message : String(e);
+			log.error("Compaction error", { error: errorMsg });
+			new Notice(`Context compaction error: ${errorMsg}`);
+		}
+	}
+
+	/**
+	 * Manually trigger context compaction.
+	 *
+	 * Registered as the "Notor: Compact context" command.
+	 */
+	async manualCompaction(): Promise<void> {
+		const conv = this.conversationManager.getActiveConversation();
+		if (!conv) {
+			new Notice("No active conversation to compact.");
+			return;
+		}
+
+		const messages = this.conversationManager.getMessages();
+		if (messages.length < 2) {
+			new Notice("Conversation is too short to compact.");
+			return;
+		}
+
+		const modelId = this.getActiveModelId();
+
+		// Show compacting indicator
+		const messagesContainer = this.view?.getMessagesContainer?.();
+		let indicator: HTMLElement | null = null;
+		if (messagesContainer) {
+			indicator = showCompactingIndicator(messagesContainer);
+		}
+
+		try {
+			const provider = this.providerRegistry.getActiveProvider();
+			const result = await performCompaction(
+				messages,
+				provider,
+				this.settings,
+				modelId,
+				conv.id,
+				"manual"
+			);
+
+			if (result.success && result.newMessages && result.record) {
+				this.conversationManager.replaceMessages(result.newMessages);
+
+				await this.historyManager.appendMessage(conv, {
+					id: result.record.id,
+					conversation_id: conv.id,
+					role: "system",
+					content: JSON.stringify(result.record),
+					timestamp: result.record.timestamp,
+				} as Message);
+
+				if (messagesContainer) {
+					showCompactionMarker(
+						messagesContainer,
+						indicator,
+						result.record.timestamp,
+						result.record.token_count_at_compaction
+					);
+				} else {
+					indicator?.remove();
+				}
+
+				new Notice("Context compacted successfully");
+			} else {
+				indicator?.remove();
+				new Notice(`Compaction failed: ${result.error ?? "Unknown error"}`);
+			}
+		} catch (e) {
+			indicator?.remove();
+			const errorMsg = e instanceof Error ? e.message : String(e);
+			new Notice(`Compaction error: ${errorMsg}`);
 		}
 	}
 
@@ -692,6 +934,12 @@ export class ChatOrchestrator {
 	// -----------------------------------------------------------------------
 	// Helpers
 	// -----------------------------------------------------------------------
+
+	/** Get the vault root absolute path (Electron-specific). */
+	getVaultRootPath(): string | undefined {
+		const adapter = this.app.vault.adapter as { basePath?: string };
+		return adapter.basePath;
+	}
 
 	private getActiveModelId(): string {
 		const providerType = this.providerRegistry.getActiveType();

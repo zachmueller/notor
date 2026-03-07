@@ -103,6 +103,18 @@ export default class NotorPlugin extends Plugin {
 			callback: () => this.newConversation(),
 		});
 
+		// Phase 3 (COMP-004): Manual compaction command
+		this.addCommand({
+			id: "compact-context",
+			name: "Compact context",
+			callback: () => {
+				this.getOrchestrator().manualCompaction().catch((e) => {
+					log.error("Manual compaction failed", { error: String(e) });
+					new Notice(`Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
+				});
+			},
+		});
+
 		// 5. Start vault rule manager (watches rules directory for changes)
 		// This is lightweight — just sets up file watchers
 		this.getVaultRuleManager().start();

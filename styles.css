@@ -1261,3 +1261,60 @@
 .notor-suggest-section-text {
 	color: var(--text-normal);
 }
+
+/* ==========================================================================
+   Compaction Markers (Phase 3 — COMP-004)
+   ========================================================================== */
+
+.notor-compaction-indicator {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 12px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-style: italic;
+}
+
+.notor-compaction-spinner {
+	animation: notor-spin 1.2s linear infinite;
+	display: inline-block;
+}
+
+@keyframes notor-spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.notor-compaction-marker {
+	padding: 6px 12px;
+	border-top: 1px dashed var(--background-modifier-border);
+	border-bottom: 1px dashed var(--background-modifier-border);
+	margin: 4px 0;
+	text-align: center;
+}
+
+.notor-compaction-marker-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: pointer;
+	user-select: none;
+	font-weight: var(--font-medium);
+}
+
+.notor-compaction-marker-label:hover {
+	color: var(--text-normal);
+}
+
+.notor-compaction-marker-details {
+	margin-top: 4px;
+}
+
+.notor-compaction-detail {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}

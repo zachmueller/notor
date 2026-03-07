@@ -530,6 +530,14 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Get the messages container element for compaction markers.
+	 * Phase 3 (COMP-004).
+	 */
+	getMessagesContainer(): HTMLElement {
+		return this.messageListEl;
+	}
+
+	/**
 	 * Render a tool call inline in the message list.
 	 */
 	renderToolCall(message: Message): HTMLElement {

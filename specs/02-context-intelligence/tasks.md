@@ -417,133 +417,133 @@
 **Files:** `src/hooks/hook-config.ts`
 **Dependencies:** FOUND-001
 **Acceptance Criteria:**
-- [ ] `Hook` interface with id (UUID), event, command, label, enabled fields
-- [ ] `HookConfig` interface with arrays per event type: `pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`
-- [ ] CRUD helpers: `addHook`, `removeHook`, `reorderHooks`, `toggleHook`
-- [ ] Hook list ordering is preserved (sequential execution order)
-- [ ] Persisted via plugin settings `loadData`/`saveData`
+- [x] `Hook` interface with id (UUID), event, command, label, enabled fields
+- [x] `HookConfig` interface with arrays per event type: `pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`
+- [x] CRUD helpers: `addHook`, `removeHook`, `reorderHooks`, `toggleHook`
+- [x] Hook list ordering is preserved (sequential execution order)
+- [x] Persisted via plugin settings `loadData`/`saveData`
 
 ### HOOK-002: Hook execution engine
 **Description:** Implement the hook execution engine that spawns shell commands with environment variable metadata injection, handles timeouts, and captures stdout for `pre-send` hooks.
 **Files:** `src/hooks/hook-engine.ts`
 **Dependencies:** FOUND-003, HOOK-001
 **Acceptance Criteria:**
-- [ ] Uses shared `ShellExecutor` infrastructure for shell spawning
-- [ ] Builds `NOTOR_*` environment variables per event type (see data-model.md Hook entity)
-- [ ] Environment variable truncation at configurable cap (default: 10,000 chars) with truncation marker
-- [ ] Global hook timeout (default: 10s) terminates shell process on expiry
-- [ ] For `pre-send`: captures stdout and returns it; awaited sequentially
-- [ ] For other events: fire-and-forget sequential execution; failures do not block
-- [ ] Failures surface non-blocking notices via Obsidian `Notice`
-- [ ] Individual hook failures do not prevent subsequent hooks from executing
-- [ ] Hook shell commands execute with `cwd` set to the vault root (hooks do not support a configurable working directory in Phase 3)
-- [ ] The working directory allow-list from `execute_command` settings is enforced for hook shell commands; if a future `cwd` option is added, commands with a working directory outside allowed paths are rejected — vault root always passes since it is implicitly included
+- [x] Uses shared `ShellExecutor` infrastructure for shell spawning
+- [x] Builds `NOTOR_*` environment variables per event type (see data-model.md Hook entity)
+- [x] Environment variable truncation at configurable cap (default: 10,000 chars) with truncation marker
+- [x] Global hook timeout (default: 10s) terminates shell process on expiry
+- [x] For `pre-send`: captures stdout and returns it; awaited sequentially
+- [x] For other events: fire-and-forget sequential execution; failures do not block
+- [x] Failures surface non-blocking notices via Obsidian `Notice`
+- [x] Individual hook failures do not prevent subsequent hooks from executing
+- [x] Hook shell commands execute with `cwd` set to the vault root (hooks do not support a configurable working directory in Phase 3)
+- [x] The working directory allow-list from `execute_command` settings is enforced for hook shell commands; if a future `cwd` option is added, commands with a working directory outside allowed paths are rejected — vault root always passes since it is implicitly included
 
 ### HOOK-003: Hook event dispatching
 **Description:** Implement the event dispatching layer that triggers hooks at the correct points in the LLM lifecycle.
 **Files:** `src/hooks/hook-events.ts`
 **Dependencies:** HOOK-002
 **Acceptance Criteria:**
-- [ ] `dispatchPreSend(context)` — awaits all enabled `pre_send` hooks sequentially; returns concatenated stdout
-- [ ] `dispatchOnToolCall(context)` — fires all enabled `on_tool_call` hooks non-blocking
-- [ ] `dispatchOnToolResult(context)` — fires all enabled `on_tool_result` hooks non-blocking
-- [ ] `dispatchAfterCompletion(context)` — fires all enabled `after_completion` hooks non-blocking
-- [ ] Context objects carry the correct metadata per event (conversation ID, tool name/params/result/status where applicable, timestamp)
-- [ ] Disabled hooks are skipped
+- [x] `dispatchPreSend(context)` — awaits all enabled `pre_send` hooks sequentially; returns concatenated stdout
+- [x] `dispatchOnToolCall(context)` — fires all enabled `on_tool_call` hooks non-blocking
+- [x] `dispatchOnToolResult(context)` — fires all enabled `on_tool_result` hooks non-blocking
+- [x] `dispatchAfterCompletion(context)` — fires all enabled `after_completion` hooks non-blocking
+- [x] Context objects carry the correct metadata per event (conversation ID, tool name/params/result/status where applicable, timestamp)
+- [x] Disabled hooks are skipped
 
 ### HOOK-004: Hook integration — `pre-send` in chat dispatch
 **Description:** Wire the `pre-send` hook dispatcher into the message dispatch path so hook stdout is captured and included in the assembled user message.
 **Files:** `src/chat/orchestrator.ts`, `src/context/message-assembler.ts`
 **Dependencies:** HOOK-003, CTX-006, ATT-008
 **Acceptance Criteria:**
-- [ ] Before message dispatch (after auto-context and attachment resolution), `dispatchPreSend()` is called
-- [ ] Captured stdout strings are passed to `assembleUserMessage()` as `hookInjections`
-- [ ] Empty stdout (hook produced no output) is omitted
-- [ ] Hook failures/timeouts surface notices but do not block message dispatch
-- [ ] Hook stdout is logged in the JSONL history as part of the message's `hook_injections` field
+- [x] Before message dispatch (after auto-context and attachment resolution), `dispatchPreSend()` is called
+- [x] Captured stdout strings are passed to `assembleUserMessage()` as `hookInjections`
+- [x] Empty stdout (hook produced no output) is omitted
+- [x] Hook failures/timeouts surface notices but do not block message dispatch
+- [x] Hook stdout is logged in the JSONL history as part of the message's `hook_injections` field
 
 ### HOOK-005: Hook integration — tool call and completion events
 **Description:** Wire `on_tool_call`, `on_tool_result`, and `after_completion` hook dispatchers into the tool dispatch and conversation turn lifecycle.
 **Files:** `src/chat/dispatcher.ts`, `src/chat/orchestrator.ts`
 **Dependencies:** HOOK-003, TOOL-017
 **Acceptance Criteria:**
-- [ ] `on_tool_call` hooks fire after tool approval, before tool execution
-- [ ] `on_tool_result` hooks fire after tool execution, before result is returned to LLM
-- [ ] `after_completion` hooks fire after the LLM's full response turn (including all tool call cycles) is complete
-- [ ] All three event types are non-blocking fire-and-forget
-- [ ] Hook failures surface non-blocking notices
+- [x] `on_tool_call` hooks fire after tool approval, before tool execution
+- [x] `on_tool_result` hooks fire after tool execution, before result is returned to LLM
+- [x] `after_completion` hooks fire after the LLM's full response turn (including all tool call cycles) is complete
+- [x] All three event types are non-blocking fire-and-forget
+- [x] Hook failures surface non-blocking notices
 
 ### HOOK-006: Hook settings UI
 **Description:** Add the hooks configuration UI in Settings → Notor, grouped by lifecycle event with collapsible subsections and add/remove/reorder capabilities per event.
 **Files:** `src/settings.ts`
 **Dependencies:** HOOK-001
 **Acceptance Criteria:**
-- [ ] Four collapsible subsections: `pre-send`, `on-tool-call`, `on-tool-result`, `after-completion`
-- [ ] Each subsection shows an ordered list of configured hooks
-- [ ] Per hook: displays label (or command if no label), enabled toggle, edit/delete buttons
-- [ ] Add button creates a new hook with a command input field and optional label
-- [ ] Reorder capability (drag or up/down buttons) to control execution order
-- [ ] Global hook timeout setting
-- [ ] Environment variable truncation cap setting
+- [x] Four collapsible subsections: `pre-send`, `on-tool-call`, `on-tool-result`, `after-completion`
+- [x] Each subsection shows an ordered list of configured hooks
+- [x] Per hook: displays label (or command if no label), enabled toggle, edit/delete buttons
+- [x] Add button creates a new hook with a command input field and optional label
+- [x] Reorder capability (drag or up/down buttons) to control execution order
+- [x] Global hook timeout setting
+- [x] Environment variable truncation cap setting
 
 ### COMP-001: Compaction threshold check
 **Description:** Implement the compaction threshold check that runs before every LLM API call (user messages and tool-result round-trips). Uses the token estimation utility to track cumulative conversation token usage.
 **Files:** `src/context/compaction.ts`
 **Dependencies:** FOUND-002, FOUND-001
 **Acceptance Criteria:**
-- [ ] `shouldCompact(conversation, settings, modelContextWindow): boolean` function implemented
-- [ ] Calculates cumulative tokens across all messages in the active context window using `estimateTokens()`
-- [ ] Compares against `settings.compaction_threshold * modelContextWindow`
-- [ ] Returns `true` if threshold is crossed
-- [ ] For models where context window is null/unknown, returns `false` (falls back to existing truncation)
+- [x] `shouldCompact(conversation, settings, modelContextWindow): boolean` function implemented
+- [x] Calculates cumulative tokens across all messages in the active context window using `estimateTokens()`
+- [x] Compares against `settings.compaction_threshold * modelContextWindow`
+- [x] Returns `true` if threshold is crossed
+- [x] For models where context window is null/unknown, returns `false` (falls back to existing truncation)
 
 ### COMP-002: Compaction summarization request
 **Description:** Implement the compaction flow: send conversation to LLM with the compaction system prompt, receive summary, and construct the new context window.
 **Files:** `src/context/compaction.ts`
 **Dependencies:** COMP-001
 **Acceptance Criteria:**
-- [ ] Sends the current conversation to the active LLM provider with the compaction system prompt (built-in default or user override)
-- [ ] Uses the same provider and model as the current conversation
-- [ ] On success: constructs new context window with synthetic user/assistant exchange — summary as user message prefixed with "Summary of prior conversation: …", followed by canned assistant acknowledgment
-- [ ] Current user message follows the synthetic exchange as the next turn
-- [ ] On failure: falls back to existing truncation behavior (dropping oldest messages); surfaces error notice
-- [ ] Compaction can be triggered manually via a command or button (in addition to automatic threshold)
-- [ ] Logs a `CompactionRecord` in the JSONL conversation file at the compaction point
+- [x] Sends the current conversation to the active LLM provider with the compaction system prompt (built-in default or user override)
+- [x] Uses the same provider and model as the current conversation
+- [x] On success: constructs new context window with synthetic user/assistant exchange — summary as user message prefixed with "Summary of prior conversation: …", followed by canned assistant acknowledgment
+- [x] Current user message follows the synthetic exchange as the next turn
+- [x] On failure: falls back to existing truncation behavior (dropping oldest messages); surfaces error notice
+- [x] Compaction can be triggered manually via a command or button (in addition to automatic threshold)
+- [x] Logs a `CompactionRecord` in the JSONL conversation file at the compaction point
 
 ### COMP-003: Compaction system prompt
 **Description:** Implement the built-in default compaction system prompt and user-override mechanism.
 **Files:** `src/context/compaction.ts`, `src/settings.ts`
 **Dependencies:** FOUND-001
 **Acceptance Criteria:**
-- [ ] Built-in default compaction prompt focused on producing a concise, faithful summary of the conversation
-- [ ] User override via `compaction_prompt_override` setting in Settings → Notor
-- [ ] When override is set and non-empty, it is used for all compaction requests
-- [ ] Clearing the override (empty string) restores the default
-- [ ] Compaction threshold setting (default: 0.8) exposed in settings UI
+- [x] Built-in default compaction prompt focused on producing a concise, faithful summary of the conversation
+- [x] User override via `compaction_prompt_override` setting in Settings → Notor
+- [x] When override is set and non-empty, it is used for all compaction requests
+- [x] Clearing the override (empty string) restores the default
+- [x] Compaction threshold setting (default: 0.8) exposed in settings UI
 
 ### COMP-004: Compaction UI — chat markers and status indicator
 **Description:** Implement the chat UI elements for auto-compaction: the "Compacting context…" inline indicator during summarization, and the permanent "Context compacted" marker.
 **Files:** `src/ui/compaction-marker.ts`, `src/ui/chat-view.ts`
 **Dependencies:** COMP-002
 **Acceptance Criteria:**
-- [ ] While compaction summarization is in flight, an inline "Compacting context…" indicator appears in the chat thread
-- [ ] Chat input remains enabled during compaction (user can compose or queue a message)
-- [ ] Once summary is received, indicator transitions to permanent "Context compacted" marker
-- [ ] Marker shows timestamp and token count at compaction on hover or expand
-- [ ] LLM-generated summary text is NOT displayed in the UI (retained in JSONL only)
-- [ ] Manual compaction trigger available via command palette ("Notor: Compact context") and/or button
-- [ ] `compact-context` command registered via `this.addCommand()` in `main.ts` with a stable command ID; command name displayed as "Compact context" in the palette
+- [x] While compaction summarization is in flight, an inline "Compacting context…" indicator appears in the chat thread
+- [x] Chat input remains enabled during compaction (user can compose or queue a message)
+- [x] Once summary is received, indicator transitions to permanent "Context compacted" marker
+- [x] Marker shows timestamp and token count at compaction on hover or expand
+- [x] LLM-generated summary text is NOT displayed in the UI (retained in JSONL only)
+- [x] Manual compaction trigger available via command palette ("Notor: Compact context") and/or button
+- [x] `compact-context` command registered via `this.addCommand()` in `main.ts` with a stable command ID; command name displayed as "Compact context" in the palette
 
 ### COMP-005: Compaction integration with chat dispatch
 **Description:** Wire the compaction threshold check into the message dispatch and tool-result round-trip paths so compaction fires automatically when needed.
 **Files:** `src/chat/orchestrator.ts`, `src/chat/dispatcher.ts`
 **Dependencies:** COMP-002, COMP-004
 **Acceptance Criteria:**
-- [ ] Compaction threshold checked before every LLM API call: user message dispatches and tool-result-to-LLM round-trips
-- [ ] When threshold is crossed, compaction runs before the pending API call proceeds
-- [ ] If compaction succeeds, the new context window is used for the pending call
-- [ ] If compaction fails, fallback to truncation and proceed
-- [ ] JSONL log records the compaction event interleaved at the correct position
+- [x] Compaction threshold checked before every LLM API call: user message dispatches and tool-result-to-LLM round-trips
+- [x] When threshold is crossed, compaction runs before the pending API call proceeds
+- [x] If compaction succeeds, the new context window is used for the pending call
+- [x] If compaction fails, fallback to truncation and proceed
+- [x] JSONL log records the compaction event interleaved at the correct position
 
 ---
 
