@@ -13,7 +13,7 @@ This specification covers Phase 4 of the roadmap:
 - **Basic persona system**: file-based personas stored as Obsidian notes under `{notor_dir}/personas/`, with system prompt customization (append or replace the global prompt), model preferences, and a provider/model identifier reference in Settings for easy configuration.
 - **Per-persona auto-approve overrides**: persona-level auto-approve settings managed through a dedicated Settings UI sub-page that override global defaults when a persona is active.
 - **Workflow notes**: workflow definitions stored as Obsidian notes under `{notor_dir}/workflows/`, with frontmatter-driven triggers and optional persona assignment.
-- **`<include_notes>` tag**: dynamic note content injection in workflow bodies, system prompts, and vault-level rule files.
+- **`<include_note>` tag**: dynamic note content injection in workflow bodies, system prompts, and vault-level rule files. Each `<include_note ... />` tag is a self-closing XML-style tag that injects the contents of a single vault note; multiple tags may appear in the same document.
 - **Vault event hooks**: hooks tied to vault lifecycle events (`on-note-open`, `on-save`, `on-tag-change`, `on-schedule`) for triggering workflows or shell commands.
 - **Hook configuration via workflow frontmatter**: extending Phase 3's settings-only hook system to support per-workflow hook overrides defined in workflow note frontmatter.
 
@@ -41,12 +41,12 @@ This specification covers Phase 4 of the roadmap:
 - As a user, I want to see workflow execution in the chat panel with full transparency so that I can follow the AI's actions and approve tool calls as usual.
 - As a user, I want a workflow to automatically revert the persona selection after it finishes so that my previous persona is restored without manual switching.
 
-### `<include_notes>` tag
+### `<include_note>` tag
 
 - As a workflow author, I want to embed the contents of another note into my workflow prompt so that I can compose prompts from reusable building blocks.
 - As a workflow author, I want to include only a specific section of a note so that I can inject focused context without pulling in the entire note.
-- As a user, I want to use `<include_notes>` in my custom system prompt so that I can assemble my system prompt from multiple modular notes.
-- As a user, I want to use `<include_notes>` in vault-level rule files so that rule instructions can reference shared content without duplication.
+- As a user, I want to use `<include_note>` in my custom system prompt so that I can assemble my system prompt from multiple modular notes.
+- As a user, I want to use `<include_note>` in vault-level rule files so that rule instructions can reference shared content without duplication.
 
 ### Vault event hooks
 
@@ -94,7 +94,7 @@ This specification covers Phase 4 of the roadmap:
 - When `notor-preferred-provider` is set and non-empty, the plugin switches to that provider when the persona is activated. If the provider is not configured or not available, the plugin falls back to the current default provider and surfaces a non-blocking notice.
 - When `notor-preferred-model` is set and non-empty, the plugin selects that model within the active provider. If the model is not available, the plugin falls back to the provider's current default model and surfaces a non-blocking notice.
 - Settings not explicitly defined in the persona's frontmatter (empty string or omitted) fall back to global defaults.
-- The persona's system prompt supports `<include_notes>` tags for dynamic note injection (inline mode only — see FR-46).
+- The persona's system prompt supports `<include_note>` tags for dynamic note injection (inline mode only — see FR-46).
 
 ### FR-39: Persona selection from the chat panel
 
@@ -166,7 +166,7 @@ This specification covers Phase 4 of the roadmap:
 **Acceptance criteria:**
 - Workflows with `notor-trigger: manual` (or any trigger type) are available for manual execution via the Obsidian command palette.
 - A single Obsidian command, "Notor: Run workflow", opens a quick-pick list of all discovered workflows for the user to select from.
-- When a workflow is selected, its body content (after stripping frontmatter) is assembled as the prompt — with any `<include_notes>` tags resolved — and sent to the LLM.
+- When a workflow is selected, its body content (after stripping frontmatter) is assembled as the prompt — with any `<include_note>` tags resolved — and sent to the LLM.
 - The workflow execution appears as a new conversation in the main Notor chat panel, with full transparency: the assembled prompt is shown as the first user message, and all subsequent LLM responses, tool calls, and results are displayed normally.
 - If the chat panel is not open, it is opened automatically when a workflow is triggered.
 - The user can interact with the workflow conversation normally — sending follow-up messages, approving/rejecting tool calls, stopping the response.
@@ -191,11 +191,11 @@ This specification covers Phase 4 of the roadmap:
 
 **Acceptance criteria:**
 - The body content of the workflow note (after stripping frontmatter) serves as the prompt template.
-- Any `<include_notes>` tags in the body are resolved at execution time (see FR-46).
+- Any `<include_note>` tags in the body are resolved at execution time (see FR-46).
 - The assembled prompt is sent as the user message in a new conversation.
 - Static text in the workflow body is included as-is.
 - If the workflow body is empty (no text after stripping frontmatter and resolving tags), the workflow execution is aborted and a notice is surfaced: "Workflow has no prompt content."
-- The assembled prompt follows the same message structure as a regular user message: auto-context block (if enabled), any resolved `<include_notes>` content, then the workflow prompt text.
+- The assembled prompt follows the same message structure as a regular user message: auto-context block (if enabled), any resolved `<include_note>` content, then the workflow prompt text.
 
 ### FR-45: Event-triggered workflow execution
 
@@ -213,16 +213,16 @@ This specification covers Phase 4 of the roadmap:
 - Event-triggered workflows that fail (e.g., LLM error, prompt assembly failure) surface a non-blocking notice. The failure does not prevent other workflows bound to the same event from executing.
 - For `on-note-open` and `on-save` triggers, a debounce period (configurable, default: 5 seconds) prevents the same workflow from firing repeatedly for rapid successive events on the same note (e.g., auto-save triggering multiple rapid `on-save` events).
 
-### FR-46: `<include_notes>` tag
+### FR-46: `<include_note>` tag
 
-**Description:** A special tag that dynamically injects the contents of a vault note (or a section of a note) into the surrounding text at resolution time.
+**Description:** A special self-closing XML-style tag (`<include_note ... />`) that dynamically injects the contents of a vault note (or a section of a note) into the surrounding text at resolution time. Each tag must be written in self-closing form — ending with `/>` — and may appear multiple times in a single document; each occurrence is resolved independently.
 
 **Acceptance criteria:**
-- The `<include_notes>` tag syntax:
+- The `<include_note>` tag syntax:
   ```markdown
-  <include_notes path="Research/Topic A.md" section="Summary" mode="inline" />
+  <include_note path="Research/Topic A.md" section="Summary" mode="inline" />
   ```
-- Tag attributes:
+- Supported attributes (all other attributes are ignored):
   | Attribute | Required | Description |
   |---|---|---|
   | `path` | yes | Vault-relative path to the note. Supports `[[wikilink]]` syntax (e.g., `path="[[Research/Topic A]]"`), which is resolved to the vault path. |
@@ -232,11 +232,10 @@ This specification covers Phase 4 of the roadmap:
   - **Workflow notes**: both `inline` and `attached` modes are supported. In `attached` mode, the note content is added to the message as an attachment (same format as user-attached notes from FR-24: `<vault-note path="..." section="...">...content...</vault-note>` within an `<attachments>` block).
   - **System prompts** (global and persona) and **vault-level rule files**: only `inline` mode is supported. The `mode` attribute is ignored; content is always inlined directly into the prompt text.
 - Tags are resolved at execution time (when the workflow is run, or when the system prompt is assembled before each LLM API call).
-- If the referenced note does not exist, the tag is replaced with an inline error marker: `[include_notes error: note 'Research/Topic A.md' not found]`. This error is visible to the LLM in the prompt text.
-- If the referenced section heading does not exist within the note, the tag is replaced with an inline error marker: `[include_notes error: section 'Summary' not found in 'Research/Topic A.md']`.
-- Nested `<include_notes>` tags are not supported. If an included note itself contains `<include_notes>` tags, those tags are passed through as literal text without resolution. This prevents circular reference loops.
-- Multiple `<include_notes>` tags can appear in a single document; each is resolved independently.
-- The tag is self-closing (ends with `/>`) and may span a single line.
+- If the referenced note does not exist, the tag is replaced with an inline error marker: `[include_note error: note 'Research/Topic A.md' not found]`. This error is visible to the LLM in the prompt text.
+- If the referenced section heading does not exist within the note, the tag is replaced with an inline error marker: `[include_note error: section 'Summary' not found in 'Research/Topic A.md']`.
+- Nested `<include_note>` tags are not supported. If an included note itself contains `<include_note>` tags, those tags are passed through as literal text without resolution. This prevents circular reference loops.
+- Multiple `<include_note>` tags can appear in a single document; each occurrence is resolved independently.
 
 ### FR-47: Vault event hooks — `on-note-open`
 
@@ -304,7 +303,7 @@ This specification covers Phase 4 of the roadmap:
 **Acceptance criteria:**
 - A new hook action type, "run a workflow," is available for all hook events (both LLM interaction hooks from Phase 3 and vault event hooks from Phase 4).
 - The action specifies the workflow by its vault-relative path under `{notor_dir}/workflows/` (e.g., `daily/review.md`).
-- When the hook fires, the specified workflow is executed following the same flow as manual workflow execution (FR-42): the workflow prompt is assembled, `<include_notes>` tags are resolved, and the prompt is sent to the LLM.
+- When the hook fires, the specified workflow is executed following the same flow as manual workflow execution (FR-42): the workflow prompt is assembled, `<include_note>` tags are resolved, and the prompt is sent to the LLM.
 - If the specified workflow does not exist or is invalid (missing `notor-workflow: true`), the hook action fails and a non-blocking notice is surfaced.
 - Vault event context (note path, changed tags, etc.) is available to the workflow prompt via template variables or environment variables, allowing the workflow to reference the triggering event's context.
 - Hook-triggered workflow execution follows the same persona switching behavior as manual execution (FR-43): if the workflow specifies `notor-workflow-persona`, the persona is activated for the workflow's duration.
@@ -363,7 +362,7 @@ This specification covers Phase 4 of the roadmap:
 **Acceptance criteria:**
 - Persona discovery (scanning `{notor_dir}/personas/`) completes in under 200 ms for up to 50 persona directories. The scan is triggered only on settings panel open and persona picker activation, not on every message.
 - Workflow discovery (scanning `{notor_dir}/workflows/`) completes in under 500 ms for up to 200 workflow notes. The scan reads only frontmatter (not full note bodies) during discovery.
-- `<include_notes>` tag resolution for a single workflow prompt completes in under 200 ms for up to 20 tags, each referencing notes of typical size (under 50 KB).
+- `<include_note>` tag resolution for a single workflow prompt completes in under 200 ms for up to 20 tags, each referencing notes of typical size (under 50 KB).
 - Vault event hooks (`on-note-open`, `on-save`, `on-tag-change`) add no perceptible delay to the vault operation that triggered them. Hook execution is non-blocking — the vault operation completes before hooks run.
 - Cron-scheduled hooks are evaluated via a lightweight in-process timer, not by spawning external processes. The timer check adds negligible CPU overhead.
 - Debounce logic for `on-note-open` and `on-save` events prevents unnecessary repeated execution without consuming significant memory (debounce state is per-note-path, pruned after the cooldown expires).
@@ -374,7 +373,7 @@ This specification covers Phase 4 of the roadmap:
 
 **Acceptance criteria:**
 - Persona files, workflow notes, and vault-level rule files are read via Obsidian's vault API — no raw filesystem access outside the vault.
-- `<include_notes>` tag resolution is limited to notes within the vault. Paths that resolve outside the vault (e.g., `../../etc/passwd`) are treated as "note not found" and replaced with an error marker.
+- `<include_note>` tag resolution is limited to notes within the vault. Paths that resolve outside the vault (e.g., `../../etc/passwd`) are treated as "note not found" and replaced with an error marker.
 - Hook-triggered workflows respect the same Plan/Act mode, auto-approve, and checkpoint mechanisms as manually triggered workflows. No safety bypass occurs because a workflow was triggered by a hook.
 - Per-persona auto-approve overrides can only make tools more or less restrictive — they cannot bypass Plan/Act mode restrictions (write tools remain blocked in Plan mode regardless of persona settings).
 - Workflow frontmatter hook configurations (`notor-hooks`) use the same shell command execution restrictions (working directory allow-list, timeout) as global hooks.
@@ -388,7 +387,7 @@ This specification covers Phase 4 of the roadmap:
 - The active persona is always visible in the chat panel so the user knows which AI personality and settings are in effect.
 - Workflow-initiated conversations are clearly labeled (e.g., "Workflow: Daily review") so the user can distinguish them from ad-hoc conversations.
 - When a workflow triggers a persona switch, a notice or indicator in the chat panel confirms which persona was activated and when it reverts.
-- `<include_notes>` resolution errors are visible in the assembled prompt (as inline error markers), ensuring the user and LLM are both aware of missing content.
+- `<include_note>` resolution errors are visible in the assembled prompt (as inline error markers), ensuring the user and LLM are both aware of missing content.
 - Vault event hook configuration in Settings follows the same grouped, collapsible UI pattern established for LLM interaction hooks in Phase 3.
 - Hook failures (both vault event and workflow-scoped) surface non-blocking notices consistent with Phase 3 behavior — failures are visible but do not interrupt the user's work.
 
@@ -399,7 +398,7 @@ This specification covers Phase 4 of the roadmap:
 **Acceptance criteria:**
 - A malformed persona `system-prompt.md` (e.g., invalid YAML frontmatter) does not crash the plugin. The persona is excluded from the picker with a warning logged. Other personas remain available.
 - A malformed workflow note (invalid frontmatter, missing required properties) is excluded from the workflow list with a warning logged. Other workflows remain available.
-- `<include_notes>` resolution failures (missing notes, missing sections) produce inline error markers rather than aborting the entire prompt assembly. The rest of the prompt is sent normally.
+- `<include_note>` resolution failures (missing notes, missing sections) produce inline error markers rather than aborting the entire prompt assembly. The rest of the prompt is sent normally.
 - Circular or deeply nested hook-to-workflow chains are detected and broken with a clear notice, preventing infinite loops or runaway resource consumption.
 - If the cron scheduler encounters an error (e.g., invalid expression at runtime), the specific scheduled hook is disabled and an error is logged. Other scheduled hooks continue to function.
 - Vault event hooks that fail do not prevent the triggering vault operation (save, open, tag change) from completing.
@@ -425,11 +424,11 @@ This specification covers Phase 4 of the roadmap:
 6. User approves the `write_note` tool call. The summary note is created and opened in the editor.
 7. After the AI's response turn completes, the persona reverts to the user's previous selection.
 
-### Primary flow: Workflow with `<include_notes>` tags
+### Primary flow: Workflow with `<include_note>` tags
 
-1. User creates a workflow note with body: "Analyze the following research notes and identify connections:\n\n<include_notes path=\"Research/Climate.md\" section=\"Key Findings\" />\n\n<include_notes path=\"Research/Energy.md\" section=\"Conclusions\" />\n\nSuggest three new research questions that bridge these topics."
+1. User creates a workflow note with body: "Analyze the following research notes and identify connections:\n\n<include_note path=\"Research/Climate.md\" section=\"Key Findings\" />\n\n<include_note path=\"Research/Energy.md\" section=\"Conclusions\" />\n\nSuggest three new research questions that bridge these topics."
 2. User runs the workflow via command palette.
-3. The plugin resolves both `<include_notes>` tags, replacing them with the respective section contents.
+3. The plugin resolves both `<include_note>` tags, replacing them with the respective section contents.
 4. The assembled prompt (with injected note content) appears as the user message in the chat panel.
 5. The AI responds with connections and research questions based on the injected content.
 
@@ -464,11 +463,11 @@ This specification covers Phase 4 of the roadmap:
 3. A notice appears: "Persona 'editor' not found; running with current settings."
 4. The workflow executes with the currently active persona (or global defaults). No crash or abort occurs.
 
-### Alternative flow: `<include_notes>` references a missing note
+### Alternative flow: `<include_note>` references a missing note
 
-1. A workflow body contains `<include_notes path="Research/Deleted.md" />`.
+1. A workflow body contains `<include_note path="Research/Deleted.md" />`.
 2. User runs the workflow.
-3. The tag is replaced with `[include_notes error: note 'Research/Deleted.md' not found]`.
+3. The tag is replaced with `[include_note error: note 'Research/Deleted.md' not found]`.
 4. The rest of the prompt assembles normally and is sent to the LLM.
 5. The LLM sees the error marker in the prompt and may inform the user that the referenced note was not found.
 
@@ -522,7 +521,7 @@ This specification covers Phase 4 of the roadmap:
 1. **Users can create and switch between specialized AI personalities** — personas defined as vault notes shape the AI's system prompt, model, and provider preferences, with changes taking effect immediately and no plugin reload required.
 2. **Personas customize the approval experience** — per-persona auto-approve overrides allow power users to streamline trusted workflows while maintaining strict approval for sensitive operations, with fallback to global defaults for unconfigured tools.
 3. **Reusable prompt templates reduce repetitive work** — workflow notes stored in the vault can be run manually from the command palette, producing a full transparent conversation in the chat panel with tool calls, results, and streaming responses.
-4. **Workflows compose dynamic prompts from vault content** — `<include_notes>` tags resolve at execution time to inject note contents (full or section-level) into workflow prompts, system prompts, and rule files without manual copy-paste.
+4. **Workflows compose dynamic prompts from vault content** — `<include_note>` tags resolve at execution time to inject note contents (full or section-level) into workflow prompts, system prompts, and rule files without manual copy-paste; multiple tags may appear in a single document and each resolves independently.
 5. **Vault events drive automated AI workflows** — hooks tied to note open, save, tag change, and cron schedule events trigger shell commands or named workflows reliably, with debounce preventing redundant executions.
 6. **Workflows can customize their hook behavior** — per-workflow LLM lifecycle hook overrides via frontmatter allow each workflow to define its own pre-send, on-tool-call, on-tool-result, and after-completion actions without affecting global configuration.
 7. **Phase 4 features are safe and resilient** — infinite loop detection prevents runaway hook-to-workflow chains, malformed personas and workflows are gracefully excluded without crashing the plugin, and all safety mechanisms (Plan/Act mode, checkpoints, auto-approve) apply equally to manually and automatically triggered workflows.
@@ -540,17 +539,18 @@ This specification covers Phase 4 of the roadmap:
 ### Workflow
 - Stored as a Markdown note under `{notor_dir}/workflows/` with `notor-workflow: true` in frontmatter.
 - Frontmatter properties define trigger type (`notor-trigger`), optional schedule (`notor-schedule`), optional persona assignment (`notor-workflow-persona`), and optional per-workflow hooks (`notor-hooks`).
-- Body content (after stripping frontmatter) is the prompt template, which may contain `<include_notes>` tags and static text.
+- Body content (after stripping frontmatter) is the prompt template, which may contain `<include_note>` tags and static text.
 - Discovered by scanning the workflows directory recursively for notes with the `notor-workflow` property.
 - Can be executed manually (command palette), triggered by vault events (via workflow-trigger frontmatter), or invoked by hooks (FR-51).
 
-### IncludeNotesTag
-- A self-closing XML-style tag (`<include_notes ... />`) that appears in workflow bodies, system prompts, and vault-level rule files.
-- Attributes: `path` (required), `section` (optional), `mode` (optional; `inline` or `attached`).
+### IncludeNoteTag
+- A self-closing XML-style tag (`<include_note ... />`) that appears in workflow bodies, system prompts, and vault-level rule files. Must be written in self-closing form ending with `/>`.
+- Supported attributes: `path` (required), `section` (optional), `mode` (optional; `inline` or `attached`). All other attributes are silently ignored.
 - Resolved at execution time by reading the referenced note content from the vault.
 - In system prompt and rule file contexts, always resolves as inline regardless of `mode` attribute.
 - Resolution failures produce inline error markers rather than aborting prompt assembly.
 - Nested resolution is not supported (no recursive includes).
+- Multiple tags may appear in the same document; each is resolved independently.
 
 ### VaultEventHook
 - A configured callback tied to a vault lifecycle event: `on-note-open`, `on-save`, `on-tag-change`, or `on-schedule`.
@@ -570,7 +570,7 @@ This specification covers Phase 4 of the roadmap:
 
 - The Notor root directory (`{notor_dir}`) is already configured by the user as part of Phase 0/1 setup. Phase 4 features rely on this directory existing with the expected subdirectory structure (`personas/`, `workflows/`).
 - Obsidian's vault API supports reading file frontmatter programmatically (via `app.metadataCache` or equivalent), enabling efficient workflow and persona discovery without parsing full note bodies.
-- Section header extraction for `<include_notes>` follows Obsidian's standard heading anchor format. Section boundaries are determined by heading level: content runs from the specified heading to the next heading of equal or higher level (or end of file).
+- Section header extraction for `<include_note>` follows Obsidian's standard heading anchor format. Section boundaries are determined by heading level: content runs from the specified heading to the next heading of equal or higher level (or end of file).
 - Cron expression parsing is handled by a lightweight JavaScript library bundled into the plugin (e.g., `cron-parser` or equivalent). No external cron daemon or OS-level scheduling is required.
 - The Phase 3 hook infrastructure (shell command execution, timeout handling, environment variable injection, settings UI pattern) is in place and can be extended for vault event hooks and the "run a workflow" action type without architectural changes.
 - Vault event detection uses Obsidian's built-in event system (`app.vault.on('modify', ...)`, `app.workspace.on('file-open', ...)`, `app.metadataCache.on('changed', ...)`). Tag change detection relies on comparing frontmatter `tags` before and after a metadata cache update.
@@ -586,9 +586,9 @@ The following are explicitly excluded from Phase 4 and deferred to later phases 
 - **Custom MCP tools** (Phase 5): user-defined tools via the Model Context Protocol.
 - **Browser capabilities** (Phase 5): web browsing for AI research, Obsidian Web Viewer integration.
 - **External file access beyond attachment** (Phase 5): AI autonomously reading external files via tool calls.
-- **Template variables / expressions in workflow prompts**: a full template engine (e.g., `{{date}}`, `{{note.title}}`, conditionals) for workflow prompt bodies. Phase 4 supports only `<include_notes>` tags for dynamic content; richer templating is deferred.
+- **Template variables / expressions in workflow prompts**: a full template engine (e.g., `{{date}}`, `{{note.title}}`, conditionals) for workflow prompt bodies. Phase 4 supports only `<include_note>` tags for dynamic content; richer templating is deferred.
 - **Workflow chaining / multi-step orchestration**: defining a sequence of workflows that execute in order, with data passed between steps. Phase 4 workflows are single-prompt interactions; multi-step orchestration is deferred.
-- **Workflow input parameters**: prompting the user for input values when a workflow is triggered (e.g., "Which folder should I review?"). Phase 4 workflows use static prompts with `<include_notes>` injection; user input parameterization is deferred.
+- **Workflow input parameters**: prompting the user for input values when a workflow is triggered (e.g., "Which folder should I review?"). Phase 4 workflows use static prompts with `<include_note>` injection; user input parameterization is deferred.
 - **Workflow versioning or history**: tracking changes to workflow definitions over time.
 - **Persona creation UI**: a dedicated wizard or settings UI for creating personas. Phase 4 personas are created by manually creating directories and files in the vault.
 - **Conditional workflow triggers**: filtering when event-triggered workflows fire based on note path patterns, tags, or other conditions (e.g., "only run this on-save workflow for notes in the Research/ folder"). Phase 4 event triggers fire for all matching events; path or tag filtering is deferred.
@@ -604,3 +604,4 @@ The following are explicitly excluded from Phase 4 and deferred to later phases 
 - The spec does not provide built-in or pre-packaged personas. The focus is purely on creating the capability for end users to customize the AI with personas of their own choosing. User stories, scenarios, and examples that reference specific personas (e.g., "researcher", "organizer") are illustrative examples of what users might create, not built-in offerings.
 - Per-persona auto-approve overrides were moved from frontmatter (`notor-auto-approve` YAML mapping) to a dedicated Settings UI sub-page (**Settings → Notor → Persona auto-approve**). This change was driven by Obsidian's frontmatter limitations with complex YAML structures (nested mappings). The Settings UI approach also enables the plugin to surface non-blocking warnings for invalid/stale tool names and provides a more user-friendly three-state selector per tool (Global default / Auto-approve / Require approval). Configuration is stored in plugin settings data, keyed by persona name.
 - A "Provider & model identifiers" reference section was added to Settings (FR-39a) so users can easily discover and copy the exact string values needed for `notor-preferred-provider` and `notor-preferred-model` frontmatter properties.
+- The dynamic content injection tag was renamed from `<include_notes>` (plural) to `<include_note>` (singular). The singular form is semantically accurate — each tag instance includes exactly one note — and follows the convention of self-closing tags that describe a single element (e.g., `<img />`). Users can include multiple notes by using multiple `<include_note ... />` tags. The tag is always written in self-closing form (ending with `/>`); the three supported attributes are `path` (required), `section` (optional), and `mode` (optional). All other attributes are silently ignored.
