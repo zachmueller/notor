@@ -21,57 +21,57 @@
 **Files:** `specs/02-context-intelligence/research.md` § R-1
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] Tested `SuggestModal`, `FuzzySuggestModal`, and `EditorSuggest` in an `ItemView` context
-- [ ] Determined whether `[[` trigger can be intercepted in a `<textarea>` or contenteditable element
-- [ ] Confirmed section header enumeration via `metadataCache.getFileCache()?.headings` works
-- [ ] Documented chosen approach (built-in API or custom implementation) in research.md
-- [ ] Identified any Obsidian API version requirements
+- [x] Tested `SuggestModal`, `FuzzySuggestModal`, and `EditorSuggest` in an `ItemView` context
+- [x] Determined whether `[[` trigger can be intercepted in a `<textarea>` or contenteditable element
+- [x] Confirmed section header enumeration via `metadataCache.getFileCache()?.headings` works
+- [x] Documented chosen approach (built-in API or custom implementation) in research.md
+- [x] Identified any Obsidian API version requirements
 
 ### RES-002 [P]: Research Electron dialog API for external file picker (R-2)
 **Description:** Determine the correct way to open an OS-native file dialog from an Obsidian plugin to select external files. Validate `remote.dialog`, `<input type="file">` fallback, and absolute path access.
 **Files:** `specs/02-context-intelligence/research.md` § R-2
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] Tested `require('electron').remote.dialog.showOpenDialog()` availability
-- [ ] If unavailable, tested `<input type="file">` fallback and path access
-- [ ] Confirmed file content can be read via `fs.readFileSync` or equivalent
-- [ ] Documented desktop-only gating via `Platform.isDesktop`
-- [ ] Documented chosen approach in research.md
+- [x] Tested `require('electron').remote.dialog.showOpenDialog()` availability
+- [x] If unavailable, tested `<input type="file">` fallback and path access
+- [x] Confirmed file content can be read via `fs.readFileSync` or equivalent
+- [x] Documented desktop-only gating via `Platform.isDesktop`
+- [x] Documented chosen approach in research.md
 
 ### RES-003 [P]: Research shell execution environment in Electron (R-3)
 **Description:** Validate `child_process.spawn` availability and behavior in Obsidian's Electron plugin context. Test login shell invocation, process termination, and environment variable limits across platforms.
 **Files:** `specs/02-context-intelligence/research.md` § R-3
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] Confirmed `require('child_process')` is available in Obsidian plugin context
-- [ ] Tested login shell invocation on macOS (`$SHELL -l -c`) and documented behavior
-- [ ] Verified `process.env.SHELL` is populated in Electron
-- [ ] Tested process termination (`SIGTERM` → `SIGKILL`) on timeout
-- [ ] Documented environment variable size limits per platform
-- [ ] Confirmed `cwd` option works without permission issues
+- [x] Confirmed `require('child_process')` is available in Obsidian plugin context
+- [x] Tested login shell invocation on macOS (`$SHELL -l -c`) and documented behavior
+- [x] Verified `process.env.SHELL` is populated in Electron
+- [x] Tested process termination (`SIGTERM` → `SIGKILL`) on timeout
+- [x] Documented environment variable size limits per platform
+- [x] Confirmed `cwd` option works without permission issues
 
 ### RES-004 [P]: Research Turndown bundling and HTML conversion quality (R-4)
 **Description:** Verify Turndown bundles cleanly with esbuild, assess HTML-to-Markdown conversion quality for common page types, and identify optimal configuration options.
 **Files:** `specs/02-context-intelligence/research.md` § R-4
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] Turndown installed and builds without esbuild errors
-- [ ] Bundle size impact measured (expected ~14 KB)
-- [ ] Conversion quality assessed on 5+ representative URLs (Wikipedia, docs, blogs)
-- [ ] Recommended Turndown configuration options documented
-- [ ] `turndown-plugin-gfm` tested for table support
-- [ ] Edge cases tested (malformed HTML, large DOMs, script/style tags)
+- [x] Turndown installed and builds without esbuild errors
+- [x] Bundle size impact measured (expected ~14 KB)
+- [x] Conversion quality assessed on 5+ representative URLs (Wikipedia, docs, blogs)
+- [x] Recommended Turndown configuration options documented
+- [x] `turndown-plugin-gfm` tested for table support
+- [x] Edge cases tested (malformed HTML, large DOMs, script/style tags)
 
 ### ENV-005: Install Turndown dependency
 **Description:** Add Turndown and its type definitions as project dependencies. Optionally add GFM plugin for table/strikethrough support.
 **Files:** `package.json`, `package-lock.json`
 **Dependencies:** RES-004
 **Acceptance Criteria:**
-- [ ] `turndown` added as a runtime dependency
-- [ ] `@types/turndown` added as a dev dependency
-- [ ] `turndown-plugin-gfm` added if R-4 findings recommend it
-- [ ] `npm run build` succeeds with new dependencies
-- [ ] No esbuild bundling errors
+- [x] `turndown` added as a runtime dependency
+- [x] `@types/turndown` added as a dev dependency
+- [x] `turndown-plugin-gfm` added if R-4 findings recommend it
+- [x] `npm run build` succeeds with new dependencies
+- [x] No esbuild bundling errors
 
 ---
 
