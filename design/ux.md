@@ -46,7 +46,7 @@ Available from the gear icon or inline typable syntax:
 
 - Per-tool auto-approve settings managed in **Settings → Notor**.
 - **Global defaults**: set auto-approve on/off for each tool.
-- **Persona overrides** (Phase 4): per-persona auto-approve settings that override global defaults when a persona is active. Falls back to global default for any tool not explicitly configured on the persona.
+- **Persona overrides** (Phase 4): per-persona auto-approve settings managed in **Settings → Notor → Persona auto-approve** that override global defaults when a persona is active. Each tool has a three-state selector: "Global default" (inherit), "Auto-approve", or "Require approval". Falls back to global default for any tool not explicitly configured on the persona.
 - When auto-approve is off for a tool, the chat panel shows an inline approval prompt (approve / reject) before executing the tool call.
 
 ### File/note attachment (Phase 3)
@@ -146,12 +146,13 @@ Centrally stored Markdown files under `{notor_dir}/rules/` that are conditionall
 - Frontmatter properties configure persona behavior:
   ```yaml
   ---
-  notor-skip-global-prompt: false   # If true, the global system prompt is NOT included; only this persona's prompt is used. Default: false (global prompt is prepended).
-  notor-preferred-provider: ""      # Optional: override default LLM provider
-  notor-preferred-model: ""         # Optional: override default model
+  notor-persona-prompt-mode: "append"  # "append" (default) or "replace". Append adds persona prompt after global prompt; replace excludes global prompt entirely.
+  notor-preferred-provider: ""         # Optional: override default LLM provider
+  notor-preferred-model: ""            # Optional: override default model
   ---
   ```
-- When `notor-skip-global-prompt` is `false` (default), the global system prompt is included first, followed by the persona's system prompt.
+- When `notor-persona-prompt-mode` is `"append"` (default, also used when omitted), the global system prompt is included first, followed by the persona's system prompt.
+- When `notor-persona-prompt-mode` is `"replace"`, only the persona's system prompt is used; the global prompt is excluded. Vault-level rule injections still apply regardless.
 - Persona files are regular Markdown notes, fully editable in Obsidian's editor.
 - The persona directory may be expanded over time to hold additional configuration files (e.g., tool access rules).
 
@@ -240,6 +241,28 @@ A user-configurable list of domains and sub-domains that the `fetch_webpage` too
 - Matching is exact-domain only: denylisting `example.com` blocks only `example.com` itself, not its sub-domains. To block sub-domains, users must add separate wildcard entries (e.g., `*.example.com`).
 - When the LLM attempts to fetch a denylisted domain, the tool returns an error indicating the domain is blocked by the user, without making a network request.
 - This is a user preference control for marking sources they consider untrustworthy — not a security mechanism.
+
+### Persona auto-approve overrides (Phase 4)
+
+A dedicated sub-page in Settings for managing per-persona auto-approve overrides.
+
+- The sub-page discovers all personas by scanning `{notor_dir}/personas/` and lists them by name.
+- For each persona, the UI shows the full list of tools (built-in and, when available, custom MCP tools) with a three-state selector per tool:
+  - **"Global default"** (inherit): the global auto-approve setting applies. This is the default state.
+  - **"Auto-approve"** (override to true): this tool is auto-approved when the persona is active.
+  - **"Require approval"** (override to false): this tool requires manual approval when the persona is active.
+- If a stored configuration references a tool name that no longer exists (e.g., an MCP tool was removed), a non-blocking warning indicator is displayed next to that entry. The user can remove or update the stale entry.
+- Configuration is stored in Notor's plugin settings data (keyed by persona name), not in the persona's `system-prompt.md` frontmatter. This avoids Obsidian's limitations with complex YAML structures in frontmatter.
+
+### Provider & model identifiers (Phase 4)
+
+A reference section in Settings that helps users find the exact string values for `notor-preferred-provider` and `notor-preferred-model` persona frontmatter properties.
+
+- Lists each configured provider by its identifier string alongside its display name.
+- Under each provider, lists available models by their identifier string alongside the model display name.
+- Each identifier string has a "copy" action (copy-to-clipboard button) so users can paste it directly into persona frontmatter.
+- Updates dynamically as providers and models change.
+- If no providers are configured, displays an informational message directing the user to configure providers first.
 
 ### MCP tool classification (Phase 5)
 

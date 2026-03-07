@@ -78,7 +78,7 @@ Message:
 Before every LLM API call (including tool-result round-trips within a single turn), the plugin assembles the system prompt from multiple sources:
 
 1. **Global system prompt**: if `{notor_dir}/prompts/core-system-prompt.md` exists, use its body content (stripping frontmatter). Otherwise, use the built-in default system prompt from plugin code.
-2. **Persona system prompt** (Phase 4): if a persona is active, append (or replace, if `notor-skip-global-prompt: true`) the persona's `system-prompt.md` from `{notor_dir}/personas/{persona_name}/`.
+2. **Persona system prompt** (Phase 4): if a persona is active, append (or replace, if `notor-persona-prompt-mode: replace`) the persona's `system-prompt.md` from `{notor_dir}/personas/{persona_name}/`. The default mode (`append`, also used when the property is omitted) appends the persona prompt after the global prompt. The `replace` mode excludes the global prompt entirely.
 3. **Vault-level instruction files** (Phase 2): scan `{notor_dir}/rules/` and inject any rule files whose frontmatter triggers match current context conditions (see trigger properties below).
 4. **Workspace context** (Phase 3): the dynamic `<auto-context>` XML block (see Auto-context injection below) is appended as a `## Workspace context` section. This is rebuilt from scratch before every LLM API call so it always reflects the latest workspace state — open tabs, vault structure, and OS are never stale.
 
@@ -161,9 +161,9 @@ A persona is a named configuration bundle that shapes the AI's behavior.
   - **Frontmatter properties** configure persona behavior:
     ```yaml
     ---
-    notor-skip-global-prompt: false   # If true, only this persona's prompt is used (global prompt excluded). Default: false.
-    notor-preferred-provider: ""      # Optional: override default LLM provider
-    notor-preferred-model: ""         # Optional: override default model
+    notor-persona-prompt-mode: "append"  # "append" (default) or "replace". Append adds persona prompt after global prompt; replace excludes global prompt entirely.
+    notor-preferred-provider: ""         # Optional: override default LLM provider
+    notor-preferred-model: ""            # Optional: override default model
     ---
     ```
 - Persona files are regular Markdown notes, fully editable in Obsidian's editor.
@@ -174,13 +174,15 @@ A persona is a named configuration bundle that shapes the AI's behavior.
 - Personas are selectable from the chat panel.
 - When a persona is active, its settings take precedence over global defaults.
 - Settings not explicitly defined on the persona fall back to global defaults.
-- When `notor-skip-global-prompt` is `false` (default), the global system prompt is included first, followed by the persona's system prompt.
+- When `notor-persona-prompt-mode` is `"append"` (default, also used when omitted), the global system prompt is included first, followed by the persona's system prompt.
+- When `notor-persona-prompt-mode` is `"replace"`, only the persona's system prompt is used; the global prompt is excluded. Vault-level rule injections still apply regardless.
+- Per-persona auto-approve overrides are managed in **Settings → Notor → Persona auto-approve** (stored in plugin settings data, not in frontmatter). Each tool has a three-state selector: "Global default" (inherit), "Auto-approve", or "Require approval".
 
 ### Extended persona (Phase 5)
 
 - **Tool access restrictions**: approve-list or block-list specific tools for the persona.
 - **Vault scope**: restrict the persona to operate only within certain vault folders.
-- The persona directory may be expanded over time to hold additional configuration files (e.g., tool access rules, auto-approve overrides).
+- The persona directory may be expanded over time to hold additional configuration files (e.g., tool access rules).
 
 ---
 

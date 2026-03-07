@@ -64,8 +64,8 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **Notor root directory**: user-configured directory within the vault (`{notor_dir}/`) serving as the central location for workflows, personas, and configuration
 - **Workflow notes**: workflow definitions stored as notes under `{notor_dir}/workflows/`, with frontmatter properties driving behavior (triggers, scheduling, conditions, persona assignment via `notor-workflow-persona`)
 - **`<include_notes>` tag**: dynamically inject note contents (or note sections) into context. Supported in workflow notes (inline and attached modes), system prompts (global and persona), and vault-level rule files (inline mode only).
-- **Basic persona system**: file-based personas stored under `{notor_dir}/personas/{persona_name}/system-prompt.md`, with frontmatter for config (model preference, skip-global-prompt flag), selectable from the chat panel
-- **Per-persona auto-approve overrides**: persona-level auto-approve settings that override global defaults when a persona is active
+- **Basic persona system**: file-based personas stored under `{notor_dir}/personas/{persona_name}/system-prompt.md`, with frontmatter for config (model preference, prompt mode — append or replace global prompt), selectable from the chat panel. A "Provider & model identifiers" reference in Settings provides copyable identifier strings for configuring `notor-preferred-provider` and `notor-preferred-model`.
+- **Per-persona auto-approve overrides**: persona-level auto-approve settings managed via a dedicated Settings UI sub-page (**Settings → Notor → Persona auto-approve**) that override global defaults when a persona is active, with three-state per-tool selectors and stale tool name warnings
 - **Hooks — vault event hooks**: hooks tied to vault events (on-note-open, on-save, on-tag-change, on-schedule) for triggering workflows or LLM interactions
 
 ## Phase 5 — Advanced & multi-agent

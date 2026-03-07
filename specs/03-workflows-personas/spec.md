@@ -10,8 +10,8 @@ Phase 4 introduces structured, reusable AI interactions and configurable AI pers
 
 This specification covers Phase 4 of the roadmap:
 
-- **Basic persona system**: file-based personas stored as Obsidian notes under `{notor_dir}/personas/`, with system prompt customization, model preferences, and a skip-global-prompt option.
-- **Per-persona auto-approve overrides**: persona-level auto-approve settings that override global defaults when a persona is active.
+- **Basic persona system**: file-based personas stored as Obsidian notes under `{notor_dir}/personas/`, with system prompt customization (append or replace the global prompt), model preferences, and a provider/model identifier reference in Settings for easy configuration.
+- **Per-persona auto-approve overrides**: persona-level auto-approve settings managed through a dedicated Settings UI sub-page that override global defaults when a persona is active.
 - **Workflow notes**: workflow definitions stored as Obsidian notes under `{notor_dir}/workflows/`, with frontmatter-driven triggers and optional persona assignment.
 - **`<include_notes>` tag**: dynamic note content injection in workflow bodies, system prompts, and vault-level rule files.
 - **Vault event hooks**: hooks tied to vault lifecycle events (`on-note-open`, `on-save`, `on-tag-change`, `on-schedule`) for triggering workflows or shell commands.
@@ -21,12 +21,12 @@ This specification covers Phase 4 of the roadmap:
 
 ### Personas
 
-- As a researcher, I want to create a persona with a specialized system prompt so that the AI approaches my research questions with domain-specific knowledge and methodology.
-- As a journal writer, I want a persona that uses a reflective, empathetic tone so that the AI feels appropriate for personal writing sessions.
+- As a user, I want to create a persona with a custom system prompt so that the AI's behavior is tailored to my specific use case.
 - As a user with multiple use cases, I want to switch between personas from the chat panel so that I can quickly adapt the AI's behavior to my current task.
 - As a user, I want a persona to optionally override the default LLM provider and model so that I can use a more capable model for complex tasks and a faster model for simple ones.
-- As a user, I want a persona to skip the global system prompt entirely so that I can create a clean-slate AI experience for specific use cases without interference from general instructions.
+- As a user, I want a persona to optionally replace the global system prompt entirely so that I can create a clean-slate AI experience for specific use cases without interference from general instructions.
 - As a user, I want to edit persona files directly in Obsidian's editor so that I can iterate on the AI's behavior using familiar note-editing tools.
+- As a user, I want to easily find the exact string values for providers and models so that I can configure `notor-preferred-provider` and `notor-preferred-model` in persona frontmatter without guessing.
 
 ### Per-persona auto-approve overrides
 
@@ -85,11 +85,12 @@ This specification covers Phase 4 of the roadmap:
 - Frontmatter properties configure persona behavior:
   | Property | Type | Default | Description |
   |---|---|---|---|
-  | `notor-skip-global-prompt` | boolean | `false` | If `true`, the global system prompt is excluded; only this persona's prompt is used |
+  | `notor-persona-prompt-mode` | string | `"append"` | Controls how the persona's system prompt relates to the global system prompt. `append`: persona prompt is appended to the global prompt. `replace`: persona prompt replaces the global prompt entirely. |
   | `notor-preferred-provider` | string | `""` | Override the default LLM provider when this persona is active |
   | `notor-preferred-model` | string | `""` | Override the default model when this persona is active |
-- When `notor-skip-global-prompt` is `false` (default), the system prompt is assembled as: global system prompt first, followed by the persona's system prompt appended as a clearly labeled section.
-- When `notor-skip-global-prompt` is `true`, the global system prompt is excluded entirely and only the persona's system prompt is used as the base prompt. Vault-level rule injections (Phase 2) still apply regardless of this flag.
+- When `notor-persona-prompt-mode` is `"append"` (default, also used when the property is omitted), the system prompt is assembled as: global system prompt first, followed by the persona's system prompt appended as a clearly labeled section.
+- When `notor-persona-prompt-mode` is `"replace"`, the global system prompt is excluded entirely and only the persona's system prompt is used as the base prompt. Vault-level rule injections (Phase 2) still apply regardless of this setting.
+- If `notor-persona-prompt-mode` contains an unrecognized value, the plugin treats it as `"append"` (the default) and logs a warning.
 - When `notor-preferred-provider` is set and non-empty, the plugin switches to that provider when the persona is activated. If the provider is not configured or not available, the plugin falls back to the current default provider and surfaces a non-blocking notice.
 - When `notor-preferred-model` is set and non-empty, the plugin selects that model within the active provider. If the model is not available, the plugin falls back to the provider's current default model and surfaces a non-blocking notice.
 - Settings not explicitly defined in the persona's frontmatter (empty string or omitted) fall back to global defaults.
@@ -107,18 +108,35 @@ This specification covers Phase 4 of the roadmap:
 - Switching personas mid-conversation does not retroactively change earlier messages; it takes effect starting from the next message sent.
 - When a persona is deactivated (switched to "None"), all settings revert to global defaults.
 
-### FR-40: Per-persona auto-approve overrides
+### FR-39a: Provider and model identifier reference
 
-**Description:** Each persona can define per-tool auto-approve settings that override global defaults when the persona is active.
+**Description:** Users can easily discover the exact string values for LLM providers and models to use in persona frontmatter properties.
 
 **Acceptance criteria:**
-- Persona auto-approve overrides are configured in the persona's `system-prompt.md` frontmatter using a `notor-auto-approve` property.
-- The `notor-auto-approve` property is a YAML mapping of tool name to boolean (e.g., `notor-auto-approve: { write_note: true, replace_in_note: true, execute_command: false }`).
-- When a persona is active, the plugin checks the persona's auto-approve map first. If the tool is listed, the persona's setting is used. If the tool is not listed in the persona's map, the global auto-approve setting for that tool applies.
-- When no persona is active (or the persona has no `notor-auto-approve` property), only global auto-approve settings apply.
+- A "Provider & model identifiers" reference section is displayed in **Settings → Notor** (within the persona management area or as a standalone subsection).
+- The reference lists each configured provider by its identifier string (the value to use in `notor-preferred-provider`), alongside the provider's display name.
+- Under each provider, the reference lists available models by their identifier string (the value to use in `notor-preferred-model`), alongside the model's display name.
+- Each identifier string has a "copy" action (e.g., a copy-to-clipboard button or icon) so users can copy it directly and paste it into their persona's frontmatter.
+- The reference list updates dynamically: when providers are added/removed or models change, the list reflects the current state without a plugin reload.
+- If no providers are configured, the section displays an informational message directing the user to configure providers first.
+
+### FR-40: Per-persona auto-approve overrides
+
+**Description:** Each persona can define per-tool auto-approve settings that override global defaults when the persona is active. Auto-approve overrides are managed through a dedicated Settings UI sub-page rather than frontmatter, due to Obsidian's frontmatter limitations with complex YAML structures.
+
+**Acceptance criteria:**
+- Per-persona auto-approve overrides are configured in **Settings → Notor** under a "Persona auto-approve" sub-page (not in persona frontmatter).
+- The sub-page discovers all personas by scanning `{notor_dir}/personas/` (same discovery logic as FR-37) and lists them. Newly created or deleted personas are reflected when the settings page is opened or refreshed.
+- For each discovered persona, the UI displays the full list of tools (built-in and, when available, custom MCP tools) with a three-state selector per tool:
+  - **"Global default"** (inherit): no override; the global auto-approve setting for this tool applies. This is the default state for all tools on all personas.
+  - **"Auto-approve"** (override to true): this tool is auto-approved when the persona is active.
+  - **"Require approval"** (override to false): this tool requires manual approval when the persona is active.
+- When a persona is active, the plugin checks the persona's auto-approve overrides first. If the tool has an explicit override ("Auto-approve" or "Require approval"), the override is used. If the tool is set to "Global default" (or has no entry), the global auto-approve setting applies.
+- When no persona is active, only global auto-approve settings apply.
 - The auto-approve override applies to all tools (built-in and future custom MCP tools).
-- Invalid tool names in the `notor-auto-approve` map are silently ignored (no error surfaced).
-- Changes to persona frontmatter take effect on the next message dispatch — no plugin reload required.
+- If a persona's stored configuration references a tool name that no longer exists (e.g., an MCP tool was removed), the Settings UI displays a non-blocking warning indicator next to that entry. The user can remove or update the stale entry. Stale entries do not cause errors at runtime — they are simply ignored during auto-approve checks.
+- Per-persona auto-approve configuration is stored in Notor's plugin settings data (via `this.saveData()`), keyed by persona name. It does not live in the persona's `system-prompt.md` frontmatter.
+- Changes to persona auto-approve settings take effect on the next message dispatch — no plugin reload required.
 
 ### FR-41: Workflow note definition and discovery
 
@@ -432,11 +450,12 @@ This specification covers Phase 4 of the roadmap:
 
 ### Primary flow: Persona with auto-approve overrides
 
-1. User creates a persona `organizer` with frontmatter including `notor-auto-approve: { write_note: true, replace_in_note: true, manage_tags: true }`.
-2. User activates the "organizer" persona in the chat panel.
-3. User asks: "Reorganize my inbox notes by adding appropriate tags."
-4. The AI invokes `manage_tags` — the tool call is auto-approved (persona override) and executes without a confirmation prompt.
-5. The AI invokes `execute_command` — this tool is not in the persona's override map, so the global auto-approve setting applies (approval required by default). A confirmation prompt appears.
+1. User creates a persona `organizer` and opens **Settings → Notor → Persona auto-approve**.
+2. Under the "organizer" persona, the user sets `write_note`, `replace_in_note`, and `manage_tags` to "Auto-approve", leaving all other tools at "Global default".
+3. User activates the "organizer" persona in the chat panel.
+4. User asks: "Reorganize my inbox notes by adding appropriate tags."
+5. The AI invokes `manage_tags` — the tool call is auto-approved (persona override) and executes without a confirmation prompt.
+6. The AI invokes `execute_command` — this tool is set to "Global default" on the persona, so the global auto-approve setting applies (approval required by default). A confirmation prompt appears.
 
 ### Alternative flow: Missing persona in workflow
 
@@ -512,7 +531,8 @@ This specification covers Phase 4 of the roadmap:
 
 ### Persona
 - Stored as a directory under `{notor_dir}/personas/{persona_name}/` containing a `system-prompt.md` file.
-- The `system-prompt.md` body content is the persona's system prompt; frontmatter properties configure behavior (`notor-skip-global-prompt`, `notor-preferred-provider`, `notor-preferred-model`, `notor-auto-approve`).
+- The `system-prompt.md` body content is the persona's system prompt; frontmatter properties configure behavior (`notor-persona-prompt-mode`, `notor-preferred-provider`, `notor-preferred-model`).
+- Per-persona auto-approve overrides are managed via **Settings → Notor → Persona auto-approve** (stored in plugin settings data, not in frontmatter).
 - Discovered by scanning the personas directory for subdirectories containing `system-prompt.md`.
 - Selectable from the chat panel; at most one persona is active at a time.
 - When active, the persona's settings take precedence over global defaults; unconfigured settings fall back to global.
@@ -580,3 +600,7 @@ The following are explicitly excluded from Phase 4 and deferred to later phases 
 
 - Q: Should the automatic persona revert (via `notor-workflow-persona`) happen immediately after the first LLM response turn completes, or should it persist for the entire conversation started by the workflow? → A: Persist for the entire conversation. The persona switch stays active as long as the user is in the workflow conversation. The user can continue sending follow-up messages under the workflow's persona. The persona reverts only when the user switches to a different conversation or starts a new one. This supports multi-turn workflows where the persona context matters throughout the full interaction.
 - Q: Should event-triggered workflows open a new conversation in the chat panel (potentially interrupting the user), or execute silently in the background? → A: Background execution with a workflow activity indicator. Event-triggered workflows run in the background without taking over the chat panel. A UI element (workflow activity indicator, FR-53) in the chat panel header signals when background workflows are underway, shows their status (running, completed, errored), and allows the user to click into any active or recently completed workflow conversation. On completion, a non-blocking notice is surfaced. This is non-disruptive while maintaining discoverability.
+- `notor-skip-global-prompt` (boolean) was renamed to `notor-persona-prompt-mode` (string: `"append"` | `"replace"`) for future extensibility. The default behavior (`append`) is unchanged — persona prompts are appended to the global system prompt. Setting `"replace"` is equivalent to the old `notor-skip-global-prompt: true`. This design allows additional modes to be introduced in the future without breaking existing configurations.
+- The spec does not provide built-in or pre-packaged personas. The focus is purely on creating the capability for end users to customize the AI with personas of their own choosing. User stories, scenarios, and examples that reference specific personas (e.g., "researcher", "organizer") are illustrative examples of what users might create, not built-in offerings.
+- Per-persona auto-approve overrides were moved from frontmatter (`notor-auto-approve` YAML mapping) to a dedicated Settings UI sub-page (**Settings → Notor → Persona auto-approve**). This change was driven by Obsidian's frontmatter limitations with complex YAML structures (nested mappings). The Settings UI approach also enables the plugin to surface non-blocking warnings for invalid/stale tool names and provides a more user-friendly three-state selector per tool (Global default / Auto-approve / Require approval). Configuration is stored in plugin settings data, keyed by persona name.
+- A "Provider & model identifiers" reference section was added to Settings (FR-39a) so users can easily discover and copy the exact string values needed for `notor-preferred-provider` and `notor-preferred-model` frontmatter properties.
