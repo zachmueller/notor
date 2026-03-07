@@ -21,6 +21,20 @@
  *   6. All sources disabled → verify no `<auto-context>` block in system prompt
  *
  * @see specs/02-context-intelligence/auto-context-iteration/tasks.md — ACI-TEST-001
+ *
+ * ## ACI-TEST-002: Open notes detection — all tabs detected on first message
+ *
+ * Tests that the ACI-004 fix reliably detects all open markdown tabs on the
+ * first message, including notes that have never been manually clicked.
+ *
+ * Scenarios:
+ *   a. Open 3+ notes programmatically → first message → ALL paths in auto-context
+ *   b. Open notes in a split pane → verify all panes detected
+ *   c. Switch active note without closing first → verify both appear
+ *   d. Close a tab → send message → closed note no longer in auto-context
+ *   e. Open notes from different vault folders → full vault-relative paths correct
+ *
+ * @see specs/02-context-intelligence/auto-context-iteration/tasks.md — ACI-TEST-002
  */
 
 import { execSync } from "node:child_process";
@@ -83,7 +97,7 @@ async function screenshot(page: Page, name: string): Promise<string> {
 async function waitForSelector(
 	page: Page,
 	selector: string,
-	timeoutMs = 8_000
+	timeoutMs = 8_000,
 ): Promise<ElementHandle | null> {
 	try {
 		return await page.waitForSelector(selector, { timeout: timeoutMs });
@@ -141,7 +155,8 @@ async function newConversation(page: Page): Promise<void> {
 function getAllUserMessages(): Array<Record<string, unknown>> {
 	if (!fs.existsSync(HISTORY_DIR)) return [];
 
-	const files = fs.readdirSync(HISTORY_DIR)
+	const files = fs
+		.readdirSync(HISTORY_DIR)
 		.filter((f) => f.endsWith(".jsonl"))
 		.sort()
 		.reverse();
@@ -157,7 +172,9 @@ function getAllUserMessages(): Array<Record<string, unknown>> {
 				if (obj.role === "user") {
 					userMessages.push(obj);
 				}
-			} catch { /* skip */ }
+			} catch {
+				/* skip */
+			}
 		}
 
 		if (userMessages.length > 0) return userMessages;
@@ -181,9 +198,7 @@ function getSystemPromptLogs(collector: LogCollector): LogEntry[] {
 	return collector
 		.getStructuredLogs()
 		.filter(
-			(e) =>
-				e.source === "ChatOrchestrator" &&
-				e.message === "System prompt assembled"
+			(e) => e.source === "ChatOrchestrator" && e.message === "System prompt assembled",
 		);
 }
 
@@ -270,12 +285,201 @@ function setupTestVault(): void {
 		fs.writeFileSync(fullPath, content, "utf8");
 	}
 
+	// Ensure additional notes used by ACI-TEST-002 exist
+	const extraNotes: Record<string, string> = {
+		"Notes/Meeting Notes.md": "# Meeting Notes\n\nNotes from meetings.\n",
+		"Notes/Project Plan.md": "# Project Plan\n\nProject planning notes.\n",
+		"Journal/2025-01-01.md": "# Journal Entry\n\nNew year thoughts.\n",
+	};
+	for (const [relativePath, content] of Object.entries(extraNotes)) {
+		const fullPath = path.join(VAULT_PATH, relativePath);
+		fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+		if (!fs.existsSync(fullPath)) {
+			fs.writeFileSync(fullPath, content, "utf8");
+		}
+	}
+
 	// Clean history
 	if (fs.existsSync(HISTORY_DIR)) {
 		fs.rmSync(HISTORY_DIR, { recursive: true, force: true });
 	}
 
 	console.log("  Test vault prepared with folders and notes.");
+}
+
+// ---------------------------------------------------------------------------
+// Obsidian note-tab helpers (used by ACI-TEST-002)
+// ---------------------------------------------------------------------------
+
+/**
+ * Open a vault-relative note path in a new tab using Obsidian's workspace API.
+ * The note will be opened in the background (new leaf) without activating it,
+ * so it remains unclicked — matching the "lazily initialised tab" scenario that
+ * the ACI-004 fix must handle.
+ *
+ * @param page      - Connected Playwright page
+ * @param notePath  - Vault-relative path, e.g. "Research/Climate.md"
+ * @param activate  - If true, make this tab the active (focused) one
+ */
+async function openNoteInNewTab(page: Page, notePath: string, activate = false): Promise<void> {
+	await page.evaluate(
+		async ({ notePath, activate }: { notePath: string; activate: boolean }) => {
+			const app = (
+				window as unknown as { app: { workspace: unknown; vault: unknown } }
+			).app;
+			const workspace = app.workspace as {
+				getLeaf: (
+					newLeaf: boolean | string,
+				) => { openFile: (file: unknown, opts?: unknown) => Promise<void> };
+			};
+			const vault = app.vault as {
+				getAbstractFileByPath: (path: string) => unknown;
+			};
+
+			const file = vault.getAbstractFileByPath(notePath);
+			if (!file) {
+				console.error(`[ACI-TEST-002] File not found: ${notePath}`);
+				return;
+			}
+
+			// "tab" creates a new background tab; activate controls focus
+			const leaf = workspace.getLeaf("tab");
+			await leaf.openFile(file, { active: activate });
+		},
+		{ notePath, activate },
+	);
+	// Brief pause so Obsidian can register the tab state
+	await page.waitForTimeout(400);
+}
+
+/**
+ * Open a note in a split pane (vertical split) next to the current leaf.
+ *
+ * @param page     - Connected Playwright page
+ * @param notePath - Vault-relative path to open in the split
+ */
+async function openNoteInSplitPane(page: Page, notePath: string): Promise<void> {
+	await page.evaluate(
+		async ({ notePath }: { notePath: string }) => {
+			const app = (
+				window as unknown as { app: { workspace: unknown; vault: unknown } }
+			).app;
+			const workspace = app.workspace as {
+				getLeaf: (
+					newLeaf: string,
+				) => { openFile: (file: unknown, opts?: unknown) => Promise<void> };
+			};
+			const vault = app.vault as {
+				getAbstractFileByPath: (path: string) => unknown;
+			};
+
+			const file = vault.getAbstractFileByPath(notePath);
+			if (!file) {
+				console.error(`[ACI-TEST-002] File not found in split: ${notePath}`);
+				return;
+			}
+
+			// "split" creates a new pane adjacent to the current one
+			const leaf = workspace.getLeaf("split");
+			await leaf.openFile(file, { active: false });
+		},
+		{ notePath },
+	);
+	await page.waitForTimeout(400);
+}
+
+/**
+ * Switch the active leaf to the specified vault-relative note path.
+ * Iterates all leaves and activates the one whose file matches.
+ */
+async function activateNote(page: Page, notePath: string): Promise<void> {
+	await page.evaluate(
+		({ notePath }: { notePath: string }) => {
+			const app = (window as unknown as { app: { workspace: unknown } }).app;
+			const workspace = app.workspace as {
+				iterateAllLeaves: (cb: (leaf: unknown) => void) => void;
+				setActiveLeaf: (leaf: unknown, opts?: unknown) => void;
+			};
+
+			workspace.iterateAllLeaves((leaf) => {
+				const typedLeaf = leaf as {
+					view?: { file?: { path: string } };
+				};
+				if (typedLeaf.view?.file?.path === notePath) {
+					workspace.setActiveLeaf(leaf, { focus: true });
+				}
+			});
+		},
+		{ notePath },
+	);
+	await page.waitForTimeout(300);
+}
+
+/**
+ * Close the tab that contains the given vault-relative note path.
+ */
+async function closeNoteTab(page: Page, notePath: string): Promise<void> {
+	await page.evaluate(
+		({ notePath }: { notePath: string }) => {
+			const app = (window as unknown as { app: { workspace: unknown } }).app;
+			const workspace = app.workspace as {
+				iterateAllLeaves: (cb: (leaf: unknown) => void) => void;
+			};
+
+			workspace.iterateAllLeaves((leaf) => {
+				const typedLeaf = leaf as {
+					view?: { file?: { path: string } };
+					detach?: () => void;
+				};
+				if (typedLeaf.view?.file?.path === notePath) {
+					typedLeaf.detach?.();
+				}
+			});
+		},
+		{ notePath },
+	);
+	await page.waitForTimeout(400);
+}
+
+/**
+ * Close ALL markdown tabs currently open (reset state between sub-tests).
+ */
+async function closeAllMarkdownTabs(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const app = (window as unknown as { app: { workspace: unknown } }).app;
+		const workspace = app.workspace as {
+			iterateAllLeaves: (cb: (leaf: unknown) => void) => void;
+		};
+
+		const toDetach: Array<{ detach?: () => void }> = [];
+		workspace.iterateAllLeaves((leaf) => {
+			const typedLeaf = leaf as {
+				view?: { getViewType?: () => string; file?: unknown };
+				detach?: () => void;
+			};
+			if (typedLeaf.view?.getViewType?.() === "markdown") {
+				toDetach.push(typedLeaf);
+			}
+		});
+		// Detach after collecting to avoid iterator mutation issues
+		for (const leaf of toDetach) {
+			leaf.detach?.();
+		}
+	});
+	await page.waitForTimeout(500);
+}
+
+/**
+ * Extract the `<open-notes>` section content from a system prompt string.
+ * Returns null if the tag is absent, or an array of trimmed non-empty lines.
+ */
+function extractOpenNotes(systemPrompt: string): string[] | null {
+	const match = systemPrompt.match(/<open-notes>([\s\S]*?)<\/open-notes>/);
+	if (!match) return null;
+	return match[1]!
+		.split("\n")
+		.map((l) => l.trim())
+		.filter((l) => l.length > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +494,7 @@ function setupTestVault(): void {
  */
 async function testUserMessageContentLacksAutoContext(
 	page: Page,
-	collector: LogCollector
+	collector: LogCollector,
 ): Promise<void> {
 	console.log("\n── ACI-TEST-001-a: User message content has no <auto-context> ──");
 	await newConversation(page);
@@ -309,7 +513,7 @@ async function testUserMessageContentLacksAutoContext(
 		fail(
 			"ACI-TEST-001-a: user message content lacks <auto-context>",
 			"No user message found in JSONL history",
-			shot
+			shot,
 		);
 		return;
 	}
@@ -321,13 +525,13 @@ async function testUserMessageContentLacksAutoContext(
 			"ACI-TEST-001-a: user message content lacks <auto-context>",
 			`<auto-context> block found in user message content (should be in system prompt only). ` +
 				`Content prefix: "${content.substring(0, 200)}"`,
-			shot
+			shot,
 		);
 	} else {
 		pass(
 			"ACI-TEST-001-a: user message content lacks <auto-context>",
 			"User message content does not contain <auto-context> XML",
-			shot
+			shot,
 		);
 	}
 }
@@ -339,17 +543,14 @@ async function testUserMessageContentLacksAutoContext(
  * field. After ACI-001, this field should no longer be populated.
  */
 async function testUserMessageAutoContextFieldAbsent(
-	collector: LogCollector
+	collector: LogCollector,
 ): Promise<void> {
 	console.log("\n── ACI-TEST-001-b: User message auto_context field is absent ──");
 
 	const userMsg = getLatestUserMessage();
 
 	if (!userMsg) {
-		fail(
-			"ACI-TEST-001-b: auto_context field absent",
-			"No user message found in JSONL history"
-		);
+		fail("ACI-TEST-001-b: auto_context field absent", "No user message found in JSONL history");
 		return;
 	}
 
@@ -358,12 +559,12 @@ async function testUserMessageAutoContextFieldAbsent(
 	if (autoContextField === null || autoContextField === undefined) {
 		pass(
 			"ACI-TEST-001-b: auto_context field absent",
-			"auto_context field is null/absent in user message JSONL — correct per ACI-001"
+			"auto_context field is null/absent in user message JSONL — correct per ACI-001",
 		);
 	} else {
 		fail(
 			"ACI-TEST-001-b: auto_context field absent",
-			`auto_context field is unexpectedly set: "${String(autoContextField).substring(0, 200)}"`
+			`auto_context field is unexpectedly set: "${String(autoContextField).substring(0, 200)}"`,
 		);
 	}
 }
@@ -377,7 +578,7 @@ async function testUserMessageAutoContextFieldAbsent(
  */
 async function testNoAutoContextDuplicationAcrossMessages(
 	page: Page,
-	collector: LogCollector
+	collector: LogCollector,
 ): Promise<void> {
 	console.log("\n── ACI-TEST-001-c: No auto-context duplication across messages ──");
 
@@ -392,7 +593,7 @@ async function testNoAutoContextDuplicationAcrossMessages(
 	if (userMessages.length === 0) {
 		fail(
 			"ACI-TEST-001-c: no auto-context duplication",
-			"No user messages found in JSONL history"
+			"No user messages found in JSONL history",
 		);
 		return;
 	}
@@ -412,12 +613,12 @@ async function testNoAutoContextDuplicationAcrossMessages(
 	if (messagesWithAutoContext.length === 0) {
 		pass(
 			"ACI-TEST-001-c: no auto-context duplication",
-			`Checked ${humanMessages.length} user messages — none contain <auto-context> content or auto_context field`
+			`Checked ${humanMessages.length} user messages — none contain <auto-context> content or auto_context field`,
 		);
 	} else {
 		fail(
 			"ACI-TEST-001-c: no auto-context duplication",
-			`${messagesWithAutoContext.length} of ${humanMessages.length} user messages still contain auto-context data`
+			`${messagesWithAutoContext.length} of ${humanMessages.length} user messages still contain auto-context data`,
 		);
 	}
 }
@@ -430,9 +631,7 @@ async function testNoAutoContextDuplicationAcrossMessages(
  * system prompt assembly (log source: "ChatOrchestrator",
  * message: "System prompt assembled").
  */
-async function testSystemPromptContainsAutoContext(
-	collector: LogCollector
-): Promise<void> {
+async function testSystemPromptContainsAutoContext(collector: LogCollector): Promise<void> {
 	console.log("\n── ACI-TEST-001-d: System prompt contains <auto-context> block ──");
 
 	const systemPrompt = getLatestSystemPrompt(collector);
@@ -441,7 +640,7 @@ async function testSystemPromptContainsAutoContext(
 		fail(
 			"ACI-TEST-001-d: system prompt contains <auto-context>",
 			"No 'System prompt assembled' log entry found. " +
-				"Ensure the plugin emitted the debug log (ChatOrchestrator source)."
+				"Ensure the plugin emitted the debug log (ChatOrchestrator source).",
 		);
 		return;
 	}
@@ -451,27 +650,27 @@ async function testSystemPromptContainsAutoContext(
 		fail(
 			"ACI-TEST-001-d: system prompt contains <auto-context>",
 			`System prompt does not contain <auto-context> block. ` +
-				`System prompt prefix: "${systemPrompt.substring(0, 300)}"`
+				`System prompt prefix: "${systemPrompt.substring(0, 300)}"`,
 		);
 		return;
 	}
 
 	pass(
 		"ACI-TEST-001-d: system prompt contains <auto-context>",
-		"<auto-context> block found in assembled system prompt"
+		"<auto-context> block found in assembled system prompt",
 	);
 
 	// Check for open-notes section
 	if (systemPrompt.includes("<open-notes>")) {
 		pass(
 			"ACI-TEST-001-d: system prompt has <open-notes>",
-			"<open-notes> section present in system prompt auto-context"
+			"<open-notes> section present in system prompt auto-context",
 		);
 	} else {
 		// Open notes may be empty if no markdown tabs are open in test env
 		pass(
 			"ACI-TEST-001-d: system prompt has <open-notes>",
-			"<open-notes> section not found — may be expected if no markdown tabs are open in test env"
+			"<open-notes> section not found — may be expected if no markdown tabs are open in test env",
 		);
 	}
 
@@ -479,7 +678,7 @@ async function testSystemPromptContainsAutoContext(
 	if (systemPrompt.includes("<vault-structure>")) {
 		pass(
 			"ACI-TEST-001-d: system prompt has <vault-structure>",
-			"<vault-structure> section present in system prompt auto-context"
+			"<vault-structure> section present in system prompt auto-context",
 		);
 
 		// Verify at least one known folder from the test vault
@@ -488,19 +687,19 @@ async function testSystemPromptContainsAutoContext(
 		if (foundFolder) {
 			pass(
 				"ACI-TEST-001-d: vault-structure has expected folder",
-				`Found test vault folder "${foundFolder}" in system prompt vault-structure`
+				`Found test vault folder "${foundFolder}" in system prompt vault-structure`,
 			);
 		} else {
 			// May not be present if the vault differs — still a soft check
 			pass(
 				"ACI-TEST-001-d: vault-structure has expected folder",
-				"Test vault folders not found (may differ in test environment) — vault-structure tag present"
+				"Test vault folders not found (may differ in test environment) — vault-structure tag present",
 			);
 		}
 	} else {
 		fail(
 			"ACI-TEST-001-d: system prompt has <vault-structure>",
-			"<vault-structure> section missing from system prompt auto-context"
+			"<vault-structure> section missing from system prompt auto-context",
 		);
 	}
 
@@ -511,18 +710,15 @@ async function testSystemPromptContainsAutoContext(
 		if (foundOS) {
 			pass(
 				"ACI-TEST-001-d: system prompt has <os>",
-				`<os> section present with recognized platform: "${foundOS}"`
+				`<os> section present with recognized platform: "${foundOS}"`,
 			);
 		} else {
-			pass(
-				"ACI-TEST-001-d: system prompt has <os>",
-				"<os> section present (platform value present)"
-			);
+			pass("ACI-TEST-001-d: system prompt has <os>", "<os> section present (platform value present)");
 		}
 	} else {
 		fail(
 			"ACI-TEST-001-d: system prompt has <os>",
-			"<os> section missing from system prompt auto-context"
+			"<os> section missing from system prompt auto-context",
 		);
 	}
 
@@ -530,12 +726,12 @@ async function testSystemPromptContainsAutoContext(
 	if (systemPrompt.includes("## Workspace context")) {
 		pass(
 			"ACI-TEST-001-d: system prompt has workspace context heading",
-			'"## Workspace context" section heading found in system prompt'
+			'"## Workspace context" section heading found in system prompt',
 		);
 	} else {
 		fail(
 			"ACI-TEST-001-d: system prompt has workspace context heading",
-			'"## Workspace context" heading missing from system prompt'
+			'"## Workspace context" heading missing from system prompt',
 		);
 	}
 }
@@ -547,9 +743,7 @@ async function testSystemPromptContainsAutoContext(
  * prompt log shows a "System prompt assembled" entry for each user send,
  * confirming fresh auto-context is injected each time.
  */
-async function testSystemPromptRebuiltPerCall(
-	collector: LogCollector
-): Promise<void> {
+async function testSystemPromptRebuiltPerCall(collector: LogCollector): Promise<void> {
 	console.log("\n── ACI-TEST-001-e: System prompt rebuilt for each LLM call ──");
 
 	const systemPromptLogs = getSystemPromptLogs(collector);
@@ -559,18 +753,18 @@ async function testSystemPromptRebuiltPerCall(
 		pass(
 			"ACI-TEST-001-e: system prompt rebuilt per LLM call",
 			`Found ${systemPromptLogs.length} "System prompt assembled" log entries — ` +
-				"system prompt is rebuilt before each LLM call as required by ACI-001"
+				"system prompt is rebuilt before each LLM call as required by ACI-001",
 		);
 	} else if (systemPromptLogs.length >= 1) {
 		pass(
 			"ACI-TEST-001-e: system prompt rebuilt per LLM call",
 			`Found ${systemPromptLogs.length} "System prompt assembled" log entries ` +
-				"(fewer than expected — provider may have rejected all but first call)"
+				"(fewer than expected — provider may have rejected all but first call)",
 		);
 	} else {
 		fail(
 			"ACI-TEST-001-e: system prompt rebuilt per LLM call",
-			"No 'System prompt assembled' log entries found — cannot verify per-call rebuild"
+			"No 'System prompt assembled' log entries found — cannot verify per-call rebuild",
 		);
 	}
 }
@@ -584,7 +778,7 @@ async function testSystemPromptRebuiltPerCall(
  */
 async function testDisabledSourceOmittedFromSystemPrompt(
 	page: Page,
-	collector: LogCollector
+	collector: LogCollector,
 ): Promise<void> {
 	console.log("\n── ACI-TEST-001-f: Disabled source omitted from system prompt ──");
 
@@ -613,7 +807,7 @@ async function testDisabledSourceOmittedFromSystemPrompt(
 		fail(
 			"ACI-TEST-001-f: disabled source omitted from system prompt",
 			"No 'System prompt assembled' log entry found after reload",
-			shot
+			shot,
 		);
 		return;
 	}
@@ -625,19 +819,19 @@ async function testDisabledSourceOmittedFromSystemPrompt(
 		pass(
 			"ACI-TEST-001-f: disabled source omitted from system prompt",
 			"<auto-context> block present but <os> tag correctly omitted when auto_context_os=false",
-			shot
+			shot,
 		);
 	} else if (!hasAutoContext) {
 		fail(
 			"ACI-TEST-001-f: disabled source omitted from system prompt",
 			"<auto-context> block missing entirely from system prompt — expected partial block",
-			shot
+			shot,
 		);
 	} else {
 		fail(
 			"ACI-TEST-001-f: disabled source omitted from system prompt",
 			"<os> tag still present in system prompt despite auto_context_os=false",
-			shot
+			shot,
 		);
 	}
 
@@ -648,12 +842,12 @@ async function testDisabledSourceOmittedFromSystemPrompt(
 		if (!content.includes("<auto-context>")) {
 			pass(
 				"ACI-TEST-001-f: user message still clean after settings reload",
-				"User message content does not contain <auto-context> after settings reload"
+				"User message content does not contain <auto-context> after settings reload",
 			);
 		} else {
 			fail(
 				"ACI-TEST-001-f: user message still clean after settings reload",
-				"<auto-context> found in user message content after settings reload"
+				"<auto-context> found in user message content after settings reload",
 			);
 		}
 	}
@@ -667,7 +861,7 @@ async function testDisabledSourceOmittedFromSystemPrompt(
  */
 async function testAllSourcesDisabledNoAutoContextInSystemPrompt(
 	page: Page,
-	collector: LogCollector
+	collector: LogCollector,
 ): Promise<void> {
 	console.log("\n── ACI-TEST-001-g: All sources disabled → no <auto-context> in system prompt ──");
 
@@ -699,7 +893,7 @@ async function testAllSourcesDisabledNoAutoContextInSystemPrompt(
 		fail(
 			"ACI-TEST-001-g: no <auto-context> when all sources disabled",
 			"No 'System prompt assembled' log entry found after reload",
-			shot
+			shot,
 		);
 		return;
 	}
@@ -708,13 +902,13 @@ async function testAllSourcesDisabledNoAutoContextInSystemPrompt(
 		pass(
 			"ACI-TEST-001-g: no <auto-context> when all sources disabled",
 			"System prompt correctly has no <auto-context> block when all sources are disabled",
-			shot
+			shot,
 		);
 	} else {
 		fail(
 			"ACI-TEST-001-g: no <auto-context> when all sources disabled",
 			"<auto-context> block still found in system prompt despite all sources being disabled",
-			shot
+			shot,
 		);
 	}
 
@@ -722,12 +916,12 @@ async function testAllSourcesDisabledNoAutoContextInSystemPrompt(
 	if (!systemPrompt.includes("## Workspace context")) {
 		pass(
 			"ACI-TEST-001-g: workspace context heading absent",
-			'"## Workspace context" heading correctly absent when no auto-context block'
+			'"## Workspace context" heading correctly absent when no auto-context block',
 		);
 	} else {
 		fail(
 			"ACI-TEST-001-g: workspace context heading absent",
-			'"## Workspace context" heading still present despite no auto-context content'
+			'"## Workspace context" heading still present despite no auto-context content',
 		);
 	}
 
@@ -736,19 +930,459 @@ async function testAllSourcesDisabledNoAutoContextInSystemPrompt(
 	if (userMsg) {
 		const content = String(userMsg.content ?? "");
 		const autoContextField = userMsg.auto_context;
-		if (!content.includes("<auto-context>") && (autoContextField === null || autoContextField === undefined)) {
+		if (
+			!content.includes("<auto-context>") &&
+			(autoContextField === null || autoContextField === undefined)
+		) {
 			pass(
 				"ACI-TEST-001-g: user message clean when all sources disabled",
-				"User message has no <auto-context> in content and auto_context field is absent"
+				"User message has no <auto-context> in content and auto_context field is absent",
 			);
 		} else {
 			fail(
 				"ACI-TEST-001-g: user message clean when all sources disabled",
 				`User message unexpectedly contains auto-context data. ` +
 					`content has tag: ${content.includes("<auto-context>")}, ` +
-					`auto_context field: ${String(autoContextField).substring(0, 100)}`
+					`auto_context field: ${String(autoContextField).substring(0, 100)}`,
 			);
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ACI-TEST-002: Open notes detection — all tabs detected on first message
+// ---------------------------------------------------------------------------
+
+/**
+ * ACI-TEST-002-a: All programmatically opened tabs detected on the first send.
+ *
+ * Opens 3 notes in new background tabs (never manually clicked), then sends
+ * the very first message in a fresh conversation. Verifies that all three
+ * paths appear in the `<open-notes>` block of the assembled system prompt.
+ *
+ * This directly validates the ACI-004 fix: `iterateAllLeaves()` must capture
+ * tabs whose views have not been activated by the user.
+ */
+async function testAllTabsDetectedOnFirstMessage(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-002-a: All tabs detected on first message ──");
+
+	// Reset state: close any existing markdown tabs, start fresh conversation
+	await closeAllMarkdownTabs(page);
+	await newConversation(page);
+
+	// Open 3 notes in separate background tabs (activate = false)
+	const notesToOpen = [
+		"Research/Climate.md",
+		"Daily/2026-07-03.md",
+		"Notes/Meeting Notes.md",
+	];
+	for (const note of notesToOpen) {
+		await openNoteInNewTab(page, note, false);
+	}
+
+	// Explicitly activate the last one so there IS an active leaf
+	await activateNote(page, notesToOpen[notesToOpen.length - 1]!);
+
+	// Send the FIRST message in this fresh conversation
+	const responded = await sendMessage(
+		page,
+		"ACI-TEST-002-a: first message after opening multiple tabs",
+	);
+	const shot = await screenshot(page, "aci-002a-all-tabs-first-message");
+
+	if (!responded) {
+		console.log("    (No LLM response — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (!systemPrompt) {
+		fail(
+			"ACI-TEST-002-a: all tabs detected on first message",
+			"No 'System prompt assembled' log entry found",
+			shot,
+		);
+		return;
+	}
+
+	const openNotes = extractOpenNotes(systemPrompt);
+
+	if (!openNotes) {
+		fail(
+			"ACI-TEST-002-a: all tabs detected on first message",
+			"<open-notes> tag not found in system prompt",
+			shot,
+		);
+		return;
+	}
+
+	// Check that every opened note appears (strip the " (active)" suffix for comparison)
+	const missingNotes: string[] = [];
+	for (const expected of notesToOpen) {
+		const found = openNotes.some(
+			(line) => line === expected || line === `${expected} (active)`,
+		);
+		if (!found) missingNotes.push(expected);
+	}
+
+	if (missingNotes.length === 0) {
+		pass(
+			"ACI-TEST-002-a: all tabs detected on first message",
+			`All ${notesToOpen.length} opened notes detected in <open-notes>: ${openNotes.join(", ")}`,
+			shot,
+		);
+	} else {
+		fail(
+			"ACI-TEST-002-a: all tabs detected on first message",
+			`${missingNotes.length} note(s) NOT detected: ${missingNotes.join(", ")}. ` +
+				`Detected: ${openNotes.join(", ")}`,
+			shot,
+		);
+	}
+}
+
+/**
+ * ACI-TEST-002-b: Notes in split panes are detected.
+ *
+ * Opens the first note normally (active), then opens a second note in a
+ * vertical split pane. Sends a message and verifies both notes appear in
+ * the `<open-notes>` block.
+ */
+async function testSplitPaneNotesDetected(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-002-b: Split pane notes detected ──");
+
+	await closeAllMarkdownTabs(page);
+	await newConversation(page);
+
+	// Open first note as active
+	await openNoteInNewTab(page, "Test Note.md", true);
+	// Open second note in a split pane (not activated)
+	await openNoteInSplitPane(page, "Notes/Project Plan.md");
+
+	const responded = await sendMessage(
+		page,
+		"ACI-TEST-002-b: split pane notes should both be detected",
+	);
+	const shot = await screenshot(page, "aci-002b-split-pane");
+
+	if (!responded) {
+		console.log("    (No LLM response — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (!systemPrompt) {
+		fail(
+			"ACI-TEST-002-b: split pane notes detected",
+			"No 'System prompt assembled' log entry found",
+			shot,
+		);
+		return;
+	}
+
+	const openNotes = extractOpenNotes(systemPrompt);
+
+	if (!openNotes) {
+		fail(
+			"ACI-TEST-002-b: split pane notes detected",
+			"<open-notes> tag not found in system prompt",
+			shot,
+		);
+		return;
+	}
+
+	const expected = ["Test Note.md", "Notes/Project Plan.md"];
+	const missingNotes = expected.filter(
+		(e) => !openNotes.some((line) => line === e || line === `${e} (active)`),
+	);
+
+	if (missingNotes.length === 0) {
+		pass(
+			"ACI-TEST-002-b: split pane notes detected",
+			`Both notes (main pane + split) detected in <open-notes>: ${openNotes.join(", ")}`,
+			shot,
+		);
+	} else {
+		fail(
+			"ACI-TEST-002-b: split pane notes detected",
+			`Missing from <open-notes>: ${missingNotes.join(", ")}. ` +
+				`Detected: ${openNotes.join(", ")}`,
+			shot,
+		);
+	}
+}
+
+/**
+ * ACI-TEST-002-c: Switching active note without closing the first → both appear.
+ *
+ * Opens note A, then switches to note B (note A remains open but unfocused).
+ * Sends a message and verifies both A and B appear in `<open-notes>`.
+ */
+async function testSwitchActiveNoteShowsBoth(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-002-c: Switch active note — both appear ──");
+
+	await closeAllMarkdownTabs(page);
+	await newConversation(page);
+
+	// Open note A and make it active first
+	await openNoteInNewTab(page, "Daily/2026-07-03.md", true);
+	// Open note B in a new tab and switch to it (A stays open in background)
+	await openNoteInNewTab(page, "Journal/2025-01-01.md", true);
+
+	const responded = await sendMessage(
+		page,
+		"ACI-TEST-002-c: switched active note — both background and active should appear",
+	);
+	const shot = await screenshot(page, "aci-002c-switch-active");
+
+	if (!responded) {
+		console.log("    (No LLM response — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (!systemPrompt) {
+		fail(
+			"ACI-TEST-002-c: switch active note — both appear",
+			"No 'System prompt assembled' log entry found",
+			shot,
+		);
+		return;
+	}
+
+	const openNotes = extractOpenNotes(systemPrompt);
+
+	if (!openNotes) {
+		fail(
+			"ACI-TEST-002-c: switch active note — both appear",
+			"<open-notes> tag not found in system prompt",
+			shot,
+		);
+		return;
+	}
+
+	const expected = ["Daily/2026-07-03.md", "Journal/2025-01-01.md"];
+	const missingNotes = expected.filter(
+		(e) => !openNotes.some((line) => line === e || line === `${e} (active)`),
+	);
+
+	if (missingNotes.length === 0) {
+		pass(
+			"ACI-TEST-002-c: switch active note — both appear",
+			`Both notes present after switching active tab: ${openNotes.join(", ")}`,
+			shot,
+		);
+	} else {
+		fail(
+			"ACI-TEST-002-c: switch active note — both appear",
+			`Note(s) missing after switching: ${missingNotes.join(", ")}. ` +
+				`Detected: ${openNotes.join(", ")}`,
+			shot,
+		);
+	}
+}
+
+/**
+ * ACI-TEST-002-d: Closed tab no longer appears in auto-context.
+ *
+ * Opens two notes, sends a message to confirm both are detected, then closes
+ * one tab. Sends a second message and verifies the closed note is gone from
+ * `<open-notes>` while the remaining open note is still present.
+ */
+async function testClosedTabNotDetected(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-002-d: Closed tab not detected ──");
+
+	await closeAllMarkdownTabs(page);
+	await newConversation(page);
+
+	const noteToKeep = "Test Note.md";
+	const noteToClose = "Research/Climate.md";
+
+	await openNoteInNewTab(page, noteToKeep, true);
+	await openNoteInNewTab(page, noteToClose, false);
+
+	// First message — both should be present (setup)
+	await sendMessage(page, "ACI-TEST-002-d setup: both notes open");
+	await page.waitForTimeout(500);
+
+	// Now close the second note
+	await closeNoteTab(page, noteToClose);
+	await page.waitForTimeout(300);
+
+	// Second message — only noteToKeep should be present
+	const responded = await sendMessage(
+		page,
+		"ACI-TEST-002-d: after closing one tab — closed note should not appear",
+	);
+	const shot = await screenshot(page, "aci-002d-closed-tab");
+
+	if (!responded) {
+		console.log("    (No LLM response after closing tab — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (!systemPrompt) {
+		fail(
+			"ACI-TEST-002-d: closed tab not detected",
+			"No 'System prompt assembled' log entry found after closing tab",
+			shot,
+		);
+		return;
+	}
+
+	const openNotes = extractOpenNotes(systemPrompt);
+
+	if (!openNotes) {
+		fail(
+			"ACI-TEST-002-d: closed tab not detected",
+			"<open-notes> tag not found in system prompt after closing tab",
+			shot,
+		);
+		return;
+	}
+
+	const closedNoteStillPresent = openNotes.some(
+		(line) => line === noteToClose || line === `${noteToClose} (active)`,
+	);
+	const keepNotePresent = openNotes.some(
+		(line) => line === noteToKeep || line === `${noteToKeep} (active)`,
+	);
+
+	if (!closedNoteStillPresent && keepNotePresent) {
+		pass(
+			"ACI-TEST-002-d: closed tab not detected",
+			`Closed note "${noteToClose}" absent; open note "${noteToKeep}" still present. ` +
+				`Open notes: ${openNotes.join(", ")}`,
+			shot,
+		);
+	} else {
+		const reasons: string[] = [];
+		if (closedNoteStillPresent)
+			reasons.push(`"${noteToClose}" still listed after closing`);
+		if (!keepNotePresent)
+			reasons.push(`"${noteToKeep}" unexpectedly missing`);
+		fail(
+			"ACI-TEST-002-d: closed tab not detected",
+			reasons.join("; ") + `. Detected: ${openNotes.join(", ")}`,
+			shot,
+		);
+	}
+}
+
+/**
+ * ACI-TEST-002-e: Full vault-relative paths for notes from different folders.
+ *
+ * Opens notes from three different vault sub-folders and verifies that the
+ * paths reported in `<open-notes>` are full vault-relative paths (e.g.
+ * `Research/Climate.md`), not bare filenames (`Climate.md`).
+ */
+async function testFullVaultRelativePathsReported(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-002-e: Full vault-relative paths reported ──");
+
+	await closeAllMarkdownTabs(page);
+	await newConversation(page);
+
+	// Notes from different folders
+	const notesFromDifferentFolders = [
+		"Research/Climate.md",
+		"Daily/2026-07-03.md",
+		"Notes/Project Plan.md",
+	];
+
+	for (const note of notesFromDifferentFolders) {
+		await openNoteInNewTab(page, note, false);
+	}
+	await activateNote(page, notesFromDifferentFolders[0]!);
+
+	const responded = await sendMessage(page, "ACI-TEST-002-e: verify full vault-relative paths");
+	const shot = await screenshot(page, "aci-002e-vault-paths");
+
+	if (!responded) {
+		console.log("    (No LLM response — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (!systemPrompt) {
+		fail(
+			"ACI-TEST-002-e: full vault-relative paths reported",
+			"No 'System prompt assembled' log entry found",
+			shot,
+		);
+		return;
+	}
+
+	const openNotes = extractOpenNotes(systemPrompt);
+
+	if (!openNotes) {
+		fail(
+			"ACI-TEST-002-e: full vault-relative paths reported",
+			"<open-notes> tag not found in system prompt",
+			shot,
+		);
+		return;
+	}
+
+	// Each expected note should appear with its FULL path (folder/file.md)
+	const failures: string[] = [];
+	for (const expected of notesFromDifferentFolders) {
+		const found = openNotes.some(
+			(line) => line === expected || line === `${expected} (active)`,
+		);
+		if (!found) {
+			// Check if just the bare filename appears (would indicate path truncation bug)
+			const bareName = expected.split("/").pop()!;
+			const foundBare = openNotes.some(
+				(line) => line === bareName || line === `${bareName} (active)`,
+			);
+			if (foundBare) {
+				failures.push(
+					`"${expected}" reported as bare name "${bareName}" (missing folder prefix)`,
+				);
+			} else {
+				failures.push(`"${expected}" not found in open-notes at all`);
+			}
+		}
+	}
+
+	if (failures.length === 0) {
+		pass(
+			"ACI-TEST-002-e: full vault-relative paths reported",
+			`All notes have full vault-relative paths: ${openNotes.join(", ")}`,
+			shot,
+		);
+	} else {
+		fail(
+			"ACI-TEST-002-e: full vault-relative paths reported",
+			failures.join("; ") + `. Detected: ${openNotes.join(", ")}`,
+			shot,
+		);
 	}
 }
 
@@ -757,7 +1391,7 @@ async function testAllSourcesDisabledNoAutoContextInSystemPrompt(
 // ---------------------------------------------------------------------------
 
 async function main() {
-	console.log("=== Notor Auto-Context E2E Test (ACI-TEST-001) ===\n");
+	console.log("=== Notor Auto-Context E2E Test (ACI-TEST-001 + ACI-TEST-002) ===\n");
 
 	console.log("[0/4] Building plugin...");
 	execSync("npm run build", { cwd: path.resolve(__dirname, "..", ".."), stdio: "inherit" });
@@ -784,7 +1418,11 @@ async function main() {
 
 	try {
 		console.log("[3/4] Launching Obsidian...");
-		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
+		obsidian = await launchObsidian({
+			vaultPath: VAULT_PATH,
+			cdpPort: CDP_PORT,
+			timeout: 30_000,
+		});
 
 		const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
 		const contexts = browser.contexts();
@@ -797,7 +1435,7 @@ async function main() {
 		await page.waitForLoadState("domcontentloaded");
 		await page.waitForTimeout(5_000);
 
-		console.log("[4/4] Running ACI-TEST-001 tests...\n");
+		console.log("[4/4] Running ACI-TEST-001 + ACI-TEST-002 tests...\n");
 		{
 			const chat = await waitForSelector(page, ".notor-chat-container", 10_000);
 			if (!chat) {
@@ -807,6 +1445,8 @@ async function main() {
 			}
 			pass("Chat panel ready", "Plugin loaded and chat container found");
 		}
+
+		// ── ACI-TEST-001 ────────────────────────────────────────────────────
 
 		// ACI-TEST-001-a: user message content must not contain <auto-context>
 		await testUserMessageContentLacksAutoContext(page, collector);
@@ -829,6 +1469,31 @@ async function main() {
 		// ACI-TEST-001-g: all sources disabled → no <auto-context> in system prompt
 		await testAllSourcesDisabledNoAutoContextInSystemPrompt(page, collector);
 
+		// ── ACI-TEST-002 ────────────────────────────────────────────────────
+		// Restore full settings before running open-notes detection tests
+		console.log(
+			"\n[ACI-TEST-002] Restoring full settings and reloading for open-notes detection tests...",
+		);
+		const fullSettings = buildSettings();
+		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(fullSettings, null, 2));
+		await page.reload();
+		await page.waitForTimeout(5_000);
+
+		// ACI-TEST-002-a: all programmatically opened tabs detected on first message
+		await testAllTabsDetectedOnFirstMessage(page, collector);
+
+		// ACI-TEST-002-b: notes in split panes detected
+		await testSplitPaneNotesDetected(page, collector);
+
+		// ACI-TEST-002-c: switch active note — both the old and new active note appear
+		await testSwitchActiveNoteShowsBoth(page, collector);
+
+		// ACI-TEST-002-d: closed tab no longer appears
+		await testClosedTabNotDetected(page, collector);
+
+		// ACI-TEST-002-e: full vault-relative paths reported for notes in sub-folders
+		await testFullVaultRelativePathsReported(page, collector);
+
 		await screenshot(page, "99-final");
 
 		console.log("\n=== Collecting logs ===");
@@ -845,14 +1510,18 @@ async function main() {
 		if (existingData !== null) {
 			fs.writeFileSync(PLUGIN_DATA_PATH, existingData);
 		} else {
-			try { fs.unlinkSync(PLUGIN_DATA_PATH); } catch { /* ignore */ }
+			try {
+				fs.unlinkSync(PLUGIN_DATA_PATH);
+			} catch {
+				/* ignore */
+			}
 		}
 	}
 
 	const passed = results.filter((r) => r.passed).length;
 	const failed = results.filter((r) => !r.passed).length;
 
-	console.log("\n=== Test Results ===");
+	console.log("\n=== Test Results (ACI-TEST-001 + ACI-TEST-002) ===");
 	console.log(`Passed: ${passed}/${results.length}`);
 	console.log(`Failed: ${failed}/${results.length}`);
 
@@ -864,7 +1533,10 @@ async function main() {
 	}
 
 	const resultsPath = path.join(RESULTS_DIR, "auto-context-results.json");
-	fs.writeFileSync(resultsPath, JSON.stringify({ passed, failed, total: results.length, results }, null, 2));
+	fs.writeFileSync(
+		resultsPath,
+		JSON.stringify({ passed, failed, total: results.length, results }, null, 2),
+	);
 	console.log(`\nResults written to: ${resultsPath}`);
 
 	if (failed > 0) process.exit(1);

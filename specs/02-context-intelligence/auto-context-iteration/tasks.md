@@ -165,7 +165,7 @@ This iteration addresses six issues discovered during manual testing of the Phas
 - Rewrote `e2e/scripts/auto-context-test.ts` with 7 sub-tests (a–g) covering: content absent, metadata absent, no duplication, system prompt sections, per-call rebuild, disabled source omission, all disabled
 - Added `getSystemPromptLogs()` / `getLatestSystemPrompt()` helpers that filter the `LogCollector` structured logs for `ChatOrchestrator` / `"System prompt assembled"` entries
 
-### ACI-TEST-002: Open notes detection — all tabs detected on first message
+### ACI-TEST-002: Open notes detection — all tabs detected on first message ✅
 
 **Description:** Create e2e test scenarios specifically targeting the open-notes detection reliability issue (I-5). These tests must open multiple notes programmatically and verify all are detected without requiring manual tab clicks.
 
@@ -174,11 +174,11 @@ This iteration addresses six issues discovered during manual testing of the Phas
 **Dependencies:** ACI-004
 
 **Acceptance Criteria:**
-- [ ] Test: programmatically open 3+ notes in separate tabs → send first message → verify ALL opened note paths appear in auto-context (not just the active one)
-- [ ] Test: open notes in split panes → verify all detected
-- [ ] Test: open a note, then switch to a different note without closing the first → verify both appear
-- [ ] Test: close a note tab → send message → verify closed note no longer appears in auto-context
-- [ ] Test: open notes from different vault folders → verify full vault-relative paths are correct
+- [x] Test: programmatically open 3+ notes in separate tabs → send first message → verify ALL opened note paths appear in auto-context (not just the active one)
+- [x] Test: open notes in split panes → verify all detected
+- [x] Test: open a note, then switch to a different note without closing the first → verify both appear
+- [x] Test: close a note tab → send message → verify closed note no longer appears in auto-context
+- [x] Test: open notes from different vault folders → verify full vault-relative paths are correct
 
 ### ACI-TEST-003: Active note marker
 
