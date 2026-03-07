@@ -154,6 +154,7 @@ export class ConversationManager {
 		tool_call?: ToolCall | null;
 		tool_result?: ToolResult | null;
 		auto_context?: string | null;
+		attachments?: Message["attachments"];
 	}): Message {
 		if (!this.activeConversation) {
 			throw new Error("No active conversation. Create or load one first.");
@@ -172,6 +173,7 @@ export class ConversationManager {
 			tool_result: params.tool_result ?? null,
 			truncated: false,
 			auto_context: params.auto_context ?? null,
+			attachments: params.attachments ?? null,
 		};
 
 		this.messages.push(message);

@@ -423,13 +423,13 @@ export default class NotorPlugin extends Plugin {
 		// Wire orchestrator ↔ view
 		orchestrator.setView(view);
 
-		// Send message
-		view.setOnSendMessage(async (content: string) => {
+		// Send message (with optional attachments from the chat view)
+		view.setOnSendMessage(async (content: string, attachments?) => {
 			// Cast is safe: both ToolDefinition types are structurally identical —
 			// the only difference is JSONSchemaProperty.type being string | undefined
 			// vs string. Provider implementations handle undefined type gracefully.
 			const toolDefinitions = toolRegistry.getToolDefinitions() as import("./providers/provider").ToolDefinition[];
-			await orchestrator.handleUserMessage(content, toolDefinitions);
+			await orchestrator.handleUserMessage(content, toolDefinitions, attachments);
 		});
 
 		// Stop response

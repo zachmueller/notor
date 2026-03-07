@@ -214,100 +214,100 @@
 **Files:** `src/context/attachment.ts`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `Attachment` interface implemented matching data-model.md (id, type, path, section, display_name, content, content_length, status, error_message)
-- [ ] `AttachmentType` enum: `vault_note`, `vault_note_section`, `external_file`
-- [ ] `AttachmentStatus` enum: `pending`, `resolved`, `error`
-- [ ] Factory functions for creating each attachment type with UUID generation
-- [ ] Duplicate detection: `isDuplicate(existing: Attachment[], candidate: { path, section })` returns boolean
+- [x] `Attachment` interface implemented matching data-model.md (id, type, path, section, display_name, content, content_length, status, error_message)
+- [x] `AttachmentType` enum: `vault_note`, `vault_note_section`, `external_file`
+- [x] `AttachmentStatus` enum: `pending`, `resolved`, `error`
+- [x] Factory functions for creating each attachment type with UUID generation
+- [x] Duplicate detection: `isDuplicate(existing: Attachment[], candidate: { path, section })` returns boolean
 
 ### ATT-002: Vault note content resolution
 **Description:** Implement the logic to resolve vault note and section attachment content at send time using Obsidian's vault and metadata cache APIs.
 **Files:** `src/context/attachment.ts`
 **Dependencies:** ATT-001
 **Acceptance Criteria:**
-- [ ] `resolveAttachment(app: App, attachment: Attachment): Promise<Attachment>` function implemented
-- [ ] For `vault_note`: reads full content via `vault.read(file)`; sets `status: resolved` and `content_length`
-- [ ] For `vault_note_section`: reads full content, extracts section from heading to next heading of equal or higher level using `metadataCache.getFileCache(file)?.headings`; takes first match for ambiguous headings
-- [ ] For `external_file`: content already populated at attach time; no-op resolution
-- [ ] If file not found: sets `status: error`, populates `error_message`
-- [ ] If section not found: sets `status: error`, populates `error_message`
+- [x] `resolveAttachment(app: App, attachment: Attachment): Promise<Attachment>` function implemented
+- [x] For `vault_note`: reads full content via `vault.read(file)`; sets `status: resolved` and `content_length`
+- [x] For `vault_note_section`: reads full content, extracts section from heading to next heading of equal or higher level using `metadataCache.getFileCache(file)?.headings`; takes first match for ambiguous headings
+- [x] For `external_file`: content already populated at attach time; no-op resolution
+- [x] If file not found: sets `status: error`, populates `error_message`
+- [x] If section not found: sets `status: error`, populates `error_message`
 
 ### ATT-003: External file reading and validation
 **Description:** Implement external file attachment: read file content, validate UTF-8, enforce size threshold confirmation. Uses `<input type="file">` with Electron's `File.path` property for absolute path access per R-2 findings.
 **Files:** `src/context/attachment.ts`
 **Dependencies:** ATT-001, RES-002, FOUND-001
 **Acceptance Criteria:**
-- [ ] External file content read at attach time via `fs.readFileSync` using the Electron-specific `File.path` property for absolute path access
-- [ ] UTF-8 validation: reject binary files with clear error ("Cannot attach binary file: only plain-text files are supported")
-- [ ] File size check against configurable threshold (default: 1 MB); returns a flag indicating confirmation is needed if exceeded
-- [ ] Desktop-only: gated behind `Platform.isDesktopApp` (not `Platform.isDesktop`) per R-2 findings — `File.path` is Electron-specific
-- [ ] Stores original filename as `display_name` (no absolute path exposed)
+- [x] External file content read at attach time via `fs.readFileSync` using the Electron-specific `File.path` property for absolute path access
+- [x] UTF-8 validation: reject binary files with clear error ("Cannot attach binary file: only plain-text files are supported")
+- [x] File size check against configurable threshold (default: 1 MB); returns a flag indicating confirmation is needed if exceeded
+- [x] Desktop-only: gated behind `Platform.isDesktopApp` (not `Platform.isDesktop`) per R-2 findings — `File.path` is Electron-specific
+- [x] Stores original filename as `display_name` (no absolute path exposed)
 
 ### ATT-004: Attachment XML serialization
 **Description:** Serialize resolved attachments into the `<attachments>` XML block per the contract specification.
 **Files:** `src/context/attachment.ts`
 **Dependencies:** ATT-001, ATT-002
 **Acceptance Criteria:**
-- [ ] `buildAttachmentsBlock(attachments: Attachment[]): string | null` function implemented
-- [ ] Vault notes serialized as `<vault-note path="...">content</vault-note>`
-- [ ] Vault note sections serialized as `<vault-note path="..." section="...">content</vault-note>`
-- [ ] External files serialized as `<external-file name="...">content</external-file>`
-- [ ] Error-status attachments are omitted from the block
-- [ ] Returns `null` if no resolved attachments (no `<attachments>` block emitted)
-- [ ] Output matches the XML format defined in contracts/tool-schemas.md
+- [x] `buildAttachmentsBlock(attachments: Attachment[]): string | null` function implemented
+- [x] Vault notes serialized as `<vault-note path="...">content</vault-note>`
+- [x] Vault note sections serialized as `<vault-note path="..." section="...">content</vault-note>`
+- [x] External files serialized as `<external-file name="...">content</external-file>`
+- [x] Error-status attachments are omitted from the block
+- [x] Returns `null` if no resolved attachments (no `<attachments>` block emitted)
+- [x] Output matches the XML format defined in contracts/tool-schemas.md
 
 ### ATT-005: Attachment picker UI — vault note autocomplete
 **Description:** Implement the vault note attachment picker with wikilink-style autocomplete in the chat input area using `AbstractInputSuggest<T>` (per R-1 findings). Includes `[[` trigger, fuzzy matching via `prepareFuzzySearch()`, and section header navigation via `metadataCache`.
 **Files:** `src/ui/attachment-picker.ts`
 **Dependencies:** RES-001, ATT-001, FOUND-005
 **Acceptance Criteria:**
-- [ ] Attachment button in chat input area opens a menu with "Attach vault note" and "Attach external file" options
-- [ ] "Attach vault note" opens vault file picker with autocomplete using `AbstractInputSuggest<T>` attached to the chat input `contenteditable <div>` (requires FOUND-005 migration)
-- [ ] Typing `[[` in the chat input triggers the vault picker directly (bypassing the menu) via an input event listener that activates the suggest overlay
-- [ ] `AbstractInputSuggest<T>` subclass implements `getSuggestions()` using `prepareFuzzySearch()` against `app.vault.getMarkdownFiles()` filenames, and `renderSuggestion()` with fuzzy match highlighting
-- [ ] Fall back to `FuzzySuggestModal` only if `AbstractInputSuggest` cannot be made to work with the chat input element
-- [ ] Fuzzy matching of vault note names using Obsidian's built-in `prepareFuzzySearch()` (no custom fuzzy matching)
-- [ ] Section header references supported: after selecting a note, `#` triggers a second suggest pass querying `metadataCache.getFileCache(selectedFile)?.headings` (returns `HeadingCache[]` with `heading: string` and `level: number`)
-- [ ] Headings displayed with their level for disambiguation (e.g., "## Introduction" vs "### Introduction")
-- [ ] Selected note/section creates an Attachment and triggers chip creation
+- [x] Attachment button in chat input area opens a menu with "Attach vault note" and "Attach external file" options
+- [x] "Attach vault note" opens vault file picker with autocomplete using `AbstractInputSuggest<T>` attached to the chat input `contenteditable <div>` (requires FOUND-005 migration)
+- [x] Typing `[[` in the chat input triggers the vault picker directly (bypassing the menu) via an input event listener that activates the suggest overlay
+- [x] `AbstractInputSuggest<T>` subclass implements `getSuggestions()` using `prepareFuzzySearch()` against `app.vault.getMarkdownFiles()` filenames, and `renderSuggestion()` with fuzzy match highlighting
+- [x] Fall back to `FuzzySuggestModal` only if `AbstractInputSuggest` cannot be made to work with the chat input element
+- [x] Fuzzy matching of vault note names using Obsidian's built-in `prepareFuzzySearch()` (no custom fuzzy matching)
+- [x] Section header references supported: after selecting a note, `#` triggers a second suggest pass querying `metadataCache.getFileCache(selectedFile)?.headings` (returns `HeadingCache[]` with `heading: string` and `level: number`)
+- [x] Headings displayed with their level for disambiguation (e.g., "## Introduction" vs "### Introduction")
+- [x] Selected note/section creates an Attachment and triggers chip creation
 
 ### ATT-006 [P]: Attachment picker UI — external file dialog
 **Description:** Implement the external file picker using a hidden `<input type="file">` element with programmatic `.click()` to open the OS-native dialog (per R-2 findings). Read absolute paths from Electron's `File.path` property.
 **Files:** `src/ui/attachment-picker.ts`
 **Dependencies:** RES-002, ATT-003
 **Acceptance Criteria:**
-- [ ] "Attach external file" option creates a hidden `<input type="file">` element and triggers `.click()` to open the OS-native filesystem dialog
-- [ ] Absolute file path read from Electron-specific `File.path` property on the selected `File` object
-- [ ] Selected file is read via `fs.readFileSync(file.path, 'utf-8')`, validated (UTF-8), and an Attachment is created
-- [ ] `input.accept` attribute set to common text-like extensions as a convenience hint (not a security boundary — runtime UTF-8 validation is authoritative)
-- [ ] `input.multiple` attribute enabled for batch attachment
-- [ ] If file exceeds size threshold, a confirmation dialog is shown with file size before attaching
-- [ ] Binary files are rejected with a clear error message
-- [ ] Feature is hidden/disabled on mobile (`Platform.isDesktopApp` check — `File.path` is Electron-specific)
+- [x] "Attach external file" option creates a hidden `<input type="file">` element and triggers `.click()` to open the OS-native filesystem dialog
+- [x] Absolute file path read from Electron-specific `File.path` property on the selected `File` object
+- [x] Selected file is read via `fs.readFileSync(file.path, 'utf-8')`, validated (UTF-8), and an Attachment is created
+- [x] `input.accept` attribute set to common text-like extensions as a convenience hint (not a security boundary — runtime UTF-8 validation is authoritative)
+- [x] `input.multiple` attribute enabled for batch attachment
+- [x] If file exceeds size threshold, a confirmation dialog is shown with file size before attaching
+- [x] Binary files are rejected with a clear error message
+- [x] Feature is hidden/disabled on mobile (`Platform.isDesktopApp` check — `File.path` is Electron-specific)
 
 ### ATT-007: Attachment chip display and management
 **Description:** Implement the attachment chip UI in the chat input area showing attached items with removal capability.
 **Files:** `src/ui/attachment-chips.ts`
 **Dependencies:** ATT-001
 **Acceptance Criteria:**
-- [ ] Each attachment renders as a labeled chip/tag in the chat input area
-- [ ] Vault notes show the note filename; sections show `Filename § Section`
-- [ ] External files show the filename with a distinct visual indicator
-- [ ] Chips have a remove button (X) that discards the attachment before sending
-- [ ] Duplicate attachments (same path + section) are silently ignored
-- [ ] Chips are cleared after the message is sent
+- [x] Each attachment renders as a labeled chip/tag in the chat input area
+- [x] Vault notes show the note filename; sections show `Filename § Section`
+- [x] External files show the filename with a distinct visual indicator
+- [x] Chips have a remove button (X) that discards the attachment before sending
+- [x] Duplicate attachments (same path + section) are silently ignored
+- [x] Chips are cleared after the message is sent
 
 ### ATT-008: Attachment integration with chat dispatch
 **Description:** Wire attachment resolution and XML serialization into the message dispatch path. Resolve vault note content at send time, build the `<attachments>` block, and assemble into the user message.
 **Files:** `src/chat/orchestrator.ts`, `src/context/message-assembler.ts`
 **Dependencies:** ATT-002, ATT-004, FOUND-004, CTX-006
 **Acceptance Criteria:**
-- [ ] Before message dispatch, all vault note attachments are resolved via `resolveAttachment()`
-- [ ] Failed resolutions surface inline warnings in the chat thread; message still sends with remaining valid attachments
-- [ ] Resolved attachments are serialized into the `<attachments>` block
-- [ ] Block is passed to `assembleUserMessage()` in the correct position (after auto-context, before hooks)
-- [ ] Attachments are logged in the JSONL history as part of the message's `attachments` field (metadata only, not full content)
-- [ ] Sent message in the chat thread shows attachment chips (name only, no content expansion)
+- [x] Before message dispatch, all vault note attachments are resolved via `resolveAttachment()`
+- [x] Failed resolutions surface inline warnings in the chat thread; message still sends with remaining valid attachments
+- [x] Resolved attachments are serialized into the `<attachments>` block
+- [x] Block is passed to `assembleUserMessage()` in the correct position (after auto-context, before hooks)
+- [x] Attachments are logged in the JSONL history as part of the message's `attachments` field (metadata only, not full content)
+- [x] Sent message in the chat thread shows attachment chips (name only, no content expansion)
 
 ---
 

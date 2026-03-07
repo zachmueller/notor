@@ -68,6 +68,16 @@ export interface Message {
 	truncated?: boolean;
 	/** Auto-context metadata logged for user messages (Phase 3). */
 	auto_context?: string | null;
+	/** Attachment metadata logged for user messages (Phase 3). */
+	attachments?: Array<{
+		id: string;
+		type: string;
+		path: string;
+		section: string | null;
+		display_name: string;
+		content_length: number | null;
+		status: string;
+	}> | null;
 }
 
 // ---------------------------------------------------------------------------

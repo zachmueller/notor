@@ -24,6 +24,8 @@ import type { NotorSettings, ModelPricing } from "../settings";
 import type { VaultRuleManager } from "../rules/vault-rules";
 import { buildAutoContextBlock } from "../context/auto-context";
 import { assembleUserMessage } from "../context/message-assembler";
+import type { Attachment } from "../context/attachment";
+import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatOrchestrator");
@@ -178,7 +180,8 @@ export class ChatOrchestrator {
 	 */
 	async handleUserMessage(
 		content: string,
-		toolDefinitions: ToolDefinition[]
+		toolDefinitions: ToolDefinition[],
+		attachments?: Attachment[]
 	): Promise<void> {
 		// Ensure we have an active conversation
 		if (!this.conversationManager.hasActiveConversation()) {
@@ -190,18 +193,55 @@ export class ChatOrchestrator {
 		// Phase 3 (CTX-006): Build auto-context block from enabled sources
 		const autoContext = buildAutoContextBlock(this.app, this.settings);
 
-		// Assemble the full message content: auto-context → user text
-		// (attachments and hook injections will be added in later phases)
+		// Phase 3 (ATT-008): Resolve attachments and build XML block
+		let attachmentsBlock: string | null = null;
+		const resolvedAttachments: Attachment[] = [];
+
+		if (attachments && attachments.length > 0) {
+			for (const att of attachments) {
+				const resolved = await resolveAttachment(this.app, att);
+				resolvedAttachments.push(resolved);
+
+				// Surface inline warnings for failed resolutions
+				if (resolved.status === "error" && resolved.error_message) {
+					this.view?.showError(`Attachment warning: ${resolved.error_message}`);
+					log.warn("Attachment resolution failed", {
+						path: resolved.path,
+						error: resolved.error_message,
+					});
+				}
+			}
+
+			attachmentsBlock = buildAttachmentsBlock(resolvedAttachments);
+		}
+
+		// Assemble the full message content: auto-context → attachments → user text
+		// (hook injections will be added in later phases)
 		const assembledContent = assembleUserMessage({
 			autoContext: autoContext ?? undefined,
+			attachments: attachmentsBlock ?? undefined,
 			userText: content,
 		});
+
+		// Build attachment metadata for JSONL logging (no content, just metadata)
+		const attachmentMetadata = resolvedAttachments.length > 0
+			? resolvedAttachments.map((a) => ({
+				id: a.id,
+				type: a.type,
+				path: a.path,
+				section: a.section,
+				display_name: a.display_name,
+				content_length: a.content_length,
+				status: a.status,
+			}))
+			: undefined;
 
 		// Add user message with assembled content
 		const userMessage = this.conversationManager.addMessage({
 			role: "user",
 			content: assembledContent,
 			auto_context: autoContext,
+			attachments: attachmentMetadata,
 		});
 
 		this.view?.renderUserMessage(userMessage);

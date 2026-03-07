@@ -1121,3 +1121,143 @@
 	background: rgba(220, 53, 69, 0.12);
 	color: var(--color-red);
 }
+
+/* ==========================================================================
+   Attachment System (Phase 3 — ATT-005, ATT-006, ATT-007)
+   ========================================================================== */
+
+/* Attachment chips container */
+
+.notor-attachment-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 4px 0;
+}
+
+.notor-attachment-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 6px 2px 4px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-normal);
+	max-width: 200px;
+	cursor: default;
+}
+
+.notor-attachment-chip--external {
+	border-color: var(--color-blue);
+	background: rgba(var(--color-blue-rgb, 68, 130, 255), 0.08);
+}
+
+.notor-attachment-chip-icon {
+	font-size: 11px;
+	line-height: 1;
+	flex-shrink: 0;
+}
+
+.notor-attachment-chip-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
+.notor-attachment-chip-remove {
+	cursor: pointer;
+	color: var(--text-faint);
+	font-size: 14px;
+	line-height: 1;
+	padding: 0 2px;
+	border-radius: var(--radius-s);
+	flex-shrink: 0;
+}
+
+.notor-attachment-chip-remove:hover {
+	color: var(--text-error);
+	background: var(--background-modifier-hover);
+}
+
+/* Attachment button */
+
+.notor-attach-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border-radius: var(--radius-s);
+	border: none;
+	cursor: pointer;
+	padding: 0;
+	background: none;
+	color: var(--text-muted);
+}
+
+.notor-attach-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+/* Attachment menu dropdown */
+
+.notor-attach-menu {
+	position: absolute;
+	bottom: 100%;
+	left: 0;
+	z-index: var(--layer-popover);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-s);
+	padding: 4px 0;
+	min-width: 180px;
+	margin-bottom: 4px;
+}
+
+.notor-attach-menu-item {
+	padding: 6px 12px;
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+}
+
+.notor-attach-menu-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* Suggest popover styling */
+
+.notor-suggest-item {
+	display: flex;
+	align-items: baseline;
+	gap: 2px;
+}
+
+.notor-suggest-path {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.notor-suggest-name {
+	color: var(--text-normal);
+}
+
+.notor-suggest-highlight {
+	color: var(--text-accent);
+	font-weight: var(--font-semibold);
+}
+
+.notor-suggest-section-level {
+	color: var(--text-faint);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-suggest-section-text {
+	color: var(--text-normal);
+}

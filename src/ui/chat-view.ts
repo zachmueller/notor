@@ -11,12 +11,15 @@
 import { ItemView, MarkdownRenderer, Modal, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
 import type { ConversationMode, Message, LLMProviderType, ModelInfo, Checkpoint } from "../types";
+import type { Attachment } from "../context/attachment";
 import type { ConversationListEntry } from "../chat/history";
 import { logger } from "../utils/logger";
 import {
 	renderWriteNoteDiffPreview,
 	renderReplaceInNoteDiffPreview,
 } from "./diff-view";
+import { VaultNoteSuggest, createAttachmentButton } from "./attachment-picker";
+import { AttachmentChipManager, createAttachmentChipContainer } from "./attachment-chips";
 
 const log = logger("ChatView");
 
@@ -45,6 +48,7 @@ export class NotorChatView extends ItemView {
 	private conversationListEl!: HTMLElement;
 	private loadingIndicatorEl!: HTMLElement;
 	private tokenFooterEl!: HTMLElement;
+	private attachmentChipContainerEl!: HTMLElement;
 
 	// State
 	private isResponding = false;
@@ -52,12 +56,17 @@ export class NotorChatView extends ItemView {
 	private showConversationList = false;
 	private lastToolCallEl: HTMLElement | null = null;
 
+	// Attachment state
+	private pendingAttachments: Attachment[] = [];
+	private attachmentChipManager!: AttachmentChipManager;
+	private vaultNoteSuggest?: VaultNoteSuggest;
+
 	// Settings popover state
 	private settingsPopoverEl?: HTMLElement;
 	private isSettingsOpen = false;
 
 	// Callbacks (set by orchestrator)
-	private onSendMessage?: (content: string) => Promise<void>;
+	private onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
 	private onStopResponse?: () => void;
 	private onNewConversation?: () => void;
 	private onSwitchConversation?: (filename: string) => void;
@@ -98,7 +107,7 @@ export class NotorChatView extends ItemView {
 	// Callback setters (wired by orchestrator / main.ts)
 	// -----------------------------------------------------------------------
 
-	setOnSendMessage(callback: (content: string) => Promise<void>): void {
+	setOnSendMessage(callback: (content: string, attachments?: Attachment[]) => Promise<void>): void {
 		this.onSendMessage = callback;
 	}
 
@@ -283,6 +292,13 @@ export class NotorChatView extends ItemView {
 		// Text input wrapper
 		const inputWrapper = this.inputAreaEl.createDiv({ cls: "notor-input-wrapper" });
 
+		// Attachment chip container (above the text input)
+		this.attachmentChipContainerEl = createAttachmentChipContainer(inputWrapper);
+		this.attachmentChipManager = new AttachmentChipManager(
+			this.attachmentChipContainerEl,
+			(attachmentId: string) => this.removeAttachment(attachmentId)
+		);
+
 		// contenteditable div — required for AbstractInputSuggest<T> attachment
 		// autocomplete (see R-1 findings). Replaces the former <textarea>.
 		this.textInputEl = inputWrapper.createDiv({
@@ -300,6 +316,9 @@ export class NotorChatView extends ItemView {
 		this.textInputEl.addEventListener("input", () => {
 			this.textInputEl.style.height = "auto";
 			this.textInputEl.style.height = Math.min(this.textInputEl.scrollHeight, 200) + "px";
+
+			// Detect `[[` trigger for vault note autocomplete
+			this.detectWikilinkTrigger();
 		});
 
 		// Enter to send, Shift+Enter for newline
@@ -310,8 +329,26 @@ export class NotorChatView extends ItemView {
 			}
 		});
 
+		// Initialize vault note suggest (lazy — created once, reused)
+		this.vaultNoteSuggest = new VaultNoteSuggest(
+			this.app,
+			this.textInputEl,
+			(attachment: Attachment) => this.addAttachment(attachment),
+			() => this.pendingAttachments
+		);
+
 		// Button wrapper
 		const buttonWrapper = this.inputAreaEl.createDiv({ cls: "notor-input-buttons" });
+
+		// Attachment button
+		createAttachmentButton(
+			buttonWrapper,
+			this.app,
+			this.textInputEl,
+			(attachment: Attachment) => this.addAttachment(attachment),
+			() => this.pendingAttachments,
+			this.plugin.settings.external_file_size_threshold_mb
+		);
 
 		// Send button
 		this.sendButtonEl = buttonWrapper.createEl("button", {
@@ -338,13 +375,18 @@ export class NotorChatView extends ItemView {
 		if (this.isResponding) return;
 
 		const content = (this.textInputEl.textContent ?? "").trim();
-		if (!content) return;
+		if (!content && this.pendingAttachments.length === 0) return;
+
+		// Capture and clear attachments before sending
+		const attachments = [...this.pendingAttachments];
+		this.pendingAttachments = [];
+		this.attachmentChipManager.clear();
 
 		this.textInputEl.textContent = "";
 		this.textInputEl.style.height = "auto";
 
 		try {
-			await this.onSendMessage?.(content);
+			await this.onSendMessage?.(content, attachments);
 		} catch (e) {
 			log.error("Send message failed", { error: String(e) });
 			new Notice(`Failed to send message: ${e instanceof Error ? e.message : String(e)}`);
@@ -781,6 +823,50 @@ export class NotorChatView extends ItemView {
 		const errorEl = this.messageListEl.createDiv({ cls: "notor-chat-error" });
 		errorEl.textContent = `⚠ ${error}`;
 		this.scrollToBottom();
+	}
+
+	// -----------------------------------------------------------------------
+	// Attachment management
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Add an attachment to the pending list and render its chip.
+	 */
+	private addAttachment(attachment: Attachment): void {
+		this.pendingAttachments.push(attachment);
+		this.attachmentChipManager.addChip(attachment);
+		log.debug("Attachment added", {
+			id: attachment.id,
+			type: attachment.type,
+			display: attachment.display_name,
+		});
+	}
+
+	/**
+	 * Remove an attachment from the pending list and its chip.
+	 */
+	private removeAttachment(attachmentId: string): void {
+		this.pendingAttachments = this.pendingAttachments.filter(
+			(a) => a.id !== attachmentId
+		);
+		this.attachmentChipManager.removeChip(attachmentId);
+		log.debug("Attachment removed", { id: attachmentId });
+	}
+
+	/**
+	 * Detect `[[` in the chat input and activate the vault note suggest.
+	 */
+	private detectWikilinkTrigger(): void {
+		const text = this.textInputEl.textContent ?? "";
+		const triggerIdx = text.lastIndexOf("[[");
+
+		if (triggerIdx !== -1 && this.vaultNoteSuggest) {
+			// Check there's no `]]` closing the link after the `[[`
+			const afterTrigger = text.slice(triggerIdx + 2);
+			if (!afterTrigger.includes("]]")) {
+				this.vaultNoteSuggest.activate(triggerIdx);
+			}
+		}
 	}
 
 	// -----------------------------------------------------------------------
