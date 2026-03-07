@@ -239,7 +239,7 @@ This iteration addresses six issues discovered during manual testing of the Phas
 - All four functions are wired into `main()` in a dedicated `[ACI-TEST-005]` block that runs after the existing five tests
 - `Array.from()` used on `NodeListOf<Element>` inside `page.evaluate()` to satisfy the e2e `tsconfig` `lib` target
 
-### ACI-TEST-006: Auto-context not duplicated across messages
+### ACI-TEST-006: Auto-context not duplicated across messages ✅
 
 **Description:** Create an e2e test that sends multiple messages in a single conversation and verifies auto-context content is not duplicated in the conversation history.
 
@@ -248,8 +248,15 @@ This iteration addresses six issues discovered during manual testing of the Phas
 **Dependencies:** ACI-001
 
 **Acceptance Criteria:**
-- [ ] Test: send 3 messages in sequence → read JSONL history → verify no user message `content` contains `<auto-context>` (all auto-context is in system prompt only)
-- [ ] Test: verify token count is not inflated by repeated auto-context blocks across messages
+- [x] Test: send 3 messages in sequence → read JSONL history → verify no user message `content` contains `<auto-context>` (all auto-context is in system prompt only)
+- [x] Test: verify token count is not inflated by repeated auto-context blocks across messages
+
+**Implementation notes:**
+- Added `getAllMessages()` helper (reads all roles from latest JSONL file) to `auto-context-test.ts`, matching the equivalent helper already present in `hook-execution-test.ts`
+- `testMultipleMessagesNoAutoContextInHistory` (ACI-TEST-006-a): opens a note tab (so auto-context has content to inject), sends 3 messages in a fresh conversation, reads all JSONL messages, and asserts zero user messages contain `<auto-context>` in `content` or in the `auto_context` metadata field; reports each offending message index and a prefix of the offending value
+- `testTokenCountNotInflatedByAutoContext` (ACI-TEST-006-b): continues in the same conversation (sends a 4th message), collects all human user messages (excluding `is_hook_injection`), checks that no individual `content` string exceeds 2 000 characters and that the max/min content length ratio does not exceed 5×; both thresholds are generous enough to tolerate natural variation in typed message length while definitively catching the old behavior of prepending a full auto-context block to every message
+- Both functions are wired into `main()` as the `[ACI-TEST-006]` block, after ACI-TEST-004, with a fresh `page.reload()` and full settings restore to ensure a clean starting state
+- Console header and results footer updated to include `ACI-TEST-006`; results also written to `auto-context-test-results.json` (primary) and `auto-context-results.json` (legacy/backward-compat alias)
 
 ---
 

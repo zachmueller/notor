@@ -61,6 +61,23 @@
  *   c. Folders are not comma-separated
  *
  * @see specs/02-context-intelligence/auto-context-iteration/tasks.md — ACI-TEST-004
+ *
+ * ## ACI-TEST-006: Auto-context not duplicated across messages
+ *
+ * Validates that sending multiple messages in a single conversation does NOT
+ * accumulate `<auto-context>` blocks in the JSONL conversation history. After
+ * the ACI-001 migration, auto-context is ephemeral system-prompt content only
+ * and must never appear in any user message `content` field or `auto_context`
+ * metadata field — regardless of how many messages have been sent.
+ *
+ * Scenarios:
+ *   a. Send 3 messages in sequence → read JSONL history → verify no user
+ *      message `content` contains `<auto-context>` XML
+ *   b. Verify token count is not inflated: the total character length of all
+ *      user message `content` fields must not grow at a rate consistent with
+ *      an accumulating auto-context block being appended to each message
+ *
+ * @see specs/02-context-intelligence/auto-context-iteration/tasks.md — ACI-TEST-006
  */
 
 import { execSync } from "node:child_process";
@@ -174,6 +191,41 @@ async function newConversation(page: Page): Promise<void> {
 // ---------------------------------------------------------------------------
 // JSONL history helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Read ALL messages (any role) from the latest JSONL history file.
+ * Used by ACI-TEST-006 to inspect the full conversation including
+ * hook injection messages.
+ */
+function getAllMessages(): Array<Record<string, unknown>> {
+	if (!fs.existsSync(HISTORY_DIR)) return [];
+
+	const files = fs
+		.readdirSync(HISTORY_DIR)
+		.filter((f) => f.endsWith(".jsonl"))
+		.sort()
+		.reverse();
+
+	for (const file of files) {
+		const content = fs.readFileSync(path.join(HISTORY_DIR, file), "utf8");
+		const lines = content.split("\n").filter((l) => l.trim());
+
+		const messages: Array<Record<string, unknown>> = [];
+		for (const line of lines) {
+			try {
+				const obj = JSON.parse(line);
+				if (obj.role) {
+					messages.push(obj);
+				}
+			} catch {
+				/* skip */
+			}
+		}
+
+		if (messages.length > 0) return messages;
+	}
+	return [];
+}
 
 /**
  * Read all user messages from the latest JSONL history file.
@@ -2072,11 +2124,212 @@ async function testVaultStructureNotCommaSeparated(
 }
 
 // ---------------------------------------------------------------------------
+// ACI-TEST-006: Auto-context not duplicated across messages
+// ---------------------------------------------------------------------------
+
+/**
+ * ACI-TEST-006-a: No user message content contains `<auto-context>` after 3 sends.
+ *
+ * Sends three messages in a fresh conversation and then reads every entry in
+ * the JSONL history file. Verifies that no user message `content` field
+ * contains `<auto-context>` XML and that no `auto_context` metadata field is
+ * set. This is the direct post-ACI-001 invariant — auto-context must live
+ * only in the (ephemeral) system prompt, never in persisted message records.
+ *
+ * This test is deliberately independent of ACI-TEST-001-c: it uses a
+ * dedicated fresh conversation and explicitly checks every message in the
+ * JSONL file (including hook-injection messages, which should also be clean).
+ */
+async function testMultipleMessagesNoAutoContextInHistory(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-006-a: No <auto-context> in JSONL history after 3 messages ──");
+
+	await closeAllMarkdownTabs(page);
+	await newConversation(page);
+
+	// Open a note so auto-context has something to include (makes the test
+	// meaningful — if auto-context were still injected into user messages it
+	// would show up here)
+	await openNoteInNewTab(page, "Research/Climate.md", true);
+
+	// Send three messages in sequence; wait for each to complete
+	const messages = [
+		"ACI-TEST-006-a: first message in multi-message sequence",
+		"ACI-TEST-006-a: second message — auto-context must not accumulate",
+		"ACI-TEST-006-a: third message — final check for duplication",
+	];
+
+	for (const msg of messages) {
+		const responded = await sendMessage(page, msg);
+		if (!responded) {
+			console.log(`    (No LLM response for "${msg.substring(0, 50)}..." — continuing)`);
+		}
+		await page.waitForTimeout(500);
+	}
+
+	await page.waitForTimeout(1_000);
+	const shot = await screenshot(page, "aci-006a-multi-message-history");
+
+	// Read ALL messages from the JSONL (any role) to check for auto-context leakage
+	const allMessages = getAllMessages();
+
+	if (allMessages.length === 0) {
+		fail(
+			"ACI-TEST-006-a: no <auto-context> in history after 3 messages",
+			"No messages found in JSONL history",
+			shot,
+		);
+		return;
+	}
+
+	// Collect all user messages (human-typed and hook injections alike — none
+	// should ever carry auto-context XML in their content)
+	const userMessages = allMessages.filter((m) => m.role === "user");
+
+	const offenders: Array<{ index: number; reason: string }> = [];
+
+	for (let i = 0; i < userMessages.length; i++) {
+		const msg = userMessages[i]!;
+		const content = String(msg.content ?? "");
+		const autoContextField = msg.auto_context;
+
+		if (content.includes("<auto-context>")) {
+			offenders.push({
+				index: i,
+				reason: `content contains <auto-context> tag (prefix: "${content.substring(0, 120)}")`,
+			});
+		}
+		if (autoContextField !== null && autoContextField !== undefined) {
+			offenders.push({
+				index: i,
+				reason: `auto_context field is set: "${String(autoContextField).substring(0, 120)}"`,
+			});
+		}
+	}
+
+	if (offenders.length === 0) {
+		pass(
+			"ACI-TEST-006-a: no <auto-context> in history after 3 messages",
+			`Checked ${userMessages.length} user message(s) across ${allMessages.length} total ` +
+				`JSONL records — none contain <auto-context> XML or auto_context metadata`,
+			shot,
+		);
+	} else {
+		fail(
+			"ACI-TEST-006-a: no <auto-context> in history after 3 messages",
+			`${offenders.length} violation(s) found across ${userMessages.length} user message(s): ` +
+				offenders.map((o) => `[msg ${o.index}] ${o.reason}`).join("; "),
+			shot,
+		);
+	}
+}
+
+/**
+ * ACI-TEST-006-b: Token count not inflated by repeated auto-context blocks.
+ *
+ * Sends three messages in the same conversation (reuses the state from
+ * ACI-TEST-006-a) and measures the character length of each user message
+ * `content` field. In the old (pre-ACI-001) implementation every user
+ * message carried a full auto-context block, so the total size of user
+ * message content grew with each round. After ACI-001, user message content
+ * consists only of the user's typed text (and optional attachment block),
+ * so the sizes across messages must NOT show the characteristic linear growth
+ * produced by accumulating auto-context.
+ *
+ * Concretely, the test checks that the *largest* single user message content
+ * string is not disproportionately larger than the smallest — specifically,
+ * that the ratio does not exceed a generous 5× threshold (accounting for
+ * natural variation in typed text length and any attachment content).
+ * A ratio above 5× would strongly suggest auto-context is still being
+ * embedded per-message.
+ *
+ * The test also verifies that no individual user message `content` is over
+ * 2 000 characters, which is a pragmatic upper-bound for what a short typed
+ * test message with no attachments should ever need.
+ */
+async function testTokenCountNotInflatedByAutoContext(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-006-b: Token count not inflated by auto-context per message ──");
+
+	// Re-use the conversation from ACI-TEST-006-a (we already sent 3 messages)
+	// Send one more message to get an additional data-point
+	const responded = await sendMessage(
+		page,
+		"ACI-TEST-006-b: additional message to assess per-message content size",
+	);
+	if (!responded) {
+		console.log("    (No LLM response — checking JSONL directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+	const shot = await screenshot(page, "aci-006b-token-inflation");
+
+	const allMessages = getAllMessages();
+	const humanUserMessages = allMessages.filter(
+		(m) => m.role === "user" && !m.is_hook_injection,
+	);
+
+	if (humanUserMessages.length === 0) {
+		fail(
+			"ACI-TEST-006-b: token count not inflated by auto-context",
+			"No human user messages found in JSONL history",
+			shot,
+		);
+		return;
+	}
+
+	const contentLengths = humanUserMessages.map((m) => String(m.content ?? "").length);
+	const maxLen = Math.max(...contentLengths);
+	const minLen = Math.min(...contentLengths);
+
+	// Safety guard: each message's content must be <= 2 000 chars
+	// (short test prompts + no attachments → well under this bound)
+	const MAX_EXPECTED_CONTENT_CHARS = 2_000;
+	const oversizedMessages = contentLengths.filter((len) => len > MAX_EXPECTED_CONTENT_CHARS);
+
+	// Size ratio check: largest / smallest must be under 5× to rule out
+	// per-message auto-context accumulation
+	const SIZE_RATIO_THRESHOLD = 5;
+	const sizeRatio = minLen > 0 ? maxLen / minLen : maxLen;
+
+	const details =
+		`Human user messages: ${humanUserMessages.length}. ` +
+		`Content lengths: [${contentLengths.join(", ")}]. ` +
+		`Min: ${minLen}, Max: ${maxLen}, Ratio: ${sizeRatio.toFixed(2)}×`;
+
+	if (oversizedMessages.length > 0) {
+		fail(
+			"ACI-TEST-006-b: token count not inflated by auto-context",
+			`${oversizedMessages.length} user message(s) exceed ${MAX_EXPECTED_CONTENT_CHARS} chars — ` +
+				`likely still embedding auto-context XML in message content. ${details}`,
+			shot,
+		);
+	} else if (sizeRatio > SIZE_RATIO_THRESHOLD) {
+		fail(
+			"ACI-TEST-006-b: token count not inflated by auto-context",
+			`Content size ratio ${sizeRatio.toFixed(2)}× exceeds threshold ${SIZE_RATIO_THRESHOLD}× — ` +
+				`messages may be accumulating auto-context blocks. ${details}`,
+			shot,
+		);
+	} else {
+		pass(
+			"ACI-TEST-006-b: token count not inflated by auto-context",
+			`All ${humanUserMessages.length} user message(s) within expected size bounds. ${details}`,
+			shot,
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 async function main() {
-	console.log("=== Notor Auto-Context E2E Test (ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003 + ACI-TEST-004) ===\n");
+	console.log("=== Notor Auto-Context E2E Test (ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003 + ACI-TEST-004 + ACI-TEST-006) ===\n");
 
 	console.log("[0/4] Building plugin...");
 	execSync("npm run build", { cwd: path.resolve(__dirname, "..", ".."), stdio: "inherit" });
@@ -2213,6 +2466,23 @@ async function main() {
 		// ACI-TEST-004-c: folders are not comma-separated
 		await testVaultStructureNotCommaSeparated(page, collector);
 
+		// ── ACI-TEST-006 ────────────────────────────────────────────────────
+		console.log(
+			"\n[ACI-TEST-006] Running auto-context duplication tests...",
+		);
+
+		// Restore full settings and reload (ensure all auto-context sources are on)
+		const settingsForDupTest = buildSettings();
+		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settingsForDupTest, null, 2));
+		await page.reload();
+		await page.waitForTimeout(5_000);
+
+		// ACI-TEST-006-a: send 3 messages → verify no user message content has <auto-context>
+		await testMultipleMessagesNoAutoContextInHistory(page, collector);
+
+		// ACI-TEST-006-b: token count not inflated (content sizes stay small and proportional)
+		await testTokenCountNotInflatedByAutoContext(page, collector);
+
 		await screenshot(page, "99-final");
 
 		console.log("\n=== Collecting logs ===");
@@ -2240,7 +2510,7 @@ async function main() {
 	const passed = results.filter((r) => r.passed).length;
 	const failed = results.filter((r) => !r.passed).length;
 
-	console.log("\n=== Test Results (ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003 + ACI-TEST-004) ===");
+	console.log("\n=== Test Results (ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003 + ACI-TEST-004 + ACI-TEST-006) ===");
 	console.log(`Passed: ${passed}/${results.length}`);
 	console.log(`Failed: ${failed}/${results.length}`);
 
@@ -2251,12 +2521,18 @@ async function main() {
 		}
 	}
 
-	const resultsPath = path.join(RESULTS_DIR, "auto-context-results.json");
+	const resultsPath = path.join(RESULTS_DIR, "auto-context-test-results.json");
 	fs.writeFileSync(
 		resultsPath,
 		JSON.stringify({ passed, failed, total: results.length, results }, null, 2),
 	);
 	console.log(`\nResults written to: ${resultsPath}`);
+	// Also write to the canonical name for backward compatibility
+	const legacyResultsPath = path.join(RESULTS_DIR, "auto-context-results.json");
+	fs.writeFileSync(
+		legacyResultsPath,
+		JSON.stringify({ passed, failed, total: results.length, results }, null, 2),
+	);
 
 	if (failed > 0) process.exit(1);
 }
