@@ -142,7 +142,7 @@ This specification covers Phase 3 of the roadmap:
 - Returns the converted Markdown content in the tool result. Does not write to a note.
 - If the URL is unreachable or returns a non-200 HTTP status, returns a clear error to the LLM (including the HTTP status code).
 - If the domain matches a configured denylist entry, the request is rejected and a user-configurable error message is returned to the LLM indicating the domain is blocked.
-- No content truncation or pagination is applied to the returned Markdown.
+- A configurable maximum output size (default: 50,000 characters) is applied to the returned Markdown. When the fetched content exceeds this limit, the tool returns content up to the cap and appends a truncation notice to the LLM (e.g., "Note: page was truncated at 50,000 characters; total fetched length was X characters"). The cap is configurable in **Settings → Notor**.
 - Classified as read-only — available in both Plan and Act modes.
 
 ### FR-8: Domain denylist for `fetch_webpage`
@@ -179,20 +179,21 @@ This specification covers Phase 3 of the roadmap:
 - A `pre-send` hook can add content to the outgoing message context (e.g., inject a note summary or a timestamp).
 - When a hook executes a shell command, conversation metadata is made available to the command as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, and a UTC timestamp. Additional metadata fields may be added over time.
 - If a hook fails, the message is still sent and the hook failure is logged and surfaced as a non-blocking notice.
-- Hooks are configured in **Settings → Notor** and/or via workflow frontmatter.
+- Hooks are configured in **Settings → Notor**. (Workflow frontmatter hook configuration is deferred to Phase 4.)
 - The hook configuration is persisted across plugin reloads.
+- All `pre-send` hooks are awaited (up to a configurable timeout) before the message is dispatched to the LLM. If a hook times out, the message is still sent and the timeout is surfaced as a non-blocking notice.
 
 ### FR-11: LLM interaction hooks — `on-tool-call`
 
 **Description:** A hook that fires each time the LLM requests a tool invocation, before the tool is executed.
 
 **Acceptance criteria:**
-- The `on-tool-call` hook is triggered after the tool call is parsed but before the auto-approve check and tool execution.
+- The `on-tool-call` hook is triggered after the tool call has been approved (or auto-approved) and immediately before tool execution.
 - The hook receives the tool name and parameters as context.
 - When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, tool name, tool parameters (serialized), and a UTC timestamp.
 - Use cases include: logging each tool call to a vault note, triggering an audit workflow, or implementing custom approval logic.
-- Hook execution is non-blocking with respect to the tool dispatch pipeline: if a hook fails, tool execution proceeds and the failure is surfaced as a notice.
-- Configured in **Settings → Notor** and/or workflow frontmatter, persisted across reloads.
+- Hook execution is non-blocking with respect to the tool dispatch pipeline: if a hook fails, tool execution proceeds and the failure is surfaced as a notice. (Note: unlike `pre-send`, `on-tool-call` hooks do not block tool dispatch.)
+- Configured in **Settings → Notor**, persisted across reloads. (Workflow frontmatter configuration is deferred to Phase 4.)
 
 ### FR-12: LLM interaction hooks — `on-tool-result`
 
@@ -204,7 +205,7 @@ This specification covers Phase 3 of the roadmap:
 - When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, tool name, tool parameters (serialized), tool result (serialized), result status (success or error), and a UTC timestamp.
 - Use cases include: logging tool outputs to a vault note, triggering follow-up actions based on tool results, or auditing tool behavior.
 - Hook execution is non-blocking: if a hook fails, the tool result is still returned to the LLM and the failure is surfaced as a notice.
-- Configured in **Settings → Notor** and/or workflow frontmatter, persisted across reloads.
+- Configured in **Settings → Notor**, persisted across reloads. (Workflow frontmatter configuration is deferred to Phase 4.)
 
 ### FR-13: LLM interaction hooks — `after-completion`
 
@@ -216,7 +217,7 @@ This specification covers Phase 3 of the roadmap:
 - The hook receives the completed conversation turn as context (user message + assistant response + any tool calls/results).
 - When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, and a UTC timestamp.
 - Hook failures are non-blocking: the conversation continues and failures are surfaced as notices.
-- Configured in **Settings → Notor** and/or workflow frontmatter, persisted across reloads.
+- Configured in **Settings → Notor**, persisted across reloads. (Workflow frontmatter configuration is deferred to Phase 4.)
 
 ## Non-functional requirements
 
@@ -393,13 +394,23 @@ This specification covers Phase 3 of the roadmap:
 - A configured callback tied to a lifecycle event: `pre-send`, `on-tool-call`, `on-tool-result`, or `after-completion`.
 - Has a trigger event and an action: run a workflow, inject context, append to a vault note, or execute a shell command.
 - When the action is a shell command, conversation metadata (conversation UUID, active workflow name, hook event name, tool name/parameters/result where applicable, UTC timestamp) is passed to the command as environment variables.
-- Persisted in plugin settings.
-- Execution is asynchronous and non-blocking.
+- Persisted in plugin settings. Configured via **Settings → Notor** only; workflow frontmatter configuration is deferred to Phase 4.
+- Execution timing depends on event type: `pre-send` hooks are fully awaited before message dispatch; all other hook events (`on-tool-call`, `on-tool-result`, `after-completion`) are non-blocking fire-and-forget.
 
 ### DomainDenylistEntry
 - A single domain string or wildcard pattern (e.g., `*.example.com`) in the user-configured denylist for `fetch_webpage`.
 - Exact-domain entries match only that domain. Wildcard entries (e.g., `*.example.com`) match all sub-domains of the specified domain.
 - Persisted in plugin settings.
+
+## Clarifications
+
+### Session 2026-07-03
+
+- Q: How should timing work for context-injecting `pre-send` hooks, given the spec states hooks are async/non-blocking? → A: All `pre-send` hooks are fully awaited before message dispatch. Only after all `pre-send` hooks complete (or time out) is the message sent to the LLM provider. Other hook events (`on-tool-call`, `on-tool-result`, `after-completion`) remain non-blocking.
+- Q: Should hook configuration via workflow frontmatter be in scope for Phase 3, given workflows are deferred to Phase 4? → A: Settings-only in Phase 3. Hook configuration via workflow frontmatter is deferred to Phase 4 alongside the workflow definition system.
+- Q: Should hook shell commands require per-execution approval like the `execute_command` tool, or is configuration-time setup sufficient? → A: Approved at configuration time. When a user configures a hook shell command in Settings, that constitutes implicit approval for that command pattern. No per-execution approval prompt is shown when the hook fires.
+- Q: Should the `on-tool-call` hook fire before or after the user approval check? → A: After approval (or auto-approval), immediately before tool execution. The hook only fires for tool calls that will actually run; rejected tool calls do not trigger the hook.
+- Q: Should `fetch_webpage` have a maximum output size cap given that large pages could consume most or all of the context window? → A: Yes — a configurable character cap (default: 50,000 characters, approximately 12,500 tokens). When the fetched Markdown exceeds the cap, the tool returns content up to the cap and appends a truncation notice to the LLM indicating the page was truncated and including the total fetched length.
 
 ## Assumptions
 
@@ -408,7 +419,7 @@ This specification covers Phase 3 of the roadmap:
 - `execute_command` uses Node.js `child_process` APIs available in Obsidian's Electron environment. If mobile compatibility is required, this tool must be gated behind desktop-only detection.
 - Section header attachment (`[[Note#Section]]`) follows Obsidian's standard heading anchor format. Ambiguous or duplicated heading names are resolved by taking the first match.
 - The per-model context window token limit (needed for auto-compaction threshold calculation) is sourced from the model metadata already tracked in Phase 0/1 provider configuration. For models where this metadata is unavailable, auto-compaction falls back to the MVP truncation behavior.
-- Hooks that execute shell commands rely on the same `execute_command` runtime used by the tool of the same name, including the working directory and path restriction model. Hooks fire shell commands asynchronously; they are not subject to the tool approval UI that governs `execute_command` tool calls from the LLM.
+- Hooks that execute shell commands rely on the same `execute_command` runtime used by the tool of the same name, including the working directory and path restriction model. Hook shell commands are approved at configuration time (configuring the hook in Settings constitutes implicit user approval); they do not trigger the per-execution approval UI that governs `execute_command` tool calls from the LLM.
 
 ## Out of scope
 
@@ -416,10 +427,11 @@ The following are explicitly excluded from Phase 3 and deferred to later phases:
 
 - **Personas** (Phase 4): per-persona auto-approve overrides are not in scope; all Phase 3 features use global settings.
 - **Workflows** (Phase 4): while hooks can trigger workflows by name, the workflow definition system itself is Phase 4.
+- **Hook configuration via workflow frontmatter** (Phase 4): in Phase 3, hooks are configured only in **Settings → Notor**. Per-workflow hook overrides via frontmatter are deferred to Phase 4 alongside the workflow definition system.
 - **`<include_notes>` tag** (Phase 4): dynamic note injection via inline tags in system prompts or workflow bodies.
 - **Vault event hooks** (Phase 4): on-note-open, on-save, on-tag-change, on-schedule triggers are Phase 4.
 - **Content extraction / readability filtering for `fetch_webpage`**: the initial implementation returns raw Turndown conversion without stripping navigation, ads, or boilerplate.
-- **Pagination of `fetch_webpage` output**: no truncation or chunking of fetched content.
+- **Pagination of `fetch_webpage` output**: no multi-page chunking or sequential fetching. A single configurable character cap (default: 50,000 characters) applies; content beyond the cap is truncated in one pass with a notice to the LLM.
 - **Background or scheduled auto-fetch**: `fetch_webpage` is only invoked by an explicit LLM tool call during an active conversation.
 - **Multi-agent and background agents** (Phase 5).
 - **Custom MCP tools** (Phase 5).
