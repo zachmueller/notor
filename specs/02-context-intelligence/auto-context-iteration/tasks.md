@@ -146,19 +146,24 @@ This iteration addresses six issues discovered during manual testing of the Phas
 
 ## Step 2: E2E Tests
 
-### ACI-TEST-001: Auto-context in system prompt (not user message)
+### ACI-TEST-001: Auto-context in system prompt (not user message) ✅
 
 **Description:** Create e2e test scenarios validating that auto-context appears in the system prompt and NOT in the user message content after the ACI-001 migration.
 
-**Files:** `e2e/scripts/auto-context-test.ts` (extend or create new file)
+**Files:** `e2e/scripts/auto-context-test.ts` (rewritten with ACI-TEST-001 scenarios)
 
 **Dependencies:** ACI-001
 
 **Acceptance Criteria:**
-- [ ] Test: send a message → verify JSONL user message `content` does NOT contain `<auto-context>` XML
-- [ ] Test: send a message → verify JSONL user message `auto_context` field is absent/null
-- [ ] Test: send multiple messages → verify auto-context is NOT duplicated across user messages in the conversation history
-- [ ] Test: intercept or log the system prompt sent to the LLM → verify it contains the `<auto-context>` block with expected content (open notes, vault structure, OS)
+- [x] Test: send a message → verify JSONL user message `content` does NOT contain `<auto-context>` XML (ACI-TEST-001-a)
+- [x] Test: send a message → verify JSONL user message `auto_context` field is absent/null (ACI-TEST-001-b)
+- [x] Test: send multiple messages → verify auto-context is NOT duplicated across user messages in the conversation history (ACI-TEST-001-c)
+- [x] Test: intercept or log the system prompt sent to the LLM → verify it contains the `<auto-context>` block with expected content (open notes, vault structure, OS) (ACI-TEST-001-d/e)
+
+**Implementation notes:**
+- Added `log.debug("System prompt assembled", { systemPrompt })` to `src/chat/orchestrator.ts` so tests can intercept the assembled system prompt via the `LogCollector` (CDP console capture)
+- Rewrote `e2e/scripts/auto-context-test.ts` with 7 sub-tests (a–g) covering: content absent, metadata absent, no duplication, system prompt sections, per-call rebuild, disabled source omission, all disabled
+- Added `getSystemPromptLogs()` / `getLatestSystemPrompt()` helpers that filter the `LogCollector` structured logs for `ChatOrchestrator` / `"System prompt assembled"` entries
 
 ### ACI-TEST-002: Open notes detection — all tabs detected on first message
 

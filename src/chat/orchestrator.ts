@@ -333,6 +333,10 @@ export class ChatOrchestrator {
 					autoContext ?? undefined
 				);
 
+				// Emit assembled system prompt as a structured log so E2E tests
+				// can verify auto-context is present in the system prompt (ACI-TEST-001).
+				log.debug("System prompt assembled", { systemPrompt });
+
 				// 3. Build messages for LLM
 				const allMessages = this.conversationManager.getMessages();
 

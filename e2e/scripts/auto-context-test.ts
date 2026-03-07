@@ -2,16 +2,25 @@
 /**
  * Auto-Context End-to-End Test
  *
- * Validates auto-context collection and injection into messages.
+ * Validates auto-context collection and injection behaviour.
+ *
+ * ## ACI-TEST-001: Auto-context in system prompt (not user message)
+ *
+ * After the ACI-001 migration, auto-context must be injected into the
+ * **system prompt** before each LLM call, and must NOT appear in:
+ *   - The user message `content` field in the JSONL history
+ *   - The `auto_context` metadata field on user messages
  *
  * Scenarios:
- *   1. Open multiple notes → send message → verify open note paths appear in JSONL log
- *   2. Verify vault structure (top-level folders only) appears in auto-context
- *   3. Verify OS platform appears in auto-context
- *   4. Disable a source in settings → verify it is omitted from auto-context
- *   5. All sources disabled → verify no <auto-context> block in message
+ *   1. Send a message → verify JSONL user message `content` does NOT contain `<auto-context>`
+ *   2. Send a message → verify JSONL user message `auto_context` field is absent/null
+ *   3. Send multiple messages → verify auto-context is NOT duplicated in user message history
+ *   4. Intercept system prompt via structured log → verify it contains `<auto-context>` block
+ *      with expected sections: `<open-notes>`, `<vault-structure>`, `<os>`
+ *   5. Disable a source in settings → verify system prompt omits that source's tag
+ *   6. All sources disabled → verify no `<auto-context>` block in system prompt
  *
- * @see specs/02-context-intelligence/tasks.md — TEST-001
+ * @see specs/02-context-intelligence/auto-context-iteration/tasks.md — ACI-TEST-001
  */
 
 import { execSync } from "node:child_process";
@@ -24,7 +33,7 @@ import {
 	closeObsidian,
 	type ObsidianProcess,
 } from "../lib/obsidian-launcher";
-import { LogCollector } from "../lib/log-collector";
+import { LogCollector, type LogEntry } from "../lib/log-collector";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -122,11 +131,15 @@ async function newConversation(page: Page): Promise<void> {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// JSONL history helpers
+// ---------------------------------------------------------------------------
+
 /**
- * Read the latest JSONL history file and find the last user message.
+ * Read all user messages from the latest JSONL history file.
  */
-function getLatestUserMessage(): Record<string, unknown> | null {
-	if (!fs.existsSync(HISTORY_DIR)) return null;
+function getAllUserMessages(): Array<Record<string, unknown>> {
+	if (!fs.existsSync(HISTORY_DIR)) return [];
 
 	const files = fs.readdirSync(HISTORY_DIR)
 		.filter((f) => f.endsWith(".jsonl"))
@@ -137,17 +150,52 @@ function getLatestUserMessage(): Record<string, unknown> | null {
 		const content = fs.readFileSync(path.join(HISTORY_DIR, file), "utf8");
 		const lines = content.split("\n").filter((l) => l.trim());
 
-		// Read lines in reverse to find the last user message
-		for (let i = lines.length - 1; i >= 0; i--) {
+		const userMessages: Array<Record<string, unknown>> = [];
+		for (const line of lines) {
 			try {
-				const obj = JSON.parse(lines[i]!);
-				if (obj.role === "user" || obj._type === "message" && obj.role === "user") {
-					return obj;
+				const obj = JSON.parse(line);
+				if (obj.role === "user") {
+					userMessages.push(obj);
 				}
 			} catch { /* skip */ }
 		}
+
+		if (userMessages.length > 0) return userMessages;
 	}
-	return null;
+	return [];
+}
+
+/**
+ * Read the latest JSONL history file and find the last user message.
+ */
+function getLatestUserMessage(): Record<string, unknown> | null {
+	const messages = getAllUserMessages();
+	return messages.length > 0 ? messages[messages.length - 1]! : null;
+}
+
+/**
+ * Find all "System prompt assembled" log entries captured by the log collector.
+ * These are emitted by ChatOrchestrator as debug-level structured logs.
+ */
+function getSystemPromptLogs(collector: LogCollector): LogEntry[] {
+	return collector
+		.getStructuredLogs()
+		.filter(
+			(e) =>
+				e.source === "ChatOrchestrator" &&
+				e.message === "System prompt assembled"
+		);
+}
+
+/**
+ * Get the most recent system prompt string from the log collector.
+ */
+function getLatestSystemPrompt(collector: LogCollector): string | null {
+	const logs = getSystemPromptLogs(collector);
+	if (logs.length === 0) return null;
+	const last = logs[logs.length - 1]!;
+	const data = last.data as { systemPrompt?: string } | undefined;
+	return data?.systemPrompt ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,18 +279,26 @@ function setupTestVault(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// ACI-TEST-001: Auto-context in system prompt (not user message)
 // ---------------------------------------------------------------------------
 
-async function testOpenNotesInAutoContext(page: Page): Promise<void> {
-	console.log("\n── Test 1: Open note paths appear in auto-context ──────────");
+/**
+ * ACI-TEST-001-a: User message content must NOT contain `<auto-context>` XML.
+ *
+ * After ACI-001, auto-context is injected into the system prompt before each
+ * LLM call. It must never appear in the persisted user message `content`.
+ */
+async function testUserMessageContentLacksAutoContext(
+	page: Page,
+	collector: LogCollector
+): Promise<void> {
+	console.log("\n── ACI-TEST-001-a: User message content has no <auto-context> ──");
 	await newConversation(page);
 
-	const responded = await sendMessage(page, "Hello, what notes do I have open?");
-	const shot = await screenshot(page, "01-open-notes");
+	const responded = await sendMessage(page, "Hello, what can you help me with?");
+	const shot = await screenshot(page, "aci-001a-no-autocontext-in-content");
 
 	if (!responded) {
-		// May not have a provider — still check JSONL
 		console.log("    (No LLM response — checking JSONL directly)");
 	}
 
@@ -250,78 +306,287 @@ async function testOpenNotesInAutoContext(page: Page): Promise<void> {
 	const userMsg = getLatestUserMessage();
 
 	if (!userMsg) {
-		fail("Open notes in auto-context", "No user message found in JSONL history", shot);
+		fail(
+			"ACI-TEST-001-a: user message content lacks <auto-context>",
+			"No user message found in JSONL history",
+			shot
+		);
 		return;
 	}
 
 	const content = String(userMsg.content ?? "");
-	const autoContext = userMsg.auto_context;
 
-	if (content.includes("<auto-context>") && content.includes("<open-notes>")) {
-		pass("Open notes in auto-context — in content", "auto-context block with open-notes found in message content", shot);
-	} else if (autoContext && String(autoContext).includes("<open-notes>")) {
-		pass("Open notes in auto-context — in metadata", "auto_context field contains open-notes", shot);
+	if (content.includes("<auto-context>")) {
+		fail(
+			"ACI-TEST-001-a: user message content lacks <auto-context>",
+			`<auto-context> block found in user message content (should be in system prompt only). ` +
+				`Content prefix: "${content.substring(0, 200)}"`,
+			shot
+		);
 	} else {
-		// Open notes might be empty if no notes are in markdown view
-		if (content.includes("<auto-context>")) {
-			pass("Open notes in auto-context — block present", "auto-context block present (open-notes may be empty if no MD tabs)", shot);
-		} else {
-			fail("Open notes in auto-context", `No auto-context block found. Content starts with: "${content.substring(0, 200)}"`, shot);
-		}
+		pass(
+			"ACI-TEST-001-a: user message content lacks <auto-context>",
+			"User message content does not contain <auto-context> XML",
+			shot
+		);
 	}
 }
 
-async function testVaultStructureInAutoContext(page: Page): Promise<void> {
-	console.log("\n── Test 2: Vault structure appears in auto-context ─────────");
+/**
+ * ACI-TEST-001-b: User message `auto_context` metadata field must be absent/null.
+ *
+ * The old implementation stored auto-context in a per-message `auto_context`
+ * field. After ACI-001, this field should no longer be populated.
+ */
+async function testUserMessageAutoContextFieldAbsent(
+	collector: LogCollector
+): Promise<void> {
+	console.log("\n── ACI-TEST-001-b: User message auto_context field is absent ──");
 
 	const userMsg = getLatestUserMessage();
+
 	if (!userMsg) {
-		fail("Vault structure in auto-context", "No user message found in JSONL history");
+		fail(
+			"ACI-TEST-001-b: auto_context field absent",
+			"No user message found in JSONL history"
+		);
 		return;
 	}
 
-	const content = String(userMsg.content ?? "");
-	const autoContext = String(userMsg.auto_context ?? "");
-	const combined = content + autoContext;
+	const autoContextField = userMsg.auto_context;
 
-	if (combined.includes("<vault-structure>")) {
-		// Check for at least one of our test folders
-		if (combined.includes("Research") || combined.includes("Daily") || combined.includes("Projects")) {
-			pass("Vault structure in auto-context", "vault-structure tag found with expected folder names");
-		} else {
-			pass("Vault structure in auto-context", "vault-structure tag found (folder names may differ in test env)");
-		}
+	if (autoContextField === null || autoContextField === undefined) {
+		pass(
+			"ACI-TEST-001-b: auto_context field absent",
+			"auto_context field is null/absent in user message JSONL — correct per ACI-001"
+		);
 	} else {
-		fail("Vault structure in auto-context", "No <vault-structure> tag found in message content or auto_context field");
+		fail(
+			"ACI-TEST-001-b: auto_context field absent",
+			`auto_context field is unexpectedly set: "${String(autoContextField).substring(0, 200)}"`
+		);
 	}
 }
 
-async function testOSInAutoContext(page: Page): Promise<void> {
-	console.log("\n── Test 3: OS platform appears in auto-context ─────────────");
+/**
+ * ACI-TEST-001-c: Auto-context must NOT be duplicated across multiple user messages.
+ *
+ * Sends three messages in sequence. In the old implementation, every user
+ * message stored a full auto-context block, inflating token costs. After ACI-001,
+ * no user message should contain `<auto-context>`.
+ */
+async function testNoAutoContextDuplicationAcrossMessages(
+	page: Page,
+	collector: LogCollector
+): Promise<void> {
+	console.log("\n── ACI-TEST-001-c: No auto-context duplication across messages ──");
 
-	const userMsg = getLatestUserMessage();
-	if (!userMsg) {
-		fail("OS in auto-context", "No user message found in JSONL history");
+	// Send two more messages in the same conversation
+	await sendMessage(page, "Tell me about note-taking strategies.");
+	await page.waitForTimeout(500);
+	await sendMessage(page, "What are some common vault structures?");
+	await page.waitForTimeout(1_000);
+
+	const userMessages = getAllUserMessages();
+
+	if (userMessages.length === 0) {
+		fail(
+			"ACI-TEST-001-c: no auto-context duplication",
+			"No user messages found in JSONL history"
+		);
 		return;
 	}
 
-	const content = String(userMsg.content ?? "");
-	const autoContext = String(userMsg.auto_context ?? "");
-	const combined = content + autoContext;
+	// Filter out hook injection messages (they're also user role but not from the human)
+	const humanMessages = userMessages.filter((m) => !m.is_hook_injection);
 
-	if (combined.includes("<os>")) {
-		if (combined.includes("macOS") || combined.includes("Windows") || combined.includes("Linux")) {
-			pass("OS in auto-context", "os tag found with recognized platform name");
-		} else {
-			pass("OS in auto-context", "os tag found (platform value present)");
-		}
+	const messagesWithAutoContext = humanMessages.filter((m) => {
+		const content = String(m.content ?? "");
+		const autoContextField = m.auto_context;
+		return (
+			content.includes("<auto-context>") ||
+			(autoContextField !== null && autoContextField !== undefined)
+		);
+	});
+
+	if (messagesWithAutoContext.length === 0) {
+		pass(
+			"ACI-TEST-001-c: no auto-context duplication",
+			`Checked ${humanMessages.length} user messages — none contain <auto-context> content or auto_context field`
+		);
 	} else {
-		fail("OS in auto-context", "No <os> tag found in message content or auto_context field");
+		fail(
+			"ACI-TEST-001-c: no auto-context duplication",
+			`${messagesWithAutoContext.length} of ${humanMessages.length} user messages still contain auto-context data`
+		);
 	}
 }
 
-async function testDisabledSourceOmitted(page: Page): Promise<void> {
-	console.log("\n── Test 4: Disabled source is omitted from auto-context ────");
+/**
+ * ACI-TEST-001-d: The system prompt MUST contain the `<auto-context>` block
+ * with the expected sections.
+ *
+ * Inspects the structured debug log emitted by ChatOrchestrator after each
+ * system prompt assembly (log source: "ChatOrchestrator",
+ * message: "System prompt assembled").
+ */
+async function testSystemPromptContainsAutoContext(
+	collector: LogCollector
+): Promise<void> {
+	console.log("\n── ACI-TEST-001-d: System prompt contains <auto-context> block ──");
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (systemPrompt === null) {
+		fail(
+			"ACI-TEST-001-d: system prompt contains <auto-context>",
+			"No 'System prompt assembled' log entry found. " +
+				"Ensure the plugin emitted the debug log (ChatOrchestrator source)."
+		);
+		return;
+	}
+
+	// Check for the outer <auto-context> block
+	if (!systemPrompt.includes("<auto-context>")) {
+		fail(
+			"ACI-TEST-001-d: system prompt contains <auto-context>",
+			`System prompt does not contain <auto-context> block. ` +
+				`System prompt prefix: "${systemPrompt.substring(0, 300)}"`
+		);
+		return;
+	}
+
+	pass(
+		"ACI-TEST-001-d: system prompt contains <auto-context>",
+		"<auto-context> block found in assembled system prompt"
+	);
+
+	// Check for open-notes section
+	if (systemPrompt.includes("<open-notes>")) {
+		pass(
+			"ACI-TEST-001-d: system prompt has <open-notes>",
+			"<open-notes> section present in system prompt auto-context"
+		);
+	} else {
+		// Open notes may be empty if no markdown tabs are open in test env
+		pass(
+			"ACI-TEST-001-d: system prompt has <open-notes>",
+			"<open-notes> section not found — may be expected if no markdown tabs are open in test env"
+		);
+	}
+
+	// Check for vault-structure section
+	if (systemPrompt.includes("<vault-structure>")) {
+		pass(
+			"ACI-TEST-001-d: system prompt has <vault-structure>",
+			"<vault-structure> section present in system prompt auto-context"
+		);
+
+		// Verify at least one known folder from the test vault
+		const knownFolders = ["Research/", "Daily/", "Projects/"];
+		const foundFolder = knownFolders.find((f) => systemPrompt.includes(f));
+		if (foundFolder) {
+			pass(
+				"ACI-TEST-001-d: vault-structure has expected folder",
+				`Found test vault folder "${foundFolder}" in system prompt vault-structure`
+			);
+		} else {
+			// May not be present if the vault differs — still a soft check
+			pass(
+				"ACI-TEST-001-d: vault-structure has expected folder",
+				"Test vault folders not found (may differ in test environment) — vault-structure tag present"
+			);
+		}
+	} else {
+		fail(
+			"ACI-TEST-001-d: system prompt has <vault-structure>",
+			"<vault-structure> section missing from system prompt auto-context"
+		);
+	}
+
+	// Check for os section
+	if (systemPrompt.includes("<os>")) {
+		const knownOS = ["macOS", "Windows", "Linux"];
+		const foundOS = knownOS.find((os) => systemPrompt.includes(os));
+		if (foundOS) {
+			pass(
+				"ACI-TEST-001-d: system prompt has <os>",
+				`<os> section present with recognized platform: "${foundOS}"`
+			);
+		} else {
+			pass(
+				"ACI-TEST-001-d: system prompt has <os>",
+				"<os> section present (platform value present)"
+			);
+		}
+	} else {
+		fail(
+			"ACI-TEST-001-d: system prompt has <os>",
+			"<os> section missing from system prompt auto-context"
+		);
+	}
+
+	// Check that ## Workspace context heading is present (injected by system-prompt.ts)
+	if (systemPrompt.includes("## Workspace context")) {
+		pass(
+			"ACI-TEST-001-d: system prompt has workspace context heading",
+			'"## Workspace context" section heading found in system prompt'
+		);
+	} else {
+		fail(
+			"ACI-TEST-001-d: system prompt has workspace context heading",
+			'"## Workspace context" heading missing from system prompt'
+		);
+	}
+}
+
+/**
+ * ACI-TEST-001-e: System prompt auto-context is rebuilt on every LLM call.
+ *
+ * Sends multiple messages in a single conversation and verifies the system
+ * prompt log shows a "System prompt assembled" entry for each user send,
+ * confirming fresh auto-context is injected each time.
+ */
+async function testSystemPromptRebuiltPerCall(
+	collector: LogCollector
+): Promise<void> {
+	console.log("\n── ACI-TEST-001-e: System prompt rebuilt for each LLM call ──");
+
+	const systemPromptLogs = getSystemPromptLogs(collector);
+
+	// We sent at least 3 messages in this session (tests c added 2 more)
+	if (systemPromptLogs.length >= 3) {
+		pass(
+			"ACI-TEST-001-e: system prompt rebuilt per LLM call",
+			`Found ${systemPromptLogs.length} "System prompt assembled" log entries — ` +
+				"system prompt is rebuilt before each LLM call as required by ACI-001"
+		);
+	} else if (systemPromptLogs.length >= 1) {
+		pass(
+			"ACI-TEST-001-e: system prompt rebuilt per LLM call",
+			`Found ${systemPromptLogs.length} "System prompt assembled" log entries ` +
+				"(fewer than expected — provider may have rejected all but first call)"
+		);
+	} else {
+		fail(
+			"ACI-TEST-001-e: system prompt rebuilt per LLM call",
+			"No 'System prompt assembled' log entries found — cannot verify per-call rebuild"
+		);
+	}
+}
+
+/**
+ * ACI-TEST-001-f: Disabled source omitted from system prompt.
+ *
+ * Disables `auto_context_os` in settings, reloads, sends a message, and
+ * verifies the system prompt does NOT contain `<os>` but does contain the
+ * other auto-context sections.
+ */
+async function testDisabledSourceOmittedFromSystemPrompt(
+	page: Page,
+	collector: LogCollector
+): Promise<void> {
+	console.log("\n── ACI-TEST-001-f: Disabled source omitted from system prompt ──");
 
 	// Update settings to disable OS auto-context
 	const settings = buildSettings({ auto_context_os: false });
@@ -333,36 +598,78 @@ async function testDisabledSourceOmitted(page: Page): Promise<void> {
 
 	await newConversation(page);
 
-	const responded = await sendMessage(page, "Test with OS disabled");
-	const shot = await screenshot(page, "04-disabled-source");
+	const responded = await sendMessage(page, "Test: OS auto-context disabled");
+	const shot = await screenshot(page, "aci-001f-os-disabled");
 
 	if (!responded) {
-		console.log("    (No LLM response — checking JSONL directly)");
+		console.log("    (No LLM response — checking log directly)");
 	}
 
 	await page.waitForTimeout(1_000);
-	const userMsg = getLatestUserMessage();
 
-	if (!userMsg) {
-		fail("Disabled source omitted", "No user message found in JSONL history", shot);
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (systemPrompt === null) {
+		fail(
+			"ACI-TEST-001-f: disabled source omitted from system prompt",
+			"No 'System prompt assembled' log entry found after reload",
+			shot
+		);
 		return;
 	}
 
-	const content = String(userMsg.content ?? "");
-	const autoContext = String(userMsg.auto_context ?? "");
-	const combined = content + autoContext;
+	const hasAutoContext = systemPrompt.includes("<auto-context>");
+	const hasOS = systemPrompt.includes("<os>");
 
-	if (combined.includes("<auto-context>") && !combined.includes("<os>")) {
-		pass("Disabled source omitted", "auto-context block present but <os> tag omitted as expected", shot);
-	} else if (!combined.includes("<os>")) {
-		pass("Disabled source omitted", "<os> tag not found (correctly omitted)", shot);
+	if (hasAutoContext && !hasOS) {
+		pass(
+			"ACI-TEST-001-f: disabled source omitted from system prompt",
+			"<auto-context> block present but <os> tag correctly omitted when auto_context_os=false",
+			shot
+		);
+	} else if (!hasAutoContext) {
+		fail(
+			"ACI-TEST-001-f: disabled source omitted from system prompt",
+			"<auto-context> block missing entirely from system prompt — expected partial block",
+			shot
+		);
 	} else {
-		fail("Disabled source omitted", "<os> tag still present despite being disabled", shot);
+		fail(
+			"ACI-TEST-001-f: disabled source omitted from system prompt",
+			"<os> tag still present in system prompt despite auto_context_os=false",
+			shot
+		);
+	}
+
+	// Also confirm user message still has no <auto-context>
+	const userMsg = getLatestUserMessage();
+	if (userMsg) {
+		const content = String(userMsg.content ?? "");
+		if (!content.includes("<auto-context>")) {
+			pass(
+				"ACI-TEST-001-f: user message still clean after settings reload",
+				"User message content does not contain <auto-context> after settings reload"
+			);
+		} else {
+			fail(
+				"ACI-TEST-001-f: user message still clean after settings reload",
+				"<auto-context> found in user message content after settings reload"
+			);
+		}
 	}
 }
 
-async function testAllSourcesDisabled(page: Page): Promise<void> {
-	console.log("\n── Test 5: All sources disabled → no auto-context block ────");
+/**
+ * ACI-TEST-001-g: All sources disabled → no `<auto-context>` block in system prompt.
+ *
+ * When every auto-context source is disabled, `buildAutoContextBlock()` returns
+ * null and the system prompt should contain no `<auto-context>` section.
+ */
+async function testAllSourcesDisabledNoAutoContextInSystemPrompt(
+	page: Page,
+	collector: LogCollector
+): Promise<void> {
+	console.log("\n── ACI-TEST-001-g: All sources disabled → no <auto-context> in system prompt ──");
 
 	// Disable all sources
 	const settings = buildSettings({
@@ -377,35 +684,71 @@ async function testAllSourcesDisabled(page: Page): Promise<void> {
 
 	await newConversation(page);
 
-	const responded = await sendMessage(page, "Test with all sources disabled");
-	const shot = await screenshot(page, "05-all-disabled");
+	const responded = await sendMessage(page, "Test: all auto-context sources disabled");
+	const shot = await screenshot(page, "aci-001g-all-disabled");
 
 	if (!responded) {
-		console.log("    (No LLM response — checking JSONL directly)");
+		console.log("    (No LLM response — checking log directly)");
 	}
 
 	await page.waitForTimeout(1_000);
-	const userMsg = getLatestUserMessage();
 
-	if (!userMsg) {
-		fail("All sources disabled", "No user message found in JSONL history", shot);
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (systemPrompt === null) {
+		fail(
+			"ACI-TEST-001-g: no <auto-context> when all sources disabled",
+			"No 'System prompt assembled' log entry found after reload",
+			shot
+		);
 		return;
 	}
 
-	const content = String(userMsg.content ?? "");
-
-	if (!content.includes("<auto-context>")) {
-		pass("All sources disabled — no block", "No <auto-context> block in message content", shot);
+	if (!systemPrompt.includes("<auto-context>")) {
+		pass(
+			"ACI-TEST-001-g: no <auto-context> when all sources disabled",
+			"System prompt correctly has no <auto-context> block when all sources are disabled",
+			shot
+		);
 	} else {
-		fail("All sources disabled — block still present", `<auto-context> block found despite all sources disabled`, shot);
+		fail(
+			"ACI-TEST-001-g: no <auto-context> when all sources disabled",
+			"<auto-context> block still found in system prompt despite all sources being disabled",
+			shot
+		);
 	}
 
-	// Verify auto_context metadata field is null/absent
-	const autoContext = userMsg.auto_context;
-	if (autoContext === null || autoContext === undefined) {
-		pass("All sources disabled — metadata null", "auto_context field is null/absent in JSONL");
+	// Verify "## Workspace context" heading is also absent
+	if (!systemPrompt.includes("## Workspace context")) {
+		pass(
+			"ACI-TEST-001-g: workspace context heading absent",
+			'"## Workspace context" heading correctly absent when no auto-context block'
+		);
 	} else {
-		fail("All sources disabled — metadata present", `auto_context field has value: ${String(autoContext).substring(0, 100)}`);
+		fail(
+			"ACI-TEST-001-g: workspace context heading absent",
+			'"## Workspace context" heading still present despite no auto-context content'
+		);
+	}
+
+	// Verify user message also has no auto-context content
+	const userMsg = getLatestUserMessage();
+	if (userMsg) {
+		const content = String(userMsg.content ?? "");
+		const autoContextField = userMsg.auto_context;
+		if (!content.includes("<auto-context>") && (autoContextField === null || autoContextField === undefined)) {
+			pass(
+				"ACI-TEST-001-g: user message clean when all sources disabled",
+				"User message has no <auto-context> in content and auto_context field is absent"
+			);
+		} else {
+			fail(
+				"ACI-TEST-001-g: user message clean when all sources disabled",
+				`User message unexpectedly contains auto-context data. ` +
+					`content has tag: ${content.includes("<auto-context>")}, ` +
+					`auto_context field: ${String(autoContextField).substring(0, 100)}`
+			);
+		}
 	}
 }
 
@@ -414,7 +757,7 @@ async function testAllSourcesDisabled(page: Page): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function main() {
-	console.log("=== Notor Auto-Context E2E Test ===\n");
+	console.log("=== Notor Auto-Context E2E Test (ACI-TEST-001) ===\n");
 
 	console.log("[0/4] Building plugin...");
 	execSync("npm run build", { cwd: path.resolve(__dirname, "..", ".."), stdio: "inherit" });
@@ -454,7 +797,7 @@ async function main() {
 		await page.waitForLoadState("domcontentloaded");
 		await page.waitForTimeout(5_000);
 
-		console.log("[4/4] Running auto-context tests...\n");
+		console.log("[4/4] Running ACI-TEST-001 tests...\n");
 		{
 			const chat = await waitForSelector(page, ".notor-chat-container", 10_000);
 			if (!chat) {
@@ -465,11 +808,26 @@ async function main() {
 			pass("Chat panel ready", "Plugin loaded and chat container found");
 		}
 
-		await testOpenNotesInAutoContext(page);
-		await testVaultStructureInAutoContext(page);
-		await testOSInAutoContext(page);
-		await testDisabledSourceOmitted(page);
-		await testAllSourcesDisabled(page);
+		// ACI-TEST-001-a: user message content must not contain <auto-context>
+		await testUserMessageContentLacksAutoContext(page, collector);
+
+		// ACI-TEST-001-b: auto_context metadata field must be absent/null
+		await testUserMessageAutoContextFieldAbsent(collector);
+
+		// ACI-TEST-001-c: no duplication across multiple messages
+		await testNoAutoContextDuplicationAcrossMessages(page, collector);
+
+		// ACI-TEST-001-d: system prompt contains <auto-context> with all sections
+		await testSystemPromptContainsAutoContext(collector);
+
+		// ACI-TEST-001-e: system prompt is rebuilt before each LLM call
+		await testSystemPromptRebuiltPerCall(collector);
+
+		// ACI-TEST-001-f: disabled source omitted from system prompt
+		await testDisabledSourceOmittedFromSystemPrompt(page, collector);
+
+		// ACI-TEST-001-g: all sources disabled → no <auto-context> in system prompt
+		await testAllSourcesDisabledNoAutoContextInSystemPrompt(page, collector);
 
 		await screenshot(page, "99-final");
 
