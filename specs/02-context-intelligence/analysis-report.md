@@ -1,18 +1,18 @@
 # Cross-Artifact Analysis Report
 
 **Generated:** 2026-07-03T18:08:00+13:00
-**Updated:** 2026-07-03T18:53:00+13:00
+**Updated:** 2026-07-03T19:05:00+13:00
 **Feature:** Phase 3 — Context & Intelligence
 **Branch:** feature/02-context-intelligence
 **Artifacts:** spec.md, plan.md, tasks.md (+ data-model.md)
 
 ## Executive Summary
 
-- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ 0, Medium: ~~5~~ ~~4~~ ~~3~~ 2, Low: 3)
+- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ ~~1~~ 0, Medium: ~~5~~ ~~4~~ ~~3~~ 2, Low: 3)
 - **Coverage:** 100% of functional requirements (FR-24 through FR-36) mapped to tasks
 - **Readiness:** READY FOR IMPLEMENTATION — all critical and high-severity issues resolved
 
-The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. ~~One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`) — **resolved 2026-07-03**.~~ ~~Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing.~~ ~~One high-severity finding remains (missing hook path restriction AC).~~ All high-severity findings resolved. ~~Five~~ ~~Four~~ Three medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
+The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. ~~One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`) — **resolved 2026-07-03**.~~ ~~Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing.~~ ~~One high-severity finding remains (missing hook path restriction AC).~~ All high-severity findings resolved (including C1 — `[[` autocomplete native API requirement now explicit in ATT-005). ~~Five~~ ~~Four~~ Three medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
 
 ---
 
@@ -21,7 +21,7 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 | ID | Category | Severity | Location(s) | Summary | Status |
 |----|----------|----------|-------------|---------|--------|
 | N1 | Inconsistency | ~~CRITICAL~~ | All 02-context-intelligence docs vs 01-mvp docs | FR/NFR/ENV/TOOL IDs renumbered to be globally unique | ✅ RESOLVED |
-| C1 | Coverage | HIGH | spec.md FR-24, tasks.md | `[[` shortcut in chat input not covered by a dedicated acceptance criterion in ATT-005 | Open |
+| C1 | Coverage | ~~HIGH~~ | spec.md FR-24, tasks.md ATT-005 | `[[` autocomplete native API requirement now explicit in ATT-005 AC | ✅ RESOLVED |
 | I1 | Inconsistency | ~~HIGH~~ | tasks.md phase numbering vs plan.md feature groups | tasks.md phases renamed to "Steps" to avoid collision with spec-level "Phase 3" label | ✅ RESOLVED |
 | C2 | Coverage | ~~MEDIUM~~ | spec.md FR-29, tasks.md | Manual compaction trigger (button/command) mentioned in FR-29 AC but only noted parenthetically in COMP-002/COMP-004; no standalone task for command registration | ✅ RESOLVED |
 | I2 | Inconsistency | ~~MEDIUM~~ | spec.md NFR-7, tasks.md | NFR-7 states hook shell commands use same working directory restrictions as `execute_command`; HOOK-002 ACs now enforce vault root cwd + allow-list | ✅ RESOLVED |
@@ -41,7 +41,7 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 
 | Requirement | Tasks | Status | Notes |
 |-------------|-------|--------|-------|
-| FR-24: Note attachment via file picker | ATT-001, ATT-002, ATT-004, ATT-005, ATT-007, ATT-008 | ✓ Complete | `[[` shortcut covered in ATT-005 AC but could be more explicit |
+| FR-24: Note attachment via file picker | ATT-001, ATT-002, ATT-004, ATT-005, ATT-007, ATT-008 | ✓ Complete | `[[` native autocomplete requirement now explicit in ATT-005 AC |
 | FR-25: External file attachment | ATT-001, ATT-003, ATT-006, ATT-007, ATT-008 | ✓ Complete | |
 | FR-26: Auto-context — open note paths | CTX-001, CTX-004, CTX-005, CTX-006 | ✓ Complete | |
 | FR-27: Auto-context — vault structure | CTX-002, CTX-004, CTX-005, CTX-006 | ✓ Complete | |
@@ -115,12 +115,13 @@ All internal cross-references (dependency lists, coverage matrices, acceptance c
 
 ---
 
-### C1 — `[[` shortcut trigger not explicitly covered in task AC (HIGH)
+### C1 — `[[` shortcut trigger not explicitly covered in task AC ~~(HIGH)~~ ✅ RESOLVED
 
 **Location:** spec.md FR-24 (second AC bullet), tasks.md ATT-005
-**Detail:** spec.md FR-24 states: "When the user types `[[` in the Notor chat input box, the vault file picker opens directly (bypassing the menu)." ATT-005 includes a general AC for `[[` trigger ("Typing `[[` in the chat input triggers the vault picker directly (bypassing the menu)"), so this is actually covered. However, the behavior of applying "the same wikilink autocomplete behavior as Obsidian's native note editor — showing matching note titles and allowing selection to complete the link" is only in the spec, not restated in the task AC.
+**Status:** ✅ **RESOLVED** — 2026-07-03
+**Resolution:** Added an explicit AC bullet to ATT-005 in tasks.md: "The `[[` autocomplete must use Obsidian's native suggest/autocomplete APIs (e.g., `EditorSuggest`, `SuggestModal`) to guarantee behavior identical to the native wikilink autocomplete in Obsidian's note editor (matching, sort order, visual style). A custom implementation is acceptable only if RES-001 research proves native APIs are unusable in the `ItemView` context." This ensures the spec's requirement for native-parity wikilink autocomplete behavior is explicitly captured in the task acceptance criteria, with a strict preference for native APIs and a documented fallback condition.
 
-**Recommendation:** This finding is **borderline adequate** — the task AC does reference `[[` trigger and fuzzy matching. Consider adding a note to ATT-005 AC that the `[[` behavior should mirror Obsidian's native wikilink autocomplete UX for consistency.
+**Original detail:** spec.md FR-24 states: "When the user types `[[` in the Notor chat input box, the vault file picker opens directly (bypassing the menu), applying the same wikilink autocomplete behavior as Obsidian's native note editor — showing matching note titles and allowing selection to complete the link." ATT-005 included a general AC for `[[` trigger ("Typing `[[` in the chat input triggers the vault picker directly (bypassing the menu)"), but did not restate the requirement that the behavior must mirror Obsidian's native wikilink autocomplete UX.
 
 ---
 

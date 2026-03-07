@@ -249,6 +249,7 @@
 - [ ] Attachment button in chat input area opens a menu with "Attach vault note" and "Attach external file" options
 - [ ] "Attach vault note" opens vault file picker with autocomplete (using approach determined by R-1)
 - [ ] Typing `[[` in the chat input triggers the vault picker directly (bypassing the menu)
+- [ ] The `[[` autocomplete must use Obsidian's native suggest/autocomplete APIs (e.g., `EditorSuggest`, `SuggestModal`) to guarantee behavior identical to the native wikilink autocomplete in Obsidian's note editor (matching, sort order, visual style). A custom implementation is acceptable only if RES-001 research proves native APIs are unusable in the `ItemView` context.
 - [ ] Fuzzy matching of vault note names
 - [ ] Section header references supported: after selecting a note, `#` triggers section header autocomplete via `metadataCache`
 - [ ] Selected note/section creates an Attachment and triggers chip creation
