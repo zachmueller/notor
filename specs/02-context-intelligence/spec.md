@@ -72,7 +72,8 @@ This specification covers Phase 3 of the roadmap:
 - Attached notes appear as labeled chips/tags in the input area before the message is sent.
 - The user can remove individual attachments before sending.
 - Duplicate attachments are silently deduplicated: if the same path and section reference is already present as a chip, a second attempt to add it is ignored without showing an error or notification.
-- Attached note contents are included in the user message sent to the LLM.
+- Attached note contents are included in the user message sent to the LLM, formatted as an XML-tagged block prepended to the user message content. Each attachment is wrapped in a descriptive tag within an `<attachments>` container: vault notes use `<vault-note path="...">`, vault note sections use `<vault-note path="..." section="...">`, and external files use `<external-file name="...">`. For example: `<attachments><vault-note path="Research/Climate.md" section="Key Findings">...section content...</vault-note><external-file name="data.csv">...file content...</external-file></attachments>`. This is consistent with the XML-tagged approach used for auto-context injection.
+- If a vault note attachment cannot be read at send time (e.g., the note was deleted, renamed, or moved after the chip was added), the message is still sent without the failed attachment's content. An inline warning is surfaced in the chat thread (e.g., "Note 'Research/Climate.md' was not found at send time; attachment omitted"). Remaining valid attachments are included normally.
 - Attachments are shown in the sent message in the chat thread as labeled chips (note/file name only). The full attached content is not displayed or expandable in the thread; it is embedded in the message context sent to the LLM but not rendered inline.
 
 ### FR-2: External file attachment
@@ -93,7 +94,8 @@ This specification covers Phase 3 of the roadmap:
 **Acceptance criteria:**
 - Before each message is sent, the plugin collects the file paths of all notes open in any leaf/tab view in the Obsidian workspace (including pinned tabs and split panes).
 - Only file paths are included — full note contents are not automatically injected.
-- The auto-context is injected into the message context (not the system prompt) so it reflects the workspace state at the time of sending. All enabled auto-context sources are assembled into a single XML-tagged block (e.g., `<auto-context><open-notes>...</open-notes><vault-structure>...</vault-structure><os>...</os></auto-context>`) prepended to the user message content. Disabled sources are omitted from the block; if all sources are disabled, no `<auto-context>` block is included.
+- The auto-context is injected into the message context (not the system prompt) so it reflects the workspace state at the time of sending. All enabled auto-context sources are assembled into a single XML-tagged block (e.g., `<auto-context><open-notes>...</open-notes><vault-structure>...</vault-structure><os>...</os></auto-context>`). Disabled sources are omitted from the block; if all sources are disabled, no `<auto-context>` block is included.
+- The assembled user message content follows a fixed ordering: (1) `<auto-context>` block (ambient workspace signals), (2) `<attachments>` block (user-attached notes/files), (3) `pre-send` hook stdout output (programmatic injections), (4) the user's typed message text. This orders content from least to most salient, with the user's actual instruction always last.
 - This source can be individually enabled or disabled in **Settings → Notor**.
 - When disabled, no open note paths are injected.
 
@@ -149,7 +151,8 @@ This specification covers Phase 3 of the roadmap:
 - If the URL is unreachable or returns a non-200 HTTP status, returns a clear error to the LLM (including the HTTP status code).
 - If the response `Content-Type` is `text/html`, converts the HTML to Markdown using Turndown. If the `Content-Type` is `text/*` (e.g., `text/plain`) or `application/json`, the response body is returned as-is without Turndown conversion. For all other content types (binary, PDF, images, etc.), the tool returns a clear error to the LLM indicating the content type is not supported.
 - If the domain matches a configured denylist entry, the request is rejected and a user-configurable error message is returned to the LLM indicating the domain is blocked.
-- A configurable maximum output size (default: 50,000 characters) is applied to the returned Markdown. When the fetched content exceeds this limit, the tool returns content up to the cap and appends a truncation notice to the LLM (e.g., "Note: page was truncated at 50,000 characters; total fetched length was X characters"). The cap is configurable in **Settings → Notor**.
+- A configurable maximum raw download size (default: 5 MB) is applied at the HTTP level. If the response body exceeds this limit, the download is aborted and a clear error is returned to the LLM indicating the page was too large (including the size at which download was aborted). The cap is configurable in **Settings → Notor**.
+- A configurable maximum output size (default: 50,000 characters) is applied to the returned Markdown (after Turndown conversion or for non-HTML text responses). When the converted/returned content exceeds this limit, the tool returns content up to the cap and appends a truncation notice to the LLM (e.g., "Note: page was truncated at 50,000 characters; total fetched length was X characters"). The cap is configurable in **Settings → Notor**.
 - Classified as read-only — available in both Plan and Act modes.
 
 ### FR-8: Domain denylist for `fetch_webpage`
@@ -169,7 +172,7 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - Accepts a `command` string and an optional `working_directory` (defaults to vault root).
-- Executes the command in a shell appropriate for the user's OS (bash/zsh on macOS/Linux, PowerShell on Windows by default). On Windows, the shell is user-configurable in **Settings → Notor** (PowerShell or cmd); on macOS/Linux, the shell is not user-configurable in Phase 3.
+- Executes the command in a shell appropriate for the user's OS. On macOS/Linux, the default shell is the user's login shell (read from the `$SHELL` environment variable, typically `/bin/zsh` on modern macOS), spawned with the `-l` (login) flag so it sources the user's shell profile (`.zprofile`, `.bash_profile`, etc.) and inherits their full PATH — ensuring tools installed via Homebrew, nvm, pyenv, etc. are available. On Windows, the default shell is PowerShell. On all platforms, the shell executable and any launch arguments are user-configurable in **Settings → Notor** (e.g., users can switch to `/bin/bash`, `cmd`, or a custom shell path, and customize flags like `-l` or `--login`). If the configured shell is not found at runtime, the tool returns an error to the LLM.
 - Returns combined stdout and stderr output to the LLM.
 - Classified as write — available in Act mode only by default, configurable.
 - Requires user approval unless auto-approved (write tool default: approval required).
@@ -351,6 +354,14 @@ This specification covers Phase 3 of the roadmap:
 2. The open note paths auto-context source contributes an empty list (or is omitted from the injected context).
 3. No error occurs; the message is sent normally with vault structure and OS context still included.
 
+### Edge case: Vault note deleted after attachment chip added
+
+1. User attaches `[[Research/Climate.md]]` — the chip appears in the input area.
+2. Before sending, the user (or another process) deletes or renames `Research/Climate.md`.
+3. The user sends the message. At send time, the plugin attempts to read the note and fails.
+4. The message is sent without the failed attachment. An inline warning appears: "Note 'Research/Climate.md' was not found at send time; attachment omitted."
+5. Any other valid attachments on the same message are included normally.
+
 ### Edge case: Section reference to non-existent heading
 
 1. User attaches `[[Research/Climate#Nonexistent Section]]`.
@@ -437,7 +448,7 @@ This specification covers Phase 3 of the roadmap:
 - Q: Is the auto-compaction summarization prompt hardcoded or user-configurable? → A: User-configurable with a solid default. The plugin ships with a built-in default compaction prompt; users can override it in Settings → Notor (same pattern as the main system prompt override). Clearing the override restores the default.
 - Q: Which model/provider handles the auto-compaction summarization request? → A: The same provider and model currently active for the conversation. No separate compaction model configuration exists.
 - Q: If a `pre-send` hook fails or times out, do subsequent `pre-send` hooks in the sequence still execute? → A: Yes — continue on failure. Each `pre-send` hook runs independently. A failed or timed-out hook surfaces a notice but does not prevent the remaining hooks in the sequence from executing.
-- Q: Which shell does `execute_command` use on Windows — PowerShell, cmd, or user-configurable? → A: PowerShell by default, user-configurable. On Windows, the shell defaults to PowerShell but can be switched to cmd in Settings → Notor. On macOS/Linux, bash/zsh is used and is not configurable in Phase 3.
+- Q: Which shell does `execute_command` use on Windows — PowerShell, cmd, or user-configurable? → A: PowerShell by default, user-configurable. On Windows, the shell defaults to PowerShell but can be switched to cmd in Settings → Notor. On macOS/Linux, the default is the user's login shell (`$SHELL`), also user-configurable.
 - Q: What does the "Context compacted" marker show on hover/expand — metadata only, full summary, or a summary excerpt? → A: Metadata only. The marker shows the timestamp and token count at the time of compaction. The LLM-generated summary text is not displayed in the UI; it is retained in the JSONL log only.
 - Q: How does the plugin count tokens to determine when the compaction threshold is crossed — local estimation, provider API, or character count only? → A: Local estimation. A lightweight bundled approximation (e.g., character count divided by a fixed ratio, or a simple BPE heuristic) is used. No provider tokenization API call is made. A small margin of error is acceptable given the 80% default threshold.
 - Q: How should `fetch_webpage` handle non-HTML content types (e.g., JSON, plain text, PDF, binary)? → A: Content-type-aware handling. `text/html` responses are converted to Markdown via Turndown. `text/*` (e.g., `text/plain`) and `application/json` responses are returned as-is without Turndown conversion. All other content types (binary, PDF, images, etc.) return a clear error to the LLM indicating the content type is not supported.
@@ -454,6 +465,11 @@ This specification covers Phase 3 of the roadmap:
 - Q: How should the plugin handle large payloads (e.g., tool results) passed as environment variables to hook shell commands, given OS-imposed env var size limits? → A: Truncate at a configurable cap (default: 10,000 characters). When a hook environment variable value (e.g., tool result, tool parameters) exceeds the cap, the value is truncated and a truncation marker is appended (e.g., `[truncated at 10,000 chars; full length: 48,231 chars]`). The full data remains available in the JSONL conversation log. The cap is configurable in **Settings → Notor**.
 - Q: When auto-compaction summarizes the conversation, how should user-attached note/file content from earlier messages be handled? → A: No special handling. Attachments are part of the conversation history and are summarized along with everything else during compaction. No attachment contents are re-injected or preserved separately in the post-compaction context window. Users can re-attach notes if detailed content is needed after compaction. The full original content remains in the JSONL log.
 - Q: Should non-blocking hooks (`on-tool-call`, `on-tool-result`, `after-completion`) have a timeout to prevent leaked processes? → A: Yes — a single global "hook timeout" setting (default: 10 seconds) applies to all hook lifecycle events. When any hook (blocking or non-blocking) exceeds the timeout, the shell process is terminated and a non-blocking notice is surfaced. The existing `pre-send` hook timeout references in the spec now refer to this same global setting.
+- Q: How should attachment contents be structured/delimited in the user message sent to the LLM? → A: XML-tagged block with type and path labels, consistent with the auto-context approach. Attachments are wrapped in an `<attachments>` container prepended to the user message content, with each attachment in a descriptive tag: `<vault-note path="..." section="...">` for vault notes/sections, `<external-file name="...">` for external files.
+- Q: How should `execute_command` select which shell to use on macOS/Linux, and how should it handle Electron's limited PATH? → A: Use the user's default login shell (`$SHELL` env var) with the `-l` (login) flag to source the user's shell profile and inherit their full PATH. This is user-configurable on all platforms in **Settings → Notor** — users can customize the shell executable and launch arguments (e.g., switch to `/bin/bash`, remove `-l`, etc.).
+- Q: What is the relative ordering of auto-context, attachments, and `pre-send` hook injections within the user message? → A: Fixed order: (1) `<auto-context>` block, (2) `<attachments>` block, (3) `pre-send` hook stdout output, (4) user's typed message text. This orders content from least to most salient — ambient signals first, user instruction last.
+- Q: What happens if a vault note attachment cannot be read at send time (e.g., note was deleted/renamed after the chip was added)? → A: Non-blocking — send the message without the failed attachment's content, surface an inline warning in the chat thread, and include the remaining valid attachments. This is consistent with the graceful-failure pattern used across Phase 3 features.
+- Q: Should `fetch_webpage` have a raw download size limit in addition to the 50K-character output cap? → A: Yes — a configurable raw download cap (default: 5 MB) applied at the HTTP level. If the response body exceeds this limit, the download is aborted and an error returned to the LLM. This protects against memory exhaustion without adding complexity; the 50K output cap operates independently on the converted/text content after download.
 
 ## Assumptions
 
