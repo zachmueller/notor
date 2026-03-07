@@ -136,93 +136,93 @@ Developer setup additions for Phase 3 are documented in [quickstart.md](quicksta
 
 ## Implementation Phases
 
-### Feature Group A: Attachment System (FR-1, FR-2)
+### Feature Group A: Attachment System (FR-24, FR-25)
 
 **Prerequisites:** R-1 (autocomplete API), R-2 (Electron dialog API) complete
 
 | Component | FRs Covered | Description |
 |---|---|---|
-| Attachment button + menu | FR-1, FR-2 | Attachment button in chat input area with two-option menu: vault note picker, external file picker |
-| Vault note autocomplete | FR-1 | Wikilink-style autocomplete with section header support (`[[Note#Section]]`); uses Obsidian suggest API |
-| External file picker | FR-2 | OS-native file dialog via Electron; UTF-8 validation on attach; size threshold confirmation (default: 1 MB) |
-| Attachment chip UI | FR-1, FR-2 | Labeled chips in input area showing attached items; removal via click/X; deduplication |
-| Attachment resolution at send | FR-1, FR-2 | Vault notes read at send time; external files read at attach time; graceful failure with inline warning for missing notes |
-| XML-tagged message assembly | FR-1, FR-2 | `<attachments>` block with `<vault-note>` and `<external-file>` tags prepended to user message |
+| Attachment button + menu | FR-24, FR-25 | Attachment button in chat input area with two-option menu: vault note picker, external file picker |
+| Vault note autocomplete | FR-24 | Wikilink-style autocomplete with section header support (`[[Note#Section]]`); uses Obsidian suggest API |
+| External file picker | FR-25 | OS-native file dialog via Electron; UTF-8 validation on attach; size threshold confirmation (default: 1 MB) |
+| Attachment chip UI | FR-24, FR-25 | Labeled chips in input area showing attached items; removal via click/X; deduplication |
+| Attachment resolution at send | FR-24, FR-25 | Vault notes read at send time; external files read at attach time; graceful failure with inline warning for missing notes |
+| XML-tagged message assembly | FR-24, FR-25 | `<attachments>` block with `<vault-note>` and `<external-file>` tags prepended to user message |
 
-### Feature Group B: Auto-Context Injection (FR-3, FR-4, FR-5)
+### Feature Group B: Auto-Context Injection (FR-26, FR-27, FR-28)
 
 **Prerequisites:** None (uses existing Obsidian APIs)
 
 | Component | FRs Covered | Description |
 |---|---|---|
-| Open note paths collector | FR-3 | Enumerate all open leaves/tabs via `workspace.getLeavesOfType("markdown")`; extract file paths |
-| Vault structure collector | FR-4 | List top-level folder names at vault root via `vault.getRoot().children`; filter to folders only |
-| OS platform detector | FR-5 | Read `process.platform` and map to human-readable name (macOS/Windows/Linux) |
-| Auto-context settings | FR-3, FR-4, FR-5 | Per-source enable/disable toggles in **Settings → Notor** (all default to enabled) |
-| XML-tagged context assembly | FR-3, FR-4, FR-5 | `<auto-context>` block with `<open-notes>`, `<vault-structure>`, `<os>` tags; omit disabled sources; omit entire block if all disabled |
-| Message ordering integration | FR-3, FR-4, FR-5 | Fixed ordering: `<auto-context>` → `<attachments>` → `pre-send` hook output → user text |
+| Open note paths collector | FR-26 | Enumerate all open leaves/tabs via `workspace.getLeavesOfType("markdown")`; extract file paths |
+| Vault structure collector | FR-27 | List top-level folder names at vault root via `vault.getRoot().children`; filter to folders only |
+| OS platform detector | FR-28 | Read `process.platform` and map to human-readable name (macOS/Windows/Linux) |
+| Auto-context settings | FR-26, FR-27, FR-28 | Per-source enable/disable toggles in **Settings → Notor** (all default to enabled) |
+| XML-tagged context assembly | FR-26, FR-27, FR-28 | `<auto-context>` block with `<open-notes>`, `<vault-structure>`, `<os>` tags; omit disabled sources; omit entire block if all disabled |
+| Message ordering integration | FR-26, FR-27, FR-28 | Fixed ordering: `<auto-context>` → `<attachments>` → `pre-send` hook output → user text |
 
-### Feature Group C: Auto-Compaction (FR-6)
+### Feature Group C: Auto-Compaction (FR-29)
 
 **Prerequisites:** Token estimation utility; existing JSONL persistence and conversation management
 
 | Component | FRs Covered | Description |
 |---|---|---|
-| Token estimation utility | FR-6 | Lightweight character-based approximation (chars/4); used for cumulative conversation token tracking |
-| Compaction threshold check | FR-6 | Evaluated before every LLM API call (user messages and tool-result round-trips); configurable threshold (default: 80%) |
-| Compaction summarization request | FR-6 | Send conversation to LLM with compaction system prompt; receive condensed summary |
-| Compaction system prompt | FR-6 | Built-in default; user-overridable in **Settings → Notor** |
-| New context window assembly | FR-6 | Synthetic user/assistant exchange with summary; current user message follows as next turn |
-| Compaction UI | FR-6 | Inline "Compacting context…" indicator during summarization; permanent "Context compacted" marker with timestamp and token count on hover |
-| Manual compaction trigger | FR-6 | Button or command to trigger compaction on demand |
-| Compaction failure fallback | FR-6 | Fall back to oldest-message truncation; surface error notice |
-| JSONL compaction record | FR-6 | Log `CompactionRecord` event in conversation JSONL file |
+| Token estimation utility | FR-29 | Lightweight character-based approximation (chars/4); used for cumulative conversation token tracking |
+| Compaction threshold check | FR-29 | Evaluated before every LLM API call (user messages and tool-result round-trips); configurable threshold (default: 80%) |
+| Compaction summarization request | FR-29 | Send conversation to LLM with compaction system prompt; receive condensed summary |
+| Compaction system prompt | FR-29 | Built-in default; user-overridable in **Settings → Notor** |
+| New context window assembly | FR-29 | Synthetic user/assistant exchange with summary; current user message follows as next turn |
+| Compaction UI | FR-29 | Inline "Compacting context…" indicator during summarization; permanent "Context compacted" marker with timestamp and token count on hover |
+| Manual compaction trigger | FR-29 | Button or command to trigger compaction on demand |
+| Compaction failure fallback | FR-29 | Fall back to oldest-message truncation; surface error notice |
+| JSONL compaction record | FR-29 | Log `CompactionRecord` event in conversation JSONL file |
 
-### Feature Group D: `fetch_webpage` Tool (FR-7, FR-8)
+### Feature Group D: `fetch_webpage` Tool (FR-30, FR-31)
 
 **Prerequisites:** R-4 (Turndown bundling) complete
 
 | Component | FRs Covered | Description |
 |---|---|---|
-| `fetch_webpage` tool implementation | FR-7 | HTTP GET via `fetch()`; neutral User-Agent; redirect following (max 5); timeout (default: 15s) |
-| Content-type routing | FR-7 | `text/html` → Turndown conversion; `text/*` and `application/json` → return as-is; other types → error |
-| Download size cap | FR-7 | Configurable raw download limit (default: 5 MB); abort and error if exceeded |
-| Output size cap | FR-7 | Configurable character cap (default: 50,000 chars); truncate with notice if exceeded |
-| Domain denylist check | FR-7, FR-8 | Pre-fetch domain matching (exact + wildcard); reject with user-configurable error message |
-| Domain denylist settings UI | FR-8 | List editor in **Settings → Notor** for add/remove domain entries |
-| Tool registration | FR-7 | Register in tool registry as read-only, Phase 3, auto-approve default: true |
+| `fetch_webpage` tool implementation | FR-30 | HTTP GET via `fetch()`; neutral User-Agent; redirect following (max 5); timeout (default: 15s) |
+| Content-type routing | FR-30 | `text/html` → Turndown conversion; `text/*` and `application/json` → return as-is; other types → error |
+| Download size cap | FR-30 | Configurable raw download limit (default: 5 MB); abort and error if exceeded |
+| Output size cap | FR-30 | Configurable character cap (default: 50,000 chars); truncate with notice if exceeded |
+| Domain denylist check | FR-30, FR-31 | Pre-fetch domain matching (exact + wildcard); reject with user-configurable error message |
+| Domain denylist settings UI | FR-31 | List editor in **Settings → Notor** for add/remove domain entries |
+| Tool registration | FR-30 | Register in tool registry as read-only, Phase 3, auto-approve default: true |
 
-### Feature Group E: `execute_command` Tool (FR-9)
+### Feature Group E: `execute_command` Tool (FR-32)
 
 **Prerequisites:** R-3 (shell execution in Electron) complete
 
 | Component | FRs Covered | Description |
 |---|---|---|
-| `execute_command` tool implementation | FR-9 | `child_process.spawn` with configurable shell; combined stdout+stderr capture |
-| Login shell resolution | FR-9 | `$SHELL` with `-l` flag on macOS/Linux; PowerShell on Windows; user-configurable shell and flags in settings |
-| Working directory validation | FR-9 | Must be vault root or within user-configured allow-list; reject with error otherwise |
-| Allowed paths settings UI | FR-9 | List editor in **Settings → Notor** (one absolute path per line); vault root always implicitly included |
-| Per-command timeout | FR-9 | Configurable (default: 30s); kill process and return timeout error |
-| Output size cap | FR-9 | Configurable character cap (default: 50,000 chars); truncate with notice if exceeded |
-| Shell configuration settings | FR-9 | Configurable shell executable and launch arguments per platform in **Settings → Notor** |
-| Tool registration | FR-9 | Register in tool registry as write, Phase 3, auto-approve default: false, Act-only |
+| `execute_command` tool implementation | FR-32 | `child_process.spawn` with configurable shell; combined stdout+stderr capture |
+| Login shell resolution | FR-32 | `$SHELL` with `-l` flag on macOS/Linux; PowerShell on Windows; user-configurable shell and flags in settings |
+| Working directory validation | FR-32 | Must be vault root or within user-configured allow-list; reject with error otherwise |
+| Allowed paths settings UI | FR-32 | List editor in **Settings → Notor** (one absolute path per line); vault root always implicitly included |
+| Per-command timeout | FR-32 | Configurable (default: 30s); kill process and return timeout error |
+| Output size cap | FR-32 | Configurable character cap (default: 50,000 chars); truncate with notice if exceeded |
+| Shell configuration settings | FR-32 | Configurable shell executable and launch arguments per platform in **Settings → Notor** |
+| Tool registration | FR-32 | Register in tool registry as write, Phase 3, auto-approve default: false, Act-only |
 
-### Feature Group F: LLM Interaction Hooks (FR-10, FR-11, FR-12, FR-13)
+### Feature Group F: LLM Interaction Hooks (FR-33, FR-34, FR-35, FR-36)
 
 **Prerequisites:** R-3 (shell execution in Electron) complete; `execute_command` shell infrastructure shared
 
 | Component | FRs Covered | Description |
 |---|---|---|
-| Hook configuration data model | FR-10–13 | Ordered list of hooks per lifecycle event; each hook has a shell command string |
-| Hook settings UI | FR-10–13 | Grouped by lifecycle event; collapsible subsections; add/remove/reorder per event |
-| Hook execution engine | FR-10–13 | Shell command execution via shared `child_process.spawn` infrastructure; metadata as environment variables |
-| Environment variable injection | FR-10–13 | `NOTOR_CONVERSATION_ID`, `NOTOR_HOOK_EVENT`, `NOTOR_WORKFLOW_NAME`, `NOTOR_TIMESTAMP`, `NOTOR_TOOL_NAME`, `NOTOR_TOOL_PARAMS`, `NOTOR_TOOL_RESULT`, `NOTOR_TOOL_STATUS` (varies by event) |
-| Environment variable truncation | FR-10–13 | Large values truncated at configurable cap (default: 10,000 chars) with marker |
-| Global hook timeout | FR-10–13 | Configurable (default: 10s); shared across all lifecycle events; terminate process on timeout |
-| `pre-send` hook integration | FR-10 | Awaited sequentially before message dispatch; stdout captured and appended to message context; continue on failure |
-| `on-tool-call` hook integration | FR-11 | Non-blocking fire-and-forget after approval, before execution; tool name + params in env vars |
-| `on-tool-result` hook integration | FR-12 | Non-blocking fire-and-forget after tool execution; tool name + params + result + status in env vars |
-| `after-completion` hook integration | FR-13 | Non-blocking fire-and-forget after LLM turn completes |
+| Hook configuration data model | FR-33–13 | Ordered list of hooks per lifecycle event; each hook has a shell command string |
+| Hook settings UI | FR-33–13 | Grouped by lifecycle event; collapsible subsections; add/remove/reorder per event |
+| Hook execution engine | FR-33–13 | Shell command execution via shared `child_process.spawn` infrastructure; metadata as environment variables |
+| Environment variable injection | FR-33–13 | `NOTOR_CONVERSATION_ID`, `NOTOR_HOOK_EVENT`, `NOTOR_WORKFLOW_NAME`, `NOTOR_TIMESTAMP`, `NOTOR_TOOL_NAME`, `NOTOR_TOOL_PARAMS`, `NOTOR_TOOL_RESULT`, `NOTOR_TOOL_STATUS` (varies by event) |
+| Environment variable truncation | FR-33–13 | Large values truncated at configurable cap (default: 10,000 chars) with marker |
+| Global hook timeout | FR-33–13 | Configurable (default: 10s); shared across all lifecycle events; terminate process on timeout |
+| `pre-send` hook integration | FR-33 | Awaited sequentially before message dispatch; stdout captured and appended to message context; continue on failure |
+| `on-tool-call` hook integration | FR-34 | Non-blocking fire-and-forget after approval, before execution; tool name + params in env vars |
+| `on-tool-result` hook integration | FR-35 | Non-blocking fire-and-forget after tool execution; tool name + params + result + status in env vars |
+| `after-completion` hook integration | FR-36 | Non-blocking fire-and-forget after LLM turn completes |
 
 ### Settings Additions
 
@@ -263,7 +263,7 @@ New settings required for Phase 3 (extends existing settings model):
 - [ ] Data model covers all functional requirements (see data-model.md)
 - [ ] Tool schemas defined for new tools (see contracts/)
 - [x] Security requirements addressed (outbound network gated, shell execution restricted, approval-enforced)
-- [x] Performance considerations documented (NFR-1: <100 ms context collection, timeouts, output caps)
+- [x] Performance considerations documented (NFR-6: <100 ms context collection, timeouts, output caps)
 - [x] Integration points defined (Obsidian APIs, Electron APIs, Node.js child_process, fetch, Turndown)
 
 ### Quality Validation

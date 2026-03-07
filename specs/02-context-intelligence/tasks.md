@@ -62,7 +62,7 @@
 - [ ] `turndown-plugin-gfm` tested for table support
 - [ ] Edge cases tested (malformed HTML, large DOMs, script/style tags)
 
-### ENV-001: Install Turndown dependency
+### ENV-005: Install Turndown dependency
 **Description:** Add Turndown and its type definitions as project dependencies. Optionally add GFM plugin for table/strikethrough support.
 **Files:** `package.json`, `package-lock.json`
 **Dependencies:** RES-004
@@ -123,7 +123,7 @@
 
 ---
 
-## Phase 2: Auto-Context Injection (Feature Group B — FR-3, FR-4, FR-5)
+## Phase 2: Auto-Context Injection (Feature Group B — FR-26, FR-27, FR-28)
 
 ### CTX-001: Open note paths collector
 **Description:** Implement the auto-context source that collects file paths of all currently open notes in the Obsidian workspace.
@@ -192,7 +192,7 @@
 
 ---
 
-## Phase 3: Attachment System (Feature Group A — FR-1, FR-2)
+## Phase 3: Attachment System (Feature Group A — FR-24, FR-25)
 
 ### ATT-001: Attachment data model
 **Description:** Implement the Attachment entity model with types, validation, and lifecycle management (pending → resolved → error).
@@ -292,10 +292,10 @@
 
 ## Phase 4: Tools — `fetch_webpage` & `execute_command` (Feature Groups D, E)
 
-### TOOL-001: `fetch_webpage` tool implementation
+### TOOL-010: `fetch_webpage` tool implementation
 **Description:** Implement the `fetch_webpage` tool core logic: HTTP GET with configurable timeout, redirect following, download size cap, and content-type routing.
 **Files:** `src/tools/fetch-webpage.ts`
-**Dependencies:** ENV-001, FOUND-001
+**Dependencies:** ENV-005, FOUND-001
 **Acceptance Criteria:**
 - [ ] HTTP GET via native `fetch()` with `User-Agent: Notor/1.0`
 - [ ] Redirect following up to 5 hops; error if exceeded
@@ -305,7 +305,7 @@
 - [ ] Output character cap (default: 50,000); truncate with notice if exceeded
 - [ ] Returns `{ success, result, error? }` matching contract format
 
-### TOOL-002: Domain denylist matching
+### TOOL-011: Domain denylist matching
 **Description:** Implement the domain denylist check that runs before every `fetch_webpage` execution. Supports exact domain and wildcard patterns.
 **Files:** `src/tools/fetch-webpage.ts`
 **Dependencies:** FOUND-001
@@ -316,10 +316,10 @@
 - [ ] URL parsing extracts domain correctly for both `http://` and `https://`
 - [ ] Returns the matching pattern for inclusion in the error message
 
-### TOOL-003: `fetch_webpage` tool registration
+### TOOL-012: `fetch_webpage` tool registration
 **Description:** Register `fetch_webpage` in the tool registry with proper schema, mode classification, and auto-approve default.
 **Files:** `src/tools/fetch-webpage.ts`, `src/tools/index.ts`
-**Dependencies:** TOOL-001, TOOL-002
+**Dependencies:** TOOL-010, TOOL-011
 **Acceptance Criteria:**
 - [ ] Tool registered with name `fetch_webpage`, input schema matching contract
 - [ ] Classified as read-only: available in both Plan and Act modes
@@ -327,7 +327,7 @@
 - [ ] Tool description matches contract specification
 - [ ] Domain denylist check runs before execution in the tool's `execute` method
 
-### TOOL-004: Domain denylist settings UI
+### TOOL-013: Domain denylist settings UI
 **Description:** Add a list editor in Settings → Notor for managing the domain denylist entries.
 **Files:** `src/settings.ts`
 **Dependencies:** FOUND-001
@@ -338,7 +338,7 @@
 - [ ] Empty by default
 - [ ] Additional settings: request timeout, max download size, max output chars
 
-### TOOL-005: `execute_command` tool implementation
+### TOOL-014: `execute_command` tool implementation
 **Description:** Implement the `execute_command` tool using the shared shell executor infrastructure. Handles working directory validation, shell spawning, timeout, and output capping.
 **Files:** `src/tools/execute-command.ts`
 **Dependencies:** FOUND-003, FOUND-001
@@ -351,10 +351,10 @@
 - [ ] Error results include exit code and stderr output for non-zero exits
 - [ ] Desktop-only: returns error if `Platform.isDesktop` is false
 
-### TOOL-006: `execute_command` tool registration
+### TOOL-015: `execute_command` tool registration
 **Description:** Register `execute_command` in the tool registry with proper schema, mode classification, and auto-approve default.
 **Files:** `src/tools/execute-command.ts`, `src/tools/index.ts`
-**Dependencies:** TOOL-005
+**Dependencies:** TOOL-014
 **Acceptance Criteria:**
 - [ ] Tool registered with name `execute_command`, input schema matching contract
 - [ ] Classified as write: available in Act mode only
@@ -362,7 +362,7 @@
 - [ ] Tool description matches contract specification
 - [ ] Working directory validation runs before execution
 
-### TOOL-007: `execute_command` settings UI
+### TOOL-016: `execute_command` settings UI
 **Description:** Add settings for execute_command: allowed paths list editor, shell configuration, timeout, and output cap.
 **Files:** `src/settings.ts`
 **Dependencies:** FOUND-001
@@ -373,10 +373,10 @@
 - [ ] Per-command timeout setting (default: 30s)
 - [ ] Max output character setting (default: 50,000)
 
-### TOOL-008: Tool dispatch flow updates
+### TOOL-017: Tool dispatch flow updates
 **Description:** Update the tool dispatch layer to include the Phase 3 additions: domain denylist check before `fetch_webpage`, working directory validation before `execute_command`, and hook firing points.
 **Files:** `src/chat/dispatcher.ts`
-**Dependencies:** TOOL-003, TOOL-006
+**Dependencies:** TOOL-012, TOOL-015
 **Acceptance Criteria:**
 - [ ] Dispatch flow includes domain denylist check for `fetch_webpage` (step 5 in updated flow)
 - [ ] Dispatch flow includes working directory validation for `execute_command` (step 6)
@@ -439,7 +439,7 @@
 ### HOOK-005: Hook integration — tool call and completion events
 **Description:** Wire `on_tool_call`, `on_tool_result`, and `after_completion` hook dispatchers into the tool dispatch and conversation turn lifecycle.
 **Files:** `src/chat/dispatcher.ts`, `src/chat/orchestrator.ts`
-**Dependencies:** HOOK-003, TOOL-008
+**Dependencies:** HOOK-003, TOOL-017
 **Acceptance Criteria:**
 - [ ] `on_tool_call` hooks fire after tool approval, before tool execution
 - [ ] `on_tool_result` hooks fire after tool execution, before result is returned to LLM
@@ -547,7 +547,7 @@
 ### TEST-003 [P]: `fetch_webpage` end-to-end testing
 **Description:** Create e2e tests for the `fetch_webpage` tool using a mock HTTP server.
 **Files:** `e2e/scripts/fetch-webpage-test.ts`
-**Dependencies:** TOOL-003
+**Dependencies:** TOOL-012
 **Acceptance Criteria:**
 - [ ] Test: fetch an HTML page → verify Markdown conversion returned
 - [ ] Test: fetch a plain text URL → verify returned as-is
@@ -559,7 +559,7 @@
 ### TEST-004 [P]: `execute_command` end-to-end testing
 **Description:** Create e2e tests for the `execute_command` tool with safe commands.
 **Files:** `e2e/scripts/execute-command-test.ts`
-**Dependencies:** TOOL-006
+**Dependencies:** TOOL-015
 **Acceptance Criteria:**
 - [ ] Test: run `echo hello` → verify output returned
 - [ ] Test: run a command in Plan mode → verify blocked with error
@@ -591,7 +591,7 @@
 ### DOC-001: Update system prompt for Phase 3 tools
 **Description:** Update the default system prompt to include instructions for the two new Phase 3 tools (`fetch_webpage` and `execute_command`) so the LLM knows how and when to use them.
 **Files:** `src/chat/default-system-prompt.ts`
-**Dependencies:** TOOL-003, TOOL-006
+**Dependencies:** TOOL-012, TOOL-015
 **Acceptance Criteria:**
 - [ ] System prompt includes `fetch_webpage` tool description and usage guidance
 - [ ] System prompt includes `execute_command` tool description, safety guidance, and platform awareness
@@ -612,7 +612,7 @@
 ### POLISH-001: Settings UI consolidation
 **Description:** Consolidate and organize all Phase 3 settings into a coherent layout within the Settings → Notor tab. Ensure logical grouping, consistent styling, and clear descriptions.
 **Files:** `src/settings.ts`
-**Dependencies:** CTX-005, TOOL-004, TOOL-007, HOOK-006, COMP-003
+**Dependencies:** CTX-005, TOOL-013, TOOL-016, HOOK-006, COMP-003
 **Acceptance Criteria:**
 - [ ] Settings organized into clear sections: Auto-context, Web fetching, Shell commands, Hooks, Context compaction, File attachments
 - [ ] Each section has a heading and brief description
@@ -625,11 +625,11 @@
 **Files:** All Phase 3 source files
 **Dependencies:** All previous tasks
 **Acceptance Criteria:**
-- [ ] FR-1 through FR-13: all functional requirements satisfied per spec acceptance criteria
-- [ ] NFR-1 (Performance): auto-context <100 ms, timeouts enforced, hooks non-blocking
-- [ ] NFR-2 (Security): no background network/shell calls, denylist enforced, working directory restricted
-- [ ] NFR-3 (Usability): attachment control discoverable, auto-context on by default, compaction marker clear, tool transparency maintained
-- [ ] NFR-4 (Reliability): all failure modes handled gracefully (fetch errors, command failures, hook timeouts, compaction failures, missing attachments)
+- [ ] FR-24 through FR-36: all functional requirements satisfied per spec acceptance criteria
+- [ ] NFR-6 (Performance): auto-context <100 ms, timeouts enforced, hooks non-blocking
+- [ ] NFR-7 (Security): no background network/shell calls, denylist enforced, working directory restricted
+- [ ] NFR-8 (Usability): attachment control discoverable, auto-context on by default, compaction marker clear, tool transparency maintained
+- [ ] NFR-9 (Reliability): all failure modes handled gracefully (fetch errors, command failures, hook timeouts, compaction failures, missing attachments)
 - [ ] All seven success criteria from spec.md verified
 - [ ] Manual testing checklist from quickstart.md completed
 
@@ -642,12 +642,12 @@ Phase 0: Research & Environment
   RES-001 ─────────────────────────────────────────────────▶ ATT-005
   RES-002 ─────────────────────────────────────────────────▶ ATT-003, ATT-006
   RES-003 ─────────────────────────────────────────────────▶ FOUND-003
-  RES-004 ─────────────────────────────────────────────────▶ ENV-001
+  RES-004 ─────────────────────────────────────────────────▶ ENV-005
 
 Phase 1: Foundation
   FOUND-001 ──▶ (used by nearly all subsequent tasks)
   FOUND-002 ──▶ COMP-001
-  FOUND-003 ──▶ TOOL-005, HOOK-002
+  FOUND-003 ──▶ TOOL-014, HOOK-002
   FOUND-004 ──▶ CTX-006, ATT-008, HOOK-004
 
 Phase 2: Auto-Context
@@ -658,9 +658,9 @@ Phase 3: Attachments
   ATT-002 + ATT-004 ──▶ ATT-008
 
 Phase 4: Tools
-  TOOL-001 + TOOL-002 ──▶ TOOL-003
-  TOOL-005 ──▶ TOOL-006
-  TOOL-003 + TOOL-006 ──▶ TOOL-008
+  TOOL-010 + TOOL-011 ──▶ TOOL-012
+  TOOL-014 ──▶ TOOL-015
+  TOOL-012 + TOOL-015 ──▶ TOOL-017
 
 Phase 5: Hooks & Compaction
   HOOK-001 ──▶ HOOK-002 ──▶ HOOK-003 ──▶ HOOK-004, HOOK-005
@@ -673,7 +673,7 @@ Phase 6: Quality
 ## Critical Path
 
 ```
-RES-003 → FOUND-003 → TOOL-005 → TOOL-006 → TOOL-008 → HOOK-005 → COMP-005 → VAL-001
+RES-003 → FOUND-003 → TOOL-014 → TOOL-015 → TOOL-017 → HOOK-005 → COMP-005 → VAL-001
 ```
 
 The longest dependency chain runs through shell infrastructure → execute_command → tool dispatch updates → hook integration → compaction integration → final validation. Auto-context (Feature Group B) has no research dependencies and can begin immediately in parallel.
@@ -685,8 +685,8 @@ The longest dependency chain runs through shell infrastructure → execute_comma
 | Research | RES-001, RES-002, RES-003, RES-004 | All four research tasks are independent |
 | Auto-context sources | CTX-001, CTX-002, CTX-003 | Three collectors are independent |
 | Attachment pickers | ATT-005, ATT-006 | Vault and external pickers are independent |
-| Tools | TOOL-001/002/003 ∥ TOOL-005/006 | `fetch_webpage` and `execute_command` are independent |
-| Settings UI | CTX-005, TOOL-004, TOOL-007, HOOK-006 | Settings UI sections are independent |
+| Tools | TOOL-010/002/003 ∥ TOOL-014/006 | `fetch_webpage` and `execute_command` are independent |
+| Settings UI | CTX-005, TOOL-013, TOOL-016, HOOK-006 | Settings UI sections are independent |
 | Hooks & Compaction | HOOK-001–006 ∥ COMP-001–005 | Hook and compaction systems are independent until integration |
 | Testing | TEST-001 through TEST-006 | All test suites are independent |
 | Foundation | FOUND-001, FOUND-002, FOUND-004 | Settings, tokens, and assembler are independent |

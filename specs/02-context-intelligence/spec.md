@@ -60,12 +60,12 @@ This specification covers Phase 3 of the roadmap:
 
 ## Functional requirements
 
-### FR-1: Note attachment via file picker
+### FR-24: Note attachment via file picker
 
 **Description:** Users can attach vault notes to a chat message using a file picker with Obsidian-native autocomplete.
 
 **Acceptance criteria:**
-- An attachment button in the chat input area opens a small menu with two options: **Attach vault note** (opens the Obsidian vault file picker with autocomplete) and **Attach external file** (opens the OS filesystem dialog, see FR-2).
+- An attachment button in the chat input area opens a small menu with two options: **Attach vault note** (opens the Obsidian vault file picker with autocomplete) and **Attach external file** (opens the OS filesystem dialog, see FR-25).
 - When the user types `[[` in the Notor chat input box, the vault file picker opens directly (bypassing the menu), applying the same wikilink autocomplete behavior as Obsidian's native note editor — showing matching note titles and allowing selection to complete the link.
 - Multiple notes can be attached to a single message.
 - Section references (`[[Note#Section Header]]`) are supported: when a section reference is used, only the content of that section (from the heading to the next heading of equal or higher level) is included in the attachment, not the full note.
@@ -76,18 +76,18 @@ This specification covers Phase 3 of the roadmap:
 - If a vault note attachment cannot be read at send time (e.g., the note was deleted, renamed, or moved after the chip was added), the message is still sent without the failed attachment's content. An inline warning is surfaced in the chat thread (e.g., "Note 'Research/Climate.md' was not found at send time; attachment omitted"). Remaining valid attachments are included normally.
 - Attachments are shown in the sent message in the chat thread as labeled chips (note/file name only). The full attached content is not displayed or expandable in the thread; it is embedded in the message context sent to the LLM but not rendered inline.
 
-### FR-2: External file attachment
+### FR-25: External file attachment
 
 **Description:** Users can attach files from outside the vault to a chat message.
 
 **Acceptance criteria:**
-- The "Attach external file" option in the attachment menu (FR-1) opens the OS-native filesystem dialog, allowing the user to select files from outside the vault.
+- The "Attach external file" option in the attachment menu (FR-24) opens the OS-native filesystem dialog, allowing the user to select files from outside the vault.
 - Attached external files are read and included in the user message context.
 - External files are labeled as such in the attachment chips so the user can distinguish them from vault notes.
 - File size limits apply: if a file exceeds a configurable threshold (default: 1 MB), a confirmation dialog is shown highlighting the file size and asking the user to confirm before attaching. The user can proceed or cancel.
 - Any file may be selected regardless of extension. At attach time, the file is read and validated as UTF-8 text. If the file is binary or cannot be decoded as UTF-8, attachment is rejected with a clear error (e.g., "Cannot attach binary file: only plain-text files are supported"). No explicit extension allowlist is enforced.
 
-### FR-3: Auto-context — open note paths
+### FR-26: Auto-context — open note paths
 
 **Description:** The paths of all currently open notes in the Obsidian workspace are automatically included with each message sent to the LLM.
 
@@ -99,7 +99,7 @@ This specification covers Phase 3 of the roadmap:
 - This source can be individually enabled or disabled in **Settings → Notor**.
 - When disabled, no open note paths are injected.
 
-### FR-4: Auto-context — vault structure
+### FR-27: Auto-context — vault structure
 
 **Description:** The top-level directory listing of the vault is automatically included with each message.
 
@@ -110,7 +110,7 @@ This specification covers Phase 3 of the roadmap:
 - This source can be individually enabled or disabled in **Settings → Notor**.
 - When disabled, no vault structure is injected.
 
-### FR-5: Auto-context — operating system
+### FR-28: Auto-context — operating system
 
 **Description:** The user's operating system platform is automatically included with each message.
 
@@ -120,7 +120,7 @@ This specification covers Phase 3 of the roadmap:
 - This source can be individually enabled or disabled in **Settings → Notor**.
 - When disabled, no OS information is injected.
 
-### FR-6: Auto-compaction
+### FR-29: Auto-compaction
 
 **Description:** When the conversation approaches the active model's context window limit, the plugin automatically summarizes the conversation and continues in a new, condensed context window.
 
@@ -137,7 +137,7 @@ This specification covers Phase 3 of the roadmap:
 - The compaction system prompt has a built-in default focused on producing a concise, faithful summary of the conversation. Users can override this prompt in **Settings → Notor** (following the same pattern as the main system prompt override). When overridden, the user-supplied prompt is used for all compaction requests; clearing the override restores the default.
 - If the summarization request itself fails, the plugin falls back to the existing truncation behavior (dropping oldest messages) and surfaces an error notice.
 
-### FR-7: `fetch_webpage` tool
+### FR-30: `fetch_webpage` tool
 
 **Description:** Fetch a webpage by URL and return its content as Markdown for use in the conversation.
 
@@ -155,7 +155,7 @@ This specification covers Phase 3 of the roadmap:
 - A configurable maximum output size (default: 50,000 characters) is applied to the returned Markdown (after Turndown conversion or for non-HTML text responses). When the converted/returned content exceeds this limit, the tool returns content up to the cap and appends a truncation notice to the LLM (e.g., "Note: page was truncated at 50,000 characters; total fetched length was X characters"). The cap is configurable in **Settings → Notor**.
 - Classified as read-only — available in both Plan and Act modes.
 
-### FR-8: Domain denylist for `fetch_webpage`
+### FR-31: Domain denylist for `fetch_webpage`
 
 **Description:** A user-configurable list of blocked domains that `fetch_webpage` cannot access.
 
@@ -166,7 +166,7 @@ This specification covers Phase 3 of the roadmap:
 - The denylist is empty by default.
 - The denylist is a user preference control, not a security mechanism.
 
-### FR-9: `execute_command` tool
+### FR-32: `execute_command` tool
 
 **Description:** Execute a shell command on the user's system and return the output to the AI.
 
@@ -182,7 +182,7 @@ This specification covers Phase 3 of the roadmap:
 - The vault root is always implicitly included in the allowed paths and cannot be removed.
 - Additional allowed paths are configured in **Settings → Notor** via a list editor (one absolute path per line), using the same pattern as the domain denylist.
 
-### FR-10: LLM interaction hooks — `pre-send`
+### FR-33: LLM interaction hooks — `pre-send`
 
 **Description:** A hook that fires before each user message is sent to the LLM.
 
@@ -197,7 +197,7 @@ This specification covers Phase 3 of the roadmap:
 - All `pre-send` hooks are awaited (up to a configurable timeout, default: 10 seconds) before the message is dispatched to the LLM. If a hook times out, the message is still sent and the timeout is surfaced as a non-blocking notice.
 - Hook failures and timeouts are independent: if one `pre-send` hook fails or times out, the remaining hooks in the sequence still execute. Each failure or timeout is surfaced as a separate non-blocking notice.
 
-### FR-11: LLM interaction hooks — `on-tool-call`
+### FR-34: LLM interaction hooks — `on-tool-call`
 
 **Description:** A hook that fires each time the LLM requests a tool invocation, before the tool is executed.
 
@@ -209,7 +209,7 @@ This specification covers Phase 3 of the roadmap:
 - Hook execution is non-blocking with respect to the tool dispatch pipeline: if a hook fails, tool execution proceeds and the failure is surfaced as a notice. (Note: unlike `pre-send`, `on-tool-call` hooks do not block tool dispatch.)
 - Configured in **Settings → Notor**, persisted across reloads. (Workflow frontmatter configuration is deferred to Phase 4.)
 
-### FR-12: LLM interaction hooks — `on-tool-result`
+### FR-35: LLM interaction hooks — `on-tool-result`
 
 **Description:** A hook that fires after each tool call completes and the result is available.
 
@@ -221,7 +221,7 @@ This specification covers Phase 3 of the roadmap:
 - Hook execution is non-blocking: if a hook fails, the tool result is still returned to the LLM and the failure is surfaced as a notice.
 - Configured in **Settings → Notor**, persisted across reloads. (Workflow frontmatter configuration is deferred to Phase 4.)
 
-### FR-13: LLM interaction hooks — `after-completion`
+### FR-36: LLM interaction hooks — `after-completion`
 
 **Description:** A hook that fires after the LLM finishes a complete response turn.
 
@@ -235,7 +235,7 @@ This specification covers Phase 3 of the roadmap:
 
 ## Non-functional requirements
 
-### NFR-1: Performance
+### NFR-6: Performance
 
 **Description:** Phase 3 features must not degrade the responsiveness of the chat panel or Obsidian editor.
 
@@ -245,7 +245,7 @@ This specification covers Phase 3 of the roadmap:
 - Auto-compaction summarization is transparent to the user: the "Context compacted" marker appears and the conversation continues without manual intervention.
 - Hook execution is asynchronous and does not block the chat pipeline. All hooks (both blocking `pre-send` and non-blocking `on-tool-call`, `on-tool-result`, `after-completion`) share a single global hook timeout (default: 10 seconds, configurable in **Settings → Notor**). Slow hooks time out independently; timed-out hook processes are terminated and do not stall message flow or leak resources.
 
-### NFR-2: Security and privacy
+### NFR-7: Security and privacy
 
 **Description:** Phase 3 introduces the first outbound network calls (web fetching) and system-level access (shell commands). These must be handled with appropriate safeguards.
 
@@ -257,7 +257,7 @@ This specification covers Phase 3 of the roadmap:
 - No auto-context data (open note paths, vault structure) is transmitted to any party other than the configured LLM provider.
 - Hooks cannot initiate arbitrary network calls or filesystem writes outside the normal Notor tool and LLM pipeline. Hook shell commands are executed using the same runtime and path restrictions as the `execute_command` tool; they do not bypass Notor's working directory allow-list.
 
-### NFR-3: Usability and transparency
+### NFR-8: Usability and transparency
 
 **Description:** New Phase 3 capabilities are discoverable, clearly surfaced in the chat UI, and safe by default.
 
@@ -269,7 +269,7 @@ This specification covers Phase 3 of the roadmap:
 - Auto-approve defaults: `fetch_webpage` defaults to auto-approved (read-only); `execute_command` defaults to approval required (write).
 - `execute_command` is restricted to Act mode by default.
 
-### NFR-4: Reliability
+### NFR-9: Reliability
 
 **Description:** Failures in Phase 3 features are handled gracefully and do not disrupt the core chat or vault operations.
 
@@ -453,7 +453,7 @@ This specification covers Phase 3 of the roadmap:
 - Q: How does the plugin count tokens to determine when the compaction threshold is crossed — local estimation, provider API, or character count only? → A: Local estimation. A lightweight bundled approximation (e.g., character count divided by a fixed ratio, or a simple BPE heuristic) is used. No provider tokenization API call is made. A small margin of error is acceptable given the 80% default threshold.
 - Q: How should `fetch_webpage` handle non-HTML content types (e.g., JSON, plain text, PDF, binary)? → A: Content-type-aware handling. `text/html` responses are converted to Markdown via Turndown. `text/*` (e.g., `text/plain`) and `application/json` responses are returned as-is without Turndown conversion. All other content types (binary, PDF, images, etc.) return a clear error to the LLM indicating the content type is not supported.
 - Q: How should the hook settings UI be structured in **Settings → Notor**? → A: Grouped by lifecycle event. The hooks settings section is divided into four subsections — one per lifecycle event (`pre-send`, `on-tool-call`, `on-tool-result`, `after-completion`) — each collapsible and containing its own add/remove/reorder list of configured hooks for that event.
-- Q: What file types should be accepted for external file attachment (FR-2) — allowlist by extension, or runtime validation? → A: Runtime UTF-8 validation, no extension allowlist. Any file may be selected; at attach time, the plugin attempts to read it as UTF-8 text. If the file is binary or fails UTF-8 decoding, the attachment is rejected with a clear error. No extension-based allowlist is enforced.
+- Q: What file types should be accepted for external file attachment (FR-25) — allowlist by extension, or runtime validation? → A: Runtime UTF-8 validation, no extension allowlist. Any file may be selected; at attach time, the plugin attempts to read it as UTF-8 text. If the file is binary or fails UTF-8 decoding, the attachment is rejected with a clear error. No extension-based allowlist is enforced.
 - Q: What message role should the compaction summary be injected as in the new context window? → A: Synthetic user/assistant exchange. The summary is sent as a `user` message labeled "Summary of prior conversation: …" immediately followed by a canned `assistant` acknowledgment (e.g., "Understood. I have context of our prior conversation."). The current user message follows as the next turn. This pattern is broadly compatible across all providers.
 - Q: Should duplicate note/file attachments (same path + section reference) in a single message be allowed, silently deduplicated, or rejected with a warning? → A: Silently deduplicate. If the same path and section reference is already present as a chip, a second attempt to add it is ignored without any error or notification.
 - Q: How should auto-context sources be formatted and positioned in the message sent to the LLM? → A: XML-tagged block prepended to the user message content. Each source is wrapped in a descriptive XML tag within an `<auto-context>` container (e.g., `<auto-context><open-notes>path1, path2</open-notes><vault-structure>folder1, folder2</vault-structure><os>macOS</os></auto-context>`). This is prepended to the user message, not injected as a separate system message.
