@@ -103,16 +103,22 @@ Fetch a webpage and convert its HTML content to Markdown for efficient consumpti
 |---|---|---|---|---|
 | `url` | string | yes | — | URL of the webpage to fetch |
 
-- Fetches the page HTML via HTTP request, then converts to Markdown using [Turndown](https://github.com/mixmark-io/turndown) (bundled directly into the plugin).
+- Fetches the page via HTTP GET using a neutral `Notor/1.0` User-Agent header (not the Electron/Obsidian default).
+- Silently follows HTTP redirects up to a maximum of 5 hops; returns an error to the LLM if the limit is exceeded.
+- Both `http://` and `https://` URLs are accepted; no protocol enforcement is applied.
+- **Configurable request timeout** (default: 15 seconds). If the request does not complete within the timeout, it is cancelled and an error is returned to the LLM.
+- **Raw download size cap** (default: 5 MB, configurable in **Settings → Notor**): the download is aborted and an error is returned to the LLM if the response body exceeds this limit.
+- **Content-type routing**: `text/html` responses are converted to Markdown via Turndown. `text/*` (e.g., `text/plain`) and `application/json` responses are returned as-is without Turndown conversion. All other content types (binary, PDF, images, etc.) return a clear error to the LLM indicating the content type is not supported.
+- **Output character cap** (default: 50,000 characters, configurable): when the converted or returned content exceeds this limit, the tool returns content up to the cap and appends a truncation notice to the LLM. The full downloaded content is discarded beyond the cap — there is no pagination.
+- Converts HTML via [Turndown](https://github.com/mixmark-io/turndown) (bundled into the plugin) with the `turndown-plugin-gfm` extension for table, strikethrough, and task list support. Custom rules strip noisy elements (`<nav>`, `<footer>`, `<aside>`, `<form>`, form inputs, buttons) from the output.
 - Returns the converted Markdown content in the tool result. Does **not** write to a note — the user can direct the LLM to save the content to a note if desired.
-- No truncation or pagination of the returned content.
-- **Domain denylist**: users can configure a denylist of domains/sub-domains in **Settings → Notor**. Requests to denylisted domains return an error indicating the domain is blocked by the user. This allows users to mark sources they consider untrustworthy.
-- The initial implementation uses raw Turndown conversion. Content extraction quality (e.g., stripping navigation, ads, boilerplate via a readability library) may be improved in future iterations.
+- **Domain denylist**: users can configure a denylist of domains in **Settings → Notor**. Requests to denylisted domains return an error indicating the domain is blocked by the user, without making a network request. Matching is exact-domain only: denylisting `example.com` blocks only `example.com` itself. To block sub-domains, add wildcard entries (e.g., `*.example.com`).
+- **Auto-approve default**: `true` (read-only tool).
 - **Mode**: read-only (available in Plan and Act).
 
 > **Design note: Turndown bundling**
 >
-> Turndown (~14KB minified) is bundled directly into the Notor plugin as a JavaScript/TypeScript dependency. If future iterations require content extraction (e.g., Mozilla's Readability.js ~40KB), that can also be bundled without significant impact on plugin size.
+> Turndown (~14KB minified) and `turndown-plugin-gfm` are bundled directly into the Notor plugin as JavaScript/TypeScript dependencies. If future iterations require full content extraction (e.g., Mozilla's Readability.js ~40KB), that can also be bundled without significant impact on plugin size.
 
 ### `execute_command` (Phase 3)
 
@@ -121,13 +127,17 @@ Execute a shell command on the user's system.
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `command` | string | yes | — | Shell command to execute |
-| `working_directory` | string | no | vault root | Working directory for the command |
+| `working_directory` | string | no | vault root | Working directory for the command (relative paths resolved from vault root) |
 
-- Cross-platform compatible (must work on macOS, Windows, Linux).
-- Output (stdout + stderr) returned to the AI.
-- Configurable restrictions: users can block specific commands or patterns in Plan mode and/or Act mode.
-- **OS context**: the user's operating system (macOS, Windows, Linux) is injected into the auto-context so the LLM can generate platform-appropriate commands. See [Architecture — Auto-context injection](architecture.md#auto-context-injection-phase-3).
-- **Mode**: write (Act only by default, configurable).
+- **Shell resolution**: on macOS/Linux, spawns the user's login shell (`$SHELL` env var) with the `-l` flag so it sources the user's shell profile and inherits the full PATH (Homebrew, nvm, pyenv, etc. all available). On Windows, defaults to PowerShell with `-NoProfile`. The shell executable and any launch arguments are user-configurable in **Settings → Notor** on all platforms.
+- Combined stdout and stderr are returned to the LLM.
+- **Working directory validation**: the resolved working directory must be within the vault root or a user-configured allow-list of absolute paths (**Settings → Notor**, one path per line). The vault root is always implicitly included. Relative paths are resolved from the vault root. Requests with a working directory outside allowed paths are rejected and an error is returned to the LLM.
+- **Configurable per-command timeout** (default: 30 seconds): on timeout, the process receives `SIGTERM` followed by `SIGKILL` after a 3-second grace period (Windows: `child.kill()`). A timeout error is returned to the LLM.
+- **Output character cap** (default: 50,000 characters, configurable): when output exceeds this limit, the tool returns output up to the cap and appends a truncation notice to the LLM.
+- **Auto-approve default**: `false` (requires explicit user approval per invocation).
+- **Desktop-only**: returns an error if `Platform.isDesktopApp` is false (mobile not supported).
+- **OS context**: the user's operating system (macOS, Windows, Linux) is injected into the auto-context in the system prompt so the LLM can generate platform-appropriate commands without asking. See [Architecture — Auto-context injection](architecture.md#auto-context-injection-phase-3).
+- **Mode**: write (Act only by default).
 
 ---
 

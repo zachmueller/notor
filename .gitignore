@@ -25,6 +25,7 @@ data.json
 # E2E testing artifacts
 e2e/results/
 e2e/test-vault/
+e2e/external-test-files/
 e2e/dist/
 test-results/
 playwright-report/

@@ -44,12 +44,14 @@ export class SystemPromptBuilder {
 	 * @param mode - Current Plan/Act mode
 	 * @param toolDefinitions - Tool definitions from the tool registry
 	 * @param vaultRuleContent - Pre-evaluated vault rule content to inject
+	 * @param autoContextBlock - Dynamic `<auto-context>` XML block (rebuilt before each LLM call)
 	 * @returns Complete system prompt string
 	 */
 	async assemble(
 		mode: ConversationMode,
 		toolDefinitions: ToolDefinition[],
-		vaultRuleContent?: string
+		vaultRuleContent?: string,
+		autoContextBlock?: string
 	): Promise<string> {
 		const parts: string[] = [];
 
@@ -69,6 +71,11 @@ export class SystemPromptBuilder {
 		// 4. Vault-level rules (if any)
 		if (vaultRuleContent && vaultRuleContent.trim()) {
 			parts.push(this.buildRulesSection(vaultRuleContent));
+		}
+
+		// 5. Workspace context (auto-context — rebuilt before each LLM call)
+		if (autoContextBlock && autoContextBlock.trim()) {
+			parts.push(this.buildAutoContextSection(autoContextBlock));
 		}
 
 		let assembled = parts.join("\n\n");
@@ -221,6 +228,19 @@ Prefer surgical edits with \`replace_in_note\` over full rewrites with \`write_n
 The following instructions are provided by the user's vault configuration and should be followed:
 
 ${ruleContent}`;
+	}
+
+	/**
+	 * Build workspace context section from auto-context XML.
+	 *
+	 * This section is rebuilt before every LLM API call (including
+	 * tool-result round-trips) so it always reflects the latest
+	 * workspace state.
+	 */
+	private buildAutoContextSection(autoContextBlock: string): string {
+		return `## Workspace context
+
+${autoContextBlock}`;
 	}
 
 	// -----------------------------------------------------------------------

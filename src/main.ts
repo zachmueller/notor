@@ -9,8 +9,10 @@
  */
 
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { MarkdownView } from "obsidian";
 import { DEFAULT_SETTINGS, NotorSettings, NotorSettingTab } from "./settings";
 import { logger } from "./utils/logger";
+import { notifyMarkdownLeafActivated } from "./context/auto-context";
 
 // Providers
 import { ProviderRegistry } from "./providers/index";
@@ -29,6 +31,8 @@ import { ListVaultTool } from "./tools/list-vault";
 import { ReadFrontmatterTool } from "./tools/read-frontmatter";
 import { UpdateFrontmatterTool } from "./tools/update-frontmatter";
 import { ManageTagsTool } from "./tools/manage-tags";
+import { FetchWebpageTool } from "./tools/fetch-webpage";
+import { ExecuteCommandTool } from "./tools/execute-command";
 import { NoteOpener } from "./tools/note-opener";
 
 // Chat
@@ -101,7 +105,34 @@ export default class NotorPlugin extends Plugin {
 			callback: () => this.newConversation(),
 		});
 
-		// 5. Start vault rule manager (watches rules directory for changes)
+		// Phase 3 (COMP-004): Manual compaction command
+		this.addCommand({
+			id: "compact-context",
+			name: "Compact context",
+			callback: () => {
+				this.getOrchestrator().manualCompaction().catch((e) => {
+					log.error("Manual compaction failed", { error: String(e) });
+					new Notice(`Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
+				});
+			},
+		});
+
+		// 5. Register active-leaf-change listener so the auto-context module
+		// can track the last-focused markdown note even when the chat panel
+		// (or another non-markdown view) has focus at send time (ACI-005).
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				const view = leaf?.view;
+				if (view instanceof MarkdownView && view.file?.path) {
+					notifyMarkdownLeafActivated(view.file.path);
+				}
+				// Intentionally NOT clearing the cache on non-markdown leaf
+				// changes — that lets us recover the last active note when the
+				// chat panel steals focus.
+			})
+		);
+
+		// 6. Start vault rule manager (watches rules directory for changes)
 		// This is lightweight — just sets up file watchers
 		this.getVaultRuleManager().start();
 
@@ -110,6 +141,9 @@ export default class NotorPlugin extends Plugin {
 
 	onunload() {
 		log.info("Plugin unloading");
+
+		// Clear the last-active markdown path cache on unload
+		notifyMarkdownLeafActivated(null);
 
 		// Stop vault rule manager file watchers
 		this._vaultRuleManager?.stop();
@@ -321,6 +355,14 @@ export default class NotorPlugin extends Plugin {
 				new ManageTagsTool(this.app, checkpointManager)
 			);
 
+			// Phase 3: New tools
+			this._toolRegistry.register(
+				new FetchWebpageTool(this.app, this.settings)
+			);
+			this._toolRegistry.register(
+				new ExecuteCommandTool(this.app, this.settings)
+			);
+
 			log.debug("Tool registry initialized", {
 				tools: this._toolRegistry.getNames(),
 			});
@@ -340,6 +382,13 @@ export default class NotorPlugin extends Plugin {
 			}
 
 			this._toolDispatcher.setAutoApprove(this.settings.auto_approve);
+			this._toolDispatcher.setSettings(this.settings);
+
+			// Set vault root path for working directory validation
+			const adapter = this.app.vault.adapter as { basePath?: string };
+			if (adapter.basePath) {
+				this._toolDispatcher.setVaultRootPath(adapter.basePath);
+			}
 		}
 		return this._toolDispatcher;
 	}
@@ -423,13 +472,13 @@ export default class NotorPlugin extends Plugin {
 		// Wire orchestrator ↔ view
 		orchestrator.setView(view);
 
-		// Send message
-		view.setOnSendMessage(async (content: string) => {
+		// Send message (with optional attachments from the chat view)
+		view.setOnSendMessage(async (content: string, attachments?) => {
 			// Cast is safe: both ToolDefinition types are structurally identical —
 			// the only difference is JSONSchemaProperty.type being string | undefined
 			// vs string. Provider implementations handle undefined type gracefully.
 			const toolDefinitions = toolRegistry.getToolDefinitions() as import("./providers/provider").ToolDefinition[];
-			await orchestrator.handleUserMessage(content, toolDefinitions);
+			await orchestrator.handleUserMessage(content, toolDefinitions, attachments);
 		});
 
 		// Stop response

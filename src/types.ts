@@ -66,6 +66,22 @@ export interface Message {
 	tool_result?: ToolResult | null;
 	/** Whether this message was truncated from the LLM context window. */
 	truncated?: boolean;
+	/** Auto-context metadata logged for user messages (Phase 3). */
+	auto_context?: string | null;
+	/** Attachment metadata logged for user messages (Phase 3). */
+	attachments?: Array<{
+		id: string;
+		type: string;
+		path: string;
+		section: string | null;
+		display_name: string;
+		content_length: number | null;
+		status: string;
+	}> | null;
+	/** Captured stdout from pre-send hooks (Phase 3). */
+	hook_injections?: string[] | null;
+	/** Whether this user message is a hook injection (ACI-002). */
+	is_hook_injection?: boolean;
 }
 
 // ---------------------------------------------------------------------------

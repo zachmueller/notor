@@ -26,6 +26,35 @@ export interface ModelPricing {
 	output: number;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3: Hook configuration interfaces
+// ---------------------------------------------------------------------------
+
+/** A single lifecycle hook — shell command tied to an event. */
+export interface Hook {
+	/** Unique identifier (UUID). */
+	id: string;
+	/** Lifecycle event this hook fires on. */
+	event: HookEvent;
+	/** Shell command to execute. */
+	command: string;
+	/** Human-readable label (optional; falls back to command). */
+	label: string;
+	/** Whether this hook is active. */
+	enabled: boolean;
+}
+
+/** Supported lifecycle hook event types. */
+export type HookEvent = "pre_send" | "on_tool_call" | "on_tool_result" | "after_completion";
+
+/** Ordered lists of hooks grouped by lifecycle event. */
+export interface HookConfig {
+	pre_send: Hook[];
+	on_tool_call: Hook[];
+	on_tool_result: Hook[];
+	after_completion: Hook[];
+}
+
 /** Notor plugin settings persisted via loadData/saveData. */
 export interface NotorSettings {
 	/** Vault-relative path for Notor-managed files. */
@@ -66,6 +95,84 @@ export interface NotorSettings {
 
 	/** Per-model pricing (per 1K tokens), keyed by model ID. */
 	model_pricing: Record<string, ModelPricing>;
+
+	// -------------------------------------------------------------------
+	// Phase 3: Auto-context settings
+	// -------------------------------------------------------------------
+
+	/** Enable open note paths auto-context. */
+	auto_context_open_notes: boolean;
+
+	/** Enable vault structure auto-context. */
+	auto_context_vault_structure: boolean;
+
+	/** Enable OS platform auto-context. */
+	auto_context_os: boolean;
+
+	// -------------------------------------------------------------------
+	// Phase 3: Compaction settings
+	// -------------------------------------------------------------------
+
+	/** Fraction of context window that triggers auto-compaction (0–1). */
+	compaction_threshold: number;
+
+	/** Custom compaction system prompt (empty = use default). */
+	compaction_prompt_override: string;
+
+	// -------------------------------------------------------------------
+	// Phase 3: fetch_webpage settings
+	// -------------------------------------------------------------------
+
+	/** HTTP request timeout in seconds. */
+	fetch_webpage_timeout: number;
+
+	/** Maximum raw download size in MB. */
+	fetch_webpage_max_download_mb: number;
+
+	/** Maximum output character count after conversion. */
+	fetch_webpage_max_output_chars: number;
+
+	/** Blocked domain patterns for fetch_webpage. */
+	domain_denylist: string[];
+
+	// -------------------------------------------------------------------
+	// Phase 3: execute_command settings
+	// -------------------------------------------------------------------
+
+	/** Per-command timeout in seconds. */
+	execute_command_timeout: number;
+
+	/** Maximum command output character count. */
+	execute_command_max_output_chars: number;
+
+	/** Additional allowed working directory absolute paths. */
+	execute_command_allowed_paths: string[];
+
+	/** Custom shell executable (empty = platform default). */
+	execute_command_shell: string;
+
+	/** Custom shell launch arguments (empty = platform default). */
+	execute_command_shell_args: string[];
+
+	// -------------------------------------------------------------------
+	// Phase 3: File attachment settings
+	// -------------------------------------------------------------------
+
+	/** File size in MB above which a confirmation dialog is shown. */
+	external_file_size_threshold_mb: number;
+
+	// -------------------------------------------------------------------
+	// Phase 3: Hook settings
+	// -------------------------------------------------------------------
+
+	/** Hook configurations grouped by lifecycle event. */
+	hooks: HookConfig;
+
+	/** Global hook timeout in seconds. */
+	hook_timeout: number;
+
+	/** Max environment variable value size for hooks (chars). */
+	hook_env_truncation_chars: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,10 +214,20 @@ const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	search_vault: true,
 	list_vault: true,
 	read_frontmatter: true,
+	fetch_webpage: true,
 	write_note: false,
 	replace_in_note: false,
 	update_frontmatter: false,
 	manage_tags: false,
+	execute_command: false,
+};
+
+/** Default empty hook configuration. */
+const DEFAULT_HOOKS: HookConfig = {
+	pre_send: [],
+	on_tool_call: [],
+	on_tool_result: [],
+	after_completion: [],
 };
 
 /** Sensible defaults for all Notor settings. */
@@ -128,6 +245,36 @@ export const DEFAULT_SETTINGS: NotorSettings = {
 	checkpoint_max_per_conversation: 100,
 	checkpoint_max_age_days: 30,
 	model_pricing: {},
+
+	// Phase 3: Auto-context
+	auto_context_open_notes: true,
+	auto_context_vault_structure: true,
+	auto_context_os: true,
+
+	// Phase 3: Compaction
+	compaction_threshold: 0.8,
+	compaction_prompt_override: "",
+
+	// Phase 3: fetch_webpage
+	fetch_webpage_timeout: 15,
+	fetch_webpage_max_download_mb: 5,
+	fetch_webpage_max_output_chars: 50000,
+	domain_denylist: [],
+
+	// Phase 3: execute_command
+	execute_command_timeout: 30,
+	execute_command_max_output_chars: 50000,
+	execute_command_allowed_paths: [],
+	execute_command_shell: "",
+	execute_command_shell_args: [],
+
+	// Phase 3: File attachments
+	external_file_size_threshold_mb: 1,
+
+	// Phase 3: Hooks
+	hooks: DEFAULT_HOOKS,
+	hook_timeout: 10,
+	hook_env_truncation_chars: 10000,
 };
 
 // ---------------------------------------------------------------------------
@@ -193,6 +340,16 @@ const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; isWrite: 
 	manage_tags: {
 		name: "Manage tags",
 		desc: "Add or remove tags on a note.",
+		isWrite: true,
+	},
+	fetch_webpage: {
+		name: "Fetch webpage",
+		desc: "Fetch a webpage by URL and return its content as Markdown.",
+		isWrite: false,
+	},
+	execute_command: {
+		name: "Execute command",
+		desc: "Execute a shell command on the user's system (desktop only).",
 		isWrite: true,
 	},
 };
@@ -262,6 +419,36 @@ export class NotorSettingTab extends PluginSettingTab {
 		this.renderBedrockProviderSection(containerEl);
 
 		// -----------------------------------------------------------------------
+		// Phase 3: Auto-context settings (CTX-005)
+		// -----------------------------------------------------------------------
+		this.renderAutoContextSection(containerEl);
+
+		// -----------------------------------------------------------------------
+		// Phase 3: Web fetching settings (TOOL-013)
+		// -----------------------------------------------------------------------
+		this.renderFetchWebpageSection(containerEl);
+
+		// -----------------------------------------------------------------------
+		// Phase 3: Shell commands settings (TOOL-016)
+		// -----------------------------------------------------------------------
+		this.renderExecuteCommandSection(containerEl);
+
+		// -----------------------------------------------------------------------
+		// Phase 3: Hooks settings (HOOK-006)
+		// -----------------------------------------------------------------------
+		this.renderHooksSection(containerEl);
+
+		// -----------------------------------------------------------------------
+		// Phase 3: File attachments settings (POLISH-001)
+		// -----------------------------------------------------------------------
+		this.renderFileAttachmentsSection(containerEl);
+
+		// -----------------------------------------------------------------------
+		// Phase 3: Compaction settings (COMP-003)
+		// -----------------------------------------------------------------------
+		this.renderCompactionSection(containerEl);
+
+		// -----------------------------------------------------------------------
 		// SET-002: General settings
 		// -----------------------------------------------------------------------
 		this.renderGeneralSection(containerEl);
@@ -297,6 +484,62 @@ export class NotorSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
+	}
+
+	// =========================================================================
+	// Phase 3: Auto-context settings (CTX-005)
+	// =========================================================================
+
+	private renderAutoContextSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Auto-context" });
+		containerEl.createEl("p", {
+			text:
+				"Ambient workspace signals automatically included with every message sent to the AI. " +
+				"Each source can be individually enabled or disabled.",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Include open note paths")
+			.setDesc(
+				"Include the vault-relative paths of all currently open notes so the AI knows your active workspace."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.auto_context_open_notes)
+					.onChange(async (value) => {
+						this.plugin.settings.auto_context_open_notes = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Include vault structure")
+			.setDesc(
+				"Include the top-level folder names in your vault so the AI can navigate and suggest directories."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.auto_context_vault_structure)
+					.onChange(async (value) => {
+						this.plugin.settings.auto_context_vault_structure = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Include operating system")
+			.setDesc(
+				"Include your OS platform (macOS, Windows, Linux) so the AI generates platform-appropriate commands."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.auto_context_os)
+					.onChange(async (value) => {
+						this.plugin.settings.auto_context_os = value;
+						await this.plugin.saveSettings();
+					})
+			);
 	}
 
 	// =========================================================================
@@ -592,6 +835,530 @@ export class NotorSettingTab extends PluginSettingTab {
 				}
 			});
 		});
+	}
+
+	// =========================================================================
+	// Phase 3: Web fetching settings (TOOL-013)
+	// =========================================================================
+
+	private renderFetchWebpageSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Web fetching" });
+		containerEl.createEl("p", {
+			text:
+				"Settings for the fetch_webpage tool. Controls timeouts, download limits, " +
+				"and domain blocking.",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Request timeout (seconds)")
+			.setDesc(
+				"Maximum time to wait for a webpage response before aborting."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("15")
+					.setValue(String(this.plugin.settings.fetch_webpage_timeout))
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.fetch_webpage_timeout = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Maximum download size (MB)")
+			.setDesc(
+				"Maximum raw download size in megabytes. Requests exceeding this are aborted."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("5")
+					.setValue(
+						String(this.plugin.settings.fetch_webpage_max_download_mb)
+					)
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.fetch_webpage_max_download_mb = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Maximum output characters")
+			.setDesc(
+				"Maximum characters in the converted output. Content exceeding this is truncated."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("50000")
+					.setValue(
+						String(this.plugin.settings.fetch_webpage_max_output_chars)
+					)
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.fetch_webpage_max_output_chars = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		// Domain denylist
+		containerEl.createEl("h3", { text: "Domain denylist" });
+		containerEl.createEl("p", {
+			text:
+				"Domains blocked from being fetched. Use exact domains (e.g. example.com) or " +
+				"wildcard patterns (e.g. *.example.com) to block all sub-domains.",
+			cls: "setting-item-description",
+		});
+
+		const denylist = this.plugin.settings.domain_denylist;
+		for (let i = 0; i < denylist.length; i++) {
+			const entry = denylist[i] ?? "";
+			new Setting(containerEl)
+				.setName(entry || "(empty)")
+				.addButton((btn) =>
+					btn
+						.setButtonText("Remove")
+						.setWarning()
+						.onClick(async () => {
+							this.plugin.settings.domain_denylist.splice(i, 1);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+				);
+		}
+
+		let newDomain = "";
+		new Setting(containerEl)
+			.setName("Add domain")
+			.setDesc("Enter a domain or wildcard pattern to block.")
+			.addText((text) => {
+				text.setPlaceholder("example.com or *.example.com").onChange(
+					(v) => {
+						newDomain = v.trim();
+					}
+				);
+			})
+			.addButton((btn) =>
+				btn.setButtonText("Add").onClick(async () => {
+					if (!newDomain) {
+						new Notice("Enter a domain pattern to add.");
+						return;
+					}
+					if (
+						!/^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/.test(
+							newDomain
+						)
+					) {
+						new Notice(
+							"Invalid domain format. Use a domain like 'example.com' or '*.example.com'."
+						);
+						return;
+					}
+					this.plugin.settings.domain_denylist.push(newDomain);
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			);
+	}
+
+	// =========================================================================
+	// Phase 3: Shell commands settings (TOOL-016)
+	// =========================================================================
+
+	private renderExecuteCommandSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Shell commands" });
+		containerEl.createEl("p", {
+			text:
+				"Settings for the execute_command tool. Controls shell configuration, " +
+				"timeouts, output limits, and allowed working directories. Desktop only.",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Command timeout (seconds)")
+			.setDesc(
+				"Maximum time a command can run before it is terminated."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("30")
+					.setValue(
+						String(this.plugin.settings.execute_command_timeout)
+					)
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.execute_command_timeout = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Maximum output characters")
+			.setDesc(
+				"Maximum characters captured from command output. Output exceeding this is truncated."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("50000")
+					.setValue(
+						String(this.plugin.settings.execute_command_max_output_chars)
+					)
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.execute_command_max_output_chars = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Shell executable")
+			.setDesc(
+				"Custom shell executable to use instead of the platform default. " +
+				"Leave empty for automatic detection ($SHELL on macOS/Linux, PowerShell on Windows)."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("(platform default)")
+					.setValue(this.plugin.settings.execute_command_shell)
+					.onChange(async (value) => {
+						this.plugin.settings.execute_command_shell = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Shell arguments")
+			.setDesc(
+				"Custom shell launch arguments (comma-separated). Leave empty for platform defaults. " +
+				"Example: -l,-c for login shell."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("(platform default)")
+					.setValue(
+						this.plugin.settings.execute_command_shell_args.join(", ")
+					)
+					.onChange(async (value) => {
+						this.plugin.settings.execute_command_shell_args = value
+							.split(",")
+							.map((s) => s.trim())
+							.filter((s) => s.length > 0);
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// Allowed paths
+		containerEl.createEl("h3", { text: "Allowed working directories" });
+		containerEl.createEl("p", {
+			text:
+				"Additional absolute paths where commands are allowed to run. " +
+				"The vault root is always allowed.",
+			cls: "setting-item-description",
+		});
+
+		const allowedPaths = this.plugin.settings.execute_command_allowed_paths;
+		for (let i = 0; i < allowedPaths.length; i++) {
+			const entry = allowedPaths[i] ?? "";
+			new Setting(containerEl)
+				.setName(entry || "(empty)")
+				.addButton((btn) =>
+					btn
+						.setButtonText("Remove")
+						.setWarning()
+						.onClick(async () => {
+							this.plugin.settings.execute_command_allowed_paths.splice(i, 1);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+				);
+		}
+
+		let newPath = "";
+		new Setting(containerEl)
+			.setName("Add allowed path")
+			.setDesc("Enter an absolute directory path.")
+			.addText((text) => {
+				text.setPlaceholder("/path/to/directory").onChange((v) => {
+					newPath = v.trim();
+				});
+			})
+			.addButton((btn) =>
+				btn.setButtonText("Add").onClick(async () => {
+					if (!newPath) {
+						new Notice("Enter a path to add.");
+						return;
+					}
+					this.plugin.settings.execute_command_allowed_paths.push(
+						newPath
+					);
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			);
+	}
+
+	// =========================================================================
+	// Phase 3: Hooks settings (HOOK-006)
+	// =========================================================================
+
+	private renderHooksSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Hooks" });
+		containerEl.createEl("p", {
+			text:
+				"Shell commands that run at specific points in the AI conversation lifecycle. " +
+				"Pre-send hooks can inject context into messages. Desktop only.",
+			cls: "setting-item-description",
+		});
+
+		// Global hook settings
+		new Setting(containerEl)
+			.setName("Hook timeout (seconds)")
+			.setDesc("Maximum time a hook command can run before being terminated.")
+			.addText((text) =>
+				text
+					.setPlaceholder("10")
+					.setValue(String(this.plugin.settings.hook_timeout))
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.hook_timeout = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Environment variable truncation (chars)")
+			.setDesc(
+				"Maximum character length for NOTOR_* environment variables passed to hooks. " +
+				"Values exceeding this are truncated with a marker."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("10000")
+					.setValue(String(this.plugin.settings.hook_env_truncation_chars))
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.hook_env_truncation_chars = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		// Per-event hook lists
+		const eventLabels: Record<string, { title: string; desc: string }> = {
+			pre_send: {
+				title: "Pre-send hooks",
+				desc: "Run before each message is sent to the AI. Stdout is captured and included in the message context.",
+			},
+			on_tool_call: {
+				title: "On tool call hooks",
+				desc: "Run after a tool call is approved, before execution. Fire-and-forget.",
+			},
+			on_tool_result: {
+				title: "On tool result hooks",
+				desc: "Run after a tool finishes execution, before the result returns to the AI. Fire-and-forget.",
+			},
+			after_completion: {
+				title: "After completion hooks",
+				desc: "Run after the AI's full response turn completes. Fire-and-forget.",
+			},
+		};
+
+		for (const [event, meta] of Object.entries(eventLabels)) {
+			const eventKey = event as keyof HookConfig;
+			containerEl.createEl("h3", { text: meta.title });
+			containerEl.createEl("p", { text: meta.desc, cls: "setting-item-description" });
+
+			const hooks = this.plugin.settings.hooks[eventKey];
+
+			// Render existing hooks
+			for (let i = 0; i < hooks.length; i++) {
+				const hook = hooks[i];
+				if (!hook) continue;
+
+				const setting = new Setting(containerEl)
+					.setName(hook.label || hook.command.substring(0, 60))
+					.setDesc(hook.label ? hook.command.substring(0, 80) : "");
+
+				// Enabled toggle
+				setting.addToggle((toggle) =>
+					toggle.setValue(hook.enabled).onChange(async (value) => {
+						hook.enabled = value;
+						await this.plugin.saveSettings();
+					})
+				);
+
+				// Move up
+				if (i > 0) {
+					setting.addButton((btn) =>
+						btn.setButtonText("↑").onClick(async () => {
+							hooks.splice(i, 1);
+							hooks.splice(i - 1, 0, hook);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+					);
+				}
+
+				// Move down
+				if (i < hooks.length - 1) {
+					setting.addButton((btn) =>
+						btn.setButtonText("↓").onClick(async () => {
+							hooks.splice(i, 1);
+							hooks.splice(i + 1, 0, hook);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+					);
+				}
+
+				// Delete
+				setting.addButton((btn) =>
+					btn
+						.setButtonText("Remove")
+						.setWarning()
+						.onClick(async () => {
+							hooks.splice(i, 1);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+				);
+			}
+
+			// Add new hook
+			let newCommand = "";
+			let newLabel = "";
+			const addSetting = new Setting(containerEl)
+				.setName("Add hook")
+				.setDesc("Shell command to execute.");
+
+			addSetting.addText((text) => {
+				text.setPlaceholder("Shell command").onChange((v) => {
+					newCommand = v.trim();
+				});
+			});
+			addSetting.addText((text) => {
+				text.setPlaceholder("Label (optional)").onChange((v) => {
+					newLabel = v.trim();
+				});
+				text.inputEl.style.width = "120px";
+			});
+			addSetting.addButton((btn) =>
+				btn.setButtonText("Add").onClick(async () => {
+					if (!newCommand) {
+						new Notice("Enter a shell command for the hook.");
+						return;
+					}
+					const newHook: Hook = {
+						id: crypto.randomUUID?.() ?? Date.now().toString(36),
+						event: eventKey,
+						command: newCommand,
+						label: newLabel,
+						enabled: true,
+					};
+					this.plugin.settings.hooks[eventKey].push(newHook);
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			);
+		}
+	}
+
+	// =========================================================================
+	// Phase 3: File attachments settings (POLISH-001)
+	// =========================================================================
+
+	private renderFileAttachmentsSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "File attachments" });
+		containerEl.createEl("p", {
+			text:
+				"Settings for attaching external files to messages. " +
+				"Vault notes can be attached without size restrictions; " +
+				"external files from your filesystem are subject to size limits. Desktop only.",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("External file size threshold (MB)")
+			.setDesc(
+				"Files larger than this threshold trigger a confirmation dialog before attaching. " +
+				"This prevents accidentally attaching very large files to the context window."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("1")
+					.setValue(String(this.plugin.settings.external_file_size_threshold_mb))
+					.onChange(async (value) => {
+						const parsed = parseFloat(value);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.external_file_size_threshold_mb = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+	}
+
+	// =========================================================================
+	// Phase 3: Compaction settings (COMP-003)
+	// =========================================================================
+
+	private renderCompactionSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Context compaction" });
+		containerEl.createEl("p", {
+			text:
+				"When a conversation approaches the model's context window limit, " +
+				"Notor can automatically summarize the conversation to reclaim space. " +
+				"You can also trigger compaction manually via the command palette (Notor: Compact context).",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Compaction threshold")
+			.setDesc(
+				"Fraction of the model's context window (0.0–1.0) that triggers auto-compaction. " +
+				"For example, 0.8 means compaction fires when 80% of the context window is used."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("0.8")
+					.setValue(String(this.plugin.settings.compaction_threshold))
+					.onChange(async (value) => {
+						const parsed = parseFloat(value);
+						if (!isNaN(parsed) && parsed > 0 && parsed <= 1) {
+							this.plugin.settings.compaction_threshold = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Custom compaction prompt")
+			.setDesc(
+				"Override the built-in compaction system prompt. " +
+				"Leave empty to use the default prompt that produces concise, faithful summaries."
+			)
+			.addTextArea((text) =>
+				text
+					.setPlaceholder("(using default prompt)")
+					.setValue(this.plugin.settings.compaction_prompt_override)
+					.onChange(async (value) => {
+						this.plugin.settings.compaction_prompt_override = value;
+						await this.plugin.saveSettings();
+					})
+			);
 	}
 
 	// =========================================================================

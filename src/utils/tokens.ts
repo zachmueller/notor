@@ -42,3 +42,13 @@ export function estimateTokenCount(text: string): number {
 	}
 	return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
+
+/**
+ * Alias for {@link estimateTokenCount} matching the Phase 3 task spec name.
+ *
+ * Used by auto-compaction and context assembly modules.
+ *
+ * @param text - The text to estimate tokens for (handles empty/null/undefined).
+ * @returns Estimated token count (always >= 0).
+ */
+export const estimateTokens = estimateTokenCount;

@@ -5,12 +5,52 @@
  * conversations from disk. Manages conversation listing, ordering,
  * and retention policy enforcement.
  *
- * @see specs/01-mvp/data-model.md — JSONL Message Schema
+ * ## JSONL Schema
+ *
+ * Each JSONL file has the following line types:
+ *
+ * **Line 1 — Conversation header:**
+ * ```json
+ * { "_type": "conversation", "id": "...", "created_at": "...", ... }
+ * ```
+ *
+ * **Subsequent lines — Message records:**
+ * ```json
+ * { "_type": "message", "id": "...", "role": "user|assistant|system|tool_call|tool_result", "content": "...", ... }
+ * ```
+ *
+ * ### Phase 3 field extensions (backward-compatible — all optional)
+ *
+ * User messages may include:
+ * - `auto_context` (string | null): The raw `<auto-context>` XML block injected
+ *   into the message, or null if auto-context was disabled/empty.
+ * - `attachments` (array | null): Metadata-only records of attached notes/files.
+ *   Each entry: `{ id, type, path, section, display_name, content_length, status }`.
+ *   Full attachment content is NOT stored — only metadata for auditability.
+ * - `hook_injections` (string[] | null): Captured stdout from `pre_send` hooks
+ *   that was injected into the assembled message.
+ *
+ * System messages may contain a serialized `CompactionRecord`:
+ * - When `role === "system"` and `content` is valid JSON with a `type` field
+ *   equal to `"compaction"`, the line represents a compaction event.
+ * - CompactionRecord fields: `{ id, type, conversation_id, timestamp, trigger,
+ *   token_count_at_compaction, summary_token_count, messages_before, messages_after }`.
+ *
+ * ### Backward compatibility
+ *
+ * All Phase 3 fields are defined as optional (`?`) on the Message interface.
+ * Older JSONL files written before Phase 3 will parse correctly — missing
+ * fields default to `undefined` which is treated identically to `null` by
+ * all consuming code. No migration is required.
+ *
+ * @see specs/01-mvp/data-model.md — JSONL Message Schema (Phase 1)
+ * @see specs/02-context-intelligence/data-model.md — Phase 3 extensions
  * @see specs/01-mvp/spec.md — FR-19
  */
 
 import type { Vault } from "obsidian";
 import type { Conversation, Message } from "../types";
+import type { CompactionRecord } from "../context/compaction";
 import { logger } from "../utils/logger";
 
 const log = logger("HistoryManager");
@@ -187,6 +227,10 @@ export class HistoryManager {
 
 	/**
 	 * Load a conversation and all its messages from a JSONL file.
+	 *
+	 * Phase 3 fields (`auto_context`, `attachments`, `hook_injections`)
+	 * are preserved if present. Older files without these fields parse
+	 * correctly — missing optional fields remain `undefined`.
 	 */
 	async loadConversation(filename: string): Promise<{
 		conversation: Conversation;
@@ -231,6 +275,53 @@ export class HistoryManager {
 		}
 
 		return { conversation, messages };
+	}
+
+	/**
+	 * Append a CompactionRecord to the conversation's JSONL file.
+	 *
+	 * Compaction records are written as system messages with the serialized
+	 * CompactionRecord as the content field. This preserves the append-only
+	 * JSONL structure while recording the compaction event at the correct
+	 * chronological position in the conversation history.
+	 */
+	async appendCompactionRecord(
+		conversation: Conversation,
+		record: CompactionRecord
+	): Promise<void> {
+		const message: Message = {
+			id: record.id,
+			conversation_id: conversation.id,
+			role: "system",
+			content: JSON.stringify(record),
+			timestamp: record.timestamp,
+		};
+		await this.appendMessage(conversation, message);
+
+		log.info("Appended compaction record", {
+			conversationId: conversation.id,
+			recordId: record.id,
+			trigger: record.trigger,
+			tokensBefore: record.token_count_at_compaction,
+		});
+	}
+
+	/**
+	 * Check if a parsed message line is a CompactionRecord.
+	 *
+	 * Returns the deserialized CompactionRecord if so, or null otherwise.
+	 */
+	static parseCompactionRecord(message: Message): CompactionRecord | null {
+		if (message.role !== "system") return null;
+		try {
+			const parsed = JSON.parse(message.content);
+			if (parsed && parsed.type === "compaction") {
+				return parsed as CompactionRecord;
+			}
+		} catch {
+			// Not JSON or not a compaction record
+		}
+		return null;
 	}
 
 	/**

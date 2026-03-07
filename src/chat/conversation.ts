@@ -153,6 +153,10 @@ export class ConversationManager {
 		cost_estimate?: number | null;
 		tool_call?: ToolCall | null;
 		tool_result?: ToolResult | null;
+		auto_context?: string | null;
+		attachments?: Message["attachments"];
+		hook_injections?: string[] | null;
+		is_hook_injection?: boolean;
 	}): Message {
 		if (!this.activeConversation) {
 			throw new Error("No active conversation. Create or load one first.");
@@ -170,6 +174,10 @@ export class ConversationManager {
 			tool_call: params.tool_call ?? null,
 			tool_result: params.tool_result ?? null,
 			truncated: false,
+			auto_context: params.auto_context ?? null,
+			attachments: params.attachments ?? null,
+			hook_injections: params.hook_injections ?? null,
+			is_hook_injection: params.is_hook_injection,
 		};
 
 		this.messages.push(message);
@@ -194,9 +202,10 @@ export class ConversationManager {
 			}
 		}
 
-		// Auto-generate title from first user message
+		// Auto-generate title from first user message (skip hook injections)
 		if (
 			params.role === "user" &&
+			!params.is_hook_injection &&
 			!this.activeConversation.title
 		) {
 			this.activeConversation.title = this.generateTitle(params.content);
@@ -236,6 +245,22 @@ export class ConversationManager {
 	 */
 	getMessageById(id: string): Message | undefined {
 		return this.messages.find((m) => m.id === id);
+	}
+
+	/**
+	 * Replace all messages with a new set (used by compaction).
+	 *
+	 * This replaces the in-memory message array without triggering
+	 * per-message callbacks (the caller handles persistence).
+	 *
+	 * @param newMessages - The replacement message array.
+	 */
+	replaceMessages(newMessages: Message[]): void {
+		this.messages = [...newMessages];
+		log.info("Messages replaced (compaction)", {
+			newCount: newMessages.length,
+			conversationId: this.activeConversation?.id,
+		});
 	}
 
 	// -----------------------------------------------------------------------

@@ -23,7 +23,8 @@ The chat panel is the primary interaction surface for Notor.
   - Tool name and parameters (collapsible for space)
   - Tool result or output (collapsible)
   - Status indicator (pending / success / error)
-- **User messages** display as-is, with any attached notes/files shown as labeled references.
+- **User messages** display as-is, with any attached notes/files shown as labeled chips (name only — no content expansion in the thread).
+- **Hook output** (Phase 3): when a `pre-send` hook produces stdout, that output is rendered as a collapsible element in the chat panel (collapsed by default, with a "Hook output" summary label). It is displayed as a distinct element — it does not appear inside the user's message bubble. Behind the scenes the hook output is sent to the LLM as a separate `user` message so the model can see it.
 
 ### Chat settings (quick access)
 
@@ -158,12 +159,13 @@ Centrally stored Markdown files under `{notor_dir}/rules/` that are conditionall
 
 ## Auto-context injection (Phase 3)
 
-Automatically included context with each message (no manual attachment required):
+Auto-context is injected into the **system prompt** (not the user message) before every LLM API call, so the user's chat bubble only shows their typed text. The context is rebuilt fresh on every call so open tabs and vault structure are never stale. Three sources are included:
 
-- **Open note paths**: file paths of all notes currently open in the Obsidian workspace (all leaf/tab views, including pinned tabs and split panes). Only paths are included — full note contents are NOT automatically injected.
-- **Vault structure**: top-level directory listing only (folder names at the vault root). Does NOT include individual file names in the root directory or recursive subdirectory contents, since many Obsidian users store most notes directly in the root.
+- **Open note paths**: file paths of all currently open markdown tabs (all leaf/tab views — pinned, split, stacked, including tabs that have never been clicked). The active note is annotated with ` (active)` in the list (e.g., `Research/Climate.md (active)`). Only paths are included — full note contents are NOT automatically injected.
+- **Vault structure**: top-level folder names at the vault root, each on its own line with a trailing `/` (e.g., `Research/`, `Daily/`). File names at the root level and recursive subdirectory contents are not included.
 - **Operating system**: the user's OS platform (macOS, Windows, Linux) so the LLM can generate platform-appropriate shell commands and tailor OS-specific guidance.
-- Users can configure which auto-context sources are active.
+
+Users can individually enable or disable each source in **Settings → Notor**. Auto-context is not stored in the JSONL conversation log — it is ephemeral system prompt content.
 
 ---
 
@@ -234,9 +236,9 @@ Plugin settings are managed in **Settings → Notor** within Obsidian's settings
 
 A user-configurable list of domains and sub-domains that the `fetch_webpage` tool is blocked from accessing.
 
-- Users add or remove domains via a list editor in the settings UI.
-- Denylisting `example.com` blocks all pages under `example.com` and its sub-domains (e.g., `sub.example.com`).
-- When the LLM attempts to fetch a denylisted domain, the tool returns an error indicating the domain is blocked by the user.
+- Users add or remove domain entries via a list editor in the settings UI.
+- Matching is exact-domain only: denylisting `example.com` blocks only `example.com` itself, not its sub-domains. To block sub-domains, users must add separate wildcard entries (e.g., `*.example.com`).
+- When the LLM attempts to fetch a denylisted domain, the tool returns an error indicating the domain is blocked by the user, without making a network request.
 - This is a user preference control for marking sources they consider untrustworthy — not a security mechanism.
 
 ### MCP tool classification (Phase 5)
