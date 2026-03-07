@@ -45,6 +45,7 @@ This specification covers Phase 4 of the roadmap:
 
 - As a workflow author, I want to embed the contents of another note into my workflow prompt so that I can compose prompts from reusable building blocks.
 - As a workflow author, I want to include only a specific section of a note so that I can inject focused context without pulling in the entire note.
+- As a workflow author, I want to reference included notes using `[[wikilink]]` syntax so that if I rename the referenced note, Obsidian automatically updates the link in my workflow just like any other internal link.
 - As a user, I want to use `<include_note>` in my custom system prompt so that I can assemble my system prompt from multiple modular notes.
 - As a user, I want to use `<include_note>` in vault-level rule files so that rule instructions can reference shared content without duplication.
 
@@ -218,21 +219,31 @@ This specification covers Phase 4 of the roadmap:
 **Description:** A special self-closing XML-style tag (`<include_note ... />`) that dynamically injects the contents of a vault note (or a section of a note) into the surrounding text at resolution time. Each tag must be written in self-closing form — ending with `/>` — and may appear multiple times in a single document; each occurrence is resolved independently.
 
 **Acceptance criteria:**
-- The `<include_note>` tag syntax:
+- The `<include_note>` tag syntax — two equivalent forms for the `path` attribute:
   ```markdown
+  <!-- Vault-relative path (explicit) -->
   <include_note path="Research/Topic A.md" section="Summary" mode="inline" />
+
+  <!-- Wikilink (Obsidian-native, rename-safe) -->
+  <include_note path="[[Topic A]]" section="Summary" mode="inline" />
   ```
 - Supported attributes (all other attributes are ignored):
   | Attribute | Required | Description |
   |---|---|---|
-  | `path` | yes | Vault-relative path to the note. Supports `[[wikilink]]` syntax (e.g., `path="[[Research/Topic A]]"`), which is resolved to the vault path. |
+  | `path` | yes | Reference to the target note. Accepts either a vault-relative file path (e.g., `"Research/Topic A.md"`) or an Obsidian wikilink (e.g., `"[[Topic A]]"` or `"[[Research/Topic A]]"`). See path resolution rules below. |
   | `section` | no | Specific section heading to extract. When specified, only the content from that heading to the next heading of equal or higher level is included. Omit for the full note body. |
   | `mode` | no | `inline` (paste content directly into the surrounding text) or `attached` (include as a separate attached file in context). Default: `inline`. |
+- **Path resolution rules:**
+  - **Vault-relative path** (e.g., `path="Research/Topic A.md"`): the plugin reads the note at that exact path within the vault. If the note is renamed or moved, the path in the tag is not automatically updated and will break.
+  - **Wikilink** (e.g., `path="[[Topic A]]"` or `path="[[Research/Topic A]]"`): the plugin resolves the link using Obsidian's `metadataCache.getFirstLinkpathDest()` API — the same resolution logic Obsidian uses for all internal wikilinks. This means the note is found by name/title without requiring the full path, and Obsidian's built-in link-update mechanism will automatically update the `path` attribute value when the referenced note is renamed or moved (because Obsidian treats the wikilink in the tag as an internal link). **Wikilink syntax is the recommended form** for notes that may be renamed.
+  - The `[[wikilink]]` value (including the double brackets) must be the entire content of the `path` attribute string: `path="[[Note Title]]"`.
+  - A wikilink may optionally include a subdirectory hint to disambiguate notes with the same name (e.g., `path="[[Research/Topic A]]"`), following standard Obsidian wikilink conventions.
+  - If a wikilink resolves to multiple candidate notes (ambiguous note name), the plugin uses Obsidian's default resolution order (same as `getFirstLinkpathDest()`) and does not surface a warning. Authors should use a more specific path to disambiguate if needed.
 - Context-specific behavior:
   - **Workflow notes**: both `inline` and `attached` modes are supported. In `attached` mode, the note content is added to the message as an attachment (same format as user-attached notes from FR-24: `<vault-note path="..." section="...">...content...</vault-note>` within an `<attachments>` block).
   - **System prompts** (global and persona) and **vault-level rule files**: only `inline` mode is supported. The `mode` attribute is ignored; content is always inlined directly into the prompt text.
 - Tags are resolved at execution time (when the workflow is run, or when the system prompt is assembled before each LLM API call).
-- If the referenced note does not exist, the tag is replaced with an inline error marker: `[include_note error: note 'Research/Topic A.md' not found]`. This error is visible to the LLM in the prompt text.
+- If the referenced note does not exist (path not found or wikilink resolves to nothing), the tag is replaced with an inline error marker: `[include_note error: note 'Research/Topic A.md' not found]`. This error is visible to the LLM in the prompt text.
 - If the referenced section heading does not exist within the note, the tag is replaced with an inline error marker: `[include_note error: section 'Summary' not found in 'Research/Topic A.md']`.
 - Nested `<include_note>` tags are not supported. If an included note itself contains `<include_note>` tags, those tags are passed through as literal text without resolution. This prevents circular reference loops.
 - Multiple `<include_note>` tags can appear in a single document; each occurrence is resolved independently.
@@ -546,6 +557,7 @@ This specification covers Phase 4 of the roadmap:
 ### IncludeNoteTag
 - A self-closing XML-style tag (`<include_note ... />`) that appears in workflow bodies, system prompts, and vault-level rule files. Must be written in self-closing form ending with `/>`.
 - Supported attributes: `path` (required), `section` (optional), `mode` (optional; `inline` or `attached`). All other attributes are silently ignored.
+- The `path` attribute accepts either a vault-relative file path (`"Research/Topic A.md"`) or an Obsidian wikilink (`"[[Topic A]]"`). Wikilinks are resolved via `metadataCache.getFirstLinkpathDest()` and benefit from Obsidian's automatic link-update on note rename. Wikilink syntax is the recommended form for resilience to renames.
 - Resolved at execution time by reading the referenced note content from the vault.
 - In system prompt and rule file contexts, always resolves as inline regardless of `mode` attribute.
 - Resolution failures produce inline error markers rather than aborting prompt assembly.
@@ -571,6 +583,7 @@ This specification covers Phase 4 of the roadmap:
 - The Notor root directory (`{notor_dir}`) is already configured by the user as part of Phase 0/1 setup. Phase 4 features rely on this directory existing with the expected subdirectory structure (`personas/`, `workflows/`).
 - Obsidian's vault API supports reading file frontmatter programmatically (via `app.metadataCache` or equivalent), enabling efficient workflow and persona discovery without parsing full note bodies.
 - Section header extraction for `<include_note>` follows Obsidian's standard heading anchor format. Section boundaries are determined by heading level: content runs from the specified heading to the next heading of equal or higher level (or end of file).
+- Wikilink resolution for `<include_note>` uses Obsidian's `metadataCache.getFirstLinkpathDest()` API. This is the same mechanism Obsidian uses internally for all wikilinks, ensuring consistent note-finding behaviour (fuzzy by note name, with optional subdirectory disambiguation). Obsidian's built-in link-updater treats wikilinks inside the `path` attribute as internal links and updates them automatically when the referenced note is renamed or moved.
 - Cron expression parsing is handled by a lightweight JavaScript library bundled into the plugin (e.g., `cron-parser` or equivalent). No external cron daemon or OS-level scheduling is required.
 - The Phase 3 hook infrastructure (shell command execution, timeout handling, environment variable injection, settings UI pattern) is in place and can be extended for vault event hooks and the "run a workflow" action type without architectural changes.
 - Vault event detection uses Obsidian's built-in event system (`app.vault.on('modify', ...)`, `app.workspace.on('file-open', ...)`, `app.metadataCache.on('changed', ...)`). Tag change detection relies on comparing frontmatter `tags` before and after a metadata cache update.
@@ -605,3 +618,4 @@ The following are explicitly excluded from Phase 4 and deferred to later phases 
 - Per-persona auto-approve overrides were moved from frontmatter (`notor-auto-approve` YAML mapping) to a dedicated Settings UI sub-page (**Settings → Notor → Persona auto-approve**). This change was driven by Obsidian's frontmatter limitations with complex YAML structures (nested mappings). The Settings UI approach also enables the plugin to surface non-blocking warnings for invalid/stale tool names and provides a more user-friendly three-state selector per tool (Global default / Auto-approve / Require approval). Configuration is stored in plugin settings data, keyed by persona name.
 - A "Provider & model identifiers" reference section was added to Settings (FR-39a) so users can easily discover and copy the exact string values needed for `notor-preferred-provider` and `notor-preferred-model` frontmatter properties.
 - The dynamic content injection tag was renamed from `<include_notes>` (plural) to `<include_note>` (singular). The singular form is semantically accurate — each tag instance includes exactly one note — and follows the convention of self-closing tags that describe a single element (e.g., `<img />`). Users can include multiple notes by using multiple `<include_note ... />` tags. The tag is always written in self-closing form (ending with `/>`); the three supported attributes are `path` (required), `section` (optional), and `mode` (optional). All other attributes are silently ignored.
+- The `path` attribute on `<include_note>` was extended to support Obsidian wikilink syntax in addition to vault-relative file paths. When `path="[[Note Title]]"` (or `path="[[Subfolder/Note Title]]"`) is used, the plugin resolves the note using Obsidian's `metadataCache.getFirstLinkpathDest()` — the same API Obsidian uses for all internal wikilinks — so the note is found by name without requiring the full path. Critically, Obsidian's built-in link-update mechanism treats the wikilink inside the `path` attribute as an internal link and will automatically rewrite it when the referenced note is renamed or moved, making wikilink syntax the recommended form. Vault-relative path syntax (`path="Research/Note.md"`) remains supported for cases where the full path is preferred or required.
