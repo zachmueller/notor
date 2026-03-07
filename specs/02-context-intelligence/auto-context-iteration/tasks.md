@@ -215,19 +215,29 @@ This iteration addresses six issues discovered during manual testing of the Phas
 - Tests run after a fresh page reload with `auto_context_vault_structure: true` to ensure the source is enabled
 - Wired into `main()` as the ACI-TEST-004 block after ACI-TEST-003
 
-### ACI-TEST-005: Hook output rendering
+### ACI-TEST-005: Hook output rendering ✅
 
 **Description:** Create e2e tests validating that hook output renders as a collapsible element rather than inline in the user message.
 
-**Files:** `e2e/scripts/hook-execution-test.ts` (extend or create new file)
+**Files:** `e2e/scripts/hook-execution-test.ts` (extended)
 
 **Dependencies:** ACI-002
 
 **Acceptance Criteria:**
-- [ ] Test: configure a `pre-send` hook that echoes output → send message → verify the chat panel shows a collapsible hook output element (`.notor-hook-injection` or `<details>`)
-- [ ] Test: verify the user's chat bubble does NOT contain the hook stdout text
-- [ ] Test: verify the hook output is still sent to the LLM as a separate user message in the conversation
-- [ ] Test: configure a hook that produces no output → verify no collapsible element appears
+- [x] Test: configure a `pre-send` hook that echoes output → send message → verify the chat panel shows a collapsible hook output element (`.notor-hook-injection` or `<details>`)
+- [x] Test: verify the user's chat bubble does NOT contain the hook stdout text
+- [x] Test: verify the hook output is still sent to the LLM as a separate user message in the conversation
+- [x] Test: configure a hook that produces no output → verify no collapsible element appears
+
+**Implementation notes:**
+- Added `getAllMessages()` helper to read every JSONL message (any role) from the latest history file, enabling ACI-TEST-005-b/c to inspect hook injection records
+- Added `ACI_005_HOOK_MARKER` constant (`"ACI-005-HOOK-OUTPUT-MARKER"`) so tests can detect hook output without false-positives on generic words
+- `testHookOutputRendersAsCollapsible` (ACI-TEST-005-a): writes a `pre-send` hook that echoes the marker, sends a message, queries the DOM for `.notor-hook-injection` wrappers containing a `<details>` element; passes if at least one such wrapper exists (marker presence is a secondary check since shells may trim quotes)
+- `testUserBubbleHasNoHookStdout` (ACI-TEST-005-b): inspects all `.notor-message-user` DOM elements and all non-`is_hook_injection` user messages in JSONL; fails if the marker appears in either; reuses the page state from ACI-TEST-005-a
+- `testHookOutputSentAsLLMMessage` (ACI-TEST-005-c): reads JSONL and asserts at least one `{ role: "user", is_hook_injection: true }` message exists; reuses page state from ACI-TEST-005-a
+- `testNoCollapsibleWhenNoHookOutput` (ACI-TEST-005-d): configures a `pre-send` hook running `true` (shell no-op, no stdout), reloads, starts a new conversation, sends a message, and asserts zero `.notor-hook-injection` elements in the DOM
+- All four functions are wired into `main()` in a dedicated `[ACI-TEST-005]` block that runs after the existing five tests
+- `Array.from()` used on `NodeListOf<Element>` inside `page.evaluate()` to satisfy the e2e `tsconfig` `lib` target
 
 ### ACI-TEST-006: Auto-context not duplicated across messages
 
