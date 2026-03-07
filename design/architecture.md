@@ -188,7 +188,7 @@ A persona is a named configuration bundle that shapes the AI's behavior.
 
 ## Workflows (Phase 4)
 
-Workflows are reusable, structured prompting sequences stored as notes in the vault.
+Workflows are reusable instruction sets stored as notes in the vault. They define structured, step-by-step guidance that shapes how the AI approaches specific tasks — not prompt templates or conversational requests. This design follows the pattern established by Cline's workflow system, where workflow content is treated as authoritative guidance the AI should follow methodically.
 
 ### Structure
 
@@ -197,14 +197,50 @@ Workflows are reusable, structured prompting sequences stored as notes in the va
   ```yaml
   ---
   notor-workflow: true
-  notor-trigger: manual           # manual | on-note-open | on-save | scheduled
+  notor-trigger: manual           # manual | on-note-open | on-save | on-tag-change | scheduled
   notor-schedule: "0 9 * * *"    # cron expression (if notor-trigger is scheduled)
   notor-workflow-persona: "researcher"  # optional: automatically switch to this persona when running the workflow
   ---
   ```
-- **Body content** is the prompt template, which can include:
-  - Static prompt text.
+- **Body content** provides step-by-step instructions that guide the AI's approach to a task. The body should be structured as clear, actionable steps rather than a conversational prompt. It can include:
+  - Static instruction text (headings, numbered steps, specific directives).
   - `<include_note>` tags for dynamic note injection.
+
+### Prompt assembly and `<workflow_instructions>` wrapping
+
+At execution time, the resolved body content is wrapped in a `<workflow_instructions>` XML tag before being sent as the user message:
+
+```xml
+<workflow_instructions type="{workflow-file-name}">
+{resolved workflow body content}
+</workflow_instructions>
+```
+
+The `type` attribute contains the workflow note's file name (e.g., `daily-review.md`) for identification and debugging. This wrapping — modeled after Cline's `<explicit_instructions>` mechanism — signals to the AI that the enclosed content is authoritative step-by-step guidance it should follow, rather than a casual user message to respond to conversationally. The AI should execute the steps methodically rather than asking clarifying questions about the instructions.
+
+If the user typed additional text when triggering the workflow (future enhancement), that text appears after the closing `</workflow_instructions>` tag — outside the instructions block — so the AI can distinguish between the workflow's steps and any supplementary user context.
+
+### Workflow authoring guidance
+
+Workflow bodies should be written as structured instructions with clear steps. Steps can be written at different levels of detail: high-level ("Run the test suite and fix any failures") lets the AI decide the approach, while specific steps can reference exact tool calls or notes. Example structure:
+
+```markdown
+# Daily note review
+
+Review today's daily notes and create a summary.
+
+## Step 1: Find today's notes
+Search for notes created or modified today in the Daily/ folder.
+
+## Step 2: Analyze themes
+Identify recurring themes, key decisions, and action items across the notes.
+
+## Step 3: Create summary
+Write a summary note at Daily/summary.md with sections for:
+- Key themes
+- Decisions made
+- Action items with owners
+```
 
 ### `<include_note>` tag
 

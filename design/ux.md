@@ -172,12 +172,12 @@ Users can individually enable or disable each source in **Settings → Notor**. 
 
 ## Workflows (Phase 4)
 
-Workflows are reusable, structured AI interactions defined as notes in the vault. See [Architecture — Workflows](architecture.md#workflows-phase-4) for the data model and frontmatter schema.
+Workflows are reusable instruction sets defined as notes in the vault. They provide structured, step-by-step guidance that shapes how the AI approaches specific tasks — not prompt templates or conversational requests. See [Architecture — Workflows](architecture.md#workflows-phase-4) for the data model, frontmatter schema, and `<workflow_instructions>` wrapping mechanism.
 
 ### Workflow execution
 
-- Workflows are triggered manually (from a command palette action, or a future UI affordance) or automatically via hooks (on-note-open, on-save, on-schedule, etc.).
-- When a workflow is triggered, its body content is assembled as the prompt — with any `<include_note>` tags resolved to inject note contents — and sent to the LLM.
+- Workflows are triggered manually (from a command palette action, or a future UI affordance) or automatically via hooks (on-note-open, on-save, on-tag-change, on-schedule, etc.).
+- When a workflow is triggered, its body content is resolved (expanding any `<include_note>` tags), wrapped in a `<workflow_instructions type="{filename}">` XML tag, and sent to the LLM as the user message. This wrapping signals to the AI that the content is authoritative step-by-step guidance to follow methodically, rather than a casual request to respond to conversationally.
 - The workflow execution appears as a conversation in the main Notor chat panel, with full transparency (tool calls, results, streaming responses).
 
 ### Automatic persona switching via `notor-workflow-persona`
@@ -195,7 +195,7 @@ All Notor-specific frontmatter properties use the `notor-` prefix to avoid confl
 | Property | Type | Required | Description |
 |---|---|---|---|
 | `notor-workflow` | boolean | yes | Must be `true` to identify the note as a workflow |
-| `notor-trigger` | string | yes | Trigger type: `manual`, `on-note-open`, `on-save`, `scheduled` |
+| `notor-trigger` | string | yes | Trigger type: `manual`, `on-note-open`, `on-save`, `on-tag-change`, `scheduled` |
 | `notor-schedule` | string | no | Cron expression (required if `notor-trigger` is `scheduled`) |
 | `notor-workflow-persona` | string | no | Persona name to automatically switch to when running this workflow |
 
