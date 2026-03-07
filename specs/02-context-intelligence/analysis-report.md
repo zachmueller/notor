@@ -7,11 +7,11 @@
 
 ## Executive Summary
 
-- **Total Findings:** 10 (Critical: 0, High: 2, Medium: 5, Low: 3)
+- **Total Findings:** 11 (Critical: 1, High: 2, Medium: 5, Low: 3)
 - **Coverage:** 100% of functional requirements (FR-1 through FR-13) mapped to tasks
-- **Readiness:** NEEDS ATTENTION — two high-severity issues should be resolved before implementation
+- **Readiness:** NEEDS ATTENTION — one critical and two high-severity issues should be resolved before implementation
 
-The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing. Five medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
+The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`). Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing. Five medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
 
 ---
 
@@ -19,6 +19,7 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 
 | ID | Category | Severity | Location(s) | Summary | Recommendation |
 |----|----------|----------|-------------|---------|----------------|
+| N1 | Inconsistency | CRITICAL | All 02-context-intelligence docs vs 01-mvp docs | FR-1–13, NFR-1–4, ENV-001, and TOOL-001–008 collide with identically numbered items in 01-mvp | Renumber: FRs→FR-24–36, NFRs→NFR-6–9, ENV-001→ENV-005, TOOL-001–008→TOOL-010–017 |
 | C1 | Coverage | HIGH | spec.md FR-1, tasks.md | `[[` shortcut in chat input not covered by a dedicated acceptance criterion in ATT-005 | Add explicit AC to ATT-005 for `[[` trigger behavior |
 | I1 | Inconsistency | HIGH | tasks.md phase numbering vs plan.md feature groups | tasks.md phases 2–5 do not match plan.md feature group labels (A–F); tasks.md "Phase 3" = Attachments but plan.md "Feature Group A" = Attachments | Align phase labels or add cross-reference mapping |
 | C2 | Coverage | MEDIUM | spec.md FR-6, tasks.md | Manual compaction trigger (button/command) mentioned in FR-6 AC but only noted parenthetically in COMP-002/COMP-004; no standalone task for command registration | Add explicit AC or subtask for command palette registration |
@@ -88,6 +89,66 @@ All user stories in spec.md map to one or more functional requirements, which in
 ---
 
 ## Detailed Findings
+
+### N1 — FR/NFR/Task ID numbering collisions with prior MVP spec (CRITICAL)
+
+**Location:** All `specs/02-context-intelligence/` documents vs `specs/01-mvp/` documents
+**Detail:** The 02-context-intelligence spec reuses FR, NFR, and task ID numbers that are already assigned in the prior 01-mvp spec. This creates ambiguity when cross-referencing requirements across phases — "FR-1" could mean either "LLM provider integration" (01-mvp) or "Note attachment via file picker" (02-context-intelligence).
+
+**Collisions identified:**
+
+| Element | 01-mvp Range | 02-context Range | Collision |
+|---------|-------------|------------------|-----------|
+| Functional Requirements (FR-) | FR-1 through FR-23 | FR-1 through FR-13 | FR-1 to FR-13 collide |
+| Non-Functional Requirements (NFR-) | NFR-1 through NFR-5 | NFR-1 through NFR-4 | NFR-1 to NFR-4 collide |
+| Task ID: ENV- | ENV-001 through ENV-004 | ENV-001 | ENV-001 collides |
+| Task ID: TOOL- | TOOL-001 through TOOL-009 | TOOL-001 through TOOL-008 | TOOL-001 to TOOL-008 collide |
+
+**Renumbering plan:**
+
+| Current (02-context) | New ID | Description |
+|---------------------|--------|-------------|
+| **Functional Requirements** | | |
+| FR-1 | FR-24 | Note attachment via file picker |
+| FR-2 | FR-25 | External file attachment |
+| FR-3 | FR-26 | Auto-context — open note paths |
+| FR-4 | FR-27 | Auto-context — vault structure |
+| FR-5 | FR-28 | Auto-context — operating system |
+| FR-6 | FR-29 | Auto-compaction |
+| FR-7 | FR-30 | `fetch_webpage` tool |
+| FR-8 | FR-31 | Domain denylist for `fetch_webpage` |
+| FR-9 | FR-32 | `execute_command` tool |
+| FR-10 | FR-33 | LLM interaction hooks — `pre-send` |
+| FR-11 | FR-34 | LLM interaction hooks — `on-tool-call` |
+| FR-12 | FR-35 | LLM interaction hooks — `on-tool-result` |
+| FR-13 | FR-36 | LLM interaction hooks — `after-completion` |
+| **Non-Functional Requirements** | | |
+| NFR-1 | NFR-6 | Performance |
+| NFR-2 | NFR-7 | Security and privacy |
+| NFR-3 | NFR-8 | Usability and transparency |
+| NFR-4 | NFR-9 | Reliability |
+| **Task IDs** | | |
+| ENV-001 | ENV-005 | Install Turndown dependency |
+| TOOL-001 | TOOL-010 | `fetch_webpage` tool implementation |
+| TOOL-002 | TOOL-011 | Domain denylist matching |
+| TOOL-003 | TOOL-012 | `fetch_webpage` tool registration |
+| TOOL-004 | TOOL-013 | Domain denylist settings UI |
+| TOOL-005 | TOOL-014 | `execute_command` tool implementation |
+| TOOL-006 | TOOL-015 | `execute_command` tool registration |
+| TOOL-007 | TOOL-016 | `execute_command` settings UI |
+| TOOL-008 | TOOL-017 | Tool dispatch flow updates |
+
+**Files requiring updates:** This renumbering affects the following files:
+- `specs/02-context-intelligence/spec.md` — all FR-N and NFR-N references
+- `specs/02-context-intelligence/plan.md` — all FR-N, NFR-N, and task ID references
+- `specs/02-context-intelligence/tasks.md` — ENV-001, TOOL-001–008 task IDs and all cross-references
+- `specs/02-context-intelligence/data-model.md` — any FR/NFR references
+- `specs/02-context-intelligence/contracts/tool-schemas.md` — any FR references
+- `specs/02-context-intelligence/checklists/requirements.md` — any FR/NFR references
+
+**Recommendation:** Renumber all colliding IDs across all 02-context-intelligence documents using the mapping above. Update all internal cross-references (dependency lists, coverage matrices, acceptance criteria referencing FR numbers). This should be done before implementation begins to avoid confusion in code comments, commit messages, and task tracking.
+
+---
 
 ### C1 — `[[` shortcut trigger not explicitly covered in task AC (HIGH)
 
@@ -206,27 +267,31 @@ The reordering itself is valid (plan.md § Recommended Implementation Order sugg
 - **User Scenarios:** 14 total (8 primary + 2 alternative + 4 edge cases), 14 (100%) covered
 - **Ambiguities:** 1 unresolved (minor — User-Agent string)
 - **Duplications:** 1 identified (acceptable — spec AC vs clarification)
-- **Critical Issues:** 0
+- **Cross-Spec Numbering Collisions:** 13 FRs, 4 NFRs, 9 task IDs require renumbering
+- **Critical Issues:** 1 (numbering collisions)
 
 ---
 
 ## Next Actions
 
+**Immediate (Critical):**
+1. **N1** — Renumber all FR, NFR, and task IDs in 02-context-intelligence documents to be globally unique across all specs. Apply the renumbering table from finding N1 to: spec.md, plan.md, tasks.md, data-model.md, contracts/tool-schemas.md, checklists/requirements.md.
+
 **Immediate (High):**
-1. **I1** — Rename task phases in tasks.md to avoid collision with the spec-level "Phase 3" label. Recommend using "Step" or "Group" prefix.
-2. **I2/C3** — Add acceptance criteria to HOOK-002 in tasks.md requiring working directory allow-list enforcement for hook shell commands, per spec.md NFR-2.
+2. **I1** — Rename task phases in tasks.md to avoid collision with the spec-level "Phase 3" label. Recommend using "Step" or "Group" prefix.
+3. **I2/C3** — Add acceptance criteria to HOOK-002 in tasks.md requiring working directory allow-list enforcement for hook shell commands, per spec.md NFR-2.
 
 **Recommended (Medium):**
-3. **C2** — Add explicit AC or subtask in COMP-004 for registering the manual compaction command via `addCommand()`.
-4. **U1** — Add clarification to spec.md FR-9 for relative working directory resolution semantics.
-5. **I3** — Add documentation note to data-model.md about external file absolute path persistence in JSONL logs.
+4. **C2** — Add explicit AC or subtask in COMP-004 for registering the manual compaction command via `addCommand()`.
+5. **U1** — Add clarification to spec.md FR-9 (will become FR-32) for relative working directory resolution semantics.
+6. **I3** — Add documentation note to data-model.md about external file absolute path persistence in JSONL logs.
 
 **Optional (Low):**
-6. **A1** — Clarify exact User-Agent string value in spec.md or contracts.
-7. **L2** — Consider updating Turndown risk impact rating in plan.md.
+7. **A1** — Clarify exact User-Agent string value in spec.md or contracts.
+8. **L2** — Consider updating Turndown risk impact rating in plan.md.
 
 **Readiness Assessment:**
-- No critical issues present.
+- One critical issue present (N1 — numbering collisions): all FR, NFR, and task IDs that collide with the prior MVP spec must be renumbered before implementation to prevent cross-phase ambiguity.
 - Two high-severity issues should be resolved before implementation begins: the phase naming collision (I1) creates confusion for developers navigating between artifacts, and the missing hook path restriction AC (I2/C3) could result in a security gap if not caught during implementation.
 - Medium/low issues can be addressed in parallel with early implementation work.
-- Overall the artifacts are well-structured, comprehensive, and ready for implementation after the two high-severity items are addressed.
+- Overall the artifacts are well-structured, comprehensive, and ready for implementation after the critical and high-severity items are addressed.
