@@ -1,18 +1,18 @@
 # Cross-Artifact Analysis Report
 
 **Generated:** 2026-07-03T18:08:00+13:00
-**Updated:** 2026-07-03T18:40:00+13:00
+**Updated:** 2026-07-03T18:53:00+13:00
 **Feature:** Phase 3 — Context & Intelligence
 **Branch:** feature/02-context-intelligence
 **Artifacts:** spec.md, plan.md, tasks.md (+ data-model.md)
 
 ## Executive Summary
 
-- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ 0, Medium: ~~5~~ ~~4~~ 3, Low: 3)
+- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ 0, Medium: ~~5~~ ~~4~~ ~~3~~ 2, Low: 3)
 - **Coverage:** 100% of functional requirements (FR-24 through FR-36) mapped to tasks
 - **Readiness:** READY FOR IMPLEMENTATION — all critical and high-severity issues resolved
 
-The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. ~~One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`) — **resolved 2026-07-03**.~~ ~~Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing.~~ ~~One high-severity finding remains (missing hook path restriction AC).~~ All high-severity findings resolved. ~~Five~~ Four medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
+The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. ~~One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`) — **resolved 2026-07-03**.~~ ~~Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing.~~ ~~One high-severity finding remains (missing hook path restriction AC).~~ All high-severity findings resolved. ~~Five~~ ~~Four~~ Three medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
 
 ---
 
@@ -28,7 +28,7 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 | U1 | Underspecification | ~~MEDIUM~~ | spec.md FR-32, plan.md, tasks.md | `execute_command` working directory resolution for relative paths is not specified in spec.md; only tasks.md TOOL-014 mentions "relative → resolve from vault root" | ✅ RESOLVED |
 | C3 | Coverage | ~~MEDIUM~~ | spec.md key entities § Hook, tasks.md HOOK-002 | Spec states hook shell commands use same runtime and path restrictions as `execute_command`; HOOK-002 ACs now include working directory allow-list enforcement | ✅ RESOLVED |
 | D1 | Duplication | MEDIUM | spec.md FR-24 AC + Clarifications | The attachment chip-only display rule appears in FR-24 AC and again in the Clarifications section as a Q&A; minor redundancy | No action needed |
-| I3 | Inconsistency | MEDIUM | data-model.md § Attachment, spec.md FR-25 | data-model.md stores `path` as "original absolute file path at attach time" for external files; `path` exposes absolute paths in JSONL logs | Open |
+| I3 | Inconsistency | ~~MEDIUM~~ | data-model.md § Attachment, spec.md FR-25 | data-model.md stores `path` as "original absolute file path at attach time" for external files; `path` exposes absolute paths in JSONL logs; privacy note added to data-model.md | ✅ RESOLVED |
 | A1 | Ambiguity | LOW | spec.md FR-30, plan.md | `fetch_webpage` uses "neutral `Notor/1.0` User-Agent header" — minor ambiguity on exact header value | Open |
 | L1 | Low-priority | LOW | tasks.md | Task count summary says "42 tasks"; count verified as accurate | No action needed |
 | L2 | Low-priority | LOW | plan.md § Risk Assessment | Risk "Turndown produces poor quality output" rated Impact: Low — may be higher for research-heavy use cases | Open |
@@ -187,12 +187,13 @@ The reordering itself was valid (plan.md § Recommended Implementation Order sug
 
 ---
 
-### I3 — External file absolute path exposure in JSONL logs (MEDIUM)
+### I3 — External file absolute path exposure in JSONL logs ~~(MEDIUM)~~ ✅ RESOLVED
 
 **Location:** data-model.md § Attachment (`path` field), spec.md FR-25
-**Detail:** data-model.md stores external file `path` as "original absolute file path at attach time" (e.g., `/Users/alice/Desktop/data.csv`). This is logged to the JSONL conversation file. While the `display_name` field ensures only the filename is shown in the UI, the absolute path is persisted. This is a minor privacy consideration — if conversation logs are shared or synced, absolute paths reveal filesystem structure.
+**Status:** ✅ **RESOLVED** — 2026-07-03
+**Resolution:** Added a "Privacy note — external file paths" paragraph to the Attachment entity section in data-model.md. The note documents that external file absolute paths are stored in the JSONL conversation log for traceability, that only the filename (`display_name`) is displayed in the chat UI, and that users who share or sync JSONL logs should be aware that absolute filesystem paths are included.
 
-**Recommendation:** Document this as a known behavior in data-model.md with a note: "External file absolute paths are stored in JSONL for traceability. Only the filename (`display_name`) is displayed in the UI. Users sharing JSONL logs should be aware that absolute paths are included."
+**Original detail:** data-model.md stores external file `path` as "original absolute file path at attach time" (e.g., `/Users/alice/Desktop/data.csv`). This is logged to the JSONL conversation file. While the `display_name` field ensures only the filename is shown in the UI, the absolute path is persisted. This is a minor privacy consideration — if conversation logs are shared or synced, absolute paths reveal filesystem structure.
 
 ---
 
@@ -251,7 +252,7 @@ The reordering itself was valid (plan.md § Recommended Implementation Order sug
 **~~Recommended (Medium):~~**
 4. ~~**C2** — Add explicit AC or subtask in COMP-004 for registering the manual compaction command via `addCommand()`.~~ ✅ **RESOLVED** — 2026-07-03
 5. ~~**U1** — Add clarification to spec.md FR-32 for relative working directory resolution semantics.~~ ✅ **RESOLVED** — 2026-07-03
-6. **I3** — Add documentation note to data-model.md about external file absolute path persistence in JSONL logs.
+6. ~~**I3** — Add documentation note to data-model.md about external file absolute path persistence in JSONL logs.~~ ✅ **RESOLVED** — 2026-07-03
 
 **Optional (Low):**
 7. **A1** — Clarify exact User-Agent string value in spec.md or contracts.

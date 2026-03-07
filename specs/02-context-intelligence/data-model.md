@@ -71,6 +71,9 @@ A note, note section, or external file attached by the user to a chat message. A
 - `content` is required when `type` is `external_file`, null for vault types until resolution
 - Duplicate detection: same `path` + `section` combination on the same message is silently deduplicated
 
+**Privacy note — external file paths:**
+External file absolute paths (e.g., `/Users/alice/Desktop/data.csv`) are stored in the JSONL conversation log for traceability, enabling the plugin to identify the original source file if the user revisits the conversation later. Only the filename (`display_name`) is displayed in the chat UI. Users who share or sync their JSONL conversation logs should be aware that absolute filesystem paths for any externally attached files are included in the persisted data.
+
 **Section extraction logic:**
 When `type` is `vault_note_section`, the plugin extracts content from the heading matching `section` to the next heading of equal or higher level (or end of file). Heading lookup uses `metadataCache.getFileCache(file)?.headings` and takes the first match if multiple headings share the same text.
 
