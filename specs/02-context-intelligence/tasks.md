@@ -554,98 +554,98 @@
 **Files:** `e2e/scripts/auto-context-test.ts`
 **Dependencies:** CTX-006
 **Acceptance Criteria:**
-- [ ] Test: open multiple notes → send message → verify open note paths appear in JSONL log `auto_context` field
-- [ ] Test: verify vault structure (top-level folders only) appears in auto-context
-- [ ] Test: verify OS platform appears in auto-context
-- [ ] Test: disable a source in settings → verify it is omitted from auto-context
-- [ ] Test: all sources disabled → verify no `<auto-context>` block in message
+- [x] Test: open multiple notes → send message → verify open note paths appear in JSONL log `auto_context` field
+- [x] Test: verify vault structure (top-level folders only) appears in auto-context
+- [x] Test: verify OS platform appears in auto-context
+- [x] Test: disable a source in settings → verify it is omitted from auto-context
+- [x] Test: all sources disabled → verify no `<auto-context>` block in message
 
 ### TEST-002 [P]: Attachment end-to-end testing
 **Description:** Create e2e tests validating attachment flow from picker to message assembly.
 **Files:** `e2e/scripts/attachment-test.ts`
 **Dependencies:** ATT-008
 **Acceptance Criteria:**
-- [ ] Test: attach a vault note → send message → verify content appears in JSONL log
-- [ ] Test: attach a section reference → verify only section content is included
-- [ ] Test: delete a note after attaching → send → verify inline warning and message still sends
-- [ ] Test: attach an external text file → verify content included
-- [ ] Test: attempt to attach a binary file → verify rejection error
+- [x] Test: attach a vault note → send message → verify content appears in JSONL log
+- [x] Test: attach a section reference → verify only section content is included
+- [x] Test: delete a note after attaching → send → verify inline warning and message still sends
+- [x] Test: attach an external text file → verify content included
+- [x] Test: attempt to attach a binary file → verify rejection error
 
 ### TEST-003 [P]: `fetch_webpage` end-to-end testing
 **Description:** Create e2e tests for the `fetch_webpage` tool using a mock HTTP server.
 **Files:** `e2e/scripts/fetch-webpage-test.ts`
 **Dependencies:** TOOL-012
 **Acceptance Criteria:**
-- [ ] Test: fetch an HTML page → verify Markdown conversion returned
-- [ ] Test: fetch a plain text URL → verify returned as-is
-- [ ] Test: fetch a JSON URL → verify returned as-is
-- [ ] Test: fetch a blocked domain → verify denylist error returned
-- [ ] Test: fetch a URL exceeding download size cap → verify error
-- [ ] Test: fetch a large page exceeding output cap → verify truncation notice
+- [x] Test: fetch an HTML page → verify Markdown conversion returned
+- [x] Test: fetch a plain text URL → verify returned as-is
+- [x] Test: fetch a JSON URL → verify returned as-is
+- [x] Test: fetch a blocked domain → verify denylist error returned
+- [x] Test: fetch a URL exceeding download size cap → verify error
+- [x] Test: fetch a large page exceeding output cap → verify truncation notice
 
 ### TEST-004 [P]: `execute_command` end-to-end testing
 **Description:** Create e2e tests for the `execute_command` tool with safe commands.
 **Files:** `e2e/scripts/execute-command-test.ts`
 **Dependencies:** TOOL-015
 **Acceptance Criteria:**
-- [ ] Test: run `echo hello` → verify output returned
-- [ ] Test: run a command in Plan mode → verify blocked with error
-- [ ] Test: specify working directory outside allowed paths → verify rejection
-- [ ] Test: run a command that times out → verify timeout error with partial output
-- [ ] Test: run a command with output exceeding cap → verify truncation
+- [x] Test: run `echo hello` → verify output returned
+- [x] Test: run a command in Plan mode → verify blocked with error
+- [x] Test: specify working directory outside allowed paths → verify rejection
+- [x] Test: run a command that times out → verify timeout error with partial output
+- [x] Test: run a command with output exceeding cap → verify truncation
 
 ### TEST-005 [P]: Hook execution testing
 **Description:** Create e2e tests validating hook execution across all lifecycle events.
 **Files:** `e2e/scripts/hook-execution-test.ts`
 **Dependencies:** HOOK-005
 **Acceptance Criteria:**
-- [ ] Test: configure `pre-send` hook (`echo "injected"`) → send message → verify stdout appears in message context
-- [ ] Test: configure `after-completion` hook → verify it fires after response completes
-- [ ] Test: configure a hook that exceeds timeout → verify timeout notice and process termination
-- [ ] Test: configure a failing hook → verify non-blocking behavior (message still sends, notice surfaced)
-- [ ] Test: disable a hook → verify it does not fire
+- [x] Test: configure `pre-send` hook (`echo "injected"`) → send message → verify stdout appears in message context
+- [x] Test: configure `after-completion` hook → verify it fires after response completes
+- [x] Test: configure a hook that exceeds timeout → verify timeout notice and process termination
+- [x] Test: configure a failing hook → verify non-blocking behavior (message still sends, notice surfaced)
+- [x] Test: disable a hook → verify it does not fire
 
 ### TEST-006: Auto-compaction testing
 **Description:** Create e2e tests for auto-compaction using a mock model with a small context window.
 **Files:** `e2e/scripts/compaction-test.ts`
 **Dependencies:** COMP-005
 **Acceptance Criteria:**
-- [ ] Test: conversation exceeds threshold → verify compaction fires and "Context compacted" marker appears
-- [ ] Test: verify JSONL log contains `CompactionRecord` event
-- [ ] Test: trigger manual compaction → verify it works
-- [ ] Test: compaction failure → verify fallback to truncation with notice
+- [x] Test: conversation exceeds threshold → verify compaction fires and "Context compacted" marker appears
+- [x] Test: verify JSONL log contains `CompactionRecord` event
+- [x] Test: trigger manual compaction → verify it works
+- [x] Test: compaction failure → verify fallback to truncation with notice
 
 ### DOC-001: Update system prompt for Phase 3 tools
 **Description:** Update the default system prompt to include instructions for the two new Phase 3 tools (`fetch_webpage` and `execute_command`) so the LLM knows how and when to use them.
 **Files:** `src/chat/default-system-prompt.ts`
 **Dependencies:** TOOL-012, TOOL-015
 **Acceptance Criteria:**
-- [ ] System prompt includes `fetch_webpage` tool description and usage guidance
-- [ ] System prompt includes `execute_command` tool description, safety guidance, and platform awareness
-- [ ] System prompt mentions that OS context is available in auto-context for platform-appropriate commands
-- [ ] System prompt guidance is consistent with existing tool descriptions
+- [x] System prompt includes `fetch_webpage` tool description and usage guidance
+- [x] System prompt includes `execute_command` tool description, safety guidance, and platform awareness
+- [x] System prompt mentions that OS context is available in auto-context for platform-appropriate commands
+- [x] System prompt guidance is consistent with existing tool descriptions
 
 ### DOC-002: JSONL schema extensions documentation
 **Description:** Ensure the JSONL conversation log correctly records all new Phase 3 data: attachments, auto-context, hook injections, and compaction records.
 **Files:** `src/chat/history.ts`
 **Dependencies:** CTX-006, ATT-008, HOOK-004, COMP-002
 **Acceptance Criteria:**
-- [ ] User messages include `attachments` field (metadata only) when attachments are present
-- [ ] User messages include `auto_context` field when auto-context is injected
-- [ ] User messages include `hook_injections` field when `pre-send` hooks produce output
-- [ ] `CompactionRecord` entries are written to JSONL at the correct position in the conversation
-- [ ] All new JSONL fields are backward-compatible (older logs without these fields still parse correctly)
+- [x] User messages include `attachments` field (metadata only) when attachments are present
+- [x] User messages include `auto_context` field when auto-context is injected
+- [x] User messages include `hook_injections` field when `pre-send` hooks produce output
+- [x] `CompactionRecord` entries are written to JSONL at the correct position in the conversation
+- [x] All new JSONL fields are backward-compatible (older logs without these fields still parse correctly)
 
 ### POLISH-001: Settings UI consolidation
 **Description:** Consolidate and organize all Phase 3 settings into a coherent layout within the Settings → Notor tab. Ensure logical grouping, consistent styling, and clear descriptions.
 **Files:** `src/settings.ts`
 **Dependencies:** CTX-005, TOOL-013, TOOL-016, HOOK-006, COMP-003
 **Acceptance Criteria:**
-- [ ] Settings organized into clear sections: Auto-context, Web fetching, Shell commands, Hooks, Context compaction, File attachments
-- [ ] Each section has a heading and brief description
-- [ ] List editors (domain denylist, allowed paths, hooks) have consistent add/remove patterns
-- [ ] All settings have tooltip or description text explaining their purpose
-- [ ] Settings tab scrolls smoothly with many sections
+- [x] Settings organized into clear sections: Auto-context, Web fetching, Shell commands, Hooks, Context compaction, File attachments
+- [x] Each section has a heading and brief description
+- [x] List editors (domain denylist, allowed paths, hooks) have consistent add/remove patterns
+- [x] All settings have tooltip or description text explaining their purpose
+- [x] Settings tab scrolls smoothly with many sections
 
 ### VAL-001: Final validation against specification
 **Description:** End-to-end validation of all Phase 3 features against the specification's success criteria and functional requirements.

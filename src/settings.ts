@@ -439,6 +439,11 @@ export class NotorSettingTab extends PluginSettingTab {
 		this.renderHooksSection(containerEl);
 
 		// -----------------------------------------------------------------------
+		// Phase 3: File attachments settings (POLISH-001)
+		// -----------------------------------------------------------------------
+		this.renderFileAttachmentsSection(containerEl);
+
+		// -----------------------------------------------------------------------
 		// Phase 3: Compaction settings (COMP-003)
 		// -----------------------------------------------------------------------
 		this.renderCompactionSection(containerEl);
@@ -1270,6 +1275,40 @@ export class NotorSettingTab extends PluginSettingTab {
 				})
 			);
 		}
+	}
+
+	// =========================================================================
+	// Phase 3: File attachments settings (POLISH-001)
+	// =========================================================================
+
+	private renderFileAttachmentsSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "File attachments" });
+		containerEl.createEl("p", {
+			text:
+				"Settings for attaching external files to messages. " +
+				"Vault notes can be attached without size restrictions; " +
+				"external files from your filesystem are subject to size limits. Desktop only.",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("External file size threshold (MB)")
+			.setDesc(
+				"Files larger than this threshold trigger a confirmation dialog before attaching. " +
+				"This prevents accidentally attaching very large files to the context window."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("1")
+					.setValue(String(this.plugin.settings.external_file_size_threshold_mb))
+					.onChange(async (value) => {
+						const parsed = parseFloat(value);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.external_file_size_threshold_mb = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
 	}
 
 	// =========================================================================
