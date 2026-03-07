@@ -10,6 +10,9 @@
 
 import type { ConversationMode, ToolCall, ToolResult } from "../types";
 import type { StreamChunk } from "../providers/provider";
+import type { NotorSettings } from "../settings";
+import { isDomainBlocked } from "../tools/fetch-webpage";
+import { resolveAndValidateWorkingDir } from "../tools/execute-command";
 import { logger } from "../utils/logger";
 
 const log = logger("ToolDispatcher");
@@ -44,6 +47,12 @@ export class ToolDispatcher {
 	/** Auto-approve settings per tool name. */
 	private autoApprove: Record<string, boolean> = {};
 
+	/** Plugin settings (for tool-specific pre-execution checks). */
+	private settings?: NotorSettings;
+
+	/** Vault root path for working directory validation. */
+	private vaultRootPath?: string;
+
 	/** Callback for requesting user approval. */
 	private approvalCallback?: ApprovalCallback;
 
@@ -63,6 +72,16 @@ export class ToolDispatcher {
 	/** Update auto-approve settings. */
 	setAutoApprove(settings: Record<string, boolean>): void {
 		this.autoApprove = { ...settings };
+	}
+
+	/** Update plugin settings reference. */
+	setSettings(settings: NotorSettings): void {
+		this.settings = settings;
+	}
+
+	/** Set the vault root path for working directory validation. */
+	setVaultRootPath(path: string): void {
+		this.vaultRootPath = path;
 	}
 
 	/** Set the approval callback for manual approval. */
@@ -192,7 +211,63 @@ export class ToolDispatcher {
 			return result;
 		}
 
-		// 3. Check auto-approve settings
+		// 3. Tool-specific pre-execution checks (Phase 3)
+
+		// 3a. fetch_webpage: domain denylist check
+		if (toolName === "fetch_webpage" && this.settings) {
+			const url = parameters["url"] as string;
+			if (url) {
+				const denyCheck = isDomainBlocked(url, this.settings.domain_denylist);
+				if (denyCheck.blocked) {
+					let hostname: string;
+					try {
+						hostname = new URL(url).hostname;
+					} catch {
+						hostname = url;
+					}
+					toolCall.status = "error";
+					this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+					const result: ToolResult = {
+						tool_name: toolName,
+						success: false,
+						result: "",
+						error: `Domain ${hostname} is blocked by your denylist.`,
+					};
+
+					log.info("Domain blocked by denylist", { toolName, url, pattern: denyCheck.pattern });
+					this.events.onToolCallResult?.(toolCall, result, messageId);
+					return result;
+				}
+			}
+		}
+
+		// 3b. execute_command: working directory validation
+		if (toolName === "execute_command" && this.settings && this.vaultRootPath) {
+			const workingDir = parameters["working_directory"] as string | undefined;
+			const cwdResult = resolveAndValidateWorkingDir(
+				workingDir,
+				this.vaultRootPath,
+				this.settings.execute_command_allowed_paths
+			);
+			if (!cwdResult.valid) {
+				toolCall.status = "error";
+				this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+				const result: ToolResult = {
+					tool_name: toolName,
+					success: false,
+					result: "",
+					error: cwdResult.error,
+				};
+
+				log.info("Working directory rejected", { toolName, workingDir, error: cwdResult.error });
+				this.events.onToolCallResult?.(toolCall, result, messageId);
+				return result;
+			}
+		}
+
+		// 4. Check auto-approve settings
 		const isAutoApproved = this.autoApprove[toolName] ?? false;
 
 		if (!isAutoApproved) {
@@ -306,6 +381,7 @@ export class ToolDispatcher {
 			replace_in_note: "edit notes",
 			update_frontmatter: "modify note frontmatter",
 			manage_tags: "modify note tags",
+			execute_command: "run shell commands",
 		};
 		return descriptions[toolName] ?? "perform write operations";
 	}

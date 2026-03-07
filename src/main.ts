@@ -29,6 +29,8 @@ import { ListVaultTool } from "./tools/list-vault";
 import { ReadFrontmatterTool } from "./tools/read-frontmatter";
 import { UpdateFrontmatterTool } from "./tools/update-frontmatter";
 import { ManageTagsTool } from "./tools/manage-tags";
+import { FetchWebpageTool } from "./tools/fetch-webpage";
+import { ExecuteCommandTool } from "./tools/execute-command";
 import { NoteOpener } from "./tools/note-opener";
 
 // Chat
@@ -321,6 +323,14 @@ export default class NotorPlugin extends Plugin {
 				new ManageTagsTool(this.app, checkpointManager)
 			);
 
+			// Phase 3: New tools
+			this._toolRegistry.register(
+				new FetchWebpageTool(this.settings)
+			);
+			this._toolRegistry.register(
+				new ExecuteCommandTool(this.app, this.settings)
+			);
+
 			log.debug("Tool registry initialized", {
 				tools: this._toolRegistry.getNames(),
 			});
@@ -340,6 +350,13 @@ export default class NotorPlugin extends Plugin {
 			}
 
 			this._toolDispatcher.setAutoApprove(this.settings.auto_approve);
+			this._toolDispatcher.setSettings(this.settings);
+
+			// Set vault root path for working directory validation
+			const adapter = this.app.vault.adapter as { basePath?: string };
+			if (adapter.basePath) {
+				this._toolDispatcher.setVaultRootPath(adapter.basePath);
+			}
 		}
 		return this._toolDispatcher;
 	}

@@ -214,10 +214,12 @@ const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	search_vault: true,
 	list_vault: true,
 	read_frontmatter: true,
+	fetch_webpage: true,
 	write_note: false,
 	replace_in_note: false,
 	update_frontmatter: false,
 	manage_tags: false,
+	execute_command: false,
 };
 
 /** Default empty hook configuration. */
@@ -340,6 +342,16 @@ const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; isWrite: 
 		desc: "Add or remove tags on a note.",
 		isWrite: true,
 	},
+	fetch_webpage: {
+		name: "Fetch webpage",
+		desc: "Fetch a webpage by URL and return its content as Markdown.",
+		isWrite: false,
+	},
+	execute_command: {
+		name: "Execute command",
+		desc: "Execute a shell command on the user's system (desktop only).",
+		isWrite: true,
+	},
 };
 
 // ---------------------------------------------------------------------------
@@ -410,6 +422,16 @@ export class NotorSettingTab extends PluginSettingTab {
 		// Phase 3: Auto-context settings (CTX-005)
 		// -----------------------------------------------------------------------
 		this.renderAutoContextSection(containerEl);
+
+		// -----------------------------------------------------------------------
+		// Phase 3: Web fetching settings (TOOL-013)
+		// -----------------------------------------------------------------------
+		this.renderFetchWebpageSection(containerEl);
+
+		// -----------------------------------------------------------------------
+		// Phase 3: Shell commands settings (TOOL-016)
+		// -----------------------------------------------------------------------
+		this.renderExecuteCommandSection(containerEl);
 
 		// -----------------------------------------------------------------------
 		// SET-002: General settings
@@ -798,6 +820,277 @@ export class NotorSettingTab extends PluginSettingTab {
 				}
 			});
 		});
+	}
+
+	// =========================================================================
+	// Phase 3: Web fetching settings (TOOL-013)
+	// =========================================================================
+
+	private renderFetchWebpageSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Web fetching" });
+		containerEl.createEl("p", {
+			text:
+				"Settings for the fetch_webpage tool. Controls timeouts, download limits, " +
+				"and domain blocking.",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Request timeout (seconds)")
+			.setDesc(
+				"Maximum time to wait for a webpage response before aborting."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("15")
+					.setValue(String(this.plugin.settings.fetch_webpage_timeout))
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.fetch_webpage_timeout = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Maximum download size (MB)")
+			.setDesc(
+				"Maximum raw download size in megabytes. Requests exceeding this are aborted."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("5")
+					.setValue(
+						String(this.plugin.settings.fetch_webpage_max_download_mb)
+					)
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.fetch_webpage_max_download_mb = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Maximum output characters")
+			.setDesc(
+				"Maximum characters in the converted output. Content exceeding this is truncated."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("50000")
+					.setValue(
+						String(this.plugin.settings.fetch_webpage_max_output_chars)
+					)
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.fetch_webpage_max_output_chars = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		// Domain denylist
+		containerEl.createEl("h3", { text: "Domain denylist" });
+		containerEl.createEl("p", {
+			text:
+				"Domains blocked from being fetched. Use exact domains (e.g. example.com) or " +
+				"wildcard patterns (e.g. *.example.com) to block all sub-domains.",
+			cls: "setting-item-description",
+		});
+
+		const denylist = this.plugin.settings.domain_denylist;
+		for (let i = 0; i < denylist.length; i++) {
+			const entry = denylist[i] ?? "";
+			new Setting(containerEl)
+				.setName(entry || "(empty)")
+				.addButton((btn) =>
+					btn
+						.setButtonText("Remove")
+						.setWarning()
+						.onClick(async () => {
+							this.plugin.settings.domain_denylist.splice(i, 1);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+				);
+		}
+
+		let newDomain = "";
+		new Setting(containerEl)
+			.setName("Add domain")
+			.setDesc("Enter a domain or wildcard pattern to block.")
+			.addText((text) => {
+				text.setPlaceholder("example.com or *.example.com").onChange(
+					(v) => {
+						newDomain = v.trim();
+					}
+				);
+			})
+			.addButton((btn) =>
+				btn.setButtonText("Add").onClick(async () => {
+					if (!newDomain) {
+						new Notice("Enter a domain pattern to add.");
+						return;
+					}
+					if (
+						!/^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/.test(
+							newDomain
+						)
+					) {
+						new Notice(
+							"Invalid domain format. Use a domain like 'example.com' or '*.example.com'."
+						);
+						return;
+					}
+					this.plugin.settings.domain_denylist.push(newDomain);
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			);
+	}
+
+	// =========================================================================
+	// Phase 3: Shell commands settings (TOOL-016)
+	// =========================================================================
+
+	private renderExecuteCommandSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Shell commands" });
+		containerEl.createEl("p", {
+			text:
+				"Settings for the execute_command tool. Controls shell configuration, " +
+				"timeouts, output limits, and allowed working directories. Desktop only.",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Command timeout (seconds)")
+			.setDesc(
+				"Maximum time a command can run before it is terminated."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("30")
+					.setValue(
+						String(this.plugin.settings.execute_command_timeout)
+					)
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.execute_command_timeout = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Maximum output characters")
+			.setDesc(
+				"Maximum characters captured from command output. Output exceeding this is truncated."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("50000")
+					.setValue(
+						String(this.plugin.settings.execute_command_max_output_chars)
+					)
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.execute_command_max_output_chars = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Shell executable")
+			.setDesc(
+				"Custom shell executable to use instead of the platform default. " +
+				"Leave empty for automatic detection ($SHELL on macOS/Linux, PowerShell on Windows)."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("(platform default)")
+					.setValue(this.plugin.settings.execute_command_shell)
+					.onChange(async (value) => {
+						this.plugin.settings.execute_command_shell = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Shell arguments")
+			.setDesc(
+				"Custom shell launch arguments (comma-separated). Leave empty for platform defaults. " +
+				"Example: -l,-c for login shell."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("(platform default)")
+					.setValue(
+						this.plugin.settings.execute_command_shell_args.join(", ")
+					)
+					.onChange(async (value) => {
+						this.plugin.settings.execute_command_shell_args = value
+							.split(",")
+							.map((s) => s.trim())
+							.filter((s) => s.length > 0);
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// Allowed paths
+		containerEl.createEl("h3", { text: "Allowed working directories" });
+		containerEl.createEl("p", {
+			text:
+				"Additional absolute paths where commands are allowed to run. " +
+				"The vault root is always allowed.",
+			cls: "setting-item-description",
+		});
+
+		const allowedPaths = this.plugin.settings.execute_command_allowed_paths;
+		for (let i = 0; i < allowedPaths.length; i++) {
+			const entry = allowedPaths[i] ?? "";
+			new Setting(containerEl)
+				.setName(entry || "(empty)")
+				.addButton((btn) =>
+					btn
+						.setButtonText("Remove")
+						.setWarning()
+						.onClick(async () => {
+							this.plugin.settings.execute_command_allowed_paths.splice(i, 1);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+				);
+		}
+
+		let newPath = "";
+		new Setting(containerEl)
+			.setName("Add allowed path")
+			.setDesc("Enter an absolute directory path.")
+			.addText((text) => {
+				text.setPlaceholder("/path/to/directory").onChange((v) => {
+					newPath = v.trim();
+				});
+			})
+			.addButton((btn) =>
+				btn.setButtonText("Add").onClick(async () => {
+					if (!newPath) {
+						new Notice("Enter a path to add.");
+						return;
+					}
+					this.plugin.settings.execute_command_allowed_paths.push(
+						newPath
+					);
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			);
 	}
 
 	// =========================================================================

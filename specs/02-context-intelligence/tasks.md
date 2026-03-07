@@ -318,95 +318,95 @@
 **Files:** `src/tools/fetch-webpage.ts`
 **Dependencies:** ENV-005, FOUND-001
 **Acceptance Criteria:**
-- [ ] HTTP GET via native `fetch()` with `User-Agent: Notor/1.0`
-- [ ] Redirect following up to 5 hops; error if exceeded
-- [ ] Configurable request timeout (default: 15s) via `AbortSignal.timeout()`
-- [ ] Raw download size cap (default: 5 MB); abort and error if exceeded
-- [ ] Content-type routing: `text/html` → Turndown, `text/*` and `application/json` → as-is, other types → error
-- [ ] Turndown configured per R-4 findings: ATX headings (`headingStyle: 'atx'`), fenced code blocks, `-` bullet markers, inline links, `*` emphasis delimiters
-- [ ] `turndown-plugin-gfm` enabled for table, strikethrough, and task list support
-- [ ] Custom Turndown rules to strip noisy elements: `<nav>`, `<footer>`, `<aside>` replaced with empty string; `<form>`, `<input>`, `<select>`, `<button>` stripped
-- [ ] Output character cap (default: 50,000); truncate with notice if exceeded
-- [ ] Returns `{ success, result, error? }` matching contract format
+- [x] HTTP GET via native `fetch()` with `User-Agent: Notor/1.0`
+- [x] Redirect following up to 5 hops; error if exceeded
+- [x] Configurable request timeout (default: 15s) via `AbortSignal.timeout()`
+- [x] Raw download size cap (default: 5 MB); abort and error if exceeded
+- [x] Content-type routing: `text/html` → Turndown, `text/*` and `application/json` → as-is, other types → error
+- [x] Turndown configured per R-4 findings: ATX headings (`headingStyle: 'atx'`), fenced code blocks, `-` bullet markers, inline links, `*` emphasis delimiters
+- [x] `turndown-plugin-gfm` enabled for table, strikethrough, and task list support
+- [x] Custom Turndown rules to strip noisy elements: `<nav>`, `<footer>`, `<aside>` replaced with empty string; `<form>`, `<input>`, `<select>`, `<button>` stripped
+- [x] Output character cap (default: 50,000); truncate with notice if exceeded
+- [x] Returns `{ success, result, error? }` matching contract format
 
 ### TOOL-011: Domain denylist matching
 **Description:** Implement the domain denylist check that runs before every `fetch_webpage` execution. Supports exact domain and wildcard patterns.
 **Files:** `src/tools/fetch-webpage.ts`
 **Dependencies:** FOUND-001
 **Acceptance Criteria:**
-- [ ] `isDomainBlocked(url: string, denylist: string[]): boolean` function implemented
-- [ ] Exact domain match: `example.com` blocks only `example.com`
-- [ ] Wildcard match: `*.example.com` blocks all sub-domains but not `example.com` itself
-- [ ] URL parsing extracts domain correctly for both `http://` and `https://`
-- [ ] Returns the matching pattern for inclusion in the error message
+- [x] `isDomainBlocked(url: string, denylist: string[]): boolean` function implemented
+- [x] Exact domain match: `example.com` blocks only `example.com`
+- [x] Wildcard match: `*.example.com` blocks all sub-domains but not `example.com` itself
+- [x] URL parsing extracts domain correctly for both `http://` and `https://`
+- [x] Returns the matching pattern for inclusion in the error message
 
 ### TOOL-012: `fetch_webpage` tool registration
 **Description:** Register `fetch_webpage` in the tool registry with proper schema, mode classification, and auto-approve default.
 **Files:** `src/tools/fetch-webpage.ts`, `src/tools/index.ts`
 **Dependencies:** TOOL-010, TOOL-011
 **Acceptance Criteria:**
-- [ ] Tool registered with name `fetch_webpage`, input schema matching contract
-- [ ] Classified as read-only: available in both Plan and Act modes
-- [ ] Auto-approve default: `true`
-- [ ] Tool description matches contract specification
-- [ ] Domain denylist check runs before execution in the tool's `execute` method
+- [x] Tool registered with name `fetch_webpage`, input schema matching contract
+- [x] Classified as read-only: available in both Plan and Act modes
+- [x] Auto-approve default: `true`
+- [x] Tool description matches contract specification
+- [x] Domain denylist check runs before execution in the tool's `execute` method
 
 ### TOOL-013: Domain denylist settings UI
 **Description:** Add a list editor in Settings → Notor for managing the domain denylist entries.
 **Files:** `src/settings.ts`
 **Dependencies:** FOUND-001
 **Acceptance Criteria:**
-- [ ] List editor under a "`fetch_webpage`" or "Web fetching" settings section
-- [ ] Users can add and remove domain entries
-- [ ] Input validated for reasonable domain format
-- [ ] Empty by default
-- [ ] Additional settings: request timeout, max download size, max output chars
+- [x] List editor under a "`fetch_webpage`" or "Web fetching" settings section
+- [x] Users can add and remove domain entries
+- [x] Input validated for reasonable domain format
+- [x] Empty by default
+- [x] Additional settings: request timeout, max download size, max output chars
 
 ### TOOL-014: `execute_command` tool implementation
 **Description:** Implement the `execute_command` tool using the shared shell executor infrastructure. Handles working directory validation, shell spawning, timeout, and output capping.
 **Files:** `src/tools/execute-command.ts`
 **Dependencies:** FOUND-003, FOUND-001
 **Acceptance Criteria:**
-- [ ] Accepts `command` and optional `working_directory` parameters
-- [ ] Working directory resolution: empty → vault root, relative → resolve from vault root, absolute → use as-is
-- [ ] Working directory validation: must be within vault root or user-configured allowed paths; reject with error otherwise
-- [ ] Delegates to `ShellExecutor.execute()` for shell spawning
-- [ ] Returns combined stdout+stderr, exit code, and timeout/truncation status
-- [ ] Error results include exit code and stderr output for non-zero exits
-- [ ] Desktop-only: returns error if `Platform.isDesktopApp` is false
+- [x] Accepts `command` and optional `working_directory` parameters
+- [x] Working directory resolution: empty → vault root, relative → resolve from vault root, absolute → use as-is
+- [x] Working directory validation: must be within vault root or user-configured allowed paths; reject with error otherwise
+- [x] Delegates to `ShellExecutor.execute()` for shell spawning
+- [x] Returns combined stdout+stderr, exit code, and timeout/truncation status
+- [x] Error results include exit code and stderr output for non-zero exits
+- [x] Desktop-only: returns error if `Platform.isDesktopApp` is false
 
 ### TOOL-015: `execute_command` tool registration
 **Description:** Register `execute_command` in the tool registry with proper schema, mode classification, and auto-approve default.
 **Files:** `src/tools/execute-command.ts`, `src/tools/index.ts`
 **Dependencies:** TOOL-014
 **Acceptance Criteria:**
-- [ ] Tool registered with name `execute_command`, input schema matching contract
-- [ ] Classified as write: available in Act mode only
-- [ ] Auto-approve default: `false`
-- [ ] Tool description matches contract specification
-- [ ] Working directory validation runs before execution
+- [x] Tool registered with name `execute_command`, input schema matching contract
+- [x] Classified as write: available in Act mode only
+- [x] Auto-approve default: `false`
+- [x] Tool description matches contract specification
+- [x] Working directory validation runs before execution
 
 ### TOOL-016: `execute_command` settings UI
 **Description:** Add settings for execute_command: allowed paths list editor, shell configuration, timeout, and output cap.
 **Files:** `src/settings.ts`
 **Dependencies:** FOUND-001
 **Acceptance Criteria:**
-- [ ] Allowed paths list editor (one absolute path per line); vault root noted as always included
-- [ ] Shell executable input (empty = platform default)
-- [ ] Shell arguments input (empty = platform default)
-- [ ] Per-command timeout setting (default: 30s)
-- [ ] Max output character setting (default: 50,000)
+- [x] Allowed paths list editor (one absolute path per line); vault root noted as always included
+- [x] Shell executable input (empty = platform default)
+- [x] Shell arguments input (empty = platform default)
+- [x] Per-command timeout setting (default: 30s)
+- [x] Max output character setting (default: 50,000)
 
 ### TOOL-017: Tool dispatch flow updates
 **Description:** Update the tool dispatch layer to include the Phase 3 additions: domain denylist check before `fetch_webpage`, working directory validation before `execute_command`, and hook firing points.
 **Files:** `src/chat/dispatcher.ts`
 **Dependencies:** TOOL-012, TOOL-015
 **Acceptance Criteria:**
-- [ ] Dispatch flow includes domain denylist check for `fetch_webpage` (step 5 in updated flow)
-- [ ] Dispatch flow includes working directory validation for `execute_command` (step 6)
+- [x] Dispatch flow includes domain denylist check for `fetch_webpage` (step 5 in updated flow)
+- [x] Dispatch flow includes working directory validation for `execute_command` (step 6)
 - [ ] Hook firing points added: `on_tool_call` after approval/before execution, `on_tool_result` after execution/before LLM return (wired in Step 5 task HOOK-004/005)
 - [ ] Compaction threshold check added after tool result (wired in Step 5 task COMP-002)
-- [ ] Existing dispatch logic (Plan/Act check, auto-approve, stale content, checkpoints) preserved
+- [x] Existing dispatch logic (Plan/Act check, auto-approve, stale content, checkpoints) preserved
 
 ---
 
