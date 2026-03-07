@@ -9,8 +9,10 @@
  */
 
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { MarkdownView } from "obsidian";
 import { DEFAULT_SETTINGS, NotorSettings, NotorSettingTab } from "./settings";
 import { logger } from "./utils/logger";
+import { notifyMarkdownLeafActivated } from "./context/auto-context";
 
 // Providers
 import { ProviderRegistry } from "./providers/index";
@@ -115,7 +117,22 @@ export default class NotorPlugin extends Plugin {
 			},
 		});
 
-		// 5. Start vault rule manager (watches rules directory for changes)
+		// 5. Register active-leaf-change listener so the auto-context module
+		// can track the last-focused markdown note even when the chat panel
+		// (or another non-markdown view) has focus at send time (ACI-005).
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				const view = leaf?.view;
+				if (view instanceof MarkdownView && view.file?.path) {
+					notifyMarkdownLeafActivated(view.file.path);
+				}
+				// Intentionally NOT clearing the cache on non-markdown leaf
+				// changes — that lets us recover the last active note when the
+				// chat panel steals focus.
+			})
+		);
+
+		// 6. Start vault rule manager (watches rules directory for changes)
 		// This is lightweight — just sets up file watchers
 		this.getVaultRuleManager().start();
 
@@ -124,6 +141,9 @@ export default class NotorPlugin extends Plugin {
 
 	onunload() {
 		log.info("Plugin unloading");
+
+		// Clear the last-active markdown path cache on unload
+		notifyMarkdownLeafActivated(null);
 
 		// Stop vault rule manager file watchers
 		this._vaultRuleManager?.stop();

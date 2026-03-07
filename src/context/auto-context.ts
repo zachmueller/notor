@@ -20,6 +20,34 @@ import { MarkdownView, TFolder } from "obsidian";
 import type { NotorSettings } from "../settings";
 
 // ---------------------------------------------------------------------------
+// Last-active markdown path cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Vault-relative path of the most recently focused markdown leaf.
+ *
+ * Updated by `notifyMarkdownLeafActivated()` which is called from an
+ * `active-leaf-change` workspace event listener registered during plugin
+ * load (see `main.ts`). The cache is intentionally NOT cleared when the
+ * active leaf changes to a non-markdown view (e.g. the chat panel) — that
+ * is precisely the case we want to recover from when assembling auto-context.
+ */
+let _lastActiveMarkdownPath: string | null = null;
+
+/**
+ * Notify the auto-context module that a markdown leaf became active.
+ *
+ * Should be called from a `registerEvent(app.workspace.on('active-leaf-change', …))`
+ * handler in the plugin entry point so the cache stays current.
+ *
+ * @param path - Vault-relative path of the newly-active markdown file,
+ *               or `null` to reset the cache (e.g. on plugin unload).
+ */
+export function notifyMarkdownLeafActivated(path: string | null): void {
+	_lastActiveMarkdownPath = path;
+}
+
+// ---------------------------------------------------------------------------
 // CTX-001: Open note paths collector
 // ---------------------------------------------------------------------------
 
@@ -33,6 +61,15 @@ import type { NotorSettings } from "../settings";
  * leaf we check `leaf.view?.getState()?.file` as a fallback when the
  * view's `.file` property hasn't been populated yet.
  *
+ * Active note detection uses a two-stage approach to handle the common
+ * case where the chat panel has focus (making the markdown view inactive):
+ *   1. Try `getActiveViewOfType(MarkdownView)` — works when a markdown
+ *      tab is currently focused.
+ *   2. Fall back to `_lastActiveMarkdownPath` — the cached path set by
+ *      the `active-leaf-change` event listener. This correctly handles
+ *      the case where the user switches from a markdown note to the chat
+ *      panel, because the cache is not cleared on non-markdown leaf changes.
+ *
  * @returns Array of vault-relative file paths. The active markdown
  *          note (if any) has ` (active)` appended.
  */
@@ -40,9 +77,13 @@ export function collectOpenNotePaths(app: App): string[] {
 	const seen = new Set<string>();
 	const paths: string[] = [];
 
-	// Determine the active markdown note's path (if any).
+	// Stage 1: Try the currently-focused markdown view.
 	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-	const activePath: string | null = activeView?.file?.path ?? null;
+	let activePath: string | null = activeView?.file?.path ?? null;
+
+	// Collect all open markdown file paths first so we can use the set
+	// for the stage-2 fallback lookup below.
+	const openPaths = new Set<string>();
 
 	// iterateAllLeaves covers pinned tabs, split panes, stacked tabs,
 	// and — crucially — tabs whose views haven't been activated yet.
@@ -63,11 +104,24 @@ export function collectOpenNotePaths(app: App): string[] {
 		// Only include markdown files (skip settings, graph, empty tabs, etc.)
 		if (filePath && filePath.endsWith(".md") && !seen.has(filePath)) {
 			seen.add(filePath);
-			const label =
-				filePath === activePath ? `${filePath} (active)` : filePath;
-			paths.push(label);
+			openPaths.add(filePath);
+			paths.push(filePath);
 		}
 	});
+
+	// Stage 2: If no markdown view is currently focused (e.g. the chat
+	// panel has focus), use the cached last-active markdown path.
+	// Only use the cached path if the corresponding tab is still open.
+	if (!activePath && _lastActiveMarkdownPath && openPaths.has(_lastActiveMarkdownPath)) {
+		activePath = _lastActiveMarkdownPath;
+	}
+
+	// Annotate the active path with " (active)" in the final list.
+	if (activePath) {
+		return paths.map((p) =>
+			p === activePath ? `${p} (active)` : p,
+		);
+	}
 
 	return paths;
 }

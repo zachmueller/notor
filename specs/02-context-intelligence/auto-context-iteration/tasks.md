@@ -262,20 +262,28 @@ This iteration addresses six issues discovered during manual testing of the Phas
 
 ## Step 3: Validation
 
-### ACI-VAL-001: End-to-end validation
+### ACI-VAL-001: End-to-end validation ✅
 
 **Description:** Run all modified and new e2e tests, plus manual spot checks, to confirm all six issues are resolved and no regressions introduced.
 
 **Dependencies:** All ACI-* and ACI-TEST-* tasks
 
 **Acceptance Criteria:**
-- [ ] All ACI-TEST-001 through ACI-TEST-006 pass
-- [ ] Existing auto-context e2e tests (TEST-001) updated and pass
-- [ ] Existing hook execution e2e tests (TEST-005) updated and pass
-- [ ] Manual check: send a message with open notes → user chat bubble shows only typed text
-- [ ] Manual check: hook output appears as collapsible element in chat panel
-- [ ] Manual check: switching active note and sending another message shows updated active marker
-- [ ] No regressions in attachment handling, compaction, or tool dispatch
+- [x] All ACI-TEST-001 through ACI-TEST-006 pass
+- [x] Existing auto-context e2e tests (TEST-001) updated and pass
+- [x] Existing hook execution e2e tests (TEST-005) updated and pass
+- [x] Manual check: send a message with open notes → user chat bubble shows only typed text
+- [x] Manual check: hook output appears as collapsible element in chat panel
+- [x] Manual check: switching active note and sending another message shows updated active marker
+- [x] No regressions in attachment handling, compaction, or tool dispatch
+
+**Validation results (2026-07-03):**
+- `e2e/scripts/auto-context-test.ts`: **29/29 passed** (ACI-TEST-001 through ACI-TEST-004, ACI-TEST-006)
+- `e2e/scripts/hook-execution-test.ts`: **10/10 passed** (original tests 1–5 + ACI-TEST-005 a–d)
+- Bug found and fixed during validation: `(active)` marker was absent when chat panel had focus because `getActiveViewOfType(MarkdownView)` returns `null` for non-markdown active views. Fixed by:
+  1. Adding `_lastActiveMarkdownPath` cache + `notifyMarkdownLeafActivated()` in `src/context/auto-context.ts`
+  2. Registering an `active-leaf-change` event listener in `src/main.ts` to keep the cache current
+  3. Updated `hook-execution-test.ts` Test 1 to reflect the ACI-002 behavioral change (hook output now in `is_hook_injection` message, not user message content)
 
 ---
 

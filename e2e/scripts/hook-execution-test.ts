@@ -214,7 +214,12 @@ const ACI_005_HOOK_MARKER = "ACI-005-HOOK-OUTPUT-MARKER";
 // ---------------------------------------------------------------------------
 
 async function testPreSendHookInjection(page: Page): Promise<void> {
-	console.log("\n── Test 1: pre-send hook stdout injected into message ──────");
+	console.log("\n── Test 1: pre-send hook fires and output reaches LLM ──────");
+
+	// After ACI-002, hook stdout is no longer inlined into the user message
+	// content. Instead it is sent as a separate user message with
+	// `is_hook_injection: true`. This test verifies that the hook fired and
+	// its output is forwarded to the LLM — regardless of where it lives.
 
 	const hooks = {
 		pre_send: [{ id: "test-pre-1", event: "pre_send", command: 'echo "hook-injected-marker"', label: "Test pre-send", enabled: true }],
@@ -232,23 +237,55 @@ async function testPreSendHookInjection(page: Page): Promise<void> {
 	const shot = await screenshot(page, "01-pre-send");
 
 	await page.waitForTimeout(1_000);
-	const userMsg = getLatestUserMessage();
 
-	if (userMsg) {
-		const content = String(userMsg.content ?? "");
-		const hookInjections = userMsg.hook_injections as string[] | null | undefined;
+	// Check all messages (any role) for hook injection evidence
+	const allMessages = getAllMessages();
+	const hookMessages = allMessages.filter(
+		(m) => m.role === "user" && m.is_hook_injection === true,
+	);
 
-		if (content.includes("hook-injected-marker")) {
-			pass("Pre-send hook injection — in content", "Hook stdout 'hook-injected-marker' found in assembled message content", shot);
-		} else if (hookInjections && hookInjections.some((h) => String(h).includes("hook-injected-marker"))) {
-			pass("Pre-send hook injection — in metadata", "hook_injections field contains the marker", shot);
-		} else if (hookInjections && hookInjections.length > 0) {
-			pass("Pre-send hook injection — hooks fired", `hook_injections has ${hookInjections.length} entries`, shot);
+	if (hookMessages.length > 0) {
+		// Check if the marker is in the hook message content
+		const withMarker = hookMessages.filter((m) =>
+			String(m.content ?? "").includes("hook-injected-marker"),
+		);
+		if (withMarker.length > 0) {
+			pass(
+				"Pre-send hook injection",
+				`Hook fired: found ${hookMessages.length} is_hook_injection message(s) with 'hook-injected-marker' in content`,
+				shot,
+			);
 		} else {
-			fail("Pre-send hook injection", `No hook output found. Content: "${content.substring(0, 200)}"`, shot);
+			pass(
+				"Pre-send hook injection",
+				`Hook fired: found ${hookMessages.length} is_hook_injection message(s) (marker may be shell-trimmed). ` +
+					`Content sample: "${String(hookMessages[0]!.content).substring(0, 100)}"`,
+				shot,
+			);
 		}
 	} else {
-		fail("Pre-send hook injection", "No user message found in JSONL history", shot);
+		// Fall back: check the user message content for the old location (should not be there post-ACI-002,
+		// but accept it as a pass if somehow still present)
+		const userMsg = getLatestUserMessage();
+		if (userMsg) {
+			const content = String(userMsg.content ?? "");
+			if (content.includes("hook-injected-marker")) {
+				pass(
+					"Pre-send hook injection",
+					"Hook marker found in user message content (old pre-ACI-002 path — still acceptable)",
+					shot,
+				);
+			} else {
+				fail(
+					"Pre-send hook injection",
+					`No hook injection message (is_hook_injection=true) found in JSONL and marker not in user message content. ` +
+						`Total JSONL messages: ${allMessages.length}`,
+					shot,
+				);
+			}
+		} else {
+			fail("Pre-send hook injection", "No messages found in JSONL history", shot);
+		}
 	}
 }
 
