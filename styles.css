@@ -519,9 +519,11 @@
 	color: var(--text-normal);
 	font-size: var(--font-text-size);
 	font-family: var(--font-interface);
-	resize: none;
 	overflow-y: auto;
 	line-height: 1.4;
+	white-space: pre-wrap;
+	word-break: break-word;
+	-webkit-user-modify: read-write-plaintext-only;
 }
 
 .notor-text-input:focus {
@@ -529,7 +531,15 @@
 	outline: none;
 }
 
-.notor-text-input:disabled {
+/* Placeholder for contenteditable div via :empty pseudo-element */
+.notor-text-input:empty::before {
+	content: attr(data-placeholder);
+	color: var(--text-faint);
+	pointer-events: none;
+}
+
+/* Disabled state (contenteditable="false") */
+.notor-text-input--disabled {
 	opacity: 0.6;
 	cursor: not-allowed;
 }

@@ -82,59 +82,59 @@
 **Files:** `src/settings.ts`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] Settings interface extended with all 16 new fields from plan (auto-context toggles, compaction settings, fetch_webpage settings, execute_command settings, hooks config, hook timeout, env truncation cap, external file size threshold)
-- [ ] Default values match plan specification
-- [ ] `HookConfig` interface defined with ordered lists per lifecycle event
-- [ ] `Hook` interface defined with id, event, command, label, enabled fields
-- [ ] Settings load/save via `loadData`/`saveData` includes new fields with backward compatibility (missing fields get defaults)
+- [x] Settings interface extended with all 16 new fields from plan (auto-context toggles, compaction settings, fetch_webpage settings, execute_command settings, hooks config, hook timeout, env truncation cap, external file size threshold)
+- [x] Default values match plan specification
+- [x] `HookConfig` interface defined with ordered lists per lifecycle event
+- [x] `Hook` interface defined with id, event, command, label, enabled fields
+- [x] Settings load/save via `loadData`/`saveData` includes new fields with backward compatibility (missing fields get defaults)
 
 ### FOUND-002: Token estimation utility
 **Description:** Implement a lightweight token estimation function using the character/4 heuristic. This utility is used by auto-compaction and token tracking.
 **Files:** `src/utils/tokens.ts`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `estimateTokens(text: string): number` function implemented using `Math.ceil(text.length / 4)`
-- [ ] Handles empty strings and null/undefined gracefully
-- [ ] Exported for use by compaction and context assembly modules
+- [x] `estimateTokens(text: string): number` function implemented using `Math.ceil(text.length / 4)`
+- [x] Handles empty strings and null/undefined gracefully
+- [x] Exported for use by compaction and context assembly modules
 
 ### FOUND-003: Shell executor (shared infrastructure)
 **Description:** Implement the core shell spawning logic shared by `execute_command` tool and hook engine. Handles platform-specific shell resolution, stdio capture, output buffering with size cap, and timeout enforcement. Uses `child_process.spawn` per R-3 findings.
 **Files:** `src/shell/shell-executor.ts`, `src/shell/shell-resolver.ts`, `src/shell/output-buffer.ts`
 **Dependencies:** RES-003, FOUND-001
 **Acceptance Criteria:**
-- [ ] `ShellResolver` determines shell executable and args per platform: `process.env.SHELL` with `['-l', '-c', command]` on macOS/Linux (login shell for full PATH inheritance), `'powershell.exe'` with `['-NoProfile', '-Command', command]` on Windows (per R-3: `-NoProfile` avoids slow profile loading), with user-configurable overrides from settings
-- [ ] `process.env.SHELL` fallback: if undefined (e.g., on Windows), falls back to `'powershell.exe'`; if also unavailable, falls back to `'cmd.exe'` with `['/c', command]`
-- [ ] `OutputBuffer` captures combined stdout+stderr into a single string with configurable character cap (default: 50,000); appends truncation notice when exceeded ("`\n[Output truncated at 50,000 characters]`")
-- [ ] `ShellExecutor.execute(command, options)` spawns a child process via `child_process.spawn` with `shell: false` (we spawn the shell directly), configurable `cwd`, `env` (merged `process.env` + custom vars), and timeout
-- [ ] Timeout enforcement: `SIGTERM` on timeout, `SIGKILL` after 3-second grace period; on Windows, `child.kill()` for termination
-- [ ] Returns `{ stdout: string, exitCode: number, timedOut: boolean, truncated: boolean }`
-- [ ] Error handling for shell-not-found (`ENOENT`), spawn failures, permission issues, and non-existent `cwd`
-- [ ] Desktop-only guard: functions throw or return error if `Platform.isDesktopApp` is false
+- [x] `ShellResolver` determines shell executable and args per platform: `process.env.SHELL` with `['-l', '-c', command]` on macOS/Linux (login shell for full PATH inheritance), `'powershell.exe'` with `['-NoProfile', '-Command', command]` on Windows (per R-3: `-NoProfile` avoids slow profile loading), with user-configurable overrides from settings
+- [x] `process.env.SHELL` fallback: if undefined (e.g., on Windows), falls back to `'powershell.exe'`; if also unavailable, falls back to `'cmd.exe'` with `['/c', command]`
+- [x] `OutputBuffer` captures combined stdout+stderr into a single string with configurable character cap (default: 50,000); appends truncation notice when exceeded ("`\n[Output truncated at 50,000 characters]`")
+- [x] `ShellExecutor.execute(command, options)` spawns a child process via `child_process.spawn` with `shell: false` (we spawn the shell directly), configurable `cwd`, `env` (merged `process.env` + custom vars), and timeout
+- [x] Timeout enforcement: `SIGTERM` on timeout, `SIGKILL` after 3-second grace period; on Windows, `child.kill()` for termination
+- [x] Returns `{ stdout: string, exitCode: number, timedOut: boolean, truncated: boolean }`
+- [x] Error handling for shell-not-found (`ENOENT`), spawn failures, permission issues, and non-existent `cwd`
+- [x] Desktop-only guard: functions throw or return error if `Platform.isDesktopApp` is false
 
 ### FOUND-005: Chat input migration (textarea → contenteditable div)
 **Description:** Migrate the chat input element from `<textarea>` to a `contenteditable <div>` to enable `AbstractInputSuggest<T>` attachment autocomplete. The existing textarea does not satisfy `AbstractInputSuggest`'s constructor requirement (`HTMLInputElement | HTMLDivElement`), as identified in R-1.
 **Files:** `src/ui/chat-view.ts`, `styles.css`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] Chat input `<textarea>` replaced with a `contenteditable <div>` element
-- [ ] Auto-resize behavior preserved (expand on input, cap at max height)
-- [ ] Enter-to-send and Shift+Enter-for-newline keyboard handling preserved
-- [ ] Input reading/writing adapted: `textContent` or `innerHTML` replaces `.value`
-- [ ] Disabled state handling adapted (e.g., `contenteditable="false"` instead of `disabled` attribute)
-- [ ] Placeholder text behavior preserved (CSS `:empty::before` pseudo-element or equivalent)
-- [ ] No visual or functional regression in the chat input area
-- [ ] `AbstractInputSuggest<T>` can attach to the new `<div>` element (verified by instantiation test)
+- [x] Chat input `<textarea>` replaced with a `contenteditable <div>` element
+- [x] Auto-resize behavior preserved (expand on input, cap at max height)
+- [x] Enter-to-send and Shift+Enter-for-newline keyboard handling preserved
+- [x] Input reading/writing adapted: `textContent` or `innerHTML` replaces `.value`
+- [x] Disabled state handling adapted (e.g., `contenteditable="false"` instead of `disabled` attribute)
+- [x] Placeholder text behavior preserved (CSS `:empty::before` pseudo-element or equivalent)
+- [x] No visual or functional regression in the chat input area
+- [x] `AbstractInputSuggest<T>` can attach to the new `<div>` element (verified by instantiation test)
 
 ### FOUND-004: Message assembler skeleton
 **Description:** Create the message assembler module that composes the final user message from multiple content sources in the defined order: auto-context → attachments → hook stdout → user text.
 **Files:** `src/context/message-assembler.ts`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `assembleUserMessage(parts: MessageParts): string` function implemented
-- [ ] `MessageParts` interface defined: `{ autoContext?: string, attachments?: string, hookInjections?: string[], userText: string }`
-- [ ] Output follows fixed ordering: auto-context block → attachments block → hook stdout (newline-joined) → user text
-- [ ] Empty sections are omitted (no empty tags or extra whitespace)
-- [ ] Exported for use by the chat orchestrator
+- [x] `assembleUserMessage(parts: MessageParts): string` function implemented
+- [x] `MessageParts` interface defined: `{ autoContext?: string, attachments?: string, hookInjections?: string[], userText: string }`
+- [x] Output follows fixed ordering: auto-context block → attachments block → hook stdout (newline-joined) → user text
+- [x] Empty sections are omitted (no empty tags or extra whitespace)
+- [x] Exported for use by the chat orchestrator
 
 ---
 

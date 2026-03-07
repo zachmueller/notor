@@ -38,7 +38,7 @@ export class NotorChatView extends ItemView {
 	private headerEl!: HTMLElement;
 	private messageListEl!: HTMLElement;
 	private inputAreaEl!: HTMLElement;
-	private textInputEl!: HTMLTextAreaElement;
+	private textInputEl!: HTMLDivElement;
 	private sendButtonEl!: HTMLButtonElement;
 	private stopButtonEl!: HTMLButtonElement;
 	private modeToggleEl!: HTMLButtonElement;
@@ -282,15 +282,21 @@ export class NotorChatView extends ItemView {
 
 		// Text input wrapper
 		const inputWrapper = this.inputAreaEl.createDiv({ cls: "notor-input-wrapper" });
-		this.textInputEl = inputWrapper.createEl("textarea", {
+
+		// contenteditable div — required for AbstractInputSuggest<T> attachment
+		// autocomplete (see R-1 findings). Replaces the former <textarea>.
+		this.textInputEl = inputWrapper.createDiv({
 			cls: "notor-text-input",
 			attr: {
-				placeholder: "Ask Notor...",
-				rows: "1",
+				contenteditable: "true",
+				role: "textbox",
+				"aria-multiline": "true",
+				"aria-label": "Ask Notor...",
+				"data-placeholder": "Ask Notor...",
 			},
 		});
 
-		// Auto-resize textarea
+		// Auto-resize contenteditable div
 		this.textInputEl.addEventListener("input", () => {
 			this.textInputEl.style.height = "auto";
 			this.textInputEl.style.height = Math.min(this.textInputEl.scrollHeight, 200) + "px";
@@ -331,10 +337,10 @@ export class NotorChatView extends ItemView {
 	private async handleSend(): Promise<void> {
 		if (this.isResponding) return;
 
-		const content = this.textInputEl.value.trim();
+		const content = (this.textInputEl.textContent ?? "").trim();
 		if (!content) return;
 
-		this.textInputEl.value = "";
+		this.textInputEl.textContent = "";
 		this.textInputEl.style.height = "auto";
 
 		try {
@@ -391,12 +397,14 @@ export class NotorChatView extends ItemView {
 		if (responding) {
 			this.sendButtonEl.addClass("notor-hidden");
 			this.stopButtonEl.removeClass("notor-hidden");
-			this.textInputEl.disabled = true;
+			this.textInputEl.setAttribute("contenteditable", "false");
+			this.textInputEl.addClass("notor-text-input--disabled");
 			this.loadingIndicatorEl.removeClass("notor-hidden");
 		} else {
 			this.sendButtonEl.removeClass("notor-hidden");
 			this.stopButtonEl.addClass("notor-hidden");
-			this.textInputEl.disabled = false;
+			this.textInputEl.setAttribute("contenteditable", "true");
+			this.textInputEl.removeClass("notor-text-input--disabled");
 			this.loadingIndicatorEl.addClass("notor-hidden");
 			this.textInputEl.focus();
 		}

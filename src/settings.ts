@@ -26,6 +26,35 @@ export interface ModelPricing {
 	output: number;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3: Hook configuration interfaces
+// ---------------------------------------------------------------------------
+
+/** A single lifecycle hook — shell command tied to an event. */
+export interface Hook {
+	/** Unique identifier (UUID). */
+	id: string;
+	/** Lifecycle event this hook fires on. */
+	event: HookEvent;
+	/** Shell command to execute. */
+	command: string;
+	/** Human-readable label (optional; falls back to command). */
+	label: string;
+	/** Whether this hook is active. */
+	enabled: boolean;
+}
+
+/** Supported lifecycle hook event types. */
+export type HookEvent = "pre_send" | "on_tool_call" | "on_tool_result" | "after_completion";
+
+/** Ordered lists of hooks grouped by lifecycle event. */
+export interface HookConfig {
+	pre_send: Hook[];
+	on_tool_call: Hook[];
+	on_tool_result: Hook[];
+	after_completion: Hook[];
+}
+
 /** Notor plugin settings persisted via loadData/saveData. */
 export interface NotorSettings {
 	/** Vault-relative path for Notor-managed files. */
@@ -66,6 +95,84 @@ export interface NotorSettings {
 
 	/** Per-model pricing (per 1K tokens), keyed by model ID. */
 	model_pricing: Record<string, ModelPricing>;
+
+	// -------------------------------------------------------------------
+	// Phase 3: Auto-context settings
+	// -------------------------------------------------------------------
+
+	/** Enable open note paths auto-context. */
+	auto_context_open_notes: boolean;
+
+	/** Enable vault structure auto-context. */
+	auto_context_vault_structure: boolean;
+
+	/** Enable OS platform auto-context. */
+	auto_context_os: boolean;
+
+	// -------------------------------------------------------------------
+	// Phase 3: Compaction settings
+	// -------------------------------------------------------------------
+
+	/** Fraction of context window that triggers auto-compaction (0–1). */
+	compaction_threshold: number;
+
+	/** Custom compaction system prompt (empty = use default). */
+	compaction_prompt_override: string;
+
+	// -------------------------------------------------------------------
+	// Phase 3: fetch_webpage settings
+	// -------------------------------------------------------------------
+
+	/** HTTP request timeout in seconds. */
+	fetch_webpage_timeout: number;
+
+	/** Maximum raw download size in MB. */
+	fetch_webpage_max_download_mb: number;
+
+	/** Maximum output character count after conversion. */
+	fetch_webpage_max_output_chars: number;
+
+	/** Blocked domain patterns for fetch_webpage. */
+	domain_denylist: string[];
+
+	// -------------------------------------------------------------------
+	// Phase 3: execute_command settings
+	// -------------------------------------------------------------------
+
+	/** Per-command timeout in seconds. */
+	execute_command_timeout: number;
+
+	/** Maximum command output character count. */
+	execute_command_max_output_chars: number;
+
+	/** Additional allowed working directory absolute paths. */
+	execute_command_allowed_paths: string[];
+
+	/** Custom shell executable (empty = platform default). */
+	execute_command_shell: string;
+
+	/** Custom shell launch arguments (empty = platform default). */
+	execute_command_shell_args: string[];
+
+	// -------------------------------------------------------------------
+	// Phase 3: File attachment settings
+	// -------------------------------------------------------------------
+
+	/** File size in MB above which a confirmation dialog is shown. */
+	external_file_size_threshold_mb: number;
+
+	// -------------------------------------------------------------------
+	// Phase 3: Hook settings
+	// -------------------------------------------------------------------
+
+	/** Hook configurations grouped by lifecycle event. */
+	hooks: HookConfig;
+
+	/** Global hook timeout in seconds. */
+	hook_timeout: number;
+
+	/** Max environment variable value size for hooks (chars). */
+	hook_env_truncation_chars: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +220,14 @@ const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	manage_tags: false,
 };
 
+/** Default empty hook configuration. */
+const DEFAULT_HOOKS: HookConfig = {
+	pre_send: [],
+	on_tool_call: [],
+	on_tool_result: [],
+	after_completion: [],
+};
+
 /** Sensible defaults for all Notor settings. */
 export const DEFAULT_SETTINGS: NotorSettings = {
 	notor_dir: "notor/",
@@ -128,6 +243,36 @@ export const DEFAULT_SETTINGS: NotorSettings = {
 	checkpoint_max_per_conversation: 100,
 	checkpoint_max_age_days: 30,
 	model_pricing: {},
+
+	// Phase 3: Auto-context
+	auto_context_open_notes: true,
+	auto_context_vault_structure: true,
+	auto_context_os: true,
+
+	// Phase 3: Compaction
+	compaction_threshold: 0.8,
+	compaction_prompt_override: "",
+
+	// Phase 3: fetch_webpage
+	fetch_webpage_timeout: 15,
+	fetch_webpage_max_download_mb: 5,
+	fetch_webpage_max_output_chars: 50000,
+	domain_denylist: [],
+
+	// Phase 3: execute_command
+	execute_command_timeout: 30,
+	execute_command_max_output_chars: 50000,
+	execute_command_allowed_paths: [],
+	execute_command_shell: "",
+	execute_command_shell_args: [],
+
+	// Phase 3: File attachments
+	external_file_size_threshold_mb: 1,
+
+	// Phase 3: Hooks
+	hooks: DEFAULT_HOOKS,
+	hook_timeout: 10,
+	hook_env_truncation_chars: 10000,
 };
 
 // ---------------------------------------------------------------------------
