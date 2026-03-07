@@ -180,7 +180,7 @@ This iteration addresses six issues discovered during manual testing of the Phas
 - [x] Test: close a note tab → send message → verify closed note no longer appears in auto-context
 - [x] Test: open notes from different vault folders → verify full vault-relative paths are correct
 
-### ACI-TEST-003: Active note marker
+### ACI-TEST-003: Active note marker ✅
 
 **Description:** Create e2e tests validating the `(active)` marker on the currently active note.
 
@@ -189,9 +189,9 @@ This iteration addresses six issues discovered during manual testing of the Phas
 **Dependencies:** ACI-005
 
 **Acceptance Criteria:**
-- [ ] Test: open multiple notes → send message → verify exactly one note has ` (active)` suffix in auto-context
-- [ ] Test: switch active note → send another message → verify the active marker moved to the new note
-- [ ] Test: the active marker matches the note that is currently in the foreground/focused leaf
+- [x] Test: open multiple notes → send message → verify exactly one note has ` (active)` suffix in auto-context
+- [x] Test: switch active note → send another message → verify the active marker moved to the new note
+- [x] Test: the active marker matches the note that is currently in the foreground/focused leaf
 
 ### ACI-TEST-004: Vault structure formatting
 

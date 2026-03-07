@@ -35,6 +35,18 @@
  *   e. Open notes from different vault folders → full vault-relative paths correct
  *
  * @see specs/02-context-intelligence/auto-context-iteration/tasks.md — ACI-TEST-002
+ *
+ * ## ACI-TEST-003: Active note marker
+ *
+ * Validates the ` (active)` marker on the currently active note in the
+ * `<open-notes>` block of the assembled system prompt (ACI-005).
+ *
+ * Scenarios:
+ *   a. Open multiple notes → send message → verify exactly one note has ` (active)` suffix
+ *   b. Switch active note → send another message → verify the active marker moved
+ *   c. The active marker matches the note currently in the foreground/focused leaf
+ *
+ * @see specs/02-context-intelligence/auto-context-iteration/tasks.md — ACI-TEST-003
  */
 
 import { execSync } from "node:child_process";
@@ -285,7 +297,7 @@ function setupTestVault(): void {
 		fs.writeFileSync(fullPath, content, "utf8");
 	}
 
-	// Ensure additional notes used by ACI-TEST-002 exist
+	// Ensure additional notes used by ACI-TEST-002 and ACI-TEST-003 exist
 	const extraNotes: Record<string, string> = {
 		"Notes/Meeting Notes.md": "# Meeting Notes\n\nNotes from meetings.\n",
 		"Notes/Project Plan.md": "# Project Plan\n\nProject planning notes.\n",
@@ -950,6 +962,375 @@ async function testAllSourcesDisabledNoAutoContextInSystemPrompt(
 }
 
 // ---------------------------------------------------------------------------
+// ACI-TEST-003: Active note marker
+// ---------------------------------------------------------------------------
+
+/**
+ * ACI-TEST-003-a: Exactly one note has ` (active)` suffix.
+ *
+ * Opens multiple notes, activates one of them, then sends a message.
+ * Verifies that exactly one entry in `<open-notes>` ends with ` (active)`,
+ * and that all opened notes are present.
+ */
+async function testExactlyOneNoteMarkedActive(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-003-a: Exactly one note marked active ──");
+
+	await closeAllMarkdownTabs(page);
+	await newConversation(page);
+
+	const notes = [
+		"Research/Climate.md",
+		"Daily/2026-07-03.md",
+		"Notes/Meeting Notes.md",
+	];
+
+	// Open all notes as background tabs first
+	for (const note of notes) {
+		await openNoteInNewTab(page, note, false);
+	}
+
+	// Activate the middle note so it is the focused leaf
+	const activeNote = notes[1]!;
+	await activateNote(page, activeNote);
+
+	const responded = await sendMessage(
+		page,
+		"ACI-TEST-003-a: verify exactly one note is marked active",
+	);
+	const shot = await screenshot(page, "aci-003a-exactly-one-active");
+
+	if (!responded) {
+		console.log("    (No LLM response — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (!systemPrompt) {
+		fail(
+			"ACI-TEST-003-a: exactly one note marked active",
+			"No 'System prompt assembled' log entry found",
+			shot,
+		);
+		return;
+	}
+
+	const openNotes = extractOpenNotes(systemPrompt);
+
+	if (!openNotes) {
+		fail(
+			"ACI-TEST-003-a: exactly one note marked active",
+			"<open-notes> tag not found in system prompt",
+			shot,
+		);
+		return;
+	}
+
+	// Count lines ending with " (active)"
+	const activeLines = openNotes.filter((line) => line.endsWith(" (active)"));
+
+	if (activeLines.length !== 1) {
+		fail(
+			"ACI-TEST-003-a: exactly one note marked active",
+			`Expected exactly 1 active marker, found ${activeLines.length}. ` +
+				`Open notes: ${openNotes.join(", ")}`,
+			shot,
+		);
+		return;
+	}
+
+	// Confirm all opened notes are present (strip active suffix for comparison)
+	const normalised = openNotes.map((l) =>
+		l.endsWith(" (active)") ? l.slice(0, -" (active)".length) : l,
+	);
+	const missingNotes = notes.filter((n) => !normalised.includes(n));
+
+	if (missingNotes.length === 0) {
+		pass(
+			"ACI-TEST-003-a: exactly one note marked active",
+			`Exactly one active marker found ("${activeLines[0]}"). All ${notes.length} notes present.`,
+			shot,
+		);
+	} else {
+		fail(
+			"ACI-TEST-003-a: exactly one note marked active",
+			`Active count correct (1) but missing notes: ${missingNotes.join(", ")}. ` +
+				`Open notes: ${openNotes.join(", ")}`,
+			shot,
+		);
+	}
+}
+
+/**
+ * ACI-TEST-003-b: Active marker moves when the user switches active note.
+ *
+ * Opens two notes and sets note A as active, sends a message and records
+ * which note was marked active. Then switches the active leaf to note B,
+ * sends another message, and verifies the marker is now on note B (not A).
+ */
+async function testActiveMarkerMovesOnSwitch(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-003-b: Active marker moves on note switch ──");
+
+	await closeAllMarkdownTabs(page);
+	await newConversation(page);
+
+	const noteA = "Research/Climate.md";
+	const noteB = "Daily/2026-07-03.md";
+
+	// Open both notes; activate A first
+	await openNoteInNewTab(page, noteA, false);
+	await openNoteInNewTab(page, noteB, false);
+	await activateNote(page, noteA);
+
+	// First message — note A should be active
+	const responded1 = await sendMessage(
+		page,
+		"ACI-TEST-003-b: first message, note A active",
+	);
+
+	if (!responded1) {
+		console.log("    (No LLM response for first message — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPromptAfterA = getLatestSystemPrompt(collector);
+
+	if (!systemPromptAfterA) {
+		fail(
+			"ACI-TEST-003-b: active marker moves on switch",
+			"No 'System prompt assembled' log entry found after first message",
+		);
+		return;
+	}
+
+	const openNotesAfterA = extractOpenNotes(systemPromptAfterA);
+
+	if (!openNotesAfterA) {
+		fail(
+			"ACI-TEST-003-b: active marker moves on switch",
+			"<open-notes> not found after first message",
+		);
+		return;
+	}
+
+	const noteAActiveAfterFirst = openNotesAfterA.some(
+		(line) => line === `${noteA} (active)`,
+	);
+
+	if (!noteAActiveAfterFirst) {
+		fail(
+			"ACI-TEST-003-b: active marker moves on switch",
+			`Expected "${noteA} (active)" after first message but got: ${openNotesAfterA.join(", ")}`,
+		);
+		return;
+	}
+
+	// Now switch to note B
+	await activateNote(page, noteB);
+
+	// Second message — note B should now be active
+	const responded2 = await sendMessage(
+		page,
+		"ACI-TEST-003-b: second message, switched to note B",
+	);
+	const shot = await screenshot(page, "aci-003b-active-moves");
+
+	if (!responded2) {
+		console.log("    (No LLM response for second message — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPromptAfterB = getLatestSystemPrompt(collector);
+
+	if (!systemPromptAfterB) {
+		fail(
+			"ACI-TEST-003-b: active marker moves on switch",
+			"No 'System prompt assembled' log entry found after second message",
+			shot,
+		);
+		return;
+	}
+
+	const openNotesAfterB = extractOpenNotes(systemPromptAfterB);
+
+	if (!openNotesAfterB) {
+		fail(
+			"ACI-TEST-003-b: active marker moves on switch",
+			"<open-notes> not found after second message",
+			shot,
+		);
+		return;
+	}
+
+	const noteBActiveAfterSwitch = openNotesAfterB.some(
+		(line) => line === `${noteB} (active)`,
+	);
+	const noteAStillActiveAfterSwitch = openNotesAfterB.some(
+		(line) => line === `${noteA} (active)`,
+	);
+
+	if (noteBActiveAfterSwitch && !noteAStillActiveAfterSwitch) {
+		pass(
+			"ACI-TEST-003-b: active marker moves on switch",
+			`Active marker correctly moved from "${noteA}" to "${noteB}" after tab switch. ` +
+				`Open notes: ${openNotesAfterB.join(", ")}`,
+			shot,
+		);
+	} else {
+		const reasons: string[] = [];
+		if (!noteBActiveAfterSwitch)
+			reasons.push(`"${noteB} (active)" not found after switch`);
+		if (noteAStillActiveAfterSwitch)
+			reasons.push(`"${noteA} (active)" still present after switching away`);
+		fail(
+			"ACI-TEST-003-b: active marker moves on switch",
+			reasons.join("; ") + `. Open notes: ${openNotesAfterB.join(", ")}`,
+			shot,
+		);
+	}
+}
+
+/**
+ * ACI-TEST-003-c: Active marker matches the foreground/focused leaf.
+ *
+ * Opens three notes, explicitly focuses one, and sends a message. Verifies
+ * that the path in `<open-notes>` ending with ` (active)` exactly matches
+ * the note that was programmatically set as the active leaf.
+ *
+ * This is the "ground truth" test — it queries Obsidian's workspace API for
+ * the current active leaf and cross-checks it against the auto-context output.
+ */
+async function testActiveMarkerMatchesFocusedLeaf(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-003-c: Active marker matches focused leaf ──");
+
+	await closeAllMarkdownTabs(page);
+	await newConversation(page);
+
+	const notes = [
+		"Test Note.md",
+		"Notes/Project Plan.md",
+		"Journal/2025-01-01.md",
+	];
+
+	// Open all notes as background tabs
+	for (const note of notes) {
+		await openNoteInNewTab(page, note, false);
+	}
+
+	// Activate the LAST note (the one we want to confirm as active)
+	const expectedActive = notes[notes.length - 1]!;
+	await activateNote(page, expectedActive);
+
+	// Query the workspace directly to confirm Obsidian's view of the active leaf
+	const obsidianActiveLeaf = await page.evaluate((): string | null => {
+		const app = (window as unknown as { app: { workspace: unknown } }).app;
+		const workspace = app.workspace as {
+			getActiveViewOfType?: (type: unknown) => { file?: { path: string } } | null;
+			activeLeaf?: { view?: { file?: { path: string } } };
+		};
+
+		// Try getActiveViewOfType approach first (may not be available in eval context)
+		if (workspace.activeLeaf?.view?.file?.path) {
+			return workspace.activeLeaf.view.file.path;
+		}
+		return null;
+	});
+
+	console.log(`    Obsidian active leaf path: ${obsidianActiveLeaf ?? "(could not determine)"}`);
+
+	const responded = await sendMessage(
+		page,
+		"ACI-TEST-003-c: verify active marker matches focused leaf",
+	);
+	const shot = await screenshot(page, "aci-003c-active-matches-leaf");
+
+	if (!responded) {
+		console.log("    (No LLM response — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (!systemPrompt) {
+		fail(
+			"ACI-TEST-003-c: active marker matches focused leaf",
+			"No 'System prompt assembled' log entry found",
+			shot,
+		);
+		return;
+	}
+
+	const openNotes = extractOpenNotes(systemPrompt);
+
+	if (!openNotes) {
+		fail(
+			"ACI-TEST-003-c: active marker matches focused leaf",
+			"<open-notes> tag not found in system prompt",
+			shot,
+		);
+		return;
+	}
+
+	// Find the line carrying the active marker
+	const activeLines = openNotes.filter((line) => line.endsWith(" (active)"));
+
+	if (activeLines.length === 0) {
+		fail(
+			"ACI-TEST-003-c: active marker matches focused leaf",
+			`No ` + "`(active)`" + ` marker found in open-notes. Open notes: ${openNotes.join(", ")}`,
+			shot,
+		);
+		return;
+	}
+
+	// Extract the path from the active line (strip " (active)" suffix)
+	const markedPath = activeLines[0]!.slice(0, -" (active)".length);
+
+	// Primary check: does the marked path match what we activated?
+	if (markedPath === expectedActive) {
+		pass(
+			"ACI-TEST-003-c: active marker matches focused leaf",
+			`Active marker correctly points to the focused note "${expectedActive}". ` +
+				`Open notes: ${openNotes.join(", ")}`,
+			shot,
+		);
+	} else if (obsidianActiveLeaf !== null && markedPath === obsidianActiveLeaf) {
+		// Secondary: if Obsidian's API returned a different active path (e.g. due to
+		// workspace layout changes), trust what Obsidian actually reports
+		pass(
+			"ACI-TEST-003-c: active marker matches focused leaf",
+			`Active marker ("${markedPath}") matches Obsidian's active leaf ` +
+				`(expected "${expectedActive}", but Obsidian reports "${obsidianActiveLeaf}"). ` +
+				`Open notes: ${openNotes.join(", ")}`,
+			shot,
+		);
+	} else {
+		fail(
+			"ACI-TEST-003-c: active marker matches focused leaf",
+			`Active marker points to "${markedPath}" but expected "${expectedActive}". ` +
+				(obsidianActiveLeaf
+					? `Obsidian active leaf: "${obsidianActiveLeaf}". `
+					: "") +
+				`Open notes: ${openNotes.join(", ")}`,
+			shot,
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // ACI-TEST-002: Open notes detection — all tabs detected on first message
 // ---------------------------------------------------------------------------
 
@@ -1391,7 +1772,7 @@ async function testFullVaultRelativePathsReported(
 // ---------------------------------------------------------------------------
 
 async function main() {
-	console.log("=== Notor Auto-Context E2E Test (ACI-TEST-001 + ACI-TEST-002) ===\n");
+	console.log("=== Notor Auto-Context E2E Test (ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003) ===\n");
 
 	console.log("[0/4] Building plugin...");
 	execSync("npm run build", { cwd: path.resolve(__dirname, "..", ".."), stdio: "inherit" });
@@ -1435,7 +1816,7 @@ async function main() {
 		await page.waitForLoadState("domcontentloaded");
 		await page.waitForTimeout(5_000);
 
-		console.log("[4/4] Running ACI-TEST-001 + ACI-TEST-002 tests...\n");
+		console.log("[4/4] Running ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003 tests...\n");
 		{
 			const chat = await waitForSelector(page, ".notor-chat-container", 10_000);
 			if (!chat) {
@@ -1494,6 +1875,20 @@ async function main() {
 		// ACI-TEST-002-e: full vault-relative paths reported for notes in sub-folders
 		await testFullVaultRelativePathsReported(page, collector);
 
+		// ── ACI-TEST-003 ────────────────────────────────────────────────────
+		console.log(
+			"\n[ACI-TEST-003] Running active note marker tests...",
+		);
+
+		// ACI-TEST-003-a: exactly one note has (active) suffix
+		await testExactlyOneNoteMarkedActive(page, collector);
+
+		// ACI-TEST-003-b: active marker moves when the user switches note
+		await testActiveMarkerMovesOnSwitch(page, collector);
+
+		// ACI-TEST-003-c: active marker matches the foreground/focused leaf
+		await testActiveMarkerMatchesFocusedLeaf(page, collector);
+
 		await screenshot(page, "99-final");
 
 		console.log("\n=== Collecting logs ===");
@@ -1521,7 +1916,7 @@ async function main() {
 	const passed = results.filter((r) => r.passed).length;
 	const failed = results.filter((r) => !r.passed).length;
 
-	console.log("\n=== Test Results (ACI-TEST-001 + ACI-TEST-002) ===");
+	console.log("\n=== Test Results (ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003) ===");
 	console.log(`Passed: ${passed}/${results.length}`);
 	console.log(`Failed: ${failed}/${results.length}`);
 
