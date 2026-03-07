@@ -1,18 +1,18 @@
 # Cross-Artifact Analysis Report
 
 **Generated:** 2026-07-03T18:08:00+13:00
-**Updated:** 2026-07-03T18:30:00+13:00
+**Updated:** 2026-07-03T18:35:00+13:00
 **Feature:** Phase 3 — Context & Intelligence
 **Branch:** feature/02-context-intelligence
 **Artifacts:** spec.md, plan.md, tasks.md (+ data-model.md)
 
 ## Executive Summary
 
-- **Total Findings:** 11 (Critical: ~~1~~ 0, High: 2, Medium: 5, Low: 3)
+- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ 1, Medium: 5, Low: 3)
 - **Coverage:** 100% of functional requirements (FR-24 through FR-36) mapped to tasks
-- **Readiness:** NEEDS ATTENTION — two high-severity issues should be resolved before implementation
+- **Readiness:** NEEDS ATTENTION — one high-severity issue should be resolved before implementation
 
-The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. ~~One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`) — **resolved 2026-07-03**.~~ Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing. Five medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
+The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. ~~One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`) — **resolved 2026-07-03**.~~ ~~Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing.~~ One high-severity finding remains (missing hook path restriction AC). Five medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
 
 ---
 
@@ -22,7 +22,7 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 |----|----------|----------|-------------|---------|--------|
 | N1 | Inconsistency | ~~CRITICAL~~ | All 02-context-intelligence docs vs 01-mvp docs | FR/NFR/ENV/TOOL IDs renumbered to be globally unique | ✅ RESOLVED |
 | C1 | Coverage | HIGH | spec.md FR-24, tasks.md | `[[` shortcut in chat input not covered by a dedicated acceptance criterion in ATT-005 | Open |
-| I1 | Inconsistency | HIGH | tasks.md phase numbering vs plan.md feature groups | tasks.md phases 2–5 do not match plan.md feature group labels (A–F); tasks.md "Phase 3" = Attachments but plan.md "Feature Group A" = Attachments | Open |
+| I1 | Inconsistency | ~~HIGH~~ | tasks.md phase numbering vs plan.md feature groups | tasks.md phases renamed to "Steps" to avoid collision with spec-level "Phase 3" label | ✅ RESOLVED |
 | C2 | Coverage | MEDIUM | spec.md FR-29, tasks.md | Manual compaction trigger (button/command) mentioned in FR-29 AC but only noted parenthetically in COMP-002/COMP-004; no standalone task for command registration | Open |
 | I2 | Inconsistency | MEDIUM | spec.md NFR-7, tasks.md | NFR-7 states hook shell commands use same working directory restrictions as `execute_command`; no task or AC covers enforcing path restrictions on hooks | Open |
 | U1 | Underspecification | MEDIUM | spec.md FR-32, plan.md, tasks.md | `execute_command` working directory resolution for relative paths is not specified in spec.md; only tasks.md TOOL-014 mentions "relative → resolve from vault root" | Open |
@@ -124,21 +124,19 @@ All internal cross-references (dependency lists, coverage matrices, acceptance c
 
 ---
 
-### I1 — Task phase numbering misaligns with plan feature group labels (HIGH)
+### I1 — Task phase numbering misaligns with plan feature group labels ~~(HIGH)~~ ✅ RESOLVED
 
-**Location:** plan.md § Implementation Phases (Feature Groups A–F), tasks.md § Phases 0–6
-**Detail:** The plan uses Feature Group labels: A (Attachments), B (Auto-Context), C (Auto-Compaction), D (fetch_webpage), E (execute_command), F (Hooks). The tasks.md reorders and renumbers these as implementation phases:
+**Location:** plan.md § Implementation Phases (Feature Groups A–F), tasks.md § ~~Phases~~ Steps 0–6
+**Status:** ✅ **RESOLVED** — 2026-07-03
+**Resolution:** Renamed all internal implementation phases in tasks.md from "Phase X" to "Step X" (e.g., "Step 0: Research & Environment Setup", "Step 3: Attachment System"). This eliminates the terminological collision with the spec-level "Phase 3" label (which refers to the entire Context & Intelligence scope). The groupings and ordering within tasks.md were preserved — only the prefix was changed. Internal cross-references (e.g., TOOL-017 AC referencing "Step 5") were also updated.
+
+**Original detail:** The plan uses Feature Group labels: A (Attachments), B (Auto-Context), C (Auto-Compaction), D (fetch_webpage), E (execute_command), F (Hooks). The tasks.md reordered and renumbered these as implementation phases:
 - tasks.md Phase 2 = Auto-Context (plan's Group B)
 - tasks.md Phase 3 = Attachments (plan's Group A)
 - tasks.md Phase 4 = Tools (plan's Groups D + E combined)
 - tasks.md Phase 5 = Hooks & Compaction (plan's Groups F + C combined)
 
-The reordering itself is valid (plan.md § Recommended Implementation Order suggests B before A). But the numeric phase labels ("Phase 3", "Phase 4") in tasks.md conflict with the feature-level "Phase 3" label used in spec.md (which refers to the entire Context & Intelligence scope). This creates terminological confusion — "Phase 3" means different things in spec.md vs tasks.md.
-
-**Recommendation:** Rename tasks.md phases to avoid collision with the spec-level phase number. Options:
-1. Use "Implementation Phase" or "Step" (e.g., "Step 2: Auto-Context Injection") instead of "Phase"
-2. Use the feature group letter labels from plan.md (e.g., "Group B: Auto-Context Injection")
-3. Keep numbered but prefix with "Impl-" (e.g., "Impl-Phase 2: Auto-Context Injection")
+The reordering itself was valid (plan.md § Recommended Implementation Order suggests B before A). But the numeric phase labels ("Phase 3", "Phase 4") in tasks.md conflicted with the feature-level "Phase 3" label used in spec.md (which refers to the entire Context & Intelligence scope). This created terminological confusion — "Phase 3" meant different things in spec.md vs tasks.md.
 
 ---
 
@@ -242,8 +240,10 @@ The reordering itself is valid (plan.md § Recommended Implementation Order sugg
 **~~Immediate (Critical):~~**
 1. ~~**N1** — Renumber all FR, NFR, and task IDs in 02-context-intelligence documents to be globally unique across all specs.~~ ✅ **RESOLVED** — 2026-07-03
 
+**~~Immediate (High):~~**
+2. ~~**I1** — Rename task phases in tasks.md to avoid collision with the spec-level "Phase 3" label. Recommend using "Step" or "Group" prefix.~~ ✅ **RESOLVED** — 2026-07-03
+
 **Immediate (High):**
-2. **I1** — Rename task phases in tasks.md to avoid collision with the spec-level "Phase 3" label. Recommend using "Step" or "Group" prefix.
 3. **I2/C3** — Add acceptance criteria to HOOK-002 in tasks.md requiring working directory allow-list enforcement for hook shell commands, per spec.md NFR-7.
 
 **Recommended (Medium):**
@@ -257,6 +257,6 @@ The reordering itself is valid (plan.md § Recommended Implementation Order sugg
 
 **Readiness Assessment:**
 - ~~One critical issue present (N1 — numbering collisions)~~ ✅ Resolved — all IDs are now globally unique across specs.
-- Two high-severity issues should be resolved before implementation begins: the phase naming collision (I1) creates confusion for developers navigating between artifacts, and the missing hook path restriction AC (I2/C3) could result in a security gap if not caught during implementation.
+- ~~Two high-severity issues should be resolved before implementation begins: the phase naming collision (I1) creates confusion for developers navigating between artifacts, and the missing hook path restriction AC (I2/C3) could result in a security gap if not caught during implementation.~~ One high-severity issue remains (I2/C3 — missing hook path restriction AC), which could result in a security gap if not caught during implementation.
 - Medium/low issues can be addressed in parallel with early implementation work.
 - Overall the artifacts are well-structured, comprehensive, and ready for implementation after the high-severity items are addressed.

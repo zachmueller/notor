@@ -8,13 +8,13 @@
 ## Task Summary
 
 **Total Tasks:** 42
-**Phases:** 7 (Research → Foundation → Auto-Context → Attachments → Tools → Hooks & Compaction → Quality & Polish)
+**Steps:** 7 (Research → Foundation → Auto-Context → Attachments → Tools → Hooks & Compaction → Quality & Polish)
 **Estimated Complexity:** High
 **Parallel Execution Opportunities:** 8 task groups
 
 ---
 
-## Phase 0: Research & Environment Setup
+## Step 0: Research & Environment Setup
 
 ### RES-001: Research Obsidian autocomplete/suggest API (R-1)
 **Description:** Investigate how to implement wikilink-style autocomplete in the Notor chat input area. Determine whether `SuggestModal`, `FuzzySuggestModal`, `EditorSuggest`, or a custom dropdown can provide `[[` autocomplete and `#Section` navigation within an `ItemView`.
@@ -75,7 +75,7 @@
 
 ---
 
-## Phase 1: Foundation & Shared Infrastructure
+## Step 1: Foundation & Shared Infrastructure
 
 ### FOUND-001: Settings model extensions
 **Description:** Extend the existing plugin settings interface and defaults with all new Phase 3 settings fields. This is the foundation for all feature groups.
@@ -123,7 +123,7 @@
 
 ---
 
-## Phase 2: Auto-Context Injection (Feature Group B — FR-26, FR-27, FR-28)
+## Step 2: Auto-Context Injection (Feature Group B — FR-26, FR-27, FR-28)
 
 ### CTX-001: Open note paths collector
 **Description:** Implement the auto-context source that collects file paths of all currently open notes in the Obsidian workspace.
@@ -192,7 +192,7 @@
 
 ---
 
-## Phase 3: Attachment System (Feature Group A — FR-24, FR-25)
+## Step 3: Attachment System (Feature Group A — FR-24, FR-25)
 
 ### ATT-001: Attachment data model
 **Description:** Implement the Attachment entity model with types, validation, and lifecycle management (pending → resolved → error).
@@ -290,7 +290,7 @@
 
 ---
 
-## Phase 4: Tools — `fetch_webpage` & `execute_command` (Feature Groups D, E)
+## Step 4: Tools — `fetch_webpage` & `execute_command` (Feature Groups D, E)
 
 ### TOOL-010: `fetch_webpage` tool implementation
 **Description:** Implement the `fetch_webpage` tool core logic: HTTP GET with configurable timeout, redirect following, download size cap, and content-type routing.
@@ -380,13 +380,13 @@
 **Acceptance Criteria:**
 - [ ] Dispatch flow includes domain denylist check for `fetch_webpage` (step 5 in updated flow)
 - [ ] Dispatch flow includes working directory validation for `execute_command` (step 6)
-- [ ] Hook firing points added: `on_tool_call` after approval/before execution, `on_tool_result` after execution/before LLM return (wired in Phase 5 task HOOK-004/005)
-- [ ] Compaction threshold check added after tool result (wired in Phase 5 task COMP-002)
+- [ ] Hook firing points added: `on_tool_call` after approval/before execution, `on_tool_result` after execution/before LLM return (wired in Step 5 task HOOK-004/005)
+- [ ] Compaction threshold check added after tool result (wired in Step 5 task COMP-002)
 - [ ] Existing dispatch logic (Plan/Act check, auto-approve, stale content, checkpoints) preserved
 
 ---
 
-## Phase 5: Hooks & Auto-Compaction (Feature Groups F, C)
+## Step 5: Hooks & Auto-Compaction (Feature Groups F, C)
 
 ### HOOK-001: Hook configuration model
 **Description:** Implement the hook data model and settings integration: ordered lists of hooks per lifecycle event, with CRUD operations.
@@ -520,7 +520,7 @@
 
 ---
 
-## Phase 6: Quality, Testing & Polish
+## Step 6: Quality, Testing & Polish
 
 ### TEST-001: Auto-context end-to-end testing
 **Description:** Create e2e tests validating auto-context collection and injection into messages.
@@ -638,35 +638,35 @@
 ## Dependency Graph
 
 ```
-Phase 0: Research & Environment
+Step 0: Research & Environment
   RES-001 ─────────────────────────────────────────────────▶ ATT-005
   RES-002 ─────────────────────────────────────────────────▶ ATT-003, ATT-006
   RES-003 ─────────────────────────────────────────────────▶ FOUND-003
   RES-004 ─────────────────────────────────────────────────▶ ENV-005
 
-Phase 1: Foundation
+Step 1: Foundation
   FOUND-001 ──▶ (used by nearly all subsequent tasks)
   FOUND-002 ──▶ COMP-001
   FOUND-003 ──▶ TOOL-014, HOOK-002
   FOUND-004 ──▶ CTX-006, ATT-008, HOOK-004
 
-Phase 2: Auto-Context
+Step 2: Auto-Context
   CTX-001/002/003 ──▶ CTX-004 ──▶ CTX-006
 
-Phase 3: Attachments
+Step 3: Attachments
   ATT-001 ──▶ ATT-002/003/004/005/007
   ATT-002 + ATT-004 ──▶ ATT-008
 
-Phase 4: Tools
+Step 4: Tools
   TOOL-010 + TOOL-011 ──▶ TOOL-012
   TOOL-014 ──▶ TOOL-015
   TOOL-012 + TOOL-015 ──▶ TOOL-017
 
-Phase 5: Hooks & Compaction
+Step 5: Hooks & Compaction
   HOOK-001 ──▶ HOOK-002 ──▶ HOOK-003 ──▶ HOOK-004, HOOK-005
   COMP-001 ──▶ COMP-002 ──▶ COMP-004, COMP-005
 
-Phase 6: Quality
+Step 6: Quality
   All feature tasks ──▶ TEST-*, DOC-*, POLISH-001, VAL-001
 ```
 
