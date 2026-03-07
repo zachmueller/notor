@@ -72,7 +72,7 @@ This specification covers Phase 3 of the roadmap:
 - Attached notes appear as labeled chips/tags in the input area before the message is sent.
 - The user can remove individual attachments before sending.
 - Attached note contents are included in the user message sent to the LLM.
-- Attachments are shown in the chat thread as labeled references after sending.
+- Attachments are shown in the sent message in the chat thread as labeled chips (note/file name only). The full attached content is not displayed or expandable in the thread; it is embedded in the message context sent to the LLM but not rendered inline.
 
 ### FR-2: External file attachment
 
@@ -128,7 +128,7 @@ This specification covers Phase 3 of the roadmap:
 - A visible "Context compacted" marker appears in the chat UI at the point where compaction occurred, clearly indicating that earlier conversation history has been condensed.
 - The full un-compacted conversation history is still accessible in the persisted JSONL log; compaction only affects what is sent to the LLM.
 - Compaction can be triggered manually by the user via a button or command.
-- The compaction threshold is configurable per-conversation and globally in **Settings → Notor**.
+- The compaction threshold is configurable globally in **Settings → Notor**. There is no per-conversation override.
 - If the summarization request itself fails, the plugin falls back to the existing truncation behavior (dropping oldest messages) and surfaces an error notice.
 
 ### FR-7: `fetch_webpage` tool
@@ -137,7 +137,9 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - Accepts a single `url` parameter.
-- Fetches the page HTML via HTTP GET request.
+- Fetches the page HTML via HTTP GET request using a neutral `Notor/1.0` User-Agent header (not the Electron/Obsidian default).
+- Silently follows HTTP redirects up to a maximum of 5 hops; if the redirect limit is exceeded, returns an error to the LLM.
+- Both `http://` and `https://` URLs are accepted; no protocol enforcement is applied.
 - Converts the HTML to Markdown using the Turndown library bundled into the plugin.
 - Returns the converted Markdown content in the tool result. Does not write to a note.
 - If the URL is unreachable or returns a non-200 HTTP status, returns a clear error to the LLM (including the HTTP status code).
@@ -167,7 +169,9 @@ This specification covers Phase 3 of the roadmap:
 - Classified as write — available in Act mode only by default, configurable.
 - Requires user approval unless auto-approved (write tool default: approval required).
 - A configurable per-command timeout (default: 30 seconds) terminates long-running commands and returns a timeout error.
-- The working directory must be within the vault or a user-specified allow-list of paths; requests outside allowed paths are rejected.
+- The working directory must be within the vault root or a user-specified allow-list of absolute paths. Requests with a working directory outside these allowed paths are rejected.
+- The vault root is always implicitly included in the allowed paths and cannot be removed.
+- Additional allowed paths are configured in **Settings → Notor** via a list editor (one absolute path per line), using the same pattern as the domain denylist.
 
 ### FR-10: LLM interaction hooks — `pre-send`
 
@@ -175,7 +179,7 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - The `pre-send` hook is triggered after the user submits a message but before it is dispatched to the LLM provider.
-- Hooks can be configured to run a workflow, inject additional context, append to a vault note, or execute a shell command.
+- Hooks can be configured to inject additional context, append to a vault note, or execute a shell command.
 - A `pre-send` hook can add content to the outgoing message context (e.g., inject a note summary or a timestamp).
 - When a hook executes a shell command, conversation metadata is made available to the command as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, and a UTC timestamp. Additional metadata fields may be added over time.
 - If a hook fails, the message is still sent and the hook failure is logged and surfaced as a non-blocking notice.
@@ -191,7 +195,7 @@ This specification covers Phase 3 of the roadmap:
 - The `on-tool-call` hook is triggered after the tool call has been approved (or auto-approved) and immediately before tool execution.
 - The hook receives the tool name and parameters as context.
 - When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, tool name, tool parameters (serialized), and a UTC timestamp.
-- Use cases include: logging each tool call to a vault note, triggering an audit workflow, or implementing custom approval logic.
+- Use cases include: logging each tool call to a vault note or executing a shell command to audit AI actions.
 - Hook execution is non-blocking with respect to the tool dispatch pipeline: if a hook fails, tool execution proceeds and the failure is surfaced as a notice. (Note: unlike `pre-send`, `on-tool-call` hooks do not block tool dispatch.)
 - Configured in **Settings → Notor**, persisted across reloads. (Workflow frontmatter configuration is deferred to Phase 4.)
 
@@ -203,7 +207,7 @@ This specification covers Phase 3 of the roadmap:
 - The `on-tool-result` hook is triggered after tool execution finishes and the result (or error) has been captured, but before the result is returned to the LLM.
 - The hook receives the tool name, parameters, result output, and success/error status as context.
 - When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, tool name, tool parameters (serialized), tool result (serialized), result status (success or error), and a UTC timestamp.
-- Use cases include: logging tool outputs to a vault note, triggering follow-up actions based on tool results, or auditing tool behavior.
+- Use cases include: logging tool outputs to a vault note, executing a shell command in response to tool results, or auditing tool behavior.
 - Hook execution is non-blocking: if a hook fails, the tool result is still returned to the LLM and the failure is surfaced as a notice.
 - Configured in **Settings → Notor**, persisted across reloads. (Workflow frontmatter configuration is deferred to Phase 4.)
 
@@ -213,7 +217,7 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - The `after-completion` hook is triggered after the LLM's full response (including any tool call cycles) is complete and the response is displayed in the chat panel.
-- Use cases include: auto-saving the conversation summary to a note, triggering a follow-up workflow, or appending a log entry.
+- Use cases include: auto-saving the conversation summary to a note, appending a log entry, or executing a shell command to trigger follow-up actions.
 - The hook receives the completed conversation turn as context (user message + assistant response + any tool calls/results).
 - When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, and a UTC timestamp.
 - Hook failures are non-blocking: the conversation continues and failures are surfaced as notices.
@@ -392,7 +396,7 @@ This specification covers Phase 3 of the roadmap:
 
 ### Hook
 - A configured callback tied to a lifecycle event: `pre-send`, `on-tool-call`, `on-tool-result`, or `after-completion`.
-- Has a trigger event and an action: run a workflow, inject context, append to a vault note, or execute a shell command.
+- Has a trigger event and an action: inject context (for `pre-send` only), append to a vault note, or execute a shell command.
 - When the action is a shell command, conversation metadata (conversation UUID, active workflow name, hook event name, tool name/parameters/result where applicable, UTC timestamp) is passed to the command as environment variables.
 - Persisted in plugin settings. Configured via **Settings → Notor** only; workflow frontmatter configuration is deferred to Phase 4.
 - Execution timing depends on event type: `pre-send` hooks are fully awaited before message dispatch; all other hook events (`on-tool-call`, `on-tool-result`, `after-completion`) are non-blocking fire-and-forget.
@@ -411,6 +415,11 @@ This specification covers Phase 3 of the roadmap:
 - Q: Should hook shell commands require per-execution approval like the `execute_command` tool, or is configuration-time setup sufficient? → A: Approved at configuration time. When a user configures a hook shell command in Settings, that constitutes implicit approval for that command pattern. No per-execution approval prompt is shown when the hook fires.
 - Q: Should the `on-tool-call` hook fire before or after the user approval check? → A: After approval (or auto-approval), immediately before tool execution. The hook only fires for tool calls that will actually run; rejected tool calls do not trigger the hook.
 - Q: Should `fetch_webpage` have a maximum output size cap given that large pages could consume most or all of the context window? → A: Yes — a configurable character cap (default: 50,000 characters, approximately 12,500 tokens). When the fetched Markdown exceeds the cap, the tool returns content up to the cap and appends a truncation notice to the LLM indicating the page was truncated and including the total fetched length.
+- Q: Should the auto-compaction threshold be configurable per-conversation as well as globally? → A: No per-conversation override. The compaction threshold is configurable globally in Settings only; there is no per-conversation mechanism.
+- Q: Should "run a workflow" be a valid hook action in Phase 3, given the workflow system is deferred to Phase 4? → A: Remove entirely from Phase 3. Phase 3 hook actions are limited to: inject context (`pre-send` only), append to a vault note, and execute a shell command. "Run a workflow" will be added as a hook action type when the workflow system ships in Phase 4.
+- Q: How should the `execute_command` working directory allow-list be configured — UI, settings file only, or vault root only? → A: List editor in Settings → Notor, one absolute path per line (same pattern as the domain denylist). The vault root is always implicitly included. Additional absolute paths can be added or removed via the list editor.
+- Q: How should attachments be rendered in the sent message thread — collapsed chip with expansion, full content inline, or chip only? → A: Chip only, no expansion. Attachments appear as labeled name chips in the sent message. The full attached content is not displayed or expandable in the thread; it is embedded in the message context sent to the LLM but not rendered inline.
+- Q: What User-Agent, redirect policy, and protocol restrictions should `fetch_webpage` use? → A: Neutral `Notor/1.0` User-Agent; silently follow up to 5 redirects (error to LLM if exceeded); both http:// and https:// URLs accepted with no protocol enforcement.
 
 ## Assumptions
 
@@ -430,6 +439,7 @@ The following are explicitly excluded from Phase 3 and deferred to later phases:
 - **Hook configuration via workflow frontmatter** (Phase 4): in Phase 3, hooks are configured only in **Settings → Notor**. Per-workflow hook overrides via frontmatter are deferred to Phase 4 alongside the workflow definition system.
 - **`<include_notes>` tag** (Phase 4): dynamic note injection via inline tags in system prompts or workflow bodies.
 - **Vault event hooks** (Phase 4): on-note-open, on-save, on-tag-change, on-schedule triggers are Phase 4.
+- **"Run a workflow" hook action** (Phase 4): triggering a named workflow from a hook is deferred to Phase 4 alongside the workflow definition system. Phase 3 hook actions are limited to inject context, append to a vault note, and execute a shell command.
 - **Content extraction / readability filtering for `fetch_webpage`**: the initial implementation returns raw Turndown conversion without stripping navigation, ads, or boilerplate.
 - **Pagination of `fetch_webpage` output**: no multi-page chunking or sequential fetching. A single configurable character cap (default: 50,000 characters) applies; content beyond the cap is truncated in one pass with a notice to the LLM.
 - **Background or scheduled auto-fetch**: `fetch_webpage` is only invoked by an explicit LLM tool call during an active conversation.
