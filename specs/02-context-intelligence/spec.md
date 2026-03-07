@@ -71,6 +71,7 @@ This specification covers Phase 3 of the roadmap:
 - Section references (`[[Note#Section Header]]`) are supported: when a section reference is used, only the content of that section (from the heading to the next heading of equal or higher level) is included in the attachment, not the full note.
 - Attached notes appear as labeled chips/tags in the input area before the message is sent.
 - The user can remove individual attachments before sending.
+- Duplicate attachments are silently deduplicated: if the same path and section reference is already present as a chip, a second attempt to add it is ignored without showing an error or notification.
 - Attached note contents are included in the user message sent to the LLM.
 - Attachments are shown in the sent message in the chat thread as labeled chips (note/file name only). The full attached content is not displayed or expandable in the thread; it is embedded in the message context sent to the LLM but not rendered inline.
 
@@ -83,6 +84,7 @@ This specification covers Phase 3 of the roadmap:
 - Attached external files are read and included in the user message context.
 - External files are labeled as such in the attachment chips so the user can distinguish them from vault notes.
 - File size limits apply: if a file exceeds a configurable threshold (default: 1 MB), a confirmation dialog is shown highlighting the file size and asking the user to confirm before attaching. The user can proceed or cancel.
+- Any file may be selected regardless of extension. At attach time, the file is read and validated as UTF-8 text. If the file is binary or cannot be decoded as UTF-8, attachment is rejected with a clear error (e.g., "Cannot attach binary file: only plain-text files are supported"). No explicit extension allowlist is enforced.
 
 ### FR-3: Auto-context — open note paths
 
@@ -124,7 +126,7 @@ This specification covers Phase 3 of the roadmap:
 - A compaction threshold (configurable, default: 80% of the model's context window token limit) triggers the auto-compaction process. The token count is estimated using a lightweight local approximation (no provider API call); a small margin of error is acceptable given the conservative default threshold.
 - When the threshold is crossed before sending a user message, the plugin sends a summarization request to the LLM with the accumulated conversation, using the configured compaction system prompt.
 - The LLM returns a condensed summary of the conversation so far.
-- The plugin begins a new context window with the summary as the opening context message, followed by the current user message.
+- The plugin begins a new context window with the summary injected as a synthetic `user`/`assistant` exchange: a `user` message containing the summary prefixed with a label (e.g., "Summary of prior conversation: …"), immediately followed by a brief canned `assistant` acknowledgment (e.g., "Understood. I have context of our prior conversation."). The current user message follows this exchange as the next turn.
 - A visible "Context compacted" marker appears in the chat UI at the point where compaction occurred, clearly indicating that earlier conversation history has been condensed.
 - The full un-compacted conversation history is still accessible in the persisted JSONL log; compaction only affects what is sent to the LLM.
 - Compaction can be triggered manually by the user via a button or command.
@@ -144,6 +146,7 @@ This specification covers Phase 3 of the roadmap:
 - Converts the HTML to Markdown using the Turndown library bundled into the plugin.
 - Returns the converted Markdown content in the tool result. Does not write to a note.
 - If the URL is unreachable or returns a non-200 HTTP status, returns a clear error to the LLM (including the HTTP status code).
+- If the response `Content-Type` is `text/html`, converts the HTML to Markdown using Turndown. If the `Content-Type` is `text/*` (e.g., `text/plain`) or `application/json`, the response body is returned as-is without Turndown conversion. For all other content types (binary, PDF, images, etc.), the tool returns a clear error to the LLM indicating the content type is not supported.
 - If the domain matches a configured denylist entry, the request is rejected and a user-configurable error message is returned to the LLM indicating the domain is blocked.
 - A configurable maximum output size (default: 50,000 characters) is applied to the returned Markdown. When the fetched content exceeds this limit, the tool returns content up to the cap and appends a truncation notice to the LLM (e.g., "Note: page was truncated at 50,000 characters; total fetched length was X characters"). The cap is configurable in **Settings → Notor**.
 - Classified as read-only — available in both Plan and Act modes.
@@ -184,7 +187,7 @@ This specification covers Phase 3 of the roadmap:
 - Context injection via a `pre-send` hook is achieved through a shell command: whatever the command prints to stdout is captured and appended as a string to the outgoing message context. No separate "inject context" action type exists; shell command stdout is the injection mechanism.
 - When a hook executes a shell command, conversation metadata is made available to the command as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, and a UTC timestamp. Additional metadata fields may be added over time.
 - If a hook fails, the message is still sent and the hook failure is logged and surfaced as a non-blocking notice.
-- Hooks are configured in **Settings → Notor**. (Workflow frontmatter hook configuration is deferred to Phase 4.)
+- Hooks are configured in **Settings → Notor** under a hooks section grouped by lifecycle event, with each event subsection being collapsible and containing its own add/remove/reorder list. (Workflow frontmatter hook configuration is deferred to Phase 4.)
 - The hook configuration is persisted across plugin reloads.
 - All `pre-send` hooks are awaited (up to a configurable timeout, default: 10 seconds) before the message is dispatched to the LLM. If a hook times out, the message is still sent and the timeout is surfaced as a non-blocking notice.
 - Hook failures and timeouts are independent: if one `pre-send` hook fails or times out, the remaining hooks in the sequence still execute. Each failure or timeout is surfaced as a separate non-blocking notice.
@@ -434,6 +437,11 @@ This specification covers Phase 3 of the roadmap:
 - Q: Which shell does `execute_command` use on Windows — PowerShell, cmd, or user-configurable? → A: PowerShell by default, user-configurable. On Windows, the shell defaults to PowerShell but can be switched to cmd in Settings → Notor. On macOS/Linux, bash/zsh is used and is not configurable in Phase 3.
 - Q: What does the "Context compacted" marker show on hover/expand — metadata only, full summary, or a summary excerpt? → A: Metadata only. The marker shows the timestamp and token count at the time of compaction. The LLM-generated summary text is not displayed in the UI; it is retained in the JSONL log only.
 - Q: How does the plugin count tokens to determine when the compaction threshold is crossed — local estimation, provider API, or character count only? → A: Local estimation. A lightweight bundled approximation (e.g., character count divided by a fixed ratio, or a simple BPE heuristic) is used. No provider tokenization API call is made. A small margin of error is acceptable given the 80% default threshold.
+- Q: How should `fetch_webpage` handle non-HTML content types (e.g., JSON, plain text, PDF, binary)? → A: Content-type-aware handling. `text/html` responses are converted to Markdown via Turndown. `text/*` (e.g., `text/plain`) and `application/json` responses are returned as-is without Turndown conversion. All other content types (binary, PDF, images, etc.) return a clear error to the LLM indicating the content type is not supported.
+- Q: How should the hook settings UI be structured in **Settings → Notor**? → A: Grouped by lifecycle event. The hooks settings section is divided into four subsections — one per lifecycle event (`pre-send`, `on-tool-call`, `on-tool-result`, `after-completion`) — each collapsible and containing its own add/remove/reorder list of configured hooks for that event.
+- Q: What file types should be accepted for external file attachment (FR-2) — allowlist by extension, or runtime validation? → A: Runtime UTF-8 validation, no extension allowlist. Any file may be selected; at attach time, the plugin attempts to read it as UTF-8 text. If the file is binary or fails UTF-8 decoding, the attachment is rejected with a clear error. No extension-based allowlist is enforced.
+- Q: What message role should the compaction summary be injected as in the new context window? → A: Synthetic user/assistant exchange. The summary is sent as a `user` message labeled "Summary of prior conversation: …" immediately followed by a canned `assistant` acknowledgment (e.g., "Understood. I have context of our prior conversation."). The current user message follows as the next turn. This pattern is broadly compatible across all providers.
+- Q: Should duplicate note/file attachments (same path + section reference) in a single message be allowed, silently deduplicated, or rejected with a warning? → A: Silently deduplicate. If the same path and section reference is already present as a chip, a second attempt to add it is ignored without any error or notification.
 
 ## Assumptions
 
