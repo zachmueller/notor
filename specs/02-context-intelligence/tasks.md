@@ -7,7 +7,7 @@
 
 ## Task Summary
 
-**Total Tasks:** 42
+**Total Tasks:** 43
 **Steps:** 7 (Research → Foundation → Auto-Context → Attachments → Tools → Hooks & Compaction → Quality & Polish)
 **Estimated Complexity:** High
 **Parallel Execution Opportunities:** 8 task groups
@@ -98,17 +98,32 @@
 - [ ] Exported for use by compaction and context assembly modules
 
 ### FOUND-003: Shell executor (shared infrastructure)
-**Description:** Implement the core shell spawning logic shared by `execute_command` tool and hook engine. Handles platform-specific shell resolution, stdio capture, output buffering with size cap, and timeout enforcement.
+**Description:** Implement the core shell spawning logic shared by `execute_command` tool and hook engine. Handles platform-specific shell resolution, stdio capture, output buffering with size cap, and timeout enforcement. Uses `child_process.spawn` per R-3 findings.
 **Files:** `src/shell/shell-executor.ts`, `src/shell/shell-resolver.ts`, `src/shell/output-buffer.ts`
 **Dependencies:** RES-003, FOUND-001
 **Acceptance Criteria:**
-- [ ] `ShellResolver` determines shell executable and args per platform: `$SHELL -l` on macOS/Linux, PowerShell on Windows, with user-configurable overrides from settings
-- [ ] `OutputBuffer` captures combined stdout+stderr into a single string with configurable character cap (default: 50,000); appends truncation notice when exceeded
-- [ ] `ShellExecutor.execute(command, options)` spawns a child process with configurable `cwd`, `env`, and timeout
-- [ ] Timeout enforcement: `SIGTERM` on timeout, `SIGKILL` after 3-second grace period
+- [ ] `ShellResolver` determines shell executable and args per platform: `process.env.SHELL` with `['-l', '-c', command]` on macOS/Linux (login shell for full PATH inheritance), `'powershell.exe'` with `['-NoProfile', '-Command', command]` on Windows (per R-3: `-NoProfile` avoids slow profile loading), with user-configurable overrides from settings
+- [ ] `process.env.SHELL` fallback: if undefined (e.g., on Windows), falls back to `'powershell.exe'`; if also unavailable, falls back to `'cmd.exe'` with `['/c', command]`
+- [ ] `OutputBuffer` captures combined stdout+stderr into a single string with configurable character cap (default: 50,000); appends truncation notice when exceeded ("`\n[Output truncated at 50,000 characters]`")
+- [ ] `ShellExecutor.execute(command, options)` spawns a child process via `child_process.spawn` with `shell: false` (we spawn the shell directly), configurable `cwd`, `env` (merged `process.env` + custom vars), and timeout
+- [ ] Timeout enforcement: `SIGTERM` on timeout, `SIGKILL` after 3-second grace period; on Windows, `child.kill()` for termination
 - [ ] Returns `{ stdout: string, exitCode: number, timedOut: boolean, truncated: boolean }`
-- [ ] Error handling for shell-not-found, spawn failures, and permission issues
-- [ ] Desktop-only guard: functions throw or return error if `Platform.isDesktop` is false
+- [ ] Error handling for shell-not-found (`ENOENT`), spawn failures, permission issues, and non-existent `cwd`
+- [ ] Desktop-only guard: functions throw or return error if `Platform.isDesktopApp` is false
+
+### FOUND-005: Chat input migration (textarea → contenteditable div)
+**Description:** Migrate the chat input element from `<textarea>` to a `contenteditable <div>` to enable `AbstractInputSuggest<T>` attachment autocomplete. The existing textarea does not satisfy `AbstractInputSuggest`'s constructor requirement (`HTMLInputElement | HTMLDivElement`), as identified in R-1.
+**Files:** `src/ui/chat-view.ts`, `styles.css`
+**Dependencies:** None
+**Acceptance Criteria:**
+- [ ] Chat input `<textarea>` replaced with a `contenteditable <div>` element
+- [ ] Auto-resize behavior preserved (expand on input, cap at max height)
+- [ ] Enter-to-send and Shift+Enter-for-newline keyboard handling preserved
+- [ ] Input reading/writing adapted: `textContent` or `innerHTML` replaces `.value`
+- [ ] Disabled state handling adapted (e.g., `contenteditable="false"` instead of `disabled` attribute)
+- [ ] Placeholder text behavior preserved (CSS `:empty::before` pseudo-element or equivalent)
+- [ ] No visual or functional regression in the chat input area
+- [ ] `AbstractInputSuggest<T>` can attach to the new `<div>` element (verified by instantiation test)
 
 ### FOUND-004: Message assembler skeleton
 **Description:** Create the message assembler module that composes the final user message from multiple content sources in the defined order: auto-context → attachments → hook stdout → user text.
@@ -218,14 +233,14 @@
 - [ ] If section not found: sets `status: error`, populates `error_message`
 
 ### ATT-003: External file reading and validation
-**Description:** Implement external file attachment: read file content, validate UTF-8, enforce size threshold confirmation.
+**Description:** Implement external file attachment: read file content, validate UTF-8, enforce size threshold confirmation. Uses `<input type="file">` with Electron's `File.path` property for absolute path access per R-2 findings.
 **Files:** `src/context/attachment.ts`
 **Dependencies:** ATT-001, RES-002, FOUND-001
 **Acceptance Criteria:**
-- [ ] External file content read at attach time via `fs.readFileSync` (or equivalent)
+- [ ] External file content read at attach time via `fs.readFileSync` using the Electron-specific `File.path` property for absolute path access
 - [ ] UTF-8 validation: reject binary files with clear error ("Cannot attach binary file: only plain-text files are supported")
 - [ ] File size check against configurable threshold (default: 1 MB); returns a flag indicating confirmation is needed if exceeded
-- [ ] Desktop-only: gated behind `Platform.isDesktop`
+- [ ] Desktop-only: gated behind `Platform.isDesktopApp` (not `Platform.isDesktop`) per R-2 findings — `File.path` is Electron-specific
 - [ ] Stores original filename as `display_name` (no absolute path exposed)
 
 ### ATT-004: Attachment XML serialization
@@ -242,28 +257,33 @@
 - [ ] Output matches the XML format defined in contracts/tool-schemas.md
 
 ### ATT-005: Attachment picker UI — vault note autocomplete
-**Description:** Implement the vault note attachment picker with wikilink-style autocomplete in the chat input area. Includes `[[` trigger, fuzzy matching, and section header navigation.
+**Description:** Implement the vault note attachment picker with wikilink-style autocomplete in the chat input area using `AbstractInputSuggest<T>` (per R-1 findings). Includes `[[` trigger, fuzzy matching via `prepareFuzzySearch()`, and section header navigation via `metadataCache`.
 **Files:** `src/ui/attachment-picker.ts`
-**Dependencies:** RES-001, ATT-001
+**Dependencies:** RES-001, ATT-001, FOUND-005
 **Acceptance Criteria:**
 - [ ] Attachment button in chat input area opens a menu with "Attach vault note" and "Attach external file" options
-- [ ] "Attach vault note" opens vault file picker with autocomplete (using approach determined by R-1)
-- [ ] Typing `[[` in the chat input triggers the vault picker directly (bypassing the menu)
-- [ ] The `[[` autocomplete must use Obsidian's native suggest/autocomplete APIs (e.g., `EditorSuggest`, `SuggestModal`) to guarantee behavior identical to the native wikilink autocomplete in Obsidian's note editor (matching, sort order, visual style). A custom implementation is acceptable only if RES-001 research proves native APIs are unusable in the `ItemView` context.
-- [ ] Fuzzy matching of vault note names
-- [ ] Section header references supported: after selecting a note, `#` triggers section header autocomplete via `metadataCache`
+- [ ] "Attach vault note" opens vault file picker with autocomplete using `AbstractInputSuggest<T>` attached to the chat input `contenteditable <div>` (requires FOUND-005 migration)
+- [ ] Typing `[[` in the chat input triggers the vault picker directly (bypassing the menu) via an input event listener that activates the suggest overlay
+- [ ] `AbstractInputSuggest<T>` subclass implements `getSuggestions()` using `prepareFuzzySearch()` against `app.vault.getMarkdownFiles()` filenames, and `renderSuggestion()` with fuzzy match highlighting
+- [ ] Fall back to `FuzzySuggestModal` only if `AbstractInputSuggest` cannot be made to work with the chat input element
+- [ ] Fuzzy matching of vault note names using Obsidian's built-in `prepareFuzzySearch()` (no custom fuzzy matching)
+- [ ] Section header references supported: after selecting a note, `#` triggers a second suggest pass querying `metadataCache.getFileCache(selectedFile)?.headings` (returns `HeadingCache[]` with `heading: string` and `level: number`)
+- [ ] Headings displayed with their level for disambiguation (e.g., "## Introduction" vs "### Introduction")
 - [ ] Selected note/section creates an Attachment and triggers chip creation
 
 ### ATT-006 [P]: Attachment picker UI — external file dialog
-**Description:** Implement the external file picker using the Electron file dialog (or fallback approach determined by R-2).
+**Description:** Implement the external file picker using a hidden `<input type="file">` element with programmatic `.click()` to open the OS-native dialog (per R-2 findings). Read absolute paths from Electron's `File.path` property.
 **Files:** `src/ui/attachment-picker.ts`
 **Dependencies:** RES-002, ATT-003
 **Acceptance Criteria:**
-- [ ] "Attach external file" option opens the OS-native filesystem dialog
-- [ ] Selected file is read, validated (UTF-8), and an Attachment is created
+- [ ] "Attach external file" option creates a hidden `<input type="file">` element and triggers `.click()` to open the OS-native filesystem dialog
+- [ ] Absolute file path read from Electron-specific `File.path` property on the selected `File` object
+- [ ] Selected file is read via `fs.readFileSync(file.path, 'utf-8')`, validated (UTF-8), and an Attachment is created
+- [ ] `input.accept` attribute set to common text-like extensions as a convenience hint (not a security boundary — runtime UTF-8 validation is authoritative)
+- [ ] `input.multiple` attribute enabled for batch attachment
 - [ ] If file exceeds size threshold, a confirmation dialog is shown with file size before attaching
 - [ ] Binary files are rejected with a clear error message
-- [ ] Feature is hidden/disabled on mobile (`Platform.isDesktop` check)
+- [ ] Feature is hidden/disabled on mobile (`Platform.isDesktopApp` check — `File.path` is Electron-specific)
 
 ### ATT-007: Attachment chip display and management
 **Description:** Implement the attachment chip UI in the chat input area showing attached items with removal capability.
@@ -294,7 +314,7 @@
 ## Step 4: Tools — `fetch_webpage` & `execute_command` (Feature Groups D, E)
 
 ### TOOL-010: `fetch_webpage` tool implementation
-**Description:** Implement the `fetch_webpage` tool core logic: HTTP GET with configurable timeout, redirect following, download size cap, and content-type routing.
+**Description:** Implement the `fetch_webpage` tool core logic: HTTP GET with configurable timeout, redirect following, download size cap, content-type routing, and Turndown HTML-to-Markdown conversion with GFM plugin and noise-stripping rules (per R-4 findings).
 **Files:** `src/tools/fetch-webpage.ts`
 **Dependencies:** ENV-005, FOUND-001
 **Acceptance Criteria:**
@@ -303,6 +323,9 @@
 - [ ] Configurable request timeout (default: 15s) via `AbortSignal.timeout()`
 - [ ] Raw download size cap (default: 5 MB); abort and error if exceeded
 - [ ] Content-type routing: `text/html` → Turndown, `text/*` and `application/json` → as-is, other types → error
+- [ ] Turndown configured per R-4 findings: ATX headings (`headingStyle: 'atx'`), fenced code blocks, `-` bullet markers, inline links, `*` emphasis delimiters
+- [ ] `turndown-plugin-gfm` enabled for table, strikethrough, and task list support
+- [ ] Custom Turndown rules to strip noisy elements: `<nav>`, `<footer>`, `<aside>` replaced with empty string; `<form>`, `<input>`, `<select>`, `<button>` stripped
 - [ ] Output character cap (default: 50,000); truncate with notice if exceeded
 - [ ] Returns `{ success, result, error? }` matching contract format
 
@@ -350,7 +373,7 @@
 - [ ] Delegates to `ShellExecutor.execute()` for shell spawning
 - [ ] Returns combined stdout+stderr, exit code, and timeout/truncation status
 - [ ] Error results include exit code and stderr output for non-zero exits
-- [ ] Desktop-only: returns error if `Platform.isDesktop` is false
+- [ ] Desktop-only: returns error if `Platform.isDesktopApp` is false
 
 ### TOOL-015: `execute_command` tool registration
 **Description:** Register `execute_command` in the tool registry with proper schema, mode classification, and auto-approve default.
@@ -653,6 +676,7 @@ Step 1: Foundation
   FOUND-002 ──▶ COMP-001
   FOUND-003 ──▶ TOOL-014, HOOK-002
   FOUND-004 ──▶ CTX-006, ATT-008, HOOK-004
+  FOUND-005 ──▶ ATT-005
 
 Step 2: Auto-Context
   CTX-001/002/003 ──▶ CTX-004 ──▶ CTX-006
@@ -693,4 +717,4 @@ The longest dependency chain runs through shell infrastructure → execute_comma
 | Settings UI | CTX-005, TOOL-013, TOOL-016, HOOK-006 | Settings UI sections are independent |
 | Hooks & Compaction | HOOK-001–006 ∥ COMP-001–005 | Hook and compaction systems are independent until integration |
 | Testing | TEST-001 through TEST-006 | All test suites are independent |
-| Foundation | FOUND-001, FOUND-002, FOUND-004 | Settings, tokens, and assembler are independent |
+| Foundation | FOUND-001, FOUND-002, FOUND-004, FOUND-005 | Settings, tokens, assembler, and chat input migration are independent |
