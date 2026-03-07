@@ -122,13 +122,14 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - A compaction threshold (configurable, default: 80% of the model's context window token limit) triggers the auto-compaction process.
-- When the threshold is crossed before sending a user message, the plugin sends a summarization request to the LLM with the accumulated conversation.
+- When the threshold is crossed before sending a user message, the plugin sends a summarization request to the LLM with the accumulated conversation, using the configured compaction system prompt.
 - The LLM returns a condensed summary of the conversation so far.
 - The plugin begins a new context window with the summary as the opening context message, followed by the current user message.
 - A visible "Context compacted" marker appears in the chat UI at the point where compaction occurred, clearly indicating that earlier conversation history has been condensed.
 - The full un-compacted conversation history is still accessible in the persisted JSONL log; compaction only affects what is sent to the LLM.
 - Compaction can be triggered manually by the user via a button or command.
 - The compaction threshold is configurable globally in **Settings → Notor**. There is no per-conversation override.
+- The compaction system prompt has a built-in default focused on producing a concise, faithful summary of the conversation. Users can override this prompt in **Settings → Notor** (following the same pattern as the main system prompt override). When overridden, the user-supplied prompt is used for all compaction requests; clearing the override restores the default.
 - If the summarization request itself fails, the plugin falls back to the existing truncation behavior (dropping oldest messages) and surfaces an error notice.
 
 ### FR-7: `fetch_webpage` tool
@@ -179,13 +180,13 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - The `pre-send` hook is triggered after the user submits a message but before it is dispatched to the LLM provider.
-- Hooks can be configured to inject additional context, append to a vault note, or execute a shell command.
-- A `pre-send` hook can add content to the outgoing message context (e.g., inject a note summary or a timestamp).
+- Hooks can be configured to append to a vault note or execute a shell command.
+- Context injection via a `pre-send` hook is achieved through a shell command: whatever the command prints to stdout is captured and appended as a string to the outgoing message context. No separate "inject context" action type exists; shell command stdout is the injection mechanism.
 - When a hook executes a shell command, conversation metadata is made available to the command as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, and a UTC timestamp. Additional metadata fields may be added over time.
 - If a hook fails, the message is still sent and the hook failure is logged and surfaced as a non-blocking notice.
 - Hooks are configured in **Settings → Notor**. (Workflow frontmatter hook configuration is deferred to Phase 4.)
 - The hook configuration is persisted across plugin reloads.
-- All `pre-send` hooks are awaited (up to a configurable timeout) before the message is dispatched to the LLM. If a hook times out, the message is still sent and the timeout is surfaced as a non-blocking notice.
+- All `pre-send` hooks are awaited (up to a configurable timeout, default: 10 seconds) before the message is dispatched to the LLM. If a hook times out, the message is still sent and the timeout is surfaced as a non-blocking notice.
 
 ### FR-11: LLM interaction hooks — `on-tool-call`
 
@@ -233,7 +234,7 @@ This specification covers Phase 3 of the roadmap:
 - Auto-context injection (open note paths, vault structure, OS) adds no perceptible latency to message dispatch — context collection completes in under 100 ms for typical vault sizes.
 - `fetch_webpage` has a configurable request timeout (default: 15 seconds) after which the request is cancelled and an error returned to the LLM.
 - Auto-compaction summarization is transparent to the user: the "Context compacted" marker appears and the conversation continues without manual intervention.
-- Hook execution is asynchronous and does not block the chat pipeline. Slow hooks time out independently and do not stall message flow.
+- Hook execution is asynchronous and does not block the chat pipeline. Slow hooks time out independently and do not stall message flow. The `pre-send` hook timeout (default: 10 seconds) is configurable in **Settings → Notor**.
 
 ### NFR-2: Security and privacy
 
@@ -380,8 +381,8 @@ This specification covers Phase 3 of the roadmap:
 ### Attachment
 - Belongs to a user message.
 - Has a type: vault note, vault note section, or external file.
-- For vault notes: stores the vault-relative path and optional section reference.
-- For external files: stores the filename and file content at the time of attachment.
+- For vault notes and vault note sections: stores only the vault-relative path and optional section reference. The note content is read from the vault at send time, not when the chip is added. This ensures the AI always receives the current saved version of the note.
+- For external files: stores the filename and file content at the time of attachment (external files are read immediately on attach since they are outside the vault and may not be accessible at send time).
 - Content is embedded into the message context at send time.
 
 ### AutoContextSource
@@ -396,10 +397,12 @@ This specification covers Phase 3 of the roadmap:
 
 ### Hook
 - A configured callback tied to a lifecycle event: `pre-send`, `on-tool-call`, `on-tool-result`, or `after-completion`.
-- Has a trigger event and an action: inject context (for `pre-send` only), append to a vault note, or execute a shell command.
+- Multiple hooks can be configured per lifecycle event. Hooks for the same event are executed sequentially in the order they appear in the configuration list.
+- Has a trigger event and an action: append to a vault note, or execute a shell command.
+- For `pre-send` hooks, context injection is the shell command's stdout mechanism: the plugin captures stdout from the shell command and appends it as a string to the outgoing message context. No separate "inject context" action type exists.
 - When the action is a shell command, conversation metadata (conversation UUID, active workflow name, hook event name, tool name/parameters/result where applicable, UTC timestamp) is passed to the command as environment variables.
 - Persisted in plugin settings. Configured via **Settings → Notor** only; workflow frontmatter configuration is deferred to Phase 4.
-- Execution timing depends on event type: `pre-send` hooks are fully awaited before message dispatch; all other hook events (`on-tool-call`, `on-tool-result`, `after-completion`) are non-blocking fire-and-forget.
+- Execution timing depends on event type: `pre-send` hooks are fully awaited sequentially before message dispatch; all other hook events (`on-tool-call`, `on-tool-result`, `after-completion`) are non-blocking fire-and-forget executed sequentially.
 
 ### DomainDenylistEntry
 - A single domain string or wildcard pattern (e.g., `*.example.com`) in the user-configured denylist for `fetch_webpage`.
@@ -420,6 +423,11 @@ This specification covers Phase 3 of the roadmap:
 - Q: How should the `execute_command` working directory allow-list be configured — UI, settings file only, or vault root only? → A: List editor in Settings → Notor, one absolute path per line (same pattern as the domain denylist). The vault root is always implicitly included. Additional absolute paths can be added or removed via the list editor.
 - Q: How should attachments be rendered in the sent message thread — collapsed chip with expansion, full content inline, or chip only? → A: Chip only, no expansion. Attachments appear as labeled name chips in the sent message. The full attached content is not displayed or expandable in the thread; it is embedded in the message context sent to the LLM but not rendered inline.
 - Q: What User-Agent, redirect policy, and protocol restrictions should `fetch_webpage` use? → A: Neutral `Notor/1.0` User-Agent; silently follow up to 5 redirects (error to LLM if exceeded); both http:// and https:// URLs accepted with no protocol enforcement.
+- Q: What form does the "inject context" action take for `pre-send` hooks — fixed string, vault note, or shell command output? → A: Shell command stdout is the injection mechanism. The hook executes a shell command; whatever the command prints to stdout is captured and appended as a string to the outgoing message context. No separate "inject context" action type exists; the two Phase 3 hook actions are "append to vault note" and "execute shell command," with stdout from the latter serving as the context injection path.
+- Q: Can multiple hooks be configured for the same lifecycle event, and if so, how are they ordered? → A: Multiple hooks per event are allowed. Hooks for the same event execute sequentially in configuration list order. This applies to both awaited `pre-send` hooks and fire-and-forget hooks on other events.
+- Q: What is the default timeout for `pre-send` hooks, which are fully awaited before message dispatch? → A: 10 seconds. This is configurable in Settings → Notor. If a hook exceeds the timeout, the message is still sent and the timeout is surfaced as a non-blocking notice.
+- Q: When is vault note content read for attachments — when the chip is added or at send time? → A: At send time. The attachment chip stores only the vault path and optional section reference; the note content is read from the vault immediately before the message is dispatched. External files are an exception: they are read at chip-add time since they may not be accessible at send time.
+- Q: Is the auto-compaction summarization prompt hardcoded or user-configurable? → A: User-configurable with a solid default. The plugin ships with a built-in default compaction prompt; users can override it in Settings → Notor (same pattern as the main system prompt override). Clearing the override restores the default.
 
 ## Assumptions
 
@@ -439,7 +447,7 @@ The following are explicitly excluded from Phase 3 and deferred to later phases:
 - **Hook configuration via workflow frontmatter** (Phase 4): in Phase 3, hooks are configured only in **Settings → Notor**. Per-workflow hook overrides via frontmatter are deferred to Phase 4 alongside the workflow definition system.
 - **`<include_notes>` tag** (Phase 4): dynamic note injection via inline tags in system prompts or workflow bodies.
 - **Vault event hooks** (Phase 4): on-note-open, on-save, on-tag-change, on-schedule triggers are Phase 4.
-- **"Run a workflow" hook action** (Phase 4): triggering a named workflow from a hook is deferred to Phase 4 alongside the workflow definition system. Phase 3 hook actions are limited to inject context, append to a vault note, and execute a shell command.
+- **"Run a workflow" hook action** (Phase 4): triggering a named workflow from a hook is deferred to Phase 4 alongside the workflow definition system. Phase 3 hook actions are limited to append to a vault note and execute a shell command (with stdout from shell commands optionally injected into message context for `pre-send` hooks).
 - **Content extraction / readability filtering for `fetch_webpage`**: the initial implementation returns raw Turndown conversion without stripping navigation, ads, or boilerplate.
 - **Pagination of `fetch_webpage` output**: no multi-page chunking or sequential fetching. A single configurable character cap (default: 50,000 characters) applies; content beyond the cap is truncated in one pass with a notice to the LLM.
 - **Background or scheduled auto-fetch**: `fetch_webpage` is only invoked by an explicit LLM tool call during an active conversation.
