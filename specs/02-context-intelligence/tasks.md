@@ -412,6 +412,8 @@
 - [ ] For other events: fire-and-forget sequential execution; failures do not block
 - [ ] Failures surface non-blocking notices via Obsidian `Notice`
 - [ ] Individual hook failures do not prevent subsequent hooks from executing
+- [ ] Hook shell commands execute with `cwd` set to the vault root (hooks do not support a configurable working directory in Phase 3)
+- [ ] The working directory allow-list from `execute_command` settings is enforced for hook shell commands; if a future `cwd` option is added, commands with a working directory outside allowed paths are rejected — vault root always passes since it is implicitly included
 
 ### HOOK-003: Hook event dispatching
 **Description:** Implement the event dispatching layer that triggers hooks at the correct points in the LLM lifecycle.

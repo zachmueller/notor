@@ -1,18 +1,18 @@
 # Cross-Artifact Analysis Report
 
 **Generated:** 2026-07-03T18:08:00+13:00
-**Updated:** 2026-07-03T18:35:00+13:00
+**Updated:** 2026-07-03T18:40:00+13:00
 **Feature:** Phase 3 — Context & Intelligence
 **Branch:** feature/02-context-intelligence
 **Artifacts:** spec.md, plan.md, tasks.md (+ data-model.md)
 
 ## Executive Summary
 
-- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ 1, Medium: 5, Low: 3)
+- **Total Findings:** 11 (Critical: ~~1~~ 0, High: ~~2~~ 0, Medium: 5, Low: 3)
 - **Coverage:** 100% of functional requirements (FR-24 through FR-36) mapped to tasks
-- **Readiness:** NEEDS ATTENTION — one high-severity issue should be resolved before implementation
+- **Readiness:** READY FOR IMPLEMENTATION — all critical and high-severity issues resolved
 
-The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. ~~One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`) — **resolved 2026-07-03**.~~ ~~Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing.~~ One high-severity finding remains (missing hook path restriction AC). Five medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
+The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. The specification is thorough with extensive clarifications. The plan faithfully translates the spec into technical architecture, and the task breakdown provides granular coverage of all functional requirements. ~~One critical finding relates to FR/NFR/task ID numbering collisions with the prior MVP spec (`specs/01-mvp/`) — **resolved 2026-07-03**.~~ ~~Two high-severity findings relate to missing task coverage for specific acceptance criteria and a terminology inconsistency in task phasing.~~ ~~One high-severity finding remains (missing hook path restriction AC).~~ All high-severity findings resolved. Five medium-severity findings involve minor gaps and inconsistencies. Three low-severity findings are cosmetic or documentation improvements.
 
 ---
 
@@ -24,9 +24,9 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 | C1 | Coverage | HIGH | spec.md FR-24, tasks.md | `[[` shortcut in chat input not covered by a dedicated acceptance criterion in ATT-005 | Open |
 | I1 | Inconsistency | ~~HIGH~~ | tasks.md phase numbering vs plan.md feature groups | tasks.md phases renamed to "Steps" to avoid collision with spec-level "Phase 3" label | ✅ RESOLVED |
 | C2 | Coverage | MEDIUM | spec.md FR-29, tasks.md | Manual compaction trigger (button/command) mentioned in FR-29 AC but only noted parenthetically in COMP-002/COMP-004; no standalone task for command registration | Open |
-| I2 | Inconsistency | MEDIUM | spec.md NFR-7, tasks.md | NFR-7 states hook shell commands use same working directory restrictions as `execute_command`; no task or AC covers enforcing path restrictions on hooks | Open |
+| I2 | Inconsistency | ~~MEDIUM~~ | spec.md NFR-7, tasks.md | NFR-7 states hook shell commands use same working directory restrictions as `execute_command`; HOOK-002 ACs now enforce vault root cwd + allow-list | ✅ RESOLVED |
 | U1 | Underspecification | MEDIUM | spec.md FR-32, plan.md, tasks.md | `execute_command` working directory resolution for relative paths is not specified in spec.md; only tasks.md TOOL-014 mentions "relative → resolve from vault root" | Open |
-| C3 | Coverage | MEDIUM | spec.md key entities § Hook, tasks.md HOOK-002 | Spec states hook shell commands use same runtime and path restrictions as `execute_command`; HOOK-002 engine does not mention working directory allow-list enforcement | Open |
+| C3 | Coverage | ~~MEDIUM~~ | spec.md key entities § Hook, tasks.md HOOK-002 | Spec states hook shell commands use same runtime and path restrictions as `execute_command`; HOOK-002 ACs now include working directory allow-list enforcement | ✅ RESOLVED |
 | D1 | Duplication | MEDIUM | spec.md FR-24 AC + Clarifications | The attachment chip-only display rule appears in FR-24 AC and again in the Clarifications section as a Q&A; minor redundancy | No action needed |
 | I3 | Inconsistency | MEDIUM | data-model.md § Attachment, spec.md FR-25 | data-model.md stores `path` as "original absolute file path at attach time" for external files; `path` exposes absolute paths in JSONL logs | Open |
 | A1 | Ambiguity | LOW | spec.md FR-30, plan.md | `fetch_webpage` uses "neutral `Notor/1.0` User-Agent header" — minor ambiguity on exact header value | Open |
@@ -60,7 +60,7 @@ The three core artifacts (spec.md, plan.md, tasks.md) are well-aligned overall. 
 | Requirement | Coverage | Status | Notes |
 |-------------|----------|--------|-------|
 | NFR-6: Performance | CTX-001 AC (<100 ms), TOOL-010 (timeout), COMP-004 (transparent), HOOK-002 (timeout) | ✓ Complete | |
-| NFR-7: Security & privacy | TOOL-011 (denylist), TOOL-014 (path validation), HOOK-002 (shell restrictions) | ⚠ Partial | Hook working directory restriction not explicitly tasked (see C3) |
+| NFR-7: Security & privacy | TOOL-011 (denylist), TOOL-014 (path validation), HOOK-002 (shell restrictions + cwd enforcement) | ✓ Complete | Hook working directory restriction added to HOOK-002 ACs |
 | NFR-8: Usability & transparency | ATT-005 (discoverable), CTX-005 (defaults on), COMP-004 (marker), TOOL-015 (Act-only), DOC-001 (system prompt) | ✓ Complete | |
 | NFR-9: Reliability | TOOL-010 (fetch errors), TOOL-014 (command failures), HOOK-002 (non-blocking), COMP-002 (fallback), ATT-002 (missing notes) | ✓ Complete | |
 
@@ -224,7 +224,7 @@ The reordering itself was valid (plan.md § Recommended Implementation Order sug
 ## Metrics
 
 - **Functional Requirements:** 13 total, 13 (100%) covered by tasks
-- **Non-Functional Requirements:** 4 total, 3.5 (87.5%) fully covered (NFR-7 partial — hook path restrictions)
+- **Non-Functional Requirements:** 4 total, 4 (100%) fully covered
 - **Tasks:** 42 total, 42 (100%) mapped to one or more requirements
 - **User Stories:** 18 total, 18 (100%) covered by FRs and tasks
 - **User Scenarios:** 14 total (8 primary + 2 alternative + 4 edge cases), 14 (100%) covered
@@ -243,8 +243,8 @@ The reordering itself was valid (plan.md § Recommended Implementation Order sug
 **~~Immediate (High):~~**
 2. ~~**I1** — Rename task phases in tasks.md to avoid collision with the spec-level "Phase 3" label. Recommend using "Step" or "Group" prefix.~~ ✅ **RESOLVED** — 2026-07-03
 
-**Immediate (High):**
-3. **I2/C3** — Add acceptance criteria to HOOK-002 in tasks.md requiring working directory allow-list enforcement for hook shell commands, per spec.md NFR-7.
+**~~Immediate (High):~~**
+3. ~~**I2/C3** — Add acceptance criteria to HOOK-002 in tasks.md requiring working directory allow-list enforcement for hook shell commands, per spec.md NFR-7.~~ ✅ **RESOLVED** — 2026-07-03
 
 **Recommended (Medium):**
 4. **C2** — Add explicit AC or subtask in COMP-004 for registering the manual compaction command via `addCommand()`.
@@ -257,6 +257,6 @@ The reordering itself was valid (plan.md § Recommended Implementation Order sug
 
 **Readiness Assessment:**
 - ~~One critical issue present (N1 — numbering collisions)~~ ✅ Resolved — all IDs are now globally unique across specs.
-- ~~Two high-severity issues should be resolved before implementation begins: the phase naming collision (I1) creates confusion for developers navigating between artifacts, and the missing hook path restriction AC (I2/C3) could result in a security gap if not caught during implementation.~~ One high-severity issue remains (I2/C3 — missing hook path restriction AC), which could result in a security gap if not caught during implementation.
+- ~~Two high-severity issues should be resolved before implementation begins: the phase naming collision (I1) creates confusion for developers navigating between artifacts, and the missing hook path restriction AC (I2/C3) could result in a security gap if not caught during implementation.~~ ~~One high-severity issue remains (I2/C3 — missing hook path restriction AC), which could result in a security gap if not caught during implementation.~~ ✅ All high-severity issues resolved — HOOK-002 ACs now enforce vault root cwd and working directory allow-list.
 - Medium/low issues can be addressed in parallel with early implementation work.
-- Overall the artifacts are well-structured, comprehensive, and ready for implementation after the high-severity items are addressed.
+- Overall the artifacts are well-structured, comprehensive, and **ready for implementation**.
