@@ -193,7 +193,7 @@ This iteration addresses six issues discovered during manual testing of the Phas
 - [x] Test: switch active note → send another message → verify the active marker moved to the new note
 - [x] Test: the active marker matches the note that is currently in the foreground/focused leaf
 
-### ACI-TEST-004: Vault structure formatting
+### ACI-TEST-004: Vault structure formatting ✅
 
 **Description:** Create e2e tests validating the vault structure formatting changes (line-per-folder, trailing `/`).
 
@@ -202,9 +202,18 @@ This iteration addresses six issues discovered during manual testing of the Phas
 **Dependencies:** ACI-003
 
 **Acceptance Criteria:**
-- [ ] Test: verify each folder in `<vault-structure>` is on its own line
-- [ ] Test: verify each folder name ends with `/`
-- [ ] Test: verify folders are not comma-separated
+- [x] Test: verify each folder in `<vault-structure>` is on its own line
+- [x] Test: verify each folder name ends with `/`
+- [x] Test: verify folders are not comma-separated
+
+**Implementation notes:**
+- Added `extractVaultStructureRaw()` helper to preserve raw inner content for comma-detection
+- Added `extractVaultStructure()` helper to parse entries into a trimmed, non-empty line array
+- ACI-TEST-004-a (`testVaultStructureFoldersOnOwnLines`): sends a message, parses `<vault-structure>` entries, asserts ≥2 entries are present with no commas inside any single entry (single-entry and empty vaults handled gracefully)
+- ACI-TEST-004-b (`testVaultStructureFoldersHaveTrailingSlash`): sends a second message in the same conversation, checks every parsed entry ends with `/`
+- ACI-TEST-004-c (`testVaultStructureNotCommaSeparated`): sends a third message, inspects the raw inner content for `, ` (the separator used by the old `join(", ")` implementation)
+- Tests run after a fresh page reload with `auto_context_vault_structure: true` to ensure the source is enabled
+- Wired into `main()` as the ACI-TEST-004 block after ACI-TEST-003
 
 ### ACI-TEST-005: Hook output rendering
 

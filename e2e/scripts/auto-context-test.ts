@@ -47,6 +47,20 @@
  *   c. The active marker matches the note currently in the foreground/focused leaf
  *
  * @see specs/02-context-intelligence/auto-context-iteration/tasks.md — ACI-TEST-003
+ *
+ * ## ACI-TEST-004: Vault structure formatting
+ *
+ * Validates that the `<vault-structure>` block in the assembled system prompt
+ * uses the corrected formatting introduced by ACI-003:
+ *   - Each folder is on its own line (not comma-separated)
+ *   - Each folder name ends with `/`
+ *
+ * Scenarios:
+ *   a. Each folder in `<vault-structure>` is on its own line
+ *   b. Each folder name ends with `/`
+ *   c. Folders are not comma-separated
+ *
+ * @see specs/02-context-intelligence/auto-context-iteration/tasks.md — ACI-TEST-004
  */
 
 import { execSync } from "node:child_process";
@@ -489,6 +503,31 @@ function extractOpenNotes(systemPrompt: string): string[] | null {
 	const match = systemPrompt.match(/<open-notes>([\s\S]*?)<\/open-notes>/);
 	if (!match) return null;
 	return match[1]!
+		.split("\n")
+		.map((l) => l.trim())
+		.filter((l) => l.length > 0);
+}
+
+/**
+ * Extract the raw `<vault-structure>` inner content from a system prompt string.
+ * Returns null if the tag is absent.
+ * Returns the raw inner string (preserving whitespace) so tests can inspect
+ * both line-separation and trailing-slash formatting.
+ */
+function extractVaultStructureRaw(systemPrompt: string): string | null {
+	const match = systemPrompt.match(/<vault-structure>([\s\S]*?)<\/vault-structure>/);
+	if (!match) return null;
+	return match[1]!;
+}
+
+/**
+ * Parse the raw vault-structure inner content into an array of non-empty,
+ * trimmed entry strings (one per folder).
+ */
+function extractVaultStructure(systemPrompt: string): string[] | null {
+	const raw = extractVaultStructureRaw(systemPrompt);
+	if (raw === null) return null;
+	return raw
 		.split("\n")
 		.map((l) => l.trim())
 		.filter((l) => l.length > 0);
@@ -1768,11 +1807,276 @@ async function testFullVaultRelativePathsReported(
 }
 
 // ---------------------------------------------------------------------------
+// ACI-TEST-004: Vault structure formatting
+// ---------------------------------------------------------------------------
+
+/**
+ * ACI-TEST-004-a: Each folder in `<vault-structure>` is on its own line.
+ *
+ * After the ACI-003 fix, `collectVaultStructure()` output is joined with
+ * newlines rather than commas. This test sends a message and inspects the
+ * assembled system prompt to confirm every entry in `<vault-structure>` is
+ * on a separate line (i.e. the parsed array has more than one entry when
+ * multiple folders exist, and none of the entries contain a comma that would
+ * indicate the old comma-separated format).
+ */
+async function testVaultStructureFoldersOnOwnLines(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-004-a: Each vault folder on its own line ──");
+
+	await closeAllMarkdownTabs(page);
+	await newConversation(page);
+
+	const responded = await sendMessage(
+		page,
+		"ACI-TEST-004-a: verify vault structure folders are on separate lines",
+	);
+	const shot = await screenshot(page, "aci-004a-folders-own-lines");
+
+	if (!responded) {
+		console.log("    (No LLM response — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (!systemPrompt) {
+		fail(
+			"ACI-TEST-004-a: each folder on its own line",
+			"No 'System prompt assembled' log entry found",
+			shot,
+		);
+		return;
+	}
+
+	if (!systemPrompt.includes("<vault-structure>")) {
+		fail(
+			"ACI-TEST-004-a: each folder on its own line",
+			"<vault-structure> tag not found in system prompt",
+			shot,
+		);
+		return;
+	}
+
+	const folders = extractVaultStructure(systemPrompt);
+
+	if (folders === null) {
+		fail(
+			"ACI-TEST-004-a: each folder on its own line",
+			"Could not extract <vault-structure> content from system prompt",
+			shot,
+		);
+		return;
+	}
+
+	// The test vault has at least Research/, Daily/, Projects/ (plus Notes/, Journal/ from extra notes)
+	// There must be more than one folder entry — if they were comma-separated they'd appear as one entry
+	if (folders.length >= 2) {
+		// Additional check: none of the entries should themselves contain a comma
+		// (which would indicate comma-separation leaked into a single entry)
+		const entriesWithComma = folders.filter((f) => f.includes(","));
+		if (entriesWithComma.length === 0) {
+			pass(
+				"ACI-TEST-004-a: each folder on its own line",
+				`${folders.length} folders each on their own line: ${folders.join(" | ")}`,
+				shot,
+			);
+		} else {
+			fail(
+				"ACI-TEST-004-a: each folder on its own line",
+				`Some entries contain commas (old comma-separated format?): ${entriesWithComma.join(", ")}. ` +
+					`All entries: ${folders.join(" | ")}`,
+				shot,
+			);
+		}
+	} else if (folders.length === 1) {
+		// Could be a single-folder vault (acceptable) OR commas still present
+		// Distinguish by checking for commas in the single entry
+		const singleEntry = folders[0]!;
+		if (singleEntry.includes(",")) {
+			fail(
+				"ACI-TEST-004-a: each folder on its own line",
+				`Only one entry found but it contains commas — folders appear comma-separated: "${singleEntry}"`,
+				shot,
+			);
+		} else {
+			pass(
+				"ACI-TEST-004-a: each folder on its own line",
+				`Only 1 folder entry found with no commas: "${singleEntry}" ` +
+					"(vault may have a single top-level folder — line-per-folder format is correct)",
+				shot,
+			);
+		}
+	} else {
+		// Empty vault-structure — acceptable if vault has no top-level folders
+		pass(
+			"ACI-TEST-004-a: each folder on its own line",
+			"<vault-structure> is empty — no top-level folders in vault (empty tag is correct)",
+			shot,
+		);
+	}
+}
+
+/**
+ * ACI-TEST-004-b: Each folder name ends with `/`.
+ *
+ * After ACI-003, `buildAutoContextBlock()` appends `/` to each folder name
+ * so the LLM can distinguish folders from files. This test verifies every
+ * non-empty entry in the `<vault-structure>` block ends with `/`.
+ */
+async function testVaultStructureFoldersHaveTrailingSlash(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-004-b: Each folder name ends with `/` ──");
+
+	// Re-use the latest system prompt from the previous test (same conversation)
+	// by sending another message to get a fresh log entry
+	const responded = await sendMessage(
+		page,
+		"ACI-TEST-004-b: verify vault structure folder names end with /",
+	);
+	const shot = await screenshot(page, "aci-004b-trailing-slash");
+
+	if (!responded) {
+		console.log("    (No LLM response — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (!systemPrompt) {
+		fail(
+			"ACI-TEST-004-b: folder names end with /",
+			"No 'System prompt assembled' log entry found",
+			shot,
+		);
+		return;
+	}
+
+	const folders = extractVaultStructure(systemPrompt);
+
+	if (folders === null) {
+		fail(
+			"ACI-TEST-004-b: folder names end with /",
+			"<vault-structure> tag not found in system prompt",
+			shot,
+		);
+		return;
+	}
+
+	if (folders.length === 0) {
+		pass(
+			"ACI-TEST-004-b: folder names end with /",
+			"<vault-structure> is empty — no entries to check (acceptable for empty vault)",
+			shot,
+		);
+		return;
+	}
+
+	const missingSlash = folders.filter((f) => !f.endsWith("/"));
+
+	if (missingSlash.length === 0) {
+		pass(
+			"ACI-TEST-004-b: folder names end with /",
+			`All ${folders.length} folder entries end with "/": ${folders.join(", ")}`,
+			shot,
+		);
+	} else {
+		fail(
+			"ACI-TEST-004-b: folder names end with /",
+			`${missingSlash.length} folder(s) missing trailing "/": ${missingSlash.join(", ")}. ` +
+				`All entries: ${folders.join(", ")}`,
+			shot,
+		);
+	}
+}
+
+/**
+ * ACI-TEST-004-c: Folders are NOT comma-separated.
+ *
+ * Directly inspects the raw `<vault-structure>` inner content for the
+ * presence of comma-separated lists. Before ACI-003 the implementation used
+ * `folders.join(", ")` which produced a single comma-separated line. This
+ * test verifies the old format no longer appears.
+ */
+async function testVaultStructureNotCommaSeparated(
+	page: Page,
+	collector: LogCollector,
+): Promise<void> {
+	console.log("\n── ACI-TEST-004-c: Folders not comma-separated ──");
+
+	const responded = await sendMessage(
+		page,
+		"ACI-TEST-004-c: verify vault structure is not comma-separated",
+	);
+	const shot = await screenshot(page, "aci-004c-no-commas");
+
+	if (!responded) {
+		console.log("    (No LLM response — checking log directly)");
+	}
+
+	await page.waitForTimeout(1_000);
+
+	const systemPrompt = getLatestSystemPrompt(collector);
+
+	if (!systemPrompt) {
+		fail(
+			"ACI-TEST-004-c: folders not comma-separated",
+			"No 'System prompt assembled' log entry found",
+			shot,
+		);
+		return;
+	}
+
+	const raw = extractVaultStructureRaw(systemPrompt);
+
+	if (raw === null) {
+		fail(
+			"ACI-TEST-004-c: folders not comma-separated",
+			"<vault-structure> tag not found in system prompt",
+			shot,
+		);
+		return;
+	}
+
+	// The old format produced entries like "Research, Daily, Projects"
+	// The new format places each entry on its own line with a trailing slash.
+	// We detect the old format by checking whether the raw content contains ", "
+	// (comma-space) which is the separator used by the old `join(", ")` call.
+	const hasCommaList = raw.includes(", ");
+
+	if (!hasCommaList) {
+		pass(
+			"ACI-TEST-004-c: folders not comma-separated",
+			`<vault-structure> content does not contain comma-separated list. ` +
+				`Raw content (trimmed): "${raw.trim().substring(0, 200)}"`,
+			shot,
+		);
+	} else {
+		// Check whether commas are between actual folder entries or just coincidentally
+		// inside a folder name (very unlikely but worth noting in the detail)
+		const folders = extractVaultStructure(systemPrompt) ?? [];
+		fail(
+			"ACI-TEST-004-c: folders not comma-separated",
+			`<vault-structure> content contains comma-separated list (old format). ` +
+				`Raw content: "${raw.trim().substring(0, 200)}". ` +
+				`Parsed entries: ${folders.join(" | ")}`,
+			shot,
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 async function main() {
-	console.log("=== Notor Auto-Context E2E Test (ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003) ===\n");
+	console.log("=== Notor Auto-Context E2E Test (ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003 + ACI-TEST-004) ===\n");
 
 	console.log("[0/4] Building plugin...");
 	execSync("npm run build", { cwd: path.resolve(__dirname, "..", ".."), stdio: "inherit" });
@@ -1889,6 +2193,26 @@ async function main() {
 		// ACI-TEST-003-c: active marker matches the foreground/focused leaf
 		await testActiveMarkerMatchesFocusedLeaf(page, collector);
 
+		// ── ACI-TEST-004 ────────────────────────────────────────────────────
+		console.log(
+			"\n[ACI-TEST-004] Running vault structure formatting tests...",
+		);
+
+		// Restore full settings and reload to ensure vault structure source is enabled
+		const settingsForVaultTest = buildSettings();
+		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settingsForVaultTest, null, 2));
+		await page.reload();
+		await page.waitForTimeout(5_000);
+
+		// ACI-TEST-004-a: each folder on its own line
+		await testVaultStructureFoldersOnOwnLines(page, collector);
+
+		// ACI-TEST-004-b: each folder name ends with /
+		await testVaultStructureFoldersHaveTrailingSlash(page, collector);
+
+		// ACI-TEST-004-c: folders are not comma-separated
+		await testVaultStructureNotCommaSeparated(page, collector);
+
 		await screenshot(page, "99-final");
 
 		console.log("\n=== Collecting logs ===");
@@ -1916,7 +2240,7 @@ async function main() {
 	const passed = results.filter((r) => r.passed).length;
 	const failed = results.filter((r) => !r.passed).length;
 
-	console.log("\n=== Test Results (ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003) ===");
+	console.log("\n=== Test Results (ACI-TEST-001 + ACI-TEST-002 + ACI-TEST-003 + ACI-TEST-004) ===");
 	console.log(`Passed: ${passed}/${results.length}`);
 	console.log(`Failed: ${failed}/${results.length}`);
 
