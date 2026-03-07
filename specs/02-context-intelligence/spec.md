@@ -65,8 +65,8 @@ This specification covers Phase 3 of the roadmap:
 **Description:** Users can attach vault notes to a chat message using a file picker with Obsidian-native autocomplete.
 
 **Acceptance criteria:**
-- An attachment button in the chat input area opens a vault file picker.
-- When the user types `[[` in the Notor chat input box, the same wikilink autocomplete behavior as Obsidian's native note editor is applied — showing matching note titles and allowing selection to complete the link.
+- An attachment button in the chat input area opens a small menu with two options: **Attach vault note** (opens the Obsidian vault file picker with autocomplete) and **Attach external file** (opens the OS filesystem dialog, see FR-2).
+- When the user types `[[` in the Notor chat input box, the vault file picker opens directly (bypassing the menu), applying the same wikilink autocomplete behavior as Obsidian's native note editor — showing matching note titles and allowing selection to complete the link.
 - Multiple notes can be attached to a single message.
 - Section references (`[[Note#Section Header]]`) are supported: when a section reference is used, only the content of that section (from the heading to the next heading of equal or higher level) is included in the attachment, not the full note.
 - Attached notes appear as labeled chips/tags in the input area before the message is sent.
@@ -80,7 +80,7 @@ This specification covers Phase 3 of the roadmap:
 **Description:** Users can attach files from outside the vault to a chat message.
 
 **Acceptance criteria:**
-- The attachment control (same button as FR-1) allows selecting files from the local filesystem outside the vault.
+- The "Attach external file" option in the attachment menu (FR-1) opens the OS-native filesystem dialog, allowing the user to select files from outside the vault.
 - Attached external files are read and included in the user message context.
 - External files are labeled as such in the attachment chips so the user can distinguish them from vault notes.
 - File size limits apply: if a file exceeds a configurable threshold (default: 1 MB), a confirmation dialog is shown highlighting the file size and asking the user to confirm before attaching. The user can proceed or cancel.
@@ -124,7 +124,7 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - A compaction threshold (configurable, default: 80% of the model's context window token limit) triggers the auto-compaction process. The token count is estimated using a lightweight local approximation (no provider API call); a small margin of error is acceptable given the conservative default threshold.
-- When the threshold is crossed before sending a user message, the plugin sends a summarization request to the LLM with the accumulated conversation, using the configured compaction system prompt.
+- The compaction threshold is checked before every LLM API call — this includes user message dispatches as well as tool-result-to-LLM round-trips within a multi-tool-call turn. When the threshold is crossed, the plugin sends a summarization request to the LLM with the accumulated conversation, using the configured compaction system prompt, before proceeding with the pending API call.
 - The LLM returns a condensed summary of the conversation so far.
 - The plugin begins a new context window with the summary injected as a synthetic `user`/`assistant` exchange: a `user` message containing the summary prefixed with a label (e.g., "Summary of prior conversation: …"), immediately followed by a brief canned `assistant` acknowledgment (e.g., "Understood. I have context of our prior conversation."). The current user message follows this exchange as the next turn.
 - A visible "Context compacted" marker appears in the chat UI at the point where compaction occurred, clearly indicating that earlier conversation history has been condensed.
@@ -173,6 +173,7 @@ This specification covers Phase 3 of the roadmap:
 - Classified as write — available in Act mode only by default, configurable.
 - Requires user approval unless auto-approved (write tool default: approval required).
 - A configurable per-command timeout (default: 30 seconds) terminates long-running commands and returns a timeout error.
+- A configurable maximum output size (default: 50,000 characters) is applied to the returned stdout+stderr. When command output exceeds this limit, the tool returns output up to the cap and appends a truncation notice to the LLM (e.g., "Note: command output was truncated at 50,000 characters; total output length was X characters"). The cap is configurable in **Settings → Notor**.
 - The working directory must be within the vault root or a user-specified allow-list of absolute paths. Requests with a working directory outside these allowed paths are rejected.
 - The vault root is always implicitly included in the allowed paths and cannot be removed.
 - Additional allowed paths are configured in **Settings → Notor** via a list editor (one absolute path per line), using the same pattern as the domain denylist.
@@ -183,8 +184,8 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - The `pre-send` hook is triggered after the user submits a message but before it is dispatched to the LLM provider.
-- Hooks can be configured to append to a vault note or execute a shell command.
-- Context injection via a `pre-send` hook is achieved through a shell command: whatever the command prints to stdout is captured and appended as a string to the outgoing message context. No separate "inject context" action type exists; shell command stdout is the injection mechanism.
+- Hooks are configured to execute a shell command.
+- Context injection via a `pre-send` hook is achieved through a shell command: whatever the command prints to stdout is captured and appended as a string to the outgoing message context. Shell command stdout is the injection mechanism.
 - When a hook executes a shell command, conversation metadata is made available to the command as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, and a UTC timestamp. Additional metadata fields may be added over time.
 - If a hook fails, the message is still sent and the hook failure is logged and surfaced as a non-blocking notice.
 - Hooks are configured in **Settings → Notor** under a hooks section grouped by lifecycle event, with each event subsection being collapsible and containing its own add/remove/reorder list. (Workflow frontmatter hook configuration is deferred to Phase 4.)
@@ -200,7 +201,7 @@ This specification covers Phase 3 of the roadmap:
 - The `on-tool-call` hook is triggered after the tool call has been approved (or auto-approved) and immediately before tool execution.
 - The hook receives the tool name and parameters as context.
 - When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, tool name, tool parameters (serialized), and a UTC timestamp.
-- Use cases include: logging each tool call to a vault note or executing a shell command to audit AI actions.
+- Use cases include: executing a shell command to log or audit AI actions (e.g., appending to a vault note via a script).
 - Hook execution is non-blocking with respect to the tool dispatch pipeline: if a hook fails, tool execution proceeds and the failure is surfaced as a notice. (Note: unlike `pre-send`, `on-tool-call` hooks do not block tool dispatch.)
 - Configured in **Settings → Notor**, persisted across reloads. (Workflow frontmatter configuration is deferred to Phase 4.)
 
@@ -212,7 +213,7 @@ This specification covers Phase 3 of the roadmap:
 - The `on-tool-result` hook is triggered after tool execution finishes and the result (or error) has been captured, but before the result is returned to the LLM.
 - The hook receives the tool name, parameters, result output, and success/error status as context.
 - When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, tool name, tool parameters (serialized), tool result (serialized), result status (success or error), and a UTC timestamp.
-- Use cases include: logging tool outputs to a vault note, executing a shell command in response to tool results, or auditing tool behavior.
+- Use cases include: executing a shell command in response to tool results (e.g., logging tool outputs, auditing tool behavior).
 - Hook execution is non-blocking: if a hook fails, the tool result is still returned to the LLM and the failure is surfaced as a notice.
 - Configured in **Settings → Notor**, persisted across reloads. (Workflow frontmatter configuration is deferred to Phase 4.)
 
@@ -402,8 +403,8 @@ This specification covers Phase 3 of the roadmap:
 ### Hook
 - A configured callback tied to a lifecycle event: `pre-send`, `on-tool-call`, `on-tool-result`, or `after-completion`.
 - Multiple hooks can be configured per lifecycle event. Hooks for the same event are executed sequentially in the order they appear in the configuration list.
-- Has a trigger event and an action: append to a vault note, or execute a shell command.
-- For `pre-send` hooks, context injection is the shell command's stdout mechanism: the plugin captures stdout from the shell command and appends it as a string to the outgoing message context. No separate "inject context" action type exists.
+- Has a trigger event and an action: execute a shell command.
+- For `pre-send` hooks, context injection is the shell command's stdout mechanism: the plugin captures stdout from the shell command and appends it as a string to the outgoing message context.
 - When the action is a shell command, conversation metadata (conversation UUID, active workflow name, hook event name, tool name/parameters/result where applicable, UTC timestamp) is passed to the command as environment variables.
 - Persisted in plugin settings. Configured via **Settings → Notor** only; workflow frontmatter configuration is deferred to Phase 4.
 - Execution timing depends on event type: `pre-send` hooks are fully awaited sequentially before message dispatch; all other hook events (`on-tool-call`, `on-tool-result`, `after-completion`) are non-blocking fire-and-forget executed sequentially.
@@ -423,11 +424,11 @@ This specification covers Phase 3 of the roadmap:
 - Q: Should the `on-tool-call` hook fire before or after the user approval check? → A: After approval (or auto-approval), immediately before tool execution. The hook only fires for tool calls that will actually run; rejected tool calls do not trigger the hook.
 - Q: Should `fetch_webpage` have a maximum output size cap given that large pages could consume most or all of the context window? → A: Yes — a configurable character cap (default: 50,000 characters, approximately 12,500 tokens). When the fetched Markdown exceeds the cap, the tool returns content up to the cap and appends a truncation notice to the LLM indicating the page was truncated and including the total fetched length.
 - Q: Should the auto-compaction threshold be configurable per-conversation as well as globally? → A: No per-conversation override. The compaction threshold is configurable globally in Settings only; there is no per-conversation mechanism.
-- Q: Should "run a workflow" be a valid hook action in Phase 3, given the workflow system is deferred to Phase 4? → A: Remove entirely from Phase 3. Phase 3 hook actions are limited to: inject context (`pre-send` only), append to a vault note, and execute a shell command. "Run a workflow" will be added as a hook action type when the workflow system ships in Phase 4.
+- Q: Should "run a workflow" be a valid hook action in Phase 3, given the workflow system is deferred to Phase 4? → A: Remove entirely from Phase 3. The sole Phase 3 hook action is execute a shell command (with stdout serving as the context injection path for `pre-send` hooks). "Run a workflow" will be added as a hook action type when the workflow system ships in Phase 4.
 - Q: How should the `execute_command` working directory allow-list be configured — UI, settings file only, or vault root only? → A: List editor in Settings → Notor, one absolute path per line (same pattern as the domain denylist). The vault root is always implicitly included. Additional absolute paths can be added or removed via the list editor.
 - Q: How should attachments be rendered in the sent message thread — collapsed chip with expansion, full content inline, or chip only? → A: Chip only, no expansion. Attachments appear as labeled name chips in the sent message. The full attached content is not displayed or expandable in the thread; it is embedded in the message context sent to the LLM but not rendered inline.
 - Q: What User-Agent, redirect policy, and protocol restrictions should `fetch_webpage` use? → A: Neutral `Notor/1.0` User-Agent; silently follow up to 5 redirects (error to LLM if exceeded); both http:// and https:// URLs accepted with no protocol enforcement.
-- Q: What form does the "inject context" action take for `pre-send` hooks — fixed string, vault note, or shell command output? → A: Shell command stdout is the injection mechanism. The hook executes a shell command; whatever the command prints to stdout is captured and appended as a string to the outgoing message context. No separate "inject context" action type exists; the two Phase 3 hook actions are "append to vault note" and "execute shell command," with stdout from the latter serving as the context injection path.
+- Q: What form does the "inject context" action take for `pre-send` hooks — fixed string, vault note, or shell command output? → A: Shell command stdout is the injection mechanism. The hook executes a shell command; whatever the command prints to stdout is captured and appended as a string to the outgoing message context. The sole Phase 3 hook action is "execute shell command," with stdout serving as the context injection path for `pre-send` hooks.
 - Q: Can multiple hooks be configured for the same lifecycle event, and if so, how are they ordered? → A: Multiple hooks per event are allowed. Hooks for the same event execute sequentially in configuration list order. This applies to both awaited `pre-send` hooks and fire-and-forget hooks on other events.
 - Q: What is the default timeout for `pre-send` hooks, which are fully awaited before message dispatch? → A: 10 seconds. This is configurable in Settings → Notor. If a hook exceeds the timeout, the message is still sent and the timeout is surfaced as a non-blocking notice.
 - Q: When is vault note content read for attachments — when the chip is added or at send time? → A: At send time. The attachment chip stores only the vault path and optional section reference; the note content is read from the vault immediately before the message is dispatched. External files are an exception: they are read at chip-add time since they may not be accessible at send time.
@@ -442,6 +443,10 @@ This specification covers Phase 3 of the roadmap:
 - Q: What file types should be accepted for external file attachment (FR-2) — allowlist by extension, or runtime validation? → A: Runtime UTF-8 validation, no extension allowlist. Any file may be selected; at attach time, the plugin attempts to read it as UTF-8 text. If the file is binary or fails UTF-8 decoding, the attachment is rejected with a clear error. No extension-based allowlist is enforced.
 - Q: What message role should the compaction summary be injected as in the new context window? → A: Synthetic user/assistant exchange. The summary is sent as a `user` message labeled "Summary of prior conversation: …" immediately followed by a canned `assistant` acknowledgment (e.g., "Understood. I have context of our prior conversation."). The current user message follows as the next turn. This pattern is broadly compatible across all providers.
 - Q: Should duplicate note/file attachments (same path + section reference) in a single message be allowed, silently deduplicated, or rejected with a warning? → A: Silently deduplicate. If the same path and section reference is already present as a chip, a second attempt to add it is ignored without any error or notification.
+- Q: Should "append to vault note" be a dedicated hook action type alongside "execute shell command"? → A: No — remove "append to vault note" as a hook action. Shell commands are the sole hook action type; users can achieve vault note appending via shell commands (e.g., `echo "..." >> note.md`). This simplifies the hook system to a single extensibility surface.
+- Q: Should `execute_command` have a configurable output size cap to prevent unbounded command output from consuming the context window? → A: Yes — a configurable character cap (default: 50,000 characters, same as `fetch_webpage`). When command output exceeds the cap, the tool returns output up to the cap and appends a truncation notice to the LLM. This provides symmetry with `fetch_webpage` and protects the context window.
+- Q: How does the user choose between vault notes and external files from the single attachment button? → A: The attachment button opens a small menu with two options: "Attach vault note" (opens the Obsidian file picker with autocomplete) and "Attach external file" (opens the OS filesystem dialog). The `[[` shortcut in the chat input bypasses the menu and opens the vault picker directly.
+- Q: Should compaction also be checked between tool call rounds within a single AI turn, or only before user messages? → A: Before every LLM API call. The compaction threshold is checked before user message dispatches and before tool-result-to-LLM round-trips within a multi-tool-call turn. This prevents mid-turn context window overflow when tool results push the conversation past the limit.
 
 ## Assumptions
 
@@ -462,7 +467,7 @@ The following are explicitly excluded from Phase 3 and deferred to later phases:
 - **Hook configuration via workflow frontmatter** (Phase 4): in Phase 3, hooks are configured only in **Settings → Notor**. Per-workflow hook overrides via frontmatter are deferred to Phase 4 alongside the workflow definition system.
 - **`<include_notes>` tag** (Phase 4): dynamic note injection via inline tags in system prompts or workflow bodies.
 - **Vault event hooks** (Phase 4): on-note-open, on-save, on-tag-change, on-schedule triggers are Phase 4.
-- **"Run a workflow" hook action** (Phase 4): triggering a named workflow from a hook is deferred to Phase 4 alongside the workflow definition system. Phase 3 hook actions are limited to append to a vault note and execute a shell command (with stdout from shell commands optionally injected into message context for `pre-send` hooks).
+- **"Run a workflow" hook action** (Phase 4): triggering a named workflow from a hook is deferred to Phase 4 alongside the workflow definition system. The sole Phase 3 hook action is execute a shell command (with stdout optionally injected into message context for `pre-send` hooks).
 - **Content extraction / readability filtering for `fetch_webpage`**: the initial implementation returns raw Turndown conversion without stripping navigation, ads, or boilerplate.
 - **Pagination of `fetch_webpage` output**: no multi-page chunking or sequential fetching. A single configurable character cap (default: 50,000 characters) applies; content beyond the cap is truncated in one pass with a notice to the LLM.
 - **Background or scheduled auto-fetch**: `fetch_webpage` is only invoked by an explicit LLM tool call during an active conversation.
@@ -470,4 +475,5 @@ The following are explicitly excluded from Phase 3 and deferred to later phases:
 - **Custom MCP tools** (Phase 5).
 - **Browser capabilities / Obsidian Web Viewer integration** (Phase 5).
 - **External file access beyond attachment** (Phase 5): external files can be attached to messages, but the AI cannot autonomously read external files via a tool call.
+- **"Append to vault note" hook action**: users can achieve vault note appending via shell commands (e.g., `echo "..." >> note.md`), so a dedicated "append to vault note" action type is not provided. Shell commands are the sole hook action type, providing a single extensibility surface for all automation.
 - **Arbitrary hook scripts beyond shell commands**: hooks can run shell commands (with metadata context), but cannot execute arbitrary in-process code or dynamically loaded scripts. Shell commands provide the extensibility surface for complex automation.
