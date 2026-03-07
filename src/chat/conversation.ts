@@ -156,6 +156,7 @@ export class ConversationManager {
 		auto_context?: string | null;
 		attachments?: Message["attachments"];
 		hook_injections?: string[] | null;
+		is_hook_injection?: boolean;
 	}): Message {
 		if (!this.activeConversation) {
 			throw new Error("No active conversation. Create or load one first.");
@@ -176,6 +177,7 @@ export class ConversationManager {
 			auto_context: params.auto_context ?? null,
 			attachments: params.attachments ?? null,
 			hook_injections: params.hook_injections ?? null,
+			is_hook_injection: params.is_hook_injection,
 		};
 
 		this.messages.push(message);
@@ -200,9 +202,10 @@ export class ConversationManager {
 			}
 		}
 
-		// Auto-generate title from first user message
+		// Auto-generate title from first user message (skip hook injections)
 		if (
 			params.role === "user" &&
+			!params.is_hook_injection &&
 			!this.activeConversation.title
 		) {
 			this.activeConversation.title = this.generateTitle(params.content);

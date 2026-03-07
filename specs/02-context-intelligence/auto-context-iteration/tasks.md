@@ -2,7 +2,7 @@
 
 **Created:** 2026-07-03
 **Parent Specification:** [../spec.md](../spec.md)
-**Status:** Planning
+**Status:** In Progress
 
 ## Summary
 
@@ -28,7 +28,7 @@ This iteration addresses six issues discovered during manual testing of the Phas
 
 ## Step 1: Code Changes
 
-### ACI-001: Move auto-context from user message to system prompt
+### ACI-001: Move auto-context from user message to system prompt ✅
 
 **Description:** Relocate the `<auto-context>` block from the assembled user message into the system prompt. The auto-context should be built once before each LLM call (not stored per-message) and injected as a dynamic section in `SystemPromptBuilder.assemble()`. This resolves I-1 (visible XML in chat) and I-3 (duplication with every message).
 
@@ -40,16 +40,16 @@ This iteration addresses six issues discovered during manual testing of the Phas
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] `SystemPromptBuilder.assemble()` accepts an optional `autoContextBlock?: string` parameter
-- [ ] When provided, auto-context block is inserted as a new section (after vault rules, before end) with a `## Workspace context` heading
-- [ ] Auto-context is freshly built before each LLM API call in `responseLoop()` (including tool-result round-trips), so open-notes and vault structure reflect the latest state
-- [ ] Auto-context XML no longer appears in user message `content` field
-- [ ] Auto-context is no longer stored per-message in JSONL `auto_context` field (it's ephemeral system prompt content)
-- [ ] `assembleUserMessage()` no longer includes `autoContext` in its output
-- [ ] User's chat bubble shows only their typed message text (no XML)
-- [ ] The `<auto-context>` block is still in XML format within the system prompt for LLM parsing consistency
+- [x] `SystemPromptBuilder.assemble()` accepts an optional `autoContextBlock?: string` parameter
+- [x] When provided, auto-context block is inserted as a new section (after vault rules, before end) with a `## Workspace context` heading
+- [x] Auto-context is freshly built before each LLM API call in `responseLoop()` (including tool-result round-trips), so open-notes and vault structure reflect the latest state
+- [x] Auto-context XML no longer appears in user message `content` field
+- [x] Auto-context is no longer stored per-message in JSONL `auto_context` field (it's ephemeral system prompt content)
+- [x] `assembleUserMessage()` no longer includes `autoContext` in its output
+- [x] User's chat bubble shows only their typed message text (no XML)
+- [x] The `<auto-context>` block is still in XML format within the system prompt for LLM parsing consistency
 
-### ACI-002: Move hook stdout to collapsible chat UI element
+### ACI-002: Move hook stdout to collapsible chat UI element ✅
 
 **Description:** Instead of injecting pre-send hook stdout directly into the user message content, render it as a separate collapsible UI element in the chat panel. Behind the scenes, the hook output is sent as a distinct `user` message in the conversation (so the LLM still sees it), but it's displayed as a collapsible block rather than inline in the user's typed message. This resolves I-2.
 
@@ -63,15 +63,15 @@ This iteration addresses six issues discovered during manual testing of the Phas
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] Pre-send hook stdout no longer appears in the user's typed message bubble
-- [ ] Hook output renders as a collapsible element in the chat panel (collapsed by default)
-- [ ] Collapsible element shows a summary label like "Hook output" with the hook content inside
-- [ ] Behind the scenes, the hook output is sent as a distinct `user` message in the conversation so the LLM can see it
-- [ ] Hook output message is logged in JSONL with `is_hook_injection: true` (or similar marker)
-- [ ] When no hooks produce output, no collapsible element or extra message is created
-- [ ] When loading a conversation from history, hook injection messages render as collapsible elements (not as regular user messages)
+- [x] Pre-send hook stdout no longer appears in the user's typed message bubble
+- [x] Hook output renders as a collapsible element in the chat panel (collapsed by default)
+- [x] Collapsible element shows a summary label like "Hook output" with the hook content inside
+- [x] Behind the scenes, the hook output is sent as a distinct `user` message in the conversation so the LLM can see it
+- [x] Hook output message is logged in JSONL with `is_hook_injection: true` (or similar marker)
+- [x] When no hooks produce output, no collapsible element or extra message is created
+- [x] When loading a conversation from history, hook injection messages render as collapsible elements (not as regular user messages)
 
-### ACI-003: Fix formatting — each note/folder on its own line, directories appended with `/`
+### ACI-003: Fix formatting — each note/folder on its own line, directories appended with `/` ✅
 
 **Description:** Update the auto-context XML assembly to ensure each open note path and each vault folder is printed on its own line. Append `/` to each directory name in vault structure to make it unambiguous. This resolves I-4 and part of I-6 (line-per-note prerequisite).
 
@@ -83,13 +83,13 @@ This iteration addresses six issues discovered during manual testing of the Phas
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] Each open note path in `<open-notes>` is on its own separate line
-- [ ] Each folder in `<vault-structure>` is on its own separate line
-- [ ] Each folder name in `<vault-structure>` ends with `/` (e.g., `Research/`, `Daily/`)
-- [ ] Empty lists produce empty tags (no stray whitespace)
-- [ ] XML output is well-formed and parseable
+- [x] Each open note path in `<open-notes>` is on its own separate line
+- [x] Each folder in `<vault-structure>` is on its own separate line
+- [x] Each folder name in `<vault-structure>` ends with `/` (e.g., `Research/`, `Daily/`)
+- [x] Empty lists produce empty tags (no stray whitespace)
+- [x] XML output is well-formed and parseable
 
-### ACI-004: Fix open notes detection — enumerate all leaves reliably
+### ACI-004: Fix open notes detection — enumerate all leaves reliably ✅
 
 **Description:** Investigate and fix the bug where `collectOpenNotePaths()` only detects notes that the user has recently clicked on, rather than all notes that are currently open in tabs. The root cause is likely that `app.workspace.getLeavesOfType("markdown")` only returns leaves whose views have been initialized (Obsidian lazily initializes tab views). This resolves I-5.
 
@@ -102,13 +102,13 @@ This iteration addresses six issues discovered during manual testing of the Phas
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] All currently open markdown tabs are detected on the first message send, not just the active one
-- [ ] Notes in pinned tabs, split panes, and stacked tabs are all detected
-- [ ] Notes that have never been clicked/activated since Obsidian launch are still detected
-- [ ] Performance remains under 100ms for typical workspaces (< 50 open tabs)
-- [ ] No errors or exceptions for leaves without a file (e.g., empty new tabs)
+- [x] All currently open markdown tabs are detected on the first message send, not just the active one
+- [x] Notes in pinned tabs, split panes, and stacked tabs are all detected
+- [x] Notes that have never been clicked/activated since Obsidian launch are still detected
+- [x] Performance remains under 100ms for typical workspaces (< 50 open tabs)
+- [x] No errors or exceptions for leaves without a file (e.g., empty new tabs)
 
-### ACI-005: Add `(active)` marker to the active note in open notes list
+### ACI-005: Add `(active)` marker to the active note in open notes list ✅
 
 **Description:** When building the open notes auto-context, identify the active leaf and append ` (active)` to its path in the list. This resolves I-6.
 
@@ -121,12 +121,12 @@ This iteration addresses six issues discovered during manual testing of the Phas
 **Dependencies:** ACI-003 (each note must be on its own line for the marker to be clear), ACI-004 (detection must be reliable first)
 
 **Acceptance Criteria:**
-- [ ] Exactly one note in the `<open-notes>` list has ` (active)` appended to its path
-- [ ] The active marker is only present when an active markdown leaf exists
-- [ ] If the active leaf is not a markdown view (e.g., settings, graph), no note is marked active
-- [ ] The marker is ` (active)` (space, parenthesized, lowercase) — e.g., `Research/Climate.md (active)`
+- [x] Exactly one note in the `<open-notes>` list has ` (active)` appended to its path
+- [x] The active marker is only present when an active markdown leaf exists
+- [x] If the active leaf is not a markdown view (e.g., settings, graph), no note is marked active
+- [x] The marker is ` (active)` (space, parenthesized, lowercase) — e.g., `Research/Climate.md (active)`
 
-### ACI-006: Clean up message assembler after ACI-001 and ACI-002
+### ACI-006: Clean up message assembler after ACI-001 and ACI-002 ✅
 
 **Description:** After auto-context and hook injections are removed from the user message assembly, simplify the `MessageParts` interface and `assembleUserMessage()` function. If attachments are the only remaining "extra" section, consider whether the assembler abstraction is still needed or if it can be simplified.
 
@@ -137,10 +137,10 @@ This iteration addresses six issues discovered during manual testing of the Phas
 **Dependencies:** ACI-001, ACI-002
 
 **Acceptance Criteria:**
-- [ ] `MessageParts` interface only has `attachments?: string` and `userText: string`
-- [ ] `assembleUserMessage()` concatenates attachments block + user text (or just user text if no attachments)
-- [ ] No dead code paths referencing removed fields
-- [ ] Existing attachment functionality is unaffected
+- [x] `MessageParts` interface only has `attachments?: string` and `userText: string`
+- [x] `assembleUserMessage()` concatenates attachments block + user text (or just user text if no attachments)
+- [x] No dead code paths referencing removed fields
+- [x] Existing attachment functionality is unaffected
 
 ---
 

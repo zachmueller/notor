@@ -194,9 +194,6 @@ export class ChatOrchestrator {
 
 		const mode = this.conversationManager.getMode();
 
-		// Phase 3 (CTX-006): Build auto-context block from enabled sources
-		const autoContext = buildAutoContextBlock(this.app, this.settings);
-
 		// Phase 3 (ATT-008): Resolve attachments and build XML block
 		let attachmentsBlock: string | null = null;
 		const resolvedAttachments: Attachment[] = [];
@@ -240,11 +237,11 @@ export class ChatOrchestrator {
 			}
 		}
 
-		// Assemble the full message content: auto-context → attachments → hooks → user text
+		// Assemble the user message content: attachments → user text
+		// (Auto-context is now injected into the system prompt per ACI-001;
+		//  hook output is sent as a separate message per ACI-002.)
 		const assembledContent = assembleUserMessage({
-			autoContext: autoContext ?? undefined,
 			attachments: attachmentsBlock ?? undefined,
-			hookInjections,
 			userText: content,
 		});
 
@@ -261,13 +258,28 @@ export class ChatOrchestrator {
 			}))
 			: undefined;
 
-		// Add user message with assembled content
+		// ACI-002: If hooks produced output, inject it as a separate user
+		// message so the LLM still sees it but it renders as a collapsible
+		// element in the chat panel instead of inline in the user's bubble.
+		if (hookInjections && hookInjections.length > 0) {
+			const filtered = hookInjections.filter((s) => s.length > 0);
+			if (filtered.length > 0) {
+				const hookContent = filtered.join("\n");
+				const hookMessage = this.conversationManager.addMessage({
+					role: "user",
+					content: hookContent,
+					is_hook_injection: true,
+					hook_injections: hookInjections,
+				});
+				this.view?.renderHookInjection(hookMessage);
+			}
+		}
+
+		// Add user message with assembled content (no auto-context, no hooks)
 		const userMessage = this.conversationManager.addMessage({
 			role: "user",
 			content: assembledContent,
-			auto_context: autoContext,
 			attachments: attachmentMetadata,
-			hook_injections: hookInjections,
 		});
 
 		this.view?.renderUserMessage(userMessage);
@@ -309,11 +321,16 @@ export class ChatOrchestrator {
 					? await this.vaultRuleManager.getActiveRuleContent()
 					: undefined;
 
-				// 2. Assemble system prompt
+				// 1b. ACI-001: Build fresh auto-context before each LLM call
+				// so open-notes and vault structure reflect the latest state.
+				const autoContext = buildAutoContextBlock(this.app, this.settings);
+
+				// 2. Assemble system prompt (now includes auto-context)
 				const systemPrompt = await this.systemPromptBuilder.assemble(
 					mode,
 					toolDefinitions,
-					vaultRuleContent
+					vaultRuleContent,
+					autoContext ?? undefined
 				);
 
 				// 3. Build messages for LLM

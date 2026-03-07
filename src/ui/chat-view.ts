@@ -463,11 +463,36 @@ export class NotorChatView extends ItemView {
 
 	/**
 	 * Render a user message in the message list.
+	 *
+	 * Hook injection messages (identified by `is_hook_injection`) are
+	 * rendered via {@link renderHookInjection} instead.
 	 */
 	renderUserMessage(message: Message): void {
+		if (message.is_hook_injection) {
+			this.renderHookInjection(message);
+			return;
+		}
+
 		const msgEl = this.messageListEl.createDiv({ cls: "notor-message notor-message-user" });
 		const contentEl = msgEl.createDiv({ cls: "notor-message-content" });
 		contentEl.createEl("p", { text: message.content });
+		this.scrollToBottom();
+	}
+
+	/**
+	 * Render hook injection output as a collapsible element in the chat
+	 * panel (ACI-002).
+	 *
+	 * The content is sent to the LLM as a separate `user` message, but
+	 * displayed to the human as a `<details>` block collapsed by default
+	 * so it doesn't clutter the conversation.
+	 */
+	renderHookInjection(message: Message): void {
+		const wrapper = this.messageListEl.createDiv({ cls: "notor-hook-injection" });
+		const details = wrapper.createEl("details");
+		details.createEl("summary", { text: "Hook output" });
+		const pre = details.createEl("pre", { cls: "notor-hook-injection-content" });
+		pre.createEl("code", { text: message.content });
 		this.scrollToBottom();
 	}
 

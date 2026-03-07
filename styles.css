@@ -1263,6 +1263,53 @@
 }
 
 /* ==========================================================================
+   Hook Injection (ACI-002)
+   ========================================================================== */
+
+.notor-hook-injection {
+	margin: 4px 0;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-hook-injection details {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary-alt);
+}
+
+.notor-hook-injection summary {
+	padding: 4px 10px;
+	cursor: pointer;
+	color: var(--text-muted);
+	font-weight: var(--font-medium);
+	user-select: none;
+}
+
+.notor-hook-injection summary:hover {
+	color: var(--text-normal);
+}
+
+.notor-hook-injection-content {
+	margin: 0;
+	padding: 6px 10px;
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	border-radius: 0 0 var(--radius-s) var(--radius-s);
+	overflow-x: auto;
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-hook-injection-content code {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	background: none;
+	padding: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+/* ==========================================================================
    Compaction Markers (Phase 3 — COMP-004)
    ========================================================================== */
 

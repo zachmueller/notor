@@ -80,6 +80,8 @@ export interface Message {
 	}> | null;
 	/** Captured stdout from pre-send hooks (Phase 3). */
 	hook_injections?: string[] | null;
+	/** Whether this user message is a hook injection (ACI-002). */
+	is_hook_injection?: boolean;
 }
 
 // ---------------------------------------------------------------------------

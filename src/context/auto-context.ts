@@ -16,7 +16,7 @@
  */
 
 import type { App } from "obsidian";
-import { TFolder } from "obsidian";
+import { MarkdownView, TFolder } from "obsidian";
 import type { NotorSettings } from "../settings";
 
 // ---------------------------------------------------------------------------
@@ -24,24 +24,50 @@ import type { NotorSettings } from "../settings";
 // ---------------------------------------------------------------------------
 
 /**
- * Collect vault-relative file paths of all currently open markdown notes.
+ * Collect vault-relative file paths of all currently open markdown notes,
+ * with the active note annotated with ` (active)`.
  *
- * Enumerates all leaves of type "markdown" in the workspace, which
- * covers pinned tabs, split panes, and stacked tabs.
+ * Uses `iterateAllLeaves()` to enumerate every leaf regardless of
+ * activation state (Obsidian lazily initialises tab views, so
+ * `getLeavesOfType("markdown")` may miss unvisited tabs). For each
+ * leaf we check `leaf.view?.getState()?.file` as a fallback when the
+ * view's `.file` property hasn't been populated yet.
  *
- * @returns Array of vault-relative file paths (empty if none open).
+ * @returns Array of vault-relative file paths. The active markdown
+ *          note (if any) has ` (active)` appended.
  */
 export function collectOpenNotePaths(app: App): string[] {
+	const seen = new Set<string>();
 	const paths: string[] = [];
-	const leaves = app.workspace.getLeavesOfType("markdown");
 
-	for (const leaf of leaves) {
-		// MarkdownView exposes .file — the TFile for the open note
-		const file = (leaf.view as { file?: { path: string } }).file;
-		if (file?.path) {
-			paths.push(file.path);
+	// Determine the active markdown note's path (if any).
+	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+	const activePath: string | null = activeView?.file?.path ?? null;
+
+	// iterateAllLeaves covers pinned tabs, split panes, stacked tabs,
+	// and — crucially — tabs whose views haven't been activated yet.
+	app.workspace.iterateAllLeaves((leaf) => {
+		// Try the view's file property first (populated for activated views).
+		let filePath: string | undefined =
+			(leaf.view as { file?: { path: string } }).file?.path;
+
+		// Fallback: read the serialised view state which Obsidian populates
+		// even for lazily-initialised tabs.
+		if (!filePath) {
+			const state = leaf.view?.getState?.() as { file?: string } | undefined;
+			if (state?.file) {
+				filePath = state.file;
+			}
 		}
-	}
+
+		// Only include markdown files (skip settings, graph, empty tabs, etc.)
+		if (filePath && filePath.endsWith(".md") && !seen.has(filePath)) {
+			seen.add(filePath);
+			const label =
+				filePath === activePath ? `${filePath} (active)` : filePath;
+			paths.push(label);
+		}
+	});
 
 	return paths;
 }
@@ -125,10 +151,13 @@ export function buildAutoContextBlock(
 		tags.push(`  <open-notes>${pathList}</open-notes>`);
 	}
 
-	// Vault structure
+	// Vault structure — one folder per line, trailing `/`
 	if (settings.auto_context_vault_structure) {
 		const folders = collectVaultStructure(app);
-		const folderList = folders.join(", ");
+		const folderList =
+			folders.length > 0
+				? "\n" + folders.map((f) => f + "/").join("\n") + "\n  "
+				: "";
 		tags.push(`  <vault-structure>${folderList}</vault-structure>`);
 	}
 
