@@ -138,10 +138,10 @@ LLM Response → Parse tool calls → Tool Dispatcher → [Auto-approve check] �
 
 ### Domain denylist (Phase 3)
 
-A user-configurable list of domains and sub-domains that the `fetch_webpage` tool is blocked from accessing. When the tool is invoked with a URL matching a denylisted domain, the request is rejected and an error is returned to the LLM indicating the domain is blocked by the user.
+A user-configurable list of domains that the `fetch_webpage` tool is blocked from accessing. When the tool is invoked with a URL matching a denylisted entry, the request is rejected and an error is returned to the LLM indicating the domain is blocked by the user.
 
 - Configured in **Settings → Notor** (see [UX — Settings](ux.md)).
-- Matching is domain-based: denylisting `example.com` blocks all pages under `example.com` and its sub-domains (e.g., `sub.example.com`).
+- Matching is exact-domain only: denylisting `example.com` blocks only `example.com` itself, not its sub-domains. To block sub-domains, users must add separate wildcard entries (e.g., `*.example.com`).
 - The denylist is intended for users to mark sources they consider untrustworthy. It is not a security mechanism — it is a user preference control.
 
 ---

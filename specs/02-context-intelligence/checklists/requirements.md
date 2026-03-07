@@ -2,6 +2,7 @@
 
 **Purpose:** Validate specification completeness and quality before proceeding to planning
 **Created:** 2026-07-03
+**Updated:** 2026-07-03 (post-review revision)
 **Feature:** [spec.md](../spec.md)
 
 ## Content Quality
@@ -28,14 +29,14 @@
 
 ## Notes
 
-All items pass. Specific validation notes:
+All items pass. Post-review changes applied:
 
-- **FR-1 / FR-2 (Attachment)**: Section-level granularity, chip UX, and error conditions are all specified. External file size limit has a concrete default (1 MB).
-- **FR-3 / FR-4 / FR-5 (Auto-context)**: Each source is independently toggleable. The spec distinguishes paths-only from full content for open notes and folder-names-only from file names for vault structure — consistent with the architecture doc.
-- **FR-6 (Auto-compaction)**: Threshold default (80%), fallback behavior (truncation), manual trigger, and JSONL log preservation are all specified. The per-model token limit dependency is captured in Assumptions.
-- **FR-7 / FR-8 (`fetch_webpage` + denylist)**: Read-only classification, Turndown bundling, domain matching rules, and empty-default denylist are specified without naming the underlying library in requirement text.
-- **FR-9 (`execute_command`)**: Working directory allow-list, per-command timeout default (30 s), OS-appropriate shell selection, and Act-mode restriction are all specified.
-- **FR-10 / FR-11 / FR-12 (Hooks)**: All three lifecycle hooks are independently specified with trigger timing, available context, non-blocking failure behavior, and persistence. Hook action types are constrained to built-in actions (arbitrary script execution is deferred, captured in Out of Scope).
-- **NFRs**: Performance targets are concrete (auto-context < 100 ms, fetch timeout default 15 s). Security constraints explicitly address the new surface area introduced by outbound network calls and shell execution.
-- **Success criteria**: All seven criteria are user/outcome-focused with no technology references.
-- **Out of Scope**: Personas, workflows, `<include_notes>`, vault event hooks, readability filtering, and MCP tools are explicitly deferred with phase attribution.
+- **FR-1 (Note attachment)**: Clarified that `[[` in the Notor chat input triggers the same wikilink autocomplete as Obsidian's native note editor — not a custom file picker.
+- **FR-2 (External file attachment)**: Replaced hard rejection of oversized files with a confirmation dialog that informs the user of the file size and lets them decide. Edge case scenario updated to match.
+- **FR-8 (Domain denylist)**: Changed from subdomain-inclusive matching to exact-domain-only matching. Wildcard entries (e.g., `*.example.com`) are required to block sub-domains. `DomainDenylistEntry` entity and corresponding `design/` docs (`tools.md`, `architecture.md`, `ux.md`) updated to match.
+- **FR-12 (new): `on-tool-result` hook**: Added a fourth LLM interaction hook that fires after tool execution completes and the result is available, but before the result is returned to the LLM. Distinct from `on-tool-call` (which fires before execution). Overview, user stories, success criteria, and Key Entities all updated.
+- **Hooks (FR-10–FR-13)**: All hook FRs updated to include shell command execution as a supported action. Conversation metadata exposed to hook shell commands as environment variables: conversation UUID, active workflow name, hook event name, UTC timestamp, and (where applicable) tool name, parameters, result, and result status.
+- **NFR-2 (Security)**: Corrected the constraint on hooks to reflect that hook shell commands are permitted but subject to the same working directory and path restrictions as the `execute_command` tool.
+- **Assumptions**: Replaced the prior "hooks are limited to built-in actions" assumption with a clarification about hook shell command execution model (async, same runtime as `execute_command`, not subject to the tool approval UI).
+- **Out of scope**: Updated to describe shell commands as the extensibility surface for hook automation, while still excluding arbitrary in-process code execution.
+- **Fetch scenario**: Updated example URL to `https://en.wikipedia.org/wiki/A_Mathematical_Theory_of_Communication`.

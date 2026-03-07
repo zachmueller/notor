@@ -106,7 +106,7 @@ Fetch a webpage and convert its HTML content to Markdown for efficient consumpti
 - Fetches the page HTML via HTTP request, then converts to Markdown using [Turndown](https://github.com/mixmark-io/turndown) (bundled directly into the plugin).
 - Returns the converted Markdown content in the tool result. Does **not** write to a note — the user can direct the LLM to save the content to a note if desired.
 - No truncation or pagination of the returned content.
-- **Domain denylist**: users can configure a denylist of domains/sub-domains in **Settings → Notor**. Requests to denylisted domains return an error indicating the domain is blocked by the user. This allows users to mark sources they consider untrustworthy.
+- **Domain denylist**: users can configure a denylist of domains in **Settings → Notor**. Requests to denylisted domains return an error indicating the domain is blocked by the user. This allows users to mark sources they consider untrustworthy. Matching is exact-domain only: denylisting `example.com` blocks only `example.com` itself, not its sub-domains. To block sub-domains, users must add separate wildcard entries (e.g., `*.example.com`).
 - The initial implementation uses raw Turndown conversion. Content extraction quality (e.g., stripping navigation, ads, boilerplate via a readability library) may be improved in future iterations.
 - **Mode**: read-only (available in Plan and Act).
 

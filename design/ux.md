@@ -234,9 +234,9 @@ Plugin settings are managed in **Settings → Notor** within Obsidian's settings
 
 A user-configurable list of domains and sub-domains that the `fetch_webpage` tool is blocked from accessing.
 
-- Users add or remove domains via a list editor in the settings UI.
-- Denylisting `example.com` blocks all pages under `example.com` and its sub-domains (e.g., `sub.example.com`).
-- When the LLM attempts to fetch a denylisted domain, the tool returns an error indicating the domain is blocked by the user.
+- Users add or remove domain entries via a list editor in the settings UI.
+- Matching is exact-domain only: denylisting `example.com` blocks only `example.com` itself, not its sub-domains. To block sub-domains, users must add separate wildcard entries (e.g., `*.example.com`).
+- When the LLM attempts to fetch a denylisted domain, the tool returns an error indicating the domain is blocked by the user, without making a network request.
 - This is a user preference control for marking sources they consider untrustworthy — not a security mechanism.
 
 ### MCP tool classification (Phase 5)

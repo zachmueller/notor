@@ -15,7 +15,7 @@ This specification covers Phase 3 of the roadmap:
 - **Auto-compaction**: deterministic, plugin-managed context window summarization that preserves continuity when approaching the token limit.
 - **`fetch_webpage` tool**: fetch a URL, convert its HTML to Markdown, and return the result to the AI — with a user-configurable domain denylist.
 - **`execute_command` tool**: run cross-platform shell commands from within the AI conversation, with configurable restrictions by mode.
-- **LLM interaction hooks**: event-driven callbacks tied to the chat lifecycle (`pre-send`, `on-tool-call`, `after-completion`) for automating follow-up actions.
+- **LLM interaction hooks**: event-driven callbacks tied to the chat lifecycle (`pre-send`, `on-tool-call`, `on-tool-result`, `after-completion`) for automating follow-up actions.
 
 ## User stories
 
@@ -55,6 +55,8 @@ This specification covers Phase 3 of the roadmap:
 - As a power user, I want to run an action automatically after the AI finishes responding so that I can chain workflows or trigger follow-up tasks without manual intervention.
 - As a user, I want a hook that fires before each message is sent so that I can inject additional context or validate the input programmatically.
 - As a user, I want a hook that fires on every tool call so that I can log or audit AI actions in my vault.
+- As a user, I want a hook that fires after each tool completes so that I can react to tool output — for example, writing a log entry that includes what the tool returned.
+- As a power user, I want hooks to be able to run shell commands so that I can drive complex external automation from within my Notor conversation.
 
 ## Functional requirements
 
@@ -64,7 +66,7 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - An attachment button in the chat input area opens a vault file picker.
-- The picker supports `[[wikilink]]` autocomplete for vault notes.
+- When the user types `[[` in the Notor chat input box, the same wikilink autocomplete behavior as Obsidian's native note editor is applied — showing matching note titles and allowing selection to complete the link.
 - Multiple notes can be attached to a single message.
 - Section references (`[[Note#Section Header]]`) are supported: when a section reference is used, only the content of that section (from the heading to the next heading of equal or higher level) is included in the attachment, not the full note.
 - Attached notes appear as labeled chips/tags in the input area before the message is sent.
@@ -80,7 +82,7 @@ This specification covers Phase 3 of the roadmap:
 - The attachment control (same button as FR-1) allows selecting files from the local filesystem outside the vault.
 - Attached external files are read and included in the user message context.
 - External files are labeled as such in the attachment chips so the user can distinguish them from vault notes.
-- File size limits apply: files larger than a configurable maximum (default: 1 MB) are rejected with a user-facing error.
+- File size limits apply: if a file exceeds a configurable threshold (default: 1 MB), a confirmation dialog is shown highlighting the file size and asking the user to confirm before attaching. The user can proceed or cancel.
 
 ### FR-3: Auto-context — open note paths
 
@@ -149,8 +151,7 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - Users can add and remove domain entries in **Settings → Notor** via a list editor.
-- Denylisting a domain (e.g., `example.com`) blocks all pages under that domain and all its sub-domains (e.g., `sub.example.com`).
-- Matching is domain-based, not path-based: the full domain and sub-domains are blocked, regardless of URL path.
+- Matching is exact-domain only: denylisting `example.com` blocks only `example.com` itself, not its sub-domains. To block sub-domains, users must add separate wildcard entries (e.g., `*.example.com`).
 - When a blocked domain is requested, the tool returns an error to the LLM indicating the domain is blocked by the user, without making a network request.
 - The denylist is empty by default.
 - The denylist is a user preference control, not a security mechanism.
@@ -174,24 +175,38 @@ This specification covers Phase 3 of the roadmap:
 
 **Acceptance criteria:**
 - The `pre-send` hook is triggered after the user submits a message but before it is dispatched to the LLM provider.
-- Hooks can be configured to run a workflow, send additional context to inject, or invoke a specific built-in action.
+- Hooks can be configured to run a workflow, inject additional context, append to a vault note, or execute a shell command.
 - A `pre-send` hook can add content to the outgoing message context (e.g., inject a note summary or a timestamp).
+- When a hook executes a shell command, conversation metadata is made available to the command as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, and a UTC timestamp. Additional metadata fields may be added over time.
 - If a hook fails, the message is still sent and the hook failure is logged and surfaced as a non-blocking notice.
 - Hooks are configured in **Settings → Notor** and/or via workflow frontmatter.
 - The hook configuration is persisted across plugin reloads.
 
 ### FR-11: LLM interaction hooks — `on-tool-call`
 
-**Description:** A hook that fires each time the LLM requests a tool invocation.
+**Description:** A hook that fires each time the LLM requests a tool invocation, before the tool is executed.
 
 **Acceptance criteria:**
 - The `on-tool-call` hook is triggered after the tool call is parsed but before the auto-approve check and tool execution.
 - The hook receives the tool name and parameters as context.
+- When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, tool name, tool parameters (serialized), and a UTC timestamp.
 - Use cases include: logging each tool call to a vault note, triggering an audit workflow, or implementing custom approval logic.
 - Hook execution is non-blocking with respect to the tool dispatch pipeline: if a hook fails, tool execution proceeds and the failure is surfaced as a notice.
 - Configured in **Settings → Notor** and/or workflow frontmatter, persisted across reloads.
 
-### FR-12: LLM interaction hooks — `after-completion`
+### FR-12: LLM interaction hooks — `on-tool-result`
+
+**Description:** A hook that fires after each tool call completes and the result is available.
+
+**Acceptance criteria:**
+- The `on-tool-result` hook is triggered after tool execution finishes and the result (or error) has been captured, but before the result is returned to the LLM.
+- The hook receives the tool name, parameters, result output, and success/error status as context.
+- When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, tool name, tool parameters (serialized), tool result (serialized), result status (success or error), and a UTC timestamp.
+- Use cases include: logging tool outputs to a vault note, triggering follow-up actions based on tool results, or auditing tool behavior.
+- Hook execution is non-blocking: if a hook fails, the tool result is still returned to the LLM and the failure is surfaced as a notice.
+- Configured in **Settings → Notor** and/or workflow frontmatter, persisted across reloads.
+
+### FR-13: LLM interaction hooks — `after-completion`
 
 **Description:** A hook that fires after the LLM finishes a complete response turn.
 
@@ -199,6 +214,7 @@ This specification covers Phase 3 of the roadmap:
 - The `after-completion` hook is triggered after the LLM's full response (including any tool call cycles) is complete and the response is displayed in the chat panel.
 - Use cases include: auto-saving the conversation summary to a note, triggering a follow-up workflow, or appending a log entry.
 - The hook receives the completed conversation turn as context (user message + assistant response + any tool calls/results).
+- When a hook executes a shell command, conversation metadata is available as environment variables, including at minimum: conversation UUID, active workflow name (if any), hook event name, and a UTC timestamp.
 - Hook failures are non-blocking: the conversation continues and failures are surfaced as notices.
 - Configured in **Settings → Notor** and/or workflow frontmatter, persisted across reloads.
 
@@ -224,7 +240,7 @@ This specification covers Phase 3 of the roadmap:
 - The domain denylist provides users a mechanism to block untrusted sources from `fetch_webpage`.
 - `execute_command` working directory is restricted to the vault or a user-configured allow-list; commands cannot be directed to arbitrary filesystem paths outside this scope.
 - No auto-context data (open note paths, vault structure) is transmitted to any party other than the configured LLM provider.
-- Hooks cannot initiate network calls, filesystem writes, or shell commands outside the normal Notor tool and LLM pipeline.
+- Hooks cannot initiate arbitrary network calls or filesystem writes outside the normal Notor tool and LLM pipeline. Hook shell commands are executed using the same runtime and path restrictions as the `execute_command` tool; they do not bypass Notor's working directory allow-list.
 
 ### NFR-3: Usability and transparency
 
@@ -262,7 +278,7 @@ This specification covers Phase 3 of the roadmap:
 
 ### Primary flow: AI fetches a webpage and saves content to a note
 
-1. User types: "Fetch https://example.com/article and create a note at Research/Article.md with the key points."
+1. User types: "Fetch https://en.wikipedia.org/wiki/A_Mathematical_Theory_of_Communication and create a note at Research/Information Theory.md with the key points."
 2. The AI invokes `fetch_webpage` with the URL. The tool call appears inline showing the URL and a result summary (e.g., "Fetched 4,200 characters of Markdown").
 3. The AI processes the Markdown and invokes `write_note` to create the note.
 4. A diff preview appears; user approves. The note is created and opened in the editor.
@@ -313,9 +329,9 @@ This specification covers Phase 3 of the roadmap:
 ### Edge case: Attachment of oversized file
 
 1. User attempts to attach a 5 MB PDF from outside the vault.
-2. The plugin checks the file size against the configurable limit (default: 1 MB).
-3. The attachment is rejected with a user-facing error: "File exceeds the maximum attachment size (1 MB)."
-4. The file does not appear in the attachment chips and is not sent.
+2. The plugin detects the file exceeds the configurable threshold (default: 1 MB).
+3. A confirmation dialog appears: "This file is 5 MB, which is larger than the recommended limit. Attaching it may consume significant context window space. Attach anyway?"
+4. If the user confirms, the file is attached and appears as a chip in the input area. If the user cancels, nothing is attached.
 
 ### Edge case: Auto-context with no open notes
 
@@ -351,7 +367,7 @@ This specification covers Phase 3 of the roadmap:
 3. **Long sessions remain productive** — conversations that exceed the context window do not abruptly terminate or require manual restart; auto-compaction preserves continuity, and the full history is always retained in the JSONL log.
 4. **The AI can retrieve and work with external web content** — users can direct the AI to fetch a URL and the returned Markdown content integrates naturally into the conversation and note editing workflow.
 5. **Shell commands can be executed through the AI conversation** — with approval required by default, commands run in the user's environment and output is returned to the AI, enabling automation beyond vault operations.
-6. **LLM lifecycle hooks enable automation** — users can configure at least one hook type (`pre-send`, `on-tool-call`, `after-completion`) that fires reliably, executes its configured action, and does not interrupt the conversation on failure.
+6. **LLM lifecycle hooks enable automation** — users can configure at least one hook type (`pre-send`, `on-tool-call`, `on-tool-result`, `after-completion`) that fires reliably, executes its configured action, and does not interrupt the conversation on failure.
 7. **Phase 3 features are safe and transparent** — `fetch_webpage` and `execute_command` are surfaced in the chat thread with the same transparency as all other tools; no background network or system calls occur without user-visible AI-initiated requests.
 
 ## Key entities
@@ -374,14 +390,15 @@ This specification covers Phase 3 of the roadmap:
 - Displayed as a "Context compacted" marker in the chat UI.
 
 ### Hook
-- A configured callback tied to a lifecycle event: `pre-send`, `on-tool-call`, or `after-completion`.
-- Has a trigger event and an action (run workflow, inject context, append to note, etc.).
+- A configured callback tied to a lifecycle event: `pre-send`, `on-tool-call`, `on-tool-result`, or `after-completion`.
+- Has a trigger event and an action: run a workflow, inject context, append to a vault note, or execute a shell command.
+- When the action is a shell command, conversation metadata (conversation UUID, active workflow name, hook event name, tool name/parameters/result where applicable, UTC timestamp) is passed to the command as environment variables.
 - Persisted in plugin settings.
 - Execution is asynchronous and non-blocking.
 
 ### DomainDenylistEntry
-- A single domain string in the user-configured denylist for `fetch_webpage`.
-- Matching applies to the domain and all its sub-domains.
+- A single domain string or wildcard pattern (e.g., `*.example.com`) in the user-configured denylist for `fetch_webpage`.
+- Exact-domain entries match only that domain. Wildcard entries (e.g., `*.example.com`) match all sub-domains of the specified domain.
 - Persisted in plugin settings.
 
 ## Assumptions
@@ -391,7 +408,7 @@ This specification covers Phase 3 of the roadmap:
 - `execute_command` uses Node.js `child_process` APIs available in Obsidian's Electron environment. If mobile compatibility is required, this tool must be gated behind desktop-only detection.
 - Section header attachment (`[[Note#Section]]`) follows Obsidian's standard heading anchor format. Ambiguous or duplicated heading names are resolved by taking the first match.
 - The per-model context window token limit (needed for auto-compaction threshold calculation) is sourced from the model metadata already tracked in Phase 0/1 provider configuration. For models where this metadata is unavailable, auto-compaction falls back to the MVP truncation behavior.
-- Hooks in Phase 3 are limited to built-in action types (run workflow, inject context, append to note). User-defined hook scripts or arbitrary code execution are deferred to a later phase.
+- Hooks that execute shell commands rely on the same `execute_command` runtime used by the tool of the same name, including the working directory and path restriction model. Hooks fire shell commands asynchronously; they are not subject to the tool approval UI that governs `execute_command` tool calls from the LLM.
 
 ## Out of scope
 
@@ -408,4 +425,4 @@ The following are explicitly excluded from Phase 3 and deferred to later phases:
 - **Custom MCP tools** (Phase 5).
 - **Browser capabilities / Obsidian Web Viewer integration** (Phase 5).
 - **External file access beyond attachment** (Phase 5): external files can be attached to messages, but the AI cannot autonomously read external files via a tool call.
-- **Hook-driven code execution**: hooks cannot run arbitrary user scripts; they trigger built-in Notor actions only.
+- **Arbitrary hook scripts beyond shell commands**: hooks can run shell commands (with metadata context), but cannot execute arbitrary in-process code or dynamically loaded scripts. Shell commands provide the extensibility surface for complex automation.
