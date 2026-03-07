@@ -6,13 +6,13 @@
 
 ## Overview
 
-Phase 4 introduces structured, reusable AI interactions and configurable AI personalities to Notor. Building on the chat infrastructure, tools, trust mechanisms, and context intelligence from Phases 0–3, this phase adds four interconnected capabilities: a file-based persona system that shapes the AI's behavior and model preferences per use case, a workflow definition system that turns Obsidian notes into reusable prompt templates with dynamic content injection, vault-event hooks that trigger automation in response to note lifecycle changes, and hook configuration via workflow frontmatter that ties Phase 3's LLM lifecycle hooks to specific workflows. Together these features transform Notor from a general-purpose AI chat assistant into a composable automation platform where users define specialized AI behaviors and chain them to vault events — all configured through familiar Obsidian notes and frontmatter.
+Phase 4 introduces structured, reusable AI interactions and configurable AI personalities to Notor. Building on the chat infrastructure, tools, trust mechanisms, and context intelligence from Phases 0–3, this phase adds four interconnected capabilities: a file-based persona system that shapes the AI's behavior and model preferences per use case, a workflow definition system that turns Obsidian notes into reusable AI instruction sets — structured step-by-step guidance that shapes how the AI approaches specific tasks, with dynamic content injection via `<include_note>` tags, vault-event hooks that trigger automation in response to note lifecycle changes, and hook configuration via workflow frontmatter that ties Phase 3's LLM lifecycle hooks to specific workflows. Together these features transform Notor from a general-purpose AI chat assistant into a composable automation platform where users define specialized AI behaviors and chain them to vault events — all configured through familiar Obsidian notes and frontmatter.
 
 This specification covers Phase 4 of the roadmap:
 
 - **Basic persona system**: file-based personas stored as Obsidian notes under `{notor_dir}/personas/`, with system prompt customization (append or replace the global prompt), model preferences, and a provider/model identifier reference in Settings for easy configuration.
 - **Per-persona auto-approve overrides**: persona-level auto-approve settings managed through a dedicated Settings UI sub-page that override global defaults when a persona is active.
-- **Workflow notes**: workflow definitions stored as Obsidian notes under `{notor_dir}/workflows/`, with frontmatter-driven triggers and optional persona assignment.
+- **Workflow notes**: workflow definitions stored as Obsidian notes under `{notor_dir}/workflows/`, providing structured step-by-step instructions that guide how the AI approaches specific tasks, with frontmatter-driven triggers and optional persona assignment.
 - **`<include_note>` tag**: dynamic note content injection in workflow bodies, system prompts, and vault-level rule files. Each `<include_note ... />` tag is a self-closing XML-style tag that injects the contents of a single vault note; multiple tags may appear in the same document.
 - **Vault event hooks**: hooks tied to vault lifecycle events (`on-note-open`, `on-save`, `on-tag-change`, `on-schedule`) for triggering workflows or shell commands.
 - **Hook configuration via workflow frontmatter**: extending Phase 3's settings-only hook system to support per-workflow hook overrides defined in workflow note frontmatter.
@@ -35,7 +35,8 @@ This specification covers Phase 4 of the roadmap:
 
 ### Workflows
 
-- As a user, I want to define reusable prompt templates as notes in my vault so that I can run the same structured AI interaction repeatedly without retyping.
+- As a user, I want to define reusable instruction sets as notes in my vault so that I can guide the AI through the same structured process repeatedly without retyping instructions.
+- As a user, I want to write workflows as step-by-step instructions that shape how the AI approaches a task so that the AI follows a specific methodology rather than interpreting a loose prompt.
 - As a user, I want a workflow to automatically switch to a specific persona when it runs so that the AI always uses the right behavior and model for that workflow.
 - As a user, I want to trigger a workflow manually from the command palette so that I can run it on demand.
 - As a user, I want to see workflow execution in the chat panel with full transparency so that I can follow the AI's actions and approve tool calls as usual.
@@ -141,7 +142,7 @@ This specification covers Phase 4 of the roadmap:
 
 ### FR-41: Workflow note definition and discovery
 
-**Description:** Workflows are defined as Obsidian notes under a well-known directory, identified by frontmatter properties.
+**Description:** Workflows are defined as Obsidian notes under a well-known directory, identified by frontmatter properties. Workflows are **instruction sets that guide how the AI approaches a task** — not prompt templates or conversational requests. They define a structured process the AI should follow, combining natural language steps with optional specific directives (e.g., tool calls, note references). This design follows the pattern established by Cline's workflow system, where workflow content is treated as authoritative step-by-step guidance that shapes the AI's methodology.
 
 **Acceptance criteria:**
 - Workflow notes are stored under `{notor_dir}/workflows/` as regular Obsidian Markdown notes.
@@ -159,6 +160,24 @@ This specification covers Phase 4 of the roadmap:
 - If `{notor_dir}/workflows/` does not exist, the plugin treats the workflow list as empty. No error is surfaced.
 - Workflow notes may be organized in subdirectories under `{notor_dir}/workflows/` (e.g., `{notor_dir}/workflows/daily/review.md`). The plugin scans recursively.
 - A workflow note with `notor-workflow: true` but missing a required `notor-trigger` property is treated as invalid; the plugin logs a warning and excludes it from the discovered workflow list.
+- **Workflow authoring guidance:** Workflow bodies should be written as structured instructions with clear steps, not as conversational prompts or open-ended questions. Effective workflows describe *what the AI should do and how*, using headings to delineate steps. Steps can be written at different levels of detail: high-level ("Run the test suite and fix any failures") lets the AI decide the approach, while specific steps can reference exact tool calls or notes. Example structure:
+  ```markdown
+  # Daily note review
+
+  Review today's daily notes and create a summary.
+
+  ## Step 1: Find today's notes
+  Search for notes created or modified today in the Daily/ folder.
+
+  ## Step 2: Analyze themes
+  Identify recurring themes, key decisions, and action items across the notes.
+
+  ## Step 3: Create summary
+  Write a summary note at Daily/summary.md with sections for:
+  - Key themes
+  - Decisions made
+  - Action items with owners
+  ```
 
 ### FR-42: Manual workflow execution
 
@@ -186,17 +205,24 @@ This specification covers Phase 4 of the roadmap:
 - The persona revert occurs regardless of whether the workflow succeeds, fails, or is stopped by the user.
 - The persona switch persists for the entire conversation that was started by the workflow. The user can continue sending follow-up messages in the workflow conversation under the workflow's persona. The persona reverts only when the user switches to a different conversation or starts a new one. This supports multi-turn workflows where the persona context matters throughout the full interaction.
 
-### FR-44: Workflow prompt assembly
+### FR-44: Workflow prompt assembly and context injection
 
-**Description:** The workflow's body content is assembled into a prompt by resolving dynamic content tags before being sent to the LLM.
+**Description:** The workflow's body content is assembled into structured instructions by resolving dynamic content tags, then injected into the conversation context wrapped in a `<workflow_instructions>` tag that signals to the AI that this content is authoritative step-by-step guidance it should follow. This injection pattern is modeled after Cline's `<explicit_instructions>` mechanism, where workflow content is wrapped in a structured XML tag and prepended to the user message, clearly distinguishing workflow instructions from casual user messages.
 
 **Acceptance criteria:**
-- The body content of the workflow note (after stripping frontmatter) serves as the prompt template.
+- The body content of the workflow note (after stripping frontmatter) provides the workflow instructions.
 - Any `<include_note>` tags in the body are resolved at execution time (see FR-46).
-- The assembled prompt is sent as the user message in a new conversation.
-- Static text in the workflow body is included as-is.
+- The resolved workflow content is wrapped in a `<workflow_instructions>` XML tag before being sent as the user message:
+  ```xml
+  <workflow_instructions type="{workflow-file-name}">
+  {resolved workflow body content}
+  </workflow_instructions>
+  ```
+  The `type` attribute contains the workflow note's file name (e.g., `daily-review.md`) for identification and debugging. This wrapping signals to the AI that the enclosed content is authoritative step-by-step guidance it should follow, rather than a casual user message to respond to conversationally. The AI should execute the steps methodically rather than asking clarifying questions about the instructions.
+- The wrapped workflow instructions are sent as the user message in a new conversation. If the user typed additional text when triggering the workflow (future enhancement), that text appears after the closing `</workflow_instructions>` tag — outside the instructions block — so the AI can distinguish between the workflow's steps and any supplementary user context.
+- Static text in the workflow body is included as-is within the `<workflow_instructions>` wrapper.
 - If the workflow body is empty (no text after stripping frontmatter and resolving tags), the workflow execution is aborted and a notice is surfaced: "Workflow has no prompt content."
-- The assembled prompt follows the same message structure as a regular user message: auto-context block (if enabled), any resolved `<include_note>` content, then the workflow prompt text.
+- The assembled message follows the same message structure as a regular user message: auto-context block (if enabled), then the `<workflow_instructions>`-wrapped content.
 
 ### FR-45: Event-triggered workflow execution
 
@@ -531,8 +557,8 @@ This specification covers Phase 4 of the roadmap:
 
 1. **Users can create and switch between specialized AI personalities** — personas defined as vault notes shape the AI's system prompt, model, and provider preferences, with changes taking effect immediately and no plugin reload required.
 2. **Personas customize the approval experience** — per-persona auto-approve overrides allow power users to streamline trusted workflows while maintaining strict approval for sensitive operations, with fallback to global defaults for unconfigured tools.
-3. **Reusable prompt templates reduce repetitive work** — workflow notes stored in the vault can be run manually from the command palette, producing a full transparent conversation in the chat panel with tool calls, results, and streaming responses.
-4. **Workflows compose dynamic prompts from vault content** — `<include_note>` tags resolve at execution time to inject note contents (full or section-level) into workflow prompts, system prompts, and rule files without manual copy-paste; multiple tags may appear in a single document and each resolves independently.
+3. **Reusable instruction sets reduce repetitive work** — workflow notes stored in the vault provide structured step-by-step guidance that the AI follows methodically. Workflows can be run manually from the command palette, producing a full transparent conversation in the chat panel with tool calls, results, and streaming responses. Workflow content is injected into the conversation context via `<workflow_instructions>` wrapping, clearly signaling to the AI that the content is authoritative guidance rather than a casual request.
+4. **Workflows compose dynamic instructions from vault content** — `<include_note>` tags resolve at execution time to inject note contents (full or section-level) into workflow instructions, system prompts, and rule files without manual copy-paste; multiple tags may appear in a single document and each resolves independently.
 5. **Vault events drive automated AI workflows** — hooks tied to note open, save, tag change, and cron schedule events trigger shell commands or named workflows reliably, with debounce preventing redundant executions.
 6. **Workflows can customize their hook behavior** — per-workflow LLM lifecycle hook overrides via frontmatter allow each workflow to define its own pre-send, on-tool-call, on-tool-result, and after-completion actions without affecting global configuration.
 7. **Phase 4 features are safe and resilient** — infinite loop detection prevents runaway hook-to-workflow chains, malformed personas and workflows are gracefully excluded without crashing the plugin, and all safety mechanisms (Plan/Act mode, checkpoints, auto-approve) apply equally to manually and automatically triggered workflows.
@@ -550,7 +576,8 @@ This specification covers Phase 4 of the roadmap:
 ### Workflow
 - Stored as a Markdown note under `{notor_dir}/workflows/` with `notor-workflow: true` in frontmatter.
 - Frontmatter properties define trigger type (`notor-trigger`), optional schedule (`notor-schedule`), optional persona assignment (`notor-workflow-persona`), and optional per-workflow hooks (`notor-hooks`).
-- Body content (after stripping frontmatter) is the prompt template, which may contain `<include_note>` tags and static text.
+- Body content (after stripping frontmatter) provides step-by-step instructions that guide the AI's approach to a task. The body should be structured as clear, actionable steps rather than a conversational prompt. It may contain `<include_note>` tags for dynamic content injection and static text.
+- At execution time, the resolved body content is wrapped in a `<workflow_instructions type="{filename}">` XML tag before being sent as the user message. This wrapping signals to the AI that the content is authoritative guidance to follow methodically, not a casual request (see FR-44).
 - Discovered by scanning the workflows directory recursively for notes with the `notor-workflow` property.
 - Can be executed manually (command palette), triggered by vault events (via workflow-trigger frontmatter), or invoked by hooks (FR-51).
 
@@ -619,3 +646,4 @@ The following are explicitly excluded from Phase 4 and deferred to later phases 
 - A "Provider & model identifiers" reference section was added to Settings (FR-39a) so users can easily discover and copy the exact string values needed for `notor-preferred-provider` and `notor-preferred-model` frontmatter properties.
 - The dynamic content injection tag was renamed from `<include_notes>` (plural) to `<include_note>` (singular). The singular form is semantically accurate — each tag instance includes exactly one note — and follows the convention of self-closing tags that describe a single element (e.g., `<img />`). Users can include multiple notes by using multiple `<include_note ... />` tags. The tag is always written in self-closing form (ending with `/>`); the three supported attributes are `path` (required), `section` (optional), and `mode` (optional). All other attributes are silently ignored.
 - The `path` attribute on `<include_note>` was extended to support Obsidian wikilink syntax in addition to vault-relative file paths. When `path="[[Note Title]]"` (or `path="[[Subfolder/Note Title]]"`) is used, the plugin resolves the note using Obsidian's `metadataCache.getFirstLinkpathDest()` — the same API Obsidian uses for all internal wikilinks — so the note is found by name without requiring the full path. Critically, Obsidian's built-in link-update mechanism treats the wikilink inside the `path` attribute as an internal link and will automatically rewrite it when the referenced note is renamed or moved, making wikilink syntax the recommended form. Vault-relative path syntax (`path="Research/Note.md"`) remains supported for cases where the full path is preferred or required.
+- Workflows were reframed from "prompt templates" to "instruction sets" after researching Cline's workflow implementation. In Cline, workflows are Markdown files defining step-by-step processes (not conversational prompts), and their content is wrapped in `<explicit_instructions type="{filename}">` XML tags when injected into the conversation context. This wrapping signals to the AI that the content is authoritative guidance to follow methodically. Notor adopts this pattern with a `<workflow_instructions>` tag (FR-44), and the spec was updated throughout to reflect this philosophy: FR-41 now includes workflow authoring guidance emphasizing structured steps over conversational prompts, the Workflow key entity description was updated, and user stories and success criteria were revised to use "instruction set" language. The core insight is that workflows shape *how the AI approaches a task* rather than simply providing text to respond to.
