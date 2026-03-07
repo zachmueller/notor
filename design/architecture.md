@@ -82,7 +82,7 @@ Before every LLM API call (including tool-result round-trips within a single tur
 3. **Vault-level instruction files** (Phase 2): scan `{notor_dir}/rules/` and inject any rule files whose frontmatter triggers match current context conditions (see trigger properties below).
 4. **Workspace context** (Phase 3): the dynamic `<auto-context>` XML block (see Auto-context injection below) is appended as a `## Workspace context` section. This is rebuilt from scratch before every LLM API call so it always reflects the latest workspace state — open tabs, vault structure, and OS are never stale.
 
-Steps 1–3 each support `<include_notes>` tags (see below) to dynamically inject note contents. In system prompt and rule file contexts, only `mode="inline"` is supported (the `mode` attribute is ignored; content is always inlined directly into the prompt text).
+Steps 1–3 each support `<include_note>` tags (see below) to dynamically inject note contents. In system prompt and rule file contexts, only `mode="inline"` is supported (the `mode` attribute is ignored; content is always inlined directly into the prompt text).
 
 #### Vault-level rule trigger evaluation (Phase 2)
 
@@ -97,7 +97,7 @@ For each Markdown file under `{notor_dir}/rules/`, the plugin evaluates frontmat
 - Multiple trigger properties on the same file use OR logic (any match causes inclusion).
 - The file body (after stripping frontmatter) is the injected instruction content.
 - Additional trigger types may be added over time.
-- Rule file bodies support `<include_notes>` tags to dynamically inject note contents (inline mode only — see system prompt assembly above).
+- Rule file bodies support `<include_note>` tags to dynamically inject note contents (inline mode only — see system prompt assembly above).
 
 ### Auto-context injection (Phase 3)
 
@@ -204,22 +204,31 @@ Workflows are reusable, structured prompting sequences stored as notes in the va
   ```
 - **Body content** is the prompt template, which can include:
   - Static prompt text.
-  - `<include_notes>` tags for dynamic note injection.
+  - `<include_note>` tags for dynamic note injection.
 
-### `<include_notes>` tag
+### `<include_note>` tag
 
-Inject note contents dynamically at execution time. Used in workflow note bodies, system prompts (global and persona), and vault-level rule files.
+Inject note contents dynamically at execution time. Used in workflow note bodies, system prompts (global and persona), and vault-level rule files. Each tag is self-closing (ending with `/>`) and injects the contents of a single note; use multiple tags to include multiple notes.
 
 ```markdown
-<include_notes path="Research/Topic A.md" section="Summary" mode="inline" />
-<include_notes path="Templates/analysis-framework.md" mode="attached" />
+<!-- Vault-relative path (explicit) -->
+<include_note path="Research/Topic A.md" section="Summary" mode="inline" />
+
+<!-- Wikilink (Obsidian-native, rename-safe — recommended) -->
+<include_note path="[[Topic A]]" section="Summary" mode="inline" />
+
+<include_note path="[[Templates/analysis-framework]]" mode="attached" />
 ```
 
 | Attribute | Required | Description |
 |---|---|---|
-| `path` | yes | Vault path to the note (supports `[[wikilink]]` syntax) |
+| `path` | yes | Reference to the target note. Accepts a vault-relative file path (e.g., `"Research/Topic A.md"`) or an Obsidian wikilink (e.g., `"[[Topic A]]"` or `"[[Research/Topic A]]"`). Wikilink syntax is recommended — see path resolution rules below. |
 | `section` | no | Specific section header to extract (omit for full note) |
 | `mode` | no | `inline` (paste content directly into prompt) or `attached` (include as a separate attached file in context). Default: `inline` |
+
+**Path resolution rules:**
+- **Vault-relative path** (e.g., `path="Research/Topic A.md"`): the plugin reads the note at that exact path within the vault. If the note is renamed or moved, the path in the tag is not automatically updated and will break.
+- **Wikilink** (e.g., `path="[[Topic A]]"` or `path="[[Research/Topic A]]"`): resolved via Obsidian's `metadataCache.getFirstLinkpathDest()` API — the same mechanism used for all internal Obsidian wikilinks. The note is found by name/title without requiring the full path. Obsidian's built-in link-update mechanism treats the wikilink inside the `path` attribute as an internal link and automatically rewrites it when the referenced note is renamed or moved. **Wikilink syntax is the recommended form** for notes that may be renamed.
 
 **Context-specific behavior:**
 - **Workflow notes**: both `inline` and `attached` modes are supported.

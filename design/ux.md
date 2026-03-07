@@ -136,13 +136,13 @@ Centrally stored Markdown files under `{notor_dir}/rules/` that are conditionall
 - Multiple trigger properties can coexist on the same file (OR logic — any matching trigger causes inclusion).
 - Additional trigger types may be added over time.
 - The file body (after stripping frontmatter) is the instruction content injected into the system prompt / context.
-- Rule file bodies support `<include_notes>` tags for dynamically injecting note contents (inline mode only — see [Architecture — `<include_notes>` tag](architecture.md#include_notes-tag)).
+- Rule file bodies support `<include_note>` tags for dynamically injecting note contents (inline mode only — see [Architecture — `<include_note>` tag](architecture.md#include_note-tag)).
 
 ### Persona system prompts (Phase 4)
 
 - Each persona is defined by a `system-prompt.md` file under `{notor_dir}/personas/{persona_name}/`.
 - The file body (stripping frontmatter) is the persona's system prompt.
-- Both global and persona system prompts support `<include_notes>` tags for dynamically injecting note contents (inline mode only — see [Architecture — `<include_notes>` tag](architecture.md#include_notes-tag)).
+- Both global and persona system prompts support `<include_note>` tags for dynamically injecting note contents (inline mode only — see [Architecture — `<include_note>` tag](architecture.md#include_note-tag)).
 - Frontmatter properties configure persona behavior:
   ```yaml
   ---
@@ -177,7 +177,7 @@ Workflows are reusable, structured AI interactions defined as notes in the vault
 ### Workflow execution
 
 - Workflows are triggered manually (from a command palette action, or a future UI affordance) or automatically via hooks (on-note-open, on-save, on-schedule, etc.).
-- When a workflow is triggered, its body content is assembled as the prompt — with any `<include_notes>` tags resolved to inject note contents — and sent to the LLM.
+- When a workflow is triggered, its body content is assembled as the prompt — with any `<include_note>` tags resolved to inject note contents — and sent to the LLM.
 - The workflow execution appears as a conversation in the main Notor chat panel, with full transparency (tool calls, results, streaming responses).
 
 ### Automatic persona switching via `notor-workflow-persona`
