@@ -227,21 +227,33 @@ async function testCompactionRecordInJSONL(page: Page): Promise<void> {
 async function testManualCompaction(page: Page): Promise<void> {
 	console.log("\n── Test 3: Manual compaction via command palette ───────────");
 
-	// Open command palette (Ctrl+P or Cmd+P)
-	const isMac = process.platform === "darwin";
-	await page.keyboard.press(isMac ? "Meta+p" : "Control+p");
-	await page.waitForTimeout(500);
+	try {
+		// Open command palette (Ctrl+P or Cmd+P)
+		const isMac = process.platform === "darwin";
+		await page.keyboard.press(isMac ? "Meta+p" : "Control+p");
+		await page.waitForTimeout(800);
 
-	// Type the compaction command
-	const paletteInput = await page.$(".prompt-input, input[type='text']");
-	if (paletteInput) {
-		await paletteInput.fill("Notor: Compact context");
-		await page.waitForTimeout(500);
+		// Wait for the palette input to appear
+		const paletteInput = await waitForSelector(page, ".prompt-input", 5_000);
+		if (!paletteInput) {
+			// Palette didn't open — close any overlay and report
+			await page.keyboard.press("Escape");
+			await page.waitForTimeout(300);
+			fail("Manual compaction", "Command palette did not open (.prompt-input not found)");
+			return;
+		}
 
-		// Look for the command in results
-		const commandItem = await page.$(".suggestion-item, .prompt-results .suggestion-item");
+		// Use keyboard.type() — fill() requires visible+editable which Obsidian's
+		// palette input may not satisfy; keyboard.type() dispatches raw key events
+		// and works reliably across Obsidian versions.
+		await paletteInput.click();
+		await page.keyboard.type("Compact context");
+		await page.waitForTimeout(600);
+
 		const shot1 = await screenshot(page, "03a-command-palette");
 
+		// Look for the "Compact context" command in results
+		const commandItem = await page.$(".suggestion-item");
 		if (commandItem) {
 			const text = await commandItem.textContent();
 			if (text?.toLowerCase().includes("compact")) {
@@ -250,20 +262,23 @@ async function testManualCompaction(page: Page): Promise<void> {
 				const shot2 = await screenshot(page, "03b-after-compact");
 				pass("Manual compaction — command found", `Found and executed: "${text.trim()}"`, shot2);
 			} else {
-				pass("Manual compaction — command palette", "Command palette opened (command may not match exactly)", shot1);
+				// Palette opened and showed results, but first item isn't the compact command
+				await page.keyboard.press("Escape");
+				pass("Manual compaction — command palette", "Command palette opened (first suggestion didn't match 'compact')", shot1);
 			}
 		} else {
-			pass("Manual compaction — command palette opened", "Palette opened; compact command may not appear without active conversation", shot1);
+			// Palette opened but no results visible — could mean no active conversation
+			await page.keyboard.press("Escape");
+			pass("Manual compaction — command palette opened", "Palette opened; no suggestions visible (may require active conversation)", shot1);
 		}
 
-		// Close palette
-		await page.keyboard.press("Escape");
 		await page.waitForTimeout(300);
-	} else {
-		// Try closing any open palette first
-		await page.keyboard.press("Escape");
+	} catch (err) {
+		// Ensure palette is closed even on error
+		await page.keyboard.press("Escape").catch(() => {});
 		await page.waitForTimeout(300);
-		fail("Manual compaction", "Command palette input not found");
+		const shot = await screenshot(page, "03-error").catch(() => undefined);
+		fail("Manual compaction", `Unexpected error: ${err instanceof Error ? err.message : String(err)}`, shot);
 	}
 }
 
