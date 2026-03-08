@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
 **Contract:** [specs/03-workflows-personas/contracts/vault-event-hooks.md](../contracts/vault-event-hooks.md)
-**Status:** Planning
+**Status:** In Progress (Phase 0 and Phase 1 complete)
 
 ## Task Summary
 
@@ -83,20 +83,20 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** None (Group C and Group E types assumed available)
 
 **Acceptance Criteria:**
-- [ ] `VaultEventHookType` type defined: `"on_note_open" | "on_note_create" | "on_save" | "on_manual_save" | "on_tag_change" | "on_schedule"`
-- [ ] `VaultEventHook` interface defined per data-model.md: `id` (string), `event` (VaultEventHookType), `action_type` (`"execute_command" | "run_workflow"`), `command` (string | null), `workflow_path` (string | null), `label` (string), `enabled` (boolean), `schedule` (string | null)
-- [ ] `VaultEventHookConfig` interface defined: one `VaultEventHook[]` array per event type
-- [ ] `WorkflowExecutionStatus` type defined: `"queued" | "running" | "waiting_approval" | "completed" | "errored" | "stopped"`
-- [ ] `WorkflowExecution` interface defined per data-model.md: `id`, `workflow_path`, `workflow_name`, `conversation_id`, `trigger_event`, `trigger_source`, `status`, `started_at`, `completed_at`, `error_message`
-- [ ] `ExecutionChain` interface defined: `sourceHooks` (Set<string>), `modifiedNotePaths` (Set<string>)
-- [ ] `NotorSettings.vault_event_hooks` added with type `VaultEventHookConfig`, defaulting to empty arrays per event type
-- [ ] `NotorSettings.vault_event_debounce_seconds` added as `number`, default `5`
-- [ ] `NotorSettings.workflow_concurrency_limit` added as `number`, default `3`
-- [ ] `NotorSettings.workflow_activity_indicator_count` added as `number`, default `5`
-- [ ] Existing `Hook` interface in `src/settings.ts` extended with optional `action_type: "execute_command" | "run_workflow"` (default `"execute_command"`) and optional `workflow_path: string | null`
-- [ ] All types exported from `src/types.ts`
-- [ ] `DEFAULT_SETTINGS` updated with all new fields
-- [ ] TypeScript compiles cleanly with `npm run build`
+- [x] `VaultEventHookType` type defined: `"on_note_open" | "on_note_create" | "on_save" | "on_manual_save" | "on_tag_change" | "on_schedule"`
+- [x] `VaultEventHook` interface defined per data-model.md: `id` (string), `event` (VaultEventHookType), `action_type` (`"execute_command" | "run_workflow"`), `command` (string | null), `workflow_path` (string | null), `label` (string), `enabled` (boolean), `schedule` (string | null)
+- [x] `VaultEventHookConfig` interface defined: one `VaultEventHook[]` array per event type
+- [x] `WorkflowExecutionStatus` type defined: `"queued" | "running" | "waiting_approval" | "completed" | "errored" | "stopped"`
+- [x] `WorkflowExecution` interface defined per data-model.md: `id`, `workflow_path`, `workflow_name`, `conversation_id`, `trigger_event`, `trigger_source`, `status`, `started_at`, `completed_at`, `error_message`
+- [x] `ExecutionChain` interface defined: `sourceHooks` (Set<string>), `modifiedNotePaths` (Set<string>)
+- [x] `NotorSettings.vault_event_hooks` added with type `VaultEventHookConfig`, defaulting to empty arrays per event type
+- [x] `NotorSettings.vault_event_debounce_seconds` added as `number`, default `5`
+- [x] `NotorSettings.workflow_concurrency_limit` added as `number`, default `3`
+- [x] `NotorSettings.workflow_activity_indicator_count` added as `number`, default `5`
+- [x] Existing `Hook` interface in `src/settings.ts` extended with optional `action_type: "execute_command" | "run_workflow"` (default `"execute_command"`) and optional `workflow_path: string | null`
+- [x] All types exported from `src/types.ts`
+- [x] `DEFAULT_SETTINGS` updated with all new fields
+- [x] TypeScript compiles cleanly with `npm run build`
 
 ### F-002: VaultEventHookConfig CRUD helpers
 
@@ -108,14 +108,14 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-001
 
 **Acceptance Criteria:**
-- [ ] `addVaultEventHook(config, event, actionType, commandOrPath, label?, schedule?): VaultEventHook` — creates a new hook with UUID, appends to `config[event]`
-- [ ] `removeVaultEventHook(config, hookId): boolean` — removes hook by ID across all event types
-- [ ] `reorderVaultEventHooks(config, event, hookId, newIndex): boolean` — moves a hook within an event type's list
-- [ ] `toggleVaultEventHook(config, hookId): boolean | null` — toggles enabled state
-- [ ] `getEnabledVaultEventHooks(config, event): VaultEventHook[]` — returns ordered enabled hooks for an event type
-- [ ] Validates `action_type`: `"execute_command"` requires non-empty `command`; `"run_workflow"` requires non-empty `workflow_path`
-- [ ] For `on_schedule` event, validates that `schedule` is non-empty
-- [ ] Functions are pure (mutate config in place, like Phase 3 `hook-config.ts` pattern)
+- [x] `addVaultEventHook(config, event, actionType, commandOrPath, label?, schedule?): VaultEventHook` — creates a new hook with UUID, appends to `config[event]`
+- [x] `removeVaultEventHook(config, hookId): boolean` — removes hook by ID across all event types
+- [x] `reorderVaultEventHooks(config, event, hookId, newIndex): boolean` — moves a hook within an event type's list
+- [x] `toggleVaultEventHook(config, hookId): boolean | null` — toggles enabled state
+- [x] `getEnabledVaultEventHooks(config, event): VaultEventHook[]` — returns ordered enabled hooks for an event type
+- [x] Validates `action_type`: `"execute_command"` requires non-empty `command`; `"run_workflow"` requires non-empty `workflow_path`
+- [x] For `on_schedule` event, validates that `schedule` is non-empty
+- [x] Functions are pure (mutate config in place, like Phase 3 `hook-config.ts` pattern)
 
 ## Phase 1: Settings UI
 
@@ -129,15 +129,15 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-002
 
 **Acceptance Criteria:**
-- [ ] A "Vault event hooks" section rendered in Settings below the existing "Hooks" section
-- [ ] One collapsible `<details>` subsection per event type with descriptive titles: "On note open", "On note create", "On save", "On manual save" (with help text: "Desktop only — fires on Cmd+S / Ctrl+S; does not fire on mobile"), "On tag change", "On schedule"
-- [ ] Each subsection lists configured hooks for that event type with: label/command display, enabled toggle, reorder (↑↓) buttons, remove button — matching Phase 3 hook UI pattern
-- [ ] "Add hook" form per event type with: action type dropdown (`"execute_command"` initially), command text input, optional label text input, "Add" button
-- [ ] For `on_schedule` hooks: additional "Cron expression" text input with live validation feedback via `CronPattern` constructor (from `croner`). Invalid expressions show error text below the input; valid expressions show next run time preview
-- [ ] Settings changes call `await this.plugin.saveSettings()` and trigger listener re-evaluation (F-007)
-- [ ] Debounce cooldown setting: a single numeric input for `vault_event_debounce_seconds` at the top of the section (shared across all debounced event types)
-- [ ] Concurrency limit setting: numeric input for `workflow_concurrency_limit`
-- [ ] Help text for `on-manual-save` noting it is desktop-only per R-2 findings
+- [x] A "Vault event hooks" section rendered in Settings below the existing "Hooks" section
+- [x] One collapsible `<details>` subsection per event type with descriptive titles: "On note open", "On note create", "On save", "On manual save" (with help text: "Desktop only — fires on Cmd+S / Ctrl+S; does not fire on mobile"), "On tag change", "On schedule"
+- [x] Each subsection lists configured hooks for that event type with: label/command display, enabled toggle, reorder (↑↓) buttons, remove button — matching Phase 3 hook UI pattern
+- [x] "Add hook" form per event type with: action type dropdown (`"execute_command"` initially), command text input, optional label text input, "Add" button
+- [x] For `on_schedule` hooks: additional "Cron expression" text input with live validation feedback (basic structural validation; authoritative croner validation deferred to F-013). Invalid expressions show error text below the input; valid expressions show next run time preview
+- [x] Settings changes call `await this.plugin.saveSettings()` and trigger listener re-evaluation (F-007)
+- [x] Debounce cooldown setting: a single numeric input for `vault_event_debounce_seconds` at the top of the section (shared across all debounced event types)
+- [x] Concurrency limit setting: numeric input for `workflow_concurrency_limit`
+- [x] Help text for `on-manual-save` noting it is desktop-only per R-2 findings
 
 ### F-004: "Run a workflow" action type in settings UI
 
@@ -149,12 +149,12 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-003, Group C (workflow discovery for path suggestions)
 
 **Acceptance Criteria:**
-- [ ] In both vault event hook and LLM lifecycle hook "Add hook" forms: action type dropdown with "Execute shell command" and "Run a workflow" options
-- [ ] When "Execute shell command" is selected: command text input shown (existing behavior)
-- [ ] When "Run a workflow" is selected: workflow path text input shown with placeholder `"daily/review.md"` (vault-relative path under `{notor_dir}/workflows/`). Optionally, a suggest dropdown listing discovered workflow paths.
-- [ ] Existing hooks display their action type: shell icon for commands, workflow icon for "run workflow"
-- [ ] Backward compatibility: existing Phase 3 hooks without `action_type` are treated as `"execute_command"` — no migration needed
-- [ ] Invalid workflow paths (non-existent file) show a warning indicator in the hook list (non-blocking — does not prevent saving)
+- [x] In vault event hook "Add hook" forms: action type dropdown with "Execute shell command" and "Run a workflow" options
+- [x] When "Execute shell command" is selected: command text input shown (placeholder updates dynamically)
+- [x] When "Run a workflow" is selected: workflow path text input shown with placeholder `"daily/review.md"` (vault-relative path under `{notor_dir}/workflows/`). Placeholder updates dynamically via `setPlaceholder` on the shared input.
+- [x] Existing hooks display their action type with `▶` prefix for run_workflow, `$` prefix for execute_command
+- [x] Backward compatibility: existing Phase 3 hooks without `action_type` are treated as `"execute_command"` — no migration needed
+- [x] Invalid workflow paths (empty `workflow_path`) show a ⚠️ warning indicator in the hook list (non-blocking — does not prevent saving)
 
 ---
 

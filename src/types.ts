@@ -522,6 +522,121 @@ export interface IncludeNoteResolutionResult {
 }
 
 // ---------------------------------------------------------------------------
+// Vault Event Hooks (Group F)
+// ---------------------------------------------------------------------------
+
+/**
+ * Vault event types that can trigger hooks or workflows.
+ *
+ * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
+ */
+export type VaultEventHookType =
+	| "on_note_open"
+	| "on_note_create"
+	| "on_save"
+	| "on_manual_save"
+	| "on_tag_change"
+	| "on_schedule";
+
+/**
+ * A single vault event hook — an action tied to a vault event type.
+ *
+ * @see specs/03-workflows-personas/data-model.md — VaultEventHook entity
+ * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
+ */
+export interface VaultEventHook {
+	/** Unique identifier (UUID v4). */
+	id: string;
+	/** The vault event type that triggers this hook. */
+	event: VaultEventHookType;
+	/** Action to perform when the hook fires. */
+	action_type: "execute_command" | "run_workflow";
+	/** Shell command to execute (required when action_type is "execute_command"). */
+	command: string | null;
+	/** Vault-relative workflow path (required when action_type is "run_workflow"). */
+	workflow_path: string | null;
+	/** Human-readable label (optional; falls back to command or workflow_path). */
+	label: string;
+	/** Whether this hook is active. */
+	enabled: boolean;
+	/** Cron expression (required when event is "on_schedule"). */
+	schedule: string | null;
+}
+
+/**
+ * Ordered lists of vault event hooks grouped by event type.
+ *
+ * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
+ */
+export interface VaultEventHookConfig {
+	on_note_open: VaultEventHook[];
+	on_note_create: VaultEventHook[];
+	on_save: VaultEventHook[];
+	on_manual_save: VaultEventHook[];
+	on_tag_change: VaultEventHook[];
+	on_schedule: VaultEventHook[];
+}
+
+/**
+ * Status of a background workflow execution.
+ *
+ * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
+ */
+export type WorkflowExecutionStatus =
+	| "queued"
+	| "running"
+	| "waiting_approval"
+	| "completed"
+	| "errored"
+	| "stopped";
+
+/**
+ * Tracks the state of a single background (event-triggered) workflow execution.
+ *
+ * In-memory only — not persisted across plugin reloads.
+ *
+ * @see specs/03-workflows-personas/data-model.md — WorkflowExecution entity
+ * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
+ */
+export interface WorkflowExecution {
+	/** Unique execution identifier (UUID v4). */
+	id: string;
+	/** Vault-relative path of the workflow note being executed. */
+	workflow_path: string;
+	/** Display name of the workflow (e.g. `"daily/review"`). */
+	workflow_name: string;
+	/** ID of the background conversation created for this execution. */
+	conversation_id: string;
+	/** The vault event type that triggered this execution. */
+	trigger_event: string;
+	/** Vault-relative path of the note that caused the trigger (null for scheduled). */
+	trigger_source: string | null;
+	/** Current execution status. */
+	status: WorkflowExecutionStatus;
+	/** When the execution started (ISO 8601). */
+	started_at: string;
+	/** When the execution completed (ISO 8601), or null if still running. */
+	completed_at: string | null;
+	/** Error message if status is "errored". */
+	error_message: string | null;
+}
+
+/**
+ * Tracks the chain of hook events that have fired within a single execution
+ * context, used to detect and prevent infinite hook-to-workflow loops.
+ *
+ * Carried through the background workflow execution pipeline.
+ *
+ * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
+ */
+export interface ExecutionChain {
+	/** Set of hook event types that have fired in this chain (loop detection). */
+	sourceHooks: Set<string>;
+	/** Set of note paths created or modified by hook-initiated workflows (create-loop prevention). */
+	modifiedNotePaths: Set<string>;
+}
+
+// ---------------------------------------------------------------------------
 // Stale Content Check
 // ---------------------------------------------------------------------------
 

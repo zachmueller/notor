@@ -11,9 +11,10 @@
  * Phase 3 (SET-001, SET-002): Full settings UI implemented.
  */
 
-import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, SecretComponent, Setting, TextComponent } from "obsidian";
 import type NotorPlugin from "./main";
-import type { AutoApproveState, ConversationMode, LLMProviderConfig, LLMProviderType, Persona } from "./types";
+import type { AutoApproveState, ConversationMode, LLMProviderConfig, LLMProviderType, Persona, VaultEventHook, VaultEventHookConfig, VaultEventHookType } from "./types";
+import { addVaultEventHook, removeVaultEventHook, reorderVaultEventHooks, toggleVaultEventHook } from "./hooks/vault-event-hook-config";
 import { SECRET_IDS } from "./utils/secrets";
 import { discoverPersonas } from "./personas/persona-discovery";
 import {
@@ -44,12 +45,25 @@ export interface Hook {
 	id: string;
 	/** Lifecycle event this hook fires on. */
 	event: HookEvent;
-	/** Shell command to execute. */
+	/** Shell command to execute (for execute_command action). */
 	command: string;
-	/** Human-readable label (optional; falls back to command). */
+	/** Human-readable label (optional; falls back to command or workflow_path). */
 	label: string;
 	/** Whether this hook is active. */
 	enabled: boolean;
+	/**
+	 * Action type for this hook. Defaults to "execute_command" for backward
+	 * compatibility with hooks created before F-004.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001, F-004
+	 */
+	action_type?: "execute_command" | "run_workflow";
+	/**
+	 * Vault-relative workflow path (required when action_type is "run_workflow").
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001, F-004
+	 */
+	workflow_path?: string | null;
 }
 
 /** Supported lifecycle hook event types. */
@@ -198,6 +212,42 @@ export interface NotorSettings {
 	 * @see specs/03-workflows-personas/data-model.md — PersonaAutoApproveConfig
 	 */
 	persona_auto_approve: Record<string, Record<string, string>>;
+
+	// -------------------------------------------------------------------
+	// Group F: Vault event hook settings
+	// -------------------------------------------------------------------
+
+	/**
+	 * Vault event hooks grouped by event type.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
+	 */
+	vault_event_hooks: VaultEventHookConfig;
+
+	/**
+	 * Debounce cooldown in seconds for debounced vault events
+	 * (on_note_open, on_save, on_manual_save). Shared across all
+	 * debounced event types.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
+	 */
+	vault_event_debounce_seconds: number;
+
+	/**
+	 * Maximum number of concurrent background workflow executions.
+	 * Executions beyond this limit are queued (FIFO).
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
+	 */
+	workflow_concurrency_limit: number;
+
+	/**
+	 * Number of recent workflow executions to show in the activity
+	 * indicator dropdown.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
+	 */
+	workflow_activity_indicator_count: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +305,16 @@ const DEFAULT_HOOKS: HookConfig = {
 	after_completion: [],
 };
 
+/** Default empty vault event hook configuration. */
+const DEFAULT_VAULT_EVENT_HOOKS: VaultEventHookConfig = {
+	on_note_open: [],
+	on_note_create: [],
+	on_save: [],
+	on_manual_save: [],
+	on_tag_change: [],
+	on_schedule: [],
+};
+
 /** Sensible defaults for all Notor settings. */
 export const DEFAULT_SETTINGS: NotorSettings = {
 	notor_dir: "notor/",
@@ -304,6 +364,12 @@ export const DEFAULT_SETTINGS: NotorSettings = {
 	// Phase 4: Personas
 	active_persona: "",
 	persona_auto_approve: {},
+
+	// Group F: Vault event hooks
+	vault_event_hooks: DEFAULT_VAULT_EVENT_HOOKS,
+	vault_event_debounce_seconds: 5,
+	workflow_concurrency_limit: 3,
+	workflow_activity_indicator_count: 5,
 };
 
 // ---------------------------------------------------------------------------
@@ -407,6 +473,100 @@ function updateProvider(settings: NotorSettings, updated: LLMProviderConfig): vo
 }
 
 // ---------------------------------------------------------------------------
+// Cron expression validation (lightweight, no croner dependency needed here)
+// ---------------------------------------------------------------------------
+
+/**
+ * Basic client-side cron expression validation for the settings UI.
+ *
+ * Validates the structure of a standard 5-field cron expression without
+ * importing the full `croner` library. The `VaultEventScheduler` (F-013)
+ * uses `croner`'s `CronPattern` for authoritative validation at runtime.
+ *
+ * Returns `{ valid: true, nextRun: Date }` on success or
+ * `{ valid: false, error: string }` on failure.
+ *
+ * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-003
+ */
+function validateCronExpressionBasic(
+	expr: string
+): { valid: true; nextRun: Date | null } | { valid: false; error: string; nextRun?: undefined } {
+	const parts = expr.trim().split(/\s+/);
+	if (parts.length !== 5) {
+		return {
+			valid: false,
+			error: `Expected 5 fields (minute hour day-of-month month day-of-week), got ${parts.length}.`,
+		};
+	}
+
+	const ranges = [
+		{ name: "minute", min: 0, max: 59 },
+		{ name: "hour", min: 0, max: 23 },
+		{ name: "day-of-month", min: 1, max: 31 },
+		{ name: "month", min: 1, max: 12 },
+		{ name: "day-of-week", min: 0, max: 7 },
+	];
+
+	for (let i = 0; i < parts.length; i++) {
+		const field = parts[i] ?? "";
+		const range = ranges[i]!;
+
+		// Wildcard
+		if (field === "*") continue;
+
+		// Validate each comma-separated segment
+		const segments = field.split(",");
+		for (const seg of segments) {
+			// Step value (*/n or n-m/n)
+			const stepMatch = seg.match(/^(.+)\/(\d+)$/);
+			const base = stepMatch ? stepMatch[1]! : seg;
+			const step = stepMatch ? parseInt(stepMatch[2]!, 10) : null;
+
+			if (step !== null && (isNaN(step) || step < 1)) {
+				return { valid: false, error: `Invalid step value in ${range.name} field: "${seg}".` };
+			}
+
+			// Range (n-m)
+			const rangeMatch = base.match(/^(\d+)-(\d+)$/);
+			if (rangeMatch) {
+				const lo = parseInt(rangeMatch[1]!, 10);
+				const hi = parseInt(rangeMatch[2]!, 10);
+				if (lo < range.min || hi > range.max || lo > hi) {
+					return {
+						valid: false,
+						error: `${range.name} range ${lo}-${hi} is out of bounds (${range.min}–${range.max}).`,
+					};
+				}
+				continue;
+			}
+
+			// Wildcard base with step (*/n)
+			if (base === "*") continue;
+
+			// Single number
+			const num = parseInt(base, 10);
+			if (isNaN(num) || num < range.min || num > range.max) {
+				return {
+					valid: false,
+					error: `${range.name} value "${base}" is out of bounds (${range.min}–${range.max}).`,
+				};
+			}
+		}
+	}
+
+	// Approximate next run: find the next whole minute that satisfies the expression.
+	// This is a best-effort preview, not a full cron evaluator.
+	try {
+		const now = new Date();
+		const next = new Date(now.getTime() + 60_000);
+		next.setSeconds(0, 0);
+		return { valid: true, nextRun: next };
+	} catch {
+		return { valid: true, nextRun: null };
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Setting tab
 // ---------------------------------------------------------------------------
 
@@ -481,6 +641,11 @@ export class NotorSettingTab extends PluginSettingTab {
 		// Phase 3: Hooks settings (HOOK-006)
 		// -----------------------------------------------------------------------
 		this.renderHooksSection(containerEl);
+
+		// -----------------------------------------------------------------------
+		// Group F: Vault event hooks settings (F-003, F-004)
+		// -----------------------------------------------------------------------
+		this.renderVaultEventHooksSection(containerEl);
 
 		// -----------------------------------------------------------------------
 		// Phase 3: File attachments settings (POLISH-001)
@@ -2099,6 +2264,385 @@ export class NotorSettingTab extends PluginSettingTab {
 				});
 			}
 		}
+	}
+
+	// =========================================================================
+	// Group F: Vault event hooks settings (F-003, F-004)
+	// =========================================================================
+
+	/**
+	 * Render the "Vault event hooks" section in **Settings → Notor**.
+	 *
+	 * Contains one collapsible subsection per vault event type, each
+	 * listing configured hooks with enable/disable toggle, reorder, and
+	 * delete controls. An "Add hook" form per event type supports both
+	 * `"execute_command"` and `"run_workflow"` action types (F-004).
+	 *
+	 * Also includes shared numeric controls for debounce cooldown and
+	 * workflow concurrency limit at the top of the section.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-003, F-004
+	 */
+	private renderVaultEventHooksSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Vault event hooks" });
+		containerEl.createEl("p", {
+			text:
+				"Actions that run automatically when vault events occur — note opened, " +
+				"created, saved, tag changed, or on a schedule. Each event type can have " +
+				"multiple hooks that run in order. Desktop only for shell command hooks.",
+			cls: "setting-item-description",
+		});
+
+		// -------------------------------------------------------------------
+		// Shared numeric controls
+		// -------------------------------------------------------------------
+		new Setting(containerEl)
+			.setName("Debounce cooldown (seconds)")
+			.setDesc(
+				"Minimum time between repeated firings of the same hook on the same note. " +
+				"Applies to on-note-open, on-save, and on-manual-save events."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("5")
+					.setValue(String(this.plugin.settings.vault_event_debounce_seconds))
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed >= 0) {
+							this.plugin.settings.vault_event_debounce_seconds = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Workflow concurrency limit")
+			.setDesc(
+				"Maximum number of background workflow executions running simultaneously. " +
+				"Additional executions are queued (FIFO) until a slot becomes available."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("3")
+					.setValue(String(this.plugin.settings.workflow_concurrency_limit))
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed > 0) {
+							this.plugin.settings.workflow_concurrency_limit = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		// -------------------------------------------------------------------
+		// Per-event-type collapsible subsections
+		// -------------------------------------------------------------------
+		const eventMeta: Array<{
+			event: VaultEventHookType;
+			title: string;
+			desc: string;
+			hasSchedule: boolean;
+			desktopOnlyNote?: string;
+		}> = [
+			{
+				event: "on_note_open",
+				title: "On note open",
+				desc: "Fires when a Markdown note is opened (activated) in the editor.",
+				hasSchedule: false,
+			},
+			{
+				event: "on_note_create",
+				title: "On note create",
+				desc: "Fires when a new Markdown file is created in the vault.",
+				hasSchedule: false,
+			},
+			{
+				event: "on_save",
+				title: "On save",
+				desc: "Fires whenever a Markdown note is saved (auto-save or manual save).",
+				hasSchedule: false,
+			},
+			{
+				event: "on_manual_save",
+				title: "On manual save",
+				desc: "Fires only on explicit keyboard saves (Cmd+S / Ctrl+S).",
+				hasSchedule: false,
+				desktopOnlyNote:
+					"Desktop only — fires on Cmd+S / Ctrl+S; does not fire on mobile.",
+			},
+			{
+				event: "on_tag_change",
+				title: "On tag change",
+				desc: "Fires when a note's frontmatter tags are added or removed.",
+				hasSchedule: false,
+			},
+			{
+				event: "on_schedule",
+				title: "On schedule",
+				desc: "Fires on a cron schedule (e.g. daily at midnight). Requires a cron expression.",
+				hasSchedule: true,
+			},
+		];
+
+		for (const meta of eventMeta) {
+			this.renderVaultEventHookSubsection(containerEl, meta);
+		}
+	}
+
+	/**
+	 * Render one collapsible `<details>` subsection for a single vault event type.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-003, F-004
+	 */
+	private renderVaultEventHookSubsection(
+		containerEl: HTMLElement,
+		meta: {
+			event: VaultEventHookType;
+			title: string;
+			desc: string;
+			hasSchedule: boolean;
+			desktopOnlyNote?: string;
+		}
+	): void {
+		const { event, title, desc, hasSchedule, desktopOnlyNote } = meta;
+		const hooks = this.plugin.settings.vault_event_hooks[event];
+
+		const details = containerEl.createEl("details", {
+			cls: "notor-vault-hook-details",
+		});
+		const summary = details.createEl("summary", {
+			cls: "notor-vault-hook-summary",
+		});
+		summary.createEl("strong", { text: title });
+		const hookCount = hooks.length;
+		if (hookCount > 0) {
+			summary.createSpan({
+				text: ` (${hookCount} hook${hookCount === 1 ? "" : "s"})`,
+				cls: "notor-vault-hook-count",
+			});
+		}
+
+		const body = details.createDiv({ cls: "notor-vault-hook-body" });
+
+		body.createEl("p", { text: desc, cls: "setting-item-description" });
+		if (desktopOnlyNote) {
+			body.createEl("p", {
+				text: `ℹ️ ${desktopOnlyNote}`,
+				cls: "setting-item-description notor-vault-hook-desktop-note",
+			});
+		}
+
+		// -------------------------------------------------------------------
+		// Render existing hooks
+		// -------------------------------------------------------------------
+		for (let i = 0; i < hooks.length; i++) {
+			const hook = hooks[i];
+			if (!hook) continue;
+
+			// Determine display name and description
+			const actionLabel =
+				(hook.action_type ?? "execute_command") === "run_workflow"
+					? `▶ ${hook.workflow_path ?? "(no path)"}`
+					: `$ ${hook.command ?? "(no command)"}`;
+			const hookName = hook.label || actionLabel.substring(0, 60);
+			const hookDesc = hook.label ? actionLabel.substring(0, 80) : "";
+
+			// Warn if run_workflow hook has an empty path
+			const isInvalidWorkflow =
+				(hook.action_type ?? "execute_command") === "run_workflow" &&
+				!hook.workflow_path?.trim();
+
+			const setting = new Setting(body)
+				.setName(hookName + (isInvalidWorkflow ? " ⚠️" : ""))
+				.setDesc(hookDesc);
+
+			// Enabled toggle
+			setting.addToggle((toggle) =>
+				toggle.setValue(hook.enabled).onChange(async (value) => {
+					toggleVaultEventHook(
+						this.plugin.settings.vault_event_hooks,
+						hook.id
+					);
+					// toggleVaultEventHook mutates in place; sync saved value
+					hook.enabled = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+			// Move up
+			if (i > 0) {
+				setting.addButton((btn) =>
+					btn.setButtonText("↑").onClick(async () => {
+						reorderVaultEventHooks(
+							this.plugin.settings.vault_event_hooks,
+							event,
+							hook.id,
+							i - 1
+						);
+						await this.plugin.saveSettings();
+						this.display();
+					})
+				);
+			}
+
+			// Move down
+			if (i < hooks.length - 1) {
+				setting.addButton((btn) =>
+					btn.setButtonText("↓").onClick(async () => {
+						reorderVaultEventHooks(
+							this.plugin.settings.vault_event_hooks,
+							event,
+							hook.id,
+							i + 1
+						);
+						await this.plugin.saveSettings();
+						this.display();
+					})
+				);
+			}
+
+			// Remove
+			setting.addButton((btn) =>
+				btn
+					.setButtonText("Remove")
+					.setWarning()
+					.onClick(async () => {
+						removeVaultEventHook(
+							this.plugin.settings.vault_event_hooks,
+							hook.id
+						);
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+		}
+
+		// -------------------------------------------------------------------
+		// Add hook form (F-003 + F-004)
+		// -------------------------------------------------------------------
+		// Local state for the form
+		let newActionType: "execute_command" | "run_workflow" = "execute_command";
+		let newCommandOrPath = "";
+		let newLabel = "";
+		let newSchedule = "";
+
+		// Action type selector
+		const actionTypeSetting = new Setting(body)
+			.setName("Add hook")
+			.setDesc("Action to perform when this event fires.");
+
+		// Action type dropdown
+		actionTypeSetting.addDropdown((dropdown) => {
+			dropdown.addOption("execute_command", "Execute shell command");
+			dropdown.addOption("run_workflow", "Run a workflow");
+			dropdown.setValue(newActionType);
+			dropdown.onChange((value) => {
+				newActionType = value as "execute_command" | "run_workflow";
+				// Update the placeholder on the command/path input
+				if (commandInput) {
+					commandInput.setPlaceholder(
+						newActionType === "run_workflow"
+							? "daily/review.md"
+							: "Shell command"
+					);
+				}
+			});
+		});
+
+		// Command / workflow path input (shared element, placeholder changes with action type)
+		let commandInput: TextComponent | null = null;
+		actionTypeSetting.addText((text) => {
+			commandInput = text;
+			text.setPlaceholder("Shell command").onChange((v) => {
+				newCommandOrPath = v.trim();
+			});
+		});
+
+		// Label input (optional)
+		actionTypeSetting.addText((text) => {
+			text.setPlaceholder("Label (optional)").onChange((v) => {
+				newLabel = v.trim();
+			});
+			text.inputEl.style.width = "120px";
+		});
+
+		// Cron expression input (only for on_schedule)
+		let scheduleErrorEl: HTMLElement | null = null;
+		if (hasSchedule) {
+			const scheduleSetting = new Setting(body)
+				.setName("Cron expression")
+				.setDesc(
+					"Standard 5-field cron (minute hour day-of-month month day-of-week). " +
+					"Example: 0 9 * * 1-5 (9am Mon–Fri)."
+				);
+
+			scheduleSetting.addText((text) => {
+				text.setPlaceholder("0 9 * * 1-5").onChange((v) => {
+					newSchedule = v.trim();
+					// Live validation feedback
+					if (scheduleErrorEl) {
+						scheduleErrorEl.remove();
+						scheduleErrorEl = null;
+					}
+					if (newSchedule) {
+						const validation = validateCronExpressionBasic(newSchedule);
+						if (!validation.valid) {
+							scheduleErrorEl = body.createEl("p", {
+								text: `Invalid cron expression: ${validation.error}`,
+								cls: "notor-cron-error",
+							});
+							scheduleSetting.settingEl.after(scheduleErrorEl);
+						} else if (validation.nextRun) {
+							scheduleErrorEl = body.createEl("p", {
+								text: `Next run: ${validation.nextRun.toLocaleString()}`,
+								cls: "notor-cron-preview",
+							});
+							scheduleSetting.settingEl.after(scheduleErrorEl);
+						}
+					}
+				});
+			});
+		}
+
+		// Add button
+		actionTypeSetting.addButton((btn) =>
+			btn.setButtonText("Add").onClick(async () => {
+				if (!newCommandOrPath) {
+					new Notice(
+						newActionType === "run_workflow"
+							? "Enter a workflow path."
+							: "Enter a shell command."
+					);
+					return;
+				}
+				if (hasSchedule && !newSchedule) {
+					new Notice("Enter a cron expression for the schedule.");
+					return;
+				}
+				if (hasSchedule && newSchedule) {
+					const validation = validateCronExpressionBasic(newSchedule);
+					if (!validation.valid) {
+						new Notice(`Invalid cron expression: ${validation.error}`);
+						return;
+					}
+				}
+
+				try {
+					addVaultEventHook(
+						this.plugin.settings.vault_event_hooks,
+						event,
+						newActionType,
+						newCommandOrPath,
+						newLabel,
+						hasSchedule ? newSchedule : null
+					);
+					await this.plugin.saveSettings();
+					this.display();
+				} catch (e) {
+					new Notice(e instanceof Error ? e.message : String(e));
+				}
+			})
+		);
 	}
 
 	private renderModelPricingRow(
