@@ -278,9 +278,26 @@ export async function resolveIncludeNotes(
 	let resultText = text;
 	const attachments: IncludeNoteResolutionResult["attachments"] = [];
 
-	// Resolve tags in order of appearance
+	// Resolve tags in order of appearance.
+	// Each tag is wrapped in a try/catch so that an unexpected error in one
+	// tag never aborts resolution of the remaining tags (D-009: partial
+	// resolution guarantee).
 	for (const tag of tags) {
-		const resolved = await resolveSingleTag(tag, vault, metadataCache, sourceFilePath);
+		let resolved: SingleTagResult;
+		try {
+			resolved = await resolveSingleTag(tag, vault, metadataCache, sourceFilePath);
+		} catch (err) {
+			// Unexpected error — produce a generic "not found" error marker
+			// and continue with the next tag.
+			const errorMarker = buildNotFoundError(tag);
+			log.warn("Unexpected resolution error", {
+				path: tag.path,
+				path_type: tag.path_type,
+				error: String(err),
+			});
+			resultText = resultText.replace(tag.raw_tag, errorMarker);
+			continue;
+		}
 
 		// Determine effective mode: system_prompt and vault_rule contexts
 		// force all tags to inline mode

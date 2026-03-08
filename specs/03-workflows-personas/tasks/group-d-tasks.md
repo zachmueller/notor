@@ -221,15 +221,15 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-008
 
 **Acceptance Criteria:**
-- [ ] **Note not found (vault-relative):** Tag replaced with `[include_note error: note '{path}' not found]`
-- [ ] **Note not found (wikilink):** Tag replaced with `[include_note error: note '[[{path}]]' not found]` (preserves wikilink syntax in the error)
-- [ ] **Section not found:** Tag replaced with `[include_note error: section '{section}' not found in '{path}']` (uses the resolved file path, not the original path attribute)
-- [ ] **Path resolves outside vault:** Treated identically to "note not found" — same error marker (vault-scoping check from D-003)
-- [ ] **File read failure:** Tag replaced with `[include_note error: note '{path}' not found]` (generic "not found" — no internal error details leaked)
-- [ ] Error markers are inserted inline at the position of the original tag — the surrounding text is unaffected
-- [ ] **Partial resolution:** If one tag fails, other tags in the same document continue to resolve normally. Resolution never aborts due to a single failure.
-- [ ] Each error is logged via `logger("IncludeNoteResolver")` at `warn` level with details (path, section, error type) for debugging
-- [ ] **Missing `path` attribute:** Tags without a `path` attribute are left as-is in the text (not replaced with an error marker) — this was handled in D-002 by excluding them from the parsed array
+- [x] **Note not found (vault-relative):** Tag replaced with `[include_note error: note '{path}' not found]`
+- [x] **Note not found (wikilink):** Tag replaced with `[include_note error: note '[[{path}]]' not found]` (preserves wikilink syntax in the error)
+- [x] **Section not found:** Tag replaced with `[include_note error: section '{section}' not found in '{path}']` (uses the resolved file path, not the original path attribute)
+- [x] **Path resolves outside vault:** Treated identically to "note not found" — same error marker (vault-scoping check from D-003)
+- [x] **File read failure:** Tag replaced with `[include_note error: note '{path}' not found]` (generic "not found" — no internal error details leaked)
+- [x] Error markers are inserted inline at the position of the original tag — the surrounding text is unaffected
+- [x] **Partial resolution:** If one tag fails, other tags in the same document continue to resolve normally. Resolution never aborts due to a single failure.
+- [x] Each error is logged via `logger("IncludeNoteResolver")` at `warn` level with details (path, section, error type) for debugging
+- [x] **Missing `path` attribute:** Tags without a `path` attribute are left as-is in the text (not replaced with an error marker) — this was handled in D-002 by excluding them from the parsed array
 
 ---
 
