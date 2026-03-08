@@ -129,20 +129,20 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 **Dependencies:** B-001, Group A (A-002 persona discovery service)
 
 **Acceptance Criteria:**
-- [ ] A "Persona auto-approve" section is rendered in **Settings → Notor**, positioned after the global auto-approve section
-- [ ] Section header includes a description: "Per-persona overrides for tool auto-approve settings. When a persona is active, these overrides take precedence over global defaults."
-- [ ] The section discovers all personas by triggering a rescan of `{notor_dir}/personas/` (same discovery logic as FR-37 / Group A) and lists each persona by name
-- [ ] If no personas are discovered, displays an informational message: "No personas found. Create a persona directory under `{notor_dir}/personas/` to configure per-persona auto-approve settings."
-- [ ] Each persona is rendered as a collapsible sub-section (using Obsidian's `Setting` + heading pattern or `<details>` element) showing the persona name
-- [ ] Within each persona sub-section, the full list of tools is displayed (sourced from the tool registry or the `TOOL_DISPLAY_NAMES` constant)
-- [ ] Each tool row displays the tool's display name, description, and a three-state dropdown selector:
+- [x] A "Persona auto-approve" section is rendered in **Settings → Notor**, positioned after the global auto-approve section
+- [x] Section header includes a description: "Per-persona overrides for tool auto-approve settings. When a persona is active, these overrides take precedence over global defaults."
+- [x] The section discovers all personas by triggering a rescan of `{notor_dir}/personas/` (same discovery logic as FR-37 / Group A) and lists each persona by name
+- [x] If no personas are discovered, displays an informational message: "No personas found. Create a persona directory under `{notor_dir}/personas/` to configure per-persona auto-approve settings."
+- [x] Each persona is rendered as a collapsible sub-section (using Obsidian's `Setting` + heading pattern or `<details>` element) showing the persona name
+- [x] Within each persona sub-section, the full list of tools is displayed (sourced from the tool registry or the `TOOL_DISPLAY_NAMES` constant)
+- [x] Each tool row displays the tool's display name, description, and a three-state dropdown selector:
   - **"Global default"** — no override; the global setting applies (this is the default)
   - **"Auto-approve"** — tool is auto-approved when this persona is active
   - **"Require approval"** — tool requires manual approval when this persona is active
-- [ ] The dropdown reflects the current saved state from `settings.persona_auto_approve[personaName][toolName]`, defaulting to "Global default" when no entry exists
-- [ ] Changing a dropdown value calls `setPersonaToolOverride()` and `saveData()` immediately
-- [ ] Tools are grouped into "Read-only tools" and "Write tools" subsections (consistent with the global auto-approve section)
-- [ ] Newly created or deleted personas are reflected when the settings page is opened or refreshed (via rescan in `display()`)
+- [x] The dropdown reflects the current saved state from `settings.persona_auto_approve[personaName][toolName]`, defaulting to "Global default" when no entry exists
+- [x] Changing a dropdown value calls `setPersonaToolOverride()` and `saveData()` immediately
+- [x] Tools are grouped into "Read-only tools" and "Write tools" subsections (consistent with the global auto-approve section)
+- [x] Newly created or deleted personas are reflected when the settings page is opened or refreshed (via rescan in `display()`)
 
 ### B-005: Stale tool name detection and warning indicator
 
@@ -155,13 +155,13 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 **Dependencies:** B-004, B-006 (for `getStaleToolNames()`)
 
 **Acceptance Criteria:**
-- [ ] After rendering the known tools for each persona, check for stale tool names using `getStaleToolNames()` comparing stored overrides against the registered tool list
-- [ ] Stale tool entries are rendered at the bottom of the persona sub-section under a "Unknown tools" subsection with a warning indicator (e.g., ⚠️ icon or warning-colored text)
-- [ ] Each stale entry displays the tool name, its current override state, and a "Remove" button to delete the stale entry
-- [ ] Clicking "Remove" calls `setPersonaToolOverride()` to delete the entry and re-renders the section
-- [ ] Stale entries do not cause errors at runtime — `resolveAutoApprove()` simply ignores overrides for tools that don't exist in the registry (the tool won't be dispatched if it doesn't exist)
-- [ ] If no stale entries exist for a persona, the "Unknown tools" subsection is not rendered
-- [ ] Warning styling is consistent with Obsidian's existing warning patterns (e.g., `.mod-warning` or a yellow/amber indicator)
+- [x] After rendering the known tools for each persona, check for stale tool names using `getStaleToolNames()` comparing stored overrides against the registered tool list
+- [x] Stale tool entries are rendered at the bottom of the persona sub-section under a "Unknown tools" subsection with a warning indicator (e.g., ⚠️ icon or warning-colored text)
+- [x] Each stale entry displays the tool name, its current override state, and a "Remove" button to delete the stale entry
+- [x] Clicking "Remove" calls `setPersonaToolOverride()` to delete the entry and re-renders the section
+- [x] Stale entries do not cause errors at runtime — `resolveAutoApprove()` simply ignores overrides for tools that don't exist in the registry (the tool won't be dispatched if it doesn't exist)
+- [x] If no stale entries exist for a persona, the "Unknown tools" subsection is not rendered
+- [x] Warning styling is consistent with Obsidian's existing warning patterns (e.g., `.mod-warning` or a yellow/amber indicator)
 
 ---
 

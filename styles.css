@@ -1462,3 +1462,64 @@
 	font-size: var(--font-ui-smaller);
 	color: var(--text-faint);
 }
+
+/* ==========================================================================
+   Persona Auto-Approve Settings (Phase 4 — B-004, B-005)
+   ========================================================================== */
+
+.notor-persona-aa-empty {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	font-style: italic;
+	padding: 4px 0;
+}
+
+.notor-persona-aa-details {
+	margin-bottom: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+}
+
+.notor-persona-aa-summary {
+	padding: 8px 12px;
+	cursor: pointer;
+	user-select: none;
+	font-size: var(--font-ui-small);
+	border-radius: var(--radius-m);
+}
+
+.notor-persona-aa-summary:hover {
+	background: var(--background-modifier-hover);
+}
+
+.notor-persona-aa-count {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-weight: normal;
+}
+
+.notor-persona-aa-body {
+	padding: 4px 12px 12px 12px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.notor-persona-aa-body h4 {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	margin: 12px 0 4px 0;
+	font-weight: var(--font-semibold);
+}
+
+/* B-005: Stale tool warning styles */
+
+.notor-persona-aa-stale-heading {
+	color: var(--text-warning, var(--color-orange)) !important;
+}
+
+.notor-persona-aa-stale-desc {
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-persona-aa-stale-row .setting-item-name {
+	color: var(--text-warning, var(--color-orange));
+}
