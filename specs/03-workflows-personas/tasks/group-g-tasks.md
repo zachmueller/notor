@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md) — FR-52
 **Data Model:** [specs/03-workflows-personas/data-model.md](../data-model.md) — WorkflowScopedHook, WorkflowHookConfig
-**Status:** Planning
+**Status:** In Progress — Phase 0 and Phase 1 complete
 
 ## Task Summary
 
@@ -40,7 +40,7 @@ G-001 (WorkflowScopedHook types & parser)
 
 ## Phase 0: Types & Parsing
 
-### G-001: WorkflowScopedHook types and frontmatter parser
+### G-001: WorkflowScopedHook types and frontmatter parser ✅
 
 **Description:** Define the `WorkflowScopedHook` and `WorkflowHookConfig` types, and implement a parser that extracts and validates the `notor-hooks` YAML mapping from workflow note frontmatter. The parser produces a validated `WorkflowHookConfig` (or `null` if not present), logging warnings for invalid entries and skipping them while preserving valid ones. This parser is called during workflow discovery (Group C) and the resulting config is stored on the `Workflow` entity.
 
@@ -51,21 +51,21 @@ G-001 (WorkflowScopedHook types & parser)
 **Dependencies:** None (Group F types assumed available; uses existing `HookEvent` type from `src/settings.ts`)
 
 **Acceptance Criteria:**
-- [ ] `WorkflowScopedHook` interface defined per data-model.md: `event` (`LLMHookEvent`), `action_type` (`"execute_command" | "run_workflow"`), `command` (string | null), `workflow_path` (string | null)
-- [ ] `LLMHookEvent` type defined (or aliased from existing `HookEvent`): `"pre_send" | "on_tool_call" | "on_tool_result" | "after_completion"`
-- [ ] `WorkflowHookConfig` interface defined: optional `WorkflowScopedHook[]` array per lifecycle event — `pre_send?`, `on_tool_call?`, `on_tool_result?`, `after_completion?`
-- [ ] `parseWorkflowHooks(frontmatter: Record<string, unknown> | undefined, workflowPath: string): WorkflowHookConfig | null` function exported
-- [ ] Returns `null` if `notor-hooks` is absent or not an object
-- [ ] Iterates over keys of the `notor-hooks` mapping; for each key:
+- [x] `WorkflowScopedHook` interface defined per data-model.md: `event` (`LLMHookEvent`), `action_type` (`"execute_command" | "run_workflow"`), `command` (string | null), `workflow_path` (string | null)
+- [x] `LLMHookEvent` type defined (or aliased from existing `HookEvent`): `"pre_send" | "on_tool_call" | "on_tool_result" | "after_completion"`
+- [x] `WorkflowHookConfig` interface defined: optional `WorkflowScopedHook[]` array per lifecycle event — `pre_send?`, `on_tool_call?`, `on_tool_result?`, `after_completion?`
+- [x] `parseWorkflowHooks(frontmatter: Record<string, unknown> | undefined, workflowPath: string): WorkflowHookConfig | null` function exported
+- [x] Returns `null` if `notor-hooks` is absent or not an object
+- [x] Iterates over keys of the `notor-hooks` mapping; for each key:
   - Validates that the key is a recognized `LLMHookEvent` — logs warning and skips unrecognized event names (e.g., `on-note-open` is NOT valid here per FR-52: "only LLM lifecycle hooks are supported in this context")
   - Validates that the value is an array — logs warning and skips if not
   - For each array entry, validates: `action` (or `action_type`) field is `"execute_command"` or `"run_workflow"`; `command` is a non-empty string when action is `"execute_command"`; `path` (or `workflow_path`) is a non-empty string when action is `"run_workflow"`
   - Invalid individual hook definitions are logged as warnings (with workflow path for context) and skipped; valid hooks in the same event array still apply
-- [ ] Handles the frontmatter YAML key format: `notor-hooks` uses hyphenated event names in YAML (`pre-send`, `on-tool-call`, `on-tool-result`, `after-completion`) which are mapped to underscore-separated `LLMHookEvent` values (`pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`)
-- [ ] Returns a `WorkflowHookConfig` with only the events that had at least one valid hook definition; events with zero valid hooks after filtering are omitted (key not present)
-- [ ] If all hook definitions are invalid, returns `null` (equivalent to no hooks)
-- [ ] All types exported from `src/types.ts`
-- [ ] TypeScript compiles cleanly with `npm run build`
+- [x] Handles the frontmatter YAML key format: `notor-hooks` uses hyphenated event names in YAML (`pre-send`, `on-tool-call`, `on-tool-result`, `after-completion`) which are mapped to underscore-separated `LLMHookEvent` values (`pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`)
+- [x] Returns a `WorkflowHookConfig` with only the events that had at least one valid hook definition; events with zero valid hooks after filtering are omitted (key not present)
+- [x] If all hook definitions are invalid, returns `null` (equivalent to no hooks)
+- [x] All types exported from `src/types.ts`
+- [x] TypeScript compiles cleanly with `npm run build`
 
 **Example frontmatter handled:**
 ```yaml
@@ -80,7 +80,7 @@ notor-hooks:
       command: "echo 'Workflow finished'"
 ```
 
-### G-002: Workflow discovery integration — store parsed hooks on Workflow entity
+### G-002: Workflow discovery integration — store parsed hooks on Workflow entity ✅
 
 **Description:** Integrate the `notor-hooks` parser (G-001) into the workflow discovery pipeline (Group C) so that each discovered workflow's `hooks` field is populated with the parsed `WorkflowHookConfig` (or `null`). This ensures hook overrides are available at execution time without re-reading or re-parsing the frontmatter.
 
@@ -90,18 +90,18 @@ notor-hooks:
 **Dependencies:** G-001, Group C (workflow discovery service)
 
 **Acceptance Criteria:**
-- [ ] During workflow discovery, after parsing standard frontmatter properties (`notor-trigger`, `notor-schedule`, `notor-workflow-persona`), call `parseWorkflowHooks(frontmatter, filePath)` to extract hook overrides
-- [ ] Store the result in the `Workflow.hooks` field (`WorkflowHookConfig | null`)
-- [ ] If `parseWorkflowHooks` returns `null` (no hooks or all invalid), `Workflow.hooks` is `null`
-- [ ] Invalid hooks in `notor-hooks` do NOT prevent the workflow from being discovered — only the invalid hook entries are skipped; the workflow itself remains valid and usable
-- [ ] Workflows without any `notor-hooks` frontmatter continue to work exactly as before (no behavioral change)
-- [ ] Rescans (plugin load, command palette open) re-parse `notor-hooks` from fresh frontmatter
+- [x] During workflow discovery, after parsing standard frontmatter properties (`notor-trigger`, `notor-schedule`, `notor-workflow-persona`), call `parseWorkflowHooks(frontmatter, filePath)` to extract hook overrides
+- [x] Store the result in the `Workflow.hooks` field (`WorkflowHookConfig | null`)
+- [x] If `parseWorkflowHooks` returns `null` (no hooks or all invalid), `Workflow.hooks` is `null`
+- [x] Invalid hooks in `notor-hooks` do NOT prevent the workflow from being discovered — only the invalid hook entries are skipped; the workflow itself remains valid and usable
+- [x] Workflows without any `notor-hooks` frontmatter continue to work exactly as before (no behavioral change)
+- [x] Rescans (plugin load, command palette open) re-parse `notor-hooks` from fresh frontmatter
 
 ---
 
 ## Phase 1: Override Manager
 
-### G-003: WorkflowHookOverrideManager
+### G-003: WorkflowHookOverrideManager ✅
 
 **Description:** Implement the runtime hook override manager that tracks when a workflow's scoped hooks should replace global hooks for specific lifecycle events. The manager holds a stack-like state: when a workflow with `notor-hooks` begins execution, its scoped hooks are activated; when the workflow ends, the override is removed and global hooks are restored. Only one workflow's hooks can be active per conversation (workflows don't nest within the same conversation).
 
@@ -111,17 +111,17 @@ notor-hooks:
 **Dependencies:** G-001 (types)
 
 **Acceptance Criteria:**
-- [ ] `WorkflowHookOverrideManager` class exported
-- [ ] `activate(conversationId: string, workflowHooks: WorkflowHookConfig): void` — registers the workflow's hook overrides for the given conversation. If an override was already active for this conversation, replaces it (last-write wins).
-- [ ] `deactivate(conversationId: string): void` — removes any workflow hook override for the conversation, restoring global hooks. Safe to call if no override is active (no-op).
-- [ ] `getEffectiveHooks(conversationId: string, event: LLMHookEvent, globalHooks: Hook[]): Hook[] | WorkflowScopedHook[]` — returns the hooks to execute for a given lifecycle event:
+- [x] `WorkflowHookOverrideManager` class exported
+- [x] `activate(conversationId: string, workflowHooks: WorkflowHookConfig): void` — registers the workflow's hook overrides for the given conversation. If an override was already active for this conversation, replaces it (last-write wins).
+- [x] `deactivate(conversationId: string): void` — removes any workflow hook override for the conversation, restoring global hooks. Safe to call if no override is active (no-op).
+- [x] `getEffectiveHooks(conversationId: string, event: LLMHookEvent, globalHooks: Hook[]): Hook[] | WorkflowScopedHook[]` — returns the hooks to execute for a given lifecycle event:
   - If an active override exists for `conversationId` AND the override includes the requested `event` → return the workflow-scoped hooks for that event
   - Otherwise → return the global hooks (unchanged behavior)
-- [ ] `isOverrideActive(conversationId: string): boolean` — returns whether a workflow hook override is currently active for the conversation
-- [ ] `getActiveOverride(conversationId: string): WorkflowHookConfig | null` — returns the active override config or `null`
-- [ ] The manager is a singleton-like service initialized once in `main.ts` and shared across the orchestrator and hook dispatch functions
-- [ ] State is in-memory only — lost on plugin reload (acceptable; workflow execution state is also in-memory)
-- [ ] `destroy(): void` — clears all state
+- [x] `isOverrideActive(conversationId: string): boolean` — returns whether a workflow hook override is currently active for the conversation
+- [x] `getActiveOverride(conversationId: string): WorkflowHookConfig | null` — returns the active override config or `null`
+- [x] The manager is a singleton-like service initialized once in `main.ts` and shared across the orchestrator and hook dispatch functions
+- [x] State is in-memory only — lost on plugin reload (acceptable; workflow execution state is also in-memory)
+- [x] `destroy(): void` — clears all state
 
 **Override semantics (per FR-52 and data-model.md):**
 - Workflow-scoped hooks **replace** global hooks for the specified lifecycle events (not merge/append)
@@ -305,7 +305,7 @@ Sprint 7:  G-008
 
 ### Prerequisites (from other groups)
 
-- [ ] **Group C complete:** Workflow discovery service available, `Workflow` entity defined with `hooks: WorkflowHookConfig | null` field
+- [x] **Group C complete:** Workflow discovery service available, `Workflow` entity defined with `hooks: WorkflowHookConfig | null` field
 - [ ] **Group E complete:** Manual workflow execution pipeline (`executeWorkflow`), conversation creation, response loop with hook dispatch calls
 - [ ] **Group F complete:** Vault event hooks operational, `executeRunWorkflowAction()` (F-019) available for `run_workflow` scoped hook actions, `WorkflowConcurrencyManager` (F-020) and background execution pipeline (F-021) available, Phase 3 hooks extended with `action_type` routing (F-022)
 - [ ] **Phase 3 hooks operational:** `hook-config.ts`, `hook-engine.ts`, `hook-events.ts` working with four lifecycle dispatch functions
