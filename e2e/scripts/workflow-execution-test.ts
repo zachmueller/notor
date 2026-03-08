@@ -427,6 +427,12 @@ async function testChipRemoveButton(page: Page): Promise<void> {
 		const textInput = await page.$(".notor-text-input");
 		if (textInput) {
 			await textInput.click();
+			await page.waitForTimeout(200);
+			// Ensure input is empty
+			await page.evaluate(() => {
+				const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+				if (el) el.textContent = "";
+			});
 			await page.keyboard.type("/");
 			await page.waitForTimeout(800);
 			const suggestion = await page.$(".suggestion-item");
@@ -447,14 +453,25 @@ async function testChipRemoveButton(page: Page): Promise<void> {
 		return;
 	}
 
-	// Click the × remove button
+	// Dismiss any open suggestion popup that could intercept pointer events
+	await page.keyboard.press("Escape");
+	await page.waitForTimeout(300);
+
+	// Re-query chip after popup dismiss (same element should still be there)
+	chip = await page.$(".notor-workflow-chip");
+	if (!chip) {
+		fail("Chip remove button", "Workflow chip disappeared after dismissing suggestion popup");
+		return;
+	}
+
+	// Click the × remove button using force to bypass any remaining overlay
 	const removeBtn = await chip.$(".notor-attachment-chip-remove");
 	if (!removeBtn) {
 		fail("Chip remove button", "No .notor-attachment-chip-remove button found in chip");
 		return;
 	}
 
-	await removeBtn.click();
+	await removeBtn.click({ force: true });
 	await page.waitForTimeout(300);
 
 	const shot = await screenshot(page, "07-chip-removed");
