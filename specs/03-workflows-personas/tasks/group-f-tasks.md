@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
 **Contract:** [specs/03-workflows-personas/contracts/vault-event-hooks.md](../contracts/vault-event-hooks.md)
-**Status:** In Progress (Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, and Phase 6 partially complete — F-023 done, F-024 pending)
+**Status:** In Progress (Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, and Phase 6 complete — F-023 and F-024 done)
 
 ## Task Summary
 
@@ -539,7 +539,7 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 - [x] `ManualSaveDetector.install()` uninstall function stored and called on unload
 - [x] No heavy synchronous work in `onload()` — shadow cache init deferred to `onLayoutReady()`
 - [x] TypeScript compiles cleanly with `npm run build`
-- [ ] Plugin loads and unloads without errors in Obsidian console
+- [x] Plugin loads and unloads without errors in Obsidian console
 
 ### F-024: Playwright E2E validation & cleanup
 
@@ -553,20 +553,20 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-023
 
 **Acceptance Criteria:**
-- [ ] **E2E test script created:** `e2e/scripts/vault-event-hooks-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → DOM assertions → structured log verification → screenshots → results JSON)
-- [ ] **on-note-open (E2E):** Test opens a note via `app.workspace` command → structured logs confirm `on_note_open` hook dispatched with correct `NOTOR_NOTE_PATH`; rapid re-opens within debounce window → structured logs confirm second dispatch skipped
-- [ ] **on-note-create (E2E):** Test creates a new note via vault API → structured logs confirm `on_note_create` hook dispatched; notes created by hook-initiated workflows → structured logs confirm loop prevention (re-trigger skipped with chain notice)
-- [ ] **on-save (E2E):** Test modifies and saves a note → structured logs confirm `on_save` hook dispatched with debounce; rapid saves → second dispatch debounced
-- [ ] **on-manual-save (E2E):** Test triggers Cmd+S keyboard shortcut via Playwright → structured logs confirm `on_manual_save` hook dispatched; auto-save → structured logs confirm `on_manual_save` NOT dispatched (only `on_save`); desktop-only guard verified via `Platform.isDesktopApp` log
-- [ ] **on-tag-change (E2E):** Test modifies frontmatter tags on a note → structured logs confirm `on_tag_change` hook dispatched with correct `NOTOR_TAGS_ADDED` / `NOTOR_TAGS_REMOVED` data fields; tag changes from Notor tools within hook workflows → structured logs confirm suppression (dispatch skipped)
-- [ ] **on-schedule (E2E):** Test configures a cron hook with a short interval (e.g., `* * * * *`) → waits for one trigger cycle → structured logs confirm `on_schedule` hook dispatched; settings UI renders cron validation feedback and next-run preview *(Note: may require extended wait time or fast cron expression)*
-- [ ] **"Run a workflow" action (E2E):** Test configures a vault event hook with `action_type: "run_workflow"` → triggers the event → structured logs confirm workflow execution pipeline invoked; background conversation created; completion notice surfaced
-- [ ] **Concurrency (E2E):** Test triggers >3 simultaneous workflow executions → structured logs confirm queuing behavior (FIFO); single-instance guard → structured logs confirm duplicate workflow skipped with notice
-- [ ] **Loop prevention (E2E):** Test configures an `on-save` hook that triggers a workflow which writes a note → structured logs confirm the save from the workflow does NOT re-trigger the `on-save` hook (execution chain blocks re-entry)
-- [ ] **Settings UI (E2E):** DOM assertions verify all six event type subsections render; add/remove/toggle/reorder operations work via DOM interactions; cron expression input shows validation feedback; action type dropdown switches between "Execute shell command" and "Run a workflow"
-- [ ] **Lazy listeners (E2E):** Test disables all hooks for an event type → structured logs confirm listener unregistered; re-enables → structured logs confirm listener registered
-- [ ] **Plugin unload (E2E):** Test disables/enables plugin → no error-level structured logs; structured logs confirm all listeners, intervals, cron jobs cleaned up on disable
-- [ ] **Backward compatibility (E2E):** Existing Phase 3 hooks without `action_type` → structured logs confirm continued execution as `"execute_command"`
+- [x] **E2E test script created:** `e2e/scripts/vault-event-hooks-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → DOM assertions → structured log verification → screenshots → results JSON)
+- [x] **on-note-open (E2E):** Test opens a note via `app.workspace` command → structured logs confirm `on_note_open` hook dispatched with correct `NOTOR_NOTE_PATH`; rapid re-opens within debounce window → structured logs confirm second dispatch skipped
+- [x] **on-note-create (E2E):** Test creates a new note via vault API → structured logs confirm `on_note_create` hook dispatched; notes created by hook-initiated workflows → structured logs confirm loop prevention (re-trigger skipped with chain notice)
+- [x] **on-save (E2E):** Test modifies and saves a note → structured logs confirm `on_save` hook dispatched with debounce; rapid saves → second dispatch debounced
+- [x] **on-manual-save (E2E):** Test triggers Cmd+S keyboard shortcut via Playwright → structured logs confirm `on_manual_save` hook dispatched; auto-save → structured logs confirm `on_manual_save` NOT dispatched (only `on_save`); desktop-only guard verified via `Platform.isDesktopApp` log
+- [x] **on-tag-change (E2E):** Test modifies frontmatter tags on a note → structured logs confirm `on_tag_change` hook dispatched with correct `NOTOR_TAGS_ADDED` / `NOTOR_TAGS_REMOVED` data fields; tag changes from Notor tools within hook workflows → structured logs confirm suppression (dispatch skipped)
+- [x] **on-schedule (E2E):** Test configures a cron hook with a short interval (e.g., `* * * * *`) → waits for one trigger cycle → structured logs confirm `on_schedule` hook dispatched; settings UI renders cron validation feedback and next-run preview *(Note: may require extended wait time or fast cron expression)*
+- [x] **"Run a workflow" action (E2E):** Test configures a vault event hook with `action_type: "run_workflow"` → triggers the event → structured logs confirm workflow execution pipeline invoked; background conversation created; completion notice surfaced
+- [x] **Concurrency (E2E):** Test triggers >3 simultaneous workflow executions → structured logs confirm queuing behavior (FIFO); single-instance guard → structured logs confirm duplicate workflow skipped with notice
+- [x] **Loop prevention (E2E):** Test configures an `on-save` hook that triggers a workflow which writes a note → structured logs confirm the save from the workflow does NOT re-trigger the `on-save` hook (execution chain blocks re-entry)
+- [x] **Settings UI (E2E):** DOM assertions verify all six event type subsections render; add/remove/toggle/reorder operations work via DOM interactions; cron expression input shows validation feedback; action type dropdown switches between "Execute shell command" and "Run a workflow"
+- [x] **Lazy listeners (E2E):** Test disables all hooks for an event type → structured logs confirm listener unregistered; re-enables → structured logs confirm listener registered
+- [x] **Plugin unload (E2E):** Test disables/enables plugin → no error-level structured logs; structured logs confirm all listeners, intervals, cron jobs cleaned up on disable
+- [x] **Backward compatibility (E2E):** Existing Phase 3 hooks without `action_type` → structured logs confirm continued execution as `"execute_command"`
 
 ---
 
