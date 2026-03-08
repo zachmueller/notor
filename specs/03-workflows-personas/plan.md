@@ -15,9 +15,9 @@
 - **`<include_note>` resolution:** Regex-based XML tag parser for self-closing `<include_note ... />` tags. Vault-relative paths resolved via `vault.getAbstractFileByPath()`; wikilink paths resolved via `metadataCache.getFirstLinkpathDest()`. Section extraction uses `metadataCache.getFileCache()?.headings`. Single resolution function shared across system prompts, vault rules, and workflow bodies.
 - **Vault event hooks:** Obsidian event system — `app.workspace.on('file-open', ...)` for note open, `app.vault.on('create', ...)` for note create, `app.vault.on('modify', ...)` for save, `app.metadataCache.on('changed', ...)` for tag change detection. Lazy per-hook-type listener activation/deactivation.
 - **Manual save detection:** Intercept `editor:save-file` command via `app.commands` — set a short-lived flag, check in subsequent `modify` handler to distinguish manual from auto-save.
-- **Cron scheduling:** Lightweight bundled JavaScript library (e.g., `croner` — ~5 KB, zero deps, ESM, Obsidian-compatible) for in-process cron expression parsing and scheduling. No external cron daemon.
+- **Cron scheduling:** `croner` v10.x (27.3 KB minified / 8.1 KB gzipped, zero deps, ESM, fully browser/Electron-safe) for in-process cron expression parsing and scheduling. No external cron daemon.
 - **Workflow concurrency:** In-memory execution manager with configurable global concurrency limit (default: 3) for background event-triggered workflows. FIFO queue for overflow. Manual workflows not counted against the limit.
-- **Slash-command UX:** Custom autocomplete dropdown in the chat input area, triggered by `/` at line start. Filters workflow list as user types.
+- **Slash-command UX:** `AbstractInputSuggest<T>` on the existing contenteditable chat input (same API as `VaultNoteSuggest` for `[[`), triggered by `/` at line start. Automatic dropdown positioning via `PopoverSuggest`. Workflow chips in external `notor-attachment-chips` container. Filters workflow list as user types.
 - **Workflow activity indicator:** DOM-based element in chat panel header with dropdown popover for recent/active workflow executions.
 - **Infinite loop prevention:** Execution chain tracking — each workflow execution carries a set of "source hooks" that prevent re-triggering the same hook type within the chain.
 
@@ -29,7 +29,7 @@
 | File-based workflow discovery (frontmatter scan) | Workflows as vault notes are searchable, linkable, and editable; frontmatter-based identification is consistent with Obsidian conventions | Dedicated config file listing workflows, tags-based identification | Requires recursive scan reading frontmatter only (mitigated by <500 ms target for 200 workflows); notes without `notor-workflow: true` are ignored |
 | Regex-based `<include_note>` tag parser | Simple, no external XML parser needed; self-closing tags have predictable structure; handles both path syntaxes | Full XML/HTML parser (e.g., DOMParser), custom AST parser | Cannot handle malformed XML gracefully; but self-closing tags are simple enough that regex is reliable. No nested resolution prevents complexity. |
 | Wikilink resolution via `getFirstLinkpathDest()` | Same API Obsidian uses internally; gets automatic link-update on rename; proven reliability | Custom link resolution, vault-wide file search | Depends on Obsidian's metadata cache being up-to-date; ambiguous names use Obsidian's default resolution order |
-| `croner` for cron scheduling | ~5 KB minified, zero dependencies, ESM-compatible, supports standard cron syntax, timezone-aware | `cron-parser` (~15 KB, parse-only — needs custom scheduler), `node-cron` (larger, Node.js-specific), custom implementation | Adds a bundled dependency; but eliminates need to write cron parsing/scheduling from scratch |
+| `croner` for cron scheduling | 27.3 KB minified / 8.1 KB gzipped, zero dependencies, ESM-compatible, full 5-field cron + shorthand aliases, per-job timezone support, browser/Electron-safe | `cron-parser` (~15 KB + luxon ~70 KB, parse-only — needs custom scheduler), `node-cron` (similar size, Node.js-focused, less maintained), custom implementation (~500+ lines) | Adds a bundled dependency (~8 KB gzipped); but eliminates need to write cron parsing/scheduling from scratch |
 | In-memory concurrency manager | Simple, no persistence needed; workflows are ephemeral execution contexts | Database-backed queue, worker threads | State lost on plugin reload (acceptable — running workflows terminate on unload); but simple and sufficient |
 | `editor:save-file` command interception for manual save | Only reliable mechanism to distinguish user-initiated save from auto-save in Obsidian | Monitoring keyboard events (fragile), Obsidian API hooks (none exists for this) | Relies on Obsidian command ID stability; but `editor:save-file` is a core command unlikely to change |
 
@@ -53,61 +53,41 @@ Phase 4 introduces several new interaction patterns with Obsidian's API that req
 
 #### R-1: Cron scheduling library evaluation
 
-**Status:** Pending
+**Status:** ✅ Complete
 
-Evaluate lightweight JavaScript cron libraries for in-process scheduling within Obsidian's Electron environment. Key questions:
-- Does `croner` (~5 KB) bundle cleanly with esbuild and run in Obsidian's renderer process?
-- Does it support standard 5-field cron syntax plus common extensions (e.g., `@daily`, `@weekly`)?
-- How does it handle timezone awareness (important for user-facing schedules)?
-- What is the API for starting/stopping scheduled jobs dynamically (needed for lazy activation)?
-- Are there alternatives worth considering (`cron-parser` + custom timer, `later.js`, custom implementation)?
+Evaluate lightweight JavaScript cron libraries for in-process scheduling within Obsidian's Electron environment.
 
-**Success criteria:** Identify a library that is <20 KB bundled, zero external dependencies, ESM-compatible, and supports dynamic job start/stop.
+**Decision:** Use `croner` v10.x — 27.3 KB minified / 8.1 KB gzipped, zero dependencies, ESM-compatible, full 5-field cron + shorthand aliases, dynamic job start/stop via `pause()`/`resume()`/`stop()`, validation via `CronPattern` constructor, per-job timezone support via `Intl.DateTimeFormat`, fully browser/Electron-safe (no Node.js APIs).
 
 **Output:** Findings in [research.md](research.md) § R-1
 
 #### R-2: Manual save detection via command interception
 
-**Status:** Pending
+**Status:** ✅ Complete
 
-Validate the approach of intercepting `editor:save-file` to distinguish manual saves from auto-saves. Key questions:
-- Is `app.commands.executeCommandById` interceptable, or do we need to patch/wrap the command?
-- What is the exact sequence of events when the user presses Cmd+S: does `editor:save-file` fire before `vault.on('modify', ...)`?
-- Is there a reliable timing window to set and check a flag between command interception and the modify event?
-- Does this approach work on both desktop and mobile? (If mobile auto-save behavior differs, how should we handle it?)
-- Are there edge cases (e.g., multiple panes, split views) where the command fires for a different note than expected?
+Validate the approach of intercepting `editor:save-file` to distinguish manual saves from auto-saves.
 
-**Success criteria:** Confirm that manual save detection is reliable across macOS, Windows, and Linux with a flag-based approach.
+**Decision:** Direct monkey-patch of `app.commands.executeCommandById` to intercept `editor:save-file`. Flag-based detection with `Map<string, number>` (note path → timestamp), 500 ms window, one-shot consumption. Auto-save correctly excluded (bypasses command system). Works on all desktop platforms (macOS, Windows, Linux). Effectively desktop-only — mobile has no save shortcut. `app.commands` API has been stable since Obsidian 0.15 (2022), relied upon by dozens of major community plugins. Graceful degradation if API unavailable.
 
 **Output:** Findings in [research.md](research.md) § R-2
 
 #### R-3: Tag change detection via metadata cache
 
-**Status:** Pending
+**Status:** ✅ Complete
 
-Determine the best approach for detecting frontmatter tag changes to support `on-tag-change` hooks. Key questions:
-- Does `metadataCache.on('changed', ...)` fire reliably when frontmatter `tags` are modified?
-- What data does the callback receive — is the previous frontmatter state accessible, or do we need to maintain a shadow cache?
-- If a shadow cache is needed, what is the memory footprint for a vault with 10,000+ notes?
-- Can we detect tag changes made by Notor's own `manage_tags` and `update_frontmatter` tools to implement loop prevention?
-- How does the metadata cache handle rapid successive tag changes (e.g., batch tag operations)?
+Determine the best approach for detecting frontmatter tag changes to support `on-tag-change` hooks.
 
-**Success criteria:** Define a tag change detection strategy that correctly identifies added/removed tags with acceptable memory overhead.
+**Decision:** Shadow cache (`Map<string, Set<string>>`) with eager initialization at plugin load (via `workspace.onLayoutReady()`), `metadataCache.on('changed')` listener, `parseFrontMatterTags()` for frontmatter-only tag extraction. Set-based diff for O(1) membership checks. Tag normalization: strip `#`, trim whitespace, lowercase for comparison, preserve original case for reporting. Memory: ~2.9 MB for 10,000 notes (acceptable). `TagChangeSuppressionManager` with two-phase consume-on-event cleanup for loop prevention. Additional lifecycle handlers for `vault.on('delete')` and `vault.on('rename')` to maintain shadow cache. No debounce needed (discrete events, shadow cache diff handles deduplication).
 
 **Output:** Findings in [research.md](research.md) § R-3
 
 #### R-4: Slash-command autocomplete in custom ItemView
 
-**Status:** Pending
+**Status:** ✅ Complete
 
-Investigate how to implement `/`-triggered autocomplete in the Notor chat input area (which is a custom `ItemView`, not Obsidian's native editor). Key questions:
-- Can `EditorSuggest` or `SuggestModal` be adapted for use in a `<textarea>` or contenteditable element within an `ItemView`?
-- Is there an existing Obsidian pattern for custom autocomplete in non-editor views?
-- What DOM positioning approach should be used for the dropdown (absolute positioning relative to caret, fixed overlay)?
-- How should the workflow chip be rendered in the input area — as a DOM element within a contenteditable, or as a separate chip container above/beside the textarea?
-- How do we prevent the `/` trigger from interfering with normal typing (e.g., user typing a URL or path)?
+Investigate how to implement `/`-triggered autocomplete in the Notor chat input area (which is a custom `ItemView`, not Obsidian's native editor).
 
-**Success criteria:** Define an implementation approach for `/`-triggered autocomplete with chip insertion that works reliably in the Notor chat input.
+**Decision:** Use `AbstractInputSuggest<T>` on the existing `<div contenteditable="true">` chat input — the same API and element already used by `VaultNoteSuggest` for `[[` autocomplete. `EditorSuggest` is NOT applicable (requires CodeMirror `Editor` + `TFile` context). Dropdown positioning handled automatically by `PopoverSuggest`. Workflow chips rendered in the existing external `notor-attachment-chips` container (same as attachment chips) — NOT inline in contenteditable (plaintext-only mode strips HTML). `WorkflowChipManager` class (~50 lines) manages single chip lifecycle. `/` trigger fires only at index 0 or after `\n`; excludes paths (query containing `/`). `isActive` flag pattern ensures coexistence with `VaultNoteSuggest`. ~150 lines of new code, ~10 lines of CSS. No new dependencies.
 
 **Output:** Findings in [research.md](research.md) § R-4
 
@@ -281,12 +261,12 @@ New settings required for Phase 4 (extends existing settings model):
 ### Technical Completeness Check
 
 - [x] Technology choices made and documented
-- [ ] R-1: Cron scheduling library evaluated
-- [ ] R-2: Manual save detection mechanism validated
-- [ ] R-3: Tag change detection strategy defined
-- [ ] R-4: Slash-command autocomplete approach determined
-- [ ] Data model covers all functional requirements (see data-model.md)
-- [ ] Contracts defined for new systems (see contracts/)
+- [x] R-1: Cron scheduling library evaluated — `croner` v10.x selected
+- [x] R-2: Manual save detection mechanism validated — `app.commands.executeCommandById` monkey-patch confirmed
+- [x] R-3: Tag change detection strategy defined — shadow cache with eager init, `parseFrontMatterTags`, Set-based diff
+- [x] R-4: Slash-command autocomplete approach determined — `AbstractInputSuggest<T>` on existing contenteditable
+- [x] Data model covers all functional requirements (see data-model.md)
+- [x] Contracts defined for new systems (see contracts/)
 - [x] Security requirements addressed (vault-scoped `<include_note>`, Plan/Act enforcement, loop prevention)
 - [x] Performance considerations documented (NFR-10: discovery times, non-blocking hooks, lazy listeners)
 - [x] Integration points defined (Obsidian APIs, existing Notor systems, cron library)
@@ -295,7 +275,7 @@ New settings required for Phase 4 (extends existing settings model):
 
 - [x] Architecture extends existing Phase 0–3 systems without breaking changes
 - [x] Security model addresses new surfaces (persona auto-approve escalation, hook loops, vault-scoped includes)
-- [ ] Data model supports all business rules (pending research completion)
+- [x] Data model supports all business rules
 - [x] Design follows established patterns (file-based config, XML context injection, grouped settings UI)
 - [x] Documentation complete for all major decisions
 
@@ -307,10 +287,10 @@ New settings required for Phase 4 (extends existing settings model):
 
 | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|
-| **Cron library too large or incompatible with esbuild** | Medium — delays scheduled hook feature | Low | R-1 will evaluate; `croner` is ~5 KB with zero deps; fallback: custom lightweight cron parser |
-| **Manual save detection unreliable across platforms** | Medium — `on-manual-save` hook unreliable | Medium | R-2 will validate; fallback: document as best-effort on unsupported platforms; `on-save` remains available for all saves |
-| **Tag change detection race conditions** | Medium — missed or duplicate `on-tag-change` fires | Medium | R-3 will define diffing strategy; debounce + shadow cache prevents most races |
-| **Slash-command autocomplete complexity in custom view** | Low — feature degraded but alternatives exist | Medium | R-4 will determine approach; fallback: simpler fixed popup triggered by button instead of `/` |
+| ~~**Cron library too large or incompatible with esbuild**~~ | ~~Medium~~ | ~~Low~~ | ✅ **Mitigated by R-1:** `croner` v10.x confirmed — 8.1 KB gzipped, zero deps, bundles cleanly with esbuild, fully browser/Electron-safe |
+| ~~**Manual save detection unreliable across platforms**~~ | ~~Medium~~ | ~~Medium~~ | ✅ **Mitigated by R-2:** `app.commands.executeCommandById` monkey-patch confirmed reliable on all desktop platforms; graceful degradation if unavailable; desktop-only (mobile all-autosave documented) |
+| ~~**Tag change detection race conditions**~~ | ~~Medium~~ | ~~Medium~~ | ✅ **Mitigated by R-3:** Shadow cache with eager init eliminates first-event false positives; `parseFrontMatterTags` avoids inline tag false positives; `TagChangeSuppressionManager` with two-phase cleanup prevents loops; no race conditions possible (interceptor is synchronous) |
+| ~~**Slash-command autocomplete complexity in custom view**~~ | ~~Low~~ | ~~Medium~~ | ✅ **Mitigated by R-4:** `AbstractInputSuggest<T>` on existing contenteditable div; proven pattern already in use (`VaultNoteSuggest`); ~150 lines new code; no new dependencies |
 | **Background workflow execution state management** | Medium — orphaned workflows, resource leaks | Low | Bounded concurrency limit; cleanup on plugin unload; skip-if-running prevents accumulation |
 | **Infinite loop detection edge cases** | High — runaway LLM conversations | Low | Execution chain tracking + per-workflow single-instance guard; conservative approach (skip with notice) |
 | **Persona `system-prompt.md` with invalid YAML** | Low — persona excluded | Medium | Graceful exclusion with warning; other personas unaffected |
@@ -318,11 +298,11 @@ New settings required for Phase 4 (extends existing settings model):
 
 ### Dependencies and Assumptions
 
-- **External dependencies:** Cron scheduling library (e.g., `croner`, ~5 KB npm package); no other new runtime dependencies
+- **External dependencies:** `croner` v10.x (27.3 KB minified / 8.1 KB gzipped npm package); no other new runtime dependencies
 - **Existing system dependencies:** Phase 4 builds on Phase 0 (LLM providers, streaming, settings, system prompt), Phase 1 (tool dispatch, Plan/Act mode, chat panel, auto-approve), Phase 2 (JSONL history, checkpoints, frontmatter tools, vault rules), and Phase 3 (hook engine, shell execution, attachment system, auto-context, message assembly)
 - **Technical assumptions:** `metadataCache.getFirstLinkpathDest()` reliably resolves wikilinks in non-editor contexts (i.e., when the wikilink appears in a `path` attribute rather than standard Markdown link syntax); `app.commands` supports command interception for manual save detection; `metadataCache.on('changed', ...)` provides access to new frontmatter state (previous state requires a shadow cache); Obsidian's event system fires `file-open`, `create`, and `modify` events in a deterministic order; cron library runs reliably in Electron's renderer process
 - **Business assumptions:** Users create persona and workflow directories manually (no creation wizard in Phase 4); users familiar with YAML frontmatter for workflow configuration; cron expressions are a familiar concept for power users configuring scheduled hooks
-- **Mobile considerations:** Vault event hooks, personas, workflows, and `<include_note>` resolution all work on mobile (vault API and metadata cache are available). `on-manual-save` may behave differently on mobile (no Cmd+S equivalent); scheduled hooks only fire while the app is active. Shell command hook actions are desktop-only (gated behind `Platform.isDesktop`).
+- **Mobile considerations:** Vault event hooks, personas, workflows, and `<include_note>` resolution all work on mobile (vault API and metadata cache are available). `on-manual-save` is effectively desktop-only — mobile has no save shortcut and all saving is via auto-save (confirmed by R-2); scheduled hooks only fire while the app is active. Shell command hook actions are desktop-only (gated behind `Platform.isDesktop`).
 
 ---
 
@@ -331,17 +311,17 @@ New settings required for Phase 4 (extends existing settings model):
 ### Task Breakdown Readiness
 
 - [x] Clear technology choices and architecture
-- [ ] Complete data model and contract specifications (pending research)
+- [x] Complete data model and contract specifications
 - [x] Development environment and tooling defined
 - [x] Quality standards and testing approach specified
 - [x] Integration requirements and dependencies clear
 
 ### Implementation Prerequisites
 
-- [ ] R-1: Cron scheduling library research complete
-- [ ] R-2: Manual save detection research complete
-- [ ] R-3: Tag change detection research complete
-- [ ] R-4: Slash-command autocomplete research complete
+- [x] R-1: Cron scheduling library research complete — `croner` v10.x selected
+- [x] R-2: Manual save detection research complete — `app.commands` monkey-patch confirmed
+- [x] R-3: Tag change detection research complete — shadow cache + `parseFrontMatterTags` + Set-based diff
+- [x] R-4: Slash-command autocomplete research complete — `AbstractInputSuggest<T>` on existing contenteditable
 - [x] Development environment requirements specified (see quickstart.md)
 - [x] Existing Phase 0–3 infrastructure available as foundation
 - [x] Quality assurance approach defined (e2e tests with Playwright, manual testing)

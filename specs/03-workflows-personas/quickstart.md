@@ -21,11 +21,10 @@ This document covers development environment additions for Phase 4. It supplemen
 Phase 4 adds one new npm dependency for cron scheduling:
 
 ```bash
-# After R-1 research confirms the library choice (e.g., croner)
 npm install croner
 ```
 
-**Note:** The specific cron library depends on R-1 research findings. `croner` is the current leading candidate (~5 KB, zero deps, ESM). If research identifies a better alternative, substitute accordingly.
+**Library:** `croner` v10.x — 27.3 KB minified / 8.1 KB gzipped, zero external dependencies, ESM-compatible, fully browser/Electron-safe. Provides both cron expression parsing and in-process job scheduling with dynamic start/stop, validation via `CronPattern` constructor, per-job timezone support, and shorthand aliases (`@daily`, `@weekly`, etc.). Confirmed by R-1 research (see [research.md](research.md) § R-1).
 
 ---
 
@@ -46,11 +45,12 @@ src/
   hooks/
     vault-event-hooks.ts    # Vault event hook configuration and listener management
     vault-event-engine.ts   # Event handler dispatch, debounce, loop prevention
-    cron-scheduler.ts       # Cron expression scheduling (wraps cron library)
+    manual-save-detector.ts # Manual save detection via editor:save-file interception
+    tag-change-detector.ts  # Tag shadow cache, change detection, suppression manager
+    cron-scheduler.ts       # Cron expression scheduling (wraps croner library)
   ui/
     persona-picker.ts       # Persona selection dropdown in chat panel
-    workflow-suggest.ts     # Slash-command autocomplete for workflow attachment
-    workflow-chip.ts        # Workflow chip rendering in chat input
+    workflow-suggest.ts     # Slash-command autocomplete + workflow chip management
     workflow-indicator.ts   # Workflow activity indicator in chat panel header
 ```
 
@@ -66,10 +66,11 @@ src/
 | `include-note.ts` | Parses `<include_note ... />` tags, resolves paths (vault-relative and wikilink), extracts sections, handles errors |
 | `vault-event-hooks.ts` | Configuration model for vault event hooks, CRUD operations (mirroring `hook-config.ts` pattern) |
 | `vault-event-engine.ts` | Registers/unregisters Obsidian event listeners, dispatches hooks, manages debounce, handles loop prevention |
-| `cron-scheduler.ts` | Wraps cron library for creating/destroying scheduled jobs, validates cron expressions |
+| `manual-save-detector.ts` | Intercepts `editor:save-file` command via `app.commands` monkey-patch; manages manual save flags (`Map<string, number>`, 500 ms window); provides `isManualSave()` check; registers periodic cleanup; graceful degradation if `app.commands` unavailable |
+| `tag-change-detector.ts` | `TagShadowCache` (`Map<string, Set<string>>`) with eager init via `workspace.onLayoutReady()`; `TagChangeSuppressionManager` with two-phase consume-on-event cleanup; tag normalization (strip `#`, lowercase); `parseFrontMatterTags` extraction; `vault.on('delete')`/`vault.on('rename')` lifecycle handlers; `computeTagDiff()` |
+| `cron-scheduler.ts` | Wraps `croner` library for creating/destroying scheduled jobs; validates cron expressions via `CronPattern` constructor; creates jobs with `{ paused: true }` for lazy activation |
 | `persona-picker.ts` | UI component for persona selection in chat panel settings area |
-| `workflow-suggest.ts` | `/`-triggered autocomplete dropdown for workflow selection |
-| `workflow-chip.ts` | Visual chip element representing an attached workflow in chat input |
+| `workflow-suggest.ts` | `WorkflowSlashSuggest` class (extends `AbstractInputSuggest<T>`) for `/`-triggered autocomplete; `WorkflowChipManager` class for chip rendering in existing `notor-attachment-chips` container; `detectSlashTrigger()` with `isActive` flag for coexistence with `VaultNoteSuggest` |
 | `workflow-indicator.ts` | Activity indicator badge/icon in chat panel header with dropdown for recent workflows |
 
 ---

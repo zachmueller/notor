@@ -186,6 +186,12 @@ function evaluateListeners() {
 7. Execute hooks sequentially
 ```
 
+**Platform notes:**
+- **Desktop (macOS, Windows, Linux):** All save shortcuts (Cmd+S / Ctrl+S) and command palette "Save current file" route through `editor:save-file`. Vim mode `:w` also routes through this command. Detection works identically on all desktop platforms.
+- **Mobile (iOS, Android):** No save shortcut exists. All saving is via auto-save (periodic timer or on-app-background). `on-manual-save` effectively never fires on mobile. This should be documented in the settings UI help text.
+- **Defensive availability check:** At registration time, check `typeof (app as any).commands?.executeCommandById === "function"`. If unavailable, log a warning and degrade gracefully — `on-manual-save` hooks simply never fire, with no crash or error.
+- **Cleanup interval:** Register a periodic cleanup interval (every 60 seconds) via `this.registerInterval()` to prune unconsumed manual-save flags older than 2× the window (1000 ms).
+
 **Context available:**
 - `note_path`: vault-relative path of the manually saved note
 
@@ -195,23 +201,75 @@ function evaluateListeners() {
 
 **Detection mechanism:**
 ```
-1. Maintain shadow cache: Map<string, string[]> of note path → last-known tags
-2. Initialize shadow cache lazily on first metadataCache 'changed' event
-3. On metadataCache 'changed' event:
-   a. Read new tags from file's frontmatter
-   b. Compare with shadow cache entry
-   c. IF tags differ → compute diff (added, removed)
-   d. Update shadow cache with new tags
-   e. IF this change was made by a hook-initiated workflow → skip (loop prevention)
-   f. Fire on-tag-change hooks with diff context
+1. Maintain shadow cache: Map<string, Set<string>> of note path → last-known normalized tags
+2. Initialize shadow cache eagerly at plugin load via workspace.onLayoutReady()
+   - Iterate all Markdown files via vault.getMarkdownFiles()
+   - Read tags from metadataCache.getFileCache(file)?.frontmatter via parseFrontMatterTags()
+   - Normalize: strip leading #, trim whitespace, lowercase for comparison
+   - Store in shadow cache (< 50 ms for 10,000 notes, no disk I/O)
+3. Register lifecycle handlers:
+   - vault.on('delete', ...) → remove entry from shadow cache
+   - vault.on('rename', ...) → move entry from old path to new path
+4. On metadataCache 'changed' event:
+   a. Extract new tags via parseFrontMatterTags(cache.frontmatter) — frontmatter tags only, NOT getAllTags()
+   b. Normalize new tags (strip #, trim, lowercase)
+   c. Compare with shadow cache entry via Set-based diff
+   d. Update shadow cache with new tags (even if suppressed, to keep cache accurate)
+   e. IF diff is empty (no tag change) → skip (non-tag metadata change)
+   f. IF suppression.checkAndConsume(file.path) returns true → skip hook dispatch (loop prevention)
+   g. Fire on-tag-change hooks with diff context
 ```
+
+**Tag normalization rules:**
+
+| Rule | Example | Rationale |
+|---|---|---|
+| Strip leading `#` | `#research` → `research` | `parseFrontMatterTags` adds `#`; frontmatter stores without it; `manage_tags` strips it |
+| Trim whitespace | `" research "` → `research` | Defensive normalization |
+| Lowercase for comparison | `Research` → `research` (in shadow cache) | Obsidian treats tags as case-insensitive; case-only changes should not trigger false add/remove events |
+
+Tags are reported in their **original case** (from the current frontmatter) in the `tags_added` / `tags_removed` arrays passed to hooks.
+
+**Why `parseFrontMatterTags` and NOT `getAllTags`:** FR-49 specifies that `on-tag-change` fires when "the `tags` frontmatter property of a note changes." `getAllTags(cache)` includes both frontmatter tags AND inline body tags (`#tag` in note body text). Using `getAllTags` would cause false positives when body text changes add/remove inline `#tag` references without any frontmatter changes. `parseFrontMatterTags` extracts frontmatter tags only, matching the spec requirement.
+
+**Why eager initialization (not lazy):** Lazy initialization on first `changed` event would have no previous state for the first tag change on any note, causing a false "all tags added" detection for every note. Eager initialization (< 50 ms for 10,000 notes from in-memory metadata cache) ensures correct diff behavior from the very first event.
 
 **Context available:**
 - `note_path`: vault-relative path of the affected note
-- `tags_added`: array of newly added tags
-- `tags_removed`: array of removed tags
+- `tags_added`: array of newly added tags (original case)
+- `tags_removed`: array of removed tags (original case)
 
-**Loop prevention:** A `_suppressTagChangeHooks: Set<string>` tracks note paths currently being modified by hook-initiated workflows. `manage_tags` and `update_frontmatter` tool calls within hook workflows add the target note path to this set before execution and remove it after.
+**Loop prevention: `TagChangeSuppressionManager`**
+
+A two-phase consume-on-event mechanism tracks note paths being modified by hook-initiated workflows:
+
+```typescript
+class TagChangeSuppressionManager {
+  private suppressed: Map<string, number> = new Map();
+  // Key: note path being modified by hook workflow
+  // Value: Date.now() timestamp when suppression was set
+
+  /** Called before tool execution within a hook workflow. */
+  suppress(path: string): void { this.suppressed.set(path, Date.now()); }
+
+  /** Called in metadataCache 'changed' handler. Consumes (deletes) the entry on match. */
+  checkAndConsume(path: string): boolean {
+    const ts = this.suppressed.get(path);
+    if (ts && Date.now() - ts < 2000) {
+      this.suppressed.delete(path);
+      return true; // suppressed
+    }
+    return false;
+  }
+
+  /** Periodic cleanup (every 30s) prunes entries older than 2 seconds. */
+  startCleanup(registerInterval: (id: number) => void): void { /* ... */ }
+}
+```
+
+**Why two-phase (not immediate cleanup after tool execution):** The `metadataCache.on('changed')` event fires **asynchronously**, typically 50–200 ms after the file write. If suppression were cleared immediately after tool execution (synchronously), the `changed` event wouldn't have fired yet and would miss the suppression. The two-phase approach ensures the flag persists until the corresponding cache event consumes it.
+
+**Note:** The shadow cache is still updated on suppressed events (step 4d) to keep it accurate. Only hook dispatch is skipped.
 
 ### `on-schedule` (FR-50)
 
