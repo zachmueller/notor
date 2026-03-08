@@ -105,12 +105,12 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-002
 
 **Acceptance Criteria:**
-- [ ] `resolveIncludeNotePath(tag: IncludeNoteTag, vault: Vault, metadataCache: MetadataCache, sourceFilePath: string): TFile | null` function exported
-- [ ] For `path_type === "vault_relative"`: calls `vault.getAbstractFileByPath(tag.path)` and checks the result is a `TFile` (not a `TFolder`)
-- [ ] Returns `null` if the path does not resolve to a file (triggers error marker in D-009)
-- [ ] Vault-scoping security check: after resolution, verifies the resolved file's path does not escape the vault (defensive — Obsidian's API inherently scopes to vault, but this guard prevents edge cases)
-- [ ] Delegates to wikilink resolution (D-004) when `path_type === "wikilink"`
-- [ ] Handles paths with and without `.md` extension gracefully
+- [x] `resolveIncludeNotePath(tag: IncludeNoteTag, vault: Vault, metadataCache: MetadataCache, sourceFilePath: string): TFile | null` function exported
+- [x] For `path_type === "vault_relative"`: calls `vault.getAbstractFileByPath(tag.path)` and checks the result is a `TFile` (not a `TFolder`)
+- [x] Returns `null` if the path does not resolve to a file (triggers error marker in D-009)
+- [x] Vault-scoping security check: after resolution, verifies the resolved file's path does not escape the vault (defensive — Obsidian's API inherently scopes to vault, but this guard prevents edge cases)
+- [x] Delegates to wikilink resolution (D-004) when `path_type === "wikilink"`
+- [x] Handles paths with and without `.md` extension gracefully
 
 ### D-004 [P]: Path resolution — wikilink paths
 
@@ -122,12 +122,12 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-002 (can be developed in parallel with D-003)
 
 **Acceptance Criteria:**
-- [ ] For `path_type === "wikilink"`: strips `[[` and `]]` from the path value using `path.replace(/^\[\[|\]\]$/g, "")`
-- [ ] Calls `metadataCache.getFirstLinkpathDest(linkPath, sourceFilePath)` with the stripped link path and the source file's vault-relative path for disambiguation context
-- [ ] Returns the resolved `TFile` or `null` if the wikilink resolves to nothing
-- [ ] Handles wikilinks with subdirectory hints (e.g., `[[Research/Topic A]]`)
-- [ ] Handles wikilinks with just a note name (e.g., `[[Topic A]]`) — relies on Obsidian's default resolution order
-- [ ] Does not warn on ambiguous note names — uses Obsidian's default resolution (same as `getFirstLinkpathDest()` behavior per spec)
+- [x] For `path_type === "wikilink"`: strips `[[` and `]]` from the path value using `path.replace(/^\[\[|\]\]$/g, "")`
+- [x] Calls `metadataCache.getFirstLinkpathDest(linkPath, sourceFilePath)` with the stripped link path and the source file's vault-relative path for disambiguation context
+- [x] Returns the resolved `TFile` or `null` if the wikilink resolves to nothing
+- [x] Handles wikilinks with subdirectory hints (e.g., `[[Research/Topic A]]`)
+- [x] Handles wikilinks with just a note name (e.g., `[[Topic A]]`) — relies on Obsidian's default resolution order
+- [x] Does not warn on ambiguous note names — uses Obsidian's default resolution (same as `getFirstLinkpathDest()` behavior per spec)
 
 ### D-005: Section extraction
 
@@ -139,15 +139,15 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-003 (or D-004 — needs a resolved `TFile`)
 
 **Acceptance Criteria:**
-- [ ] `extractSection(content: string, sectionName: string, file: TFile, metadataCache: MetadataCache): string | null` function exported
-- [ ] Retrieves headings from `metadataCache.getFileCache(file)?.headings`
-- [ ] Finds the first heading whose `heading` text matches `sectionName` (exact match, case-sensitive)
-- [ ] Extracts content from the matched heading's `position.start.offset` to the next heading of equal or higher level's `position.start.offset`, or to the end of the content string if no such heading exists
-- [ ] Returns the extracted content (including the heading line itself), trimmed
-- [ ] Returns `null` if the heading is not found in the file's headings (triggers error marker in D-009)
-- [ ] Handles files with no headings (returns `null` if `section` is specified)
-- [ ] Handles the last heading in a file (extracts to end of content)
-- [ ] Section offsets are computed against the full file content (before frontmatter stripping) — coordinate with D-007 to ensure offset math is correct when `strip_frontmatter` is true
+- [x] `extractSection(content: string, sectionName: string, file: TFile, metadataCache: MetadataCache): string | null` function exported
+- [x] Retrieves headings from `metadataCache.getFileCache(file)?.headings`
+- [x] Finds the first heading whose `heading` text matches `sectionName` (exact match, case-sensitive)
+- [x] Extracts content from the matched heading's `position.start.offset` to the next heading of equal or higher level's `position.start.offset`, or to the end of the content string if no such heading exists
+- [x] Returns the extracted content (including the heading line itself), trimmed
+- [x] Returns `null` if the heading is not found in the file's headings (triggers error marker in D-009)
+- [x] Handles files with no headings (returns `null` if `section` is specified)
+- [x] Handles the last heading in a file (extracts to end of content)
+- [x] Section offsets are computed against the full file content (before frontmatter stripping) — coordinate with D-007 to ensure offset math is correct when `strip_frontmatter` is true
 
 ### D-006: Note content reading
 
@@ -159,11 +159,11 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-003
 
 **Acceptance Criteria:**
-- [ ] `readNoteContent(file: TFile, vault: Vault): Promise<string>` function exported
-- [ ] Calls `vault.read(file)` and returns the raw content string
-- [ ] Returns the full content including frontmatter (frontmatter stripping is a separate step in D-007)
-- [ ] Throws or returns null on read failure (caught by error handling in D-009)
-- [ ] No caching — always reads the latest content from vault (per contract: "Tags are always resolved with the latest note content — there is no caching of resolved content between calls")
+- [x] `readNoteContent(file: TFile, vault: Vault): Promise<string>` function exported
+- [x] Calls `vault.read(file)` and returns the raw content string
+- [x] Returns the full content including frontmatter (frontmatter stripping is a separate step in D-007)
+- [x] Throws or returns null on read failure (caught by error handling in D-009)
+- [x] No caching — always reads the latest content from vault (per contract: "Tags are always resolved with the latest note content — there is no caching of resolved content between calls")
 
 ### D-007: Frontmatter stripping
 
@@ -175,12 +175,12 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-005, D-006
 
 **Acceptance Criteria:**
-- [ ] `stripNoteFrontmatter(content: string): string` function exported
-- [ ] Uses Obsidian's `getFrontMatterInfo(content)` utility (from `obsidian` package) to reliably determine the frontmatter boundary
-- [ ] Returns `content.slice(fmInfo.contentStart)` — the body content after the closing `---` delimiter
-- [ ] If the content has no frontmatter (no leading `---`), returns the full content as-is
-- [ ] When `strip_frontmatter` is `false`, this function is not called — the full raw content (including YAML block) is used
-- [ ] **Section extraction coordination:** When both `section` and `strip_frontmatter` are active, section extraction runs on the full content first (using metadata cache offsets which are based on the full file), and then frontmatter stripping is applied only if the extracted section happens to start before the frontmatter boundary (edge case — normally sections are body headings that appear after frontmatter). In the common case, section extraction already produces body-only content since headings are in the body.
+- [x] `stripNoteFrontmatter(content: string): string` function exported
+- [x] Uses Obsidian's `getFrontMatterInfo(content)` utility (from `obsidian` package) to reliably determine the frontmatter boundary
+- [x] Returns `content.slice(fmInfo.contentStart)` — the body content after the closing `---` delimiter
+- [x] If the content has no frontmatter (no leading `---`), returns the full content as-is
+- [x] When `strip_frontmatter` is `false`, this function is not called — the full raw content (including YAML block) is used
+- [x] **Section extraction coordination:** When both `section` and `strip_frontmatter` are active, section extraction runs on the full content first (using metadata cache offsets which are based on the full file), and then frontmatter stripping is applied only if the extracted section happens to start before the frontmatter boundary (edge case — normally sections are body headings that appear after frontmatter). In the common case, section extraction already produces body-only content since headings are in the body.
 
 ### D-008: Inline vs attached mode assembly
 
@@ -192,20 +192,20 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-007
 
 **Acceptance Criteria:**
-- [ ] `resolveIncludeNotes(text: string, vault: Vault, metadataCache: MetadataCache, sourceFilePath: string, context: "workflow" | "system_prompt" | "vault_rule"): Promise<IncludeNoteResolutionResult>` function exported — this is the main public API
-- [ ] **Inline mode (`mode="inline"`):** The `<include_note ... />` tag in the text is replaced with the resolved content directly. The surrounding text flows naturally around the injected content.
-- [ ] **Attached mode (`mode="attached"`):** The `<include_note ... />` tag in the text is replaced with an empty string. The resolved content is added to the `attachments` array in the result as a `<vault-note>` element:
+- [x] `resolveIncludeNotes(text: string, vault: Vault, metadataCache: MetadataCache, sourceFilePath: string, context: "workflow" | "system_prompt" | "vault_rule"): Promise<IncludeNoteResolutionResult>` function exported — this is the main public API
+- [x] **Inline mode (`mode="inline"`):** The `<include_note ... />` tag in the text is replaced with the resolved content directly. The surrounding text flows naturally around the injected content.
+- [x] **Attached mode (`mode="attached"`):** The `<include_note ... />` tag in the text is replaced with an empty string. The resolved content is added to the `attachments` array in the result as a `<vault-note>` element:
   ```xml
   <vault-note path="{resolved-path}" section="{section-if-specified}">
   {resolved content}
   </vault-note>
   ```
-- [ ] Multiple attached-mode tags are collected into a single `attachments` array — the caller wraps them in an `<attachments>` block
-- [ ] **Context-specific rules enforced:** When `context` is `"system_prompt"` or `"vault_rule"`, the `mode` attribute is ignored and all tags are resolved as `inline` (per contract and FR-46). When `context` is `"workflow"`, both modes are supported.
-- [ ] Tags are resolved in order of appearance in the text — earlier tags don't affect the offsets of later tags (use string replacement on the `raw_tag` match, not offset-based replacement)
-- [ ] **No nested resolution:** If resolved content itself contains `<include_note>` tags, they are passed through as literal text (single-pass resolution per contract)
-- [ ] The `inlineContent` field of the result contains the text with all inline-resolved tags replaced and attached-mode tags removed
-- [ ] The `attachments` field contains the collected attached-mode entries (empty array if none)
+- [x] Multiple attached-mode tags are collected into a single `attachments` array — the caller wraps them in an `<attachments>` block
+- [x] **Context-specific rules enforced:** When `context` is `"system_prompt"` or `"vault_rule"`, the `mode` attribute is ignored and all tags are resolved as `inline` (per contract and FR-46). When `context` is `"workflow"`, both modes are supported.
+- [x] Tags are resolved in order of appearance in the text — earlier tags don't affect the offsets of later tags (use string replacement on the `raw_tag` match, not offset-based replacement)
+- [x] **No nested resolution:** If resolved content itself contains `<include_note>` tags, they are passed through as literal text (single-pass resolution per contract)
+- [x] The `inlineContent` field of the result contains the text with all inline-resolved tags replaced and attached-mode tags removed
+- [x] The `attachments` field contains the collected attached-mode entries (empty array if none)
 
 ---
 
