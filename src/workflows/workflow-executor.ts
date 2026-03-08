@@ -18,7 +18,7 @@
  * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-002..E-009
  */
 
-import { getFrontMatterInfo, Notice, TFile, type MetadataCache, type Vault } from "obsidian";
+import { App, FuzzySuggestModal, getFrontMatterInfo, Notice, TFile, type MetadataCache, type Vault } from "obsidian";
 import type {
 	IncludeNoteResolutionResult,
 	TriggerContext,
@@ -26,6 +26,7 @@ import type {
 	WorkflowAssemblyResult,
 	WorkflowExecutionRequest,
 } from "../types";
+import type { PersonaManager } from "../personas/persona-manager";
 import { resolveIncludeNotes } from "../include-note/resolver";
 import { assembleUserMessage } from "../context/message-assembler";
 import { logger } from "../utils/logger";
@@ -330,4 +331,192 @@ export async function assembleWorkflowPrompt(
 		workflowName: workflow.display_name,
 		attachments: includeResult.attachments,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// E-007: Persona switching on workflow start
+// ---------------------------------------------------------------------------
+
+/**
+ * Switch to the workflow's designated persona before execution begins.
+ *
+ * Saves the current persona state (for later revert by `revertWorkflowPersona`),
+ * then activates the named persona via `PersonaManager.activatePersona()`.
+ *
+ * If `personaName` is null or empty, no switch is performed and the caller
+ * can proceed with the current persona unchanged.
+ *
+ * If `activatePersona()` returns `false` (persona not found), execution
+ * is NOT aborted — a notice is surfaced and the workflow proceeds with
+ * the current settings.
+ *
+ * @param personaName - Persona name from `notor-workflow-persona` frontmatter, or null.
+ * @param personaManager - The active `PersonaManager` instance.
+ * @returns Whether the switch occurred and the previous persona name for revert.
+ *
+ * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-007
+ */
+export async function switchWorkflowPersona(
+	personaName: string | null,
+	personaManager: PersonaManager
+): Promise<{ switched: boolean; previousPersona: string | null }> {
+	if (!personaName || personaName.trim().length === 0) {
+		return { switched: false, previousPersona: null };
+	}
+
+	// Save current state before switching
+	personaManager.savePersonaState();
+	const previousPersona = personaManager.getActivePersona()?.name ?? null;
+
+	const activated = await personaManager.activatePersona(personaName);
+
+	if (activated) {
+		new Notice(`Persona '${personaName}' activated for workflow.`);
+		log.info("Workflow persona switched", {
+			personaName,
+			previousPersona,
+		});
+		return { switched: true, previousPersona };
+	} else {
+		// Persona not found — clear the saved state (nothing to revert)
+		// and proceed with current settings per spec.
+		new Notice(`Persona '${personaName}' not found; running with current settings.`);
+		log.warn("Workflow persona not found, continuing with current settings", {
+			personaName,
+		});
+		return { switched: false, previousPersona: null };
+	}
+}
+
+// ---------------------------------------------------------------------------
+// E-008: Persona revert on workflow end
+// ---------------------------------------------------------------------------
+
+/**
+ * Revert the active persona to the state saved before a workflow execution.
+ *
+ * Called when the user leaves a workflow conversation (switches to another
+ * conversation or starts a new one). The revert happens regardless of whether
+ * the workflow succeeded, failed, or was stopped.
+ *
+ * If `previousPersona` is null, calls `deactivatePersona()` to revert to
+ * global defaults. If non-null, calls `activatePersona()` to restore the
+ * saved persona.
+ *
+ * If the previous persona is no longer available (deleted while the workflow
+ * was running), silently falls back to global defaults.
+ *
+ * @param previousPersona - The persona name saved by `switchWorkflowPersona()`, or null.
+ * @param personaManager - The active `PersonaManager` instance.
+ *
+ * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-008
+ */
+export async function revertWorkflowPersona(
+	previousPersona: string | null,
+	personaManager: PersonaManager
+): Promise<void> {
+	if (previousPersona !== null) {
+		const restored = await personaManager.activatePersona(previousPersona);
+		if (!restored) {
+			// Persona was deleted while workflow was running — fall back to defaults
+			log.warn("Previous persona no longer available after workflow, deactivating", {
+				previousPersona,
+			});
+			personaManager.deactivatePersona();
+		} else {
+			log.info("Workflow persona reverted", { previousPersona });
+		}
+	} else {
+		personaManager.deactivatePersona();
+		log.info("Workflow persona reverted to global defaults");
+	}
+}
+
+// ---------------------------------------------------------------------------
+// E-009: "Notor: Run workflow" command palette picker
+// ---------------------------------------------------------------------------
+
+/**
+ * FuzzySuggestModal subclass that lists all discovered workflows and
+ * calls a callback when the user selects one.
+ *
+ * Used by the "Notor: Run workflow" command palette entry.
+ *
+ * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-009
+ */
+class WorkflowPickerModal extends FuzzySuggestModal<Workflow> {
+	constructor(
+		app: App,
+		private readonly workflows: Workflow[],
+		private readonly onSelect: (workflow: Workflow) => void,
+		private readonly notorDir: string
+	) {
+		super(app);
+		this.setPlaceholder("Select a workflow to run…");
+	}
+
+	getItems(): Workflow[] {
+		return this.workflows;
+	}
+
+	getItemText(workflow: Workflow): string {
+		return workflow.display_name;
+	}
+
+	onChooseItem(workflow: Workflow): void {
+		this.onSelect(workflow);
+	}
+
+	/** Override to show an informational empty state message. */
+	onNoSuggestion(): void {
+		// The base class renders "No match found" — we surface a custom
+		// empty-list message only when the query is empty and workflows is [].
+		if (this.workflows.length === 0) {
+			this.resultContainerEl.empty();
+			const msg = this.resultContainerEl.createDiv({ cls: "notor-workflow-picker-empty" });
+			msg.textContent = `No workflows found in ${this.notorDir}/workflows/`;
+		}
+	}
+}
+
+/**
+ * Open the workflow picker modal.
+ *
+ * Refreshes the workflow list via `rescanWorkflows()` before showing the
+ * picker so that newly created or deleted workflows are reflected without
+ * a plugin reload (FR-41 requirement). When the user selects a workflow,
+ * the provided `onSelect` callback is invoked.
+ *
+ * If no workflows are discovered, the modal still opens and shows an
+ * informational empty-state message.
+ *
+ * @param app - The Obsidian `App` instance.
+ * @param rescanWorkflows - Async function that rescans and returns all discovered workflows.
+ * @param onSelect - Callback invoked with the selected `Workflow`.
+ * @param notorDir - The Notor directory path (for the empty-state message).
+ *
+ * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-009
+ */
+export async function showWorkflowPicker(
+	app: App,
+	rescanWorkflows: () => Promise<Workflow[]>,
+	onSelect: (workflow: Workflow) => void,
+	notorDir: string
+): Promise<void> {
+	log.debug("Opening workflow picker — rescanning workflows");
+
+	let workflows: Workflow[];
+	try {
+		workflows = await rescanWorkflows();
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		log.error("Workflow rescan failed before picker open", { error: msg });
+		new Notice(`Failed to load workflows: ${msg}`);
+		return;
+	}
+
+	log.info("Workflow picker opened", { count: workflows.length });
+
+	const modal = new WorkflowPickerModal(app, workflows, onSelect, notorDir);
+	modal.open();
 }

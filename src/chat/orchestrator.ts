@@ -31,6 +31,7 @@ import { dispatchPreSend, dispatchAfterCompletion } from "../hooks/hook-events";
 import { shouldCompact, performCompaction, estimateConversationTokens } from "../context/compaction";
 import type { CompactionRecord } from "../context/compaction";
 import { showCompactingIndicator, showCompactionMarker } from "../ui/compaction-marker";
+import { revertWorkflowPersona } from "../workflows/workflow-executor";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatOrchestrator");
@@ -55,6 +56,19 @@ export class ChatOrchestrator {
 
 	/** Persona manager for active persona state (Phase 4, A-013). */
 	private personaManager?: PersonaManager;
+
+	/**
+	 * Tracks whether the currently active conversation is a workflow conversation
+	 * that performed a persona switch (E-008). When non-null, leaving this
+	 * conversation triggers a persona revert via `revertWorkflowPersona()`.
+	 *
+	 * Stores the persona name that was active *before* the workflow switched it,
+	 * or `null` if no persona was active before (i.e., the workflow activated a
+	 * persona from global defaults).
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-008
+	 */
+	private workflowPreviousPersona: string | null | undefined = undefined;
 
 	constructor(
 		private readonly app: App,
@@ -123,14 +137,43 @@ export class ChatOrchestrator {
 		this.personaManager = manager;
 	}
 
+	/**
+	 * Record that the current conversation performed a workflow persona switch.
+	 *
+	 * Called by the workflow execution path (E-013/E-015) immediately after
+	 * `switchWorkflowPersona()` succeeds. The stored `previousPersona` value
+	 * is used by `newConversation()` and `switchConversation()` to revert the
+	 * persona when the user leaves this conversation (E-008).
+	 *
+	 * Pass `undefined` to clear the revert state (e.g., when no persona was
+	 * switched, or after a revert has been performed).
+	 *
+	 * @param previousPersona - The persona name that was active before the
+	 *   workflow switched it, `null` if no persona was active, or `undefined`
+	 *   to clear/disable the revert.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-008
+	 */
+	setWorkflowPersonaRevert(previousPersona: string | null | undefined): void {
+		this.workflowPreviousPersona = previousPersona;
+		log.debug("Workflow persona revert state set", { previousPersona });
+	}
+
 	// -----------------------------------------------------------------------
 	// Conversation lifecycle
 	// -----------------------------------------------------------------------
 
 	/**
 	 * Start a new conversation.
+	 *
+	 * If the current conversation was a workflow conversation that performed
+	 * a persona switch (E-008), the persona is reverted before creating the
+	 * new conversation.
 	 */
 	async newConversation(): Promise<void> {
+		// E-008: Revert workflow persona before leaving this conversation
+		await this.maybeRevertWorkflowPersona();
+
 		const providerType = this.providerRegistry.getActiveType();
 		const providerConfig = this.providerRegistry.getConfig(providerType);
 		const modelId = providerConfig?.model_id ?? "";
@@ -159,8 +202,14 @@ export class ChatOrchestrator {
 
 	/**
 	 * Switch to an existing conversation.
+	 *
+	 * If the current conversation was a workflow conversation that performed
+	 * a persona switch (E-008), the persona is reverted before switching.
 	 */
 	async switchConversation(filename: string): Promise<void> {
+		// E-008: Revert workflow persona before leaving this conversation
+		await this.maybeRevertWorkflowPersona();
+
 		try {
 			const { conversation, messages } = await this.historyManager.loadConversation(filename);
 			this.conversationManager.loadConversation(conversation, messages);
@@ -184,6 +233,32 @@ export class ChatOrchestrator {
 		} catch (e) {
 			log.error("Failed to switch conversation", { filename, error: String(e) });
 			this.view?.showError(`Failed to load conversation: ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+
+	/**
+	 * Revert the workflow persona if the current conversation had one active.
+	 *
+	 * Checks `workflowPreviousPersona` — if set (not `undefined`), calls
+	 * `revertWorkflowPersona()` and clears the state. A value of `null` means
+	 * "the workflow activated a persona from global defaults; deactivate on
+	 * revert". A value of `undefined` means "no workflow persona was switched".
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-008
+	 */
+	private async maybeRevertWorkflowPersona(): Promise<void> {
+		if (this.workflowPreviousPersona === undefined || !this.personaManager) {
+			return;
+		}
+
+		const previousPersona = this.workflowPreviousPersona;
+		// Clear state first so a revert error doesn't leave us in a loop
+		this.workflowPreviousPersona = undefined;
+
+		try {
+			await revertWorkflowPersona(previousPersona, this.personaManager);
+		} catch (e) {
+			log.error("Failed to revert workflow persona", { error: String(e) });
 		}
 	}
 

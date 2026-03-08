@@ -197,12 +197,12 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-001, Group A (A-005 — `PersonaManager` with `savePersonaState()`, `activatePersona()`)
 
 **Acceptance Criteria:**
-- [ ] `switchWorkflowPersona(personaName: string | null, personaManager: PersonaManager): Promise<{ switched: boolean; previousPersona: string | null }>` function exported
-- [ ] If `personaName` is null or empty → returns `{ switched: false, previousPersona: null }` (no switch needed)
-- [ ] If `personaName` is non-empty: calls `personaManager.savePersonaState()` to record the current active persona, then calls `personaManager.activatePersona(personaName)`
-- [ ] If `activatePersona()` returns `true` (persona found and activated): surfaces `new Notice("Persona '{name}' activated for workflow.")` and returns `{ switched: true, previousPersona: savedState }`
-- [ ] If `activatePersona()` returns `false` (persona not found): surfaces `new Notice("Persona '{name}' not found; running with current settings.")` and returns `{ switched: false, previousPersona: null }` — does NOT abort workflow execution
-- [ ] The persona switch applies the persona's system prompt, provider, model, and auto-approve overrides (handled internally by `PersonaManager.activatePersona()`)
+- [x] `switchWorkflowPersona(personaName: string | null, personaManager: PersonaManager): Promise<{ switched: boolean; previousPersona: string | null }>` function exported
+- [x] If `personaName` is null or empty → returns `{ switched: false, previousPersona: null }` (no switch needed)
+- [x] If `personaName` is non-empty: calls `personaManager.savePersonaState()` to record the current active persona, then calls `personaManager.activatePersona(personaName)`
+- [x] If `activatePersona()` returns `true` (persona found and activated): surfaces `new Notice("Persona '{name}' activated for workflow.")` and returns `{ switched: true, previousPersona: savedState }`
+- [x] If `activatePersona()` returns `false` (persona not found): surfaces `new Notice("Persona '{name}' not found; running with current settings.")` and returns `{ switched: false, previousPersona: null }` — does NOT abort workflow execution
+- [x] The persona switch applies the persona's system prompt, provider, model, and auto-approve overrides (handled internally by `PersonaManager.activatePersona()`)
 
 ### E-008: Persona revert on workflow end
 
@@ -215,16 +215,16 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-007
 
 **Acceptance Criteria:**
-- [ ] `revertWorkflowPersona(previousPersona: string | null, personaManager: PersonaManager): Promise<void>` function exported
-- [ ] If `previousPersona` is non-null: calls `personaManager.activatePersona(previousPersona)` to restore the previous persona
-- [ ] If `previousPersona` is null: calls `personaManager.deactivatePersona()` to revert to global defaults (no persona was active before the workflow)
-- [ ] The revert triggers are wired in `ChatOrchestrator`:
+- [x] `revertWorkflowPersona(previousPersona: string | null, personaManager: PersonaManager): Promise<void>` function exported
+- [x] If `previousPersona` is non-null: calls `personaManager.activatePersona(previousPersona)` to restore the previous persona
+- [x] If `previousPersona` is null: calls `personaManager.deactivatePersona()` to revert to global defaults (no persona was active before the workflow)
+- [x] The revert triggers are wired in `ChatOrchestrator`:
   - When the user switches to a different conversation (via `switchConversation()`)
   - When the user starts a new conversation (via `newConversation()`)
   - When the user explicitly changes the persona via the picker (already handled by `PersonaManager`)
-- [ ] The orchestrator tracks whether the current conversation is a workflow conversation and stores the `previousPersona` value from `switchWorkflowPersona()`
-- [ ] Persona revert occurs regardless of workflow outcome (success, failure, user stop)
-- [ ] If the revert target persona is no longer available (deleted while workflow was running), the persona reverts to global defaults silently
+- [x] The orchestrator tracks whether the current conversation is a workflow conversation and stores the `previousPersona` value from `switchWorkflowPersona()` (via `setWorkflowPersonaRevert()`)
+- [x] Persona revert occurs regardless of workflow outcome (success, failure, user stop)
+- [x] If the revert target persona is no longer available (deleted while workflow was running), the persona reverts to global defaults silently
 
 ### E-009 [P]: "Notor: Run workflow" command palette entry
 
@@ -237,14 +237,14 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-001, Group C (C-008 — `getDiscoveredWorkflows()` and `rescanWorkflows()` available)
 
 **Acceptance Criteria:**
-- [ ] Command registered with `id: "run-workflow"` and `name: "Run workflow"` via `this.addCommand()` in `main.ts`
-- [ ] When triggered, calls `rescanWorkflows()` to refresh the workflow list (ensuring newly created/deleted workflows are reflected without plugin reload per FR-41)
-- [ ] Opens an Obsidian `FuzzySuggestModal` (or equivalent quick-pick) listing all discovered workflows by `display_name`
-- [ ] All discovered workflows are listed regardless of `notor-trigger` type — manual, on-save, scheduled, etc. can all be run manually per FR-42 ("the trigger type does not restrict manual execution")
-- [ ] Each list entry shows the workflow `display_name` (e.g., `daily/review`, `auto-tag`)
-- [ ] When the user selects a workflow, the execution flow proceeds to conversation creation (E-013): assemble prompt, switch persona (if configured), create conversation, send to LLM
-- [ ] If no workflows are discovered, the picker shows an empty list with an informational message (e.g., "No workflows found in {notor_dir}/workflows/")
-- [ ] The command is available even when the chat panel is closed — selecting a workflow opens the panel automatically (handled in E-013)
+- [x] Command registered with `id: "run-workflow"` and `name: "Run workflow"` via `this.addCommand()` in `main.ts`
+- [x] When triggered, calls `rescanWorkflows()` to refresh the workflow list (ensuring newly created/deleted workflows are reflected without plugin reload per FR-41)
+- [x] Opens an Obsidian `FuzzySuggestModal` (or equivalent quick-pick) listing all discovered workflows by `display_name`
+- [x] All discovered workflows are listed regardless of `notor-trigger` type — manual, on-save, scheduled, etc. can all be run manually per FR-42 ("the trigger type does not restrict manual execution")
+- [x] Each list entry shows the workflow `display_name` (e.g., `daily/review`, `auto-tag`)
+- [ ] When the user selects a workflow, the execution flow proceeds to conversation creation (E-013): assemble prompt, switch persona (if configured), create conversation, send to LLM — *wired in E-013*
+- [x] If no workflows are discovered, the picker shows an empty list with an informational message (e.g., "No workflows found in {notor_dir}/workflows/")
+- [x] The command is available even when the chat panel is closed — selecting a workflow opens the panel automatically
 
 ---
 

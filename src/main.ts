@@ -16,6 +16,7 @@ import { notifyMarkdownLeafActivated } from "./context/auto-context";
 
 // Workflows
 import { discoverWorkflows } from "./workflows/workflow-discovery";
+import { showWorkflowPicker } from "./workflows/workflow-executor";
 import type { Workflow } from "./types";
 
 // Providers
@@ -124,6 +125,42 @@ export default class NotorPlugin extends Plugin {
 				this.getOrchestrator().manualCompaction().catch((e) => {
 					log.error("Manual compaction failed", { error: String(e) });
 					new Notice(`Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
+				});
+			},
+		});
+
+		// E-009: "Notor: Run workflow" command palette entry.
+		// Rescans workflows on each invocation so newly created/deleted
+		// workflows are reflected without a plugin reload (FR-41).
+		this.addCommand({
+			id: "run-workflow",
+			name: "Run workflow",
+			callback: () => {
+				showWorkflowPicker(
+					this.app,
+					() => this.rescanWorkflows(),
+					(workflow) => {
+						// Open the chat panel if not already open, then execute the workflow.
+						// The panel open is non-blocking — execution begins once the view is ready.
+						this.openChatPanel().then(() => {
+							log.info("Workflow selected from command palette", {
+								display_name: workflow.display_name,
+								file_path: workflow.file_path,
+							});
+							// Workflow execution (E-013) is wired in a future task.
+							// For now, log the selection so E2E tests can verify the
+							// picker round-trip is functional.
+						}).catch((e) => {
+							log.error("Failed to open chat panel for workflow", {
+								error: String(e),
+							});
+							new Notice(`Failed to open chat panel: ${e instanceof Error ? e.message : String(e)}`);
+						});
+					},
+					this.settings.notor_dir
+				).catch((e) => {
+					log.error("Run workflow command failed", { error: String(e) });
+					new Notice(`Failed to open workflow picker: ${e instanceof Error ? e.message : String(e)}`);
 				});
 			},
 		});
