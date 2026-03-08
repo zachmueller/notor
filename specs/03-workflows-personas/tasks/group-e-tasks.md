@@ -242,7 +242,7 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 - [x] Opens an Obsidian `FuzzySuggestModal` (or equivalent quick-pick) listing all discovered workflows by `display_name`
 - [x] All discovered workflows are listed regardless of `notor-trigger` type — manual, on-save, scheduled, etc. can all be run manually per FR-42 ("the trigger type does not restrict manual execution")
 - [x] Each list entry shows the workflow `display_name` (e.g., `daily/review`, `auto-tag`)
-- [ ] When the user selects a workflow, the execution flow proceeds to conversation creation (E-013): assemble prompt, switch persona (if configured), create conversation, send to LLM — *wired in E-013*
+- [x] When the user selects a workflow, the execution flow proceeds to conversation creation (E-013): assemble prompt, switch persona (if configured), create conversation, send to LLM — *wired in E-013*
 - [x] If no workflows are discovered, the picker shows an empty list with an informational message (e.g., "No workflows found in {notor_dir}/workflows/")
 - [x] The command is available even when the chat panel is closed — selecting a workflow opens the panel automatically
 
