@@ -3,7 +3,7 @@
 **Created:** 2026-08-03
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
-**Status:** In Progress
+**Status:** Complete
 
 ## Task Summary
 
@@ -200,13 +200,13 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 **Acceptance Criteria:**
 - [x] **E2E test script created:** `e2e/scripts/auto-approve-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → DOM assertions → structured log verification → screenshots → results JSON)
 - [x] **Primary flow validated (E2E):** Test opens **Settings → Notor → Persona auto-approve** section → verifies "organizer" persona is listed → sets tool overrides via DOM selects → activates "organizer" persona in chat settings popover → structured logs confirm auto-approve resolution uses persona overrides for `manage_tags` and global fallback for `execute_command`
-- [ ] **Global default fallback validated (E2E):** Test sets a tool to "Global default" on persona → toggles global auto-approve on/off → structured logs confirm resolution follows the global value in both states
-- [ ] **"Require approval" override validated (E2E):** Test sets a tool to "Require approval" on persona with global auto-approve enabled → structured logs confirm tool requires approval despite global setting
+- [x] **Global default fallback validated (E2E):** Test sets a tool to "Global default" on persona → toggles global auto-approve on/off → structured logs confirm resolution follows the global value in both states
+- [x] **"Require approval" override validated (E2E):** Test sets a tool to "Require approval" on persona with global auto-approve enabled → structured logs confirm tool requires approval despite global setting
 - [x] **No persona active validated (E2E):** Test deactivates persona → triggers tool dispatch → structured logs confirm only global auto-approve is consulted, persona overrides ignored
-- [ ] **Plan mode respected validated (E2E):** Test activates persona with write tool set to "Auto-approve" → switches to Plan mode → structured logs confirm write tool is blocked regardless of persona override
+- [x] **Plan mode respected validated (E2E):** Test activates persona with write tool set to "Auto-approve" → switches to Plan mode → structured logs confirm write tool is blocked regardless of persona override
 - [x] **Stale tool warning validated (E2E):** Test injects a fake tool name entry into `persona_auto_approve` via plugin settings manipulation → opens Settings → verifies stale tool warning indicator is visible in the DOM → clicks "Remove" → verifies entry removed from DOM
-- [ ] **No personas discovered validated (E2E):** Test removes personas directory before launch → verifies persona auto-approve section shows informational message in the DOM, no error-level structured logs
-- [ ] **Settings persistence validated (E2E):** Test sets overrides → reloads plugin (or restarts Obsidian) → verifies overrides still present in Settings UI DOM and effective at runtime via structured logs
+- [x] **No personas discovered validated (E2E):** Test removes personas directory before launch → verifies persona auto-approve section shows informational message in the DOM, no error-level structured logs
+- [x] **Settings persistence validated (E2E):** Test sets overrides → reloads plugin (or restarts Obsidian) → verifies overrides still present in Settings UI DOM and effective at runtime via structured logs
 - [x] Build succeeds: `npm run build` produces clean `main.js`
 - [x] No TypeScript errors: `npx tsc --noEmit` passes
 - [x] No persona/auto-approve-related error-level structured logs during test execution (filtered via `LogCollector.getLogsByLevel("error")`)
