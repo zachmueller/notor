@@ -246,15 +246,15 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-009
 
 **Acceptance Criteria:**
-- [ ] **System prompt integration:** In `SystemPromptBuilder.getBasePrompt()`, after reading the custom system prompt file content (or getting the default), call `resolveIncludeNotes(content, vault, metadataCache, customPromptPath, "system_prompt")` to resolve any `<include_note>` tags. Use only `inlineContent` from the result (attached mode ignored in system prompt context).
-- [ ] **Persona prompt integration:** In the persona prompt section of `SystemPromptBuilder.assemble()` (to be added by Group A's A-006), resolve `<include_note>` tags in the persona's `prompt_content` using `resolveIncludeNotes(promptContent, vault, metadataCache, persona.system_prompt_path, "system_prompt")`. Use only `inlineContent`.
-- [ ] **Vault rules integration:** In `VaultRuleManager.getActiveRuleContent()` (or at the point where each rule's body content is assembled), call `resolveIncludeNotes(rule.content, vault, metadataCache, rule.file_path, "vault_rule")` for each applicable rule. Use only `inlineContent`.
-- [ ] `SystemPromptBuilder` constructor is extended to accept `MetadataCache` in addition to `Vault` (needed for wikilink resolution and section extraction)
-- [ ] `VaultRuleManager` already has access to `App` (which provides both `vault` and `metadataCache`) — no constructor change needed
-- [ ] Resolution errors in system prompts and vault rules produce inline error markers visible to the LLM — the rest of the prompt assembles normally
-- [ ] Performance: resolution is fast enough to not noticeably delay system prompt assembly (per NFR-10: <200 ms for up to 20 tags)
-- [ ] Backward-compatible: when no `<include_note>` tags are present, existing behavior is unchanged (the resolver returns the original text unmodified)
-- [ ] **Note:** Workflow body resolution (Group E) is NOT wired here — Group E's prompt assembly task will call `resolveIncludeNotes()` directly with context `"workflow"`
+- [x] **System prompt integration:** In `SystemPromptBuilder.getBasePrompt()`, after reading the custom system prompt file content (or getting the default), call `resolveIncludeNotes(content, vault, metadataCache, customPromptPath, "system_prompt")` to resolve any `<include_note>` tags. Use only `inlineContent` from the result (attached mode ignored in system prompt context).
+- [x] **Persona prompt integration:** In the persona prompt section of `SystemPromptBuilder.assemble()` (to be added by Group A's A-006), resolve `<include_note>` tags in the persona's `prompt_content` using `resolveIncludeNotes(promptContent, vault, metadataCache, persona.system_prompt_path, "system_prompt")`. Use only `inlineContent`.
+- [x] **Vault rules integration:** In `VaultRuleManager.getActiveRuleContent()` (or at the point where each rule's body content is assembled), call `resolveIncludeNotes(rule.content, vault, metadataCache, rule.file_path, "vault_rule")` for each applicable rule. Use only `inlineContent`.
+- [x] `SystemPromptBuilder` constructor is extended to accept `MetadataCache` in addition to `Vault` (needed for wikilink resolution and section extraction)
+- [x] `VaultRuleManager` already has access to `App` (which provides both `vault` and `metadataCache`) — no constructor change needed
+- [x] Resolution errors in system prompts and vault rules produce inline error markers visible to the LLM — the rest of the prompt assembles normally
+- [x] Performance: resolution is fast enough to not noticeably delay system prompt assembly (per NFR-10: <200 ms for up to 20 tags)
+- [x] Backward-compatible: when no `<include_note>` tags are present, existing behavior is unchanged (the resolver returns the original text unmodified)
+- [x] **Note:** Workflow body resolution (Group E) is NOT wired here — Group E's prompt assembly task will call `resolveIncludeNotes()` directly with context `"workflow"`
 
 ### D-011 [P]: Test vault fixtures and Playwright E2E validation
 
@@ -270,9 +270,9 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-009 (can be developed in parallel with D-010)
 
 **Acceptance Criteria:**
-- [ ] **E2E test script created:** `e2e/scripts/include-note-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → structured log verification → screenshots → results JSON)
-- [ ] `Research/Climate.md` created with frontmatter (tags, title) and multiple headings (`## Key Findings`, `## Methodology`, `## Conclusions`) — each heading has distinct body content
-- [ ] `Research/Energy.md` created with frontmatter and body content — used for full-note inclusion tests
+- [x] **E2E test script created:** `e2e/scripts/include-note-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → structured log verification → screenshots → results JSON)
+- [x] `Research/Climate.md` created with frontmatter (tags, title) and multiple headings (`## Key Findings`, `## Methodology`, `## Conclusions`) — each heading has distinct body content
+- [x] `Research/Energy.md` created with frontmatter and body content — used for full-note inclusion tests
 - [ ] **Vault-relative path test (E2E):** Structured logs confirm `<include_note path="Research/Climate.md" section="Key Findings" />` resolved successfully with correct section content
 - [ ] **Wikilink test (E2E):** Structured logs confirm `<include_note path="[[Climate]]" section="Key Findings" />` resolved via wikilink to the same section
 - [ ] **Full note inclusion test (E2E):** Structured logs confirm `<include_note path="Research/Energy.md" />` resolved to full body content (frontmatter stripped by default)
@@ -304,8 +304,8 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 - [ ] **No `<include_note>` tags scenario validated (E2E):** Documents without tags pass through unchanged — no IncludeNoteResolver structured log entries emitted
 - [ ] **Multiple tags in one document validated (E2E):** Structured logs confirm multiple tags in the same document each resolve independently
 - [ ] **Performance validated (E2E):** Resolution of 5+ tags completes without perceptible delay (no timeout errors in E2E test)
-- [ ] Build succeeds: `npm run build` produces clean `main.js`
-- [ ] No TypeScript errors: `npx tsc --noEmit` passes
+- [x] Build succeeds: `npm run build` produces clean `main.js`
+- [x] No TypeScript errors: `npx tsc --noEmit` passes
 - [ ] No error-level structured logs from IncludeNoteResolver during test execution
 - [ ] **Note:** Attached mode and workflow integration will be validated as part of Group E tasks — this validation focuses on inline mode and system prompt / vault rule contexts
 

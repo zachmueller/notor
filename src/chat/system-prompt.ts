@@ -10,11 +10,12 @@
  * @see design/architecture.md — system prompt assembly
  */
 
-import type { Vault } from "obsidian";
+import type { MetadataCache, Vault } from "obsidian";
 import type { ConversationMode, Persona } from "../types";
 import type { ToolDefinition } from "../providers/provider";
 import { estimateTokenCount } from "../utils/tokens";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt";
+import { resolveIncludeNotes } from "../include-note/resolver";
 import { logger } from "../utils/logger";
 
 const log = logger("SystemPromptBuilder");
@@ -28,7 +29,8 @@ const MAX_SYSTEM_PROMPT_TOKENS = 8000;
 export class SystemPromptBuilder {
 	constructor(
 		private readonly vault: Vault,
-		private notorDir: string
+		private notorDir: string,
+		private readonly metadataCache?: MetadataCache
 	) {}
 
 	/**
@@ -75,7 +77,13 @@ export class SystemPromptBuilder {
 			// Replace mode: persona prompt replaces the global system prompt
 			// entirely. Use persona prompt as the base (may be empty).
 			if (persona.prompt_content.trim()) {
-				parts.push(persona.prompt_content);
+				// D-010: Resolve <include_note> tags in persona prompt (replace mode).
+				const resolvedPersonaPrompt = await this.resolveIncludeNotesIfAvailable(
+					persona.prompt_content,
+					persona.system_prompt_path,
+					"system_prompt"
+				);
+				parts.push(resolvedPersonaPrompt);
 			}
 			log.debug("Using persona prompt in replace mode", {
 				persona: persona.name,
@@ -89,7 +97,16 @@ export class SystemPromptBuilder {
 			// Append persona prompt as a labeled section (if persona active
 			// and has non-empty content)
 			if (persona && persona.prompt_content.trim()) {
-				parts.push(this.buildPersonaSection(persona));
+				// D-010: Resolve <include_note> tags in persona prompt (append mode).
+				const resolvedPersonaContent = await this.resolveIncludeNotesIfAvailable(
+					persona.prompt_content,
+					persona.system_prompt_path,
+					"system_prompt"
+				);
+				parts.push(this.buildPersonaSection({
+					...persona,
+					prompt_content: resolvedPersonaContent,
+				}));
 			}
 		}
 
@@ -145,7 +162,14 @@ export class SystemPromptBuilder {
 				const stripped = this.stripFrontmatter(content);
 				if (stripped.trim()) {
 					log.debug("Using custom system prompt", { path: customPath });
-					return stripped.trim();
+					// D-010: Resolve <include_note> tags in the custom system prompt.
+					// Uses only inlineContent (attached mode ignored in system_prompt context).
+					const resolved = await this.resolveIncludeNotesIfAvailable(
+						stripped.trim(),
+						customPath,
+						"system_prompt"
+					);
+					return resolved;
 				}
 			}
 		} catch (e) {
@@ -294,6 +318,48 @@ ${autoContextBlock}`;
 	// -----------------------------------------------------------------------
 	// Helpers
 	// -----------------------------------------------------------------------
+
+	/**
+	 * Resolve `<include_note>` tags in text if MetadataCache is available.
+	 *
+	 * D-010: Backward-compatible — when MetadataCache was not provided to the
+	 * constructor (pre-Phase 4 callers), or the text contains no tags, this
+	 * returns the original text unmodified. Resolution errors produce inline
+	 * error markers visible to the LLM; the rest of the text assembles normally.
+	 *
+	 * @param text - Text potentially containing `<include_note>` tags
+	 * @param sourceFilePath - Vault-relative path of the file containing the tags
+	 * @param context - Resolution context (`"system_prompt"` or `"vault_rule"`)
+	 * @returns Text with `<include_note>` tags resolved (inlineContent only)
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-d-tasks.md — D-010
+	 */
+	private async resolveIncludeNotesIfAvailable(
+		text: string,
+		sourceFilePath: string,
+		context: "system_prompt" | "vault_rule"
+	): Promise<string> {
+		if (!this.metadataCache) {
+			return text;
+		}
+		try {
+			const result = await resolveIncludeNotes(
+				text,
+				this.vault,
+				this.metadataCache,
+				sourceFilePath,
+				context
+			);
+			return result.inlineContent;
+		} catch (e) {
+			log.warn("Failed to resolve <include_note> tags", {
+				sourceFilePath,
+				context,
+				error: String(e),
+			});
+			return text;
+		}
+	}
 
 	/**
 	 * Strip YAML frontmatter from Markdown content.

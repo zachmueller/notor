@@ -459,7 +459,8 @@ export default class NotorPlugin extends Plugin {
 		if (!this._systemPromptBuilder) {
 			this._systemPromptBuilder = new SystemPromptBuilder(
 				this.app.vault,
-				this.settings.notor_dir
+				this.settings.notor_dir,
+				this.app.metadataCache
 			);
 		}
 		return this._systemPromptBuilder;

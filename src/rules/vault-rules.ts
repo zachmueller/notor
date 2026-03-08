@@ -19,6 +19,7 @@
 import type { App, TFile } from "obsidian";
 import { TAbstractFile } from "obsidian";
 import type { VaultRule } from "../types";
+import { resolveIncludeNotes } from "../include-note/resolver";
 import { logger } from "../utils/logger";
 
 const log = logger("VaultRuleManager");
@@ -180,8 +181,36 @@ export class VaultRuleManager {
 		const applicableRules = this.evaluateRules();
 		if (applicableRules.length === 0) return "";
 
-		const content = applicableRules
-			.map((rule) => rule.content.trim())
+		// D-010: Resolve <include_note> tags in each rule's body content.
+		// Uses vault_rule context so mode attribute is ignored (always inline).
+		// VaultRuleManager already has access to App which provides both
+		// vault and metadataCache — no constructor change needed.
+		const resolvedContents: string[] = [];
+		for (const rule of applicableRules) {
+			const trimmed = rule.content.trim();
+			if (trimmed.length === 0) continue;
+
+			try {
+				const result = await resolveIncludeNotes(
+					trimmed,
+					this.app.vault,
+					this.app.metadataCache,
+					rule.file_path,
+					"vault_rule"
+				);
+				resolvedContents.push(result.inlineContent);
+			} catch (e) {
+				// On resolution failure, use the original content so the rule
+				// still applies. Log the error for debugging.
+				log.warn("Failed to resolve <include_note> tags in rule", {
+					filePath: rule.file_path,
+					error: String(e),
+				});
+				resolvedContents.push(trimmed);
+			}
+		}
+
+		const content = resolvedContents
 			.filter((c) => c.length > 0)
 			.join("\n\n---\n\n");
 
