@@ -148,9 +148,13 @@ export default class NotorPlugin extends Plugin {
 		this.getVaultRuleManager().start();
 
 		// 7. Kick off initial workflow discovery (C-008).
-		// Deferred/non-blocking — does not delay plugin startup.
-		this.rescanWorkflows().catch((e) => {
-			log.warn("Initial workflow discovery failed", { error: String(e) });
+		// Deferred until layout is ready — vault file index must be fully
+		// populated before getAbstractFileByPath() can resolve the
+		// workflows directory. This is a standard Obsidian pattern.
+		this.app.workspace.onLayoutReady(() => {
+			this.rescanWorkflows().catch((e) => {
+				log.warn("Initial workflow discovery failed", { error: String(e) });
+			});
 		});
 
 		log.info("Plugin loaded");
