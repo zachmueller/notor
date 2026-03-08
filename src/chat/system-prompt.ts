@@ -11,7 +11,7 @@
  */
 
 import type { Vault } from "obsidian";
-import type { ConversationMode } from "../types";
+import type { ConversationMode, Persona } from "../types";
 import type { ToolDefinition } from "../providers/provider";
 import { estimateTokenCount } from "../utils/tokens";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt";
@@ -41,23 +41,57 @@ export class SystemPromptBuilder {
 	/**
 	 * Assemble the complete system prompt.
 	 *
+	 * When a persona is active, its system prompt is incorporated based on
+	 * the persona's `prompt_mode`:
+	 * - `"append"` (default): global system prompt first, then persona prompt
+	 *   appended as a labeled section.
+	 * - `"replace"`: global system prompt is excluded entirely; only the
+	 *   persona prompt is used as the base. Vault-level rules still apply.
+	 *
+	 * Backward-compatible: when `persona` is null/undefined, existing
+	 * behavior is unchanged.
+	 *
 	 * @param mode - Current Plan/Act mode
 	 * @param toolDefinitions - Tool definitions from the tool registry
 	 * @param vaultRuleContent - Pre-evaluated vault rule content to inject
 	 * @param autoContextBlock - Dynamic `<auto-context>` XML block (rebuilt before each LLM call)
+	 * @param persona - Active persona, or null/undefined for no persona
 	 * @returns Complete system prompt string
+	 *
+	 * @see specs/03-workflows-personas/spec.md — FR-38
+	 * @see specs/03-workflows-personas/tasks/group-a-tasks.md — A-006
 	 */
 	async assemble(
 		mode: ConversationMode,
 		toolDefinitions: ToolDefinition[],
 		vaultRuleContent?: string,
-		autoContextBlock?: string
+		autoContextBlock?: string,
+		persona?: Persona | null
 	): Promise<string> {
 		const parts: string[] = [];
 
-		// 1. Base system prompt (built-in or custom)
-		const basePrompt = await this.getBasePrompt();
-		parts.push(basePrompt);
+		// 1. Base system prompt — depends on persona prompt_mode
+		if (persona && persona.prompt_mode === "replace") {
+			// Replace mode: persona prompt replaces the global system prompt
+			// entirely. Use persona prompt as the base (may be empty).
+			if (persona.prompt_content.trim()) {
+				parts.push(persona.prompt_content);
+			}
+			log.debug("Using persona prompt in replace mode", {
+				persona: persona.name,
+				hasContent: !!persona.prompt_content.trim(),
+			});
+		} else {
+			// No persona, or append mode: start with global system prompt
+			const basePrompt = await this.getBasePrompt();
+			parts.push(basePrompt);
+
+			// Append persona prompt as a labeled section (if persona active
+			// and has non-empty content)
+			if (persona && persona.prompt_content.trim()) {
+				parts.push(this.buildPersonaSection(persona));
+			}
+		}
 
 		// 2. Tool definitions section
 		if (toolDefinitions.length > 0) {
@@ -68,7 +102,7 @@ export class SystemPromptBuilder {
 		// 3. Mode-aware instructions
 		parts.push(this.buildModeSection(mode));
 
-		// 4. Vault-level rules (if any)
+		// 4. Vault-level rules (always applied regardless of persona prompt_mode)
 		if (vaultRuleContent && vaultRuleContent.trim()) {
 			parts.push(this.buildRulesSection(vaultRuleContent));
 		}
@@ -80,7 +114,7 @@ export class SystemPromptBuilder {
 
 		let assembled = parts.join("\n\n");
 
-		// Enforce hard ceiling
+		// Enforce hard ceiling (persona content included in the limit)
 		const tokenCount = estimateTokenCount(assembled);
 		if (tokenCount > MAX_SYSTEM_PROMPT_TOKENS) {
 			log.warn("System prompt exceeds token ceiling, truncating", {
@@ -217,6 +251,20 @@ If you need to make changes, inform the user and suggest switching to Act mode.`
 You are in **Act mode**. You can use all tools, including creating and editing notes. Write operations may require user approval before being applied.
 
 Prefer surgical edits with \`replace_in_note\` over full rewrites with \`write_note\`.`;
+	}
+
+	/**
+	 * Build the persona system prompt section for append mode.
+	 *
+	 * Appended after the global system prompt as a clearly labeled section
+	 * so the LLM understands which persona is active and its instructions.
+	 *
+	 * @see specs/03-workflows-personas/spec.md — FR-38 (append mode assembly)
+	 */
+	private buildPersonaSection(persona: Persona): string {
+		return `## Active persona: ${persona.name}
+
+${persona.prompt_content}`;
 	}
 
 	/**

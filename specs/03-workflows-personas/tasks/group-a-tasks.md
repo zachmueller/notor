@@ -144,15 +144,15 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-001, A-002
 
 **Acceptance Criteria:**
-- [ ] `PersonaManager` class created with access to `Vault`, `MetadataCache`, `NotorSettings`, and `ProviderRegistry`
-- [ ] `getActivePersona(): Persona | null` returns the currently active persona or null
-- [ ] `activatePersona(name: string): Promise<boolean>` discovers and activates the named persona; returns false if not found
-- [ ] `deactivatePersona(): void` reverts to global defaults (no persona)
-- [ ] `getDiscoveredPersonas(): Promise<Persona[]>` triggers a fresh discovery scan and returns all valid personas
-- [ ] Stores active persona name in settings (`active_persona`) and persists via `saveData()`
-- [ ] On activation, calls `getDiscoveredPersonas()` to find the persona by name and caches the active `Persona` object
-- [ ] `savePersonaState()` / `restorePersonaState()` methods for workflow persona revert (saves current persona name, restores later) — supports Group E integration
-- [ ] Switching personas mid-conversation does not retroactively change earlier messages
+- [x] `PersonaManager` class created with access to `Vault`, `MetadataCache`, `NotorSettings`, and `ProviderRegistry`
+- [x] `getActivePersona(): Persona | null` returns the currently active persona or null
+- [x] `activatePersona(name: string): Promise<boolean>` discovers and activates the named persona; returns false if not found
+- [x] `deactivatePersona(): void` reverts to global defaults (no persona)
+- [x] `getDiscoveredPersonas(): Promise<Persona[]>` triggers a fresh discovery scan and returns all valid personas
+- [x] Stores active persona name in settings (`active_persona`) and persists via `saveData()`
+- [x] On activation, calls `getDiscoveredPersonas()` to find the persona by name and caches the active `Persona` object
+- [x] `savePersonaState()` / `restorePersonaState()` methods for workflow persona revert (saves current persona name, restores later) — supports Group E integration
+- [x] Switching personas mid-conversation does not retroactively change earlier messages
 
 ### A-006: System prompt assembly — persona integration
 
@@ -164,13 +164,13 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-005
 
 **Acceptance Criteria:**
-- [ ] `assemble()` method signature extended to accept an optional `persona: Persona | null` parameter
-- [ ] When persona is null or `prompt_mode` is `"append"`: global system prompt is assembled first, then persona prompt is appended as a clearly labeled section (e.g., `## Active persona: {name}\n\n{prompt_content}`)
-- [ ] When `prompt_mode` is `"replace"`: global system prompt is excluded entirely; only persona prompt is used as base prompt. Vault-level rule injections still apply regardless of mode.
-- [ ] Empty persona `prompt_content` with `"append"` mode: no persona section appended (global prompt only)
-- [ ] Empty persona `prompt_content` with `"replace"` mode: base prompt is empty (only vault rules and tool definitions remain)
-- [ ] Token ceiling enforcement applies to the full assembled prompt (persona content included)
-- [ ] Backward-compatible: when no persona is passed (or null), existing behavior is unchanged
+- [x] `assemble()` method signature extended to accept an optional `persona: Persona | null` parameter
+- [x] When persona is null or `prompt_mode` is `"append"`: global system prompt is assembled first, then persona prompt is appended as a clearly labeled section (e.g., `## Active persona: {name}\n\n{prompt_content}`)
+- [x] When `prompt_mode` is `"replace"`: global system prompt is excluded entirely; only persona prompt is used as base prompt. Vault-level rule injections still apply regardless of mode.
+- [x] Empty persona `prompt_content` with `"append"` mode: no persona section appended (global prompt only)
+- [x] Empty persona `prompt_content` with `"replace"` mode: base prompt is empty (only vault rules and tool definitions remain)
+- [x] Token ceiling enforcement applies to the full assembled prompt (persona content included)
+- [x] Backward-compatible: when no persona is passed (or null), existing behavior is unchanged
 
 ### A-007: Provider and model switching on persona activation
 
@@ -182,11 +182,11 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-005
 
 **Acceptance Criteria:**
-- [ ] When `preferred_provider` is non-null and non-empty, call `providerRegistry.switchProvider()` to the specified provider
-- [ ] When `preferred_model` is non-null and non-empty, update the active model on the provider
-- [ ] On `deactivatePersona()`, revert provider and model to global defaults stored in settings (`active_provider`, provider `model_id`)
-- [ ] Provider/model switch takes effect immediately for subsequent messages
-- [ ] The chat view's model/provider display is updated to reflect the change (via callback/event)
+- [x] When `preferred_provider` is non-null and non-empty, call `providerRegistry.switchProvider()` to the specified provider
+- [x] When `preferred_model` is non-null and non-empty, update the active model on the provider
+- [x] On `deactivatePersona()`, revert provider and model to global defaults stored in settings (`active_provider`, provider `model_id`)
+- [x] Provider/model switch takes effect immediately for subsequent messages
+- [x] The chat view's model/provider display is updated to reflect the change (via callback/event)
 
 ### A-008 [P]: Provider/model fallback and notice handling
 
@@ -198,11 +198,11 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-007
 
 **Acceptance Criteria:**
-- [ ] If `preferred_provider` is set but the provider is not configured or not available, fall back to the current default provider and surface `new Notice("Provider '{name}' not available; using default.")`
-- [ ] If `preferred_model` is set but the model is not available from the active provider, fall back to the provider's current default model and surface `new Notice("Model '{name}' not available; using default.")`
-- [ ] If both provider and model are unavailable, both fallbacks apply and both notices surface
-- [ ] Settings not explicitly defined in persona frontmatter (null values) fall back to global defaults silently (no notice)
-- [ ] Fallback does not disrupt conversation flow — the message is sent with whatever provider/model is available
+- [x] If `preferred_provider` is set but the provider is not configured or not available, fall back to the current default provider and surface `new Notice("Provider '{name}' not available; using default.")`
+- [x] If `preferred_model` is set but the model is not available from the active provider, fall back to the provider's current default model and surface `new Notice("Model '{name}' not available; using default.")`
+- [x] If both provider and model are unavailable, both fallbacks apply and both notices surface
+- [x] Settings not explicitly defined in persona frontmatter (null values) fall back to global defaults silently (no notice)
+- [x] Fallback does not disrupt conversation flow — the message is sent with whatever provider/model is available
 
 ---
 
