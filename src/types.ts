@@ -263,6 +263,36 @@ export interface Persona {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-Approve Override (Per-Persona)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-persona auto-approve override state for a single tool.
+ *
+ * - `"global"` — no override; the global auto-approve setting applies.
+ * - `"approve"` — tool is auto-approved when this persona is active.
+ * - `"deny"` — tool requires manual approval when this persona is active.
+ *
+ * @see specs/03-workflows-personas/data-model.md — PersonaAutoApproveConfig
+ */
+export type AutoApproveState = "global" | "approve" | "deny";
+
+/**
+ * Per-persona per-tool auto-approve override configuration.
+ *
+ * Not persisted as a standalone entity — stored in plugin settings
+ * as `persona_auto_approve: Record<string, Record<string, string>>`.
+ *
+ * @see specs/03-workflows-personas/data-model.md — PersonaAutoApproveConfig
+ */
+export interface PersonaAutoApproveConfig {
+	/** Name of the persona these overrides apply to. */
+	persona_name: string;
+	/** Map of tool name → override state. */
+	overrides: Record<string, AutoApproveState>;
+}
+
+// ---------------------------------------------------------------------------
 // Stale Content Check
 // ---------------------------------------------------------------------------
 

@@ -3,7 +3,7 @@
 **Created:** 2026-08-03
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
-**Status:** Planning
+**Status:** In Progress
 
 ## Task Summary
 
@@ -50,12 +50,12 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 **Dependencies:** Group A complete (A-001 types must exist)
 
 **Acceptance Criteria:**
-- [ ] `AutoApproveState` type defined: `"global" | "approve" | "deny"`
-- [ ] `PersonaAutoApproveConfig` interface defined per data-model.md: `persona_name: string`, `overrides: Record<string, AutoApproveState>`
-- [ ] `NotorSettings.persona_auto_approve` added as `Record<string, Record<string, string>>` — outer key is persona name, inner key is tool name, value is `AutoApproveState`
-- [ ] `DEFAULT_SETTINGS` updated with `persona_auto_approve: {}`
-- [ ] All new types exported from `src/types.ts`
-- [ ] TypeScript compiles cleanly with `npm run build`
+- [x] `AutoApproveState` type defined: `"global" | "approve" | "deny"`
+- [x] `PersonaAutoApproveConfig` interface defined per data-model.md: `persona_name: string`, `overrides: Record<string, AutoApproveState>`
+- [x] `NotorSettings.persona_auto_approve` added as `Record<string, Record<string, string>>` — outer key is persona name, inner key is tool name, value is `AutoApproveState`
+- [x] `DEFAULT_SETTINGS` updated with `persona_auto_approve: {}`
+- [x] All new types exported from `src/types.ts`
+- [x] TypeScript compiles cleanly with `npm run build`
 
 ---
 
@@ -71,14 +71,14 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 **Dependencies:** B-001
 
 **Acceptance Criteria:**
-- [ ] `resolveAutoApprove(toolName: string, personaName: string | null, personaOverrides: Record<string, Record<string, string>>, globalAutoApprove: Record<string, boolean>): boolean` function exported
-- [ ] When `personaName` is null (no active persona) → return `globalAutoApprove[toolName] ?? false`
-- [ ] When persona is active and tool has override `"approve"` → return `true`
-- [ ] When persona is active and tool has override `"deny"` → return `false`
-- [ ] When persona is active and tool has override `"global"` or no entry → fall back to `globalAutoApprove[toolName] ?? false`
-- [ ] Resolution does NOT consider Plan/Act mode (that check remains in the dispatcher, upstream of auto-approve)
-- [ ] Function is pure (no side effects, no Obsidian API calls) for easy unit testing
-- [ ] Edge case: persona name exists in overrides but has an empty overrides map → falls back to global for all tools
+- [x] `resolveAutoApprove(toolName: string, personaName: string | null, personaOverrides: Record<string, Record<string, string>>, globalAutoApprove: Record<string, boolean>): boolean` function exported
+- [x] When `personaName` is null (no active persona) → return `globalAutoApprove[toolName] ?? false`
+- [x] When persona is active and tool has override `"approve"` → return `true`
+- [x] When persona is active and tool has override `"deny"` → return `false`
+- [x] When persona is active and tool has override `"global"` or no entry → fall back to `globalAutoApprove[toolName] ?? false`
+- [x] Resolution does NOT consider Plan/Act mode (that check remains in the dispatcher, upstream of auto-approve)
+- [x] Function is pure (no side effects, no Obsidian API calls) for easy unit testing
+- [x] Edge case: persona name exists in overrides but has an empty overrides map → falls back to global for all tools
 
 ### B-003: Extend ToolDispatcher for persona-aware auto-approve
 
@@ -90,13 +90,13 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 **Dependencies:** B-002
 
 **Acceptance Criteria:**
-- [ ] `ToolDispatcher` gains a `setPersonaAutoApprove(overrides: Record<string, Record<string, string>>): void` method to receive the full persona auto-approve config from settings
-- [ ] `ToolDispatcher` gains a `setActivePersonaName(name: string | null): void` method to track the currently active persona
-- [ ] `dispatch()` method's auto-approve check (currently `const isAutoApproved = this.autoApprove[toolName] ?? false`) replaced with a call to `resolveAutoApprove()` passing the active persona name, persona overrides, and global auto-approve settings
-- [ ] Backward-compatible: when no persona is active (`null`), behavior is identical to current global-only auto-approve logic
-- [ ] Plan/Act mode check remains upstream and unaffected — write tools in Plan mode are still blocked regardless of persona overrides
-- [ ] `setAutoApprove()` continues to work for global settings (no breaking changes to existing callers)
-- [ ] Changes take effect on the next `dispatch()` call — no plugin reload required
+- [x] `ToolDispatcher` gains a `setPersonaAutoApprove(overrides: Record<string, Record<string, string>>): void` method to receive the full persona auto-approve config from settings
+- [x] `ToolDispatcher` gains a `setActivePersonaName(name: string | null): void` method to track the currently active persona
+- [x] `dispatch()` method's auto-approve check (currently `const isAutoApproved = this.autoApprove[toolName] ?? false`) replaced with a call to `resolveAutoApprove()` passing the active persona name, persona overrides, and global auto-approve settings
+- [x] Backward-compatible: when no persona is active (`null`), behavior is identical to current global-only auto-approve logic
+- [x] Plan/Act mode check remains upstream and unaffected — write tools in Plan mode are still blocked regardless of persona overrides
+- [x] `setAutoApprove()` continues to work for global settings (no breaking changes to existing callers)
+- [x] Changes take effect on the next `dispatch()` call — no plugin reload required
 
 ### B-006 [P]: Storage helpers — read and write persona overrides
 
@@ -108,12 +108,12 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 **Dependencies:** B-001
 
 **Acceptance Criteria:**
-- [ ] `getPersonaOverrides(settings: NotorSettings, personaName: string): Record<string, AutoApproveState>` returns the overrides map for a persona (empty record if not found)
-- [ ] `setPersonaToolOverride(settings: NotorSettings, personaName: string, toolName: string, state: AutoApproveState): void` sets a single tool override for a persona; creates the persona entry if it doesn't exist
-- [ ] `removePersonaOverrides(settings: NotorSettings, personaName: string): void` removes all overrides for a persona (cleanup when persona is deleted)
-- [ ] `getStaleToolNames(personaOverrides: Record<string, string>, registeredToolNames: string[]): string[]` returns tool names in overrides that are not in the registered tool list
-- [ ] All helpers operate on the `NotorSettings` object directly (caller is responsible for `saveData()`)
-- [ ] Functions are pure/deterministic where possible
+- [x] `getPersonaOverrides(settings: NotorSettings, personaName: string): Record<string, AutoApproveState>` returns the overrides map for a persona (empty record if not found)
+- [x] `setPersonaToolOverride(settings: NotorSettings, personaName: string, toolName: string, state: AutoApproveState): void` sets a single tool override for a persona; creates the persona entry if it doesn't exist
+- [x] `removePersonaOverrides(settings: NotorSettings, personaName: string): void` removes all overrides for a persona (cleanup when persona is deleted)
+- [x] `getStaleToolNames(personaOverrides: Record<string, string>, registeredToolNames: string[]): string[]` returns tool names in overrides that are not in the registered tool list
+- [x] All helpers operate on the `NotorSettings` object directly (caller is responsible for `saveData()`)
+- [x] Functions are pure/deterministic where possible
 
 ---
 

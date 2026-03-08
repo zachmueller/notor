@@ -184,6 +184,16 @@ export interface NotorSettings {
 
 	/** Name of the currently active persona (empty string = no persona active). */
 	active_persona: string;
+
+	/**
+	 * Per-persona per-tool auto-approve overrides.
+	 *
+	 * Outer key: persona name. Inner key: tool name.
+	 * Value: `"global"` | `"approve"` | `"deny"`.
+	 *
+	 * @see specs/03-workflows-personas/data-model.md — PersonaAutoApproveConfig
+	 */
+	persona_auto_approve: Record<string, Record<string, string>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +299,7 @@ export const DEFAULT_SETTINGS: NotorSettings = {
 
 	// Phase 4: Personas
 	active_persona: "",
+	persona_auto_approve: {},
 };
 
 // ---------------------------------------------------------------------------

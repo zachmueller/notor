@@ -13,6 +13,7 @@ import type { StreamChunk } from "../providers/provider";
 import type { NotorSettings } from "../settings";
 import { isDomainBlocked } from "../tools/fetch-webpage";
 import { resolveAndValidateWorkingDir } from "../tools/execute-command";
+import { resolveAutoApprove } from "../personas/auto-approve-resolver";
 import { logger } from "../utils/logger";
 
 const log = logger("ToolDispatcher");
@@ -44,8 +45,14 @@ export class ToolDispatcher {
 	/** Registered tools keyed by name. */
 	private tools = new Map<string, DispatchableTool>();
 
-	/** Auto-approve settings per tool name. */
+	/** Auto-approve settings per tool name (global defaults). */
 	private autoApprove: Record<string, boolean> = {};
+
+	/** Per-persona per-tool auto-approve overrides from settings. */
+	private personaAutoApprove: Record<string, Record<string, string>> = {};
+
+	/** Currently active persona name (null = no persona). */
+	private activePersonaName: string | null = null;
 
 	/** Plugin settings (for tool-specific pre-execution checks). */
 	private settings?: NotorSettings;
@@ -92,6 +99,37 @@ export class ToolDispatcher {
 	/** Set event handlers for UI updates. */
 	setEvents(events: DispatcherEvents): void {
 		this.events = events;
+	}
+
+	/**
+	 * Update the per-persona auto-approve overrides.
+	 *
+	 * Called on plugin load with the full `settings.persona_auto_approve`
+	 * config, and again whenever persona auto-approve settings are saved
+	 * via the Settings UI.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-b-tasks.md — B-003
+	 */
+	setPersonaAutoApprove(overrides: Record<string, Record<string, string>>): void {
+		this.personaAutoApprove = overrides;
+		log.debug("Updated persona auto-approve overrides", {
+			personaCount: Object.keys(overrides).length,
+		});
+	}
+
+	/**
+	 * Set the currently active persona name.
+	 *
+	 * Called on plugin load with `settings.active_persona` (or null if
+	 * empty), and whenever the user switches personas via the persona picker.
+	 * Changes take effect on the next `dispatch()` call.
+	 *
+	 * @param name - Active persona name, or null for "no persona"
+	 * @see specs/03-workflows-personas/tasks/group-b-tasks.md — B-003
+	 */
+	setActivePersonaName(name: string | null): void {
+		this.activePersonaName = name;
+		log.debug("Updated active persona for auto-approve", { persona: name });
 	}
 
 	// -----------------------------------------------------------------------
@@ -267,8 +305,13 @@ export class ToolDispatcher {
 			}
 		}
 
-		// 4. Check auto-approve settings
-		const isAutoApproved = this.autoApprove[toolName] ?? false;
+		// 4. Check auto-approve settings (persona-aware — B-003)
+		const isAutoApproved = resolveAutoApprove(
+			toolName,
+			this.activePersonaName,
+			this.personaAutoApprove,
+			this.autoApprove
+		);
 
 		if (!isAutoApproved) {
 			// Request user approval
