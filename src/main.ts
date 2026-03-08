@@ -14,6 +14,10 @@ import { DEFAULT_SETTINGS, NotorSettings, NotorSettingTab } from "./settings";
 import { logger } from "./utils/logger";
 import { notifyMarkdownLeafActivated } from "./context/auto-context";
 
+// Workflows
+import { discoverWorkflows } from "./workflows/workflow-discovery";
+import type { Workflow } from "./types";
+
 // Providers
 import { ProviderRegistry } from "./providers/index";
 import { LocalProvider } from "./providers/local-provider";
@@ -73,6 +77,9 @@ export default class NotorPlugin extends Plugin {
 	private _noteOpener?: NoteOpener;
 	private _staleTracker?: StaleContentTracker;
 	private _personaManager?: PersonaManager;
+
+	/** Cached workflow discovery results (C-008). In-memory only — always re-discovered from vault. */
+	private _discoveredWorkflows: Workflow[] = [];
 
 	// -----------------------------------------------------------------------
 	// Plugin lifecycle
@@ -140,6 +147,12 @@ export default class NotorPlugin extends Plugin {
 		// This is lightweight — just sets up file watchers
 		this.getVaultRuleManager().start();
 
+		// 7. Kick off initial workflow discovery (C-008).
+		// Deferred/non-blocking — does not delay plugin startup.
+		this.rescanWorkflows().catch((e) => {
+			log.warn("Initial workflow discovery failed", { error: String(e) });
+		});
+
 		log.info("Plugin loaded");
 	}
 
@@ -151,6 +164,9 @@ export default class NotorPlugin extends Plugin {
 
 		// Stop vault rule manager file watchers
 		this._vaultRuleManager?.stop();
+
+		// Clear cached workflow discovery results (C-008)
+		this._discoveredWorkflows = [];
 
 		// All DOM elements, intervals, and event listeners registered via
 		// this.register* / this.registerEvent / this.registerDomEvent are
@@ -227,6 +243,13 @@ export default class NotorPlugin extends Plugin {
 		if (this._toolDispatcher) {
 			this._toolDispatcher.setPersonaAutoApprove(this.settings.persona_auto_approve);
 		}
+
+		// C-008: Re-discover workflows when notor_dir may have changed.
+		// Non-blocking — fire and forget so saveSettings() doesn't await
+		// the full vault scan.
+		this.rescanWorkflows().catch((e) => {
+			log.warn("Workflow rescan after settings change failed", { error: String(e) });
+		});
 	}
 
 	// -----------------------------------------------------------------------
@@ -492,6 +515,50 @@ export default class NotorPlugin extends Plugin {
 			this._orchestrator.setPersonaManager(this.getPersonaManager());
 		}
 		return this._orchestrator;
+	}
+
+	// -----------------------------------------------------------------------
+	// Workflow discovery (C-008)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Return the cached workflow discovery results.
+	 *
+	 * Results are populated during `onload()` and refreshed on demand
+	 * via `rescanWorkflows()`. Downstream consumers (Group E command
+	 * palette, Group F event-triggered workflows, Group H activity
+	 * indicator) use this synchronous accessor to read the last
+	 * discovered set.
+	 *
+	 * @returns Array of discovered `Workflow` objects (may be empty if
+	 *          discovery hasn't completed yet or no workflows exist)
+	 */
+	getDiscoveredWorkflows(): Workflow[] {
+		return this._discoveredWorkflows;
+	}
+
+	/**
+	 * Trigger a fresh workflow discovery scan and update the cache.
+	 *
+	 * Intended to be called when:
+	 * - The command palette workflow list is opened (Group E)
+	 * - Settings change (e.g., `notor_dir` updated)
+	 * - The plugin loads for the first time
+	 *
+	 * @returns The freshly discovered `Workflow` array
+	 */
+	async rescanWorkflows(): Promise<Workflow[]> {
+		const workflows = await discoverWorkflows(
+			this.app.vault,
+			this.app.metadataCache,
+			this.settings.notor_dir
+		);
+		this._discoveredWorkflows = workflows;
+		log.debug("Workflow cache updated", {
+			count: workflows.length,
+			names: workflows.map((w) => w.display_name),
+		});
+		return workflows;
 	}
 
 	// -----------------------------------------------------------------------

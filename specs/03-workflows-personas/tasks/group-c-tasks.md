@@ -208,15 +208,15 @@ C-004 + C-005 + C-006 ──▶ C-007 (Test vault fixtures & manual validation)
 **Dependencies:** C-007
 
 **Acceptance Criteria:**
-- [ ] `WorkflowDiscoveryService` (or equivalent module) is instantiated in `onload()` with access to `vault`, `metadataCache`, and the configured `notor_dir` from settings
-- [ ] Initial workflow discovery runs during `onload()` (deferred/non-blocking — does not delay plugin startup)
-- [ ] `NotorPlugin` exposes a `getDiscoveredWorkflows(): Workflow[]` accessor returning the cached discovery results
-- [ ] `NotorPlugin` exposes a `rescanWorkflows(): Promise<Workflow[]>` method that triggers a fresh discovery scan and updates the cache — intended to be called when the command palette workflow list is opened (Group E) or when settings change (Group F)
-- [ ] Discovery results are stored in-memory on the plugin instance (not in persisted settings — workflows are always discovered fresh from the vault)
-- [ ] On plugin unload, no stale references or timers remain from the discovery service
-- [ ] Existing plugin functionality is unaffected — no breaking changes to `onload()` or `onunload()`
-- [ ] Build succeeds: `npm run build` produces clean `main.js`
-- [ ] No TypeScript errors: `npx tsc --noEmit` passes
+- [x] `WorkflowDiscoveryService` (or equivalent module) is instantiated in `onload()` with access to `vault`, `metadataCache`, and the configured `notor_dir` from settings
+- [x] Initial workflow discovery runs during `onload()` (deferred/non-blocking — does not delay plugin startup)
+- [x] `NotorPlugin` exposes a `getDiscoveredWorkflows(): Workflow[]` accessor returning the cached discovery results
+- [x] `NotorPlugin` exposes a `rescanWorkflows(): Promise<Workflow[]>` method that triggers a fresh discovery scan and updates the cache — intended to be called when the command palette workflow list is opened (Group E) or when settings change (Group F)
+- [x] Discovery results are stored in-memory on the plugin instance (not in persisted settings — workflows are always discovered fresh from the vault)
+- [x] On plugin unload, no stale references or timers remain from the discovery service
+- [x] Existing plugin functionality is unaffected — no breaking changes to `onload()` or `onunload()`
+- [x] Build succeeds: `npm run build` produces clean `main.js`
+- [x] No TypeScript errors: `npx tsc --noEmit` passes
 
 ---
 
