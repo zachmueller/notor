@@ -290,21 +290,20 @@ async function testSystemPromptIncludeNote(
 			);
 		}
 	} else {
-		// Check if system prompt builder ran with custom prompt
-		const customPromptLog = findLogContaining(
-			getSystemPromptLogs(collector),
-			["custom system prompt"],
-			"debug"
+		// Check IncludeNoteResolver logs directly — if resolution ran, we should see logs
+		const resolverLogs = getResolverLogs(collector);
+		const resolvedLog = resolverLogs.find(
+			(e) => e.message && e.message.toLowerCase().includes("resolv")
 		);
-		if (customPromptLog) {
+		if (resolvedLog) {
 			pass(
 				"System prompt include_note resolved",
-				"Custom system prompt loaded (assembled log may not be present yet — no LLM message sent)"
+				`IncludeNoteResolver ran: "${resolvedLog.message}"`
 			);
 		} else {
 			fail(
 				"System prompt include_note resolved",
-				"No system prompt assembled log found — plugin may not have assembled prompt yet"
+				"No system prompt assembled log and no IncludeNoteResolver logs — system prompt was not assembled (no LLM call was triggered)"
 			);
 		}
 	}
@@ -547,6 +546,27 @@ async function main() {
 		// ── Test 1: Plugin loaded ───────────────────────────────────────────
 		await testPluginLoads(page);
 		await screenshot(page, "01-initial-state");
+
+		// ── Trigger system prompt assembly by sending a test message ────────
+		// The system prompt (including <include_note> resolution) is only
+		// assembled when the first LLM call is made. We send a minimal message
+		// to force assembly, then wait for the ChatOrchestrator log or any
+		// error response (no LLM is configured in E2E — an error is expected).
+		console.log("\n[Triggering] Sending message to trigger system prompt assembly...");
+		{
+			const textarea = await waitForSelector(page, ".notor-text-input", 5000);
+			if (textarea) {
+				await textarea.click();
+				await textarea.fill("ping");
+				await page.keyboard.press("Enter");
+				// Wait for system prompt assembly + provider error to propagate
+				await page.waitForTimeout(6000);
+				console.log("  Message sent. Waiting for system prompt logs...");
+			} else {
+				console.log("  WARNING: text input not found — skipping message trigger");
+			}
+		}
+		await screenshot(page, "02-after-message-send");
 
 		// ── Test 2: System prompt integration ───────────────────────────────
 		await testSystemPromptIncludeNote(collector);
