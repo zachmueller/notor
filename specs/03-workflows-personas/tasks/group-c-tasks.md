@@ -3,7 +3,7 @@
 **Created:** 2026-08-03
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
-**Status:** Planning
+**Status:** In Progress
 
 ## Task Summary
 
@@ -47,14 +47,14 @@ C-004 + C-005 + C-006 ──▶ C-007 (Test vault fixtures & manual validation)
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] `WorkflowTrigger` type defined: `"manual" | "on-note-open" | "on-note-create" | "on-save" | "on-manual-save" | "on-tag-change" | "scheduled"`
-- [ ] `LLMHookEvent` type defined: `"pre_send" | "on_tool_call" | "on_tool_result" | "after_completion"`
-- [ ] `WorkflowScopedHook` interface defined per data-model.md: `event`, `action_type` (`"execute_command" | "run_workflow"`), `command` (string | null), `workflow_path` (string | null)
-- [ ] `WorkflowHookConfig` interface defined: optional arrays of `WorkflowScopedHook` keyed by `pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`
-- [ ] `Workflow` interface defined per data-model.md: `file_path`, `file_name`, `display_name`, `trigger`, `schedule` (string | null), `persona_name` (string | null), `hooks` (WorkflowHookConfig | null), `body_content`
-- [ ] `VALID_WORKFLOW_TRIGGERS` constant array exported for validation
-- [ ] All types exported from `src/types.ts`
-- [ ] TypeScript compiles cleanly with `npm run build`
+- [x] `WorkflowTrigger` type defined: `"manual" | "on-note-open" | "on-note-create" | "on-save" | "on-manual-save" | "on-tag-change" | "scheduled"`
+- [x] `LLMHookEvent` type defined: `"pre_send" | "on_tool_call" | "on_tool_result" | "after_completion"`
+- [x] `WorkflowScopedHook` interface defined per data-model.md: `event`, `action_type` (`"execute_command" | "run_workflow"`), `command` (string | null), `workflow_path` (string | null)
+- [x] `WorkflowHookConfig` interface defined: optional arrays of `WorkflowScopedHook` keyed by `pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`
+- [x] `Workflow` interface defined per data-model.md: `file_path`, `file_name`, `display_name`, `trigger`, `schedule` (string | null), `persona_name` (string | null), `hooks` (WorkflowHookConfig | null), `body_content`
+- [x] `VALID_WORKFLOW_TRIGGERS` constant array exported for validation
+- [x] All types exported from `src/types.ts`
+- [x] TypeScript compiles cleanly with `npm run build`
 
 ---
 
@@ -70,17 +70,17 @@ C-004 + C-005 + C-006 ──▶ C-007 (Test vault fixtures & manual validation)
 **Dependencies:** C-001
 
 **Acceptance Criteria:**
-- [ ] `WorkflowDiscoveryService` class (or exported functions) created in new `src/workflows/` directory
-- [ ] `discoverWorkflows(vault: Vault, metadataCache: MetadataCache, notorDir: string): Promise<Workflow[]>` is the primary entry point
-- [ ] Scans `{notor_dir}/workflows/` recursively for all Markdown files (`.md` extension)
-- [ ] Uses `vault.getAbstractFileByPath()` to locate the workflows root directory
-- [ ] Recursively traverses subdirectories (e.g., `{notor_dir}/workflows/daily/review.md` is discovered)
-- [ ] For each Markdown file, checks frontmatter via `metadataCache.getFileCache(file)?.frontmatter` for `notor-workflow: true`
-- [ ] Only notes with `notor-workflow: true` (boolean `true`, not string `"true"`) are included
-- [ ] Notes without `notor-workflow: true` are silently ignored
-- [ ] If `{notor_dir}/workflows/` does not exist, returns an empty array without error
-- [ ] Handles errors gracefully (logs warning per-file, does not throw on overall scan failure)
-- [ ] Returns an array of `Workflow` objects (partially populated — `body_content` is not read during discovery to keep scans fast; frontmatter-only reads for discovery)
+- [x] `WorkflowDiscoveryService` class (or exported functions) created in new `src/workflows/` directory
+- [x] `discoverWorkflows(vault: Vault, metadataCache: MetadataCache, notorDir: string): Promise<Workflow[]>` is the primary entry point
+- [x] Scans `{notor_dir}/workflows/` recursively for all Markdown files (`.md` extension)
+- [x] Uses `vault.getAbstractFileByPath()` to locate the workflows root directory
+- [x] Recursively traverses subdirectories (e.g., `{notor_dir}/workflows/daily/review.md` is discovered)
+- [x] For each Markdown file, checks frontmatter via `metadataCache.getFileCache(file)?.frontmatter` for `notor-workflow: true`
+- [x] Only notes with `notor-workflow: true` (boolean `true`, not string `"true"`) are included
+- [x] Notes without `notor-workflow: true` are silently ignored
+- [x] If `{notor_dir}/workflows/` does not exist, returns an empty array without error
+- [x] Handles errors gracefully (logs warning per-file, does not throw on overall scan failure)
+- [x] Returns an array of `Workflow` objects (partially populated — `body_content` is not read during discovery to keep scans fast; frontmatter-only reads for discovery)
 
 ### C-003: Workflow frontmatter parser
 
@@ -92,15 +92,15 @@ C-004 + C-005 + C-006 ──▶ C-007 (Test vault fixtures & manual validation)
 **Dependencies:** C-002
 
 **Acceptance Criteria:**
-- [ ] Parses `notor-trigger` from frontmatter: must be one of the valid `WorkflowTrigger` values
-- [ ] Missing `notor-trigger` → logs a warning ("Workflow '{file_path}' is missing required 'notor-trigger' property") and excludes the workflow from the returned list
-- [ ] Unrecognized `notor-trigger` value → logs a warning ("Workflow '{file_path}' has unrecognized trigger '{value}'") and excludes the workflow from the returned list
-- [ ] Parses `notor-schedule`: string or null (required when trigger is `"scheduled"`; validated in C-005)
-- [ ] Parses `notor-workflow-persona`: string or null (empty/omitted → null)
-- [ ] `file_name` derived from the note's filename (e.g., `review.md`)
-- [ ] `display_name` derived from filename without extension for top-level workflows (e.g., `review`) or subdirectory-qualified for nested workflows (e.g., `daily/review`)
-- [ ] `body_content` is set to an empty string during discovery (full body is read lazily at execution time by the workflow executor in Group E)
-- [ ] Malformed YAML frontmatter causes that workflow to be excluded with a warning logged; other workflows unaffected
+- [x] Parses `notor-trigger` from frontmatter: must be one of the valid `WorkflowTrigger` values
+- [x] Missing `notor-trigger` → logs a warning ("Workflow '{file_path}' is missing required 'notor-trigger' property") and excludes the workflow from the returned list
+- [x] Unrecognized `notor-trigger` value → logs a warning ("Workflow '{file_path}' has unrecognized trigger '{value}'") and excludes the workflow from the returned list
+- [x] Parses `notor-schedule`: string or null (required when trigger is `"scheduled"`; validated in C-005)
+- [x] Parses `notor-workflow-persona`: string or null (empty/omitted → null)
+- [x] `file_name` derived from the note's filename (e.g., `review.md`)
+- [x] `display_name` derived from filename without extension for top-level workflows (e.g., `review`) or subdirectory-qualified for nested workflows (e.g., `daily/review`)
+- [x] `body_content` is set to an empty string during discovery (full body is read lazily at execution time by the workflow executor in Group E)
+- [x] Malformed YAML frontmatter causes that workflow to be excluded with a warning logged; other workflows unaffected
 
 ### C-004: Workflow validation logic
 
@@ -112,14 +112,14 @@ C-004 + C-005 + C-006 ──▶ C-007 (Test vault fixtures & manual validation)
 **Dependencies:** C-003
 
 **Acceptance Criteria:**
-- [ ] `validateWorkflow(frontmatter: Record<string, unknown>, filePath: string): { valid: boolean; errors: string[] }` function exported
-- [ ] Validates `notor-workflow` is `true` (boolean)
-- [ ] Validates `notor-trigger` is present and is a recognized `WorkflowTrigger` value (uses `VALID_WORKFLOW_TRIGGERS` constant from C-001)
-- [ ] Validates that `notor-schedule` is present when `notor-trigger` is `"scheduled"` (cron expression syntax validation is in C-005)
-- [ ] Validates that `notor-workflow-persona` is either a string or omitted (not a number, boolean, etc.)
-- [ ] Returns a structured result with `valid: boolean` and an array of human-readable error strings
-- [ ] Discovery function (`discoverWorkflows`) calls `validateWorkflow()` and excludes invalid workflows, logging each error string as a warning via `console.warn()`
-- [ ] Valid workflows with non-fatal issues (e.g., `scheduled` trigger with invalid cron expression) are included in the list but flagged — they can be triggered manually but not scheduled
+- [x] `validateWorkflow(frontmatter: Record<string, unknown>, filePath: string): { valid: boolean; errors: string[] }` function exported
+- [x] Validates `notor-workflow` is `true` (boolean)
+- [x] Validates `notor-trigger` is present and is a recognized `WorkflowTrigger` value (uses `VALID_WORKFLOW_TRIGGERS` constant from C-001)
+- [x] Validates that `notor-schedule` is present when `notor-trigger` is `"scheduled"` (cron expression syntax validation is in C-005)
+- [x] Validates that `notor-workflow-persona` is either a string or omitted (not a number, boolean, etc.)
+- [x] Returns a structured result with `valid: boolean` and an array of human-readable error strings
+- [x] Discovery function (`discoverWorkflows`) calls `validateWorkflow()` and excludes invalid workflows, logging each error string as a warning via `console.warn()`
+- [x] Valid workflows with non-fatal issues (e.g., `scheduled` trigger with invalid cron expression) are included in the list but flagged — they can be triggered manually but not scheduled
 
 ### C-005: Cron expression validation for scheduled workflows
 
@@ -131,12 +131,12 @@ C-004 + C-005 + C-006 ──▶ C-007 (Test vault fixtures & manual validation)
 **Dependencies:** C-004
 
 **Acceptance Criteria:**
-- [ ] `validateCronExpression(expression: string): { valid: boolean; error?: string }` function exported
-- [ ] Validates basic cron structure: 5 fields separated by spaces (minute, hour, day-of-month, month, day-of-week), or recognized shorthand aliases (`@daily`, `@weekly`, `@monthly`, `@yearly`, `@annually`, `@hourly`)
-- [ ] Returns `{ valid: true }` for structurally valid expressions or `{ valid: false, error: "..." }` with a descriptive error message
-- [ ] This is a basic structural check — deep semantic validation (e.g., valid day ranges) will be handled by `croner`'s `CronPattern` constructor when the cron library is integrated in Group F
-- [ ] During discovery, workflows with trigger `"scheduled"` and an invalid/missing `notor-schedule` are logged with a warning ("Workflow '{file_path}' has invalid cron expression: {error}") and marked with `schedule: null` — they remain in the discovered list (can be triggered manually) but are excluded from scheduled execution
-- [ ] Workflows with trigger `"scheduled"` and a valid `notor-schedule` have their `schedule` field populated
+- [x] `validateCronExpression(expression: string): { valid: boolean; error?: string }` function exported
+- [x] Validates basic cron structure: 5 fields separated by spaces (minute, hour, day-of-month, month, day-of-week), or recognized shorthand aliases (`@daily`, `@weekly`, `@monthly`, `@yearly`, `@annually`, `@hourly`)
+- [x] Returns `{ valid: true }` for structurally valid expressions or `{ valid: false, error: "..." }` with a descriptive error message
+- [x] This is a basic structural check — deep semantic validation (e.g., valid day ranges) will be handled by `croner`'s `CronPattern` constructor when the cron library is integrated in Group F
+- [x] During discovery, workflows with trigger `"scheduled"` and an invalid/missing `notor-schedule` are logged with a warning ("Workflow '{file_path}' has invalid cron expression: {error}") and marked with `schedule: null` — they remain in the discovered list (can be triggered manually) but are excluded from scheduled execution
+- [x] Workflows with trigger `"scheduled"` and a valid `notor-schedule` have their `schedule` field populated
 
 ### C-006 [P]: WorkflowScopedHook frontmatter parser
 
@@ -148,19 +148,19 @@ C-004 + C-005 + C-006 ──▶ C-007 (Test vault fixtures & manual validation)
 **Dependencies:** C-001 (types only)
 
 **Acceptance Criteria:**
-- [ ] `parseWorkflowHooks(hooksValue: unknown, filePath: string): WorkflowHookConfig | null` function exported
-- [ ] Accepts the raw `notor-hooks` value from frontmatter (which Obsidian's YAML parser returns as a JavaScript object or `undefined`)
-- [ ] If `notor-hooks` is omitted or `undefined` → returns `null` (no hook overrides)
-- [ ] If `notor-hooks` is not an object (e.g., string, number, boolean, array) → logs warning ("Workflow '{file_path}' has invalid notor-hooks: expected YAML mapping"), returns `null`
-- [ ] For each key in the mapping, validates it is a recognized `LLMHookEvent` (`pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`). Unrecognized keys are logged as warnings and ignored.
-- [ ] For each recognized event key, the value must be an array of hook action objects. Each action object must have:
+- [x] `parseWorkflowHooks(hooksValue: unknown, filePath: string): WorkflowHookConfig | null` function exported
+- [x] Accepts the raw `notor-hooks` value from frontmatter (which Obsidian's YAML parser returns as a JavaScript object or `undefined`)
+- [x] If `notor-hooks` is omitted or `undefined` → returns `null` (no hook overrides)
+- [x] If `notor-hooks` is not an object (e.g., string, number, boolean, array) → logs warning ("Workflow '{file_path}' has invalid notor-hooks: expected YAML mapping"), returns `null`
+- [x] For each key in the mapping, validates it is a recognized `LLMHookEvent` (`pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`). Unrecognized keys are logged as warnings and ignored.
+- [x] For each recognized event key, the value must be an array of hook action objects. Each action object must have:
   - `action`: either `"execute_command"` or `"run_workflow"` (mapped to `action_type`)
   - `command`: required when `action` is `"execute_command"`
   - `path`: required when `action` is `"run_workflow"` (mapped to `workflow_path`)
-- [ ] Invalid individual hook action definitions (missing required fields, unsupported action type) are logged as warnings and skipped; valid actions in the same array still apply
-- [ ] Returns a populated `WorkflowHookConfig` with only the events that have at least one valid action
-- [ ] Handles YAML frontmatter using both kebab-case (`pre-send`) and snake_case (`pre_send`) event names — normalizes to snake_case for the `LLMHookEvent` type
-- [ ] Edge case: `notor-hooks` with all invalid actions → returns `null` (treated as no overrides)
+- [x] Invalid individual hook action definitions (missing required fields, unsupported action type) are logged as warnings and skipped; valid actions in the same array still apply
+- [x] Returns a populated `WorkflowHookConfig` with only the events that have at least one valid action
+- [x] Handles YAML frontmatter using both kebab-case (`pre-send`) and snake_case (`pre_send`) event names — normalizes to snake_case for the `LLMHookEvent` type
+- [x] Edge case: `notor-hooks` with all invalid actions → returns `null` (treated as no overrides)
 
 ---
 

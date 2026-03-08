@@ -296,6 +296,124 @@ export interface PersonaAutoApproveConfig {
 // Stale Content Check
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Workflow
+// ---------------------------------------------------------------------------
+
+/**
+ * Valid trigger types for workflow notes.
+ *
+ * - `"manual"` — triggered via command palette or slash-command.
+ * - `"on-note-open"` — fired when a note is opened.
+ * - `"on-note-create"` — fired when a new note is created.
+ * - `"on-save"` — fired on any save (auto or manual).
+ * - `"on-manual-save"` — fired on explicit Cmd/Ctrl+S save only.
+ * - `"on-tag-change"` — fired when frontmatter tags change.
+ * - `"scheduled"` — fired on a cron schedule.
+ *
+ * @see specs/03-workflows-personas/data-model.md — Workflow entity
+ */
+export type WorkflowTrigger =
+	| "manual"
+	| "on-note-open"
+	| "on-note-create"
+	| "on-save"
+	| "on-manual-save"
+	| "on-tag-change"
+	| "scheduled";
+
+/**
+ * Constant array of all valid `WorkflowTrigger` values, used for
+ * validation during workflow discovery.
+ */
+export const VALID_WORKFLOW_TRIGGERS: readonly WorkflowTrigger[] = [
+	"manual",
+	"on-note-open",
+	"on-note-create",
+	"on-save",
+	"on-manual-save",
+	"on-tag-change",
+	"scheduled",
+] as const;
+
+/**
+ * LLM lifecycle hook event types for per-workflow hook overrides.
+ *
+ * @see specs/03-workflows-personas/data-model.md — WorkflowScopedHook entity
+ */
+export type LLMHookEvent =
+	| "pre_send"
+	| "on_tool_call"
+	| "on_tool_result"
+	| "after_completion";
+
+/**
+ * A single per-workflow LLM lifecycle hook override.
+ *
+ * Defined in workflow frontmatter under `notor-hooks` and parsed
+ * at discovery time. Overrides global hooks for the corresponding
+ * lifecycle event during the workflow's execution.
+ *
+ * @see specs/03-workflows-personas/data-model.md — WorkflowScopedHook entity
+ */
+export interface WorkflowScopedHook {
+	/** Lifecycle event this hook fires on. */
+	event: LLMHookEvent;
+	/** Action to perform when the hook fires. */
+	action_type: "execute_command" | "run_workflow";
+	/** Shell command (required when action_type is "execute_command"). */
+	command: string | null;
+	/** Vault-relative workflow path (required when action_type is "run_workflow"). */
+	workflow_path: string | null;
+}
+
+/**
+ * Per-workflow hook configuration — optional arrays of
+ * `WorkflowScopedHook` keyed by lifecycle event.
+ *
+ * Only events with at least one valid action are present.
+ *
+ * @see specs/03-workflows-personas/data-model.md — WorkflowHookConfig
+ */
+export interface WorkflowHookConfig {
+	pre_send?: WorkflowScopedHook[];
+	on_tool_call?: WorkflowScopedHook[];
+	on_tool_result?: WorkflowScopedHook[];
+	after_completion?: WorkflowScopedHook[];
+}
+
+/**
+ * In-memory representation of a discovered workflow note.
+ *
+ * Not persisted as structured data — workflows are discovered at
+ * runtime by scanning the workflows directory. The structured
+ * representation describes the in-memory model.
+ *
+ * @see specs/03-workflows-personas/data-model.md — Workflow entity
+ */
+export interface Workflow {
+	/** Vault-relative path to the workflow note (e.g., `notor/workflows/daily/review.md`). */
+	file_path: string;
+	/** File name of the workflow note (e.g., `review.md`). */
+	file_name: string;
+	/** Human-readable display name (e.g., `review` or `daily/review` for nested workflows). */
+	display_name: string;
+	/** Trigger type from `notor-trigger` frontmatter. */
+	trigger: WorkflowTrigger;
+	/** Cron expression from `notor-schedule` (required when trigger is `"scheduled"`). */
+	schedule: string | null;
+	/** Persona to activate from `notor-workflow-persona` (null = use current persona). */
+	persona_name: string | null;
+	/** Per-workflow LLM lifecycle hook overrides from `notor-hooks`. */
+	hooks: WorkflowHookConfig | null;
+	/** Body content of the workflow note (empty string during discovery; read lazily at execution time). */
+	body_content: string;
+}
+
+// ---------------------------------------------------------------------------
+// Stale Content Check
+// ---------------------------------------------------------------------------
+
 /** Tracks the last-read content for a note path within a conversation. */
 export interface StaleContentEntry {
 	/** Vault-relative path. */
