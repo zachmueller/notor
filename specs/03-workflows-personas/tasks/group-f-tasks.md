@@ -170,12 +170,12 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-001 (types only)
 
 **Acceptance Criteria:**
-- [ ] `VaultEventDebounce` class exported with constructor accepting `cooldownMs: number`
-- [ ] `shouldDebounce(eventType: string, notePath: string): boolean` — returns `true` if the same event+path was recorded within `cooldownMs`; otherwise records timestamp and returns `false`
-- [ ] Uses nested `Map<string, Map<string, number>>` (event type → note path → timestamp)
-- [ ] `startCleanup(registerInterval: (callback: () => void, ms: number) => number): void` — registers a periodic cleanup interval (every 60s) that prunes entries older than 2× cooldownMs
-- [ ] `destroy(): void` — clears all internal state
-- [ ] Cooldown can be updated at runtime (reads `cooldownMs` dynamically from settings if a getter is passed)
+- [x] `VaultEventDebounce` class exported with constructor accepting `cooldownMs: number`
+- [x] `shouldDebounce(eventType: string, notePath: string): boolean` — returns `true` if the same event+path was recorded within `cooldownMs`; otherwise records timestamp and returns `false`
+- [x] Uses nested `Map<string, Map<string, number>>` (event type → note path → timestamp)
+- [x] `startCleanup(registerInterval: (callback: () => void, ms: number) => number): void` — registers a periodic cleanup interval (every 60s) that prunes entries older than 2× cooldownMs
+- [x] `destroy(): void` — clears all internal state
+- [x] Cooldown can be updated at runtime (reads `cooldownMs` dynamically from settings if a getter is passed)
 
 ### F-006 [P]: Execution chain tracker — infinite loop prevention
 
@@ -187,13 +187,13 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-001 (types only)
 
 **Acceptance Criteria:**
-- [ ] `ExecutionChainTracker` class exported
-- [ ] `createChain(sourceHookEvent: string): ExecutionChain` — creates a new chain with the initial source hook event
-- [ ] `shouldSkipHook(chain: ExecutionChain | null, hookEvent: string): boolean` — returns `true` if `hookEvent` is already in `chain.sourceHooks`; returns `false` if chain is null (no chain context = not hook-triggered)
-- [ ] `extendChain(chain: ExecutionChain, hookEvent: string): ExecutionChain` — returns a new chain with the additional hook event added to `sourceHooks`
-- [ ] `suppressNotePath(chain: ExecutionChain, notePath: string): void` — adds a path to `modifiedNotePaths` for create-loop prevention
-- [ ] `isNotePathSuppressed(chain: ExecutionChain | null, notePath: string): boolean` — checks if a note path is in the chain's suppressed set
-- [ ] When a loop is detected, the caller surfaces `new Notice("Hook cycle detected; skipping '{hookEvent}' to prevent infinite loop.")`
+- [x] `ExecutionChainTracker` class exported
+- [x] `createChain(sourceHookEvent: string): ExecutionChain` — creates a new chain with the initial source hook event
+- [x] `shouldSkipHook(chain: ExecutionChain | null, hookEvent: string): boolean` — returns `true` if `hookEvent` is already in `chain.sourceHooks`; returns `false` if chain is null (no chain context = not hook-triggered)
+- [x] `extendChain(chain: ExecutionChain, hookEvent: string): ExecutionChain` — returns a new chain with the additional hook event added to `sourceHooks`
+- [x] `suppressNotePath(chain: ExecutionChain, notePath: string): void` — adds a path to `modifiedNotePaths` for create-loop prevention
+- [x] `isNotePathSuppressed(chain: ExecutionChain | null, notePath: string): boolean` — checks if a note path is in the chain's suppressed set
+- [x] When a loop is detected, the caller surfaces `new Notice("Hook cycle detected; skipping '{hookEvent}' to prevent infinite loop.")`
 
 ### F-007 [P]: Lazy listener manager
 
@@ -205,15 +205,15 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-001 (types only)
 
 **Acceptance Criteria:**
-- [ ] `VaultEventListenerManager` class exported
-- [ ] Constructor accepts `plugin: Plugin`, `settings: NotorSettings`, `getDiscoveredWorkflows: () => Workflow[]`
-- [ ] `evaluateListeners(): void` — for each `VaultEventHookType`, determines if at least one enabled settings hook OR one discovered workflow with matching `notor-trigger` exists; registers/unregisters listeners accordingly
-- [ ] `registerListener(eventType)` / `unregisterListener(eventType)` manage individual Obsidian event subscriptions via `plugin.registerEvent()` — each listener stored in a `Map<VaultEventHookType, EventRef>`
-- [ ] Mapping from hook event types to Obsidian events per contract: `on_note_open` → `workspace.on('file-open')`, `on_note_create` → `vault.on('create')`, `on_save`/`on_manual_save` → `vault.on('modify')` (shared listener), `on_tag_change` → `metadataCache.on('changed')`, `on_schedule` → cron timer management
-- [ ] When `on_save` OR `on_manual_save` have hooks, a single `vault.on('modify')` listener is registered (the modify handler dispatches to the correct hook type internally)
-- [ ] `setEventHandler(eventType, handler)` — allows individual listener implementations (F-008..F-016) to register their handler callbacks
-- [ ] `destroy(): void` — unregisters all active listeners; called on plugin unload
-- [ ] Re-evaluation is triggered by: settings save, workflow discovery completion, plugin reload
+- [x] `VaultEventListenerManager` class exported
+- [x] Constructor accepts `plugin: Plugin`, `settings: NotorSettings`, `getDiscoveredWorkflows: () => Workflow[]`
+- [x] `evaluateListeners(): void` — for each `VaultEventHookType`, determines if at least one enabled settings hook OR one discovered workflow with matching `notor-trigger` exists; registers/unregisters listeners accordingly
+- [x] `registerListener(eventType)` / `unregisterListener(eventType)` manage individual Obsidian event subscriptions via `plugin.registerEvent()` — each listener stored in a `Map<VaultEventHookType, EventRef>`
+- [x] Mapping from hook event types to Obsidian events per contract: `on_note_open` → `workspace.on('file-open')`, `on_note_create` → `vault.on('create')`, `on_save`/`on_manual_save` → `vault.on('modify')` (shared listener), `on_tag_change` → `metadataCache.on('changed')`, `on_schedule` → cron timer management
+- [x] When `on_save` OR `on_manual_save` have hooks, a single `vault.on('modify')` listener is registered (the modify handler dispatches to the correct hook type internally)
+- [x] `setEventHandler(eventType, handler)` — allows individual listener implementations (F-008..F-016) to register their handler callbacks
+- [x] `destroy(): void` — unregisters all active listeners; called on plugin unload
+- [x] Re-evaluation is triggered by: settings save, workflow discovery completion, plugin reload
 
 ### F-017 [P]: Vault event hook environment variables
 
@@ -225,14 +225,14 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-001 (types only)
 
 **Acceptance Criteria:**
-- [ ] `VaultEventHookContext` interface defined: `hookEvent` (string), `timestamp` (string — ISO 8601), `notePath` (string | null), `tagsAdded` (string[] | null), `tagsRemoved` (string[] | null)
-- [ ] `buildVaultEventHookEnv(context: VaultEventHookContext): Record<string, string>` function exported
-- [ ] Sets `NOTOR_HOOK_EVENT` to event name (e.g., `on_note_open`)
-- [ ] Sets `NOTOR_TIMESTAMP` to UTC ISO 8601 timestamp
-- [ ] Sets `NOTOR_NOTE_PATH` when `notePath` is non-null (note-related events)
-- [ ] Sets `NOTOR_TAGS_ADDED` (comma-separated) and `NOTOR_TAGS_REMOVED` (comma-separated) when present (`on_tag_change` only)
-- [ ] Does NOT include Phase 3 LLM-specific variables (`NOTOR_CONVERSATION_ID`, `NOTOR_TOOL_NAME`, etc.) per contract
-- [ ] `executeVaultEventHook(hook: VaultEventHook, context: VaultEventHookContext, settings: NotorSettings, vaultRootPath: string): Promise<HookExecutionResult>` — executes a shell command hook using the shared `executeShellCommand()` infrastructure, with vault event env vars injected
+- [x] `VaultEventHookContext` interface defined: `hookEvent` (string), `timestamp` (string — ISO 8601), `notePath` (string | null), `tagsAdded` (string[] | null), `tagsRemoved` (string[] | null)
+- [x] `buildVaultEventHookEnv(context: VaultEventHookContext): Record<string, string>` function exported
+- [x] Sets `NOTOR_HOOK_EVENT` to event name (e.g., `on_note_open`)
+- [x] Sets `NOTOR_TIMESTAMP` to UTC ISO 8601 timestamp
+- [x] Sets `NOTOR_NOTE_PATH` when `notePath` is non-null (note-related events)
+- [x] Sets `NOTOR_TAGS_ADDED` (comma-separated) and `NOTOR_TAGS_REMOVED` (comma-separated) when present (`on_tag_change` only)
+- [x] Does NOT include Phase 3 LLM-specific variables (`NOTOR_CONVERSATION_ID`, `NOTOR_TOOL_NAME`, etc.) per contract
+- [x] `executeVaultEventHook(hook: VaultEventHook, context: VaultEventHookContext, settings: NotorSettings, vaultRootPath: string): Promise<HookExecutionResult>` — executes a shell command hook using the shared `executeShellCommand()` infrastructure, with vault event env vars injected
 
 ## Phase 3: Event Listeners
 
