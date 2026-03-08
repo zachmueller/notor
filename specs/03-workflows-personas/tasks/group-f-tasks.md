@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
 **Contract:** [specs/03-workflows-personas/contracts/vault-event-hooks.md](../contracts/vault-event-hooks.md)
-**Status:** In Progress (Phase 0, Phase 1, Phase 2, and Phase 3 complete)
+**Status:** In Progress (Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, and Phase 5 complete)
 
 ## Task Summary
 
@@ -423,15 +423,15 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-005, F-006, F-017, all listener tasks (F-008..F-016)
 
 **Acceptance Criteria:**
-- [ ] `dispatchVaultEventHooks(hooks: Array<VaultEventHook | Workflow>, context: VaultEventHookContext, chain: ExecutionChain | null, deps: DispatcherDeps): void` function exported
-- [ ] Executes hooks sequentially in the provided order (settings hooks first, then workflow triggers alphabetically per contract)
-- [ ] For each hook, checks execution chain: `if shouldSkipHook(chain, context.hookEvent)` → skip with loop notice
-- [ ] For `execute_command` action: calls `executeVaultEventHook()` from F-017. Subject to global hook timeout. Non-blocking: failures surface a notice but do not prevent subsequent hooks.
-- [ ] For `run_workflow` action: calls the workflow action executor (F-019). NOT subject to hook timeout — workflow runs its full lifecycle.
-- [ ] For workflow triggers (discovered workflows with matching `notor-trigger`): treated same as `run_workflow` action — assembles and executes the workflow
-- [ ] Single-instance guard per contract: if a workflow is already running, skip with `new Notice("Workflow '{name}' already running; skipped.")`
-- [ ] Fire-and-forget: the entire dispatch is non-blocking — listeners do not await completion
-- [ ] Passes `Platform.isDesktopApp` guard for shell command actions
+- [x] `dispatchVaultEventHooks(hooks: Array<VaultEventHook | Workflow>, context: VaultEventHookContext, chain: ExecutionChain | null, deps: DispatcherDeps): void` function exported
+- [x] Executes hooks sequentially in the provided order (settings hooks first, then workflow triggers alphabetically per contract)
+- [x] For each hook, checks execution chain: `if shouldSkipHook(chain, context.hookEvent)` → skip with loop notice
+- [x] For `execute_command` action: calls `executeVaultEventHook()` from F-017. Subject to global hook timeout. Non-blocking: failures surface a notice but do not prevent subsequent hooks.
+- [x] For `run_workflow` action: calls the workflow action executor (F-019). NOT subject to hook timeout — workflow runs its full lifecycle.
+- [x] For workflow triggers (discovered workflows with matching `notor-trigger`): treated same as `run_workflow` action — assembles and executes the workflow
+- [x] Single-instance guard per contract: if a workflow is already running, skip with `new Notice("Workflow '{name}' already running; skipped.")`
+- [x] Fire-and-forget: the entire dispatch is non-blocking — listeners do not await completion
+- [x] Passes `Platform.isDesktopApp` guard for shell command actions
 
 ### F-019: "Run a workflow" hook action executor
 
@@ -443,16 +443,16 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-018, Group E (`assembleWorkflowPrompt` from E-006)
 
 **Acceptance Criteria:**
-- [ ] `executeRunWorkflowAction(workflowPath: string, context: VaultEventHookContext, chain: ExecutionChain | null, deps: DispatcherDeps): Promise<void>` function exported
-- [ ] Resolves workflow by vault-relative path via workflow discovery results or `vault.getAbstractFileByPath()`
-- [ ] If workflow not found or invalid (missing `notor-workflow: true`) → `new Notice("Workflow '{path}' not found.")` and return
-- [ ] Builds `TriggerContext` from event context: `event`, `note_path`, `tags_added`, `tags_removed`
-- [ ] Creates `WorkflowExecutionRequest` with the resolved workflow, null supplementary text, and the trigger context
-- [ ] Calls `assembleWorkflowPrompt()` (from Group E) to build the user message with `<trigger_context>` + `<workflow_instructions>` blocks
-- [ ] If assembly returns null (empty workflow) → notice and return
-- [ ] Delegates to `WorkflowConcurrencyManager.submit()` (F-020) for background execution
-- [ ] Applies persona switching if workflow has `notor-workflow-persona` (via Group E's `switchWorkflowPersona()`)
-- [ ] Extends execution chain with current hook event before passing to the workflow execution
+- [x] `executeRunWorkflowAction(workflowPath: string, context: VaultEventHookContext, chain: ExecutionChain | null, deps: DispatcherDeps): Promise<void>` function exported
+- [x] Resolves workflow by vault-relative path via workflow discovery results or `vault.getAbstractFileByPath()`
+- [x] If workflow not found or invalid (missing `notor-workflow: true`) → `new Notice("Workflow '{path}' not found.")` and return
+- [x] Builds `TriggerContext` from event context: `event`, `note_path`, `tags_added`, `tags_removed`
+- [x] Creates `WorkflowExecutionRequest` with the resolved workflow, null supplementary text, and the trigger context
+- [x] Calls `assembleWorkflowPrompt()` (from Group E) to build the user message with `<trigger_context>` + `<workflow_instructions>` blocks
+- [x] If assembly returns null (empty workflow) → notice and return
+- [x] Delegates to `WorkflowConcurrencyManager.submit()` (F-020) for background execution
+- [x] Applies persona switching if workflow has `notor-workflow-persona` (via Group E's `switchWorkflowPersona()`)
+- [x] Extends execution chain with current hook event before passing to the workflow execution
 
 ### F-020: Workflow concurrency manager
 
@@ -464,17 +464,17 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-019
 
 **Acceptance Criteria:**
-- [ ] `WorkflowConcurrencyManager` class exported
-- [ ] Constructor accepts `limit: number` (from `settings.workflow_concurrency_limit`, default 3)
-- [ ] `submit(execution: WorkflowExecution, runFn: () => Promise<void>): void` — if active count < limit, starts immediately (status → `running`); otherwise queues (status → `queued`). FIFO queue for overflow.
-- [ ] `onComplete(executionId: string, status: WorkflowExecutionStatus, error?: string): void` — marks execution complete, updates `completed_at` and `error_message`; starts next queued execution if any
-- [ ] Single-instance guard: `isWorkflowRunning(workflowPath: string): boolean` — checks if the same workflow is already active or queued. Returns `true` → caller skips with notice.
-- [ ] `getActiveExecutions(): WorkflowExecution[]` — returns currently running/waiting executions (for activity indicator)
-- [ ] `getRecentExecutions(n: number): WorkflowExecution[]` — returns the N most recent completed + active executions sorted by recency (for activity indicator dropdown)
-- [ ] `updateStatus(executionId: string, status: WorkflowExecutionStatus): void` — updates status (e.g., `running` → `waiting_approval`)
-- [ ] State is in-memory only — lost on plugin reload (acceptable per plan.md)
-- [ ] Manually triggered workflows are NOT submitted through this manager — they run in the foreground per FR-45
-- [ ] `destroy(): void` — clears all state
+- [x] `WorkflowConcurrencyManager` class exported
+- [x] Constructor accepts `limit: number` (from `settings.workflow_concurrency_limit`, default 3)
+- [x] `submit(execution: WorkflowExecution, runFn: () => Promise<void>): void` — if active count < limit, starts immediately (status → `running`); otherwise queues (status → `queued`). FIFO queue for overflow.
+- [x] `onComplete(executionId: string, status: WorkflowExecutionStatus, error?: string): void` — marks execution complete, updates `completed_at` and `error_message`; starts next queued execution if any
+- [x] Single-instance guard: `isWorkflowRunning(workflowPath: string): boolean` — checks if the same workflow is already active or queued. Returns `true` → caller skips with notice.
+- [x] `getActiveExecutions(): WorkflowExecution[]` — returns currently running/waiting executions (for activity indicator)
+- [x] `getRecentExecutions(n: number): WorkflowExecution[]` — returns the N most recent completed + active executions sorted by recency (for activity indicator dropdown)
+- [x] `updateStatus(executionId: string, status: WorkflowExecutionStatus): void` — updates status (e.g., `running` → `waiting_approval`)
+- [x] State is in-memory only — lost on plugin reload (acceptable per plan.md)
+- [x] Manually triggered workflows are NOT submitted through this manager — they run in the foreground per FR-45
+- [x] `destroy(): void` — clears all state
 
 ### F-021: Background workflow execution pipeline
 
@@ -486,18 +486,18 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-020, Group E (`executeWorkflow` pipeline from E-013)
 
 **Acceptance Criteria:**
-- [ ] `ChatOrchestrator.executeBackgroundWorkflow(request: WorkflowExecutionRequest, execution: WorkflowExecution, chain: ExecutionChain): Promise<void>` method added
-- [ ] Creates a new background conversation via `ConversationManager.createConversation()` with `is_background: true`, workflow metadata, and the active persona name
-- [ ] Does NOT reveal the chat panel or switch the user's active conversation — runs silently in background
-- [ ] Sends the assembled prompt as the first user message with `is_workflow_message: true`
-- [ ] Dispatches to the LLM via a dedicated `responseLoop()` that runs independently of the main chat panel's response loop
-- [ ] When a tool call requires approval: updates `WorkflowExecution.status` to `"waiting_approval"` via concurrency manager. The activity indicator (Group H) shows "Waiting for approval" status. User clicks into the conversation to approve/reject.
-- [ ] On completion: updates status to `"completed"`, surfaces `new Notice("Workflow '{name}' completed.")`
-- [ ] On error: updates status to `"errored"` with `error_message`, surfaces `new Notice("Workflow '{name}' failed: {error}")`
-- [ ] On user stop: updates status to `"stopped"`
-- [ ] Persona revert is scoped to the background conversation — does not affect main chat panel persona
-- [ ] Execution chain is passed to the background response loop for loop prevention during tool calls
-- [ ] The `_suppressNoteCreateHooks` and tag change suppression are wired for tool calls within the background workflow
+- [x] `ChatOrchestrator.executeBackgroundWorkflow(request: WorkflowExecutionRequest, execution: WorkflowExecution, chain: ExecutionChain): Promise<void>` method added
+- [x] Creates a new background conversation via `ConversationManager.createConversation()` with `is_background: true`, workflow metadata, and the active persona name
+- [x] Does NOT reveal the chat panel or switch the user's active conversation — runs silently in background
+- [x] Sends the assembled prompt as the first user message with `is_workflow_message: true`
+- [x] Dispatches to the LLM via a dedicated `responseLoop()` that runs independently of the main chat panel's response loop
+- [x] When a tool call requires approval: updates `WorkflowExecution.status` to `"waiting_approval"` via concurrency manager. The activity indicator (Group H) shows "Waiting for approval" status. User clicks into the conversation to approve/reject.
+- [x] On completion: updates status to `"completed"`, surfaces `new Notice("Workflow '{name}' completed.")`
+- [x] On error: updates status to `"errored"` with `error_message`, surfaces `new Notice("Workflow '{name}' failed: {error}")`
+- [ ] On user stop: updates status to `"stopped"` (deferred — requires explicit stop mechanism in Group H)
+- [x] Persona revert is scoped to the background conversation — does not affect main chat panel persona
+- [x] Execution chain is passed to the background response loop for loop prevention during tool calls
+- [ ] The `_suppressNoteCreateHooks` and tag change suppression are wired for tool calls within the background workflow (deferred to F-023 wiring)
 
 ### F-022: Extend Phase 3 LLM lifecycle hooks with "run workflow" action
 
@@ -510,13 +510,13 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-019, F-021
 
 **Acceptance Criteria:**
-- [ ] In `dispatchPreSend()`, `dispatchOnToolCall()`, `dispatchOnToolResult()`, `dispatchAfterCompletion()`: for each hook, check `hook.action_type ?? "execute_command"`
-- [ ] If `"execute_command"`: existing behavior (call `executeHook()`) — unchanged
-- [ ] If `"run_workflow"`: call `executeRunWorkflowAction()` with the hook's `workflow_path` and appropriate context. For lifecycle hooks, trigger context includes `conversationId` and `hookEvent` but no note path.
-- [ ] `pre_send` hooks with `"run_workflow"` action: the workflow runs fire-and-forget (stdout capture is not applicable to workflow actions). No stdout is returned.
-- [ ] `"run_workflow"` actions are NOT subject to the global hook timeout (per FR-51) — timeout applies only to shell commands
-- [ ] Backward-compatible: hooks without `action_type` field default to `"execute_command"`
-- [ ] Hooks with `action_type: "run_workflow"` and missing/invalid `workflow_path` are skipped with a notice
+- [x] In `dispatchPreSend()`, `dispatchOnToolCall()`, `dispatchOnToolResult()`, `dispatchAfterCompletion()`: for each hook, check `hook.action_type ?? "execute_command"`
+- [x] If `"execute_command"`: existing behavior (call `executeHook()`) — unchanged
+- [x] If `"run_workflow"`: call `executeRunWorkflowAction()` with the hook's `workflow_path` and appropriate context. For lifecycle hooks, trigger context includes `conversationId` and `hookEvent` but no note path.
+- [x] `pre_send` hooks with `"run_workflow"` action: the workflow runs fire-and-forget (stdout capture is not applicable to workflow actions). No stdout is returned.
+- [x] `"run_workflow"` actions are NOT subject to the global hook timeout (per FR-51) — timeout applies only to shell commands
+- [x] Backward-compatible: hooks without `action_type` field default to `"execute_command"`
+- [x] Hooks with `action_type: "run_workflow"` and missing/invalid `workflow_path` are skipped with a notice
 
 ## Phase 6: Wiring & Validation
 

@@ -9,7 +9,7 @@
  */
 
 import { type App, Notice } from "obsidian";
-import type { ConversationMode, Message } from "../types";
+import type { ConversationMode, Message, WorkflowExecution, ExecutionChain } from "../types";
 import type { ChatMessage, ToolDefinition, StreamChunk, SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
@@ -32,7 +32,8 @@ import { shouldCompact, performCompaction, estimateConversationTokens } from "..
 import type { CompactionRecord } from "../context/compaction";
 import { showCompactingIndicator, showCompactionMarker } from "../ui/compaction-marker";
 import { revertWorkflowPersona, switchWorkflowPersona, assembleWorkflowPrompt } from "../workflows/workflow-executor";
-import type { Workflow } from "../types";
+import type { Workflow, WorkflowExecutionRequest } from "../types";
+import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatOrchestrator");
@@ -415,6 +416,453 @@ export class ChatOrchestrator {
 		} finally {
 			this.view?.setRespondingState(false);
 		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Background workflow execution (F-021)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Execute a workflow in the background (event-triggered).
+	 *
+	 * Creates a background conversation, sends the assembled prompt, and runs
+	 * the LLM response loop independently of the main chat panel. The user's
+	 * active conversation is never disturbed.
+	 *
+	 * Execution sequence:
+	 * 1. Create a background conversation (`is_background: true`) with workflow metadata
+	 * 2. Update execution record with the new conversation ID
+	 * 3. Add the assembled prompt as the first user message (`is_workflow_message: true`)
+	 * 4. Run the response loop in the background
+	 * 5. Surface a completion/failure Notice
+	 * 6. Call `concurrencyManager.onComplete()` in the finally block
+	 *
+	 * When a tool call requires approval, the execution status is updated to
+	 * `"waiting_approval"` via `concurrencyManager.updateStatus()`.
+	 *
+	 * @param request            - The workflow execution request (workflow + trigger context).
+	 * @param execution          - The execution tracking record (from F-020).
+	 * @param chain              - Execution chain for loop prevention.
+	 * @param concurrencyManager - Manager to call `onComplete()` when done.
+	 * @param personaSwitchResult - Result of any persona switch performed before submission.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-021
+	 */
+	async executeBackgroundWorkflow(
+		request: WorkflowExecutionRequest,
+		execution: WorkflowExecution,
+		chain: ExecutionChain,
+		concurrencyManager: WorkflowConcurrencyManager,
+		personaSwitchResult: { switched: boolean; previousPersona: string | null }
+	): Promise<void> {
+		const { workflow, supplementaryText, triggerContext } = request;
+
+		log.info("Starting background workflow execution", {
+			executionId: execution.id,
+			workflowName: workflow.display_name,
+			hookEvent: triggerContext?.event,
+		});
+
+		// Step 1: Assemble the workflow prompt (re-assemble here to get the
+		// assembled message string; the dispatcher already validated it is non-null)
+		let assemblyResult;
+		try {
+			assemblyResult = await assembleWorkflowPrompt(
+				{
+					workflow,
+					supplementaryText: supplementaryText ?? null,
+					triggerContext: triggerContext ?? null,
+				},
+				this.app.vault,
+				this.app.metadataCache
+			);
+		} catch (e) {
+			const errMsg = e instanceof Error ? e.message : String(e);
+			log.error("Background workflow prompt assembly failed", {
+				executionId: execution.id,
+				error: errMsg,
+			});
+			concurrencyManager.onComplete(execution.id, "errored", errMsg);
+			new Notice(`Workflow '${workflow.display_name}' failed: ${errMsg}`);
+			// Revert persona if we switched it
+			if (personaSwitchResult.switched && this.personaManager) {
+				await revertWorkflowPersona(personaSwitchResult.previousPersona, this.personaManager);
+			}
+			return;
+		}
+
+		if (assemblyResult === null) {
+			// Empty guard: Notice already surfaced by assembleWorkflowPrompt
+			log.warn("Background workflow assembly returned null", {
+				executionId: execution.id,
+			});
+			concurrencyManager.onComplete(execution.id, "errored", "Workflow has no prompt content");
+			if (personaSwitchResult.switched && this.personaManager) {
+				await revertWorkflowPersona(personaSwitchResult.previousPersona, this.personaManager);
+			}
+			return;
+		}
+
+		// Step 2: Create a background conversation (does NOT switch the user's
+		// active conversation — we operate on a separate ConversationManager instance
+		// scoped to this background execution).
+		const providerType = this.providerRegistry.getActiveType();
+		const providerConfig = this.providerRegistry.getConfig(providerType);
+		const modelId = providerConfig?.model_id ?? "";
+		const mode = this.settings.mode;
+
+		// Determine the active persona name after any switch
+		const activePersonaName = this.personaManager?.getActivePersona()?.name ?? null;
+
+		// Create a dedicated ConversationManager for this background execution
+		// so it runs fully isolated from the main chat panel's state.
+		const { ConversationManager } = await import("./conversation");
+		const bgConversationManager = new ConversationManager(mode);
+
+		// Wire persistence callbacks (same pattern as the main orchestrator)
+		bgConversationManager.setOnMessageAdded(async (message) => {
+			const conv = bgConversationManager.getActiveConversation();
+			if (conv) {
+				await this.historyManager.appendMessage(conv, message);
+			}
+		});
+		bgConversationManager.setOnConversationChanged(async (conv) => {
+			await this.historyManager.updateConversationHeader(conv);
+		});
+
+		const bgConversation = bgConversationManager.createConversation(
+			providerType,
+			modelId,
+			mode,
+			{
+				workflow_path: workflow.file_path,
+				workflow_name: workflow.display_name,
+				persona_name: activePersonaName,
+				is_background: true,
+				title: `Workflow: ${workflow.display_name}`,
+			}
+		);
+
+		await this.historyManager.createConversationFile(bgConversation);
+
+		// Step 3: Update execution record with conversation ID
+		execution.conversation_id = bgConversation.id;
+
+		// Step 4: Add the assembled message as the first user message
+		bgConversationManager.addMessage({
+			role: "user",
+			content: assemblyResult.assembledMessage,
+			is_workflow_message: true,
+		});
+
+		log.info("Background workflow conversation created", {
+			conversationId: bgConversation.id,
+			workflowName: workflow.display_name,
+		});
+
+		// Step 5: Run the response loop (no view — background execution)
+		// We build a self-contained response loop using the background conversation manager.
+		let finalStatus: "completed" | "errored" | "stopped" = "completed";
+		let errorMessage: string | undefined;
+
+		try {
+			const toolDefinitions = this.getToolDefinitionsCallback?.() ?? [];
+			await this._backgroundResponseLoop(
+				bgConversationManager,
+				toolDefinitions,
+				mode,
+				execution,
+				concurrencyManager,
+				chain
+			);
+		} catch (e) {
+			const errMsg = e instanceof Error ? e.message : String(e);
+			log.error("Background workflow response loop error", {
+				executionId: execution.id,
+				error: errMsg,
+			});
+			finalStatus = "errored";
+			errorMessage = errMsg;
+		} finally {
+			// Step 6: Mark completion
+			concurrencyManager.onComplete(execution.id, finalStatus, errorMessage);
+
+			if (finalStatus === "completed") {
+				log.info("Background workflow completed", {
+					executionId: execution.id,
+					workflowName: workflow.display_name,
+				});
+				new Notice(`Workflow '${workflow.display_name}' completed.`);
+			} else if (finalStatus === "errored") {
+				new Notice(`Workflow '${workflow.display_name}' failed: ${errorMessage ?? "Unknown error"}`);
+			}
+
+			// Revert persona if we switched it — scoped to this background execution
+			if (personaSwitchResult.switched && this.personaManager) {
+				try {
+					await revertWorkflowPersona(
+						personaSwitchResult.previousPersona,
+						this.personaManager
+					);
+				} catch (e) {
+					log.error("Failed to revert workflow persona after background execution", {
+						error: String(e),
+					});
+				}
+			}
+		}
+	}
+
+	/**
+	 * Background response loop — drives LLM turns for a background workflow
+	 * execution without touching the main chat panel UI.
+	 *
+	 * Mirrors `responseLoop()` but operates on the provided background
+	 * `ConversationManager` and never renders to the view.
+	 *
+	 * @param bgConvManager      - Isolated conversation manager for this execution.
+	 * @param toolDefinitions    - Available tool definitions.
+	 * @param mode               - Conversation mode (plan/act).
+	 * @param execution          - Execution record for status tracking.
+	 * @param concurrencyManager - Concurrency manager for status updates.
+	 * @param chain              - Execution chain for loop prevention.
+	 */
+	private async _backgroundResponseLoop(
+		bgConvManager: import("./conversation").ConversationManager,
+		toolDefinitions: import("../providers/provider").ToolDefinition[],
+		mode: ConversationMode,
+		execution: WorkflowExecution,
+		concurrencyManager: WorkflowConcurrencyManager,
+		chain: ExecutionChain
+	): Promise<void> {
+		let continueLoop = true;
+		const vaultRootPath = this.getVaultRootPath();
+
+		while (continueLoop) {
+			continueLoop = false;
+
+			// 1. Build system prompt
+			const vaultRuleContent = this.vaultRuleManager
+				? await this.vaultRuleManager.getActiveRuleContent()
+				: undefined;
+
+			const { buildAutoContextBlock } = await import("../context/auto-context");
+			const autoContext = buildAutoContextBlock(this.app, this.settings);
+			const activePersona = this.personaManager?.getActivePersona() ?? null;
+			const systemPrompt = await this.systemPromptBuilder.assemble(
+				mode,
+				toolDefinitions,
+				vaultRuleContent,
+				autoContext ?? undefined,
+				activePersona
+			);
+
+			// 2. Assemble messages
+			const allMessages = bgConvManager.getMessages();
+			const hasSystemMessage = allMessages.some((m) => m.role === "system");
+			if (!hasSystemMessage) {
+				allMessages.unshift({
+					id: "system",
+					conversation_id: bgConvManager.getActiveConversation()!.id,
+					role: "system",
+					content: systemPrompt,
+					timestamp: new Date().toISOString(),
+				});
+			}
+
+			// 3. Assemble context window
+			const { ContextManager } = await import("./context");
+			const contextMgr = new ContextManager();
+			const modelId = this.providerRegistry.getConfig(
+				this.providerRegistry.getActiveType()
+			)?.model_id ?? "";
+			const contextResult = contextMgr.assembleContextWindow(allMessages, modelId);
+
+			// 4. Convert to ChatMessage format
+			const chatMessages = this._bgToChatMessages(
+				contextResult.messages,
+				systemPrompt
+			);
+
+			// 5. Send to LLM
+			const abortController = new AbortController();
+			const provider = this.providerRegistry.getActiveProvider();
+			const stream = provider.sendMessage(chatMessages, toolDefinitions, {
+				model: modelId,
+				abort_signal: abortController.signal,
+			});
+
+			// 6. Process stream (background — no UI rendering)
+			let textContent = "";
+			let inputTokens = 0;
+			let outputTokens = 0;
+			let toolCallId = "";
+			let toolName = "";
+			let toolCallJson = "";
+			let hasToolCall = false;
+			let streamDone = false;
+
+			try {
+				for await (const chunk of stream) {
+					if (abortController.signal.aborted) {
+						streamDone = true;
+						break;
+					}
+					switch (chunk.type) {
+						case "text_delta":
+							textContent += chunk.text;
+							break;
+						case "tool_call_start":
+							hasToolCall = true;
+							toolCallId = chunk.id;
+							toolName = chunk.tool_name;
+							toolCallJson = "";
+							break;
+						case "tool_call_delta":
+							toolCallJson += chunk.partial_json;
+							break;
+						case "tool_call_end":
+							streamDone = true;
+							break;
+						case "message_end":
+							inputTokens = chunk.input_tokens;
+							outputTokens = chunk.output_tokens;
+							break;
+						case "error":
+							throw new Error(chunk.error);
+					}
+					if (streamDone && hasToolCall) break;
+				}
+			} catch (e) {
+				throw e;
+			}
+
+			if (hasToolCall) {
+				// Parse tool call parameters
+				let parameters: Record<string, unknown> = {};
+				try {
+					if (toolCallJson.trim()) {
+						parameters = JSON.parse(toolCallJson);
+					}
+				} catch (e) {
+					log.warn("Failed to parse tool call JSON in background workflow", {
+						toolName,
+						error: String(e),
+					});
+					throw new Error(`Failed to parse tool call parameters for ${toolName}`);
+				}
+
+				// Add tool call message
+				const toolCallMessage = bgConvManager.addMessage({
+					role: "tool_call",
+					content: "",
+					tool_call: {
+						id: toolCallId,
+						tool_name: toolName,
+						parameters,
+						status: "pending",
+					},
+				});
+
+				// Update status to waiting_approval if the tool is not auto-approved
+				const isAutoApproved =
+					this.settings.auto_approve[toolName] ?? false;
+
+				if (!isAutoApproved) {
+					concurrencyManager.updateStatus(execution.id, "waiting_approval");
+					log.info("Background workflow waiting for tool approval", {
+						executionId: execution.id,
+						toolName,
+					});
+				}
+
+				// Dispatch the tool
+				const toolResult = await this.dispatcher.dispatch(
+					toolName,
+					parameters,
+					mode,
+					toolCallMessage.id
+				);
+				toolResult.tool_call_id = toolCallId;
+
+				// Restore running status after approval/execution
+				if (!isAutoApproved) {
+					concurrencyManager.updateStatus(execution.id, "running");
+				}
+
+				// Dispatch hook events if applicable
+				const bgConv = bgConvManager.getActiveConversation();
+				if (bgConv && vaultRootPath) {
+					const { dispatchOnToolCall, dispatchOnToolResult } =
+						await import("../hooks/hook-events");
+					dispatchOnToolCall(
+						{
+							conversationId: bgConv.id,
+							timestamp: new Date().toISOString(),
+							toolName,
+							toolParams: parameters,
+						},
+						this.settings,
+						vaultRootPath
+					);
+
+					const toolResultStr = typeof toolResult.result === "string"
+						? toolResult.result
+						: JSON.stringify(toolResult.result);
+					dispatchOnToolResult(
+						{
+							conversationId: bgConv.id,
+							timestamp: new Date().toISOString(),
+							toolName,
+							toolParams: parameters,
+							toolResult: toolResultStr,
+							toolStatus: toolResult.success ? "success" : "error",
+						},
+						this.settings,
+						vaultRootPath
+					);
+				}
+
+				// Add tool result message
+				bgConvManager.addMessage({
+					role: "tool_result",
+					content: "",
+					tool_result: toolResult,
+				});
+
+				// Add token tracking message if available
+				if (inputTokens || outputTokens) {
+					bgConvManager.addMessage({
+						role: "assistant",
+						content: textContent || "",
+						input_tokens: inputTokens,
+						output_tokens: outputTokens,
+					});
+				}
+
+				// Continue the loop
+				continueLoop = true;
+			} else {
+				// Final text response
+				bgConvManager.addMessage({
+					role: "assistant",
+					content: textContent,
+					input_tokens: inputTokens,
+					output_tokens: outputTokens,
+				});
+			}
+		}
+	}
+
+	/**
+	 * Convert internal messages to ChatMessage format for the background response loop.
+	 * Mirrors `toChatMessages()` but without the full class context.
+	 */
+	private _bgToChatMessages(
+		messages: Message[],
+		systemPrompt: string
+	): import("../providers/provider").ChatMessage[] {
+		return this.toChatMessages(messages, systemPrompt);
 	}
 
 	/**
