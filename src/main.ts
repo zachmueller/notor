@@ -19,6 +19,25 @@ import { discoverWorkflows } from "./workflows/workflow-discovery";
 import { showWorkflowPicker } from "./workflows/workflow-executor";
 import type { Workflow } from "./types";
 
+// Group F: Vault event hooks
+import { TagShadowCache } from "./hooks/tag-change-detector";
+import { TagChangeSuppressionManager } from "./hooks/tag-change-detector";
+import { VaultEventDebounce } from "./hooks/vault-event-debounce";
+import { ExecutionChainTracker } from "./hooks/execution-chain";
+import { ManualSaveDetector } from "./hooks/manual-save-detector";
+import { VaultEventScheduler } from "./hooks/vault-event-scheduler";
+import { VaultEventListenerManager } from "./hooks/vault-event-listener-manager";
+import { WorkflowConcurrencyManager } from "./workflows/workflow-concurrency";
+import {
+	handleNoteOpen,
+	handleNoteCreate,
+	handleModify,
+	handleMetadataChanged,
+} from "./hooks/vault-event-handlers";
+import type { VaultEventHandlerDeps } from "./hooks/vault-event-handlers";
+import { dispatchVaultEventHooks } from "./hooks/vault-event-dispatcher";
+import type { DispatcherDeps } from "./hooks/vault-event-dispatcher";
+
 // Providers
 import { ProviderRegistry } from "./providers/index";
 import { LocalProvider } from "./providers/local-provider";
@@ -81,6 +100,34 @@ export default class NotorPlugin extends Plugin {
 
 	/** Cached workflow discovery results (C-008). In-memory only — always re-discovered from vault. */
 	private _discoveredWorkflows: Workflow[] = [];
+
+	// -----------------------------------------------------------------------
+	// Group F: Vault event hook components (F-023)
+	// -----------------------------------------------------------------------
+
+	/** Tag shadow cache for on_tag_change diff computation (F-014). */
+	private _tagShadowCache?: TagShadowCache;
+
+	/** Tag change suppression manager to prevent re-trigger from Notor tools (F-015). */
+	private _tagSuppression?: TagChangeSuppressionManager;
+
+	/** Per-event-type, per-note-path debounce engine (F-005). */
+	private _vaultEventDebounce?: VaultEventDebounce;
+
+	/** Execution chain tracker for infinite loop prevention (F-006). */
+	private _executionChainTracker?: ExecutionChainTracker;
+
+	/** Manual save detector — monkey-patches executeCommandById (F-011). */
+	private _manualSaveDetector?: ManualSaveDetector;
+
+	/** Cron-based scheduler for on_schedule hooks (F-013). */
+	private _vaultEventScheduler?: VaultEventScheduler;
+
+	/** Lazy listener manager — registers/unregisters Obsidian event listeners (F-007). */
+	private _vaultEventListenerManager?: VaultEventListenerManager;
+
+	/** Concurrency manager for background workflow executions (F-020). */
+	private _workflowConcurrencyManager?: WorkflowConcurrencyManager;
 
 	// -----------------------------------------------------------------------
 	// Plugin lifecycle
@@ -182,7 +229,11 @@ export default class NotorPlugin extends Plugin {
 		// This is lightweight — just sets up file watchers
 		this.getVaultRuleManager().start();
 
-		// 7. Kick off initial workflow discovery (C-008).
+		// 7. Initialize Group F: vault event hook components (F-023).
+		// Heavy init (tag shadow cache) is deferred to onLayoutReady.
+		this._initVaultEventHooks();
+
+		// 8. Kick off initial workflow discovery (C-008).
 		// Deferred until layout is ready — vault file index must be fully
 		// populated before getAbstractFileByPath() can resolve the
 		// workflows directory. This is a standard Obsidian pattern.
@@ -207,6 +258,18 @@ export default class NotorPlugin extends Plugin {
 		// Clear cached workflow discovery results (C-008)
 		this._discoveredWorkflows = [];
 
+		// Group F: Tear down vault event hook components in reverse order (F-023)
+		this._vaultEventListenerManager?.destroy();
+		this._vaultEventScheduler?.destroy();
+		this._manualSaveDetector?.destroy();
+		this._tagSuppression?.destroy();
+		this._vaultEventDebounce?.destroy();
+		this._executionChainTracker; // stateless — nothing to destroy
+		this._tagShadowCache?.destroy();
+		this._workflowConcurrencyManager?.destroy();
+
+		log.info("Group F vault event hook components destroyed");
+
 		// All DOM elements, intervals, and event listeners registered via
 		// this.register* / this.registerEvent / this.registerDomEvent are
 		// automatically cleaned up by Obsidian when the plugin unloads.
@@ -225,6 +288,186 @@ export default class NotorPlugin extends Plugin {
 			await this.loadData()
 		);
 	}
+
+	// -----------------------------------------------------------------------
+	// Group F: Vault event hook initialization (F-023)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Initialize all Group F vault event hook components and wire them together.
+	 *
+	 * Initialization order per F-023 acceptance criteria:
+	 * 1. TagShadowCache (deferred init via onLayoutReady)
+	 * 2. VaultEventDebounce
+	 * 3. ExecutionChainTracker
+	 * 4. ManualSaveDetector (install)
+	 * 5. TagChangeSuppressionManager
+	 * 6. WorkflowConcurrencyManager
+	 * 7. VaultEventScheduler
+	 * 8. VaultEventListenerManager (with handler registrations)
+	 * 9. evaluateListeners() (after layout ready)
+	 *
+	 * All periodic cleanups are registered via this.registerInterval() for
+	 * proper Obsidian lifecycle management.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-023
+	 */
+	private _initVaultEventHooks(): void {
+		// Step 1: Tag shadow cache — init deferred to onLayoutReady
+		const tagShadowCache = new TagShadowCache();
+		this._tagShadowCache = tagShadowCache;
+
+		// Step 2: Debounce engine
+		const debounceMs = (this.settings.vault_event_debounce_seconds ?? 5) * 1000;
+		const vaultEventDebounce = new VaultEventDebounce(debounceMs);
+		this._vaultEventDebounce = vaultEventDebounce;
+		vaultEventDebounce.startCleanup(
+			(cb, ms) => this.registerInterval(window.setInterval(cb, ms))
+		);
+
+		// Step 3: Execution chain tracker (stateless factory — no cleanup needed)
+		const executionChainTracker = new ExecutionChainTracker();
+		this._executionChainTracker = executionChainTracker;
+
+		// Step 4: Manual save detector
+		const manualSaveDetector = new ManualSaveDetector();
+		this._manualSaveDetector = manualSaveDetector;
+		manualSaveDetector.install(this.app);
+		manualSaveDetector.startCleanup(
+			(cb, ms) => this.registerInterval(window.setInterval(cb, ms))
+		);
+
+		// Step 5: Tag change suppression manager
+		const tagSuppression = new TagChangeSuppressionManager();
+		this._tagSuppression = tagSuppression;
+		tagSuppression.startCleanup(
+			(cb, ms) => this.registerInterval(window.setInterval(cb, ms))
+		);
+
+		// Step 6: Workflow concurrency manager
+		const workflowConcurrencyManager = new WorkflowConcurrencyManager(
+			this.settings.workflow_concurrency_limit ?? 3
+		);
+		this._workflowConcurrencyManager = workflowConcurrencyManager;
+
+		// Step 7: Vault event scheduler (cron jobs for on_schedule hooks)
+		const vaultEventScheduler = new VaultEventScheduler();
+		this._vaultEventScheduler = vaultEventScheduler;
+
+		// Step 8: Build the dispatcher deps object (assembled here for access
+		// by handler closures). Orchestrator is accessed lazily via getter so
+		// it isn't initialized until first use (lazy init pattern).
+		const getDispatcherDeps = (): DispatcherDeps => {
+			const adapter = this.app.vault.adapter as { basePath?: string };
+			return {
+				app: this.app,
+				vault: this.app.vault,
+				metadataCache: this.app.metadataCache,
+				getSettings: () => this.settings,
+				vaultRootPath: adapter.basePath ?? "",
+				concurrencyManager: workflowConcurrencyManager,
+				orchestrator: this.getOrchestrator(),
+				personaManager: this._personaManager,
+				chainTracker: executionChainTracker,
+			};
+		};
+
+		// Step 9: Build handler deps (assembled for handler functions)
+		const handlerDeps: VaultEventHandlerDeps = {
+			debounce: vaultEventDebounce,
+			chainTracker: executionChainTracker,
+			manualSaveDetector,
+			tagShadowCache,
+			tagSuppression,
+			dispatch: (hooks, context, chain) => {
+				dispatchVaultEventHooks(hooks, context, chain, getDispatcherDeps());
+			},
+			getSettings: () => this.settings,
+			getDiscoveredWorkflows: () => this._discoveredWorkflows,
+		};
+
+		// Step 10: Vault event listener manager
+		const listenerManager = new VaultEventListenerManager(
+			this,
+			() => this.settings,
+			() => this._discoveredWorkflows
+		);
+		this._vaultEventListenerManager = listenerManager;
+
+		// Register handler callbacks for all event types
+		listenerManager.setEventHandler("on_note_open", {
+			type: "on_note_open",
+			handler: (file) => handleNoteOpen(file, handlerDeps),
+		});
+		listenerManager.setEventHandler("on_note_create", {
+			type: "on_note_create",
+			handler: (file) => handleNoteCreate(file, handlerDeps),
+		});
+		listenerManager.setEventHandler("on_save", {
+			type: "on_save",
+			handler: (file) => handleModify(file, handlerDeps),
+		});
+		listenerManager.setEventHandler("on_manual_save", {
+			type: "on_manual_save",
+			// on_manual_save is dispatched from within handleModify (F-010);
+			// the shared modify listener calls handleModify which internally
+			// calls handleManualSave when the save detector flags it.
+			handler: (file) => handleModify(file, handlerDeps),
+		});
+		listenerManager.setEventHandler("on_tag_change", {
+			type: "on_tag_change",
+			handler: (file, data, cache) => handleMetadataChanged(file, data, cache, handlerDeps),
+		});
+		listenerManager.setEventHandler("on_schedule", {
+			type: "on_schedule",
+			handler: null,
+		});
+
+		// Wire the dispatch function and workflow discovery accessor into the scheduler
+		vaultEventScheduler.setDispatch(
+			(hooks, context, chain) => {
+				dispatchVaultEventHooks(hooks, context, chain, getDispatcherDeps());
+			},
+			() => this._discoveredWorkflows
+		);
+
+		// Register vault.on('delete') and vault.on('rename') for tag shadow cache maintenance (F-014)
+		this.registerEvent(
+			this.app.vault.on("delete", (file) => {
+				tagShadowCache.removePath(file.path);
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("rename", (file, oldPath) => {
+				tagShadowCache.renamePath(oldPath, file.path);
+			})
+		);
+
+		// Deferred initialization: tag shadow cache + listener evaluation after layout ready
+		this.app.workspace.onLayoutReady(() => {
+			// Initialize the tag shadow cache from Obsidian's metadata cache
+			tagShadowCache.initialize(this.app);
+			log.info("Tag shadow cache initialized");
+
+			// Evaluate which listeners should be active based on current settings
+			// and discovered workflows (called again after rescanWorkflows in step 8)
+			listenerManager.evaluateListeners();
+
+			// Sync cron jobs with current on_schedule hooks
+			const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
+				(h) => h.enabled
+			);
+			vaultEventScheduler.syncJobs(enabledScheduleHooks);
+
+			log.info("Vault event hook listeners evaluated and scheduler synced");
+		});
+
+		log.info("Group F vault event hook components initialized");
+	}
+
+	// -----------------------------------------------------------------------
+	// Settings
+	// -----------------------------------------------------------------------
 
 	async saveSettings() {
 		await this.saveData(this.settings);
@@ -281,6 +524,31 @@ export default class NotorPlugin extends Plugin {
 		// without requiring a plugin reload.
 		if (this._toolDispatcher) {
 			this._toolDispatcher.setPersonaAutoApprove(this.settings.persona_auto_approve);
+		}
+
+		// Group F: Propagate debounce cooldown change to live debounce engine
+		if (this._vaultEventDebounce) {
+			this._vaultEventDebounce.setCooldown(
+				(this.settings.vault_event_debounce_seconds ?? 5) * 1000
+			);
+		}
+
+		// Group F: Update concurrency manager limit
+		if (this._workflowConcurrencyManager) {
+			this._workflowConcurrencyManager.updateLimit(
+				this.settings.workflow_concurrency_limit ?? 3
+			);
+		}
+
+		// Group F: Re-evaluate listeners and sync scheduler on settings save
+		if (this._vaultEventListenerManager) {
+			this._vaultEventListenerManager.evaluateListeners();
+		}
+		if (this._vaultEventScheduler) {
+			const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
+				(h) => h.enabled
+			);
+			this._vaultEventScheduler.syncJobs(enabledScheduleHooks);
 		}
 
 		// C-008: Re-discover workflows when notor_dir may have changed.
@@ -598,6 +866,19 @@ export default class NotorPlugin extends Plugin {
 			count: workflows.length,
 			names: workflows.map((w) => w.display_name),
 		});
+
+		// Group F: Re-evaluate listeners after workflow discovery completes
+		// so newly discovered workflow triggers activate their listeners (F-007).
+		if (this._vaultEventListenerManager) {
+			this._vaultEventListenerManager.evaluateListeners();
+		}
+		if (this._vaultEventScheduler) {
+			const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
+				(h) => h.enabled
+			);
+			this._vaultEventScheduler.syncJobs(enabledScheduleHooks);
+		}
+
 		return workflows;
 	}
 

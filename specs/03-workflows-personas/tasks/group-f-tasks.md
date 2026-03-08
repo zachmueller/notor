@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
 **Contract:** [specs/03-workflows-personas/contracts/vault-event-hooks.md](../contracts/vault-event-hooks.md)
-**Status:** In Progress (Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, and Phase 5 complete)
+**Status:** In Progress (Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5, and Phase 6 partially complete — F-023 done, F-024 pending)
 
 ## Task Summary
 
@@ -530,15 +530,15 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-001 through F-022
 
 **Acceptance Criteria:**
-- [ ] In `onload()`, initialize in order: (1) `TagShadowCache` with deferred `initialize()` via `workspace.onLayoutReady()`, (2) `VaultEventDebounce` with cooldown from settings, (3) `ExecutionChainTracker`, (4) `ManualSaveDetector` with `install()`, (5) `TagChangeSuppressionManager`, (6) `VaultEventScheduler`, (7) `VaultEventListenerManager` with handler registrations for all event types, (8) call `evaluateListeners()` after layout ready
-- [ ] All periodic cleanups registered via `this.registerInterval()` for proper Obsidian lifecycle management
-- [ ] `VaultEventHandlerDeps` dependency object assembled and passed to all handler registrations — includes references to debounce, execution chain tracker, manual save detector, tag shadow cache, tag suppression manager, dispatcher, settings getter
-- [ ] On settings save: call `listenerManager.evaluateListeners()` and `scheduler.syncJobs(enabledScheduleHooks)`
-- [ ] On workflow discovery completion: call `listenerManager.evaluateListeners()`
-- [ ] In `onunload()`: call `destroy()` on all Group F components — listener manager, scheduler, manual save detector, debounce engine, tag shadow cache, tag suppression manager
-- [ ] `ManualSaveDetector.install()` uninstall function stored and called on unload
-- [ ] No heavy synchronous work in `onload()` — shadow cache init deferred to `onLayoutReady()`
-- [ ] TypeScript compiles cleanly with `npm run build`
+- [x] In `onload()`, initialize in order: (1) `TagShadowCache` with deferred `initialize()` via `workspace.onLayoutReady()`, (2) `VaultEventDebounce` with cooldown from settings, (3) `ExecutionChainTracker`, (4) `ManualSaveDetector` with `install()`, (5) `TagChangeSuppressionManager`, (6) `VaultEventScheduler`, (7) `VaultEventListenerManager` with handler registrations for all event types, (8) call `evaluateListeners()` after layout ready
+- [x] All periodic cleanups registered via `this.registerInterval()` for proper Obsidian lifecycle management
+- [x] `VaultEventHandlerDeps` dependency object assembled and passed to all handler registrations — includes references to debounce, execution chain tracker, manual save detector, tag shadow cache, tag suppression manager, dispatcher, settings getter
+- [x] On settings save: call `listenerManager.evaluateListeners()` and `scheduler.syncJobs(enabledScheduleHooks)`
+- [x] On workflow discovery completion: call `listenerManager.evaluateListeners()`
+- [x] In `onunload()`: call `destroy()` on all Group F components — listener manager, scheduler, manual save detector, debounce engine, tag shadow cache, tag suppression manager
+- [x] `ManualSaveDetector.install()` uninstall function stored and called on unload
+- [x] No heavy synchronous work in `onload()` — shadow cache init deferred to `onLayoutReady()`
+- [x] TypeScript compiles cleanly with `npm run build`
 - [ ] Plugin loads and unloads without errors in Obsidian console
 
 ### F-024: Playwright E2E validation & cleanup
