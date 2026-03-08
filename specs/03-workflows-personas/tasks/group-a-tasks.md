@@ -3,7 +3,7 @@
 **Created:** 2026-08-03
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
-**Status:** Planning
+**Status:** In Progress
 
 ## Task Summary
 
@@ -62,12 +62,12 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] `Persona` interface defined per data-model.md: `name`, `directory_path`, `system_prompt_path`, `prompt_content`, `prompt_mode`, `preferred_provider`, `preferred_model`
-- [ ] `PersonaPromptMode` type: `"append" | "replace"`
-- [ ] `NotorSettings.active_persona` added as `string` (empty string = no persona active), defaulting to `""`
-- [ ] All types exported from `src/types.ts`
-- [ ] `DEFAULT_SETTINGS` updated with `active_persona: ""`
-- [ ] TypeScript compiles cleanly with `npm run build`
+- [x] `Persona` interface defined per data-model.md: `name`, `directory_path`, `system_prompt_path`, `prompt_content`, `prompt_mode`, `preferred_provider`, `preferred_model`
+- [x] `PersonaPromptMode` type: `"append" | "replace"`
+- [x] `NotorSettings.active_persona` added as `string` (empty string = no persona active), defaulting to `""`
+- [x] All types exported from `src/types.ts`
+- [x] `DEFAULT_SETTINGS` updated with `active_persona: ""`
+- [x] TypeScript compiles cleanly with `npm run build`
 
 ---
 

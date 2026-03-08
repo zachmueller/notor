@@ -224,6 +224,45 @@ export interface VaultRule {
 }
 
 // ---------------------------------------------------------------------------
+// Persona
+// ---------------------------------------------------------------------------
+
+/**
+ * How a persona's system prompt relates to the global system prompt.
+ *
+ * - `"append"` — persona prompt is appended after the global system prompt.
+ * - `"replace"` — persona prompt replaces the global system prompt entirely
+ *   (vault-level rules still apply).
+ */
+export type PersonaPromptMode = "append" | "replace";
+
+/**
+ * In-memory representation of a discovered persona, loaded from a
+ * subdirectory under `{notor_dir}/personas/`.
+ *
+ * Not persisted as structured data — personas are discovered at runtime
+ * by scanning the persona directory.
+ *
+ * @see specs/03-workflows-personas/data-model.md — Persona entity
+ */
+export interface Persona {
+	/** Persona name, derived from subdirectory name (e.g., `"researcher"`). */
+	name: string;
+	/** Vault-relative path to the persona directory (e.g., `"notor/personas/researcher/"`). */
+	directory_path: string;
+	/** Vault-relative path to `system-prompt.md` (e.g., `"notor/personas/researcher/system-prompt.md"`). */
+	system_prompt_path: string;
+	/** Body content of `system-prompt.md` after stripping frontmatter — the persona's system prompt text. */
+	prompt_content: string;
+	/** How the persona prompt relates to the global system prompt. Default: `"append"`. */
+	prompt_mode: PersonaPromptMode;
+	/** Override LLM provider identifier (null = use global default). */
+	preferred_provider: string | null;
+	/** Override model identifier (null = use global default). */
+	preferred_model: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Stale Content Check
 // ---------------------------------------------------------------------------
 

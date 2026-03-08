@@ -173,6 +173,13 @@ export interface NotorSettings {
 
 	/** Max environment variable value size for hooks (chars). */
 	hook_env_truncation_chars: number;
+
+	// -------------------------------------------------------------------
+	// Phase 4: Persona settings
+	// -------------------------------------------------------------------
+
+	/** Name of the currently active persona (empty string = no persona active). */
+	active_persona: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +282,9 @@ export const DEFAULT_SETTINGS: NotorSettings = {
 	hooks: DEFAULT_HOOKS,
 	hook_timeout: 10,
 	hook_env_truncation_chars: 10000,
+
+	// Phase 4: Personas
+	active_persona: "",
 };
 
 // ---------------------------------------------------------------------------
