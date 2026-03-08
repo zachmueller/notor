@@ -220,6 +220,13 @@ export default class NotorPlugin extends Plugin {
 		if (this._personaManager) {
 			this._personaManager.updateSettings(this.settings);
 		}
+
+		// B-007: Propagate persona auto-approve config changes to dispatcher
+		// so changes from the Settings UI take effect on the next dispatch()
+		// without requiring a plugin reload.
+		if (this._toolDispatcher) {
+			this._toolDispatcher.setPersonaAutoApprove(this.settings.persona_auto_approve);
+		}
 	}
 
 	// -----------------------------------------------------------------------
@@ -392,6 +399,12 @@ export default class NotorPlugin extends Plugin {
 			this._toolDispatcher.setAutoApprove(this.settings.auto_approve);
 			this._toolDispatcher.setSettings(this.settings);
 
+			// B-007: Initialize persona auto-approve state on dispatcher
+			this._toolDispatcher.setPersonaAutoApprove(this.settings.persona_auto_approve);
+			this._toolDispatcher.setActivePersonaName(
+				this.settings.active_persona || null
+			);
+
 			// Set vault root path for working directory validation
 			const adapter = this.app.vault.adapter as { basePath?: string };
 			if (adapter.basePath) {
@@ -506,6 +519,14 @@ export default class NotorPlugin extends Plugin {
 		const personaManager = this.getPersonaManager();
 		view.setPersonaManager(personaManager);
 
+		// B-007: Wire persona name changes to the dispatcher so auto-approve
+		// resolution tracks the active persona in real time. When the user
+		// switches personas via the picker, the PersonaManager fires this
+		// callback, which updates the dispatcher's active persona name.
+		personaManager.setOnPersonaNameChanged((name) => {
+			toolDispatcher.setActivePersonaName(name);
+		});
+
 		// Restore active persona from settings on view wire (deferred, non-blocking).
 		// This ensures the persona label and provider/model state are restored
 		// when the chat panel opens after plugin load.
@@ -540,6 +561,11 @@ export default class NotorPlugin extends Plugin {
 			this.loadSettings().then(() => {
 				// Propagate refreshed auto-approve settings to the dispatcher
 				toolDispatcher.setAutoApprove(this.settings.auto_approve);
+				// B-007: Also propagate persona auto-approve on settings reload
+				toolDispatcher.setPersonaAutoApprove(this.settings.persona_auto_approve);
+				toolDispatcher.setActivePersonaName(
+					this.settings.active_persona || null
+				);
 				if (this._orchestrator) {
 					this._orchestrator.updateSettings(this.settings);
 				}

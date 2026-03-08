@@ -179,13 +179,13 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 **Dependencies:** B-003, B-005, B-006, Group A (A-005 persona manager)
 
 **Acceptance Criteria:**
-- [ ] On plugin load, `ToolDispatcher.setPersonaAutoApprove()` is called with the current `settings.persona_auto_approve` config
-- [ ] On plugin load, `ToolDispatcher.setActivePersonaName()` is called with the current `settings.active_persona` (or null if empty)
-- [ ] When the user switches personas (via the persona picker from Group A), `ToolDispatcher.setActivePersonaName()` is called with the new persona name (or null for "None")
-- [ ] When persona auto-approve settings are saved (via the Settings UI from B-004), `ToolDispatcher.setPersonaAutoApprove()` is called with the updated config
-- [ ] `PersonaManager.activatePersona()` and `deactivatePersona()` propagate the persona name change to the dispatcher (via a callback, event, or direct reference)
-- [ ] Integration does not break existing non-persona auto-approve flows — when no persona is active, behavior is identical to Phase 3
-- [ ] Settings changes take effect on the next message dispatch without plugin reload
+- [x] On plugin load, `ToolDispatcher.setPersonaAutoApprove()` is called with the current `settings.persona_auto_approve` config
+- [x] On plugin load, `ToolDispatcher.setActivePersonaName()` is called with the current `settings.active_persona` (or null if empty)
+- [x] When the user switches personas (via the persona picker from Group A), `ToolDispatcher.setActivePersonaName()` is called with the new persona name (or null for "None")
+- [x] When persona auto-approve settings are saved (via the Settings UI from B-004), `ToolDispatcher.setPersonaAutoApprove()` is called with the updated config
+- [x] `PersonaManager.activatePersona()` and `deactivatePersona()` propagate the persona name change to the dispatcher (via a callback, event, or direct reference)
+- [x] Integration does not break existing non-persona auto-approve flows — when no persona is active, behavior is identical to Phase 3
+- [x] Settings changes take effect on the next message dispatch without plugin reload
 
 ### B-008: Playwright E2E validation and final cleanup
 
@@ -198,18 +198,18 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 **Dependencies:** B-007
 
 **Acceptance Criteria:**
-- [ ] **E2E test script created:** `e2e/scripts/auto-approve-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → DOM assertions → structured log verification → screenshots → results JSON)
-- [ ] **Primary flow validated (E2E):** Test opens **Settings → Notor → Persona auto-approve** section → verifies "organizer" persona is listed → sets tool overrides via DOM selects → activates "organizer" persona in chat settings popover → structured logs confirm auto-approve resolution uses persona overrides for `manage_tags` and global fallback for `execute_command`
+- [x] **E2E test script created:** `e2e/scripts/auto-approve-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → DOM assertions → structured log verification → screenshots → results JSON)
+- [x] **Primary flow validated (E2E):** Test opens **Settings → Notor → Persona auto-approve** section → verifies "organizer" persona is listed → sets tool overrides via DOM selects → activates "organizer" persona in chat settings popover → structured logs confirm auto-approve resolution uses persona overrides for `manage_tags` and global fallback for `execute_command`
 - [ ] **Global default fallback validated (E2E):** Test sets a tool to "Global default" on persona → toggles global auto-approve on/off → structured logs confirm resolution follows the global value in both states
 - [ ] **"Require approval" override validated (E2E):** Test sets a tool to "Require approval" on persona with global auto-approve enabled → structured logs confirm tool requires approval despite global setting
-- [ ] **No persona active validated (E2E):** Test deactivates persona → triggers tool dispatch → structured logs confirm only global auto-approve is consulted, persona overrides ignored
+- [x] **No persona active validated (E2E):** Test deactivates persona → triggers tool dispatch → structured logs confirm only global auto-approve is consulted, persona overrides ignored
 - [ ] **Plan mode respected validated (E2E):** Test activates persona with write tool set to "Auto-approve" → switches to Plan mode → structured logs confirm write tool is blocked regardless of persona override
-- [ ] **Stale tool warning validated (E2E):** Test injects a fake tool name entry into `persona_auto_approve` via plugin settings manipulation → opens Settings → verifies stale tool warning indicator is visible in the DOM → clicks "Remove" → verifies entry removed from DOM
+- [x] **Stale tool warning validated (E2E):** Test injects a fake tool name entry into `persona_auto_approve` via plugin settings manipulation → opens Settings → verifies stale tool warning indicator is visible in the DOM → clicks "Remove" → verifies entry removed from DOM
 - [ ] **No personas discovered validated (E2E):** Test removes personas directory before launch → verifies persona auto-approve section shows informational message in the DOM, no error-level structured logs
 - [ ] **Settings persistence validated (E2E):** Test sets overrides → reloads plugin (or restarts Obsidian) → verifies overrides still present in Settings UI DOM and effective at runtime via structured logs
-- [ ] Build succeeds: `npm run build` produces clean `main.js`
-- [ ] No TypeScript errors: `npx tsc --noEmit` passes
-- [ ] No persona/auto-approve-related error-level structured logs during test execution (filtered via `LogCollector.getLogsByLevel("error")`)
+- [x] Build succeeds: `npm run build` produces clean `main.js`
+- [x] No TypeScript errors: `npx tsc --noEmit` passes
+- [x] No persona/auto-approve-related error-level structured logs during test execution (filtered via `LogCollector.getLogsByLevel("error")`)
 
 ---
 

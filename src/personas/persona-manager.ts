@@ -36,6 +36,15 @@ export class PersonaManager {
 	/** Callback fired when the active persona changes (for UI updates). */
 	private onPersonaChanged: ((persona: Persona | null) => void) | null = null;
 
+	/**
+	 * Callback fired when the active persona name changes, specifically
+	 * for propagating the persona name to the ToolDispatcher so auto-approve
+	 * resolution stays in sync.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-b-tasks.md — B-007
+	 */
+	private onPersonaNameChanged: ((name: string | null) => void) | null = null;
+
 	constructor(
 		private readonly vault: Vault,
 		private readonly metadataCache: MetadataCache,
@@ -61,6 +70,19 @@ export class PersonaManager {
 	 */
 	setOnPersonaChanged(callback: (persona: Persona | null) => void): void {
 		this.onPersonaChanged = callback;
+	}
+
+	/**
+	 * Register a callback that fires when the active persona name changes.
+	 *
+	 * Used by main.ts to propagate the persona name to the ToolDispatcher
+	 * so that per-persona auto-approve resolution stays in sync whenever
+	 * the user switches personas via the persona picker.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-b-tasks.md — B-007
+	 */
+	setOnPersonaNameChanged(callback: (name: string | null) => void): void {
+		this.onPersonaNameChanged = callback;
 	}
 
 	// -----------------------------------------------------------------------
@@ -118,6 +140,9 @@ export class PersonaManager {
 		// Notify listeners (UI label, chat view model selector)
 		this.onPersonaChanged?.(persona);
 
+		// Propagate persona name to dispatcher for auto-approve resolution (B-007)
+		this.onPersonaNameChanged?.(name);
+
 		return true;
 	}
 
@@ -144,6 +169,9 @@ export class PersonaManager {
 
 		// Notify listeners
 		this.onPersonaChanged?.(null);
+
+		// Propagate null persona to dispatcher for auto-approve resolution (B-007)
+		this.onPersonaNameChanged?.(null);
 	}
 
 	/**

@@ -95,6 +95,10 @@ export class ChatOrchestrator {
 	updateSettings(settings: NotorSettings): void {
 		this.settings = settings;
 		this.dispatcher.setAutoApprove(settings.auto_approve);
+
+		// B-007: Propagate persona auto-approve config so Settings UI
+		// changes take effect on the next dispatch without plugin reload.
+		this.dispatcher.setPersonaAutoApprove(settings.persona_auto_approve);
 	}
 
 	/** Get the conversation manager. */
