@@ -30,6 +30,36 @@ export interface Conversation {
 	estimated_cost: number | null;
 	/** Current Plan/Act mode state. */
 	mode: ConversationMode;
+	/**
+	 * Vault-relative path of the workflow note that created this conversation
+	 * (null for non-workflow conversations).
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
+	 */
+	workflow_path?: string | null;
+	/**
+	 * Display name of the workflow (e.g. `"daily/review"`) for UI labeling.
+	 * null for non-workflow conversations.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
+	 */
+	workflow_name?: string | null;
+	/**
+	 * Active persona name at the time the workflow conversation was created
+	 * (after any persona switch). null for non-workflow conversations or
+	 * workflow conversations without a persona override.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
+	 */
+	persona_name?: string | null;
+	/**
+	 * Whether this conversation is a background (event-triggered) workflow
+	 * execution. false for manual (foreground) workflows; undefined/null
+	 * for non-workflow conversations.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
+	 */
+	is_background?: boolean;
 }
 
 /** Plan/Act mode. */
@@ -82,6 +112,14 @@ export interface Message {
 	hook_injections?: string[] | null;
 	/** Whether this user message is a hook injection (ACI-002). */
 	is_hook_injection?: boolean;
+	/**
+	 * Whether this user message is the opening workflow message (contains
+	 * `<workflow_instructions>` content). Used to trigger `<details>`
+	 * rendering in the chat UI.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
+	 */
+	is_workflow_message?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -495,4 +533,75 @@ export interface StaleContentEntry {
 	last_read_content: string;
 	/** When the content was last read (ISO 8601). */
 	last_read_timestamp: string;
+}
+
+// ---------------------------------------------------------------------------
+// Workflow Execution (Group E)
+// ---------------------------------------------------------------------------
+
+/**
+ * Structured context about the event that triggered a workflow execution.
+ *
+ * Populated by Group F (event-triggered workflows) and passed to
+ * `assembleWorkflowPrompt()`. Manual triggers pass `null`.
+ *
+ * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
+ * @see specs/03-workflows-personas/contracts/workflow-assembly.md — Step 5
+ */
+export interface TriggerContext {
+	/** The event type that triggered the workflow (e.g. `"on-save"`, `"scheduled"`). */
+	event: string;
+	/** Vault-relative path of the note that caused the event (null for scheduled events). */
+	note_path: string | null;
+	/** Tags added to the note (only for `on-tag-change` events). */
+	tags_added: string[] | null;
+	/** Tags removed from the note (only for `on-tag-change` events). */
+	tags_removed: string[] | null;
+}
+
+/**
+ * Input to the workflow prompt assembly pipeline.
+ *
+ * Passed to `assembleWorkflowPrompt()` to produce the complete user
+ * message for a workflow execution.
+ *
+ * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
+ * @see specs/03-workflows-personas/contracts/workflow-assembly.md — Pipeline
+ */
+export interface WorkflowExecutionRequest {
+	/** The discovered workflow to execute. */
+	workflow: Workflow;
+	/**
+	 * Optional supplementary text typed by the user alongside the workflow
+	 * chip (slash-command UX). Null for command-palette executions.
+	 */
+	supplementaryText: string | null;
+	/**
+	 * Event context for event-triggered executions (Group F).
+	 * Null for manual (command palette / slash-command) executions.
+	 */
+	triggerContext: TriggerContext | null;
+}
+
+/**
+ * Output of the workflow prompt assembly pipeline.
+ *
+ * Returned by `assembleWorkflowPrompt()` on successful assembly.
+ *
+ * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
+ */
+export interface WorkflowAssemblyResult {
+	/** The fully assembled user message string, ready for dispatch to the LLM. */
+	assembledMessage: string;
+	/** Display name of the workflow (used for UI labeling and conversation title). */
+	workflowName: string;
+	/**
+	 * Attachments collected from `<include_note mode="attached">` tags in the
+	 * workflow body. Empty array if no attached-mode tags were resolved.
+	 */
+	attachments: Array<{
+		path: string;
+		section: string | null;
+		content: string;
+	}>;
 }

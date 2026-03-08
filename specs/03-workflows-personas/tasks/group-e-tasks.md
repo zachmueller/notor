@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
 **Contract:** [specs/03-workflows-personas/contracts/workflow-assembly.md](../contracts/workflow-assembly.md)
-**Status:** Planning
+**Status:** In Progress
 
 ## Task Summary
 
@@ -65,14 +65,14 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** None (Group C's `Workflow` types assumed available)
 
 **Acceptance Criteria:**
-- [ ] `WorkflowExecutionRequest` interface defined: `workflow` (Workflow), `supplementaryText` (string | null), `triggerContext` (TriggerContext | null)
-- [ ] `WorkflowAssemblyResult` interface defined: `assembledMessage` (string — the full user message text), `workflowName` (string — display name for UI), `attachments` (array from `<include_note mode="attached">` resolution)
-- [ ] `TriggerContext` interface defined per data-model.md: `event` (string), `note_path` (string | null), `tags_added` (string[] | null), `tags_removed` (string[] | null)
-- [ ] `Conversation` interface extended with optional fields: `workflow_path` (string | null), `workflow_name` (string | null), `persona_name` (string | null), `is_background` (boolean)
-- [ ] `Message` interface extended with optional field: `is_workflow_message` (boolean)
-- [ ] `MessageParts` interface extended with optional fields: `triggerContext` (string — pre-formatted XML block), `workflowInstructions` (string — pre-wrapped `<workflow_instructions>` block)
-- [ ] All types exported from `src/types.ts`
-- [ ] TypeScript compiles cleanly with `npm run build`
+- [x] `WorkflowExecutionRequest` interface defined: `workflow` (Workflow), `supplementaryText` (string | null), `triggerContext` (TriggerContext | null)
+- [x] `WorkflowAssemblyResult` interface defined: `assembledMessage` (string — the full user message text), `workflowName` (string — display name for UI), `attachments` (array from `<include_note mode="attached">` resolution)
+- [x] `TriggerContext` interface defined per data-model.md: `event` (string), `note_path` (string | null), `tags_added` (string[] | null), `tags_removed` (string[] | null)
+- [x] `Conversation` interface extended with optional fields: `workflow_path` (string | null), `workflow_name` (string | null), `persona_name` (string | null), `is_background` (boolean)
+- [x] `Message` interface extended with optional field: `is_workflow_message` (boolean)
+- [x] `MessageParts` interface extended with optional fields: `triggerContext` (string — pre-formatted XML block), `workflowInstructions` (string — pre-wrapped `<workflow_instructions>` block)
+- [x] All types exported from `src/types.ts`
+- [x] TypeScript compiles cleanly with `npm run build`
 
 ---
 
@@ -88,12 +88,12 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-001
 
 **Acceptance Criteria:**
-- [ ] `readWorkflowBody(file: TFile, vault: Vault): Promise<string>` function exported
-- [ ] Reads the full note content via `vault.read(file)`
-- [ ] Strips YAML frontmatter using Obsidian's `getFrontMatterInfo(content)` utility: returns `content.slice(fmInfo.contentStart)`
-- [ ] If the note has no frontmatter (no leading `---`), returns the full content as-is
-- [ ] Returns the body content string (may be empty — emptiness is checked in E-004)
-- [ ] Handles read errors gracefully — throws a descriptive error that callers can catch
+- [x] `readWorkflowBody(file: TFile, vault: Vault): Promise<string>` function exported
+- [x] Reads the full note content via `vault.read(file)`
+- [x] Strips YAML frontmatter using Obsidian's `getFrontMatterInfo(content)` utility: returns `content.slice(fmInfo.contentStart)`
+- [x] If the note has no frontmatter (no leading `---`), returns the full content as-is
+- [x] Returns the body content string (may be empty — emptiness is checked in E-004)
+- [x] Handles read errors gracefully — throws a descriptive error that callers can catch
 
 ### E-003: `<include_note>` resolution in workflow bodies
 
@@ -105,13 +105,13 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-002, Group D (D-008 — `resolveIncludeNotes()` function available)
 
 **Acceptance Criteria:**
-- [ ] `resolveWorkflowIncludes(body: string, vault: Vault, metadataCache: MetadataCache, workflowFilePath: string): Promise<IncludeNoteResolutionResult>` function exported
-- [ ] Calls `resolveIncludeNotes(body, vault, metadataCache, workflowFilePath, "workflow")` from Group D's resolver module
-- [ ] Passes `"workflow"` as the context parameter so both `inline` and `attached` modes are supported
-- [ ] The `workflowFilePath` (the workflow note's own vault-relative path) is passed as `sourceFilePath` for wikilink disambiguation
-- [ ] Returns the `IncludeNoteResolutionResult` containing `inlineContent` (body with inline tags resolved, attached tags removed) and `attachments` (collected attached-mode entries)
-- [ ] Resolution errors in individual tags produce inline error markers (handled by Group D) — this function does not abort on partial failures
-- [ ] Nested `<include_note>` tags in resolved content are passed through as literal text (single-pass, handled by Group D)
+- [x] `resolveWorkflowIncludes(body: string, vault: Vault, metadataCache: MetadataCache, workflowFilePath: string): Promise<IncludeNoteResolutionResult>` function exported
+- [x] Calls `resolveIncludeNotes(body, vault, metadataCache, workflowFilePath, "workflow")` from Group D's resolver module
+- [x] Passes `"workflow"` as the context parameter so both `inline` and `attached` modes are supported
+- [x] The `workflowFilePath` (the workflow note's own vault-relative path) is passed as `sourceFilePath` for wikilink disambiguation
+- [x] Returns the `IncludeNoteResolutionResult` containing `inlineContent` (body with inline tags resolved, attached tags removed) and `attachments` (collected attached-mode entries)
+- [x] Resolution errors in individual tags produce inline error markers (handled by Group D) — this function does not abort on partial failures
+- [x] Nested `<include_note>` tags in resolved content are passed through as literal text (single-pass, handled by Group D)
 
 ### E-004: Empty workflow guard
 
@@ -123,11 +123,11 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-003
 
 **Acceptance Criteria:**
-- [ ] `validateWorkflowContent(resolvedBody: string): boolean` function exported
-- [ ] Returns `false` if `resolvedBody.trim().length === 0` (body is empty or whitespace-only)
-- [ ] Returns `true` if the body has non-whitespace content
-- [ ] When the guard fails (returns `false`), the caller aborts execution and surfaces `new Notice("Workflow has no prompt content.")` per FR-44
-- [ ] Body consisting entirely of error markers (e.g., `[include_note error: ...]`) is considered non-empty and passes the guard — the LLM receives the error markers and can inform the user
+- [x] `validateWorkflowContent(resolvedBody: string): boolean` function exported
+- [x] Returns `false` if `resolvedBody.trim().length === 0` (body is empty or whitespace-only)
+- [x] Returns `true` if the body has non-whitespace content
+- [x] When the guard fails (returns `false`), the caller aborts execution and surfaces `new Notice("Workflow has no prompt content.")` per FR-44
+- [x] Body consisting entirely of error markers (e.g., `[include_note error: ...]`) is considered non-empty and passes the guard — the LLM receives the error markers and can inform the user
 
 ### E-005: `<workflow_instructions>` XML wrapping
 
@@ -139,17 +139,17 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-004
 
 **Acceptance Criteria:**
-- [ ] `wrapWorkflowInstructions(resolvedBody: string, workflowFileName: string): string` function exported
-- [ ] Produces the format:
+- [x] `wrapWorkflowInstructions(resolvedBody: string, workflowFileName: string): string` function exported
+- [x] Produces the format:
   ```xml
   <workflow_instructions type="{workflowFileName}">
   {resolvedBody}
   </workflow_instructions>
   ```
-- [ ] The `type` attribute contains the workflow note's **file name** only (e.g., `daily-review.md`), not the full vault-relative path
-- [ ] Opening tag, content, and closing tag are on separate lines per the contract
-- [ ] No additional whitespace is inserted around the content
-- [ ] The resolved body content is included as-is (including any inline error markers from `<include_note>` resolution)
+- [x] The `type` attribute contains the workflow note's **file name** only (e.g., `daily-review.md`), not the full vault-relative path
+- [x] Opening tag, content, and closing tag are on separate lines per the contract
+- [x] No additional whitespace is inserted around the content
+- [x] The resolved body content is included as-is (including any inline error markers from `<include_note>` resolution)
 
 ### E-006: Workflow prompt assembler — full pipeline orchestration
 
@@ -162,10 +162,10 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-005
 
 **Acceptance Criteria:**
-- [ ] `assembleWorkflowPrompt(request: WorkflowExecutionRequest, vault: Vault, metadataCache: MetadataCache): Promise<WorkflowAssemblyResult | null>` function exported
-- [ ] Returns `null` when the empty guard fails (caller surfaces the notice)
-- [ ] Pipeline steps executed in order: (1) `readWorkflowBody()`, (2) `resolveWorkflowIncludes()`, (3) `validateWorkflowContent()`, (4) `wrapWorkflowInstructions()`, (5) build trigger context XML (if `request.triggerContext` is non-null), (6) compose final message
-- [ ] **Trigger context formatting:** When `request.triggerContext` is non-null, formats the `<trigger_context>` XML block per the contract:
+- [x] `assembleWorkflowPrompt(request: WorkflowExecutionRequest, vault: Vault, metadataCache: MetadataCache): Promise<WorkflowAssemblyResult | null>` function exported
+- [x] Returns `null` when the empty guard fails (caller surfaces the notice)
+- [x] Pipeline steps executed in order: (1) `readWorkflowBody()`, (2) `resolveWorkflowIncludes()`, (3) `validateWorkflowContent()`, (4) `wrapWorkflowInstructions()`, (5) build trigger context XML (if `request.triggerContext` is non-null), (6) compose final message
+- [x] **Trigger context formatting:** When `request.triggerContext` is non-null, formats the `<trigger_context>` XML block per the contract:
   ```xml
   <trigger_context>
   event: {event}
@@ -173,15 +173,15 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
   </trigger_context>
   ```
   For `on-tag-change` events, includes `tags_added` and `tags_removed` fields (comma-separated). For `scheduled` events, includes only `event` (no note path). For manual triggers, `triggerContext` is null and no block is prepended.
-- [ ] **Message assembly:** Extends `assembleUserMessage()` to support the Phase 4 message ordering:
+- [x] **Message assembly:** Extends `assembleUserMessage()` to support the Phase 4 message ordering:
   1. `<trigger_context>` block (event-triggered only)
   2. `<attachments>` block (from `<include_note mode="attached">` entries, if any)
   3. `<workflow_instructions>` wrapped block
   4. User's supplementary text (from `request.supplementaryText`, if non-null)
-- [ ] The `assembleUserMessage()` function is updated to accept the new optional `MessageParts` fields (`triggerContext`, `workflowInstructions`) and insert them in the correct order
-- [ ] For non-workflow messages (when `workflowInstructions` is undefined), `assembleUserMessage()` behavior is unchanged — backward-compatible
-- [ ] Collected `attachments` from attached-mode `<include_note>` tags are formatted into an `<attachments>` block using the same `<vault-note>` format established in Phase 2 (reuses `buildAttachmentsBlock()` or equivalent from `src/context/attachment.ts`)
-- [ ] Returns `WorkflowAssemblyResult` with `assembledMessage`, `workflowName` (the workflow's `display_name`), and `attachments` array
+- [x] The `assembleUserMessage()` function is updated to accept the new optional `MessageParts` fields (`triggerContext`, `workflowInstructions`) and insert them in the correct order
+- [x] For non-workflow messages (when `workflowInstructions` is undefined), `assembleUserMessage()` behavior is unchanged — backward-compatible
+- [x] Collected `attachments` from attached-mode `<include_note>` tags are formatted into an `<attachments>` block using the same `<vault-note>` format established in Phase 2 (reuses `buildAttachmentsBlock()` or equivalent from `src/context/attachment.ts`)
+- [x] Returns `WorkflowAssemblyResult` with `assembledMessage`, `workflowName` (the workflow's `display_name`), and `attachments` array
 
 ---
 
