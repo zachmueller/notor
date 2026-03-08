@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
 **Contract:** [specs/03-workflows-personas/contracts/include-note-tag.md](../contracts/include-note-tag.md)
-**Status:** Planning
+**Status:** In Progress
 
 ## Task Summary
 
@@ -56,12 +56,12 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] `IncludeNotePathType` type defined: `"vault_relative" | "wikilink"`
-- [ ] `IncludeNoteMode` type defined: `"inline" | "attached"`
-- [ ] `IncludeNoteTag` interface defined per data-model.md: `raw_tag` (string), `path` (string), `path_type` (IncludeNotePathType), `section` (string | null), `mode` (IncludeNoteMode), `strip_frontmatter` (boolean)
-- [ ] `IncludeNoteResolutionResult` interface defined: `inlineContent` (string — text with inline tags resolved), `attachments` (array of `{ path: string; section: string | null; content: string }` — collected attached-mode entries)
-- [ ] All types exported from `src/types.ts`
-- [ ] TypeScript compiles cleanly with `npm run build`
+- [x] `IncludeNotePathType` type defined: `"vault_relative" | "wikilink"`
+- [x] `IncludeNoteMode` type defined: `"inline" | "attached"`
+- [x] `IncludeNoteTag` interface defined per data-model.md: `raw_tag` (string), `path` (string), `path_type` (IncludeNotePathType), `section` (string | null), `mode` (IncludeNoteMode), `strip_frontmatter` (boolean)
+- [x] `IncludeNoteResolutionResult` interface defined: `inlineContent` (string — text with inline tags resolved), `attachments` (array of `{ path: string; section: string | null; content: string }` — collected attached-mode entries)
+- [x] All types exported from `src/types.ts`
+- [x] TypeScript compiles cleanly with `npm run build`
 
 ---
 
@@ -77,19 +77,19 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-001
 
 **Acceptance Criteria:**
-- [ ] `parseIncludeNoteTags(text: string): IncludeNoteTag[]` function exported
-- [ ] Uses regex `/<include_note\s+([^>]*?)\s*\/>/g` to find all self-closing `<include_note ... />` tags (per contract)
-- [ ] Extracts attributes from each tag using `(\w+)\s*=\s*"([^"]*)"/g` (double-quoted values only; single-quoted values are not supported per contract)
-- [ ] `path` attribute: required — if missing or empty, the tag is excluded from the returned array (left as-is in source text)
-- [ ] `path_type` detection: if `path` value contains `[[` → `"wikilink"`, otherwise → `"vault_relative"`
-- [ ] `section` attribute: defaults to `null` if absent
-- [ ] `mode` attribute: defaults to `"inline"` if absent; unrecognized values default to `"inline"`
-- [ ] `strip_frontmatter` attribute: defaults to `true`; only the exact string `"false"` sets it to `false`
-- [ ] `raw_tag` captures the full original tag text (for replacement during resolution)
-- [ ] Attributes not in the supported set (`path`, `section`, `mode`, `strip_frontmatter`) are silently ignored
-- [ ] Returns an array of `IncludeNoteTag` objects in the order they appear in the text
-- [ ] Handles edge cases: tags with extra whitespace, attributes in any order, tags spanning one line or multiple lines (regex handles `\s` which includes newlines)
-- [ ] Pure function — no side effects, no vault access
+- [x] `parseIncludeNoteTags(text: string): IncludeNoteTag[]` function exported
+- [x] Uses regex `/<include_note\s+([^>]*?)\s*\/>/g` to find all self-closing `<include_note ... />` tags (per contract)
+- [x] Extracts attributes from each tag using `(\w+)\s*=\s*"([^"]*)"/g` (double-quoted values only; single-quoted values are not supported per contract)
+- [x] `path` attribute: required — if missing or empty, the tag is excluded from the returned array (left as-is in source text)
+- [x] `path_type` detection: if `path` value contains `[[` → `"wikilink"`, otherwise → `"vault_relative"`
+- [x] `section` attribute: defaults to `null` if absent
+- [x] `mode` attribute: defaults to `"inline"` if absent; unrecognized values default to `"inline"`
+- [x] `strip_frontmatter` attribute: defaults to `true`; only the exact string `"false"` sets it to `false`
+- [x] `raw_tag` captures the full original tag text (for replacement during resolution)
+- [x] Attributes not in the supported set (`path`, `section`, `mode`, `strip_frontmatter`) are silently ignored
+- [x] Returns an array of `IncludeNoteTag` objects in the order they appear in the text
+- [x] Handles edge cases: tags with extra whitespace, attributes in any order, tags spanning one line or multiple lines (regex handles `\s` which includes newlines)
+- [x] Pure function — no side effects, no vault access
 
 ---
 

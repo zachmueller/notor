@@ -414,6 +414,79 @@ export interface Workflow {
 // Stale Content Check
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// IncludeNoteTag
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the path in an `<include_note>` tag is a vault-relative path
+ * or a wikilink.
+ *
+ * - `"vault_relative"` — plain file path, resolved via `vault.getAbstractFileByPath()`.
+ * - `"wikilink"` — path wrapped in `[[…]]`, resolved via `metadataCache.getFirstLinkpathDest()`.
+ *
+ * @see specs/03-workflows-personas/data-model.md — IncludeNoteTag entity
+ */
+export type IncludeNotePathType = "vault_relative" | "wikilink";
+
+/**
+ * Injection mode for a resolved `<include_note>` tag.
+ *
+ * - `"inline"` — resolved content replaces the tag directly in the surrounding text.
+ * - `"attached"` — resolved content is collected into a separate `<attachments>` block.
+ *
+ * @see specs/03-workflows-personas/contracts/include-note-tag.md — Supported Attributes
+ */
+export type IncludeNoteMode = "inline" | "attached";
+
+/**
+ * Parsed representation of a single `<include_note ... />` tag, extracted
+ * from workflow bodies, system prompts, or vault rule files at resolution time.
+ *
+ * Not persisted — tags are parsed and resolved at execution time. This
+ * interface describes the intermediate parsed form before resolution.
+ *
+ * @see specs/03-workflows-personas/data-model.md — IncludeNoteTag entity
+ * @see specs/03-workflows-personas/contracts/include-note-tag.md
+ */
+export interface IncludeNoteTag {
+	/** The full original tag text as found in the source (for replacement). */
+	raw_tag: string;
+	/** The `path` attribute value — vault-relative path or wikilink. */
+	path: string;
+	/** Whether the path is a vault-relative path or a wikilink. */
+	path_type: IncludeNotePathType;
+	/** The `section` attribute value — heading to extract (null = full note). */
+	section: string | null;
+	/** Injection mode. Default: `"inline"`. */
+	mode: IncludeNoteMode;
+	/** Whether to strip YAML frontmatter before injection. Default: `true`. */
+	strip_frontmatter: boolean;
+}
+
+/**
+ * Result of resolving all `<include_note>` tags in a text string.
+ *
+ * - `inlineContent` — the text with inline-mode tags replaced and attached-mode tags removed.
+ * - `attachments` — collected attached-mode entries (empty array if none).
+ *
+ * @see specs/03-workflows-personas/contracts/include-note-tag.md — Resolution Algorithm
+ */
+export interface IncludeNoteResolutionResult {
+	/** Text with inline tags resolved and attached-mode tags removed. */
+	inlineContent: string;
+	/** Collected attached-mode entries. */
+	attachments: Array<{
+		path: string;
+		section: string | null;
+		content: string;
+	}>;
+}
+
+// ---------------------------------------------------------------------------
+// Stale Content Check
+// ---------------------------------------------------------------------------
+
 /** Tracks the last-read content for a note path within a conversation. */
 export interface StaleContentEntry {
 	/** Vault-relative path. */
