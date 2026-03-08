@@ -753,7 +753,7 @@ For 10 notes processed sequentially, all 10 `changed` events fire within ~2 seco
 
 ## R-4: Slash-Command Autocomplete in Custom ItemView
 
-**Status:** Pending
+**Status:** ✅ Complete
 **Blocking:** Group E (Manual Workflow Execution — slash-command workflow attachment, FR-42)
 
 ### Context
@@ -795,11 +795,265 @@ Phase 4 introduces a slash-command UX in the Notor chat input area: when the use
 
 ### Findings
 
-*(To be completed during research phase)*
+**Reference implementation:** [`research/research-r4-slash-command-test.ts`](research/research-r4-slash-command-test.ts)
+
+#### Q1: Current chat input implementation
+
+**The Notor chat input is a `<div contenteditable="true">`.** It is NOT a `<textarea>` or a custom component.
+
+Key details from `src/ui/chat-view.ts`:
+
+```typescript
+this.textInputEl = inputWrapper.createDiv({
+  cls: "notor-text-input",
+  attr: {
+    contenteditable: "true",
+    role: "textbox",
+    "aria-multiline": "true",
+    "aria-label": "Ask Notor...",
+    "data-placeholder": "Ask Notor...",
+  },
+});
+```
+
+The contenteditable div was adopted in Phase 2 specifically to support `AbstractInputSuggest<T>` for the `[[` vault note autocomplete (per Phase 2's R-1 findings). The div uses `-webkit-user-modify: read-write-plaintext-only` CSS to ensure plaintext-only input (no rich text formatting), with auto-resize via `scrollHeight` capped at 200px.
+
+**This is directly relevant to our approach:** since the input is already a contenteditable div with an existing `AbstractInputSuggest` instance attached, we can reuse the same pattern for `/`-triggered workflow autocomplete.
+
+#### Q2: `EditorSuggest` applicability
+
+**`EditorSuggest<T>` is NOT applicable for non-editor (contenteditable div) contexts.** It is designed exclusively for Obsidian's CodeMirror-based `Editor` instances.
+
+Evidence from `obsidian.d.ts`:
+
+```typescript
+export abstract class EditorSuggest<T> extends PopoverSuggest<T> {
+  context: EditorSuggestContext | null;
+  constructor(app: App);
+
+  abstract onTrigger(
+    cursor: EditorPosition,
+    editor: Editor,           // ← Requires CodeMirror Editor
+    file: TFile | null        // ← Requires a vault file context
+  ): EditorSuggestTriggerInfo | null;
+
+  abstract getSuggestions(
+    context: EditorSuggestContext  // ← Contains Editor + TFile
+  ): T[] | Promise<T[]>;
+}
+```
+
+`EditorSuggest` requires:
+1. An `Editor` object (Obsidian's CodeMirror wrapper) — the chat input has no `Editor` instance.
+2. A `TFile` context — the chat input is not associated with any vault file.
+3. `EditorPosition` (line/ch coordinates) — contenteditable divs don't use this coordinate system.
+
+**The correct API is `AbstractInputSuggest<T>`**, which was specifically designed for `<input>` elements and `<div contentEditable>` elements:
+
+```typescript
+export abstract class AbstractInputSuggest<T> extends PopoverSuggest<T> {
+  limit: number;
+  constructor(app: App, textInputEl: HTMLInputElement | HTMLDivElement);
+  setValue(value: string): void;
+  getValue(): string;
+  protected abstract getSuggestions(query: string): T[] | Promise<T[]>;
+  selectSuggestion(value: T, evt: MouseEvent | KeyboardEvent): void;
+  onSelect(callback: (value: T, evt: MouseEvent | KeyboardEvent) => any): this;
+}
+```
+
+`AbstractInputSuggest` is:
+- Available since Obsidian 1.4.10 (well within our `minAppVersion` range)
+- Accepts a contenteditable `<div>` directly in its constructor
+- Calls `getSuggestions(query)` with the full text content of the input on every change
+- Handles popover positioning, keyboard navigation (arrow keys, Enter, Escape), and click selection automatically
+- Already proven in Notor's codebase via `VaultNoteSuggest` on the exact same element
+
+#### Q3: Custom autocomplete patterns in Obsidian community plugins
+
+Several community plugins implement autocomplete in non-editor contexts. The dominant patterns are:
+
+| Plugin | Context | Approach | Notes |
+|---|---|---|---|
+| **Templater** | Settings input fields | `AbstractInputSuggest` on `<input>` | Standard pattern for settings UI autocomplete |
+| **Dataview** | Inline fields in editor | `EditorSuggest` | Uses CodeMirror editor context — not applicable to us |
+| **Tasks** | Task date/tag fields in editor | `EditorSuggest` | Uses CodeMirror editor context — not applicable to us |
+| **Obsidian Copilot** | Chat input (contenteditable) | Custom DOM autocomplete | Builds its own dropdown overlay positioned relative to the input |
+| **Various Typing** | Custom input fields | `AbstractInputSuggest` on `<input>` | Standard pattern |
+| **Commander** | Command palette extensions | `FuzzySuggestModal` | Uses modal, not inline — different UX |
+
+**Conclusion:** For non-editor contexts (custom views, settings, chat inputs), `AbstractInputSuggest` is the standard community pattern. Plugins that don't use it typically build custom DOM overlays, which is more code and less integrated with Obsidian's theming and accessibility.
+
+**Notor should use `AbstractInputSuggest`** — it's the established pattern, already in use in our codebase, and handles positioning/keyboard/accessibility automatically.
+
+#### Q4: DOM positioning for dropdown
+
+**`AbstractInputSuggest` handles dropdown positioning automatically.** This is a significant advantage over building a custom autocomplete:
+
+- `PopoverSuggest` (the base class) manages a popover element positioned relative to the input element.
+- The popover respects Obsidian's `z-index` layering (`var(--layer-popover)`).
+- Keyboard navigation (arrow keys to move selection, Enter to select, Escape to dismiss) is handled by `PopoverSuggest.scope`.
+- The popover appears directly below/above the input element (not at the text cursor position within the contenteditable). This is slightly less precise than cursor-position tracking but is consistent with how `AbstractInputSuggest` works for `[[` autocomplete.
+
+**Cursor-position dropdown (alternative, NOT recommended):** Positioning a dropdown at the exact cursor position within a contenteditable div would require:
+1. Using `window.getSelection()` to get the current caret Range
+2. Calling `range.getBoundingClientRect()` to get pixel coordinates
+3. Positioning an absolute/fixed element at those coordinates
+4. Handling scroll offsets, viewport boundaries, and popover flipping
+
+This is significantly more complex and fragile. Since `AbstractInputSuggest` provides automatic positioning that works identically to the existing `[[` autocomplete, there is no reason to build custom positioning.
+
+**Verdict:** Use `AbstractInputSuggest`'s built-in positioning. The dropdown appears below the input area, consistent with the `[[` vault note autocomplete behavior users are already familiar with.
+
+#### Q5: Workflow chip rendering
+
+**Recommended: External chip container (same as attachment chips), NOT inline DOM elements in the contenteditable.**
+
+Three approaches were evaluated:
+
+| Approach | Feasibility | Pros | Cons |
+|---|---|---|---|
+| **External chip container** (above text input) | ✅ **Recommended** | Reuses existing `AttachmentChipManager` infrastructure; works with plaintext-only contenteditable; clean separation of chip state and text state | Chip is visually separated from cursor position (above the input, not inline with text) |
+| **Inline `<span>` in contenteditable** | ❌ Not viable | Would appear inline with text at cursor position | The contenteditable uses `-webkit-user-modify: read-write-plaintext-only` which strips all HTML elements on input; inline spans would be destroyed on the next keypress |
+| **Hybrid: switch to non-plaintext contenteditable** | ⚠️ High risk | Inline chips possible | Would break the plaintext guarantee; introduces rich-text editing complexity (paste handling, cursor management around non-editable spans, text serialization); regression risk for all existing input handling |
+
+**Why external chip container is the right choice:**
+
+1. **Already proven:** The `AttachmentChipManager` in `src/ui/attachment-chips.ts` uses this exact pattern — chips render in a flex container (`notor-attachment-chips`) above the text input. The workflow chip can use the same container.
+
+2. **Plaintext-only constraint:** The contenteditable div has CSS `-webkit-user-modify: read-write-plaintext-only`, which means it strips ALL HTML elements from its content — any inline `<span>` chip would be destroyed by the browser on the next keystroke. Removing this constraint to support inline chips would break `textContent`-based text extraction used throughout chat-view.ts.
+
+3. **Visual consistency:** Attachment chips (vault notes, external files) already appear above the input. Adding workflow chips to the same container provides a consistent, predictable UX.
+
+4. **State management simplicity:** The chip is a separate DOM element with its own lifecycle (add/remove/clear). It does not interfere with text input, cursor position, or Enter-to-send behavior.
+
+**Implementation approach:**
+
+- Create a `WorkflowChipManager` class (analogous to `AttachmentChipManager`) that renders workflow chips into the existing `notor-attachment-chips` container.
+- Enforce the "at most one workflow per message" constraint (per FR-42) by replacing any existing workflow chip when a new one is selected.
+- Workflow chips use a distinct visual style: `📋` icon, purple-tinted background (vs. the default/blue of attachment chips) — making it instantly distinguishable from vault note and external file attachments.
+- Chip removal: click the `×` button, or backspace when the text input is empty.
+
+**Chip rendering example:**
+
+```html
+<!-- Existing attachment chip container (above text input) -->
+<div class="notor-attachment-chips">
+  <!-- Attachment chips (existing) -->
+  <div class="notor-attachment-chip" data-attachment-id="...">
+    <span class="notor-attachment-chip-icon">📄</span>
+    <span class="notor-attachment-chip-label">Research Notes</span>
+    <span class="notor-attachment-chip-remove">×</span>
+  </div>
+
+  <!-- Workflow chip (new — same container, distinct style) -->
+  <div class="notor-attachment-chip notor-workflow-chip" data-workflow-path="daily/review.md">
+    <span class="notor-attachment-chip-icon">📋</span>
+    <span class="notor-attachment-chip-label">daily-review</span>
+    <span class="notor-attachment-chip-remove">×</span>
+  </div>
+</div>
+
+<!-- Text input below -->
+<div class="notor-text-input" contenteditable="true">
+  Also check my inbox notes from this week
+</div>
+```
+
+#### Q6: `/` trigger precision
+
+**The `/` trigger fires only at the start of the input or after a newline.** The detection logic checks the character immediately before the `/`:
+
+```typescript
+function detectSlashTrigger(text: string): number | null {
+  const slashIdx = text.lastIndexOf("/");
+  if (slashIdx === -1) return null;
+
+  const isAtStart = slashIdx === 0;
+  const isAfterNewline = slashIdx > 0 && text[slashIdx - 1] === "\n";
+
+  if (isAtStart || isAfterNewline) {
+    // Additional check: no `/` in the query text (to exclude paths)
+    const afterSlash = text.slice(slashIdx + 1);
+    if (!afterSlash.includes("/")) {
+      return slashIdx; // Valid trigger position
+    }
+  }
+
+  return null; // Not a valid trigger position
+}
+```
+
+**Test cases:**
+
+| Input | `/` Position | Trigger? | Reason |
+|---|---|---|---|
+| `/daily` | index 0 | ✅ Yes | `/` is first character |
+| `/` | index 0 | ✅ Yes | `/` is first character, empty query shows all workflows |
+| `Hello /daily` | index 6 | ❌ No | `/` is in the middle of text (preceded by space, not newline) |
+| `Line 1\n/daily` | index 7 | ✅ Yes | `/` is after newline |
+| `http://example.com` | index 7 | ❌ No | `/` is in the middle of a URL |
+| `path/to/file` | index 7 | ❌ No | `/` is in the middle of a path |
+| `/path/file` | index 0 | ❌ No | Query contains `/` (indicates a file path, not a command) |
+| `Review notes\n/review` | index 13 | ✅ Yes | `/` is after newline |
+
+**Dismissal behavior:** The autocomplete popup dismisses when:
+- The user presses **Escape** — handled by `PopoverSuggest.scope` (built-in)
+- The user **clicks outside** the popover — handled by `PopoverSuggest` (built-in)
+- The user **deletes the `/`** trigger character — detected by `extractQuery()` returning null, which triggers `deactivate()`
+- The user types a **newline** after the query — detected by `extractQuery()` checking for `\n` in the query text
+- The user **selects a suggestion** — `selectSuggestion()` calls `deactivate()`
+
+**Coexistence with `[[` trigger:** The `/` trigger and `[[` trigger are mutually exclusive by position:
+- `/` triggers at index 0 or after `\n` — these positions never overlap with `[[` mid-text
+- `[[` triggers at any position — but typing `[[` at the start of input doesn't match `/` (different character)
+- Both use the `isActive` flag pattern: when one suggest is active, the other returns `[]` from `getSuggestions()` and its popover stays closed
+- The `input` event handler calls both `detectWikilinkTrigger()` and `detectSlashTrigger()`, but at most one will activate
+
+#### Summary of recommended approach
+
+| Question | Answer |
+|---|---|
+| Input element type | `<div contenteditable="true">` — already in place, no change needed |
+| Autocomplete API | `AbstractInputSuggest<T>` — same as existing `VaultNoteSuggest` |
+| Dropdown positioning | Automatic via `AbstractInputSuggest` / `PopoverSuggest` |
+| Chip rendering | External chip container (`notor-attachment-chips`) — same as attachment chips |
+| `/` trigger detection | Check if `/` is at index 0 or after `\n`; filter out paths (query contains `/`) |
+| Coexistence with `[[` | `isActive` flag pattern; mutually exclusive trigger positions |
+
+**Implementation complexity estimate:** ~150 lines of new TypeScript code:
+- `WorkflowSlashSuggest` class (~80 lines): extends `AbstractInputSuggest`, implements `getSuggestions`, `renderSuggestion`, `selectSuggestion`
+- `WorkflowChipManager` class (~50 lines): manages single workflow chip in existing chip container
+- Trigger detection + integration in `chat-view.ts` (~20 lines): `detectSlashTrigger()`, event handler additions, `handleSend()` changes
+
+No new external dependencies required. CSS additions: ~10 lines for the workflow chip variant styling.
 
 ### Decision
 
-*(To be documented after research)*
+**✅ Use `AbstractInputSuggest<T>` with external chip container** for slash-command workflow autocomplete in the chat input.
+
+**Rationale:**
+1. **All success criteria met:**
+   - Input element type confirmed: `<div contenteditable="true">`, no change needed.
+   - Autocomplete dropdown positioning handled automatically by `AbstractInputSuggest` / `PopoverSuggest`.
+   - Chip rendering approach defined: external chip container (same `notor-attachment-chips` div used by attachment chips), with distinct `📋` icon and purple-tinted style for visual differentiation.
+   - `/` trigger detection logic defined and tested: fires only at index 0 or after `\n`, excludes paths (query containing `/`), dismisses on Escape/click-outside/trigger-deletion.
+   - Reference implementation provided with full integration notes.
+2. **Zero new dependencies.** The approach uses only Obsidian's built-in `AbstractInputSuggest` API and `prepareFuzzySearch` utility — both already imported in the codebase.
+3. **Proven pattern.** The exact same architecture (`AbstractInputSuggest` on the same contenteditable div + chip container) is already working in production for `VaultNoteSuggest`. The slash-command implementation mirrors this pattern, reducing implementation risk.
+4. **Coexists cleanly with existing suggest.** The `isActive` gating pattern and mutually exclusive trigger positions ensure `WorkflowSlashSuggest` and `VaultNoteSuggest` cannot interfere with each other.
+5. **Low implementation complexity.** ~150 lines of new code, ~10 lines of CSS. No architectural changes to `chat-view.ts` — only additive changes (new fields, new methods, additional calls in existing event handlers).
+
+**Integration notes for implementation:**
+
+- **New module:** `src/ui/workflow-suggest.ts` — contains `WorkflowSlashSuggest`, `WorkflowChipManager`, `detectSlashTrigger()`, and the `WorkflowSuggestion` interface.
+- **Chat view integration:** In `NotorChatView.buildInputArea()`, create the `WorkflowSlashSuggest` instance after the existing `VaultNoteSuggest`, passing the same `textInputEl`. Create `WorkflowChipManager` targeting the existing `attachmentChipContainerEl`.
+- **Input event handler:** Add `this.detectSlashTrigger()` call alongside the existing `this.detectWikilinkTrigger()` in the `input` event listener.
+- **Send handler:** In `handleSend()`, capture `this.pendingWorkflow`, clear it, and pass it to `onSendMessage` alongside the message text and attachments.
+- **Backspace handling:** Add a `keydown` listener that clears the workflow chip when Backspace is pressed on an empty input.
+- **Workflow discovery callback:** The `getWorkflows` callback is wired by the orchestrator (via a setter on `NotorChatView`) to return the current list of discovered workflows from the workflow discovery module.
+- **CSS additions:** Add `.notor-workflow-chip` style (purple border/background tint) and `.notor-workflow-suggest-*` styles for the dropdown items. Both use Obsidian CSS custom properties for theme compatibility.
+- **At most one workflow per message:** Enforced by `WorkflowChipManager.setChip()` which replaces any existing chip. The `pendingWorkflow` field on `NotorChatView` is a single object (not an array).
 
 ---
 
