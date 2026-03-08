@@ -49,6 +49,9 @@ import { CheckpointManager } from "./checkpoints/checkpoint";
 // Rules
 import { VaultRuleManager } from "./rules/vault-rules";
 
+// Personas
+import { PersonaManager } from "./personas/persona-manager";
+
 // UI
 import { NotorChatView, CHAT_VIEW_TYPE } from "./ui/chat-view";
 
@@ -69,6 +72,7 @@ export default class NotorPlugin extends Plugin {
 	private _orchestrator?: ChatOrchestrator;
 	private _noteOpener?: NoteOpener;
 	private _staleTracker?: StaleContentTracker;
+	private _personaManager?: PersonaManager;
 
 	// -----------------------------------------------------------------------
 	// Plugin lifecycle
@@ -211,6 +215,10 @@ export default class NotorPlugin extends Plugin {
 
 		if (this._systemPromptBuilder) {
 			this._systemPromptBuilder.setNotorDir(this.settings.notor_dir);
+		}
+
+		if (this._personaManager) {
+			this._personaManager.updateSettings(this.settings);
 		}
 	}
 
@@ -428,6 +436,25 @@ export default class NotorPlugin extends Plugin {
 		return this._vaultRuleManager;
 	}
 
+	/**
+	 * Persona manager — manages active persona state, discovery,
+	 * provider/model switching, and save/restore for workflow revert.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-a-tasks.md — A-013
+	 */
+	getPersonaManager(): PersonaManager {
+		if (!this._personaManager) {
+			this._personaManager = new PersonaManager(
+				this.app.vault,
+				this.app.metadataCache,
+				this.settings,
+				this.getProviderRegistry(),
+				async () => this.saveData(this.settings)
+			);
+		}
+		return this._personaManager;
+	}
+
 	/** Chat orchestrator — the main send/receive loop coordinator. */
 	getOrchestrator(): ChatOrchestrator {
 		if (!this._orchestrator) {
@@ -447,6 +474,9 @@ export default class NotorPlugin extends Plugin {
 				undefined, // view wired later via wireView()
 				vaultRuleManager
 			);
+
+			// Wire persona manager to orchestrator (A-013)
+			this._orchestrator.setPersonaManager(this.getPersonaManager());
 		}
 		return this._orchestrator;
 	}
@@ -471,6 +501,17 @@ export default class NotorPlugin extends Plugin {
 
 		// Wire orchestrator ↔ view
 		orchestrator.setView(view);
+
+		// Wire persona manager to view (A-013: picker + label)
+		const personaManager = this.getPersonaManager();
+		view.setPersonaManager(personaManager);
+
+		// Restore active persona from settings on view wire (deferred, non-blocking).
+		// This ensures the persona label and provider/model state are restored
+		// when the chat panel opens after plugin load.
+		personaManager.restoreFromSettings().catch((e) => {
+			log.warn("Failed to restore active persona from settings", { error: String(e) });
+		});
 
 		// Send message (with optional attachments from the chat view)
 		view.setOnSendMessage(async (content: string, attachments?) => {

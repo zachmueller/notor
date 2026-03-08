@@ -294,13 +294,13 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-005, A-006, A-007, A-009, A-010
 
 **Acceptance Criteria:**
-- [ ] `PersonaManager` is instantiated in `onload()` with access to `vault`, `metadataCache`, settings, and `ProviderRegistry`
-- [ ] `PersonaManager` is passed to `NotorChatView` (for picker and label) and `ChatOrchestrator` (for system prompt assembly)
-- [ ] `ChatOrchestrator.handleUserMessage()` passes `personaManager.getActivePersona()` to `SystemPromptBuilder.assemble()` before each LLM call
-- [ ] Provider/model changes from persona activation propagate to the chat view's model selector display
-- [ ] On plugin unload, persona manager is cleaned up (no stale listeners or references)
-- [ ] Existing conversations and non-persona flows remain fully functional (backward-compatible)
-- [ ] Active persona is restored from settings on plugin load (if `active_persona` is non-empty, resolve it from discovery)
+- [x] `PersonaManager` is instantiated in `onload()` with access to `vault`, `metadataCache`, settings, and `ProviderRegistry`
+- [x] `PersonaManager` is passed to `NotorChatView` (for picker and label) and `ChatOrchestrator` (for system prompt assembly)
+- [x] `ChatOrchestrator.handleUserMessage()` passes `personaManager.getActivePersona()` to `SystemPromptBuilder.assemble()` before each LLM call
+- [x] Provider/model changes from persona activation propagate to the chat view's model selector display
+- [x] On plugin unload, persona manager is cleaned up (no stale listeners or references)
+- [x] Existing conversations and non-persona flows remain fully functional (backward-compatible)
+- [x] Active persona is restored from settings on plugin load (if `active_persona` is non-empty, resolve it from discovery)
 
 ### A-014: Manual validation and final cleanup
 
@@ -320,8 +320,8 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 - [ ] **Missing directory validated:** No `{notor_dir}/personas/` directory → picker shows only "None", no errors
 - [ ] **Provider/model reference validated:** Settings section shows providers and models with working copy buttons
 - [ ] **Rescan validated:** Create new persona while plugin is running → open picker → new persona appears without reload
-- [ ] Build succeeds: `npm run build` produces clean `main.js`
-- [ ] No TypeScript errors: `npx tsc --noEmit` passes
+- [x] Build succeeds: `npm run build` produces clean `main.js`
+- [x] No TypeScript errors: `npx tsc --noEmit` passes
 - [ ] No console errors during normal operation
 
 ---

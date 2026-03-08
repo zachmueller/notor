@@ -22,6 +22,7 @@ import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings, ModelPricing } from "../settings";
 import type { VaultRuleManager } from "../rules/vault-rules";
+import type { PersonaManager } from "../personas/persona-manager";
 import { buildAutoContextBlock } from "../context/auto-context";
 import { assembleUserMessage } from "../context/message-assembler";
 import type { Attachment } from "../context/attachment";
@@ -51,6 +52,9 @@ const log = logger("ChatOrchestrator");
 export class ChatOrchestrator {
 	private conversationManager: ConversationManager;
 	private contextManager: ContextManager;
+
+	/** Persona manager for active persona state (Phase 4, A-013). */
+	private personaManager?: PersonaManager;
 
 	constructor(
 		private readonly app: App,
@@ -101,6 +105,18 @@ export class ChatOrchestrator {
 	/** Get the context manager. */
 	getContextManager(): ContextManager {
 		return this.contextManager;
+	}
+
+	/**
+	 * Set the persona manager reference.
+	 *
+	 * The orchestrator queries the persona manager for the active persona
+	 * before each LLM call and passes it to the system prompt builder.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-a-tasks.md — A-013
+	 */
+	setPersonaManager(manager: PersonaManager): void {
+		this.personaManager = manager;
 	}
 
 	// -----------------------------------------------------------------------
@@ -325,12 +341,14 @@ export class ChatOrchestrator {
 				// so open-notes and vault structure reflect the latest state.
 				const autoContext = buildAutoContextBlock(this.app, this.settings);
 
-				// 2. Assemble system prompt (now includes auto-context)
+				// 2. Assemble system prompt (now includes auto-context and active persona)
+				const activePersona = this.personaManager?.getActivePersona() ?? null;
 				const systemPrompt = await this.systemPromptBuilder.assemble(
 					mode,
 					toolDefinitions,
 					vaultRuleContent,
-					autoContext ?? undefined
+					autoContext ?? undefined,
+					activePersona
 				);
 
 				// Emit assembled system prompt as a structured log so E2E tests
