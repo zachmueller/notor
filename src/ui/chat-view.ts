@@ -22,6 +22,8 @@ import {
 } from "./diff-view";
 import { VaultNoteSuggest, createAttachmentButton } from "./attachment-picker";
 import { AttachmentChipManager, createAttachmentChipContainer } from "./attachment-chips";
+import { WorkflowSlashSuggest, WorkflowChipManager, detectSlashTrigger } from "./workflow-suggest";
+import type { Workflow } from "../types";
 
 const log = logger("ChatView");
 
@@ -62,6 +64,15 @@ export class NotorChatView extends ItemView {
 	private pendingAttachments: Attachment[] = [];
 	private attachmentChipManager!: AttachmentChipManager;
 	private vaultNoteSuggest?: VaultNoteSuggest;
+
+	// Workflow slash-command state (E-010, E-011, E-012)
+	private workflowSuggest?: WorkflowSlashSuggest;
+	private workflowChipManager?: WorkflowChipManager;
+	private pendingWorkflow: Workflow | null = null;
+	private getWorkflowsCallback?: () => Workflow[];
+
+	// Workflow send callback (E-012)
+	private onSendWorkflow?: (workflow: Workflow, supplementaryText: string) => Promise<void>;
 
 	// Settings popover state
 	private settingsPopoverEl?: HTMLElement;
@@ -179,6 +190,41 @@ export class NotorChatView extends ItemView {
 
 	setOnGetCurrentContent(callback: (notePath: string) => Promise<string | null>): void {
 		this.onGetCurrentContent = callback;
+	}
+
+	// -----------------------------------------------------------------------
+	// Workflow slash-command setters (E-012)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Provide the workflow discovery callback to the slash-command suggest.
+	 *
+	 * Called by the orchestrator once workflow discovery is available.
+	 * If the suggest is already built (view already open), the callback
+	 * is applied immediately; otherwise it is stored and applied in
+	 * `buildInputArea()`.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-012
+	 */
+	setGetWorkflows(callback: () => Workflow[]): void {
+		this.getWorkflowsCallback = callback;
+		// If the suggest already exists (view reopened), update its source.
+		// WorkflowSlashSuggest reads the callback on every getSuggestions()
+		// invocation, so no further action is needed beyond storing it.
+	}
+
+	/**
+	 * Set the callback invoked when the user sends a message with an
+	 * attached workflow chip.
+	 *
+	 * When set, `handleSend()` routes workflow-attached messages here
+	 * instead of the normal `onSendMessage` path. The orchestrator
+	 * wires this to `ChatOrchestrator.executeWorkflow()`.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-012, E-013
+	 */
+	setOnSendWorkflow(callback: (workflow: Workflow, supplementaryText: string) => Promise<void>): void {
+		this.onSendWorkflow = callback;
 	}
 
 	// -----------------------------------------------------------------------
@@ -380,13 +426,23 @@ export class NotorChatView extends ItemView {
 
 			// Detect `[[` trigger for vault note autocomplete
 			this.detectWikilinkTrigger();
+
+			// Detect `/` trigger for workflow slash-command autocomplete (E-012)
+			this.detectSlashCommandTrigger();
 		});
 
-		// Enter to send, Shift+Enter for newline
+		// Enter to send, Shift+Enter for newline; Backspace to dismiss workflow chip (E-012)
 		this.textInputEl.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
 				this.handleSend();
+			} else if (e.key === "Backspace") {
+				// When the input is empty and a workflow chip is present, remove the chip
+				const isEmpty = !(this.textInputEl.textContent ?? "").trim();
+				if (isEmpty && this.workflowChipManager?.getSelectedWorkflow()) {
+					this.removeWorkflow();
+					e.preventDefault();
+				}
 			}
 		});
 
@@ -396,6 +452,18 @@ export class NotorChatView extends ItemView {
 			this.textInputEl,
 			(attachment: Attachment) => this.addAttachment(attachment),
 			() => this.pendingAttachments
+		);
+
+		// Initialize workflow slash suggest and chip manager (E-010, E-011, E-012)
+		this.workflowChipManager = new WorkflowChipManager(
+			this.attachmentChipContainerEl,
+			() => this.removeWorkflow()
+		);
+		this.workflowSuggest = new WorkflowSlashSuggest(
+			this.app,
+			this.textInputEl,
+			(workflow: Workflow) => this.attachWorkflow(workflow),
+			() => this.getWorkflowsCallback?.() ?? []
 		);
 
 		// Button wrapper
@@ -436,18 +504,32 @@ export class NotorChatView extends ItemView {
 		if (this.isResponding) return;
 
 		const content = (this.textInputEl.textContent ?? "").trim();
-		if (!content && this.pendingAttachments.length === 0) return;
+
+		// Capture pending workflow before clearing state (E-012)
+		const pendingWorkflow = this.pendingWorkflow;
+
+		// A workflow send requires a workflow chip; guard: no content AND no workflow AND no attachments
+		if (!content && this.pendingAttachments.length === 0 && !pendingWorkflow) return;
 
 		// Capture and clear attachments before sending
 		const attachments = [...this.pendingAttachments];
 		this.pendingAttachments = [];
 		this.attachmentChipManager.clear();
 
+		// Clear the workflow chip (E-012)
+		this.pendingWorkflow = null;
+		this.workflowChipManager?.clear();
+
 		this.textInputEl.textContent = "";
 		this.textInputEl.style.height = "auto";
 
 		try {
-			await this.onSendMessage?.(content, attachments);
+			if (pendingWorkflow && this.onSendWorkflow) {
+				// Route to the workflow execution path (E-012, E-013)
+				await this.onSendWorkflow(pendingWorkflow, content);
+			} else {
+				await this.onSendMessage?.(content, attachments);
+			}
 		} catch (e) {
 			log.error("Send message failed", { error: String(e) });
 			new Notice(`Failed to send message: ${e instanceof Error ? e.message : String(e)}`);
@@ -945,6 +1027,56 @@ export class NotorChatView extends ItemView {
 		);
 		this.attachmentChipManager.removeChip(attachmentId);
 		log.debug("Attachment removed", { id: attachmentId });
+	}
+
+	// -----------------------------------------------------------------------
+	// Workflow slash-command management (E-012)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Attach a workflow chip from the slash-command suggest selection.
+	 *
+	 * Sets `pendingWorkflow` and renders the chip in the container.
+	 * Replaces any previously attached workflow.
+	 */
+	private attachWorkflow(workflow: Workflow): void {
+		this.pendingWorkflow = workflow;
+		this.workflowChipManager?.setChip(workflow);
+		log.debug("Workflow attached via slash command", {
+			display_name: workflow.display_name,
+		});
+	}
+
+	/**
+	 * Remove the workflow chip and clear `pendingWorkflow`.
+	 *
+	 * Called by the chip × button, the backspace handler, and after send.
+	 */
+	private removeWorkflow(): void {
+		this.pendingWorkflow = null;
+		this.workflowChipManager?.removeChip();
+		log.debug("Workflow chip removed");
+	}
+
+	/**
+	 * Detect `/` trigger in the chat input and activate `WorkflowSlashSuggest`.
+	 *
+	 * Only activates when `VaultNoteSuggest` is NOT active (prevents
+	 * interference between the two suggests). Called from the `input`
+	 * event handler alongside `detectWikilinkTrigger()`.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-012
+	 */
+	private detectSlashCommandTrigger(): void {
+		// Don't activate if the wikilink suggest is active
+		if (this.vaultNoteSuggest?.["isActive"]) return;
+
+		const text = this.textInputEl.textContent ?? "";
+		const slashIdx = detectSlashTrigger(text);
+
+		if (slashIdx !== null && this.workflowSuggest) {
+			this.workflowSuggest.activate(slashIdx);
+		}
 	}
 
 	/**

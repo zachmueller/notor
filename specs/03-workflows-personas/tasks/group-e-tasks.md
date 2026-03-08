@@ -260,23 +260,22 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-001 (types only — no dependency on the prompt assembly pipeline)
 
 **Acceptance Criteria:**
-- [ ] `WorkflowSuggestion` interface defined: `workflow` (Workflow), `match` (FuzzyMatch or similar)
-- [ ] `WorkflowSlashSuggest` class extends `AbstractInputSuggest<WorkflowSuggestion>`
-- [ ] Constructor accepts `app: App`, `textInputEl: HTMLDivElement`, and `getWorkflows: () => Workflow[]` callback
-- [ ] `getSuggestions(inputStr: string)` implementation:
-  - Calls `detectSlashTrigger(inputStr)` to determine if `/` is at a valid trigger position
-  - If no valid trigger → returns empty array (popup stays closed)
+- [x] `WorkflowSuggestion` interface defined: `workflow` (Workflow), `score` (number | null for fuzzy match)
+- [x] `WorkflowSlashSuggest` class extends `AbstractInputSuggest<WorkflowSuggestion>`
+- [x] Constructor accepts `app: App`, `textInputEl: HTMLDivElement`, `onSelect` callback, and `getWorkflows: () => Workflow[]` callback
+- [x] `getSuggestions(inputStr: string)` implementation:
+  - Returns empty array when `isActive` is false (popup stays closed)
   - If valid trigger → extracts query text after `/`, filters workflows by `display_name` using `prepareFuzzySearch` (from Obsidian API), returns matching `WorkflowSuggestion[]`
-  - When `isActive` flag on the coexisting `VaultNoteSuggest` is true → returns empty array (prevents interference)
-- [ ] `detectSlashTrigger(text: string): number | null` function exported:
+  - When trigger `/` is deleted → deactivates automatically
+- [x] `detectSlashTrigger(text: string): number | null` function exported:
   - Returns the index of `/` if it's at position 0 OR preceded by `\n`
   - Returns `null` otherwise (e.g., `/` in the middle of text, in a URL, in a path)
   - Additional guard: if the query text after `/` contains another `/`, returns `null` (excludes file paths like `/path/to/file`)
-- [ ] `renderSuggestion(suggestion, el)` renders each workflow entry with `📋` icon prefix and `display_name` text
-- [ ] `selectSuggestion(suggestion)` calls the `onSelect` callback (wired in E-012) with the selected workflow, then calls `deactivate()`
-- [ ] `activate(triggerStartIndex)` / `deactivate()` methods manage an `isActive` flag — when active, the `VaultNoteSuggest` returns empty suggestions and vice versa
-- [ ] Uses Obsidian's `prepareFuzzySearch` for fuzzy matching workflow names (same utility used by `VaultNoteSuggest`)
-- [ ] Popup dismisses on Escape, click outside (handled by `PopoverSuggest` base class), trigger deletion, or newline in query
+- [x] `renderSuggestion(suggestion, el)` renders each workflow entry with `📋` icon prefix and `display_name` text
+- [x] `selectSuggestion(suggestion)` calls the `onWorkflowSelect` callback with the selected workflow, then calls `deactivate()`
+- [x] `activate(triggerStartIndex)` / `deactivate()` methods manage an `isActive` flag — coexistence with `VaultNoteSuggest` handled via `detectSlashCommandTrigger()` in chat-view.ts
+- [x] Uses Obsidian's `prepareFuzzySearch` for fuzzy matching workflow names (same utility used by `VaultNoteSuggest`)
+- [x] Popup dismisses on Escape, click outside (handled by `PopoverSuggest` base class), trigger deletion, or newline in query
 
 ### E-011: WorkflowChipManager — chip rendering
 
@@ -289,12 +288,12 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-010
 
 **Acceptance Criteria:**
-- [ ] `WorkflowChipManager` class created with constructor accepting `containerEl: HTMLElement` (the existing `notor-attachment-chips` container) and `onRemove: () => void` callback
-- [ ] `setChip(workflow: Workflow): void` — renders a workflow chip in the container; replaces any existing workflow chip (enforces "at most one workflow per message" per FR-42)
-- [ ] `removeChip(): void` — removes the current workflow chip from the container and clears internal state
-- [ ] `getSelectedWorkflow(): Workflow | null` — returns the currently attached workflow or null
-- [ ] `clear(): void` — removes the chip and resets state (called after message send)
-- [ ] Chip HTML structure:
+- [x] `WorkflowChipManager` class created with constructor accepting `containerEl: HTMLElement` (the existing `notor-attachment-chips` container) and `onRemove: () => void` callback
+- [x] `setChip(workflow: Workflow): void` — renders a workflow chip in the container; replaces any existing workflow chip (enforces "at most one workflow per message" per FR-42)
+- [x] `removeChip(): void` — removes the current workflow chip from the container and clears internal state
+- [x] `getSelectedWorkflow(): Workflow | null` — returns the currently attached workflow or null
+- [x] `clear(): void` — removes the chip and resets state (called after message send)
+- [x] Chip HTML structure:
   ```html
   <div class="notor-attachment-chip notor-workflow-chip" data-workflow-path="{file_path}">
     <span class="notor-attachment-chip-icon">📋</span>
@@ -302,9 +301,9 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
     <span class="notor-attachment-chip-remove">×</span>
   </div>
   ```
-- [ ] Clicking the `×` button calls `removeChip()` and triggers the `onRemove` callback
-- [ ] CSS styling in `styles.css`: `.notor-workflow-chip` has a purple-tinted border/background (distinct from attachment chips) using Obsidian CSS custom properties for theme compatibility (e.g., `var(--interactive-accent)` with reduced opacity)
-- [ ] Chip is visually consistent with existing attachment chips but clearly distinguishable
+- [x] Clicking the `×` button calls `removeChip()` and triggers the `onRemove` callback
+- [x] CSS styling in `styles.css`: `.notor-workflow-chip` has a purple-tinted border/background (distinct from attachment chips) using Obsidian CSS custom properties for theme compatibility (`var(--color-purple, #7c3aed)`)
+- [x] Chip is visually consistent with existing attachment chips but clearly distinguishable
 
 ### E-012: Slash-command integration in chat-view.ts
 
@@ -316,15 +315,16 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-011
 
 **Acceptance Criteria:**
-- [ ] `NotorChatView` gains private fields: `workflowSuggest: WorkflowSlashSuggest`, `workflowChipManager: WorkflowChipManager`, `pendingWorkflow: Workflow | null`
-- [ ] In `buildInputArea()`: create `WorkflowSlashSuggest` instance on the same `textInputEl` used by `VaultNoteSuggest`; create `WorkflowChipManager` targeting the existing `attachmentChipContainerEl`
-- [ ] **Input event handler** (existing `input` listener on `textInputEl`): alongside the existing `detectWikilinkTrigger()` call, add a call to detect slash trigger. When slash trigger is detected and `VaultNoteSuggest.isActive` is false, activate `WorkflowSlashSuggest`. When no slash trigger, deactivate it.
-- [ ] **Selection callback:** When a workflow is selected from the suggest popup, call `workflowChipManager.setChip(workflow)` and set `this.pendingWorkflow = workflow`. Clear the `/query` text from the input.
-- [ ] **Send handler** (`handleSend()`): capture `this.pendingWorkflow`, clear it and call `workflowChipManager.clear()`. If a workflow is attached, the send handler passes both the user's typed text (supplementary text) and the workflow to the execution pipeline instead of treating it as a normal user message.
-- [ ] **Backspace handler:** Add a `keydown` listener — when Backspace is pressed and the text input is empty and a workflow chip is present, remove the workflow chip (same pattern as attachment chip backspace removal)
-- [ ] **Coexistence with VaultNoteSuggest:** The `isActive` flag pattern ensures only one suggest popup is active at a time. When `WorkflowSlashSuggest` is active, `VaultNoteSuggest.getSuggestions()` returns `[]` and vice versa.
-- [ ] `setGetWorkflows(callback: () => Workflow[]): void` setter on `NotorChatView` — wired by the orchestrator to provide the workflow discovery results to the suggest popup
-- [ ] After sending a message with a workflow, the chip is cleared and the input returns to normal text-only mode
+- [x] `NotorChatView` gains private fields: `workflowSuggest: WorkflowSlashSuggest`, `workflowChipManager: WorkflowChipManager`, `pendingWorkflow: Workflow | null`, `getWorkflowsCallback`, `onSendWorkflow`
+- [x] In `buildInputArea()`: create `WorkflowSlashSuggest` instance on the same `textInputEl` used by `VaultNoteSuggest`; create `WorkflowChipManager` targeting the existing `attachmentChipContainerEl`
+- [x] **Input event handler** (existing `input` listener on `textInputEl`): alongside the existing `detectWikilinkTrigger()` call, `detectSlashCommandTrigger()` is called. When slash trigger is detected and `VaultNoteSuggest.isActive` is false, activate `WorkflowSlashSuggest`.
+- [x] **Selection callback:** When a workflow is selected from the suggest popup, `attachWorkflow()` is called — sets `pendingWorkflow`, calls `workflowChipManager.setChip()`. The `/query` text is cleaned up by `WorkflowSlashSuggest.selectSuggestion()`.
+- [x] **Send handler** (`handleSend()`): captures `pendingWorkflow` before clearing state; routes to `onSendWorkflow(workflow, supplementaryText)` when a workflow is attached; falls back to normal `onSendMessage` path otherwise
+- [x] **Backspace handler:** `keydown` listener — when Backspace is pressed and the text input is empty and a workflow chip is present, `removeWorkflow()` is called and the event is prevented
+- [x] **Coexistence with VaultNoteSuggest:** `detectSlashCommandTrigger()` skips activation when `vaultNoteSuggest.isActive` is true; both suggests return `[]` when their `isActive` is false
+- [x] `setGetWorkflows(callback: () => Workflow[]): void` setter on `NotorChatView` — stores callback read on every `getSuggestions()` invocation
+- [x] `setOnSendWorkflow(callback)` setter — orchestrator wires this to `executeWorkflow()` (E-013)
+- [x] After sending a message with a workflow, the chip is cleared and the input returns to normal text-only mode
 
 ---
 

@@ -1263,6 +1263,93 @@
 }
 
 /* ==========================================================================
+   Workflow Chip (E-011) & Workflow Details (E-014)
+   ========================================================================== */
+
+/* Workflow chip — purple-tinted to distinguish from attachment chips */
+.notor-workflow-chip {
+	border-color: var(--color-purple, #7c3aed);
+	background: rgba(124, 58, 237, 0.08);
+}
+
+.theme-dark .notor-workflow-chip {
+	background: rgba(167, 139, 250, 0.12);
+}
+
+/* Workflow suggest dropdown item */
+.notor-workflow-suggest-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.notor-workflow-suggest-icon {
+	font-size: 13px;
+	line-height: 1;
+	flex-shrink: 0;
+}
+
+.notor-workflow-suggest-name {
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Workflow details — collapsible <details> for <workflow_instructions> blocks */
+.notor-workflow-details {
+	margin: 4px 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary-alt);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-workflow-details summary {
+	padding: 5px 10px;
+	cursor: pointer;
+	color: var(--text-muted);
+	font-weight: var(--font-medium);
+	user-select: none;
+	list-style: none;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.notor-workflow-details summary::-webkit-details-marker {
+	display: none;
+}
+
+.notor-workflow-details summary::before {
+	content: "▶";
+	font-size: 10px;
+	transition: transform 0.15s ease;
+	flex-shrink: 0;
+}
+
+.notor-workflow-details[open] summary::before {
+	transform: rotate(90deg);
+}
+
+.notor-workflow-details summary:hover {
+	color: var(--text-normal);
+}
+
+.notor-workflow-content {
+	padding: 8px 10px;
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	border-radius: 0 0 var(--radius-s) var(--radius-s);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow-x: auto;
+	color: var(--text-normal);
+}
+
+/* ==========================================================================
    Hook Injection (ACI-002)
    ========================================================================== */
 
