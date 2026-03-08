@@ -31,7 +31,8 @@ import { dispatchPreSend, dispatchAfterCompletion } from "../hooks/hook-events";
 import { shouldCompact, performCompaction, estimateConversationTokens } from "../context/compaction";
 import type { CompactionRecord } from "../context/compaction";
 import { showCompactingIndicator, showCompactionMarker } from "../ui/compaction-marker";
-import { revertWorkflowPersona } from "../workflows/workflow-executor";
+import { revertWorkflowPersona, switchWorkflowPersona, assembleWorkflowPrompt } from "../workflows/workflow-executor";
+import type { Workflow } from "../types";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatOrchestrator");
@@ -260,6 +261,182 @@ export class ChatOrchestrator {
 		} catch (e) {
 			log.error("Failed to revert workflow persona", { error: String(e) });
 		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Workflow execution (E-013)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Execute a workflow: assemble the prompt, switch persona, create a new
+	 * conversation, add the assembled message, and start the LLM response loop.
+	 *
+	 * This is the convergence point for both command-palette and slash-command
+	 * workflow triggers. Both paths produce a `Workflow` + optional
+	 * supplementary text, which are passed here.
+	 *
+	 * Execution sequence:
+	 * 1. Revert any existing workflow persona (leaving the previous conversation)
+	 * 2. Switch to workflow persona if `workflow.persona_name` is set (E-007)
+	 * 3. Assemble the workflow prompt via `assembleWorkflowPrompt()` (E-006)
+	 * 4. If assembly returns null (empty guard), surface notice and abort
+	 * 5. Create a new conversation with workflow metadata
+	 * 6. Open the chat panel if not already visible
+	 * 7. Store persona revert state (E-008)
+	 * 8. Add the assembled message as the first user message (`is_workflow_message: true`)
+	 * 9. Dispatch to the LLM via `responseLoop()`
+	 *
+	 * @param workflow - The discovered workflow to execute.
+	 * @param supplementaryText - Optional user text from the slash-command input.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-013
+	 */
+	async executeWorkflow(workflow: Workflow, supplementaryText = ""): Promise<void> {
+		log.info("Executing workflow", {
+			display_name: workflow.display_name,
+			file_path: workflow.file_path,
+			persona_name: workflow.persona_name,
+		});
+
+		// Step 2: Switch persona if the workflow specifies one
+		let personaSwitchResult: { switched: boolean; previousPersona: string | null } = {
+			switched: false,
+			previousPersona: null,
+		};
+
+		if (workflow.persona_name && this.personaManager) {
+			try {
+				personaSwitchResult = await switchWorkflowPersona(
+					workflow.persona_name,
+					this.personaManager
+				);
+			} catch (e) {
+				log.error("Persona switch failed before workflow execution", {
+					personaName: workflow.persona_name,
+					error: String(e),
+				});
+				// Non-fatal — continue with current persona
+			}
+		}
+
+		// Step 3: Assemble the workflow prompt
+		let assemblyResult;
+		try {
+			assemblyResult = await assembleWorkflowPrompt(
+				{
+					workflow,
+					supplementaryText: supplementaryText || null,
+					triggerContext: null, // manual execution — no trigger context
+				},
+				this.app.vault,
+				this.app.metadataCache
+			);
+		} catch (e) {
+			const errMsg = e instanceof Error ? e.message : String(e);
+			log.error("Workflow prompt assembly failed", { error: errMsg });
+			new Notice(`Workflow execution failed: ${errMsg}`);
+			// Revert persona if we switched it
+			if (personaSwitchResult.switched && this.personaManager) {
+				await revertWorkflowPersona(personaSwitchResult.previousPersona, this.personaManager);
+			}
+			return;
+		}
+
+		// Step 4: Empty guard — assembleWorkflowPrompt returns null and surfaces Notice itself
+		if (assemblyResult === null) {
+			// Revert persona if we switched it
+			if (personaSwitchResult.switched && this.personaManager) {
+				await revertWorkflowPersona(personaSwitchResult.previousPersona, this.personaManager);
+			}
+			return;
+		}
+
+		// Step 5: Create a new conversation with workflow metadata
+		// (This also calls maybeRevertWorkflowPersona for the *previous* conversation
+		// via the E-008 path — we intentionally skip that here because we already
+		// handled persona switching above before creating the new conversation.)
+		const providerType = this.providerRegistry.getActiveType();
+		const providerConfig = this.providerRegistry.getConfig(providerType);
+		const modelId = providerConfig?.model_id ?? "";
+		const currentMode = this.conversationManager.hasActiveConversation()
+			? this.conversationManager.getMode()
+			: this.settings.mode;
+
+		// Determine the active persona name after any switch
+		const activePersonaName = this.personaManager?.getActivePersona()?.name ?? null;
+
+		const conversation = this.conversationManager.createConversation(
+			providerType,
+			modelId,
+			currentMode,
+			{
+				workflow_path: workflow.file_path,
+				workflow_name: workflow.display_name,
+				persona_name: activePersonaName,
+				is_background: false,
+				title: `Workflow: ${workflow.display_name}`,
+			}
+		);
+
+		await this.historyManager.createConversationFile(conversation);
+
+		this.view?.clearMessages();
+		this.view?.updateModeDisplay(conversation.mode);
+
+		// Step 7: Store persona revert state for E-008
+		if (personaSwitchResult.switched) {
+			this.setWorkflowPersonaRevert(personaSwitchResult.previousPersona);
+		} else {
+			// No switch performed — clear any stale revert state from a previous workflow
+			this.workflowPreviousPersona = undefined;
+		}
+
+		// Step 8: Add the assembled message as the first user message
+		const userMessage = this.conversationManager.addMessage({
+			role: "user",
+			content: assemblyResult.assembledMessage,
+			is_workflow_message: true,
+		});
+
+		this.view?.renderUserMessage(userMessage);
+
+		log.info("Workflow conversation created", {
+			conversation_id: conversation.id,
+			workflow_name: workflow.display_name,
+			assembled_length: assemblyResult.assembledMessage.length,
+		});
+
+		// Step 9: Start the response loop
+		try {
+			const toolDefinitions = this.getToolDefinitionsCallback?.() ?? [];
+			await this.responseLoop(toolDefinitions, currentMode);
+		} catch (e) {
+			this.handleError(e);
+		} finally {
+			this.view?.setRespondingState(false);
+		}
+	}
+
+	/**
+	 * Callback that provides tool definitions for the response loop.
+	 *
+	 * Set by main.ts via `setGetToolDefinitions()` so `executeWorkflow()`
+	 * can call `responseLoop()` without direct access to the tool registry.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-015
+	 */
+	private getToolDefinitionsCallback?: () => import("../providers/provider").ToolDefinition[];
+
+	/**
+	 * Set the callback that provides tool definitions for the response loop.
+	 *
+	 * Called by main.ts during view wiring so `executeWorkflow()` can start
+	 * the response loop without a direct reference to the tool registry.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-015
+	 */
+	setGetToolDefinitions(callback: () => import("../providers/provider").ToolDefinition[]): void {
+		this.getToolDefinitionsCallback = callback;
 	}
 
 	// -----------------------------------------------------------------------

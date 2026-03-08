@@ -609,6 +609,14 @@ export class NotorChatView extends ItemView {
 	 *
 	 * Hook injection messages (identified by `is_hook_injection`) are
 	 * rendered via {@link renderHookInjection} instead.
+	 *
+	 * Workflow messages (identified by `is_workflow_message`) render any
+	 * `<workflow_instructions type="…">…</workflow_instructions>` block as a
+	 * collapsed `<details>` element (E-014). Text outside the tag — such as
+	 * supplementary user text after the closing tag — is rendered normally as
+	 * a paragraph below the details element.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-014
 	 */
 	renderUserMessage(message: Message): void {
 		if (message.is_hook_injection) {
@@ -618,8 +626,66 @@ export class NotorChatView extends ItemView {
 
 		const msgEl = this.messageListEl.createDiv({ cls: "notor-message notor-message-user" });
 		const contentEl = msgEl.createDiv({ cls: "notor-message-content" });
-		contentEl.createEl("p", { text: message.content });
+
+		// E-014: Detect <workflow_instructions> block and render as collapsible <details>
+		if (message.is_workflow_message) {
+			this.renderWorkflowMessage(contentEl, message.content);
+		} else {
+			contentEl.createEl("p", { text: message.content });
+		}
+
 		this.scrollToBottom();
+	}
+
+	/**
+	 * Render a workflow message with the `<workflow_instructions>` block as a
+	 * collapsed `<details>` element and any supplementary text as a paragraph.
+	 *
+	 * Regex: `/<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/`
+	 *
+	 * - If the regex matches, the matched block is rendered as `<details>`.
+	 * - Text before the opening tag (e.g. `<trigger_context>` for event-triggered
+	 *   workflows — future Group F use) is rendered as preformatted text.
+	 * - Text after the closing tag (supplementary user text from the slash-command)
+	 *   is rendered as a normal paragraph.
+	 * - If the regex does not match (plain workflow message), falls back to plain text.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-014
+	 */
+	private renderWorkflowMessage(container: HTMLElement, content: string): void {
+		const WORKFLOW_RE = /<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/;
+		const match = WORKFLOW_RE.exec(content);
+
+		if (!match) {
+			// Fallback: render as plain text if no <workflow_instructions> block found
+			container.createEl("p", { text: content });
+			return;
+		}
+
+		const matchStart = match.index;
+		const matchEnd = match.index + match[0].length;
+		const workflowType = match[1] ?? "";
+		const workflowBody = match[2] ?? "";
+
+		const beforeText = content.slice(0, matchStart).trim();
+		const afterText = content.slice(matchEnd).trim();
+
+		// Render text before the block (e.g., <trigger_context> for Group F)
+		if (beforeText) {
+			const pre = container.createEl("pre", { cls: "notor-workflow-pre-context" });
+			pre.textContent = beforeText;
+		}
+
+		// Render the workflow instructions as a collapsed <details> element
+		const details = container.createEl("details", { cls: "notor-workflow-details" });
+		details.createEl("summary", { text: `Workflow: ${workflowType}` });
+		const bodyEl = details.createDiv({ cls: "notor-workflow-content" });
+		bodyEl.textContent = workflowBody;
+
+		// Render supplementary text after the closing tag
+		if (afterText) {
+			container.createEl("p", { text: afterText });
+		}
 	}
 
 	/**

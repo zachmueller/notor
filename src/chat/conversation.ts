@@ -68,11 +68,19 @@ export class ConversationManager {
 	 * @param providerId - The active provider type
 	 * @param modelId - The active model ID
 	 * @param mode - Optional mode override (defaults to plugin setting)
+	 * @param workflowMetadata - Optional workflow metadata for workflow conversations (E-013)
 	 */
 	createConversation(
 		providerId: string,
 		modelId: string,
-		mode?: ConversationMode
+		mode?: ConversationMode,
+		workflowMetadata?: {
+			workflow_path?: string | null;
+			workflow_name?: string | null;
+			persona_name?: string | null;
+			is_background?: boolean;
+			title?: string;
+		}
 	): Conversation {
 		const now = new Date().toISOString();
 		const conversation: Conversation = {
@@ -85,6 +93,22 @@ export class ConversationManager {
 			total_output_tokens: 0,
 			estimated_cost: null,
 			mode: mode ?? this.defaultMode,
+			// Workflow metadata (E-013) — undefined fields are omitted from JSONL
+			...(workflowMetadata?.workflow_path !== undefined && {
+				workflow_path: workflowMetadata.workflow_path,
+			}),
+			...(workflowMetadata?.workflow_name !== undefined && {
+				workflow_name: workflowMetadata.workflow_name,
+			}),
+			...(workflowMetadata?.persona_name !== undefined && {
+				persona_name: workflowMetadata.persona_name,
+			}),
+			...(workflowMetadata?.is_background !== undefined && {
+				is_background: workflowMetadata.is_background,
+			}),
+			...(workflowMetadata?.title !== undefined && {
+				title: workflowMetadata.title,
+			}),
 		};
 
 		this.activeConversation = conversation;
@@ -157,6 +181,8 @@ export class ConversationManager {
 		attachments?: Message["attachments"];
 		hook_injections?: string[] | null;
 		is_hook_injection?: boolean;
+		/** Whether this is the opening workflow message (E-013). */
+		is_workflow_message?: boolean;
 	}): Message {
 		if (!this.activeConversation) {
 			throw new Error("No active conversation. Create or load one first.");
@@ -178,6 +204,7 @@ export class ConversationManager {
 			attachments: params.attachments ?? null,
 			hook_injections: params.hook_injections ?? null,
 			is_hook_injection: params.is_hook_injection,
+			is_workflow_message: params.is_workflow_message,
 		};
 
 		this.messages.push(message);

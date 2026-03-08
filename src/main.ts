@@ -141,20 +141,18 @@ export default class NotorPlugin extends Plugin {
 					() => this.rescanWorkflows(),
 					(workflow) => {
 						// Open the chat panel if not already open, then execute the workflow.
-						// The panel open is non-blocking — execution begins once the view is ready.
 						this.openChatPanel().then(() => {
 							log.info("Workflow selected from command palette", {
 								display_name: workflow.display_name,
 								file_path: workflow.file_path,
 							});
-							// Workflow execution (E-013) is wired in a future task.
-							// For now, log the selection so E2E tests can verify the
-							// picker round-trip is functional.
+							// E-013: Execute the workflow via the orchestrator.
+							return this.getOrchestrator().executeWorkflow(workflow);
 						}).catch((e) => {
-							log.error("Failed to open chat panel for workflow", {
+							log.error("Failed to execute workflow from command palette", {
 								error: String(e),
 							});
-							new Notice(`Failed to open chat panel: ${e instanceof Error ? e.message : String(e)}`);
+							new Notice(`Workflow execution failed: ${e instanceof Error ? e.message : String(e)}`);
 						});
 					},
 					this.settings.notor_dir
@@ -642,6 +640,24 @@ export default class NotorPlugin extends Plugin {
 		personaManager.restoreFromSettings().catch((e) => {
 			log.warn("Failed to restore active persona from settings", { error: String(e) });
 		});
+
+		// E-015: Wire tool definitions callback so executeWorkflow() can
+		// start the response loop without a direct tool registry reference.
+		orchestrator.setGetToolDefinitions(() => {
+			return toolRegistry.getToolDefinitions() as import("./providers/provider").ToolDefinition[];
+		});
+
+		// E-012 / E-015: Wire the workflow send callback from the chat view
+		// to the orchestrator's executeWorkflow() method. When the user sends
+		// a message with a workflow chip attached, this path is taken instead
+		// of the normal handleUserMessage path.
+		view.setOnSendWorkflow(async (workflow, supplementaryText) => {
+			await orchestrator.executeWorkflow(workflow, supplementaryText);
+		});
+
+		// E-015: Provide the workflow discovery callback to the slash-command suggest
+		// so it can list workflows in the autocomplete popup.
+		view.setGetWorkflows(() => this.getDiscoveredWorkflows());
 
 		// Send message (with optional attachments from the chat view)
 		view.setOnSendMessage(async (content: string, attachments?) => {

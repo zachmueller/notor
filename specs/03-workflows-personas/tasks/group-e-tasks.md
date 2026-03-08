@@ -342,8 +342,8 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-006, E-008, E-009
 
 **Acceptance Criteria:**
-- [ ] `ChatOrchestrator.executeWorkflow(workflow: Workflow, supplementaryText?: string): Promise<void>` method added
-- [ ] Execution flow sequence:
+- [x] `ChatOrchestrator.executeWorkflow(workflow: Workflow, supplementaryText?: string): Promise<void>` method added
+- [x] Execution flow sequence:
   1. Resolve the workflow's `TFile` from `workflow.file_path` via `vault.getAbstractFileByPath()`
   2. Call `switchWorkflowPersona()` if `workflow.persona_name` is set (E-007)
   3. Call `assembleWorkflowPrompt()` to build the complete user message (E-006)
@@ -353,11 +353,11 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
   7. Store the `previousPersona` from step 2 on the orchestrator for later revert (E-008)
   8. Add the assembled message as the first user message with `is_workflow_message: true`
   9. Dispatch the message to the LLM via the existing `responseLoop()` — the AI responds normally with streaming, tool calls, etc.
-- [ ] `ConversationManager.createConversation()` extended to accept optional `workflow_path`, `workflow_name`, `persona_name`, `is_background` fields, stored in the `Conversation` object
-- [ ] `HistoryManager.createConversationFile()` extended to write the workflow metadata fields into the JSONL conversation header (for persistence and reload)
-- [ ] The user can interact with the workflow conversation normally after the first response — sending follow-up messages, approving/rejecting tool calls, stopping the response
-- [ ] If the workflow file cannot be found (e.g., deleted between discovery and execution), a notice is surfaced and execution aborts gracefully
-- [ ] Error handling: if `assembleWorkflowPrompt()` throws (e.g., vault read error), catch the error, surface a notice ("Workflow execution failed: {error}"), and revert persona if switched
+- [x] `ConversationManager.createConversation()` extended to accept optional `workflow_path`, `workflow_name`, `persona_name`, `is_background` fields, stored in the `Conversation` object
+- [x] `HistoryManager.createConversationFile()` extended to write the workflow metadata fields into the JSONL conversation header (for persistence and reload) — fields serialized automatically via `JSON.stringify({ _type: "conversation", ...conversation })`
+- [x] The user can interact with the workflow conversation normally after the first response — sending follow-up messages, approving/rejecting tool calls, stopping the response
+- [x] If the workflow file cannot be found (e.g., deleted between discovery and execution), a notice is surfaced and execution aborts gracefully — handled in `assembleWorkflowPrompt()` which throws a descriptive error caught in `executeWorkflow()`
+- [x] Error handling: if `assembleWorkflowPrompt()` throws (e.g., vault read error), catch the error, surface a notice ("Workflow execution failed: {error}"), and revert persona if switched
 
 ### E-014: `<details>` rendering for `<workflow_instructions>` in chat UI
 
@@ -370,21 +370,21 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 **Dependencies:** E-013
 
 **Acceptance Criteria:**
-- [ ] `renderUserMessage()` detects `<workflow_instructions type="...">` blocks in user message content using a regex: `/<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/`
-- [ ] When detected, the block is rendered as:
+- [x] `renderUserMessage()` detects `<workflow_instructions type="...">` blocks in user message content using a regex: `/<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/`
+- [x] When detected, the block is rendered as:
   ```html
   <details class="notor-workflow-details">
     <summary>Workflow: {type-attribute-value}</summary>
     <div class="notor-workflow-content">{workflow body content}</div>
   </details>
   ```
-- [ ] The `<details>` element is **collapsed by default** (no `open` attribute) so the workflow instructions are hidden initially
-- [ ] The summary label shows "Workflow: {workflow-name}" extracted from the `type` attribute (e.g., "Workflow: daily-review.md")
-- [ ] Text after the closing `</workflow_instructions>` tag (supplementary user text from slash-command) is rendered **outside** the `<details>` element as normal paragraph text
-- [ ] Text before the opening `<workflow_instructions>` tag (e.g., `<trigger_context>` block for event-triggered workflows — future Group F use) is rendered as preformatted context or hidden (per future design; for now, any preceding text is rendered normally)
-- [ ] CSS styling: `.notor-workflow-details` has subtle background color, border, and rounded corners. `.notor-workflow-details summary` has cursor pointer and appropriate spacing. Content within uses monospace or the standard note font.
-- [ ] Messages without `<workflow_instructions>` are rendered unchanged — backward-compatible
-- [ ] The `<workflow_instructions>` content inside the details is rendered as plain text (not parsed as Markdown) to preserve the original workflow structure
+- [x] The `<details>` element is **collapsed by default** (no `open` attribute) so the workflow instructions are hidden initially
+- [x] The summary label shows "Workflow: {workflow-name}" extracted from the `type` attribute (e.g., "Workflow: daily-review.md")
+- [x] Text after the closing `</workflow_instructions>` tag (supplementary user text from slash-command) is rendered **outside** the `<details>` element as normal paragraph text
+- [x] Text before the opening `<workflow_instructions>` tag (e.g., `<trigger_context>` block for event-triggered workflows — future Group F use) is rendered as preformatted text via `<pre class="notor-workflow-pre-context">`
+- [x] CSS styling: `.notor-workflow-details` has subtle background color, border, and rounded corners. `.notor-workflow-details summary` has cursor pointer and appropriate spacing. Content within uses monospace or the standard note font.
+- [x] Messages without `<workflow_instructions>` are rendered unchanged — backward-compatible
+- [x] The `<workflow_instructions>` content inside the details is rendered as plain text (not parsed as Markdown) to preserve the original workflow structure
 
 ---
 
