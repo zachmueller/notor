@@ -10,7 +10,7 @@ This document consolidates the research plan and findings for Phase 4. Four rese
 
 ## R-1: Cron Scheduling Library Evaluation
 
-**Status:** Pending
+**Status:** ✅ Complete
 **Blocking:** Group F (Vault Event Hooks — `on-schedule` hook type)
 
 ### Context
@@ -43,11 +43,158 @@ Phase 4 introduces scheduled vault event hooks (`on-schedule`) that fire on user
 
 ### Findings
 
-*(To be completed during research phase)*
+**Evaluated:** `croner` v10.0.1 (MIT license, [github.com/hexagon/croner](https://github.com/hexagon/croner))
+**Test scripts:** [`research/research-r1-test.mjs`](research/research-r1-test.mjs), [`research/research-r1-bundle-test.mjs`](research/research-r1-bundle-test.mjs)
+
+#### Q1: Compatibility with esbuild and Obsidian's Electron renderer
+
+- **ESM import works cleanly.** `import { Cron, CronPattern } from "croner"` loads without issue in Node.js ESM context.
+- **esbuild bundles without errors.** Using `npx esbuild --bundle --format=cjs --platform=browser` produces a valid bundle.
+- **Zero Node.js-specific APIs.** Source code scan of `croner.js` confirmed none of the following are present: `require(`, `process.`, `fs.`, `path.`, `child_process`, `Buffer.`, `__dirname`, `__filename`, `global.`. The library is fully browser-compatible and will run in Obsidian's Electron renderer without issues.
+- **Zero external dependencies.** `package.json` shows no `dependencies` or `peerDependencies`.
+
+#### Q2: Cron syntax support
+
+All standard 5-field expressions passed:
+
+| Expression | Description | Result |
+|---|---|---|
+| `0 9 * * *` | 9 AM daily | ✅ |
+| `*/15 * * * *` | Every 15 minutes | ✅ |
+| `0 0 1 * *` | First of month midnight | ✅ |
+| `30 14 * * 1-5` | 2:30 PM weekdays | ✅ |
+| `0 */6 * * *` | Every 6 hours | ✅ |
+
+**Shorthand aliases all supported:** `@yearly`, `@monthly`, `@weekly`, `@daily`, `@hourly` — all ✅.
+
+**6-field (seconds) support:** `*/30 * * * * *` works. This is a bonus — not required by our spec, but useful if we ever need sub-minute scheduling.
+
+**7-field support:** The library also supports 7 fields (seconds + year), per its docs.
+
+#### Q3: Timezone handling
+
+- **Per-job timezone via `{ timezone: "America/New_York" }` option.** Tested and confirmed for `America/New_York`, `Europe/London`, `Pacific/Auckland`, `UTC` — all ✅.
+- **Default behavior (no timezone option):** Uses the system/local timezone. Confirmed: when run in NZ timezone, `nextRun()` returns NZ times.
+- **Implementation uses `Intl.DateTimeFormat`** internally for timezone resolution — this is a standard browser API available in all Electron versions Obsidian targets.
+- **Recommendation for Notor:** Default to no timezone option (use local system time), which is the most intuitive behavior for users. Optionally expose a per-hook timezone override in the future.
+
+#### Q4: Dynamic job management
+
+The API is clean and supports all required lifecycle operations:
+
+```typescript
+// Create paused
+const job = new Cron("0 9 * * *", { paused: true }, () => { /* handler */ });
+
+// State inspection
+job.isRunning();  // false (paused)
+job.isStopped();  // false (not destroyed)
+
+// Resume (start firing)
+job.resume();
+job.isRunning();  // true
+
+// Pause (stop firing, can resume later)
+job.pause();
+job.isRunning();  // false
+job.isStopped();  // false
+
+// Stop (permanent destroy, cannot resume)
+job.stop();
+job.isStopped();  // true
+
+// Next run prediction
+job.nextRun();  // returns Date or null
+```
+
+**Key findings:**
+- `{ paused: true }` creates a job that does not fire until `.resume()` — ideal for lazy activation (FR-50a).
+- `.pause()` / `.resume()` cycle works correctly. After pausing, no additional fires occur. After resuming, fires resume on schedule.
+- `.stop()` permanently destroys the job. Attempting to resume after stop has no effect.
+- **Independent job management confirmed.** Stopping jobA does not affect jobB. Tested with two concurrent every-second jobs — stopping one left the other running normally.
+- Jobs use `setTimeout` internally (not `setInterval`), scheduling the next tick after each fire. This means no drift accumulation.
+
+#### Q5: Validation API
+
+- **No static `Cron.validate()` method exists.** `typeof Cron.validate === "undefined"`.
+- **Validation via `CronPattern` constructor works reliably.** Wrapping `new CronPattern(expr)` in a try/catch provides accurate validation with descriptive error messages:
+
+| Expression | Expected | Result | Error message |
+|---|---|---|---|
+| `0 9 * * *` | valid | ✅ valid | — |
+| `*/15 * * * *` | valid | ✅ valid | — |
+| `@daily` | valid | ✅ valid | — |
+| `invalid-cron` | invalid | ✅ invalid | "invalid configuration format, exactly five, six, or seven space separated parts are required" |
+| `99 99 99 99 99` | invalid | ✅ invalid | "Invalid value for minute: 99" |
+| `0 25 * * *` | invalid | ✅ invalid | "Invalid value for hour: 25" |
+| `""` (empty) | invalid | ✅ invalid | "invalid configuration format" |
+| `* * * *` (4 fields) | invalid | ✅ invalid | "exactly five, six, or seven space separated parts are required" |
+
+**Recommended validation wrapper for settings UI:**
+```typescript
+function isValidCron(expr: string): { valid: boolean; error?: string } {
+  try {
+    new CronPattern(expr);
+    return { valid: true };
+  } catch (e) {
+    return { valid: false, error: (e as Error).message };
+  }
+}
+```
+
+#### Q6: Bundle size
+
+| Metric | Size |
+|---|---|
+| ESM source (`croner.js`) | 27.6 KB |
+| esbuild bundled (unminified) | 35.1 KB |
+| esbuild bundled (minified) | 27.3 KB |
+| esbuild bundled (minified + gzip) | **~8.1 KB** |
+| Current Notor `main.js` (for reference) | 2.7 KB (stub) |
+| npm package on disk | 164 KB |
+
+The minified bundle is 27.3 KB, which exceeds the original "~5 KB" estimate in the research questions but is well within the <20 KB gzipped threshold. At **8.1 KB gzipped**, this is acceptable for a feature that provides full cron scheduling.
+
+> **Note:** The "~5 KB" figure from the research question appears to be outdated — it may have referred to an earlier version of croner. v10.0.1 is larger due to added features (7-field support, improved timezone handling, etc.), but still lightweight compared to alternatives.
+
+#### Q6 (continued): Alternatives comparison
+
+| Library | Version | Bundle size (min) | Dependencies | Scheduling | Validation | Browser-safe | Notes |
+|---|---|---|---|---|---|---|---|
+| **croner** | 10.0.1 | 27.3 KB (8.1 KB gz) | 0 | ✅ Full scheduler | ✅ via CronPattern | ✅ | Best fit. Full scheduler + parser in one. |
+| **cron-parser** | 5.5.0 | ~15 KB + luxon | 1 (luxon ~70 KB) | ❌ Parse only | ✅ | ✅ | Parse-only; would need custom setInterval wrapper. luxon dep adds ~70 KB. |
+| **node-cron** | 4.2.1 | ~25 KB | 0 | ✅ Full scheduler | ✅ | ⚠️ Name implies Node focus; need to verify | Similar size to croner but less actively maintained, fewer features. |
+| **Custom (setInterval)** | — | <1 KB | 0 | ⚠️ Basic | ❌ Manual | ✅ | Minimal size but requires implementing cron parsing, next-run calculation, timezone handling from scratch. High maintenance burden. |
+
+**Why not cron-parser:** It requires `luxon` as a dependency (~70 KB), making the total bundle significantly larger. It's parse-only — we'd need to build our own scheduler loop on top, which is exactly what croner already provides.
+
+**Why not node-cron:** Similar bundle size to croner with fewer features and less active maintenance. The name suggests Node.js focus, though v4 may be browser-compatible. Croner has better documentation and TypeScript support.
+
+**Why not custom:** Building a correct cron parser with timezone support, day-of-week handling, range/step expressions, and shorthand aliases is non-trivial (~500+ lines). The maintenance burden is not justified when croner handles it in 8.1 KB gzipped.
 
 ### Decision
 
-*(To be documented after research)*
+**✅ Use `croner` v10.x** as the cron scheduling library for `on-schedule` vault event hooks.
+
+**Rationale:**
+1. **All success criteria met:**
+   - Bundle size: 27.3 KB minified / 8.1 KB gzipped (within <20 KB gzipped target)
+   - Zero external dependencies
+   - ESM-compatible with clean esbuild bundling
+   - Full 5-field cron syntax + shorthand aliases (`@daily`, etc.)
+   - Dynamic job start/stop via `pause()` / `resume()` / `stop()`
+   - Validation via `CronPattern` constructor with descriptive errors
+   - No Node.js-specific APIs — fully browser/Electron-safe
+2. **Best-in-class for our use case:** Provides both parsing and scheduling in a single library, with per-job timezone support and clean lifecycle management.
+3. **Low integration risk:** The API maps directly to our requirements — `{ paused: true }` for lazy activation, `pause()`/`resume()` for dynamic control, `CronPattern` for validation.
+
+**Integration notes for implementation:**
+- Install as a regular dependency: `npm install croner`
+- Import: `import { Cron, CronPattern } from "croner"`
+- Create jobs with `{ paused: true }` and `.resume()` on lazy activation
+- Use `CronPattern` constructor in try/catch for settings UI validation
+- Call `.stop()` on all active jobs in `plugin.onunload()` for clean cleanup
+- Default to local timezone (no `timezone` option); consider exposing per-hook timezone as a future enhancement
 
 ---
 
