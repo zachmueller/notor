@@ -278,6 +278,12 @@ export async function resolveIncludeNotes(
 	let resultText = text;
 	const attachments: IncludeNoteResolutionResult["attachments"] = [];
 
+	log.debug("Resolving include_note tags", {
+		sourceFilePath,
+		context,
+		tagCount: tags.length,
+	});
+
 	// Resolve tags in order of appearance.
 	// Each tag is wrapped in a try/catch so that an unexpected error in one
 	// tag never aborts resolution of the remaining tags (D-009: partial
@@ -317,11 +323,34 @@ export async function resolveIncludeNotes(
 				section: tag.section,
 				content: resolved.content!,
 			});
+			log.debug("Tag resolved (attached mode)", {
+				path: tag.path,
+				path_type: tag.path_type,
+				section: tag.section,
+				strip_frontmatter: tag.strip_frontmatter,
+				resolvedPath: resolved.resolvedPath,
+				contentLength: resolved.content!.length,
+			});
 		} else {
 			// Inline mode (default): replace the tag with the resolved content
 			resultText = resultText.replace(tag.raw_tag, resolved.content!);
+			log.debug("Tag resolved (inline mode)", {
+				path: tag.path,
+				path_type: tag.path_type,
+				section: tag.section,
+				strip_frontmatter: tag.strip_frontmatter,
+				resolvedPath: resolved.resolvedPath,
+				contentLength: resolved.content!.length,
+			});
 		}
 	}
+
+	log.debug("Include note resolution complete", {
+		sourceFilePath,
+		context,
+		totalTags: tags.length,
+		attachmentCount: attachments.length,
+	});
 
 	return { inlineContent: resultText, attachments };
 }
