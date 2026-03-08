@@ -10,9 +10,11 @@
 
 import { ItemView, MarkdownRenderer, Modal, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
-import type { ConversationMode, Message, LLMProviderType, ModelInfo, Checkpoint } from "../types";
+import type { ConversationMode, Message, LLMProviderType, ModelInfo, Checkpoint, Persona } from "../types";
 import type { Attachment } from "../context/attachment";
 import type { ConversationListEntry } from "../chat/history";
+import type { PersonaManager } from "../personas/persona-manager";
+import { buildPersonaPicker } from "./persona-picker";
 import { logger } from "../utils/logger";
 import {
 	renderWriteNoteDiffPreview,
@@ -64,6 +66,10 @@ export class NotorChatView extends ItemView {
 	// Settings popover state
 	private settingsPopoverEl?: HTMLElement;
 	private isSettingsOpen = false;
+
+	// Persona state (A-009, A-010)
+	private personaManager?: PersonaManager;
+	private personaLabelEl?: HTMLElement;
 
 	// Callbacks (set by orchestrator)
 	private onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
@@ -173,6 +179,61 @@ export class NotorChatView extends ItemView {
 
 	setOnGetCurrentContent(callback: (notePath: string) => Promise<string | null>): void {
 		this.onGetCurrentContent = callback;
+	}
+
+	// -----------------------------------------------------------------------
+	// Persona integration (A-009, A-010)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Set the persona manager for the picker and label.
+	 *
+	 * The manager's onPersonaChanged callback is wired to update the
+	 * persona label whenever the active persona changes (from picker,
+	 * programmatic switch, or workflow revert).
+	 */
+	setPersonaManager(manager: PersonaManager): void {
+		this.personaManager = manager;
+
+		// Listen for persona changes to update the label
+		manager.setOnPersonaChanged((persona) => {
+			this.updatePersonaLabel(persona);
+		});
+
+		// Initialize label with current state
+		this.updatePersonaLabel(manager.getActivePersona());
+	}
+
+	/**
+	 * Update the active persona label near the chat input area.
+	 *
+	 * Shows "🎭 {name}" when a persona is active, hidden when none.
+	 * Called on persona switch (picker, programmatic, or workflow revert).
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-a-tasks.md — A-010
+	 */
+	updatePersonaLabel(persona: Persona | null): void {
+		if (!this.personaLabelEl) {
+			// Create the label element if it doesn't exist yet.
+			// Inserted at the start of the input area, before the mode toggle.
+			if (this.inputAreaEl) {
+				this.personaLabelEl = this.inputAreaEl.createDiv({
+					cls: "notor-persona-label notor-hidden",
+				});
+				// Move it to be the first child of the input area
+				this.inputAreaEl.insertBefore(this.personaLabelEl, this.inputAreaEl.firstChild);
+			} else {
+				return;
+			}
+		}
+
+		if (persona) {
+			this.personaLabelEl.textContent = `🎭 ${persona.name}`;
+			this.personaLabelEl.removeClass("notor-hidden");
+		} else {
+			this.personaLabelEl.textContent = "";
+			this.personaLabelEl.addClass("notor-hidden");
+		}
 	}
 
 	/**
@@ -969,6 +1030,11 @@ export class NotorChatView extends ItemView {
 		});
 
 		this.buildModelSelect(modelSection);
+
+		// Persona picker (A-009) — triggers rescan on each popover open
+		if (this.personaManager) {
+			buildPersonaPicker(this.settingsPopoverEl, this.personaManager);
+		}
 
 		// Checkpoints section
 		this.buildCheckpointsSection(this.settingsPopoverEl);

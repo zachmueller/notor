@@ -219,13 +219,13 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-002 (discovery), A-005 (manager)
 
 **Acceptance Criteria:**
-- [ ] Persona picker accessible from the chat settings area (gear icon), consistent with existing provider and model selectors
-- [ ] Dropdown lists all discovered personas by name plus a "None" option at the top
-- [ ] Selecting a persona triggers `personaManager.activatePersona(name)` — updates system prompt, provider, model
-- [ ] Selecting "None" triggers `personaManager.deactivatePersona()` — reverts to global defaults
-- [ ] Currently active persona is pre-selected in the dropdown when the popover opens
-- [ ] Picker triggers a rescan of the personas directory each time it is activated (opened), reflecting newly created or deleted personas without plugin reload
-- [ ] Dropdown is visually consistent with the existing provider/model selectors in the settings popover
+- [x] Persona picker accessible from the chat settings area (gear icon), consistent with existing provider and model selectors
+- [x] Dropdown lists all discovered personas by name plus a "None" option at the top
+- [x] Selecting a persona triggers `personaManager.activatePersona(name)` — updates system prompt, provider, model
+- [x] Selecting "None" triggers `personaManager.deactivatePersona()` — reverts to global defaults
+- [x] Currently active persona is pre-selected in the dropdown when the popover opens
+- [x] Picker triggers a rescan of the personas directory each time it is activated (opened), reflecting newly created or deleted personas without plugin reload
+- [x] Dropdown is visually consistent with the existing provider/model selectors in the settings popover
 
 ### A-010: Active persona label in chat panel
 
@@ -238,12 +238,12 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-009
 
 **Acceptance Criteria:**
-- [ ] A label or badge element is displayed near the chat input area showing the active persona name (e.g., "🎭 researcher")
-- [ ] Label is hidden when no persona is active (persona is "None")
-- [ ] Label updates immediately when the user switches personas via the picker
-- [ ] Label updates when persona is switched programmatically (e.g., workflow persona switch in Group E)
-- [ ] Styling is unobtrusive and visually consistent with the existing chat panel design
-- [ ] Label element is registered for cleanup on view close
+- [x] A label or badge element is displayed near the chat input area showing the active persona name (e.g., "🎭 researcher")
+- [x] Label is hidden when no persona is active (persona is "None")
+- [x] Label updates immediately when the user switches personas via the picker
+- [x] Label updates when persona is switched programmatically (e.g., workflow persona switch in Group E)
+- [x] Styling is unobtrusive and visually consistent with the existing chat panel design
+- [x] Label element is registered for cleanup on view close
 
 ### A-011: Persona picker rescan on settings open
 
@@ -255,10 +255,10 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-002 (discovery)
 
 **Acceptance Criteria:**
-- [ ] When the Notor settings tab `display()` method is called, a persona rescan is triggered
-- [ ] The rescan result is available for future settings UI elements (Group B will use this for persona auto-approve sub-page)
-- [ ] Rescan does not block the settings UI from rendering — it can complete asynchronously
-- [ ] No visible UI change in settings tab yet (persona auto-approve UI is Group B) — this task just ensures the rescan hook is in place
+- [x] When the Notor settings tab `display()` method is called, a persona rescan is triggered
+- [x] The rescan result is available for future settings UI elements (Group B will use this for persona auto-approve sub-page)
+- [x] Rescan does not block the settings UI from rendering — it can complete asynchronously
+- [x] No visible UI change in settings tab yet (persona auto-approve UI is Group B) — this task just ensures the rescan hook is in place
 
 ### A-012 [P]: Provider and model identifier reference in Settings
 
@@ -270,14 +270,14 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-001 (types only — no dependency on discovery or manager)
 
 **Acceptance Criteria:**
-- [ ] A "Provider & model identifiers" section is rendered in **Settings → Notor** (positioned near the provider sections or as a standalone subsection)
-- [ ] Lists each configured provider by its identifier string (the `type` value, e.g., `"anthropic"`, `"local"`) alongside the provider's display name
-- [ ] Under each provider, lists available models by their identifier string (model ID, e.g., `"claude-sonnet-4-20250514"`) alongside the model's display name
-- [ ] Each identifier string has a copy-to-clipboard button/icon that copies the exact string to the user's clipboard and shows a brief "Copied" confirmation
-- [ ] The reference list fetches models from the provider registry's cached model list (does not trigger a new API call)
-- [ ] If a provider has no cached models, shows a message like "No models loaded — open the chat panel to refresh"
-- [ ] If no providers are configured, the section displays "Configure a provider above to see available identifiers"
-- [ ] Uses `navigator.clipboard.writeText()` for copy functionality
+- [x] A "Provider & model identifiers" section is rendered in **Settings → Notor** (positioned near the provider sections or as a standalone subsection)
+- [x] Lists each configured provider by its identifier string (the `type` value, e.g., `"anthropic"`, `"local"`) alongside the provider's display name
+- [x] Under each provider, lists available models by their identifier string (model ID, e.g., `"claude-sonnet-4-20250514"`) alongside the model's display name
+- [x] Each identifier string has a copy-to-clipboard button/icon that copies the exact string to the user's clipboard and shows a brief "Copied" confirmation
+- [x] The reference list fetches models from the provider registry's cached model list (does not trigger a new API call)
+- [x] If a provider has no cached models, shows a message like "No models loaded — open the chat panel to refresh"
+- [x] If no providers are configured, the section displays "Configure a provider above to see available identifiers"
+- [x] Uses `navigator.clipboard.writeText()` for copy functionality
 
 ---
 

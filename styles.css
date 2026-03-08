@@ -1310,6 +1310,103 @@
 }
 
 /* ==========================================================================
+   Persona Label (Phase 4 — A-010)
+   ========================================================================== */
+
+.notor-persona-label {
+	padding: 4px 8px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	color: var(--text-accent);
+	background: rgba(var(--color-accent-rgb, 68, 130, 255), 0.1);
+	border: 1px solid rgba(var(--color-accent-rgb, 68, 130, 255), 0.2);
+	white-space: nowrap;
+	user-select: none;
+	flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Persona Picker (Phase 4 — A-009)
+   ========================================================================== */
+
+.notor-persona-select-wrapper {
+	margin-top: 4px;
+}
+
+/* ==========================================================================
+   Provider/Model Reference (Phase 4 — A-012)
+   ========================================================================== */
+
+.notor-provider-ref-section {
+	margin-top: 8px;
+}
+
+.notor-provider-ref-group {
+	margin-bottom: 12px;
+}
+
+.notor-provider-ref-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+
+.notor-provider-ref-id {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.notor-model-ref-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 0 3px 12px;
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-model-ref-name {
+	color: var(--text-normal);
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.notor-model-ref-id {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.notor-copy-id-btn {
+	padding: 1px 6px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.notor-copy-id-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.notor-provider-ref-empty {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	font-style: italic;
+	padding: 4px 0 4px 12px;
+}
+
+/* ==========================================================================
    Compaction Markers (Phase 3 — COMP-004)
    ========================================================================== */
 

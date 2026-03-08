@@ -13,8 +13,12 @@
 
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
 import type NotorPlugin from "./main";
-import type { ConversationMode, LLMProviderConfig } from "./types";
+import type { ConversationMode, LLMProviderConfig, LLMProviderType } from "./types";
 import { SECRET_IDS } from "./utils/secrets";
+import { discoverPersonas } from "./personas/persona-discovery";
+import { logger } from "./utils/logger";
+
+const log = logger("SettingsTab");
 
 // ---------------------------------------------------------------------------
 // Settings interface
@@ -459,9 +463,19 @@ export class NotorSettingTab extends PluginSettingTab {
 		this.renderCompactionSection(containerEl);
 
 		// -----------------------------------------------------------------------
+		// Phase 4: Provider & model identifier reference (A-012)
+		// -----------------------------------------------------------------------
+		this.renderProviderModelReferenceSection(containerEl);
+
+		// -----------------------------------------------------------------------
 		// SET-002: General settings
 		// -----------------------------------------------------------------------
 		this.renderGeneralSection(containerEl);
+
+		// -----------------------------------------------------------------------
+		// Phase 4: Persona rescan on settings open (A-011)
+		// -----------------------------------------------------------------------
+		this.triggerPersonaRescan();
 		this.renderAutoApproveSection(containerEl);
 		this.renderHistorySection(containerEl);
 		this.renderCheckpointSection(containerEl);
@@ -1681,6 +1695,161 @@ export class NotorSettingTab extends PluginSettingTab {
 				this.display();
 			})
 		);
+	}
+
+	// =========================================================================
+	// Phase 4: Persona rescan on settings open (A-011)
+	// =========================================================================
+
+	/**
+	 * Trigger an asynchronous persona rescan when the settings tab is opened.
+	 *
+	 * The rescan result is available for future settings UI elements
+	 * (Group B will use this for persona auto-approve sub-page).
+	 * Rescan does not block the settings UI from rendering.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-a-tasks.md — A-011
+	 */
+	private triggerPersonaRescan(): void {
+		discoverPersonas(
+			this.app.vault,
+			this.app.metadataCache,
+			this.plugin.settings.notor_dir
+		)
+			.then((personas) => {
+				log.debug("Persona rescan on settings open complete", {
+					count: personas.length,
+					names: personas.map((p) => p.name),
+				});
+			})
+			.catch((e) => {
+				log.warn("Persona rescan on settings open failed", {
+					error: String(e),
+				});
+			});
+	}
+
+	// =========================================================================
+	// Phase 4: Provider & model identifier reference (A-012)
+	// =========================================================================
+
+	/**
+	 * Render a "Provider & model identifiers" reference section in Settings.
+	 *
+	 * Lists each configured provider by its identifier string alongside
+	 * available models with copyable identifier strings. Helps users
+	 * configure `notor-preferred-provider` and `notor-preferred-model`
+	 * in persona frontmatter.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-a-tasks.md — A-012
+	 */
+	private renderProviderModelReferenceSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "Provider & model identifiers" });
+		containerEl.createEl("p", {
+			text:
+				"Reference list of provider and model identifier strings for use in persona " +
+				"frontmatter (notor-preferred-provider and notor-preferred-model). " +
+				"Click the copy button to copy an identifier to your clipboard.",
+			cls: "setting-item-description",
+		});
+
+		const providers = this.plugin.settings.providers;
+
+		if (providers.length === 0) {
+			containerEl.createEl("p", {
+				text: "Configure a provider above to see available identifiers.",
+				cls: "notor-provider-ref-empty",
+			});
+			return;
+		}
+
+		const refContainer = containerEl.createDiv({ cls: "notor-provider-ref-section" });
+
+		for (const providerConfig of providers) {
+			const group = refContainer.createDiv({ cls: "notor-provider-ref-group" });
+
+			// Provider header: display name + identifier with copy button
+			const header = group.createDiv({ cls: "notor-provider-ref-header" });
+			header.createEl("strong", { text: providerConfig.display_name });
+			header.createSpan({
+				cls: "notor-provider-ref-id",
+				text: `(${providerConfig.type})`,
+			});
+
+			const providerCopyBtn = header.createEl("button", {
+				cls: "notor-copy-id-btn",
+				text: "Copy",
+				attr: { "aria-label": `Copy provider identifier: ${providerConfig.type}` },
+			});
+			providerCopyBtn.addEventListener("click", () => {
+				navigator.clipboard.writeText(providerConfig.type).then(() => {
+					providerCopyBtn.textContent = "Copied";
+					setTimeout(() => {
+						providerCopyBtn.textContent = "Copy";
+					}, 1500);
+				});
+			});
+
+			// Models list from cached model data in the provider config
+			const cachedModels = providerConfig.model_cache;
+			if (cachedModels && cachedModels.length > 0) {
+				for (const model of cachedModels) {
+					const item = group.createDiv({ cls: "notor-model-ref-item" });
+					item.createSpan({
+						cls: "notor-model-ref-name",
+						text: model.display_name || model.id,
+					});
+					item.createSpan({
+						cls: "notor-model-ref-id",
+						text: model.id,
+					});
+
+					const modelCopyBtn = item.createEl("button", {
+						cls: "notor-copy-id-btn",
+						text: "Copy",
+						attr: { "aria-label": `Copy model identifier: ${model.id}` },
+					});
+					modelCopyBtn.addEventListener("click", () => {
+						navigator.clipboard.writeText(model.id).then(() => {
+							modelCopyBtn.textContent = "Copied";
+							setTimeout(() => {
+								modelCopyBtn.textContent = "Copy";
+							}, 1500);
+						});
+					});
+				}
+			} else if (providerConfig.model_id) {
+				// Show the single configured model_id if no cache
+				const item = group.createDiv({ cls: "notor-model-ref-item" });
+				item.createSpan({
+					cls: "notor-model-ref-name",
+					text: providerConfig.model_id,
+				});
+				item.createSpan({
+					cls: "notor-model-ref-id",
+					text: providerConfig.model_id,
+				});
+
+				const modelCopyBtn = item.createEl("button", {
+					cls: "notor-copy-id-btn",
+					text: "Copy",
+					attr: { "aria-label": `Copy model identifier: ${providerConfig.model_id}` },
+				});
+				modelCopyBtn.addEventListener("click", () => {
+					navigator.clipboard.writeText(providerConfig.model_id!).then(() => {
+						modelCopyBtn.textContent = "Copied";
+						setTimeout(() => {
+							modelCopyBtn.textContent = "Copy";
+						}, 1500);
+					});
+				});
+			} else {
+				group.createDiv({
+					cls: "notor-provider-ref-empty",
+					text: "No models loaded — open the chat panel to refresh",
+				});
+			}
+		}
 	}
 
 	private renderModelPricingRow(
