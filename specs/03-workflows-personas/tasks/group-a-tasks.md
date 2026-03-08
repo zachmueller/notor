@@ -83,14 +83,14 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-001
 
 **Acceptance Criteria:**
-- [ ] `PersonaDiscoveryService` class (or exported functions) created
-- [ ] `discoverPersonas(vault: Vault, notorDir: string): Promise<Persona[]>` scans `{notor_dir}/personas/` for subdirectories
-- [ ] Uses `vault.getAbstractFileByPath()` to locate the personas root directory
-- [ ] Filters subdirectories to those containing a `system-prompt.md` file
-- [ ] Persona names derived from subdirectory names (e.g., `notor/personas/researcher/` → `"researcher"`)
-- [ ] If `{notor_dir}/personas/` does not exist, returns an empty array without error
-- [ ] Subdirectories without `system-prompt.md` are silently ignored
-- [ ] Handles errors gracefully (logs warning, does not throw)
+- [x] `PersonaDiscoveryService` class (or exported functions) created
+- [x] `discoverPersonas(vault: Vault, notorDir: string): Promise<Persona[]>` scans `{notor_dir}/personas/` for subdirectories
+- [x] Uses `vault.getAbstractFileByPath()` to locate the personas root directory
+- [x] Filters subdirectories to those containing a `system-prompt.md` file
+- [x] Persona names derived from subdirectory names (e.g., `notor/personas/researcher/` → `"researcher"`)
+- [x] If `{notor_dir}/personas/` does not exist, returns an empty array without error
+- [x] Subdirectories without `system-prompt.md` are silently ignored
+- [x] Handles errors gracefully (logs warning, does not throw)
 
 ### A-003: Persona frontmatter parser
 
@@ -102,14 +102,14 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-002
 
 **Acceptance Criteria:**
-- [ ] Reads frontmatter from `system-prompt.md` via `metadataCache.getFileCache()?.frontmatter`
-- [ ] Parses `notor-persona-prompt-mode`: accepts `"append"` or `"replace"`; defaults to `"append"` for missing/unrecognized values; logs warning for unrecognized values
-- [ ] Parses `notor-preferred-provider`: string or null (empty/omitted → null)
-- [ ] Parses `notor-preferred-model`: string or null (empty/omitted → null)
-- [ ] Extracts body content of `system-prompt.md` after stripping frontmatter → `prompt_content`
-- [ ] Populates complete `Persona` object with all fields from data-model.md
-- [ ] Malformed YAML frontmatter causes that persona to be excluded with a warning logged; other personas unaffected
-- [ ] Empty `prompt_content` is allowed (persona has no custom system prompt text)
+- [x] Reads frontmatter from `system-prompt.md` via `metadataCache.getFileCache()?.frontmatter`
+- [x] Parses `notor-persona-prompt-mode`: accepts `"append"` or `"replace"`; defaults to `"append"` for missing/unrecognized values; logs warning for unrecognized values
+- [x] Parses `notor-preferred-provider`: string or null (empty/omitted → null)
+- [x] Parses `notor-preferred-model`: string or null (empty/omitted → null)
+- [x] Extracts body content of `system-prompt.md` after stripping frontmatter → `prompt_content`
+- [x] Populates complete `Persona` object with all fields from data-model.md
+- [x] Malformed YAML frontmatter causes that persona to be excluded with a warning logged; other personas unaffected
+- [x] Empty `prompt_content` is allowed (persona has no custom system prompt text)
 
 ### A-004: Discovery service validation
 
@@ -123,12 +123,12 @@ A-010 + A-008 + A-011 ──▶ A-013 (main.ts wiring)
 **Dependencies:** A-003
 
 **Acceptance Criteria:**
-- [ ] Test persona files created per quickstart.md test vault setup instructions
-- [ ] `researcher` persona: append mode, no provider/model override
-- [ ] `organizer` persona: append mode, `notor-preferred-provider: "anthropic"`, `notor-preferred-model: "claude-sonnet-4-20250514"`
-- [ ] `broken` persona: malformed YAML frontmatter (e.g., unbalanced quotes) — excluded from discovery with warning
-- [ ] Subdirectory without `system-prompt.md` (e.g., `notor/personas/empty-dir/`) is ignored
-- [ ] Discovery returns `researcher` and `organizer` but not `broken`
+- [x] Test persona files created per quickstart.md test vault setup instructions
+- [x] `researcher` persona: append mode, no provider/model override
+- [x] `organizer` persona: append mode, `notor-preferred-provider: "anthropic"`, `notor-preferred-model: "claude-sonnet-4-20250514"`
+- [x] `broken` persona: malformed YAML frontmatter (e.g., unbalanced quotes) — excluded from discovery with warning
+- [x] Subdirectory without `system-prompt.md` (e.g., `notor/personas/empty-dir/`) is ignored
+- [x] Discovery returns `researcher` and `organizer` but not `broken`
 
 ---
 
