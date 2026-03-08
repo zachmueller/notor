@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md) — FR-52
 **Data Model:** [specs/03-workflows-personas/data-model.md](../data-model.md) — WorkflowScopedHook, WorkflowHookConfig
-**Status:** In Progress — Phase 0 and Phase 1 complete
+**Status:** In Progress — Phase 0, Phase 1, and Phase 2 complete
 
 ## Task Summary
 
@@ -132,7 +132,7 @@ notor-hooks:
 
 ## Phase 2: Dispatch Integration & Wiring
 
-### G-004: Extend hook dispatch functions to support workflow-scoped hooks
+### G-004: Extend hook dispatch functions to support workflow-scoped hooks ✅
 
 **Description:** Modify the four dispatch functions in `src/hooks/hook-events.ts` (`dispatchPreSend`, `dispatchOnToolCall`, `dispatchOnToolResult`, `dispatchAfterCompletion`) to accept an optional `conversationId` + `WorkflowHookOverrideManager` reference, and use `getEffectiveHooks()` instead of directly calling `getEnabledHooks()` from global settings. When workflow-scoped hooks are active, the dispatch functions execute the scoped hooks using the same execution semantics (pre-send: blocking/sequential with stdout capture; others: fire-and-forget sequential). Workflow-scoped hooks share the same global hook timeout setting.
 
@@ -142,63 +142,62 @@ notor-hooks:
 **Dependencies:** G-003
 
 **Acceptance Criteria:**
-- [ ] All four dispatch functions accept a new optional parameter: `overrideManager?: WorkflowHookOverrideManager` (or a deps object containing it)
-- [ ] All four dispatch functions accept `conversationId` as a required parameter in their context objects (already present in existing context interfaces: `PreSendContext.conversationId`, `ToolHookContext.conversationId`, `CompletionContext.conversationId`)
-- [ ] Each dispatch function calls `overrideManager.getEffectiveHooks(conversationId, event, globalHooks)` when an override manager is provided; falls back to `getEnabledHooks(settings.hooks, event)` when no override manager is provided (backward-compatible)
-- [ ] When effective hooks are `WorkflowScopedHook[]` (from override):
+- [x] All four dispatch functions accept a new optional parameter: `overrideManager?: WorkflowHookOverrideManager` (or a deps object containing it)
+- [x] All four dispatch functions accept `conversationId` as a required parameter in their context objects (already present in existing context interfaces: `PreSendContext.conversationId`, `ToolHookContext.conversationId`, `CompletionContext.conversationId`)
+- [x] Each dispatch function calls `overrideManager.getEffectiveHooks(conversationId, event, globalHooks)` when an override manager is provided; falls back to `getEnabledHooks(settings.hooks, event)` when no override manager is provided (backward-compatible)
+- [x] When effective hooks are `WorkflowScopedHook[]` (from override):
   - For `execute_command` action: convert to a `Hook`-compatible object and execute via the existing `executeHook()` engine — same timeout, same env vars, same stdout capture behavior
   - For `run_workflow` action: delegate to `executeRunWorkflowAction()` (from F-019) — NOT subject to hook timeout per FR-51
-- [ ] `dispatchPreSend` with workflow-scoped hooks: fully awaited sequential execution with stdout collection — same semantics as global hooks. `run_workflow` action for `pre_send` fires sequentially but does not return stdout (stdout capture is not applicable to workflow actions per F-022).
-- [ ] `dispatchOnToolCall`, `dispatchOnToolResult`, `dispatchAfterCompletion` with workflow-scoped hooks: fire-and-forget sequential execution — same semantics as global hooks
-- [ ] Workflow-scoped hooks use the same `settings.hook_timeout` for `execute_command` actions
-- [ ] When no `overrideManager` is provided, all functions behave identically to their current (Phase 3) implementation — zero behavioral change for existing callers
-- [ ] TypeScript compiles cleanly with `npm run build`
+- [x] `dispatchPreSend` with workflow-scoped hooks: fully awaited sequential execution with stdout collection — same semantics as global hooks. `run_workflow` action for `pre_send` fires sequentially but does not return stdout (stdout capture is not applicable to workflow actions per F-022).
+- [x] `dispatchOnToolCall`, `dispatchOnToolResult`, `dispatchAfterCompletion` with workflow-scoped hooks: fire-and-forget sequential execution — same semantics as global hooks
+- [x] Workflow-scoped hooks use the same `settings.hook_timeout` for `execute_command` actions
+- [x] When no `overrideManager` is provided, all functions behave identically to their current (Phase 3) implementation — zero behavioral change for existing callers
+- [x] TypeScript compiles cleanly with `npm run build`
 
-### G-005 [P]: Hook revert on workflow end
+### G-005 [P]: Hook revert on workflow end ✅
 
 **Description:** Ensure that workflow-scoped hook overrides are cleaned up when a workflow execution ends, regardless of how it ends — success, failure, LLM error, or user stop. The `WorkflowHookOverrideManager.deactivate()` must be called on all workflow exit paths. This task covers both manual (foreground) and background workflow execution exit paths.
 
 **Files:**
 - `src/chat/orchestrator.ts` — Add `deactivate()` calls to workflow completion paths
-- `src/workflows/workflow-concurrency.ts` — Ensure background workflow cleanup calls `deactivate()`
+- `src/main.ts` — Wire `WorkflowHookOverrideManager` singleton; call `destroy()` on unload
 
 **Dependencies:** G-003
 
 **Acceptance Criteria:**
-- [ ] **Manual workflow execution (foreground):** When a workflow conversation's LLM response loop completes (success), `overrideManager.deactivate(conversationId)` is called
-- [ ] **Manual workflow execution (failure):** When the LLM response loop encounters an error, `deactivate()` is called in the error/catch handler
-- [ ] **Manual workflow execution (user stop):** When the user stops a workflow mid-execution, `deactivate()` is called in the stop handler
-- [ ] **Background workflow execution (success/failure/stop):** `WorkflowConcurrencyManager.onComplete()` (F-020) calls `overrideManager.deactivate(conversationId)` as part of its cleanup
-- [ ] **Plugin unload:** `WorkflowHookOverrideManager.destroy()` is called during `onunload()`, clearing all active overrides
-- [ ] After `deactivate()`, subsequent hook dispatches for the same conversation use global hooks
-- [ ] No dangling override state is possible — every `activate()` path has a corresponding `deactivate()` path
-- [ ] Revert occurs regardless of outcome — the pattern is `try { run workflow } finally { deactivate() }`
+- [x] **Manual workflow execution (foreground):** When a workflow conversation's LLM response loop completes (success), `overrideManager.deactivate(conversationId)` is called
+- [x] **Manual workflow execution (failure):** When the LLM response loop encounters an error, `deactivate()` is called in the error/catch handler
+- [x] **Manual workflow execution (user stop):** When the user stops a workflow mid-execution, `deactivate()` is called in the stop handler
+- [x] **Background workflow execution (success/failure/stop):** `deactivate(conversationId)` is called in the `finally` block of `executeBackgroundWorkflow()` before `concurrencyManager.onComplete()`
+- [x] **Plugin unload:** `WorkflowHookOverrideManager.destroy()` is called during `onunload()`, clearing all active overrides
+- [x] After `deactivate()`, subsequent hook dispatches for the same conversation use global hooks
+- [x] No dangling override state is possible — every `activate()` path has a corresponding `deactivate()` path
+- [x] Revert occurs regardless of outcome — the pattern is `try { run workflow } finally { deactivate() }`
 
-### G-006: Wire override manager into manual workflow execution pipeline
+### G-006: Wire override manager into manual workflow execution pipeline ✅
 
 **Description:** Connect the `WorkflowHookOverrideManager` to the manual (foreground) workflow execution pipeline established in Group E. When a workflow with `notor-hooks` is triggered manually (command palette or slash-command), `activate()` the override before the first LLM API call and pass the override manager reference to all hook dispatch call sites within the conversation's response loop.
 
 **Files:**
 - `src/chat/orchestrator.ts` — Wire `WorkflowHookOverrideManager` into `executeWorkflow()` (or equivalent Group E method)
-- `src/chat/dispatcher.ts` — Pass override manager to hook dispatch calls within tool dispatch
 
 **Dependencies:** G-004, G-005, Group E (manual workflow execution pipeline)
 
 **Acceptance Criteria:**
-- [ ] When `executeWorkflow()` is called for a manual workflow:
+- [x] When `executeWorkflow()` is called for a manual workflow:
   1. Check `workflow.hooks` — if non-null, call `overrideManager.activate(conversationId, workflow.hooks)` before the first message is sent to the LLM
   2. If `workflow.hooks` is null, skip activation (global hooks apply as usual)
-- [ ] The `overrideManager` reference is passed through to all hook dispatch call sites within the conversation's response loop:
+- [x] The `overrideManager` reference is passed through to all hook dispatch call sites within the conversation's response loop:
   - `dispatchPreSend()` — called before each LLM API call in the conversation
   - `dispatchOnToolCall()` — called when the LLM invokes a tool
   - `dispatchOnToolResult()` — called after a tool returns its result
   - `dispatchAfterCompletion()` — called when the LLM response turn completes
-- [ ] Each dispatch call includes the conversation ID so the override manager can look up the active override
-- [ ] On workflow completion/failure/stop: `deactivate()` is called (covered by G-005, but verify the wiring is correct for manual execution)
-- [ ] Workflows without `notor-hooks` frontmatter: zero behavioral change — global hooks fire as before
-- [ ] The override is scoped to the conversation — follow-up messages in the same workflow conversation continue to use the workflow-scoped hooks until the conversation is left or a new one is started
+- [x] Each dispatch call includes the conversation ID so the override manager can look up the active override
+- [x] On workflow completion/failure/stop: `deactivate()` is called (covered by G-005, but verify the wiring is correct for manual execution)
+- [x] Workflows without `notor-hooks` frontmatter: zero behavioral change — global hooks fire as before
+- [x] The override is scoped to the conversation — follow-up messages in the same workflow conversation continue to use the workflow-scoped hooks until the conversation is left or a new one is started
 
-### G-007: Wire override manager into background workflow execution
+### G-007: Wire override manager into background workflow execution ✅
 
 **Description:** Connect the `WorkflowHookOverrideManager` to the background (event-triggered) workflow execution pipeline established in Group F. Background workflows with `notor-hooks` activate their hook overrides just like foreground workflows, scoped to their background conversation.
 
@@ -208,13 +207,13 @@ notor-hooks:
 **Dependencies:** G-006, F-021 (background workflow execution pipeline)
 
 **Acceptance Criteria:**
-- [ ] When `executeBackgroundWorkflow()` is called for a workflow with `notor-hooks`:
+- [x] When `executeBackgroundWorkflow()` is called for a workflow with `notor-hooks`:
   1. Call `overrideManager.activate(conversationId, workflow.hooks)` before the first message dispatch
   2. Pass the override manager to all hook dispatch calls within the background response loop
-- [ ] Background workflow override is isolated to its own conversation ID — does NOT affect the user's active foreground conversation or other background workflows running concurrently
-- [ ] On background workflow completion/failure/stop: `deactivate()` is called via `WorkflowConcurrencyManager.onComplete()` cleanup (verified with G-005)
-- [ ] Multiple concurrent background workflows can each have their own independent hook overrides (different conversation IDs, different override configs)
-- [ ] If the same workflow is triggered by a vault event hook (e.g., `on-save` → run workflow) and that workflow has `notor-hooks`, the overrides apply to the hook-triggered execution's conversation
+- [x] Background workflow override is isolated to its own conversation ID — does NOT affect the user's active foreground conversation or other background workflows running concurrently
+- [x] On background workflow completion/failure/stop: `deactivate()` is called in the `finally` block of `executeBackgroundWorkflow()` (G-005)
+- [x] Multiple concurrent background workflows can each have their own independent hook overrides (different conversation IDs, different override configs)
+- [x] If the same workflow is triggered by a vault event hook (e.g., `on-save` → run workflow) and that workflow has `notor-hooks`, the overrides apply to the hook-triggered execution's conversation
 
 ---
 

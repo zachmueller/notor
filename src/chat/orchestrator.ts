@@ -28,6 +28,7 @@ import { assembleUserMessage } from "../context/message-assembler";
 import type { Attachment } from "../context/attachment";
 import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment";
 import { dispatchPreSend, dispatchAfterCompletion } from "../hooks/hook-events";
+import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-override";
 import { shouldCompact, performCompaction, estimateConversationTokens } from "../context/compaction";
 import type { CompactionRecord } from "../context/compaction";
 import { showCompactingIndicator, showCompactionMarker } from "../ui/compaction-marker";
@@ -35,6 +36,7 @@ import { revertWorkflowPersona, switchWorkflowPersona, assembleWorkflowPrompt } 
 import type { Workflow, WorkflowExecutionRequest } from "../types";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import { logger } from "../utils/logger";
+import type { WorkflowHookConfig } from "../types";
 
 const log = logger("ChatOrchestrator");
 
@@ -58,6 +60,15 @@ export class ChatOrchestrator {
 
 	/** Persona manager for active persona state (Phase 4, A-013). */
 	private personaManager?: PersonaManager;
+
+	/**
+	 * Workflow hook override manager — tracks per-conversation workflow-scoped
+	 * hook overrides (G-003/G-005/G-006/G-007).
+	 *
+	 * When set, the orchestrator activates overrides before the first LLM API
+	 * call in a workflow conversation and deactivates them on all exit paths.
+	 */
+	private workflowHookOverrideManager?: WorkflowHookOverrideManager;
 
 	/**
 	 * Tracks whether the currently active conversation is a workflow conversation
@@ -137,6 +148,18 @@ export class ChatOrchestrator {
 	 */
 	setPersonaManager(manager: PersonaManager): void {
 		this.personaManager = manager;
+	}
+
+	/**
+	 * Set the workflow hook override manager reference.
+	 *
+	 * Called by `main.ts` after the manager is instantiated so the orchestrator
+	 * can activate/deactivate scoped hook overrides around workflow execution.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-g-tasks.md — G-005, G-006, G-007
+	 */
+	setWorkflowHookOverrideManager(manager: WorkflowHookOverrideManager): void {
+		this.workflowHookOverrideManager = manager;
 	}
 
 	/**
@@ -407,6 +430,15 @@ export class ChatOrchestrator {
 			assembled_length: assemblyResult.assembledMessage.length,
 		});
 
+		// G-006: Activate workflow-scoped hook overrides before the first LLM call
+		if (workflow.hooks && this.workflowHookOverrideManager) {
+			this.workflowHookOverrideManager.activate(conversation.id, workflow.hooks);
+			log.info("Workflow hook overrides activated for manual execution", {
+				conversationId: conversation.id,
+				events: Object.keys(workflow.hooks),
+			});
+		}
+
 		// Step 9: Start the response loop
 		try {
 			const toolDefinitions = this.getToolDefinitionsCallback?.() ?? [];
@@ -414,6 +446,10 @@ export class ChatOrchestrator {
 		} catch (e) {
 			this.handleError(e);
 		} finally {
+			// G-005: Deactivate workflow-scoped hook overrides on all exit paths
+			if (this.workflowHookOverrideManager) {
+				this.workflowHookOverrideManager.deactivate(conversation.id);
+			}
 			this.view?.setRespondingState(false);
 		}
 	}
@@ -560,6 +596,15 @@ export class ChatOrchestrator {
 			workflowName: workflow.display_name,
 		});
 
+		// G-007: Activate workflow-scoped hook overrides before the first LLM call
+		if (workflow.hooks && this.workflowHookOverrideManager) {
+			this.workflowHookOverrideManager.activate(bgConversation.id, workflow.hooks);
+			log.info("Workflow hook overrides activated for background execution", {
+				conversationId: bgConversation.id,
+				events: Object.keys(workflow.hooks),
+			});
+		}
+
 		// Step 5: Run the response loop (no view — background execution)
 		// We build a self-contained response loop using the background conversation manager.
 		let finalStatus: "completed" | "errored" | "stopped" = "completed";
@@ -584,6 +629,13 @@ export class ChatOrchestrator {
 			finalStatus = "errored";
 			errorMessage = errMsg;
 		} finally {
+			// G-005: Deactivate workflow-scoped hook overrides on all exit paths
+			// This runs before concurrencyManager.onComplete() so the override is
+			// always cleared even if onComplete() throws.
+			if (this.workflowHookOverrideManager) {
+				this.workflowHookOverrideManager.deactivate(bgConversation.id);
+			}
+
 			// Step 6: Mark completion
 			concurrencyManager.onComplete(execution.id, finalStatus, errorMessage);
 
@@ -791,6 +843,7 @@ export class ChatOrchestrator {
 				}
 
 				// Dispatch hook events if applicable
+			// G-004: Pass override manager so workflow-scoped hooks are used when active
 				const bgConv = bgConvManager.getActiveConversation();
 				if (bgConv && vaultRootPath) {
 					const { dispatchOnToolCall, dispatchOnToolResult } =
@@ -803,7 +856,8 @@ export class ChatOrchestrator {
 							toolParams: parameters,
 						},
 						this.settings,
-						vaultRootPath
+						vaultRootPath,
+						this.workflowHookOverrideManager
 					);
 
 					const toolResultStr = typeof toolResult.result === "string"
@@ -819,7 +873,8 @@ export class ChatOrchestrator {
 							toolStatus: toolResult.success ? "success" : "error",
 						},
 						this.settings,
-						vaultRootPath
+						vaultRootPath,
+						this.workflowHookOverrideManager
 					);
 				}
 
@@ -937,6 +992,7 @@ export class ChatOrchestrator {
 		}
 
 		// Phase 3 (HOOK-004): Dispatch pre-send hooks and capture stdout
+		// G-004: Pass override manager so workflow-scoped hooks are used when active
 		let hookInjections: string[] | undefined;
 		const conv = this.conversationManager.getActiveConversation();
 		if (conv) {
@@ -948,7 +1004,8 @@ export class ChatOrchestrator {
 						timestamp: new Date().toISOString(),
 					},
 					this.settings,
-					vaultRootPath
+					vaultRootPath,
+					this.workflowHookOverrideManager
 				);
 				// Filter empty results
 				if (hookInjections && hookInjections.length === 0) {
@@ -1148,6 +1205,7 @@ export class ChatOrchestrator {
 					const toolCallEl = this.view?.renderToolCall(toolCallMessage);
 
 					// Phase 3 (HOOK-005): Fire on_tool_call hooks after approval, before execution
+					// G-004: Pass override manager so workflow-scoped hooks are used when active
 					const currentConv = this.conversationManager.getActiveConversation();
 					if (currentConv && vaultRootPath) {
 						const { dispatchOnToolCall } = await import("../hooks/hook-events");
@@ -1159,7 +1217,8 @@ export class ChatOrchestrator {
 								toolParams: result.parameters,
 							},
 							this.settings,
-							vaultRootPath
+							vaultRootPath,
+							this.workflowHookOverrideManager
 						);
 					}
 
@@ -1190,6 +1249,7 @@ export class ChatOrchestrator {
 					this.view?.renderToolResult(toolResultMessage);
 
 					// Phase 3 (HOOK-005): Fire on_tool_result hooks after execution
+					// G-004: Pass override manager so workflow-scoped hooks are used when active
 					const convForToolResult = this.conversationManager.getActiveConversation();
 					if (convForToolResult && vaultRootPath) {
 						const { dispatchOnToolResult } = await import("../hooks/hook-events");
@@ -1206,7 +1266,8 @@ export class ChatOrchestrator {
 								toolStatus: toolResult.success ? "success" : "error",
 							},
 							this.settings,
-							vaultRootPath
+							vaultRootPath,
+							this.workflowHookOverrideManager
 						);
 					}
 
@@ -1267,6 +1328,9 @@ export class ChatOrchestrator {
 	/**
 	 * Dispatch after_completion hooks. Called from responseLoopWithHooks so the
 	 * hooks always fire regardless of how the loop terminates.
+	 *
+	 * G-004: Passes the override manager so workflow-scoped hooks are used
+	 * when a workflow-scoped override is active for this conversation.
 	 */
 	private dispatchAfterCompletionHooks(): void {
 		const convForCompletion = this.conversationManager.getActiveConversation();
@@ -1278,7 +1342,8 @@ export class ChatOrchestrator {
 					timestamp: new Date().toISOString(),
 				},
 				this.settings,
-				vaultRootPath
+				vaultRootPath,
+				this.workflowHookOverrideManager
 			);
 		}
 	}

@@ -19,6 +19,9 @@ import { discoverWorkflows } from "./workflows/workflow-discovery";
 import { showWorkflowPicker } from "./workflows/workflow-executor";
 import type { Workflow } from "./types";
 
+// Group G: Workflow hook override manager
+import { WorkflowHookOverrideManager } from "./hooks/workflow-hook-override";
+
 // Group F: Vault event hooks
 import { TagShadowCache } from "./hooks/tag-change-detector";
 import { TagChangeSuppressionManager } from "./hooks/tag-change-detector";
@@ -128,6 +131,21 @@ export default class NotorPlugin extends Plugin {
 
 	/** Concurrency manager for background workflow executions (F-020). */
 	private _workflowConcurrencyManager?: WorkflowConcurrencyManager;
+
+	// -----------------------------------------------------------------------
+	// Group G: Workflow hook override manager (G-003/G-005)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Singleton workflow hook override manager.
+	 *
+	 * Tracks per-conversation workflow-scoped hook overrides (FR-52).
+	 * Instantiated once and shared by the orchestrator and hook dispatch
+	 * functions. Destroyed on plugin unload via `destroy()`.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-g-tasks.md — G-003, G-005
+	 */
+	private _workflowHookOverrideManager?: WorkflowHookOverrideManager;
 
 	// -----------------------------------------------------------------------
 	// Plugin lifecycle
@@ -269,6 +287,10 @@ export default class NotorPlugin extends Plugin {
 		this._workflowConcurrencyManager?.destroy();
 
 		log.info("Group F vault event hook components destroyed");
+
+		// Group G: Clear all workflow hook override state (G-005)
+		this._workflowHookOverrideManager?.destroy();
+		log.info("WorkflowHookOverrideManager destroyed");
 
 		// All DOM elements, intervals, and event listeners registered via
 		// this.register* / this.registerEvent / this.registerDomEvent are
@@ -821,8 +843,30 @@ export default class NotorPlugin extends Plugin {
 
 			// Wire persona manager to orchestrator (A-013)
 			this._orchestrator.setPersonaManager(this.getPersonaManager());
+
+			// G-005/G-006/G-007: Wire workflow hook override manager to orchestrator
+			this._orchestrator.setWorkflowHookOverrideManager(
+				this.getWorkflowHookOverrideManager()
+			);
 		}
 		return this._orchestrator;
+	}
+
+	/**
+	 * Workflow hook override manager — singleton, instantiated on first use.
+	 *
+	 * Shared by the orchestrator (for activate/deactivate) and hook dispatch
+	 * functions (for effective hook resolution). Calling `destroy()` clears all
+	 * state; called during `onunload()` (G-005).
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-g-tasks.md — G-003, G-005
+	 */
+	getWorkflowHookOverrideManager(): WorkflowHookOverrideManager {
+		if (!this._workflowHookOverrideManager) {
+			this._workflowHookOverrideManager = new WorkflowHookOverrideManager();
+			log.debug("WorkflowHookOverrideManager instantiated");
+		}
+		return this._workflowHookOverrideManager;
 	}
 
 	// -----------------------------------------------------------------------

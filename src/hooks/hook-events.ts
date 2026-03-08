@@ -12,9 +12,16 @@
  * via lazy import to avoid circular dependencies. Hooks without `action_type` or
  * with `action_type: "execute_command"` use the existing `executeHook()` path.
  *
+ * G-004: Each dispatch function now accepts an optional `overrideManager` parameter
+ * (WorkflowHookOverrideManager). When provided, `getEffectiveHooks()` is called
+ * instead of `getEnabledHooks()` so that workflow-scoped hook overrides take
+ * precedence for the duration of a workflow execution. Callers that do not pass an
+ * `overrideManager` receive identical behaviour to the pre-G-004 implementation.
+ *
  * @see specs/02-context-intelligence/data-model.md — Hook entity
  * @see specs/02-context-intelligence/tasks.md — HOOK-003
  * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-022
+ * @see specs/03-workflows-personas/tasks/group-g-tasks.md — G-004
  */
 
 import { Notice } from "obsidian";
@@ -22,6 +29,8 @@ import type { NotorSettings } from "../settings";
 import type { Hook } from "../settings";
 import { getEnabledHooks } from "./hook-config";
 import { executeHook, type HookContext } from "./hook-engine";
+import type { WorkflowHookOverrideManager } from "./workflow-hook-override";
+import type { LLMHookEvent, WorkflowScopedHook } from "../types";
 import { logger } from "../utils/logger";
 
 const log = logger("HookEvents");
@@ -144,6 +153,95 @@ function getRegisteredDispatcherDeps(): import("./vault-event-dispatcher").Dispa
 }
 
 // ---------------------------------------------------------------------------
+// G-004: WorkflowScopedHook execution helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute a `WorkflowScopedHook` with `action_type: "execute_command"`.
+ *
+ * Adapts the scoped hook into a `Hook`-compatible object and runs it via
+ * the existing `executeHook()` engine. The global `hook_timeout` is used.
+ *
+ * Returns the stdout string (empty string on failure or no output).
+ */
+async function executeScopedCommandHook(
+	scopedHook: WorkflowScopedHook,
+	hookContext: HookContext,
+	settings: NotorSettings,
+	vaultRootPath: string
+): Promise<string> {
+	if (!scopedHook.command?.trim()) {
+		log.warn("Scoped execute_command hook has no command; skipping", {
+			event: scopedHook.event,
+		});
+		return "";
+	}
+
+	// Build a minimal Hook-compatible object so we can reuse executeHook()
+	const syntheticHook: Hook = {
+		id: `scoped-${scopedHook.event}-${Date.now()}`,
+		label: `workflow-scoped:${scopedHook.event}`,
+		event: hookContext.hookEvent as Hook["event"],
+		action_type: "execute_command",
+		command: scopedHook.command,
+		workflow_path: null,
+		enabled: true,
+	};
+
+	const result = await executeHook(syntheticHook, hookContext, settings, vaultRootPath);
+	return result.stdout && result.stdout.length > 0 ? result.stdout : "";
+}
+
+/**
+ * Execute a `WorkflowScopedHook` with `action_type: "run_workflow"`.
+ *
+ * Delegates to `executeRunWorkflowAction()` from the vault event dispatcher
+ * via lazy import (to avoid circular dependencies). NOT subject to
+ * `hook_timeout` per FR-51.
+ */
+async function executeScopedWorkflowHook(
+	scopedHook: WorkflowScopedHook,
+	lifecycleContext: LifecycleHookWorkflowContext,
+	settings: NotorSettings
+): Promise<void> {
+	const workflowPath = scopedHook.workflow_path;
+	if (!workflowPath?.trim()) {
+		log.warn("Scoped run_workflow hook has no workflow_path; skipping", {
+			event: scopedHook.event,
+		});
+		return;
+	}
+
+	log.info("Routing scoped lifecycle hook to run_workflow action", {
+		event: scopedHook.event,
+		workflowPath,
+	});
+
+	const { executeRunWorkflowAction } = await import("./vault-event-dispatcher");
+	const deps = getRegisteredDispatcherDeps();
+	if (!deps) {
+		log.warn(
+			"Dispatcher deps not registered; cannot execute scoped run_workflow hook",
+			{ event: scopedHook.event }
+		);
+		new Notice(
+			`Cannot run workflow '${workflowPath}': plugin not fully initialised.`
+		);
+		return;
+	}
+
+	const vaultContext: import("./vault-event-hook-engine").VaultEventHookContext = {
+		hookEvent: lifecycleContext.hookEvent,
+		timestamp: lifecycleContext.timestamp,
+		notePath: null,
+		tagsAdded: null,
+		tagsRemoved: null,
+	};
+
+	await executeRunWorkflowAction(workflowPath, vaultContext, null, deps);
+}
+
+// ---------------------------------------------------------------------------
 // Pre-send context (specific to pre_send hooks)
 // ---------------------------------------------------------------------------
 
@@ -183,20 +281,40 @@ export interface CompletionContext {
  *
  * Hook failures do not block subsequent hooks or message dispatch.
  *
+ * G-004: When `overrideManager` is provided and a workflow-scoped override
+ * is active for `context.conversationId`, the scoped hooks are executed
+ * instead of global hooks. `run_workflow` scoped hooks fire-and-forget
+ * (no stdout capture); `execute_command` scoped hooks are awaited and
+ * their stdout is collected.
+ *
  * @param context - Pre-send context metadata.
  * @param settings - Plugin settings.
  * @param vaultRootPath - Vault root path for hook cwd.
+ * @param overrideManager - Optional workflow hook override manager (G-004).
  * @returns Array of non-empty stdout strings from hooks.
  */
 export async function dispatchPreSend(
 	context: PreSendContext,
 	settings: NotorSettings,
-	vaultRootPath: string
+	vaultRootPath: string,
+	overrideManager?: WorkflowHookOverrideManager
 ): Promise<string[]> {
-	const hooks = getEnabledHooks(settings.hooks, "pre_send");
-	if (hooks.length === 0) return [];
+	// G-004: Resolve effective hooks (scoped or global)
+	const globalHooks = getEnabledHooks(settings.hooks, "pre_send");
+	const effectiveHooks = overrideManager
+		? overrideManager.getEffectiveHooks(context.conversationId, "pre_send", globalHooks)
+		: globalHooks;
 
-	log.info("Dispatching pre_send hooks", { count: hooks.length });
+	if (effectiveHooks.length === 0) return [];
+
+	// Discriminate scoped vs global: override is active AND returned a different array
+	const areScopedHooks = overrideManager?.isOverrideActive(context.conversationId) &&
+		effectiveHooks !== globalHooks;
+
+	log.info("Dispatching pre_send hooks", {
+		count: effectiveHooks.length,
+		scoped: areScopedHooks,
+	});
 
 	const stdoutResults: string[] = [];
 
@@ -206,35 +324,61 @@ export async function dispatchPreSend(
 		timestamp: context.timestamp,
 	};
 
-	for (const hook of hooks) {
-		// F-022: Route based on action_type
-		const actionType = hook.action_type ?? "execute_command";
-		if (actionType === "run_workflow") {
-			// run_workflow: fire-and-forget (no stdout capture applicable)
-			// NOT subject to hook timeout per FR-51
-			void executeLifecycleHookWorkflowAction(
-				hook,
-				{
-					conversationId: context.conversationId,
-					hookEvent: "pre_send",
-					timestamp: context.timestamp,
-				},
-				settings
-			);
-			continue;
-		}
+	const lifecycleCtx: LifecycleHookWorkflowContext = {
+		conversationId: context.conversationId,
+		hookEvent: "pre_send",
+		timestamp: context.timestamp,
+	};
 
-		// execute_command: existing path (await; captures stdout)
-		const result = await executeHook(hook, hookContext, settings, vaultRootPath);
-		if (result.stdout && result.stdout.length > 0) {
-			stdoutResults.push(result.stdout);
+	if (areScopedHooks) {
+		// G-004: Execute workflow-scoped hooks
+		for (const hook of effectiveHooks as WorkflowScopedHook[]) {
+			if (hook.action_type === "run_workflow") {
+				// run_workflow: fire-and-forget for pre_send scoped hooks
+				// (stdout capture not applicable to workflow actions per F-022)
+				void executeScopedWorkflowHook(hook, lifecycleCtx, settings);
+			} else {
+				// execute_command: await and capture stdout
+				const stdout = await executeScopedCommandHook(
+					hook,
+					hookContext,
+					settings,
+					vaultRootPath
+				);
+				if (stdout.length > 0) {
+					stdoutResults.push(stdout);
+				}
+			}
 		}
-		// Failures are logged and noticed inside executeHook; continue to next
+	} else {
+		// Original global hook path (unchanged from pre-G-004)
+		for (const hook of effectiveHooks as Hook[]) {
+			// F-022: Route based on action_type
+			const actionType = hook.action_type ?? "execute_command";
+			if (actionType === "run_workflow") {
+				// run_workflow: fire-and-forget (no stdout capture applicable)
+				// NOT subject to hook timeout per FR-51
+				void executeLifecycleHookWorkflowAction(
+					hook,
+					lifecycleCtx,
+					settings
+				);
+				continue;
+			}
+
+			// execute_command: existing path (await; captures stdout)
+			const result = await executeHook(hook, hookContext, settings, vaultRootPath);
+			if (result.stdout && result.stdout.length > 0) {
+				stdoutResults.push(result.stdout);
+			}
+			// Failures are logged and noticed inside executeHook; continue to next
+		}
 	}
 
 	log.info("Pre-send hooks complete", {
-		total: hooks.length,
+		total: effectiveHooks.length,
 		withOutput: stdoutResults.length,
+		scoped: areScopedHooks,
 	});
 
 	return stdoutResults;
@@ -250,19 +394,37 @@ export async function dispatchPreSend(
  * Hooks are executed sequentially but the entire dispatch is
  * fire-and-forget — the caller does not wait for completion.
  *
+ * G-004: When `overrideManager` is provided and a workflow-scoped override
+ * is active for `context.conversationId`, scoped hooks are executed
+ * instead of global hooks using the same fire-and-forget semantics.
+ *
  * @param context - Tool call context metadata.
  * @param settings - Plugin settings.
  * @param vaultRootPath - Vault root path for hook cwd.
+ * @param overrideManager - Optional workflow hook override manager (G-004).
  */
 export function dispatchOnToolCall(
 	context: ToolHookContext,
 	settings: NotorSettings,
-	vaultRootPath: string
+	vaultRootPath: string,
+	overrideManager?: WorkflowHookOverrideManager
 ): void {
-	const hooks = getEnabledHooks(settings.hooks, "on_tool_call");
-	if (hooks.length === 0) return;
+	// G-004: Resolve effective hooks (scoped or global)
+	const globalHooks = getEnabledHooks(settings.hooks, "on_tool_call");
+	const effectiveHooks = overrideManager
+		? overrideManager.getEffectiveHooks(context.conversationId, "on_tool_call", globalHooks)
+		: globalHooks;
 
-	log.info("Dispatching on_tool_call hooks", { count: hooks.length, tool: context.toolName });
+	if (effectiveHooks.length === 0) return;
+
+	const areScopedHooks = overrideManager?.isOverrideActive(context.conversationId) &&
+		effectiveHooks !== globalHooks;
+
+	log.info("Dispatching on_tool_call hooks", {
+		count: effectiveHooks.length,
+		tool: context.toolName,
+		scoped: areScopedHooks,
+	});
 
 	const hookContext: HookContext = {
 		conversationId: context.conversationId,
@@ -272,26 +434,39 @@ export function dispatchOnToolCall(
 		toolParams: JSON.stringify(context.toolParams),
 	};
 
+	const lifecycleCtx: LifecycleHookWorkflowContext = {
+		conversationId: context.conversationId,
+		hookEvent: "on_tool_call",
+		timestamp: context.timestamp,
+	};
+
 	// Fire-and-forget: run sequentially but don't block caller
 	void (async () => {
-		for (const hook of hooks) {
-			// F-022: Route based on action_type
-			const actionType = hook.action_type ?? "execute_command";
-			if (actionType === "run_workflow") {
-				await executeLifecycleHookWorkflowAction(
-					hook,
-					{
-						conversationId: context.conversationId,
-						hookEvent: "on_tool_call",
-						timestamp: context.timestamp,
-					},
-					settings
-				);
-				continue;
+		if (areScopedHooks) {
+			// G-004: Execute workflow-scoped hooks
+			for (const hook of effectiveHooks as WorkflowScopedHook[]) {
+				if (hook.action_type === "run_workflow") {
+					await executeScopedWorkflowHook(hook, lifecycleCtx, settings);
+				} else {
+					await executeScopedCommandHook(hook, hookContext, settings, vaultRootPath);
+				}
 			}
-			await executeHook(hook, hookContext, settings, vaultRootPath);
+		} else {
+			// Original global hook path (unchanged from pre-G-004)
+			for (const hook of effectiveHooks as Hook[]) {
+				// F-022: Route based on action_type
+				const actionType = hook.action_type ?? "execute_command";
+				if (actionType === "run_workflow") {
+					await executeLifecycleHookWorkflowAction(hook, lifecycleCtx, settings);
+					continue;
+				}
+				await executeHook(hook, hookContext, settings, vaultRootPath);
+			}
 		}
-		log.info("on_tool_call hooks complete", { count: hooks.length });
+		log.info("on_tool_call hooks complete", {
+			count: effectiveHooks.length,
+			scoped: areScopedHooks,
+		});
 	})();
 }
 
@@ -302,19 +477,37 @@ export function dispatchOnToolCall(
 /**
  * Dispatch all enabled `on_tool_result` hooks non-blocking.
  *
+ * G-004: When `overrideManager` is provided and a workflow-scoped override
+ * is active for `context.conversationId`, scoped hooks are executed
+ * instead of global hooks using the same fire-and-forget semantics.
+ *
  * @param context - Tool result context metadata.
  * @param settings - Plugin settings.
  * @param vaultRootPath - Vault root path for hook cwd.
+ * @param overrideManager - Optional workflow hook override manager (G-004).
  */
 export function dispatchOnToolResult(
 	context: ToolHookContext,
 	settings: NotorSettings,
-	vaultRootPath: string
+	vaultRootPath: string,
+	overrideManager?: WorkflowHookOverrideManager
 ): void {
-	const hooks = getEnabledHooks(settings.hooks, "on_tool_result");
-	if (hooks.length === 0) return;
+	// G-004: Resolve effective hooks (scoped or global)
+	const globalHooks = getEnabledHooks(settings.hooks, "on_tool_result");
+	const effectiveHooks = overrideManager
+		? overrideManager.getEffectiveHooks(context.conversationId, "on_tool_result", globalHooks)
+		: globalHooks;
 
-	log.info("Dispatching on_tool_result hooks", { count: hooks.length, tool: context.toolName });
+	if (effectiveHooks.length === 0) return;
+
+	const areScopedHooks = overrideManager?.isOverrideActive(context.conversationId) &&
+		effectiveHooks !== globalHooks;
+
+	log.info("Dispatching on_tool_result hooks", {
+		count: effectiveHooks.length,
+		tool: context.toolName,
+		scoped: areScopedHooks,
+	});
 
 	const hookContext: HookContext = {
 		conversationId: context.conversationId,
@@ -326,26 +519,43 @@ export function dispatchOnToolResult(
 		toolStatus: context.toolStatus,
 	};
 
+	const lifecycleCtx: LifecycleHookWorkflowContext = {
+		conversationId: context.conversationId,
+		hookEvent: "on_tool_result",
+		timestamp: context.timestamp,
+	};
+
 	// Fire-and-forget
 	void (async () => {
-		for (const hook of hooks) {
-			// F-022: Route based on action_type
-			const actionType = hook.action_type ?? "execute_command";
-			if (actionType === "run_workflow") {
-				await executeLifecycleHookWorkflowAction(
-					hook,
-					{
-						conversationId: context.conversationId,
-						hookEvent: "on_tool_result",
-						timestamp: context.timestamp,
-					},
-					settings
-				);
-				continue;
+		if (areScopedHooks) {
+			// G-004: Execute workflow-scoped hooks
+			for (const hook of effectiveHooks as WorkflowScopedHook[]) {
+				if (hook.action_type === "run_workflow") {
+					await executeScopedWorkflowHook(hook, lifecycleCtx, settings);
+				} else {
+					await executeScopedCommandHook(hook, hookContext, settings, vaultRootPath);
+				}
 			}
-			await executeHook(hook, hookContext, settings, vaultRootPath);
+		} else {
+			// Original global hook path (unchanged from pre-G-004)
+			for (const hook of effectiveHooks as Hook[]) {
+				// F-022: Route based on action_type
+				const actionType = hook.action_type ?? "execute_command";
+				if (actionType === "run_workflow") {
+					await executeLifecycleHookWorkflowAction(
+						hook,
+						lifecycleCtx,
+						settings
+					);
+					continue;
+				}
+				await executeHook(hook, hookContext, settings, vaultRootPath);
+			}
 		}
-		log.info("on_tool_result hooks complete", { count: hooks.length });
+		log.info("on_tool_result hooks complete", {
+			count: effectiveHooks.length,
+			scoped: areScopedHooks,
+		});
 	})();
 }
 
@@ -356,19 +566,36 @@ export function dispatchOnToolResult(
 /**
  * Dispatch all enabled `after_completion` hooks non-blocking.
  *
+ * G-004: When `overrideManager` is provided and a workflow-scoped override
+ * is active for `context.conversationId`, scoped hooks are executed
+ * instead of global hooks using the same fire-and-forget semantics.
+ *
  * @param context - Completion context metadata.
  * @param settings - Plugin settings.
  * @param vaultRootPath - Vault root path for hook cwd.
+ * @param overrideManager - Optional workflow hook override manager (G-004).
  */
 export function dispatchAfterCompletion(
 	context: CompletionContext,
 	settings: NotorSettings,
-	vaultRootPath: string
+	vaultRootPath: string,
+	overrideManager?: WorkflowHookOverrideManager
 ): void {
-	const hooks = getEnabledHooks(settings.hooks, "after_completion");
-	if (hooks.length === 0) return;
+	// G-004: Resolve effective hooks (scoped or global)
+	const globalHooks = getEnabledHooks(settings.hooks, "after_completion");
+	const effectiveHooks = overrideManager
+		? overrideManager.getEffectiveHooks(context.conversationId, "after_completion", globalHooks)
+		: globalHooks;
 
-	log.info("Dispatching after_completion hooks", { count: hooks.length });
+	if (effectiveHooks.length === 0) return;
+
+	const areScopedHooks = overrideManager?.isOverrideActive(context.conversationId) &&
+		effectiveHooks !== globalHooks;
+
+	log.info("Dispatching after_completion hooks", {
+		count: effectiveHooks.length,
+		scoped: areScopedHooks,
+	});
 
 	const hookContext: HookContext = {
 		conversationId: context.conversationId,
@@ -376,25 +603,42 @@ export function dispatchAfterCompletion(
 		timestamp: context.timestamp,
 	};
 
+	const lifecycleCtx: LifecycleHookWorkflowContext = {
+		conversationId: context.conversationId,
+		hookEvent: "after_completion",
+		timestamp: context.timestamp,
+	};
+
 	// Fire-and-forget
 	void (async () => {
-		for (const hook of hooks) {
-			// F-022: Route based on action_type
-			const actionType = hook.action_type ?? "execute_command";
-			if (actionType === "run_workflow") {
-				await executeLifecycleHookWorkflowAction(
-					hook,
-					{
-						conversationId: context.conversationId,
-						hookEvent: "after_completion",
-						timestamp: context.timestamp,
-					},
-					settings
-				);
-				continue;
+		if (areScopedHooks) {
+			// G-004: Execute workflow-scoped hooks
+			for (const hook of effectiveHooks as WorkflowScopedHook[]) {
+				if (hook.action_type === "run_workflow") {
+					await executeScopedWorkflowHook(hook, lifecycleCtx, settings);
+				} else {
+					await executeScopedCommandHook(hook, hookContext, settings, vaultRootPath);
+				}
 			}
-			await executeHook(hook, hookContext, settings, vaultRootPath);
+		} else {
+			// Original global hook path (unchanged from pre-G-004)
+			for (const hook of effectiveHooks as Hook[]) {
+				// F-022: Route based on action_type
+				const actionType = hook.action_type ?? "execute_command";
+				if (actionType === "run_workflow") {
+					await executeLifecycleHookWorkflowAction(
+						hook,
+						lifecycleCtx,
+						settings
+					);
+					continue;
+				}
+				await executeHook(hook, hookContext, settings, vaultRootPath);
+			}
 		}
-		log.info("after_completion hooks complete", { count: hooks.length });
+		log.info("after_completion hooks complete", {
+			count: effectiveHooks.length,
+			scoped: areScopedHooks,
+		});
 	})();
 }
