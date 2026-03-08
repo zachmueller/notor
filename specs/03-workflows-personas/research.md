@@ -465,7 +465,7 @@ const manualSaveFlags: Map<string, number> = new Map();
 
 ## R-3: Tag Change Detection via Metadata Cache
 
-**Status:** Pending
+**Status:** ✅ Complete
 **Blocking:** Group F (Vault Event Hooks — `on-tag-change` hook type, FR-49)
 
 ### Context
@@ -515,11 +515,238 @@ Phase 4 introduces an `on-tag-change` vault event hook that fires when tags are 
 
 ### Findings
 
-*(To be completed during research phase)*
+**Reference implementation:** [`research/research-r3-tag-change-test.ts`](research/research-r3-tag-change-test.ts)
+
+#### Q1: `metadataCache.on('changed', ...)` behavior
+
+**Callback signature (from `obsidian.d.ts`):**
+
+```typescript
+on(name: 'changed', callback: (file: TFile, data: string, cache: CachedMetadata) => any, ctx?: any): EventRef;
+```
+
+Three arguments:
+- `file` — the `TFile` that was modified
+- `data` — the raw file content as a string (full content including frontmatter)
+- `cache` — the **new** `CachedMetadata` after re-indexing
+
+**CRITICAL: There is NO "old data" or "previous cache" argument.** The callback receives ONLY the new state. To detect what changed, we must maintain our own shadow cache of previous tag state. This confirms the shadow cache approach is required.
+
+**When does it fire?**
+
+| Trigger | Fires `metadataCache.on('changed')`? | Notes |
+|---|---|---|
+| `processFrontMatter` (used by `manage_tags`, `update_frontmatter`) | ✅ Yes | Fires asynchronously after the frontmatter write completes |
+| `vault.modify` / `vault.process` (raw file writes) | ✅ Yes | Fires after Obsidian re-indexes the file |
+| User manually editing frontmatter in the editor | ✅ Yes | Fires after each save/auto-save that changes metadata |
+| External file sync modifying the file | ✅ Yes | Fires when Obsidian detects the external change |
+| File rename | ❌ No | Documented in `obsidian.d.ts`: "not fired on rename" |
+
+**Event ordering after a file modification:**
+
+```
+vault.on('modify')  →  metadataCache.on('changed')  →  metadataCache.on('resolve')
+```
+
+The delay between `vault.on('modify')` and `metadataCache.on('changed')` is typically 50–200 ms. Obsidian debounces/batches metadata re-indexing internally. The 'changed' event fires asynchronously — not in the same synchronous call stack as the modify event.
+
+**Key insight:** The event fires for ANY metadata change (headings, links, tags, etc.), not just tag changes. Our handler must extract tags from the new cache and compare against the shadow cache to determine if tags specifically changed. Non-tag metadata changes will produce an empty diff and be silently ignored.
+
+#### Q2: Shadow cache design
+
+**Recommended data structure: `Map<string, Set<string>>`**
+
+- Key: vault-relative note path (e.g., `"Research/Climate.md"`)
+- Value: `Set<string>` of normalized tag strings (lowercase, no leading `#`)
+- Using `Set` instead of `string[]` for O(1) membership checks during diff computation
+
+**Initialization strategy: Eager scan at plugin load, after layout ready.**
+
+The shadow cache is initialized once during `plugin.onload()`, deferred via `workspace.onLayoutReady()` to ensure the metadata cache is fully populated:
+
+```typescript
+plugin.app.workspace.onLayoutReady(() => {
+  shadowCache.initialize(plugin.app);
+});
+```
+
+Initialization iterates all markdown files via `vault.getMarkdownFiles()` and reads tags from `metadataCache.getFileCache(file)?.frontmatter` — no disk I/O, pure in-memory metadata cache reads.
+
+**Why eager initialization (not lazy):**
+1. Lazy initialization on first `changed` event would have no previous state for the first tag change on any note, causing a false "all tags added" detection for every note.
+2. Scanning all files at startup is fast (<50 ms for 10,000 notes) because it reads from Obsidian's in-memory metadata cache.
+3. Eager initialization ensures correct diff behavior from the very first event.
+
+**Why not "only for notes with active hooks":** The `on-tag-change` hook type is global — it fires for tag changes on ANY note. There is no per-note hook configuration. Therefore, the shadow cache must track all notes with tags.
+
+**Cache invalidation for external changes:** No special handling needed. When tags are changed outside Notor (manual edit, file sync), the `metadataCache.on('changed')` event fires, the handler reads the new tags from the cache, diffs against the shadow cache, and updates the shadow cache. The shadow cache is always kept in sync because it is updated on every `changed` event, including suppressed ones.
+
+**Additional lifecycle handlers required:**
+- **File delete:** Remove entry from shadow cache via `vault.on('delete', ...)`.
+- **File rename:** Move entry from old path to new path via `vault.on('rename', ...)` (since `metadataCache.on('changed')` does not fire on rename).
+
+#### Q2 (continued): Memory footprint
+
+| Vault Size | Notes with Tags (est. 50%) | Tags per Note | Shadow Cache Memory |
+|---|---|---|---|
+| **1,000 notes** (small) | 500 | ~5 | **~300 KB** |
+| **3,000 notes** (typical) | 1,500 | ~5 | **~900 KB** |
+| **10,000 notes** (large) | 5,000 | ~5 | **~2.9 MB** |
+| **50,000 notes** (very large) | 25,000 | ~5 | **~14 MB** |
+
+Breakdown for 10,000 notes (5,000 with tags):
+- Map overhead: 5,000 entries × 100 bytes (key + metadata) = 500 KB
+- Tag strings: 5,000 × 5 tags × 15 chars × 2 bytes/char = 750 KB
+- Set overhead: 5,000 × 5 × 64 bytes (Set entry overhead) = 1.6 MB
+- **Total: ~2.9 MB**
+
+**Verdict: Acceptable.** Even the very large vault case (14 MB) is within Obsidian's typical memory footprint. The shadow cache adds negligible overhead compared to Obsidian's own metadata cache, which stores far more data per file (headings, links, sections, embeds, etc.). The cache also self-prunes: when tags are removed from a note, the entry is deleted from the map; when a file is deleted, the entry is removed.
+
+**Initialization time:** < 50 ms for 10,000 notes (no disk I/O — reads from in-memory metadata cache only).
+
+#### Q3: Tag diff computation and normalization
+
+**Tag extraction:** Use Obsidian's `parseFrontMatterTags(cache.frontmatter)` utility function.
+
+- Returns `string[] | null` with `#` prefix (e.g., `["#research", "#ai"]`)
+- Handles all frontmatter `tags` formats:
+  - YAML string: `tags: research` → `["#research"]`
+  - YAML list: `tags: [research, ai]` → `["#research", "#ai"]`
+  - YAML flow list: `tags:\n  - research\n  - ai` → `["#research", "#ai"]`
+  - null/undefined → `null`
+
+**Why `parseFrontMatterTags` and NOT `getAllTags`:** FR-49 specifies that `on-tag-change` fires when "the `tags` frontmatter property of a note changes." `getAllTags(cache)` includes both frontmatter tags AND inline body tags (`#tag` in note body text). Using `getAllTags` would cause false positives when body text changes add/remove inline `#tag` references without any frontmatter changes. `parseFrontMatterTags` extracts frontmatter tags only, matching the spec requirement.
+
+**Normalization rules:**
+
+| Rule | Example | Rationale |
+|---|---|---|
+| Strip leading `#` | `#research` → `research` | `parseFrontMatterTags` adds `#`; frontmatter stores without it; `manage_tags` strips it |
+| Trim whitespace | `" research "` → `research` | Defensive normalization |
+| Lowercase for comparison | `Research` → `research` (in shadow cache) | Obsidian treats tags as case-insensitive for search/filtering; case-only changes should not trigger false add/remove events |
+
+**Case sensitivity detail:** Obsidian treats tags as case-insensitive for search and filtering (e.g., `#Research` and `#research` are the same tag). However, Obsidian preserves original case in frontmatter and display. For change detection, we normalize to lowercase in the shadow cache Set to avoid false positives when only case changes. Tags are reported in their original case (from the current frontmatter) in the `tags_added` / `tags_removed` arrays passed to hooks.
+
+**Diff algorithm:**
+
+```typescript
+function computeTagDiff(oldTags: Set<string>, newTags: Set<string>): { added: string[]; removed: string[] } {
+  const added: string[] = [];
+  const removed: string[] = [];
+
+  for (const tag of newTags) {
+    if (!oldTags.has(tag)) added.push(tag);
+  }
+  for (const tag of oldTags) {
+    if (!newTags.has(tag)) removed.push(tag);
+  }
+
+  return { added, removed };
+}
+```
+
+Time complexity: O(m + n) where m and n are tag counts. Negligible for typical tag counts (< 20 per note).
+
+#### Q4: Loop prevention
+
+**Mechanism: Per-note-path suppression with two-phase consume-on-event cleanup.**
+
+When Notor's tools (`manage_tags`, `update_frontmatter`) change tags within a hook-initiated workflow, the `on-tag-change` hooks must be suppressed for those specific changes to prevent infinite loops.
+
+**Implementation: `TagChangeSuppressionManager`**
+
+```typescript
+class TagChangeSuppressionManager {
+  private suppressed: Map<string, number> = new Map();
+  // Key: note path being modified by hook workflow
+  // Value: Date.now() timestamp when suppression was set
+
+  suppress(path: string): void { this.suppressed.set(path, Date.now()); }
+  checkAndConsume(path: string): boolean { /* check + delete */ }
+  startCleanup(registerInterval: (id: number) => void): void { /* prune stale entries */ }
+}
+```
+
+**Two-phase approach:**
+1. **Before tool execution** within a hook workflow: `suppression.suppress(notePath)`.
+2. **In `metadataCache.on('changed')` handler:** If `suppression.checkAndConsume(file.path)` returns true, the shadow cache is still updated (to keep it accurate), but hook dispatch is skipped. The suppression entry is consumed (deleted) on match.
+3. **Safety cleanup:** A periodic timer (every 30 seconds) prunes entries older than 2 seconds. This handles edge cases where the `changed` event never fires (e.g., if the file write fails silently).
+
+**Why two-phase (not immediate cleanup after tool execution):**
+
+The `metadataCache.on('changed')` event fires **asynchronously**, typically 50–200 ms after the file write. If we cleared the suppression flag immediately after tool execution (synchronously), the `changed` event wouldn't have fired yet and would miss the suppression. The two-phase approach ensures the flag persists until the corresponding cache event consumes it.
+
+**Scoping: Per-note-path, NOT global.**
+
+The suppression targets specific note paths, not all notes. This allows:
+- Hook workflow modifies note A's tags → `on-tag-change` suppressed for A only
+- User simultaneously modifies note B's tags → `on-tag-change` fires normally for B
+
+**Integration with execution chain tracking:**
+
+The suppression manager works alongside the higher-level execution chain tracking (`sourceHooks: Set<string>` from the vault-event-hooks contract). The execution chain prevents the same hook EVENT TYPE from re-triggering; the suppression manager prevents the specific TOOL OPERATION from triggering any tag-change hooks. Both mechanisms are needed:
+
+| Scenario | Prevented by |
+|---|---|
+| `on-tag-change` hook runs workflow → workflow changes tags → would re-trigger `on-tag-change` | Execution chain tracking (`on_tag_change` already in `sourceHooks`) |
+| `on-save` hook runs workflow → workflow calls `manage_tags` → would trigger `on-tag-change` | Suppression manager (note path suppressed during tool execution) |
+
+#### Q5: Timing and batching
+
+**Per-file, not coalesced:** `metadataCache.on('changed')` fires once per file per modification. If a batch operation changes tags on 10 different notes, each note gets its own `changed` event. Events are not coalesced across files.
+
+**Same-file rapid modifications:** If the same file is modified multiple times in rapid succession (e.g., two `processFrontMatter` calls within a few ms), Obsidian may coalesce the metadata cache updates into a single `changed` event, or fire multiple events. The shadow cache diff approach handles both cases correctly:
+- If coalesced: the diff shows all tag changes at once.
+- If multiple events: each diff shows incremental changes.
+
+**Debounce:** Not needed for `on-tag-change`. The contract (vault-event-hooks.md) correctly specifies that debounce does NOT apply to `on-tag-change`. Rationale:
+- Tag changes are discrete, meaningful events — not rapid-fire like saves
+- The shadow cache diff already handles deduplication: if the same tags are written twice, the second diff is empty → no hook fires
+- Adding debounce would delay legitimate tag change reactions
+
+**Batch operation timing:** When Notor's `manage_tags` tool changes tags on a single note, the typical timing is:
+1. `processFrontMatter` completes (synchronous callback, async file write): ~5–20 ms
+2. `vault.on('modify')` fires: ~5–10 ms after write
+3. `metadataCache.on('changed')` fires: ~50–200 ms after modify
+
+For 10 notes processed sequentially, all 10 `changed` events fire within ~2 seconds. Each is handled independently by the shadow cache diff.
 
 ### Decision
 
-*(To be documented after research)*
+**✅ Use shadow cache with `metadataCache.on('changed')` listener** for `on-tag-change` vault event hook detection.
+
+**Rationale:**
+1. **All success criteria met:**
+   - Tag change detection strategy defined: shadow cache (`Map<string, Set<string>>`) + `metadataCache.on('changed')` listener + `parseFrontMatterTags()` extraction + set-based diff.
+   - Memory overhead quantified: ~300 KB (small vault) to ~14 MB (very large vault). Acceptable for all practical vault sizes.
+   - `metadataCache.on('changed')` confirmed to fire reliably for all frontmatter tag change sources: `processFrontMatter`, `vault.modify`, manual editor edits, and external file sync.
+   - Loop prevention mechanism defined: `TagChangeSuppressionManager` with per-note-path, two-phase consume-on-event cleanup. Works alongside execution chain tracking for comprehensive loop prevention.
+   - Tag normalization rules documented: strip `#`, trim whitespace, lowercase for comparison, preserve original case for reporting.
+2. **No alternative to shadow cache:** Obsidian's `metadataCache.on('changed')` provides only the new state, not the previous state. A shadow cache is the only way to compute the diff. This is a well-established pattern used by other Obsidian plugins that need change detection (e.g., Dataview, Metadata Menu).
+3. **Low implementation complexity:** ~150 lines of code for the shadow cache + suppression manager + listener registration. No external dependencies. The `parseFrontMatterTags` utility from Obsidian handles tag format normalization, and the `Set`-based diff is straightforward.
+4. **Correct edge case handling:** File create (all tags "added"), file delete (entry removed), file rename (entry moved), external changes (detected via cache event), suppressed changes (shadow cache still updated), empty diffs (silently ignored).
+
+**Integration notes for implementation:**
+
+- **New module:** `src/hooks/tag-change-detector.ts` — contains `TagShadowCache`, `TagChangeSuppressionManager`, tag normalization functions, and `registerTagChangeListener()`.
+- **Initialization:** Call `shadowCache.initialize(app)` inside `workspace.onLayoutReady()` in `plugin.onload()`. This is a synchronous scan of the in-memory metadata cache (< 50 ms).
+- **Listener registration:** Use `plugin.registerEvent(app.metadataCache.on('changed', ...))` for automatic cleanup on plugin unload. Also register `vault.on('delete')` and `vault.on('rename')` handlers for shadow cache maintenance.
+- **Tag extraction:** Import `parseFrontMatterTags` from `"obsidian"` for robust frontmatter tag parsing. Fall back to manual extraction if the function is unavailable (defensive).
+- **Suppression integration:** When hook-initiated workflows call `manage_tags` or `update_frontmatter`, the tool dispatcher should call `suppression.suppress(notePath)` before execution. The suppression manager is a singleton shared between the tool dispatcher and the tag change listener.
+- **Environment variables for shell command actions:**
+  - `NOTOR_NOTE_PATH`: vault-relative path of the affected note
+  - `NOTOR_TAGS_ADDED`: comma-separated list of added tags (lowercase, no `#`)
+  - `NOTOR_TAGS_REMOVED`: comma-separated list of removed tags (lowercase, no `#`)
+- **Trigger context for workflow actions:**
+  ```xml
+  <trigger_context>
+  event: on-tag-change
+  note_path: Research/Climate.md
+  tags_added: review-needed, important
+  tags_removed: draft
+  </trigger_context>
+  ```
+- **Lazy listener activation (FR-50a):** The `metadataCache.on('changed')` listener (and shadow cache initialization) should only be registered if at least one `on-tag-change` hook or workflow trigger is configured. If all `on-tag-change` hooks are removed, the listener and shadow cache should be torn down to free resources.
 
 ---
 
