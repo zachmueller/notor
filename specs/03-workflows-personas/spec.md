@@ -14,7 +14,7 @@ This specification covers Phase 4 of the roadmap:
 - **Per-persona auto-approve overrides**: persona-level auto-approve settings managed through a dedicated Settings UI sub-page that override global defaults when a persona is active.
 - **Workflow notes**: workflow definitions stored as Obsidian notes under `{notor_dir}/workflows/`, providing structured step-by-step instructions that guide how the AI approaches specific tasks, with frontmatter-driven triggers and optional persona assignment.
 - **`<include_note>` tag**: dynamic note content injection in workflow bodies, system prompts, and vault-level rule files. Each `<include_note ... />` tag is a self-closing XML-style tag that injects the contents of a single vault note; multiple tags may appear in the same document.
-- **Vault event hooks**: hooks tied to vault lifecycle events (`on-note-open`, `on-save`, `on-tag-change`, `on-schedule`) for triggering workflows or shell commands.
+- **Vault event hooks**: hooks tied to vault lifecycle events (`on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`, `on-schedule`) for triggering workflows or shell commands, with lazy per-hook-type listener activation to avoid unnecessary overhead when no hooks of a given type are configured.
 - **Hook configuration via workflow frontmatter**: extending Phase 3's settings-only hook system to support per-workflow hook overrides defined in workflow note frontmatter.
 
 ## User stories
@@ -53,10 +53,13 @@ This specification covers Phase 4 of the roadmap:
 ### Vault event hooks
 
 - As a user, I want a hook that fires when I open a note so that the AI can automatically summarize or check the note for stale content.
+- As a user, I want a hook that fires when a new note is created so that the AI can automatically scaffold it with templates, tags, or metadata.
 - As a user, I want a hook that fires when I save a note so that the AI can auto-tag, update indexes, or lint my content.
+- As a user, I want a hook that fires only when I manually save a note (not on auto-save) so that I can trigger deliberate AI actions without them firing constantly during editing.
 - As a user, I want a hook that fires when tags change on a note so that the AI can trigger categorization or organization workflows.
 - As a user, I want scheduled hooks that run on a cron schedule so that the AI can perform periodic vault maintenance like daily digests or weekly reviews.
 - As a power user, I want vault event hooks to be able to run a workflow so that complex automation chains can be triggered by vault events.
+- As a performance-conscious user, I want vault event listeners to only be active when I have hooks configured for that event type so that unused event types don't consume unnecessary processing cycles.
 
 ### Hook configuration via workflow frontmatter
 
@@ -151,7 +154,7 @@ This specification covers Phase 4 of the roadmap:
   | Property | Type | Required | Default | Description |
   |---|---|---|---|---|
   | `notor-workflow` | boolean | yes | — | Must be `true` to identify the note as a workflow |
-  | `notor-trigger` | string | yes | — | Trigger type: `manual`, `on-note-open`, `on-save`, `on-tag-change`, `scheduled` |
+  | `notor-trigger` | string | yes | — | Trigger type: `manual`, `on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`, `scheduled` |
   | `notor-schedule` | string | no | — | Cron expression (required if `notor-trigger` is `scheduled`) |
   | `notor-workflow-persona` | string | no | — | Persona name to automatically switch to when running this workflow |
 - The plugin discovers workflows by scanning `{notor_dir}/workflows/` for Markdown notes with `notor-workflow: true` in their frontmatter. Notes without this property are ignored.
@@ -181,16 +184,26 @@ This specification covers Phase 4 of the roadmap:
 
 ### FR-42: Manual workflow execution
 
-**Description:** Users can trigger workflows manually from the Obsidian command palette.
+**Description:** Users can trigger workflows manually from the Obsidian command palette or by attaching a workflow via a slash-command UX in the Notor chat input.
 
 **Acceptance criteria:**
 - Workflows with `notor-trigger: manual` (or any trigger type) are available for manual execution via the Obsidian command palette.
 - A single Obsidian command, "Notor: Run workflow", opens a quick-pick list of all discovered workflows for the user to select from.
 - When a workflow is selected, its body content (after stripping frontmatter) is assembled as the prompt — with any `<include_note>` tags resolved — and sent to the LLM.
 - The workflow execution appears as a new conversation in the main Notor chat panel, with full transparency: the assembled prompt is shown as the first user message, and all subsequent LLM responses, tool calls, and results are displayed normally.
+- When workflow contents are included within the user's message in the conversation, the `<workflow_instructions>` block is rendered in the chat panel as a collapsed-by-default `<details>` element (with a summary label such as "Workflow: {workflow-name}") so it does not dominate the chat view. The user can expand it to inspect the full workflow instructions if desired, but by default the workflow content is compactly hidden.
 - If the chat panel is not open, it is opened automatically when a workflow is triggered.
 - The user can interact with the workflow conversation normally — sending follow-up messages, approving/rejecting tool calls, stopping the response.
 - Workflows with non-manual triggers (e.g., `on-save`, `scheduled`) can still be run manually via this command; the trigger type does not restrict manual execution.
+- **Slash-command workflow attachment in chat input:** In addition to the command palette, users can attach a workflow directly from the Notor chat input box using a slash-command UX:
+  - When the user types `/` at the beginning of the chat input (or after a newline), an auto-complete popup appears listing all discovered workflows by name.
+  - As the user continues typing after `/`, the list filters in real time to match the typed text against workflow names (fuzzy or prefix match).
+  - Selecting a workflow from the auto-complete list inserts a visual "chip" (pill-shaped tag) in the chat input area representing the attached workflow (e.g., `[📋 daily-review]`). The chip displays the workflow name and is visually distinct from regular text.
+  - The user can type additional message text alongside the attached workflow chip. This supplementary text is sent after the `</workflow_instructions>` closing tag (see FR-44), allowing the user to provide extra context or instructions beyond the workflow's built-in steps.
+  - The user can remove an attached workflow chip by clicking its dismiss/close button or by backspacing into it.
+  - At most one workflow can be attached per message. Attempting to attach a second workflow replaces the first.
+  - When the message is sent with an attached workflow, the workflow is executed following the same flow as command-palette execution: the workflow prompt is assembled, `<include_note>` tags are resolved, persona switching occurs (if configured), and the conversation is created.
+  - The slash-command popup does not interfere with normal typing — it only activates when `/` is typed at the start of the input or after a newline, and it dismisses when the user presses Escape, clicks outside, or continues typing non-matching text.
 
 ### FR-43: Automatic persona switching via `notor-workflow-persona`
 
@@ -230,7 +243,9 @@ This specification covers Phase 4 of the roadmap:
 
 **Acceptance criteria:**
 - Workflows with `notor-trigger: on-note-open` execute when a note is opened in the Obsidian editor. The opened note's path is available to the workflow prompt via an environment variable or a built-in template variable.
-- Workflows with `notor-trigger: on-save` execute when a note is saved. The saved note's path is available to the workflow prompt.
+- Workflows with `notor-trigger: on-note-create` execute when a new note is created in the vault. The newly created note's path is available to the workflow prompt.
+- Workflows with `notor-trigger: on-save` execute when a note is saved (manual or auto-save). The saved note's path is available to the workflow prompt.
+- Workflows with `notor-trigger: on-manual-save` execute only when a note is saved manually by the user (not on auto-save). The saved note's path is available to the workflow prompt.
 - Workflows with `notor-trigger: on-tag-change` execute when tags are added to or removed from a note's frontmatter. The affected note's path and the changed tags are available to the workflow prompt.
 - Workflows with `notor-trigger: scheduled` execute on the cron schedule defined in `notor-schedule`. If `notor-schedule` is missing or invalid, the workflow is excluded from scheduled execution and a warning is logged.
 - Event-triggered workflow execution follows the same prompt assembly and conversation creation flow as manual execution (FR-42, FR-44).
@@ -304,6 +319,37 @@ This specification covers Phase 4 of the roadmap:
 - A debounce cooldown (configurable, default: 5 seconds) prevents the same hook from firing repeatedly for rapid successive saves on the same note (e.g., auto-save triggering multiple times in quick succession).
 - The `on-save` hook fires after the save operation is complete (the file has been written to disk), not before.
 
+### FR-48a: Vault event hooks — `on-note-create`
+
+**Description:** A hook that fires when a new note is created in the vault.
+
+**Acceptance criteria:**
+- The `on-note-create` hook is triggered when a new Markdown file is created in the vault (via Obsidian's UI, Notor's `write_note` tool, or any other mechanism that creates a file through the vault API).
+- The hook receives the newly created note's vault-relative file path as context.
+- Hook actions available: execute a shell command or run a workflow (FR-51).
+- When the action is a shell command, the note path is available as an environment variable (`NOTOR_NOTE_PATH`), alongside standard hook metadata variables.
+- Multiple hooks can be configured for the `on-note-create` event. They execute sequentially in configuration order.
+- Hook execution is non-blocking: failures surface a notice but do not prevent the note from being created or subsequent hooks from executing.
+- The hook fires after the file has been created in the vault, not before.
+- To prevent infinite loops, notes created by hook-initiated workflow executions (e.g., a `write_note` tool call within a hook's workflow) do not re-trigger `on-note-create` hooks.
+- The `on-note-create` hook is distinct from `on-note-open`: `on-note-create` fires exactly once when a note is first created, while `on-note-open` fires each time an existing note is opened. If a newly created note is also immediately opened, both hooks fire (create first, then open).
+
+### FR-48b: Vault event hooks — `on-manual-save`
+
+**Description:** A hook that fires only when a note is saved manually by the user, excluding auto-save events.
+
+**Acceptance criteria:**
+- The `on-manual-save` hook is triggered only when a note is saved via an explicit user action — specifically, the user pressing the save keyboard shortcut (e.g., Cmd+S / Ctrl+S) or using the "Save current file" command from the command palette. Auto-save events do not trigger this hook.
+- The hook receives the saved note's vault-relative file path as context.
+- Hook actions available: execute a shell command or run a workflow (FR-51).
+- When the action is a shell command, the note path is available as an environment variable (`NOTOR_NOTE_PATH`), alongside standard hook metadata variables.
+- Multiple hooks can be configured for the `on-manual-save` event. They execute sequentially in configuration order.
+- Hook execution is non-blocking: failures surface a notice but do not block the save operation or prevent subsequent hooks from executing.
+- The hook fires after the save operation is complete (the file has been written to disk), not before.
+- A debounce cooldown (configurable, default: 5 seconds) prevents the same hook from firing repeatedly if the user rapidly presses save multiple times on the same note.
+- **Distinction from `on-save`:** `on-save` fires on every save (manual and auto-save), while `on-manual-save` fires only on deliberate user-initiated saves. Users who want hooks to respond to all saves should use `on-save`; users who want hooks only for intentional save actions should use `on-manual-save`. Both hook types can be configured independently — they are not mutually exclusive.
+- **Detection mechanism:** The plugin distinguishes manual saves by intercepting the Obsidian `editor:save-file` command (or equivalent hotkey-triggered save action). Saves that occur through Obsidian's auto-save mechanism (periodic or on-focus-loss) are excluded.
+
 ### FR-49: Vault event hooks — `on-tag-change`
 
 **Description:** A hook that fires when tags are added to or removed from a note.
@@ -332,6 +378,23 @@ This specification covers Phase 4 of the roadmap:
 - Invalid cron expressions are caught at configuration time; the hook is saved but marked as inactive with a validation error displayed in the settings UI.
 - Multiple hooks can use the same cron expression. They execute sequentially in configuration order when the schedule fires.
 - Hook execution is non-blocking: failures surface a notice but do not prevent subsequent scheduled hooks from executing.
+
+### FR-50a: Lazy per-hook-type vault event listener activation
+
+**Description:** Vault event listeners are only registered for event types that have at least one configured hook or workflow-trigger, ensuring no unnecessary processing overhead for unused event types.
+
+**Acceptance criteria:**
+- On plugin load (and whenever hook configuration changes in Settings), the plugin evaluates which vault event hook types have at least one configured hook or at least one discovered workflow with a matching `notor-trigger` value.
+- For each vault event type (`on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`, `on-schedule`), the underlying Obsidian event listener (e.g., `app.workspace.on('file-open', ...)`, `app.vault.on('create', ...)`, `app.vault.on('modify', ...)`) is only registered if at least one hook or workflow trigger of that type is configured. If no hooks or workflow triggers exist for a given event type, the corresponding listener is not registered.
+- When a hook is added for an event type that previously had no hooks (e.g., the user adds the first `on-note-create` hook in Settings), the plugin dynamically registers the corresponding Obsidian event listener without requiring a plugin reload.
+- When the last hook for a given event type is removed (e.g., the user deletes the only `on-save` hook), the plugin dynamically unregisters the corresponding Obsidian event listener to free resources.
+- For `on-schedule` hooks, the cron scheduler timer is only started if at least one `on-schedule` hook is configured. If all scheduled hooks are removed, the timer is stopped.
+- Listener registration state is re-evaluated when:
+  - Plugin settings are saved (hook configuration changes).
+  - Workflow discovery completes (new workflows may introduce event-triggered workflows).
+  - The plugin is reloaded.
+- This optimization is transparent to the user — there is no UI indication of listener state. The behavior is purely a performance optimization to avoid unnecessary event processing cycles.
+- Listeners registered via this mechanism use Obsidian's `this.registerEvent()` / `this.register()` helpers to ensure proper cleanup on plugin unload.
 
 ### FR-51: "Run a workflow" hook action
 
@@ -372,23 +435,27 @@ This specification covers Phase 4 of the roadmap:
 - Workflow-scoped hooks share the same global hook timeout setting.
 - When the workflow execution ends (or is stopped), the hook configuration reverts to global settings.
 - Invalid hook definitions in workflow frontmatter (e.g., unsupported action type, missing required fields) are logged as warnings. Invalid individual hooks are skipped; valid hooks in the same configuration still apply.
-- Vault event hooks (`on-note-open`, `on-save`, `on-tag-change`, `on-schedule`) are not configurable via workflow frontmatter — only LLM lifecycle hooks are supported in this context.
+- Vault event hooks (`on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`, `on-schedule`) are not configurable via workflow frontmatter — only LLM lifecycle hooks are supported in this context.
 
 ### FR-53: Workflow activity indicator
 
-**Description:** A UI element in the chat panel that signals when background workflows are running and provides quick access to their conversations.
+**Description:** A persistent UI element in the chat panel that always shows the most recent workflow executions and signals when background workflows are actively running.
 
 **Acceptance criteria:**
-- A workflow activity indicator is displayed in the Notor chat panel header area (e.g., an icon or badge) whenever one or more event-triggered workflows are executing in the background.
+- A workflow activity indicator is always displayed in the Notor chat panel header area (e.g., an icon or badge). The indicator is always visible regardless of whether workflows are currently running — it serves as both an activity signal and a quick-access point for recent workflow history.
 - The indicator is visible but unobtrusive — it does not interrupt the user's current conversation or take focus.
-- When workflows are actively running, the indicator shows an animated or highlighted state (e.g., a spinning icon or pulsing badge) to signal activity.
+- When workflows are actively running, the indicator shows an animated or highlighted state (e.g., a spinning icon or pulsing badge) to signal activity. When no workflows are actively running, the indicator is displayed in a static/inactive state (not animated).
+- The indicator always shows the most recently completed (or currently active) **N** workflow executions, where **N** is a configurable integer in **Settings → Notor** (default: 5). This means:
+  - If no workflows are currently running, the indicator dropdown shows the N most recently completed workflows.
+  - If workflows are currently running, they appear at the top of the list, with the remaining slots filled by the most recently completed workflows (up to N total entries).
+  - The list is ordered by recency: currently running workflows first (sorted by start time, newest first), then completed workflows (sorted by completion time, newest first).
 - Clicking the indicator opens a dropdown or popover list showing:
   - **Currently running workflows**: workflow name, trigger source (e.g., "on-save: Research/Climate.md"), and a brief status (e.g., "Running…", "Waiting for approval").
-  - **Recently completed workflows**: workflow name, trigger source, completion status (success or error), and timestamp. Recently completed workflows remain in the list for a configurable duration (default: 5 minutes) or until the user dismisses them.
+  - **Most recently completed workflows**: workflow name, trigger source, completion status (success or error), and timestamp.
 - Clicking on a specific workflow entry in the list opens that workflow's conversation in the main Notor chat panel. The user can then review the full conversation, send follow-up messages, approve pending tool calls, or stop the workflow.
-- When no workflows are running and no recent completions remain, the indicator is hidden or displayed in an inactive state (not pulsing/animated).
-- The indicator reflects the count of active background workflows (e.g., a numeric badge showing "2" when two workflows are running).
+- The indicator reflects the count of active background workflows when any are running (e.g., a numeric badge showing "2" when two workflows are running). When no workflows are running, the count badge is hidden but the indicator itself remains visible.
 - Manually triggered workflows (FR-42) that open directly in the chat panel do not appear in the activity indicator — it is exclusively for background event-triggered workflows.
+- The configurable N value is stored in Notor's plugin settings data. Changes take effect immediately without a plugin reload.
 
 ## Non-functional requirements
 
@@ -400,7 +467,8 @@ This specification covers Phase 4 of the roadmap:
 - Persona discovery (scanning `{notor_dir}/personas/`) completes in under 200 ms for up to 50 persona directories. The scan is triggered only on settings panel open and persona picker activation, not on every message.
 - Workflow discovery (scanning `{notor_dir}/workflows/`) completes in under 500 ms for up to 200 workflow notes. The scan reads only frontmatter (not full note bodies) during discovery.
 - `<include_note>` tag resolution for a single workflow prompt completes in under 200 ms for up to 20 tags, each referencing notes of typical size (under 50 KB).
-- Vault event hooks (`on-note-open`, `on-save`, `on-tag-change`) add no perceptible delay to the vault operation that triggered them. Hook execution is non-blocking — the vault operation completes before hooks run.
+- Vault event hooks (`on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`) add no perceptible delay to the vault operation that triggered them. Hook execution is non-blocking — the vault operation completes before hooks run.
+- Lazy per-hook-type listener activation (FR-50a) ensures that no Obsidian event listeners are registered for vault event types with zero configured hooks or workflow triggers, eliminating unnecessary processing cycles for unused event types.
 - Cron-scheduled hooks are evaluated via a lightweight in-process timer, not by spawning external processes. The timer check adds negligible CPU overhead.
 - Debounce logic for `on-note-open` and `on-save` events prevents unnecessary repeated execution without consuming significant memory (debounce state is per-note-path, pruned after the cooldown expires).
 
@@ -559,7 +627,7 @@ This specification covers Phase 4 of the roadmap:
 2. **Personas customize the approval experience** — per-persona auto-approve overrides allow power users to streamline trusted workflows while maintaining strict approval for sensitive operations, with fallback to global defaults for unconfigured tools.
 3. **Reusable instruction sets reduce repetitive work** — workflow notes stored in the vault provide structured step-by-step guidance that the AI follows methodically. Workflows can be run manually from the command palette, producing a full transparent conversation in the chat panel with tool calls, results, and streaming responses. Workflow content is injected into the conversation context via `<workflow_instructions>` wrapping, clearly signaling to the AI that the content is authoritative guidance rather than a casual request.
 4. **Workflows compose dynamic instructions from vault content** — `<include_note>` tags resolve at execution time to inject note contents (full or section-level) into workflow instructions, system prompts, and rule files without manual copy-paste; multiple tags may appear in a single document and each resolves independently.
-5. **Vault events drive automated AI workflows** — hooks tied to note open, save, tag change, and cron schedule events trigger shell commands or named workflows reliably, with debounce preventing redundant executions.
+5. **Vault events drive automated AI workflows** — hooks tied to note open, note create, save, manual save, tag change, and cron schedule events trigger shell commands or named workflows reliably, with debounce preventing redundant executions and lazy per-hook-type listener activation ensuring zero overhead for unused event types.
 6. **Workflows can customize their hook behavior** — per-workflow LLM lifecycle hook overrides via frontmatter allow each workflow to define its own pre-send, on-tool-call, on-tool-result, and after-completion actions without affecting global configuration.
 7. **Phase 4 features are safe and resilient** — infinite loop detection prevents runaway hook-to-workflow chains, malformed personas and workflows are gracefully excluded without crashing the plugin, and all safety mechanisms (Plan/Act mode, checkpoints, auto-approve) apply equally to manually and automatically triggered workflows.
 
@@ -592,12 +660,13 @@ This specification covers Phase 4 of the roadmap:
 - Multiple tags may appear in the same document; each is resolved independently.
 
 ### VaultEventHook
-- A configured callback tied to a vault lifecycle event: `on-note-open`, `on-save`, `on-tag-change`, or `on-schedule`.
+- A configured callback tied to a vault lifecycle event: `on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`, or `on-schedule`.
 - Configured in **Settings → Notor** under the vault event hooks section, grouped by event type.
 - Each hook has an action type: "execute shell command" (from Phase 3) or "run a workflow" (Phase 4).
 - For note-related events, context (note path, changed tags) is passed via environment variables.
 - Shares the global hook timeout with LLM interaction hooks.
-- Debounce logic prevents rapid re-triggering for `on-note-open` and `on-save` events.
+- Debounce logic prevents rapid re-triggering for `on-note-open`, `on-save`, and `on-manual-save` events.
+- Vault event listeners are lazily activated per hook type (FR-50a): Obsidian event listeners are only registered for event types that have at least one configured hook or workflow trigger, and are dynamically added/removed as hook configuration changes.
 
 ### WorkflowScopedHook
 - An LLM lifecycle hook defined in a workflow note's `notor-hooks` frontmatter property.
@@ -613,7 +682,8 @@ This specification covers Phase 4 of the roadmap:
 - Wikilink resolution for `<include_note>` uses Obsidian's `metadataCache.getFirstLinkpathDest()` API. This is the same mechanism Obsidian uses internally for all wikilinks, ensuring consistent note-finding behaviour (fuzzy by note name, with optional subdirectory disambiguation). Obsidian's built-in link-updater treats wikilinks inside the `path` attribute as internal links and updates them automatically when the referenced note is renamed or moved.
 - Cron expression parsing is handled by a lightweight JavaScript library bundled into the plugin (e.g., `cron-parser` or equivalent). No external cron daemon or OS-level scheduling is required.
 - The Phase 3 hook infrastructure (shell command execution, timeout handling, environment variable injection, settings UI pattern) is in place and can be extended for vault event hooks and the "run a workflow" action type without architectural changes.
-- Vault event detection uses Obsidian's built-in event system (`app.vault.on('modify', ...)`, `app.workspace.on('file-open', ...)`, `app.metadataCache.on('changed', ...)`). Tag change detection relies on comparing frontmatter `tags` before and after a metadata cache update.
+- Vault event detection uses Obsidian's built-in event system (`app.vault.on('modify', ...)`, `app.vault.on('create', ...)`, `app.workspace.on('file-open', ...)`, `app.metadataCache.on('changed', ...)`). Note creation detection uses `app.vault.on('create', ...)`. Tag change detection relies on comparing frontmatter `tags` before and after a metadata cache update.
+- Manual save detection for `on-manual-save` hooks relies on intercepting Obsidian's `editor:save-file` command (triggered by Cmd+S / Ctrl+S or the command palette "Save current file" action). The plugin sets a short-lived flag when this command is intercepted, then checks the flag in the subsequent `modify` event handler to distinguish manual saves from auto-saves. This approach assumes Obsidian's command interception API (`app.commands`) is stable and that the `editor:save-file` command ID does not change across Obsidian versions.
 - Workflow prompts that reference the triggering note's path (for event-triggered workflows) use a simple text substitution mechanism or environment variable; no full template engine is assumed.
 - Only one instance of a given workflow can execute at a time. If a workflow is already running and the same trigger fires again (after debounce), the second invocation is queued or skipped.
 
