@@ -182,16 +182,16 @@ C-004 + C-005 + C-006 ──▶ C-007 (Test vault fixtures & manual validation)
 **Dependencies:** C-004, C-005, C-006
 
 **Acceptance Criteria:**
-- [ ] **E2E test script created:** `e2e/scripts/workflow-discovery-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → structured log verification → screenshots → results JSON)
-- [ ] `daily/review.md`: `notor-workflow: true`, `notor-trigger: manual`, `notor-workflow-persona: "organizer"`, body with step-by-step instructions — structured logs confirm discovered with trigger `"manual"`, persona `"organizer"`, display_name `"daily/review"` (E2E)
-- [ ] `auto-tag.md`: `notor-workflow: true`, `notor-trigger: on-save`, no persona — structured logs confirm discovered with trigger `"on-save"`, persona `null`, display_name `"auto-tag"` (E2E)
-- [ ] `scheduled/weekly-review.md`: `notor-workflow: true`, `notor-trigger: scheduled`, `notor-schedule: "0 9 * * 1"` — structured logs confirm discovered with trigger `"scheduled"`, schedule `"0 9 * * 1"`, display_name `"scheduled/weekly-review"` (E2E)
-- [ ] `broken-no-trigger.md`: `notor-workflow: true`, no `notor-trigger` — structured logs confirm warn-level entry mentioning missing trigger; excluded from discovery count (E2E)
-- [ ] `not-a-workflow.md`: regular note without `notor-workflow` — no discovery log entries for this file (E2E)
-- [ ] `hooks-test.md`: `notor-workflow: true`, `notor-trigger: manual`, `notor-hooks` with `pre-send` and `after-completion` entries — structured logs confirm discovered with hooks parsed (E2E)
-- [ ] Discovery structured logs confirm exactly 4 valid workflows discovered, excluding `broken-no-trigger` and ignoring `not-a-workflow` (E2E)
-- [ ] Subdirectory organization preserved in `file_path` and `display_name` per structured log data fields (E2E)
-- [ ] No error-level structured logs from WorkflowDiscovery source during test execution (E2E)
+- [x] **E2E test script created:** `e2e/scripts/workflow-discovery-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → structured log verification → screenshots → results JSON)
+- [x] `daily/review.md`: `notor-workflow: true`, `notor-trigger: manual`, `notor-workflow-persona: "organizer"`, body with step-by-step instructions — structured logs confirm discovered with trigger `"manual"`, persona `"organizer"`, display_name `"daily/review"` (E2E)
+- [x] `auto-tag.md`: `notor-workflow: true`, `notor-trigger: on-save`, no persona — structured logs confirm discovered with trigger `"on-save"`, persona `null`, display_name `"auto-tag"` (E2E)
+- [x] `scheduled/weekly-review.md`: `notor-workflow: true`, `notor-trigger: scheduled`, `notor-schedule: "0 9 * * 1"` — structured logs confirm discovered with trigger `"scheduled"`, schedule `"0 9 * * 1"`, display_name `"scheduled/weekly-review"` (E2E)
+- [x] `broken-no-trigger.md`: `notor-workflow: true`, no `notor-trigger` — structured logs confirm warn-level entry mentioning missing trigger; excluded from discovery count (E2E)
+- [x] `not-a-workflow.md`: regular note without `notor-workflow` — no discovery log entries for this file (E2E)
+- [x] `hooks-test.md`: `notor-workflow: true`, `notor-trigger: manual`, `notor-hooks` with `pre-send` and `after-completion` entries — structured logs confirm discovered with hooks parsed (E2E)
+- [x] Discovery structured logs confirm exactly 4 valid workflows discovered, excluding `broken-no-trigger` and ignoring `not-a-workflow` (E2E)
+- [x] Subdirectory organization preserved in `file_path` and `display_name` per structured log data fields (E2E)
+- [x] No error-level structured logs from WorkflowDiscovery source during test execution (E2E)
 
 ---
 
