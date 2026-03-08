@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md) — FR-52
 **Data Model:** [specs/03-workflows-personas/data-model.md](../data-model.md) — WorkflowScopedHook, WorkflowHookConfig
-**Status:** In Progress — Phase 0, Phase 1, and Phase 2 complete
+**Status:** In Progress — Phase 0, Phase 1, Phase 2, and Phase 3 complete
 
 ## Task Summary
 
