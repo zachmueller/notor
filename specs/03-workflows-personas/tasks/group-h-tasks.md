@@ -233,38 +233,40 @@ The tracker does NOT duplicate execution state — it subscribes to state change
 - [ ] The dropdown immediately reflects the new N value — if N is reduced, excess entries are trimmed from the visible list; if N is increased, more history is available (up to what the concurrency manager retains)
 - [ ] Input validation: minimum 1, maximum 50 (reasonable bounds). Non-numeric input is rejected or clamped.
 
-### H-008: End-to-end validation & cleanup
+### H-008: Playwright E2E validation & cleanup
 
-**Description:** Validate the complete workflow activity indicator system end-to-end. Verify indicator visibility, badge counts, animation states, dropdown content, conversation navigation, and settings integration. Fix any integration issues discovered.
+**Description:** Validate the complete workflow activity indicator system end-to-end via a Playwright E2E test script (`e2e/scripts/activity-indicator-test.ts`). The test launches Obsidian via CDP, triggers background workflow executions to populate the activity indicator, and verifies indicator visibility, badge counts, animation states, dropdown content, conversation navigation, and settings integration via DOM assertions and structured logs. Fix any integration issues discovered.
 
 **Files:**
+- `e2e/scripts/activity-indicator-test.ts` — New Playwright E2E test script
 - All Group H files — integration testing and bug fixes
 - Existing Group E and F files — verify no regressions
 
 **Dependencies:** H-007
 
 **Acceptance Criteria:**
-- [ ] **Indicator always visible:** The activity indicator icon is rendered in the chat panel header at all times — when no workflows have run, when workflows are active, and when workflows have completed. It never disappears.
-- [ ] **Badge count — zero active:** When no background workflows are running, the numeric badge is hidden (not "0").
-- [ ] **Badge count — active workflows:** When 2 background workflows are running, the badge shows "2". When one completes, the badge updates to "1". When both complete, the badge hides.
-- [ ] **Animation — idle state:** When no workflows are active, the indicator icon is static with no animation classes.
-- [ ] **Animation — running state:** When at least one workflow is running (but none waiting for approval), the indicator has the `is-active` class and shows a subtle animation.
-- [ ] **Animation — waiting for approval:** When at least one workflow has status `"waiting_approval"`, the indicator has the `is-waiting-approval` class with a more prominent visual treatment. This is the primary signal to the user that they need to act.
-- [ ] **Dropdown — empty state:** When no workflows have executed since plugin load, clicking the indicator opens the dropdown with "No recent workflow activity" message.
-- [ ] **Dropdown — active entries:** Running workflows appear at the top with "Running…" status badge and relative timestamp. Queued workflows show "Queued" status.
-- [ ] **Dropdown — completed entries:** Completed workflows show checkmark/success badge, trigger source, and completion timestamp. Errored workflows show error badge with error context.
-- [ ] **Dropdown — entry ordering:** Active workflows (running/waiting) sorted by start time (newest first), then completed (by completion time, newest first). Total entries bounded by configurable N.
-- [ ] **Dropdown — live update:** If a workflow completes while the dropdown is open, the entry updates in place (status badge changes, timestamp updates) without requiring the user to close and reopen.
-- [ ] **Conversation navigation — running workflow:** Clicking a running workflow entry opens its conversation in the chat panel. The user can see streaming LLM output and pending tool calls.
-- [ ] **Conversation navigation — waiting for approval:** Clicking a "Waiting for approval" entry opens the conversation with the pending tool call approval UI visible. The user can approve/reject, and the workflow resumes.
-- [ ] **Conversation navigation — completed workflow:** Clicking a completed workflow entry opens the full conversation history for review.
-- [ ] **Settings — configurable N:** Changing `workflow_activity_indicator_count` in Settings from 5 to 3 immediately limits the dropdown to 3 entries. Changing to 10 shows up to 10 entries.
-- [ ] **Manual workflows excluded:** Workflows triggered via command palette or slash-command do NOT appear in the activity indicator. Only background (event-triggered) workflows are shown per FR-53.
-- [ ] **Plugin unload/reload:** All indicator DOM elements are cleaned up on plugin disable. No dangling event listeners. On re-enable, indicator renders fresh with no stale state.
-- [ ] **Reduced motion:** When `prefers-reduced-motion: reduce` is active, animations are disabled or simplified.
+- [ ] **E2E test script created:** `e2e/scripts/activity-indicator-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → DOM assertions → structured log verification → screenshots → results JSON)
+- [ ] **Indicator always visible (E2E):** DOM assertion confirms `.notor-workflow-activity-indicator` element present in chat panel header at all times — when no workflows have run, when workflows are active, and when workflows have completed.
+- [ ] **Badge count — zero active (E2E):** DOM assertion confirms `.notor-workflow-activity-badge` has `is-hidden` class or `display: none` when no background workflows are running.
+- [ ] **Badge count — active workflows (E2E):** Test triggers 2 background workflows → DOM assertion confirms badge text is "2"; when one completes (verified via structured logs) → badge updates to "1"; when both complete → badge hides.
+- [ ] **Animation — idle state (E2E):** DOM assertion confirms `.notor-workflow-activity-indicator` does NOT have `is-active` or `is-waiting-approval` classes when no workflows are active.
+- [ ] **Animation — running state (E2E):** Test triggers background workflow → DOM assertion confirms `is-active` class applied to indicator element.
+- [ ] **Animation — waiting for approval (E2E):** Test triggers background workflow that requires tool approval → structured logs confirm `waiting_approval` status → DOM assertion confirms `is-waiting-approval` class applied.
+- [ ] **Dropdown — empty state (E2E):** Test clicks indicator when no workflows have run → DOM assertion confirms dropdown contains "No recent workflow activity" message.
+- [ ] **Dropdown — active entries (E2E):** Test clicks indicator while workflows running → DOM assertion confirms `.notor-workflow-activity-entry` elements with "Running…" status badge and workflow name.
+- [ ] **Dropdown — completed entries (E2E):** After workflow completes → test clicks indicator → DOM assertion confirms completed entry with checkmark/success badge and trigger source text.
+- [ ] **Dropdown — entry ordering (E2E):** DOM assertion confirms active entries appear before completed entries; entries within each group sorted by recency.
+- [ ] **Dropdown — live update (E2E):** Test opens dropdown while workflow running → waits for completion (structured logs confirm) → DOM assertion confirms entry status updated in-place without reopening dropdown.
+- [ ] **Conversation navigation — running workflow (E2E):** Test clicks running workflow entry in dropdown → DOM assertion confirms chat panel switches to that conversation (conversation messages visible).
+- [ ] **Conversation navigation — waiting for approval (E2E):** Test clicks "Waiting for approval" entry → DOM assertion confirms chat panel shows pending tool call approval UI.
+- [ ] **Conversation navigation — completed workflow (E2E):** Test clicks completed workflow entry → DOM assertion confirms full conversation history loaded in chat panel.
+- [ ] **Settings — configurable N (E2E):** Test changes `workflow_activity_indicator_count` from 5 to 3 in Settings DOM → reopens dropdown → DOM assertion confirms at most 3 entries shown.
+- [ ] **Manual workflows excluded (E2E):** Test triggers workflow via command palette → DOM assertion confirms indicator badge does NOT increment; structured logs confirm manual execution NOT tracked by WorkflowConcurrencyManager.
+- [ ] **Plugin unload/reload (E2E):** Test disables/enables plugin → DOM assertion confirms indicator re-renders fresh; no error-level structured logs; no orphaned DOM elements.
+- [ ] **Reduced motion (E2E):** *(Note: `prefers-reduced-motion` testing may require Playwright media emulation — include if feasible, otherwise mark as manual-only)*
 - [ ] `npm run build` compiles without errors
-- [ ] Plugin loads and unloads without errors in Obsidian console
-- [ ] No visual regressions in the chat panel header layout
+- [ ] No error-level structured logs from WorkflowActivityTracker or WorkflowActivityIndicator sources during test execution
+- [ ] No visual regressions in the chat panel header layout (screenshot comparison)
 
 ---
 
@@ -280,6 +282,7 @@ The tracker does NOT duplicate execution state — it subscribes to state change
 | `src/settings.ts` | Modified | H-007 |
 | `src/main.ts` | Modified | H-006 |
 | `styles.css` | Modified | H-002, H-003, H-004 |
+| `e2e/scripts/activity-indicator-test.ts` | **New** | H-008 |
 
 ## Parallel Execution Opportunities
 

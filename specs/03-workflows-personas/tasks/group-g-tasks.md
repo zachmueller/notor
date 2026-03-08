@@ -220,35 +220,37 @@ notor-hooks:
 
 ## Phase 3: Validation
 
-### G-008: End-to-end validation & cleanup
+### G-008: Playwright E2E validation & cleanup
 
-**Description:** Validate the complete workflow frontmatter hooks system end-to-end. Verify parsing, activation, override behavior during execution, revert on all exit paths, and interaction with both foreground and background workflows. Fix any integration issues discovered.
+**Description:** Validate the complete workflow frontmatter hooks system end-to-end via a Playwright E2E test script (`e2e/scripts/workflow-hooks-test.ts`). The test launches Obsidian via CDP, sets up test workflows with various `notor-hooks` configurations, triggers workflow executions, and verifies parsing, override activation, hook dispatch routing, revert on all exit paths, and interaction with both foreground and background workflows via structured logs and DOM assertions. Fix any integration issues discovered.
 
 **Files:**
+- `e2e/scripts/workflow-hooks-test.ts` — New Playwright E2E test script
 - All Group G files — integration testing and bug fixes
 - Existing Group E and F files — verify no regressions
 
 **Dependencies:** G-007
 
 **Acceptance Criteria:**
-- [ ] **Parsing valid `notor-hooks`:** A workflow with well-formed `notor-hooks` YAML has its `WorkflowHookConfig` correctly populated during discovery. Both `execute_command` and `run_workflow` action types are parsed correctly.
-- [ ] **Parsing invalid hooks:** A workflow with partially invalid `notor-hooks` (e.g., one valid entry and one missing `command`) logs warnings for the invalid entry and still populates the valid entry. The workflow is still discoverable and executable.
-- [ ] **Parsing unsupported event names:** A workflow with vault event names in `notor-hooks` (e.g., `on-note-open`) logs a warning that only LLM lifecycle hooks are supported; those entries are skipped.
-- [ ] **Override activation — manual workflow:** Running a workflow with `notor-hooks` via command palette activates the override; the scoped `pre-send` hook fires instead of the global one. Verified by configuring a global `pre-send` hook (e.g., `echo "global"`) and a workflow-scoped `pre-send` hook (e.g., `echo "workflow"`) and observing which stdout appears in the assembled message.
-- [ ] **Non-overridden events use global hooks:** A workflow that overrides only `after-completion` still fires global `pre-send`, `on-tool-call`, and `on-tool-result` hooks during its execution.
-- [ ] **Revert on success:** After a workflow with `notor-hooks` completes successfully, subsequent conversations use global hooks (override fully cleared).
-- [ ] **Revert on failure:** If the LLM errors during a workflow with `notor-hooks`, the override is reverted and global hooks restored.
-- [ ] **Revert on user stop:** If the user stops a workflow mid-execution, the override is reverted.
-- [ ] **Background workflow override isolation:** Two concurrent background workflows with different `notor-hooks` configurations maintain independent overrides — each fires its own scoped hooks for its own conversation without cross-contamination.
-- [ ] **Background workflow does not affect foreground:** A background workflow's hook override does not interfere with the user's active foreground conversation hooks.
-- [ ] **Workflow without `notor-hooks`:** Executing a workflow that has no `notor-hooks` frontmatter uses global hooks throughout — zero behavioral change from pre-Group-G behavior.
-- [ ] **`run_workflow` action in scoped hooks:** A workflow-scoped `after-completion` hook with `action: run_workflow` correctly triggers the specified workflow on completion. The triggered workflow runs via the standard workflow execution pipeline (F-019/F-021).
-- [ ] **Timeout behavior:** Workflow-scoped `execute_command` hooks respect `settings.hook_timeout`. Workflow-scoped `run_workflow` hooks are NOT subject to timeout (per FR-51).
-- [ ] **Edge case — empty `notor-hooks` mapping:** A workflow with `notor-hooks: {}` (empty mapping) is treated as having no hook overrides (`workflow.hooks` is `null`). Global hooks apply.
-- [ ] **Edge case — `notor-hooks` is not a mapping:** A workflow with `notor-hooks: "invalid"` (string instead of mapping) logs a warning and is treated as having no hook overrides.
+- [ ] **E2E test script created:** `e2e/scripts/workflow-hooks-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → structured log verification → screenshots → results JSON)
+- [ ] **Parsing valid `notor-hooks` (E2E):** Structured logs from WorkflowDiscovery confirm `WorkflowHookConfig` correctly populated during discovery for a test workflow with well-formed `notor-hooks` YAML. Both `execute_command` and `run_workflow` action types parsed correctly per log data fields.
+- [ ] **Parsing invalid hooks (E2E):** Structured logs confirm warn-level entries for invalid hook entries (missing `command`); valid entries in same config still populated. Workflow remains discoverable per discovery logs.
+- [ ] **Parsing unsupported event names (E2E):** Structured logs confirm warn-level entry for vault event names in `notor-hooks` (e.g., `on-note-open`); those entries skipped; valid LLM lifecycle entries still apply.
+- [ ] **Override activation — manual workflow (E2E):** Test triggers workflow with `notor-hooks` via command palette → structured logs from HookDispatch confirm scoped `pre-send` hook fired instead of global one. Global hook stdout absent; workflow-scoped hook stdout present in structured log data.
+- [ ] **Non-overridden events use global hooks (E2E):** Test triggers workflow that overrides only `after-completion` → structured logs confirm global `pre-send`, `on-tool-call`, `on-tool-result` hooks still fire during execution.
+- [ ] **Revert on success (E2E):** After workflow completes → test sends a normal message in a new conversation → structured logs confirm global hooks fire (override cleared).
+- [ ] **Revert on failure (E2E):** Test triggers workflow that causes LLM error → structured logs confirm override reverted; subsequent conversation uses global hooks.
+- [ ] **Revert on user stop (E2E):** Test stops workflow mid-execution → structured logs confirm override reverted via `deactivate()` call.
+- [ ] **Background workflow override isolation (E2E):** Test triggers two concurrent background workflows with different `notor-hooks` → structured logs confirm each conversation fires its own scoped hooks independently (conversation IDs differ in log entries).
+- [ ] **Background workflow does not affect foreground (E2E):** Test triggers background workflow with hook override → sends message in foreground → structured logs confirm foreground conversation uses global hooks.
+- [ ] **Workflow without `notor-hooks` (E2E):** Test triggers workflow without `notor-hooks` → structured logs confirm global hooks fire throughout — zero WorkflowHookOverride activation logs.
+- [ ] **`run_workflow` action in scoped hooks (E2E):** Test triggers workflow with `after-completion` scoped hook using `action: run_workflow` → structured logs confirm triggered workflow executed via standard pipeline on completion.
+- [ ] **Timeout behavior (E2E):** Structured logs confirm `execute_command` scoped hooks respect `hook_timeout`; `run_workflow` scoped hooks show no timeout enforcement.
+- [ ] **Edge case — empty `notor-hooks` mapping (E2E):** Test workflow with `notor-hooks: {}` → structured logs confirm no override activated; global hooks apply.
+- [ ] **Edge case — `notor-hooks` is not a mapping (E2E):** Test workflow with `notor-hooks: "invalid"` → structured logs confirm warn-level entry; no override activated.
 - [ ] `npm run build` compiles without errors
-- [ ] Plugin loads and unloads without errors in Obsidian console
-- [ ] No leaked override state after plugin disable/enable cycle
+- [ ] No error-level structured logs from WorkflowHookOverride or HookDispatch sources during normal test flows
+- [ ] No leaked override state after plugin disable/enable cycle (verified via structured logs on re-enable)
 
 ---
 
@@ -265,6 +267,7 @@ notor-hooks:
 | `src/workflows/workflow-concurrency.ts` | Modified | G-005 |
 | `src/chat/dispatcher.ts` | Modified | G-006 |
 | `src/main.ts` | Modified | G-005 (destroy on unload) |
+| `e2e/scripts/workflow-hooks-test.ts` | **New** | G-008 |
 
 ## Parallel Execution Opportunities
 

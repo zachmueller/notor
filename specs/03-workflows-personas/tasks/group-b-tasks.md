@@ -187,27 +187,29 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 - [ ] Integration does not break existing non-persona auto-approve flows — when no persona is active, behavior is identical to Phase 3
 - [ ] Settings changes take effect on the next message dispatch without plugin reload
 
-### B-008: Manual validation and final cleanup
+### B-008: Playwright E2E validation and final cleanup
 
-**Description:** End-to-end manual validation of the complete per-persona auto-approve system following the "Persona with auto-approve overrides" user scenario from spec.md, plus edge case verification. Clean up any remaining issues.
+**Description:** End-to-end Playwright-based validation of the complete per-persona auto-approve system following the "Persona with auto-approve overrides" user scenario from spec.md, plus edge case verification. Create a dedicated E2E test script (`e2e/scripts/auto-approve-test.ts`) that launches Obsidian via CDP, configures persona overrides in the Settings UI, activates personas in the chat panel, triggers tool dispatches, and verifies correct auto-approve resolution via structured logs and DOM assertions. Clean up any remaining issues.
 
 **Files:**
+- `e2e/scripts/auto-approve-test.ts` — New Playwright E2E test script
 - All files from B-001 through B-007 (review and polish)
 
 **Dependencies:** B-007
 
 **Acceptance Criteria:**
-- [ ] **Primary flow validated:** Create persona "organizer" → open **Settings → Notor → Persona auto-approve** → "organizer" persona listed → set `write_note`, `replace_in_note`, `manage_tags` to "Auto-approve" → set `execute_command` to "Global default" → activate "organizer" persona in chat → ask AI to manage tags → `manage_tags` auto-approved (no confirmation prompt) → ask AI to execute a command → `execute_command` follows global setting (approval required by default)
-- [ ] **Global default fallback validated:** Tool set to "Global default" on persona uses the global auto-approve toggle value — verify both "on" and "off" global states
-- [ ] **"Require approval" override validated:** Tool set to "Require approval" on persona always prompts, even if the global auto-approve for that tool is enabled
-- [ ] **No persona active validated:** Deactivate persona → all tools use global auto-approve only, persona overrides are ignored
-- [ ] **Plan mode respected validated:** Activate persona with write tool set to "Auto-approve" → switch to Plan mode → AI attempts write tool → blocked by Plan mode regardless of persona override
-- [ ] **Stale tool warning validated:** Manually add a fake tool name entry to `persona_auto_approve` in settings → open Settings → stale tool shown with warning indicator and "Remove" button → click "Remove" → entry removed
-- [ ] **No personas discovered validated:** No `{notor_dir}/personas/` directory → persona auto-approve section shows informational message, no errors
-- [ ] **Settings persistence validated:** Set overrides → reload plugin → overrides still present in Settings UI and effective at runtime
+- [ ] **E2E test script created:** `e2e/scripts/auto-approve-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → DOM assertions → structured log verification → screenshots → results JSON)
+- [ ] **Primary flow validated (E2E):** Test opens **Settings → Notor → Persona auto-approve** section → verifies "organizer" persona is listed → sets tool overrides via DOM selects → activates "organizer" persona in chat settings popover → structured logs confirm auto-approve resolution uses persona overrides for `manage_tags` and global fallback for `execute_command`
+- [ ] **Global default fallback validated (E2E):** Test sets a tool to "Global default" on persona → toggles global auto-approve on/off → structured logs confirm resolution follows the global value in both states
+- [ ] **"Require approval" override validated (E2E):** Test sets a tool to "Require approval" on persona with global auto-approve enabled → structured logs confirm tool requires approval despite global setting
+- [ ] **No persona active validated (E2E):** Test deactivates persona → triggers tool dispatch → structured logs confirm only global auto-approve is consulted, persona overrides ignored
+- [ ] **Plan mode respected validated (E2E):** Test activates persona with write tool set to "Auto-approve" → switches to Plan mode → structured logs confirm write tool is blocked regardless of persona override
+- [ ] **Stale tool warning validated (E2E):** Test injects a fake tool name entry into `persona_auto_approve` via plugin settings manipulation → opens Settings → verifies stale tool warning indicator is visible in the DOM → clicks "Remove" → verifies entry removed from DOM
+- [ ] **No personas discovered validated (E2E):** Test removes personas directory before launch → verifies persona auto-approve section shows informational message in the DOM, no error-level structured logs
+- [ ] **Settings persistence validated (E2E):** Test sets overrides → reloads plugin (or restarts Obsidian) → verifies overrides still present in Settings UI DOM and effective at runtime via structured logs
 - [ ] Build succeeds: `npm run build` produces clean `main.js`
 - [ ] No TypeScript errors: `npx tsc --noEmit` passes
-- [ ] No console errors during normal operation
+- [ ] No persona/auto-approve-related error-level structured logs during test execution (filtered via `LogCollector.getLogsByLevel("error")`)
 
 ---
 
@@ -228,6 +230,11 @@ B-003 + B-005 + B-006 ──▶ B-007 (main.ts wiring & integration)
 | `src/personas/persona-manager.ts` | B-007 | Propagate persona changes to dispatcher |
 | `src/chat/orchestrator.ts` | B-007 | Ensure dispatcher has current persona before dispatch |
 | `styles.css` | B-005 | Stale tool warning indicator styling (if needed) |
+
+### E2E Test Files
+| File | Tasks | Description |
+|---|---|---|
+| `e2e/scripts/auto-approve-test.ts` | B-008 | Playwright E2E test: persona auto-approve override resolution, settings UI, stale tool warnings |
 
 ---
 

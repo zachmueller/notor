@@ -412,31 +412,33 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 - [ ] Build succeeds: `npm run build` produces clean `main.js`
 - [ ] No TypeScript errors: `npx tsc --noEmit` passes
 
-### E-016: End-to-end validation and cleanup
+### E-016: Playwright E2E validation and cleanup
 
-**Description:** Comprehensive manual validation of the complete Group E workflow execution system following the user scenarios from spec.md. Verify command palette execution, slash-command execution, persona switching/revert, `<include_note>` resolution, `<details>` rendering, conversation persistence, and all edge cases.
+**Description:** Comprehensive Playwright-based E2E validation of the complete Group E workflow execution system following the user scenarios from spec.md. Create a dedicated E2E test script (`e2e/scripts/workflow-execution-test.ts`) that launches Obsidian via CDP, exercises command palette execution, slash-command execution, persona switching/revert, `<include_note>` resolution, `<details>` rendering, conversation persistence, and all edge cases. Verification is performed via DOM assertions and structured log analysis.
 
 **Files:**
+- `e2e/scripts/workflow-execution-test.ts` — New Playwright E2E test script
 - All files from E-001 through E-015 (review and polish)
 
 **Dependencies:** E-015
 
 **Acceptance Criteria:**
-- [ ] **Primary flow — command palette:** Open command palette → select "Notor: Run workflow" → pick a workflow from the list → chat panel opens → persona switches (if configured, confirmed by label change) → workflow prompt appears as first message with collapsed `<details>` → AI responds normally → tool calls appear inline with approval prompts → user can send follow-up messages → switching to another conversation reverts persona
-- [ ] **Primary flow — slash-command:** Type `/` in chat input → autocomplete popup shows workflows → type to filter → select workflow → chip appears in chip container → type supplementary text → send message → workflow executes with supplementary text after `</workflow_instructions>` → chip clears after send
-- [ ] **`<include_note>` resolution validated:** Workflow with `<include_note>` tags → tags resolved at execution time → included content appears in assembled message → section extraction works for heading-bounded sections → error markers appear for missing notes/sections
-- [ ] **Attached mode validated:** Workflow with `<include_note mode="attached">` → tag removed from body text → content appears in `<attachments>` block in the assembled message
-- [ ] **Persona switching validated:** Workflow with `notor-workflow-persona: "organizer"` → persona activates with notice → persona label updates → provider/model change if configured → switching conversations reverts persona → starting new conversation reverts persona
-- [ ] **Missing persona validated:** Workflow with non-existent persona name → notice "Persona '{name}' not found; running with current settings" → workflow executes with current persona/defaults → no crash
-- [ ] **Empty workflow validated:** Workflow with no body content (only frontmatter) → notice "Workflow has no prompt content." → execution aborted, no conversation created
-- [ ] **`<details>` rendering validated:** Collapsed by default → click to expand → shows full workflow instructions → supplementary text visible outside the `<details>` → works correctly on conversation reload
-- [ ] **Slash-command edge cases validated:** `/` in middle of text does not trigger → `/` after newline triggers → path-like query (e.g., `/path/to`) does not trigger → Escape dismisses popup → chip removal via `×` button works → backspace removes chip when input is empty → at most one chip at a time
-- [ ] **Coexistence with `[[` autocomplete validated:** Typing `[[` activates vault note suggest (not workflow suggest) → typing `/` at start activates workflow suggest (not vault note suggest) → both cannot be active simultaneously
-- [ ] **Conversation persistence validated:** Close and reopen plugin → workflow conversation loads from history → workflow metadata (path, name, persona) restored → first message renders with `<details>`
-- [ ] **Workflow not found at execution time:** Delete a workflow file after it appears in picker → select it → notice "Workflow execution failed" → no crash
+- [ ] **E2E test script created:** `e2e/scripts/workflow-execution-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → DOM assertions → structured log verification → screenshots → results JSON)
+- [ ] **Primary flow — command palette (E2E):** Test triggers "Notor: Run workflow" command → interacts with `FuzzySuggestModal` to select a workflow → verifies chat panel opens (`.notor-chat-container` visible) → verifies persona label updates if configured → verifies `<details class="notor-workflow-details">` element rendered collapsed in first message → verifies structured logs confirm workflow prompt assembly and LLM dispatch
+- [ ] **Primary flow — slash-command (E2E):** Test types `/` in chat input element → verifies autocomplete popup appears with workflow entries → selects a workflow → verifies `.notor-workflow-chip` element appears in chip container → types supplementary text → sends message → verifies chip cleared after send → structured logs confirm workflow execution with supplementary text
+- [ ] **`<include_note>` resolution validated (E2E):** Structured logs confirm `<include_note>` tags in workflow body resolved at execution time; IncludeNoteResolver logs show successful resolution; section extraction and error markers verified via log data fields
+- [ ] **Attached mode validated (E2E):** Structured logs confirm attached-mode `<include_note>` tags produce `<attachments>` block entries in assembled message
+- [ ] **Persona switching validated (E2E):** Structured logs from PersonaManager confirm persona activation on workflow start; `.notor-persona-label` DOM element updates; structured logs confirm persona deactivation on conversation switch
+- [ ] **Missing persona validated (E2E):** Test triggers workflow with non-existent persona → structured logs confirm fallback behavior; no error-level logs; execution completes normally
+- [ ] **Empty workflow validated (E2E):** Test triggers workflow with empty body → structured logs confirm execution aborted; no conversation created; Notice surfaced
+- [ ] **`<details>` rendering validated (E2E):** DOM assertion confirms `.notor-workflow-details` element exists without `open` attribute (collapsed by default) → test clicks `<summary>` → verifies element now has `open` attribute → supplementary text visible outside the `<details>` element
+- [ ] **Slash-command edge cases validated (E2E):** Test types `/` in middle of text → verifies no popup; types `/` at start → verifies popup appears; presses Escape → verifies popup dismissed; clicks chip `×` button → verifies chip removed; backspace with empty input and chip present → verifies chip removed
+- [ ] **Coexistence with `[[` autocomplete validated (E2E):** Test types `[[` → verifies vault note suggest active; types `/` at start → verifies workflow suggest active (not vault note suggest); both cannot be active simultaneously per DOM assertions
+- [ ] **Conversation persistence validated (E2E):** Test creates workflow conversation → navigates away → navigates back → verifies first message still renders `<details>` element with workflow instructions → structured logs confirm conversation reload with workflow metadata
+- [ ] **Workflow not found at execution time (E2E):** Test deletes a workflow file after discovery → triggers execution → verifies structured logs show error; no crash; Notice surfaced
 - [ ] Build succeeds: `npm run build` produces clean `main.js`
 - [ ] No TypeScript errors: `npx tsc --noEmit` passes
-- [ ] No console errors during normal operation
+- [ ] No workflow/execution-related error-level structured logs during normal test flows (filtered via `LogCollector.getLogsByLevel("error")`)
 
 ---
 
@@ -459,6 +461,11 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 | `src/ui/chat-view.ts` | E-012, E-014 | Add `WorkflowSlashSuggest` and `WorkflowChipManager` instances; wire input/send/backspace handlers; add `<details>` rendering for `<workflow_instructions>` blocks; add `setGetWorkflows()` setter |
 | `styles.css` | E-011, E-014 | Add `.notor-workflow-chip` styling; add `.notor-workflow-details` styling |
 | `src/main.ts` | E-009, E-015 | Register "Notor: Run workflow" command; wire workflow discovery to chat view; connect `executeWorkflow` callback |
+
+### E2E Test Files
+| File | Tasks | Description |
+|---|---|---|
+| `e2e/scripts/workflow-execution-test.ts` | E-016 | Playwright E2E test: command palette execution, slash-command UX, persona switching, `<details>` rendering, conversation persistence |
 
 ---
 

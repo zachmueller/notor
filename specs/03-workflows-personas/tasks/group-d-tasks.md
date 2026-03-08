@@ -256,34 +256,37 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 - [ ] Backward-compatible: when no `<include_note>` tags are present, existing behavior is unchanged (the resolver returns the original text unmodified)
 - [ ] **Note:** Workflow body resolution (Group E) is NOT wired here — Group E's prompt assembly task will call `resolveIncludeNotes()` directly with context `"workflow"`
 
-### D-011 [P]: Test vault fixtures and manual validation
+### D-011 [P]: Test vault fixtures and Playwright E2E validation
 
-**Description:** Create test notes and `<include_note>` usage examples in the e2e test vault to validate all resolution paths: vault-relative paths, wikilinks, section extraction, frontmatter stripping, attached mode, error cases, and nested tag pass-through.
+**Description:** Create test notes and `<include_note>` usage examples in the e2e test vault, and build a Playwright E2E test script (`e2e/scripts/include-note-test.ts`) to validate all resolution paths: vault-relative paths, wikilinks, section extraction, frontmatter stripping, error cases, and nested tag pass-through. The E2E test launches Obsidian, triggers system prompt assembly and/or sends a message that exercises `<include_note>` resolution, then verifies correct resolution via structured logs (the `IncludeNoteResolver` logger source) and assembled prompt content.
 
 **Files:**
 - `e2e/test-vault/Research/Climate.md` — Test note with multiple headings (target for section extraction)
 - `e2e/test-vault/Research/Energy.md` — Test note with frontmatter and body content
 - `e2e/test-vault/notor/prompts/core-system-prompt.md` — Extended with `<include_note>` tags for system prompt integration testing
 - `e2e/test-vault/notor/rules/include-test-rule.md` — Test rule file with `<include_note>` tags
+- `e2e/scripts/include-note-test.ts` — New Playwright E2E test script
 
 **Dependencies:** D-009 (can be developed in parallel with D-010)
 
 **Acceptance Criteria:**
+- [ ] **E2E test script created:** `e2e/scripts/include-note-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → structured log verification → screenshots → results JSON)
 - [ ] `Research/Climate.md` created with frontmatter (tags, title) and multiple headings (`## Key Findings`, `## Methodology`, `## Conclusions`) — each heading has distinct body content
 - [ ] `Research/Energy.md` created with frontmatter and body content — used for full-note inclusion tests
-- [ ] **Vault-relative path test:** An `<include_note path="Research/Climate.md" section="Key Findings" />` tag resolves to the "Key Findings" section content
-- [ ] **Wikilink test:** An `<include_note path="[[Climate]]" section="Key Findings" />` tag resolves the same section via wikilink
-- [ ] **Full note inclusion test:** An `<include_note path="Research/Energy.md" />` tag resolves to the full body content of Energy.md (frontmatter stripped by default)
-- [ ] **Frontmatter preserved test:** An `<include_note path="Research/Energy.md" strip_frontmatter="false" />` tag resolves to the full content including YAML frontmatter
-- [ ] **Missing note test:** An `<include_note path="Research/Deleted.md" />` tag produces the error marker `[include_note error: note 'Research/Deleted.md' not found]`
-- [ ] **Missing section test:** An `<include_note path="Research/Climate.md" section="Nonexistent" />` tag produces the error marker `[include_note error: section 'Nonexistent' not found in 'Research/Climate.md']`
-- [ ] **Nested tag pass-through test:** If `Research/Climate.md` contains an `<include_note path="[[Energy]]" />` tag in its body, that nested tag is passed through as literal text when Climate.md is included
-- [ ] **System prompt integration test:** `notor/prompts/core-system-prompt.md` with an `<include_note>` tag resolves correctly during system prompt assembly
-- [ ] **Vault rule integration test:** `notor/rules/include-test-rule.md` with `notor-always-include: true` and an `<include_note>` tag in its body resolves correctly during rule evaluation
+- [ ] **Vault-relative path test (E2E):** Structured logs confirm `<include_note path="Research/Climate.md" section="Key Findings" />` resolved successfully with correct section content
+- [ ] **Wikilink test (E2E):** Structured logs confirm `<include_note path="[[Climate]]" section="Key Findings" />` resolved via wikilink to the same section
+- [ ] **Full note inclusion test (E2E):** Structured logs confirm `<include_note path="Research/Energy.md" />` resolved to full body content (frontmatter stripped by default)
+- [ ] **Frontmatter preserved test (E2E):** Structured logs confirm `<include_note path="Research/Energy.md" strip_frontmatter="false" />` resolved with YAML frontmatter intact
+- [ ] **Missing note test (E2E):** Structured logs confirm warn-level entry from IncludeNoteResolver for `Research/Deleted.md` not found; error marker present in resolved text
+- [ ] **Missing section test (E2E):** Structured logs confirm warn-level entry from IncludeNoteResolver for section `Nonexistent` not found; error marker present in resolved text
+- [ ] **Nested tag pass-through test (E2E):** If `Research/Climate.md` contains an `<include_note>` tag in its body, structured logs confirm single-pass resolution (nested tag passed through as literal text)
+- [ ] **System prompt integration test (E2E):** `notor/prompts/core-system-prompt.md` with an `<include_note>` tag — structured logs confirm resolution during system prompt assembly
+- [ ] **Vault rule integration test (E2E):** `notor/rules/include-test-rule.md` with `notor-always-include: true` and an `<include_note>` tag — structured logs confirm resolution during rule evaluation
+- [ ] No error-level structured logs from IncludeNoteResolver source during test execution (E2E)
 
-### D-012: Final wiring and validation
+### D-012: Final wiring and Playwright E2E validation
 
-**Description:** End-to-end manual validation of the complete `<include_note>` system across all integration points (system prompts, vault rules). Ensure backward compatibility, performance, and correct error handling. Clean up any remaining issues.
+**Description:** End-to-end Playwright-based validation of the complete `<include_note>` system across all integration points (system prompts, vault rules). The D-011 E2E test script covers individual resolution paths; this task extends validation to the full integration by verifying that assembled system prompts contain correctly resolved `<include_note>` content via structured logs. Ensure backward compatibility, performance, and correct error handling. Clean up any remaining issues.
 
 **Files:**
 - All files from D-001 through D-011 (review and polish)
@@ -291,19 +294,19 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 **Dependencies:** D-010, D-011
 
 **Acceptance Criteria:**
-- [ ] **System prompt with `<include_note>` validated:** Custom system prompt containing `<include_note>` tags resolves correctly; assembled system prompt contains the included note content
-- [ ] **Vault rule with `<include_note>` validated:** Rule file body with `<include_note>` tags resolves correctly; included content appears in the system prompt's vault instructions section
-- [ ] **Error markers validated:** Missing note and missing section produce correct inline error markers that are visible in the assembled prompt
-- [ ] **Frontmatter stripping validated:** Default behavior strips frontmatter; `strip_frontmatter="false"` includes it
-- [ ] **Section extraction validated:** Section boundaries are correct — content runs from the target heading to the next heading of equal or higher level (not lower-level subheadings)
-- [ ] **Wikilink resolution validated:** Wikilink paths resolve correctly via Obsidian's metadata cache
-- [ ] **Nested tags validated:** `<include_note>` tags within included content are passed through as literal text (no recursive resolution)
-- [ ] **No `<include_note>` tags scenario validated:** Documents without any tags pass through unchanged — no performance overhead or behavioral change
-- [ ] **Multiple tags in one document validated:** Several `<include_note>` tags in the same document each resolve independently
-- [ ] **Performance validated:** Resolution of 5+ tags in a single document completes without perceptible delay
+- [ ] **System prompt with `<include_note>` validated (E2E):** D-011 E2E test verifies structured logs confirm system prompt assembly includes resolved `<include_note>` content from custom system prompt file
+- [ ] **Vault rule with `<include_note>` validated (E2E):** D-011 E2E test verifies structured logs confirm rule file body with `<include_note>` tags resolves correctly during rule evaluation
+- [ ] **Error markers validated (E2E):** Structured logs confirm warn-level entries for missing note/section; error markers present in assembled prompt content
+- [ ] **Frontmatter stripping validated (E2E):** Structured logs confirm default stripping behavior and `strip_frontmatter="false"` preservation
+- [ ] **Section extraction validated (E2E):** Structured logs confirm section boundaries are correct — content runs from target heading to next heading of equal or higher level
+- [ ] **Wikilink resolution validated (E2E):** Structured logs confirm wikilink paths resolve correctly via Obsidian's metadata cache
+- [ ] **Nested tags validated (E2E):** Structured logs confirm single-pass resolution — nested `<include_note>` tags in included content passed through as literal text
+- [ ] **No `<include_note>` tags scenario validated (E2E):** Documents without tags pass through unchanged — no IncludeNoteResolver structured log entries emitted
+- [ ] **Multiple tags in one document validated (E2E):** Structured logs confirm multiple tags in the same document each resolve independently
+- [ ] **Performance validated (E2E):** Resolution of 5+ tags completes without perceptible delay (no timeout errors in E2E test)
 - [ ] Build succeeds: `npm run build` produces clean `main.js`
 - [ ] No TypeScript errors: `npx tsc --noEmit` passes
-- [ ] No console errors during normal operation
+- [ ] No error-level structured logs from IncludeNoteResolver during test execution
 - [ ] **Note:** Attached mode and workflow integration will be validated as part of Group E tasks — this validation focuses on inline mode and system prompt / vault rule contexts
 
 ---
@@ -330,6 +333,11 @@ D-008 ──▶ D-009 (Error handling & edge cases)
 | `e2e/test-vault/Research/Energy.md` | D-011 | Test note with frontmatter for inclusion and stripping tests |
 | `e2e/test-vault/notor/prompts/core-system-prompt.md` | D-011 | Extended with `<include_note>` tags for system prompt testing |
 | `e2e/test-vault/notor/rules/include-test-rule.md` | D-011 | Test rule file with `<include_note>` tags |
+
+### E2E Test Files
+| File | Tasks | Description |
+|---|---|---|
+| `e2e/scripts/include-note-test.ts` | D-011 | Playwright E2E test: `<include_note>` resolution paths, section extraction, error markers, structured log verification |
 
 ---
 
