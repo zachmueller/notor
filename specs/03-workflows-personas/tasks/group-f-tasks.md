@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md)
 **Contract:** [specs/03-workflows-personas/contracts/vault-event-hooks.md](../contracts/vault-event-hooks.md)
-**Status:** In Progress (Phase 0 and Phase 1 complete)
+**Status:** In Progress (Phase 0, Phase 1, Phase 2, and Phase 3 complete)
 
 ## Task Summary
 
@@ -246,13 +246,13 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-005 (debounce), F-007 (listener manager)
 
 **Acceptance Criteria:**
-- [ ] `handleNoteOpen(file: TFile | null, deps: VaultEventHandlerDeps): void` function exported
-- [ ] Skips if `file` is null or not a Markdown file (`.md` extension)
-- [ ] Calls `debounce.shouldDebounce("on_note_open", file.path)` — skips if debounced
-- [ ] Collects matching hooks: settings-configured `on_note_open` hooks (in order) + discovered workflows with `notor-trigger: on-note-open` (alphabetical by path)
-- [ ] Dispatches hooks via the vault event hook dispatcher (F-018) — non-blocking (fire-and-forget)
-- [ ] Passes `notePath: file.path` as context for env vars and trigger context
-- [ ] Registered via listener manager's `setEventHandler("on_note_open", handleNoteOpen)`
+- [x] `handleNoteOpen(file: TFile | null, deps: VaultEventHandlerDeps): void` function exported
+- [x] Skips if `file` is null or not a Markdown file (`.md` extension)
+- [x] Calls `debounce.shouldDebounce("on_note_open", file.path)` — skips if debounced
+- [x] Collects matching hooks: settings-configured `on_note_open` hooks (in order) + discovered workflows with `notor-trigger: on-note-open` (alphabetical by path)
+- [x] Dispatches hooks via the vault event hook dispatcher (F-018) — non-blocking (fire-and-forget)
+- [x] Passes `notePath: file.path` as context for env vars and trigger context
+- [x] Registered via listener manager's `setEventHandler("on_note_open", handleNoteOpen)`
 
 ### F-009 [P]: on-note-create listener
 
@@ -264,13 +264,13 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-006 (execution chain), F-007 (listener manager)
 
 **Acceptance Criteria:**
-- [ ] `handleNoteCreate(file: TAbstractFile, deps: VaultEventHandlerDeps): void` function exported
-- [ ] Skips if file is not a `TFile` or not `.md`
-- [ ] Checks execution chain: if `isNotePathSuppressed(activeChain, file.path)` → skip (note created by hook workflow)
-- [ ] No debounce applied (`on-note-create` fires once per file per contract)
-- [ ] Collects matching hooks + workflow triggers for `on_note_create`
-- [ ] Dispatches hooks non-blocking with `notePath: file.path`
-- [ ] Fires after the file has been created in the vault (Obsidian's `create` event guarantees this)
+- [x] `handleNoteCreate(file: TAbstractFile, deps: VaultEventHandlerDeps): void` function exported
+- [x] Skips if file is not a `TFile` or not `.md`
+- [x] Checks execution chain: if `isNotePathSuppressed(activeChain, file.path)` → skip (note created by hook workflow)
+- [x] No debounce applied (`on-note-create` fires once per file per contract)
+- [x] Collects matching hooks + workflow triggers for `on_note_create`
+- [x] Dispatches hooks non-blocking with `notePath: file.path`
+- [x] Fires after the file has been created in the vault (Obsidian's `create` event guarantees this)
 
 ### F-010 [P]: on-save listener
 
@@ -282,13 +282,13 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-005 (debounce), F-007 (listener manager)
 
 **Acceptance Criteria:**
-- [ ] `handleModify(file: TAbstractFile, deps: VaultEventHandlerDeps): void` function exported
-- [ ] Skips if file is not a `TFile` or not `.md`
-- [ ] For `on_save` hooks: calls `debounce.shouldDebounce("on_save", file.path)` — skips if debounced
-- [ ] Collects enabled `on_save` hooks + workflow triggers and dispatches non-blocking
-- [ ] Also calls `handleManualSave()` (F-012) if the manual save detector indicates this was a manual save
-- [ ] Passes `notePath: file.path` as context
-- [ ] Fires after the save operation is complete (file written to disk)
+- [x] `handleModify(file: TAbstractFile, deps: VaultEventHandlerDeps): void` function exported
+- [x] Skips if file is not a `TFile` or not `.md`
+- [x] For `on_save` hooks: calls `debounce.shouldDebounce("on_save", file.path)` — skips if debounced
+- [x] Collects enabled `on_save` hooks + workflow triggers and dispatches non-blocking
+- [x] Also calls `handleManualSave()` (F-012) if the manual save detector indicates this was a manual save
+- [x] Passes `notePath: file.path` as context
+- [x] Fires after the save operation is complete (file written to disk)
 
 ### F-011: Manual save detector — command interception
 
@@ -300,14 +300,14 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-010
 
 **Acceptance Criteria:**
-- [ ] `ManualSaveDetector` class exported
-- [ ] `install(app: App): () => void` — patches `app.commands.executeCommandById` to intercept `"editor:save-file"`. When intercepted, records `{ notePath: activeFilePath, timestamp: Date.now() }` in an internal `Map<string, number>`. Returns an uninstall function that restores the original method.
-- [ ] Defensive check: `typeof (app as any).commands?.executeCommandById === "function"` — if unavailable, logs warning and returns a no-op uninstall function (graceful degradation per R-2)
-- [ ] `isManualSave(notePath: string): boolean` — checks if the note path has a recent manual-save flag within 500 ms window. Consumes (deletes) the flag on match (one-shot per R-2). Returns `false` if no flag or flag expired.
-- [ ] `startCleanup(registerInterval): void` — registers periodic cleanup (every 60s) to prune unconsumed flags older than 1000 ms (2× the 500 ms window)
-- [ ] `destroy(): void` — calls uninstall function, clears all flags
-- [ ] Active file path read via `app.workspace.getActiveViewOfType(MarkdownView)?.file?.path`
-- [ ] Desktop-only: `Platform.isDesktopApp` guard. On mobile, `install()` is a no-op and `isManualSave()` always returns `false`.
+- [x] `ManualSaveDetector` class exported
+- [x] `install(app: App): () => void` — patches `app.commands.executeCommandById` to intercept `"editor:save-file"`. When intercepted, records `{ notePath: activeFilePath, timestamp: Date.now() }` in an internal `Map<string, number>`. Returns an uninstall function that restores the original method.
+- [x] Defensive check: `typeof (app as any).commands?.executeCommandById === "function"` — if unavailable, logs warning and returns a no-op uninstall function (graceful degradation per R-2)
+- [x] `isManualSave(notePath: string): boolean` — checks if the note path has a recent manual-save flag within 500 ms window. Consumes (deletes) the flag on match (one-shot per R-2). Returns `false` if no flag or flag expired.
+- [x] `startCleanup(registerInterval): void` — registers periodic cleanup (every 60s) to prune unconsumed flags older than 1000 ms (2× the 500 ms window)
+- [x] `destroy(): void` — calls uninstall function, clears all flags
+- [x] Active file path read via `app.workspace.getActiveViewOfType(MarkdownView)?.file?.path`
+- [x] Desktop-only: `Platform.isDesktopApp` guard. On mobile, `install()` is a no-op and `isManualSave()` always returns `false`.
 
 ### F-012: on-manual-save listener
 
@@ -319,12 +319,12 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-011 (manual save detector)
 
 **Acceptance Criteria:**
-- [ ] `handleManualSave(file: TFile, deps: VaultEventHandlerDeps): void` function exported
-- [ ] Called by `handleModify()` only when `manualSaveDetector.isManualSave(file.path)` returns `true`
-- [ ] Applies debounce: `debounce.shouldDebounce("on_manual_save", file.path)` — skips if debounced
-- [ ] Collects enabled `on_manual_save` hooks + workflow triggers and dispatches non-blocking
-- [ ] Passes `notePath: file.path` as context
-- [ ] Fires after the save operation is complete (same timing as `on-save`)
+- [x] `handleManualSave(file: TFile, deps: VaultEventHandlerDeps): void` function exported
+- [x] Called by `handleModify()` only when `manualSaveDetector.isManualSave(file.path)` returns `true`
+- [x] Applies debounce: `debounce.shouldDebounce("on_manual_save", file.path)` — skips if debounced
+- [x] Collects enabled `on_manual_save` hooks + workflow triggers and dispatches non-blocking
+- [x] Passes `notePath: file.path` as context
+- [x] Fires after the save operation is complete (same timing as `on-save`)
 
 ### F-013 [P]: on-schedule listener — croner integration
 
@@ -336,17 +336,17 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-007 (listener manager)
 
 **Acceptance Criteria:**
-- [ ] `VaultEventScheduler` class exported
-- [ ] `npm install croner` added as a dependency (run during implementation)
-- [ ] `syncJobs(hooks: VaultEventHook[]): void` — takes the current list of enabled `on_schedule` hooks, creates new `Cron` jobs for newly added hooks, stops jobs for removed hooks, leaves unchanged hooks running
-- [ ] Each cron job created with `new Cron(schedule, { paused: false }, handler)` per R-1 API findings
-- [ ] Job handler calls the vault event hook dispatcher (F-018) with event type `on_schedule` and no note path context
-- [ ] `validateCronExpression(expr: string): { valid: boolean; error?: string }` — wraps `new CronPattern(expr)` in try/catch per R-1 findings; exported for settings UI validation (F-003)
-- [ ] `getNextRun(expr: string): Date | null` — creates a temporary `Cron` and calls `nextRun()` for preview in settings UI
-- [ ] `destroy(): void` — calls `.stop()` on all active jobs; clears internal job map
-- [ ] Jobs are stored in `Map<string, Cron>` keyed by hook ID for individual management
-- [ ] If Obsidian is not running at scheduled time, execution is skipped (no catch-up — inherent behavior of in-process cron)
-- [ ] Default timezone: local system time (no `timezone` option per R-1 recommendation)
+- [x] `VaultEventScheduler` class exported
+- [x] `npm install croner` added as a dependency (run during implementation)
+- [x] `syncJobs(hooks: VaultEventHook[]): void` — takes the current list of enabled `on_schedule` hooks, creates new `Cron` jobs for newly added hooks, stops jobs for removed hooks, leaves unchanged hooks running
+- [x] Each cron job created with `new Cron(schedule, { paused: false }, handler)` per R-1 API findings
+- [x] Job handler calls the vault event hook dispatcher (F-018) with event type `on_schedule` and no note path context
+- [x] `validateCronExpression(expr: string): { valid: boolean; error?: string }` — wraps `new CronPattern(expr)` in try/catch per R-1 findings; exported for settings UI validation (F-003)
+- [x] `getNextRun(expr: string): Date | null` — creates a temporary `Cron` and calls `nextRun()` for preview in settings UI
+- [x] `destroy(): void` — calls `.stop()` on all active jobs; clears internal job map
+- [x] Jobs are stored in `Map<string, Cron>` keyed by hook ID for individual management
+- [x] If Obsidian is not running at scheduled time, execution is skipped (no catch-up — inherent behavior of in-process cron)
+- [x] Default timezone: local system time (no `timezone` option per R-1 recommendation)
 
 ## Phase 4: Tag Change Detection
 
@@ -360,17 +360,17 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-001 (types only)
 
 **Acceptance Criteria:**
-- [ ] `TagShadowCache` class exported
-- [ ] `initialize(app: App): void` — iterates all Markdown files via `vault.getMarkdownFiles()`, reads tags from `metadataCache.getFileCache(file)?.frontmatter` via `parseFrontMatterTags()`, normalizes (strip `#`, trim, lowercase), stores in `Map<string, Set<string>>`
-- [ ] Initialization is synchronous in-memory reads only (no disk I/O — reads from Obsidian's metadata cache). Target: <50 ms for 10,000 notes per R-3 findings
-- [ ] `getTags(notePath: string): Set<string>` — returns the shadow cache entry for a note (empty Set if not present)
-- [ ] `updateTags(notePath: string, newTags: Set<string>): void` — replaces the cache entry
-- [ ] `removePath(notePath: string): void` — called on file delete
-- [ ] `renamePath(oldPath: string, newPath: string): void` — called on file rename (moves entry)
-- [ ] `computeDiff(notePath: string, newTags: Set<string>): { added: string[]; removed: string[] }` — compares shadow cache entry against new tags using Set-based diff. Returns empty diff if no change. Tags reported in original case (from new tags), compared in lowercase.
-- [ ] Tag normalization: strip leading `#` (from `parseFrontMatterTags`), trim whitespace, lowercase for comparison. Original case preserved for reporting per R-3.
-- [ ] Uses `parseFrontMatterTags()` (NOT `getAllTags()`) to extract frontmatter-only tags per R-3 rationale
-- [ ] Registers `vault.on('delete')` and `vault.on('rename')` handlers for cache maintenance
+- [x] `TagShadowCache` class exported
+- [x] `initialize(app: App): void` — iterates all Markdown files via `vault.getMarkdownFiles()`, reads tags from `metadataCache.getFileCache(file)?.frontmatter` via `parseFrontMatterTags()`, normalizes (strip `#`, trim, lowercase), stores in `Map<string, Set<string>>`
+- [x] Initialization is synchronous in-memory reads only (no disk I/O — reads from Obsidian's metadata cache). Target: <50 ms for 10,000 notes per R-3 findings
+- [x] `getTags(notePath: string): Set<string>` — returns the shadow cache entry for a note (empty Set if not present)
+- [x] `updateTags(notePath: string, newTags: Set<string>): void` — replaces the cache entry
+- [x] `removePath(notePath: string): void` — called on file delete
+- [x] `renamePath(oldPath: string, newPath: string): void` — called on file rename (moves entry)
+- [x] `computeDiff(notePath: string, newTags: Set<string>): { added: string[]; removed: string[] }` — compares shadow cache entry against new tags using Set-based diff. Returns empty diff if no change. Tags reported in original case (from new tags), compared in lowercase.
+- [x] Tag normalization: strip leading `#` (from `parseFrontMatterTags`), trim whitespace, lowercase for comparison. Original case preserved for reporting per R-3.
+- [x] Uses `parseFrontMatterTags()` (NOT `getAllTags()`) to extract frontmatter-only tags per R-3 rationale
+- [x] Registers `vault.on('delete')` and `vault.on('rename')` handlers for cache maintenance (wired in F-023)
 
 ### F-015: Tag change suppression manager
 
@@ -382,13 +382,13 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-014
 
 **Acceptance Criteria:**
-- [ ] `TagChangeSuppressionManager` class exported
-- [ ] `suppress(notePath: string): void` — records the note path with a `Date.now()` timestamp in an internal `Map<string, number>`
-- [ ] `checkAndConsume(notePath: string): boolean` — checks if the path has an active suppression within 2000 ms window. If yes, deletes the entry and returns `true` (suppressed). Otherwise returns `false`.
-- [ ] `startCleanup(registerInterval): void` — registers periodic cleanup (every 30s) that prunes entries older than 2 seconds
-- [ ] `destroy(): void` — clears all state
-- [ ] Integration point: when `manage_tags` or `update_frontmatter` is called within a hook-initiated workflow, the tool dispatcher calls `suppress(notePath)` before the tool executes
-- [ ] The shadow cache is still updated on suppressed events (to keep it accurate) — only hook dispatch is skipped
+- [x] `TagChangeSuppressionManager` class exported
+- [x] `suppress(notePath: string): void` — records the note path with a `Date.now()` timestamp in an internal `Map<string, number>`
+- [x] `checkAndConsume(notePath: string): boolean` — checks if the path has an active suppression within 2000 ms window. If yes, deletes the entry and returns `true` (suppressed). Otherwise returns `false`.
+- [x] `startCleanup(registerInterval): void` — registers periodic cleanup (every 30s) that prunes entries older than 2 seconds
+- [x] `destroy(): void` — clears all state
+- [x] Integration point: when `manage_tags` or `update_frontmatter` is called within a hook-initiated workflow, the tool dispatcher calls `suppress(notePath)` before the tool executes
+- [x] The shadow cache is still updated on suppressed events (to keep it accurate) — only hook dispatch is skipped
 
 ### F-016: on-tag-change listener
 
@@ -400,16 +400,16 @@ F-022 ──▶ F-023 (main.ts wiring — connect all vault event hook component
 **Dependencies:** F-014, F-015
 
 **Acceptance Criteria:**
-- [ ] `handleMetadataChanged(file: TFile, data: string, cache: CachedMetadata, deps: VaultEventHandlerDeps): void` function exported
-- [ ] Extracts new tags via `parseFrontMatterTags(cache.frontmatter)` — frontmatter only per R-3
-- [ ] Normalizes new tags (strip `#`, trim, lowercase for comparison)
-- [ ] Calls `shadowCache.computeDiff(file.path, normalizedNewTags)` to get `added` / `removed` arrays
-- [ ] Updates shadow cache with new tags regardless of suppression (step 4d per R-3: keep cache accurate)
-- [ ] If diff is empty (no tag change) → return early (non-tag metadata change)
-- [ ] If `suppression.checkAndConsume(file.path)` returns `true` → return early (suppress hook dispatch)
-- [ ] Collects enabled `on_tag_change` hooks + workflow triggers
-- [ ] Dispatches hooks non-blocking with context: `notePath: file.path`, `tagsAdded: added`, `tagsRemoved: removed`
-- [ ] No debounce applied (tag changes are discrete; shadow cache diff handles deduplication per R-3)
+- [x] `handleMetadataChanged(file: TFile, data: string, cache: CachedMetadata, deps: VaultEventHandlerDeps): void` function exported
+- [x] Extracts new tags via `parseFrontMatterTags(cache.frontmatter)` — frontmatter only per R-3
+- [x] Normalizes new tags (strip `#`, trim, lowercase for comparison)
+- [x] Calls `shadowCache.computeDiff(file.path, normalizedNewTags)` to get `added` / `removed` arrays
+- [x] Updates shadow cache with new tags regardless of suppression (step 4d per R-3: keep cache accurate)
+- [x] If diff is empty (no tag change) → return early (non-tag metadata change)
+- [x] If `suppression.checkAndConsume(file.path)` returns `true` → return early (suppress hook dispatch)
+- [x] Collects enabled `on_tag_change` hooks + workflow triggers
+- [x] Dispatches hooks non-blocking with context: `notePath: file.path`, `tagsAdded: added`, `tagsRemoved: removed`
+- [x] No debounce applied (tag changes are discrete; shadow cache diff handles deduplication per R-3)
 
 ## Phase 5: Hook Dispatch & Background Execution
 
@@ -643,7 +643,7 @@ Sprint 9:  F-023 → F-024
 - [ ] **Group C complete:** Workflow discovery, `notor-trigger` frontmatter parsing, `assembleWorkflowPrompt()` available
 - [ ] **Group E complete:** Workflow execution pipeline (`executeWorkflow`), persona switching (`switchWorkflowPersona`), conversation creation with workflow metadata
 - [ ] **Phase 3 hooks operational:** `hook-config.ts`, `hook-engine.ts`, `hook-events.ts` working with `execute_command` action type
-- [ ] **`croner` installed:** `npm install croner` run and `package.json` updated
+- [x] **`croner` installed:** `npm install croner` run and `package.json` updated
 
 ### Integration Points
 
