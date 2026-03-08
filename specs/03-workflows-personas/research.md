@@ -516,6 +516,7 @@ Phase 4 introduces an `on-tag-change` vault event hook that fires when tags are 
 ### Findings
 
 **Reference implementation:** [`research/research-r3-tag-change-test.ts`](research/research-r3-tag-change-test.ts)
+**Standalone unit tests:** [`research/research-r3-unit-test.mjs`](research/research-r3-unit-test.mjs) (39 tests, all passing — run: `node specs/03-workflows-personas/research/research-r3-unit-test.mjs`)
 
 #### Q1: `metadataCache.on('changed', ...)` behavior
 
