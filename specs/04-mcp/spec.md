@@ -25,6 +25,7 @@ This specification covers Phase 4.1 of the roadmap:
 - As a user, I want to connect a locally-running MCP server via stdio (spawning a local process) so that I can use community MCP servers that run as command-line tools on my machine.
 - As a user, I want to connect a remote MCP server via HTTP so that I can use cloud-hosted or network-accessible tool servers.
 - As a user, I want to enable or disable individual MCP servers without removing their configuration so that I can temporarily stop using a server without losing its settings.
+- As a user, I want to quickly toggle MCP servers on or off and see their connection status directly from the chat panel so that I don't have to open Obsidian Settings every time I want to enable, disable, or check on a server.
 - As a user, I want to see the connection status of each configured MCP server (connected, disconnected, error) so that I can diagnose connectivity issues.
 
 ### Tool discovery and invocation
@@ -74,7 +75,8 @@ This specification covers Phase 4.1 of the roadmap:
 - Users can enable or disable individual servers via a toggle without removing their configuration.
 - Server configurations are persisted in Notor's plugin settings data (via `loadData`/`saveData`), not in a separate configuration file.
 - The `stdio` transport type is only available on desktop. On mobile, the Settings UI hides the `stdio` option or displays an informational message that local process servers require the desktop app.
-- When a server configuration is saved, the plugin connects (or reconnects) to the server automatically if the server is enabled. A manual "Restart" button is available per server for reconnecting after errors or configuration changes.
+- When a server configuration is saved, the plugin connects (or reconnects) to the server automatically if the server is enabled.
+- To reconnect a server after an error or configuration change, the user toggles the server's enable/disable switch off and then back on. There is no dedicated "Restart" button — the toggle serves as the universal mechanism for stopping and restarting a server connection.
 - Changes to server configuration take effect without requiring a plugin reload.
 
 ### FR-55: MCP server connection lifecycle
@@ -99,7 +101,7 @@ This specification covers Phase 4.1 of the roadmap:
   - HTTP transports: connections are closed
 - Connection cleanup is registered via Obsidian's `this.register()` helper to ensure cleanup occurs even on unexpected shutdown.
 - **Reconnection behavior:**
-  - **stdio**: on disconnection (process exit or crash), the server is marked as disconnected. No automatic reconnection. The user can click "Restart" in Settings to re-spawn the process.
+  - **stdio**: on disconnection (process exit or crash), the server is marked as disconnected. No automatic reconnection. The user can toggle the server off and back on (in Settings or the chat panel MCP status popover) to re-spawn the process.
   - **HTTP transports (SSE, Streamable HTTP)**: on disconnection, automatic reconnection is attempted with exponential backoff. After repeated failures, the server is marked as errored with a descriptive message.
 - If a server's `initialize` handshake fails (e.g., incompatible protocol version, timeout), the server is marked as errored with the failure reason displayed in Settings.
 
@@ -181,7 +183,7 @@ This specification covers Phase 4.1 of the roadmap:
   - An "Add server" button that opens a form for registering a new server (transport type selector, then transport-specific fields).
 - Each server entry is expandable to show:
   - Server configuration fields (editable).
-  - A "Restart" button to manually reconnect.
+  - An enable/disable toggle (same toggle as the top-level server list). Toggling off disconnects the server; toggling back on reconnects it — this is the mechanism for restarting a server after errors or configuration changes.
   - A "Remove" button to delete the server configuration (with a confirmation prompt).
   - After connection, a "Tools" sub-section listing all discovered tools with:
     - Tool name and description.
@@ -204,6 +206,22 @@ This specification covers Phase 4.1 of the roadmap:
 - The approval UI for MCP tools is identical to built-in tools: an approve/reject prompt appears inline in the chat when manual approval is required.
 - Tool call parameters and results for MCP tools may contain arbitrary content (unlike built-in tools with known parameter shapes). The UI renders parameters as formatted key-value pairs and results as preformatted text, handling unexpected content gracefully (e.g., truncating very large results with an expansion option).
 
+### FR-63: MCP server status in the chat panel
+
+**Description:** The Notor chat panel provides a quick-access MCP server status indicator so users can view connection status and toggle servers on or off without navigating to Obsidian Settings.
+
+**Acceptance criteria:**
+- An MCP status indicator is displayed in the Notor chat panel header area (e.g., an icon or badge), accessible from the chat settings area (gear icon) consistent with the existing provider, model, and persona selectors.
+- The indicator is only visible when at least one MCP server is configured. If no servers are configured, the indicator is hidden.
+- Clicking the indicator opens a popover or dropdown listing all configured MCP servers. For each server, the popover displays:
+  - Server name.
+  - Connection status with a visual indicator: a colored dot or icon representing the current state (connected, connecting, disconnected, error). For example: green = connected, yellow = connecting, grey = disconnected, red = error.
+  - An enable/disable toggle. This toggle controls the same enabled state as the toggle in **Settings → Notor → MCP servers** (FR-61) — they are synchronized. Toggling a server off disconnects it immediately; toggling it back on initiates a new connection.
+- When a server is in an error state, a brief error summary is shown next to the status indicator (e.g., "command not found"). The full error message is available in Settings.
+- The popover reflects real-time connection status changes — if a server connects or disconnects while the popover is open, the status updates without requiring the user to close and reopen it.
+- Toggle state changes made in the chat panel popover are persisted to plugin settings and take effect immediately (same behavior as toggling in Settings).
+- The indicator in the chat panel header provides an at-a-glance summary: when all enabled servers are connected, the indicator appears in a normal/healthy state. When any enabled server is in an error or disconnected state, the indicator shows a warning state (e.g., a different color or alert badge) to draw attention.
+
 ## Non-functional requirements
 
 ### NFR-14: Performance
@@ -215,7 +233,7 @@ This specification covers Phase 4.1 of the roadmap:
 - Tool schema discovery (the `tools/list` request) completes within the per-server timeout. Discovered tools appear in the AI's tool set as soon as discovery completes, without requiring a plugin reload.
 - Tool invocation latency is determined by the MCP server's response time plus network overhead. Notor adds no more than 50 ms of dispatch overhead (Plan/Act check, auto-approve check, `_meta` injection, response formatting) beyond the server's own processing time.
 - Connecting up to 10 concurrent MCP servers does not cause perceptible degradation in chat panel responsiveness or editor performance.
-- stdio server process spawning completes within 10 seconds. If the process does not produce a valid MCP `initialize` response within 30 seconds, the connection is marked as errored and no further retries occur until the user clicks "Restart".
+- stdio server process spawning completes within 10 seconds. If the process does not produce a valid MCP `initialize` response within 30 seconds, the connection is marked as errored and no further retries occur until the user toggles the server off and back on.
 
 ### NFR-15: Security and privacy
 
@@ -284,14 +302,14 @@ This specification covers Phase 4.1 of the roadmap:
 1. User adds a stdio server with an invalid command (e.g., a binary that doesn't exist).
 2. The plugin attempts to spawn the process. The spawn fails immediately.
 3. The server status shows "Error" with the message: "Failed to spawn process: command not found."
-4. The user corrects the command in Settings and clicks "Restart". The server connects successfully.
+4. The user corrects the command in Settings and toggles the server off and back on. The server connects successfully.
 
 ### Alternative flow: MCP server disconnects mid-conversation
 
 1. User is mid-conversation and the AI invokes an MCP tool. The MCP server process crashes during execution.
 2. The tool call returns an error to the LLM: "MCP server 'filesystem' is unavailable (disconnected)."
 3. A non-blocking notice appears: "MCP server 'filesystem' disconnected."
-4. The server status in Settings updates to "Disconnected". The user can click "Restart" to re-spawn.
+4. The server status in Settings updates to "Disconnected". The user can toggle the server off and back on (via Settings or the chat panel MCP status popover) to re-spawn.
 5. The conversation continues normally — the LLM can use built-in tools or other MCP servers.
 
 ### Alternative flow: Tool discovery fails
@@ -368,12 +386,13 @@ This specification covers Phase 4.1 of the roadmap:
 ### Connection status
 - A state machine with four states: `Connecting`, `Connected`, `Disconnected`, `Error`.
 - Transitions:
-  - `Disconnected` → `Connecting` (on enable, restart, or plugin load)
+  - `Disconnected` → `Connecting` (on enable toggle or plugin load)
   - `Connecting` → `Connected` (handshake + tool discovery succeed)
   - `Connecting` → `Error` (handshake fails, timeout, spawn fails)
-  - `Connected` → `Disconnected` (process exit for stdio, network loss for HTTP)
-  - `Error` → `Connecting` (on restart or config edit + save)
-- Displayed in Settings UI with a visual indicator per server.
+  - `Connected` → `Disconnected` (process exit for stdio, network loss for HTTP, or user toggles off)
+  - `Error` → `Disconnected` (user toggles off)
+  - `Disconnected` → `Connecting` (user toggles on)
+- Displayed in both the Settings UI and the chat panel MCP status popover (FR-63) with a visual indicator per server.
 
 ## Assumptions
 
