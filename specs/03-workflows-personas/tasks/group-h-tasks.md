@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md) — FR-53
 **Data Model:** [specs/03-workflows-personas/data-model.md](../data-model.md) — WorkflowExecution, WorkflowExecutionStatus
-**Status:** In Progress (Phase 0 + Phase 1 + Phase 2 + Phase 3 H-006/H-007 complete)
+**Status:** In Progress (Phase 0 + Phase 1 + Phase 2 + Phase 3 complete)
 
 ## Task Summary
 
