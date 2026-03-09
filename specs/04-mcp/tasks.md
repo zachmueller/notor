@@ -347,14 +347,14 @@ gzip -c main.js | wc -c
 - `e2e/scripts/setup-vault.ts` — extend vault setup to include MCP server config if needed
 **Dependencies:** All Phase 1–3 tasks
 **Acceptance Criteria:**
-- [ ] Test configures a stdio MCP server (e.g., filesystem server pointed at a temp directory)
-- [ ] Verify server connects successfully and status shows "Connected"
-- [ ] Verify tools are discovered and appear in the tool registry
-- [ ] Verify a tool call (e.g., `list_directory`) goes through approval UI → execution → result returned to LLM
-- [ ] Verify server disconnect (kill process) → status shows "Disconnected" → toggle off/on → reconnects
-- [ ] Verify Plan mode blocks write-classified MCP tools
-- [ ] Verify Act mode allows write-classified MCP tools with approval
-- [ ] Test covers error scenarios: invalid command → "Error" status with message; timeout → error ToolResult
+- [x] Test configures a stdio MCP server (e.g., filesystem server pointed at a temp directory)
+- [x] Verify server connects successfully and status shows "Connected"
+- [x] Verify tools are discovered and appear in the tool registry
+- [x] Verify a tool call (e.g., `list_directory`) goes through approval UI → execution → result returned to LLM
+- [x] Verify server disconnect (kill process) → status shows "Disconnected" → toggle off/on → reconnects
+- [x] Verify Plan mode blocks write-classified MCP tools
+- [x] Verify Act mode allows write-classified MCP tools with approval
+- [x] Test covers error scenarios: invalid command → "Error" status with message; timeout → error ToolResult
 
 ### TEST-002 [P]: E2E test — HTTP MCP server and chat panel status
 **Description:** Create an e2e test script that validates HTTP transport (SSE or Streamable HTTP) MCP server flow and the chat panel MCP status indicator/popover.
@@ -363,14 +363,14 @@ gzip -c main.js | wc -c
 - `e2e/scripts/mcp-http-test.ts` — e2e test script for HTTP server + status indicator
 **Dependencies:** All Phase 1–3 tasks
 **Acceptance Criteria:**
-- [ ] Test configures an HTTP-based MCP server (SSE or Streamable HTTP)
-- [ ] Verify connection, tool discovery, and tool invocation work over HTTP
-- [ ] Verify chat panel MCP status indicator is visible when ≥1 server configured
-- [ ] Verify status indicator shows healthy state when all servers connected, warning when any errored
-- [ ] Verify popover opens on click, lists servers with correct status dots
-- [ ] Verify enable/disable toggle in popover works and syncs with Settings
-- [ ] Verify MCP tool calls displayed in chat with `server/tool` format
-- [ ] Verify tool parameters and results rendered correctly (key-value pairs, preformatted text)
+- [x] Test configures an HTTP-based MCP server (SSE or Streamable HTTP)
+- [x] Verify connection, tool discovery, and tool invocation work over HTTP
+- [x] Verify chat panel MCP status indicator is visible when ≥1 server configured
+- [x] Verify status indicator shows healthy state when all servers connected, warning when any errored
+- [x] Verify popover opens on click, lists servers with correct status dots
+- [x] Verify enable/disable toggle in popover works and syncs with Settings
+- [x] Verify MCP tool calls displayed in chat with `server/tool` format
+- [x] Verify tool parameters and results rendered correctly (key-value pairs, preformatted text)
 
 ### TEST-003 [P]: E2E test — auto-approve and persona overrides for MCP tools
 **Description:** Create an e2e test script that validates MCP tool auto-approve settings and persona override interactions.
@@ -379,12 +379,12 @@ gzip -c main.js | wc -c
 - `e2e/scripts/mcp-auto-approve-test.ts` — e2e test for MCP auto-approve flows
 **Dependencies:** FEAT-002, INT-004
 **Acceptance Criteria:**
-- [ ] Test configures MCP server with auto-approve enabled for one tool, disabled for another
-- [ ] Verify auto-approved tool executes without approval prompt
-- [ ] Verify non-auto-approved tool shows approval UI
-- [ ] Test configures persona with MCP tool overrides (approve one, deny another)
-- [ ] Verify persona override takes precedence over server-level auto-approve
-- [ ] Verify stale tool handling: disconnect server → auto-approve entries preserved with warning
+- [x] Test configures MCP server with auto-approve enabled for one tool, disabled for another
+- [x] Verify auto-approved tool executes without approval prompt
+- [x] Verify non-auto-approved tool shows approval UI
+- [x] Test configures persona with MCP tool overrides (approve one, deny another)
+- [x] Verify persona override takes precedence over server-level auto-approve
+- [x] Verify stale tool handling: disconnect server → auto-approve entries preserved with warning
 
 ### PERF-001 [P]: Performance and reliability validation
 **Description:** Validate NFR-14 (performance), NFR-15 (security), and NFR-16 (reliability) requirements through manual and automated testing.
@@ -393,16 +393,16 @@ gzip -c main.js | wc -c
 - Manual testing against quickstart.md scenarios
 **Dependencies:** All Phase 1–3 tasks
 **Acceptance Criteria:**
-- [ ] Plugin `onload()` completes without waiting for MCP connections — chat panel usable immediately
-- [ ] Tool dispatch overhead ≤ 50 ms beyond MCP server response time (measured via logs)
-- [ ] 10 concurrent MCP servers configured — no perceptible UI degradation
-- [ ] stdio process spawning completes within 10 seconds; handshake timeout at 30 seconds works correctly
-- [ ] Single MCP server crash does not affect built-in tools, other MCP servers, or active conversation
-- [ ] Malformed MCP server response → error ToolResult (not plugin crash)
-- [ ] Plugin unload cleanly terminates all MCP connections and child processes — no zombie processes
-- [ ] stdio transport guarded behind `Platform.isDesktopApp` — not available on mobile
-- [ ] Sensitive credentials stored in SecretStorage, not in plain-text `data.json`
-- [ ] Trust warnings non-dismissible — appear every time a new server is added
+- [x] Plugin `onload()` completes without waiting for MCP connections — chat panel usable immediately
+- [x] Tool dispatch overhead ≤ 50 ms beyond MCP server response time (measured via logs)
+- [x] 10 concurrent MCP servers configured — no perceptible UI degradation
+- [x] stdio process spawning completes within 10 seconds; handshake timeout at 30 seconds works correctly
+- [x] Single MCP server crash does not affect built-in tools, other MCP servers, or active conversation
+- [x] Malformed MCP server response → error ToolResult (not plugin crash)
+- [x] Plugin unload cleanly terminates all MCP connections and child processes — no zombie processes
+- [x] stdio transport guarded behind `Platform.isDesktopApp` — not available on mobile
+- [x] Sensitive credentials stored in SecretStorage, not in plain-text `data.json`
+- [x] Trust warnings non-dismissible — appear every time a new server is added
 
 ## Phase 5: Documentation & Final Validation
 
