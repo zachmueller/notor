@@ -1442,7 +1442,10 @@ async function main() {
 		collector.attach(page);
 
 		await page.waitForLoadState("domcontentloaded");
-		await page.waitForTimeout(8_000); // allow full plugin init + workflow discovery
+		// Reload the page so that plugin re-initializes with the log collector
+		// already attached — ensures discovery + parser logs are captured.
+		await page.reload();
+		await page.waitForTimeout(10_000); // allow full plugin init + workflow discovery
 
 		console.log("\n[3/3] Running workflow hook tests...\n");
 
