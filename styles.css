@@ -133,22 +133,6 @@
 	background: var(--background-modifier-hover);
 }
 
-.notor-settings-link {
-	border-top: 1px solid var(--background-modifier-border);
-	padding-top: 8px;
-	text-align: center;
-}
-
-.notor-settings-full-link {
-	font-size: var(--font-ui-smaller);
-	color: var(--text-accent);
-	cursor: pointer;
-}
-
-.notor-settings-full-link:hover {
-	text-decoration: underline;
-}
-
 .notor-model-select-wrapper {
 	margin-top: 4px;
 }

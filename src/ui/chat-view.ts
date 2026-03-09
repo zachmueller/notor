@@ -79,6 +79,8 @@ export class NotorChatView extends ItemView {
 	// Settings popover state
 	private settingsPopoverEl?: HTMLElement;
 	private isSettingsOpen = false;
+	private settingsOutsideClickHandler?: (e: MouseEvent) => void;
+	private settingsEscapeHandler?: (e: KeyboardEvent) => void;
 
 	// Persona state (A-009, A-010)
 	private personaManager?: PersonaManager;
@@ -1314,6 +1316,32 @@ export class NotorChatView extends ItemView {
 
 		this.settingsPopoverEl = this.headerEl.createDiv({ cls: "notor-settings-popover" });
 
+		// Close on click outside — deferred to next tick so the opening click
+		// doesn't immediately dismiss the popover.
+		setTimeout(() => {
+			this.settingsOutsideClickHandler = (e: MouseEvent) => {
+				const target = e.target as Node | null;
+				if (
+					this.settingsPopoverEl &&
+					target &&
+					!this.settingsPopoverEl.contains(target) &&
+					!(target as HTMLElement).closest?.("[aria-label='Chat settings']")
+				) {
+					this.closeSettingsPopover();
+				}
+			};
+			document.addEventListener("mousedown", this.settingsOutsideClickHandler, true);
+		}, 0);
+
+		// Close on Escape key
+		this.settingsEscapeHandler = (e: KeyboardEvent) => {
+			if (e.key === "Escape") {
+				this.closeSettingsPopover();
+				e.preventDefault();
+			}
+		};
+		document.addEventListener("keydown", this.settingsEscapeHandler, true);
+
 		// Provider selection
 		const providerSection = this.settingsPopoverEl.createDiv({ cls: "notor-settings-section" });
 		providerSection.createDiv({ cls: "notor-settings-label", text: "Provider" });
@@ -1371,14 +1399,6 @@ export class NotorChatView extends ItemView {
 
 		// Checkpoints section
 		this.buildCheckpointsSection(this.settingsPopoverEl);
-
-		// Full settings link
-		const fullSettingsLink = this.settingsPopoverEl.createDiv({ cls: "notor-settings-link" });
-		fullSettingsLink.createEl("a", { text: "Open full settings", cls: "notor-settings-full-link" });
-		fullSettingsLink.addEventListener("click", () => {
-			this.closeSettingsPopover();
-			this.onSettingsOpen?.();
-		});
 	}
 
 	private buildModelSelect(container: HTMLElement): void {
@@ -1555,6 +1575,14 @@ export class NotorChatView extends ItemView {
 	}
 
 	private closeSettingsPopover(): void {
+		if (this.settingsOutsideClickHandler) {
+			document.removeEventListener("mousedown", this.settingsOutsideClickHandler, true);
+			this.settingsOutsideClickHandler = undefined;
+		}
+		if (this.settingsEscapeHandler) {
+			document.removeEventListener("keydown", this.settingsEscapeHandler, true);
+			this.settingsEscapeHandler = undefined;
+		}
 		this.isSettingsOpen = false;
 		this.settingsPopoverEl?.remove();
 		this.settingsPopoverEl = undefined;
