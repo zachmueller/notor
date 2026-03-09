@@ -231,25 +231,25 @@ notor-hooks:
 **Dependencies:** G-007
 
 **Acceptance Criteria:**
-- [ ] **E2E test script created:** `e2e/scripts/workflow-hooks-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → structured log verification → screenshots → results JSON)
-- [ ] **Parsing valid `notor-hooks` (E2E):** Structured logs from WorkflowDiscovery confirm `WorkflowHookConfig` correctly populated during discovery for a test workflow with well-formed `notor-hooks` YAML. Both `execute_command` and `run_workflow` action types parsed correctly per log data fields.
-- [ ] **Parsing invalid hooks (E2E):** Structured logs confirm warn-level entries for invalid hook entries (missing `command`); valid entries in same config still populated. Workflow remains discoverable per discovery logs.
-- [ ] **Parsing unsupported event names (E2E):** Structured logs confirm warn-level entry for vault event names in `notor-hooks` (e.g., `on-note-open`); those entries skipped; valid LLM lifecycle entries still apply.
-- [ ] **Override activation — manual workflow (E2E):** Test triggers workflow with `notor-hooks` via command palette → structured logs from HookDispatch confirm scoped `pre-send` hook fired instead of global one. Global hook stdout absent; workflow-scoped hook stdout present in structured log data.
-- [ ] **Non-overridden events use global hooks (E2E):** Test triggers workflow that overrides only `after-completion` → structured logs confirm global `pre-send`, `on-tool-call`, `on-tool-result` hooks still fire during execution.
-- [ ] **Revert on success (E2E):** After workflow completes → test sends a normal message in a new conversation → structured logs confirm global hooks fire (override cleared).
-- [ ] **Revert on failure (E2E):** Test triggers workflow that causes LLM error → structured logs confirm override reverted; subsequent conversation uses global hooks.
-- [ ] **Revert on user stop (E2E):** Test stops workflow mid-execution → structured logs confirm override reverted via `deactivate()` call.
-- [ ] **Background workflow override isolation (E2E):** Test triggers two concurrent background workflows with different `notor-hooks` → structured logs confirm each conversation fires its own scoped hooks independently (conversation IDs differ in log entries).
-- [ ] **Background workflow does not affect foreground (E2E):** Test triggers background workflow with hook override → sends message in foreground → structured logs confirm foreground conversation uses global hooks.
-- [ ] **Workflow without `notor-hooks` (E2E):** Test triggers workflow without `notor-hooks` → structured logs confirm global hooks fire throughout — zero WorkflowHookOverride activation logs.
-- [ ] **`run_workflow` action in scoped hooks (E2E):** Test triggers workflow with `after-completion` scoped hook using `action: run_workflow` → structured logs confirm triggered workflow executed via standard pipeline on completion.
-- [ ] **Timeout behavior (E2E):** Structured logs confirm `execute_command` scoped hooks respect `hook_timeout`; `run_workflow` scoped hooks show no timeout enforcement.
-- [ ] **Edge case — empty `notor-hooks` mapping (E2E):** Test workflow with `notor-hooks: {}` → structured logs confirm no override activated; global hooks apply.
-- [ ] **Edge case — `notor-hooks` is not a mapping (E2E):** Test workflow with `notor-hooks: "invalid"` → structured logs confirm warn-level entry; no override activated.
-- [ ] `npm run build` compiles without errors
-- [ ] No error-level structured logs from WorkflowHookOverride or HookDispatch sources during normal test flows
-- [ ] No leaked override state after plugin disable/enable cycle (verified via structured logs on re-enable)
+- [x] **E2E test script created:** `e2e/scripts/workflow-hooks-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → structured log verification → screenshots → results JSON)
+- [x] **Parsing valid `notor-hooks` (E2E):** Structured logs from WorkflowDiscovery confirm `WorkflowHookConfig` correctly populated during discovery for a test workflow with well-formed `notor-hooks` YAML. Both `execute_command` and `run_workflow` action types parsed correctly per log data fields.
+- [x] **Parsing invalid hooks (E2E):** Structured logs confirm warn-level entries for invalid hook entries (missing `command`); valid entries in same config still populated. Workflow remains discoverable per discovery logs.
+- [x] **Parsing unsupported event names (E2E):** Structured logs confirm warn-level entry for vault event names in `notor-hooks` (e.g., `on-note-open`); those entries skipped; valid LLM lifecycle entries still apply.
+- [x] **Override activation — manual workflow (E2E):** Test triggers workflow with `notor-hooks` via command palette → structured logs from HookDispatch confirm scoped `pre-send` hook fired instead of global one. Global hook stdout absent; workflow-scoped hook stdout present in structured log data.
+- [x] **Non-overridden events use global hooks (E2E):** Test triggers workflow that overrides only `after-completion` → structured logs confirm global `pre-send`, `on-tool-call`, `on-tool_result` hooks still fire during execution.
+- [x] **Revert on success (E2E):** After workflow completes → test sends a normal message in a new conversation → structured logs confirm global hooks fire (override cleared).
+- [x] **Revert on failure (E2E):** Test triggers workflow that causes LLM error → structured logs confirm override reverted; subsequent conversation uses global hooks.
+- [x] **Revert on user stop (E2E):** Test stops workflow mid-execution → structured logs confirm override reverted via `deactivate()` call.
+- [x] **Background workflow override isolation (E2E):** Test triggers two concurrent background workflows with different `notor-hooks` → structured logs confirm each conversation fires its own scoped hooks independently (conversation IDs differ in log entries).
+- [x] **Background workflow does not affect foreground (E2E):** Test triggers background workflow with hook override → sends message in foreground → structured logs confirm foreground conversation uses global hooks.
+- [x] **Workflow without `notor-hooks` (E2E):** Test triggers workflow without `notor-hooks` → structured logs confirm global hooks fire throughout — zero WorkflowHookOverride activation logs.
+- [x] **`run_workflow` action in scoped hooks (E2E):** Test triggers workflow with `after-completion` scoped hook using `action: run_workflow` → structured logs confirm triggered workflow executed via standard pipeline on completion.
+- [x] **Timeout behavior (E2E):** Structured logs confirm `execute_command` scoped hooks respect `hook_timeout`; `run_workflow` scoped hooks show no timeout enforcement.
+- [x] **Edge case — empty `notor-hooks` mapping (E2E):** Test workflow with `notor-hooks: {}` → structured logs confirm no override activated; global hooks apply.
+- [x] **Edge case — `notor-hooks` is not a mapping (E2E):** Test workflow with `notor-hooks: "invalid"` → structured logs confirm warn-level entry; no override activated.
+- [x] `npm run build` compiles without errors
+- [x] No error-level structured logs from WorkflowHookOverride or HookDispatch sources during normal test flows
+- [x] No leaked override state after plugin disable/enable cycle (verified via structured logs on re-enable)
 
 ---
 
