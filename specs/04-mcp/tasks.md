@@ -414,10 +414,10 @@ gzip -c main.js | wc -c
 - `design/tools.md` — add MCP tool classification documentation
 **Dependencies:** All Phase 0–4 tasks
 **Acceptance Criteria:**
-- [ ] quickstart.md testing instructions match actual implementation
-- [ ] All file paths in quickstart.md, plan.md, and spec.md are accurate
-- [ ] architecture.md updated with MCP subsystem overview (McpHub, transport layer, tool adapter)
-- [ ] tools.md updated with MCP tool classification behavior (default write, readOnlyHint override, user override)
+- [x] quickstart.md testing instructions match actual implementation
+- [x] All file paths in quickstart.md, plan.md, and spec.md are accurate
+- [x] architecture.md updated with MCP subsystem overview (McpHub, transport layer, tool adapter)
+- [x] tools.md updated with MCP tool classification behavior (default write, readOnlyHint override, user override)
 
 ### VAL-001: Final end-to-end validation against specification
 **Description:** Systematic walkthrough of all spec.md user scenarios and success criteria. Verify every FR and NFR is satisfied. Run through the primary flows, alternative flows, and edge cases documented in spec.md.

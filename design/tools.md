@@ -211,14 +211,68 @@ Beyond the built-in tools, Notor should support user-defined tools via the Model
 
 ### MCP tool classification and Plan/Act awareness
 
-- **Read/write classification**: each custom MCP tool can optionally be classified as read-only or write in its Notor configuration. This classification is used to enforce Plan/Act restrictions the same way as built-in tools (write-classified MCP tools are blocked in Plan mode).
-- **Plan/Act state signaling**: beyond Notor's own enforcement of read/write restrictions, the current Plan/Act mode state should be communicated to MCP tool servers so they can make their own decisions about whether to take write-type actions. The trust model is cooperative — MCP servers are trusted to respect the signal, and Notor does not attempt to externally verify compliance. Users are responsible for understanding the behavior of their configured MCP tools.
-- The signal is a simple binary: `plan` or `act`. Additional context (auto-approve settings, active persona, etc.) is not included in the initial implementation.
+#### Read/write classification
 
-> **⚠️ Research required: Plan/Act state signaling mechanism for MCP tools**
->
-> The specific mechanism for communicating Plan/Act state to MCP servers needs research and experimentation. Potential approaches include: passing the mode as an extra parameter or metadata field in each tool invocation, providing it as part of MCP server initialization/configuration context, or defining a custom MCP protocol extension (e.g., a capability or queryable resource). The right approach may depend on MCP protocol conventions and what MCP server implementations can realistically consume. This research should be conducted alongside the broader MCP integration research. See [Roadmap — Research tasks](roadmap.md#research-tasks). Output: findings incorporated into `design/research/mcp-server-integration.md`.
+Each MCP tool's mode is resolved via the following precedence at dispatch time (implemented in `McpRegisteredTool.mode`):
 
-> **⚠️ Research required: MCP integration in Obsidian**
->
-> We need to research the practical options for how an Obsidian plugin can discover and communicate with locally-running MCP servers. Key questions include: transport mechanisms (stdio, HTTP/SSE, WebSocket), how to spawn/manage local MCP server processes from within the Obsidian plugin sandbox, and any Electron/Node.js API constraints that affect connectivity. This research should be completed before creating implementation specifications for Phase 4.1. See [Roadmap — Research tasks](roadmap.md#research-tasks).
+1. **User override** — explicit `"read"` or `"write"` set in `McpServerConfig.toolClassifications[rawToolName]` via the settings UI. Takes precedence over everything else.
+2. **Server-reported `readOnlyHint`** — if the MCP server includes `annotations.readOnlyHint: true` in its `tools/list` response for a tool, Notor classifies it as `"read"`. Advisory: this hint is not verified and can be overridden by the user. The settings UI shows the server-reported default and highlights when a user override is in effect.
+3. **Default `"write"`** — all MCP tools with no user override and no `readOnlyHint` are conservatively classified as write. Write-classified tools are blocked in Plan mode.
+
+#### Plan mode enforcement
+
+Write-classified MCP tools are blocked in Plan mode at the dispatcher level, before the tool is ever called. The LLM receives the error message:
+
+```
+Tool '{serverName}__{toolName}' is write-only and blocked in Plan mode. Switch to Act mode to use this tool.
+```
+
+This is identical to the enforcement applied to built-in write tools (`write_note`, `replace_in_note`, etc.).
+
+#### Plan/Act state signaling to MCP servers
+
+Beyond Notor's own Plan mode enforcement, every `tools/call` request to an MCP server includes a `_meta` field with the current mode:
+
+```json
+{
+  "_meta": {
+    "notor_mode": "act"
+  }
+}
+```
+
+The value is `"plan"` or `"act"`. This cooperative signal lets MCP servers make their own decisions about write-type actions. The trust model is cooperative — Notor does not verify compliance. Users are responsible for understanding the behavior of their configured MCP servers.
+
+Additional context (auto-approve settings, active persona, etc.) is not included in the signal.
+
+#### Auto-approve precedence for MCP tools
+
+MCP tool auto-approve follows this precedence chain (implemented in `resolveMcpAutoApprove()` in the dispatcher):
+
+1. **Active persona override** — if the persona has an explicit `"approve"` or `"deny"` entry for the namespaced tool name (`{serverName}__{toolName}`), that takes precedence.
+2. **Server-level `autoApprove` list** — if the raw tool name (without namespace) appears in `McpServerConfig.autoApprove[]`, the tool is auto-approved.
+3. **Global default `false`** — all MCP tools require manual approval by default. This is intentionally conservative given the trust considerations of externally-authored tool servers.
+
+#### MCP tool name conventions
+
+| Context | Format | Example |
+|---|---|---|
+| Registry and LLM | `{serverName}__{toolName}` (double underscore) | `my-db-server__query` |
+| Chat UI display | `{serverName}/{toolName}` (slash) | `my-db-server/query` |
+| Auto-approve list in `McpServerConfig` | raw tool name only | `query` |
+| Persona auto-approve key | namespaced (`server__tool`) | `my-db-server__query` |
+
+Helper functions in `src/mcp/mcp-tool-adapter.ts`:
+- `isMcpTool(name)` — returns `true` if `name` contains `__`
+- `parseMcpToolName(name)` — splits on the first `__` to return `{ serverName, toolName }`
+
+#### MCP tool classification table
+
+The built-in tool classification table above covers Notor's own tools. For MCP tools, the effective classification depends on user configuration and server hints. The default for any newly discovered MCP tool is **write** (requires Act mode, requires approval).
+
+| Classification source | Effective mode | Notes |
+|---|---|---|
+| User override: `"read"` | read | Available in Plan and Act. No approval required if auto-approved. |
+| User override: `"write"` | write | Blocked in Plan mode. |
+| Server `readOnlyHint: true` (no user override) | read | Server hint accepted. User can override. |
+| No override, no hint (default) | write | Conservative default. User should review and reclassify known-safe tools. |
