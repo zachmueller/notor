@@ -1,7 +1,7 @@
 # Task Breakdown: Settings Refactor — Module Decomposition
 
 **Created:** 2026-09-03
-**Status:** Not Started
+**Status:** In Progress (Phase 0 + Phase 1 complete)
 
 ## Overview
 
@@ -102,12 +102,12 @@ E2E scripts (`e2e/scripts/*.ts`) do **not** import from `src/settings.ts`. They 
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] `src/settings/` directory exists with `index.ts`
-- [ ] `src/settings.ts` (root-level) is converted to a single-line re-export shim: `export * from "./settings/index";`
-- [ ] `src/settings/index.ts` initially re-exports everything that was previously in `src/settings.ts` (copy content temporarily, or import from a monolithic `src/settings/_legacy.ts` intermediate file)
-- [ ] `npm run build` succeeds — all 21 consumers resolve their imports through the shim with zero changes
-- [ ] `npx tsc --noEmit` passes with no new errors
-- [ ] No runtime behavior changes — the plugin loads and functions identically
+- [x] `src/settings/` directory exists with `index.ts`
+- [x] `src/settings.ts` (root-level) is converted to a single-line re-export shim: `export * from "./settings/index";`
+- [x] `src/settings/index.ts` initially re-exports everything that was previously in `src/settings.ts` (copy content temporarily, or import from a monolithic `src/settings/_legacy.ts` intermediate file)
+- [x] `npm run build` succeeds — all 21 consumers resolve their imports through the shim with zero changes
+- [x] `npx tsc --noEmit` passes with no new errors
+- [ ] No runtime behavior changes — the plugin loads and functions identically (manual verification deferred to S-007)
 
 **Implementation Notes:**
 - The simplest approach: rename `src/settings.ts` → `src/settings/_legacy.ts`, then create `src/settings/index.ts` that re-exports everything from `./_legacy`, and create `src/settings.ts` as `export * from "./settings/index"`. This gives a guaranteed-working intermediate state.
@@ -133,16 +133,16 @@ E2E scripts (`e2e/scripts/*.ts`) do **not** import from `src/settings.ts`. They 
 **Dependencies:** S-001
 
 **Acceptance Criteria:**
-- [ ] `src/settings/types.ts` exports: `ModelPricing`, `Hook`, `HookEvent`, `HookConfig`, `NotorSettings`
-- [ ] `src/settings/defaults.ts` exports: `DEFAULT_SETTINGS` (and the sub-defaults it depends on: `DEFAULT_PROVIDERS`, `DEFAULT_AUTO_APPROVE`, `DEFAULT_HOOKS`, `DEFAULT_VAULT_EVENT_HOOKS`)
-- [ ] `src/settings/constants.ts` exports: `AWS_REGIONS` (array of `{ value, label }`), `TOOL_DISPLAY_NAMES` (record of tool metadata)
-- [ ] `src/settings/helpers.ts` exports: `getProvider()`, `updateProvider()`, `validateCronExpressionBasic()`
-- [ ] `src/settings/index.ts` re-exports all public symbols from the new sub-modules — the public API surface is unchanged
-- [ ] Import paths within the extracted modules reference each other correctly (e.g., `defaults.ts` imports `NotorSettings` from `./types`, `helpers.ts` imports `NotorSettings` from `./types`)
-- [ ] `defaults.ts` imports `LLMProviderConfig` from `../types` (the root `src/types.ts`) and `VaultEventHookConfig` from `../types`
-- [ ] `npm run build` succeeds with zero consumer changes
-- [ ] `npx tsc --noEmit` passes
-- [ ] No runtime behavior changes
+- [x] `src/settings/types.ts` exports: `ModelPricing`, `Hook`, `HookEvent`, `HookConfig`, `NotorSettings`
+- [x] `src/settings/defaults.ts` exports: `DEFAULT_SETTINGS` (and the sub-defaults it depends on: `DEFAULT_PROVIDERS`, `DEFAULT_AUTO_APPROVE`, `DEFAULT_HOOKS`, `DEFAULT_VAULT_EVENT_HOOKS`)
+- [x] `src/settings/constants.ts` exports: `AWS_REGIONS` (array of `{ value, label }`), `TOOL_DISPLAY_NAMES` (record of tool metadata)
+- [x] `src/settings/helpers.ts` exports: `getProvider()`, `updateProvider()`, `validateCronExpressionBasic()`
+- [x] `src/settings/index.ts` re-exports all public symbols from the new sub-modules — the public API surface is unchanged
+- [x] Import paths within the extracted modules reference each other correctly (e.g., `defaults.ts` imports `NotorSettings` from `./types`, `helpers.ts` imports `NotorSettings` from `./types`)
+- [x] `defaults.ts` imports `LLMProviderConfig` from `../types` (the root `src/types.ts`) and `VaultEventHookConfig` from `../types`
+- [x] `npm run build` succeeds with zero consumer changes
+- [x] `npx tsc --noEmit` passes
+- [ ] No runtime behavior changes (manual verification deferred to S-007)
 
 **Notes on type dependencies:**
 - `NotorSettings` references types from `src/types.ts` (`ConversationMode`, `LLMProviderConfig`, `VaultEventHookConfig`). These remain imported from `../types` in `src/settings/types.ts`.
