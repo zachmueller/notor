@@ -909,6 +909,19 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Update the status badge on an existing tool call card.
+	 *
+	 * Called by the orchestrator after tool dispatch completes to
+	 * reflect success/error/rejected state in the UI.
+	 */
+	updateToolCallStatus(toolEl: HTMLElement, status: string): void {
+		const statusEl = toolEl.querySelector(".notor-tool-call-status") as HTMLElement | null;
+		if (!statusEl) return;
+		statusEl.className = `notor-tool-call-status notor-tool-status-${status}`;
+		statusEl.textContent = status;
+	}
+
+	/**
 	 * Render a tool call inline in the message list.
 	 */
 	renderToolCall(message: Message): HTMLElement {

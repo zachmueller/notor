@@ -1262,6 +1262,14 @@ export class ChatOrchestrator {
 						toolCallMessage.id
 					);
 
+					// Update tool call status badge in the UI
+					if (toolCallEl) {
+						this.view?.updateToolCallStatus(
+							toolCallEl,
+							toolResult.success ? "success" : "error"
+						);
+					}
+
 					// Propagate the provider tool call ID so the result can be correlated
 					toolResult.tool_call_id = result.toolCallId;
 
