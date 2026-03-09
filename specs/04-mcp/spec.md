@@ -17,6 +17,14 @@ This specification covers Phase 4.1 of the roadmap:
 - **Plan/Act state signaling**: the current Plan/Act mode is communicated to MCP servers on each tool invocation via the `_meta.notor_mode` field so servers can make their own cooperative decisions about write-type actions.
 - **Trust and safety**: clear warnings are displayed in the settings UI and documentation, communicating that custom tools bypass built-in safety guarantees.
 
+## Clarifications
+
+### Session 2026-09-03
+
+- Q: How should Notor handle non-text MCP tool results (images, embedded resources)? → A: Text-only for Phase 4.1 — extract text content items, discard image/resource items with a brief notice appended to the result (e.g., "[1 image omitted]"). Image/resource rendering deferred to a future iteration.
+- Q: What validation rules should apply to MCP server names (used as unique key and namespace prefix)? → A: Slug format — lowercase alphanumeric + hyphens only (e.g., `my-db-server`). Auto-slugify on input (trim, lowercase, replace spaces/special chars with hyphens). Max 50 characters. Uniqueness enforced.
+- Q: Should MCP tool results have an output character cap? → A: No cap — the per-server request timeout is the only limit. MCP tool results are passed through to the LLM regardless of size. The chat UI handles large results via its existing truncation-with-expansion display.
+
 ## User stories
 
 ### MCP server configuration
@@ -61,7 +69,7 @@ This specification covers Phase 4.1 of the roadmap:
 - Each server configuration includes:
   | Field | Required | Description |
   |---|---|---|
-  | Name | yes | A user-chosen display name for the server (used as the unique key in configuration) |
+  | Name | yes | A user-chosen identifier for the server (used as the unique key in configuration and as the namespace prefix in tool names). Must be slug format: lowercase alphanumeric and hyphens only (`[a-z0-9-]`), max 50 characters. Input is auto-slugified (trimmed, lowercased, spaces and special characters replaced with hyphens). Must be unique across all configured servers. |
   | Transport type | yes | One of: `stdio`, `sse`, or `streamableHttp` |
   | Command | yes (stdio) | The command to spawn the local process (e.g., `npx`, `python`, a path to a binary) |
   | Arguments | no (stdio) | Command-line arguments for the process |
@@ -161,6 +169,7 @@ This specification covers Phase 4.1 of the roadmap:
 - If the MCP server returns an error (e.g., tool execution failure, timeout), the error is formatted and returned to the LLM as a tool result (not swallowed), consistent with how built-in tool errors are handled.
 - If the MCP server is disconnected when a tool call is attempted, an error is returned to the LLM indicating the server is unavailable.
 - The per-server request timeout (FR-54, default: 60 seconds) applies to each `tools/call` request. If the timeout is exceeded, the request is cancelled and a timeout error is returned to the LLM.
+- MCP tool results have no output character cap. The full text result from the server is passed through to the LLM regardless of size — the per-server request timeout is the only limit on result size. The chat UI handles display of large results via its existing truncation-with-expansion mechanism (FR-62).
 
 ### FR-60: Auto-approve settings for MCP tools
 
@@ -205,6 +214,7 @@ This specification covers Phase 4.1 of the roadmap:
 - The display format is consistent with built-in tool calls — the same collapsible tool-call UI component is used.
 - The approval UI for MCP tools is identical to built-in tools: an approve/reject prompt appears inline in the chat when manual approval is required.
 - Tool call parameters and results for MCP tools may contain arbitrary content (unlike built-in tools with known parameter shapes). The UI renders parameters as formatted key-value pairs and results as preformatted text, handling unexpected content gracefully (e.g., truncating very large results with an expansion option).
+- MCP tool results may contain multiple content items of different types (`TextContent`, `ImageContent`, `EmbeddedResource`). In Phase 4.1, only `TextContent` items are extracted and returned to the LLM. Non-text content items (images, embedded resources) are discarded, with a brief notice appended to the result (e.g., "[1 image omitted]") so the LLM and user are aware content was excluded.
 
 ### FR-63: MCP server status in the chat panel
 
@@ -367,7 +377,7 @@ This specification covers Phase 4.1 of the roadmap:
 
 ### McpServerConfig
 - Represents a single MCP server configuration entry in Notor's plugin settings.
-- Fields: name (unique key), transport type (`stdio` | `sse` | `streamableHttp`), transport-specific connection parameters (command/args/cwd/env for stdio; url/headers for HTTP), enabled flag, request timeout, per-tool classification overrides, per-tool auto-approve list.
+- Fields: name (unique key, slug format: `[a-z0-9-]`, max 50 chars, auto-slugified on input), transport type (`stdio` | `sse` | `streamableHttp`), transport-specific connection parameters (command/args/cwd/env for stdio; url/headers for HTTP), enabled flag, request timeout, per-tool classification overrides, per-tool auto-approve list.
 - Stored in `mcpServers` map within Notor's plugin settings data (`data.json` via `loadData`/`saveData`).
 
 ### McpConnection
@@ -420,3 +430,4 @@ The following are explicitly excluded from Phase 4.1 and deferred to later phase
 - **MCP server logging/diagnostics UI**: detailed logging of MCP JSON-RPC traffic for debugging. Phase 4.1 surfaces connection status and errors but does not provide a protocol-level debug view.
 - **Automatic tool classification inference**: inferring read/write classification from tool names or descriptions using heuristics or LLM analysis. Phase 4.1 relies on `ToolAnnotations.readOnlyHint` and user overrides only.
 - **MCP server health monitoring**: periodic health checks or heartbeat pings to detect unresponsive servers proactively. Failures are detected reactively when tool calls fail or connections drop.
+- **Non-text MCP tool result rendering**: MCP tools can return `ImageContent` (base64-encoded images) and `EmbeddedResource` content. Phase 4.1 extracts only `TextContent` items and appends a notice for omitted non-text items. Inline image rendering and embedded resource display in the chat UI are deferred to a future iteration.
