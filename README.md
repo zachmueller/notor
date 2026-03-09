@@ -4,7 +4,7 @@
 
 Notor brings AI-powered assistance directly into your Obsidian workflow. It gives you a full AI chat panel with the ability to read, search, create, and surgically edit notes in your vault — with full transparency into every AI action, a safety-first approval model, diff previews for proposed changes, and rollback via checkpoints.
 
-> **Status:** Phases 0–4 of the roadmap implemented.
+> **Status:** Phases 0–4.1 of the roadmap implemented.
 
 ---
 
@@ -178,6 +178,27 @@ Dynamically inject the contents of any vault note (or a specific section) into w
 - **Multiple tags per document** — any number of `<include_note />` tags may appear in a single document; each resolves independently.
 - **No nested resolution** — if an included note itself contains `<include_note>` tags, those tags are passed through as literal text (no recursive includes), preventing circular reference loops.
 
+### Custom MCP tool servers
+
+Extend the AI's tool set beyond built-in tools by connecting custom MCP (Model Context Protocol) servers — local command-line processes (stdio) or remote HTTP services:
+
+- **MCP server configuration** — register and manage servers in **Settings → Notor → MCP servers**. Each server has a name (slug format: `[a-z0-9-]`), transport type, connection parameters, and optional per-tool overrides. Configuration is persisted in plugin settings; no separate config file.
+- **Three transport types:**
+  - **stdio** (desktop only) — spawns a local process via the configured command, arguments, working directory, and environment variables. JSON-RPC over stdin/stdout. Compatible with the vast majority of community MCP servers (e.g., `npx -y @modelcontextprotocol/server-filesystem`).
+  - **SSE** — HTTP with Server-Sent Events for server-to-client streaming. Works on all platforms.
+  - **Streamable HTTP** — HTTP POST for requests with optional SSE for streaming responses. The current MCP standard. Works on all platforms.
+- **Automatic tool discovery** — after connecting, Notor queries the server for its available tools and input schemas. Discovered tools are registered in the unified tool registry alongside built-in tools. The AI sees and invokes MCP tools the same way as built-in tools — no special prompting required.
+- **Namespaced tool names** — MCP tools are registered as `{serverName}__{toolName}` (e.g., `filesystem__read_file`) to prevent collisions with built-in tools or tools from other servers. The chat UI displays the friendlier `server/tool` format for readability.
+- **Uniform dispatch pipeline** — MCP tool calls go through the same pipeline as built-in tools: Plan/Act enforcement → auto-approve check → approval UI → execution → result display. No special treatment.
+- **Read/write classification** — each MCP tool is classified as read-only or write. The default is derived from the server-reported `ToolAnnotations.readOnlyHint`; users can override the classification per tool in Settings. Write-classified MCP tools are blocked in Plan mode; read-only tools are allowed.
+- **Plan/Act state signaling** — on every `tools/call` request, Notor includes `_meta: { notor_mode: "plan" | "act" }` so cooperative servers can make their own decisions about write-type actions. Notor's own Plan/Act enforcement is always the hard gate.
+- **Per-tool auto-approve** — newly discovered MCP tools default to requiring manual approval. Auto-approve can be enabled per tool in Settings. Per-persona auto-approve overrides extend to MCP tools alongside built-in tools.
+- **Sensitive credential storage** — stdio environment variables and HTTP headers (e.g., `Authorization`) can be individually marked "sensitive" via a toggle in Settings. Sensitive values are stored in Obsidian's secrets manager (OS-level encrypted storage); non-sensitive values are stored in plain-text settings.
+- **Connection lifecycle** — servers connect asynchronously after plugin load without blocking startup. Connection status is tracked per server: Connecting → Connected / Error. stdio servers require a manual toggle off/on to reconnect after a crash; HTTP transport servers auto-reconnect with exponential backoff. Cleanup (process termination, connection close) is registered via Obsidian's plugin lifecycle helpers.
+- **MCP status indicator in the chat panel** — an icon in the chat panel header (visible only when ≥1 server is configured) shows at-a-glance health. Clicking it opens a popover listing all servers with status dots (green = connected, yellow = connecting, grey = disconnected, red = error) and enable/disable toggles — no need to open Obsidian Settings just to restart a server.
+- **Trust warnings** — a prominent non-dismissible warning is shown each time a new server is added. An additional warning appears for stdio servers noting that a local process will be spawned with the user's permissions.
+- **Failure isolation** — a single server crashing, timing out, or disconnecting does not affect built-in tools, other MCP servers, or the active conversation. Errors are returned to the LLM as tool results, not swallowed.
+
 ### Vault event hooks
 
 Configure hooks that fire automatically in response to vault lifecycle events:
@@ -274,6 +295,28 @@ npm run dev
    ```
 3. Open the command palette → **Notor: Run workflow** → select your workflow
 
+### Connect your first MCP server
+
+> **Desktop only** for stdio servers. HTTP-based servers (SSE, Streamable HTTP) work on all platforms.
+
+The example below uses the community filesystem MCP server, which gives the AI access to a directory on your machine:
+
+1. Open **Settings → Notor → MCP servers** and click **Add server**
+2. Acknowledge the trust warning, then configure:
+   - **Name:** `filesystem`
+   - **Transport:** `stdio`
+   - **Command:** `npx` (use the absolute path if Obsidian can't find it — run `which npx` in your terminal)
+   - **Arguments:** `-y @modelcontextprotocol/server-filesystem /path/to/your/directory`
+3. Save — Notor spawns the process and performs the MCP handshake automatically
+4. The status dot turns green and discovered tools appear in the server's settings entry (e.g., `read_file`, `write_file`, `list_directory`)
+5. Open the Notor chat panel — the MCP status icon in the header confirms the server is connected
+6. Ask the AI something like "List the files in my directory" — the AI will invoke `filesystem/list_directory`, the approval UI will appear, and after you approve, the result is returned inline in the chat
+
+To connect a remote HTTP server instead:
+1. Click **Add server**, select transport **Streamable HTTP** (or **SSE**)
+2. Enter the server's URL and any required headers (mark `Authorization` values as **Sensitive** to store them encrypted)
+3. Save — the server connects and tools are discovered automatically; HTTP servers auto-reconnect if the connection drops
+
 ---
 
 ## Project structure
@@ -328,7 +371,8 @@ The `design/` directory contains the full medium-term vision for Notor, written 
 | **Phase 2** | Trust & observability: checkpoints/rollback, token tracking, chat history, frontmatter & tag tools, vault rules | ✅ Complete |
 | **Phase 3** | Context & intelligence: note/file attachment, auto-context injection, auto-compaction, web fetching, shell execution, LLM interaction hooks | ✅ Complete |
 | **Phase 4** | Workflows & personas: file-based personas, reusable workflow notes, `<include_note>` tag, vault event hooks | ✅ Complete |
-| **Phase 5** | Advanced & multi-agent: parallel agents, agent monitor panel, background agents, custom MCP tools, browser capabilities | 🔜 Planned |
+| **Phase 4.1** | Custom MCP servers: stdio/SSE/Streamable HTTP transports, tool discovery, uniform dispatch, read/write classification, Plan/Act signaling, auto-approve, chat panel status indicator | ✅ Complete |
+| **Phase 5** | Advanced & multi-agent: parallel agents, agent monitor panel, background agents, browser capabilities | 🔜 Planned |
 
 ---
 
