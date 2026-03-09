@@ -778,7 +778,7 @@ export class NotorChatView extends ItemView {
 	 *
 	 * - If the regex matches, the matched block is rendered as `<details>`.
 	 * - Text before the opening tag (e.g. `<trigger_context>` for event-triggered
-	 *   workflows — future Group F use) is rendered as preformatted text.
+	 *   workflows) is rendered as a collapsed-by-default `<details>` element.
 	 * - Text after the closing tag (supplementary user text from the slash-command)
 	 *   is rendered as a normal paragraph.
 	 * - If the regex does not match (plain workflow message), falls back to plain text.
@@ -803,10 +803,12 @@ export class NotorChatView extends ItemView {
 		const beforeText = content.slice(0, matchStart).trim();
 		const afterText = content.slice(matchEnd).trim();
 
-		// Render text before the block (e.g., <trigger_context> for Group F)
+		// Render text before the block (e.g., <trigger_context> for event-triggered workflows)
 		if (beforeText) {
-			const pre = container.createEl("pre", { cls: "notor-workflow-pre-context" });
-			pre.textContent = beforeText;
+			const triggerDetails = container.createEl("details", { cls: "notor-trigger-context-details" });
+			triggerDetails.createEl("summary", { text: "Trigger context" });
+			const pre = triggerDetails.createEl("pre");
+			pre.createEl("code", { text: beforeText });
 		}
 
 		// Render the workflow instructions as a collapsed <details> element

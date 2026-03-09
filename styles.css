@@ -1349,6 +1349,60 @@
 	color: var(--text-normal);
 }
 
+/* Trigger context — collapsed <details> for event-triggered workflow metadata (E-014) */
+.notor-trigger-context-details {
+	margin: 4px 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+	overflow: hidden;
+}
+
+.notor-trigger-context-details summary {
+	padding: 4px 10px;
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	list-style: none;
+	user-select: none;
+}
+
+.notor-trigger-context-details summary::-webkit-details-marker {
+	display: none;
+}
+
+.notor-trigger-context-details summary::before {
+	content: "▶";
+	display: inline-block;
+	margin-right: 6px;
+	font-size: 0.7em;
+	transition: transform 120ms ease;
+}
+
+.notor-trigger-context-details[open] summary::before {
+	transform: rotate(90deg);
+}
+
+.notor-trigger-context-details summary:hover {
+	color: var(--text-normal);
+}
+
+.notor-trigger-context-details pre {
+	margin: 0;
+	padding: 8px 10px;
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	border-radius: 0 0 var(--radius-s) var(--radius-s);
+}
+
+.notor-trigger-context-details pre code {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: var(--text-normal);
+}
+
 /* ==========================================================================
    Hook Injection (ACI-002)
    ========================================================================== */

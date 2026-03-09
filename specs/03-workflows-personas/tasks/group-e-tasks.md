@@ -381,8 +381,9 @@ E-012 + E-014 ──▶ E-015 (main.ts wiring — connect all components)
 - [x] The `<details>` element is **collapsed by default** (no `open` attribute) so the workflow instructions are hidden initially
 - [x] The summary label shows "Workflow: {workflow-name}" extracted from the `type` attribute (e.g., "Workflow: daily-review.md")
 - [x] Text after the closing `</workflow_instructions>` tag (supplementary user text from slash-command) is rendered **outside** the `<details>` element as normal paragraph text
-- [x] Text before the opening `<workflow_instructions>` tag (e.g., `<trigger_context>` block for event-triggered workflows — future Group F use) is rendered as preformatted text via `<pre class="notor-workflow-pre-context">`
+- [x] Text before the opening `<workflow_instructions>` tag (e.g., `<trigger_context>` block for event-triggered workflows) is rendered as a collapsed-by-default `<details>` element with class `notor-trigger-context-details` and summary "Trigger context". The content inside is displayed as preformatted text (`<pre><code>…</code></pre>`). The previous `.notor-workflow-pre-context` `<pre>`-only rendering is removed.
 - [x] CSS styling: `.notor-workflow-details` has subtle background color, border, and rounded corners. `.notor-workflow-details summary` has cursor pointer and appropriate spacing. Content within uses monospace or the standard note font.
+- [x] CSS styling: `.notor-trigger-context-details` follows the same visual pattern as `.notor-hook-injection details` and `.notor-workflow-details` — subtle background, border, rounded corners, cursor pointer on summary.
 - [x] Messages without `<workflow_instructions>` are rendered unchanged — backward-compatible
 - [x] The `<workflow_instructions>` content inside the details is rendered as plain text (not parsed as Markdown) to preserve the original workflow structure
 
