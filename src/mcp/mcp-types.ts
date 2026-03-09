@@ -8,6 +8,9 @@
  * @see specs/04-mcp/data-model.md
  */
 
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+
 // ---------------------------------------------------------------------------
 // Persisted configuration types (stored in NotorSettings)
 // ---------------------------------------------------------------------------
@@ -179,10 +182,10 @@ export interface McpConnection {
 	status: McpConnectionStatus;
 
 	/** MCP SDK Client instance. Null when disconnected. */
-	client: unknown | null;
+	client: Client | null;
 
 	/** MCP SDK transport instance. Null when disconnected. */
-	transport: unknown | null;
+	transport: Transport | null;
 
 	/** Tools discovered via tools/list. Empty before discovery or on failure. */
 	tools: McpDiscoveredTool[];

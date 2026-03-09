@@ -88,15 +88,15 @@ gzip -c main.js | wc -c
 - `src/mcp/mcp-types.ts` — `McpServerConfig`, `McpEnvVar`, `McpHeader`, `McpConnection`, `McpConnectionStatus`, `McpDiscoveredTool`, `McpToolCallResult`, `McpContentItem`, `ToolAnnotations`
 **Dependencies:** ENV-002
 **Acceptance Criteria:**
-- [ ] `McpServerConfig` interface matches data-model.md exactly (name, type, command, args, cwd, env, url, headers, disabled, timeout, toolClassifications, autoApprove)
-- [ ] `McpEnvVar` and `McpHeader` interfaces include `key`, `value`, and `sensitive` fields
-- [ ] `McpConnection` runtime type includes serverName, config, status, client, transport, tools, error fields
-- [ ] `McpConnectionStatus` is `"disconnected" | "connecting" | "connected" | "error"`
-- [ ] `McpDiscoveredTool` includes name, description, inputSchema, annotations
-- [ ] `McpContentItem` discriminated union covers `text`, `image`, and `resource` types
-- [ ] Secrets manager key format helpers exported: `mcpEnvSecretKey(serverName, key)` → `mcp_env_{serverName}_{key}`, `mcpHeaderSecretKey(serverName, key)` → `mcp_header_{serverName}_{key}`
-- [ ] Server name validation regex exported: `MCP_SERVER_NAME_REGEX = /^[a-z0-9][a-z0-9-]*$/`, max 50 chars
-- [ ] `npm run build` succeeds with no type errors
+- [x] `McpServerConfig` interface matches data-model.md exactly (name, type, command, args, cwd, env, url, headers, disabled, timeout, toolClassifications, autoApprove)
+- [x] `McpEnvVar` and `McpHeader` interfaces include `key`, `value`, and `sensitive` fields
+- [x] `McpConnection` runtime type includes serverName, config, status, client, transport, tools, error fields
+- [x] `McpConnectionStatus` is `"disconnected" | "connecting" | "connected" | "error"`
+- [x] `McpDiscoveredTool` includes name, description, inputSchema, annotations
+- [x] `McpContentItem` discriminated union covers `text`, `image`, and `resource` types
+- [x] Secrets manager key format helpers exported: `mcpEnvSecretKey(serverName, key)` → `mcp_env_{serverName}_{key}`, `mcpHeaderSecretKey(serverName, key)` → `mcp_header_{serverName}_{key}`
+- [x] Server name validation regex exported: `MCP_SERVER_NAME_REGEX = /^[a-z0-9][a-z0-9-]*$/`, max 50 chars
+- [x] `npm run build` succeeds with no type errors
 
 ### ARCH-002: McpHub connection manager — connect, disconnect, lifecycle
 **Description:** Implement the core `McpHub` singleton class that manages all MCP server connections. This task covers the connection lifecycle (connect, disconnect, dispose), transport factory (stdio/SSE/Streamable HTTP), credential resolution from secrets manager, process lifecycle management for stdio, reconnection logic for HTTP transports, and status change notifications. Does NOT yet include tool discovery or `callTool` (those are ARCH-003).
@@ -105,19 +105,19 @@ gzip -c main.js | wc -c
 - `src/mcp/mcp-hub.ts` — `McpHub` class with `initialize()`, `connectServer()`, `disconnectServer()`, `getConnection()`, `getAllConnections()`, `onStatusChange()`, `dispose()`
 **Dependencies:** ARCH-001
 **Acceptance Criteria:**
-- [ ] `McpHub.initialize(settings, secretStorage)` reads `mcp_servers` config and calls `connectServer()` for each enabled server — asynchronously, non-blocking (does not await all connections)
-- [ ] `connectServer()` creates the correct transport based on `config.type`:
+- [x] `McpHub.initialize(settings, secretStorage)` reads `mcp_servers` config and calls `connectServer()` for each enabled server — asynchronously, non-blocking (does not await all connections)
+- [x] `connectServer()` creates the correct transport based on `config.type`:
   - stdio: `StdioClientTransport` with command, args, cwd, merged env (system + config + secrets). Guarded behind `Platform.isDesktopApp` — returns error on mobile.
   - sse: `SSEClientTransport` with URL and resolved headers (sensitive from secrets manager)
   - streamableHttp: `StreamableHTTPClientTransport` with URL and resolved headers. Includes Cline's 404→405 compatibility shim.
-- [ ] `connectServer()` performs MCP `initialize` handshake with `clientInfo: { name: "Notor", version: <from manifest> }`. 30-second handshake timeout.
-- [ ] Connection status transitions follow the state machine: Disconnected → Connecting → Connected / Error
-- [ ] stdio: monitors child process for exit/crash events → sets status to "disconnected". Captures stderr for logging. No auto-reconnect.
-- [ ] HTTP transports: auto-reconnect with exponential backoff (1s initial, 2x factor, 60s max). After 5 consecutive failures → status "error" with message (reconnection continues in background).
-- [ ] `disconnectServer()` cleanly closes transport. stdio: SIGTERM → 5s grace → SIGKILL. Safe to call if already disconnected.
-- [ ] `dispose()` disconnects all servers in parallel via `Promise.allSettled()`.
-- [ ] `onStatusChange(callback)` registers listeners; status changes emit to all registered callbacks.
-- [ ] Credential resolution: sensitive env vars read from `secretStorage.get(mcpEnvSecretKey(...))` at connection time; sensitive headers from `secretStorage.get(mcpHeaderSecretKey(...))`.
+- [x] `connectServer()` performs MCP `initialize` handshake with `clientInfo: { name: "Notor", version: <from manifest> }`. 30-second handshake timeout.
+- [x] Connection status transitions follow the state machine: Disconnected → Connecting → Connected / Error
+- [x] stdio: monitors child process for exit/crash events → sets status to "disconnected". Captures stderr for logging. No auto-reconnect.
+- [x] HTTP transports: auto-reconnect with exponential backoff (1s initial, 2x factor, 60s max). After 5 consecutive failures → status "error" with message (reconnection continues in background).
+- [x] `disconnectServer()` cleanly closes transport. stdio: SIGTERM → 5s grace → SIGKILL. Safe to call if already disconnected.
+- [x] `dispose()` disconnects all servers in parallel via `Promise.allSettled()`.
+- [x] `onStatusChange(callback)` registers listeners; status changes emit to all registered callbacks.
+- [x] Credential resolution: sensitive env vars read from `secretStorage.get(mcpEnvSecretKey(...))` at connection time; sensitive headers from `secretStorage.get(mcpHeaderSecretKey(...))`.
 
 ### ARCH-003: McpHub tool discovery and callTool
 **Description:** Extend McpHub with tool discovery (`tools/list`) after successful handshake, `callTool()` with `_meta.notor_mode` injection, text-only result extraction, refresh tools, and `getAllDiscoveredTools()`. This completes the McpHub contract from `contracts/mcp-connection-lifecycle.md`.
@@ -126,14 +126,14 @@ gzip -c main.js | wc -c
 - `src/mcp/mcp-hub.ts` — add `callTool()`, `refreshTools()`, `getAllDiscoveredTools()`, private `discoverTools()`, private `extractToolResult()`
 **Dependencies:** ARCH-002
 **Acceptance Criteria:**
-- [ ] After successful `initialize` handshake, `discoverTools()` sends `tools/list` and parses response into `McpDiscoveredTool[]` stored on the connection
-- [ ] If `tools/list` fails, server is marked connected with warning (tools array empty, error message set). Does not block connection.
-- [ ] `callTool(serverName, toolName, args, mode)` sends `tools/call` with `_meta: { notor_mode: mode }` on every request per FR-58
-- [ ] `callTool()` respects per-server timeout (`config.timeout * 1000` ms). On timeout, request is cancelled, connection is NOT closed.
-- [ ] `extractToolResult()` extracts only `TextContent` items (concatenated with newlines). Counts and appends notices for omitted images/resources (e.g., `[1 image omitted]`). Returns `(empty result)` if no text content.
-- [ ] `callTool()` error handling per contract: server not connected → error ToolResult; tool not found → error; timeout → error; malformed response → error; transport error → error. All returned as `ToolResult`, never thrown.
-- [ ] `refreshTools(serverName)` re-queries `tools/list` for a connected server and updates `connection.tools`
-- [ ] `getAllDiscoveredTools()` returns `{ serverName, tool }[]` across all connected servers
+- [x] After successful `initialize` handshake, `discoverTools()` sends `tools/list` and parses response into `McpDiscoveredTool[]` stored on the connection
+- [x] If `tools/list` fails, server is marked connected with warning (tools array empty, error message set). Does not block connection.
+- [x] `callTool(serverName, toolName, args, mode)` sends `tools/call` with `_meta: { notor_mode: mode }` on every request per FR-58
+- [x] `callTool()` respects per-server timeout (`config.timeout * 1000` ms). On timeout, request is cancelled, connection is NOT closed.
+- [x] `extractToolResult()` extracts only `TextContent` items (concatenated with newlines). Counts and appends notices for omitted images/resources (e.g., `[1 image omitted]`). Returns `(empty result)` if no text content.
+- [x] `callTool()` error handling per contract: server not connected → error ToolResult; tool not found → error; timeout → error; malformed response → error; transport error → error. All returned as `ToolResult`, never thrown.
+- [x] `refreshTools(serverName)` re-queries `tools/list` for a connected server and updates `connection.tools`
+- [x] `getAllDiscoveredTools()` returns `{ serverName, tool }[]` across all connected servers
 
 ### ARCH-004 [P]: McpRegisteredTool adapter
 **Description:** Implement the `McpRegisteredTool` class that wraps an `McpDiscoveredTool` to implement Notor's `Tool` interface. This adapter enables MCP tools to be registered in the `ToolRegistry` alongside built-in tools. Includes namespaced naming (`{serverName}__{toolName}`), read/write classification logic, and the `execute()` method that delegates to `McpHub.callTool()`.
@@ -142,13 +142,13 @@ gzip -c main.js | wc -c
 - `src/mcp/mcp-tool-adapter.ts` — `McpRegisteredTool` class implementing `Tool` interface
 **Dependencies:** ARCH-001, ARCH-003
 **Acceptance Criteria:**
-- [ ] `McpRegisteredTool` implements `Tool` from `src/tools/tool.ts`
-- [ ] `name` property returns `{serverName}__{toolName}` (e.g., `my-db-server__query`)
-- [ ] `description` passes through from `McpDiscoveredTool.description`
-- [ ] `input_schema` passes through from `McpDiscoveredTool.inputSchema`, defaults to `{ type: "object" }` if undefined
-- [ ] `mode` property computed per classification precedence: user override in `toolClassifications` → `readOnlyHint === true` → default `"write"`
-- [ ] `execute(params)` delegates to `mcpHub.callTool(serverName, toolName, params, currentMode)` — obtains current mode from a mode accessor callback
-- [ ] Helper functions exported: `isMcpTool(name)` (checks for `__`), `parseMcpToolName(name)` (splits on first `__`)
+- [x] `McpRegisteredTool` implements `Tool` from `src/tools/tool.ts`
+- [x] `name` property returns `{serverName}__{toolName}` (e.g., `my-db-server__query`)
+- [x] `description` passes through from `McpDiscoveredTool.description`
+- [x] `input_schema` passes through from `McpDiscoveredTool.inputSchema`, defaults to `{ type: "object" }` if undefined
+- [x] `mode` property computed per classification precedence: user override in `toolClassifications` → `readOnlyHint === true` → default `"write"`
+- [x] `execute(params)` delegates to `mcpHub.callTool(serverName, toolName, params, currentMode)` — obtains current mode from a mode accessor callback
+- [x] Helper functions exported: `isMcpTool(name)` (checks for `__`), `parseMcpToolName(name)` (splits on first `__`)
 
 ### ARCH-005 [P]: Plugin lifecycle integration
 **Description:** Wire McpHub into the plugin lifecycle in `main.ts`. Initialize McpHub on plugin load (async, non-blocking), register cleanup via `this.register()`, and extend `ToolRegistry` to support dynamic registration/unregistration of MCP tools.
@@ -158,13 +158,13 @@ gzip -c main.js | wc -c
 - `src/tools/index.ts` — add `unregister(name)` method to `ToolRegistry`
 **Dependencies:** ARCH-002, ARCH-004
 **Acceptance Criteria:**
-- [ ] `ToolRegistry` gains an `unregister(name: string)` method that removes a tool by name
-- [ ] `main.ts` creates `McpHub` instance during `onload()` and calls `mcpHub.initialize()` without awaiting — plugin load is not blocked by MCP connections
-- [ ] Cleanup registered via `this.register(() => mcpHub.dispose())` — ensures all connections closed on unload
-- [ ] McpHub status change listener wired up to add/remove `McpRegisteredTool` instances in `ToolRegistry` when servers connect/disconnect
-- [ ] On server connect + tool discovery: tools are registered in `ToolRegistry` and `ToolDispatcher`
-- [ ] On server disconnect: tools are unregistered from `ToolRegistry` and `ToolDispatcher`
-- [ ] Plugin loads and unloads cleanly with 0 configured MCP servers (no errors, no regressions)
+- [x] `ToolRegistry` gains an `unregister(name: string)` method that removes a tool by name
+- [x] `main.ts` creates `McpHub` instance during `onload()` and calls `mcpHub.initialize()` without awaiting — plugin load is not blocked by MCP connections
+- [x] Cleanup registered via `this.register(() => mcpHub.dispose())` — ensures all connections closed on unload
+- [x] McpHub status change listener wired up to add/remove `McpRegisteredTool` instances in `ToolRegistry` when servers connect/disconnect
+- [x] On server connect + tool discovery: tools are registered in `ToolRegistry` and `ToolDispatcher`
+- [x] On server disconnect: tools are unregistered from `ToolRegistry` and `ToolDispatcher`
+- [x] Plugin loads and unloads cleanly with 0 configured MCP servers (no errors, no regressions)
 
 ## Phase 2: Core Feature Implementation (Group B — Tool Registration & Dispatch)
 
