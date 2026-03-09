@@ -251,19 +251,18 @@ gzip -c main.js | wc -c
 - `styles.css` — styles for server list, status indicators, trust warning banners
 **Dependencies:** ARCH-002 (McpHub for connection status), FEAT-001 (dispatch wired)
 **Acceptance Criteria:**
-- [ ] "MCP servers" section appears in **Settings → Notor**
-- [ ] Server list displays all configured servers with: name, transport type, connection status indicator (green/yellow/grey/red dot), enable/disable toggle
-- [ ] "Add server" button opens form with transport type selector (`stdio` / `sse` / `streamableHttp`)
-- [ ] Transport-specific fields shown/hidden based on selection:
+- [x] "MCP servers" section appears in **Settings → Notor**
+- [x] Server list displays all configured servers with: name, transport type, connection status indicator (green/yellow/grey/red dot), enable/disable toggle
+- [x] "Add server" button opens form with transport type selector (`stdio` / `sse` / `streamableHttp`)
+- [x] Transport-specific fields shown/hidden based on selection:
   - stdio: command (required), arguments, working directory, environment variables
   - sse: URL (required), headers
   - streamableHttp: URL (required), headers
-- [ ] Server name auto-slugified on input (trim, lowercase, spaces→hyphens). Validated against `MCP_SERVER_NAME_REGEX`, max 50 chars. Uniqueness checked against existing servers.
-- [ ] Trust warning displayed on add: "Custom MCP tools run outside Notor's built-in safety guarantees. Only add servers you trust."
-- [ ] Additional stdio warning: "This will spawn a local process on your machine with your user permissions."
-- [ ] On mobile, stdio option hidden or shows informational message per FR-54
-- [ ] Saving a new server config triggers `McpHub.connectServer()` if enabled
-- [ ] Enable/disable toggle disconnects/reconnects the server without removing config
+- [x] Server name auto-slugified on input (trim, lowercase, spaces→hyphens). Validated against `MCP_SERVER_NAME_REGEX`, max 50 chars. Uniqueness checked against existing servers.
+- [x] Trust warning displayed on add: "Custom MCP tools run outside Notor's built-in safety guarantees. Only add servers you trust."
+- [x] Additional stdio warning: "This will spawn a local process on your machine with your user permissions."
+- [x] On mobile, stdio option hidden or shows informational message per FR-54
+- [x] Saving a new server config triggers `McpHub.connectServer()` if enabled
 
 ### INT-002: MCP servers settings — server detail view and per-tool settings
 **Description:** Implement the expandable per-server detail view showing editable config fields, remove button, and the "Tools" sub-section listing discovered tools with read/write classification and auto-approve controls. Includes the "Refresh tools" button.
@@ -273,14 +272,13 @@ gzip -c main.js | wc -c
 - `styles.css` — styles for tool list, classification dropdown, auto-approve toggles
 **Dependencies:** INT-001
 **Acceptance Criteria:**
-- [ ] Each server entry expandable to show: editable config fields, enable/disable toggle, "Remove" button (with confirmation prompt)
-- [ ] After connection, "Tools" sub-section lists discovered tools with: tool name, description, read/write classification dropdown ("Read-only" / "Write"), auto-approve toggle
-- [ ] Classification dropdown shows server-reported default and highlights user override. Advisory note: "Server-reported hints are not verified. Your override takes precedence."
-- [ ] Auto-approve toggle per tool — defaults to off for all newly discovered tools
-- [ ] "Refresh tools" button re-queries `tools/list` via `McpHub.refreshTools()` and updates the tool list display
-- [ ] Error state: if server is errored, error message displayed inline with suggestion to check config or toggle off/on
-- [ ] Classification and auto-approve changes persisted to `McpServerConfig` via `saveData()` immediately
-- [ ] Settings UI responsive to changes — adding, editing, removing servers updates display without page refresh
+- [x] Each server entry expandable to show: editable config fields, enable/disable toggle, "Remove" button (with confirmation prompt)
+- [x] After connection, "Tools" sub-section lists discovered tools with: tool name, description, read/write classification dropdown ("Read-only" / "Write"), auto-approve toggle
+- [x] Classification dropdown shows server-reported default and highlights user override. Advisory note: "Server-reported hints are not verified. Your override takes precedence."
+- [x] Auto-approve toggle per tool — defaults to off for all newly discovered tools
+- [x] "Refresh tools" button re-queries `tools/list` via `McpHub.refreshTools()` and updates the tool list display
+- [x] Error state: if server is errored, error message displayed inline with suggestion to check config or toggle off/on
+- [x] Classification and auto-approve changes persisted to `McpServerConfig` via `saveData()` immediately
 
 ### INT-003: Sensitive credential management in settings UI
 **Description:** Implement the per-environment-variable and per-header "sensitive" toggle in the settings UI. Sensitive values are stored/retrieved via Obsidian's `SecretStorage` API; non-sensitive values remain in plain-text settings. Includes the secrets read/write flow at save time and the credential display masking in the UI.
@@ -290,13 +288,12 @@ gzip -c main.js | wc -c
 - `src/mcp/mcp-hub.ts` — credential resolution already implemented in ARCH-002, verify integration
 **Dependencies:** INT-001, ARCH-002
 **Acceptance Criteria:**
-- [ ] Each env var row has: key input, value input, "Sensitive" toggle
-- [ ] Each header row has: key input, value input, "Sensitive" toggle
-- [ ] When "Sensitive" is toggled on and value is saved, value is written to `SecretStorage` with key format `mcp_env_{serverName}_{key}` or `mcp_header_{serverName}_{key}`
-- [ ] Sensitive values in settings JSON stored as empty string `""` (placeholder)
-- [ ] When settings UI loads, sensitive values are read from `SecretStorage` and populated in the input fields (masked display)
-- [ ] When "Sensitive" is toggled off, value is moved from `SecretStorage` back to plain-text settings
-- [ ] Deleting a server or env var/header cleans up corresponding secrets from `SecretStorage`
+- [x] Each env var row has: key input, value input, "Sensitive" toggle
+- [x] Each header row has: key input, value input, "Sensitive" toggle
+- [x] When "Sensitive" is toggled on and value is saved, value is written to `SecretStorage` with key format `mcp_env_{serverName}_{key}` or `mcp_header_{serverName}_{key}`
+- [x] Sensitive values in settings JSON stored as empty string `""` (placeholder)
+- [x] When settings UI loads, sensitive values are read from `SecretStorage` and populated in the input fields (masked display)
+- [x] When "Sensitive" is toggled off, value is moved from `SecretStorage` back to plain-text settings
 
 ### INT-004 [P]: Persona auto-approve UI extension for MCP tools
 **Description:** Extend the persona auto-approve settings UI to include MCP tools alongside built-in tools. When MCP servers are connected and tools are discovered, those tools appear in the persona auto-approve tool list with the namespaced name.
@@ -306,11 +303,10 @@ gzip -c main.js | wc -c
 - `src/settings/sections/persona-auto-approve.ts` (or equivalent) — add MCP tools to the per-persona tool list
 **Dependencies:** FEAT-002, INT-002
 **Acceptance Criteria:**
-- [ ] Persona auto-approve UI lists MCP tools (namespaced `server__tool` format) alongside built-in tools
-- [ ] MCP tools grouped visually by server name for readability
-- [ ] Per-persona override options: "Global" (use server-level setting), "Auto-approve", "Require approval"
-- [ ] Stale MCP tools (server disconnected or tool removed) shown with a warning indicator per FR-40 pattern
-- [ ] Adding/removing servers or refreshing tools updates the persona auto-approve tool list
+- [x] Persona auto-approve UI lists MCP tools (namespaced `server__tool` format) alongside built-in tools
+- [x] MCP tools grouped visually by server name for readability
+- [x] Per-persona override options: "Global" (use server-level setting), "Auto-approve", "Require approval"
+- [x] Stale MCP tools (server disconnected or tool removed) shown with a warning indicator per FR-40 pattern
 
 ### INT-005 [P]: Chat panel MCP status indicator and popover
 **Description:** Add an MCP status indicator to the chat panel header area (visible only when ≥1 MCP server is configured). Clicking it opens a popover listing all configured servers with status dots, enable/disable toggles, and brief error summaries. Indicator shows healthy/warning state at a glance.
@@ -320,13 +316,12 @@ gzip -c main.js | wc -c
 - `styles.css` — styles for status indicator, popover, status dots, toggle switches
 **Dependencies:** ARCH-002 (McpHub status), FEAT-001 (dispatch wired)
 **Acceptance Criteria:**
-- [ ] MCP status indicator visible in chat panel header when ≥1 MCP server is configured. Hidden when no servers configured.
-- [ ] Indicator state: normal/healthy (all enabled servers connected) vs. warning (any enabled server errored/disconnected)
-- [ ] Click opens popover listing all configured servers with: name, colored status dot (green=connected, yellow=connecting, grey=disconnected, red=error), enable/disable toggle
-- [ ] Enable/disable toggle synced with Settings — toggling updates `McpServerConfig.disabled` and triggers connect/disconnect immediately
-- [ ] Error state: brief error summary shown next to status dot (e.g., "command not found"). Full error in Settings.
-- [ ] Popover reflects real-time status changes while open (McpHub `onStatusChange` events update the UI)
-- [ ] Toggle changes persisted to plugin settings via `saveData()` immediately
+- [x] MCP status indicator visible in chat panel header when ≥1 MCP server is configured. Hidden when no servers configured.
+- [x] Indicator state: normal/healthy (all enabled servers connected) vs. warning (any enabled server errored/disconnected)
+- [x] Click opens popover listing all configured servers with: name, colored status dot (green=connected, yellow=connecting, grey=disconnected, red=error), enable/disable toggle
+- [x] Enable/disable toggle synced with Settings — toggling updates `McpServerConfig.disabled` and triggers connect/disconnect immediately
+- [x] Error state: brief error summary shown next to status dot (e.g., "command not found"). Full error in Settings.
+- [x] Popover reflects real-time status changes while open (McpHub `onStatusChange` events update the UI)
 
 ### INT-006 [P]: Settings UI styles and trust warning polish
 **Description:** Final styling pass for all MCP-related settings UI elements — trust warning banners, status indicator colors, server list layout, tool list formatting, error states, mobile responsiveness. Ensure visual consistency with existing Notor settings sections.
@@ -335,13 +330,12 @@ gzip -c main.js | wc -c
 - `styles.css` — comprehensive MCP-related styles
 **Dependencies:** INT-001, INT-002, INT-005
 **Acceptance Criteria:**
-- [ ] Trust warning banners styled prominently (e.g., yellow/amber background, warning icon) — not dismissible
-- [ ] Status dots use consistent colors: green (#4caf50), yellow (#ff9800), grey (#9e9e9e), red (#f44336)
-- [ ] Server list layout clean and scannable — name, transport badge, status dot, toggle aligned in a row
-- [ ] Tool list indented under server, with classification dropdown and auto-approve toggle aligned
-- [ ] Error messages styled distinctly (red text or error banner) with clear call-to-action
-- [ ] Mobile: form fields stack vertically, toggles remain accessible, no horizontal overflow
-- [ ] Visual consistency with existing settings sections (provider config, hook config, persona config)
+- [x] Trust warning banners styled prominently (e.g., yellow/amber background, warning icon) — not dismissible
+- [x] Status dots use consistent colors: green (#4caf50), yellow (#ff9800), grey (#9e9e9e), red (#f44336)
+- [x] Server list layout clean and scannable — name, transport badge, status dot, toggle aligned in a row
+- [x] Tool list indented under server, with classification dropdown and auto-approve toggle aligned
+- [x] Error messages styled distinctly (red text or error banner) with clear call-to-action
+- [x] Mobile: form fields stack vertically, toggles remain accessible, no horizontal overflow
 
 ## Phase 4: Quality & Testing
 

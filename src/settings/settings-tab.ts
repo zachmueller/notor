@@ -33,6 +33,7 @@ import { renderPersonaAutoApproveSection, triggerPersonaRescan } from "./section
 import { renderHistorySection } from "./sections/history";
 import { renderCheckpointSection } from "./sections/checkpoints";
 import { renderModelPricingSection } from "./sections/model-pricing";
+import { renderMcpServersSection } from "./sections/mcp-servers";
 
 /**
  * Notor settings tab registered in Obsidian's Settings panel.
@@ -106,6 +107,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		);
 		triggerPersonaRescan(ctx, rerenderPersonaSection);
 
+		renderMcpServersSection(containerEl, ctx);
 		renderHistorySection(containerEl, ctx);
 		renderCheckpointSection(containerEl, ctx);
 		renderModelPricingSection(containerEl, ctx);

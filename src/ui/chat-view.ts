@@ -26,6 +26,7 @@ import { WorkflowSlashSuggest, WorkflowChipManager, detectSlashTrigger } from ".
 import { WorkflowActivityIndicator } from "./workflow-activity-indicator";
 import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tracker";
 import type { Workflow } from "../types";
+import { McpStatusIndicator } from "./mcp-status-indicator";
 
 const log = logger("ChatView");
 
@@ -89,6 +90,9 @@ export class NotorChatView extends ItemView {
 	// Workflow activity indicator state (H-002, H-003)
 	private workflowActivityTracker?: WorkflowActivityTracker;
 	private workflowActivityIndicator?: WorkflowActivityIndicator;
+
+	// MCP status indicator (INT-005)
+	private mcpStatusIndicator?: McpStatusIndicator;
 
 	// Callbacks (set by orchestrator)
 	private onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
@@ -451,6 +455,10 @@ export class NotorChatView extends ItemView {
 		this.workflowActivityIndicator?.destroy();
 		this.workflowActivityIndicator = undefined;
 
+		// INT-005: Clean up MCP status indicator
+		this.mcpStatusIndicator?.destroy();
+		this.mcpStatusIndicator = undefined;
+
 		log.info("Chat view closed");
 	}
 
@@ -493,6 +501,11 @@ export class NotorChatView extends ItemView {
 		settingsBtn.addEventListener("click", () => {
 			this.toggleSettingsPopover();
 		});
+
+		// INT-005: MCP status indicator — rendered into the actions bar.
+		// Only visible when ≥1 MCP server is configured.
+		this.mcpStatusIndicator = new McpStatusIndicator(actions, this.plugin);
+		this.mcpStatusIndicator.render();
 	}
 
 	private buildConversationList(container: HTMLElement): void {

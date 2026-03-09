@@ -18,6 +18,12 @@ import {
 import { TOOL_DISPLAY_NAMES } from "../constants";
 import { logger } from "../../utils/logger";
 import type { SettingsContext } from "./context";
+import type { McpHub } from "../../mcp/mcp-hub";
+
+/** Get the McpHub instance from the plugin (cast through unknown). */
+function getMcpHub(ctx: SettingsContext): McpHub | undefined {
+	return (ctx.plugin as unknown as { _mcpHub?: McpHub })._mcpHub;
+}
 
 const log = logger("SettingsTab");
 
@@ -161,6 +167,47 @@ export function renderPersonaAutoApproveSection(
 		personaBody.createEl("h4", { text: "Write tools" });
 		for (const [toolId, meta] of writeTools) {
 			renderToolRow(personaBody, toolId, meta);
+		}
+
+		// -----------------------------------------------------------
+		// INT-004: MCP tools grouped by server (FR-60)
+		// -----------------------------------------------------------
+		const mcpHub = getMcpHub(ctx);
+		const allMcpTools = mcpHub?.getAllDiscoveredTools() ?? [];
+
+		if (allMcpTools.length > 0) {
+			personaBody.createEl("h4", { text: "MCP tools" });
+			personaBody.createEl("p", {
+				text: "Overrides for tools discovered from connected MCP servers.",
+				cls: "setting-item-description",
+			});
+
+			// Group tools by server name
+			const byServer = new Map<string, typeof allMcpTools>();
+			for (const entry of allMcpTools) {
+				const list = byServer.get(entry.serverName) ?? [];
+				list.push(entry);
+				byServer.set(entry.serverName, list);
+			}
+
+			for (const [serverName, serverTools] of byServer) {
+				personaBody.createEl("h5", {
+					text: serverName,
+					cls: "notor-persona-aa-mcp-server-heading",
+				});
+
+				for (const { tool } of serverTools) {
+					const namespacedName = `${serverName}__${tool.name}`;
+					renderToolRow(personaBody, namespacedName, {
+						name: `${serverName}/${tool.name}`,
+						desc: tool.description || namespacedName,
+					});
+					// Add namespacedName to registered names so it isn't flagged stale
+					if (!registeredToolNames.includes(namespacedName)) {
+						registeredToolNames.push(namespacedName);
+					}
+				}
+			}
 		}
 
 		// -----------------------------------------------------------
