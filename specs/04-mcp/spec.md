@@ -24,6 +24,8 @@ This specification covers Phase 4.1 of the roadmap:
 - Q: How should Notor handle non-text MCP tool results (images, embedded resources)? → A: Text-only for Phase 4.1 — extract text content items, discard image/resource items with a brief notice appended to the result (e.g., "[1 image omitted]"). Image/resource rendering deferred to a future iteration.
 - Q: What validation rules should apply to MCP server names (used as unique key and namespace prefix)? → A: Slug format — lowercase alphanumeric + hyphens only (e.g., `my-db-server`). Auto-slugify on input (trim, lowercase, replace spaces/special chars with hyphens). Max 50 characters. Uniqueness enforced.
 - Q: Should MCP tool results have an output character cap? → A: No cap — the per-server request timeout is the only limit. MCP tool results are passed through to the LLM regardless of size. The chat UI handles large results via its existing truncation-with-expansion display.
+- Q: What separator should be used for namespaced MCP tool names, given LLM function calling APIs restrict tool names to `[a-zA-Z0-9_-]` (no `/`)? → A: Double underscore `__` separator (e.g., `my-db-server__query`). Unambiguous because server names are slug-format `[a-z0-9-]` and never contain `__`. The `__` is used in the tool name sent to the LLM and in the tool registry key; the chat UI may display a friendlier `server/tool` format.
+- Q: Should stdio environment variable values be stored via Obsidian's secrets manager (like HTTP headers and LLM API keys), or in plain-text plugin settings? → A: User-marked sensitive toggle per variable. Each env var in the Settings UI has a "sensitive" toggle. Values marked sensitive are stored via Obsidian's secrets manager API; non-sensitive values are stored in plain-text plugin settings. This lets users protect API keys/tokens while keeping innocuous config (e.g., `NODE_ENV=production`) simple.
 
 ## User stories
 
@@ -74,7 +76,7 @@ This specification covers Phase 4.1 of the roadmap:
   | Command | yes (stdio) | The command to spawn the local process (e.g., `npx`, `python`, a path to a binary) |
   | Arguments | no (stdio) | Command-line arguments for the process |
   | Working directory | no (stdio) | Working directory for the spawned process (defaults to vault root) |
-  | Environment variables | no (stdio) | Additional environment variables to set for the spawned process (merged with the system environment) |
+  | Environment variables | no (stdio) | Additional environment variables to set for the spawned process (merged with the system environment). Each variable has a key, value, and a "sensitive" toggle. Values marked sensitive are stored via Obsidian's secrets manager API; non-sensitive values are stored in plain-text plugin settings. |
   | URL | yes (sse, streamableHttp) | The server endpoint URL |
   | Headers | no (sse, streamableHttp) | Custom HTTP headers (e.g., for API key authentication) |
   | Enabled | no | Whether the server is active (default: `true`). Disabled servers are not connected on plugin load. |
@@ -121,7 +123,7 @@ This specification covers Phase 4.1 of the roadmap:
 - After a successful `initialize` handshake, the plugin sends a `tools/list` request to the server.
 - Each discovered tool includes: name, description (optional), input schema (JSON Schema for parameters), and optional `ToolAnnotations` (including `readOnlyHint`).
 - Discovered tools are registered in Notor's unified tool registry so the AI sees them alongside built-in tools. The AI does not need to distinguish between built-in and MCP tools.
-- MCP tools are namespaced in the tool registry to prevent name collisions with built-in tools or tools from other MCP servers. The naming convention is `{serverName}/{toolName}` (e.g., `my-db-server/query`). When the tool is presented to the LLM, the full namespaced name is used.
+- MCP tools are namespaced in the tool registry to prevent name collisions with built-in tools or tools from other MCP servers. The naming convention is `{serverName}__{toolName}` using a double underscore separator (e.g., `my-db-server__query`). This format is used in both the tool registry key and the tool name sent to the LLM, because LLM function calling APIs restrict tool names to `[a-zA-Z0-9_-]` (no `/`). The separator is unambiguous because server names (slug format `[a-z0-9-]`) never contain `__`. The chat UI may display the friendlier `server/tool` format for human readability.
 - The tool descriptions sent to the LLM include the tool name, description, and input schema — in the same format as built-in tools.
 - The Settings UI displays the list of discovered tools for each connected server, showing each tool's name, description, read/write classification, and auto-approve status.
 - If the `tools/list` request fails, the server is marked as connected but with a warning that tool discovery failed. The user can retry via a "Refresh tools" button in Settings.
@@ -253,6 +255,7 @@ This specification covers Phase 4.1 of the roadmap:
 - stdio MCP servers are guarded behind a desktop-only check. On mobile, stdio transport is unavailable and the Settings UI does not offer it as an option.
 - stdio server processes are spawned with the same user permissions as the Obsidian process. No privilege escalation is possible through the MCP integration.
 - HTTP transport headers (which may contain API keys or tokens) are stored in Notor's plugin settings data. Sensitive header values (e.g., `Authorization`) should use Obsidian's secrets manager API for storage where feasible, consistent with how LLM provider API keys are stored.
+- stdio environment variables that the user marks as "sensitive" (via a per-variable toggle in the Settings UI) are stored via Obsidian's secrets manager API. Non-sensitive environment variable values are stored in plain-text plugin settings. This is consistent with the credential storage pattern used for HTTP headers and LLM provider API keys.
 - MCP tool calls do not bypass Plan/Act enforcement. Write-classified MCP tools are blocked in Plan mode regardless of what the MCP server reports or does.
 - The `_meta.notor_mode` signal is advisory and cooperative. Notor does not attempt to verify that an MCP server respects the signal.
 - No MCP server can access Notor's internal state, other MCP servers' data, or vault contents beyond what is explicitly passed as tool arguments by the AI.
@@ -280,8 +283,8 @@ This specification covers Phase 4.1 of the roadmap:
 4. An additional notice appears: "This will spawn a local process on your machine with your user permissions."
 5. User saves the configuration. The plugin spawns the process, performs the MCP handshake, and discovers tools (e.g., `read_file`, `write_file`, `list_directory`).
 6. The server status shows "Connected" with a green indicator. The discovered tools are listed under the server entry with their names, descriptions, and default classifications.
-7. User starts a new conversation in the chat panel. The AI's tool set now includes `filesystem/read_file`, `filesystem/write_file`, and `filesystem/list_directory` alongside built-in tools.
-8. User asks: "List the files in my documents folder." The AI invokes `filesystem/list_directory`. The tool call appears inline in the chat. Since MCP tools default to requiring approval, the approval UI appears.
+7. User starts a new conversation in the chat panel. The AI's tool set now includes `filesystem__read_file`, `filesystem__write_file`, and `filesystem__list_directory` alongside built-in tools.
+8. User asks: "List the files in my documents folder." The AI invokes `filesystem__list_directory`. The tool call appears inline in the chat. Since MCP tools default to requiring approval, the approval UI appears.
 9. User approves the call. The tool executes and returns the directory listing. The result is displayed in the chat and the AI summarizes the contents.
 
 ### Primary flow: Add and use an HTTP MCP server
@@ -296,16 +299,16 @@ This specification covers Phase 4.1 of the roadmap:
 
 1. User has a connected MCP server "db-tools" with discovered tools `query` and `execute_sql`.
 2. In Settings, user sets `query` to "Read-only" and `execute_sql` to "Write". User enables auto-approve for `query`.
-3. In Plan mode, the AI can invoke `db-tools/query` (read-only, auto-approved — executes without approval prompt). The AI attempts `db-tools/execute_sql` but it is blocked — the LLM receives an error: "Tool 'db-tools/execute_sql' is write-only and blocked in Plan mode."
-4. User switches to Act mode. The AI invokes `db-tools/execute_sql`. Since it is not auto-approved, the approval UI appears. User approves and the SQL is executed.
+3. In Plan mode, the AI can invoke `db-tools__query` (read-only, auto-approved — executes without approval prompt). The AI attempts `db-tools__execute_sql` but it is blocked — the LLM receives an error: "Tool 'db-tools__execute_sql' is write-only and blocked in Plan mode."
+4. User switches to Act mode. The AI invokes `db-tools__execute_sql`. Since it is not auto-approved, the approval UI appears. User approves and the SQL is executed.
 
 ### Primary flow: Persona auto-approve override for MCP tools
 
 1. User has a persona "data-analyst" with auto-approve overrides configured in **Settings → Notor → Persona auto-approve**.
-2. Under the "data-analyst" persona, user sets `db-tools/query` to "Auto-approve" and `db-tools/execute_sql` to "Require approval".
+2. Under the "data-analyst" persona, user sets `db-tools__query` to "Auto-approve" and `db-tools__execute_sql` to "Require approval".
 3. User activates the "data-analyst" persona and asks the AI to analyze some data.
-4. The AI invokes `db-tools/query` — auto-approved via persona override, no prompt.
-5. The AI invokes `db-tools/execute_sql` — requires approval per persona override, approval UI appears.
+4. The AI invokes `db-tools__query` — auto-approved via persona override, no prompt.
+5. The AI invokes `db-tools__execute_sql` — requires approval per persona override, approval UI appears.
 
 ### Alternative flow: MCP server fails to connect
 
@@ -354,13 +357,13 @@ This specification covers Phase 4.1 of the roadmap:
 ### Edge case: Tool name collision prevention
 
 1. Two MCP servers each expose a tool called `search`. Server A is named "web-search" and server B is named "vault-search".
-2. The tools are registered as `web-search/search` and `vault-search/search` — no collision.
+2. The tools are registered as `web-search__search` and `vault-search__search` — no collision.
 3. The AI sees both tools with their distinct namespaced names and can invoke either one specifically.
 
 ### Edge case: Server timeout on tool call
 
 1. The AI invokes an MCP tool. The server takes longer than the configured timeout (default: 60 seconds) to respond.
-2. The request is cancelled and a timeout error is returned to the LLM: "Tool call to 'my-server/slow-tool' timed out after 60 seconds."
+2. The request is cancelled and a timeout error is returned to the LLM: "Tool call to 'my-server__slow-tool' timed out after 60 seconds."
 3. The conversation continues — the LLM can retry or take an alternative approach.
 
 ## Success criteria
@@ -389,7 +392,7 @@ This specification covers Phase 4.1 of the roadmap:
 ### McpTool (discovered)
 - Represents a single tool discovered from an MCP server via `tools/list`.
 - Properties: name, description, input schema (JSON Schema), `ToolAnnotations` (including `readOnlyHint`).
-- Registered in Notor's unified tool registry with a namespaced name (`{serverName}/{toolName}`).
+- Registered in Notor's unified tool registry with a namespaced name (`{serverName}__{toolName}`, e.g., `my-db-server__query`).
 - Classification (read/write) is derived from `readOnlyHint` by default, overridable by user in Settings.
 - Auto-approve is off by default for all MCP tools, configurable per-tool.
 
