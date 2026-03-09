@@ -21,6 +21,7 @@ import {
 	mcpEnvSecretKey,
 	mcpHeaderSecretKey,
 } from "../../mcp/mcp-types";
+import { parseShellArgs, serializeShellArgs } from "../../utils/shell-args";
 import type { McpHub } from "../../mcp/mcp-hub";
 import type { McpConnectionStatus } from "../../mcp/mcp-types";
 
@@ -338,13 +339,17 @@ function renderStdioFields(
 
 	new Setting(containerEl)
 		.setName("Arguments")
-		.setDesc("Space-separated arguments for the command.")
+		.setDesc(
+			"Arguments for the command. Separate with spaces. " +
+			"Wrap arguments that contain spaces in double or single quotes " +
+			'(e.g. -y server "/path/with spaces").'
+		)
 		.addText((text) =>
 			text
-				.setPlaceholder("-y @modelcontextprotocol/server-filesystem /path")
-				.setValue((config.args ?? []).join(" "))
+				.setPlaceholder('-y @modelcontextprotocol/server-filesystem "/path/with spaces"')
+				.setValue(serializeShellArgs(config.args ?? []))
 				.onChange(async (value) => {
-					config.args = value.trim() ? value.trim().split(/\s+/) : [];
+					config.args = parseShellArgs(value);
 					await ctx.saveSettings();
 				})
 		);
@@ -763,10 +768,14 @@ function renderAddServerForm(
 				});
 			new Setting(transportFieldsEl)
 				.setName("Arguments")
-				.setDesc("Space-separated arguments.")
+				.setDesc(
+					"Arguments for the command. Separate with spaces. " +
+					"Wrap arguments that contain spaces in double or single quotes " +
+					'(e.g. -y server "/path/with spaces").'
+				)
 				.addText((t) => {
-					t.setPlaceholder("-y @modelcontextprotocol/server-filesystem /path");
-					t.onChange((v) => { stdioArgs = v.trim(); });
+					t.setPlaceholder('-y @modelcontextprotocol/server-filesystem "/path/with spaces"');
+					t.onChange((v) => { stdioArgs = v; });
 				});
 		} else {
 			new Setting(transportFieldsEl)
@@ -824,7 +833,8 @@ function renderAddServerForm(
 				};
 				if (selectedType === "stdio") {
 					newConfig.command = stdioCommand;
-					if (stdioArgs) newConfig.args = stdioArgs.split(/\s+/);
+					const parsedArgs = parseShellArgs(stdioArgs);
+					if (parsedArgs.length > 0) newConfig.args = parsedArgs;
 				} else {
 					newConfig.url = httpUrlInput;
 				}
