@@ -1655,6 +1655,479 @@
 }
 
 /* ==========================================================================
+   MCP Settings Section (INT-001, INT-002, INT-003, INT-006)
+   ========================================================================== */
+
+/* Server list */
+.notor-mcp-server-list {
+	margin-bottom: 12px;
+}
+
+.notor-mcp-empty {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	font-style: italic;
+	padding: 4px 0;
+}
+
+/* Collapsible server entry */
+.notor-mcp-server-entry {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	margin-bottom: 6px;
+}
+
+.notor-mcp-server-summary {
+	padding: 8px 12px;
+	cursor: pointer;
+	user-select: none;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	list-style: none;
+	border-radius: var(--radius-m);
+}
+
+.notor-mcp-server-summary::-webkit-details-marker { display: none; }
+
+.notor-mcp-server-summary:hover {
+	background: var(--background-modifier-hover);
+}
+
+.notor-mcp-server-summary-left {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1;
+	min-width: 0;
+}
+
+.notor-mcp-server-summary-right {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+}
+
+.notor-mcp-status-dot {
+	font-size: 10px;
+	flex-shrink: 0;
+}
+
+.notor-mcp-server-name {
+	font-weight: var(--font-semibold);
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.notor-mcp-transport-badge {
+	font-size: var(--font-ui-smaller);
+	padding: 1px 5px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+	font-weight: var(--font-medium);
+	flex-shrink: 0;
+}
+
+.notor-mcp-server-error-hint {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-error, var(--color-red));
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+	min-width: 0;
+}
+
+/* Server detail body */
+.notor-mcp-server-body {
+	padding: 8px 12px 12px 12px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Error banner */
+.notor-mcp-error-banner {
+	background: var(--background-modifier-error, rgba(220,53,69,0.1));
+	color: var(--text-error, var(--color-red));
+	padding: 8px 10px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-small);
+	margin-bottom: 10px;
+}
+
+.notor-mcp-error-hint {
+	margin: 4px 0 0 0;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+/* Divider */
+.notor-mcp-divider {
+	border: none;
+	border-top: 1px solid var(--background-modifier-border);
+	margin: 10px 0;
+}
+
+/* Key-value rows (env vars, headers) */
+.notor-mcp-kv-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+.notor-mcp-kv-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.notor-mcp-kv-key {
+	width: 120px;
+	flex-shrink: 0;
+	padding: 4px 6px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+	font-family: var(--font-monospace);
+}
+
+.notor-mcp-kv-value {
+	flex: 1;
+	min-width: 80px;
+	padding: 4px 6px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-mcp-kv-sensitive-label {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.notor-mcp-kv-remove {
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--text-faint);
+	font-size: 14px;
+	padding: 2px 4px;
+	border-radius: var(--radius-s);
+	flex-shrink: 0;
+}
+
+.notor-mcp-kv-remove:hover {
+	color: var(--text-error);
+	background: var(--background-modifier-hover);
+}
+
+/* Tools subsection */
+.notor-mcp-tools-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin: 8px 0 4px 0;
+}
+
+.notor-mcp-tools-header h4 {
+	margin: 0;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.notor-mcp-refresh-btn {
+	padding: 3px 8px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-muted);
+}
+
+.notor-mcp-refresh-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.notor-mcp-refresh-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.notor-mcp-tools-empty {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+.notor-mcp-classification-note {
+	font-size: var(--font-ui-smaller);
+	margin-bottom: 6px;
+}
+
+/* Tool list */
+.notor-mcp-tool-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.notor-mcp-tool-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 6px 8px;
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	flex-wrap: wrap;
+}
+
+.notor-mcp-tool-meta {
+	flex: 1;
+	min-width: 120px;
+}
+
+.notor-mcp-tool-name {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-normal);
+	font-weight: var(--font-medium);
+	display: block;
+}
+
+.notor-mcp-tool-desc {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	display: block;
+	margin-top: 2px;
+}
+
+.notor-mcp-tool-controls {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	flex-shrink: 0;
+}
+
+.notor-mcp-class-select {
+	padding: 3px 6px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-mcp-hint-badge {
+	font-size: var(--font-ui-smaller);
+	padding: 1px 5px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-hover);
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+
+.notor-mcp-aa-label {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+/* Add server form */
+.notor-mcp-add-server {
+	margin-top: 16px;
+	padding-top: 12px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Trust warning banner — non-dismissible, always visible (FR-61, INT-006) */
+.notor-mcp-trust-warning {
+	background: rgba(var(--color-orange-rgb, 232, 168, 56), 0.15);
+	color: var(--text-warning, var(--color-orange));
+	border: 1px solid rgba(var(--color-orange-rgb, 232, 168, 56), 0.3);
+	border-radius: var(--radius-s);
+	padding: 8px 12px;
+	margin-bottom: 12px;
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-medium);
+}
+
+/* stdio spawn warning */
+.notor-mcp-stdio-warning {
+	background: rgba(var(--color-orange-rgb, 232, 168, 56), 0.1);
+	color: var(--text-warning, var(--color-orange));
+	border: 1px solid rgba(var(--color-orange-rgb, 232, 168, 56), 0.2);
+	border-radius: var(--radius-s);
+	padding: 6px 10px;
+	margin-bottom: 10px;
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-mcp-mobile-notice {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-mcp-add-transport-fields {
+	margin-top: 4px;
+}
+
+.notor-mcp-add-error {
+	color: var(--text-error, var(--color-red));
+	font-size: var(--font-ui-smaller);
+	margin: 4px 0;
+}
+
+/* Persona AA MCP section */
+.notor-persona-aa-mcp-server-heading {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin: 8px 0 2px 0;
+	font-weight: var(--font-medium);
+}
+
+/* ==========================================================================
+   MCP Status Indicator (INT-005, INT-006)
+   ========================================================================== */
+
+/* Chat header MCP button */
+.notor-mcp-status-btn {
+	position: relative;
+}
+
+/* Healthy: green-tinted */
+.notor-mcp-status-btn.notor-mcp-status-healthy {
+	color: var(--color-green, #4caf50);
+}
+
+/* Warning: orange-tinted */
+.notor-mcp-status-btn.notor-mcp-status-warning {
+	color: var(--color-orange, #ff9800);
+	animation: notor-mcp-pulse 2s ease-in-out infinite;
+}
+
+@keyframes notor-mcp-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.notor-mcp-status-btn.notor-mcp-status-warning {
+		animation: none;
+		outline: 2px solid var(--color-orange, #ff9800);
+		outline-offset: 1px;
+	}
+}
+
+/* MCP popover (positioned relative to chat header) */
+.notor-mcp-popover {
+	position: absolute;
+	top: 100%;
+	right: 0;
+	z-index: var(--layer-popover);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-s);
+	padding: 8px 12px;
+	min-width: 220px;
+	max-width: 300px;
+}
+
+.notor-mcp-popover-title {
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	margin: 0 0 8px 0;
+	color: var(--text-normal);
+}
+
+.notor-mcp-popover-empty {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+.notor-mcp-popover-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.notor-mcp-popover-row:last-child {
+	border-bottom: none;
+}
+
+/* Status dots (FR-63 colors) */
+.notor-mcp-popover-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	display: inline-block;
+}
+
+.notor-mcp-dot-connected { background: #4caf50; }
+.notor-mcp-dot-connecting { background: #ff9800; }
+.notor-mcp-dot-disconnected { background: #9e9e9e; }
+.notor-mcp-dot-error { background: #f44336; }
+
+.notor-mcp-popover-server-name {
+	flex: 1;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
+.notor-mcp-popover-error {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-error, var(--color-red));
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+	min-width: 0;
+}
+
+.notor-mcp-popover-toggle-label {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: pointer;
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+
+/* ==========================================================================
    Workflow Activity Indicator (H-002, H-003)
    ========================================================================== */
 

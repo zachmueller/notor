@@ -14,9 +14,58 @@ import type { NotorSettings } from "../settings";
 import { isDomainBlocked } from "../tools/fetch-webpage";
 import { resolveAndValidateWorkingDir } from "../tools/execute-command";
 import { resolveAutoApprove } from "../personas/auto-approve-resolver";
+import { isMcpTool, McpRegisteredTool } from "../mcp/mcp-tool-adapter";
 import { logger } from "../utils/logger";
 
 const log = logger("ToolDispatcher");
+
+// ---------------------------------------------------------------------------
+// MCP auto-approve resolution (FEAT-002)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the effective auto-approve decision for an MCP tool call.
+ *
+ * MCP auto-approve precedence (FR-60):
+ * 1. Active persona override → "approve" → true, "deny" → false, "global"/absent → fall through
+ * 2. Server-level: raw tool name (without namespace) in `McpServerConfig.autoApprove[]` → true
+ * 3. Global default: false (all MCP tools require manual approval unless configured)
+ *
+ * @param namespacedToolName - Full `server__tool` name
+ * @param tool - The McpRegisteredTool instance (exposes server config and raw name)
+ * @param activePersonaName - Currently active persona name, or null
+ * @param personaOverrides - Full persona auto-approve config from settings
+ * @returns true if auto-approved, false if manual approval required
+ *
+ * @see specs/04-mcp/tasks.md — FEAT-002
+ */
+function resolveMcpAutoApprove(
+	namespacedToolName: string,
+	tool: McpRegisteredTool,
+	activePersonaName: string | null,
+	personaOverrides: Record<string, Record<string, string>>
+): boolean {
+	// 1. Check persona override (uses namespaced name for lookup, same as built-in tools)
+	if (activePersonaName !== null) {
+		const overrides = personaOverrides[activePersonaName];
+		if (overrides) {
+			const state = overrides[namespacedToolName];
+			if (state === "approve") return true;
+			if (state === "deny") return false;
+			// "global" or absent → fall through to server-level
+		}
+	}
+
+	// 2. Server-level: check McpServerConfig.autoApprove array (raw tool name)
+	const config = tool.getServerConfig();
+	const rawToolName = tool.getRawToolName();
+	if (config.autoApprove && config.autoApprove.includes(rawToolName)) {
+		return true;
+	}
+
+	// 3. Global default: require approval for all MCP tools
+	return false;
+}
 
 /** Tool interface for the dispatcher (minimal — not the full tool registry). */
 export interface DispatchableTool {
@@ -74,6 +123,23 @@ export class ToolDispatcher {
 	registerTool(tool: DispatchableTool): void {
 		this.tools.set(tool.name, tool);
 		log.debug("Registered tool", { name: tool.name, mode: tool.mode });
+	}
+
+	/**
+	 * Unregister a tool by name.
+	 *
+	 * Used to remove MCP tools when servers disconnect or tools are
+	 * removed on refresh. Safe to call if the tool is not registered.
+	 *
+	 * @returns true if the tool was found and removed, false otherwise
+	 * @see specs/04-mcp/tasks.md — FEAT-004
+	 */
+	unregisterTool(name: string): boolean {
+		const existed = this.tools.delete(name);
+		if (existed) {
+			log.debug("Unregistered tool", { name });
+		}
+		return existed;
 	}
 
 	/** Update auto-approve settings. */
@@ -237,11 +303,16 @@ export class ToolDispatcher {
 			toolCall.status = "error";
 			this.events.onToolCallStatusChanged?.(toolCall, messageId);
 
+			// FEAT-001: MCP tools get a specific error message format per spec FR-59
+			const planModeError = isMcpTool(toolName)
+				? `Tool '${toolName}' is write-only and blocked in Plan mode. Switch to Act mode to use this tool.`
+				: `${toolName} is not available in Plan mode. Switch to Act mode to ${this.getWriteToolDescription(toolName)}.`;
+
 			const result: ToolResult = {
 				tool_name: toolName,
 				success: false,
 				result: "",
-				error: `${toolName} is not available in Plan mode. Switch to Act mode to ${this.getWriteToolDescription(toolName)}.`,
+				error: planModeError,
 			};
 
 			log.info("Blocked write tool in Plan mode", { toolName });
@@ -305,13 +376,25 @@ export class ToolDispatcher {
 			}
 		}
 
-		// 4. Check auto-approve settings (persona-aware — B-003)
-		const isAutoApproved = resolveAutoApprove(
-			toolName,
-			this.activePersonaName,
-			this.personaAutoApprove,
-			this.autoApprove
-		);
+		// 4. Check auto-approve settings
+		// For MCP tools: persona override → server-level per-tool → default false (FEAT-002)
+		// For built-in tools: persona override → global setting (B-003)
+		let isAutoApproved: boolean;
+		if (isMcpTool(toolName) && tool instanceof McpRegisteredTool) {
+			isAutoApproved = resolveMcpAutoApprove(
+				toolName,
+				tool,
+				this.activePersonaName,
+				this.personaAutoApprove
+			);
+		} else {
+			isAutoApproved = resolveAutoApprove(
+				toolName,
+				this.activePersonaName,
+				this.personaAutoApprove,
+				this.autoApprove
+			);
+		}
 
 		if (!isAutoApproved) {
 			// Request user approval

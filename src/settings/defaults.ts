@@ -135,4 +135,7 @@ export const DEFAULT_SETTINGS: NotorSettings = {
 	vault_event_debounce_seconds: 5,
 	workflow_concurrency_limit: 3,
 	workflow_activity_indicator_count: 5,
+
+	// Phase 4.1: MCP servers
+	mcp_servers: {},
 };

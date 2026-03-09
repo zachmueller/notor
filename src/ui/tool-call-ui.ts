@@ -12,6 +12,27 @@
  */
 
 import type { ToolCall, ToolResult } from "../types";
+import { isMcpTool, parseMcpToolName } from "../mcp/mcp-tool-adapter";
+
+/**
+ * Format a tool name for human-readable display.
+ *
+ * MCP tools use the internal `server__tool` naming convention but should
+ * be displayed as `server/tool` in the UI for readability (FR-62, FEAT-005).
+ * Built-in tool names are returned unchanged.
+ *
+ * @param toolName - The internal tool name (e.g., `my-db-server__query`)
+ * @returns Human-readable display name (e.g., `my-db-server/query`)
+ *
+ * @see specs/04-mcp/tasks.md — FEAT-005
+ */
+export function formatToolDisplayName(toolName: string): string {
+	if (isMcpTool(toolName)) {
+		const { serverName, toolName: rawName } = parseMcpToolName(toolName);
+		return `${serverName}/${rawName}`;
+	}
+	return toolName;
+}
 
 /**
  * Renders a tool call card inline in the chat thread.
@@ -30,7 +51,9 @@ export function renderToolCallCard(
 	const headerEl = toolEl.createDiv({ cls: "notor-tool-call-header" });
 
 	const nameEl = headerEl.createSpan({ cls: "notor-tool-call-name" });
-	nameEl.textContent = toolCall.tool_name;
+	// FEAT-005: Display MCP tools as "server/tool" for human readability.
+	// The LLM and registry use "server__tool" internally; the UI shows "server/tool".
+	nameEl.textContent = formatToolDisplayName(toolCall.tool_name);
 
 	const statusEl = headerEl.createSpan({
 		cls: `notor-tool-call-status notor-tool-status-${toolCall.status}`,

@@ -83,6 +83,10 @@ import { VaultRuleManager } from "./rules/vault-rules";
 // Personas
 import { PersonaManager } from "./personas/persona-manager";
 
+// MCP
+import { McpHub } from "./mcp/mcp-hub";
+import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
+
 // UI
 import { NotorChatView, CHAT_VIEW_TYPE } from "./ui/chat-view";
 
@@ -104,6 +108,20 @@ export default class NotorPlugin extends Plugin {
 	private _noteOpener?: NoteOpener;
 	private _staleTracker?: StaleContentTracker;
 	private _personaManager?: PersonaManager;
+
+	// -----------------------------------------------------------------------
+	// Phase 4.1: MCP (ARCH-005)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * MCP connection hub — manages all MCP server connections.
+	 *
+	 * Initialized on plugin load (async, non-blocking). Cleanup registered
+	 * via this.register() so all connections are closed on unload.
+	 *
+	 * @see specs/04-mcp/tasks.md — ARCH-005
+	 */
+	private _mcpHub?: McpHub;
 
 	/** Cached workflow discovery results (C-008). In-memory only — always re-discovered from vault. */
 	private _discoveredWorkflows: Workflow[] = [];
@@ -271,7 +289,12 @@ export default class NotorPlugin extends Plugin {
 		// Heavy init (tag shadow cache) is deferred to onLayoutReady.
 		this._initVaultEventHooks();
 
-		// 8. Kick off initial workflow discovery (C-008).
+		// 8. Initialize MCP hub (ARCH-005).
+		// Async, non-blocking — plugin load completes without waiting for
+		// MCP server connections. Cleanup registered via this.register().
+		this._initMcpHub();
+
+		// 9. Kick off initial workflow discovery (C-008).
 		// Deferred until layout is ready — vault file index must be fully
 		// populated before getAbstractFileByPath() can resolve the
 		// workflows directory. This is a standard Obsidian pattern.
@@ -523,6 +546,124 @@ export default class NotorPlugin extends Plugin {
 		});
 
 		log.info("Group F vault event hook components initialized");
+	}
+
+	// -----------------------------------------------------------------------
+	// Phase 4.1: MCP hub initialization (ARCH-005)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Initialize the MCP connection hub and wire status change listeners
+	 * to dynamically register/unregister MCP tools in the ToolRegistry
+	 * and ToolDispatcher.
+	 *
+	 * Non-blocking — McpHub.initialize() fires off connections asynchronously.
+	 * Cleanup is registered via this.register() for proper Obsidian lifecycle.
+	 *
+	 * @see specs/04-mcp/tasks.md — ARCH-005
+	 * @see specs/04-mcp/contracts/mcp-connection-lifecycle.md
+	 */
+	private _initMcpHub(): void {
+		const adapter = this.app.vault.adapter as { basePath?: string };
+		const vaultRootPath = adapter.basePath ?? "";
+
+		const mcpHub = new McpHub(this.manifest.version, vaultRootPath);
+		this._mcpHub = mcpHub;
+
+		// Register cleanup via Obsidian lifecycle — ensures all connections
+		// closed on unload even if unexpected shutdown occurs
+		this.register(() => {
+			mcpHub.dispose().catch((e) => {
+				log.error("McpHub dispose failed", { error: String(e) });
+			});
+		});
+
+		// Wire status change listener to add/remove MCP tools in the
+		// ToolRegistry and ToolDispatcher when servers connect/disconnect
+		mcpHub.onStatusChange((serverName, status) => {
+			const toolRegistry = this._toolRegistry;
+			const toolDispatcher = this._toolDispatcher;
+			if (!toolRegistry || !toolDispatcher) return;
+
+			if (status === "connected") {
+				// Server connected + tools discovered → register MCP tools
+				const connection = mcpHub.getConnection(serverName);
+				if (!connection) return;
+
+				// Mode accessor: reads current mode from the orchestrator's
+				// conversation manager at call time
+				const getModeCallback = (): "plan" | "act" => {
+					try {
+						const convManager = this._orchestrator?.getConversationManager();
+						return convManager?.getActiveConversation()?.mode ?? this.settings.mode;
+					} catch {
+						return this.settings.mode;
+					}
+				};
+
+				for (const discoveredTool of connection.tools) {
+					const registeredTool = new McpRegisteredTool(
+						serverName,
+						discoveredTool,
+						connection.config,
+						mcpHub,
+						getModeCallback
+					);
+					toolRegistry.register(registeredTool);
+					toolDispatcher.registerTool(registeredTool);
+				}
+
+				log.info("MCP tools registered", {
+					serverName,
+					toolCount: connection.tools.length,
+					tools: connection.tools.map((t) => `${serverName}__${t.name}`),
+				});
+			} else if (status === "disconnected" || status === "error") {
+				// Server disconnected → unregister its tools from both
+				// ToolRegistry and ToolDispatcher (FEAT-004)
+				const toolNames = toolRegistry.getNames().filter(
+					(name) => name.startsWith(`${serverName}__`)
+				);
+				for (const name of toolNames) {
+					toolRegistry.unregister(name);
+					toolDispatcher.unregisterTool(name);
+				}
+
+				if (toolNames.length > 0) {
+					log.info("MCP tools unregistered", { serverName, tools: toolNames });
+				}
+			}
+		});
+
+		// Resolve SecretStorage from the Obsidian app
+		// Obsidian exposes SecretStorage on the plugin instance but the
+		// type definitions don't include it. Access it safely.
+		const secretStorage = (this.app as unknown as {
+			loadLocalStorage?: (key: string) => string | null;
+		});
+		// Use Obsidian's plugin-level secret storage if available
+		const pluginSecretStorage = {
+			get: async (key: string): Promise<string | undefined> => {
+				try {
+					// Obsidian stores secrets via the app's internal SecretStorage
+					const app = this.app as unknown as {
+						vault: { adapter: { basePath?: string } };
+						loadLocalStorage?: (key: string) => string | null;
+					};
+					const val = app.loadLocalStorage?.(`notor-secret-${key}`);
+					return val ?? undefined;
+				} catch {
+					return undefined;
+				}
+			},
+		};
+
+		// Initialize McpHub — non-blocking, fires off connections asynchronously
+		mcpHub.initialize(this.settings, pluginSecretStorage).catch((e) => {
+			log.error("McpHub initialization failed", { error: String(e) });
+		});
+
+		log.info("McpHub initialized (connections launching in background)");
 	}
 
 	// -----------------------------------------------------------------------

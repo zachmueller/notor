@@ -44,6 +44,23 @@ export class ToolRegistry {
 		}
 	}
 
+	/**
+	 * Unregister a tool by name.
+	 *
+	 * Used to remove MCP tools when servers disconnect or tools are
+	 * removed on refresh.
+	 *
+	 * @returns true if the tool was found and removed, false otherwise
+	 * @see specs/04-mcp/tasks.md — ARCH-005
+	 */
+	unregister(name: string): boolean {
+		const existed = this.tools.delete(name);
+		if (existed) {
+			log.debug("Unregistered tool", { name });
+		}
+		return existed;
+	}
+
 	// -----------------------------------------------------------------------
 	// Lookup
 	// -----------------------------------------------------------------------

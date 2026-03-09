@@ -68,6 +68,21 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **Per-persona auto-approve overrides**: persona-level auto-approve settings managed via a dedicated Settings UI sub-page (**Settings → Notor → Persona auto-approve**) that override global defaults when a persona is active, with three-state per-tool selectors and stale tool name warnings
 - **Hooks — vault event hooks**: hooks tied to vault events (on-note-open, on-save, on-tag-change, on-schedule) for triggering workflows or LLM interactions
 
+## Phase 4.1 — Custom MCP servers
+
+*Extend Notor's tool set with user-defined MCP servers.*
+
+- **MCP server configuration**: users register and configure custom MCP servers in **Settings → Notor** — specifying either a server URL (for HTTP/SSE transport) or a local process command (for stdio transport)
+- **Tool schema discovery**: on connection, Notor queries the MCP server for its tool list and input schemas via the MCP protocol. Custom tools are surfaced to the AI alongside built-in tools with no special treatment.
+- **Uniform tool dispatch**: custom MCP tools go through the same dispatch pipeline as built-in tools — Plan/Act enforcement, auto-approve checks, and approval UI apply equally.
+- **Read/write classification**: each custom MCP tool can optionally be classified as read-only or write in its Notor configuration, enabling Plan mode enforcement for write-classified MCP tools.
+- **Plan/Act state signaling**: the current Plan/Act mode is communicated to MCP servers on each tool invocation so servers can make their own cooperative decisions about write-type actions. The signal is a simple binary: `plan` or `act`.
+- **Trust and safety**: custom tools bypass built-in safety guarantees. Clear warnings are displayed in the settings UI and documentation.
+
+> **⚠️ Research required before implementation** — see [Pre-Phase 4.1 research tasks](#pre-phase-41-blocking-custom-mcp-servers) below.
+
+---
+
 ## Phase 5 — Advanced & multi-agent
 
 *Power features for advanced users.*
@@ -78,7 +93,6 @@ Phased implementation plan for Notor. Phases 0–1 form the MVP. Later phases ad
 - **Extended persona capabilities**: per-persona tool access restrictions and vault scope limitations
 - **Browser capabilities**: web browsing for AI research, ideally integrated with Obsidian Web Viewer so browsing is visible in the editor
 - **External file access**: ability to read/attach files outside the vault
-- **Custom MCP tool support**: user-defined MCP tools beyond the built-in set (exploring both externally-run and Obsidian-native execution). Includes optional read/write classification per MCP tool for Plan/Act enforcement, and Plan/Act state signaling to MCP servers.
 - **Agent resource limits**: configurable caps on chat history retention (by size or age), concurrency limits for parallel agents
 
 ---
@@ -97,9 +111,9 @@ The following research items must be completed before their respective implement
 
 - **Obsidian vault API and frontmatter handling**: investigate how Obsidian's vault API (`vault.create`, `vault.modify`, `vault.read`) handles file writes — specifically whether writes overwrite the entire file including frontmatter, or whether the API provides any frontmatter-aware methods. Determine the safest approach for `write_note` to avoid silently destroying frontmatter when the LLM hasn't read it. This directly affects the parameter design of `write_note` and `replace_in_note`. See [Tools — write_note](tools.md#write_note). Output: `design/research/obsidian-vault-api-frontmatter.md`.
 
-### Pre-Phase 5 (blocking custom MCP tools)
+### Pre-Phase 4.1 (blocking custom MCP servers)
 
-- **MCP server integration from Obsidian plugins**: research how an Obsidian plugin (running in Electron) can discover and communicate with locally-running MCP servers. Key areas: supported transport mechanisms (stdio, HTTP/SSE, WebSocket), spawning/managing local MCP server processes from within the plugin sandbox, Electron/Node.js API constraints, and existing community patterns or libraries for MCP in Electron apps. This determines the technical approach for the custom MCP tools settings UI and runtime. See [Tools — Custom MCP tools](tools.md#custom-mcp-tools-phase-5). Output: `design/research/mcp-server-integration.md`.
+- **MCP server integration from Obsidian plugins**: research how an Obsidian plugin (running in Electron) can discover and communicate with locally-running MCP servers. Key areas: supported transport mechanisms (stdio, HTTP/SSE, WebSocket), spawning/managing local MCP server processes from within the plugin sandbox, Electron/Node.js API constraints, and existing community patterns or libraries for MCP in Electron apps. This determines the technical approach for the custom MCP tools settings UI and runtime. See [Tools — Custom MCP tools](tools.md#custom-mcp-tools-phase-41). Output: `design/research/mcp-server-integration.md`.
 
 - **Plan/Act state signaling mechanism for MCP tools**: research how to communicate Notor's current Plan/Act mode state to MCP tool servers so they can make cooperative decisions about write-type actions. Potential approaches include: passing mode as an extra parameter or metadata field in each tool invocation, providing it as part of MCP server initialization/configuration context, or defining a custom MCP protocol extension (e.g., a capability or queryable resource). The right approach may depend on MCP protocol conventions and what MCP server implementations can realistically consume. Findings should be incorporated into the MCP integration research output. See [Tools — MCP tool classification and Plan/Act awareness](tools.md#mcp-tool-classification-and-planact-awareness). Output: findings incorporated into `design/research/mcp-server-integration.md`.
 
@@ -111,4 +125,5 @@ The following research items must be completed before their respective implement
 - Phase 2's checkpoints should ideally ship before or alongside any feature that enables bulk/automated edits.
 - Phase 3's auto-context and auto-compaction build on the tool and chat infrastructure from Phases 0–1.
 - Phase 4's personas and workflows build on the hooks and auto-approve systems from earlier phases.
+- Phase 4.1's custom MCP servers can be delivered after Phase 4 (the tool dispatch and auto-approve infrastructure is in place by then), but is independent of Phase 5.
 - Phase 5's multi-agent work requires the chat history persistence from Phase 2 (separate context windows stored as separate files).

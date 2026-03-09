@@ -113,6 +113,79 @@ Each source can be individually enabled/disabled in settings. If all sources are
 
 ---
 
+## MCP subsystem (Phase 4.1)
+
+Notor supports user-configured external tool servers via the **Model Context Protocol (MCP)**. The MCP subsystem manages server connections, tool discovery, and routing MCP tool calls through the same dispatch pipeline as built-in tools.
+
+### Components
+
+```
+McpHub                    — central connection manager (singleton, initialized on plugin load)
+McpRegisteredTool         — adapter: wraps an McpDiscoveredTool as a Notor Tool
+mcp-types.ts              — all shared TypeScript interfaces and runtime helpers
+src/settings/sections/
+  mcp-servers.ts          — Settings UI for server configuration and per-tool controls
+```
+
+### McpHub
+
+`McpHub` is the singleton manager for all MCP server connections. It is initialized in `_initMcpHub()` during `onload()` and disposed via `this.register(() => mcpHub.dispose())` on unload.
+
+**Lifecycle:**
+1. `initialize(settings, secretStorage)` — reads `mcp_servers` config and fires off `connectServer()` for each enabled server asynchronously. Plugin load is never blocked.
+2. `connectServer(serverName, config)` — creates the appropriate transport, runs the MCP `initialize` handshake (30-second timeout), then calls `discoverTools()`.
+3. `discoverTools()` — sends `tools/list` and stores discovered tools on the `McpConnection` runtime object.
+4. `dispose()` — disconnects all servers in parallel via `Promise.allSettled()`.
+
+**Transport types:**
+
+| Type | Class | Notes |
+|---|---|---|
+| `stdio` | `StdioClientTransport` | Spawns a local child process. Desktop-only (`Platform.isDesktopApp` guard). No auto-reconnect. |
+| `sse` | `SSEClientTransport` | HTTP Server-Sent Events. Auto-reconnects with exponential backoff (1s → 2× → 60s max). |
+| `streamableHttp` | `StreamableHTTPClientTransport` | HTTP Streamable transport. Same reconnect policy as SSE. Includes 404→405 compatibility shim. |
+
+**Status state machine:**
+```
+disconnected → connecting → connected
+                         ↘ error
+connected    → disconnected  (process exit / network loss / user toggle off)
+error        → disconnected  (user toggle off)
+```
+
+**Tool registration flow:**
+```
+McpHub.onStatusChange("connected") →
+  create McpRegisteredTool for each discovered tool →
+  ToolRegistry.register(tool) + ToolDispatcher.registerTool(tool)
+
+McpHub.onStatusChange("disconnected" | "error") →
+  ToolRegistry.unregister(name) + ToolDispatcher.unregisterTool(name)
+  for all tools matching "{serverName}__*"
+```
+
+### McpRegisteredTool
+
+`McpRegisteredTool` implements Notor's `Tool` interface, adapting an `McpDiscoveredTool` for use in the `ToolRegistry` alongside built-in tools.
+
+- **Name:** `{serverName}__{toolName}` — the `__` separator identifies MCP tools at dispatch time
+- **Mode:** computed via classification precedence: user override → `readOnlyHint === true` → default `"write"` (conservative)
+- **execute():** delegates to `McpHub.callTool(serverName, toolName, params, currentMode)`
+
+### Credential resolution
+
+Sensitive credentials (env var values, header values) are stored in Obsidian's SecretStorage rather than plain-text `data.json`. At connection time, `McpHub` resolves them using the key formats:
+- `mcp_env_{serverName}_{key}` for environment variables
+- `mcp_header_{serverName}_{key}` for HTTP headers
+
+In `data.json`, sensitive fields are stored as empty string `""` placeholders.
+
+### Plan/Act state signaling
+
+Every `tools/call` request includes `_meta: { notor_mode: "plan" | "act" }` so MCP servers can make their own cooperative decisions about write-type actions. Notor independently enforces write-classified MCP tool blocking in Plan mode before ever reaching the server.
+
+---
+
 ## Tool dispatch
 
 ### Architecture
@@ -136,7 +209,7 @@ LLM Response → Parse tool calls → Tool Dispatcher → [Auto-approve check] �
 ### Tool registry
 
 - Built-in tools are registered at plugin load time.
-- Custom MCP tools (Phase 5) are registered from configuration, with schema discovery via MCP protocol. Each MCP tool can optionally be classified as read-only or write for Plan/Act enforcement.
+- Custom MCP tools (Phase 4.1) are registered from configuration, with schema discovery via MCP protocol. Each MCP tool can optionally be classified as read-only or write for Plan/Act enforcement.
 - All tools share a uniform interface: `{ name, description, inputSchema, execute(params) → result }`.
 
 ### Domain denylist (Phase 3)
