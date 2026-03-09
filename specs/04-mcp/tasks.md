@@ -5,7 +5,7 @@
 **Specification:** [spec.md](spec.md)
 **Data Model:** [data-model.md](data-model.md)
 **Contracts:** [contracts/](contracts/)
-**Status:** Planning
+**Status:** In Progress
 
 ## Task Summary
 
@@ -44,11 +44,11 @@ ENV-001 → ENV-002 → ARCH-001 → ARCH-002 → ARCH-003 → FEAT-001 → FEAT
 - `esbuild.config.mjs` — verify SDK is NOT in the `external` array
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `@modelcontextprotocol/sdk` v1.25+ installed as a direct dependency
-- [ ] `npm run build` succeeds with no errors
-- [ ] SDK is bundled into `main.js` (not externalized) — verified by checking `esbuild.config.mjs` externals list
-- [ ] Bundle size increase is ≤ 200 KB gzipped over baseline (target: ~166 KB per R-2)
-- [ ] Server-side SDK code (express, hono, cors) is tree-shaken out — not present in `main.js`
+- [x] `@modelcontextprotocol/sdk` v1.25+ installed as a direct dependency
+- [x] `npm run build` succeeds with no errors
+- [x] SDK is bundled into `main.js` (not externalized) — verified by checking `esbuild.config.mjs` externals list
+- [x] Bundle size increase is ≤ 200 KB gzipped over baseline (target: ~166 KB per R-2)
+- [x] Server-side SDK code (express, hono, cors) is tree-shaken out — not present in `main.js`
 
 **Commands:**
 ```bash
@@ -73,11 +73,11 @@ gzip -c main.js | wc -c
 - `src/settings/defaults.ts` — add default `mcp_servers: {}`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `src/mcp/` directory exists with four skeleton files
-- [ ] `NotorSettings` interface includes `mcp_servers` field typed as `Record<string, McpServerConfig>`
-- [ ] Default settings include `mcp_servers: {}`
-- [ ] `npm run build` succeeds with no type errors
-- [ ] Existing functionality unaffected — plugin loads normally with empty MCP config
+- [x] `src/mcp/` directory exists with four skeleton files
+- [x] `NotorSettings` interface includes `mcp_servers` field typed as `Record<string, McpServerConfig>`
+- [x] Default settings include `mcp_servers: {}`
+- [x] `npm run build` succeeds with no type errors
+- [x] Existing functionality unaffected — plugin loads normally with empty MCP config
 
 ## Phase 1: Foundation & Architecture (Group A — MCP Core Infrastructure)
 

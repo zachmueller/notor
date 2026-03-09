@@ -9,6 +9,7 @@
  */
 
 import type { ConversationMode, LLMProviderConfig, VaultEventHookConfig } from "../types";
+import type { McpServerConfig } from "../mcp/mcp-types";
 
 // ---------------------------------------------------------------------------
 // Settings interface
@@ -233,4 +234,15 @@ export interface NotorSettings {
 	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001
 	 */
 	workflow_activity_indicator_count: number;
+
+	// -------------------------------------------------------------------
+	// Phase 4.1: MCP server settings
+	// -------------------------------------------------------------------
+
+	/**
+	 * MCP server configurations keyed by server name (slug format).
+	 *
+	 * @see specs/04-mcp/data-model.md — McpServerConfig
+	 */
+	mcp_servers: Record<string, McpServerConfig>;
 }
