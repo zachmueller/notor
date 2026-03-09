@@ -84,7 +84,9 @@ export class McpStatusIndicator {
 			}
 		});
 
-		// Subscribe to McpHub status changes to update the indicator in real time
+		// Subscribe to McpHub status changes to update the indicator in real time.
+		// Store the unsubscribe callback so destroy() can clean up the listener
+		// and prevent accumulation across repeated render/destroy cycles.
 		if (mcpHub) {
 			const callback = () => {
 				this.updateIndicatorState(mcpHub);
@@ -94,8 +96,7 @@ export class McpStatusIndicator {
 					this.openPopover(mcpHub);
 				}
 			};
-			mcpHub.onStatusChange(callback);
-			// We can't easily unsubscribe (no return value), so we track it for GC purposes
+			this.statusUnsubscribe = mcpHub.onStatusChange(callback);
 		}
 	}
 
@@ -211,8 +212,13 @@ export class McpStatusIndicator {
 
 	/**
 	 * Destroy the indicator: remove DOM elements and clean up listeners.
+	 *
+	 * Calls the McpHub unsubscribe function to prevent callback accumulation
+	 * across repeated render/destroy cycles (e.g. chat view open/close).
 	 */
 	destroy(): void {
+		this.statusUnsubscribe?.();
+		this.statusUnsubscribe = undefined;
 		this.closePopover();
 		this.indicatorEl?.remove();
 		this.indicatorEl = null;

@@ -506,9 +506,19 @@ export class McpHub {
 
 	/**
 	 * Register a callback for connection status changes.
+	 *
+	 * @returns An unsubscribe function. Call it to remove the callback and
+	 *          prevent accumulation across repeated render/destroy cycles
+	 *          (e.g. McpStatusIndicator open/close).
 	 */
-	onStatusChange(callback: StatusChangeCallback): void {
+	onStatusChange(callback: StatusChangeCallback): () => void {
 		this.statusCallbacks.push(callback);
+		return () => {
+			const idx = this.statusCallbacks.indexOf(callback);
+			if (idx !== -1) {
+				this.statusCallbacks.splice(idx, 1);
+			}
+		};
 	}
 
 	/**
