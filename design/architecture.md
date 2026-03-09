@@ -136,7 +136,7 @@ LLM Response → Parse tool calls → Tool Dispatcher → [Auto-approve check] �
 ### Tool registry
 
 - Built-in tools are registered at plugin load time.
-- Custom MCP tools (Phase 5) are registered from configuration, with schema discovery via MCP protocol. Each MCP tool can optionally be classified as read-only or write for Plan/Act enforcement.
+- Custom MCP tools (Phase 4.1) are registered from configuration, with schema discovery via MCP protocol. Each MCP tool can optionally be classified as read-only or write for Plan/Act enforcement.
 - All tools share a uniform interface: `{ name, description, inputSchema, execute(params) → result }`.
 
 ### Domain denylist (Phase 3)

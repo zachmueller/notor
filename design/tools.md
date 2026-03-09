@@ -192,7 +192,7 @@ Add or remove tags on a note (operating on frontmatter `tags` property).
 
 ---
 
-## Custom MCP tools (Phase 5)
+## Custom MCP tools (Phase 4.1)
 
 Beyond the built-in tools, Notor should support user-defined tools via the Model Context Protocol (MCP).
 
@@ -221,4 +221,4 @@ Beyond the built-in tools, Notor should support user-defined tools via the Model
 
 > **⚠️ Research required: MCP integration in Obsidian**
 >
-> We need to research the practical options for how an Obsidian plugin can discover and communicate with locally-running MCP servers. Key questions include: transport mechanisms (stdio, HTTP/SSE, WebSocket), how to spawn/manage local MCP server processes from within the Obsidian plugin sandbox, and any Electron/Node.js API constraints that affect connectivity. This research should be completed before creating implementation specifications for Phase 5. See [Roadmap — Research tasks](roadmap.md#research-tasks).
+> We need to research the practical options for how an Obsidian plugin can discover and communicate with locally-running MCP servers. Key questions include: transport mechanisms (stdio, HTTP/SSE, WebSocket), how to spawn/manage local MCP server processes from within the Obsidian plugin sandbox, and any Electron/Node.js API constraints that affect connectivity. This research should be completed before creating implementation specifications for Phase 4.1. See [Roadmap — Research tasks](roadmap.md#research-tasks).
