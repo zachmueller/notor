@@ -1,7 +1,7 @@
 # Task Breakdown: Settings Refactor — Module Decomposition
 
 **Created:** 2026-09-03
-**Status:** In Progress (Phase 0 + Phase 1 complete)
+**Status:** In Progress (Phase 0 + Phase 1 + Phase 2 complete)
 
 ## Overview
 
@@ -198,17 +198,17 @@ export interface SettingsContext {
 **Dependencies:** S-002
 
 **Acceptance Criteria:**
-- [ ] Each section renderer is a standalone exported function with signature: `(containerEl: HTMLElement, ctx: SettingsContext) => void` (sync) or `=> Promise<void>` (async where needed)
-- [ ] The `SettingsContext` interface is defined in `src/settings/sections/context.ts` and imported by all section files
-- [ ] Provider section renderers (`provider-local.ts`, etc.) import `getProvider()` and `updateProvider()` from `../helpers`
-- [ ] `connection-test.ts` uses a dynamic `import()` for `registry-factory` to avoid circular deps (same pattern as the current code)
-- [ ] `hooks.ts` imports `Hook`, `HookConfig` from `../types`
-- [ ] `vault-event-hooks.ts` imports vault event hook CRUD functions from `../../hooks/vault-event-hook-config` (unchanged)
-- [ ] `persona-auto-approve.ts` handles its own async state: `cachedPersonas` is managed as a closure variable within the `renderPersonaAutoApproveSection()` function, with a `triggerPersonaRescan()` helper that re-renders the section container when discovery completes
-- [ ] `auto-approve.ts` imports `TOOL_DISPLAY_NAMES` from `../constants`
-- [ ] All Obsidian UI imports (`Setting`, `Notice`, `SecretComponent`, `TextComponent`) are imported directly in each section file that uses them — no central re-export
-- [ ] `npm run build` succeeds
-- [ ] `npx tsc --noEmit` passes
+- [x] Each section renderer is a standalone exported function with signature: `(containerEl: HTMLElement, ctx: SettingsContext) => void` (sync) or `=> Promise<void>` (async where needed)
+- [x] The `SettingsContext` interface is defined in `src/settings/sections/context.ts` and imported by all section files
+- [x] Provider section renderers (`provider-local.ts`, etc.) import `getProvider()` and `updateProvider()` from `../helpers`
+- [x] `connection-test.ts` uses a dynamic `import()` for `registry-factory` to avoid circular deps (same pattern as the current code)
+- [x] `hooks.ts` imports `Hook`, `HookConfig` from `../types`
+- [x] `vault-event-hooks.ts` imports vault event hook CRUD functions from `../../hooks/vault-event-hook-config` (unchanged)
+- [x] `persona-auto-approve.ts` handles its own async state: `cachedPersonas` is managed as a closure variable within the `renderPersonaAutoApproveSection()` function, with a `triggerPersonaRescan()` helper that re-renders the section container when discovery completes
+- [x] `auto-approve.ts` imports `TOOL_DISPLAY_NAMES` from `../constants`
+- [x] All Obsidian UI imports (`Setting`, `Notice`, `SecretComponent`, `TextComponent`) are imported directly in each section file that uses them — no central re-export
+- [x] `npm run build` succeeds
+- [x] `npx tsc --noEmit` passes
 
 **Design decisions:**
 
@@ -230,16 +230,16 @@ export interface SettingsContext {
 **Dependencies:** S-003
 
 **Acceptance Criteria:**
-- [ ] `NotorSettingTab` class is in `src/settings/settings-tab.ts` (renamed from `_legacy.ts`)
-- [ ] Class body contains only: constructor, `display()` method, and the `cachedPersonas` / `personaAutoApproveSectionEl` state for the persona section
-- [ ] `display()` creates a `SettingsContext` object and passes it to each section renderer function
-- [ ] Each section call in `display()` is a one-liner like: `renderAutoContextSection(containerEl, ctx);`
-- [ ] The persona auto-approve section still handles async rescan correctly: `display()` creates the container div, calls the initial render, then calls `triggerPersonaRescan()` which updates the container on completion
-- [ ] `src/settings/index.ts` re-exports `NotorSettingTab` from `./settings-tab`
-- [ ] `src/settings/settings-tab.ts` is under ~100 lines total (class definition + imports + display orchestration)
-- [ ] `npm run build` succeeds
-- [ ] `npx tsc --noEmit` passes
-- [ ] No runtime behavior changes — every settings section renders and functions identically
+- [x] `NotorSettingTab` class is in `src/settings/settings-tab.ts` (renamed from `_legacy.ts`)
+- [x] Class body contains only: constructor, `display()` method, and the `cachedPersonas` / `personaAutoApproveSectionEl` state for the persona section
+- [x] `display()` creates a `SettingsContext` object and passes it to each section renderer function
+- [x] Each section call in `display()` is a one-liner like: `renderAutoContextSection(containerEl, ctx);`
+- [x] The persona auto-approve section still handles async rescan correctly: `display()` creates the container div, calls the initial render, then calls `triggerPersonaRescan()` which updates the container on completion
+- [x] `src/settings/index.ts` re-exports `NotorSettingTab` from `./settings-tab`
+- [x] `src/settings/settings-tab.ts` is under ~100 lines total (class definition + imports + display orchestration)
+- [x] `npm run build` succeeds
+- [x] `npx tsc --noEmit` passes
+- [ ] No runtime behavior changes — every settings section renders and functions identically (manual verification deferred to S-007)
 
 ---
 

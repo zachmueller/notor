@@ -22,4 +22,4 @@ export { AWS_REGIONS, TOOL_DISPLAY_NAMES } from "./constants";
 export { getProvider, updateProvider, validateCronExpressionBasic } from "./helpers";
 
 // Settings tab (UI class)
-export { NotorSettingTab } from "./_legacy";
+export { NotorSettingTab } from "./settings-tab";
