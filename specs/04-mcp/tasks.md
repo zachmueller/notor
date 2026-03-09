@@ -175,70 +175,70 @@ gzip -c main.js | wc -c
 - `src/chat/dispatcher.ts` — extend `dispatch()` to handle MCP tools; import `isMcpTool`, `parseMcpToolName` from adapter
 **Dependencies:** ARCH-004, ARCH-005
 **Acceptance Criteria:**
-- [ ] `dispatch()` recognizes MCP tools via `isMcpTool(toolName)` — tool names containing `__`
-- [ ] MCP tool calls go through the same pipeline as built-in: Plan/Act check → pre-execution checks → auto-approve check → approval UI → execute → result
-- [ ] Write-classified MCP tools are blocked in Plan mode with error message: `"Tool '{name}' is write-only and blocked in Plan mode. Switch to Act mode to use this tool."`
-- [ ] If MCP server is disconnected when tool is called, returns error ToolResult to LLM (does not crash)
-- [ ] Tool execution delegates to `McpRegisteredTool.execute()` (which calls McpHub.callTool internally)
-- [ ] All tool call events emitted correctly (onToolCallStarted, onToolCallResult, onToolCallStatusChanged)
-- [ ] Existing built-in tool dispatch is unaffected — no regressions
+- [x] `dispatch()` recognizes MCP tools via `isMcpTool(toolName)` — tool names containing `__`
+- [x] MCP tool calls go through the same pipeline as built-in: Plan/Act check → pre-execution checks → auto-approve check → approval UI → execute → result
+- [x] Write-classified MCP tools are blocked in Plan mode with error message: `"Tool '{name}' is write-only and blocked in Plan mode. Switch to Act mode to use this tool."`
+- [x] If MCP server is disconnected when tool is called, returns error ToolResult to LLM (does not crash)
+- [x] Tool execution delegates to `McpRegisteredTool.execute()` (which calls McpHub.callTool internally)
+- [x] All tool call events emitted correctly (onToolCallStarted, onToolCallResult, onToolCallStatusChanged)
+- [x] Existing built-in tool dispatch is unaffected — no regressions
 
 ### FEAT-002: MCP auto-approve resolution
 **Description:** Extend the auto-approve resolution chain to include MCP server-level per-tool auto-approve settings. The precedence is: persona override → MCP server per-tool → global default (require approval for all MCP tools).
 **FRs:** FR-60
 **Files:**
-- `src/personas/auto-approve-resolver.ts` — extend `resolveAutoApprove()` to accept MCP server config and check `McpServerConfig.autoApprove` array
-- `src/chat/dispatcher.ts` — pass MCP server config to auto-approve resolver for MCP tool calls
+- `src/chat/dispatcher.ts` — `resolveMcpAutoApprove()` module-level function implements MCP precedence chain; `McpRegisteredTool.getServerConfig()` and `getRawToolName()` expose config for resolution
+- `src/mcp/mcp-tool-adapter.ts` — added `getServerConfig()` and `getRawToolName()` accessor methods
 **Dependencies:** FEAT-001
 **Acceptance Criteria:**
-- [ ] For MCP tools, auto-approve precedence is: active persona override → `McpServerConfig.autoApprove` array → default `false` (require approval)
-- [ ] Persona override values: `"approve"` → auto-approve, `"deny"` → require approval, `"global"` or absent → fall through to server-level
-- [ ] Server-level: if raw tool name (without namespace) is in `config.autoApprove[]` → auto-approve
-- [ ] Global default: all newly discovered MCP tools require manual approval
-- [ ] Changes to auto-approve settings take effect on next dispatch (no reload required)
-- [ ] Built-in tool auto-approve resolution unchanged — no regressions
+- [x] For MCP tools, auto-approve precedence is: active persona override → `McpServerConfig.autoApprove` array → default `false` (require approval)
+- [x] Persona override values: `"approve"` → auto-approve, `"deny"` → require approval, `"global"` or absent → fall through to server-level
+- [x] Server-level: if raw tool name (without namespace) is in `config.autoApprove[]` → auto-approve
+- [x] Global default: all newly discovered MCP tools require manual approval
+- [x] Changes to auto-approve settings take effect on next dispatch (no reload required)
+- [x] Built-in tool auto-approve resolution unchanged — no regressions
 
 ### FEAT-003: Orchestrator and system prompt integration
 **Description:** Ensure MCP tools are included in the `getToolDefinitions()` callback used by `ChatOrchestrator` and `SystemPromptBuilder`. MCP tools must appear alongside built-in tools in the tool definitions sent to the LLM.
 **FRs:** FR-56, FR-59
 **Files:**
-- `src/chat/orchestrator.ts` — verify `setGetToolDefinitions()` callback includes MCP tools (should work automatically if ToolRegistry is the source)
-- `src/chat/system-prompt.ts` — verify tool definitions section includes MCP tools
+- `src/chat/orchestrator.ts` — verified: `setGetToolDefinitions()` callback calls `toolRegistry.getToolDefinitions()` which includes MCP tools automatically (no changes required)
+- `src/chat/system-prompt.ts` — verified: `buildToolDefinitionsSection()` renders all tool definitions uniformly (no changes required)
 **Dependencies:** FEAT-001
 **Acceptance Criteria:**
-- [ ] `getToolDefinitions()` returns both built-in and MCP tools in a single array
-- [ ] MCP tool definitions include namespaced name (`server__tool`), description, and input_schema
-- [ ] System prompt tool section renders MCP tools in the same format as built-in tools — AI cannot distinguish between them
-- [ ] When MCP servers connect/disconnect mid-conversation, the next LLM call uses the updated tool set
-- [ ] No performance degradation with up to 10 servers × ~10 tools each = ~100 additional tool definitions
+- [x] `getToolDefinitions()` returns both built-in and MCP tools in a single array
+- [x] MCP tool definitions include namespaced name (`server__tool`), description, and input_schema
+- [x] System prompt tool section renders MCP tools in the same format as built-in tools — AI cannot distinguish between them
+- [x] When MCP servers connect/disconnect mid-conversation, the next LLM call uses the updated tool set
+- [x] No performance degradation with up to 10 servers × ~10 tools each = ~100 additional tool definitions
 
 ### FEAT-004 [P]: Dynamic tool registry updates
 **Description:** Implement the dynamic registration/unregistration flow that fires when MCP servers connect, disconnect, or have their tools refreshed. Ensure the tool registry and dispatcher stay in sync with McpHub's connection state.
 **FRs:** FR-56
 **Files:**
-- `src/mcp/mcp-hub.ts` — emit tool change events alongside status changes
-- `src/main.ts` — wire McpHub tool change events to ToolRegistry/ToolDispatcher add/remove
+- `src/chat/dispatcher.ts` — added `unregisterTool(name)` method to `ToolDispatcher`
+- `src/main.ts` — fixed disconnect handler to call both `toolRegistry.unregister()` and `toolDispatcher.unregisterTool()`
 **Dependencies:** ARCH-005, FEAT-001
 **Acceptance Criteria:**
-- [ ] When a server connects and tools are discovered, `McpRegisteredTool` instances are created and registered in both `ToolRegistry` and `ToolDispatcher`
-- [ ] When a server disconnects, all its tools are unregistered from `ToolRegistry` and `ToolDispatcher`
-- [ ] When `refreshTools()` is called and the tool list changes, stale tools are removed and new tools are added
-- [ ] User-configured `toolClassifications` and `autoApprove` entries are preserved for tools that still exist after refresh
-- [ ] No duplicate registrations if a server reconnects with the same tool set
+- [x] When a server connects and tools are discovered, `McpRegisteredTool` instances are created and registered in both `ToolRegistry` and `ToolDispatcher`
+- [x] When a server disconnects, all its tools are unregistered from `ToolRegistry` and `ToolDispatcher`
+- [x] When `refreshTools()` is called and the tool list changes, stale tools are removed and new tools are added
+- [x] User-configured `toolClassifications` and `autoApprove` entries are preserved for tools that still exist after refresh
+- [x] No duplicate registrations if a server reconnects with the same tool set
 
 ### FEAT-005 [P]: MCP tool display name formatting
 **Description:** In the chat UI, display MCP tool names in the friendlier `server/tool` format for human readability, while the LLM and registry continue to use the `server__tool` format. Add the `getWriteToolDescription()` mapping for MCP tools.
 **FRs:** FR-62
 **Files:**
-- `src/ui/chat-view.ts` — add display name transformation for MCP tools in tool call rendering
-- `src/chat/dispatcher.ts` — extend `getWriteToolDescription()` to handle MCP tool names
+- `src/ui/tool-call-ui.ts` — added `formatToolDisplayName()` exported helper; `renderToolCallCard()` uses it for display
+- `src/chat/dispatcher.ts` — `getWriteToolDescription()` already returns generic fallback `"perform write operations"` for unknown (including MCP) tools
 **Dependencies:** FEAT-001
 **Acceptance Criteria:**
-- [ ] Tool call UI displays MCP tools as `server/tool` (e.g., `my-db-server/query`) instead of `my-db-server__query`
-- [ ] Tool parameters displayed as formatted key-value pairs (arbitrary content from MCP tools handled gracefully)
-- [ ] Tool results displayed as preformatted text with existing truncation-with-expansion for large results
-- [ ] `getWriteToolDescription()` returns `"perform write operations"` for MCP tools (generic fallback)
-- [ ] Approval UI for MCP tools is identical to built-in tools — approve/reject prompt inline
+- [x] Tool call UI displays MCP tools as `server/tool` (e.g., `my-db-server/query`) instead of `my-db-server__query`
+- [x] Tool parameters displayed as formatted key-value pairs (arbitrary content from MCP tools handled gracefully)
+- [x] Tool results displayed as preformatted text with existing truncation-with-expansion for large results
+- [x] `getWriteToolDescription()` returns `"perform write operations"` for MCP tools (generic fallback)
+- [x] Approval UI for MCP tools is identical to built-in tools — approve/reject prompt inline
 
 ## Phase 3: Integration & UI (Groups C + D + E — Auto-Approve, Settings UI, Chat Panel)
 

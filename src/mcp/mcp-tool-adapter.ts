@@ -167,4 +167,25 @@ export class McpRegisteredTool implements Tool {
 			currentMode
 		);
 	}
+
+	/**
+	 * Expose the server config for auto-approve resolution in the dispatcher.
+	 *
+	 * Used by the dispatcher (FEAT-002) to check the server-level autoApprove
+	 * list as part of the MCP auto-approve precedence chain:
+	 * persona override → server-level per-tool → global default (false).
+	 *
+	 * @see specs/04-mcp/tasks.md — FEAT-002
+	 */
+	getServerConfig(): McpServerConfig {
+		return this.serverConfig;
+	}
+
+	/**
+	 * Raw tool name (without server namespace prefix).
+	 * Used by the auto-approve resolver to check the server's autoApprove list.
+	 */
+	getRawToolName(): string {
+		return this.discoveredTool.name;
+	}
 }

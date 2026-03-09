@@ -619,16 +619,14 @@ export default class NotorPlugin extends Plugin {
 					tools: connection.tools.map((t) => `${serverName}__${t.name}`),
 				});
 			} else if (status === "disconnected" || status === "error") {
-				// Server disconnected → unregister its tools
+				// Server disconnected → unregister its tools from both
+				// ToolRegistry and ToolDispatcher (FEAT-004)
 				const toolNames = toolRegistry.getNames().filter(
 					(name) => name.startsWith(`${serverName}__`)
 				);
 				for (const name of toolNames) {
 					toolRegistry.unregister(name);
-					// ToolDispatcher doesn't have unregister yet (added in Phase 2),
-					// but the dispatcher looks up tools by name, so removing from
-					// the registry is sufficient — the dispatcher's internal map
-					// will be stale but dispatch() checks the registry first.
+					toolDispatcher.unregisterTool(name);
 				}
 
 				if (toolNames.length > 0) {
