@@ -1610,3 +1610,109 @@
 .notor-persona-aa-stale-row .setting-item-name {
 	color: var(--text-warning, var(--color-orange));
 }
+
+/* ==========================================================================
+   Workflow Activity Indicator (H-002, H-003)
+   ========================================================================== */
+
+/* Indicator container — always visible in the chat panel header */
+.notor-workflow-activity-indicator {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	position: relative;
+	width: 24px;
+	height: 24px;
+	cursor: pointer;
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	transition: color 0.15s ease;
+}
+
+.notor-workflow-activity-indicator:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.notor-workflow-activity-indicator svg {
+	width: 16px;
+	height: 16px;
+}
+
+/* Numeric badge — overlaid on the icon, hidden when count is 0 */
+.notor-workflow-activity-badge {
+	position: absolute;
+	top: -2px;
+	right: -4px;
+	min-width: 14px;
+	height: 14px;
+	padding: 0 3px;
+	border-radius: 7px;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-size: 10px;
+	font-weight: var(--font-semibold);
+	line-height: 14px;
+	text-align: center;
+	pointer-events: none;
+	z-index: 1;
+}
+
+.notor-workflow-activity-badge.is-hidden {
+	display: none;
+}
+
+/* Active state — subtle pulse animation when workflows are running (H-003) */
+.notor-workflow-activity-indicator.is-active {
+	color: var(--text-accent);
+	animation: notor-indicator-pulse 2s ease-in-out infinite;
+}
+
+/* Waiting for approval — prominent amber/orange pulse to draw attention (H-003) */
+.notor-workflow-activity-indicator.is-waiting-approval {
+	color: var(--text-warning, var(--color-orange));
+	animation: notor-indicator-attention 1.2s ease-in-out infinite;
+}
+
+.notor-workflow-activity-indicator.is-waiting-approval .notor-workflow-activity-badge {
+	background: var(--color-orange, #e8a838);
+}
+
+/* Pulse animation — gentle opacity/scale for running workflows */
+@keyframes notor-indicator-pulse {
+	0%, 100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	50% {
+		opacity: 0.7;
+		transform: scale(1.05);
+	}
+}
+
+/* Attention animation — more prominent pulse for approval-needed state */
+@keyframes notor-indicator-attention {
+	0%, 100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	50% {
+		opacity: 0.6;
+		transform: scale(1.1);
+	}
+}
+
+/* Respect prefers-reduced-motion — disable or simplify animations (H-003) */
+@media (prefers-reduced-motion: reduce) {
+	.notor-workflow-activity-indicator.is-active,
+	.notor-workflow-activity-indicator.is-waiting-approval {
+		animation: none;
+	}
+
+	/* For waiting-approval, still provide a static visual cue even with reduced motion */
+	.notor-workflow-activity-indicator.is-waiting-approval {
+		outline: 2px solid var(--color-orange, #e8a838);
+		outline-offset: 1px;
+		border-radius: var(--radius-s);
+	}
+}

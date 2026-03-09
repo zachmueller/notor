@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md) — FR-53
 **Data Model:** [specs/03-workflows-personas/data-model.md](../data-model.md) — WorkflowExecution, WorkflowExecutionStatus
-**Status:** Planning
+**Status:** In Progress (Phase 0 + Phase 1 complete)
 
 ## Task Summary
 
@@ -52,17 +52,17 @@ The tracker does NOT duplicate execution state — it subscribes to state change
 **Dependencies:** F-020 (`WorkflowConcurrencyManager` — provides `getActiveExecutions()`, `getRecentExecutions()`, `updateStatus()`)
 
 **Acceptance Criteria:**
-- [ ] `WorkflowActivityTracker` class exported
-- [ ] Constructor accepts `concurrencyManager: WorkflowConcurrencyManager` and `maxEntries: number` (from `settings.workflow_activity_indicator_count`, default 5)
-- [ ] `getIndicatorEntries(): WorkflowExecution[]` — returns up to `maxEntries` entries, ordered by recency: currently running/waiting workflows first (sorted by `started_at` descending), then completed/errored/stopped workflows (sorted by `completed_at` descending). Delegates to `concurrencyManager.getActiveExecutions()` and `concurrencyManager.getRecentExecutions(maxEntries)`.
-- [ ] `getActiveCount(): number` — returns the count of executions with status `"running"` or `"waiting_approval"`. Used by the numeric badge (H-002).
-- [ ] `hasActiveWorkflows(): boolean` — returns `true` if any execution is in `"running"` or `"waiting_approval"` status. Used to toggle the animated indicator state (H-003).
-- [ ] `hasWaitingApproval(): boolean` — returns `true` if any execution has status `"waiting_approval"`. Used for prominent approval-needed indicator styling.
-- [ ] `onChange(callback: () => void): () => void` — registers a listener that fires whenever execution state changes (new execution submitted, status updated, execution completed). Returns an unregister function.
-- [ ] `notifyChange(): void` — called by the concurrency manager (or wiring layer) whenever execution state changes. Fires all registered `onChange` callbacks.
-- [ ] `updateMaxEntries(n: number): void` — updates the `maxEntries` limit at runtime (for settings changes without plugin reload)
-- [ ] `destroy(): void` — clears all registered callbacks
-- [ ] **Filtering rule per FR-53:** Only background (event-triggered) workflow executions appear. Manually triggered workflows that open directly in the chat panel are excluded. This is determined by the `WorkflowExecution.trigger_event` field — manually triggered executions (if any were tracked) would have trigger `"manual"`, but per F-020 design, only background executions are submitted to the concurrency manager, so this filtering is inherent.
+- [x] `WorkflowActivityTracker` class exported
+- [x] Constructor accepts `concurrencyManager: WorkflowConcurrencyManager` and `maxEntries: number` (from `settings.workflow_activity_indicator_count`, default 5)
+- [x] `getIndicatorEntries(): WorkflowExecution[]` — returns up to `maxEntries` entries, ordered by recency: currently running/waiting workflows first (sorted by `started_at` descending), then completed/errored/stopped workflows (sorted by `completed_at` descending). Delegates to `concurrencyManager.getActiveExecutions()` and `concurrencyManager.getRecentExecutions(maxEntries)`.
+- [x] `getActiveCount(): number` — returns the count of executions with status `"running"` or `"waiting_approval"`. Used by the numeric badge (H-002).
+- [x] `hasActiveWorkflows(): boolean` — returns `true` if any execution is in `"running"` or `"waiting_approval"` status. Used to toggle the animated indicator state (H-003).
+- [x] `hasWaitingApproval(): boolean` — returns `true` if any execution has status `"waiting_approval"`. Used for prominent approval-needed indicator styling.
+- [x] `onChange(callback: () => void): () => void` — registers a listener that fires whenever execution state changes (new execution submitted, status updated, execution completed). Returns an unregister function.
+- [x] `notifyChange(): void` — called by the concurrency manager (or wiring layer) whenever execution state changes. Fires all registered `onChange` callbacks.
+- [x] `updateMaxEntries(n: number): void` — updates the `maxEntries` limit at runtime (for settings changes without plugin reload)
+- [x] `destroy(): void` — clears all registered callbacks
+- [x] **Filtering rule per FR-53:** Only background (event-triggered) workflow executions appear. Manually triggered workflows that open directly in the chat panel are excluded. This is determined by the `WorkflowExecution.trigger_event` field — manually triggered executions (if any were tracked) would have trigger `"manual"`, but per F-020 design, only background executions are submitted to the concurrency manager, so this filtering is inherent.
 
 ---
 
@@ -80,22 +80,22 @@ The tracker does NOT duplicate execution state — it subscribes to state change
 **Dependencies:** H-001
 
 **Acceptance Criteria:**
-- [ ] `WorkflowActivityIndicator` class exported, extending or composable with the chat view
-- [ ] Constructor accepts `containerEl: HTMLElement` (the chat panel header), `tracker: WorkflowActivityTracker`
-- [ ] Renders a clickable icon element (e.g., a workflow/activity icon using Obsidian's `setIcon()` API) in the chat panel header area, positioned consistently with existing header elements (gear icon, etc.)
-- [ ] The indicator element has the CSS class `notor-workflow-activity-indicator` for styling
-- [ ] **Numeric badge:** A `<span>` element with class `notor-workflow-activity-badge` overlaid on the icon. Displays the count of active background workflows (`tracker.getActiveCount()`). Hidden (CSS `display: none` or class toggle) when count is 0 per FR-53.
-- [ ] **Always visible:** The indicator icon is rendered regardless of whether workflows are running — it is never hidden. When idle, it is static; when active, it is animated (H-003).
-- [ ] Registers an `onChange` callback with the tracker to reactively update the badge count when execution state changes
-- [ ] `render(): void` — creates or updates the indicator DOM
-- [ ] `updateBadge(): void` — reads `tracker.getActiveCount()` and updates badge text/visibility
-- [ ] `destroy(): void` — removes DOM elements and unregisters tracker callback
-- [ ] The indicator is unobtrusive — small icon size, consistent with Obsidian's UI density
-- [ ] Indicator is added to `chat-view.ts` during `onOpen()` and removed during `onClose()`
+- [x] `WorkflowActivityIndicator` class exported, extending or composable with the chat view
+- [x] Constructor accepts `containerEl: HTMLElement` (the chat panel header), `tracker: WorkflowActivityTracker`
+- [x] Renders a clickable icon element (e.g., a workflow/activity icon using Obsidian's `setIcon()` API) in the chat panel header area, positioned consistently with existing header elements (gear icon, etc.)
+- [x] The indicator element has the CSS class `notor-workflow-activity-indicator` for styling
+- [x] **Numeric badge:** A `<span>` element with class `notor-workflow-activity-badge` overlaid on the icon. Displays the count of active background workflows (`tracker.getActiveCount()`). Hidden (CSS `display: none` or class toggle) when count is 0 per FR-53.
+- [x] **Always visible:** The indicator icon is rendered regardless of whether workflows are running — it is never hidden. When idle, it is static; when active, it is animated (H-003).
+- [x] Registers an `onChange` callback with the tracker to reactively update the badge count when execution state changes
+- [x] `render(): void` — creates or updates the indicator DOM
+- [x] `updateBadge(): void` — reads `tracker.getActiveCount()` and updates badge text/visibility
+- [x] `destroy(): void` — removes DOM elements and unregisters tracker callback
+- [x] The indicator is unobtrusive — small icon size, consistent with Obsidian's UI density
+- [x] Indicator is added to `chat-view.ts` during `onOpen()` and removed during `onClose()`
 
 **CSS (in `styles.css`):**
-- [ ] `.notor-workflow-activity-indicator` — flex/inline-flex container, cursor pointer, relative positioning for badge overlay, appropriate size (~20-24px icon)
-- [ ] `.notor-workflow-activity-badge` — absolute positioned, small pill/circle, background color (accent or theme-aware), white text, font-size ~10-11px, hidden when empty via `.notor-workflow-activity-badge.is-hidden` or `[data-count="0"]`
+- [x] `.notor-workflow-activity-indicator` — flex/inline-flex container, cursor pointer, relative positioning for badge overlay, appropriate size (~20-24px icon)
+- [x] `.notor-workflow-activity-badge` — absolute positioned, small pill/circle, background color (accent or theme-aware), white text, font-size ~10-11px, hidden when empty via `.notor-workflow-activity-badge.is-hidden` or `[data-count="0"]`
 
 ### H-003: Animated/highlighted state for active workflows
 
@@ -108,19 +108,19 @@ The tracker does NOT duplicate execution state — it subscribes to state change
 **Dependencies:** H-002
 
 **Acceptance Criteria:**
-- [ ] `updateAnimationState(): void` method added — reads `tracker.hasActiveWorkflows()` and `tracker.hasWaitingApproval()` and toggles CSS classes accordingly
-- [ ] When `hasActiveWorkflows()` is `true` and `hasWaitingApproval()` is `false`: indicator icon has class `is-active` — a subtle animation (e.g., slow spin, pulse, or glow) signals background work is in progress
-- [ ] When `hasWaitingApproval()` is `true`: indicator icon has class `is-waiting-approval` — a more prominent animation or color change (e.g., pulsing amber/orange badge, or a distinct attention-drawing style) signals that user action is needed
-- [ ] When `hasActiveWorkflows()` is `false`: no animation classes applied — indicator is static/idle
-- [ ] Animation state updates are driven by the `onChange` tracker callback (same as badge updates in H-002) — called in `updateBadge()` or a combined `update()` method
-- [ ] Animations are CSS-only (no JavaScript timers) for performance and smooth rendering
-- [ ] Animations respect `prefers-reduced-motion` media query — reduced or no animation when the user has motion sensitivity preferences enabled
+- [x] `updateAnimationState(): void` method added — reads `tracker.hasActiveWorkflows()` and `tracker.hasWaitingApproval()` and toggles CSS classes accordingly
+- [x] When `hasActiveWorkflows()` is `true` and `hasWaitingApproval()` is `false`: indicator icon has class `is-active` — a subtle animation (e.g., slow spin, pulse, or glow) signals background work is in progress
+- [x] When `hasWaitingApproval()` is `true`: indicator icon has class `is-waiting-approval` — a more prominent animation or color change (e.g., pulsing amber/orange badge, or a distinct attention-drawing style) signals that user action is needed
+- [x] When `hasActiveWorkflows()` is `false`: no animation classes applied — indicator is static/idle
+- [x] Animation state updates are driven by the `onChange` tracker callback (same as badge updates in H-002) — called in `updateBadge()` or a combined `update()` method
+- [x] Animations are CSS-only (no JavaScript timers) for performance and smooth rendering
+- [x] Animations respect `prefers-reduced-motion` media query — reduced or no animation when the user has motion sensitivity preferences enabled
 
 **CSS (in `styles.css`):**
-- [ ] `.notor-workflow-activity-indicator.is-active` — subtle animation, e.g., `animation: notor-pulse 2s ease-in-out infinite` or a gentle glow effect
-- [ ] `.notor-workflow-activity-indicator.is-waiting-approval` — more prominent visual, e.g., amber/orange-tinted badge pulse, or a distinct border/shadow to draw attention
-- [ ] `@keyframes notor-pulse` — a gentle scale/opacity pulse animation
-- [ ] `@media (prefers-reduced-motion: reduce)` — disables or simplifies animations
+- [x] `.notor-workflow-activity-indicator.is-active` — subtle animation, e.g., `animation: notor-pulse 2s ease-in-out infinite` or a gentle glow effect
+- [x] `.notor-workflow-activity-indicator.is-waiting-approval` — more prominent visual, e.g., amber/orange-tinted badge pulse, or a distinct border/shadow to draw attention
+- [x] `@keyframes notor-pulse` — a gentle scale/opacity pulse animation
+- [x] `@media (prefers-reduced-motion: reduce)` — disables or simplifies animations
 
 ---
 

@@ -23,6 +23,8 @@ import {
 import { VaultNoteSuggest, createAttachmentButton } from "./attachment-picker";
 import { AttachmentChipManager, createAttachmentChipContainer } from "./attachment-chips";
 import { WorkflowSlashSuggest, WorkflowChipManager, detectSlashTrigger } from "./workflow-suggest";
+import { WorkflowActivityIndicator } from "./workflow-activity-indicator";
+import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tracker";
 import type { Workflow } from "../types";
 
 const log = logger("ChatView");
@@ -81,6 +83,10 @@ export class NotorChatView extends ItemView {
 	// Persona state (A-009, A-010)
 	private personaManager?: PersonaManager;
 	private personaLabelEl?: HTMLElement;
+
+	// Workflow activity indicator state (H-002, H-003)
+	private workflowActivityTracker?: WorkflowActivityTracker;
+	private workflowActivityIndicator?: WorkflowActivityIndicator;
 
 	// Callbacks (set by orchestrator)
 	private onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
@@ -228,6 +234,48 @@ export class NotorChatView extends ItemView {
 	}
 
 	// -----------------------------------------------------------------------
+	// Workflow activity indicator (H-002, H-003)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Set the workflow activity tracker for the activity indicator.
+	 *
+	 * Called by `main.ts` `wireView()` after the tracker is initialized.
+	 * If the header is already built (view already open), the indicator
+	 * is rendered immediately. Otherwise it renders on the next `onOpen()`.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-h-tasks.md — H-002
+	 */
+	setWorkflowActivityTracker(tracker: WorkflowActivityTracker): void {
+		this.workflowActivityTracker = tracker;
+
+		// If the header is already built, render the indicator immediately
+		if (this.headerEl) {
+			this.initActivityIndicator();
+		}
+	}
+
+	/**
+	 * Initialize the workflow activity indicator in the chat panel header.
+	 *
+	 * Called from `onOpen()` (if tracker is already set) or from
+	 * `setWorkflowActivityTracker()` (if header is already built).
+	 */
+	private initActivityIndicator(): void {
+		// Destroy any existing indicator to avoid duplicates
+		this.workflowActivityIndicator?.destroy();
+		this.workflowActivityIndicator = undefined;
+
+		if (!this.workflowActivityTracker || !this.headerEl) return;
+
+		this.workflowActivityIndicator = new WorkflowActivityIndicator(
+			this.headerEl,
+			this.workflowActivityTracker
+		);
+		this.workflowActivityIndicator.render();
+	}
+
+	// -----------------------------------------------------------------------
 	// Persona integration (A-009, A-010)
 	// -----------------------------------------------------------------------
 
@@ -311,11 +359,19 @@ export class NotorChatView extends ItemView {
 		this.buildMessageList(container);
 		this.buildInputArea(container);
 
+		// H-002: Render workflow activity indicator in header (if tracker is already wired)
+		this.initActivityIndicator();
+
 		log.info("Chat view opened");
 	}
 
 	async onClose(): Promise<void> {
 		this.abortController?.abort();
+
+		// H-002: Clean up workflow activity indicator DOM and callbacks
+		this.workflowActivityIndicator?.destroy();
+		this.workflowActivityIndicator = undefined;
+
 		log.info("Chat view closed");
 	}
 
