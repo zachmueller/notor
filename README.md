@@ -4,7 +4,7 @@
 
 Notor brings AI-powered assistance directly into your Obsidian workflow. It gives you a full AI chat panel with the ability to read, search, create, and surgically edit notes in your vault — with full transparency into every AI action, a safety-first approval model, diff previews for proposed changes, and rollback via checkpoints.
 
-> **Status:** Phases 0–3 of the roadmap implemented.
+> **Status:** Phases 0–4 of the roadmap implemented.
 
 ---
 
@@ -55,7 +55,7 @@ Store Markdown rule files under `notor/rules/` in your vault. Use frontmatter tr
 - `notor-directory-include: <path>` — injected when the AI accesses a note under the given directory
 - `notor-tag-include: <tag>` — injected when the AI accesses a note with the given tag
 
-Rule files are regular Markdown notes — fully visible and editable in Obsidian.
+Rule files are regular Markdown notes — fully visible and editable in Obsidian. Rule file bodies support `<include_note>` tags for dynamic content injection.
 
 ### Attach notes and files to your messages
 
@@ -126,6 +126,78 @@ Configure shell commands to fire automatically at key points in the conversation
 - Hook failures are non-blocking — the conversation continues and a notice is surfaced.
 - Configured in **Settings → Notor** under a dedicated hooks section grouped by lifecycle event (each subsection is collapsible).
 - A single global hook timeout (default: 10 seconds) applies to all hook events; timed-out processes are terminated without stalling the conversation.
+- Each hook action can either **execute a shell command** or **run a workflow** (see Workflows below).
+
+### Personas
+
+Define specialized AI personalities as notes in your vault — each persona shapes the AI's system prompt, model preferences, and approval behavior:
+
+- **File-based persona definitions** — personas are stored as directories under `notor/personas/{persona-name}/`, each containing a `system-prompt.md` file. The note body is the persona's system prompt; frontmatter properties configure behavior.
+- **System prompt modes** — set `notor-persona-prompt-mode: "append"` (default) to append the persona's prompt after the global system prompt, or `"replace"` to use only the persona's prompt as the base. Vault-level rule injections always apply regardless of this setting.
+- **Provider and model overrides** — set `notor-preferred-provider` and `notor-preferred-model` in a persona's frontmatter to automatically switch the AI to a specific provider and model when that persona is active.
+- **Persona picker in the chat panel** — access the persona picker from the gear icon in the chat panel header. Selecting a persona immediately updates the active system prompt and model preferences for subsequent messages. The active persona name is shown as a badge near the chat input area.
+- **Provider & model identifier reference** — a reference section in **Settings → Notor** lists all configured providers and their available models with their exact identifier strings and one-click copy buttons, making it easy to fill in persona frontmatter without guessing.
+- **Per-persona auto-approve overrides** — configure per-tool approval behavior per persona in **Settings → Notor → Persona auto-approve**. Each tool offers three states: *Global default* (inherit global setting), *Auto-approve*, or *Require approval*. Unconfigured tools fall back to global defaults. Configuration is stored in plugin settings data, not in persona frontmatter.
+- Personas are regular Obsidian notes — fully visible in the file explorer, searchable, and editable. The plugin rescans the personas directory when Settings is opened or the persona picker is activated; no plugin reload is needed when personas are created or deleted.
+
+### Workflows
+
+Define reusable instruction sets as Obsidian notes that guide the AI through structured, step-by-step processes:
+
+- **Workflow notes** — stored as Markdown notes under `notor/workflows/`, identified by `notor-workflow: true` in frontmatter. Workflow bodies are written as step-by-step instructions that shape *how the AI approaches a task*, not as conversational prompts.
+- **Run manually from the command palette** — the **Notor: Run workflow** command opens a quick-pick list of all discovered workflows. Selecting one assembles the workflow prompt, resolves any `<include_note>` tags, and sends it to the LLM as a new conversation in the chat panel with full transparency: streaming responses, inline tool calls, diff previews, and approval prompts all work as normal.
+- **Slash-command workflow attachment** — type `/` at the start of the Notor chat input to open a fuzzy-search autocomplete list of workflows. Selecting one inserts a chip in the input area (like a note attachment). You can type additional context alongside the chip. At most one workflow can be attached per message.
+- **Workflow instructions rendering** — the `<workflow_instructions>` block injected into the conversation is rendered as a collapsed `<details>` element in the chat panel (labeled "Workflow: {name}") so it doesn't dominate the view. Click to expand and inspect the full instructions.
+- **Automatic persona switching** — set `notor-workflow-persona: "{persona-name}"` in a workflow's frontmatter to automatically activate a persona when the workflow runs. The persona persists for the entire workflow conversation and reverts when the user switches to a different conversation or starts a new one.
+- **Event-triggered workflows** — set `notor-trigger` in the frontmatter to one of the vault event types (see Vault event hooks below) to run the workflow automatically in response to vault events. Event-triggered workflows run in the background without interrupting the current conversation.
+- **Workflow activity indicator** — a persistent indicator in the chat panel header shows the status of background workflow executions. It displays an animated state when workflows are running, a numeric badge for the count of active executions, and a dropdown listing currently running and recently completed workflows with their status (running, waiting for approval, succeeded, errored). Click any entry to open that workflow's conversation. A configurable number of recent entries are shown (default: 5, configurable in **Settings → Notor**).
+- **Concurrency limit** — a configurable cap (default: 3) limits simultaneous background workflow executions. Additional triggered workflows are queued FIFO and execute as slots become available. Manually triggered workflows are not counted against this limit.
+- **Per-workflow hook overrides** — define a `notor-hooks` YAML mapping in a workflow's frontmatter to override global LLM lifecycle hooks for that workflow's duration. Overridden events use the workflow-scoped hooks; non-overridden events continue using global hooks. Reverts to global hooks when the workflow ends.
+- **Loop prevention** — if a hook-triggered workflow would re-trigger the same hook (e.g., an `on-tag-change` hook runs a workflow that adds tags), the cycle is detected and the re-trigger is skipped with a notice.
+- Workflows are regular Obsidian notes — visible, searchable, and editable. Subdirectories under `notor/workflows/` are supported. The plugin rescans workflows on plugin load and when the workflow list is opened.
+
+### `<include_note>` tag
+
+Dynamically inject the contents of any vault note (or a specific section) into workflow bodies, system prompts, and vault-level rule files:
+
+```markdown
+<!-- Vault-relative path -->
+<include_note path="Research/Climate.md" section="Key Findings" />
+
+<!-- Obsidian wikilink (rename-safe, recommended) -->
+<include_note path="[[Climate Research]]" section="Key Findings" />
+```
+
+- **Supported attributes:**
+  - `path` (required) — vault-relative file path or `[[wikilink]]`. Wikilinks are resolved via Obsidian's standard link resolution and are automatically updated when the referenced note is renamed — the recommended form.
+  - `section` (optional) — heading text to extract. Only the content from that heading to the next heading of equal or higher level is included. Omit for the full note body.
+  - `mode` (optional) — `inline` (paste directly into surrounding text) or `attached` (add as a separate attachment in context). Default: `inline`. In system prompts and rule files, `inline` is always used regardless of this attribute.
+  - `strip_frontmatter` (optional) — `true` (default) strips YAML frontmatter before injection; `false` includes frontmatter as-is (useful when the AI needs the note's metadata).
+- **Resolution at execution time** — tags are resolved when the workflow is run or when the system prompt is assembled before each LLM API call.
+- **Error markers** — if the referenced note or section is not found, the tag is replaced with an inline error marker (e.g., `[include_note error: note 'Research/Deleted.md' not found]`) that is visible to both the user and the LLM. Prompt assembly continues normally.
+- **Multiple tags per document** — any number of `<include_note />` tags may appear in a single document; each resolves independently.
+- **No nested resolution** — if an included note itself contains `<include_note>` tags, those tags are passed through as literal text (no recursive includes), preventing circular reference loops.
+
+### Vault event hooks
+
+Configure hooks that fire automatically in response to vault lifecycle events:
+
+| Event | When it fires |
+|---|---|
+| `on-note-open` | A note is opened (activated) in the editor |
+| `on-note-create` | A new Markdown file is created in the vault |
+| `on-save` | A note is saved (manual or auto-save) |
+| `on-manual-save` | A note is saved by an explicit user action (Cmd+S / Ctrl+S) — not auto-save |
+| `on-tag-change` | Tags are added to or removed from a note's frontmatter |
+| `on-schedule` | A configured cron schedule fires (while Obsidian is running) |
+
+- Each hook action can either **execute a shell command** or **run a workflow**. For shell commands, event context is available as environment variables (`NOTOR_NOTE_PATH`, `NOTOR_TAGS_ADDED`, `NOTOR_TAGS_REMOVED`).
+- **Debounce** — `on-note-open`, `on-save`, and `on-manual-save` hooks include a configurable cooldown (default: 5 seconds) to prevent rapid-fire execution from auto-save or tab switching.
+- **Cron scheduling** — `on-schedule` hooks use cron expressions (e.g., `0 9 * * 1` for 9 AM every Monday). Scheduling is in-process (powered by the `croner` library) — no OS-level cron daemon is required. Missed executions while Obsidian is closed are skipped; no catch-up occurs.
+- **Lazy listener activation** — Obsidian event listeners are only registered for event types that have at least one configured hook or workflow trigger. Removing the last hook for an event type dynamically unregisters its listener, adding zero overhead for unused event types.
+- **Loop prevention** — tag changes and note creations caused by hook-triggered workflow executions do not re-trigger their corresponding hooks, preventing infinite loops.
+- **Non-blocking** — hook failures surface a non-blocking notice without interrupting the triggering vault operation or preventing subsequent hooks from executing.
+- Vault event hooks are configured in **Settings → Notor** under a dedicated section grouped by event type, using the same collapsible UI pattern as LLM interaction hooks.
 
 ---
 
@@ -168,6 +240,40 @@ npm run dev
 4. Select a model from the dropdown (or type a model ID if the list is unavailable)
 5. Open the Notor chat panel from the sidebar ribbon and start a conversation
 
+### Create your first persona
+
+1. Create the directory `notor/personas/my-persona/` in your vault
+2. Create `system-prompt.md` inside it — the body content is the persona's system prompt
+3. Optionally add frontmatter:
+   ```yaml
+   ---
+   notor-persona-prompt-mode: "append"
+   notor-preferred-provider: "anthropic"
+   notor-preferred-model: "claude-opus-4-5"
+   ---
+   ```
+4. Open the Notor chat panel → click the gear icon → select your persona
+
+### Create your first workflow
+
+1. Create `notor/workflows/my-workflow.md` in your vault
+2. Add frontmatter and write the instructions:
+   ```markdown
+   ---
+   notor-workflow: true
+   notor-trigger: manual
+   notor-workflow-persona: "my-persona"
+   ---
+   # My workflow
+
+   ## Step 1
+   Search the vault for notes tagged #todo.
+
+   ## Step 2
+   Summarize the action items found across all matching notes.
+   ```
+3. Open the command palette → **Notor: Run workflow** → select your workflow
+
 ---
 
 ## Project structure
@@ -175,7 +281,6 @@ npm run dev
 ```
 src/
   main.ts              # Plugin entry point and lifecycle
-  settings.ts          # Settings interface and defaults
   types.ts             # Shared TypeScript types
   chat/                # Conversation orchestration, history, context management, system prompt
   providers/           # LLM provider integrations (Anthropic, OpenAI, Bedrock, local)
@@ -183,9 +288,16 @@ src/
   checkpoints/         # Checkpoint storage and management
   context/             # Auto-context injection, attachment handling, message assembly, compaction
   hooks/               # LLM lifecycle hook configuration, execution engine, event dispatch
+  personas/            # Persona discovery, activation/switching, per-persona auto-approve resolution
+  workflows/           # Workflow discovery, prompt assembly, executor, concurrency management, hook parsing
+  include-note/        # <include_note> tag parser and resolver (vault-relative paths and wikilinks)
   rules/               # Vault-level instruction file evaluation
   shell/               # Shell executor, shell resolver, output buffer (shared by execute_command and hooks)
-  ui/                  # Chat panel, diff view, approval UI, tool call display, attachment chips, compaction markers
+  mcp/                 # MCP server hub, tool adapter, and type definitions
+  settings/            # Settings interface, defaults, tab UI, per-section UI components
+  ui/                  # Chat panel, diff view, approval UI, tool call display, attachment chips,
+                       #   compaction markers, persona picker, workflow activity indicator,
+                       #   workflow slash-command suggest
   utils/               # Logging, token utilities, secret helpers
 specs/                 # Detailed specifications for each development phase
 design/                # Architecture, UX, tool design, and roadmap documents
@@ -215,7 +327,7 @@ The `design/` directory contains the full medium-term vision for Notor, written 
 | **Phase 1** | Core note operations: read/write/search/list tools, diff preview, Plan/Act mode, auto-approve | ✅ Complete |
 | **Phase 2** | Trust & observability: checkpoints/rollback, token tracking, chat history, frontmatter & tag tools, vault rules | ✅ Complete |
 | **Phase 3** | Context & intelligence: note/file attachment, auto-context injection, auto-compaction, web fetching, shell execution, LLM interaction hooks | ✅ Complete |
-| **Phase 4** | Workflows & personas: file-based personas, reusable workflow notes, `<include_notes>` tag, vault event hooks | 🔜 Planned |
+| **Phase 4** | Workflows & personas: file-based personas, reusable workflow notes, `<include_note>` tag, vault event hooks | ✅ Complete |
 | **Phase 5** | Advanced & multi-agent: parallel agents, agent monitor panel, background agents, custom MCP tools, browser capabilities | 🔜 Planned |
 
 ---
