@@ -10,7 +10,8 @@
 
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { MarkdownView } from "obsidian";
-import { DEFAULT_SETTINGS, NotorSettings, NotorSettingTab } from "./settings";
+import { DEFAULT_SETTINGS, NotorSettingTab } from "./settings";
+import type { NotorSettings } from "./settings";
 import { logger } from "./utils/logger";
 import { notifyMarkdownLeafActivated } from "./context/auto-context";
 

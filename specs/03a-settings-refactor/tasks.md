@@ -1,7 +1,7 @@
 # Task Breakdown: Settings Refactor — Module Decomposition
 
 **Created:** 2026-09-03
-**Status:** In Progress (Phase 0 + Phase 1 + Phase 2 complete)
+**Status:** In Progress (Phase 0 + Phase 1 + Phase 2 + Phase 3 complete)
 
 ## Overview
 
@@ -256,13 +256,13 @@ export interface SettingsContext {
 **Dependencies:** S-004
 
 **Acceptance Criteria:**
-- [ ] All 17 type-only consumers use `import type { NotorSettings } from "../settings"` — import paths unchanged (the barrel index resolves)
-- [ ] `src/main.ts` uses `import { DEFAULT_SETTINGS, NotorSettingTab } from "./settings"` and `import type { NotorSettings } from "./settings"` — path unchanged
-- [ ] `src/hooks/hook-config.ts` imports from `"../settings"` (unchanged path, now resolves through barrel)
-- [ ] All import paths that currently reference `"../settings"` or `"./settings"` continue to work — the directory module with `index.ts` is resolved by TypeScript and esbuild automatically
-- [ ] Verify no file imports from `"../settings/_legacy"`, `"../settings/types"`, or other internal module paths — all external consumers go through the barrel `index.ts`
-- [ ] `npm run build` succeeds
-- [ ] `npx tsc --noEmit` passes
+- [x] All 17 type-only consumers use `import type { NotorSettings } from "../settings"` — import paths unchanged (the barrel index resolves)
+- [x] `src/main.ts` uses `import { DEFAULT_SETTINGS, NotorSettingTab } from "./settings"` and `import type { NotorSettings } from "./settings"` — path unchanged
+- [x] `src/hooks/hook-config.ts` imports from `"../settings"` (unchanged path, now resolves through barrel)
+- [x] All import paths that currently reference `"../settings"` or `"./settings"` continue to work — the directory module with `index.ts` is resolved by TypeScript and esbuild automatically
+- [x] Verify no file imports from `"../settings/_legacy"`, `"../settings/types"`, or other internal module paths — all external consumers go through the barrel `index.ts`
+- [x] `npm run build` succeeds
+- [x] `npx tsc --noEmit` passes
 
 **Implementation note:** Because TypeScript and esbuild both resolve `"./settings"` to `./settings/index.ts` when a directory module exists, most consumer import paths may not need any changes at all. The key verification is that the build succeeds and all symbols resolve correctly. The main action items are:
 1. Verify each consumer compiles (automated by `npm run build`)
@@ -279,12 +279,12 @@ export interface SettingsContext {
 **Dependencies:** S-005
 
 **Acceptance Criteria:**
-- [ ] `src/settings.ts` (root-level file) is deleted
-- [ ] No file named `_legacy.ts` exists in `src/settings/`
-- [ ] All imports resolve via `src/settings/index.ts` barrel
-- [ ] `npm run build` succeeds
-- [ ] `npx tsc --noEmit` passes
-- [ ] No runtime behavior changes
+- [x] `src/settings.ts` (root-level file) is deleted
+- [x] No file named `_legacy.ts` exists in `src/settings/`
+- [x] All imports resolve via `src/settings/index.ts` barrel
+- [x] `npm run build` succeeds
+- [x] `npx tsc --noEmit` passes
+- [ ] No runtime behavior changes (manual verification deferred to S-007)
 
 ### S-007: Build verification, cleanup, and final validation
 
