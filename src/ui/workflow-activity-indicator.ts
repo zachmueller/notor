@@ -15,6 +15,7 @@
 
 import { setIcon } from "obsidian";
 import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tracker";
+import { WorkflowActivityDropdown, type NavigateToConversationCallback } from "./workflow-activity-dropdown";
 import { logger } from "../utils/logger";
 
 const log = logger("WorkflowActivityIndicator");
@@ -38,6 +39,10 @@ export class WorkflowActivityIndicator {
 	private badgeEl: HTMLElement | null = null;
 	/** Unregister function for the tracker onChange callback. */
 	private unregisterOnChange: (() => void) | null = null;
+	/** The dropdown component for the activity popover (H-004). */
+	private dropdown: WorkflowActivityDropdown | null = null;
+	/** Callback for navigating to a conversation (H-005). */
+	private onNavigateToConversation: NavigateToConversationCallback | null = null;
 
 	/**
 	 * @param containerEl - The chat panel header element to render into.
@@ -78,6 +83,14 @@ export class WorkflowActivityIndicator {
 		// Set the icon using Obsidian's setIcon API (activity/zap icon)
 		setIcon(this.indicatorEl, "activity");
 
+		// Click handler — toggles the dropdown (H-004)
+		this.indicatorEl.addEventListener("click", (e) => {
+			e.stopPropagation();
+			if (this.indicatorEl && this.dropdown) {
+				this.dropdown.toggle(this.indicatorEl);
+			}
+		});
+
 		// Create the numeric badge overlay
 		this.badgeEl = this.indicatorEl.createSpan({
 			cls: "notor-workflow-activity-badge is-hidden",
@@ -93,6 +106,14 @@ export class WorkflowActivityIndicator {
 			// Fallback: append to the container
 			this.containerEl.appendChild(this.indicatorEl);
 		}
+
+		// Initialize the dropdown component (H-004)
+		this.dropdown = new WorkflowActivityDropdown(
+			this.tracker,
+			(conversationId: string) => {
+				this.onNavigateToConversation?.(conversationId);
+			}
+		);
 
 		// Register the onChange callback for reactive updates
 		this.unregisterOnChange = this.tracker.onChange(() => {
@@ -175,11 +196,23 @@ export class WorkflowActivityIndicator {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Return the indicator DOM element (used as anchor for the dropdown
-	 * in Phase 2 — H-004).
+	 * Return the indicator DOM element (used as anchor for the dropdown — H-004).
 	 */
 	getIndicatorEl(): HTMLElement | null {
 		return this.indicatorEl;
+	}
+
+	/**
+	 * Set the callback for navigating to a workflow's conversation (H-005).
+	 *
+	 * Called by `chat-view.ts` during initialization to wire the dropdown
+	 * entry click handler to the chat panel's conversation switching logic.
+	 *
+	 * @param callback - Function that receives a conversation ID and switches
+	 *                   the chat panel to display that conversation.
+	 */
+	setOnNavigateToConversation(callback: NavigateToConversationCallback): void {
+		this.onNavigateToConversation = callback;
 	}
 
 	// -----------------------------------------------------------------------
@@ -196,6 +229,10 @@ export class WorkflowActivityIndicator {
 			this.unregisterOnChange();
 			this.unregisterOnChange = null;
 		}
+
+		// Destroy the dropdown (H-004)
+		this.dropdown?.destroy();
+		this.dropdown = null;
 
 		if (this.indicatorEl) {
 			this.indicatorEl.remove();

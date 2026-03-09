@@ -1716,3 +1716,161 @@
 		border-radius: var(--radius-s);
 	}
 }
+
+/* ==========================================================================
+   Workflow Activity Dropdown (H-004, H-005)
+   ========================================================================== */
+
+/* Dropdown container — positioned fixed, popover effect */
+.notor-workflow-activity-dropdown {
+	z-index: var(--layer-popover, 100);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-s);
+	min-width: 280px;
+	max-width: 360px;
+	max-height: 400px;
+	overflow-y: auto;
+	padding: 4px 0;
+}
+
+/* Empty state — no recent workflow activity */
+.notor-workflow-activity-empty {
+	padding: 16px 12px;
+	text-align: center;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-style: italic;
+}
+
+/* Entry row — clickable workflow execution item */
+.notor-workflow-activity-entry {
+	padding: 8px 12px;
+	cursor: pointer;
+	border-bottom: 1px solid var(--background-modifier-border);
+	transition: background 0.1s ease;
+}
+
+.notor-workflow-activity-entry:last-child {
+	border-bottom: none;
+}
+
+.notor-workflow-activity-entry:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* Entry top row — workflow name + status badge */
+.notor-workflow-activity-entry-top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+/* Workflow name — primary text, truncate if long */
+.notor-workflow-activity-entry .workflow-name {
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-medium);
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+	flex: 1;
+}
+
+/* Status badge — inline pill with status-specific color */
+.notor-workflow-activity-entry .status-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	padding: 1px 6px;
+	border-radius: var(--radius-s);
+	font-size: 10px;
+	font-weight: var(--font-medium);
+	white-space: nowrap;
+	flex-shrink: 0;
+	line-height: 1.4;
+}
+
+.notor-workflow-activity-entry .status-badge .status-icon {
+	display: inline-flex;
+	align-items: center;
+}
+
+.notor-workflow-activity-entry .status-badge .status-icon svg {
+	width: 11px;
+	height: 11px;
+}
+
+/* Status-specific badge colors */
+.notor-workflow-activity-entry .status-badge.status-running {
+	background: rgba(var(--color-accent-rgb, 68, 130, 255), 0.15);
+	color: var(--text-accent);
+}
+
+.notor-workflow-activity-entry .status-badge.status-waiting_approval {
+	background: rgba(var(--color-orange-rgb, 232, 168, 56), 0.2);
+	color: var(--text-warning, var(--color-orange));
+	font-weight: var(--font-semibold);
+}
+
+.notor-workflow-activity-entry .status-badge.status-completed {
+	background: rgba(var(--color-green-rgb, 68, 207, 110), 0.15);
+	color: var(--text-success, var(--color-green));
+}
+
+.notor-workflow-activity-entry .status-badge.status-errored {
+	background: rgba(var(--color-red-rgb, 220, 53, 69), 0.15);
+	color: var(--text-error, var(--color-red));
+}
+
+.notor-workflow-activity-entry .status-badge.status-stopped {
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+.notor-workflow-activity-entry .status-badge.status-queued {
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+/* Entry bottom row — trigger source + timestamp */
+.notor-workflow-activity-entry-bottom {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-top: 3px;
+}
+
+/* Trigger source — secondary/muted text, smaller font */
+.notor-workflow-activity-entry .trigger-source {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+	flex: 1;
+}
+
+/* Timestamp — muted text, right-aligned */
+.notor-workflow-activity-entry .timestamp {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
+/* Spinning animation for running status icon */
+.notor-workflow-activity-entry .status-badge.status-running .status-icon svg {
+	animation: notor-spin 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.notor-workflow-activity-entry .status-badge.status-running .status-icon svg {
+		animation: none;
+	}
+}

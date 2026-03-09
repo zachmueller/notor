@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md) — FR-53
 **Data Model:** [specs/03-workflows-personas/data-model.md](../data-model.md) — WorkflowExecution, WorkflowExecutionStatus
-**Status:** In Progress (Phase 0 + Phase 1 complete)
+**Status:** In Progress (Phase 0 + Phase 1 + Phase 2 complete)
 
 ## Task Summary
 
@@ -137,11 +137,11 @@ The tracker does NOT duplicate execution state — it subscribes to state change
 **Dependencies:** H-001 (tracker for data), H-002 (indicator element for positioning anchor)
 
 **Acceptance Criteria:**
-- [ ] `WorkflowActivityDropdown` class exported
-- [ ] Constructor accepts `tracker: WorkflowActivityTracker` and an anchor element reference (the indicator icon) for positioning
-- [ ] `open(anchorEl: HTMLElement): void` — creates and displays the dropdown, positioned below or near the anchor element. Uses Obsidian's `Menu` API or a custom absolutely-positioned `<div>` with class `notor-workflow-activity-dropdown`.
-- [ ] `close(): void` — removes the dropdown from the DOM
-- [ ] **Entry rendering:** For each `WorkflowExecution` from `tracker.getIndicatorEntries()`, renders a clickable row containing:
+- [x] `WorkflowActivityDropdown` class exported
+- [x] Constructor accepts `tracker: WorkflowActivityTracker` and an anchor element reference (the indicator icon) for positioning
+- [x] `open(anchorEl: HTMLElement): void` — creates and displays the dropdown, positioned below or near the anchor element. Uses Obsidian's `Menu` API or a custom absolutely-positioned `<div>` with class `notor-workflow-activity-dropdown`.
+- [x] `close(): void` — removes the dropdown from the DOM
+- [x] **Entry rendering:** For each `WorkflowExecution` from `tracker.getIndicatorEntries()`, renders a clickable row containing:
   - **Workflow name:** `execution.workflow_name` (e.g., "daily/review")
   - **Trigger source:** `execution.trigger_source` (e.g., "on-save: Research/Climate.md") — smaller/muted text
   - **Status badge:** Visual badge based on `execution.status`:
@@ -152,19 +152,19 @@ The tracker does NOT duplicate execution state — it subscribes to state change
     - `"stopped"` → stop icon or "Stopped" label with muted color
     - `"queued"` → clock/queue icon or "Queued" label with muted color
   - **Timestamp:** For active workflows: relative time since start (e.g., "2m ago"). For completed: completion timestamp or relative time.
-- [ ] **Entry ordering:** Currently running/waiting workflows first (by `started_at` descending), then completed (by `completed_at` descending) — same ordering as `tracker.getIndicatorEntries()`
-- [ ] **Empty state:** If no entries exist (no workflows have run since plugin load), show a brief message: "No recent workflow activity"
-- [ ] **Dismiss behavior:** Dropdown closes when the user clicks outside it, presses Escape, or clicks the indicator icon again (toggle)
-- [ ] Dropdown updates live while open — if a running workflow completes while the dropdown is visible, the entry updates. Driven by `tracker.onChange()` callback.
-- [ ] `destroy(): void` — closes dropdown if open, unregisters any listeners
+- [x] **Entry ordering:** Currently running/waiting workflows first (by `started_at` descending), then completed (by `completed_at` descending) — same ordering as `tracker.getIndicatorEntries()`
+- [x] **Empty state:** If no entries exist (no workflows have run since plugin load), show a brief message: "No recent workflow activity"
+- [x] **Dismiss behavior:** Dropdown closes when the user clicks outside it, presses Escape, or clicks the indicator icon again (toggle)
+- [x] Dropdown updates live while open — if a running workflow completes while the dropdown is visible, the entry updates. Driven by `tracker.onChange()` callback.
+- [x] `destroy(): void` — closes dropdown if open, unregisters any listeners
 
 **CSS (in `styles.css`):**
-- [ ] `.notor-workflow-activity-dropdown` — positioned absolutely or fixed, z-index above chat content, max-height with overflow-y scroll, background/border consistent with Obsidian theme, shadow/elevation for popover effect, min-width ~280px
-- [ ] `.notor-workflow-activity-entry` — flex row, padding, hover highlight, cursor pointer, border-bottom separator
-- [ ] `.notor-workflow-activity-entry .workflow-name` — primary text, truncate with ellipsis if long
-- [ ] `.notor-workflow-activity-entry .trigger-source` — secondary/muted text, smaller font-size
-- [ ] `.notor-workflow-activity-entry .status-badge` — inline badge with status-specific background color and text
-- [ ] `.notor-workflow-activity-entry .timestamp` — muted text, right-aligned or after status
+- [x] `.notor-workflow-activity-dropdown` — positioned absolutely or fixed, z-index above chat content, max-height with overflow-y scroll, background/border consistent with Obsidian theme, shadow/elevation for popover effect, min-width ~280px
+- [x] `.notor-workflow-activity-entry` — flex row, padding, hover highlight, cursor pointer, border-bottom separator
+- [x] `.notor-workflow-activity-entry .workflow-name` — primary text, truncate with ellipsis if long
+- [x] `.notor-workflow-activity-entry .trigger-source` — secondary/muted text, smaller font-size
+- [x] `.notor-workflow-activity-entry .status-badge` — inline badge with status-specific background color and text
+- [x] `.notor-workflow-activity-entry .timestamp` — muted text, right-aligned or after status
 
 ### H-005: Conversation navigation from dropdown entries
 
@@ -177,15 +177,15 @@ The tracker does NOT duplicate execution state — it subscribes to state change
 **Dependencies:** H-004
 
 **Acceptance Criteria:**
-- [ ] Each workflow entry in the dropdown has a click handler that:
+- [x] Each workflow entry in the dropdown has a click handler that:
   1. Calls a `switchToConversation(conversationId: string)` method on the chat view (or orchestrator) to display the workflow's conversation
   2. Closes the dropdown after navigation
   3. Reveals and focuses the chat panel if it is not currently visible
-- [ ] `switchToConversation(conversationId)` is exposed by `chat-view.ts` (or the conversation manager) — loads the specified conversation's message history and makes it the active conversation in the chat panel
-- [ ] If the conversation ID no longer exists (e.g., cleared between plugin reloads — unlikely since executions are in-memory), a non-blocking notice is surfaced: "Conversation not found" and the entry is treated as stale
-- [ ] For workflows with status `"waiting_approval"`: clicking the entry navigates to the conversation where the pending tool call approval prompt is visible, allowing the user to approve or reject it. This is the primary mechanism for the user to unblock a paused background workflow per FR-53 and FR-45.
-- [ ] For completed/errored workflows: clicking navigates to the full conversation history so the user can review what happened
-- [ ] Navigation does not disrupt the current conversation's state — the user can navigate back to their previous conversation via normal conversation switching
+- [x] `switchToConversation(conversationId)` is exposed by `chat-view.ts` (or the conversation manager) — loads the specified conversation's message history and makes it the active conversation in the chat panel
+- [x] If the conversation ID no longer exists (e.g., cleared between plugin reloads — unlikely since executions are in-memory), a non-blocking notice is surfaced: "Conversation not found" and the entry is treated as stale
+- [x] For workflows with status `"waiting_approval"`: clicking the entry navigates to the conversation where the pending tool call approval prompt is visible, allowing the user to approve or reject it. This is the primary mechanism for the user to unblock a paused background workflow per FR-53 and FR-45.
+- [x] For completed/errored workflows: clicking navigates to the full conversation history so the user can review what happened
+- [x] Navigation does not disrupt the current conversation's state — the user can navigate back to their previous conversation via normal conversation switching
 
 ---
 

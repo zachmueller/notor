@@ -93,6 +93,7 @@ export class NotorChatView extends ItemView {
 	private onStopResponse?: () => void;
 	private onNewConversation?: () => void;
 	private onSwitchConversation?: (filename: string) => void;
+	private onSwitchToConversationById?: (conversationId: string) => Promise<boolean>;
 	private onOpenConversationList?: () => Promise<ConversationListEntry[]>;
 	private onModeToggle?: (mode: ConversationMode) => void;
 	private onSettingsOpen?: () => void;
@@ -144,6 +145,23 @@ export class NotorChatView extends ItemView {
 
 	setOnSwitchConversation(callback: (filename: string) => void): void {
 		this.onSwitchConversation = callback;
+	}
+
+	/**
+	 * Set the callback for switching to a conversation by ID (H-005).
+	 *
+	 * This is used by the workflow activity dropdown to navigate to a
+	 * specific workflow's conversation. The callback searches conversation
+	 * history for the matching ID and loads it.
+	 *
+	 * @param callback - Async function that finds and switches to the
+	 *                   conversation with the given ID. Returns true if
+	 *                   the conversation was found and loaded, false otherwise.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-h-tasks.md — H-005
+	 */
+	setOnSwitchToConversationById(callback: (conversationId: string) => Promise<boolean>): void {
+		this.onSwitchToConversationById = callback;
 	}
 
 	setOnOpenConversationList(callback: () => Promise<ConversationListEntry[]>): void {
@@ -272,7 +290,66 @@ export class NotorChatView extends ItemView {
 			this.headerEl,
 			this.workflowActivityTracker
 		);
+
+		// Wire the conversation navigation callback (H-005)
+		this.workflowActivityIndicator.setOnNavigateToConversation(
+			(conversationId: string) => {
+				this.switchToConversation(conversationId);
+			}
+		);
+
 		this.workflowActivityIndicator.render();
+	}
+
+	/**
+	 * Switch to a specific conversation by ID (H-005).
+	 *
+	 * Called when the user clicks a workflow entry in the activity dropdown.
+	 * Delegates to the `onSwitchToConversationById` callback wired by
+	 * the orchestrator/main.ts. If the conversation is not found, a
+	 * non-blocking notice is surfaced.
+	 *
+	 * For workflows with status `"waiting_approval"`, this navigates to the
+	 * conversation where the pending tool call approval prompt is visible,
+	 * allowing the user to unblock the paused background workflow.
+	 *
+	 * Reveals and focuses the chat panel if it is not currently visible.
+	 *
+	 * @param conversationId - The conversation ID to navigate to.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-h-tasks.md — H-005
+	 */
+	async switchToConversation(conversationId: string): Promise<void> {
+		// Ensure the chat panel is visible
+		this.app.workspace.revealLeaf(this.leaf);
+
+		// Close conversation list if it was open
+		if (this.showConversationList) {
+			this.showConversationList = false;
+			this.conversationListEl.addClass("notor-hidden");
+			this.messageListEl.removeClass("notor-hidden");
+		}
+
+		if (!this.onSwitchToConversationById) {
+			log.warn("switchToConversation called but no callback is set", { conversationId });
+			return;
+		}
+
+		try {
+			const found = await this.onSwitchToConversationById(conversationId);
+			if (!found) {
+				const { Notice } = await import("obsidian");
+				new Notice("Conversation not found");
+				log.warn("Conversation not found for navigation", { conversationId });
+			}
+		} catch (e) {
+			log.error("Failed to switch to conversation", {
+				conversationId,
+				error: String(e),
+			});
+			const { Notice } = await import("obsidian");
+			new Notice(`Failed to load conversation: ${e instanceof Error ? e.message : String(e)}`);
+		}
 	}
 
 	// -----------------------------------------------------------------------
