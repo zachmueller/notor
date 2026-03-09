@@ -745,8 +745,22 @@ function renderAddServerForm(
 		.addText((text) => {
 			text.setPlaceholder("my-server");
 			text.onChange((value) => {
-				const slugged = slugify(value);
-				if (slugged !== value) text.setValue(slugged);
+				// During typing: only replace invalid characters but preserve trailing hyphens
+				// so the user can type "my-server" without the hyphen being stripped mid-input.
+				const partial = value
+					.toLowerCase()
+					.replace(/[^a-z0-9-]+/g, "-")
+					.replace(/^-+/, "")
+					.replace(/-{2,}/g, "-")
+					.substring(0, MCP_SERVER_NAME_MAX_LENGTH);
+				if (partial !== value) text.setValue(partial);
+				// For validation/submission, use the fully-slugified value (strips trailing hyphens)
+				nameInput = slugify(partial);
+			});
+			// On blur, apply full slugify (strip trailing hyphens, etc.)
+			text.inputEl.addEventListener("blur", () => {
+				const slugged = slugify(text.getValue());
+				if (slugged !== text.getValue()) text.setValue(slugged);
 				nameInput = slugged;
 			});
 		});
