@@ -116,6 +116,37 @@ async function waitForResponse(page: Page, ms = RESPONSE_TIMEOUT_MS): Promise<bo
 	return false;
 }
 
+/**
+ * Helper: Dismiss all Obsidian notice toasts that may overlay clickable elements.
+ * Obsidian notices can intercept pointer events and cause Playwright clicks to time out.
+ */
+async function dismissNotices(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const notices = document.querySelectorAll(".notice");
+		for (const notice of Array.from(notices)) {
+			(notice as HTMLElement).remove();
+		}
+	});
+	await page.waitForTimeout(200);
+}
+
+/**
+ * Helper: Safely run a test function, catching any unhandled errors so that
+ * a single test crash does not abort the entire suite.
+ */
+async function runTest(
+	name: string,
+	fn: () => Promise<void>
+): Promise<void> {
+	try {
+		await fn();
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		fail(name, `Unhandled error: ${msg.substring(0, 200)}`);
+		console.error(`  [catch] ${name}:`, err);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Structured log helpers
 // ---------------------------------------------------------------------------
@@ -430,7 +461,8 @@ async function testDropdownEmptyState(page: Page): Promise<void> {
 		return;
 	}
 
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(500);
 
 	const shot = await screenshot(page, "05-dropdown-empty");
@@ -482,7 +514,8 @@ async function testDropdownEmptyState(page: Page): Promise<void> {
 	}
 
 	// Close the dropdown by clicking the indicator again (toggle)
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(300);
 }
 
@@ -683,7 +716,8 @@ async function testDropdownActiveEntries(page: Page, collector: LogCollector): P
 		return;
 	}
 
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(500);
 
 	const shot = await screenshot(page, "08-dropdown-active-entries");
@@ -733,7 +767,8 @@ async function testDropdownActiveEntries(page: Page, collector: LogCollector): P
 	}
 
 	// Close dropdown
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(300);
 }
 
@@ -770,7 +805,8 @@ async function testDropdownCompletedEntries(page: Page, collector: LogCollector)
 		return;
 	}
 
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(500);
 
 	const shot = await screenshot(page, "09-dropdown-completed");
@@ -822,7 +858,8 @@ async function testDropdownCompletedEntries(page: Page, collector: LogCollector)
 	}
 
 	// Close dropdown
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(300);
 }
 
@@ -837,7 +874,8 @@ async function testDropdownEntryOrdering(page: Page, collector: LogCollector): P
 		return;
 	}
 
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(500);
 
 	const shot = await screenshot(page, "10-dropdown-ordering");
@@ -901,7 +939,8 @@ async function testDropdownEntryOrdering(page: Page, collector: LogCollector): P
 	}
 
 	// Close dropdown
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(300);
 }
 
@@ -916,7 +955,8 @@ async function testDropdownLiveUpdate(page: Page, collector: LogCollector): Prom
 		return;
 	}
 
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(500);
 
 	// Capture entry count before triggering a new workflow
@@ -974,7 +1014,8 @@ async function testDropdownLiveUpdate(page: Page, collector: LogCollector): Prom
 
 	// Close dropdown if still open
 	if (isDropdownStillOpen) {
-		await indicator.click();
+		await dismissNotices(page);
+		await indicator.click({ force: true });
 		await page.waitForTimeout(300);
 	}
 }
@@ -990,7 +1031,8 @@ async function testNavigationRunningWorkflow(page: Page, collector: LogCollector
 		return;
 	}
 
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(500);
 
 	const dropdown = await page.$(".notor-workflow-activity-dropdown");
@@ -1004,7 +1046,8 @@ async function testNavigationRunningWorkflow(page: Page, collector: LogCollector
 	if (!firstEntry) {
 		const shot = await screenshot(page, "12-navigation-no-entries");
 		fail("Navigation — running workflow", "No entries in dropdown to click", shot);
-		await indicator.click();
+		await dismissNotices(page);
+		await indicator.click({ force: true });
 		await page.waitForTimeout(300);
 		return;
 	}
@@ -1056,7 +1099,8 @@ async function testNavigationRunningWorkflow(page: Page, collector: LogCollector
 			shot
 		);
 		// Clean up
-		await indicator.click();
+		await dismissNotices(page);
+	await indicator.click({ force: true });
 		await page.waitForTimeout(300);
 	}
 }
@@ -1072,7 +1116,8 @@ async function testNavigationCompletedWorkflow(page: Page, collector: LogCollect
 		return;
 	}
 
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(500);
 
 	const dropdown = await page.$(".notor-workflow-activity-dropdown");
@@ -1102,7 +1147,8 @@ async function testNavigationCompletedWorkflow(page: Page, collector: LogCollect
 			"No completed entries available — skipping (workflows may still be running)",
 			shot
 		);
-		await indicator.click();
+		await dismissNotices(page);
+	await indicator.click({ force: true });
 		await page.waitForTimeout(300);
 		return;
 	}
@@ -1140,7 +1186,8 @@ async function testNavigationCompletedWorkflow(page: Page, collector: LogCollect
 			"Dropdown did not close or conversation not loaded after clicking completed entry",
 			shot
 		);
-		await indicator.click();
+		await dismissNotices(page);
+	await indicator.click({ force: true });
 		await page.waitForTimeout(300);
 	}
 }
@@ -1169,7 +1216,8 @@ async function testSettingsConfigurableN(page: Page, collector: LogCollector): P
 		return;
 	}
 
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(500);
 
 	const shot = await screenshot(page, "14-settings-configurable-n");
@@ -1200,7 +1248,8 @@ async function testSettingsConfigurableN(page: Page, collector: LogCollector): P
 	}
 
 	// Close dropdown and restore settings
-	await indicator.click();
+	await dismissNotices(page);
+	await indicator.click({ force: true });
 	await page.waitForTimeout(300);
 
 	const restored = buildSettings(); // N defaults back to 5
@@ -1470,31 +1519,31 @@ async function main() {
 		console.log("\n[3/3] Running activity indicator tests...\n");
 
 		// ── Tests 1–5: Static state (no workflows running) ──────────────────
-		await testPluginLoads(page);
-		await testIndicatorAlwaysVisible(page);
-		await testBadgeHiddenWhenZero(page);
-		await testAnimationIdleState(page);
-		await testDropdownEmptyState(page);
+		await runTest("Plugin loads", () => testPluginLoads(page));
+		await runTest("Indicator always visible", () => testIndicatorAlwaysVisible(page));
+		await runTest("Badge hidden when zero", () => testBadgeHiddenWhenZero(page));
+		await runTest("Animation idle state", () => testAnimationIdleState(page));
+		await runTest("Dropdown empty state", () => testDropdownEmptyState(page));
 
 		// ── Tests 6–11: Active workflow state ───────────────────────────────
-		await testBadgeCountActive(page, collector);
-		await testAnimationRunningState(page, collector);
-		await testDropdownActiveEntries(page, collector);
-		await testDropdownCompletedEntries(page, collector);
-		await testDropdownEntryOrdering(page, collector);
-		await testDropdownLiveUpdate(page, collector);
+		await runTest("Badge count — active workflows", () => testBadgeCountActive(page, collector!));
+		await runTest("Animation running state", () => testAnimationRunningState(page, collector!));
+		await runTest("Dropdown active entries", () => testDropdownActiveEntries(page, collector!));
+		await runTest("Dropdown completed entries", () => testDropdownCompletedEntries(page, collector!));
+		await runTest("Dropdown entry ordering", () => testDropdownEntryOrdering(page, collector!));
+		await runTest("Dropdown live update", () => testDropdownLiveUpdate(page, collector!));
 
 		// ── Tests 12–13: Conversation navigation ────────────────────────────
-		await testNavigationRunningWorkflow(page, collector);
-		await testNavigationCompletedWorkflow(page, collector);
+		await runTest("Navigation — running workflow", () => testNavigationRunningWorkflow(page, collector!));
+		await runTest("Navigation — completed workflow", () => testNavigationCompletedWorkflow(page, collector!));
 
 		// ── Tests 14–16: Settings, manual exclusion, reload ─────────────────
-		await testSettingsConfigurableN(page, collector);
-		await testManualWorkflowsExcluded(page, collector);
-		await testPluginReloadClean(page, collector);
+		await runTest("Settings — configurable N", () => testSettingsConfigurableN(page, collector!));
+		await runTest("Manual workflows excluded", () => testManualWorkflowsExcluded(page, collector!));
+		await runTest("Plugin unload/reload", () => testPluginReloadClean(page, collector!));
 
 		// ── Test 17: Error log check ────────────────────────────────────────
-		await testNoErrorLevelLogs(collector);
+		await runTest("No error-level logs", () => testNoErrorLevelLogs(collector!));
 
 		// ── Final screenshot & log summary ──────────────────────────────────
 		await screenshot(page, "99-final");

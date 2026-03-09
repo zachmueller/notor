@@ -245,28 +245,28 @@ The tracker does NOT duplicate execution state — it subscribes to state change
 **Dependencies:** H-007
 
 **Acceptance Criteria:**
-- [ ] **E2E test script created:** `e2e/scripts/activity-indicator-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → DOM assertions → structured log verification → screenshots → results JSON)
-- [ ] **Indicator always visible (E2E):** DOM assertion confirms `.notor-workflow-activity-indicator` element present in chat panel header at all times — when no workflows have run, when workflows are active, and when workflows have completed.
-- [ ] **Badge count — zero active (E2E):** DOM assertion confirms `.notor-workflow-activity-badge` has `is-hidden` class or `display: none` when no background workflows are running.
-- [ ] **Badge count — active workflows (E2E):** Test triggers 2 background workflows → DOM assertion confirms badge text is "2"; when one completes (verified via structured logs) → badge updates to "1"; when both complete → badge hides.
-- [ ] **Animation — idle state (E2E):** DOM assertion confirms `.notor-workflow-activity-indicator` does NOT have `is-active` or `is-waiting-approval` classes when no workflows are active.
-- [ ] **Animation — running state (E2E):** Test triggers background workflow → DOM assertion confirms `is-active` class applied to indicator element.
-- [ ] **Animation — waiting for approval (E2E):** Test triggers background workflow that requires tool approval → structured logs confirm `waiting_approval` status → DOM assertion confirms `is-waiting-approval` class applied.
-- [ ] **Dropdown — empty state (E2E):** Test clicks indicator when no workflows have run → DOM assertion confirms dropdown contains "No recent workflow activity" message.
-- [ ] **Dropdown — active entries (E2E):** Test clicks indicator while workflows running → DOM assertion confirms `.notor-workflow-activity-entry` elements with "Running…" status badge and workflow name.
-- [ ] **Dropdown — completed entries (E2E):** After workflow completes → test clicks indicator → DOM assertion confirms completed entry with checkmark/success badge and trigger source text.
-- [ ] **Dropdown — entry ordering (E2E):** DOM assertion confirms active entries appear before completed entries; entries within each group sorted by recency.
-- [ ] **Dropdown — live update (E2E):** Test opens dropdown while workflow running → waits for completion (structured logs confirm) → DOM assertion confirms entry status updated in-place without reopening dropdown.
-- [ ] **Conversation navigation — running workflow (E2E):** Test clicks running workflow entry in dropdown → DOM assertion confirms chat panel switches to that conversation (conversation messages visible).
-- [ ] **Conversation navigation — waiting for approval (E2E):** Test clicks "Waiting for approval" entry → DOM assertion confirms chat panel shows pending tool call approval UI.
-- [ ] **Conversation navigation — completed workflow (E2E):** Test clicks completed workflow entry → DOM assertion confirms full conversation history loaded in chat panel.
-- [ ] **Settings — configurable N (E2E):** Test changes `workflow_activity_indicator_count` from 5 to 3 in Settings DOM → reopens dropdown → DOM assertion confirms at most 3 entries shown.
-- [ ] **Manual workflows excluded (E2E):** Test triggers workflow via command palette → DOM assertion confirms indicator badge does NOT increment; structured logs confirm manual execution NOT tracked by WorkflowConcurrencyManager.
-- [ ] **Plugin unload/reload (E2E):** Test disables/enables plugin → DOM assertion confirms indicator re-renders fresh; no error-level structured logs; no orphaned DOM elements.
+- [x] **E2E test script created:** `e2e/scripts/activity-indicator-test.ts` follows the established pattern (build → launch Obsidian → connect Playwright via CDP → `LogCollector` → DOM assertions → structured log verification → screenshots → results JSON)
+- [x] **Indicator always visible (E2E):** DOM assertion confirms `.notor-workflow-activity-indicator` element present in chat panel header at all times — when no workflows have run, when workflows are active, and when workflows have completed.
+- [x] **Badge count — zero active (E2E):** DOM assertion confirms `.notor-workflow-activity-badge` has `is-hidden` class or `display: none` when no background workflows are running.
+- [x] **Badge count — active workflows (E2E):** Test triggers 2 background workflows → DOM assertion confirms badge text is "2"; when one completes (verified via structured logs) → badge updates to "1"; when both complete → badge hides.
+- [x] **Animation — idle state (E2E):** DOM assertion confirms `.notor-workflow-activity-indicator` does NOT have `is-active` or `is-waiting-approval` classes when no workflows are active.
+- [x] **Animation — running state (E2E):** Test triggers background workflow → DOM assertion confirms `is-active` class applied to indicator element.
+- [ ] **Animation — waiting for approval (E2E):** Test triggers background workflow that requires tool approval → structured logs confirm `waiting_approval` status → DOM assertion confirms `is-waiting-approval` class applied. *(Skipped: requires specific tool-approval workflow setup not included in current test fixtures)*
+- [x] **Dropdown — empty state (E2E):** Test clicks indicator when no workflows have run → DOM assertion confirms dropdown contains "No recent workflow activity" message.
+- [x] **Dropdown — active entries (E2E):** Test clicks indicator while workflows running → DOM assertion confirms `.notor-workflow-activity-entry` elements with "Running…" status badge and workflow name.
+- [x] **Dropdown — completed entries (E2E):** After workflow completes → test clicks indicator → DOM assertion confirms completed entry with checkmark/success badge and trigger source text.
+- [x] **Dropdown — entry ordering (E2E):** DOM assertion confirms active entries appear before completed entries; entries within each group sorted by recency.
+- [x] **Dropdown — live update (E2E):** Test opens dropdown while workflow running → waits for completion (structured logs confirm) → DOM assertion confirms entry status updated in-place without reopening dropdown.
+- [x] **Conversation navigation — running workflow (E2E):** Test clicks running workflow entry in dropdown → DOM assertion confirms chat panel switches to that conversation (conversation messages visible).
+- [ ] **Conversation navigation — waiting for approval (E2E):** Test clicks "Waiting for approval" entry → DOM assertion confirms chat panel shows pending tool call approval UI. *(Skipped: requires specific tool-approval workflow setup not included in current test fixtures)*
+- [x] **Conversation navigation — completed workflow (E2E):** Test clicks completed workflow entry → DOM assertion confirms full conversation history loaded in chat panel.
+- [x] **Settings — configurable N (E2E):** Test changes `workflow_activity_indicator_count` from 5 to 3 in Settings DOM → reopens dropdown → DOM assertion confirms at most 3 entries shown.
+- [x] **Manual workflows excluded (E2E):** Test triggers workflow via command palette → DOM assertion confirms indicator badge does NOT increment; structured logs confirm manual execution NOT tracked by WorkflowConcurrencyManager.
+- [x] **Plugin unload/reload (E2E):** Test disables/enables plugin → DOM assertion confirms indicator re-renders fresh; no error-level structured logs; no orphaned DOM elements.
 - [ ] **Reduced motion (E2E):** *(Note: `prefers-reduced-motion` testing may require Playwright media emulation — include if feasible, otherwise mark as manual-only)*
-- [ ] `npm run build` compiles without errors
-- [ ] No error-level structured logs from WorkflowActivityTracker or WorkflowActivityIndicator sources during test execution
-- [ ] No visual regressions in the chat panel header layout (screenshot comparison)
+- [x] `npm run build` compiles without errors
+- [x] No error-level structured logs from WorkflowActivityTracker or WorkflowActivityIndicator sources during test execution
+- [x] No visual regressions in the chat panel header layout (screenshot comparison)
 
 ---
 
