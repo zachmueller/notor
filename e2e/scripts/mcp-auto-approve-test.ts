@@ -95,6 +95,9 @@ async function waitForSelector(
  * Inject a simulated MCP server config with discovered tools into plugin internals.
  * Bypasses real connection — sets up McpHub's connection map directly for testing
  * auto-approve logic without needing a live MCP server.
+ *
+ * Uses a string-based page.evaluate to avoid tsx/esbuild injecting __name helpers
+ * into arrow/named functions inside the callback.
  */
 async function injectSimulatedMcpServer(
 	page: Page,
@@ -102,79 +105,44 @@ async function injectSimulatedMcpServer(
 	autoApproveTools: string[],
 	toolClassifications: Record<string, "read" | "write"> = {}
 ): Promise<void> {
-	await page.evaluate(
-		({
-			name,
-			autoApprove,
-			classifications,
-			autoApprovedTool,
-			manualTool,
-		}: {
-			name: string;
-			autoApprove: string[];
-			classifications: Record<string, string>;
-			autoApprovedTool: string;
-			manualTool: string;
-		}) => {
-			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			if (!plugin) return;
+	// Embed cfg directly as a JSON literal in the script string to avoid
+	// both the tsx __name injection issue (no TypeScript arrow functions in
+	// the evaluated code) and the `arguments` unavailability in strict-mode eval.
+	const cfg = {
+		name: serverName,
+		autoApprove: autoApproveTools,
+		classifications: toolClassifications,
+		autoApprovedTool: AUTO_APPROVED_TOOL,
+		manualTool: MANUAL_APPROVE_TOOL,
+	};
+	const script =
+		"(function() {" +
+		"  var cfg = " + JSON.stringify(cfg) + ";" +
+		"  var plugin = window.app && window.app.plugins && window.app.plugins.plugins && window.app.plugins.plugins['notor'];" +
+		"  if (!plugin) return;" +
+		"  plugin.settings.mcp_servers = plugin.settings.mcp_servers || {};" +
+		"  plugin.settings.mcp_servers[cfg.name] = {" +
+		"    name: cfg.name, type: 'stdio', command: 'echo', args: [], disabled: false," +
+		"    timeout: 30, autoApprove: cfg.autoApprove, toolClassifications: cfg.classifications" +
+		"  };" +
+		"  var toolRegistry = plugin._toolRegistry;" +
+		"  var toolDispatcher = plugin._toolDispatcher;" +
+		"  if (!toolRegistry || !toolDispatcher) return;" +
+		"  var aToolName = cfg.name + '__' + cfg.autoApprovedTool;" +
+		"  var mToolName = cfg.name + '__' + cfg.manualTool;" +
+		"  var tools = [" +
+		"    { name: aToolName, mode: 'read', description: 'read tool', input_schema: {type:'object'}, execute: function() { return Promise.resolve({tool_name: aToolName, success:true, result:'ok'}); } }," +
+		"    { name: mToolName, mode: 'write', description: 'write tool', input_schema: {type:'object'}, execute: function() { return Promise.resolve({tool_name: mToolName, success:true, result:'ok'}); } }" +
+		"  ];" +
+		"  for (var i = 0; i < tools.length; i++) {" +
+		"    var t = tools[i];" +
+		"    if (toolRegistry.getNames().indexOf(t.name) === -1) {" +
+		"      toolRegistry.register(t); toolDispatcher.registerTool(t);" +
+		"    }" +
+		"  }" +
+		"})()";
 
-			// 1. Add to settings
-			plugin.settings.mcp_servers = plugin.settings.mcp_servers ?? {};
-			plugin.settings.mcp_servers[name] = {
-				name,
-				type: "stdio",
-				command: "echo",
-				args: [],
-				disabled: false,
-				timeout: 30,
-				autoApprove,
-				toolClassifications: classifications,
-			};
-
-			// 2. Register simulated tools in ToolRegistry if McpHub is accessible
-			const hub = plugin._mcpHub;
-			const toolRegistry = plugin._toolRegistry;
-			const toolDispatcher = plugin._toolDispatcher;
-			if (!hub || !toolRegistry || !toolDispatcher) return;
-
-			// Simulate what McpHub.onStatusChange does when a server connects
-			const { McpRegisteredTool } = (window as any).__notorModules?.mcpToolAdapter ?? {};
-
-			// If module not directly accessible, simulate by registering mock tools
-			// that have the correct namespacing and classification
-			const mockTools = [
-				{
-					name: `${name}__${autoApprovedTool}`,
-					execute: async () => ({ tool_name: `${name}__${autoApprovedTool}`, success: true, result: "list_resources result" }),
-					mode: "read",
-					description: "Lists resources (read-only)",
-					input_schema: { type: "object" },
-				},
-				{
-					name: `${name}__${manualTool}`,
-					execute: async () => ({ tool_name: `${name}__${manualTool}`, success: true, result: "write_resource result" }),
-					mode: "write",
-					description: "Writes a resource (write)",
-					input_schema: { type: "object" },
-				},
-			];
-
-			for (const tool of mockTools) {
-				if (!toolRegistry.getNames().includes(tool.name)) {
-					toolRegistry.register(tool);
-					toolDispatcher.registerTool(tool);
-				}
-			}
-		},
-		{
-			name: serverName,
-			autoApprove: autoApproveTools,
-			classifications: toolClassifications,
-			autoApprovedTool: AUTO_APPROVED_TOOL,
-			manualTool: MANUAL_APPROVE_TOOL,
-		}
-	);
+	await page.evaluate(script);
 }
 
 /**

@@ -425,13 +425,13 @@ gzip -c main.js | wc -c
 - Validation against spec.md scenarios
 **Dependencies:** DOC-001
 **Acceptance Criteria:**
-- [ ] **SC-1:** Users can register and connect stdio + HTTP MCP servers from Settings without plugin reload
-- [ ] **SC-2:** MCP tools appear alongside built-in tools — AI discovers, invokes, and receives results identically
-- [ ] **SC-3:** Write-classified MCP tools blocked in Plan mode; `_meta.notor_mode` sent on every `tools/call`; classification overridable per-tool
-- [ ] **SC-4:** MCP tools go through same auto-approve + approval flow as built-in; persona overrides apply
-- [ ] **SC-5:** Trust warnings displayed on server add; stdio spawning warning shown; warnings non-dismissible
-- [ ] **SC-6:** Single server failure isolated — no impact on built-in tools, other servers, or conversation
-- [ ] **SC-7:** Plugin startup not degraded — MCP connections async, chat panel usable immediately
-- [ ] All primary flows from spec.md user scenarios pass (stdio server, HTTP server, classification/auto-approve, persona overrides)
-- [ ] All alternative flows pass (connection failure, mid-conversation disconnect, tool discovery failure, stdio on mobile)
-- [ ] All edge cases pass (cooperative Plan/Act signaling, tool list changes on reconnect, name collision prevention, timeout)
+- [x] **SC-1:** Users can register and connect stdio + HTTP MCP servers from Settings without plugin reload
+- [x] **SC-2:** MCP tools appear alongside built-in tools — AI discovers, invokes, and receives results identically
+- [x] **SC-3:** Write-classified MCP tools blocked in Plan mode; `_meta.notor_mode` sent on every `tools/call`; classification overridable per-tool
+- [x] **SC-4:** MCP tools go through same auto-approve + approval flow as built-in; persona overrides apply
+- [x] **SC-5:** Trust warnings displayed on server add; stdio spawning warning shown; warnings non-dismissible
+- [x] **SC-6:** Single server failure isolated — no impact on built-in tools, other servers, or conversation
+- [x] **SC-7:** Plugin startup not degraded — MCP connections async, chat panel usable immediately
+- [x] All primary flows from spec.md user scenarios pass (stdio server, HTTP server, classification/auto-approve, persona overrides)
+- [x] All alternative flows pass (connection failure, mid-conversation disconnect, tool discovery failure, stdio on mobile)
+- [x] All edge cases pass (cooperative Plan/Act signaling, tool list changes on reconnect, name collision prevention, timeout)

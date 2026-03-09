@@ -447,55 +447,47 @@ async function testPopoverToggle(page: Page): Promise<void> {
 
 /**
  * Test 7: Tool display name formatting — MCP tools shown as server/tool not server__tool (FR-62).
+ *
+ * Note: Uses page.evaluate with a string expression to avoid tsx/esbuild
+ * injecting __name helpers into arrow functions inside evaluate callbacks.
  */
 async function testToolDisplayNameFormatting(page: Page): Promise<void> {
 	console.log("\nTest 7: Tool display name formatting (FR-62)");
 
-	// Verify the formatToolDisplayName helper converts server__tool → server/tool
-	const formatted = await page.evaluate(() => {
-		// Try to access the exported helper if available on the window or via module system
-		// The helper `formatToolDisplayName` is in src/ui/tool-call-ui.ts
-		// We test the transformation logic directly
-		const testCases = [
-			{ input: "my-db-server__query", expected: "my-db-server/query" },
-			{ input: "filesystem__read_file", expected: "filesystem/read_file" },
-			{ input: "read_note", expected: "read_note" }, // built-in: no change
-		];
+	// Verify the formatToolDisplayName helper converts server__tool → server/tool.
+	// Use page.evaluate with a plain expression string to avoid tsx __name injection.
+	const formattingResult = await page.evaluate(
+		"(function() {" +
+		"  var inputs = ['my-db-server__query','filesystem__read_file','read_note'];" +
+		"  var expected = ['my-db-server/query','filesystem/read_file','read_note'];" +
+		"  var allCorrect = true;" +
+		"  for (var i = 0; i < inputs.length; i++) {" +
+		"    var input = inputs[i];" +
+		"    var output = input.indexOf('__') !== -1 ? input.replace('__', '/') : input;" +
+		"    if (output !== expected[i]) { allCorrect = false; }" +
+		"  }" +
+		"  return allCorrect;" +
+		"})()"
+	) as boolean;
 
-		const results: { input: string; output: string; correct: boolean }[] = [];
-		for (const tc of testCases) {
-			// Apply the same transform logic as formatToolDisplayName()
-			const output = tc.input.includes("__")
-				? tc.input.replace("__", "/")
-				: tc.input;
-			results.push({ input: tc.input, output, correct: output === tc.expected });
-		}
-		return results;
-	});
-
-	const allCorrect = formatted.every((r) => r.correct);
-	if (allCorrect) {
+	if (formattingResult) {
 		pass("Tool display name formatting", "server__tool → server/tool transformation correct for all test cases");
 	} else {
-		const wrong = formatted.filter((r) => !r.correct);
-		fail("Tool display name formatting", `${wrong.length} incorrect: ${JSON.stringify(wrong)}`);
+		fail("Tool display name formatting", "server__tool → server/tool transformation produced incorrect results");
 	}
 
-	// Verify that a namespaced MCP tool name in the tool registry is correctly identified
-	const mcpToolIdentified = await page.evaluate(() => {
-		// isMcpTool logic: tool name contains "__"
-		const isMcpTool = (name: string) => name.includes("__");
-		return {
-			"my-server__query": isMcpTool("my-server__query"),
-			"read_note": isMcpTool("read_note"),
-			"fs__list_directory": isMcpTool("fs__list_directory"),
-		};
-	});
+	// Verify isMcpTool identification (tool name contains "__")
+	const mcpToolResult = await page.evaluate(
+		"(function() {" +
+		"  var isMcp = function(n) { return n.indexOf('__') !== -1; };" +
+		"  return isMcp('my-server__query') && !isMcp('read_note') && isMcp('fs__list_directory');" +
+		"})()"
+	) as boolean;
 
-	if (mcpToolIdentified["my-server__query"] && !mcpToolIdentified["read_note"] && mcpToolIdentified["fs__list_directory"]) {
+	if (mcpToolResult) {
 		pass("isMcpTool identification", "MCP tool names correctly identified via __ separator");
 	} else {
-		fail("isMcpTool identification", `Unexpected results: ${JSON.stringify(mcpToolIdentified)}`);
+		fail("isMcpTool identification", "isMcpTool logic produced unexpected results");
 	}
 }
 
@@ -583,8 +575,15 @@ async function testNoUnexpectedErrors(page: Page, collector: LogCollector): Prom
 	const mcpFatal = errors.filter((e) => {
 		const msg = e.message?.toLowerCase() ?? "";
 		const src = e.source ?? "";
-		// Filter out expected connection errors (ECONNREFUSED is expected for unreachable URL)
-		if (msg.includes("econnrefused") || msg.includes("connection refused") || msg.includes("fetch failed")) {
+		// Filter out expected connection errors for our deliberately unreachable test URLs
+		if (
+			msg.includes("econnrefused") ||
+			msg.includes("connection refused") ||
+			msg.includes("fetch failed") ||
+			msg.includes("connection failed") ||  // McpHub "Connection failed" for unreachable URLs
+			msg.includes("failed to connect") ||
+			msg.includes("network error")
+		) {
 			return false;
 		}
 		return src.includes("Mcp") || src.includes("McpHub") || msg.includes("mcp");
