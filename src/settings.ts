@@ -2334,6 +2334,24 @@ export class NotorSettingTab extends PluginSettingTab {
 					})
 			);
 
+		new Setting(containerEl)
+			.setName("Recent workflow entries")
+			.setDesc(
+				"Number of recent workflow executions shown in the activity indicator dropdown."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("5")
+					.setValue(String(this.plugin.settings.workflow_activity_indicator_count))
+					.onChange(async (value) => {
+						const parsed = parseInt(value, 10);
+						if (!isNaN(parsed) && parsed >= 1 && parsed <= 50) {
+							this.plugin.settings.workflow_activity_indicator_count = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
 		// -------------------------------------------------------------------
 		// Per-event-type collapsible subsections
 		// -------------------------------------------------------------------

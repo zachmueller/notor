@@ -64,7 +64,45 @@ export class WorkflowConcurrencyManager {
 	/** Maximum completed executions to retain for the activity indicator. */
 	private static readonly MAX_RECENT = 20;
 
+	/**
+	 * Registered state change callback — fired after every state mutation
+	 * (submit, status update, completion). Used by `WorkflowActivityTracker`
+	 * (H-006) to propagate changes to the indicator UI.
+	 */
+	private onStateChangeCallback: (() => void) | null = null;
+
 	constructor(private limit: number = 3) {}
+
+	// -----------------------------------------------------------------------
+	// State change notification (H-006)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Register a callback that fires after every execution state mutation.
+	 *
+	 * Only one callback is supported (the `WorkflowActivityTracker`). Setting
+	 * a new callback replaces the previous one.
+	 *
+	 * @param callback - Function invoked after submit, updateStatus, or onComplete.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-h-tasks.md — H-006
+	 */
+	setOnStateChange(callback: (() => void) | null): void {
+		this.onStateChangeCallback = callback;
+	}
+
+	/**
+	 * Fire the registered state change callback (if any).
+	 *
+	 * Called internally after every method that mutates execution state.
+	 */
+	private notifyStateChange(): void {
+		try {
+			this.onStateChangeCallback?.();
+		} catch (e) {
+			log.error("State change callback error", { error: String(e) });
+		}
+	}
 
 	// -----------------------------------------------------------------------
 	// Submission
@@ -102,6 +140,7 @@ export class WorkflowConcurrencyManager {
 			// Status already "queued" from caller
 			execution.status = "queued";
 			this.queue.push({ execution, runFn });
+			this.notifyStateChange();
 		}
 	}
 
@@ -162,6 +201,10 @@ export class WorkflowConcurrencyManager {
 				remainingQueue: this.queue.length,
 			});
 			this._start(next.execution, next.runFn);
+		} else {
+			// H-006: Notify after completion when no queue advancement
+			// (queue advancement triggers notification via _start)
+			this.notifyStateChange();
 		}
 	}
 
@@ -183,6 +226,7 @@ export class WorkflowConcurrencyManager {
 		if (execution) {
 			execution.status = status;
 			log.debug("Execution status updated", { executionId, status });
+			this.notifyStateChange();
 		}
 	}
 
@@ -296,6 +340,7 @@ export class WorkflowConcurrencyManager {
 	private _start(execution: WorkflowExecution, runFn: () => Promise<void>): void {
 		execution.status = "running";
 		execution.started_at = new Date().toISOString();
+		this.notifyStateChange();
 
 		void runFn().catch((e) => {
 			// Errors should be handled inside the run function itself; this

@@ -22,6 +22,9 @@ import type { Workflow } from "./types";
 // Group G: Workflow hook override manager
 import { WorkflowHookOverrideManager } from "./hooks/workflow-hook-override";
 
+// Group H: Workflow activity tracker
+import { WorkflowActivityTracker } from "./workflows/workflow-activity-tracker";
+
 // Group F: Vault event hooks
 import { TagShadowCache } from "./hooks/tag-change-detector";
 import { TagChangeSuppressionManager } from "./hooks/tag-change-detector";
@@ -131,6 +134,22 @@ export default class NotorPlugin extends Plugin {
 
 	/** Concurrency manager for background workflow executions (F-020). */
 	private _workflowConcurrencyManager?: WorkflowConcurrencyManager;
+
+	// -----------------------------------------------------------------------
+	// Group H: Workflow activity tracker (H-006)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Workflow activity tracker — UI-oriented view of background execution state.
+	 *
+	 * Wraps the `WorkflowConcurrencyManager` to provide sorted, filtered,
+	 * bounded entry lists and change notification callbacks for the activity
+	 * indicator UI. Initialized alongside the concurrency manager in
+	 * `_initVaultEventHooks()` and destroyed on plugin unload.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-h-tasks.md — H-001, H-006
+	 */
+	private _workflowActivityTracker?: WorkflowActivityTracker;
 
 	// -----------------------------------------------------------------------
 	// Group G: Workflow hook override manager (G-003/G-005)
@@ -286,6 +305,10 @@ export default class NotorPlugin extends Plugin {
 		this._tagShadowCache?.destroy();
 		this._workflowConcurrencyManager?.destroy();
 
+		// Group H: Destroy workflow activity tracker (H-006)
+		this._workflowActivityTracker?.destroy();
+		log.info("WorkflowActivityTracker destroyed");
+
 		log.info("Group F vault event hook components destroyed");
 
 		// Group G: Clear all workflow hook override state (G-005)
@@ -371,6 +394,20 @@ export default class NotorPlugin extends Plugin {
 			this.settings.workflow_concurrency_limit ?? 3
 		);
 		this._workflowConcurrencyManager = workflowConcurrencyManager;
+
+		// Step 6b: Workflow activity tracker (H-006)
+		// Wraps the concurrency manager to provide UI-focused views and
+		// change notifications for the activity indicator. Wired as the
+		// concurrency manager's state change listener so that every submit,
+		// status update, or completion triggers tracker.notifyChange().
+		const workflowActivityTracker = new WorkflowActivityTracker(
+			workflowConcurrencyManager,
+			this.settings.workflow_activity_indicator_count ?? 5
+		);
+		this._workflowActivityTracker = workflowActivityTracker;
+		workflowConcurrencyManager.setOnStateChange(() => {
+			workflowActivityTracker.notifyChange();
+		});
 
 		// Step 7: Vault event scheduler (cron jobs for on_schedule hooks)
 		const vaultEventScheduler = new VaultEventScheduler();
@@ -559,6 +596,13 @@ export default class NotorPlugin extends Plugin {
 		if (this._workflowConcurrencyManager) {
 			this._workflowConcurrencyManager.updateLimit(
 				this.settings.workflow_concurrency_limit ?? 3
+			);
+		}
+
+		// Group H: Update activity indicator entry count (H-007)
+		if (this._workflowActivityTracker) {
+			this._workflowActivityTracker.updateMaxEntries(
+				this.settings.workflow_activity_indicator_count ?? 5
 			);
 		}
 
@@ -946,6 +990,20 @@ export default class NotorPlugin extends Plugin {
 
 		// Wire orchestrator ↔ view
 		orchestrator.setView(view);
+
+		// H-006: Wire workflow activity tracker to the chat view so the
+		// indicator is created in onOpen() and destroyed in onClose().
+		if (this._workflowActivityTracker) {
+			view.setWorkflowActivityTracker(this._workflowActivityTracker);
+		}
+
+		// H-005: Wire conversation-by-ID switching for the activity dropdown.
+		// When a user clicks a workflow entry in the dropdown, it calls
+		// switchToConversation(conversationId) on the view, which delegates
+		// to this callback to find and load the conversation from history.
+		view.setOnSwitchToConversationById(async (conversationId: string) => {
+			return orchestrator.switchToConversationById(conversationId);
+		});
 
 		// Wire persona manager to view (A-013: picker + label)
 		const personaManager = this.getPersonaManager();

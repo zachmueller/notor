@@ -262,6 +262,38 @@ export class ChatOrchestrator {
 	}
 
 	/**
+	 * Switch to a conversation by its unique ID (H-005).
+	 *
+	 * Searches the conversation history for an entry matching the given ID,
+	 * then delegates to `switchConversation()` with the matching filename.
+	 * Used by the workflow activity dropdown to navigate to a specific
+	 * workflow's conversation.
+	 *
+	 * @param conversationId - The conversation ID to find and switch to.
+	 * @returns `true` if the conversation was found and loaded, `false` otherwise.
+	 *
+	 * @see specs/03-workflows-personas/tasks/group-h-tasks.md — H-005
+	 */
+	async switchToConversationById(conversationId: string): Promise<boolean> {
+		try {
+			const entries = await this.historyManager.listConversations();
+			const match = entries.find((e) => e.id === conversationId);
+			if (!match) {
+				log.warn("Conversation not found by ID", { conversationId });
+				return false;
+			}
+			await this.switchConversation(match.filename);
+			return true;
+		} catch (e) {
+			log.error("Failed to switch to conversation by ID", {
+				conversationId,
+				error: String(e),
+			});
+			return false;
+		}
+	}
+
+	/**
 	 * Revert the workflow persona if the current conversation had one active.
 	 *
 	 * Checks `workflowPreviousPersona` — if set (not `undefined`), calls

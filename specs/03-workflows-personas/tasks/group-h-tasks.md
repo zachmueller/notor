@@ -4,7 +4,7 @@
 **Implementation Plan:** [specs/03-workflows-personas/plan.md](../plan.md)
 **Specification:** [specs/03-workflows-personas/spec.md](../spec.md) — FR-53
 **Data Model:** [specs/03-workflows-personas/data-model.md](../data-model.md) — WorkflowExecution, WorkflowExecutionStatus
-**Status:** In Progress (Phase 0 + Phase 1 + Phase 2 complete)
+**Status:** In Progress (Phase 0 + Phase 1 + Phase 2 + Phase 3 H-006/H-007 complete)
 
 ## Task Summary
 
@@ -203,17 +203,17 @@ The tracker does NOT duplicate execution state — it subscribes to state change
 **Dependencies:** H-003, H-005, F-020 (concurrency manager), F-021 (background execution pipeline)
 
 **Acceptance Criteria:**
-- [ ] `WorkflowConcurrencyManager` emits notifications on state changes: extend `submit()`, `onComplete()`, and `updateStatus()` to call a registered notification callback (or emit an event) after mutating state
-- [ ] `WorkflowActivityTracker` is initialized in `main.ts` with a reference to the `WorkflowConcurrencyManager`
-- [ ] The tracker registers as a state change listener on the concurrency manager — whenever execution state changes, `tracker.notifyChange()` is called, which in turn fires all registered `onChange` callbacks (updating the indicator UI)
-- [ ] The `WorkflowActivityIndicator` is created in `chat-view.ts` `onOpen()` with a reference to the tracker, and destroyed in `onClose()`
-- [ ] State changes that trigger UI updates:
+- [x] `WorkflowConcurrencyManager` emits notifications on state changes: extend `submit()`, `onComplete()`, and `updateStatus()` to call a registered notification callback (or emit an event) after mutating state
+- [x] `WorkflowActivityTracker` is initialized in `main.ts` with a reference to the `WorkflowConcurrencyManager`
+- [x] The tracker registers as a state change listener on the concurrency manager — whenever execution state changes, `tracker.notifyChange()` is called, which in turn fires all registered `onChange` callbacks (updating the indicator UI)
+- [x] The `WorkflowActivityIndicator` is created in `chat-view.ts` `onOpen()` with a reference to the tracker, and destroyed in `onClose()`
+- [x] State changes that trigger UI updates:
   - New execution submitted (`queued` or `running`) → badge count may increase, animation may start
   - Execution status updated (`running` → `waiting_approval`) → "waiting for approval" styling applied
   - Execution completed (`completed`, `errored`, `stopped`) → badge count decreases, entry moves to completed section, animation may stop
   - Queued execution starts (`queued` → `running`) → no visible change if already showing active count
-- [ ] `destroy()` chain: on plugin unload, `tracker.destroy()` is called which clears callbacks; `indicator.destroy()` is called which removes DOM elements
-- [ ] The indicator correctly reflects the concurrency manager's state immediately after wiring — if the plugin is reloaded and there are no executions, the indicator shows idle state with no entries
+- [x] `destroy()` chain: on plugin unload, `tracker.destroy()` is called which clears callbacks; `indicator.destroy()` is called which removes DOM elements
+- [x] The indicator correctly reflects the concurrency manager's state immediately after wiring — if the plugin is reloaded and there are no executions, the indicator shows idle state with no entries
 
 ### H-007: Settings integration — configurable N
 
@@ -226,12 +226,12 @@ The tracker does NOT duplicate execution state — it subscribes to state change
 **Dependencies:** H-006
 
 **Acceptance Criteria:**
-- [ ] A "Recent workflow entries" (or "Activity indicator history") numeric input is rendered in **Settings → Notor**, in the same section as the workflow concurrency limit setting
-- [ ] The input reads from and writes to `settings.workflow_activity_indicator_count` (default: 5)
-- [ ] Help text: "Number of recent workflow executions shown in the activity indicator dropdown."
-- [ ] On settings save, calls `tracker.updateMaxEntries(settings.workflow_activity_indicator_count)` to update the tracker at runtime
-- [ ] The dropdown immediately reflects the new N value — if N is reduced, excess entries are trimmed from the visible list; if N is increased, more history is available (up to what the concurrency manager retains)
-- [ ] Input validation: minimum 1, maximum 50 (reasonable bounds). Non-numeric input is rejected or clamped.
+- [x] A "Recent workflow entries" (or "Activity indicator history") numeric input is rendered in **Settings → Notor**, in the same section as the workflow concurrency limit setting
+- [x] The input reads from and writes to `settings.workflow_activity_indicator_count` (default: 5)
+- [x] Help text: "Number of recent workflow executions shown in the activity indicator dropdown."
+- [x] On settings save, calls `tracker.updateMaxEntries(settings.workflow_activity_indicator_count)` to update the tracker at runtime
+- [x] The dropdown immediately reflects the new N value — if N is reduced, excess entries are trimmed from the visible list; if N is increased, more history is available (up to what the concurrency manager retains)
+- [x] Input validation: minimum 1, maximum 50 (reasonable bounds). Non-numeric input is rejected or clamped.
 
 ### H-008: Playwright E2E validation & cleanup
 
