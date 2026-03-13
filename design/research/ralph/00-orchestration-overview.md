@@ -60,11 +60,13 @@ hats:
 ```
 
 The runtime:
-1. Fires the starting event
-2. Finds hats whose `triggers` match
-3. Assembles **full system prompt** via `InstructionBuilder` (orientation + hat instructions + guardrails + must-publish rule)
-4. Calls the LLM; LLM runs `ralph emit "topic" "payload"` as a shell command, writing to `.ralph/events.jsonl`
-5. Event loop reads, validates, and routes the JSONL entries to the next matching hat
+1. Fires the starting event (`task.start` or a configured `starting_event`)
+2. **Ralph ALWAYS executes** — custom hats define topology, not separate LLM turns
+3. Assembles **full system prompt** via `HatlessRalph.build_prompt()`:
+   - Coordinating (no hat triggered): shows `## HATS` topology table + Mermaid diagram
+   - Hat active: shows `## ACTIVE HAT` section with that hat's instructions inline
+4. LLM runs `ralph emit "topic" "payload"` as a shell command, writing to `.ralph/events.jsonl`
+5. Event loop reads and routes the JSONL entries; determines which hat(s) are now triggered
 6. Repeat until `LOOP_COMPLETE` or a termination condition fires
 
 See [01-ralph-architecture.md](01-ralph-architecture.md) for full detail.
@@ -173,23 +175,44 @@ Notor uses a proper tool call instead — cleaner, no file polling needed, same 
 
 **The most important non-obvious concept from the Rust implementation.**
 
-Hat instructions are never passed raw to the LLM. Ralph's `InstructionBuilder` wraps them in a
-structural scaffold that is directly responsible for reliable hat behavior:
+Hat instructions are never passed raw to the LLM. Ralph's `HatlessRalph.build_prompt()`
+wraps them in a structural prompt that drives reliable behavior. **In multi-hat mode, Ralph
+is ALWAYS the executing agent.** When a custom hat is triggered, its instructions appear
+as `## ACTIVE HAT` section within Ralph's broader prompt — not as a standalone system prompt.
 
+When Ralph is coordinating (no specific hat triggered), it sees:
 ```
-You are {hat.name}. You have fresh context each iteration.
-
-### 0. ORIENTATION — study the event, don't assume work is done
-### 0b. TOOL DISCIPLINE — use task/memory tools; record decisions
-### 1. EXECUTE — {hat.instructions} goes here
-### 2. VERIFY — run checks, verify before claiming done
-### 3. REPORT — MUST call emit_event with {hat.publishes}
-            Plain prose does NOT count. You MUST stop after emitting.
-### GUARDRAILS — {numbered 999+}
-
-Triggering event: {topic}
-Payload: {payload}
+## HATS
+| Hat | Triggers On | Publishes | Description |
+...topology table...
+```mermaid
+flowchart LR
+...diagram...
 ```
+CONSTRAINT: You MUST only publish events from this list: `build.task`, `review.request`...
+```
+
+When a custom hat is triggered, Ralph sees:
+```
+## ACTIVE HAT
+
+### Builder Instructions
+
+{hat.instructions goes here}
+
+### Event Publishing Guide
+
+You MUST publish exactly ONE event when your work is complete...
+When you publish:
+- `build.done` → Received by: Reviewer
+- `build.blocked` → Received by: Ralph (coordinates next steps)
+```
+
+`InstructionBuilder.build_custom_hat()` also exists with a numbered scaffold structure
+(0. ORIENTATION / 0b. TOOL DISCIPLINE / 1. EXECUTE / 2. VERIFY / 3. REPORT / GUARDRAILS)
+but per the source code it is a "backward compatibility and tests" path — not the primary
+runtime path. Its structural principles are still important to replicate in Notor since
+they encode the must-publish enforcement and guardrails injection.
 
 The must-publish rule in REPORT is always injected, even when a hat has custom instructions.
 Without it, LLMs reliably forget to emit and the loop stalls silently.
@@ -221,10 +244,15 @@ Essential to prevent infinite token burn on stuck loops:
 |-----------|---------|
 | `max_iterations` | counter check each iteration |
 | `max_runtime` | wall-clock check each iteration |
-| **Stale loop** | same (topic + payload fingerprint) emitted 3× in a row → terminate |
-| **Thrashing** | FallbackCoordinator activated 3× in a row → terminate |
-| `default_publishes` synthesis | hat produces no emit_event call → auto-fire the default |
+| `max_cost_usd` | cumulative LLM cost check each iteration |
+| **Stale loop** | same (topic + source + payload fingerprint) emitted 3× in a row → `LoopStale` |
+| **Thrashing** | planner redispatches 3+ already-abandoned tasks → `LoopThrashing` |
+| **Validation failure** | 3+ consecutive malformed JSONL lines → `ValidationFailure` |
+| `default_publishes` synthesis | hat produces no JSONL output → auto-fire the default topic |
 | `required_events` enforcement | LOOP_COMPLETE blocked until all required events were seen |
+| `persistent` mode | LOOP_COMPLETE suppressed entirely; `task.resume` injected instead |
+| `cancellation_promise` | `loop.cancel` event triggers clean exit without required_events check |
+| `max_activations` per hat | `{hat_id}.exhausted` event injected when exceeded |
 
 ### 8. OrchestrationSessionManager
 
@@ -353,7 +381,7 @@ All components required for a working end-to-end loop:
 
 1. Pre/post loop-phase shell commands (`pre.loop.start`, `post.iteration.start`, etc.)
 2. Rich JSON payload to hook stdin (session ID, iteration, active hat, etc.)
-3. `on_error: warn | fail | suspend` — suspend blocks the loop pending human approval
+3. `on_error: warn | block | suspend` — `block` stops the lifecycle action as failure; `suspend` blocks the loop pending human approval
 
 ### Phase 6: Built-in Preset Library
 
@@ -397,7 +425,7 @@ Vault-native ports of Ralph's builtin presets: code-assist, research, review.
 | Preset source | YAML file on disk | Vault note with frontmatter |
 | LLM backend | External CLI (`ralph run --backend ...`) | Notor's existing provider system |
 | Event emission | `ralph emit <topic> <payload>` shell cmd → JSONL file → polled | `emit_event` tool call (cleaner) |
-| Hat system prompt | `InstructionBuilder` scaffold + hat instructions | `HatSystemPromptBuilder` equivalent |
+| Hat system prompt | `HatlessRalph.build_prompt()` — Ralph always runs; hat instructions appear as `## ACTIVE HAT` section | `HatSystemPromptBuilder` equivalent (same concept, different prompt structure) |
 | Fallback coordinator | HatlessRalph (always registered, can't override) | FallbackCoordinator (new) |
 | Shared state | Filesystem files | Vault notes via vault tools |
 | Memory | `.ralph/agent/memories.md` (cross-session) | `memories.md` vault note (cross-session) |

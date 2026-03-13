@@ -17,8 +17,10 @@ specialized AI agent roles ("hats") collaborate by publishing and subscribing to
 The whole workflow is defined in a YAML config file.
 
 The key differentiation from Notor's current single-turn workflow: Ralph produces **multi-step
-autonomous execution** — an LLM plays the Planner role, emits an event, another LLM turn plays
-the Builder role, emits an event, and so on, until a terminal "loop complete" signal is reached.
+autonomous execution** — Ralph (the always-present coordinator) runs one turn, emits an event
+that triggers a hat, runs another turn playing that hat's role, emits another event, and so on,
+until a terminal "loop complete" signal is reached. Custom hats define the topology and
+per-role instructions; Ralph is the single executing agent that adapts its prompt accordingly.
 
 ---
 
@@ -57,15 +59,20 @@ YAML Config defines:
 ### How It Actually Flows
 
 1. `ralph run -c config.yml -P prompt.txt` is invoked (directly or as subprocess)
-2. Ralph publishes the starting event (`build.start`) to the in-process `EventBus`
-3. `EventBus` routes to the hat whose `triggers` match — the planner
-4. Ralph assembles the **full system prompt** using `InstructionBuilder` (see below)
-5. Ralph calls the configured LLM backend with that prompt + event payload
+2. Ralph publishes the starting event (`task.start`) to the in-process `EventBus`
+3. **Ralph ALWAYS executes** as the LLM agent — custom hats define topology and instructions but do not get separate LLM turns
+4. Ralph assembles the **full system prompt** using `HatlessRalph.build_prompt()` (see below)
+   - **Solo mode** (no custom hats): Ralph's workflow sections are shown
+   - **Multi-hat, coordinating** (no hat triggered): `## HATS` topology table + Mermaid diagram is shown; Ralph must delegate via events
+   - **Multi-hat, hat active** (pending events match a hat): `## ACTIVE HAT` section shows that hat's instructions + Event Publishing Guide
+5. Ralph calls the configured LLM backend with that prompt
 6. The LLM runs tools, including the `ralph emit` shell command, which **writes a JSONL line to `.ralph/events.jsonl`**
-7. Ralph reads that events file and processes the new JSONL entries
+7. After the LLM turn, Ralph reads new lines from that events file (via `EventReader`)
 8. Events are validated (backpressure checks, malformed line detection)
-9. If valid, the event is published to `EventBus`, which routes to the next matching hat
+9. If valid, the event is published to `EventBus`, which determines the next hat to activate
 10. Repeat until `LOOP_COMPLETE` is emitted or a termination condition fires
+
+**Note:** An `EventParser` also exists that parses XML-style `<event topic="...">payload</event>` tags from CLI output, but per the `process_output()` source: *"Events are ONLY read from the JSONL file written by `ralph emit`. This enforces tool use and prevents confabulation."* The XML parser is used for diagnostics/logging only, not for event routing.
 
 ### The JSONL File Mechanism
 
@@ -92,11 +99,34 @@ Fields: `ts` (ISO timestamp), `iteration` (number), `hat` (emitting hat name),
 
 ---
 
-## InstructionBuilder: The System Prompt Template
+## Prompt Architecture: HatlessRalph + InstructionBuilder
 
-Hat instructions are **not** passed raw to the LLM. Every hat turn is wrapped in a
-structured template by `InstructionBuilder.build_custom_hat()`. This template is the
-actual scaffolding that makes hats behave reliably:
+**Critical understanding:** Ralph ALWAYS executes as the LLM agent. The prompt builder is
+`HatlessRalph.build_prompt(events_context, active_hats)`. How it varies by mode:
+
+### Solo Mode (no custom hats)
+Ralph's full workflow sections: ORIENTATION → SCRATCHPAD → STATE MANAGEMENT → GUARDRAILS →
+OBJECTIVE → WORKFLOW (PLAN → IMPLEMENT → VERIFY → COMMIT → EXIT) → event writing instructions.
+
+### Multi-hat Mode: Ralph Coordinating (no custom hat triggered)
+Same core sections plus `## HATS` with:
+- Full topology table (hat name / triggers / publishes / description)
+- Mermaid flowchart showing event routing
+- `CONSTRAINT:` listing which events Ralph may publish
+
+### Multi-hat Mode: Hat Active (custom hat triggered by pending events)
+Same core sections plus `## ACTIVE HAT` with:
+- `### {hat.name} Instructions` — the hat's raw instructions verbatim
+- `### Event Publishing Guide` — which events to emit and who receives them
+- `### TOOL RESTRICTIONS` — if the hat has `disallowed_tools` configured
+
+All modes include: scratchpad prepended, ready-tasks prepended, memories auto-injected
+(when `memories.inject: auto`), robot guidance (from Telegram), skill index.
+
+### InstructionBuilder.build_custom_hat()
+
+A separate `InstructionBuilder` also exists and builds a standalone hat prompt with a
+numbered scaffold structure:
 
 ```
 You are {hat.name}. You have fresh context each iteration.
@@ -138,7 +168,9 @@ You MUST handle these events:
 {events_context}
 ```
 
-Key behaviors this enforces:
+Per the source code, `build_custom_hat()` is a **"backward compatibility and tests"** path.
+In production, `next_hat()` always returns "ralph" in multi-hat mode, so `HatlessRalph.build_prompt()`
+is the sole active path. Key behaviors the scaffold enforces (relevant for Notor's implementation):
 - **Must-publish injection**: Even when a hat has explicit instructions, the "emit exactly one"
   rule is always injected into the REPORT section
 - **Guardrails are numbered 999+**: Makes them appear last, signaling highest precedence
@@ -166,30 +198,46 @@ In "solo mode" (no custom hats), Ralph is the only coordinator and handles every
 
 ## Hat Preset YAML Schema
 
+The config supports two formats: **v1 (flat)** and **v2 (nested)**. v1 fields like
+`agent:`, `completion_promise:`, `max_iterations:` map to v2 nested equivalents and are
+still accepted for backward compatibility.
+
 ```yaml
-# Top-level sections
+# Top-level sections (v2 nested format)
 event_loop:
-  completion_promise: "LOOP_COMPLETE"
-  starting_event: "build.start"
-  max_iterations: 100
-  max_runtime_seconds: 14400
-  max_cost_usd: 10.00          # optional: terminates on cost exceeded
-  required_events:             # optional: LOOP_COMPLETE rejected unless these were seen
+  completion_promise: "LOOP_COMPLETE"   # default
+  starting_event: "build.start"        # optional: event Ralph emits after initial coordination
+  max_iterations: 100                  # default
+  max_runtime_seconds: 14400           # default (4 hours)
+  max_cost_usd: 10.00                  # optional: terminates on cost exceeded
+  max_consecutive_failures: 5          # default: stop after 5 failures in a row
+  cooldown_delay_seconds: 0            # delay between iterations (skipped for human events)
+  required_events:                     # optional: LOOP_COMPLETE rejected unless these were seen
     - "review.approved"
-  persistent: false            # if true: suppresses LOOP_COMPLETE, loop stays alive
+  persistent: false                    # if true: suppresses LOOP_COMPLETE, loop stays alive
+  cancellation_promise: ""             # set to "loop.cancel" to enable graceful abort event
+  enforce_hat_scope: false             # if true: out-of-scope events replaced with scope_violation
 
 cli:
-  backend: "claude"            # which AI backend adapter to use
+  backend: "claude"            # which AI backend: claude, kiro, gemini, codex, amp, pi, custom
 
 core:
-  specs_dir: "./specs/"
+  specs_dir: ".ralph/specs/"
   scratchpad: ".ralph/agent/scratchpad.md"
-  guardrails:                  # injected into every LLM system prompt via InstructionBuilder
-    - "Verification is mandatory"
-    - "YAGNI ruthlessly"
+  guardrails:                  # injected into every LLM system prompt
+    - "Fresh context each iteration - scratchpad is memory"
+    - "Don't assume 'not implemented' - search first"
+    - "Backpressure is law - tests/typecheck/lint/audit must pass"
+    - "Confidence protocol: score decisions 0-100..."
+    - "Commit atomically..."
 
 memories:
-  enabled: true                # enables .ralph/agent/memories.md and task enforcement
+  enabled: true                # enables .ralph/agent/memories.md; also gates task enforcement
+  inject: auto                 # auto | manual | none (auto = injected every iteration)
+  budget: 0                   # max tokens to inject (0 = unlimited)
+
+tasks:
+  enabled: true                # enables .ralph/agent/tasks.jsonl (separate from memories)
 
 skills:
   enabled: true
@@ -199,10 +247,12 @@ skills:
 hats:
   planner:
     name: "📋 Planner"
-    description: "Short description"
+    description: "Short description"      # REQUIRED — validation error if missing
     triggers: ["build.start", "queue.advance"]
     publishes: ["tasks.ready", "all_steps.done"]
-    default_publishes: "tasks.ready"   # synthesized if hat produces no JSONL output
+    default_publishes: "tasks.ready"      # synthesized if hat produces no JSONL output
+    max_activations: 10                   # optional: {hat_id}.exhausted if exceeded
+    disallowed_tools: []                  # optional: tools blocked for this hat
     instructions: |
       ## PLANNER MODE
       Full markdown instructions for the LLM playing this role...
@@ -216,28 +266,37 @@ events:                               # optional metadata about events
     on_publish: "When ready to start building."
 ```
 
+**Reserved triggers:** `task.start` and `task.resume` are reserved for Ralph's coordination
+layer. Custom hats may not subscribe to these — doing so causes a config validation error.
+
 ---
 
 ## Loop Termination Reasons
 
-The event loop has **eleven** distinct termination conditions (not just max_iterations):
+The event loop has **thirteen** distinct termination conditions (not just max_iterations):
 
-| Reason | Trigger |
-|--------|---------|
-| `CompletionPromise` | `LOOP_COMPLETE` event seen (exit 0) |
-| `Cancelled` | `loop.cancel` event (exit 0 — intentional abort) |
-| `MaxIterations` | iteration count exceeded (exit 2) |
-| `MaxRuntime` | wall-clock time exceeded (exit 2) |
-| `MaxCost` | cumulative LLM cost exceeded (exit 2) |
-| `ConsecutiveFailures` | too many failures in a row (exit 1) |
-| `LoopThrashing` | planner redispatches 3+ already-abandoned tasks (exit 1) |
-| `LoopStale` | same event+payload fingerprint emitted 3+ times in a row (exit 1) |
-| `ValidationFailure` | 3+ consecutive malformed JSONL lines (exit 1) |
-| `Stopped` | `.ralph/stop-requested` file appears (exit 1) |
-| `WorkspaceGone` | worktree directory removed externally (exit 1) |
+| Reason | Trigger | Exit Code |
+|--------|---------|-----------|
+| `CompletionPromise` | `LOOP_COMPLETE` event seen | 0 |
+| `Cancelled` | `loop.cancel` event (intentional abort) | 0 |
+| `MaxIterations` | iteration count exceeded | 2 |
+| `MaxRuntime` | wall-clock time exceeded | 2 |
+| `MaxCost` | cumulative LLM cost exceeded | 2 |
+| `ConsecutiveFailures` | too many failures in a row | 1 |
+| `LoopThrashing` | planner redispatches 3+ already-abandoned tasks | 1 |
+| `LoopStale` | same event+payload fingerprint emitted 3+ times in a row | 1 |
+| `ValidationFailure` | 3+ consecutive malformed JSONL lines | 1 |
+| `Stopped` | `.ralph/stop-requested` file appears | 1 |
+| `WorkspaceGone` | worktree directory removed externally | 1 |
+| `Interrupted` | SIGINT or SIGTERM signal received | 130 |
+| `RestartRequested` | `.ralph/restart-requested` file appears (Telegram `/restart`) | 3 |
 
 Stale loop and thrashing detection are critical for production use — without them, a stuck
 agent burns tokens indefinitely. Both check recent history per-iteration.
+
+`Cancelled` enables graceful workflow abort without required_events validation; enables
+human rejection or timeout escalation paths. Set `event_loop.cancellation_promise: "loop.cancel"`
+to activate this (disabled by default).
 
 ---
 
@@ -267,8 +326,10 @@ A `task.resume` event is injected so the loop continues.
 
 ## Runtime Tasks: JSONL Store with Completion Enforcement
 
-The task store at `.ralph/agent/tasks.jsonl` is **mandatory** when `memories.enabled = true`.
-The LLM uses `ralph tools task ensure/start/close/reopen/fail` to manage tasks.
+`memories` and `tasks` are **separate config sections**, both enabled by default.
+The task store lives at `.ralph/agent/tasks.jsonl`. The LLM uses `ralph tools task ensure/start/close/reopen/fail`
+to manage tasks. LOOP_COMPLETE rejection for open tasks is enforced when `memories.enabled = true`
+(not `tasks.enabled`) — this is because memories mode is the "structured tracking" mode.
 
 The loop **rejects LOOP_COMPLETE** if any tasks are still open:
 
@@ -317,32 +378,45 @@ Lifecycle hooks are shell commands that fire at loop **phases**:
 ```yaml
 # In ralph.yml
 hooks:
+  enabled: true
   defaults:
-    timeout_seconds: 45
-    on_error: warn
-    suspend_mode: wait_then_retry
+    timeout_seconds: 30         # default
+    max_output_bytes: 8192      # default
+    suspend_mode: wait_for_resume
 
   events:
     pre.loop.start:
       - name: env-guard
         command: ["./scripts/check-env.sh"]
+        on_error: block         # required per-hook field: warn | block | suspend
 
     post.iteration.start:
       - name: notify-slack
         command: ["./scripts/notify.sh"]
         on_error: warn
 
-    pre.loop.terminate:
+    pre.loop.complete:
       - name: cleanup
         command: ["./scripts/cleanup.sh"]
-        on_error: ignore
+        on_error: warn
+
+    pre.loop.error:
+      - name: alert
+        command: ["./scripts/alert.sh"]
+        on_error: warn
 ```
 
-Hook phases:
+Hook phases (12 total):
 - `pre.loop.start` / `post.loop.start`
 - `pre.iteration.start` / `post.iteration.start`
-- `pre.loop.terminate` / `post.loop.terminate`
+- `pre.plan.created` / `post.plan.created`
 - `pre.human.interact` / `post.human.interact`
+- `pre.loop.complete` / `post.loop.complete`
+- `pre.loop.error` / `post.loop.error`
+
+**Correction from earlier research:** There is no `pre.loop.terminate`/`post.loop.terminate`.
+Loop end is split into `loop.complete` (clean exit) and `loop.error` (failure exit).
+The `on_error` values are `warn | block | suspend` (not "fail").
 
 Each hook receives a rich JSON payload on stdin:
 ```json
@@ -417,9 +491,14 @@ the LLM ran them and validates the evidence format.
 supports wildcards: `task.*` matches `task.start`, `task.resume`, etc. A prefix index
 provides O(1) early-exit for no-match lookups.
 
-When multiple hats subscribe to the same topic, **all are activated** in sorted key order.
+When multiple hats subscribe to the same topic, **all are activated** in sorted key order
+(BTreeMap ensures deterministic alphabetical ordering).
 
-"HatlessRalph" is always registered last with subscription `*` as the universal fallback.
+The "ralph" hat with subscription `*` is always registered (after custom hats) as the
+universal fallback. In multi-hat mode, `next_hat()` ALWAYS returns "ralph" — custom hats
+define topology/instructions but don't execute separately. The `can_publish()` method
+enforces hat scope: unregistered hats (including ralph) may publish any topic; registered
+hats are limited to their declared `publishes` list.
 
 ---
 
