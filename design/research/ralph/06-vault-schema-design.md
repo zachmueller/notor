@@ -152,6 +152,46 @@ All work is done. Terminates the orchestration loop.
 
 ---
 
+## Session Event Log
+
+The most important session file for crash recovery. Written by the engine (not by hats).
+
+```
+notor/orchestrations/sessions/2025-01-15-abc123/
+  session-log.jsonl   # append-only; written before routing; source of truth for recovery
+```
+
+Each line is a JSON object. Entry types:
+
+```jsonl
+{"type":"session.start","session_id":"2025-01-15-abc123","preset":"code-assist","prompt":"implement --verbose flag","ts":"..."}
+{"type":"event.emitted","turn":1,"topic":"build.start","payload":"implement --verbose flag","ts":"..."}
+{"type":"turn.start","turn":2,"hat":"planner","trigger_topic":"build.start","trigger_payload":"...","ts":"..."}
+{"type":"event.emitted","turn":2,"topic":"tasks.ready","payload":"{\"task_id\":\"step-01\"}","ts":"..."}
+{"type":"turn.complete","turn":2,"hat":"planner","emitted_topic":"tasks.ready","ts":"..."}
+{"type":"turn.start","turn":3,"hat":"builder","trigger_topic":"tasks.ready","trigger_payload":"...","ts":"..."}
+{"type":"turn.complete","turn":3,"hat":"builder","emitted_topic":"review.ready","ts":"..."}
+{"type":"session.complete","turn":12,"outcome":"LOOP_COMPLETE","ts":"..."}
+```
+
+**Write order (enforced):**
+1. `turn.start` → written *before* `sendMessage()` starts
+2. `event.emitted` → written *before* the event is published to the bus (write-before-route)
+3. `turn.complete` → written *after* emit is captured, *before* routing to next hat
+
+**Recovery algorithm:**
+- Scan from the end of the log for the last entry
+- Last entry is `turn.start` (no `turn.complete`): turn was interrupted → re-emit
+  `trigger_topic`/`trigger_payload` to retry the hat turn
+- Last entry is `event.emitted` or `turn.complete` (no following `turn.start`): event was
+  emitted but routing didn't complete → re-publish the emitted topic to resume
+
+This log is the only file that must be written to survive a crash gracefully. All other
+session state (task notes, workspace notes) is authoritative on disk already; the log
+provides the routing state that lives in memory.
+
+---
+
 ## Workspace Notes (Scratchpad)
 
 During orchestration, hats write shared state to vault notes.
@@ -159,6 +199,7 @@ Convention: `{notor_dir}/orchestrations/sessions/{session_id}/`
 
 ```
 notor/orchestrations/sessions/2025-01-15-abc123/
+  session-log.jsonl  # engine-written; append-only event + turn log (see above)
   context.md         # implementation context, repo patterns, dependencies
   plan.md            # numbered high-level steps
   progress.md        # current step, active wave notes, verification log
@@ -263,6 +304,7 @@ with a SQLite index for fast queries during orchestration.
       sessions/                   # created at runtime
         {session-id}/
           session.json            # metadata (status, iteration count, etc.)
+          session-log.jsonl       # append-only event+turn log (engine-written; crash recovery source)
           context.md              # shared context note
           plan.md                 # shared plan note
           progress.md             # shared progress note

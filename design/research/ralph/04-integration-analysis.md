@@ -245,7 +245,7 @@ The core pub/sub routing:
 
 ```typescript
 class OrchestrationEventEngine {
-  publish(topic: string, payload: string): void
+  publish(topic: string, payload: string): void  // write-before-route: appends to session log first
   subscribe(topic: string | "*", handler: EventHandler): Unsubscribe
   getSubscribers(topic: string): HatDefinition[]
   getEventHistory(): OrchestrationEvent[]
@@ -253,6 +253,11 @@ class OrchestrationEventEngine {
 ```
 
 The engine supports wildcard subscriptions (`*`) for the fallback coordinator.
+
+**Write-before-route:** `publish()` must append the event to the session log (`session-log.jsonl`)
+*before* delivering it to any subscriber. This mirrors Ralph's file-write model and is the
+foundation of crash recovery — an emitted event exists on disk even if the process dies before
+the next turn starts.
 
 ### 7. Loop Safety Mechanisms
 
@@ -344,15 +349,17 @@ Flow:
   4. Publish starting_event
   5. EventEngine.getSubscribers(topic) → find matching hat(s)
   6. HatTurnExecutor.execute(hat, event, session):
-     a. HatSystemPromptBuilder assembles full system prompt
-     b. Build user message from event payload + workspace note context
-     c. Execute via sendMessage() with emit_event tool injected
-     d. If LLM calls emit_event: capture topic + payload
-     e. If no emit_event call: synthesize hat.default_publishes
-     f. BackpressureValidator: intercept build.done etc., validate evidence
-     g. If validation fails: substitute build.blocked
-     h. LoopSafetyGuards: check iteration, runtime, stale, thrashing, required_events
-  7. EventEngine.publish(event) → routes to next matching hat
+     a. Append turn.start to session-log.jsonl (before sendMessage)
+     b. HatSystemPromptBuilder assembles full system prompt
+     c. Build user message from event payload + workspace note context
+     d. Execute via sendMessage() with emit_event tool injected
+     e. If LLM calls emit_event: capture topic + payload
+     f. If no emit_event call: synthesize hat.default_publishes
+     g. BackpressureValidator: intercept build.done etc., validate evidence
+     h. If validation fails: substitute build.blocked
+     i. LoopSafetyGuards: check iteration, runtime, stale, thrashing, required_events
+     j. Append turn.complete to session-log.jsonl (after emit captured, before routing)
+  7. EventEngine.publish(event) → appends event.emitted to session-log.jsonl → routes to next hat
   8. Repeat until LOOP_COMPLETE passes all checks, or a safety limit fires
   9. Finalize session, update workspace notes
 ```
@@ -385,22 +392,27 @@ Flow:
 Components:
 1. `HatNoteParser` — reads hat vault note frontmatter + body
 2. `OrchestrationPresetParser` — reads preset vault note
-3. `OrchestrationEventEngine` — pub/sub with wildcard support
+3. `OrchestrationEventEngine` — pub/sub with wildcard support; `publish()` uses write-before-route
 4. `FallbackCoordinator` — catch-all `*` subscriber to prevent orphaned-event stalls
 5. `HatSystemPromptBuilder` — wraps hat instructions in scaffold template (orientation / execute / verify / report / guardrails)
-6. `HatTurnExecutor` — calls `sendMessage()` with hat system prompt + `emit_event` tool injected
+6. `HatTurnExecutor` — calls `sendMessage()` with hat system prompt + `emit_event` tool injected;
+   writes `turn.start` marker before calling `sendMessage()`, `turn.complete` after emit captured
 7. `emit_event` tool — captures topic + payload, signals engine after turn ends
 8. `default_publishes` synthesis — fires when hat turn produces no emit call
-9. Loop safety: max_iterations, max_runtime, stale-loop detection (3× same signature), thrashing detection (planner redispatching 3+ abandoned tasks)
-10. `OrchestrationRunner` — the main loop that wires these together
-11. Command palette: "Notor: Run Orchestration" → preset picker → initial prompt
+9. **Session event log** (`sessions/{id}/session-log.jsonl`) — append-only JSONL; records
+   `session.start`, `turn.start`, `event.emitted`, and `turn.complete` entries; written before
+   routing. **Must be in Phase 1**, not Phase 2 — without it, crash recovery in Phase 2 has
+   nothing to replay from.
+10. Loop safety: max_iterations, max_runtime, stale-loop detection (3× same signature), thrashing detection (planner redispatching 3+ abandoned tasks)
+11. `OrchestrationRunner` — the main loop that wires these together
+12. Command palette: "Notor: Run Orchestration" → preset picker → initial prompt
 
 **This Phase 1 makes the core loop functional.** Hats activate, emit events, route correctly,
-and the loop terminates cleanly.
+and the loop terminates cleanly. The event log makes every run recoverable from Phase 2 onward.
 
 ### Phase 2: Session Workspace + Task Registry
 
-**Goal:** Hats share state via vault notes; tasks are tracked and enforced.
+**Goal:** Hats share state via vault notes; tasks are tracked and enforced; crashes are recoverable.
 
 1. `OrchestrationSessionManager` — creates `sessions/{id}/` directory, persists `session.json`
 2. Workspace notes: `context.md`, `plan.md`, `progress.md`, `decisions.md` auto-created
@@ -408,7 +420,17 @@ and the loop terminates cleanly.
 4. Runtime task vault notes + tools: `orchestration_task_ensure/start/close/list`
 5. LOOP_COMPLETE enforcement: reject if open tasks exist, inject resume context
 6. Persistent memory note: `{notor_dir}/orchestrations/memories.md` (cross-session)
-7. Session recovery: on plugin load, detect incomplete sessions, offer resume
+7. **Session recovery** — on plugin load, scan for sessions with `session.json` status `active`
+   or `interrupted`:
+   - Read `session-log.jsonl` (written in Phase 1) to find the last complete state
+   - If last entry is `turn.start` with no matching `turn.complete`: turn was interrupted
+     mid-execution → re-emit the triggering event (the hat turn retries cleanly)
+   - If last entry is `event.emitted` or `turn.complete` with no following `turn.start`:
+     event was emitted but not yet routed → re-publish the event to resume routing
+   - Scan task notes to reconstruct task state (task notes on disk are authoritative)
+   - Offer the user a "Resume orchestration?" prompt with a summary of where it left off
+   - Hat instructions must be idempotent (check before acting) to make retry safe;
+     document this as a hat authoring requirement
 
 ### Phase 3: Backpressure Evidence Validation
 
@@ -492,4 +514,9 @@ Presets (ported from Ralph):
 - Hat prompt engineering quality — Ralph's instructions are 200–400 lines; reproducing
   reliable planner/builder/critic behavior requires careful prompt work
 - Debugging failed orchestrations — need good logging and trace to diagnose stalls
-- Session recovery across plugin reloads — requires reliable session.json state
+
+### Mitigated (was High Risk)
+- **Session recovery across plugin reloads** — downgraded from High to Medium with the
+  append-only `session-log.jsonl` design. The log gives recovery a concrete replay source.
+  Remaining risk: hat instructions must be idempotent for retried turns to be safe; this
+  is a prompt engineering discipline requirement, not an engine guarantee.
