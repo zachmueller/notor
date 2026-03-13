@@ -26,12 +26,22 @@ vault. It supports:
 - Fires pre-send and after-completion hooks
 - Tracks token counts and cost estimates
 
+**`dispatcher.ts`** (ToolDispatcher) — Sits between LLM response parsing and tool execution:
+- Enforces Plan/Act mode (Plan mode requires approval; Act mode can auto-approve)
+- Applies per-persona and per-tool auto-approve settings
+- Routes tool calls to the correct tool implementation (built-in or MCP)
+- Emits events for UI rendering (approval dialogs, tool call chips)
+
+**`stale-tracker.ts`** (StaleContentTracker) — Safe write guard:
+- Tracks the last-read content hash for each note per conversation
+- Before any write tool executes, compares current vault content against what the LLM last read
+- Prevents silent overwrites when notes are edited concurrently
+
 **`conversation.ts`** (ConversationManager) — CRUD for conversations and messages in SQLite
 
 **`context.ts`** (ContextManager) — Manages conversation context:
 - Token window tracking
 - Context compaction (summarization when approaching limits)
-- Stale content detection (tracks which notes have been read)
 
 **`system-prompt.ts`** (SystemPromptBuilder) — Assembles the system prompt from:
 - Global system prompt (from settings)
@@ -56,6 +66,7 @@ interface StreamChunk { type: "text" | "tool_call" | "tool_result" | "usage"; ..
 **Concrete implementations:**
 - `anthropic-provider.ts` — Direct Anthropic API via SDK
 - `openai-provider.ts` — OpenAI-compatible API
+- `bedrock-provider.ts` — AWS Bedrock (Anthropic models via Bedrock)
 - `local-provider.ts` — Local endpoints (Ollama, etc.)
 - `registry-factory.ts` — Factory that builds ProviderRegistry
 - `sse.ts` — SSE streaming utility
@@ -173,12 +184,38 @@ Rules are injected into the system prompt when their trigger conditions match.
 
 - `chat-view.ts` — Main chat interface (ItemView)
 - `approval-ui.ts` — Tool call approval dialog
+- `tool-call-ui.ts` — Tool call rendering in the chat stream
 - `diff-view.ts` / `diff-engine.ts` — Side-by-side diff for write operations
 - `attachment-chips.ts` / `attachment-picker.ts` — Attachment management
 - `persona-picker.ts` — Persona selection UI
 - `workflow-activity-indicator.ts` / `workflow-activity-dropdown.ts` — Background workflow status
 - `workflow-suggest.ts` — Slash-command workflow picker
 - `compaction-marker.ts` — Visual marker for compacted context
+- `mcp-status-indicator.ts` — MCP server connection status in the UI
+
+### MCP System (`src/mcp/`)
+
+Notor has full [Model Context Protocol](https://modelcontextprotocol.io) support, enabling
+connections to external tool servers:
+
+**`mcp-hub.ts`** (McpHub) — Connection manager for all MCP servers:
+- Connects to MCP servers via **stdio** (subprocess), **SSE**, or **Streamable HTTP** transports
+- Manages connection lifecycle: connect, disconnect, reconnect
+- Credential injection from secrets manager (env vars, headers)
+- Tool discovery via `tools/list` after handshake
+- `callTool()` delegates to the active connection
+
+**`mcp-tool-adapter.ts`** (McpRegisteredTool) — Adapts discovered MCP tools as Notor `Tool` instances:
+- Namespaced naming: `{serverName}__{toolName}`
+- Read/write classification (user override → `readOnlyHint` → default write)
+- Uniform registration in `ToolRegistry` alongside built-in tools
+- `isMcpTool()` / `parseMcpToolName()` helpers
+
+**`mcp-types.ts`** — Shared types: `McpServerConfig`, `McpConnection`, `McpDiscoveredTool`, etc.
+
+**For orchestration:** Ralph hats can specify per-hat `mcp_servers` in their config.
+Notor already has the MCP plumbing; per-hat MCP tool sets would require teaching
+`HatTurnExecutor` to activate/deactivate MCP connections as the active hat changes.
 
 ### Shell System (`src/shell/`)
 
@@ -272,8 +309,9 @@ or loop completion signals.
 
 ---
 
-## Include Note System
+## Include Note System (`src/include-note/`)
 
+The include-note system has its own module (`src/include-note/parser.ts` and `resolver.ts`).
 Workflow notes can reference vault content via `<include_note>` tags:
 ```xml
 <include_note path="Projects/current.md" />

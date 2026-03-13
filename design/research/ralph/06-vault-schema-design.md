@@ -58,6 +58,8 @@ Do not implement. Do not review.
 - `notor-hat-default-publishes` — event emitted if hat doesn't call emit_event
 - `notor-hat-persona` — optional persona name for system prompt
 - `notor-hat-model` — optional model override (uses active provider)
+- `notor-hat-mcp-servers` — *(future)* MCP server configs active for this hat's turns; Ralph
+  supports per-hat `mcp_servers` and Notor has MCP infrastructure (`src/mcp/`) already in place
 
 ---
 

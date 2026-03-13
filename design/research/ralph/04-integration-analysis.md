@@ -42,6 +42,7 @@ Obsidian plugin, without requiring an external Ralph CLI subprocess.
 | Shared scratchpad files | Vault notes | Natural fit — vault is Ralph's project files |
 | Lifecycle hooks (pre/post loop phases) | Partial via existing vault hooks | Ralph's loop-phase hooks are a distinct concept |
 | guardrails | Could be part of system prompt | Already have vault rules system |
+| Per-hat `mcp_servers` | Notor already has MCP support | McpHub manages connections; per-hat activation needs design |
 | Backpressure evidence validation | New: payload text parser | LLM claims, engine validates the claim format |
 | Loop thrashing detection | N/A | Needs to be built |
 | Stale loop detection | N/A | Needs to be built |
@@ -177,6 +178,17 @@ reasonable Notor design choice even though it differs from Ralph's runtime appro
 Ralph wraps hat instructions verbatim; Notor can add more explicit framing since the
 context window starts fresh per hat turn.
 
+Ralph's `HatlessRalph.build_prompt()` injects these persistent sections into **every** prompt,
+before the hat-specific content. Notor's builder should do the same:
+
+```
+### 0. ORIENTATION / SCRATCHPAD / STATE MANAGEMENT / GUARDRAILS
+[skill index — compact reference table]
+## OBJECTIVE       ← the user's original prompt; set once at start, injected every iteration
+## PENDING EVENTS  ← events that triggered this hat turn
+```
+
+Full proposed scaffold for each hat turn:
 ```
 You are {hat.name}. You have fresh context each iteration.
 
@@ -206,6 +218,12 @@ You MUST call emit_event before ending your turn or the loop will terminate.
 1000. {guardrail_2}
 
 ---
+## OBJECTIVE
+
+{original_user_prompt}
+
+## PENDING EVENTS
+
 Triggering event: {event.topic}
 Payload: {event.payload}
 ```
@@ -238,7 +256,7 @@ The engine supports wildcard subscriptions (`*`) for the fallback coordinator.
 
 ### 7. Loop Safety Mechanisms
 
-Ralph has eleven termination conditions (see `01-ralph-architecture.md`). The minimum
+Ralph has 13 termination conditions (see `01-ralph-architecture.md`). The minimum
 set Notor needs for safety:
 
 | Mechanism | How |
@@ -256,6 +274,10 @@ Stale loop and thrashing detection prevent infinite token burn on stuck loops.
 
 Tasks at `.ralph/agent/tasks.jsonl` — when enabled, the loop **rejects LOOP_COMPLETE**
 if any tasks are open. This enforces that the LLM actually closes work before declaring done.
+
+**Important:** In Ralph, LOOP_COMPLETE task rejection is gated on `config.memories.enabled`
+(not `tasks.enabled`). Both the task system and memories share the same enable flag — if you
+want task enforcement, you must enable memories. In Notor we can decouple these.
 
 In Notor: vault notes are the right storage (visible in Obsidian, version-controlled).
 The task completion check on LOOP_COMPLETE should be implementable in Phase 2.
