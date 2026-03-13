@@ -2,6 +2,8 @@
 
 > Synthesizes architecture of both systems to identify integration points,
 > mapping, and implementation strategy.
+>
+> **Updated:** Reflects Rust core implementation details, not just the Node.js management layer.
 
 ---
 
@@ -13,9 +15,9 @@ no event routing between specialized agents, and no loop completion contract.
 
 Ralph's orchestration model provides:
 1. **Multi-hat event loops** — different LLM roles collaborate through named events
-2. **Persistent shared state** — hats read/write shared files (scratchpad, plan, progress)
+2. **Persistent shared state** — hats read/write shared files (scratchpad, tasks, memories)
 3. **Loop completion semantics** — loops run until a `LOOP_COMPLETE` event or limits hit
-4. **Quality gates** — backpressure gates enforce automated checks before publishing
+4. **Quality gates** — backpressure validates evidence in event payloads before routing
 5. **Interactive planning** — loops can pause for human input
 
 **Goal:** Implement this same orchestration capability natively inside Notor as an
@@ -29,17 +31,23 @@ Obsidian plugin, without requiring an external Ralph CLI subprocess.
 |---------------|---------------------------|-------|
 | Hat (role definition) | Workflow note | Ralph hat = named role with triggers/publishes/instructions |
 | Hat instructions | Workflow body content | Already similar structure |
-| Preset YAML | New "Orchestration Workflow" note format | Need new frontmatter schema |
+| Preset YAML | New "Orchestration Preset" vault note | Need new frontmatter schema |
 | Event loop | New core engine | Does not exist yet |
 | Event pub/sub | N/A | Needs to be built |
-| `ralph run` subprocess | In-process orchestration | Key architectural difference |
+| `ralph emit` shell command | `emit_event` tool call | Different mechanism — see below |
+| InstructionBuilder template | New: hat system-prompt assembly | Hat instructions alone are not enough |
+| HatlessRalph fallback coordinator | New: fallback hat | Needed to handle orphaned events |
 | runtime tasks (`ralph tools task`) | N/A | Notor has no task tracker |
-| Shared scratchpad files | Vault notes | Natural fit — Notor vault = Ralph's project files |
+| `.ralph/agent/memories.md` | Vault note (cross-session) | Maps well to a memories vault note |
+| Shared scratchpad files | Vault notes | Natural fit — vault is Ralph's project files |
+| Lifecycle hooks (pre/post loop phases) | Partial via existing vault hooks | Ralph's loop-phase hooks are a distinct concept |
 | guardrails | Could be part of system prompt | Already have vault rules system |
-| backpressure gates | Could map to hooks | Hooks already support shell command execution |
+| Backpressure evidence validation | New: payload text parser | LLM claims, engine validates the claim format |
+| Loop thrashing detection | N/A | Needs to be built |
+| Stale loop detection | N/A | Needs to be built |
+| `required_events` validation | N/A | Blocks premature LOOP_COMPLETE |
 | Loop completion | N/A | Needs new concept |
-| Planning sessions | New conversational workflow mode | Partially similar to multi-turn chat |
-| Persona per hat | Per-hat persona assignment | Notor already has personas, could assign per hat |
+| Persona per hat | Per-hat persona assignment | Notor already has personas |
 
 ---
 
@@ -47,204 +55,235 @@ Obsidian plugin, without requiring an external Ralph CLI subprocess.
 
 ### Option A: Spawn Ralph CLI (External Process)
 
-Notor would spawn `ralph run -c <preset> -P <prompt>` as a subprocess (like ralph-web-server does):
-- Parse JSONL events from stdout
-- Stream logs to chat view via `RalphEventParser`
-- Show Ralph event loop as a special conversation view
+Notor would spawn `ralph run -c <preset> -P <prompt>` as a subprocess (like ralph-web-server does).
 
-**Pros:**
-- Reuses all existing ralph logic exactly
-- Get all ralph features for free (backpressure, all backends, loop management)
-- Much simpler implementation in Notor
+**Pros:** Reuses all existing ralph logic exactly; get all ralph features for free.
 
 **Cons:**
-- Requires Ralph CLI to be installed (external dependency)
-- Can't show the same rich Obsidian UI for tool calls/approval
-- Tool calls happen outside Obsidian (no vault integration during execution)
-- Can't use Notor's provider configuration
-- Can't use Notor's persona system per-hat
-- No real-time tool approval UI during execution
+- Requires Ralph CLI installed (external dependency)
+- No vault integration during execution
+- Can't use Notor's provider/persona/tool/approval systems
+- Tool calls happen in a subprocess with no Obsidian UI
 
-### Option B: Native In-Process Orchestration
+### Option B: Native In-Process Orchestration (Recommended)
 
 Implement the event loop engine directly in TypeScript/Notor:
-- Parse hat presets from vault YAML files
-- Run each hat as a Notor `sendMessage()` call with hat-specific system prompt + instructions
+- Parse hat presets from vault notes
+- Run each hat as a Notor `sendMessage()` call with hat-specific system prompt
 - Route events between hats using an in-memory pub/sub engine
 - Use Notor's existing tool system during each hat turn
 - Show each hat turn as messages in a special "Orchestration Conversation"
 
 **Pros:**
-- Full vault integration (hat turns can read/write vault notes)
-- Uses Notor's existing provider, persona, tool, and approval systems
+- Full vault integration (hat turns read/write vault notes natively)
+- Notor's existing provider, persona, tool, and approval systems apply per hat turn
 - Rich UI: each hat's output visible, tool approvals work normally
 - No external dependency
-- Notor's checkpoint system protects note changes during orchestration
 
 **Cons:**
 - Significant engineering effort to build the event loop engine
-- Some Ralph features (backpressure gates, worktree loops) need adaptation
-- May not achieve 1:1 parity with Ralph's CLI behavior
+- Some Ralph features (lifecycle hooks, worktree loops) need adaptation
 
-### Option C: Hybrid — Ralph CLI + Notor Observation
-
-Notor shows a live view of a running Ralph process (read JSONL events from logs),
-but doesn't control the execution:
-- Monitor `~/.ralph/web/runs/{taskId}/stdout.log` for events
-- Show status in Notor UI
-- Allow cancellation
-
-**Cons:** Very limited — Notor just watches, no integration.
-
-**Recommendation: Option B (Native In-Process)** is the most powerful and most
-integrated approach, aligning with Notor's vision of deep vault integration.
-This is what the rest of this document analyzes.
+**Recommendation: Option B.** Most powerful and most integrated.
 
 ---
 
 ## New Concepts Needed in Notor
 
-### 1. Hat Definition
+### 1. Hat Definition (vault note)
 
-A hat is a named role with:
-- `triggers: string[]` — event topics that activate this hat
-- `publishes: string[]` — events this hat can emit
-- `default_publishes: string` — event emitted if hat doesn't emit anything
-- `instructions: string` — detailed markdown prompt for this role
-
-**Where to store:** Vault notes, with a new frontmatter schema. The workflow body
-becomes the hat's instructions.
+A hat is a named role with triggers, publishes, and instructions. Stored as a vault note
+with `notor-type: hat` frontmatter; note body = hat's custom instructions.
 
 ```yaml
 ---
-notor-trigger: orchestration  # marks this as a hat definition
-notor-hat-triggers:
-  - build.start
-  - queue.advance
-notor-hat-publishes:
-  - tasks.ready
-notor-hat-default-publishes: tasks.ready
+notor-type: hat
 notor-hat-name: "📋 Planner"
-notor-hat-description: "Manages step decomposition and task queue"
+notor-hat-triggers: [build.start, queue.advance]
+notor-hat-publishes: [tasks.ready, all_steps.done]
+notor-hat-default-publishes: tasks.ready
+notor-hat-persona: planner-persona    # optional Notor persona override
+notor-hat-model: claude-opus-4-6      # optional model override
 ---
 
-## PLANNER MODE
+## PLANNER MODE — Step-Wave Strategy
 
-Your instructions here...
+You manage decomposition and queue progression.
+Do not implement. Do not review.
+...
 ```
 
-### 2. Orchestration Preset
-
-A "preset" is a collection of hats + event loop configuration. In Notor, this
-would be a note that lists the hats participating in the orchestration.
+### 2. Orchestration Preset (vault note)
 
 ```yaml
 ---
-notor-trigger: orchestration-preset
+notor-type: orchestration-preset
+notor-preset-name: "Code Implementation"
 notor-loop-starting-event: build.start
 notor-loop-completion-promise: LOOP_COMPLETE
 notor-loop-max-iterations: 100
 notor-loop-max-runtime-minutes: 240
+notor-loop-required-events:          # LOOP_COMPLETE rejected unless these were seen
+  - review.approved
+notor-hats:
+  - notor/orchestrations/hats/planner.md
+  - notor/orchestrations/hats/builder.md
+  - notor/orchestrations/hats/critic.md
+  - notor/orchestrations/hats/finalizer.md
 notor-guardrails:
-  - "Verification is mandatory"
+  - "Verification is mandatory — tests must pass"
   - "YAGNI ruthlessly"
-notor-hats:                           # ordered list of hat note paths
-  - notor/orchestrations/planner.md
-  - notor/orchestrations/builder.md
-  - notor/orchestrations/critic.md
-  - notor/orchestrations/finalizer.md
+  - "Confidence >80: proceed. 50-80: document in decisions. <50: safe default."
 ---
-
-# My Code Implementation Workflow
-
-Brief description of the workflow...
 ```
 
-### 3. Orchestration Event Engine
+### 3. `emit_event` Tool
 
-The core new module: `src/orchestration/event-engine.ts`
+In Ralph, the LLM emits events by running `ralph emit "topic" "payload"` as a shell command,
+which writes to a JSONL file. **Notor uses a real tool call instead** — cleaner and avoids
+the file-polling indirection. The mechanism is better; the LLM behavior is identical.
 
 ```typescript
-interface OrchestratorEvent {
-  id: string;
-  topic: string;
-  payload: unknown;
-  ts: string;
-  iteration: number;
-  emittedBy?: string;  // hat name
-}
-
-class OrchestrationEventEngine {
-  subscribe(topic: string, handler: (event) => void): void
-  publish(topic: string, payload: unknown): void
-  getEventHistory(): OrchestratorEvent[]
-}
-```
-
-### 4. Hat Turn Executor
-
-Executes one LLM turn for a hat:
-- Assembles system prompt: global prompt + guardrails + hat persona + hat instructions
-- Includes event payload as the user message
-- Wires up a special "emit event" tool that the LLM can call
-- Uses `sendMessage()` in the existing Notor orchestrator
-- Returns the emitted events
-
-### 5. Orchestration Session
-
-Tracks the full execution of a multi-hat preset:
-```typescript
-interface OrchestrationSession {
-  id: string;
-  preset_path: string;
-  conversation_id: string;   // the main conversation showing all turns
-  status: "running" | "paused" | "completed" | "errored" | "stopped";
-  current_iteration: number;
-  max_iterations: number;
-  started_at: string;
-  completed_at: string | null;
-  event_history: OrchestratorEvent[];
-  active_hat: string | null;
-}
-```
-
-### 6. "Emit Event" Tool
-
-A new tool available only during orchestration hat turns:
-```typescript
-// Tool definition for the LLM
 {
   name: "emit_event",
-  description: "Publish an orchestration event to advance the workflow.",
+  description: "Publish an orchestration event to advance the workflow to the next hat.",
   parameters: {
-    topic: { type: "string", description: "Event topic name" },
-    payload: { type: "object", description: "Event data" }
+    topic: { type: "string", description: "Event topic name, e.g. tasks.ready" },
+    payload: { type: "string", description: "Evidence or context for the next hat" }
   }
 }
 ```
 
-When the LLM calls this tool, the orchestration engine routes to the next hat.
+When called, the tool records the event and signals the engine to route after the hat turn ends.
 
-### 7. Task Registry (Runtime Tasks)
+### 4. HatSystemPromptBuilder (equivalent to Ralph's InstructionBuilder)
 
-The code-assist preset heavily uses `ralph tools task ensure/start/close/show`.
-These are lightweight task tracking entries for subtasks within an orchestration.
+Hat instructions cannot be passed raw to the LLM — they need a structural scaffold.
+Ralph's `InstructionBuilder` produces a template that is responsible for reliable hat
+behavior: orientation, tool discipline, execute, verify, report phases, and guardrails.
 
-In Notor: Could be implemented as vault notes in a special `notor/tasks/` directory,
-or as in-memory records in the OrchestrationSession.
+Notor needs an equivalent. The structure:
 
-**Option A: Vault notes** — each task is a note with frontmatter tracking status
-**Option B: In-memory** — ephemeral, not persisted across plugin reloads
-**Option C: SQLite** — add a `orchestration_tasks` table to the existing DB
+```
+You are {hat.name}. You have fresh context each iteration.
 
-### 8. Backpressure Gates
+### 0. ORIENTATION
+You MUST study the incoming event context.
+You MUST NOT assume work isn't done — verify first.
 
-Before a hat can emit an event, configured shell commands must pass.
-Maps naturally to Notor's existing `execute_command` tool + hook system.
+### 0b. TOOL DISCIPLINE
+Session state lives in orchestration workspace notes, not ad hoc text.
+You MUST check open tasks before creating new ones.
+If blocked or a command fails, record it in decisions.md.
+[...task/memory/workspace tool discipline...]
 
-Implementation: After hat LLM turn completes but before routing the event,
-run configured gate commands. If any fail, inject failure feedback into
-the next hat turn (rather than routing the event).
+### 1. EXECUTE
+{hat.instructions}          ← the hat's custom content
+
+### 2. VERIFY
+You MUST run the required checks before reporting done.
+
+### 3. REPORT
+You MUST call emit_event with one of: {hat.publishes}
+Narrative summaries do NOT count as event emission.
+You MUST call emit_event before ending your turn or the loop will terminate.
+
+### GUARDRAILS
+999. {guardrail_1}
+1000. {guardrail_2}
+
+---
+Triggering event: {event.topic}
+Payload: {event.payload}
+```
+
+The must-publish rule in section 3 is **always injected** even when a hat has explicit
+instructions. This is critical — without it, LLMs regularly forget to emit and the loop stalls.
+
+### 5. FallbackCoordinator (equivalent to HatlessRalph)
+
+Always register a catch-all "Notor" hat that handles any event with no other subscriber.
+Without this, a single misnamed event topic silently stalls the loop.
+
+Behavior: when triggered by an orphaned event, the coordinator figures out what to do —
+typically injects a helpful error message or steers back to a known state.
+
+### 6. OrchestrationEventEngine
+
+The core pub/sub routing:
+
+```typescript
+class OrchestrationEventEngine {
+  publish(topic: string, payload: string): void
+  subscribe(topic: string | "*", handler: EventHandler): Unsubscribe
+  getSubscribers(topic: string): HatDefinition[]
+  getEventHistory(): OrchestrationEvent[]
+}
+```
+
+The engine supports wildcard subscriptions (`*`) for the fallback coordinator.
+
+### 7. Loop Safety Mechanisms
+
+Ralph has eleven termination conditions (see `01-ralph-architecture.md`). The minimum
+set Notor needs for safety:
+
+| Mechanism | How |
+|-----------|-----|
+| `max_iterations` | simple counter check each iteration |
+| `max_runtime` | `Date.now() - startedAt > maxMs` check each iteration |
+| **Stale loop** | If same (topic + payload) seen 3+ times in a row → terminate |
+| **Thrashing** | If fallback coordinator triggers 3+ times in a row → terminate |
+| `default_publishes` synthesis | When hat produces no emit_event call, synthesize the default |
+| `required_events` enforcement | Reject LOOP_COMPLETE until all required events have been seen |
+
+Stale loop and thrashing detection prevent infinite token burn on stuck loops.
+
+### 8. Runtime Task Registry
+
+Tasks at `.ralph/agent/tasks.jsonl` — when enabled, the loop **rejects LOOP_COMPLETE**
+if any tasks are open. This enforces that the LLM actually closes work before declaring done.
+
+In Notor: vault notes are the right storage (visible in Obsidian, version-controlled).
+The task completion check on LOOP_COMPLETE should be implementable in Phase 2.
+
+**Task note format:**
+```yaml
+---
+notor-type: orchestration-task
+notor-task-status: open           # open | running | closed | failed
+notor-task-key: step-01:impl
+notor-task-created: 2025-01-15T10:00:00Z
+---
+
+# Add --verbose flag parsing
+
+Implement --verbose in CLI entry point with focused tests.
+```
+
+Tools needed: `orchestration_task_ensure`, `orchestration_task_start`,
+`orchestration_task_close`, `orchestration_task_list`.
+
+### 9. Persistent Memory Note
+
+Ralph's `.ralph/agent/memories.md` persists cross-session learnings (patterns, decisions,
+fixes, context). The `InstructionBuilder` template explicitly tells every hat to search
+memories before acting in unfamiliar territory and to record fix memories when blocked.
+
+In Notor: a `{notor_dir}/orchestrations/memories.md` vault note. The `HatSystemPromptBuilder`
+includes analogous instructions about reading and writing this note.
+
+### 10. Backpressure Evidence Validation
+
+The engine intercepts specific events and validates payload evidence before routing:
+- `build.done` → check for `tests: pass, lint: pass, typecheck: pass, audit: pass, coverage: pass, complexity: <n>, duplication: pass`
+- If evidence missing or failed → substitute `build.blocked`
+
+This is payload text parsing, not shell command execution. The LLM is responsible for
+actually running checks. The engine validates the claim format.
+
+Notor should implement the same `build.done`/`build.blocked` pattern. The checked
+events and required evidence fields can be configurable in the preset.
 
 ---
 
@@ -252,83 +291,36 @@ the next hat turn (rather than routing the event).
 
 ```
 OrchestrationRunner
-  ├── EventEngine (pub/sub)
+  ├── OrchestrationEventEngine (pub/sub + wildcard)
   ├── HatRegistry (loaded from preset note)
-  ├── HatTurnExecutor (calls existing ChatOrchestrator)
-  ├── BackpressureGates (shell command runner)
-  ├── OrchestrationSession (tracks state)
-  └── UI: OrchestrationView (special Obsidian view)
+  │     └── FallbackCoordinator ("*" wildcard subscriber)
+  ├── HatSystemPromptBuilder (wraps hat instructions in scaffold template)
+  ├── HatTurnExecutor (calls existing sendMessage() pipeline)
+  │     └── emit_event tool (injected per hat turn)
+  ├── BackpressureValidator (parses payload evidence for build.done etc.)
+  ├── LoopSafetyGuards (stale/thrashing/iteration/runtime/required-events checks)
+  ├── OrchestrationSession (tracks state + workspace notes)
+  └── UI: OrchestrationView
 
 Flow:
-  1. User invokes orchestration preset (command palette or slash command)
+  1. User invokes preset (command palette or slash command)
   2. OrchestrationRunner.start(presetNote, promptText)
-  3. Load hats from preset's hat list
+  3. Load hats from preset; register FallbackCoordinator
   4. Publish starting_event
-  5. EventEngine finds matching hat for event
-  6. HatTurnExecutor.executeHatTurn(hat, event, session)
-     a. Assemble system prompt (global + guardrails + hat instructions)
-     b. Build user message from event payload + current vault context
-     c. Execute via ChatOrchestrator.sendMessage()
-     d. If LLM calls emit_event tool: capture event
-     e. Run backpressure gates for the emitted event
-     f. If gates pass: EventEngine.publish(event)
-     g. If gates fail: inject failure feedback, re-run hat
-  7. EventEngine routes to next hat matching the topic
-  8. Repeat until LOOP_COMPLETE or limits exceeded
-  9. Finalize session, update conversation
+  5. EventEngine.getSubscribers(topic) → find matching hat(s)
+  6. HatTurnExecutor.execute(hat, event, session):
+     a. HatSystemPromptBuilder assembles full system prompt
+     b. Build user message from event payload + workspace note context
+     c. Execute via sendMessage() with emit_event tool injected
+     d. If LLM calls emit_event: capture topic + payload
+     e. If no emit_event call: synthesize hat.default_publishes
+     f. BackpressureValidator: intercept build.done etc., validate evidence
+     g. If validation fails: substitute build.blocked
+     h. LoopSafetyGuards: check iteration, runtime, stale, thrashing, required_events
+  7. EventEngine.publish(event) → routes to next matching hat
+  8. Repeat until LOOP_COMPLETE passes all checks, or a safety limit fires
+  9. Finalize session, update workspace notes
 ```
-
----
-
-## UI Approach
-
-### Orchestration Conversation View
-
-Each orchestration session creates a special conversation that shows:
-- **Hat turns as collapsible sections**: each hat's output folded under a header
-- **Event flow visualization**: breadcrumb showing event chain (e.g., `build.start → tasks.ready → review.ready → review.passed`)
-- **Tool calls within hat turns**: using the existing approval UI
-- **Live status indicator**: which hat is currently executing
-- **Session controls**: pause, stop, inject steering input
-
-This could be implemented as:
-- A new `OrchestrationView` (ItemView)
-- Or as special rendering within the existing `ChatView` with a new rendering mode
-
-### Mapping to Existing Chat UI
-
-The simplest approach: each hat turn appears as a separate "message group" in the
-chat view, with the hat name shown as a label. The LLM's output is shown normally,
-tool calls work with the existing approval UI. Events emitted by the LLM are shown
-as special "event" markers in the chat.
-
----
-
-## Hat Notes as "Personas" Extension
-
-An elegant mapping: hats are essentially personas scoped to an orchestration.
-Notor already has a persona system with system prompt overrides. Extending it to
-support "hat mode" (with triggers/publishes) would allow hat notes to use the
-full persona system (provider overrides, model selection per hat).
-
-This means:
-- Each hat can use a different LLM model (e.g., planner uses Sonnet, builder uses Haiku)
-- Each hat can have different auto-approve settings for tools
-- Hats are just personas with additional orchestration metadata
-
----
-
-## Shared State via Vault Notes
-
-Ralph uses shared files (scratchpad, plan, progress) that persist between hat turns.
-In Notor, these map naturally to vault notes:
-- The orchestration session could have a "workspace folder" (e.g., `notor/orchestrations/sessions/{id}/`)
-- Hat instructions reference these via `<include_note>` tags
-- Hats write to these notes using the `write-note` and `replace-in-note` tools
-- Checkpoints protect these files from accidental corruption
-
-This is a huge advantage of the in-process approach: hats write to the Obsidian vault
-directly, with full checkpoint protection and diff view for reviews.
 
 ---
 
@@ -336,57 +328,90 @@ directly, with full checkpoint protection and diff view for reviews.
 
 | Ralph Tool | Notor Equivalent |
 |------------|-----------------|
-| `ralph emit <event> <payload>` | `emit_event` tool (new) |
-| `ralph tools task ensure/start/close` | `manage_task` tool (new) or vault note CRUD |
-| `ralph tools task show` | `read_note` on task note |
-| `ralph tools interact progress` | N/A — could be `send_user_message` for human-in-loop |
-| `ralph tools memory add` | `write-note` to a memories vault note |
-| General shell commands | `execute_command` (already exists) |
-| File read/write | `read-note`, `write-note` (already exist) |
-| Search | `search-vault` (already exists) |
-
-The `emit_event` tool is the most critical new addition.
+| `ralph emit "topic" "payload"` | `emit_event` tool call (new — cleaner mechanism) |
+| `ralph tools task ensure/start/close` | `orchestration_task_ensure/start/close` (new) |
+| `ralph tools task show` | `read_note` on task note (existing) |
+| `ralph tools task list` | `orchestration_task_list` (new) |
+| `ralph tools memory add/search` | `write_note` / `read_note` on memories.md (existing) |
+| `ralph tools interact progress` | `send_user_update` for non-blocking status (new) |
+| `ralph tools interact ask` | `user_input_required` — pauses loop (new, Phase 4) |
+| General shell commands | `execute_command` (existing) |
+| File read/write | `read_note`, `write_note` (existing) |
+| Search | `search_vault` (existing) |
 
 ---
 
-## Implementation Priority
+## Implementation Phases
 
 ### Phase 1: Minimal Viable Orchestration
 
-1. Parse orchestration preset from vault note (hats list + loop config)
-2. Load hat definitions from vault notes (triggers/publishes/instructions)
-3. Build minimal EventEngine (in-memory pub/sub)
-4. Build HatTurnExecutor using existing `sendMessage()` pipeline
-5. Add `emit_event` tool to tool registry (available in orchestration mode only)
-6. Build OrchestrationRunner that wires these together
-7. Minimal UI: shows hat turns in chat view with event markers
+**Goal:** Run a preset end-to-end with correct hat routing and loop termination.
 
-**This Phase 1 would implement the core event loop and allow running presets like code-assist.**
+Components:
+1. `HatNoteParser` — reads hat vault note frontmatter + body
+2. `OrchestrationPresetParser` — reads preset vault note
+3. `OrchestrationEventEngine` — pub/sub with wildcard support
+4. `FallbackCoordinator` — catch-all `*` subscriber to prevent orphaned-event stalls
+5. `HatSystemPromptBuilder` — wraps hat instructions in scaffold template (orientation / execute / verify / report / guardrails)
+6. `HatTurnExecutor` — calls `sendMessage()` with hat system prompt + `emit_event` tool injected
+7. `emit_event` tool — captures topic + payload, signals engine after turn ends
+8. `default_publishes` synthesis — fires when hat turn produces no emit call
+9. Loop safety: max_iterations, max_runtime, stale-loop detection (3× same signature), thrashing detection (3× fallback activations)
+10. `OrchestrationRunner` — the main loop that wires these together
+11. Command palette: "Notor: Run Orchestration" → preset picker → initial prompt
 
-### Phase 2: Task Registry
+**This Phase 1 makes the core loop functional.** Hats activate, emit events, route correctly,
+and the loop terminates cleanly.
 
-1. Add runtime task tracking (vault notes or SQLite)
-2. Add `manage_task` tool (ensure/start/close/show)
-3. Add task list view in UI
+### Phase 2: Session Workspace + Task Registry
 
-### Phase 3: Backpressure Gates
+**Goal:** Hats share state via vault notes; tasks are tracked and enforced.
 
-1. Add gate configuration to preset notes
-2. Run gate commands after hat turn, before event routing
-3. Inject failure feedback into hat on gate failure
+1. `OrchestrationSessionManager` — creates `sessions/{id}/` directory, persists `session.json`
+2. Workspace notes: `context.md`, `plan.md`, `progress.md`, `decisions.md` auto-created
+3. Hat turn logs written to `logs/{n}-{hat}-output.md`
+4. Runtime task vault notes + tools: `orchestration_task_ensure/start/close/list`
+5. LOOP_COMPLETE enforcement: reject if open tasks exist, inject resume context
+6. Persistent memory note: `{notor_dir}/orchestrations/memories.md` (cross-session)
+7. Session recovery: on plugin load, detect incomplete sessions, offer resume
 
-### Phase 4: Interactive Planning Mode
+### Phase 3: Backpressure Evidence Validation
 
-1. Add `user.prompt` event handling in event engine
-2. Pause execution when `user.prompt` emitted
-3. Show prompt in chat UI as a question
-4. Resume on user response
+**Goal:** Build quality gates that can't be skipped.
 
-### Phase 5: Preset Library
+1. `BackpressureValidator` — parse `build.done` payload for evidence strings
+2. Required fields: tests, lint, typecheck, audit, coverage, complexity, duplication
+3. On failure: substitute `build.blocked` with specific failure context
+4. `required_events` enforcement on LOOP_COMPLETE
+5. Configurable: preset can declare which events require evidence and what fields are required
 
-1. Convert ralph's builtin presets to Notor vault format
-2. Add preset browser in settings or command palette
-3. Template system for creating new presets
+### Phase 4: Interactive Orchestration
+
+**Goal:** A hat can pause and ask the user a question.
+
+1. `user.input.required` special event — pauses loop, shows question in chat view
+2. User types response in chat; it's injected as context into the next hat turn
+3. Session state: `active` / `waiting_for_input` / `paused` / `completed`
+4. `orchestration_task_progress` non-blocking update (inform without pausing)
+
+### Phase 5: Lifecycle Hooks
+
+**Goal:** Observable loop phases that integrate with external systems.
+
+1. Hook phase events: `pre/post.loop.start`, `pre/post.iteration.start`, `pre/post.loop.terminate`
+2. Shell commands registered in preset that fire at each phase
+3. Rich JSON payload to hook stdin (session ID, iteration, active hat, etc.)
+4. `on_error: warn | fail | suspend` — suspend blocks the loop pending human approval
+5. Maps to and extends Notor's existing hook system
+
+### Phase 6: Built-in Preset Library
+
+**Goal:** Ship useful presets out of the box.
+
+Presets (ported from Ralph):
+- `code-assist` — TDD implementation: planner → builder → critic → finalizer
+- `research` — research synthesis workflow
+- `review` — code or document review workflow
 
 ---
 
@@ -394,22 +419,19 @@ The `emit_event` tool is the most critical new addition.
 
 ### What's Easier in Notor
 
-- **Vault integration** — hats can read/write any note; no file path gymnastics
-- **Tool approval** — existing rich diff/approval UI automatically applies to orchestration
+- **Vault integration** — hats read/write any note natively; no file path gymnastics
+- **Tool approval** — existing rich diff/approval UI applies to orchestration automatically
 - **Checkpoint protection** — existing checkpoint system protects notes during orchestration
 - **Provider flexibility** — each hat can use a different provider/model via persona
-- **No subprocess management** — no ProcessSupervisor, no log file tailing
-- **Integrated UI** — orchestration visible in Obsidian alongside notes being modified
+- **No subprocess management** — no ProcessSupervisor, log file tailing, PID files
+- **`emit_event` as a tool** — cleaner than writing to a JSONL file and polling
 
 ### What's Harder in Notor
 
-- **Backend adapters** — Ralph has many backends (Claude, Gemini, Codex, Kiro, Amp); Notor
-  uses its provider system which currently supports Anthropic, OpenAI, Bedrock, local
-- **Parallel loops** — Ralph supports git worktree-based parallel execution; Notor is single-process
-- **Backpressure enforcement** — needs new implementation
-- **CLI tool ecosystem** — Ralph has `ralph tools task`, `ralph emit`, etc.; Notor needs new tools
-- **Process survival across restarts** — Ralph processes survive server restart; Notor orchestration
-  is in-memory and would need checkpoint/resume logic to survive plugin reload
+- **Backend adapters** — Ralph supports many CLI backends; Notor uses its provider system
+- **Parallel loops** — Ralph supports git worktree-based parallel execution; out of scope for now
+- **Process survival across restarts** — Ralph subprocesses survive; Notor needs session.json recovery
+- **Hat prompt engineering** — Ralph's instructions are long and detailed; reproducing quality matters
 
 ---
 
@@ -418,17 +440,19 @@ The `emit_event` tool is the most critical new addition.
 ### Low Risk
 - Event engine implementation (well-understood pub/sub)
 - Hat note format (clear YAML frontmatter schema)
-- HatTurnExecutor (thin wrapper around existing sendMessage)
 - `emit_event` tool (straightforward tool addition)
+- `default_publishes` synthesis
 
 ### Medium Risk
-- Orchestration UI (need good UX for showing multi-hat conversation)
-- Task registry design (which storage model is best)
-- Preset migration from YAML to vault notes (format translation)
-- Context management per hat (each hat needs fresh context vs shared context)
+- `HatSystemPromptBuilder` template — needs iteration to produce reliable hat behavior
+- Orchestration UI — need good UX for multi-hat conversation display
+- Task registry + LOOP_COMPLETE enforcement — completion enforcement is subtle
+- Stale/thrashing detection — needs careful implementation to not false-positive
+- Backpressure evidence parsing — the payload format is loose, parsing must be robust
+- Context budgeting — long orchestrations need token budget management per hat turn
 
 ### High Risk
-- Handling very long orchestrations (token budgeting across many hat turns)
-- Backpressure gate reliability (shell commands may be slow or flaky)
-- Debugging failed orchestrations (need good logging/trace)
-- hat prompt engineering (ralph's instructions are very detailed; reproducing them well matters)
+- Hat prompt engineering quality — Ralph's instructions are 200–400 lines; reproducing
+  reliable planner/builder/critic behavior requires careful prompt work
+- Debugging failed orchestrations — need good logging and trace to diagnose stalls
+- Session recovery across plugin reloads — requires reliable session.json state
