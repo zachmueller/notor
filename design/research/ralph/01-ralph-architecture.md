@@ -72,7 +72,11 @@ YAML Config defines:
 9. If valid, the event is published to `EventBus`, which determines the next hat to activate
 10. Repeat until `LOOP_COMPLETE` is emitted or a termination condition fires
 
-**Note:** An `EventParser` also exists that parses XML-style `<event topic="...">payload</event>` tags from CLI output, but per the `process_output()` source: *"Events are ONLY read from the JSONL file written by `ralph emit`. This enforces tool use and prevents confabulation."* The XML parser is used for diagnostics/logging only, not for event routing.
+**Note:** `crates/ralph-core/src/event_parser.rs` serves two distinct purposes:
+1. **Backpressure evidence validation** (primary production role) — parses JSONL event payload text for structured evidence strings (`tests: pass, lint: pass, ...`) on `build.done`, `review.done`, and `verify.passed` events. Called inside `process_events_from_jsonl()` to decide whether to route or substitute events.
+2. **XML-style event scanning** — `EventParser::new().parse(output)` parses `<event topic="...">payload</event>` tags from raw CLI output text. Exposed as `EventLoop::check_ralph_completion()` (available for tooling/tests) but **not called** from the production loop runner. Events are routed exclusively via the JSONL file written by `ralph emit`.
+
+(The `process_output()` function referenced in earlier research no longer exists.)
 
 ### The JSONL File Mechanism
 
@@ -90,12 +94,21 @@ The file is the bridge between LLM output and the routing engine.
 
 ### Event Wire Format (JSONL)
 
+Two schemas coexist in `.ralph/events.jsonl`:
+
+**Agent-written format** (written by `ralph emit`, consumed by `EventReader` for routing):
 ```json
-{"ts":"2025-01-15T10:00:00Z","iteration":3,"hat":"builder","topic":"review.ready","payload":"tests: pass, lint: pass"}
+{"topic":"review.ready","payload":"tests: pass, lint: pass","ts":"2025-01-15T10:00:00Z"}
 ```
 
-Fields: `ts` (ISO timestamp), `iteration` (number), `hat` (emitting hat name),
-`topic` (event name), `triggered` (what caused this), `payload` (plain string — not JSON).
+**Internal log format** (written by `EventLogger` for debugging/post-mortem, after routing):
+```json
+{"ts":"2025-01-15T10:00:00Z","iteration":3,"hat":"builder","topic":"review.ready","triggered":"critic","payload":"tests: pass, lint: pass"}
+```
+
+Agent-format fields: `topic` (event name), `payload` (string or JSON object — both accepted),
+`ts` (ISO timestamp). Internal-format adds: `iteration` (number), `hat` (emitting hat name),
+`triggered` (which hat will be triggered).
 
 ---
 
@@ -104,24 +117,46 @@ Fields: `ts` (ISO timestamp), `iteration` (number), `hat` (emitting hat name),
 **Critical understanding:** Ralph ALWAYS executes as the LLM agent. The prompt builder is
 `HatlessRalph.build_prompt(events_context, active_hats)`. How it varies by mode:
 
+### Prompt construction order (all modes)
+
+The final prompt is assembled by wrapping `build_prompt()` output with several prepended layers:
+
+```
+[<scratchpad>...</scratchpad>]         ← prepend_scratchpad()
+[<ready-tasks>...</ready-tasks>]       ← prepend_ready_tasks() (when tasks.enabled)
+[<memories>...</memories> + ralph-tools skill]  ← prepend_auto_inject_skills()
+[## ROBOT GUIDANCE]                    ← injected when human.guidance events pending
+────────────────────────────────────────  (above: HatlessRalph.build_prompt() output below)
+### 0a. ORIENTATION
+### 0b. SCRATCHPAD
+### STATE MANAGEMENT
+### GUARDRAILS (999+)
+[### AVAILABLE CONTEXT FILES]          ← optional: .ralph/agent/*.md listing
+[## SKILL INDEX]                       ← skill index table (when skills.enabled)
+[## OBJECTIVE]                         ← user's original prompt, persisted every iteration
+[## ROBOT GUIDANCE section]            ← squashed human.guidance payloads
+## PENDING EVENTS                      ← pending event topics and payloads
+[## WORKFLOW]                          ← omitted when a custom hat is active
+[## HATS or ## ACTIVE HAT]             ← topology or active hat instructions
+```
+
 ### Solo Mode (no custom hats)
-Ralph's full workflow sections: ORIENTATION → SCRATCHPAD → STATE MANAGEMENT → GUARDRAILS →
-OBJECTIVE → WORKFLOW (PLAN → IMPLEMENT → VERIFY → COMMIT → EXIT) → event writing instructions.
+`WORKFLOW` sections are shown: `1. Study the prompt` → `2. PLAN` → `3. IMPLEMENT` (one task) →
+`4. VERIFY & COMMIT` (memories mode) or `4. COMMIT` + `5. REPEAT` (scratchpad-only mode).
 
 ### Multi-hat Mode: Ralph Coordinating (no custom hat triggered)
-Same core sections plus `## HATS` with:
+`WORKFLOW` shows `1. PLAN` + `2. DELEGATE`. Followed by `## HATS` with:
 - Full topology table (hat name / triggers / publishes / description)
 - Mermaid flowchart showing event routing
 - `CONSTRAINT:` listing which events Ralph may publish
+- **Fast path**: if `starting_event` is configured and no scratchpad exists yet, the `WORKFLOW`
+  is replaced with a single "publish `{starting_event}` immediately and stop" directive.
 
 ### Multi-hat Mode: Hat Active (custom hat triggered by pending events)
-Same core sections plus `## ACTIVE HAT` with:
+`WORKFLOW` is **skipped** (the hat's instructions replace it). `## ACTIVE HAT` with:
 - `### {hat.name} Instructions` — the hat's raw instructions verbatim
 - `### Event Publishing Guide` — which events to emit and who receives them
 - `### TOOL RESTRICTIONS` — if the hat has `disallowed_tools` configured
-
-All modes include: scratchpad prepended, ready-tasks prepended, memories auto-injected
-(when `memories.inject: auto`), robot guidance (from Telegram), skill index.
 
 ### InstructionBuilder.build_custom_hat()
 
@@ -268,6 +303,10 @@ events:                               # optional metadata about events
 
 **Reserved triggers:** `task.start` and `task.resume` are reserved for Ralph's coordination
 layer. Custom hats may not subscribe to these — doing so causes a config validation error.
+
+**Unique trigger constraint:** Each trigger topic must be claimed by at most one hat. If two
+hats share the same trigger, validation throws `ConfigError::AmbiguousRouting`. This enforces
+deterministic routing — every trigger maps to exactly one hat.
 
 ---
 
@@ -603,3 +642,118 @@ settings:
 collections:
   id, name, description, graphData (React Flow JSON), createdAt, updatedAt
 ```
+
+---
+
+## Rust API Server (`crates/ralph-api/`)
+
+Alongside the Node.js management layer there is a newer **Rust HTTP API server** at
+`crates/ralph-api/`. It is an Axum-based service that implements the same management
+operations (task CRUD, loop management, streaming, collections, planning) as a native
+Rust binary. It exposes a JSON-RPC v1 protocol and WebSocket streaming, with auth modes
+`trusted_local` and `token`.
+
+The ralph-api crate is a parallel/replacement implementation of the Node.js layer. For
+Notor's purposes both layers are equally irrelevant — we implement orchestration natively
+in-process — but it's important to know the repo has two distinct management API surfaces.
+
+---
+
+## Skills System (`crates/ralph-core/src/skill.rs`, `skill_registry.rs`)
+
+Ralph has a two-tier skill injection system that makes tool knowledge available to agents:
+
+1. **Skill index** — a compact table of all available skills, injected into every prompt between
+   `GUARDRAILS` and `OBJECTIVE`. Agents can see skill names and one-line descriptions at a glance.
+2. **On-demand full content** — agents load full skill content with `ralph tools skill load <name>`.
+
+Skills are markdown files discovered from directories configured in `skills.dirs` (default:
+`.claude/skills`). The `ralph-tools` skill is special: it is auto-injected when `memories.enabled`
+or `tasks.enabled` is true, teaching agents the `ralph tools task` and `ralph tools memory` CLI
+commands.
+
+For Notor: the `InstructionBuilder`'s `TOOL DISCIPLINE` block serves a similar purpose —
+injecting per-hat guidance about `emit_event` and workspace note tools.
+
+---
+
+## RObot / Human-in-the-Loop (`crates/ralph-proto/src/robot.rs`, `crates/ralph-core/src/config.rs`)
+
+Ralph has an optional **RObot** subsystem for human-in-the-loop interaction. The feature is
+off by default (`enabled: false`) and opt-in via YAML config.
+
+### Configuration
+
+```yaml
+RObot:
+  enabled: true
+  timeout_seconds: 300                # How long to wait for a human reply (required when enabled)
+  checkin_interval_seconds: 120       # Optional: send a status message every N seconds
+  telegram:
+    bot_token: "..."                  # Or RALPH_TELEGRAM_BOT_TOKEN env var, or OS keychain
+```
+
+Token resolution order (highest to lowest priority):
+1. `RALPH_TELEGRAM_BOT_TOKEN` environment variable
+2. `RObot.telegram.bot_token` in config
+3. OS keychain (service `ralph`, account `telegram-bot-token`)
+
+### The `RobotService` trait (`ralph-proto`)
+
+The event loop holds an `Option<Box<dyn RobotService>>`. The trait is platform-agnostic:
+
+| Method | Purpose |
+|--------|---------|
+| `send_question(payload)` | Forwards an agent's `human.interact` payload to the human |
+| `wait_for_response(events_path)` | Blocks until `human.response` event appears in the events file (or timeout) |
+| `send_checkin(iteration, elapsed, context)` | Sends periodic status update |
+| `timeout_secs()` | Returns configured timeout |
+| `shutdown_flag()` | `Arc<AtomicBool>` for cooperative interrupt |
+| `stop()` | Graceful shutdown |
+
+Currently only the Telegram backend is shipped; the trait is designed to allow Slack or
+other platforms without changing the event loop.
+
+### Interaction flow
+
+1. **Agent asks**: Agent writes a `human.interact` event to the events file.
+2. **Loop detects**: On the next `process_output()` pass, the loop finds the `human.interact`
+   topic in `validated_events`.
+3. **RObot sends**: `robot_service.send_question(payload)` forwards the message to Telegram.
+4. **Loop blocks**: `robot_service.wait_for_response(events_path)` polls the events file
+   until a `human.response` event appears or `timeout_seconds` elapses.
+5. **Response or timeout**:
+   - Response → a `human.response` event is injected into the event bus for the next iteration.
+   - Timeout → a `human.timeout` event is injected instead; the agent handles it gracefully.
+   - Send failure → treated as timeout (loop continues).
+
+### Proactive guidance (`human.guidance`)
+
+Humans can also **push** messages to the loop at any time by writing a `human.guidance` event
+into the events file. These events are handled differently from regular events:
+
+- They are **not** routed through the normal hat topology.
+- Instead, they accumulate in `HatlessRalph.robot_guidance: Vec<String>`.
+- At prompt-build time, `collect_robot_guidance()` emits a `## ROBOT GUIDANCE` section
+  placed between `## OBJECTIVE` and `## PENDING EVENTS`.
+- After injection, `clear_robot_guidance()` resets the buffer.
+
+### Periodic check-ins
+
+When `checkin_interval_seconds` is configured, the event loop calls
+`robot_service.send_checkin(iteration, elapsed, context)` periodically. The `CheckinContext`
+includes `current_hat`, `open_tasks`, `closed_tasks`, and `cumulative_cost_usd` so the human
+sees meaningful status.
+
+### Hooks
+
+The hook system exposes `pre.human.interact` and `post.human.interact` phase-events so
+external scripts can react to blocking interactions.
+
+### For Notor
+
+The RObot subsystem is unlikely to be replicated directly in the Obsidian plugin. Obsidian
+itself is an always-present UI, making Telegram-based interaction redundant. However the
+**pattern** — agents signal blocking questions via a reserved topic, and the orchestrator
+injects responses back as events — is a useful model for any future interactive-pause
+feature.

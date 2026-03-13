@@ -8,6 +8,7 @@
 > **Source layers researched:**
 > - `crates/ralph-core/src/` — Rust orchestration runtime (event loop, InstructionBuilder, hat registry, memory, tasks, lifecycle hooks, backpressure)
 > - `crates/ralph-cli/src/` — Rust CLI entry point and loop runner
+> - `crates/ralph-api/src/` — Newer Rust Axum HTTP API server (parallel to the Node.js layer; JSON-RPC + WebSocket)
 > - `backend/ralph-web-server/src/` — Node.js management layer (runs and monitors the Rust binary; not the orchestration engine)
 
 ---
@@ -24,16 +25,16 @@ Ralph is the reference implementation. We build this natively in Notor, integrat
 
 ---
 
-## The Two Layers of Ralph
+## The Layers of Ralph
 
-**Critical understanding:** The Node.js web server (`backend/ralph-web-server/`) is a *management
-layer* — it runs `ralph` as a subprocess, monitors it, streams logs to a browser UI, and provides
-a tRPC API for a React dashboard. All actual orchestration logic lives in the Rust crates.
+**Critical understanding:** The management API layers are separate from the orchestration engine.
+All actual orchestration logic lives in the Rust crates. There are two management surfaces:
 
 | Layer | What it does | Relevant for Notor? |
 |-------|-------------|---------------------|
 | Rust `ralph-core` + `ralph-cli` | Event loop, hat routing, InstructionBuilder, memory, tasks, hooks, backpressure | Yes — this is what we replicate |
-| Node.js `ralph-web-server` | Process supervision, task queue, WebSocket streaming, React UI | No — replaced by Notor's plugin systems |
+| Rust `ralph-api` (`crates/ralph-api/`) | Newer Axum HTTP API server; JSON-RPC v1 + WebSocket streaming; parallel replacement for the Node.js layer | No — management layer |
+| Node.js `ralph-web-server` | Original process supervision, task queue, tRPC, React UI | No — replaced by Notor's plugin systems |
 
 ---
 
@@ -63,6 +64,8 @@ The runtime:
 1. Fires the starting event (`task.start` or a configured `starting_event`)
 2. **Ralph ALWAYS executes** — custom hats define topology, not separate LLM turns
 3. Assembles **full system prompt** via `HatlessRalph.build_prompt()`:
+   - Every iteration: injects `## OBJECTIVE` (the original user prompt, set once at init);
+     optional `## ROBOT GUIDANCE` (from `human.guidance` events); `## PENDING EVENTS`
    - Coordinating (no hat triggered): shows `## HATS` topology table + Mermaid diagram
    - Hat active: shows `## ACTIVE HAT` section with that hat's instructions inline
 4. LLM runs `ralph emit "topic" "payload"` as a shell command, writing to `.ralph/events.jsonl`
@@ -180,7 +183,17 @@ wraps them in a structural prompt that drives reliable behavior. **In multi-hat 
 is ALWAYS the executing agent.** When a custom hat is triggered, its instructions appear
 as `## ACTIVE HAT` section within Ralph's broader prompt — not as a standalone system prompt.
 
-When Ralph is coordinating (no specific hat triggered), it sees:
+Every prompt (regardless of hat active or not) contains these sections in order:
+```
+0. ORIENTATION / SCRATCHPAD / STATE MANAGEMENT / GUARDRAILS
+[skill index — compact table of available skills]
+## OBJECTIVE       ← the user's original prompt, stored once at init, injected every iteration
+## ROBOT GUIDANCE  ← only present if human.guidance events arrived this iteration
+## PENDING EVENTS  ← events that must be handled this iteration
+## WORKFLOW / HATS or ACTIVE HAT
+```
+
+When Ralph is coordinating (no specific hat triggered), the end of the prompt contains:
 ```
 ## HATS
 | Hat | Triggers On | Publishes | Description |
@@ -192,7 +205,7 @@ flowchart LR
 CONSTRAINT: You MUST only publish events from this list: `build.task`, `review.request`...
 ```
 
-When a custom hat is triggered, Ralph sees:
+When a custom hat is triggered, the end of the prompt contains:
 ```
 ## ACTIVE HAT
 
@@ -431,6 +444,7 @@ Vault-native ports of Ralph's builtin presets: code-assist, research, review.
 | Memory | `.ralph/agent/memories.md` (cross-session) | `memories.md` vault note (cross-session) |
 | Task completion enforcement | Loop rejects LOOP_COMPLETE if tasks open | Same behavior in Phase 2 |
 | Process model | Detached subprocess (survives restart) | In-process (session.json for recovery) |
+| Management API | Two surfaces: Node.js `ralph-web-server` (tRPC/SQLite) + Rust `ralph-api` (Axum/JSON-RPC) | Not applicable — Notor is the UI |
 | Lifecycle hooks | Pre/post loop-phase shell commands | Phase 5 |
 | Git worktrees | LoopsManager (parallel isolated branches) | Not in scope |
 
@@ -440,7 +454,7 @@ Vault-native ports of Ralph's builtin presets: code-assist, research, review.
 
 | Document | Contents |
 |----------|----------|
-| [01-ralph-architecture.md](01-ralph-architecture.md) | Ralph's Rust core: event loop, InstructionBuilder, HatlessRalph, memory, tasks, lifecycle hooks, backpressure evidence validation, eleven termination conditions; plus Node.js management layer |
+| [01-ralph-architecture.md](01-ralph-architecture.md) | Ralph's Rust core: event loop, InstructionBuilder, HatlessRalph, memory, tasks, lifecycle hooks, backpressure evidence validation, 13 termination conditions; plus Node.js management layer, Rust API server, and skills system |
 | [02-notor-architecture.md](02-notor-architecture.md) | Notor's current systems: chat, provider, tools, workflows, personas, hooks |
 | [03-ralph-preset-examples.md](03-ralph-preset-examples.md) | Real preset analysis (code-assist.yml, ralph.yml) with key learnings |
 | [04-integration-analysis.md](04-integration-analysis.md) | Architecture options, recommendation, all ten new concepts, corrected implementation phases, tool mapping, risk assessment |
