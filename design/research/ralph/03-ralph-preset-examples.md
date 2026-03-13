@@ -79,9 +79,11 @@ hats:
   planner / builder / reviewer / finalizer
 ```
 
-**Backpressure gates** — shell commands that must pass before an event can be published.
-This is a quality enforcement mechanism that's automatic and doesn't require the LLM
-to remember to run checks.
+**Backpressure gates** — instruct the LLM which commands to run before emitting a `build.done`
+event. The `gates` section is not executed by the engine; it tells the LLM what to run. The
+engine then validates the evidence text in the emitted `build.done` payload (e.g.,
+`tests: pass, lint: pass`) to confirm the checks were done before routing. If evidence is
+missing or shows failure, the engine substitutes `build.blocked` instead.
 
 ---
 
@@ -185,8 +187,13 @@ Used for project-wide constraints like:
 - "Confidence protocol: >80 proceed; 50-80 document; <50 choose safe default"
 - "YAGNI ruthlessly — no speculative features"
 
-### 6. backpressure.gates: Automated Quality Gates
+### 6. backpressure.gates: Quality Gate Instructions
 
-Shell commands that must pass before any event can be published.
-Enforces quality without relying on the LLM to remember to run checks.
-E.g.: "cargo fmt", "cargo clippy", "cargo test" must all pass.
+The `backpressure.gates` section lists the commands the LLM should run (e.g., `cargo fmt`,
+`cargo clippy`, `cargo test`) before emitting a `build.done` event. The gates are **not
+executed automatically by the engine** — the LLM is responsible for running them as tool calls.
+
+The engine's role is **payload validation**: when `build.done` is emitted, it checks that the
+payload contains the required evidence strings (`tests: pass, lint: pass, typecheck: pass`,
+etc.). If evidence is missing or shows failure, the engine substitutes `build.blocked` instead.
+Quality is enforced through payload text validation, not command execution.

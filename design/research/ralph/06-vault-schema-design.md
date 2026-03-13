@@ -108,7 +108,10 @@ phases automatically.
 - `notor-loop-max-runtime-minutes` — wall-clock time limit
 - `notor-hats` — ordered list of hat note paths
 - `notor-guardrails` — list of constraints injected into every hat's system prompt
-- `notor-backpressure-gates` — shell commands that must pass before event routing
+- `notor-backpressure-gates` — instructs the LLM which commands to run before emitting
+  `build.done`; the engine validates evidence strings in the payload (not executing the
+  commands itself). Notor could optionally execute these commands directly since it has
+  shell execution capability — a design choice distinct from Ralph's approach.
 
 ---
 

@@ -35,7 +35,7 @@ Obsidian plugin, without requiring an external Ralph CLI subprocess.
 | Event loop | New core engine | Does not exist yet |
 | Event pub/sub | N/A | Needs to be built |
 | `ralph emit` shell command | `emit_event` tool call | Different mechanism — see below |
-| InstructionBuilder template | New: hat system-prompt assembly | Hat instructions alone are not enough |
+| HatlessRalph prompt builder | New: HatSystemPromptBuilder | Ralph's runtime builder; hat instructions alone are not enough |
 | HatlessRalph fallback coordinator | New: fallback hat | Needed to handle orphaned events |
 | runtime tasks (`ralph tools task`) | N/A | Notor has no task tracker |
 | `.ralph/agent/memories.md` | Vault note (cross-session) | Maps well to a memories vault note |
@@ -156,13 +156,26 @@ the file-polling indirection. The mechanism is better; the LLM behavior is ident
 
 When called, the tool records the event and signals the engine to route after the hat turn ends.
 
-### 4. HatSystemPromptBuilder (equivalent to Ralph's InstructionBuilder)
+### 4. HatSystemPromptBuilder (equivalent to Ralph's HatlessRalph)
 
 Hat instructions cannot be passed raw to the LLM — they need a structural scaffold.
-Ralph's `InstructionBuilder` produces a template that is responsible for reliable hat
-behavior: orientation, tool discipline, execute, verify, report phases, and guardrails.
+Ralph's **runtime** prompt builder is `HatlessRalph.build_prompt()`, which operates in
+two modes depending on whether a hat is active:
 
-Notor needs an equivalent. The structure:
+- **Coordination mode** (no active hat): injects a `## HATS` topology table (event routing
+  summary across all hats) and a Mermaid diagram, so the agent understands the full workflow
+- **Hat-active mode**: injects an `## ACTIVE HAT` section with the hat's instructions
+  verbatim, plus an Event Publishing Guide listing the hat's allowed `publishes` events
+
+Note: `InstructionBuilder.build_custom_hat()` (the numbered ORIENTATION/EXECUTE/VERIFY/REPORT
+scaffold) is explicitly marked **"backward compatibility and tests"** in the source code — it
+is not the runtime path.
+
+**For Notor's in-process design**, each hat gets its own `sendMessage()` call (unlike Ralph
+where "ralph" always executes). We need our own scaffold. The numbered structure below is a
+reasonable Notor design choice even though it differs from Ralph's runtime approach:
+Ralph wraps hat instructions verbatim; Notor can add more explicit framing since the
+context window starts fresh per hat turn.
 
 ```
 You are {hat.name}. You have fresh context each iteration.
@@ -233,7 +246,7 @@ set Notor needs for safety:
 | `max_iterations` | simple counter check each iteration |
 | `max_runtime` | `Date.now() - startedAt > maxMs` check each iteration |
 | **Stale loop** | If same (topic + payload) seen 3+ times in a row → terminate |
-| **Thrashing** | If fallback coordinator triggers 3+ times in a row → terminate |
+| **Thrashing** | If planner redispatches 3+ already-abandoned tasks (tracked via per-task block counts) → terminate |
 | `default_publishes` synthesis | When hat produces no emit_event call, synthesize the default |
 | `required_events` enforcement | Reject LOOP_COMPLETE until all required events have been seen |
 
@@ -267,8 +280,8 @@ Tools needed: `orchestration_task_ensure`, `orchestration_task_start`,
 ### 9. Persistent Memory Note
 
 Ralph's `.ralph/agent/memories.md` persists cross-session learnings (patterns, decisions,
-fixes, context). The `InstructionBuilder` template explicitly tells every hat to search
-memories before acting in unfamiliar territory and to record fix memories when blocked.
+fixes, context). The hat prompt builder explicitly tells every hat to search memories before acting in
+unfamiliar territory and to record fix memories when blocked.
 
 In Notor: a `{notor_dir}/orchestrations/memories.md` vault note. The `HatSystemPromptBuilder`
 includes analogous instructions about reading and writing this note.
@@ -356,7 +369,7 @@ Components:
 6. `HatTurnExecutor` — calls `sendMessage()` with hat system prompt + `emit_event` tool injected
 7. `emit_event` tool — captures topic + payload, signals engine after turn ends
 8. `default_publishes` synthesis — fires when hat turn produces no emit call
-9. Loop safety: max_iterations, max_runtime, stale-loop detection (3× same signature), thrashing detection (3× fallback activations)
+9. Loop safety: max_iterations, max_runtime, stale-loop detection (3× same signature), thrashing detection (planner redispatching 3+ abandoned tasks)
 10. `OrchestrationRunner` — the main loop that wires these together
 11. Command palette: "Notor: Run Orchestration" → preset picker → initial prompt
 
@@ -398,10 +411,12 @@ and the loop terminates cleanly.
 
 **Goal:** Observable loop phases that integrate with external systems.
 
-1. Hook phase events: `pre/post.loop.start`, `pre/post.iteration.start`, `pre/post.loop.terminate`
+1. Hook phase events: `pre/post.loop.start`, `pre/post.iteration.start`, `pre/post.plan.created`,
+   `pre/post.human.interact`, `pre/post.loop.complete`, `pre/post.loop.error`
 2. Shell commands registered in preset that fire at each phase
 3. Rich JSON payload to hook stdin (session ID, iteration, active hat, etc.)
-4. `on_error: warn | fail | suspend` — suspend blocks the loop pending human approval
+4. `on_error: warn | block | suspend` — `block` returns non-zero and aborts the loop;
+   `suspend` pauses the loop pending human approval
 5. Maps to and extends Notor's existing hook system
 
 ### Phase 6: Built-in Preset Library
