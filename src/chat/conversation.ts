@@ -35,10 +35,10 @@ export class ConversationManager {
 	private messages: Message[] = [];
 
 	/** Callback invoked when a message is added (for persistence, UI updates). */
-	private onMessageAdded?: (message: Message) => void;
+	private onMessageAdded?: (message: Message) => void | Promise<void>;
 
 	/** Callback invoked when the conversation metadata changes. */
-	private onConversationChanged?: (conversation: Conversation) => void;
+	private onConversationChanged?: (conversation: Conversation) => void | Promise<void>;
 
 	constructor(
 		private defaultMode: ConversationMode = "plan"
@@ -49,12 +49,12 @@ export class ConversationManager {
 	// -----------------------------------------------------------------------
 
 	/** Register a callback for when a message is added. */
-	setOnMessageAdded(callback: (message: Message) => void): void {
+	setOnMessageAdded(callback: (message: Message) => void | Promise<void>): void {
 		this.onMessageAdded = callback;
 	}
 
 	/** Register a callback for when conversation metadata changes. */
-	setOnConversationChanged(callback: (conversation: Conversation) => void): void {
+	setOnConversationChanged(callback: (conversation: Conversation) => void | Promise<void>): void {
 		this.onConversationChanged = callback;
 	}
 

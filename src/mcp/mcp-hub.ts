@@ -748,46 +748,48 @@ export class McpHub {
 
 		log.debug("Scheduling reconnect", { serverName, attempt: attempts + 1, delayMs: delay });
 
-		const timer = setTimeout(async () => {
-			this.reconnectTimers.delete(serverName);
+		const timer = setTimeout(() => {
+			void (async () => {
+				this.reconnectTimers.delete(serverName);
 
-			// Check server is still configured and not manually disabled
-			const config = this.settings?.mcp_servers?.[serverName];
-			if (!config || config.disabled) {
-				log.debug("Reconnect cancelled — server disabled or removed", { serverName });
-				return;
-			}
+				// Check server is still configured and not manually disabled
+				const config = this.settings?.mcp_servers?.[serverName];
+				if (!config || config.disabled) {
+					log.debug("Reconnect cancelled — server disabled or removed", { serverName });
+					return;
+				}
 
-			const currentConnection = this.connections.get(serverName);
-			if (currentConnection?.status === "connected") {
-				log.debug("Reconnect cancelled — already connected", { serverName });
-				return;
-			}
+				const currentConnection = this.connections.get(serverName);
+				if (currentConnection?.status === "connected") {
+					log.debug("Reconnect cancelled — already connected", { serverName });
+					return;
+				}
 
-			this.reconnectAttempts.set(serverName, attempts + 1);
+				this.reconnectAttempts.set(serverName, attempts + 1);
 
-			try {
-				await this.connectServer(serverName);
-			} catch (e) {
-				log.warn("Reconnect attempt failed", {
-					serverName,
-					attempt: attempts + 1,
-					error: String(e),
-				});
+				try {
+					await this.connectServer(serverName);
+				} catch (e) {
+					log.warn("Reconnect attempt failed", {
+						serverName,
+						attempt: attempts + 1,
+						error: String(e),
+					});
 
-				// After N consecutive failures, set to error state
-				// (reconnection continues in background)
-				if (attempts + 1 >= RECONNECT_MAX_CONSECUTIVE_FAILURES) {
-					const connection = this.connections.get(serverName);
-					if (connection && connection.status !== "connected") {
-						this.setStatus(
-							connection,
-							"error",
-							`Connection failed after ${attempts + 1} attempts. Retrying in background.`
-						);
+					// After N consecutive failures, set to error state
+					// (reconnection continues in background)
+					if (attempts + 1 >= RECONNECT_MAX_CONSECUTIVE_FAILURES) {
+						const connection = this.connections.get(serverName);
+						if (connection && connection.status !== "connected") {
+							this.setStatus(
+								connection,
+								"error",
+								`Connection failed after ${attempts + 1} attempts. Retrying in background.`
+							);
+						}
 					}
 				}
-			}
+			})();
 		}, delay);
 
 		this.reconnectTimers.set(serverName, timer);

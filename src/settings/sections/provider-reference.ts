@@ -59,7 +59,7 @@ export function renderProviderModelReferenceSection(
 			attr: { "aria-label": `Copy provider identifier: ${providerConfig.type}` },
 		});
 		providerCopyBtn.addEventListener("click", () => {
-			navigator.clipboard.writeText(providerConfig.type).then(() => {
+			void navigator.clipboard.writeText(providerConfig.type).then(() => {
 				providerCopyBtn.textContent = "Copied";
 				setTimeout(() => {
 					providerCopyBtn.textContent = "Copy";
@@ -107,7 +107,7 @@ function renderModelRefItem(
 		attr: { "aria-label": `Copy model identifier: ${modelId}` },
 	});
 	modelCopyBtn.addEventListener("click", () => {
-		navigator.clipboard.writeText(modelId).then(() => {
+		void navigator.clipboard.writeText(modelId).then(() => {
 			modelCopyBtn.textContent = "Copied";
 			setTimeout(() => {
 				modelCopyBtn.textContent = "Copy";

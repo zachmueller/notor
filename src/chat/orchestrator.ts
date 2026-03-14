@@ -1843,7 +1843,7 @@ export class ChatOrchestrator {
 			case "assistant": {
 				const el = this.view?.createAssistantMessagePlaceholder();
 				if (el) {
-					this.view?.finalizeAssistantMessage(el, message);
+					void this.view?.finalizeAssistantMessage(el, message);
 				}
 				break;
 			}

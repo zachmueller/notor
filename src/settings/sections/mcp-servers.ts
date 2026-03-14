@@ -561,12 +561,12 @@ function renderKeyValueRow(
 		});
 	};
 
-	keyInput.addEventListener("change", emitChange);
-	valueInput.addEventListener("change", emitChange);
+	keyInput.addEventListener("change", () => void emitChange());
+	valueInput.addEventListener("change", () => void emitChange());
 	sensitiveCheck.addEventListener("change", () => {
 		valueInput.type = sensitiveCheck.checked ? "password" : "text";
 		valueInput.placeholder = sensitiveCheck.checked ? "••••••••" : "Value";
-		emitChange();
+		void emitChange();
 	});
 	removeBtn.addEventListener("click", async () => {
 		await onRemove();
@@ -596,19 +596,21 @@ function renderToolsSubsection(
 		text: "Refresh tools",
 		cls: "notor-mcp-refresh-btn",
 	});
-	refreshBtn.addEventListener("click", async () => {
-		refreshBtn.disabled = true;
-		refreshBtn.textContent = "Refreshing…";
-		try {
-			await mcpHub?.refreshTools(serverName);
-			new Notice(`Tools refreshed for "${serverName}".`);
-			refresh();
-		} catch (e) {
-			new Notice(`Failed to refresh tools: ${e instanceof Error ? e.message : String(e)}`);
-		} finally {
-			refreshBtn.disabled = false;
-			refreshBtn.textContent = "Refresh tools";
-		}
+	refreshBtn.addEventListener("click", () => {
+		void (async () => {
+			refreshBtn.disabled = true;
+			refreshBtn.textContent = "Refreshing…";
+			try {
+				await mcpHub?.refreshTools(serverName);
+				new Notice(`Tools refreshed for "${serverName}".`);
+				refresh();
+			} catch (e) {
+				new Notice(`Failed to refresh tools: ${e instanceof Error ? e.message : String(e)}`);
+			} finally {
+				refreshBtn.disabled = false;
+				refreshBtn.textContent = "Refresh tools";
+			}
+		})();
 	});
 
 	const conn = mcpHub?.getConnection(serverName);
@@ -658,15 +660,17 @@ function renderToolsSubsection(
 			toolControls.createSpan({ cls: "notor-mcp-hint-badge", text: hintText });
 		}
 
-		classSelect.addEventListener("change", async () => {
-			const val = classSelect.value as "read" | "write";
-			if (!config.toolClassifications) config.toolClassifications = {};
-			if (val === defaultMode) {
-				delete config.toolClassifications[rawName];
-			} else {
-				config.toolClassifications[rawName] = val;
-			}
-			await ctx.saveSettings();
+		classSelect.addEventListener("change", () => {
+			void (async () => {
+				const val = classSelect.value as "read" | "write";
+				if (!config.toolClassifications) config.toolClassifications = {};
+				if (val === defaultMode) {
+					delete config.toolClassifications[rawName];
+				} else {
+					config.toolClassifications[rawName] = val;
+				}
+				await ctx.saveSettings();
+			})();
 		});
 
 		// Auto-approve toggle
@@ -675,14 +679,16 @@ function renderToolsSubsection(
 		autoApproveCheck.checked = isAutoApproved;
 		autoApproveLabel.createSpan({ text: " Auto-approve" });
 
-		autoApproveCheck.addEventListener("change", async () => {
-			if (!config.autoApprove) config.autoApprove = [];
-			if (autoApproveCheck.checked) {
-				if (!config.autoApprove.includes(rawName)) config.autoApprove.push(rawName);
-			} else {
-				config.autoApprove = config.autoApprove.filter((n) => n !== rawName);
-			}
-			await ctx.saveSettings();
+		autoApproveCheck.addEventListener("change", () => {
+			void (async () => {
+				if (!config.autoApprove) config.autoApprove = [];
+				if (autoApproveCheck.checked) {
+					if (!config.autoApprove.includes(rawName)) config.autoApprove.push(rawName);
+				} else {
+					config.autoApprove = config.autoApprove.filter((n) => n !== rawName);
+				}
+				await ctx.saveSettings();
+			})();
 		});
 	}
 }

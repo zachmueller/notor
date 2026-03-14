@@ -302,7 +302,7 @@ export class NotorChatView extends ItemView {
 		// Wire the conversation navigation callback (H-005)
 		this.workflowActivityIndicator.setOnNavigateToConversation(
 			(conversationId: string) => {
-				this.switchToConversation(conversationId);
+				void this.switchToConversation(conversationId);
 			}
 		);
 
@@ -329,7 +329,7 @@ export class NotorChatView extends ItemView {
 	 */
 	async switchToConversation(conversationId: string): Promise<void> {
 		// Ensure the chat panel is visible
-		this.app.workspace.revealLeaf(this.leaf);
+		void this.app.workspace.revealLeaf(this.leaf);
 
 		// Close conversation list if it was open
 		if (this.showConversationList) {
@@ -592,7 +592,7 @@ export class NotorChatView extends ItemView {
 		this.textInputEl.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
-				this.handleSend();
+				void this.handleSend();
 			} else if (e.key === "Backspace") {
 				// When the input is empty and a workflow chip is present, remove the chip
 				const isEmpty = !(this.textInputEl.textContent ?? "").trim();
@@ -642,7 +642,7 @@ export class NotorChatView extends ItemView {
 			attr: { "aria-label": "Send message" },
 		});
 		setIcon(this.sendButtonEl, "send");
-		this.sendButtonEl.addEventListener("click", () => this.handleSend());
+		this.sendButtonEl.addEventListener("click", () => void this.handleSend());
 
 		// Stop button (hidden by default)
 		this.stopButtonEl = buttonWrapper.createEl("button", {
@@ -1410,18 +1410,20 @@ export class NotorChatView extends ItemView {
 			attr: { "aria-label": "Refresh model list" },
 		});
 		refreshBtn.textContent = "↻";
-		refreshBtn.addEventListener("click", async () => {
-			refreshBtn.disabled = true;
-			refreshBtn.textContent = "…";
-			try {
-				await this.onRefreshModels?.();
-				this.refreshModelSelect();
-			} catch {
-				// Fall through to text input
-			} finally {
-				refreshBtn.disabled = false;
-				refreshBtn.textContent = "↻";
-			}
+		refreshBtn.addEventListener("click", () => {
+			void (async () => {
+				refreshBtn.disabled = true;
+				refreshBtn.textContent = "…";
+				try {
+					await this.onRefreshModels?.();
+					this.refreshModelSelect();
+				} catch {
+					// Fall through to text input
+				} finally {
+					refreshBtn.disabled = false;
+					refreshBtn.textContent = "↻";
+				}
+			})();
 		});
 
 		this.buildModelSelect(modelSection);
@@ -1514,10 +1516,10 @@ export class NotorChatView extends ItemView {
 			}
 		};
 
-		refreshBtn.addEventListener("click", () => loadCheckpoints());
+		refreshBtn.addEventListener("click", () => void loadCheckpoints());
 
 		// Load immediately when the section is created
-		loadCheckpoints();
+		void loadCheckpoints();
 	}
 
 	private renderCheckpointItem(container: HTMLElement, cp: Checkpoint): void {
@@ -1546,13 +1548,20 @@ export class NotorChatView extends ItemView {
 			text: "Compare",
 			attr: { "aria-label": "Compare checkpoint with current note" },
 		});
-		compareBtn.addEventListener("click", async () => {
-			const current = await this.onGetCurrentContent?.(cp.note_path);
-			if (current == null) {
-				new Notice(`Note not found: ${cp.note_path}`);
-				return;
-			}
-			this.showCheckpointDiffModal(cp, current);
+		compareBtn.addEventListener("click", () => {
+			void (async () => {
+				try {
+					const current = await this.onGetCurrentContent?.(cp.note_path);
+					if (current == null) {
+						new Notice(`Note not found: ${cp.note_path}`);
+						return;
+					}
+					this.showCheckpointDiffModal(cp, current);
+				} catch (err) {
+					log.error("Failed to compare checkpoint", { err });
+					new Notice("Failed to compare checkpoint");
+				}
+			})();
 		});
 
 		// Restore button
@@ -1561,22 +1570,24 @@ export class NotorChatView extends ItemView {
 			text: "Restore",
 			attr: { "aria-label": "Restore note to this checkpoint" },
 		});
-		restoreBtn.addEventListener("click", async () => {
-			restoreBtn.disabled = true;
-			restoreBtn.textContent = "Restoring…";
-			try {
-				const ok = await this.onRestoreCheckpoint?.(cp.id);
-				if (ok) {
-					new Notice(`Restored ${cp.note_path} to checkpoint from ${this.formatRelativeTime(new Date(cp.timestamp))}`);
-				} else {
+		restoreBtn.addEventListener("click", () => {
+			void (async () => {
+				restoreBtn.disabled = true;
+				restoreBtn.textContent = "Restoring…";
+				try {
+					const ok = await this.onRestoreCheckpoint?.(cp.id);
+					if (ok) {
+						new Notice(`Restored ${cp.note_path} to checkpoint from ${this.formatRelativeTime(new Date(cp.timestamp))}`);
+					} else {
+						new Notice(`Failed to restore checkpoint`);
+					}
+				} catch {
 					new Notice(`Failed to restore checkpoint`);
+				} finally {
+					restoreBtn.disabled = false;
+					restoreBtn.textContent = "Restore";
 				}
-			} catch {
-				new Notice(`Failed to restore checkpoint`);
-			} finally {
-				restoreBtn.disabled = false;
-				restoreBtn.textContent = "Restore";
-			}
+			})();
 		});
 	}
 

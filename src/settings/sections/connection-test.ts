@@ -29,7 +29,7 @@ export function renderConnectionTestButton(
 		.setDesc("Verify that the provider is reachable and credentials are valid.");
 
 	if (providerType === "bedrock") {
-		renderBedrockConnectionTestButton(containerEl, setting, ctx);
+		void renderBedrockConnectionTestButton(containerEl, setting, ctx);
 		return;
 	}
 

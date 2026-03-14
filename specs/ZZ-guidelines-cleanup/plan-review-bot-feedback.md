@@ -190,10 +190,10 @@ Two related lint rules:
 - `void (async () => { await fn(); })()` — async body inside a void-return event handler
 
 **Acceptance Criteria:**
-- [ ] Zero `no-floating-promises` lint errors in `src/`
-- [ ] Zero `no-misused-promises` lint errors in `src/`
-- [ ] Every fix matches the classification in GUIDE-013-R; no site fixed without documented rationale
-- [ ] No regressions in chat send, MCP operations, or settings interactions
+- [x] Zero `no-floating-promises` lint errors in `src/`
+- [x] Zero `no-misused-promises` lint errors in `src/`
+- [x] Every fix matches the classification in GUIDE-013-R; no site fixed without documented rationale
+- [x] No regressions in chat send, MCP operations, or settings interactions
 
 ---
 

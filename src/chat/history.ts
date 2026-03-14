@@ -122,7 +122,7 @@ export class HistoryManager {
 		const next = current.then(operation, operation); // always advance even on error
 		this.writeQueues.set(filePath, next);
 		// Prevent unbounded memory growth: remove the entry once the chain settles
-		next.finally(() => {
+		void next.finally(() => {
 			if (this.writeQueues.get(filePath) === next) {
 				this.writeQueues.delete(filePath);
 			}

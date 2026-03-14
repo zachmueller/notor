@@ -1443,7 +1443,7 @@ export default class NotorPlugin extends Plugin {
 		const existing = workspace.getLeavesOfType(CHAT_VIEW_TYPE);
 		if (existing.length > 0) {
 			// Reveal the existing leaf
-			workspace.revealLeaf(existing[0] as WorkspaceLeaf);
+			void workspace.revealLeaf(existing[0] as WorkspaceLeaf);
 			return;
 		}
 
@@ -1451,7 +1451,7 @@ export default class NotorPlugin extends Plugin {
 		const leaf = workspace.getRightLeaf(false);
 		if (leaf) {
 			await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
-			workspace.revealLeaf(leaf);
+			void workspace.revealLeaf(leaf);
 		}
 	}
 

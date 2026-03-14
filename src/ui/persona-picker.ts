@@ -101,11 +101,11 @@ function renderPersonaSelect(
 			personaManager.deactivatePersona();
 			log.info("Persona deactivated via picker");
 		} else {
-			personaManager.activatePersona(value).then((success) => {
+			void personaManager.activatePersona(value).then((success) => {
 				if (!success) {
 					log.warn("Failed to activate persona from picker", { name: value });
 				}
-			});
+			}).catch((err) => log.error("Persona activation error", { name: value, err }));
 		}
 	});
 }
