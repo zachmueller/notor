@@ -551,7 +551,7 @@ A collection of small, isolated fixes that don't warrant individual tasks.
 
 One occurrence was missed in Phase 1:
 
-- `src/settings/settings-tab.ts:L85` — still using a raw HTML heading element instead of `new Setting(containerEl).setName(...).setHeading()`
+- [x] `src/settings/settings-tab.ts:L85` — still using a raw HTML heading element instead of `new Setting(containerEl).setName(...).setHeading()`
 
 **Fix:** Apply the same pattern as the rest of the file; use the Obsidian `Setting` API.
 
