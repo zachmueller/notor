@@ -95,16 +95,18 @@ Pre-submission audit against the official Obsidian plugin guidelines. Nine viola
 
 **Guideline:** Minimize console logging; configure to show only errors by default.
 
-**Description:** A `console.error(...)` for debugging is left in production code in the Bedrock provider. Route it through the existing structured `Logger` utility so it respects the plugin's log level configuration.
+**Description:** A `console.error(...)` for debugging is left in production code in the Bedrock provider. Route it through the existing structured `Logger` utility instead.
+
+Note: the Logger has no configurable level filtering — it always emits all levels (debug/info/warn/error) to the console, prefixed with `[NOTOR_LOG]` and JSON-formatted for Playwright CDP capture. There is no user-facing log level setting. The value of routing through Logger is consistency and structured output, not filtering.
 
 **Files:**
-- `src/providers/bedrock-provider.ts` — line ~354: replace `console.error("[Notor] Bedrock stream error (full object for debugging):", e)` with an appropriate `logger.error(...)` or `logger.debug(...)` call
+- `src/providers/bedrock-provider.ts` — line ~354: replace `console.error("[Notor] Bedrock stream error (full object for debugging):", e)` with `log.error(...)` using the existing scoped logger for that module
 
 **Dependencies:** None
 
 **Acceptance Criteria:**
 - [ ] No bare `console.error` / `console.log` calls remain in non-logger production code
-- [ ] Bedrock stream error is still observable via the Logger when log level is set appropriately
+- [ ] Bedrock stream error is still observable in the console as a structured `[NOTOR_LOG]` JSON entry
 
 ---
 
@@ -150,10 +152,10 @@ For each replacement, identify the best matching Lucide icon name first (Obsidia
 | Current SVG | Suggested Lucide name |
 |-------------|----------------------|
 | Message list icon | `list` |
-| New conversation | `plus` or `message-square-plus` |
+| New conversation | `message-square-plus` |
 | Settings | `settings` |
-| Send arrow | `send` or `corner-down-left` |
-| Stop square | `square` |
+| Send arrow | `send` |
+| Stop square | `square-x` |
 | Attachment/paperclip | `paperclip` |
 | MCP connected (checkmark circle) | `circle-check` |
 | MCP connecting (loader) | `loader` |
