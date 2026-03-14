@@ -63,8 +63,8 @@ Pre-submission audit against the official Obsidian plugin guidelines. Nine viola
 
 **Acceptance Criteria:**
 - [x] No bare hex color literals remain without a CSS variable wrapper
-- [ ] Colors render correctly in both light and dark Obsidian themes
-- [ ] MCP status dots (connected/connecting/disconnected/error) remain visually distinct across themes
+- [x] Colors render correctly in both light and dark Obsidian themes
+- [x] MCP status dots (connected/connecting/disconnected/error) remain visually distinct across themes
 
 ---
 
