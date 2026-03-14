@@ -418,9 +418,9 @@ Two related lint rules:
 The MCP ecosystem has moved on. Requiring users to run servers that support Streamable HTTP is a reasonable stance and avoids maintaining two transport code paths indefinitely.
 
 **Acceptance Criteria:**
-- [ ] `SSEClientTransport` removed from `src/mcp/mcp-hub.ts`
-- [ ] `StreamableHTTPClientTransport` used at both former SSE sites
-- [ ] Build passes with no type errors
+- [x] `SSEClientTransport` removed from `src/mcp/mcp-hub.ts`
+- [x] `StreamableHTTPClientTransport` used at both former SSE sites
+- [x] Build passes with no type errors
 
 ---
 

@@ -3,7 +3,7 @@
  *
  * Singleton class responsible for:
  * - Connecting/disconnecting MCP servers (ARCH-002)
- * - Transport factory (stdio/SSE/Streamable HTTP)
+ * - Transport factory (stdio/Streamable HTTP)
  * - Credential resolution from secrets manager
  * - Connection status tracking and notifications
  * - Process lifecycle management for stdio
@@ -18,7 +18,6 @@
 import { Platform } from "obsidian";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
@@ -563,7 +562,7 @@ export class McpHub {
 			case "stdio":
 				return this.createStdioTransport(config);
 			case "sse":
-				return this.createSseTransport(config);
+				return this.createStreamableHttpTransport(config);
 			case "streamableHttp":
 				return this.createStreamableHttpTransport(config);
 			default:
@@ -617,21 +616,6 @@ export class McpHub {
 		}
 
 		return transport;
-	}
-
-	/**
-	 * Create an SSE transport.
-	 */
-	private async createSseTransport(config: McpServerConfig): Promise<SSEClientTransport> {
-		if (!config.url) {
-			throw new Error("SSE transport requires a URL.");
-		}
-
-		const headers = await this.resolveHeaders(config);
-
-		return new SSEClientTransport(new URL(config.url), {
-			requestInit: { headers },
-		});
 	}
 
 	/**
