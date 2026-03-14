@@ -116,6 +116,7 @@ export class McpHub {
 		log.info("Initializing McpHub", {
 			totalServers: Object.keys(servers).length,
 			enabledServers: enabledServers.length,
+			serverNames: Object.keys(servers),
 		});
 
 		// Fire off all connections asynchronously — do NOT await
@@ -128,6 +129,21 @@ export class McpHub {
 			});
 		}
 		return Promise.resolve();
+	}
+
+	/**
+	 * Update the settings reference held by McpHub.
+	 *
+	 * Must be called whenever the plugin replaces its settings object
+	 * (e.g. after loadSettings() on new-conversation or after saveSettings()
+	 * adds a newly-configured server). Without this, McpHub would hold a
+	 * stale reference and fail to find servers added after the last reload.
+	 */
+	updateSettings(settings: NotorSettings): void {
+		log.debug("McpHub settings reference updated", {
+			serverNames: Object.keys(settings.mcp_servers ?? {}),
+		});
+		this.settings = settings;
 	}
 
 	// -----------------------------------------------------------------------
@@ -145,11 +161,27 @@ export class McpHub {
 			return;
 		}
 
+		log.debug("connectServer called", {
+			serverName,
+			knownServers: Object.keys(this.settings.mcp_servers ?? {}),
+		});
+
 		const config = this.settings.mcp_servers?.[serverName];
 		if (!config) {
-			log.error("Server config not found", { serverName });
+			log.error("Server config not found", {
+				serverName,
+				knownServers: Object.keys(this.settings.mcp_servers ?? {}),
+			});
 			return;
 		}
+
+		log.debug("Server config found", {
+			serverName,
+			type: config.type,
+			command: config.command,
+			url: config.url,
+			disabled: config.disabled,
+		});
 
 		// Disconnect first if already connected
 		const existing = this.connections.get(serverName);
@@ -177,7 +209,9 @@ export class McpHub {
 
 		try {
 			// 1. Create transport
+			log.debug("Creating transport", { serverName, type: config.type });
 			const transport = await this.createTransport(config);
+			log.debug("Transport created", { serverName, type: config.type });
 
 			// 2. Create MCP Client
 			const client = new Client(
@@ -200,6 +234,7 @@ export class McpHub {
 			};
 
 			// 4. Connect client to transport (performs initialize handshake)
+			log.debug("Starting MCP handshake", { serverName, timeoutMs: HANDSHAKE_TIMEOUT_MS });
 			await client.connect(transport, { timeout: HANDSHAKE_TIMEOUT_MS });
 
 			log.info("MCP handshake complete", {
@@ -584,6 +619,11 @@ export class McpHub {
 			throw new Error("stdio transport requires a command.");
 		}
 
+		log.debug("Resolving stdio environment", {
+			serverName: config.name,
+			configuredEnvKeys: (config.env ?? []).map((e) => e.key),
+		});
+
 		// Resolve environment variables (system + config + secrets)
 		const env = await this.resolveEnvironment(config);
 
@@ -595,10 +635,19 @@ export class McpHub {
 		}
 		Object.assign(mergedEnv, env);
 
+		const effectiveCwd = config.cwd || this.vaultRootPath;
+		log.debug("Spawning stdio process", {
+			serverName: config.name,
+			command: config.command,
+			args: config.args ?? [],
+			cwd: effectiveCwd,
+			extraEnvKeys: Object.keys(env),
+		});
+
 		const transport = new StdioClientTransport({
 			command: config.command,
 			args: config.args ?? [],
-			cwd: config.cwd || this.vaultRootPath,
+			cwd: effectiveCwd,
 			env: mergedEnv,
 			stderr: "pipe",
 		});
@@ -631,6 +680,12 @@ export class McpHub {
 		}
 
 		const headers = await this.resolveHeaders(config);
+
+		log.debug("Creating streamable HTTP transport", {
+			serverName: config.name,
+			url: config.url,
+			headerKeys: Object.keys(headers),
+		});
 
 		return new StreamableHTTPClientTransport(new URL(config.url), {
 			requestInit: { headers },

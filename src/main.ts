@@ -743,6 +743,12 @@ export default class NotorPlugin extends Plugin {
 			);
 		}
 
+		// Phase 4.1: Keep McpHub's settings reference in sync so it can find
+		// newly-added servers without requiring a plugin reload (ARCH-005).
+		if (this._mcpHub) {
+			this._mcpHub.updateSettings(this.settings);
+		}
+
 		// Group F: Re-evaluate listeners and sync scheduler on settings save
 		if (this._vaultEventListenerManager) {
 			this._vaultEventListenerManager.evaluateListeners();
@@ -1216,6 +1222,11 @@ export default class NotorPlugin extends Plugin {
 				);
 				if (this._orchestrator) {
 					this._orchestrator.updateSettings(this.settings);
+				}
+				// Phase 4.1: Keep McpHub settings reference in sync after reload
+				// so servers configured after the last reload can still be found.
+				if (this._mcpHub) {
+					this._mcpHub.updateSettings(this.settings);
 				}
 
 				return orchestrator.newConversation();
