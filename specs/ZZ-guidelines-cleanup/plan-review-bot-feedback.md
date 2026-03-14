@@ -115,6 +115,8 @@ const response = await fetch(url, { ... });
 - Replace each `if (confirm("..."))` block with `new ConfirmModal(this.app, title, message, () => { /* moved logic */ }).open()`
 - Ensure no code that was previously guarded by `confirm()` now runs unconditionally
 
+**Research:** `specs/ZZ-guidelines-cleanup/research/GUIDE-012-confirm-modal-audit.md`
+
 **Acceptance Criteria:**
 - [ ] No `confirm()` calls remain in `src/`
 - [ ] Delete-server and remove-attachment flows show an Obsidian modal instead of browser dialog
