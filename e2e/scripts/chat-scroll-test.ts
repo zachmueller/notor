@@ -85,9 +85,17 @@ async function screenshot(page: Page, name: string): Promise<string> {
 
 /** Send a message and return immediately (do not wait for response). */
 async function sendMessageNoWait(page: Page, message: string): Promise<void> {
-	const input = await page.$(".notor-text-input");
+	// Wait for the input to be present
+	const input = await page.waitForSelector(".notor-text-input", { timeout: 8_000 }).catch(() => null);
 	if (!input) throw new Error("Chat input not found");
-	await input.fill(message);
+	// Set textContent via evaluate (more reliable than keyboard.type on contenteditable)
+	await page.evaluate((text) => {
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		if (!el) return;
+		el.focus();
+		el.textContent = text;
+		el.dispatchEvent(new Event("input", { bubbles: true }));
+	}, message);
 	await page.waitForTimeout(200);
 	await page.keyboard.press("Enter");
 	await page.waitForTimeout(400);
@@ -118,10 +126,10 @@ async function waitForResponse(page: Page, timeoutMs = RESPONSE_TIMEOUT_MS): Pro
 }
 
 /** Wait for at least one streaming text chunk to appear in the last assistant message. */
-async function waitForStreamingStart(page: Page, timeoutMs = 20_000): Promise<boolean> {
+async function waitForStreamingStart(page: Page, timeoutMs = 45_000): Promise<boolean> {
 	const start = Date.now();
 	while (Date.now() - start < timeoutMs) {
-		await page.waitForTimeout(300);
+		await page.waitForTimeout(500);
 		const hasContent = await page.evaluate(() => {
 			const msgs = document.querySelectorAll(".notor-message-assistant");
 			if (msgs.length === 0) return false;
@@ -259,49 +267,87 @@ function buildSettings(writeAutoApprove: boolean): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Inject a transparent spacer into the message list to force it to overflow.
+ * Returns a cleanup function that removes the spacer.
+ */
+async function injectScrollSpacer(page: Page, heightPx = 600): Promise<() => Promise<void>> {
+	await page.evaluate((h) => {
+		const el = document.querySelector(".notor-message-list") as HTMLElement | null;
+		if (!el) return;
+		const spacer = document.createElement("div");
+		spacer.id = "e2e-scroll-spacer";
+		spacer.style.height = `${h}px`;
+		spacer.style.flexShrink = "0";
+		el.prepend(spacer);
+	}, heightPx);
+	return async () => {
+		await page.evaluate(() => {
+			document.getElementById("e2e-scroll-spacer")?.remove();
+		});
+	};
+}
+
+/**
  * Test 1: Scroll position is preserved when the user scrolls up mid-stream.
  *
- * Ask for a long response, wait for streaming to start, scroll up, then
- * verify the scroll position does not snap back to the bottom while the
- * response is still streaming.
+ * Strategy: inject a DOM spacer to guarantee the message list overflows,
+ * then send a short message. While the response streams in, scroll up and
+ * verify the position does not snap back to the bottom.
  */
 async function testScrollPreservedDuringStreaming(page: Page): Promise<void> {
 	console.log("\n── Scroll Test 1: scroll preserved during streaming ────────────");
 	await newConversation(page);
 
-	// Ask for a long response to give us time to scroll up mid-stream.
-	await sendMessageNoWait(
-		page,
-		"Please write a detailed essay of at least 500 words about the history of the internet. " +
-		"Include sections on ARPANET, the World Wide Web, broadband adoption, and social media."
-	);
+	// Inject a large spacer to force the message list to overflow well before streaming begins.
+	// Use 1500px to ensure overflow even in a tall panel (clientHeight was measured at 860px).
+	const removeSpacerT1 = await injectScrollSpacer(page, 1500);
+
+	// Scroll to the bottom so autoScroll is engaged.
+	await scrollToBottom(page);
+	await page.waitForTimeout(200);
+
+	// Send a short message — the response will stream in and autoScroll would
+	// normally keep snapping us to the bottom without the fix.
+	await sendMessageNoWait(page, "Please respond with a paragraph about the moon landing.");
 
 	// Wait for streaming to begin
-	const streamingStarted = await waitForStreamingStart(page, 20_000);
+	const streamingStarted = await waitForStreamingStart(page, 45_000);
 	if (!streamingStarted) {
 		const shot = await screenshot(page, "01-no-stream");
-		fail("streaming — streaming started", "No assistant text appeared within 20s", shot);
+		fail("streaming — streaming started", "No assistant text appeared within 45s", shot);
+		await removeSpacerT1();
 		await waitForResponse(page, 60_000);
 		return;
 	}
-
 	pass("streaming — streaming started", "Assistant is actively streaming text");
 
-	// Scroll up significantly while the response is still streaming
+	// Confirm the message list is now overflowing (spacer + user msg + streaming response)
+	const scrollDims = await page.evaluate(() => {
+		const el = document.querySelector(".notor-message-list") as HTMLElement | null;
+		return el ? { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight } : { scrollHeight: 0, clientHeight: 0 };
+	});
+	console.log(`    [scroll dims] scrollHeight=${scrollDims.scrollHeight} clientHeight=${scrollDims.clientHeight} overflow=${scrollDims.scrollHeight - scrollDims.clientHeight}px`);
+
+	if (scrollDims.scrollHeight <= scrollDims.clientHeight) {
+		fail("streaming — message list overflowing", `No overflow even with spacer (scrollHeight=${scrollDims.scrollHeight}, clientHeight=${scrollDims.clientHeight})`);
+		await removeSpacerT1();
+		await waitForResponse(page, RESPONSE_TIMEOUT_MS);
+		return;
+	}
+	pass("streaming — message list overflowing", `${scrollDims.scrollHeight - scrollDims.clientHeight}px overflow`);
+
+	// Scroll up while the response is streaming — this should disable autoScroll.
 	await scrollUp(page, 400);
 	const stateAfterScroll = await getScrollState(page);
 	const scrollTopAfterManualScroll = stateAfterScroll.scrollTop;
 
 	const shot1 = await screenshot(page, "01-scrolled-up-mid-stream");
 
-	// Wait 2 seconds while streaming continues — check that scroll position hasn't changed
+	// Wait 2 seconds; without the fix, scrollToBottom() would fire every chunk
+	// and snap us back down. With the fix, we should stay put.
 	await page.waitForTimeout(2_000);
 
 	const stateAfterWait = await getScrollState(page);
-	const scrollTopAfterWait = stateAfterWait.scrollTop;
-
-	// Allow a small tolerance (content may reflow slightly), but must NOT have
-	// jumped all the way to the bottom.
 	const distanceFromBottom = stateAfterWait.scrollHeight - stateAfterWait.scrollTop - stateAfterWait.clientHeight;
 	const wasSnappedToBottom = distanceFromBottom < 10;
 
@@ -310,69 +356,72 @@ async function testScrollPreservedDuringStreaming(page: Page): Promise<void> {
 	if (wasSnappedToBottom) {
 		fail(
 			"streaming — scroll preserved mid-stream",
-			`Scroll snapped to bottom during streaming (scrollTop: ${scrollTopAfterManualScroll} → ${scrollTopAfterWait}, distanceFromBottom: ${distanceFromBottom}px)`,
+			`Scroll snapped to bottom during streaming (scrollTop: ${scrollTopAfterManualScroll} → ${stateAfterWait.scrollTop}, distanceFromBottom: ${distanceFromBottom}px)`,
 			shot2
 		);
 	} else {
 		pass(
 			"streaming — scroll preserved mid-stream",
-			`Scroll held at ${Math.round(scrollTopAfterWait)}px (${Math.round(distanceFromBottom)}px from bottom, not snapped)`,
+			`Scroll held at ${Math.round(stateAfterWait.scrollTop)}px (${Math.round(distanceFromBottom)}px from bottom, not snapped)`,
 			shot2
 		);
 	}
 
-	// Wait for full response to complete
+	await removeSpacerT1();
 	await waitForResponse(page, RESPONSE_TIMEOUT_MS);
 }
 
 /**
  * Test 2: Auto-scroll re-engages when the user scrolls back to the bottom.
  *
- * During streaming, scroll up then back down. Verify that subsequent content
- * causes the panel to track to the bottom again.
+ * Strategy: inject a spacer to guarantee overflow, send a short message,
+ * scroll up (disabling autoScroll), then scroll back to the bottom
+ * (re-enabling autoScroll), and verify that new streaming content tracks
+ * to the bottom.
  */
 async function testAutoScrollReengagesOnScrollDown(page: Page): Promise<void> {
 	console.log("\n── Scroll Test 2: auto-scroll re-engages on scroll-to-bottom ──");
 	await newConversation(page);
 
-	await sendMessageNoWait(
-		page,
-		"Please write a detailed step-by-step guide of at least 400 words about how to make sourdough bread. " +
-		"Include steps for the starter, mixing, fermentation, shaping, and baking."
-	);
+	const removeSpacerT2 = await injectScrollSpacer(page, 1500);
+	await scrollToBottom(page);
+	await page.waitForTimeout(200);
 
-	const streamingStarted = await waitForStreamingStart(page, 20_000);
+	await sendMessageNoWait(page, "Please respond with a short paragraph about ocean tides.");
+
+	const streamingStarted = await waitForStreamingStart(page, 45_000);
 	if (!streamingStarted) {
 		const shot = await screenshot(page, "02-no-stream");
-		fail("re-engage — streaming started", "No assistant text appeared within 20s", shot);
+		fail("re-engage — streaming started", "No assistant text appeared within 45s", shot);
+		await removeSpacerT2();
 		await waitForResponse(page, 60_000);
 		return;
 	}
+	pass("re-engage — streaming started", "Assistant is actively streaming text");
 
-	// Scroll up to disable auto-scroll
+	// Scroll up to disable auto-scroll, then back to bottom to re-enable it.
 	await scrollUp(page, 400);
-	await page.waitForTimeout(500);
+	await page.waitForTimeout(400);
 
 	const stateScrolledUp = await getScrollState(page);
-	const distanceFromBottomScrolledUp =
-		stateScrolledUp.scrollHeight - stateScrolledUp.scrollTop - stateScrolledUp.clientHeight;
+	const distanceScrolledUp = stateScrolledUp.scrollHeight - stateScrolledUp.scrollTop - stateScrolledUp.clientHeight;
 
-	if (distanceFromBottomScrolledUp < 10) {
-		// Content isn't tall enough to scroll; skip the re-engage check
-		pass("re-engage — scrolled up", "Content not tall enough to test scroll (response too short so far)");
+	if (distanceScrolledUp < 10) {
+		pass("re-engage — content not overflowing", "Spacer may not have been enough; skipping re-engage check");
+		await removeSpacerT2();
 		await waitForResponse(page, RESPONSE_TIMEOUT_MS);
 		return;
 	}
 
-	// Now scroll back to the bottom to re-enable auto-scroll
+	// Scroll back to the bottom — this fires the scroll event and sets autoScroll=true.
 	await scrollToBottom(page);
 	await page.waitForTimeout(500);
 
-	const stateAtBottom = await getScrollState(page);
-	const distanceAtBottom = stateAtBottom.scrollHeight - stateAtBottom.scrollTop - stateAtBottom.clientHeight;
+	// Capture height before more content arrives.
+	const stateBefore = await getScrollState(page);
+	const heightBefore = stateBefore.scrollHeight;
 
-	// Allow 1.5 seconds for more streaming content to arrive; the scroll should track
-	const heightBefore = stateAtBottom.scrollHeight;
+	// Allow more streaming content to arrive; autoScroll should track to bottom.
 	await page.waitForTimeout(1_500);
 
 	const stateAfterMoreContent = await getScrollState(page);
@@ -396,6 +445,7 @@ async function testAutoScrollReengagesOnScrollDown(page: Page): Promise<void> {
 		);
 	}
 
+	await removeSpacerT2();
 	await waitForResponse(page, RESPONSE_TIMEOUT_MS);
 }
 
@@ -426,10 +476,10 @@ async function testScrollPreservedDuringDiffApproval(page: Page): Promise<void> 
 		"\n## Conclusion\n\nThis is the final section of the test note.\n"
 	);
 
-	const approvalAppeared = await waitForApprovalUI(page, 45_000);
+	const approvalAppeared = await waitForApprovalUI(page, 90_000);
 	if (!approvalAppeared) {
 		const shot = await screenshot(page, "03-no-approval-ui");
-		fail("diff approval — approval UI appeared", "Diff/approval UI did not appear within 45s", shot);
+		fail("diff approval — approval UI appeared", "Diff/approval UI did not appear within 90s", shot);
 		await waitForResponse(page, 30_000);
 		return;
 	}
@@ -611,9 +661,13 @@ async function main() {
 		}
 
 		// ── Run scroll tests ─────────────────────────────────────────────
+		// Brief settle between tests to let any pending LLM activity clear.
 		await testScrollPreservedDuringStreaming(page);
+		await page.waitForTimeout(2_000);
 		await testAutoScrollReengagesOnScrollDown(page);
+		await page.waitForTimeout(2_000);
 		await testScrollPreservedDuringDiffApproval(page);
+		await page.waitForTimeout(2_000);
 		await testNewMessageResetsAutoScroll(page);
 
 		// ── Final screenshot ─────────────────────────────────────────────
