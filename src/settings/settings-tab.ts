@@ -50,12 +50,25 @@ export class NotorSettingTab extends PluginSettingTab {
 	/** Container element for the persona auto-approve section. */
 	private personaAutoApproveSectionEl: HTMLElement | null = null;
 
+	/** Cleanup functions registered by section renderers (e.g. McpHub subscriptions). */
+	private cleanupFns: Array<() => void> = [];
+
 	constructor(app: App, plugin: NotorPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
+	private runCleanups(): void {
+		for (const fn of this.cleanupFns) fn();
+		this.cleanupFns = [];
+	}
+
+	hide(): void {
+		this.runCleanups();
+	}
+
 	display(): void {
+		this.runCleanups();
 		const { containerEl } = this;
 		containerEl.empty();
 
@@ -65,6 +78,7 @@ export class NotorSettingTab extends PluginSettingTab {
 			settings: this.plugin.settings,
 			saveSettings: () => this.plugin.saveSettings(),
 			redisplay: () => this.display(),
+			addCleanup: (fn) => this.cleanupFns.push(fn),
 		};
 
 		containerEl.createEl("h1", { text: "Notor" });

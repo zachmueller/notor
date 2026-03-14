@@ -160,6 +160,11 @@ export function renderMcpServersSection(
 	serverListEl.empty();
 	renderServerList(serverListEl, ctx, mcpHub, refresh);
 
+	// Subscribe to live status changes so icons update as connections resolve.
+	if (mcpHub) {
+		ctx.addCleanup?.(mcpHub.onStatusChange(refresh));
+	}
+
 	// "Add server" form section
 	const addServerFormEl = containerEl.createDiv({ cls: "notor-mcp-add-server" });
 	renderAddServerForm(addServerFormEl, ctx, mcpHub, refresh);

@@ -19,4 +19,6 @@ export interface SettingsContext {
 	settings: NotorSettings;
 	saveSettings: () => Promise<void>;
 	redisplay: () => void;
+	/** Register a teardown function to be called when the settings tab hides or re-displays. */
+	addCleanup?: (fn: () => void) => void;
 }
