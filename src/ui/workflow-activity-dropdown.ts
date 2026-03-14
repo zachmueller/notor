@@ -111,7 +111,7 @@ export class WorkflowActivityDropdown {
 
 		// Position relative to the anchor — append to the document body
 		// so the dropdown is not clipped by overflow: hidden on parent containers.
-		document.body.appendChild(this.dropdownEl);
+		activeDocument.body.appendChild(this.dropdownEl);
 		this.positionDropdown(anchorEl);
 
 		// Register live update callback
@@ -140,8 +140,8 @@ export class WorkflowActivityDropdown {
 
 		// Use setTimeout to avoid the opening click from immediately closing
 		setTimeout(() => {
-			document.addEventListener("click", this.outsideClickHandler!);
-			document.addEventListener("keydown", this.escapeHandler!);
+			activeDocument.addEventListener("click", this.outsideClickHandler!);
+			activeDocument.addEventListener("keydown", this.escapeHandler!);
 		}, 0);
 
 		log.debug("Workflow activity dropdown opened");
@@ -157,12 +157,12 @@ export class WorkflowActivityDropdown {
 		}
 
 		if (this.outsideClickHandler) {
-			document.removeEventListener("click", this.outsideClickHandler);
+			activeDocument.removeEventListener("click", this.outsideClickHandler);
 			this.outsideClickHandler = null;
 		}
 
 		if (this.escapeHandler) {
-			document.removeEventListener("keydown", this.escapeHandler);
+			activeDocument.removeEventListener("keydown", this.escapeHandler);
 			this.escapeHandler = null;
 		}
 
@@ -372,13 +372,13 @@ export class WorkflowActivityDropdown {
 			left = 8;
 		}
 
-		const viewportWidth = window.innerWidth;
+		const viewportWidth = activeWindow.innerWidth;
 		if (left + 300 > viewportWidth) {
 			left = viewportWidth - 308;
 		}
 
 		// If the dropdown would go below the viewport, position above the anchor
-		const viewportHeight = window.innerHeight;
+		const viewportHeight = activeWindow.innerHeight;
 		if (top + 300 > viewportHeight) {
 			top = anchorRect.top - 4; // will be adjusted by max-height CSS
 			this.dropdownEl.style.maxHeight = `${anchorRect.top - 16}px`;

@@ -233,12 +233,12 @@ import { ..., activeDocument, activeWindow } from 'obsidian';
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] `activeDocument` and `activeWindow` imported from `obsidian`
-- [ ] `document.body.appendChild` → `activeDocument.body.appendChild` (line ~114)
-- [ ] Both `document.addEventListener` calls → `activeDocument.addEventListener` (lines ~143–144)
-- [ ] Both `document.removeEventListener` calls → `activeDocument.removeEventListener` (lines ~160, ~165)
-- [ ] `window.innerWidth` → `activeWindow.innerWidth` (line ~375)
-- [ ] `window.innerHeight` → `activeWindow.innerHeight` (line ~381)
+- [x] `activeDocument` and `activeWindow` available as Obsidian global ambient variables (no import needed — declared via `declare global`)
+- [x] `document.body.appendChild` → `activeDocument.body.appendChild` (line ~114)
+- [x] Both `document.addEventListener` calls → `activeDocument.addEventListener` (lines ~143–144)
+- [x] Both `document.removeEventListener` calls → `activeDocument.removeEventListener` (lines ~160, ~165)
+- [x] `window.innerWidth` → `activeWindow.innerWidth` (line ~375)
+- [x] `window.innerHeight` → `activeWindow.innerHeight` (line ~381)
 - [ ] Dropdown renders and positions correctly in the main window
 - [ ] No regressions to workflow activity dropdown open/close and live-update behavior
 
