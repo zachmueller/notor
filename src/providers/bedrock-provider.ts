@@ -56,6 +56,9 @@ import { fromIni } from "@aws-sdk/credential-providers";
 
 const log = logger("BedrockProvider");
 
+/** Recursive JSON document type — mirrors @smithy/types DocumentType for AWS SDK compatibility. */
+type DocumentType = null | boolean | number | string | DocumentType[] | { [key: string]: DocumentType };
+
 /** Default AWS region. */
 const DEFAULT_REGION = "us-east-1";
 
@@ -87,8 +90,7 @@ function toBedrockMessages(
 						toolUse: {
 							toolUseId: msg.tool_call.id,
 							name: msg.tool_call.tool_name,
-							// eslint-disable-next-line @typescript-eslint/no-explicit-any
-							input: msg.tool_call.parameters as any,
+							input: msg.tool_call.parameters as unknown as DocumentType,
 						},
 					},
 				],
@@ -137,8 +139,7 @@ function toBedrockToolConfig(
 				name: tool.name,
 				description: tool.description,
 				inputSchema: {
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					json: tool.input_schema as any,
+					json: tool.input_schema as unknown as DocumentType,
 				},
 			},
 		})),
@@ -458,14 +459,13 @@ export class BedrockProvider implements LLMProvider {
 		try {
 			// BedrockClient.send() returns ServiceOutputTypes (a broad union type).
 			// We cast via unknown to the concrete output type we know this command returns.
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const rawResult: any = await client.send(
+			const rawResult = await client.send(
 				new ListInferenceProfilesCommand({
 					typeEquals: "SYSTEM_DEFINED",
 					...(token ? { nextToken: token } : {}),
 				})
-			);
-			return rawResult as ListInferenceProfilesCommandOutput;
+			) as unknown as ListInferenceProfilesCommandOutput;
+			return rawResult;
 		} catch (e: unknown) {
 			const errMsg = e instanceof Error ? e.message : String(e);
 			const errName =

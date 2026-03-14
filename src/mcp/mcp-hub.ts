@@ -457,8 +457,7 @@ export class McpHub {
 	 */
 	private extractToolResult(
 		namespacedName: string,
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		result: any
+		result: { [key: string]: unknown; content?: Array<{ type: string; text?: string }>; isError?: boolean }
 	): ToolResult {
 		const textParts: string[] = [];
 		let omittedImages = 0;
@@ -467,7 +466,7 @@ export class McpHub {
 		const content = result.content ?? [];
 		for (const item of content) {
 			if (item.type === "text") {
-				textParts.push(item.text);
+				textParts.push(item.text ?? "");
 			} else if (item.type === "image") {
 				omittedImages++;
 			} else if (item.type === "resource") {

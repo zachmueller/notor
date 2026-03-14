@@ -365,7 +365,7 @@ export function readExternalFile(
 	filename: string,
 	thresholdMb: number
 ): ExternalFileReadResult {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- fs must be loaded via require(); static import is unavailable in Obsidian's plugin bundle
 	const fs = require("fs") as typeof import("fs");
 
 	try {

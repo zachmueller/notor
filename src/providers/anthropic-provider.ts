@@ -25,6 +25,15 @@ import { logger } from "../utils/logger";
 
 const log = logger("AnthropicProvider");
 
+/** Minimal shape of Anthropic SSE event data payloads (raw JSON, no SDK dependency). */
+interface AnthropicEventData {
+	content_block?: { type?: string; id?: string; name?: string };
+	delta?: { type?: string; text?: string; partial_json?: string };
+	index?: number;
+	usage?: { input_tokens?: number; output_tokens?: number };
+	error?: { message?: string };
+}
+
 /** Default Anthropic API endpoint. */
 const DEFAULT_ENDPOINT = "https://api.anthropic.com";
 
@@ -292,8 +301,7 @@ export class AnthropicProvider implements LLMProvider {
 	 */
 	private *handleAnthropicEvent(
 		eventType: string,
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		data: any
+		data: AnthropicEventData
 	): Iterable<StreamChunk> {
 		switch (eventType) {
 			case "content_block_start": {
@@ -301,8 +309,8 @@ export class AnthropicProvider implements LLMProvider {
 				if (block?.type === "tool_use") {
 					yield {
 						type: "tool_call_start",
-						id: block.id,
-						tool_name: block.name,
+						id: block.id ?? "",
+						tool_name: block.name ?? "",
 					};
 				}
 				break;
@@ -311,12 +319,12 @@ export class AnthropicProvider implements LLMProvider {
 			case "content_block_delta": {
 				const delta = data.delta;
 				if (delta?.type === "text_delta") {
-					yield { type: "text_delta", text: delta.text };
+					yield { type: "text_delta", text: delta.text ?? "" };
 				} else if (delta?.type === "input_json_delta") {
 					yield {
 						type: "tool_call_delta",
 						id: data.index?.toString() ?? "0",
-						partial_json: delta.partial_json,
+						partial_json: delta.partial_json ?? "",
 					};
 				}
 				break;

@@ -219,9 +219,9 @@ Two related lint rules:
 - For `no-explicit-any` directives that cannot be suppressed: replace `any` with the narrowest appropriate type (`unknown`, a discriminated union, or the specific SDK type)
 
 **Acceptance Criteria:**
-- [ ] All `eslint-disable` comments include a description after `--`
-- [ ] No `no-explicit-any` disables remain; underlying types are explicit
-- [ ] Build passes with no type errors
+- [x] All `eslint-disable` comments include a description after `--`
+- [x] No `no-explicit-any` disables remain; underlying types are explicit
+- [x] Build passes with no type errors
 
 ---
 
