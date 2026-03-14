@@ -173,7 +173,7 @@ export class LogCollector {
 	 * Write a summary file with stats and recent errors for quick Cline review.
 	 * This is the primary file Cline reads to understand plugin state.
 	 */
-	async writeSummary(): Promise<string> {
+	writeSummary(): string {
 		const summaryPath = path.join(this.options.outputDir, "latest-summary.json");
 
 		const errors = this.getLogsByLevel("error");

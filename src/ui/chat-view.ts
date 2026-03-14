@@ -434,7 +434,7 @@ export class NotorChatView extends ItemView {
 	// Lifecycle
 	// -----------------------------------------------------------------------
 
-	async onOpen(): Promise<void> {
+	onOpen(): Promise<void> {
 		const container = this.containerEl.children[1] as HTMLElement;
 		container.empty();
 		container.addClass("notor-chat-container");
@@ -448,9 +448,10 @@ export class NotorChatView extends ItemView {
 		this.initActivityIndicator();
 
 		log.info("Chat view opened");
+		return Promise.resolve();
 	}
 
-	async onClose(): Promise<void> {
+	onClose(): Promise<void> {
 		this.abortController?.abort();
 
 		// H-002: Clean up workflow activity indicator DOM and callbacks
@@ -462,6 +463,7 @@ export class NotorChatView extends ItemView {
 		this.mcpStatusIndicator = undefined;
 
 		log.info("Chat view closed");
+		return Promise.resolve();
 	}
 
 	// -----------------------------------------------------------------------

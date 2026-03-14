@@ -88,11 +88,11 @@ export function renderConnectionTestButton(
  * displays the AWS Account ID and caller ARN in an Obsidian Notice and inline
  * status element so the user can confirm they are authenticated correctly.
  */
-async function renderBedrockConnectionTestButton(
+function renderBedrockConnectionTestButton(
 	containerEl: HTMLElement,
 	setting: import("obsidian").Setting,
 	ctx: SettingsContext
-): Promise<void> {
+): void {
 	let statusEl: HTMLElement | null = null;
 
 	setting

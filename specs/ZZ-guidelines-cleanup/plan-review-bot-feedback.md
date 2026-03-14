@@ -322,9 +322,9 @@ Two related lint rules:
 - Check for interface/base class method signatures that declare the method as returning `Promise<T>` — if the interface requires `Promise<T>`, keep `async` or return `Promise.resolve(value)` explicitly
 
 **Acceptance Criteria:**
-- [ ] Zero `require-await` lint errors for the listed methods
-- [ ] Return type annotations updated where needed
-- [ ] Build passes; callers that await these methods still compile correctly
+- [x] Zero `require-await` lint errors for the listed methods
+- [x] Return type annotations updated where needed
+- [x] Build passes; callers that await these methods still compile correctly
 
 ---
 

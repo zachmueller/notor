@@ -105,7 +105,7 @@ export class McpHub {
 	 * Non-blocking — fires off connections asynchronously so plugin load
 	 * completes immediately.
 	 */
-	async initialize(settings: NotorSettings, secretStorage: SecretStorage): Promise<void> {
+	initialize(settings: NotorSettings, secretStorage: SecretStorage): Promise<void> {
 		this.settings = settings;
 		this.secretStorage = secretStorage;
 
@@ -128,6 +128,7 @@ export class McpHub {
 				});
 			});
 		}
+		return Promise.resolve();
 	}
 
 	// -----------------------------------------------------------------------

@@ -43,16 +43,16 @@ export class ReadFrontmatterTool implements Tool {
 
 	constructor(private readonly app: App) {}
 
-	async execute(params: Record<string, unknown>): Promise<ToolResult> {
+	execute(params: Record<string, unknown>): Promise<ToolResult> {
 		const path = params["path"] as string;
 
 		if (!path || typeof path !== "string") {
-			return {
+			return Promise.resolve({
 				tool_name: this.name,
 				success: false,
 				result: "",
 				error: "Missing required parameter: path",
-			};
+			});
 		}
 
 		log.debug("Reading frontmatter", { path });
@@ -60,12 +60,12 @@ export class ReadFrontmatterTool implements Tool {
 		// Verify the file exists
 		const file = this.app.vault.getFileByPath(path);
 		if (!file) {
-			return {
+			return Promise.resolve({
 				tool_name: this.name,
 				success: false,
 				result: "",
 				error: `Note not found: ${path}`,
-			};
+			});
 		}
 
 		// Use metadata cache — no disk read needed
@@ -73,11 +73,11 @@ export class ReadFrontmatterTool implements Tool {
 		if (!cache?.frontmatter) {
 			// No frontmatter — return empty object (not an error per spec)
 			log.debug("No frontmatter found", { path });
-			return {
+			return Promise.resolve({
 				tool_name: this.name,
 				success: true,
 				result: {},
-			};
+			});
 		}
 
 		// Clone and strip the internal `position` property from FrontMatterCache
@@ -85,10 +85,10 @@ export class ReadFrontmatterTool implements Tool {
 
 		log.info("Read frontmatter", { path, keyCount: Object.keys(frontmatter).length });
 
-		return {
+		return Promise.resolve({
 			tool_name: this.name,
 			success: true,
 			result: frontmatter,
-		};
+		});
 	}
 }

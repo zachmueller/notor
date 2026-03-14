@@ -69,11 +69,11 @@ const CRON_SHORTHANDS = new Set([
  * @param notorDir - Vault-relative path to the Notor directory (e.g. `"notor/"`)
  * @returns Array of discovered and validated Workflow objects
  */
-export async function discoverWorkflows(
+export function discoverWorkflows(
 	vault: Vault,
 	metadataCache: MetadataCache,
 	notorDir: string
-): Promise<Workflow[]> {
+): Workflow[] {
 	const workflowsRootPath = getWorkflowsRootPath(notorDir);
 	const workflowsRoot = vault.getAbstractFileByPath(workflowsRootPath);
 

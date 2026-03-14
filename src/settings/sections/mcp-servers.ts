@@ -77,24 +77,26 @@ function transportLabel(type: McpServerConfig["type"]): string {
  */
 function makeSecretStorage(ctx: SettingsContext) {
 	return {
-		get: async (key: string): Promise<string | undefined> => {
+		get: (key: string): Promise<string | undefined> => {
 			try {
 				const app = ctx.app as unknown as { loadLocalStorage?: (k: string) => string | null };
 				const val = app.loadLocalStorage?.(`notor-secret-${key}`);
-				return val ?? undefined;
-			} catch { return undefined; }
+				return Promise.resolve(val ?? undefined);
+			} catch { return Promise.resolve(undefined); }
 		},
-		set: async (key: string, value: string): Promise<void> => {
+		set: (key: string, value: string): Promise<void> => {
 			try {
 				const app = ctx.app as unknown as { saveLocalStorage?: (k: string, v: string) => void };
 				app.saveLocalStorage?.(`notor-secret-${key}`, value);
 			} catch { /* silent */ }
+			return Promise.resolve();
 		},
-		delete: async (key: string): Promise<void> => {
+		delete: (key: string): Promise<void> => {
 			try {
 				const app = ctx.app as unknown as { saveLocalStorage?: (k: string, v: string | null) => void };
 				app.saveLocalStorage?.(`notor-secret-${key}`, null as unknown as string);
 			} catch { /* silent */ }
+			return Promise.resolve();
 		},
 	};
 }

@@ -91,7 +91,7 @@ export class ListVaultTool implements Tool {
 
 	constructor(private readonly app: App) {}
 
-	async execute(params: Record<string, unknown>): Promise<ToolResult> {
+	execute(params: Record<string, unknown>): Promise<ToolResult> {
 		const listPath = ((params["path"] as string | undefined) ?? "").trim();
 		const recursive = (params["recursive"] as boolean | undefined) ?? false;
 		const limit = Math.max(
@@ -127,11 +127,11 @@ export class ListVaultTool implements Tool {
 			returned: paginated.length,
 		});
 
-		return {
+		return Promise.resolve({
 			tool_name: this.name,
 			success: true,
 			result: result as unknown as Record<string, unknown>,
-		};
+		});
 	}
 
 	// -----------------------------------------------------------------------

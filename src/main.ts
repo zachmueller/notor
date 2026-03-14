@@ -644,7 +644,7 @@ export default class NotorPlugin extends Plugin {
 		});
 		// Use Obsidian's plugin-level secret storage if available
 		const pluginSecretStorage = {
-			get: async (key: string): Promise<string | undefined> => {
+			get: (key: string): Promise<string | undefined> => {
 				try {
 					// Obsidian stores secrets via the app's internal SecretStorage
 					const app = this.app as unknown as {
@@ -652,9 +652,9 @@ export default class NotorPlugin extends Plugin {
 						loadLocalStorage?: (key: string) => string | null;
 					};
 					const val = app.loadLocalStorage?.(`notor-secret-${key}`);
-					return val ?? undefined;
+					return Promise.resolve(val ?? undefined);
 				} catch {
-					return undefined;
+					return Promise.resolve(undefined);
 				}
 			},
 		};
@@ -1090,7 +1090,7 @@ export default class NotorPlugin extends Plugin {
 	 * @returns The freshly discovered `Workflow` array
 	 */
 	async rescanWorkflows(): Promise<Workflow[]> {
-		const workflows = await discoverWorkflows(
+		const workflows = discoverWorkflows(
 			this.app.vault,
 			this.app.metadataCache,
 			this.settings.notor_dir
