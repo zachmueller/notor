@@ -165,10 +165,10 @@ For each replacement, identify the best matching Lucide icon name first (Obsidia
 **Dependencies:** None (can be done file by file)
 
 **Acceptance Criteria:**
-- [ ] Zero `innerHTML` assignments remain across all source files
+- [x] Zero `innerHTML` assignments remain across all source files
 - [ ] All icons render correctly and are visually equivalent to previous SVGs
-- [ ] `setIcon()` used where a Lucide equivalent exists
-- [ ] `createEl('svg', ...)` pattern used only where no Lucide equivalent exists
+- [x] `setIcon()` used where a Lucide equivalent exists
+- [x] `createEl('svg', ...)` pattern used only where no Lucide equivalent exists
 
 ---
 

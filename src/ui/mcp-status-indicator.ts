@@ -12,27 +12,19 @@
  * @see specs/04-mcp/spec.md — FR-63
  */
 
-import { ToggleComponent } from "obsidian";
+import { setIcon, ToggleComponent } from "obsidian";
 import type NotorPlugin from "../main";
 import type { McpHub } from "../mcp/mcp-hub";
 import type { McpConnectionStatus } from "../mcp/mcp-types";
 
-/** Return Lucide SVG HTML for a connection status icon. */
-function statusIconHtml(status: McpConnectionStatus | undefined): string {
+/** Set a Lucide status icon on an element based on connection status. */
+function setStatusIcon(el: HTMLElement, status: McpConnectionStatus | undefined): void {
 	switch (status) {
-		case "connected":
-			// circle-check
-			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>';
-		case "connecting":
-			// loader-circle
-			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
-		case "error":
-			// circle-x
-			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>';
+		case "connected":    setIcon(el, "circle-check"); break;
+		case "connecting":   setIcon(el, "loader"); break;
+		case "error":        setIcon(el, "circle-alert"); break;
 		case "disconnected":
-		default:
-			// circle-slash
-			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>';
+		default:             setIcon(el, "circle-minus"); break;
 	}
 }
 
@@ -87,8 +79,7 @@ export class McpStatusIndicator {
 			cls: "notor-chat-header-btn notor-mcp-status-btn clickable-icon",
 			attr: { "aria-label": "MCP servers" },
 		});
-		// Use a simple server/plug icon (SVG)
-		btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>';
+		setIcon(btn, "server");
 		this.indicatorEl = btn;
 
 		// Update appearance based on connection states
@@ -174,7 +165,7 @@ export class McpStatusIndicator {
 
 				// Status icon
 				const dot = rowEl.createSpan({ cls: `notor-mcp-popover-dot notor-mcp-dot-${status ?? "disconnected"}` });
-				dot.innerHTML = statusIconHtml(status);
+				setStatusIcon(dot, status);
 
 				// Server name
 				const nameEl = rowEl.createSpan({ cls: "notor-mcp-popover-server-name" });
