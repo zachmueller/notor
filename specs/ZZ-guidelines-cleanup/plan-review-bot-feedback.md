@@ -165,9 +165,9 @@ For every flagged location, read the surrounding code and answer:
 **Output:** Write findings to `specs/ZZ-guidelines-cleanup/research/GUIDE-013-promise-audit.md`. Structure it as a table or per-file sections with: location, intent, error visibility, correct fix, risk level, and any notes. Flag any sites where intent is ambiguous and a decision is needed before proceeding.
 
 **Acceptance Criteria:**
-- [ ] Every flagged location has a documented classification and recommended fix
-- [ ] All High-risk sites are explicitly called out with rationale
-- [ ] Research file committed before GUIDE-013 implementation begins
+- [x] Every flagged location has a documented classification and recommended fix
+- [x] All High-risk sites are explicitly called out with rationale (none found; two Low-Medium sites flagged)
+- [x] Research file committed before GUIDE-013 implementation begins
 
 ---
 
