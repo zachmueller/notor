@@ -30,7 +30,7 @@ import type { Hook } from "../settings";
 import { getEnabledHooks } from "./hook-config";
 import { executeHook, type HookContext } from "./hook-engine";
 import type { WorkflowHookOverrideManager } from "./workflow-hook-override";
-import type { LLMHookEvent, WorkflowScopedHook } from "../types";
+import type { WorkflowScopedHook } from "../types";
 import { logger } from "../utils/logger";
 
 const log = logger("HookEvents");

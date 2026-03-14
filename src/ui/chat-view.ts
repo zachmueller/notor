@@ -1743,8 +1743,6 @@ class CheckpointModal extends Modal {
 		a: string[],
 		b: string[]
 	): Array<{ type: "unchanged" | "removed" | "added"; text: string }> {
-		const result: Array<{ type: "unchanged" | "removed" | "added"; text: string }> = [];
-
 		// Build LCS table
 		const m = a.length;
 		const n = b.length;

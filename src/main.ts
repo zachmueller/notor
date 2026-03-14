@@ -636,12 +636,6 @@ export default class NotorPlugin extends Plugin {
 			}
 		});
 
-		// Resolve SecretStorage from the Obsidian app
-		// Obsidian exposes SecretStorage on the plugin instance but the
-		// type definitions don't include it. Access it safely.
-		const secretStorage = (this.app as unknown as {
-			loadLocalStorage?: (key: string) => string | null;
-		});
 		// Use Obsidian's plugin-level secret storage if available
 		const pluginSecretStorage = {
 			get: (key: string): Promise<string | undefined> => {

@@ -520,9 +520,9 @@ A collection of small, isolated fixes that don't warrant individual tasks.
 - For `err` in catch: replace with `_err` or `_` if the catch block is intentionally empty
 
 **Acceptance Criteria:**
-- [ ] Zero `no-unused-vars` warnings in the listed locations
-- [ ] No dead code introduced
-- [ ] Build passes
+- [x] Zero `no-unused-vars` warnings in the listed locations
+- [x] No dead code introduced
+- [x] Build passes
 
 ---
 

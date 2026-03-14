@@ -125,9 +125,6 @@ export function isDomainBlocked(
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Maximum redirect hops before erroring. */
-const MAX_REDIRECTS = 5;
-
 /** User-Agent header sent with all requests. */
 const USER_AGENT = "Notor/1.0";
 

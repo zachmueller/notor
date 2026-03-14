@@ -29,14 +29,12 @@ import type { Attachment } from "../context/attachment";
 import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment";
 import { dispatchPreSend, dispatchAfterCompletion } from "../hooks/hook-events";
 import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-override";
-import { shouldCompact, performCompaction, estimateConversationTokens } from "../context/compaction";
-import type { CompactionRecord } from "../context/compaction";
+import { shouldCompact, performCompaction } from "../context/compaction";
 import { showCompactingIndicator, showCompactionMarker } from "../ui/compaction-marker";
 import { revertWorkflowPersona, switchWorkflowPersona, assembleWorkflowPrompt } from "../workflows/workflow-executor";
 import type { Workflow, WorkflowExecutionRequest } from "../types";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import { logger } from "../utils/logger";
-import type { WorkflowHookConfig } from "../types";
 
 const log = logger("ChatOrchestrator");
 
@@ -1567,7 +1565,6 @@ export class ChatOrchestrator {
 		let currentToolCallId = "";
 		let currentToolName = "";
 		let toolCallJson = "";
-		let hasToolCall = false;
 
 		try {
 			for await (const chunk of stream) {
@@ -1594,7 +1591,6 @@ export class ChatOrchestrator {
 						break;
 
 					case "tool_call_start":
-						hasToolCall = true;
 						currentToolCallId = chunk.id;
 						currentToolName = chunk.tool_name;
 						toolCallJson = "";

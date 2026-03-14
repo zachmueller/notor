@@ -57,7 +57,7 @@ async function main() {
 				stdio: "inherit",
 			});
 			console.log("Build complete.");
-		} catch (err) {
+		} catch {
 			console.error("Build failed! Fix build errors first.");
 			process.exit(1);
 		}

@@ -81,7 +81,7 @@ export class ReadFrontmatterTool implements Tool {
 		}
 
 		// Clone and strip the internal `position` property from FrontMatterCache
-		const { position: _position, ...frontmatter } = cache.frontmatter;
+		const { position: _, ...frontmatter } = cache.frontmatter;
 
 		log.info("Read frontmatter", { path, keyCount: Object.keys(frontmatter).length });
 
