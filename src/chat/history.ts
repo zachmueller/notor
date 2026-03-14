@@ -251,7 +251,6 @@ export class HistoryManager {
 			throw new Error(`Invalid conversation header in: ${path}`);
 		}
 
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars -- _headerType destructured to strip internal field from serialized data
 		const { _type: _headerType, ...conversationData } = headerObj;
 		const conversation = conversationData as Conversation;
 
@@ -262,7 +261,6 @@ export class HistoryManager {
 			if (!line) continue;
 			try {
 				const obj = JSON.parse(line);
-				// eslint-disable-next-line @typescript-eslint/no-unused-vars -- _msgType destructured to strip internal field from serialized data
 				const { _type: _msgType, ...messageData } = obj;
 				messages.push(messageData as Message);
 			} catch (e) {

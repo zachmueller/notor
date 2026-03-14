@@ -12,7 +12,7 @@
 
 import type { Message } from "../types";
 import type { NotorSettings } from "../settings";
-import type { LLMProvider, ChatMessage, SendMessageOptions, StreamChunk } from "../providers/provider";
+import type { LLMProvider, ChatMessage, SendMessageOptions } from "../providers/provider";
 import { estimateTokens } from "../utils/tokens";
 import { getContextWindow } from "../providers/model-metadata";
 import { logger } from "../utils/logger";

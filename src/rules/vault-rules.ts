@@ -16,7 +16,7 @@
  * @see design/ux.md — vault-level instruction files
  */
 
-import type { App, TFile } from "obsidian";
+import type { App } from "obsidian";
 import { TAbstractFile } from "obsidian";
 import type { VaultRule } from "../types";
 import { resolveIncludeNotes } from "../include-note/resolver";

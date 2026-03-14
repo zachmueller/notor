@@ -791,7 +791,7 @@ export default class NotorPlugin extends Plugin {
 
 			// Bedrock registered lazily via dynamic import to keep startup
 			// bundle lean (AWS SDK is large and Node.js-only)
-			this._providerRegistry.registerFactory("bedrock", (config, app) => {
+			this._providerRegistry.registerFactory("bedrock", (_config, _app) => {
 				// BedrockProvider is constructed synchronously once the module
 				// is imported; the actual credential resolution is deferred
 				// inside the provider's sendMessage / validateConnection calls.

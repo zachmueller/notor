@@ -715,7 +715,7 @@ export class ChatOrchestrator {
 		mode: ConversationMode,
 		execution: WorkflowExecution,
 		concurrencyManager: WorkflowConcurrencyManager,
-		chain: ExecutionChain
+		_chain: ExecutionChain
 	): Promise<void> {
 		let continueLoop = true;
 		const vaultRootPath = this.getVaultRootPath();

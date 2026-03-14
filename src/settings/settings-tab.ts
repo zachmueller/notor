@@ -8,7 +8,7 @@
  * @see specs/03a-settings-refactor/tasks.md — S-004
  */
 
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab } from "obsidian";
 import type NotorPlugin from "../main";
 import type { Persona } from "../types";
 import type { SettingsContext } from "./sections/context";
@@ -81,8 +81,6 @@ export class NotorSettingTab extends PluginSettingTab {
 			redisplay: () => this.display(),
 			addCleanup: (fn) => this.cleanupFns.push(fn),
 		};
-
-		new Setting(containerEl).setName("Notor").setHeading();
 
 		// --- Provider Setup (expanded by default) ---
 		const providerGroup = createSettingsGroup(containerEl, "Provider setup", true);

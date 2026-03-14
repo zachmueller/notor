@@ -5,25 +5,38 @@ import { globalIgnores } from "eslint/config";
 
 export default tseslint.config(
 	{
+		files: ["src/**/*.ts"],
+		plugins: {
+			"@typescript-eslint": tseslint.plugin,
+		},
 		languageOptions: {
+			parser: tseslint.parser,
 			globals: {
 				...globals.browser,
 			},
 			parserOptions: {
-				projectService: {
-					allowDefaultProject: [
-						'eslint.config.js',
-						'manifest.json'
-					]
-				},
+				projectService: true,
 				tsconfigRootDir: import.meta.dirname,
 				extraFileExtensions: ['.json']
 			},
 		},
-	},
-	...obsidianmd.configs.recommended,
-	{
 		rules: {
+			"@typescript-eslint/no-unused-vars": ["error", {
+				varsIgnorePattern: "^_",
+				argsIgnorePattern: "^_",
+			}],
+			"@typescript-eslint/no-require-imports": "error",
+			"no-restricted-globals": ["error", {
+				name: "fetch",
+				message: "Use Obsidian's requestUrl instead of fetch for cross-platform compatibility. Only disable this rule when fetch is strictly required (e.g. streaming responses).",
+			}],
+		},
+	},
+	{
+		files: ["src/**/*.ts"],
+		plugins: { obsidianmd },
+		rules: {
+			...obsidianmd.configs.recommended,
 			"obsidianmd/ui/sentence-case": ["error", {
 				enforceCamelCaseLower: true,
 				brands: [
@@ -58,7 +71,10 @@ export default tseslint.config(
 	},
 	globalIgnores([
 		"node_modules",
+		"build",
 		"dist",
+		"specs",
+		"e2e",
 		"esbuild.config.mjs",
 		"eslint.config.js",
 		"version-bump.mjs",

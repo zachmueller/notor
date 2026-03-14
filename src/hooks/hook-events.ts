@@ -71,7 +71,7 @@ interface LifecycleHookWorkflowContext {
 async function executeLifecycleHookWorkflowAction(
 	hook: Hook,
 	context: LifecycleHookWorkflowContext,
-	settings: NotorSettings
+	_settings: NotorSettings
 ): Promise<void> {
 	const workflowPath = hook.workflow_path;
 	if (!workflowPath?.trim()) {
@@ -202,7 +202,7 @@ async function executeScopedCommandHook(
 async function executeScopedWorkflowHook(
 	scopedHook: WorkflowScopedHook,
 	lifecycleContext: LifecycleHookWorkflowContext,
-	settings: NotorSettings
+	_settings: NotorSettings
 ): Promise<void> {
 	const workflowPath = scopedHook.workflow_path;
 	if (!workflowPath?.trim()) {
