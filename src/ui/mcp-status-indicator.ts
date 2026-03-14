@@ -12,6 +12,7 @@
  * @see specs/04-mcp/spec.md — FR-63
  */
 
+import { ToggleComponent } from "obsidian";
 import type NotorPlugin from "../main";
 import type { McpHub } from "../mcp/mcp-hub";
 import type { McpConnectionStatus } from "../mcp/mcp-types";
@@ -188,21 +189,17 @@ export class McpStatusIndicator {
 				}
 
 				// Enable/disable toggle
-				const toggleLabel = rowEl.createEl("label", { cls: "notor-mcp-popover-toggle-label" });
-				const toggleInput = toggleLabel.createEl("input", { type: "checkbox" });
-				toggleInput.checked = !config.disabled;
-				toggleLabel.createSpan({ text: toggleInput.checked ? "On" : "Off" });
-
-				toggleInput.addEventListener("change", async () => {
-					config.disabled = !toggleInput.checked;
-					toggleLabel.querySelector("span")!.textContent = toggleInput.checked ? "On" : "Off";
-					await this.plugin.saveSettings();
-					if (toggleInput.checked) {
-						mcpHub?.connectServer(serverName).catch(() => {});
-					} else {
-						mcpHub?.disconnectServer(serverName).catch(() => {});
-					}
-				});
+				new ToggleComponent(rowEl)
+					.setValue(!config.disabled)
+					.onChange(async (value) => {
+						config.disabled = !value;
+						await this.plugin.saveSettings();
+						if (value) {
+							mcpHub?.connectServer(serverName).catch(() => {});
+						} else {
+							mcpHub?.disconnectServer(serverName).catch(() => {});
+						}
+					});
 			}
 		}
 

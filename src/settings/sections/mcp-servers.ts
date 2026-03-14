@@ -12,7 +12,7 @@
  * @see specs/04-mcp/spec.md — FR-54, FR-57, FR-60, FR-61
  */
 
-import { Notice, Platform, Setting } from "obsidian";
+import { Notice, Platform, Setting, ToggleComponent } from "obsidian";
 import type { SettingsContext } from "./context";
 import type { McpServerConfig, McpEnvVar, McpHeader } from "../../mcp/mcp-types";
 import {
@@ -217,20 +217,20 @@ function renderServerList(
 
 		// Enable/disable toggle (right side of summary)
 		const summaryRight = summary.createDiv({ cls: "notor-mcp-server-summary-right" });
-		const toggle = summaryRight.createEl("input", { type: "checkbox" });
-		toggle.checked = !config.disabled;
-		toggle.title = config.disabled ? "Enable server" : "Disable server";
-		toggle.addEventListener("change", async (e) => {
-			e.stopPropagation();
-			config.disabled = !toggle.checked;
-			await ctx.saveSettings();
-			if (toggle.checked) {
-				mcpHub?.connectServer(serverName).catch(() => {});
-			} else {
-				mcpHub?.disconnectServer(serverName).catch(() => {});
-			}
-			refresh();
-		});
+		const toggle = new ToggleComponent(summaryRight)
+			.setValue(!config.disabled)
+			.onChange(async (value) => {
+				config.disabled = !value;
+				await ctx.saveSettings();
+				if (value) {
+					mcpHub?.connectServer(serverName).catch(() => {});
+				} else {
+					mcpHub?.disconnectServer(serverName).catch(() => {});
+				}
+				refresh();
+			});
+		// Prevent the <details> element from collapsing when clicking the toggle
+		toggle.toggleEl.addEventListener("click", (e) => e.stopPropagation());
 
 		// Detail body
 		const body = details.createDiv({ cls: "notor-mcp-server-body" });

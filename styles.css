@@ -2144,17 +2144,6 @@
 	min-width: 0;
 }
 
-.notor-mcp-popover-toggle-label {
-	display: flex;
-	align-items: center;
-	gap: 3px;
-	font-size: var(--font-ui-smaller);
-	color: var(--text-muted);
-	cursor: pointer;
-	flex-shrink: 0;
-	white-space: nowrap;
-}
-
 /* ==========================================================================
    Workflow Activity Indicator (H-002, H-003)
    ========================================================================== */
