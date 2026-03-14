@@ -187,6 +187,11 @@
 	padding: 0 18px 10px;
 }
 
+/* Fixed-width variants for inline settings inputs */
+.notor-input-w-80 { width: 80px; }
+.notor-input-w-120 { width: 120px; }
+.notor-input-w-160 { width: 160px; }
+
 .notor-model-select-wrapper {
 	margin-top: 4px;
 }
@@ -569,6 +574,7 @@
 	width: 100%;
 	min-height: 32px;
 	max-height: 200px;
+	height: var(--notor-input-height, auto);
 	padding: 6px 10px;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
@@ -2310,6 +2316,8 @@
 
 /* Dropdown container — positioned fixed, popover effect */
 .notor-workflow-activity-dropdown {
+	position: fixed;
+	top: var(--notor-dropdown-top, auto);
 	z-index: var(--layer-popover, 100);
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);

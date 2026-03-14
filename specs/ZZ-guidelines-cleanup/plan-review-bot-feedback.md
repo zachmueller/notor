@@ -353,9 +353,9 @@ Two related lint rules:
 - For the dynamic top/position in workflow dropdown: use `el.setCssProps(...)` with CSS variable-driven positioning
 
 **Acceptance Criteria:**
-- [ ] No `element.style.width`, `.height`, `.top`, or `.position` direct assignments remain in `src/`
-- [ ] Layout and positioning behavior unchanged visually
-- [ ] Dropdown still positions correctly relative to the trigger element
+- [x] No `element.style.width`, `.height`, `.top`, or `.position` direct assignments remain in `src/`
+- [x] Layout and positioning behavior unchanged visually
+- [x] Dropdown still positions correctly relative to the trigger element
 
 ---
 

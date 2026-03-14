@@ -48,19 +48,19 @@ export function renderModelPricingSection(
 		text.setPlaceholder("Model ID").onChange((v) => {
 			newModelId = v.trim();
 		});
-		text.inputEl.style.width = "160px";
+		text.inputEl.addClass("notor-input-w-160");
 	});
 	addSetting.addText((text) => {
 		text.setPlaceholder("Input $").onChange((v) => {
 			newInputPrice = v.trim();
 		});
-		text.inputEl.style.width = "80px";
+		text.inputEl.addClass("notor-input-w-80");
 	});
 	addSetting.addText((text) => {
 		text.setPlaceholder("Output $").onChange((v) => {
 			newOutputPrice = v.trim();
 		});
-		text.inputEl.style.width = "80px";
+		text.inputEl.addClass("notor-input-w-80");
 	});
 	addSetting.addButton((btn) =>
 		btn.setButtonText("Add").onClick(async () => {

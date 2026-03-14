@@ -154,7 +154,7 @@ export function renderHooksSection(
 			text.setPlaceholder("Label (optional)").onChange((v) => {
 				newLabel = v.trim();
 			});
-			text.inputEl.style.width = "120px";
+			text.inputEl.addClass("notor-input-w-120");
 		});
 		addSetting.addButton((btn) =>
 			btn.setButtonText("Add").onClick(async () => {

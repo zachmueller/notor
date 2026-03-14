@@ -383,13 +383,12 @@ export class WorkflowActivityDropdown {
 			top = anchorRect.top - 4; // will be adjusted by max-height CSS
 			this.dropdownEl.style.maxHeight = `${anchorRect.top - 16}px`;
 			this.dropdownEl.style.bottom = `${viewportHeight - anchorRect.top + 4}px`;
-			this.dropdownEl.style.top = "auto";
+			this.dropdownEl.setCssProps({ '--notor-dropdown-top': 'auto' });
 		} else {
-			this.dropdownEl.style.top = `${top}px`;
+			this.dropdownEl.setCssProps({ '--notor-dropdown-top': `${top}px` });
 		}
 
 		this.dropdownEl.style.left = `${left}px`;
-		this.dropdownEl.style.position = "fixed";
 	}
 
 	// -----------------------------------------------------------------------

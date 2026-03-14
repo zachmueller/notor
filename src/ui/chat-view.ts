@@ -580,8 +580,8 @@ export class NotorChatView extends ItemView {
 
 		// Auto-resize contenteditable div
 		this.textInputEl.addEventListener("input", () => {
-			this.textInputEl.style.height = "auto";
-			this.textInputEl.style.height = Math.min(this.textInputEl.scrollHeight, 200) + "px";
+			this.textInputEl.setCssProps({ '--notor-input-height': 'auto' });
+			this.textInputEl.setCssProps({ '--notor-input-height': Math.min(this.textInputEl.scrollHeight, 200) + 'px' });
 
 			// Detect `[[` trigger for vault note autocomplete
 			this.detectWikilinkTrigger();
@@ -683,7 +683,7 @@ export class NotorChatView extends ItemView {
 		this.workflowChipManager?.clear();
 
 		this.textInputEl.textContent = "";
-		this.textInputEl.style.height = "auto";
+		this.textInputEl.setCssProps({ '--notor-input-height': 'auto' });
 
 		try {
 			if (pendingWorkflow && this.onSendWorkflow) {

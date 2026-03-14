@@ -191,7 +191,7 @@ export function renderVaultEventHookSubsection(
 		text.setPlaceholder("Label (optional)").onChange((v) => {
 			newLabel = v.trim();
 		});
-		text.inputEl.style.width = "120px";
+		text.inputEl.addClass("notor-input-w-120");
 	});
 
 	// Cron expression input (only for on_schedule)
