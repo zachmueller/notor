@@ -212,7 +212,7 @@ export async function resolveAttachment(
 	}
 
 	try {
-		const fullContent = await app.vault.read(file as TFile);
+		const fullContent = await app.vault.read(file);
 
 		if (attachment.type === "vault_note") {
 			return {
@@ -228,7 +228,7 @@ export async function resolveAttachment(
 		if (attachment.type === "vault_note_section" && attachment.section) {
 			const sectionContent = extractSection(
 				app,
-				file as TFile,
+				file,
 				fullContent,
 				attachment.section
 			);

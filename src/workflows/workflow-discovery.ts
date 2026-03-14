@@ -90,7 +90,7 @@ export async function discoverWorkflows(
 	}
 
 	const workflows: Workflow[] = [];
-	const markdownFiles = collectMarkdownFiles(workflowsRoot as TFolder);
+	const markdownFiles = collectMarkdownFiles(workflowsRoot);
 
 	for (const file of markdownFiles) {
 		try {
@@ -272,9 +272,9 @@ function collectMarkdownFiles(folder: TFolder): TFile[] {
 
 	for (const child of folder.children) {
 		if (isFolder(child)) {
-			files.push(...collectMarkdownFiles(child as TFolder));
+			files.push(...collectMarkdownFiles(child));
 		} else if (isFile(child) && child.name.endsWith(".md")) {
-			files.push(child as TFile);
+			files.push(child);
 		}
 	}
 

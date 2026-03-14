@@ -402,13 +402,13 @@ function renderStdioFields(
 					// If sensitive toggled off, move value out of secrets
 					if (wasSensitive && !updated.sensitive) {
 						const stored = await secrets.get(mcpEnvSecretKey(serverName, oldKey));
-						if (stored) config.env![i]!.value = stored;
+						if (stored) config.env![i].value = stored;
 						await secrets.delete(mcpEnvSecretKey(serverName, oldKey));
 					}
 					// If sensitive toggled on, store value in secrets
 					if (!wasSensitive && updated.sensitive && updated.value) {
 						await secrets.set(mcpEnvSecretKey(serverName, updated.key), updated.value);
-						config.env![i]!.value = "";
+						config.env![i].value = "";
 					}
 					// Handle key rename for sensitive entries
 					if (wasSensitive && updated.sensitive && oldKey !== updated.key) {
@@ -485,12 +485,12 @@ function renderHttpFields(
 					config.headers![i] = updated;
 					if (wasSensitive && !updated.sensitive) {
 						const stored = await secrets.get(mcpHeaderSecretKey(serverName, oldKey));
-						if (stored) config.headers![i]!.value = stored;
+						if (stored) config.headers![i].value = stored;
 						await secrets.delete(mcpHeaderSecretKey(serverName, oldKey));
 					}
 					if (!wasSensitive && updated.sensitive && updated.value) {
 						await secrets.set(mcpHeaderSecretKey(serverName, updated.key), updated.value);
-						config.headers![i]!.value = "";
+						config.headers![i].value = "";
 					}
 					if (wasSensitive && updated.sensitive && oldKey !== updated.key) {
 						const stored = await secrets.get(mcpHeaderSecretKey(serverName, oldKey));

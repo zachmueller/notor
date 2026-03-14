@@ -479,7 +479,7 @@ function updateAllBlockUI(
 	const blockEls = blocksContainerEl.querySelectorAll(".notor-diff-block");
 	blockEls.forEach((blockEl, idx) => {
 		const accepted = blockAccepted.get(idx) ?? true;
-		const toggleBtn = blockEl.querySelector(".notor-diff-block-toggle") as HTMLButtonElement | null;
+		const toggleBtn = blockEl.querySelector(".notor-diff-block-toggle");
 		if (toggleBtn) {
 			toggleBtn.textContent = accepted ? "✓ Accept" : "✗ Reject";
 			toggleBtn.removeClass("notor-diff-block-accepted", "notor-diff-block-rejected");

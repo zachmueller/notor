@@ -59,7 +59,7 @@ export function parseIncludeNoteTags(text: string): IncludeNoteTag[] {
 
 	let match: RegExpExecArray | null;
 	while ((match = TAG_REGEX.exec(text)) !== null) {
-		const rawTag = match[0] as string;
+		const rawTag = match[0];
 		const attrString = match[1] as string;
 
 		// Extract all key="value" pairs from the attribute string

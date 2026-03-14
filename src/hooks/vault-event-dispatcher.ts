@@ -153,7 +153,7 @@ async function _executeOneHook(
 
 	if (isWorkflowTrigger) {
 		// Raw workflow trigger — treat as run_workflow action
-		const workflow = hook as Workflow;
+		const workflow = hook;
 
 		// Single-instance guard
 		if (deps.concurrencyManager.isWorkflowRunning(workflow.file_path)) {
@@ -173,7 +173,7 @@ async function _executeOneHook(
 	}
 
 	// Settings-configured VaultEventHook
-	const vaultHook = hook as VaultEventHook;
+	const vaultHook = hook;
 	const actionType = vaultHook.action_type ?? "execute_command";
 
 	if (actionType === "execute_command") {

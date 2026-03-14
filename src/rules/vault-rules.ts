@@ -278,11 +278,11 @@ export class VaultRuleManager {
 				always_include: parsed.frontmatter["notor-always-include"] === true,
 				directory_include:
 					typeof parsed.frontmatter["notor-directory-include"] === "string"
-						? (parsed.frontmatter["notor-directory-include"] as string)
+						? parsed.frontmatter["notor-directory-include"]
 						: null,
 				tag_include:
 					typeof parsed.frontmatter["notor-tag-include"] === "string"
-						? (parsed.frontmatter["notor-tag-include"] as string)
+						? parsed.frontmatter["notor-tag-include"]
 						: null,
 			};
 
@@ -363,7 +363,7 @@ export class VaultRuleManager {
 		const file = this.app.vault.getFileByPath(notePath);
 		if (!file) return false;
 
-		const cache = this.app.metadataCache.getFileCache(file as TFile);
+		const cache = this.app.metadataCache.getFileCache(file);
 		if (!cache) return false;
 
 		// Check frontmatter tags

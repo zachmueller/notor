@@ -49,7 +49,7 @@ async function fetchWithTimeout(
 
 	// Combine caller's signal with the timeout signal if both present
 	const combinedSignal = init.signal
-		? anySignal([init.signal as AbortSignal, timeoutController.signal])
+		? anySignal([init.signal, timeoutController.signal])
 		: timeoutController.signal;
 
 	try {

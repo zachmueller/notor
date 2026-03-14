@@ -125,15 +125,15 @@ export function setPersonaToolOverride(
 
 	if (state === "global") {
 		// Remove the entry — "global" is the default, no need to persist
-		delete settings.persona_auto_approve[personaName]![toolName];
+		delete settings.persona_auto_approve[personaName][toolName];
 
 		// Clean up empty persona entries
-		const remaining = settings.persona_auto_approve[personaName]!;
+		const remaining = settings.persona_auto_approve[personaName];
 		if (Object.keys(remaining).length === 0) {
 			delete settings.persona_auto_approve[personaName];
 		}
 	} else {
-		settings.persona_auto_approve[personaName]![toolName] = state;
+		settings.persona_auto_approve[personaName][toolName] = state;
 	}
 }
 

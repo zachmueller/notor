@@ -940,7 +940,7 @@ export class NotorChatView extends ItemView {
 	 * reflect success/error/rejected state in the UI.
 	 */
 	updateToolCallStatus(toolEl: HTMLElement, status: string): void {
-		const statusEl = toolEl.querySelector(".notor-tool-call-status") as HTMLElement | null;
+		const statusEl = toolEl.querySelector(".notor-tool-call-status");
 		if (!statusEl) return;
 		statusEl.className = `notor-tool-call-status notor-tool-status-${status}`;
 		statusEl.textContent = status;
@@ -1095,7 +1095,7 @@ export class NotorChatView extends ItemView {
 			try {
 				const file = this.app.vault.getFileByPath(notePath);
 				if (file) {
-					beforeContent = await this.app.vault.read(file as import("obsidian").TFile);
+					beforeContent = await this.app.vault.read(file);
 				}
 			} catch {
 				// New file — beforeContent stays empty
@@ -1123,7 +1123,7 @@ export class NotorChatView extends ItemView {
 			try {
 				const file = this.app.vault.getFileByPath(notePath);
 				if (file) {
-					noteContent = await this.app.vault.read(file as import("obsidian").TFile);
+					noteContent = await this.app.vault.read(file);
 				}
 			} catch {
 				// Fall back to plain prompt if file unreadable

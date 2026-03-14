@@ -251,9 +251,9 @@ Two related lint rules:
 - In some cases (e.g., where the assertion was compensating for a missing `instanceof` guard) the fix should be GUIDE-016 instead — coordinate
 
 **Acceptance Criteria:**
-- [ ] Zero `no-unnecessary-type-assertion` lint errors
-- [ ] No new type errors introduced
-- [ ] Build passes
+- [x] Zero `no-unnecessary-type-assertion` lint errors
+- [x] No new type errors introduced
+- [x] Build passes
 
 ---
 

@@ -90,7 +90,7 @@ export function updateToolCallStatus(
 	toolEl: HTMLElement,
 	status: ToolCall["status"]
 ): void {
-	const statusEl = toolEl.querySelector(".notor-tool-call-status") as HTMLElement | null;
+	const statusEl = toolEl.querySelector(".notor-tool-call-status");
 	if (!statusEl) return;
 
 	// Remove all status classes and add the new one

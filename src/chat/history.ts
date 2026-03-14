@@ -365,7 +365,7 @@ export class HistoryManager {
 					try {
 						const msg = JSON.parse(msgLine) as Record<string, unknown>;
 						if (msg.role === "user" && typeof msg.content === "string") {
-							preview = (msg.content as string).substring(0, 120);
+							preview = msg.content.substring(0, 120);
 							break;
 						}
 					} catch {

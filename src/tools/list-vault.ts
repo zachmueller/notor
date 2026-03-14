@@ -224,7 +224,7 @@ export class ListVaultTool implements Tool {
 			};
 		}
 
-		const file = abstractFile as TFile;
+		const file = abstractFile;
 		return {
 			name: file.name,
 			path: file.path,

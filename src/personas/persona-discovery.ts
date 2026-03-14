@@ -56,12 +56,12 @@ export async function discoverPersonas(
 	}
 
 	const personas: Persona[] = [];
-	const folder = personasRoot as TFolder;
+	const folder = personasRoot;
 
 	for (const child of folder.children) {
 		if (!isFolder(child)) continue;
 
-		const subdir = child as TFolder;
+		const subdir = child;
 		const persona = await loadPersonaFromDirectory(vault, metadataCache, subdir);
 		if (persona) {
 			personas.push(persona);
@@ -95,7 +95,7 @@ async function loadPersonaFromDirectory(
 		return null;
 	}
 
-	const tFile = promptFile as TFile;
+	const tFile = promptFile;
 
 	try {
 		return await parsePersona(vault, metadataCache, subdir, tFile);

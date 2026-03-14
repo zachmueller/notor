@@ -260,7 +260,7 @@ export async function performCompaction(
 		let inputTokens = 0;
 		let outputTokens = 0;
 
-		for await (const chunk of stream as AsyncIterable<StreamChunk>) {
+		for await (const chunk of stream) {
 			switch (chunk.type) {
 				case "text_delta":
 					summaryText += chunk.text;
