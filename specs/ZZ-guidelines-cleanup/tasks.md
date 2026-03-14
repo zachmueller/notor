@@ -211,7 +211,7 @@ vault.process(file: TFile, fn: (data: string) => string): Promise<string>
 
 ### GUIDE-008: Fix `document.body.appendChild()` in workflow activity dropdown
 
-**Guideline:** (Best practice) Plugins should not manipulate `document.body` directly; use Obsidian workspace containers or APIs.
+**Guideline:** [Support pop-out windows](https://docs.obsidian.md/Plugins/Guides/Support+pop-out+windows) — each pop-out window has its own `Window` and `Document`; use `activeDocument`/`activeWindow` instead of bare globals.
 
 **Description:** `workflow-activity-dropdown.ts` appends its dropdown element directly to `document.body` and registers event listeners on bare `document`/`window` globals. All five references must be replaced with `activeDocument`/`activeWindow` equivalents so the dropdown works correctly when Obsidian is in a popout window.
 

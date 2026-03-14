@@ -7,6 +7,8 @@
 
 ## Summary
 
+This fix is grounded in the official Obsidian guide: [Support pop-out windows](https://docs.obsidian.md/Plugins/Guides/Support+pop-out+windows). That guide states each pop-out window has its own `Window` and `Document` object, and recommends using the `activeDocument`/`activeWindow` API exports instead of bare globals. This is *not* covered by the Plugin Guidelines page — it lives in the Guides section.
+
 The task spec is accurate but incomplete. The file has five distinct `document`/`window` references that all need updating, not just the one `document.body.appendChild` call mentioned. There is also a `window.innerWidth` / `window.innerHeight` pair that needs `activeWindow` equivalents. The `Menu` API is not a viable replacement for this component.
 
 ---
