@@ -288,9 +288,9 @@ Two related lint rules:
 - Note: some of these will resolve GUIDE-015 violations at the same locations
 
 **Acceptance Criteria:**
-- [ ] No `as TFile` or `as TFolder` casts remain in `src/`
-- [ ] Narrowing is done via `instanceof` at each location
-- [ ] Build passes; no logic regressions in persona/workflow/vault-rules discovery
+- [x] No `as TFile` or `as TFolder` casts remain in `src/`
+- [x] Narrowing is done via `instanceof` at each location
+- [x] Build passes; no logic regressions in persona/workflow/vault-rules discovery
 
 ---
 

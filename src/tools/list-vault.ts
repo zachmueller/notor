@@ -158,7 +158,9 @@ export class ListVaultTool implements Tool {
 			}
 
 			for (const child of folder.children) {
-				items.push(this.toListItem(child as TFile | TFolder));
+				if (child instanceof TFile || child instanceof TFolder) {
+					items.push(this.toListItem(child));
+				}
 			}
 		} else {
 			// Recursive: walk all vault files and folders
