@@ -22,7 +22,7 @@ export function renderGeneralSection(
 		)
 		.addText((text) =>
 			text
-				.setPlaceholder("notor/")
+				.setPlaceholder("Notor/")
 				.setValue(ctx.settings.notor_dir)
 				.onChange(async (value) => {
 					ctx.settings.notor_dir =

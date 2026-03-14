@@ -63,7 +63,7 @@ export function renderConnectionTestButton(
 				);
 				await provider.validateConnection();
 
-				statusEl.textContent = "✓ Connection successful";
+				statusEl.textContent = "✓ connection successful";
 				statusEl.className =
 					"notor-connection-status notor-connection-status--success";
 			} catch (e) {
@@ -97,8 +97,7 @@ function renderBedrockConnectionTestButton(
 
 	setting
 		.setDesc(
-			"Calls AWS STS GetCallerIdentity to verify your AWS credentials " +
-				"are valid (equivalent to `aws sts get-caller-identity`)."
+			"Calls the AWS STS identity check to verify your AWS credentials are valid."
 		)
 		.addButton((button) => {
 			button.setButtonText("Test connection").onClick(async () => {

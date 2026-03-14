@@ -34,7 +34,7 @@ export function renderOpenAIProviderSection(
 	new Setting(containerEl)
 		.setName("Custom endpoint URL")
 		.setDesc(
-			"Override the default OpenAI endpoint. Leave blank to use api.openai.com. " +
+			"Override the default OpenAI API base URL. Leave blank to use the default. " +
 				"Useful for Azure OpenAI or other compatible services."
 		)
 		.addText((text) =>

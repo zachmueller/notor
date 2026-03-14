@@ -41,7 +41,7 @@ export function renderModelPricingSection(
 	const addSetting = new Setting(containerEl)
 		.setName("Add model pricing")
 		.setDesc(
-			"Model ID (e.g. gpt-4o, claude-sonnet-4-5), input price per 1K tokens, output price per 1K tokens."
+			"Model ID (e.g., gpt-4o, claude-sonnet-4-5), input price per 1k tokens, output price per 1k tokens."
 		);
 
 	addSetting.addText((text) => {

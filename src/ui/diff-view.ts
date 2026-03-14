@@ -112,11 +112,11 @@ export function renderWriteNoteDiffPreview(
 			bodyEl.addClass("notor-hidden");
 
 			const collapseToggle = headerEl.createDiv({ cls: "notor-diff-toggle" });
-			collapseToggle.textContent = "▶ Show diff";
+			collapseToggle.textContent = "▶ show diff";
 			collapseToggle.addEventListener("click", () => {
 				const isHidden = bodyEl.hasClass("notor-hidden");
 				bodyEl.toggleClass("notor-hidden", !isHidden);
-				collapseToggle.textContent = isHidden ? "▼ Hide diff" : "▶ Show diff";
+				collapseToggle.textContent = isHidden ? "▼ hide diff" : "▶ show diff";
 			});
 
 			// Render the diff lines
@@ -124,7 +124,7 @@ export function renderWriteNoteDiffPreview(
 
 			// Auto-approve: applied immediately, show status
 			const statusEl = wrapperEl.createDiv({ cls: "notor-diff-status notor-diff-status-applied" });
-			statusEl.textContent = diffResult.isNewFile ? "✓ File created" : "✓ Changes applied";
+			statusEl.textContent = diffResult.isNewFile ? "✓ file created" : "✓ changes applied";
 
 			resolve({ accepted: true, finalContent: afterContent });
 		} else {
@@ -153,7 +153,7 @@ export function renderWriteNoteDiffPreview(
 
 			acceptBtn.addEventListener("click", () => {
 				actionsEl.remove();
-				renderAppliedStatus(wrapperEl, diffResult.isNewFile ? "✓ File created" : "✓ Changes accepted");
+				renderAppliedStatus(wrapperEl, diffResult.isNewFile ? "✓ file created" : "✓ changes accepted");
 				resolve({ accepted: true, finalContent: afterContent });
 			});
 
@@ -222,7 +222,7 @@ export function renderReplaceInNoteDiffPreview(
 		if (autoApproved) {
 			// Auto-approved: collapsed combined diff, no controls
 			const collapseToggle = headerEl.createDiv({ cls: "notor-diff-toggle" });
-			collapseToggle.textContent = "▶ Show diff";
+			collapseToggle.textContent = "▶ show diff";
 
 			const bodyEl = wrapperEl.createDiv({ cls: "notor-diff-body notor-hidden" });
 			renderFileDiffLines(bodyEl, diffResult.combinedDiff);
@@ -230,7 +230,7 @@ export function renderReplaceInNoteDiffPreview(
 			collapseToggle.addEventListener("click", () => {
 				const isHidden = bodyEl.hasClass("notor-hidden");
 				bodyEl.toggleClass("notor-hidden", !isHidden);
-				collapseToggle.textContent = isHidden ? "▼ Hide diff" : "▶ Show diff";
+				collapseToggle.textContent = isHidden ? "▼ hide diff" : "▶ show diff";
 			});
 
 			const statusEl = wrapperEl.createDiv({ cls: "notor-diff-status notor-diff-status-applied" });
@@ -266,7 +266,7 @@ export function renderReplaceInNoteDiffPreview(
 			// Per-block accept/reject toggle button
 			const blockToggleBtn = blockHeaderEl.createEl("button", {
 				cls: "notor-diff-block-toggle notor-diff-block-accepted",
-				text: "✓ Accept",
+				text: "✓ accept",
 			});
 
 			// Block diff lines
@@ -279,7 +279,7 @@ export function renderReplaceInNoteDiffPreview(
 				const newState = !currentlyAccepted;
 				blockAccepted.set(blockDiff.blockIndex, newState);
 
-				blockToggleBtn.textContent = newState ? "✓ Accept" : "✗ Reject";
+				blockToggleBtn.textContent = newState ? "✓ accept" : "✗ reject";
 				blockToggleBtn.removeClass("notor-diff-block-accepted", "notor-diff-block-rejected");
 				blockToggleBtn.addClass(newState ? "notor-diff-block-accepted" : "notor-diff-block-rejected");
 
@@ -481,7 +481,7 @@ function updateAllBlockUI(
 		const accepted = blockAccepted.get(idx) ?? true;
 		const toggleBtn = blockEl.querySelector(".notor-diff-block-toggle");
 		if (toggleBtn) {
-			toggleBtn.textContent = accepted ? "✓ Accept" : "✗ Reject";
+			toggleBtn.textContent = accepted ? "✓ accept" : "✗ reject";
 			toggleBtn.removeClass("notor-diff-block-accepted", "notor-diff-block-rejected");
 			toggleBtn.addClass(accepted ? "notor-diff-block-accepted" : "notor-diff-block-rejected");
 		}

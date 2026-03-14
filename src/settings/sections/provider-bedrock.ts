@@ -52,9 +52,8 @@ export function renderBedrockProviderSection(
 	new Setting(containerEl)
 		.setName("Authentication method")
 		.setDesc(
-			"Choose how to authenticate with AWS. " +
-				"'AWS profile' delegates to the AWS credential chain (~/.aws/credentials, env vars, SSO). " +
-				"'Access keys' stores credentials directly in Obsidian's secret storage."
+			"How to authenticate with AWS: 'AWS profile' uses the standard credential chain; " +
+				"'access keys' stores them in Obsidian's secret storage."
 		)
 		.addDropdown((dropdown) => {
 			dropdown.addOption("profile", "AWS profile");
@@ -78,12 +77,11 @@ export function renderBedrockProviderSection(
 		new Setting(containerEl)
 			.setName("AWS profile name")
 			.setDesc(
-				"The AWS named profile to use from ~/.aws/credentials or ~/.aws/config. " +
-					"Uses the 'default' profile if left blank."
+				"The AWS named profile to use. Leave blank to use the 'default' profile."
 			)
 			.addText((text) =>
 				text
-					.setPlaceholder("default")
+					.setPlaceholder("Default")
 					.setValue(getBedrockProvider().aws_profile ?? "default")
 					.onChange(async (value) => {
 						const updated = { ...getBedrockProvider() };

@@ -64,7 +64,7 @@ export function renderToolCallCard(
 	const hasParams = Object.keys(toolCall.parameters).length > 0;
 	if (hasParams) {
 		const paramsToggle = toolEl.createDiv({ cls: "notor-tool-call-toggle" });
-		paramsToggle.textContent = "▶ Parameters";
+		paramsToggle.textContent = "▶ parameters";
 
 		const paramsEl = toolEl.createDiv({ cls: "notor-tool-call-params notor-hidden" });
 		const pre = paramsEl.createEl("pre");
@@ -73,7 +73,7 @@ export function renderToolCallCard(
 		paramsToggle.addEventListener("click", () => {
 			const isHidden = paramsEl.hasClass("notor-hidden");
 			paramsEl.toggleClass("notor-hidden", !isHidden);
-			paramsToggle.textContent = isHidden ? "▼ Parameters" : "▶ Parameters";
+			paramsToggle.textContent = isHidden ? "▼ parameters" : "▶ parameters";
 		});
 	}
 
@@ -127,7 +127,7 @@ export function renderToolResultSummary(
 		// Collapsible full result for longer outputs
 		if (resultStr.length > 120) {
 			const toggle = resultEl.createDiv({ cls: "notor-tool-call-toggle" });
-			toggle.textContent = "▶ Full result";
+			toggle.textContent = "▶ full result";
 
 			const fullEl = resultEl.createDiv({ cls: "notor-tool-result-full notor-hidden" });
 			const pre = fullEl.createEl("pre");
@@ -140,7 +140,7 @@ export function renderToolResultSummary(
 			toggle.addEventListener("click", () => {
 				const isHidden = fullEl.hasClass("notor-hidden");
 				fullEl.toggleClass("notor-hidden", !isHidden);
-				toggle.textContent = isHidden ? "▼ Full result" : "▶ Full result";
+				toggle.textContent = isHidden ? "▼ full result" : "▶ full result";
 			});
 		}
 	} else {

@@ -128,7 +128,7 @@ export class NotorChatView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Notor Chat";
+		return "Notor chat";
 	}
 
 	getIcon(): string {
@@ -551,7 +551,7 @@ export class NotorChatView extends ItemView {
 		this.modeToggleEl = this.inputAreaEl.createEl("button", {
 			cls: "notor-mode-toggle notor-mode-plan",
 			text: "Plan",
-			attr: { "aria-label": "Toggle Plan/Act mode" },
+			attr: { "aria-label": "Toggle plan/act mode" },
 		});
 		this.modeToggleEl.addEventListener("click", () => this.handleModeToggle());
 
@@ -969,7 +969,7 @@ export class NotorChatView extends ItemView {
 
 		// Collapsible parameters
 		const paramsToggle = toolEl.createDiv({ cls: "notor-tool-call-toggle" });
-		paramsToggle.textContent = "▶ Parameters";
+		paramsToggle.textContent = "▶ parameters";
 		const paramsEl = toolEl.createDiv({ cls: "notor-tool-call-params notor-hidden" });
 		const pre = paramsEl.createEl("pre");
 		pre.createEl("code", { text: JSON.stringify(toolCall.parameters, null, 2) });
@@ -977,8 +977,8 @@ export class NotorChatView extends ItemView {
 		paramsToggle.addEventListener("click", () => {
 			paramsEl.toggleClass("notor-hidden", !paramsEl.hasClass("notor-hidden"));
 			paramsToggle.textContent = paramsEl.hasClass("notor-hidden")
-				? "▶ Parameters"
-				: "▼ Parameters";
+				? "▶ parameters"
+				: "▼ parameters";
 		});
 
 		this.lastToolCallEl = toolEl;
@@ -1016,7 +1016,7 @@ export class NotorChatView extends ItemView {
 
 			if (resultStr.length > 100) {
 				const toggle = resultEl.createDiv({ cls: "notor-tool-call-toggle" });
-				toggle.textContent = "▶ Full result";
+				toggle.textContent = "▶ full result";
 				const fullEl = resultEl.createDiv({ cls: "notor-tool-result-full notor-hidden" });
 				const pre = fullEl.createEl("pre");
 				pre.createEl("code", { text: resultStr });
@@ -1024,8 +1024,8 @@ export class NotorChatView extends ItemView {
 				toggle.addEventListener("click", () => {
 					fullEl.toggleClass("notor-hidden", !fullEl.hasClass("notor-hidden"));
 					toggle.textContent = fullEl.hasClass("notor-hidden")
-						? "▶ Full result"
-						: "▼ Full result";
+						? "▶ full result"
+						: "▼ full result";
 				});
 			}
 		}
@@ -1720,7 +1720,7 @@ class CheckpointModal extends Modal {
 	): void {
 		container.createEl("p", {
 			cls: "notor-checkpoint-modal-label",
-			text: "− Checkpoint  /  + Current",
+			text: "− checkpoint  /  + current",
 		});
 
 		const diffEl = container.createEl("pre", { cls: "notor-checkpoint-modal-diff" });

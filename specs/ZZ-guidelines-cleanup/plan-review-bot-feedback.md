@@ -491,9 +491,9 @@ A collection of small, isolated fixes that don't warrant individual tasks.
 - "API Key" → "API key" (API is an acronym, keep caps; "key" is lowercase)
 
 **Acceptance Criteria:**
-- [ ] All 53 flagged strings are in sentence case
-- [ ] Proper nouns and acronyms (API, MCP, URL, AI, AWS, OpenAI, Anthropic, Bedrock) retain their capitalization
-- [ ] Build passes; no visual regression in settings or UI
+- [x] All 53 flagged strings are in sentence case
+- [x] Proper nouns and acronyms (API, MCP, URL, AI, AWS, OpenAI, Anthropic, Bedrock) retain their capitalization
+- [x] Build passes; no visual regression in settings or UI
 
 ---
 

@@ -109,7 +109,7 @@ export function renderFetchWebpageSection(
 		.setName("Add domain")
 		.setDesc("Enter a domain or wildcard pattern to block.")
 		.addText((text) => {
-			text.setPlaceholder("example.com or *.example.com").onChange(
+			text.setPlaceholder("Example.com or *.example.com").onChange(
 				(v) => {
 					newDomain = v.trim();
 				}

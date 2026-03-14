@@ -341,10 +341,10 @@ function renderStdioFields(
 ): void {
 	new Setting(containerEl)
 		.setName("Command")
-		.setDesc("The command to spawn (e.g. npx, python, /usr/local/bin/server).")
+		.setDesc("The command to spawn (e.g., npx, python, /usr/local/bin/server).")
 		.addText((text) =>
 			text
-				.setPlaceholder("npx")
+				.setPlaceholder("Npx")
 				.setValue(config.command ?? "")
 				.onChange(async (value) => {
 					config.command = value.trim();
@@ -435,7 +435,7 @@ function renderStdioFields(
 
 	new Setting(containerEl)
 		.addButton((btn) =>
-			btn.setButtonText("+ Add variable").onClick(() => {
+			btn.setButtonText("+ add variable").onClick(() => {
 				if (!config.env) config.env = [];
 				config.env.push({ key: "", value: "", sensitive: false });
 				renderEnvList();
@@ -469,7 +469,7 @@ function renderHttpFields(
 	// Headers with sensitive toggle (INT-003)
 	new Setting(containerEl).setHeading().setName("Headers");
 	containerEl.createEl("p", {
-		text: "Custom HTTP headers (e.g. for API key authentication). Mark sensitive values to store them securely.",
+		text: "Custom HTTP headers (e.g., for API key authentication). Mark sensitive values to store them securely.",
 		cls: "setting-item-description",
 	});
 
@@ -516,7 +516,7 @@ function renderHttpFields(
 
 	new Setting(containerEl)
 		.addButton((btn) =>
-			btn.setButtonText("+ Add header").onClick(() => {
+			btn.setButtonText("+ add header").onClick(() => {
 				if (!config.headers) config.headers = [];
 				config.headers.push({ key: "", value: "", sensitive: false });
 				renderHeaderList();
@@ -727,7 +727,7 @@ function renderAddServerForm(
 		.setDesc("How to connect to the MCP server.")
 		.addDropdown((dd) => {
 			if (Platform.isDesktopApp) {
-				dd.addOption("stdio", "stdio — local process");
+				dd.addOption("stdio", "Stdio — local process");
 			}
 			dd.addOption("sse", "SSE — remote HTTP (legacy)");
 			dd.addOption("streamableHttp", "Streamable HTTP — remote HTTP");
@@ -762,9 +762,9 @@ function renderAddServerForm(
 	// Server name
 	const nameSetting = new Setting(containerEl)
 		.setName("Server name")
-		.setDesc("Unique identifier — slug format (e.g. my-server). Auto-slugified on input.")
+		.setDesc("Unique identifier — slug format (e.g., my-server). Auto-slugified on input.")
 		.addText((text) => {
-			text.setPlaceholder("my-server");
+			text.setPlaceholder("My-server");
 			text.onChange((value) => {
 				// During typing: only replace invalid characters but preserve trailing hyphens
 				// so the user can type "my-server" without the hyphen being stripped mid-input.
@@ -796,9 +796,9 @@ function renderAddServerForm(
 		if (selectedType === "stdio") {
 			new Setting(transportFieldsEl)
 				.setName("Command")
-				.setDesc("Command to spawn (e.g. npx).")
+				.setDesc("Command to spawn (e.g., npx).")
 				.addText((t) => {
-					t.setPlaceholder("npx");
+					t.setPlaceholder("Npx");
 					t.onChange((v) => { stdioCommand = v.trim(); });
 				});
 			new Setting(transportFieldsEl)
