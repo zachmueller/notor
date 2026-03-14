@@ -291,11 +291,11 @@ Level ordering for filtering: `debug < info < warn < error`
 **Dependencies:** None (can land before or after GUIDE-004)
 
 **Acceptance Criteria:**
-- [ ] With default settings (`log_level: "error"`), only `error`-level entries appear in the console during normal use
-- [ ] Setting `"log_level": "debug"` in `data.json` and reloading the plugin restores full logging
-- [ ] `log_level` field does not appear anywhere in the Settings UI
-- [ ] Level filtering applies to all Logger instances (module-level state, not per-instance)
-- [ ] `npm run build` passes with no type errors
+- [x] With default settings (`log_level: "error"`), only `error`-level entries appear in the console during normal use
+- [x] Setting `"log_level": "debug"` in `data.json` and reloading the plugin restores full logging
+- [x] `log_level` field does not appear anywhere in the Settings UI
+- [x] Level filtering applies to all Logger instances (module-level state, not per-instance)
+- [x] `npm run build` passes with no type errors
 
 ---
 

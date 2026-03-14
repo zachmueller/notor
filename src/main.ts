@@ -12,7 +12,7 @@ import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { MarkdownView } from "obsidian";
 import { DEFAULT_SETTINGS, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
-import { logger } from "./utils/logger";
+import { logger, setLogLevel } from "./utils/logger";
 import { notifyMarkdownLeafActivated } from "./context/auto-context";
 
 // Workflows
@@ -194,6 +194,7 @@ export default class NotorPlugin extends Plugin {
 
 		// 1. Load settings (fast — required immediately)
 		await this.loadSettings();
+		setLogLevel(this.settings.log_level);
 		log.debug("Settings loaded", { settings: this.settings });
 
 		// 2. Register the settings tab
@@ -765,6 +766,9 @@ export default class NotorPlugin extends Plugin {
 		this.rescanWorkflows().catch((e) => {
 			log.warn("Workflow rescan after settings change failed", { error: String(e) });
 		});
+
+		// Propagate log level change immediately
+		setLogLevel(this.settings.log_level);
 	}
 
 	// -----------------------------------------------------------------------

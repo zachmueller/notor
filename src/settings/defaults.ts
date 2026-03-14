@@ -138,4 +138,7 @@ export const DEFAULT_SETTINGS: NotorSettings = {
 
 	// Phase 4.1: MCP servers
 	mcp_servers: {},
+
+	// Developer escape hatch
+	log_level: "error",
 };

@@ -10,6 +10,7 @@
 
 import type { ConversationMode, LLMProviderConfig, VaultEventHookConfig } from "../types";
 import type { McpServerConfig } from "../mcp/mcp-types";
+import type { LogLevel } from "../utils/logger";
 
 // ---------------------------------------------------------------------------
 // Settings interface
@@ -245,4 +246,15 @@ export interface NotorSettings {
 	 * @see specs/04-mcp/data-model.md — McpServerConfig
 	 */
 	mcp_servers: Record<string, McpServerConfig>;
+
+	// -------------------------------------------------------------------
+	// Developer escape hatch: log level filtering
+	// -------------------------------------------------------------------
+
+	/**
+	 * Minimum log level. Entries below this level are silently dropped.
+	 * Not exposed in the Settings UI — edit data.json directly.
+	 * Default: "error" (production-quiet). Set to "debug" for development.
+	 */
+	log_level: LogLevel;
 }

@@ -30,7 +30,20 @@ export interface LogEntry {
 /** Prefix used to identify structured log lines among other console output. */
 export const LOG_PREFIX = "[NOTOR_LOG]";
 
+const LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+
+let currentLevel: LogLevel = "error";
+
+/**
+ * Set the minimum log level. Entries below this level are silently dropped.
+ * Defaults to "error". Set to "debug" via data.json for development/testing.
+ */
+export function setLogLevel(level: LogLevel): void {
+	currentLevel = level;
+}
+
 function emit(level: LogLevel, source: string, message: string, data?: unknown): void {
+	if (LEVEL_ORDER[level] < LEVEL_ORDER[currentLevel]) return;
 	const entry: LogEntry = {
 		timestamp: new Date().toISOString(),
 		level,

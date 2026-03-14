@@ -138,6 +138,17 @@ if (fs.existsSync(pluginDir)) {
 	console.log(`  Symlinked: ${pluginDir} → ${BUILD_DIR}`);
 }
 
+// Write plugin data.json with debug-level logging for E2E test observability.
+// This ensures all [NOTOR_LOG] entries are captured by Playwright CDP, since
+// the production default (log_level: "error") would silence debug/info/warn.
+const pluginDataPath = path.join(pluginDir, "data.json");
+const existingData: Record<string, unknown> = fs.existsSync(pluginDataPath)
+	? JSON.parse(fs.readFileSync(pluginDataPath, "utf8"))
+	: {};
+existingData["log_level"] = "debug";
+fs.writeFileSync(pluginDataPath, JSON.stringify(existingData, null, 2));
+console.log(`\nConfigured plugin data.json with log_level: "debug" for E2E testing.`);
+
 // Clear plugin history to ensure a clean test state each time
 const historyDir = path.join(BUILD_DIR, "history");
 if (fs.existsSync(historyDir)) {
