@@ -175,12 +175,11 @@ export class McpHub {
 			return;
 		}
 
-		log.debug("Server config found", {
+		log.info("Connecting to MCP server", {
 			serverName,
 			type: config.type,
 			command: config.command,
 			url: config.url,
-			disabled: config.disabled,
 		});
 
 		// Disconnect first if already connected
@@ -207,6 +206,14 @@ export class McpHub {
 		// Set status to connecting
 		this.setStatus(connection, "connecting");
 
+		// Collect stderr lines for error reporting. For stdio servers,
+		// transport.stderr is a PassThrough stream available immediately
+		// after transport construction. The SDK pipes the process's stderr
+		// into it and the 'close' event (which triggers "Connection closed")
+		// only fires after all stdio streams have finished — so by the time
+		// the catch block runs, any stderr output is already in this buffer.
+		const stderrLines: string[] = [];
+
 		try {
 			// 1. Create transport
 			log.debug("Creating transport", { serverName, type: config.type });
@@ -222,7 +229,7 @@ export class McpHub {
 			connection.client = client;
 			connection.transport = transport;
 
-			// 3. Wire transport close/error handlers
+			// 3. Wire transport close/error handlers + stderr capture
 			transport.onclose = () => {
 				if (connection.status === "connected") {
 					log.info("Transport closed for connected server", { serverName });
@@ -233,8 +240,25 @@ export class McpHub {
 				log.warn("Transport error", { serverName, error: error.message });
 			};
 
+			// Attach stderr listener now (transport.stderr is a PassThrough stream
+			// that is non-null immediately for stdio servers configured with
+			// stderr: "pipe"). Buffering here allows error messages to include
+			// the process's own output when the connection attempt fails.
+			if (config.type === "stdio") {
+				const stderrStream = (transport as unknown as { stderr?: { on?: (event: string, handler: (data: Buffer) => void) => void } }).stderr;
+				if (stderrStream?.on) {
+					stderrStream.on("data", (data: Buffer) => {
+						const text = data.toString().trim();
+						if (text) {
+							stderrLines.push(text);
+							log.debug("stdio stderr", { serverName, text });
+						}
+					});
+				}
+			}
+
 			// 4. Connect client to transport (performs initialize handshake)
-			log.debug("Starting MCP handshake", { serverName, timeoutMs: HANDSHAKE_TIMEOUT_MS });
+			log.info("Starting MCP handshake", { serverName, timeoutMs: HANDSHAKE_TIMEOUT_MS });
 			await client.connect(transport, { timeout: HANDSHAKE_TIMEOUT_MS });
 
 			log.info("MCP handshake complete", {
@@ -255,12 +279,16 @@ export class McpHub {
 			});
 		} catch (e) {
 			const errorMsg = e instanceof Error ? e.message : String(e);
-			log.error("Connection failed", { serverName, error: errorMsg });
+			const stderrSuffix = stderrLines.length > 0
+				? `; process output: ${stderrLines.join(" | ")}`
+				: "";
+			const fullError = errorMsg + stderrSuffix;
+			log.error("Connection failed", { serverName, error: fullError });
 
 			// Clean up partial connection
 			await this.cleanupConnection(connection);
 
-			this.setStatus(connection, "error", errorMsg);
+			this.setStatus(connection, "error", fullError);
 
 			// Schedule auto-reconnect for HTTP transports
 			if (config.type === "sse" || config.type === "streamableHttp") {
@@ -636,7 +664,7 @@ export class McpHub {
 		Object.assign(mergedEnv, env);
 
 		const effectiveCwd = config.cwd || this.vaultRootPath;
-		log.debug("Spawning stdio process", {
+		log.info("Spawning stdio process", {
 			serverName: config.name,
 			command: config.command,
 			args: config.args ?? [],
@@ -652,18 +680,8 @@ export class McpHub {
 			stderr: "pipe",
 		});
 
-		// Capture stderr for logging once transport is started
-		const serverName = config.name;
-		const stderrStream = transport.stderr;
-		if (stderrStream) {
-			stderrStream.on("data", (data: Buffer) => {
-				const text = data.toString().trim();
-				if (text) {
-					log.debug("stdio stderr", { serverName, text });
-				}
-			});
-		}
-
+		// Note: stderr listener is attached in connectServer after transport
+		// creation so that stderrLines can be included in error messages.
 		return transport;
 	}
 

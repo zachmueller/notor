@@ -59,7 +59,7 @@ function emit(level: LogLevel, source: string, message: string, data?: unknown):
 			console.debug(line);
 			break;
 		case "info":
-			console.debug(line);
+			console.log(line);
 			break;
 		case "warn":
 			console.warn(line);
