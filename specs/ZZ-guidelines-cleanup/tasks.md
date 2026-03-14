@@ -10,7 +10,7 @@ Pre-submission audit against the official Obsidian plugin guidelines. Nine viola
 
 ## Task Summary
 
-**Total Tasks:** 9
+**Total Tasks:** 10
 **Phases:** 2 (Quick wins → Structural fixes)
 **Estimated Complexity:** Low–Medium
 
@@ -253,6 +253,38 @@ The collapsible `<details>/<summary>` groups via `createSettingsGroup()` are fin
 - [ ] No `createEl("h2")`, `createEl("h3")`, or `createEl("h4")` calls remain in settings sections
 - [ ] Any replaced headings render with consistent Obsidian heading styles
 - [ ] Settings tab visual hierarchy unchanged
+
+---
+
+### GUIDE-010: Add configurable minimum log level (default: error)
+
+**Guideline:** Minimize console logging; configure to show only errors by default.
+
+**Description:** The Logger currently has no level filtering — every `log.debug(...)` and `log.info(...)` call across the codebase emits to the console unconditionally. Add a minimum log level that defaults to `"error"` so production installs are quiet, while developers can lower it to `"debug"` by editing `data.json` directly.
+
+The setting is intentionally hidden from the Settings UI — it's a developer/power-user escape hatch, not an end-user option.
+
+**Implementation sketch:**
+1. Add `log_level: LogLevel` to `NotorSettings` with default `"error"`
+2. Add a module-level `setLogLevel(level: LogLevel)` export to `logger.ts`; the `emit()` function skips emission when `level` is below the current minimum
+3. Call `setLogLevel(settings.log_level)` in `main.ts` after settings load, and again after any settings save
+
+Level ordering for filtering: `debug < info < warn < error`
+
+**Files:**
+- `src/utils/logger.ts` — add module-level `currentLevel: LogLevel = "error"` and `setLogLevel()` export; update `emit()` to skip when level is below minimum
+- `src/settings/types.ts` — add `log_level: LogLevel` to `NotorSettings`
+- `src/settings/defaults.ts` — add `log_level: "error"` to defaults
+- `src/main.ts` — call `setLogLevel(this.settings.log_level)` after `loadSettings()` and after each `saveSettings()`
+
+**Dependencies:** None (can land before or after GUIDE-004)
+
+**Acceptance Criteria:**
+- [ ] With default settings (`log_level: "error"`), only `error`-level entries appear in the console during normal use
+- [ ] Setting `"log_level": "debug"` in `data.json` and reloading the plugin restores full logging
+- [ ] `log_level` field does not appear anywhere in the Settings UI
+- [ ] Level filtering applies to all Logger instances (module-level state, not per-instance)
+- [ ] `npm run build` passes with no type errors
 
 ---
 
