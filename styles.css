@@ -133,6 +133,56 @@
 	background: var(--background-modifier-hover);
 }
 
+/* ==========================================================================
+   Settings Tab — Collapsible Group Headers
+   ========================================================================== */
+
+.notor-settings-group {
+	margin-bottom: 16px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	overflow: hidden;
+}
+
+.notor-settings-group-summary {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 16px;
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-semibold);
+	cursor: pointer;
+	user-select: none;
+	background: var(--background-secondary);
+	list-style: none;
+}
+
+.notor-settings-group-summary::-webkit-details-marker {
+	display: none;
+}
+
+.notor-settings-group-summary::before {
+	content: "›";
+	display: inline-block;
+	transition: transform 0.15s ease;
+	font-size: 1.15em;
+	line-height: 1;
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.notor-settings-group[open] > .notor-settings-group-summary::before {
+	transform: rotate(90deg);
+}
+
+.notor-settings-group-summary:hover {
+	background: var(--background-modifier-hover);
+}
+
+.notor-settings-group-body {
+	padding: 0 4px;
+}
+
 .notor-model-select-wrapper {
 	margin-top: 4px;
 }

@@ -34,6 +34,33 @@ export function updateProvider(settings: NotorSettings, updated: LLMProviderConf
 }
 
 // ---------------------------------------------------------------------------
+// Settings UI layout helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a top-level collapsible group in the settings pane.
+ *
+ * Wraps related section renderers inside a styled `<details>` element,
+ * giving users a way to collapse areas they rarely need. Returns the body
+ * `<div>` to pass as `containerEl` to the section renderers inside the group.
+ */
+export function createSettingsGroup(
+	containerEl: HTMLElement,
+	title: string,
+	open = false
+): HTMLElement {
+	const details = containerEl.createEl("details", {
+		cls: "notor-settings-group",
+	});
+	if (open) details.setAttribute("open", "");
+	const summary = details.createEl("summary", {
+		cls: "notor-settings-group-summary",
+	});
+	summary.createEl("span", { text: title });
+	return details.createDiv({ cls: "notor-settings-group-body" });
+}
+
+// ---------------------------------------------------------------------------
 // Cron expression validation
 // ---------------------------------------------------------------------------
 

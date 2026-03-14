@@ -34,6 +34,7 @@ import { renderHistorySection } from "./sections/history";
 import { renderCheckpointSection } from "./sections/checkpoints";
 import { renderModelPricingSection } from "./sections/model-pricing";
 import { renderMcpServersSection } from "./sections/mcp-servers";
+import { createSettingsGroup } from "./helpers";
 
 /**
  * Notor settings tab registered in Obsidian's Settings panel.
@@ -83,24 +84,26 @@ export class NotorSettingTab extends PluginSettingTab {
 
 		containerEl.createEl("h1", { text: "Notor" });
 
-		renderActiveProviderSection(containerEl, ctx);
-		renderLocalProviderSection(containerEl, ctx);
-		renderAnthropicProviderSection(containerEl, ctx);
-		renderOpenAIProviderSection(containerEl, ctx);
-		renderBedrockProviderSection(containerEl, ctx);
-		renderAutoContextSection(containerEl, ctx);
-		renderFetchWebpageSection(containerEl, ctx);
-		renderExecuteCommandSection(containerEl, ctx);
-		renderHooksSection(containerEl, ctx);
-		renderVaultEventHooksSection(containerEl, ctx);
-		renderFileAttachmentsSection(containerEl, ctx);
-		renderCompactionSection(containerEl, ctx);
-		renderProviderModelReferenceSection(containerEl, ctx);
-		renderGeneralSection(containerEl, ctx);
-		renderAutoApproveSection(containerEl, ctx);
+		// --- Provider Setup (expanded by default) ---
+		const providerGroup = createSettingsGroup(containerEl, "Provider Setup", true);
+		renderActiveProviderSection(providerGroup, ctx);
+		renderLocalProviderSection(providerGroup, ctx);
+		renderAnthropicProviderSection(providerGroup, ctx);
+		renderOpenAIProviderSection(providerGroup, ctx);
+		renderBedrockProviderSection(providerGroup, ctx);
+
+		// --- Conversation (expanded by default) ---
+		const conversationGroup = createSettingsGroup(containerEl, "Conversation", true);
+		renderGeneralSection(conversationGroup, ctx);
+		renderAutoContextSection(conversationGroup, ctx);
+		renderCompactionSection(conversationGroup, ctx);
+
+		// --- Tools & Permissions (expanded by default) ---
+		const toolsGroup = createSettingsGroup(containerEl, "Tools & Permissions", true);
+		renderAutoApproveSection(toolsGroup, ctx);
 
 		// Persona auto-approve section with async rescan
-		this.personaAutoApproveSectionEl = containerEl.createDiv();
+		this.personaAutoApproveSectionEl = toolsGroup.createDiv();
 		const rerenderPersonaSection = (personas: Persona[]) => {
 			this.cachedPersonas = personas;
 			if (this.personaAutoApproveSectionEl) {
@@ -121,9 +124,27 @@ export class NotorSettingTab extends PluginSettingTab {
 		);
 		triggerPersonaRescan(ctx, rerenderPersonaSection);
 
-		renderMcpServersSection(containerEl, ctx);
-		renderHistorySection(containerEl, ctx);
-		renderCheckpointSection(containerEl, ctx);
-		renderModelPricingSection(containerEl, ctx);
+		renderMcpServersSection(toolsGroup, ctx);
+
+		// --- Tool Configuration (collapsed by default) ---
+		const toolConfigGroup = createSettingsGroup(containerEl, "Tool Configuration");
+		renderFetchWebpageSection(toolConfigGroup, ctx);
+		renderExecuteCommandSection(toolConfigGroup, ctx);
+		renderFileAttachmentsSection(toolConfigGroup, ctx);
+
+		// --- Automation (collapsed by default) ---
+		const automationGroup = createSettingsGroup(containerEl, "Automation");
+		renderHooksSection(automationGroup, ctx);
+		renderVaultEventHooksSection(automationGroup, ctx);
+
+		// --- Storage (collapsed by default) ---
+		const storageGroup = createSettingsGroup(containerEl, "Storage");
+		renderHistorySection(storageGroup, ctx);
+		renderCheckpointSection(storageGroup, ctx);
+
+		// --- Reference (collapsed by default) ---
+		const referenceGroup = createSettingsGroup(containerEl, "Reference");
+		renderProviderModelReferenceSection(referenceGroup, ctx);
+		renderModelPricingSection(referenceGroup, ctx);
 	}
 }
