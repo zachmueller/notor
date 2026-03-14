@@ -112,7 +112,7 @@ function createCompactionMarkerEl(timestamp: string, tokenCount: number): HTMLEl
 
 	// Toggle details on click
 	label.addEventListener("click", () => {
-		details.toggleClass("notor-hidden");
+		details.toggleClass("notor-hidden", !details.hasClass("notor-hidden"));
 	});
 
 	return marker;
