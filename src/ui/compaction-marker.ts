@@ -99,7 +99,7 @@ function createCompactionMarkerEl(timestamp: string, tokenCount: number): HTMLEl
 	const details = marker.createDiv({
 		cls: "notor-compaction-marker-details",
 	});
-	details.style.display = "none";
+	details.addClass("notor-hidden");
 
 	details.createDiv({
 		cls: "notor-compaction-detail",
@@ -112,8 +112,7 @@ function createCompactionMarkerEl(timestamp: string, tokenCount: number): HTMLEl
 
 	// Toggle details on click
 	label.addEventListener("click", () => {
-		const isHidden = details.style.display === "none";
-		details.style.display = isHidden ? "block" : "none";
+		details.toggleClass("notor-hidden");
 	});
 
 	return marker;

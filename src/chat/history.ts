@@ -48,7 +48,7 @@
  * @see specs/01-mvp/spec.md — FR-19
  */
 
-import type { Vault } from "obsidian";
+import { normalizePath, type Vault } from "obsidian";
 import type { Conversation, Message } from "../types";
 import type { CompactionRecord } from "../context/compaction";
 import { logger } from "../utils/logger";
@@ -331,7 +331,7 @@ export class HistoryManager {
 		await this.ensureDirectory();
 
 		const entries: ConversationListEntry[] = [];
-		const files = await this.vault.adapter.list(this.normalizePath(this.historyPath));
+		const files = await this.vault.adapter.list(normalizePath(this.historyPath));
 
 		for (const file of files.files) {
 			if (!file.endsWith(".jsonl")) continue;
@@ -501,17 +501,12 @@ export class HistoryManager {
 
 	/** Get the full vault-relative path for a history file. */
 	private getFilePath(filename: string): string {
-		return this.normalizePath(`${this.historyPath}${filename}`);
-	}
-
-	/** Normalize a path (remove trailing slashes, handle double slashes). */
-	private normalizePath(path: string): string {
-		return path.replace(/\/+/g, "/").replace(/\/$/, "");
+		return normalizePath(`${this.historyPath}${filename}`);
 	}
 
 	/** Ensure the history directory exists. */
 	private async ensureDirectory(): Promise<void> {
-		const dir = this.normalizePath(this.historyPath);
+		const dir = normalizePath(this.historyPath);
 		const exists = await this.vault.adapter.exists(dir);
 		if (!exists) {
 			await this.vault.adapter.mkdir(dir);

@@ -85,7 +85,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		containerEl.createEl("h1", { text: "Notor" });
 
 		// --- Provider Setup (expanded by default) ---
-		const providerGroup = createSettingsGroup(containerEl, "Provider Setup", true);
+		const providerGroup = createSettingsGroup(containerEl, "Provider setup", true);
 		renderActiveProviderSection(providerGroup, ctx);
 		renderLocalProviderSection(providerGroup, ctx);
 		renderAnthropicProviderSection(providerGroup, ctx);
@@ -99,7 +99,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		renderCompactionSection(conversationGroup, ctx);
 
 		// --- Tools & Permissions (expanded by default) ---
-		const toolsGroup = createSettingsGroup(containerEl, "Tools & Permissions", true);
+		const toolsGroup = createSettingsGroup(containerEl, "Tools & permissions", true);
 		renderAutoApproveSection(toolsGroup, ctx);
 
 		// Persona auto-approve section with async rescan
@@ -127,7 +127,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		renderMcpServersSection(toolsGroup, ctx);
 
 		// --- Tool Configuration (collapsed by default) ---
-		const toolConfigGroup = createSettingsGroup(containerEl, "Tool Configuration");
+		const toolConfigGroup = createSettingsGroup(containerEl, "Tool configuration");
 		renderFetchWebpageSection(toolConfigGroup, ctx);
 		renderExecuteCommandSection(toolConfigGroup, ctx);
 		renderFileAttachmentsSection(toolConfigGroup, ctx);

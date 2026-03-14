@@ -344,14 +344,7 @@ export class BedrockProvider implements LLMProvider {
 			if (options.abort_signal?.aborted) {
 				return;
 			}
-			// Log the full error object so users can inspect the hidden `$response`
-			// field the AWS SDK references in messages like:
-			// "Truncated event message received. Deserialization error: to see the
-			// raw response, inspect the hidden field {error}.$response on this object."
-			// Use console.error directly (not the structured logger) so the live
-			// object is available in Obsidian's developer console rather than being
-			// flattened by JSON.stringify.
-			console.error("[Notor] Bedrock stream error (full object for debugging):", e);
+			log.error("Bedrock stream error (full object for debugging)", e);
 			yield {
 				type: "error",
 				error: e instanceof Error ? e.message : String(e),

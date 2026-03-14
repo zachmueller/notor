@@ -2,7 +2,7 @@
 
 **Created:** 2026-03-14
 **Reference:** https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines
-**Status:** Not Started
+**Status:** Phase 1 Complete
 
 ## Context
 
@@ -34,8 +34,8 @@ Pre-submission audit against the official Obsidian plugin guidelines. Nine viola
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] All three affected group headings render in sentence case
-- [ ] No `Setting.setName()` calls across sections use title case for multi-word labels
+- [x] All three affected group headings render in sentence case
+- [x] No `Setting.setName()` calls across sections use title case for multi-word labels
 - [ ] No regressions in settings tab rendering (`npm run build` passes)
 
 ---
@@ -62,7 +62,7 @@ Pre-submission audit against the official Obsidian plugin guidelines. Nine viola
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] No bare hex color literals remain without a CSS variable wrapper
+- [x] No bare hex color literals remain without a CSS variable wrapper
 - [ ] Colors render correctly in both light and dark Obsidian themes
 - [ ] MCP status dots (connected/connecting/disconnected/error) remain visually distinct across themes
 
@@ -85,7 +85,7 @@ Pre-submission audit against the official Obsidian plugin guidelines. Nine viola
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] No `.style.display` assignments for show/hide remain in the two affected files
+- [x] No `.style.display` assignments for show/hide remain in the two affected files
 - [ ] Compaction marker show/hide behavior unchanged
 - [ ] stdio warning banner in MCP settings shows/hides correctly based on transport type selection
 
@@ -105,8 +105,8 @@ Note: the Logger has no configurable level filtering — it always emits all lev
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] No bare `console.error` / `console.log` calls remain in non-logger production code
-- [ ] Bedrock stream error is still observable in the console as a structured `[NOTOR_LOG]` JSON entry
+- [x] No bare `console.error` / `console.log` calls remain in non-logger production code
+- [x] Bedrock stream error is still observable in the console as a structured `[NOTOR_LOG]` JSON entry
 
 ---
 
@@ -122,9 +122,9 @@ Note: the Logger has no configurable level filtering — it always emits all lev
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] Custom `normalizePath()` method removed from `HistoryManager`
-- [ ] `normalizePath` imported from `'obsidian'`
-- [ ] All history path construction call sites updated
+- [x] Custom `normalizePath()` method removed from `HistoryManager`
+- [x] `normalizePath` imported from `'obsidian'`
+- [x] All history path construction call sites updated
 - [ ] History read/write operations function correctly (existing e2e tests pass)
 
 ---

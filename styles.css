@@ -539,12 +539,12 @@
 /* Ensure error text is always visible regardless of theme variable resolution */
 .theme-dark .notor-chat-error {
 	background: rgba(220, 53, 69, 0.2);
-	color: #ff8080;
+	color: var(--color-red, #ff8080);
 }
 
 .theme-light .notor-chat-error {
 	background: rgba(220, 53, 69, 0.1);
-	color: #c0392b;
+	color: var(--color-red, #c0392b);
 }
 
 /* ==========================================================================
@@ -2162,10 +2162,10 @@
 	flex-shrink: 0;
 }
 
-.notor-mcp-dot-connected { color: #4caf50; }
-.notor-mcp-dot-connecting { color: #ff9800; }
-.notor-mcp-dot-disconnected { color: #9e9e9e; }
-.notor-mcp-dot-error { color: #f44336; }
+.notor-mcp-dot-connected { color: var(--color-green, #4caf50); }
+.notor-mcp-dot-connecting { color: var(--color-orange, #ff9800); }
+.notor-mcp-dot-disconnected { color: var(--text-muted, #9e9e9e); }
+.notor-mcp-dot-error { color: var(--color-red, #f44336); }
 
 .notor-mcp-dot-connecting svg {
 	animation: notor-mcp-spin 1s linear infinite;

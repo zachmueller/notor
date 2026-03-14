@@ -730,7 +730,7 @@ function renderAddServerForm(
 			dd.onChange((value) => {
 				selectedType = value as McpServerConfig["type"];
 				if (stdioWarningEl) {
-					stdioWarningEl.style.display = selectedType === "stdio" ? "" : "none";
+					stdioWarningEl.toggleClass("notor-hidden", selectedType !== "stdio");
 				}
 				updateTransportFields();
 			});
@@ -750,7 +750,7 @@ function renderAddServerForm(
 	stdioWarningEl.createSpan({
 		text: "This will spawn a local process on your machine with your user permissions.",
 	});
-	if (selectedType !== "stdio") stdioWarningEl.style.display = "none";
+	if (selectedType !== "stdio") stdioWarningEl.addClass("notor-hidden");
 
 	// Server name
 	const nameSetting = new Setting(containerEl)
