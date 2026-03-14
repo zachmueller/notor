@@ -50,14 +50,22 @@ function validateServerName(name: string): string | null {
 	return null;
 }
 
-/** Return a colored dot character for a connection status. */
-function statusDot(status: McpConnectionStatus | undefined): string {
+/** Return Lucide SVG HTML for a connection status icon. */
+function statusIconHtml(status: McpConnectionStatus | undefined): string {
 	switch (status) {
-		case "connected": return "🟢";
-		case "connecting": return "🟡";
-		case "error": return "🔴";
+		case "connected":
+			// circle-check
+			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>';
+		case "connecting":
+			// loader-circle
+			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
+		case "error":
+			// circle-x
+			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>';
 		case "disconnected":
-		default: return "⚫";
+		default:
+			// circle-slash
+			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>';
 	}
 }
 
@@ -193,7 +201,8 @@ function renderServerList(
 
 		// Status dot + name + transport badge
 		const summaryLeft = summary.createDiv({ cls: "notor-mcp-server-summary-left" });
-		summaryLeft.createSpan({ cls: "notor-mcp-status-dot", text: statusDot(status) });
+		const dotSpan = summaryLeft.createSpan({ cls: `notor-mcp-status-dot notor-mcp-dot-${status ?? "disconnected"}` });
+		dotSpan.innerHTML = statusIconHtml(status);
 		summaryLeft.createSpan({ cls: "notor-mcp-server-name", text: serverName });
 		summaryLeft.createSpan({ cls: "notor-mcp-transport-badge", text: transportLabel(config.type) });
 

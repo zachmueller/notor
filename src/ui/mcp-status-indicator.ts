@@ -16,6 +16,25 @@ import type NotorPlugin from "../main";
 import type { McpHub } from "../mcp/mcp-hub";
 import type { McpConnectionStatus } from "../mcp/mcp-types";
 
+/** Return Lucide SVG HTML for a connection status icon. */
+function statusIconHtml(status: McpConnectionStatus | undefined): string {
+	switch (status) {
+		case "connected":
+			// circle-check
+			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>';
+		case "connecting":
+			// loader-circle
+			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
+		case "error":
+			// circle-x
+			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>';
+		case "disconnected":
+		default:
+			// circle-slash
+			return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>';
+	}
+}
+
 /** Get the McpHub from the plugin (private field access via cast). */
 function getMcpHub(plugin: NotorPlugin): McpHub | undefined {
 	return (plugin as unknown as { _mcpHub?: McpHub })._mcpHub;
@@ -152,9 +171,9 @@ export class McpStatusIndicator {
 
 				const rowEl = popover.createDiv({ cls: "notor-mcp-popover-row" });
 
-				// Status dot
-				const dot = rowEl.createSpan({ cls: "notor-mcp-popover-dot" });
-				dot.addClass(`notor-mcp-dot-${status ?? "disconnected"}`);
+				// Status icon
+				const dot = rowEl.createSpan({ cls: `notor-mcp-popover-dot notor-mcp-dot-${status ?? "disconnected"}` });
+				dot.innerHTML = statusIconHtml(status);
 
 				// Server name
 				const nameEl = rowEl.createSpan({ cls: "notor-mcp-popover-server-name" });

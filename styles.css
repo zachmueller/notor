@@ -1725,7 +1725,8 @@
 }
 
 .notor-mcp-status-dot {
-	font-size: 10px;
+	display: inline-flex;
+	align-items: center;
 	flex-shrink: 0;
 }
 
@@ -2047,6 +2048,11 @@
 	50% { opacity: 0.6; }
 }
 
+@keyframes notor-mcp-spin {
+	from { transform: rotate(0deg); }
+	to { transform: rotate(360deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.notor-mcp-status-btn.notor-mcp-status-warning {
 		animation: none;
@@ -2095,19 +2101,27 @@
 	border-bottom: none;
 }
 
-/* Status dots (FR-63 colors) */
+/* Status icons — shape + color for color-blind accessibility (FR-63) */
 .notor-mcp-popover-dot {
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
+	display: inline-flex;
+	align-items: center;
 	flex-shrink: 0;
-	display: inline-block;
 }
 
-.notor-mcp-dot-connected { background: #4caf50; }
-.notor-mcp-dot-connecting { background: #ff9800; }
-.notor-mcp-dot-disconnected { background: #9e9e9e; }
-.notor-mcp-dot-error { background: #f44336; }
+.notor-mcp-dot-connected { color: #4caf50; }
+.notor-mcp-dot-connecting { color: #ff9800; }
+.notor-mcp-dot-disconnected { color: #9e9e9e; }
+.notor-mcp-dot-error { color: #f44336; }
+
+.notor-mcp-dot-connecting svg {
+	animation: notor-mcp-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.notor-mcp-dot-connecting svg {
+		animation: none;
+	}
+}
 
 .notor-mcp-popover-server-name {
 	flex: 1;
