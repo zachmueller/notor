@@ -1,0 +1,100 @@
+# Getting started with Notor
+
+## Requirements
+
+- Obsidian **1.11.4** or later (desktop only)
+- Node.js 18+ (for building from source)
+- A running LLM provider (local or cloud)
+
+## Install and build
+
+```bash
+git clone https://github.com/zachmueller/notor.git
+cd notor
+npm install
+npm run build
+```
+
+Copy `main.js`, `manifest.json`, and `styles.css` to your vault:
+
+```
+<Vault>/.obsidian/plugins/notor/
+```
+
+Reload Obsidian and enable **Notor** in **Settings → Community plugins**.
+
+## Development (watch mode)
+
+```bash
+npm run dev
+```
+
+## Configure a provider
+
+1. Open **Settings → Notor**
+2. Choose a provider (defaults to local OpenAI-compatible at `http://localhost:11434/v1`)
+3. Enter credentials if required (stored securely via Obsidian's secrets manager)
+4. Select a model from the dropdown (or type a model ID if the list is unavailable)
+5. Open the Notor chat panel from the sidebar ribbon and start a conversation
+
+## Create your first persona
+
+Personas let you define specialized AI personalities with their own system prompt, model preferences, and approval behavior. See [personas.md](personas.md) for the full reference.
+
+1. Create the directory `notor/personas/my-persona/` in your vault
+2. Create `system-prompt.md` inside it — the body content is the persona's system prompt
+3. Optionally add frontmatter:
+   ```yaml
+   ---
+   notor-persona-prompt-mode: "append"
+   notor-preferred-provider: "anthropic"
+   notor-preferred-model: "claude-opus-4-5"
+   ---
+   ```
+4. Open the Notor chat panel → click the gear icon → select your persona
+
+## Create your first workflow
+
+Workflows are reusable instruction sets stored as vault notes that guide the AI through structured tasks. See [workflows.md](workflows.md) for the full reference.
+
+1. Create `notor/workflows/my-workflow.md` in your vault
+2. Add frontmatter and write the instructions:
+   ```markdown
+   ---
+   notor-workflow: true
+   notor-trigger: manual
+   notor-workflow-persona: "my-persona"
+   ---
+   # My workflow
+
+   ## Step 1
+   Search the vault for notes tagged #todo.
+
+   ## Step 2
+   Summarize the action items found across all matching notes.
+   ```
+3. Open the command palette → **Notor: Run workflow** → select your workflow
+
+## Connect your first MCP server
+
+> **Desktop only** for stdio servers. HTTP-based servers (SSE, Streamable HTTP) work on all platforms.
+
+MCP servers extend the AI's built-in tool set with custom tools from local or remote sources. See [mcp-servers.md](mcp-servers.md) for the full reference.
+
+The example below uses the community filesystem MCP server, which gives the AI access to a directory on your machine:
+
+1. Open **Settings → Notor → MCP servers** and click **Add server**
+2. Acknowledge the trust warning, then configure:
+   - **Name:** `filesystem`
+   - **Transport:** `stdio`
+   - **Command:** `npx` (use the absolute path if Obsidian can't find it — run `which npx` in your terminal)
+   - **Arguments:** `-y @modelcontextprotocol/server-filesystem /path/to/your/directory`
+3. Save — Notor spawns the process and performs the MCP handshake automatically
+4. The status dot turns green and discovered tools appear in the server's settings entry (e.g., `read_file`, `write_file`, `list_directory`)
+5. Open the Notor chat panel — the MCP status icon in the header confirms the server is connected
+6. Ask the AI something like "List the files in my directory" — the AI will invoke `filesystem/list_directory`, the approval UI will appear, and after you approve, the result is returned inline in the chat
+
+To connect a remote HTTP server instead:
+1. Click **Add server**, select transport **Streamable HTTP** (or **SSE**)
+2. Enter the server's URL and any required headers (mark `Authorization` values as **Sensitive** to store them encrypted)
+3. Save — the server connects and tools are discovered automatically; HTTP servers auto-reconnect if the connection drops
