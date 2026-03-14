@@ -26,6 +26,14 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * Obsidian's config directory name for the test vault.
+ * Standard vaults always use ".obsidian". This fixture creates the vault on
+ * disk before Obsidian launches, so `app.vault.configDir` is not yet available.
+ */
+// eslint-disable-next-line obsidianmd/hardcoded-config-path -- pre-launch fixture creates the vault directory; Vault#configDir is unavailable before Obsidian starts
+const OBSIDIAN_CONFIG_DIR = ".obsidian";
+
 /** Default test vault path — can be overridden with E2E_VAULT_PATH env var */
 function getVaultPath(): string {
 	if (process.env.E2E_VAULT_PATH) {
@@ -37,7 +45,7 @@ function getVaultPath(): string {
 
 /** Ensure the test vault exists with minimal structure */
 function ensureTestVault(vaultPath: string): void {
-	const obsidianDir = path.join(vaultPath, ".obsidian");
+	const obsidianDir = path.join(vaultPath, OBSIDIAN_CONFIG_DIR);
 	if (!fs.existsSync(obsidianDir)) {
 		fs.mkdirSync(obsidianDir, { recursive: true });
 		// Write minimal config so Obsidian recognizes this as a vault

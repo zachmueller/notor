@@ -12,7 +12,7 @@
 export type { ModelPricing, Hook, HookEvent, HookConfig, NotorSettings } from "./types";
 
 // Defaults
-export { DEFAULT_SETTINGS } from "./defaults";
+export { createDefaultSettings } from "./defaults";
 
 // Constants (re-exported for internal use; not part of the original public API
 // but available for consumers that need them)

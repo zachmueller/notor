@@ -10,7 +10,7 @@
 
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { MarkdownView } from "obsidian";
-import { DEFAULT_SETTINGS, NotorSettingTab } from "./settings";
+import { createDefaultSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
 import { notifyMarkdownLeafActivated } from "./context/auto-context";
@@ -354,7 +354,7 @@ export default class NotorPlugin extends Plugin {
 	async loadSettings() {
 		this.settings = Object.assign(
 			{},
-			DEFAULT_SETTINGS,
+			createDefaultSettings(this.app.vault.configDir),
 			await this.loadData()
 		);
 	}

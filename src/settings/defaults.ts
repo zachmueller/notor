@@ -80,18 +80,24 @@ export const DEFAULT_VAULT_EVENT_HOOKS: VaultEventHookConfig = {
 // Main default settings
 // ---------------------------------------------------------------------------
 
-/** Sensible defaults for all Notor settings. */
-export const DEFAULT_SETTINGS: NotorSettings = {
+/**
+ * Create sensible defaults for all Notor settings.
+ *
+ * @param configDir - The vault config directory. Pass `app.vault.configDir`
+ *   to respect user-configured vault layouts (e.g. sandbox vaults).
+ */
+export function createDefaultSettings(configDir: string): NotorSettings {
+	return {
 	notor_dir: "notor/",
 	active_provider: "local",
 	providers: DEFAULT_PROVIDERS,
 	auto_approve: DEFAULT_AUTO_APPROVE,
 	mode: "plan",
 	open_notes_on_access: true,
-	history_path: ".obsidian/plugins/notor/history/",
+	history_path: `${configDir}/plugins/notor/history/`,
 	history_max_size_mb: 500,
 	history_max_age_days: 90,
-	checkpoint_path: ".obsidian/plugins/notor/checkpoints/",
+	checkpoint_path: `${configDir}/plugins/notor/checkpoints/`,
 	checkpoint_max_per_conversation: 100,
 	checkpoint_max_age_days: 30,
 	model_pricing: {},
@@ -141,4 +147,5 @@ export const DEFAULT_SETTINGS: NotorSettings = {
 
 	// Developer escape hatch
 	log_level: "error",
-};
+	};
+}

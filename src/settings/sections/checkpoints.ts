@@ -22,12 +22,12 @@ export function renderCheckpointSection(
 		)
 		.addText((text) =>
 			text
-				.setPlaceholder(".obsidian/plugins/notor/checkpoints/")
+				.setPlaceholder(`${ctx.app.vault.configDir}/plugins/notor/checkpoints/`)
 				.setValue(ctx.settings.checkpoint_path)
 				.onChange(async (value) => {
 					ctx.settings.checkpoint_path =
 						value.trim() ||
-						".obsidian/plugins/notor/checkpoints/";
+						`${ctx.app.vault.configDir}/plugins/notor/checkpoints/`;
 					await ctx.saveSettings();
 				})
 		);

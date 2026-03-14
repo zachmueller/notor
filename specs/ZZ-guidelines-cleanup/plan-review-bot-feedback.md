@@ -375,10 +375,10 @@ Two related lint rules:
 - In `e2e/` fixture: the fixture is constructing a test vault path; it may need to read the config dir from the Obsidian process rather than hardcode it, or use a known fixture value for the test vault
 
 **Acceptance Criteria:**
-- [ ] No `.obsidian` string literals used as path components in `src/`
-- [ ] Settings and history paths use `app.vault.configDir`
-- [ ] E2E vault fixture uses the correct config directory path
-- [ ] Build passes
+- [x] No `.obsidian` string literals used as path components in `src/`
+- [x] Settings and history paths use `app.vault.configDir`
+- [x] E2E vault fixture uses the correct config directory path
+- [x] Build passes
 
 ---
 

@@ -22,12 +22,12 @@ export function renderHistorySection(
 		)
 		.addText((text) =>
 			text
-				.setPlaceholder(".obsidian/plugins/notor/history/")
+				.setPlaceholder(`${ctx.app.vault.configDir}/plugins/notor/history/`)
 				.setValue(ctx.settings.history_path)
 				.onChange(async (value) => {
 					ctx.settings.history_path =
 						value.trim() ||
-						".obsidian/plugins/notor/history/";
+						`${ctx.app.vault.configDir}/plugins/notor/history/`;
 					await ctx.saveSettings();
 				})
 		);
