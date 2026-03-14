@@ -213,23 +213,34 @@ vault.process(file: TFile, fn: (data: string) => string): Promise<string>
 
 **Guideline:** (Best practice) Plugins should not manipulate `document.body` directly; use Obsidian workspace containers or APIs.
 
-**Description:** `workflow-activity-dropdown.ts` appends its dropdown element directly to `document.body` for absolute positioning. Replace `document.body` references with `activeDocument.body` (required for correct behavior when Obsidian is in a popout window) and consider whether Obsidian's `Menu` API could replace the custom dropdown entirely.
+**Description:** `workflow-activity-dropdown.ts` appends its dropdown element directly to `document.body` and registers event listeners on bare `document`/`window` globals. All five references must be replaced with `activeDocument`/`activeWindow` equivalents so the dropdown works correctly when Obsidian is in a popout window.
 
-If using `activeDocument.body`, import `activeDocument` from `obsidian`:
+The `Menu` API is not a viable replacement — each entry renders two-row structured content (name + status badge, trigger source + timestamp) with live updates while open, which `Menu` does not support.
+
+Import both exports from `obsidian`:
 ```typescript
-import { ..., activeDocument } from 'obsidian';
+import { ..., activeDocument, activeWindow } from 'obsidian';
 ```
 
 **Files:**
-- `src/ui/workflow-activity-dropdown.ts` — line ~114: `document.body.appendChild(this.dropdownEl)` → `activeDocument.body.appendChild(this.dropdownEl)`; also update any other `document.body` or `document.addEventListener` references to use `activeDocument` equivalents
+- `src/ui/workflow-activity-dropdown.ts`:
+  - line ~114: `document.body.appendChild(this.dropdownEl)` → `activeDocument.body.appendChild(this.dropdownEl)`
+  - lines ~143–144: `document.addEventListener(...)` → `activeDocument.addEventListener(...)`
+  - lines ~160, ~165: `document.removeEventListener(...)` → `activeDocument.removeEventListener(...)`
+  - line ~375: `window.innerWidth` → `activeWindow.innerWidth`
+  - line ~381: `window.innerHeight` → `activeWindow.innerHeight`
 
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] `document.body` replaced with `activeDocument.body` for dropdown attachment
+- [ ] `activeDocument` and `activeWindow` imported from `obsidian`
+- [ ] `document.body.appendChild` → `activeDocument.body.appendChild` (line ~114)
+- [ ] Both `document.addEventListener` calls → `activeDocument.addEventListener` (lines ~143–144)
+- [ ] Both `document.removeEventListener` calls → `activeDocument.removeEventListener` (lines ~160, ~165)
+- [ ] `window.innerWidth` → `activeWindow.innerWidth` (line ~375)
+- [ ] `window.innerHeight` → `activeWindow.innerHeight` (line ~381)
 - [ ] Dropdown renders and positions correctly in the main window
-- [ ] Dropdown renders correctly in Obsidian popout windows (if tested)
-- [ ] No regressions to workflow activity dropdown open/close behavior
+- [ ] No regressions to workflow activity dropdown open/close and live-update behavior
 
 ---
 
