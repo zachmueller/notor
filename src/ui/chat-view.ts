@@ -62,6 +62,8 @@ export class NotorChatView extends ItemView {
 	private abortController: AbortController | null = null;
 	private showConversationList = false;
 	private lastToolCallEl: HTMLElement | null = null;
+	/** Whether to auto-scroll to the bottom on new content. Set to false when the user scrolls up. */
+	private autoScroll = true;
 
 	// Attachment state
 	private pendingAttachments: Attachment[] = [];
@@ -517,6 +519,13 @@ export class NotorChatView extends ItemView {
 	private buildMessageList(container: HTMLElement): void {
 		this.messageListEl = container.createDiv({ cls: "notor-message-list" });
 
+		// Re-enable auto-scroll when the user scrolls back to the bottom; disable it when they scroll up.
+		this.messageListEl.addEventListener("scroll", () => {
+			const el = this.messageListEl;
+			const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+			this.autoScroll = distanceFromBottom <= 50;
+		});
+
 		// Loading indicator
 		this.loadingIndicatorEl = container.createDiv({
 			cls: "notor-loading-indicator notor-hidden",
@@ -650,6 +659,9 @@ export class NotorChatView extends ItemView {
 
 	private async handleSend(): Promise<void> {
 		if (this.isResponding) return;
+
+		// Re-engage auto-scroll for the new exchange so the user sees the response as it streams in.
+		this.autoScroll = true;
 
 		const content = (this.textInputEl.textContent ?? "").trim();
 
@@ -1089,8 +1101,8 @@ export class NotorChatView extends ItemView {
 				// New file — beforeContent stays empty
 			}
 
-			// Start rendering the diff, then keep scrolling so the action
-			// buttons stay visible while the user decides.
+			// Render the diff. Scroll once to show the action buttons; after that the
+			// user is free to scroll up and read the full diff without being fought back.
 			const decisionPromise = renderWriteNoteDiffPreview(
 				this.messageListEl,
 				notePath,
@@ -1098,10 +1110,8 @@ export class NotorChatView extends ItemView {
 				afterContent,
 				/*autoApproved=*/ false
 			);
-			// Poll-scroll: keep the bottom visible while approval is pending.
-			const scrollTimer = window.setInterval(() => this.scrollToBottom(), 100);
+			this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
 			const decision = await decisionPromise;
-			window.clearInterval(scrollTimer);
 			return decision.accepted ? "approved" : "rejected";
 		}
 
@@ -1124,8 +1134,8 @@ export class NotorChatView extends ItemView {
 				return this.renderApprovalPrompt(toolCallEl);
 			}
 
-			// Start rendering the diff, then keep scrolling so the action
-			// buttons stay visible while the user decides.
+			// Render the diff. Scroll once to show the action buttons; after that the
+			// user is free to scroll up and read the full diff without being fought back.
 			const decisionPromise = renderReplaceInNoteDiffPreview(
 				this.messageListEl,
 				notePath,
@@ -1133,10 +1143,8 @@ export class NotorChatView extends ItemView {
 				changeBlocks,
 				/*autoApproved=*/ false
 			);
-			// Poll-scroll: keep the bottom visible while approval is pending.
-			const scrollTimer = window.setInterval(() => this.scrollToBottom(), 100);
+			this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
 			const decision = await decisionPromise;
-			window.clearInterval(scrollTimer);
 			return decision.accepted ? "approved" : "rejected";
 		}
 
@@ -1619,6 +1627,7 @@ export class NotorChatView extends ItemView {
 	// -----------------------------------------------------------------------
 
 	scrollToBottom(): void {
+		if (!this.autoScroll) return;
 		this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
 	}
 
