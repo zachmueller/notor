@@ -36,7 +36,7 @@ Pre-submission audit against the official Obsidian plugin guidelines. Nine viola
 **Acceptance Criteria:**
 - [x] All three affected group headings render in sentence case
 - [x] No `Setting.setName()` calls across sections use title case for multi-word labels
-- [ ] No regressions in settings tab rendering (`npm run build` passes)
+- [x] No regressions in settings tab rendering (`npm run build` passes)
 
 ---
 
