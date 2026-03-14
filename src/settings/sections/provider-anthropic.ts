@@ -14,7 +14,7 @@ export function renderAnthropicProviderSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Anthropic" });
+	new Setting(containerEl).setHeading().setName("Anthropic");
 
 	new Setting(containerEl)
 		.setName("API key")

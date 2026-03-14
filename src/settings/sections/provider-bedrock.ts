@@ -16,7 +16,7 @@ export function renderBedrockProviderSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "AWS Bedrock" });
+	new Setting(containerEl).setHeading().setName("AWS Bedrock");
 
 	// IAM policy note
 	containerEl.createEl("p", {

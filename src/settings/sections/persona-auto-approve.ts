@@ -49,7 +49,7 @@ export function renderPersonaAutoApproveSection(
 	ctx: SettingsContext,
 	onRerender: (personas: Persona[]) => void
 ): void {
-	containerEl.createEl("h2", { text: "Persona auto-approve" });
+	new Setting(containerEl).setHeading().setName("Persona auto-approve");
 	containerEl.createEl("p", {
 		text:
 			"Per-persona overrides for tool auto-approve settings. When a persona " +
@@ -158,13 +158,13 @@ export function renderPersonaAutoApproveSection(
 		};
 
 		// Read-only tools sub-group
-		personaBody.createEl("h4", { text: "Read-only tools" });
+		new Setting(personaBody).setHeading().setName("Read-only tools");
 		for (const [toolId, meta] of readTools) {
 			renderToolRow(personaBody, toolId, meta);
 		}
 
 		// Write tools sub-group
-		personaBody.createEl("h4", { text: "Write tools" });
+		new Setting(personaBody).setHeading().setName("Write tools");
 		for (const [toolId, meta] of writeTools) {
 			renderToolRow(personaBody, toolId, meta);
 		}
@@ -176,7 +176,7 @@ export function renderPersonaAutoApproveSection(
 		const allMcpTools = mcpHub?.getAllDiscoveredTools() ?? [];
 
 		if (allMcpTools.length > 0) {
-			personaBody.createEl("h4", { text: "MCP tools" });
+			new Setting(personaBody).setHeading().setName("MCP tools");
 			personaBody.createEl("p", {
 				text: "Overrides for tools discovered from connected MCP servers.",
 				cls: "setting-item-description",
@@ -215,10 +215,7 @@ export function renderPersonaAutoApproveSection(
 		// -----------------------------------------------------------
 		const staleNames = getStaleToolNames(overrides, registeredToolNames);
 		if (staleNames.length > 0) {
-			personaBody.createEl("h4", {
-				text: "Unknown tools",
-				cls: "notor-persona-aa-stale-heading",
-			});
+			new Setting(personaBody).setHeading().setName("Unknown tools").setClass("notor-persona-aa-stale-heading");
 			personaBody.createEl("p", {
 				text:
 					"These tool names are stored in overrides but no longer exist in the tool registry. " +

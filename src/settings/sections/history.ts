@@ -12,7 +12,7 @@ export function renderHistorySection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Chat history" });
+	new Setting(containerEl).setHeading().setName("Chat history");
 
 	new Setting(containerEl)
 		.setName("Storage path")

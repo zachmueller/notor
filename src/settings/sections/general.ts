@@ -12,7 +12,7 @@ export function renderGeneralSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "General" });
+	new Setting(containerEl).setHeading().setName("General");
 
 	new Setting(containerEl)
 		.setName("Notor directory")

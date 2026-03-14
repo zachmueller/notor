@@ -13,7 +13,7 @@ export function renderAutoApproveSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Auto-approve" });
+	new Setting(containerEl).setHeading().setName("Auto-approve");
 	containerEl.createEl("p", {
 		text:
 			"When auto-approve is on for a tool, it executes immediately without " +
@@ -30,7 +30,7 @@ export function renderAutoApproveSection(
 	);
 
 	// Read-only tools
-	containerEl.createEl("h3", { text: "Read-only tools" });
+	new Setting(containerEl).setHeading().setName("Read-only tools");
 	for (const [toolId, meta] of readTools) {
 		new Setting(containerEl)
 			.setName(meta.name)
@@ -48,7 +48,7 @@ export function renderAutoApproveSection(
 	}
 
 	// Write tools
-	containerEl.createEl("h3", { text: "Write tools" });
+	new Setting(containerEl).setHeading().setName("Write tools");
 	for (const [toolId, meta] of writeTools) {
 		new Setting(containerEl)
 			.setName(meta.name)

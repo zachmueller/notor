@@ -12,7 +12,7 @@ export function renderCompactionSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Context compaction" });
+	new Setting(containerEl).setHeading().setName("Context compaction");
 	containerEl.createEl("p", {
 		text:
 			"When a conversation approaches the model's context window limit, " +

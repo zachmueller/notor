@@ -261,7 +261,7 @@ The collapsible `<details>/<summary>` groups via `createSettingsGroup()` are fin
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] No `createEl("h2")`, `createEl("h3")`, or `createEl("h4")` calls remain in settings sections
+- [x] No `createEl("h2")`, `createEl("h3")`, or `createEl("h4")` calls remain in settings sections
 - [ ] Any replaced headings render with consistent Obsidian heading styles
 - [ ] Settings tab visual hierarchy unchanged
 

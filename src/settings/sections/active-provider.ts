@@ -12,7 +12,7 @@ export function renderActiveProviderSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Active provider" });
+	new Setting(containerEl).setHeading().setName("Active provider");
 
 	new Setting(containerEl)
 		.setName("Active provider")

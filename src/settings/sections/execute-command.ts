@@ -12,7 +12,7 @@ export function renderExecuteCommandSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Shell commands" });
+	new Setting(containerEl).setHeading().setName("Shell commands");
 	containerEl.createEl("p", {
 		text:
 			"Settings for the execute_command tool. Controls shell configuration, " +
@@ -98,7 +98,7 @@ export function renderExecuteCommandSection(
 		);
 
 	// Allowed paths
-	containerEl.createEl("h3", { text: "Allowed working directories" });
+	new Setting(containerEl).setHeading().setName("Allowed working directories");
 	containerEl.createEl("p", {
 		text:
 			"Additional absolute paths where commands are allowed to run. " +

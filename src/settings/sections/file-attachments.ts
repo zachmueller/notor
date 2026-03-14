@@ -12,7 +12,7 @@ export function renderFileAttachmentsSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "File attachments" });
+	new Setting(containerEl).setHeading().setName("File attachments");
 	containerEl.createEl("p", {
 		text:
 			"Settings for attaching external files to messages. " +

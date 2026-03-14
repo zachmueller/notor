@@ -15,7 +15,7 @@ export function renderOpenAIProviderSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "OpenAI" });
+	new Setting(containerEl).setHeading().setName("OpenAI");
 
 	const provider = getProvider(ctx.settings, "openai");
 

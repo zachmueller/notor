@@ -12,7 +12,7 @@ export function renderCheckpointSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Checkpoints" });
+	new Setting(containerEl).setHeading().setName("Checkpoints");
 
 	new Setting(containerEl)
 		.setName("Storage path")

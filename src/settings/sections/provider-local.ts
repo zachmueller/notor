@@ -15,7 +15,7 @@ export function renderLocalProviderSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Local (OpenAI-compatible)" });
+	new Setting(containerEl).setHeading().setName("Local (OpenAI-compatible)");
 
 	const provider = getProvider(ctx.settings, "local");
 

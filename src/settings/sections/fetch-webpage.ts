@@ -12,7 +12,7 @@ export function renderFetchWebpageSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Web fetching" });
+	new Setting(containerEl).setHeading().setName("Web fetching");
 	containerEl.createEl("p", {
 		text:
 			"Settings for the fetch_webpage tool. Controls timeouts, download limits, " +
@@ -79,7 +79,7 @@ export function renderFetchWebpageSection(
 		);
 
 	// Domain denylist
-	containerEl.createEl("h3", { text: "Domain denylist" });
+	new Setting(containerEl).setHeading().setName("Domain denylist");
 	containerEl.createEl("p", {
 		text:
 			"Domains blocked from being fetched. Use exact domains (e.g. example.com) or " +

@@ -13,7 +13,7 @@ export function renderModelPricingSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Model pricing" });
+	new Setting(containerEl).setHeading().setName("Model pricing");
 	containerEl.createEl("p", {
 		text:
 			"Optional per-model pricing for token cost estimates. " +

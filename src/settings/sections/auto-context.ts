@@ -12,7 +12,7 @@ export function renderAutoContextSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Auto-context" });
+	new Setting(containerEl).setHeading().setName("Auto-context");
 	containerEl.createEl("p", {
 		text:
 			"Ambient workspace signals automatically included with every message sent to the AI. " +

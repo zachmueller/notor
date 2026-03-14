@@ -4,6 +4,7 @@
  * @see specs/03a-settings-refactor/tasks.md — S-003
  */
 
+import { Setting } from "obsidian";
 import type { SettingsContext } from "./context";
 
 /**
@@ -20,7 +21,7 @@ export function renderProviderModelReferenceSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Provider & model identifiers" });
+	new Setting(containerEl).setHeading().setName("Provider & model identifiers");
 	containerEl.createEl("p", {
 		text:
 			"Reference list of provider and model identifier strings for use in persona " +

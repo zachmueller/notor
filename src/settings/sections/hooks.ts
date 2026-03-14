@@ -13,7 +13,7 @@ export function renderHooksSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Hooks" });
+	new Setting(containerEl).setHeading().setName("Hooks");
 	containerEl.createEl("p", {
 		text:
 			"Shell commands that run at specific points in the AI conversation lifecycle. " +
@@ -79,7 +79,7 @@ export function renderHooksSection(
 
 	for (const [event, meta] of Object.entries(eventLabels)) {
 		const eventKey = event as keyof HookConfig;
-		containerEl.createEl("h3", { text: meta.title });
+		new Setting(containerEl).setHeading().setName(meta.title);
 		containerEl.createEl("p", { text: meta.desc, cls: "setting-item-description" });
 
 		const hooks = ctx.settings.hooks[eventKey];

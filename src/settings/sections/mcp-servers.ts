@@ -117,7 +117,7 @@ export function renderMcpServersSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "MCP servers" });
+	new Setting(containerEl).setHeading().setName("MCP servers");
 	containerEl.createEl("p", {
 		text:
 			"Connect custom MCP (Model Context Protocol) servers to extend the AI's tool set " +
@@ -374,7 +374,7 @@ function renderStdioFields(
 		);
 
 	// Environment variables with sensitive toggle (INT-003)
-	containerEl.createEl("h4", { text: "Environment variables" });
+	new Setting(containerEl).setHeading().setName("Environment variables");
 	containerEl.createEl("p", {
 		text: "Additional environment variables for the spawned process. Mark sensitive values to store them securely.",
 		cls: "setting-item-description",
@@ -458,7 +458,7 @@ function renderHttpFields(
 		);
 
 	// Headers with sensitive toggle (INT-003)
-	containerEl.createEl("h4", { text: "Headers" });
+	new Setting(containerEl).setHeading().setName("Headers");
 	containerEl.createEl("p", {
 		text: "Custom HTTP headers (e.g. for API key authentication). Mark sensitive values to store them securely.",
 		cls: "setting-item-description",
@@ -582,7 +582,7 @@ function renderToolsSubsection(
 	containerEl.createEl("hr", { cls: "notor-mcp-divider" });
 
 	const toolsHeader = containerEl.createDiv({ cls: "notor-mcp-tools-header" });
-	toolsHeader.createEl("h4", { text: "Tools" });
+	new Setting(toolsHeader).setHeading().setName("Tools");
 
 	// Refresh tools button
 	const refreshBtn = toolsHeader.createEl("button", {
@@ -690,7 +690,7 @@ function renderAddServerForm(
 	mcpHub: McpHub | undefined,
 	refresh: () => void
 ): void {
-	containerEl.createEl("h3", { text: "Add server" });
+	new Setting(containerEl).setHeading().setName("Add server");
 
 	// Trust warning (non-dismissible, always shown) per FR-61
 	const trustWarning = containerEl.createDiv({ cls: "notor-mcp-trust-warning" });

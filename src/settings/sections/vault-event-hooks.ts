@@ -29,7 +29,7 @@ export function renderVaultEventHooksSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	containerEl.createEl("h2", { text: "Vault event hooks" });
+	new Setting(containerEl).setHeading().setName("Vault event hooks");
 	containerEl.createEl("p", {
 		text:
 			"Actions that run automatically when vault events occur — note opened, " +
