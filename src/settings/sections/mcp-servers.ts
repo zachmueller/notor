@@ -13,6 +13,7 @@
  */
 
 import { Notice, Platform, setIcon, Setting, ToggleComponent } from "obsidian";
+import { ConfirmModal } from "../../ui/confirm-modal";
 import type { SettingsContext } from "./context";
 import type { McpServerConfig, McpEnvVar, McpHeader } from "../../mcp/mcp-types";
 import {
@@ -293,29 +294,35 @@ function renderServerDetail(
 			btn
 				.setButtonText("Remove")
 				.setWarning()
-				.onClick(async () => {
-					const confirmed = confirm(`Remove MCP server "${serverName}"? This cannot be undone.`);
-					if (!confirmed) return;
+				.onClick(() => {
+					new ConfirmModal(
+						ctx.app,
+						"Remove server",
+						`Remove MCP server "${serverName}"? This cannot be undone.`,
+						async () => {
+							// Disconnect first
+							await mcpHub?.disconnectServer(serverName).catch(() => {});
 
-					// Disconnect first
-					await mcpHub?.disconnectServer(serverName).catch(() => {});
+							// Clean up secrets for env vars and headers
+							const secrets = makeSecretStorage(ctx);
+							for (const envVar of config.env ?? []) {
+								if (envVar.sensitive) {
+									await secrets.delete(mcpEnvSecretKey(serverName, envVar.key));
+								}
+							}
+							for (const header of config.headers ?? []) {
+								if (header.sensitive) {
+									await secrets.delete(mcpHeaderSecretKey(serverName, header.key));
+								}
+							}
 
-					// Clean up secrets for env vars and headers
-					const secrets = makeSecretStorage(ctx);
-					for (const envVar of config.env ?? []) {
-						if (envVar.sensitive) {
-							await secrets.delete(mcpEnvSecretKey(serverName, envVar.key));
-						}
-					}
-					for (const header of config.headers ?? []) {
-						if (header.sensitive) {
-							await secrets.delete(mcpHeaderSecretKey(serverName, header.key));
-						}
-					}
-
-					delete ctx.settings.mcp_servers[serverName];
-					await ctx.saveSettings();
-					refresh();
+							delete ctx.settings.mcp_servers[serverName];
+							await ctx.saveSettings();
+							refresh();
+						},
+						"Remove",
+						true
+					).open();
 				})
 		);
 }

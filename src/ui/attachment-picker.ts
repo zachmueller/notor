@@ -21,6 +21,7 @@ import {
 	prepareFuzzySearch,
 	setIcon,
 } from "obsidian";
+import { ConfirmModal } from "./confirm-modal";
 import type { Attachment } from "../context/attachment";
 import {
 	createVaultNoteAttachment,
@@ -377,6 +378,7 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
  * @param thresholdMb - File size threshold for confirmation dialog.
  */
 export function openExternalFileDialog(
+	app: App,
 	onAttachmentAdded: OnAttachmentAdded,
 	existingAttachments: () => Attachment[],
 	thresholdMb: number
@@ -396,6 +398,9 @@ export function openExternalFileDialog(
 	input.addEventListener("change", () => {
 		const files = Array.from(input.files ?? []);
 		const existing = existingAttachments();
+
+		type PendingFile = { absolutePath: string; name: string; content: string; fileSizeBytes: number };
+		const pendingConfirmation: PendingFile[] = [];
 
 		for (const file of files) {
 			// Electron-specific `File.path` for absolute path access
@@ -420,16 +425,15 @@ export function openExternalFileDialog(
 			}
 
 			if (result.needsConfirmation) {
-				// Show confirmation dialog for large files
-				const sizeMb = (result.fileSizeBytes ?? 0) / (1024 * 1024);
-				const proceed = confirm(
-					`The file "${file.name}" is ${sizeMb.toFixed(1)} MB, ` +
-						`which exceeds the ${thresholdMb} MB threshold.\n\n` +
-						`Attach anyway?`
-				);
-				if (!proceed) {
-					continue;
-				}
+				// Queue for modal confirmation — modals are non-blocking so handle
+				// these after the synchronous loop
+				pendingConfirmation.push({
+					absolutePath,
+					name: file.name,
+					content: result.content!,
+					fileSizeBytes: result.fileSizeBytes ?? 0,
+				});
+				continue;
 			}
 
 			// Create the attachment
@@ -443,8 +447,42 @@ export function openExternalFileDialog(
 			log.debug("External file attached", { name: file.name });
 		}
 
-		// Clean up the input element
-		input.remove();
+		// Chain modals for oversized files one at a time.
+		// onDismiss (fires on both confirm and cancel) advances to the next file.
+		// onConfirm attaches the file before advancing.
+		const showNextConfirmation = (index: number): void => {
+			const pending = pendingConfirmation[index];
+			if (!pending) {
+				// All files processed — clean up the input element
+				input.remove();
+				return;
+			}
+
+			const { absolutePath, name, content, fileSizeBytes } = pending;
+			const sizeMb = fileSizeBytes / (1024 * 1024);
+
+			new ConfirmModal(
+				app,
+				"Large file",
+				`The file "${name}" is ${sizeMb.toFixed(1)} MB, which exceeds the ${thresholdMb} MB threshold. Attach anyway?`,
+				() => {
+					const attachment = createExternalFileAttachment(absolutePath, name, content);
+					onAttachmentAdded(attachment);
+					log.debug("External file attached", { name });
+				},
+				"Attach anyway",
+				false,
+				() => showNextConfirmation(index + 1)
+			).open();
+		};
+
+		if (pendingConfirmation.length > 0) {
+			// Chain starts here; input.remove() is deferred to end of chain
+			showNextConfirmation(0);
+		} else {
+			// No oversized files — clean up immediately
+			input.remove();
+		}
 	});
 
 	// Trigger the OS file dialog
@@ -527,6 +565,7 @@ export function createAttachmentButton(
 				menuEl?.remove();
 				menuEl = null;
 				openExternalFileDialog(
+					app,
 					onAttachmentAdded,
 					existingAttachments,
 					thresholdMb

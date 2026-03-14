@@ -118,11 +118,11 @@ const response = await fetch(url, { ... });
 **Research:** `specs/ZZ-guidelines-cleanup/research/GUIDE-012-confirm-modal-audit.md`
 
 **Acceptance Criteria:**
-- [ ] No `confirm()` calls remain in `src/`
-- [ ] Delete-server and remove-attachment flows show an Obsidian modal instead of browser dialog
-- [ ] Cancel correctly aborts the operation with no side effects
-- [ ] Confirm executes the same logic as the previous `if (confirm(...))` branch
-- [ ] No code that was previously inside the `if` branch now runs outside the callback
+- [x] No `confirm()` calls remain in `src/`
+- [x] Delete-server and remove-attachment flows show an Obsidian modal instead of browser dialog
+- [x] Cancel correctly aborts the operation with no side effects
+- [x] Confirm executes the same logic as the previous `if (confirm(...))` branch
+- [x] No code that was previously inside the `if` branch now runs outside the callback
 
 ---
 
