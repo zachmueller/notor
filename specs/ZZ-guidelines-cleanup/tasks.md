@@ -166,7 +166,7 @@ For each replacement, identify the best matching Lucide icon name first (Obsidia
 
 **Acceptance Criteria:**
 - [x] Zero `innerHTML` assignments remain across all source files
-- [ ] All icons render correctly and are visually equivalent to previous SVGs
+- [x] All icons render correctly and are visually equivalent to previous SVGs
 - [x] `setIcon()` used where a Lucide equivalent exists
 - [x] `createEl('svg', ...)` pattern used only where no Lucide equivalent exists
 
@@ -202,7 +202,7 @@ vault.process(file: TFile, fn: (data: string) => string): Promise<string>
 **Dependencies:** None
 
 **Acceptance Criteria:**
-- [ ] Both `vault.modify()` calls replaced with `vault.process()`
+- [x] Both `vault.modify()` calls replaced with `vault.process()`
 - [ ] Checkpoint restore writes the correct content to the file
 - [ ] `write_note` tool overwrites existing file content correctly
 - [ ] E2E test for write-note and checkpoint restore passes

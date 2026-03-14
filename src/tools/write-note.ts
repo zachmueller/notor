@@ -157,7 +157,7 @@ export class WriteNoteTool implements Tool {
 				finalContent = content;
 			}
 
-			await this.app.vault.modify(existingFile, finalContent);
+			await this.app.vault.process(existingFile, () => finalContent);
 
 			// Update stale tracker so subsequent writes don't falsely detect staleness
 			this.staleTracker.updateAfterWrite(path, finalContent);

@@ -181,7 +181,7 @@ export class CheckpointManager {
 		);
 
 		try {
-			await this.app.vault.modify(file, checkpoint.content);
+			await this.app.vault.process(file, () => checkpoint.content);
 			log.info("Restored checkpoint", {
 				checkpointId,
 				notePath: checkpoint.note_path,
