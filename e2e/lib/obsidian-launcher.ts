@@ -144,8 +144,27 @@ function ensureTestUserDataDir(userDataDir: string, vaultPath: string): void {
 	const configPath = path.join(userDataDir, "obsidian.json");
 	const resolvedVaultPath = path.resolve(vaultPath);
 
-	// Always rewrite so the correct vault is registered as open
-	const id = Math.random().toString(16).slice(2, 18);
+	// Read existing config to reuse the vault ID if this path was already registered.
+	// Preserving the ID across runs lets Obsidian retain per-vault state (trust
+	// confirmation, window position, etc.) so dialogs don't reappear every run.
+	let existingId: string | undefined;
+	if (fs.existsSync(configPath)) {
+		try {
+			const existing = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+				vaults?: Record<string, { path: string }>;
+			};
+			for (const [id, vault] of Object.entries(existing.vaults ?? {})) {
+				if (path.resolve(vault.path) === resolvedVaultPath) {
+					existingId = id;
+					break;
+				}
+			}
+		} catch {
+			// Malformed config — will be overwritten below
+		}
+	}
+
+	const id = existingId ?? Math.random().toString(16).slice(2, 18);
 	const config = {
 		vaults: {
 			[id]: { path: resolvedVaultPath, ts: Date.now(), open: true },
@@ -153,7 +172,7 @@ function ensureTestUserDataDir(userDataDir: string, vaultPath: string): void {
 	};
 	fs.writeFileSync(configPath, JSON.stringify(config));
 	console.log(`[launcher] Wrote test obsidian.json → ${configPath}`);
-	console.log(`[launcher] Test vault: ${resolvedVaultPath}`);
+	console.log(`[launcher] Test vault: ${resolvedVaultPath} (id: ${id})`);
 }
 
 /**
