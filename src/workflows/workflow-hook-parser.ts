@@ -203,7 +203,7 @@ function parseHookAction(
 				path: filePath,
 				event: eventKey,
 				index,
-				action: actionType === undefined ? "(missing)" : String(actionType),
+				action: actionType === undefined ? "(missing)" : typeof actionType === "string" ? actionType : JSON.stringify(actionType),
 			}
 		);
 		return null;

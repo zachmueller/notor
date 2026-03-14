@@ -156,7 +156,7 @@ export function validateWorkflow(
 			`Workflow '${filePath}' is missing required 'notor-trigger' property`
 		);
 	} else {
-		const triggerStr = String(triggerValue);
+		const triggerStr = typeof triggerValue === "string" ? triggerValue : JSON.stringify(triggerValue);
 		if (!(VALID_WORKFLOW_TRIGGERS as readonly string[]).includes(triggerStr)) {
 			errors.push(
 				`Workflow '${filePath}' has unrecognized trigger '${triggerStr}'`
@@ -165,15 +165,14 @@ export function validateWorkflow(
 	}
 
 	// Validate notor-schedule is present when trigger is "scheduled"
-	const triggerStr = triggerValue !== undefined && triggerValue !== null
-		? String(triggerValue)
-		: "";
+	const triggerStr = typeof triggerValue === "string" ? triggerValue : "";
 	if (triggerStr === "scheduled") {
 		const scheduleValue = frontmatter["notor-schedule"];
 		if (
 			scheduleValue === undefined ||
 			scheduleValue === null ||
-			String(scheduleValue).trim() === ""
+			typeof scheduleValue !== "string" ||
+			scheduleValue.trim() === ""
 		) {
 			errors.push(
 				`Workflow '${filePath}' has trigger 'scheduled' but is missing 'notor-schedule'`
@@ -401,6 +400,7 @@ function parseWorkflowFile(
  */
 function parseStringOrNull(value: unknown): string | null {
 	if (value === undefined || value === null) return null;
+	if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return null;
 	const str = String(value).trim();
 	return str.length > 0 ? str : null;
 }

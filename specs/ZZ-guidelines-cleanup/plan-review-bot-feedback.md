@@ -397,9 +397,9 @@ Two related lint rules:
 - For `actionType` (L206): likely wants `.type` or `.name` from a discriminated union — check the type definition
 
 **Acceptance Criteria:**
-- [ ] No variables of object type interpolated directly in template literals in the listed files
-- [ ] The correct string representation is used (property access or JSON.stringify)
-- [ ] Build passes; no behavioral changes to workflow/persona parsing
+- [x] No variables of object type interpolated directly in template literals in the listed files
+- [x] The correct string representation is used (property access or JSON.stringify)
+- [x] Build passes; no behavioral changes to workflow/persona parsing
 
 ---
 

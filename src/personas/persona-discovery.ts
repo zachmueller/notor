@@ -189,9 +189,9 @@ function parsePromptMode(
 	if (!frontmatter) return "append";
 
 	const raw = frontmatter["notor-persona-prompt-mode"];
-	if (raw === undefined || raw === null || raw === "") return "append";
+	if (typeof raw !== "string" || raw.trim() === "") return "append";
 
-	const value = String(raw).trim().toLowerCase();
+	const value = raw.trim().toLowerCase();
 	if (value === "append" || value === "replace") {
 		return value;
 	}
@@ -210,6 +210,7 @@ function parsePromptMode(
  */
 function parseStringOrNull(value: unknown): string | null {
 	if (value === undefined || value === null) return null;
+	if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return null;
 	const str = String(value).trim();
 	return str.length > 0 ? str : null;
 }
