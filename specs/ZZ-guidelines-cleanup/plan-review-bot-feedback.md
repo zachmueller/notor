@@ -85,7 +85,7 @@ const response = await fetch(url, { ... });
 **Acceptance Criteria:**
 - [x] Every bare `fetch()` call in `src/providers/` has a described `eslint-disable-next-line` comment with the streaming justification
 - [x] No `fetch()` call is silently suppressed — each comment is specific to the line
-- [ ] Build passes; streaming inference still works for all three providers
+- [x] Build passes; streaming inference still works for all three providers
 
 ---
 
