@@ -7,23 +7,27 @@
  *
  * The launcher:
  *  1. Resolves the Obsidian executable path based on the OS
- *  2. Launches Obsidian with --remote-debugging-port=<port>
- *  3. Waits for the CDP endpoint to become available
- *  4. Returns the child process and WebSocket debugger URL
+ *  2. Prepares an isolated user data directory so the test instance never
+ *     conflicts with a running main Obsidian vault (via --user-data-dir)
+ *  3. Launches Obsidian with --remote-debugging-port=<port>
+ *  4. Waits for the CDP endpoint to become available
+ *  5. Returns the child process and WebSocket debugger URL
  */
 
 import { execSync, spawn, type ChildProcess } from "node:child_process";
-import { platform, homedir } from "node:os";
+import { platform } from "node:os";
 import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export interface ObsidianProcess {
 	process: ChildProcess;
 	wsEndpoint: string;
 	cdpPort: number;
-	/** Path to the backup of obsidian.json (if vault config was modified) */
-	configBackupPath?: string;
 }
 
 export interface LaunchOptions {
@@ -33,6 +37,12 @@ export interface LaunchOptions {
 	cdpPort?: number;
 	/** Maximum time to wait for CDP endpoint (ms, default: 30000) */
 	timeout?: number;
+	/**
+	 * Path to an isolated Electron user-data directory for the test instance.
+	 * Defaults to `e2e/test-user-data/`. Using a separate directory prevents
+	 * conflicts when the user's main Obsidian vault is already open.
+	 */
+	userDataDir?: string;
 	/** Additional CLI arguments for Obsidian */
 	extraArgs?: string[];
 }
@@ -119,82 +129,31 @@ async function waitForCDP(port: number, timeout: number): Promise<string> {
 }
 
 /**
- * Resolve the path to Obsidian's global config file (obsidian.json).
- * This file controls which vaults are open on launch.
+ * Prepare an isolated Electron user-data directory for the test Obsidian instance.
+ *
+ * By pointing Obsidian at a separate --user-data-dir, the test process is fully
+ * isolated from any already-running Obsidian instance. Electron's single-instance
+ * lock is per user-data-dir, so both instances can coexist without conflict.
+ *
+ * The directory is persistent across test runs (not a temp dir) so that Obsidian
+ * skips its first-run setup UI on subsequent invocations.
  */
-function getObsidianConfigPath(): string {
-	const os = platform();
-	switch (os) {
-		case "darwin":
-			return path.join(homedir(), "Library", "Application Support", "obsidian", "obsidian.json");
-		case "win32":
-			return path.join(process.env.APPDATA || path.join(homedir(), "AppData", "Roaming"), "obsidian", "obsidian.json");
-		case "linux":
-			return path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "obsidian", "obsidian.json");
-		default:
-			throw new Error(`Unsupported platform: ${os}`);
-	}
-}
+function ensureTestUserDataDir(userDataDir: string, vaultPath: string): void {
+	fs.mkdirSync(userDataDir, { recursive: true });
 
-/**
- * Modify Obsidian's global config so only the specified vault opens on launch.
- * Backs up the original config and returns the backup path for later restoration.
- */
-function setOpenVault(vaultPath: string): string | undefined {
-	const configPath = getObsidianConfigPath();
-	if (!fs.existsSync(configPath)) {
-		console.log("[launcher] obsidian.json not found — skipping vault config override");
-		return undefined;
-	}
-
-	const backupPath = configPath + ".e2e-backup";
-	const raw = fs.readFileSync(configPath, "utf8");
-	fs.writeFileSync(backupPath, raw);
-	console.log(`[launcher] Backed up obsidian.json → ${backupPath}`);
-
-	const config = JSON.parse(raw) as {
-		vaults: Record<string, { path: string; ts?: number; open?: boolean }>;
-		[key: string]: unknown;
-	};
-
+	const configPath = path.join(userDataDir, "obsidian.json");
 	const resolvedVaultPath = path.resolve(vaultPath);
-	let foundTestVault = false;
 
-	for (const [id, vault] of Object.entries(config.vaults)) {
-		if (path.resolve(vault.path) === resolvedVaultPath) {
-			// Mark the test vault as open
-			config.vaults[id] = { ...vault, open: true, ts: Date.now() };
-			foundTestVault = true;
-		} else {
-			// Close all other vaults
-			const { open, ...rest } = vault;
-			config.vaults[id] = rest;
-		}
-	}
-
-	// If the test vault isn't registered yet, add it
-	if (!foundTestVault) {
-		const id = Math.random().toString(16).slice(2, 18);
-		config.vaults[id] = { path: resolvedVaultPath, ts: Date.now(), open: true };
-		console.log(`[launcher] Registered test vault in obsidian.json (id: ${id})`);
-	}
-
+	// Always rewrite so the correct vault is registered as open
+	const id = Math.random().toString(16).slice(2, 18);
+	const config = {
+		vaults: {
+			[id]: { path: resolvedVaultPath, ts: Date.now(), open: true },
+		},
+	};
 	fs.writeFileSync(configPath, JSON.stringify(config));
-	console.log(`[launcher] Set only vault "${resolvedVaultPath}" to open`);
-
-	return backupPath;
-}
-
-/**
- * Restore the original obsidian.json from backup.
- */
-function restoreObsidianConfig(backupPath: string): void {
-	const configPath = getObsidianConfigPath();
-	if (fs.existsSync(backupPath)) {
-		fs.copyFileSync(backupPath, configPath);
-		fs.unlinkSync(backupPath);
-		console.log("[launcher] Restored original obsidian.json");
-	}
+	console.log(`[launcher] Wrote test obsidian.json → ${configPath}`);
+	console.log(`[launcher] Test vault: ${resolvedVaultPath}`);
 }
 
 /**
@@ -204,11 +163,14 @@ export async function launchObsidian(options: LaunchOptions): Promise<ObsidianPr
 	const obsidianPath = process.env.OBSIDIAN_PATH || resolveObsidianPath();
 	const cdpPort = options.cdpPort ?? 9222;
 	const timeout = options.timeout ?? 30_000;
+	const userDataDir = options.userDataDir ?? path.resolve(__dirname, "..", "test-user-data");
 
-	// Configure Obsidian to open only the test vault
-	const configBackupPath = setOpenVault(options.vaultPath);
+	// Set up an isolated user-data directory so the test instance doesn't
+	// conflict with any already-running Obsidian vault
+	ensureTestUserDataDir(userDataDir, options.vaultPath);
 
 	const args = [
+		`--user-data-dir=${userDataDir}`,
 		`--remote-debugging-port=${cdpPort}`,
 		...(options.extraArgs ?? []),
 	];
@@ -251,7 +213,6 @@ export async function launchObsidian(options: LaunchOptions): Promise<ObsidianPr
 		process: child,
 		wsEndpoint,
 		cdpPort,
-		configBackupPath,
 	};
 }
 
@@ -260,10 +221,6 @@ export async function launchObsidian(options: LaunchOptions): Promise<ObsidianPr
  */
 export async function closeObsidian(obsidian: ObsidianProcess): Promise<void> {
 	if (obsidian.process.killed) {
-		// Still restore config even if process was already killed
-		if (obsidian.configBackupPath) {
-			restoreObsidianConfig(obsidian.configBackupPath);
-		}
 		return;
 	}
 
@@ -287,11 +244,6 @@ export async function closeObsidian(obsidian: ObsidianProcess): Promise<void> {
 			resolve();
 		});
 	});
-
-	// Restore the original vault config
-	if (obsidian.configBackupPath) {
-		restoreObsidianConfig(obsidian.configBackupPath);
-	}
 
 	console.log("[launcher] Obsidian shut down");
 }
