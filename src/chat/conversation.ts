@@ -347,7 +347,7 @@ export class ConversationManager {
 	private generateTitle(content: string): string {
 		// Strip markdown formatting for title
 		const cleaned = content
-			.replace(/[#*_~`>\[\]()]/g, "")
+			.replace(/[#*_~`>[\]()]/g, "")
 			.replace(/\n+/g, " ")
 			.trim();
 

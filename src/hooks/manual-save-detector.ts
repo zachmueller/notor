@@ -131,16 +131,11 @@ export class ManualSaveDetector {
 		) => unknown;
 
 		// Patch: intercept save-file command
-		const detector = this;
-		commands["executeCommandById"] = function (
-			this: unknown,
-			id: string,
-			...args: unknown[]
-		): unknown {
+		commands["executeCommandById"] = (id: string, ...args: unknown[]): unknown => {
 			if (id === SAVE_COMMAND_ID) {
-				detector.recordManualSaveFlag();
+				this.recordManualSaveFlag();
 			}
-			return originalFn.apply(this, [id, ...args]);
+			return originalFn.apply(commands, [id, ...args]);
 		};
 
 		log.debug("ManualSaveDetector: installed command interceptor");

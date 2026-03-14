@@ -326,7 +326,7 @@ export default class NotorPlugin extends Plugin {
 		this._manualSaveDetector?.destroy();
 		this._tagSuppression?.destroy();
 		this._vaultEventDebounce?.destroy();
-		this._executionChainTracker; // stateless — nothing to destroy
+		// this._executionChainTracker — stateless, nothing to destroy
 		this._tagShadowCache?.destroy();
 		this._workflowConcurrencyManager?.destroy();
 

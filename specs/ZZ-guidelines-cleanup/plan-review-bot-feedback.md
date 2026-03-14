@@ -452,9 +452,9 @@ A collection of small, isolated fixes that don't warrant individual tasks.
 - Investigate why the type is inferred as `never` — likely an unreachable branch or exhaustive switch. Add a default case or cast properly.
 
 **Acceptance Criteria:**
-- [ ] Zero lint errors for the listed sub-tasks
-- [ ] Build passes
-- [ ] No behavioral regressions
+- [x] Zero lint errors for the listed sub-tasks
+- [x] Build passes
+- [x] No behavioral regressions
 
 ---
 

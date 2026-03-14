@@ -566,7 +566,7 @@ export class McpHub {
 			case "streamableHttp":
 				return this.createStreamableHttpTransport(config);
 			default:
-				throw new Error(`Unsupported transport type: ${config.type}`);
+				throw new Error(`Unsupported transport type: ${config.type as string}`);
 		}
 	}
 

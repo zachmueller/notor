@@ -786,39 +786,35 @@ export class ChatOrchestrator {
 			let hasToolCall = false;
 			let streamDone = false;
 
-			try {
-				for await (const chunk of stream) {
-					if (abortController.signal.aborted) {
+			for await (const chunk of stream) {
+				if (abortController.signal.aborted) {
+					streamDone = true;
+					break;
+				}
+				switch (chunk.type) {
+					case "text_delta":
+						textContent += chunk.text;
+						break;
+					case "tool_call_start":
+						hasToolCall = true;
+						toolCallId = chunk.id;
+						toolName = chunk.tool_name;
+						toolCallJson = "";
+						break;
+					case "tool_call_delta":
+						toolCallJson += chunk.partial_json;
+						break;
+					case "tool_call_end":
 						streamDone = true;
 						break;
-					}
-					switch (chunk.type) {
-						case "text_delta":
-							textContent += chunk.text;
-							break;
-						case "tool_call_start":
-							hasToolCall = true;
-							toolCallId = chunk.id;
-							toolName = chunk.tool_name;
-							toolCallJson = "";
-							break;
-						case "tool_call_delta":
-							toolCallJson += chunk.partial_json;
-							break;
-						case "tool_call_end":
-							streamDone = true;
-							break;
-						case "message_end":
-							inputTokens = chunk.input_tokens;
-							outputTokens = chunk.output_tokens;
-							break;
-						case "error":
-							throw new Error(chunk.error);
-					}
-					if (streamDone && hasToolCall) break;
+					case "message_end":
+						inputTokens = chunk.input_tokens;
+						outputTokens = chunk.output_tokens;
+						break;
+					case "error":
+						throw new Error(chunk.error);
 				}
-			} catch (e) {
-				throw e;
+				if (streamDone && hasToolCall) break;
 			}
 
 			if (hasToolCall) {
@@ -1609,7 +1605,7 @@ export class ChatOrchestrator {
 						toolCallJson += chunk.partial_json;
 						break;
 
-					case "tool_call_end":
+					case "tool_call_end": {
 						// Tool call complete — return for dispatch
 						let parameters: Record<string, unknown> = {};
 						try {
@@ -1643,6 +1639,7 @@ export class ChatOrchestrator {
 							outputTokens,
 							contentEl,
 						};
+					}
 
 					case "message_end":
 						inputTokens = chunk.input_tokens;
