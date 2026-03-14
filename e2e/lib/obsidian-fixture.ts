@@ -71,7 +71,7 @@ function ensureTestVault(vaultPath: string): void {
 	// Create symlink if it doesn't exist — points to build/ (not repo root)
 	if (!fs.existsSync(pluginDir)) {
 		fs.symlinkSync(buildDir, pluginDir, "junction");
-		console.log(`[fixture] Symlinked plugin: ${buildDir} → ${pluginDir}`);
+		console.debug(`[fixture] Symlinked plugin: ${buildDir} → ${pluginDir}`);
 	}
 
 	// Ensure community plugins are enabled and our plugin is active

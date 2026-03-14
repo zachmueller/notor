@@ -45,28 +45,28 @@ const VAULT_PATH = getArg("vault", path.resolve(__dirname, "test-vault"));
 const CDP_PORT = parseInt(getArg("port", "9222"), 10);
 
 async function main() {
-	console.log("=== Notor E2E Debug Runner ===");
-	console.log(`Duration: ${DURATION_S}s | Vault: ${VAULT_PATH} | CDP port: ${CDP_PORT}`);
+	console.debug("=== Notor E2E Debug Runner ===");
+	console.debug(`Duration: ${DURATION_S}s | Vault: ${VAULT_PATH} | CDP port: ${CDP_PORT}`);
 
 	// Step 1: Build the plugin (unless skipped)
 	if (!SKIP_BUILD) {
-		console.log("\n[1/5] Building plugin...");
+		console.debug("\n[1/5] Building plugin...");
 		try {
 			execSync("npm run build", {
 				cwd: path.resolve(__dirname, ".."),
 				stdio: "inherit",
 			});
-			console.log("Build complete.");
+			console.debug("Build complete.");
 		} catch {
 			console.error("Build failed! Fix build errors first.");
 			process.exit(1);
 		}
 	} else {
-		console.log("\n[1/5] Skipping build (--skip-build)");
+		console.debug("\n[1/5] Skipping build (--skip-build)");
 	}
 
 	// Step 2: Launch Obsidian
-	console.log("\n[2/5] Launching Obsidian...");
+	console.debug("\n[2/5] Launching Obsidian...");
 	let obsidian: ObsidianProcess | undefined;
 	let collector: LogCollector | undefined;
 
@@ -78,7 +78,7 @@ async function main() {
 		});
 
 		// Step 3: Connect Playwright
-		console.log("\n[3/5] Connecting Playwright via CDP...");
+		console.debug("\n[3/5] Connecting Playwright via CDP...");
 		const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
 		const contexts = browser.contexts();
 		const pages = contexts[0]?.pages() ?? [];
@@ -89,14 +89,14 @@ async function main() {
 		}
 
 		// Step 4: Attach log collector
-		console.log("\n[4/5] Collecting logs...");
+		console.debug("\n[4/5] Collecting logs...");
 		const outputDir = path.resolve(__dirname, "results", "logs");
 		collector = new LogCollector({ outputDir });
 		collector.attach(page);
 
 		// Wait for Obsidian + plugin to initialize
 		await page.waitForLoadState("domcontentloaded");
-		console.log(`Capturing console output for ${DURATION_S} seconds...`);
+		console.debug(`Capturing console output for ${DURATION_S} seconds...`);
 
 		// Take a screenshot right after load
 		const screenshotsDir = path.resolve(__dirname, "results", "screenshots");
@@ -117,31 +117,31 @@ async function main() {
 		});
 
 		// Step 5: Write summary and close
-		console.log("\n[5/5] Writing summary and shutting down...");
+		console.debug("\n[5/5] Writing summary and shutting down...");
 		const summaryPath = await collector.writeSummary();
 
 		const logs = collector.getStructuredLogs();
 		const errors = collector.getLogsByLevel("error");
 
-		console.log(`\n=== Results ===`);
-		console.log(`Total structured log entries: ${logs.length}`);
-		console.log(`Errors: ${errors.length}`);
-		console.log(`Warnings: ${collector.getLogsByLevel("warn").length}`);
-		console.log(`Summary: ${summaryPath}`);
+		console.debug(`\n=== Results ===`);
+		console.debug(`Total structured log entries: ${logs.length}`);
+		console.debug(`Errors: ${errors.length}`);
+		console.debug(`Warnings: ${collector.getLogsByLevel("warn").length}`);
+		console.debug(`Summary: ${summaryPath}`);
 
 		if (errors.length > 0) {
-			console.log(`\n=== Errors ===`);
+			console.debug(`\n=== Errors ===`);
 			for (const err of errors) {
-				console.log(`  [${err.source}] ${err.message}`);
-				if (err.data) console.log(`    Data: ${JSON.stringify(err.data)}`);
+				console.debug(`  [${err.source}] ${err.message}`);
+				if (err.data) console.debug(`    Data: ${JSON.stringify(err.data)}`);
 			}
 		}
 
 		await collector.dispose();
 		await browser.close().catch(() => {});
 
-		console.log("\nDone. Cline can read the summary at:");
-		console.log(`  ${summaryPath}`);
+		console.debug("\nDone. Cline can read the summary at:");
+		console.debug(`  ${summaryPath}`);
 	} catch (err) {
 		console.error("Fatal error:", err);
 		if (collector) await collector.dispose().catch(() => {});

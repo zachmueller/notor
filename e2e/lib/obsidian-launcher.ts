@@ -171,8 +171,8 @@ function ensureTestUserDataDir(userDataDir: string, vaultPath: string): void {
 		},
 	};
 	fs.writeFileSync(configPath, JSON.stringify(config));
-	console.log(`[launcher] Wrote test obsidian.json → ${configPath}`);
-	console.log(`[launcher] Test vault: ${resolvedVaultPath} (id: ${id})`);
+	console.debug(`[launcher] Wrote test obsidian.json → ${configPath}`);
+	console.debug(`[launcher] Test vault: ${resolvedVaultPath} (id: ${id})`);
 }
 
 /**
@@ -194,9 +194,9 @@ export async function launchObsidian(options: LaunchOptions): Promise<ObsidianPr
 		...(options.extraArgs ?? []),
 	];
 
-	console.log(`[launcher] Starting Obsidian: ${obsidianPath}`);
-	console.log(`[launcher] Args: ${args.join(" ")}`);
-	console.log(`[launcher] CDP port: ${cdpPort}`);
+	console.debug(`[launcher] Starting Obsidian: ${obsidianPath}`);
+	console.debug(`[launcher] Args: ${args.join(" ")}`);
+	console.debug(`[launcher] CDP port: ${cdpPort}`);
 
 	const child = spawn(obsidianPath, args, {
 		detached: false,
@@ -209,11 +209,11 @@ export async function launchObsidian(options: LaunchOptions): Promise<ObsidianPr
 	});
 
 	child.stdout?.on("data", (data) => {
-		console.log(`[obsidian:stdout] ${data.toString().trim()}`);
+		console.debug(`[obsidian:stdout] ${data.toString().trim()}`);
 	});
 
 	child.stderr?.on("data", (data) => {
-		console.log(`[obsidian:stderr] ${data.toString().trim()}`);
+		console.debug(`[obsidian:stderr] ${data.toString().trim()}`);
 	});
 
 	child.on("error", (err) => {
@@ -221,12 +221,12 @@ export async function launchObsidian(options: LaunchOptions): Promise<ObsidianPr
 	});
 
 	child.on("exit", (code, signal) => {
-		console.log(`[launcher] Obsidian exited: code=${code}, signal=${signal}`);
+		console.debug(`[launcher] Obsidian exited: code=${code}, signal=${signal}`);
 	});
 
-	console.log(`[launcher] Waiting for CDP endpoint on port ${cdpPort}...`);
+	console.debug(`[launcher] Waiting for CDP endpoint on port ${cdpPort}...`);
 	const wsEndpoint = await waitForCDP(cdpPort, timeout);
-	console.log(`[launcher] CDP ready: ${wsEndpoint}`);
+	console.debug(`[launcher] CDP ready: ${wsEndpoint}`);
 
 	return {
 		process: child,
@@ -243,7 +243,7 @@ export async function closeObsidian(obsidian: ObsidianProcess): Promise<void> {
 		return;
 	}
 
-	console.log("[launcher] Shutting down Obsidian...");
+	console.debug("[launcher] Shutting down Obsidian...");
 
 	// Try graceful shutdown first
 	obsidian.process.kill("SIGTERM");
@@ -252,7 +252,7 @@ export async function closeObsidian(obsidian: ObsidianProcess): Promise<void> {
 	await new Promise<void>((resolve) => {
 		const timer = setTimeout(() => {
 			if (!obsidian.process.killed) {
-				console.log("[launcher] Force-killing Obsidian");
+				console.debug("[launcher] Force-killing Obsidian");
 				obsidian.process.kill("SIGKILL");
 			}
 			resolve();
@@ -264,5 +264,5 @@ export async function closeObsidian(obsidian: ObsidianProcess): Promise<void> {
 		});
 	});
 
-	console.log("[launcher] Obsidian shut down");
+	console.debug("[launcher] Obsidian shut down");
 }

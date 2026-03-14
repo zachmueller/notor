@@ -541,9 +541,9 @@ A collection of small, isolated fixes that don't warrant individual tasks.
 - `src/utils/logger.ts:L62`: This is the logger's internal `console.*` call. If it's using `console.log` or `console.info`, change to `console.debug` for non-error entries.
 
 **Acceptance Criteria:**
-- [ ] No `console.log` or `console.info` calls remain anywhere in the repo
-- [ ] E2E output verbosity is unchanged (debug is equivalent for test purposes)
-- [ ] Logger still emits structured JSON entries to the console
+- [x] No `console.log` or `console.info` calls remain anywhere in the repo
+- [x] E2E output verbosity is unchanged (debug is equivalent for test purposes)
+- [x] Logger still emits structured JSON entries to the console
 
 ---
 
