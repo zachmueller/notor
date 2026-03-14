@@ -67,6 +67,7 @@ const configs: Record<string, unknown> = {
 		alwaysUpdateLinks: true,
 		newFileLocation: "current",
 		attachmentFolderPath: "./",
+		restrictMode: false,
 	},
 	"appearance.json": {
 		baseFontSize: 16,

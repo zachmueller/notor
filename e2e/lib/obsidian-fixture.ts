@@ -43,7 +43,7 @@ function ensureTestVault(vaultPath: string): void {
 		// Write minimal config so Obsidian recognizes this as a vault
 		fs.writeFileSync(
 			path.join(obsidianDir, "app.json"),
-			JSON.stringify({ alwaysUpdateLinks: true }, null, 2)
+			JSON.stringify({ alwaysUpdateLinks: true, restrictMode: false }, null, 2)
 		);
 		fs.writeFileSync(
 			path.join(obsidianDir, "appearance.json"),
