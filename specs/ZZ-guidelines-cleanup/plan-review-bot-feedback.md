@@ -71,15 +71,21 @@ New tasks are numbered GUIDE-011 onward.
 - `src/providers/openai-provider.ts` — lines L170, L316
 
 **Approach:**
-- Import `requestUrl, RequestUrlParam` from `'obsidian'`
-- Replace `fetch(url, { method, headers, body })` with `requestUrl({ url, method, headers, body, throw: false })`
-- Map the `RequestUrlResponse` fields (`status`, `text`, `json`, `arrayBuffer`) to the equivalent Response interface the caller expects
-- Note: `requestUrl` does not support streaming. For streaming endpoints (SSE/chunked), the current `fetch`-based approach may need to stay with a targeted `// eslint-disable-next-line` comment bearing a justification, or a streaming adapter may be needed. Investigate per provider before replacing.
+
+Obsidian's `requestUrl` is a single-shot HTTP call that buffers the entire response before returning. All three providers use streaming (`fetch` with SSE or chunked transfer encoding) to emit tokens in real time as they arrive from the model. These two APIs are fundamentally incompatible: streaming cannot be implemented on top of `requestUrl`.
+
+The correct fix is to keep `fetch` for inference endpoints and add a described `eslint-disable-next-line` comment at each usage site explaining the justification. This satisfies the spirit of the guideline (document the reason for the exception) without breaking streaming.
+
+For each `fetch` call:
+```typescript
+// eslint-disable-next-line no-restricted-globals -- requestUrl does not support streaming; fetch is required for SSE/chunked inference responses
+const response = await fetch(url, { ... });
+```
 
 **Acceptance Criteria:**
-- [ ] No bare `fetch()` calls remain in `src/providers/`
-- [ ] All three providers build without type errors
-- [ ] Connection test passes for Anthropic, OpenAI, and local providers
+- [ ] Every bare `fetch()` call in `src/providers/` has a described `eslint-disable-next-line` comment with the streaming justification
+- [ ] No `fetch()` call is silently suppressed — each comment is specific to the line
+- [ ] Build passes; streaming inference still works for all three providers
 
 ---
 
@@ -91,27 +97,54 @@ New tasks are numbered GUIDE-011 onward.
 - `src/settings/sections/mcp-servers.ts` — line L297: confirmation before deleting an MCP server
 - `src/ui/attachment-picker.ts` — lines L425–L429: confirmation before removing an attachment
 
-**Approach:**
-- Create a small reusable `ConfirmModal extends Modal` in `src/ui/confirm-modal.ts` (or inline if only used once) with a title, message, and Confirm/Cancel buttons
-- Replace each `if (confirm("..."))` with a `new ConfirmModal(app, message, onConfirm).open()` call
-- Ensure the async flow is preserved (the modal callback replaces the inline conditional)
+**Before implementing, research each usage site carefully.** The two locations have meaningfully different contexts and the async nature of modals vs. the synchronous nature of `confirm()` can introduce subtle control-flow issues if not handled correctly.
+
+**Research questions to answer before coding:**
+
+1. **`src/settings/sections/mcp-servers.ts:L297`** — What action is being confirmed? What code runs in the `if (confirm(...))` branch, and what state does it modify? Is the surrounding function already `async`? Does the UI need to be refreshed or re-rendered after the confirmation?
+
+2. **`src/ui/attachment-picker.ts:L425–L429`** — Same questions. The picker is likely inside an event handler — what is the expected behavior if the user opens a modal from within a picker interaction?
+
+3. **Flow control:** `confirm()` blocks synchronously and returns a boolean, so code after it always runs in a defined order. An Obsidian Modal is non-blocking — `open()` returns immediately and the confirm/cancel callbacks fire later. Any code that currently follows the `confirm()` call and relies on its result will need to move inside the callback.
+
+4. **`ConfirmModal` design:** Is a single shared `ConfirmModal` class the right call, or are there UI differences between the two confirmation dialogs (different titles, button labels, destructive styling)? Check whether Obsidian's built-in `Modal` provides a standard destructive-action pattern.
+
+**Approach (after research):**
+- Create `src/ui/confirm-modal.ts` with a `ConfirmModal extends Modal` accepting a title, message, and `onConfirm` callback
+- Move the post-confirmation logic for each site into the `onConfirm` callback
+- Replace each `if (confirm("..."))` block with `new ConfirmModal(this.app, title, message, () => { /* moved logic */ }).open()`
+- Ensure no code that was previously guarded by `confirm()` now runs unconditionally
 
 **Acceptance Criteria:**
 - [ ] No `confirm()` calls remain in `src/`
 - [ ] Delete-server and remove-attachment flows show an Obsidian modal instead of browser dialog
-- [ ] Cancel action correctly aborts the operation
+- [ ] Cancel correctly aborts the operation with no side effects
+- [ ] Confirm executes the same logic as the previous `if (confirm(...))` branch
+- [ ] No code that was previously inside the `if` branch now runs outside the callback
 
 ---
 
-### GUIDE-013: Fix floating and void-context Promise issues
+### GUIDE-013-R: Research — Audit Promise handling sites before fixing
 
-**Guideline:** Unhandled Promises hide errors. Either await, chain `.catch`, or explicitly mark fire-and-forget with `void`.
+**Pre-requisite for GUIDE-013.** Do not begin GUIDE-013 implementation until this research is complete.
 
-Two related lint rules:
-- `@typescript-eslint/no-floating-promises` — Promise expression result discarded with no handling
-- `@typescript-eslint/no-misused-promises` — async callback passed where `void`-return is expected
+**Purpose:** The 29 Promise-handling violations span critical paths (orchestrator, MCP hub, chat view). Applying a mechanical fix without understanding each site risks silently swallowing errors, changing execution order, or masking real bugs. This research step classifies every site so that GUIDE-013 can be executed with confidence.
 
-**Files (floating promises — 13 occurrences):**
+**What to investigate at each site:**
+
+For every flagged location, read the surrounding code and answer:
+
+1. **Intent** — Is this intentionally fire-and-forget (the caller doesn't need to wait), or should the caller actually be waiting?
+2. **Error visibility** — If the Promise rejects, is that error currently observable anywhere (try/catch upstream, `.catch`, event handler)? Would the proposed fix change whether errors surface?
+3. **Execution order sensitivity** — Does any code on the lines immediately following depend on the Promise having completed? Would adding `void` vs `await` change observable behavior?
+4. **Correct fix** — One of:
+   - `void fn()` — intentional fire-and-forget, errors are either non-critical or handled elsewhere
+   - `.catch(err => log.error(...))` — fire-and-forget but errors must not be silent
+   - Convert surrounding function to `async` + `await fn()` — caller actually needs to wait
+   - `void (async () => { await fn(); })()` — async callback in void-return context (event handler)
+5. **Risk level** — Low (mechanical `void` prefix), Medium (requires async conversion of caller), High (unclear intent or potential behavioral change)
+
+**Files to audit (floating promises — 13 occurrences):**
 - `src/chat/history.ts` — L125–L129
 - `src/chat/orchestrator.ts` — L1846
 - `src/main.ts` — L1446, L1454
@@ -121,20 +154,43 @@ Two related lint rules:
 - `src/ui/chat-view.ts` — L305, L332, L595, L1520
 - `src/ui/persona-picker.ts` — L104–L108
 
-**Files (promise-in-void-context — 16 occurrences):**
+**Files to audit (promise-in-void-context — 16 occurrences):**
 - `src/chat/orchestrator.ts` — L100–L105, L107–L109, L591–L596, L597–L599
 - `src/mcp/mcp-hub.ts` — L751–L791
 - `src/settings/sections/mcp-servers.ts` — L557–L558, L564–L567, L592–L605, L654–L663, L671–L679
 - `src/ui/chat-view.ts` — L645, L1413–L1425, L1517, L1549–L1556, L1564–L1580
 
-**Approach:**
-- For event handler callbacks that intentionally fire-and-forget, prefix the call with `void`
-- For cases where errors should surface, add `.catch(err => log.error(...))` or convert the handler to `async` and add proper `await`
-- For the `no-misused-promises` cases: either wrap the async callback body in a `void (async () => { ... })()` IIFE, or use a synchronous wrapper that calls `void asyncFn()`
+**Output:** Write findings to `specs/ZZ-guidelines-cleanup/research/GUIDE-013-promise-audit.md`. Structure it as a table or per-file sections with: location, intent, error visibility, correct fix, risk level, and any notes. Flag any sites where intent is ambiguous and a decision is needed before proceeding.
+
+**Acceptance Criteria:**
+- [ ] Every flagged location has a documented classification and recommended fix
+- [ ] All High-risk sites are explicitly called out with rationale
+- [ ] Research file committed before GUIDE-013 implementation begins
+
+---
+
+### GUIDE-013: Fix floating and void-context Promise issues
+
+**Pre-requisite:** GUIDE-013-R must be complete. Use the research output to drive every fix decision.
+
+**Guideline:** Unhandled Promises hide errors. Either await, chain `.catch`, or explicitly mark fire-and-forget with `void`.
+
+Two related lint rules:
+- `@typescript-eslint/no-floating-promises` — Promise expression result discarded with no handling
+- `@typescript-eslint/no-misused-promises` — async callback passed where `void`-return is expected
+
+**Files:** See GUIDE-013-R for the full list (29 occurrences across both rule categories).
+
+**Approach:** Apply the fix classified in the research for each site:
+- `void fn()` — intentional fire-and-forget
+- `.catch(err => log.error(...))` — fire-and-forget where errors must surface
+- `await fn()` — caller needs to wait; convert surrounding function to `async` if needed
+- `void (async () => { await fn(); })()` — async body inside a void-return event handler
 
 **Acceptance Criteria:**
 - [ ] Zero `no-floating-promises` lint errors in `src/`
 - [ ] Zero `no-misused-promises` lint errors in `src/`
+- [ ] Every fix matches the classification in GUIDE-013-R; no site fixed without documented rationale
 - [ ] No regressions in chat send, MCP operations, or settings interactions
 
 ---
@@ -353,15 +409,16 @@ Two related lint rules:
 - `src/mcp/mcp-hub.ts` — L625, L632
 
 **Approach:**
-- Replace `new SSEClientTransport(url)` with `new StreamableHTTPClientTransport(url)`
-- Import `StreamableHTTPClientTransport` from `@modelcontextprotocol/sdk`
-- Note: the deprecation notice says "clients may need to support both transports during the migration period" — consider keeping a fallback to `SSEClientTransport` for servers that haven't upgraded yet (feature-detect via a try/catch or a user-facing toggle)
+- Replace `new SSEClientTransport(url)` with `new StreamableHTTPClientTransport(url)` at both locations
+- Replace the `SSEClientTransport` import with `StreamableHTTPClientTransport` from `@modelcontextprotocol/sdk`
+- Remove any now-unused SSE-specific code paths
+
+The MCP ecosystem has moved on. Requiring users to run servers that support Streamable HTTP is a reasonable stance and avoids maintaining two transport code paths indefinitely.
 
 **Acceptance Criteria:**
-- [ ] `SSEClientTransport` is no longer the primary transport
-- [ ] `StreamableHTTPClientTransport` is used for new connections
-- [ ] MCP server connections continue to function for both HTTP and SSE servers
-- [ ] Build passes
+- [ ] `SSEClientTransport` removed from `src/mcp/mcp-hub.ts`
+- [ ] `StreamableHTTPClientTransport` used at both former SSE sites
+- [ ] Build passes with no type errors
 
 ---
 
@@ -513,11 +570,12 @@ One occurrence was missed in Phase 1:
 8. GUIDE-016 (instanceof checks for TFile/TFolder)
 9. GUIDE-019 (configDir)
 10. GUIDE-020 (object stringification)
-11. GUIDE-013 (floating promises)
+11. GUIDE-013-R (Promise audit research — must precede GUIDE-013)
+12. GUIDE-013 (floating promises — implement per research findings)
 
 **Phase C: API migration and structural changes**
-12. GUIDE-011 (fetch → requestUrl)
-13. GUIDE-012 (confirm → Modal)
-14. GUIDE-018 (inline styles → CSS)
-15. GUIDE-021 (SSE transport migration)
-16. GUIDE-025 (console methods in e2e)
+13. GUIDE-011 (fetch → eslint-disable with streaming justification)
+14. GUIDE-012 (confirm → Modal)
+15. GUIDE-018 (inline styles → CSS)
+16. GUIDE-021 (SSE transport migration)
+17. GUIDE-025 (console methods in e2e)
