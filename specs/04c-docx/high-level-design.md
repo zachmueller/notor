@@ -6,6 +6,8 @@ This document captures the high-level design for three new Notor built-in tools 
 
 All three tools are **desktop-only** (Obsidian's Electron environment). They are not supported on mobile.
 
+All libraries used must be available via **npm** (no external binaries, no Python dependencies).
+
 ---
 
 ## Motivation
@@ -76,7 +78,7 @@ A general-purpose `read_file` tool is also introduced as a foundational primitiv
 
 ### 3. `write_docx`
 
-**Purpose**: Convert Markdown content to a `.docx` file, optionally applying styles from a user-supplied Word template.
+**Purpose**: Convert Markdown content to a `.docx` file, optionally applying styles and layout from a user-supplied Word template.
 
 **Mode**: `write`
 **Desktop-only**: Yes
@@ -87,30 +89,32 @@ A general-purpose `read_file` tool is also introduced as a foundational primitiv
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `content` | string | Yes | Markdown content to convert to `.docx`. |
+| `title` | string | No | Document title. Substituted into the `{title}` placeholder in the template wherever it appears. |
 | `output_path` | string | Conditional | Full vault-relative or absolute output path. Required if `write_docx_default_output_dir` is not configured and `filename` is not provided. |
 | `filename` | string | No | Output filename without extension. Used with `write_docx_default_output_dir` to construct the output path. |
-| `template_path` | string | No | Path to a `.docx` template for style inheritance. Vault-relative or absolute. Overrides the `write_docx_default_template_path` setting. |
+| `template_path` | string | No | Path to a `.docx` template. Vault-relative or absolute. Overrides the `write_docx_default_template_path` setting. |
 
 **Output path resolution**:
 1. If `output_path` is given, use it directly.
 2. Else if `filename` + `write_docx_default_output_dir` are both available, combine them.
 3. Otherwise, return an error asking the user to provide an output path or configure a default output directory.
 
-**Template system — style inheritance**:
+**Template system**:
 
-The primary template approach is modeled on the existing Python reference script (`md_to_docx.py`), which uses:
+The approach uses `docxtemplater` + `pizzip` (both npm packages). The template is a standard `.docx` file containing two special placeholders:
 
-```
-pandoc --reference-doc=template.docx input.md -o output.docx
-```
+| Placeholder | Type | Description |
+|-------------|------|-------------|
+| `{title}` | Plain text | Replaced with the `title` parameter. May appear anywhere in the document — cover page, running header, title field, etc. Optional: if no `{title}` placeholder exists in the template, the `title` parameter is a no-op. |
+| Body content placeholder | HTML block | The entire Markdown-converted content, injected as a single block. Exact syntax TBD in research spike (see below). |
 
-With pandoc's `--reference-doc` flag, the output `.docx` inherits all styles, fonts, margins, page setup, and headers/footers from the template. The template file itself requires no special placeholder syntax — it simply needs the desired Word styles defined (e.g., custom "Heading 1", "Body Text", caption styles). Pandoc maps Markdown heading levels and formatting to the corresponding named styles in the template.
+`docxtemplater` operates directly on the template's underlying ZIP/XML structure, so the output inherits the template's styles, fonts, margins, page setup, and headers/footers without any additional extraction step. The user only needs to place these two tags — there is no requirement to structure the template around a specific heading count or content schema.
 
-This is the same mechanism that makes the Python script work: the template acts as a style dictionary and page layout source, while pandoc fills it with content from Markdown.
+When no template is provided, the tool falls back to generating a plain `.docx` using Word's default styles.
 
-If no template is provided, pandoc generates a `.docx` with Word's built-in default styles.
+**Markdown → HTML conversion**: `marked` or the `unified`/`remark` pipeline (TBD in research spike) converts the Markdown `content` parameter to HTML before injection into the template.
 
-**Library decision — research required**: See [Pre-Spec Research](#pre-spec-research) below.
+**Library**: `docxtemplater` + `pizzip` + a Markdown-to-HTML library
 
 ---
 
@@ -128,27 +132,23 @@ Three new settings entries are needed in `NotorSettings`:
 
 ## Pre-Spec Research
 
-Before writing functional requirements and implementation tasks, one research spike is needed:
+One research spike is needed before writing functional requirements:
 
-### `write_docx` Library Selection
+### `write_docx` Implementation Details
 
-**File**: `specs/04c-docx/research/write-docx-library.md`
+**File**: `specs/04c-docx/research/write-docx-implementation.md`
 
-The core question is how to invoke pandoc (or a suitable alternative) from within an Obsidian plugin:
+The library choice (`docxtemplater` + `pizzip`) is decided. The research spike should nail down:
 
-**Q1 — Pandoc via `child_process`**: Obsidian's Electron environment supports Node.js `child_process` in the main process. The existing `execute_command` shell executor already uses this mechanism. Confirm that `child_process.spawn` with pandoc is viable, and how to resolve the pandoc binary PATH in the same way `execute_command` handles shell PATH resolution on macOS.
+**Q1 — HTML injection syntax**: Confirm the exact placeholder syntax for the body content block. `docxtemplater` has multiple HTML injection mechanisms (e.g., `docxtemplater-module-html` uses `{~html}` or `{^^html}`; other approaches exist). Identify the right module, its placeholder syntax, and how it maps HTML elements to Word style names (e.g., `<h1>` → "Heading 1", `<p>` → "Normal").
 
-**Q2 — Pandoc availability**: Since pandoc is an external binary, users may not have it installed. Define the strategy:
-- **Option A** — Require pandoc; return a clear error with installation instructions if not found.
-- **Option B** — Auto-detect pandoc and fall back to a pure-JS library if not available.
-- **Option C** — Pure-JS only (no pandoc dependency).
+**Q2 — Style name mapping**: By default, docxtemplater's HTML module maps HTML elements to Word's built-in style names ("Heading 1", "Heading 2", "Normal", etc.). Confirm this default mapping is configurable, so users with templates that use custom style names (e.g., "Report Heading") can override the mapping — either via a settings entry or a future per-template config file.
 
-**Q3 — Pure-JS fallback candidates** (if Option B or C):
-- `docx` npm package: programmatic `.docx` generation with manual Markdown-to-style mapping
-- `docxtemplater` + `pizzip`: mail-merge template filling (template must contain `{content}` placeholders — less ideal for style inheritance, but simpler)
-- Other options
+**Q3 — Markdown-to-HTML library**: Confirm which Markdown-to-HTML library to use upstream of docxtemplater. The plugin already bundles `turndown` (HTML → Markdown) for `read_docx`; assess whether a reciprocal library (e.g., `marked`, `remark`/`rehype`) is appropriate or if a simpler approach suffices.
 
-**Research output**: A recommendation on which option to adopt, with rationale, and any relevant code pointers.
+**Q4 — No-template fallback**: Confirm the cleanest approach when no template is provided. Options: (a) use `docx` npm package to generate a basic styled document from scratch, (b) ship a minimal built-in template as a bundled asset.
+
+**Research output**: Implementation recommendations for each question above, with relevant code snippets or proof-of-concept.
 
 ---
 
@@ -168,6 +168,5 @@ The core question is how to invoke pandoc (or a suitable alternative) from withi
 - Reading embedded images from `.docx` (image extraction)
 - PDF read or write
 - XLSX or other Office formats
-- Automatic git metadata injection (present in the Python reference script but not relevant to Notor)
-- Author alias replacement in template headers (Python-specific workflow)
+- Custom style name mapping configuration (HTML element → Word style name override) — noted as a future enhancement after the default mapping is validated
 - DOCX-to-DOCX transformation or editing an existing `.docx` in place
