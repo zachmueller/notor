@@ -117,9 +117,9 @@ rescanWorkflows(): Workflow[] {
 ```
 
 **Acceptance criteria additions for GUIDE-017:**
-- [ ] `rescanWorkflows` has `async` removed and return type updated to `Workflow[]`
-- [ ] All callers compile cleanly with the updated signature
-- [ ] No interface or abstract method constraint violated
+- [x] `rescanWorkflows` has `async` removed and return type updated to `Workflow[]`
+- [x] All callers compile cleanly with the updated signature
+- [x] No interface or abstract method constraint violated
 
 ---
 

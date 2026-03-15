@@ -300,9 +300,11 @@ export default class NotorPlugin extends Plugin {
 		// populated before getAbstractFileByPath() can resolve the
 		// workflows directory. This is a standard Obsidian pattern.
 		this.app.workspace.onLayoutReady(() => {
-			this.rescanWorkflows().catch((e) => {
+			try {
+				this.rescanWorkflows();
+			} catch (e) {
 				log.warn("Initial workflow discovery failed", { error: String(e) });
-			});
+			}
 		});
 
 		log.info("Plugin loaded");
@@ -763,9 +765,11 @@ export default class NotorPlugin extends Plugin {
 		// C-008: Re-discover workflows when notor_dir may have changed.
 		// Non-blocking — fire and forget so saveSettings() doesn't await
 		// the full vault scan.
-		this.rescanWorkflows().catch((e) => {
+		try {
+			this.rescanWorkflows();
+		} catch (e) {
 			log.warn("Workflow rescan after settings change failed", { error: String(e) });
-		});
+		}
 
 		// Propagate log level change immediately
 		setLogLevel(this.settings.log_level);
@@ -1089,7 +1093,7 @@ export default class NotorPlugin extends Plugin {
 	 *
 	 * @returns The freshly discovered `Workflow` array
 	 */
-	async rescanWorkflows(): Promise<Workflow[]> {
+	rescanWorkflows(): Workflow[] {
 		const workflows = discoverWorkflows(
 			this.app.vault,
 			this.app.metadataCache,

@@ -491,7 +491,7 @@ class WorkflowPickerModal extends FuzzySuggestModal<Workflow> {
  * informational empty-state message.
  *
  * @param app - The Obsidian `App` instance.
- * @param rescanWorkflows - Async function that rescans and returns all discovered workflows.
+ * @param rescanWorkflows - Function that rescans and returns all discovered workflows.
  * @param onSelect - Callback invoked with the selected `Workflow`.
  * @param notorDir - The Notor directory path (for the empty-state message).
  *
@@ -499,7 +499,7 @@ class WorkflowPickerModal extends FuzzySuggestModal<Workflow> {
  */
 export async function showWorkflowPicker(
 	app: App,
-	rescanWorkflows: () => Promise<Workflow[]>,
+	rescanWorkflows: () => Workflow[],
 	onSelect: (workflow: Workflow) => void,
 	notorDir: string
 ): Promise<void> {
@@ -507,7 +507,7 @@ export async function showWorkflowPicker(
 
 	let workflows: Workflow[];
 	try {
-		workflows = await rescanWorkflows();
+		workflows = rescanWorkflows();
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		log.error("Workflow rescan failed before picker open", { error: msg });
