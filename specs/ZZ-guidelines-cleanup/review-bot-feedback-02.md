@@ -129,7 +129,13 @@ The 29 sentence-case violations are a subset of what GUIDE-023 already tracks (5
 
 **One line that may be net-new:** `connection-test.ts:L100`. GUIDE-023 lists `L66` for that file; the bot now flags `L100`. These could be the same string whose line number shifted after code changes, or a genuinely separate violation in the description text. When implementing GUIDE-023, read both L66 and L100 in `connection-test.ts` and fix whichever strings are not in sentence case.
 
-**No new task required.** Implement GUIDE-023 as specified in `plan-review-bot-feedback.md`.
+**Verified (2026-03-15):** Both lines checked post-GUIDE-023 implementation:
+- `L66`: `"✓ connection successful"` — sentence case ✓
+- `L100`: `"Calls the AWS STS identity check to verify your AWS credentials are valid."` — sentence case ✓
+
+No fixes needed. `eslint --rule obsidianmd/ui/sentence-case` reports zero violations across all `src/` files.
+
+**No new task required.** Implement GUIDE-023 as specified in `plan-review-bot-feedback.md`. ✅ Complete.
 
 ---
 
