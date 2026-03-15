@@ -194,7 +194,7 @@ Every prompt (regardless of hat active or not) contains these sections in order:
 ```
 
 When Ralph is coordinating (no specific hat triggered), the end of the prompt contains:
-```
+````
 ## HATS
 | Hat | Triggers On | Publishes | Description |
 ...topology table...
@@ -203,7 +203,7 @@ flowchart LR
 ...diagram...
 ```
 CONSTRAINT: You MUST only publish events from this list: `build.task`, `review.request`...
-```
+````
 
 When a custom hat is triggered, the end of the prompt contains:
 ```
