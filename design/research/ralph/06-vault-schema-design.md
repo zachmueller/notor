@@ -78,10 +78,10 @@ notor-loop-completion-promise: LOOP_COMPLETE
 notor-loop-max-iterations: 100
 notor-loop-max-runtime-minutes: 240
 notor-hats:
-  - notor/orchestrations/hats/planner.md
-  - notor/orchestrations/hats/builder.md
-  - notor/orchestrations/hats/critic.md
-  - notor/orchestrations/hats/finalizer.md
+  - "[[planner]]"
+  - "[[builder]]"
+  - "[[critic]]"
+  - "[[finalizer]]"
 notor-guardrails:
   - "Verification is mandatory — tests must pass"
   - "YAGNI ruthlessly — no speculative features"
@@ -108,7 +108,7 @@ phases automatically.
 - `notor-loop-completion-promise` — terminal event that ends the loop
 - `notor-loop-max-iterations` — safety limit on hat turns
 - `notor-loop-max-runtime-minutes` — wall-clock time limit
-- `notor-hats` — ordered list of hat note paths
+- `notor-hats` — ordered list of hat note wikilinks (resolved via Obsidian's `metadataCache`)
 - `notor-guardrails` — list of constraints injected into every hat's system prompt
 - `notor-backpressure-gates` — instructs the LLM which commands to run before emitting
   `build.done`; the engine validates evidence strings in the payload (not executing the
@@ -332,23 +332,23 @@ Given a list of hat paths from a preset, loads each hat note:
 
 ---
 
-## Wikilink Support for Hat References
+## Hat References via Wikilinks
 
-Hats can be referenced in preset frontmatter as wikilinks:
+Hat entries in `notor-hats` use Obsidian wikilink syntax and are resolved via
+`metadataCache`. This enables standard link resolution, aliases, and backlink tracking.
+
 ```yaml
 notor-hats:
-  - "[[planner]]"      # wikilink resolved via metadataCache
+  - "[[planner]]"
   - "[[builder]]"
 ```
 
-Or as vault-relative paths:
-```yaml
-notor-hats:
-  - notor/orchestrations/hats/planner.md
-```
-
-This allows using Obsidian's standard link resolution, including aliases and
-backlink tracking.
+**Name conflict risk:** Obsidian resolves wikilinks by note title across the entire vault.
+If a note named `planner` exists outside `hats/`, the link is ambiguous. Notor's resolution
+strategy: when a wikilink in `notor-hats` matches multiple notes, **prefer the note under
+`{notor_dir}/orchestrations/hats/`**. If no match exists there, fall back to Obsidian's
+standard resolution and warn the user. Users should ensure hat note titles are unique, or
+use a more specific title (e.g., `[[code-assist-planner]]`) if conflicts arise.
 
 ---
 

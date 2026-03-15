@@ -152,11 +152,11 @@ notor-loop-max-iterations: 100
 notor-loop-max-runtime-minutes: 240
 notor-loop-required-events:
   - review.approved                              # LOOP_COMPLETE blocked until these are seen
-notor-hats:
-  - notor/orchestrations/hats/planner.md
-  - notor/orchestrations/hats/builder.md
-  - notor/orchestrations/hats/critic.md
-  - notor/orchestrations/hats/finalizer.md
+notor-hats:                    # wikilink resolved to the hat note in hats/ directory;
+  - "[[planner]]"             # note titles must be unique — if a conflict exists elsewhere
+  - "[[builder]]"             # in the vault, Notor resolves to the note under hats/ first
+  - "[[critic]]"
+  - "[[finalizer]]"
 notor-guardrails:                                # inline strings injected verbatim into every
   - "Verification is mandatory — tests must pass" # hat's GUARDRAILS section of the system prompt
   - "YAGNI ruthlessly"
