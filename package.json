@@ -1,6 +1,6 @@
 {
 	"name": "notor",
-	"version": "0.2.5",
+	"version": "0.2.6",
 	"description": "AI-powered assistant for Obsidian.",
 	"main": "main.js",
 	"type": "module",
