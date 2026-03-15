@@ -82,8 +82,8 @@ removeBtn.addEventListener("click", () => {
 ```
 
 **Acceptance criteria additions for GUIDE-013:**
-- [ ] `mcp-servers.ts:L573–L576` event listener no longer passes an async function to `addEventListener`
-- [ ] `onRemove()` is still awaited; `rowEl.remove()` still executes after it completes
+- [x] `mcp-servers.ts:L573–L576` event listener no longer passes an async function to `addEventListener`
+- [x] `onRemove()` is still awaited; `rowEl.remove()` still executes after it completes
 
 ---
 

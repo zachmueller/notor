@@ -570,9 +570,11 @@ function renderKeyValueRow(
 		valueInput.placeholder = sensitiveCheck.checked ? "••••••••" : "Value";
 		void emitChange();
 	});
-	removeBtn.addEventListener("click", async () => {
-		await onRemove();
-		rowEl.remove();
+	removeBtn.addEventListener("click", () => {
+		void (async () => {
+			await onRemove();
+			rowEl.remove();
+		})();
 	});
 }
 
