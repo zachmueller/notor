@@ -51,8 +51,8 @@ void this.onConversationChanged?.(conversation);
 ```
 
 **Acceptance criteria additions for GUIDE-013:**
-- [ ] All five `conversation.ts` callback invocations prefixed with `void`
-- [ ] No change to callback semantics — callers still receive notifications
+- [x] All five `conversation.ts` callback invocations prefixed with `void`
+- [x] No change to callback semantics — callers still receive notifications
 
 ---
 

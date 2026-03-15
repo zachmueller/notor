@@ -121,7 +121,7 @@ export class ConversationManager {
 			mode: conversation.mode,
 		});
 
-		this.onConversationChanged?.(conversation);
+		void this.onConversationChanged?.(conversation);
 		return conversation;
 	}
 
@@ -139,7 +139,7 @@ export class ConversationManager {
 			messageCount: messages.length,
 		});
 
-		this.onConversationChanged?.(this.activeConversation);
+		void this.onConversationChanged?.(this.activeConversation);
 	}
 
 	/**
@@ -244,8 +244,8 @@ export class ConversationManager {
 			conversationId: this.activeConversation.id,
 		});
 
-		this.onMessageAdded?.(message);
-		this.onConversationChanged?.(this.activeConversation);
+		void this.onMessageAdded?.(message);
+		void this.onConversationChanged?.(this.activeConversation);
 
 		return message;
 	}
@@ -307,7 +307,7 @@ export class ConversationManager {
 	setMode(mode: ConversationMode): void {
 		if (this.activeConversation) {
 			this.activeConversation.mode = mode;
-			this.onConversationChanged?.(this.activeConversation);
+			void this.onConversationChanged?.(this.activeConversation);
 			log.info("Mode changed", { mode, conversationId: this.activeConversation.id });
 		}
 	}
