@@ -124,8 +124,12 @@ notes.
 ---
 notor-type: hat
 notor-hat-name: "📋 Planner"
-notor-hat-triggers: [build.start, queue.advance]
-notor-hat-publishes: [tasks.ready, all_steps.done]
+notor-hat-triggers:
+  - build.start
+  - queue.advance
+notor-hat-publishes:
+  - tasks.ready
+  - all_steps.done
 notor-hat-default-publishes: tasks.ready
 notor-hat-persona: planner-persona    # optional
 notor-hat-model: claude-opus-4-6      # optional
@@ -146,22 +150,25 @@ notor-loop-starting-event: build.start
 notor-loop-completion-promise: LOOP_COMPLETE
 notor-loop-max-iterations: 100
 notor-loop-max-runtime-minutes: 240
-notor-loop-required-events: [review.approved]   # LOOP_COMPLETE blocked until these are seen
+notor-loop-required-events:
+  - review.approved                              # LOOP_COMPLETE blocked until these are seen
 notor-hats:
   - notor/orchestrations/hats/planner.md
   - notor/orchestrations/hats/builder.md
   - notor/orchestrations/hats/critic.md
   - notor/orchestrations/hats/finalizer.md
-notor-guardrails:
-  - "Verification is mandatory — tests must pass"
+notor-guardrails:                                # inline strings injected verbatim into every
+  - "Verification is mandatory — tests must pass" # hat's GUARDRAILS section of the system prompt
   - "YAGNI ruthlessly"
 ---
 ```
 
 ### 3. `emit_event` Tool
 
-In Ralph, the LLM runs `ralph emit "topic" "payload"` as a shell command that writes to a file.
-Notor uses a proper tool call instead — cleaner, no file polling needed, same LLM behavior.
+In Ralph, the LLM runs `ralph emit "topic" "payload"` as a shell command that writes to a JSONL
+file, which the event loop then polls. Notor uses a proper tool call instead — the tool triggers
+a write to `session-log.jsonl` (write-before-route) for crash recoverability, then signals the
+engine to route after the hat turn ends. No polling is needed; the file write still happens.
 
 ```typescript
 {
