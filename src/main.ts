@@ -64,6 +64,9 @@ import { UpdateFrontmatterTool } from "./tools/update-frontmatter";
 import { ManageTagsTool } from "./tools/manage-tags";
 import { FetchWebpageTool } from "./tools/fetch-webpage";
 import { ExecuteCommandTool } from "./tools/execute-command";
+import { ReadFileTool } from "./tools/read-file";
+import { ReadDocxTool } from "./tools/read-docx";
+import { WriteDocxTool } from "./tools/write-docx";
 import { NoteOpener } from "./tools/note-opener";
 
 // Chat
@@ -923,6 +926,9 @@ export default class NotorPlugin extends Plugin {
 			this._toolRegistry.register(
 				new ExecuteCommandTool(this.app, this.settings)
 			);
+			this._toolRegistry.register(new ReadFileTool(this.app, this.settings));
+			this._toolRegistry.register(new ReadDocxTool(this.app, this.settings));
+			this._toolRegistry.register(new WriteDocxTool(this.app, this.settings));
 
 			log.debug("Tool registry initialized", {
 				tools: this._toolRegistry.getNames(),

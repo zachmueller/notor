@@ -492,20 +492,20 @@ Fills in the `generateDocx(content, templatePath)` function stubbed in DOCX-010.
 
 **Files modified:** `src/main.ts`
 
-- [ ] Add three import statements in the `// Tools` import block alongside existing tool imports (after `ExecuteCommandTool`):
+- [x] Add three import statements in the `// Tools` import block alongside existing tool imports (after `ExecuteCommandTool`):
   ```typescript
   import { ReadFileTool } from "./tools/read-file";
   import { ReadDocxTool } from "./tools/read-docx";
   import { WriteDocxTool } from "./tools/write-docx";
   ```
-- [ ] In `getToolRegistry()`, locate the `this._toolRegistry.register(new ExecuteCommandTool(this.app, this.settings))` call (around line 924)
-- [ ] Add three `register` calls immediately after it:
+- [x] In `getToolRegistry()`, locate the `this._toolRegistry.register(new ExecuteCommandTool(this.app, this.settings))` call (around line 924)
+- [x] Add three `register` calls immediately after it:
   ```typescript
   this._toolRegistry.register(new ReadFileTool(this.app, this.settings));
   this._toolRegistry.register(new ReadDocxTool(this.app, this.settings));
   this._toolRegistry.register(new WriteDocxTool(this.app, this.settings));
   ```
-- [ ] Run `npm run build` and confirm the full plugin bundles without errors
+- [x] Run `npm run build` and confirm the full plugin bundles without errors
 - [ ] Open Obsidian with the plugin loaded and verify:
   - [ ] All three tools appear in Settings → Notor → Auto-approve
   - [ ] `read_file` and `read_docx` display as read tools (no "Write" badge)
