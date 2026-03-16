@@ -6,7 +6,7 @@ This document captures the high-level design for three new Notor built-in tools 
 
 All three tools are **desktop-only** (Obsidian's Electron environment). They are not supported on mobile.
 
-All libraries used must be available via **npm** (no external binaries, no Python dependencies).
+All libraries used are **free npm packages** (MIT licensed). No external binaries, no commercial modules, no Python dependencies.
 
 ---
 
@@ -89,32 +89,39 @@ A general-purpose `read_file` tool is also introduced as a foundational primitiv
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `content` | string | Yes | Markdown content to convert to `.docx`. |
-| `title` | string | No | Document title. Substituted into the `{title}` placeholder in the template wherever it appears. |
-| `output_path` | string | Conditional | Full vault-relative or absolute output path. Required if `write_docx_default_output_dir` is not configured and `filename` is not provided. |
-| `filename` | string | No | Output filename without extension. Used with `write_docx_default_output_dir` to construct the output path. |
+| `title` | string | No | Document title. Substituted into any `{title}` placeholder found in the template (body, headers, footers). No-op if the template contains no `{title}` tag or no template is used. |
+| `output_path` | string | Conditional | Full vault-relative or absolute output path for the generated file. Required if `write_docx_default_output_dir` is not configured and `filename` is not provided. |
+| `filename` | string | No | Output filename without `.docx` extension. Used with `write_docx_default_output_dir` to construct the output path. |
 | `template_path` | string | No | Path to a `.docx` template. Vault-relative or absolute. Overrides the `write_docx_default_template_path` setting. |
 
 **Output path resolution**:
 1. If `output_path` is given, use it directly.
 2. Else if `filename` + `write_docx_default_output_dir` are both available, combine them.
-3. Otherwise, return an error asking the user to provide an output path or configure a default output directory.
+3. Otherwise, return an error asking the user to provide an output path or configure a default output directory in settings.
 
-**Template system**:
+**Template system — `pizzip` body-replacement hybrid**:
 
-The approach uses `docxtemplater` + `pizzip` (both npm packages). The template is a standard `.docx` file containing two special placeholders:
+The template approach works at the ZIP level. A `.docx` file is a ZIP archive; the body content lives in `word/document.xml`. The pipeline:
 
-| Placeholder | Type | Description |
-|-------------|------|-------------|
-| `{title}` | Plain text | Replaced with the `title` parameter. May appear anywhere in the document — cover page, running header, title field, etc. Optional: if no `{title}` placeholder exists in the template, the `title` parameter is a no-op. |
-| Body content placeholder | HTML block | The entire Markdown-converted content, injected as a single block. Exact syntax TBD in research spike (see below). |
+1. Parse Markdown and build content using the `docx` npm API (headings, paragraphs, tables, etc.)
+2. Render to an in-memory `.docx` buffer via `Packer.toBuffer()`
+3. Use `pizzip` to unzip the buffer and extract the `<w:body>` XML
+4. Use `pizzip` to unzip the user's template
+5. Replace the `<w:body>` in the template's `word/document.xml` with the generated body, preserving the template's `<w:sectPr>` (page margins, orientation, header/footer links)
+6. Apply `{title}` text substitution across all XML files in the template ZIP (body, headers, footers)
+7. Repack and write to the output path
 
-`docxtemplater` operates directly on the template's underlying ZIP/XML structure, so the output inherits the template's styles, fonts, margins, page setup, and headers/footers without any additional extraction step. The user only needs to place these two tags — there is no requirement to structure the template around a specific heading count or content schema.
+Because only the body content is replaced, the output file inherits the template's styles, fonts, margins, page setup, headers, and footers.
 
-When no template is provided, the tool falls back to generating a plain `.docx` using Word's default styles.
+**Template contract**: The user's template `.docx` requires no special structure. Optionally, place a `{title}` text tag anywhere — in the document body, a cover page, or a running header — and it will be replaced with the `title` parameter.
 
-**Markdown → HTML conversion**: `marked` or the `unified`/`remark` pipeline (TBD in research spike) converts the Markdown `content` parameter to HTML before injection into the template.
+**Style name matching**: Content is generated using Word's standard built-in style names ("Heading 1"–"Heading 6", "Normal", "List Paragraph"). Templates using these standard names will render correctly. Templates with fully custom style names for body/headings will fall back gracefully — the text appears correctly but without the custom style applied. Custom style name mapping is a future enhancement.
 
-**Library**: `docxtemplater` + `pizzip` + a Markdown-to-HTML library
+**No-template fallback**: When no template is provided, `docx` npm generates a clean `.docx` with Word's default built-in styles.
+
+**Libraries**: `docx` (content generation) + `pizzip` (ZIP manipulation) + `marked` (Markdown parsing)
+
+See [research/write-docx-implementation.md](research/write-docx-implementation.md) for the full analysis.
 
 ---
 
@@ -130,34 +137,12 @@ Three new settings entries are needed in `NotorSettings`:
 
 ---
 
-## Pre-Spec Research
-
-One research spike is needed before writing functional requirements:
-
-### `write_docx` Implementation Details
-
-**File**: `specs/04c-docx/research/write-docx-implementation.md`
-
-The library choice (`docxtemplater` + `pizzip`) is decided. The research spike should nail down:
-
-**Q1 — HTML injection syntax**: Confirm the exact placeholder syntax for the body content block. `docxtemplater` has multiple HTML injection mechanisms (e.g., `docxtemplater-module-html` uses `{~html}` or `{^^html}`; other approaches exist). Identify the right module, its placeholder syntax, and how it maps HTML elements to Word style names (e.g., `<h1>` → "Heading 1", `<p>` → "Normal").
-
-**Q2 — Style name mapping**: By default, docxtemplater's HTML module maps HTML elements to Word's built-in style names ("Heading 1", "Heading 2", "Normal", etc.). Confirm this default mapping is configurable, so users with templates that use custom style names (e.g., "Report Heading") can override the mapping — either via a settings entry or a future per-template config file.
-
-**Q3 — Markdown-to-HTML library**: Confirm which Markdown-to-HTML library to use upstream of docxtemplater. The plugin already bundles `turndown` (HTML → Markdown) for `read_docx`; assess whether a reciprocal library (e.g., `marked`, `remark`/`rehype`) is appropriate or if a simpler approach suffices.
-
-**Q4 — No-template fallback**: Confirm the cleanest approach when no template is provided. Options: (a) use `docx` npm package to generate a basic styled document from scratch, (b) ship a minimal built-in template as a bundled asset.
-
-**Research output**: Implementation recommendations for each question above, with relevant code snippets or proof-of-concept.
-
----
-
 ## Architecture Notes
 
 - All three tools follow the standard `Tool` interface (`name`, `description`, `input_schema`, `mode`, `execute`).
 - Registered in `main.ts` at plugin load time alongside existing tools.
 - Path resolution and allowed-paths validation logic will be extracted into a shared utility (reused by `read_file`, `read_docx`, and `write_docx`) to avoid duplicating the `execute_command` logic.
-- Checkpoint support (`CheckpointManager`) is not applicable to `read_file` or `read_docx`. It may apply to `write_docx` if an existing `.docx` is being overwritten — to be decided in the spec.
+- Checkpoint support (`CheckpointManager`) is not applicable to `read_file` or `read_docx`. For `write_docx`, if the output path points to an existing file, a checkpoint should be created before overwriting — to be decided in the spec.
 - `write_docx` does not interact with the vault or `StaleContentTracker` since it writes to the native filesystem, not a vault note.
 
 ---
@@ -168,5 +153,5 @@ The library choice (`docxtemplater` + `pizzip`) is decided. The research spike s
 - Reading embedded images from `.docx` (image extraction)
 - PDF read or write
 - XLSX or other Office formats
-- Custom style name mapping configuration (HTML element → Word style name override) — noted as a future enhancement after the default mapping is validated
+- Custom style name mapping (template style names → generated content style names)
 - DOCX-to-DOCX transformation or editing an existing `.docx` in place
