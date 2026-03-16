@@ -10,7 +10,7 @@
 
 import { Notice, Setting } from "obsidian";
 import fs from "fs";
-import { extname } from "path";
+import { extname, resolve, isAbsolute } from "path";
 import type { SettingsContext } from "./context";
 
 /** Render the "Word & file tools" settings section. */
@@ -128,7 +128,14 @@ export function renderDocxToolsSection(
 					errorMessage = "Template must be a .docx file.";
 				} else {
 					try {
-						await fs.promises.stat(value);
+						const adapter = ctx.app.vault.adapter as {
+							basePath?: string;
+						};
+						const vaultRoot = adapter.basePath ?? "";
+						const resolvedPath = isAbsolute(value)
+							? value
+							: resolve(vaultRoot, value);
+						await fs.promises.stat(resolvedPath);
 					} catch {
 						errorMessage = `Template file not found: ${value}`;
 					}
