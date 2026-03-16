@@ -176,50 +176,50 @@ Remove the now-duplicated path logic from `execute-command.ts` and delegate to t
 **Files created:** `src/tools/read-file.ts`
 
 **File scaffold & metadata:**
-- [ ] Add a file-level JSDoc comment referencing FR-70, NFR-19, NFR-21
-- [ ] Import `Platform` and `App` from `"obsidian"`
-- [ ] Import `fs` from `"fs"` (use `fs.promises` for all I/O)
-- [ ] Import `Tool` and `ToolResult` from `"./tool"`
-- [ ] Import `NotorSettings` from `"../settings"`
-- [ ] Import `resolveAndValidatePath` from `"../utils/path-validation"`
-- [ ] Import `logger` from `"../utils/logger"` and create `const log = logger("ReadFileTool")`
+- [x] Add a file-level JSDoc comment referencing FR-70, NFR-19, NFR-21
+- [x] Import `Platform` and `App` from `"obsidian"`
+- [x] Import `fs` from `"fs"` (use `fs.promises` for all I/O)
+- [x] Import `Tool` and `ToolResult` from `"./tool"`
+- [x] Import `NotorSettings` from `"../settings"`
+- [x] Import `resolveAndValidatePath` from `"../utils/path-validation"`
+- [x] Import `logger` from `"../utils/logger"` and create `const log = logger("ReadFileTool")`
 
 **Class declaration:**
-- [ ] Export class `ReadFileTool implements Tool`
-- [ ] Set `readonly name = "read_file"`
-- [ ] Set `readonly mode = "read" as const`
-- [ ] Write `readonly description` string describing the tool (mirrors the pattern in `execute-command.ts`)
-- [ ] Define `readonly input_schema` with:
-  - [ ] `path`: required string, description "Path to the file. Vault-relative or absolute."
-  - [ ] `encoding`: optional string, description "File encoding. Default: utf-8.", default `"utf-8"`
-- [ ] Constructor: `(private readonly app: App, private readonly settings: NotorSettings)`
+- [x] Export class `ReadFileTool implements Tool`
+- [x] Set `readonly name = "read_file"`
+- [x] Set `readonly mode = "read" as const`
+- [x] Write `readonly description` string describing the tool (mirrors the pattern in `execute-command.ts`)
+- [x] Define `readonly input_schema` with:
+  - [x] `path`: required string, description "Path to the file. Vault-relative or absolute."
+  - [x] `encoding`: optional string, description "File encoding. Default: utf-8.", default `"utf-8"`
+- [x] Constructor: `(private readonly app: App, private readonly settings: NotorSettings)`
 
 **`execute()` method — guard checks:**
-- [ ] Extract `path` and `encoding` from `params` (cast to `string | undefined`)
-- [ ] Return `{ success: false, error: "Missing required parameter: path" }` if `path` is empty/missing
-- [ ] Check `Platform.isDesktopApp`; return `{ success: false, error: "read_file is only available on desktop." }` if false
-- [ ] Resolve vault root via `(this.app.vault.adapter as { basePath?: string }).basePath`; return `{ success: false, error: "Could not determine vault root path." }` if null
+- [x] Extract `path` and `encoding` from `params` (cast to `string | undefined`)
+- [x] Return `{ success: false, error: "Missing required parameter: path" }` if `path` is empty/missing
+- [x] Check `Platform.isDesktopApp`; return `{ success: false, error: "read_file is only available on desktop." }` if false
+- [x] Resolve vault root via `(this.app.vault.adapter as { basePath?: string }).basePath`; return `{ success: false, error: "Could not determine vault root path." }` if null
 
 **`execute()` method — path validation:**
-- [ ] Call `resolveAndValidatePath(path, vaultRoot, this.settings.read_file_allowed_paths)`
-- [ ] If `!result.valid`, return `{ success: false, error: result.error }`
-- [ ] Assign `resolvedPath = result.resolvedPath`
+- [x] Call `resolveAndValidatePath(path, vaultRoot, this.settings.read_file_allowed_paths)`
+- [x] If `!result.valid`, return `{ success: false, error: result.error }`
+- [x] Assign `resolvedPath = result.resolvedPath`
 
 **`execute()` method — file read & binary detection:**
-- [ ] Wrap all I/O in a `try/catch`; in the catch block return `{ success: false, error: e.message }` (verbatim)
-- [ ] Check file existence: `await fs.promises.stat(resolvedPath)` — if `ENOENT`, return `{ success: false, error: "File not found: ${resolvedPath}" }`
-- [ ] Read file as raw Buffer: `const buf = await fs.promises.readFile(resolvedPath)` (no encoding argument)
-- [ ] Inspect first 8 KB for null bytes: `buf.slice(0, 8192).includes(0)` (or equivalent loop)
-- [ ] If null bytes found, return `{ success: false, error: "read_file only supports text-based files. For Word documents, use read_docx instead." }`
-- [ ] Decode buffer: `buf.toString((encoding as BufferEncoding) ?? "utf-8")`
-- [ ] Return `{ success: true, result: decodedString }`
+- [x] Wrap all I/O in a `try/catch`; in the catch block return `{ success: false, error: e.message }` (verbatim)
+- [x] Check file existence: `await fs.promises.stat(resolvedPath)` — if `ENOENT`, return `{ success: false, error: "File not found: ${resolvedPath}" }`
+- [x] Read file as raw Buffer: `const buf = await fs.promises.readFile(resolvedPath)` (no encoding argument)
+- [x] Inspect first 8 KB for null bytes: `buf.slice(0, 8192).includes(0)` (or equivalent loop)
+- [x] If null bytes found, return `{ success: false, error: "read_file only supports text-based files. For Word documents, use read_docx instead." }`
+- [x] Decode buffer: `buf.toString((encoding as BufferEncoding) ?? "utf-8")`
+- [x] Return `{ success: true, result: decodedString }`
 
 **Helpers:**
-- [ ] Extract `getVaultRootPath()` private method returning `string | null`, using `(this.app.vault.adapter as { basePath?: string }).basePath ?? null` (mirrors `execute-command.ts`)
+- [x] Extract `getVaultRootPath()` private method returning `string | null`, using `(this.app.vault.adapter as { basePath?: string }).basePath ?? null` (mirrors `execute-command.ts`)
 
 **Verification:**
-- [ ] All `ToolResult` objects include `tool_name: this.name`
-- [ ] Confirm the file compiles without TypeScript errors
+- [x] All `ToolResult` objects include `tool_name: this.name`
+- [x] Confirm the file compiles without TypeScript errors
 
 ---
 
@@ -228,48 +228,48 @@ Remove the now-duplicated path logic from `execute-command.ts` and delegate to t
 **Files created:** `src/tools/read-docx.ts`
 
 **File scaffold & metadata:**
-- [ ] Add a file-level JSDoc comment referencing FR-71, NFR-19
-- [ ] Import `Platform` and `App` from `"obsidian"`
-- [ ] Import `fs` from `"fs"` and `{ extname }` from `"path"`
-- [ ] Import `mammoth` from `"mammoth"`
-- [ ] Import `TurndownService` from `"turndown"` and `{ gfm }` from `"turndown-plugin-gfm"`
-- [ ] Import `Tool` and `ToolResult` from `"./tool"`
-- [ ] Import `NotorSettings` from `"../settings"`
-- [ ] Import `resolveAndValidatePath` from `"../utils/path-validation"`
-- [ ] Import `logger` and create `const log = logger("ReadDocxTool")`
+- [x] Add a file-level JSDoc comment referencing FR-71, NFR-19
+- [x] Import `Platform` and `App` from `"obsidian"`
+- [x] Import `fs` from `"fs"` and `{ extname }` from `"path"`
+- [x] Import `mammoth` from `"mammoth"`
+- [x] Import `TurndownService` from `"turndown"` and `{ gfm }` from `"turndown-plugin-gfm"`
+- [x] Import `Tool` and `ToolResult` from `"./tool"`
+- [x] Import `NotorSettings` from `"../settings"`
+- [x] Import `resolveAndValidatePath` from `"../utils/path-validation"`
+- [x] Import `logger` and create `const log = logger("ReadDocxTool")`
 
 **Class declaration:**
-- [ ] Export class `ReadDocxTool implements Tool`
-- [ ] Set `readonly name = "read_docx"`, `readonly mode = "read" as const`
-- [ ] Write `readonly description`
-- [ ] Define `readonly input_schema` with `path`: required string
-- [ ] Constructor: `(private readonly app: App, private readonly settings: NotorSettings)`
+- [x] Export class `ReadDocxTool implements Tool`
+- [x] Set `readonly name = "read_docx"`, `readonly mode = "read" as const`
+- [x] Write `readonly description`
+- [x] Define `readonly input_schema` with `path`: required string
+- [x] Constructor: `(private readonly app: App, private readonly settings: NotorSettings)`
 
 **`execute()` method — guard checks:**
-- [ ] Extract `path` from `params`; return missing-param error if absent
-- [ ] Check `Platform.isDesktopApp`; return `"read_docx is only available on desktop."` if false
-- [ ] Resolve and check vault root; return error if null
+- [x] Extract `path` from `params`; return missing-param error if absent
+- [x] Check `Platform.isDesktopApp`; return `"read_docx is only available on desktop."` if false
+- [x] Resolve and check vault root; return error if null
 
 **`execute()` method — path validation:**
-- [ ] Call `resolveAndValidatePath(path, vaultRoot, this.settings.read_file_allowed_paths)`; return error if invalid
-- [ ] Check `extname(resolvedPath).toLowerCase() !== ".docx"`; return `"read_docx only supports .docx files."` if true
+- [x] Call `resolveAndValidatePath(path, vaultRoot, this.settings.read_file_allowed_paths)`; return error if invalid
+- [x] Check `extname(resolvedPath).toLowerCase() !== ".docx"`; return `"read_docx only supports .docx files."` if true
 
 **`execute()` method — file existence & conversion:**
-- [ ] Wrap all I/O and conversion in a `try/catch`; return `{ success: false, error: e.message }` on any exception
-- [ ] Check file existence via `fs.promises.stat`; return `"File not found: ${resolvedPath}"` on `ENOENT`
-- [ ] Read file: `const buf = await fs.promises.readFile(resolvedPath)`
-- [ ] Convert to HTML: `const { value: html } = await mammoth.convertToHtml({ buffer: buf })`
-- [ ] Instantiate a local `TurndownService` (do **not** import or call the singleton from `fetch-webpage.ts`):
-  - [ ] Use the same constructor options as `fetch-webpage.ts`: `headingStyle: "atx"`, `codeBlockStyle: "fenced"`, `bulletListMarker: "-"`, `emDelimiter: "*"`, `strongDelimiter: "**"`, `linkStyle: "inlined"`
-  - [ ] Call `.use(gfm)` to enable GFM tables/strikethrough
-  - [ ] Do **not** add the `stripNav`/`stripForms` rules (those are webpage-specific)
-  - [ ] Add an `img` replacement rule: `filter: ["img"], replacement: () => "[image]"`
-- [ ] Convert HTML to Markdown: `const markdown = td.turndown(html)`
-- [ ] Return `{ success: true, result: markdown }`
+- [x] Wrap all I/O and conversion in a `try/catch`; return `{ success: false, error: e.message }` on any exception
+- [x] Check file existence via `fs.promises.stat`; return `"File not found: ${resolvedPath}"` on `ENOENT`
+- [x] Read file: `const buf = await fs.promises.readFile(resolvedPath)`
+- [x] Convert to HTML: `const { value: html } = await mammoth.convertToHtml({ buffer: buf })`
+- [x] Instantiate a local `TurndownService` (do **not** import or call the singleton from `fetch-webpage.ts`):
+  - [x] Use the same constructor options as `fetch-webpage.ts`: `headingStyle: "atx"`, `codeBlockStyle: "fenced"`, `bulletListMarker: "-"`, `emDelimiter: "*"`, `strongDelimiter: "**"`, `linkStyle: "inlined"`
+  - [x] Call `.use(gfm)` to enable GFM tables/strikethrough
+  - [x] Do **not** add the `stripNav`/`stripForms` rules (those are webpage-specific)
+  - [x] Add an `img` replacement rule: `filter: ["img"], replacement: () => "[image]"`
+- [x] Convert HTML to Markdown: `const markdown = td.turndown(html)`
+- [x] Return `{ success: true, result: markdown }`
 
 **Verification:**
-- [ ] All `ToolResult` objects include `tool_name: this.name`
-- [ ] Confirm the file compiles without TypeScript errors
+- [x] All `ToolResult` objects include `tool_name: this.name`
+- [x] Confirm the file compiles without TypeScript errors
 
 ---
 
@@ -280,73 +280,73 @@ After this task the tool correctly validates all inputs and returns appropriate 
 **Files created:** `src/tools/write-docx.ts` (partial)
 
 **File scaffold & metadata:**
-- [ ] Add a file-level JSDoc comment referencing FR-72, FR-73, NFR-19
-- [ ] Import `Platform` and `App` from `"obsidian"`
-- [ ] Import `fs` from `"fs"` and `{ join, dirname, extname }` from `"path"`
-- [ ] Import `Tool` and `ToolResult` from `"./tool"`
-- [ ] Import `NotorSettings` from `"../settings"`
-- [ ] Import `resolveAndValidatePath` from `"../utils/path-validation"`
-- [ ] Import `logger` and create `const log = logger("WriteDocxTool")`
+- [x] Add a file-level JSDoc comment referencing FR-72, FR-73, NFR-19
+- [x] Import `Platform` and `App` from `"obsidian"`
+- [x] Import `fs` from `"fs"` and `{ join, dirname, extname }` from `"path"`
+- [x] Import `Tool` and `ToolResult` from `"./tool"`
+- [x] Import `NotorSettings` from `"../settings"`
+- [x] Import `resolveAndValidatePath` from `"../utils/path-validation"`
+- [x] Import `logger` and create `const log = logger("WriteDocxTool")`
 
 **Class declaration:**
-- [ ] Export class `WriteDocxTool implements Tool`
-- [ ] Set `readonly name = "write_docx"`, `readonly mode = "write" as const`
-- [ ] Write `readonly description`
-- [ ] Define `readonly input_schema`:
-  - [ ] `content`: required string — "Markdown content to convert to `.docx`."
-  - [ ] `output_path`: optional string — "Full output path including `.docx` extension. Vault-relative or absolute."
-  - [ ] `filename`: optional string — "Output filename without `.docx` extension. Used with the default output directory setting."
-  - [ ] `template_path`: optional string — "Path to a `.docx` template. Overrides the default template setting."
-- [ ] Constructor: `(private readonly app: App, private readonly settings: NotorSettings)`
+- [x] Export class `WriteDocxTool implements Tool`
+- [x] Set `readonly name = "write_docx"`, `readonly mode = "write" as const`
+- [x] Write `readonly description`
+- [x] Define `readonly input_schema`:
+  - [x] `content`: required string — "Markdown content to convert to `.docx`."
+  - [x] `output_path`: optional string — "Full output path including `.docx` extension. Vault-relative or absolute."
+  - [x] `filename`: optional string — "Output filename without `.docx` extension. Used with the default output directory setting."
+  - [x] `template_path`: optional string — "Path to a `.docx` template. Overrides the default template setting."
+- [x] Constructor: `(private readonly app: App, private readonly settings: NotorSettings)`
 
 **`execute()` method — guard checks:**
-- [ ] Extract `content`, `output_path`, `filename`, `template_path` from `params` (all `string | undefined`)
-- [ ] Return missing-param error if `content` is absent or empty
-- [ ] Check `Platform.isDesktopApp`; return `"write_docx is only available on desktop."` if false
-- [ ] Resolve and check vault root; return error if null
+- [x] Extract `content`, `output_path`, `filename`, `template_path` from `params` (all `string | undefined`)
+- [x] Return missing-param error if `content` is absent or empty
+- [x] Check `Platform.isDesktopApp`; return `"write_docx is only available on desktop."` if false
+- [x] Resolve and check vault root; return error if null
 
 **`execute()` method — `filename` validation:**
-- [ ] If `filename` is provided and contains `/` or `\`, return `{ success: false, error: "filename must not contain path separators." }`
+- [x] If `filename` is provided and contains `/` or `\`, return `{ success: false, error: "filename must not contain path separators." }`
 
 **`execute()` method — output path resolution (three-step):**
-- [ ] Track whether `filename` was ignored (for warning): set `filenameIgnored = false`
-- [ ] **Step 1:** If `output_path` is provided:
-  - [ ] If `filename` is also provided, set `filenameIgnored = true`
-  - [ ] Use `output_path` as the raw path to resolve
-- [ ] **Step 2:** Else if `filename` is provided and `this.settings.write_docx_default_output_dir` is non-empty:
-  - [ ] Resolve the default output dir: `resolveAndValidatePath(defaultOutputDir, vaultRoot, allowedPaths)` — return its error if invalid
-  - [ ] Combine: `rawOutputPath = join(resolvedDefaultDir, filename + ".docx")`
-- [ ] **Step 3:** Else return `{ success: false, error: "No output path provided. Pass output_path, or provide a filename and configure write_docx_default_output_dir in Settings." }`
+- [x] Track whether `filename` was ignored (for warning): set `filenameIgnored = false`
+- [x] **Step 1:** If `output_path` is provided:
+  - [x] If `filename` is also provided, set `filenameIgnored = true`
+  - [x] Use `output_path` as the raw path to resolve
+- [x] **Step 2:** Else if `filename` is provided and `this.settings.write_docx_default_output_dir` is non-empty:
+  - [x] Resolve the default output dir: `resolveAndValidatePath(defaultOutputDir, vaultRoot, allowedPaths)` — return its error if invalid
+  - [x] Combine: `rawOutputPath = join(resolvedDefaultDir, filename + ".docx")`
+- [x] **Step 3:** Else return `{ success: false, error: "No output path provided. Pass output_path, or provide a filename and configure write_docx_default_output_dir in Settings." }`
 
 **`execute()` method — output path boundary & parent-dir validation:**
-- [ ] Call `resolveAndValidatePath(rawOutputPath, vaultRoot, this.settings.read_file_allowed_paths)`; return error if invalid
-- [ ] Assign `resolvedOutputPath = result.resolvedPath`
-- [ ] Check parent directory: `await fs.promises.stat(dirname(resolvedOutputPath))` — if `ENOENT` return `{ success: false, error: "Output directory '${dirname(resolvedOutputPath)}' does not exist." }`
+- [x] Call `resolveAndValidatePath(rawOutputPath, vaultRoot, this.settings.read_file_allowed_paths)`; return error if invalid
+- [x] Assign `resolvedOutputPath = result.resolvedPath`
+- [x] Check parent directory: `await fs.promises.stat(dirname(resolvedOutputPath))` — if `ENOENT` return `{ success: false, error: "Output directory '${dirname(resolvedOutputPath)}' does not exist." }`
 
 **`execute()` method — template path resolution:**
-- [ ] Determine `rawTemplatePath`: `template_path` param → `this.settings.write_docx_default_template_path` (if non-empty) → `null` (no template)
-- [ ] If `rawTemplatePath` is non-null:
-  - [ ] Validate with `resolveAndValidatePath`; return error if outside allowed paths
-  - [ ] Assign `resolvedTemplatePath`
-  - [ ] Check existence: `await fs.promises.stat(resolvedTemplatePath)` — return `"Template file not found: ${resolvedTemplatePath}"` on `ENOENT`
-  - [ ] Check extension: `extname(resolvedTemplatePath).toLowerCase() !== ".docx"` → return `"Template must be a .docx file."`
-- [ ] Set `resolvedTemplatePath = null` if no template was configured
+- [x] Determine `rawTemplatePath`: `template_path` param → `this.settings.write_docx_default_template_path` (if non-empty) → `null` (no template)
+- [x] If `rawTemplatePath` is non-null:
+  - [x] Validate with `resolveAndValidatePath`; return error if outside allowed paths
+  - [x] Assign `resolvedTemplatePath`
+  - [x] Check existence: `await fs.promises.stat(resolvedTemplatePath)` — return `"Template file not found: ${resolvedTemplatePath}"` on `ENOENT`
+  - [x] Check extension: `extname(resolvedTemplatePath).toLowerCase() !== ".docx"` → return `"Template must be a .docx file."`
+- [x] Set `resolvedTemplatePath = null` if no template was configured
 
 **`execute()` method — generation & write:**
-- [ ] Call `const buffer = await generateDocx(content, resolvedTemplatePath)` (stub or fully implemented after DOCX-011)
-- [ ] `await fs.promises.writeFile(resolvedOutputPath, buffer)`
-- [ ] Build success message: `"Successfully wrote .docx file to ${resolvedOutputPath}"`
-- [ ] If `filenameIgnored`, prepend: `"Warning: filename was ignored because output_path was provided.\n\n"` before the success message
-- [ ] Return `{ success: true, result: successMessage }`
-- [ ] Wrap the generation+write step in `try/catch`; return `{ success: false, error: e.message }` on failure
+- [x] Call `const buffer = await generateDocx(content, resolvedTemplatePath)` (stub or fully implemented after DOCX-011)
+- [x] `await fs.promises.writeFile(resolvedOutputPath, buffer)`
+- [x] Build success message: `"Successfully wrote .docx file to ${resolvedOutputPath}"`
+- [x] If `filenameIgnored`, prepend: `"Warning: filename was ignored because output_path was provided.\n\n"` before the success message
+- [x] Return `{ success: true, result: successMessage }`
+- [x] Wrap the generation+write step in `try/catch`; return `{ success: false, error: e.message }` on failure
 
 **Helpers:**
-- [ ] Add `private getVaultRootPath(): string | null` (same pattern as other tools)
+- [x] Add `private getVaultRootPath(): string | null` (same pattern as other tools)
 
 **Verification:**
-- [ ] All `ToolResult` objects include `tool_name: this.name`
-- [ ] All validations occur before any call to `generateDocx` (per FR-72)
-- [ ] Confirm the file compiles without TypeScript errors
+- [x] All `ToolResult` objects include `tool_name: this.name`
+- [x] All validations occur before any call to `generateDocx` (per FR-72)
+- [x] Confirm the file compiles without TypeScript errors
 
 ---
 
@@ -357,67 +357,67 @@ Fills in the `generateDocx(content, templatePath)` function stubbed in DOCX-010.
 **Files modified:** `src/tools/write-docx.ts`
 
 **Additional imports:**
-- [ ] Import `{ Lexer, marked }` (or `marked.lexer`) from `"marked"`
-- [ ] Import `{ Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, ExternalHyperlink, AlignmentType, WidthType, BorderStyle, AbstractNumbering, Numbering, LevelFormat }` (and any other needed) from `"docx"`
-- [ ] Import `PizZip` from `"pizzip"`
+- [x] Import `{ Lexer, marked }` (or `marked.lexer`) from `"marked"`
+- [x] Import `{ Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, ExternalHyperlink, AlignmentType, WidthType, BorderStyle, AbstractNumbering, Numbering, LevelFormat }` (and any other needed) from `"docx"`
+- [x] Import `PizZip` from `"pizzip"`
 
 **Inline token renderer — `renderInline(tokens)`:**
-- [ ] Create a helper `renderInline(tokens: marked.Token[]): (TextRun | ExternalHyperlink)[]` that iterates inline tokens and returns `docx` inline objects:
-  - [ ] `text` token → `new TextRun({ text: token.text })`
-  - [ ] `strong` token → `new TextRun({ text: token.text, bold: true })`
-  - [ ] `em` token → `new TextRun({ text: token.text, italics: true })`
-  - [ ] `codespan` token → `new TextRun({ text: token.text, style: "Verbatim Char" })` — if style may not exist in the template, also set `font: { name: "Courier New" }` as fallback
-  - [ ] `link` token → `new ExternalHyperlink({ link: token.href, children: [new TextRun({ text: token.text })] })`
-  - [ ] Any other token type → `new TextRun({ text: token.raw ?? "" })` as a safe fallback
+- [x] Create a helper `renderInline(tokens: marked.Token[]): (TextRun | ExternalHyperlink)[]` that iterates inline tokens and returns `docx` inline objects:
+  - [x] `text` token → `new TextRun({ text: token.text })`
+  - [x] `strong` token → `new TextRun({ text: token.text, bold: true })`
+  - [x] `em` token → `new TextRun({ text: token.text, italics: true })`
+  - [x] `codespan` token → `new TextRun({ text: token.text, style: "Verbatim Char" })` — if style may not exist in the template, also set `font: { name: "Courier New" }` as fallback
+  - [x] `link` token → `new ExternalHyperlink({ link: token.href, children: [new TextRun({ text: token.text })] })`
+  - [x] Any other token type → `new TextRun({ text: token.raw ?? "" })` as a safe fallback
 
 **Block token renderer — `buildDocxChildren(tokens)`:**
-- [ ] Create `buildDocxChildren(tokens: marked.Token[]): (Paragraph | Table)[]` that maps each top-level token:
-  - [ ] `heading` → `new Paragraph({ heading: HeadingLevel["HEADING_" + token.depth], children: renderInline(token.tokens ?? []) })`
-  - [ ] `paragraph` → `new Paragraph({ children: renderInline(token.tokens ?? []) })`
-  - [ ] `code` (fenced) → `new Paragraph({ style: "Source Code", children: [new TextRun({ text: token.text, font: { name: "Courier New" } })] })` — style `"Source Code"` renders with the template style if present, falls back to `Normal` + font if absent
-  - [ ] `hr` → `new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 6, space: 1, color: "auto" } } })`
-  - [ ] `blockquote` → `new Paragraph({ indent: { left: 720 }, children: renderInline(token.tokens ?? []) })`
-  - [ ] `list` (unordered) → one `new Paragraph({ bullet: { level: 0 } , children: renderInline(item.tokens ?? []) })` per list item (recurse for nested items, incrementing level)
-  - [ ] `list` (ordered) → one `new Paragraph({ numbering: { reference: "default-numbering", level: 0 }, children: renderInline(item.tokens ?? []) })` per item; define one `AbstractNumbering` on the `Document` with `reference: "default-numbering"`
-  - [ ] `table` → build a `new Table(...)`:
-    - [ ] Header row: `new TableRow({ children: token.header.map(cell => new TableCell({ children: [new Paragraph({ children: renderInline(cell.tokens ?? []) })] })) })`
-    - [ ] Body rows: same pattern for each `token.rows` entry
-    - [ ] Set `width: { size: 100, type: WidthType.PERCENTAGE }` on the table
-  - [ ] `space` → skip (no output)
-  - [ ] Unknown token types → `new Paragraph({ children: [new TextRun({ text: token.raw ?? "" })] })` as a safe fallback
+- [x] Create `buildDocxChildren(tokens: marked.Token[]): (Paragraph | Table)[]` that maps each top-level token:
+  - [x] `heading` → `new Paragraph({ heading: HeadingLevel["HEADING_" + token.depth], children: renderInline(token.tokens ?? []) })`
+  - [x] `paragraph` → `new Paragraph({ children: renderInline(token.tokens ?? []) })`
+  - [x] `code` (fenced) → `new Paragraph({ style: "Source Code", children: [new TextRun({ text: token.text, font: { name: "Courier New" } })] })` — style `"Source Code"` renders with the template style if present, falls back to `Normal` + font if absent
+  - [x] `hr` → `new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 6, space: 1, color: "auto" } } })`
+  - [x] `blockquote` → `new Paragraph({ indent: { left: 720 }, children: renderInline(token.tokens ?? []) })`
+  - [x] `list` (unordered) → one `new Paragraph({ bullet: { level: 0 } , children: renderInline(item.tokens ?? []) })` per list item (recurse for nested items, incrementing level)
+  - [x] `list` (ordered) → one `new Paragraph({ numbering: { reference: "default-numbering", level: 0 }, children: renderInline(item.tokens ?? []) })` per item; define one `AbstractNumbering` on the `Document` with `reference: "default-numbering"`
+  - [x] `table` → build a `new Table(...)`:
+    - [x] Header row: `new TableRow({ children: token.header.map(cell => new TableCell({ children: [new Paragraph({ children: renderInline(cell.tokens ?? []) })] })) })`
+    - [x] Body rows: same pattern for each `token.rows` entry
+    - [x] Set `width: { size: 100, type: WidthType.PERCENTAGE }` on the table
+  - [x] `space` → skip (no output)
+  - [x] Unknown token types → `new Paragraph({ children: [new TextRun({ text: token.raw ?? "" })] })` as a safe fallback
 
 **`generateDocx(content, templatePath)` function:**
-- [ ] Call `const tokens = marked.lexer(content)` to produce the token tree
-- [ ] Call `const children = buildDocxChildren(tokens)` to get the array of `docx` block objects
-- [ ] Define a `numbering` object with one `AbstractNumbering` for ordered lists (only if any ordered list was encountered, or always define it defensively)
-- [ ] Construct `new Document({ numbering: { config: [...] }, sections: [{ children }] })`
-- [ ] Produce the temp buffer: `const tempBuffer = await Packer.toBuffer(doc)`
+- [x] Call `const tokens = marked.lexer(content)` to produce the token tree
+- [x] Call `const children = buildDocxChildren(tokens)` to get the array of `docx` block objects
+- [x] Define a `numbering` object with one `AbstractNumbering` for ordered lists (only if any ordered list was encountered, or always define it defensively)
+- [x] Construct `new Document({ numbering: { config: [...] }, sections: [{ children }] })`
+- [x] Produce the temp buffer: `const tempBuffer = await Packer.toBuffer(doc)`
 
 **No-template path:**
-- [ ] If `templatePath` is `null`, return `tempBuffer` directly from `generateDocx`
+- [x] If `templatePath` is `null`, return `tempBuffer` directly from `generateDocx`
 
 **With-template path (pizzip graft):**
-- [ ] Unzip the generated buffer: `const generatedZip = new PizZip(tempBuffer)`
-- [ ] Read generated `word/document.xml`: `const generatedXml: string = generatedZip.files["word/document.xml"].asText()`
-- [ ] Extract generated body content between `<w:body>` and `</w:body>` using: `/<w:body>([\s\S]*?)<\/w:body>/`; if no match return error `"Generated document.xml is malformed — could not locate <w:body>."`
-- [ ] Assign the captured group as `generatedBodyContent`
-- [ ] Strip any `<w:sectPr>` from `generatedBodyContent`: remove the block matching `/<w:sectPr[\s\S]*?<\/w:sectPr>/g`
-- [ ] Read template file: `const templateBuf = await fs.promises.readFile(templatePath)`
-- [ ] Unzip template: `const templateZip = new PizZip(templateBuf)`
-- [ ] Read template `word/document.xml`: `const templateXml: string = templateZip.files["word/document.xml"].asText()`
-- [ ] Extract template `<w:sectPr>` block: match `/<w:sectPr[\s\S]*?<\/w:sectPr>/` against `templateXml`; if not found, `sectPr = ""`
-- [ ] Replace the template's `<w:body>…</w:body>` with the new body:
-  - [ ] Build replacement: `` `<w:body>${generatedBodyContent}${sectPr}</w:body>` ``
-  - [ ] Apply: `templateXml.replace(/<w:body>[\s\S]*?<\/w:body>/, replacement)`
-  - [ ] If the regex does not match `<w:body>` in the template XML, return error `"Template document.xml is malformed — could not locate <w:body>."`
-- [ ] Update the template ZIP: `templateZip.file("word/document.xml", newTemplateXml)`
-- [ ] Generate final buffer: `templateZip.generate({ type: "nodebuffer" })`
-- [ ] Return the final buffer from `generateDocx`
+- [x] Unzip the generated buffer: `const generatedZip = new PizZip(tempBuffer)`
+- [x] Read generated `word/document.xml`: `const generatedXml: string = generatedZip.files["word/document.xml"].asText()`
+- [x] Extract generated body content between `<w:body>` and `</w:body>` using: `/<w:body>([\s\S]*?)<\/w:body>/`; if no match return error `"Generated document.xml is malformed — could not locate <w:body>."`
+- [x] Assign the captured group as `generatedBodyContent`
+- [x] Strip any `<w:sectPr>` from `generatedBodyContent`: remove the block matching `/<w:sectPr[\s\S]*?<\/w:sectPr>/g`
+- [x] Read template file: `const templateBuf = await fs.promises.readFile(templatePath)`
+- [x] Unzip template: `const templateZip = new PizZip(templateBuf)`
+- [x] Read template `word/document.xml`: `const templateXml: string = templateZip.files["word/document.xml"].asText()`
+- [x] Extract template `<w:sectPr>` block: match `/<w:sectPr[\s\S]*?<\/w:sectPr>/` against `templateXml`; if not found, `sectPr = ""`
+- [x] Replace the template's `<w:body>…</w:body>` with the new body:
+  - [x] Build replacement: `` `<w:body>${generatedBodyContent}${sectPr}</w:body>` ``
+  - [x] Apply: `templateXml.replace(/<w:body>[\s\S]*?<\/w:body>/, replacement)`
+  - [x] If the regex does not match `<w:body>` in the template XML, return error `"Template document.xml is malformed — could not locate <w:body>."`
+- [x] Update the template ZIP: `templateZip.file("word/document.xml", newTemplateXml)`
+- [x] Generate final buffer: `templateZip.generate({ type: "nodebuffer" })`
+- [x] Return the final buffer from `generateDocx`
 
 **Verification:**
 - [ ] No-template path: open output in LibreOffice/Word and confirm headings, paragraphs, bold, italic, lists, tables, code blocks, and horizontal rules all render correctly
 - [ ] Template path: confirm output inherits template fonts, margins, headers, footers, and that `<w:sectPr>` is preserved
-- [ ] Confirm the file compiles without TypeScript errors
+- [x] Confirm the file compiles without TypeScript errors
 
 ---
 
