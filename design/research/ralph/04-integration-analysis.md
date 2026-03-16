@@ -100,8 +100,12 @@ with `notor-type: hat` frontmatter; note body = hat's custom instructions.
 ---
 notor-type: hat
 notor-hat-name: "📋 Planner"
-notor-hat-triggers: [build.start, queue.advance]
-notor-hat-publishes: [tasks.ready, all_steps.done]
+notor-hat-triggers:
+  - build.start
+  - queue.advance
+notor-hat-publishes:
+  - tasks.ready
+  - all_steps.done
 notor-hat-default-publishes: tasks.ready
 notor-hat-persona: planner-persona    # optional Notor persona override
 notor-hat-model: claude-opus-4-6      # optional model override
@@ -155,7 +159,10 @@ the file-polling indirection. The mechanism is better; the LLM behavior is ident
 }
 ```
 
-When called, the tool records the event and signals the engine to route after the hat turn ends.
+When called, the tool writes the event to `session-log.jsonl` (write-before-route) for crash
+recoverability — an emitted event exists on disk even if the process dies before the next turn starts —
+then signals the engine to route after the hat turn ends. No file polling is needed; the file write
+still happens.
 
 ### 4. HatSystemPromptBuilder (equivalent to Ralph's HatlessRalph)
 
@@ -463,15 +470,6 @@ and the loop terminates cleanly. The event log makes every run recoverable from 
    `suspend` pauses the loop pending human approval
 5. Maps to and extends Notor's existing hook system
 
-### Phase 6: Built-in Preset Library
-
-**Goal:** Ship useful presets out of the box.
-
-Presets (ported from Ralph):
-- `code-assist` — TDD implementation: planner → builder → critic → finalizer
-- `research` — research synthesis workflow
-- `review` — code or document review workflow
-
 ---
 
 ## Key Differences from Ralph
@@ -515,8 +513,3 @@ Presets (ported from Ralph):
   reliable planner/builder/critic behavior requires careful prompt work
 - Debugging failed orchestrations — need good logging and trace to diagnose stalls
 
-### Mitigated (was High Risk)
-- **Session recovery across plugin reloads** — downgraded from High to Medium with the
-  append-only `session-log.jsonl` design. The log gives recovery a concrete replay source.
-  Remaining risk: hat instructions must be idempotent for retried turns to be safe; this
-  is a prompt engineering discipline requirement, not an engine guarantee.
