@@ -430,46 +430,46 @@ Fills in the `generateDocx(content, templatePath)` function stubbed in DOCX-010.
 **Files created:** `src/settings/sections/docx-tools.ts`
 
 **File scaffold:**
-- [ ] Add a file-level JSDoc comment referencing FR-76
-- [ ] Import `Notice`, `Setting` from `"obsidian"`
-- [ ] Import `fs` from `"fs"` and `{ extname }` from `"path"` (for template path validation on blur)
-- [ ] Import `SettingsContext` from `"./context"`
-- [ ] Export function `renderDocxToolsSection(containerEl: HTMLElement, ctx: SettingsContext): void`
+- [x] Add a file-level JSDoc comment referencing FR-76
+- [x] Import `Notice`, `Setting` from `"obsidian"`
+- [x] Import `fs` from `"fs"` and `{ extname }` from `"path"` (for template path validation on blur)
+- [x] Import `SettingsContext` from `"./context"`
+- [x] Export function `renderDocxToolsSection(containerEl: HTMLElement, ctx: SettingsContext): void`
 
 **Section heading & description:**
-- [ ] Render `new Setting(containerEl).setHeading().setName("Word & file tools")`
-- [ ] Render a `<p class="setting-item-description">` noting tools are desktop-only and `write_docx` requires Act mode
+- [x] Render `new Setting(containerEl).setHeading().setName("Word & file tools")`
+- [x] Render a `<p class="setting-item-description">` noting tools are desktop-only and `write_docx` requires Act mode
 
 **Allowed paths sub-section:**
-- [ ] Render `new Setting(containerEl).setHeading().setName("Allowed read/write paths")`
-- [ ] Render a `<p class="setting-item-description">` explaining the paths are shared by `read_file`, `read_docx`, and `write_docx`, and that vault root is always implicitly allowed
-- [ ] Iterate `ctx.settings.read_file_allowed_paths`: for each entry render a `Setting` row with the path as the name and a "Remove" button that:
-  - [ ] Calls `ctx.settings.read_file_allowed_paths.splice(i, 1)`
-  - [ ] Calls `await ctx.saveSettings()`
-  - [ ] Calls `ctx.redisplay()`
-- [ ] Render an "Add allowed path" row with a text input and "Add" button:
-  - [ ] Text input: `setPlaceholder("/path/to/directory")`, captures value into a local `let newPath = ""`
-  - [ ] Button onClick: if `newPath` is empty show `new Notice("Enter a path to add.")`; otherwise push to `read_file_allowed_paths`, save, and `ctx.redisplay()`
+- [x] Render `new Setting(containerEl).setHeading().setName("Allowed read/write paths")`
+- [x] Render a `<p class="setting-item-description">` explaining the paths are shared by `read_file`, `read_docx`, and `write_docx`, and that vault root is always implicitly allowed
+- [x] Iterate `ctx.settings.read_file_allowed_paths`: for each entry render a `Setting` row with the path as the name and a "Remove" button that:
+  - [x] Calls `ctx.settings.read_file_allowed_paths.splice(i, 1)`
+  - [x] Calls `await ctx.saveSettings()`
+  - [x] Calls `ctx.redisplay()`
+- [x] Render an "Add allowed path" row with a text input and "Add" button:
+  - [x] Text input: `setPlaceholder("/path/to/directory")`, captures value into a local `let newPath = ""`
+  - [x] Button onClick: if `newPath` is empty show `new Notice("Enter a path to add.")`; otherwise push to `read_file_allowed_paths`, save, and `ctx.redisplay()`
 
 **Default output directory setting:**
-- [ ] Render a `Setting` with name "Default output directory" and description "Default output directory for `write_docx`. Leave empty to require `output_path` per call."
-- [ ] Add a text input:
-  - [ ] `setPlaceholder("(none — output_path required per call)")`
-  - [ ] `setValue(ctx.settings.write_docx_default_output_dir)`
-  - [ ] `onChange`: update `ctx.settings.write_docx_default_output_dir = value.trim()` and `await ctx.saveSettings()`
+- [x] Render a `Setting` with name "Default output directory" and description "Default output directory for `write_docx`. Leave empty to require `output_path` per call."
+- [x] Add a text input:
+  - [x] `setPlaceholder("(none — output_path required per call)")`
+  - [x] `setValue(ctx.settings.write_docx_default_output_dir)`
+  - [x] `onChange`: update `ctx.settings.write_docx_default_output_dir = value.trim()` and `await ctx.saveSettings()`
 
 **Default template path setting:**
-- [ ] Render a `Setting` with name "Default template path" and description "Default `.docx` template applied by `write_docx`. Leave empty to use no template."
-- [ ] Add a text input:
-  - [ ] `setPlaceholder("(none — no template applied by default)")`
-  - [ ] `setValue(ctx.settings.write_docx_default_template_path)`
-  - [ ] `onChange`: update setting value and `await ctx.saveSettings()`; clear any existing inline error element
-  - [ ] `onBlur` (attach via `inputEl.addEventListener("blur", ...)`): if field is non-empty, check:
-    - [ ] File exists: `await fs.promises.stat(resolvedPath)` — catch `ENOENT`
-    - [ ] Extension is `.docx`: `extname(value).toLowerCase() !== ".docx"`
-    - [ ] If either check fails, create (or update) an inline `<p>` error element beneath the input with the failure reason
-    - [ ] If both checks pass (or field is empty), remove the inline error element if present
-- [ ] Confirm all saves go through `ctx.saveSettings()`
+- [x] Render a `Setting` with name "Default template path" and description "Default `.docx` template applied by `write_docx`. Leave empty to use no template."
+- [x] Add a text input:
+  - [x] `setPlaceholder("(none — no template applied by default)")`
+  - [x] `setValue(ctx.settings.write_docx_default_template_path)`
+  - [x] `onChange`: update setting value and `await ctx.saveSettings()`; clear any existing inline error element
+  - [x] `onBlur` (attach via `inputEl.addEventListener("blur", ...)`): if field is non-empty, check:
+    - [x] File exists: `await fs.promises.stat(resolvedPath)` — catch `ENOENT`
+    - [x] Extension is `.docx`: `extname(value).toLowerCase() !== ".docx"`
+    - [x] If either check fails, create (or update) an inline `<p>` error element beneath the input with the failure reason
+    - [x] If both checks pass (or field is empty), remove the inline error element if present
+- [x] Confirm all saves go through `ctx.saveSettings()`
 
 ---
 
@@ -477,9 +477,9 @@ Fills in the `generateDocx(content, templatePath)` function stubbed in DOCX-010.
 
 **Files modified:** `src/settings/settings-tab.ts`
 
-- [ ] Add import: `import { renderDocxToolsSection } from "./sections/docx-tools"` alongside the other section imports at the top
-- [ ] In the `display()` method, locate the `renderExecuteCommandSection(toolConfigGroup, ctx)` call (currently line ~130)
-- [ ] Add `renderDocxToolsSection(toolConfigGroup, ctx)` on the next line, immediately after `renderExecuteCommandSection`
+- [x] Add import: `import { renderDocxToolsSection } from "./sections/docx-tools"` alongside the other section imports at the top
+- [x] In the `display()` method, locate the `renderExecuteCommandSection(toolConfigGroup, ctx)` call (currently line ~130)
+- [x] Add `renderDocxToolsSection(toolConfigGroup, ctx)` on the next line, immediately after `renderExecuteCommandSection`
 - [ ] Confirm the settings tab renders in Obsidian without errors (open Settings → Notor and verify "Word & file tools" section appears after "Shell commands")
 
 ---

@@ -22,6 +22,7 @@ import { renderBedrockProviderSection } from "./sections/provider-bedrock";
 import { renderAutoContextSection } from "./sections/auto-context";
 import { renderFetchWebpageSection } from "./sections/fetch-webpage";
 import { renderExecuteCommandSection } from "./sections/execute-command";
+import { renderDocxToolsSection } from "./sections/docx-tools";
 import { renderHooksSection } from "./sections/hooks";
 import { renderVaultEventHooksSection } from "./sections/vault-event-hooks";
 import { renderFileAttachmentsSection } from "./sections/file-attachments";
@@ -128,6 +129,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		const toolConfigGroup = createSettingsGroup(containerEl, "Tool configuration");
 		renderFetchWebpageSection(toolConfigGroup, ctx);
 		renderExecuteCommandSection(toolConfigGroup, ctx);
+		renderDocxToolsSection(toolConfigGroup, ctx);
 		renderFileAttachmentsSection(toolConfigGroup, ctx);
 
 		// --- Automation (collapsed by default) ---
