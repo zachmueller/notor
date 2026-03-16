@@ -470,6 +470,15 @@ and the loop terminates cleanly. The event log makes every run recoverable from 
    `suspend` pauses the loop pending human approval
 5. Maps to and extends Notor's existing hook system
 
+### Phase 6: Built-in Preset Library
+
+**Goal:** Ship useful presets out of the box.
+
+Presets (ported from Ralph):
+- `code-assist` — TDD implementation: planner → builder → critic → finalizer
+- `research` — research synthesis workflow
+- `review` — code or document review workflow
+
 ---
 
 ## Key Differences from Ralph
