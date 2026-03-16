@@ -64,9 +64,10 @@ This specification covers:
 - `mode` is `"read"`. Available in both Plan and Act modes.
 - Desktop-only: returns error `"read_file is only available on desktop."` if `Platform.isDesktopApp` is false.
 - Path resolution follows the shared utility (FR-74): vault-relative paths are resolved from vault root; absolute paths are used as-is.
-- The resolved path must be within the vault root or one of the `read_file_allowed_paths` entries; otherwise returns error `"Path '...' is outside the allowed paths. Allowed: vault root and configured paths."`.
+- The resolved path must be within the vault root or one of the `read_file_allowed_paths` entries; otherwise returns error `"Path '...' is outside the allowed paths."`.
 - If the file does not exist, returns error `"File not found: ..."`.
 - Binary file detection: after reading, check the first 8 KB of content for null bytes (`\0`). If found, return error `"read_file only supports text-based files. For Word documents, use read_docx instead."`.
+- Any Node.js I/O error (e.g., unrecognised encoding, permission denied) is caught and returned verbatim as the tool result error string so the LLM and user can diagnose the failure.
 - Returns the full file contents as the tool result string on success.
 - Auto-approve default: `false`.
 
@@ -90,8 +91,9 @@ This specification covers:
 - If the file does not exist, returns error `"File not found: ..."`.
 - If the file extension is not `.docx` (case-insensitive), returns error `"read_docx only supports .docx files."`.
 - Converts `.docx` → HTML using `mammoth.convertToHtml()` with its default style map.
-- Converts HTML → Markdown using `turndown` with GFM plugin, consistent with how `fetch_webpage` uses it.
+- Converts HTML → Markdown by instantiating its own `TurndownService` with the GFM plugin, using matching options to `fetch_webpage` but not importing its helper directly (avoids tight coupling).
 - Embedded images are represented as `[image]` placeholders (image extraction is out of scope for v1).
+- If `mammoth.convertToHtml()` throws (e.g., corrupted file, password-protected document), the exception message is propagated verbatim as the tool result error string.
 - Returns the Markdown string as the tool result on success.
 - Auto-approve default: `false`.
 
@@ -126,9 +128,14 @@ This specification covers:
 
 - `mode` is `"write"`. Available in Act mode only; blocked in Plan mode.
 - Desktop-only: returns error `"write_docx is only available on desktop."` if `Platform.isDesktopApp` is false.
-- The resolved output path must be within the vault root or one of the `read_file_allowed_paths` entries; otherwise returns error `"Output path '...' is outside the allowed paths. Allowed: vault root and configured paths."`.
+- If `filename` contains a path separator (`/` or `\`), returns error `"filename must not contain path separators."`.
+- If both `output_path` and `filename` are provided, `output_path` takes precedence and a warning is prepended to the success result: `"Warning: filename was ignored because output_path was provided.\n\nSuccessfully wrote .docx file to <resolvedOutputPath>"`.
+- The resolved output path must be within the vault root or one of the `read_file_allowed_paths` entries; otherwise returns error `"Path '...' is outside the allowed paths."`.
+- If the parent directory of the resolved output path does not exist, returns error `"Output directory '...' does not exist."` (where `...` is the resolved parent directory path).
+- The resolved `template_path` (if any) must also be within the vault root or one of the `read_file_allowed_paths` entries; otherwise returns error `"Path '...' is outside the allowed paths."`.
 - If a resolved `template_path` does not exist, returns error `"Template file not found: ..."`.
 - If the resolved `template_path` does not have a `.docx` extension (case-insensitive), returns error `"Template must be a .docx file."`.
+- All path validation (output path boundary check, parent directory existence, template path boundary check, template existence, template extension) is performed **before** parsing Markdown or running the `docx` pipeline.
 - Overwriting an existing file is allowed without a confirmation prompt, consistent with how `write_note` overwrites existing vault notes. No checkpoint is created (see Assumptions).
 - On success, returns `"Successfully wrote .docx file to <resolvedOutputPath>"`.
 - Auto-approve default: `false`.
@@ -152,8 +159,8 @@ This specification covers:
 | Body paragraphs | `new Paragraph({ text })` |
 | **Bold** | `TextRun({ bold: true })` |
 | *Italic* | `TextRun({ italics: true })` |
-| `inline code` | `TextRun` with `Courier New` font |
-| Fenced code blocks | `Paragraph` with preserved line breaks, monospace font |
+| `inline code` | `TextRun` with `Verbatim Char` character style (fallback: `Courier New` font if style absent) |
+| Fenced code blocks | `Paragraph` with `Source Code` paragraph style (fallback: `Normal` style with `Courier New` font if `Source Code` is absent) |
 | Bullet lists | `Paragraph` with `bullet: { level }` |
 | Numbered lists | `Paragraph` with `numbering` via `AbstractNumbering` |
 | Tables | `Table`, `TableRow`, `TableCell` |
@@ -261,7 +268,7 @@ export function isPathWithin(target: string, base: string): boolean
 - The section is headed **"Word & file tools"** with a brief paragraph description noting these tools are desktop-only and require the AI to be in Act mode for `write_docx`.
 - An **"Allowed read/write paths"** sub-heading introduces a list of current `read_file_allowed_paths` entries, each showing the path and a "Remove" button. Below the list, a text field and "Add" button allow adding new paths. This pattern follows `renderExecuteCommandSection` exactly.
 - A **"Default output directory"** text input for `write_docx_default_output_dir`, with placeholder `(none — output_path required per call)`.
-- A **"Default template path"** text input for `write_docx_default_template_path`, with placeholder `(none — no template applied by default)`.
+- A **"Default template path"** text input for `write_docx_default_template_path`, with placeholder `(none — no template applied by default)`. On blur, if the field is non-empty, validate that (a) the path exists on the filesystem and (b) has a `.docx` extension; display an inline error message beneath the field if either check fails. The error clears when the field is empty or the path becomes valid.
 - All changes persist immediately via `ctx.saveSettings()`.
 - The section is rendered in the main Settings tab immediately after the "Shell commands" section.
 
@@ -375,7 +382,7 @@ export function isPathWithin(target: string, base: string): boolean
 
 1. AI calls `read_file` with `path: "/etc/passwd"`.
 2. `/etc` is not the vault root and not in `read_file_allowed_paths`.
-3. Tool returns error: `"Path '/etc/passwd' is outside the allowed paths. Allowed: vault root and configured paths."`.
+3. Tool returns error: `"Path '/etc/passwd' is outside the allowed paths."`.
 
 ### Alternative flow: `write_docx` with no output path configured
 
