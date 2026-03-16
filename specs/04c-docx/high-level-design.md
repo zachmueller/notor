@@ -89,7 +89,6 @@ A general-purpose `read_file` tool is also introduced as a foundational primitiv
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `content` | string | Yes | Markdown content to convert to `.docx`. |
-| `title` | string | No | Document title. Substituted into any `{title}` placeholder found in the template (body, headers, footers). No-op if the template contains no `{title}` tag or no template is used. |
 | `output_path` | string | Conditional | Full vault-relative or absolute output path for the generated file. Required if `write_docx_default_output_dir` is not configured and `filename` is not provided. |
 | `filename` | string | No | Output filename without `.docx` extension. Used with `write_docx_default_output_dir` to construct the output path. |
 | `template_path` | string | No | Path to a `.docx` template. Vault-relative or absolute. Overrides the `write_docx_default_template_path` setting. |
@@ -108,12 +107,11 @@ The template approach works at the ZIP level. A `.docx` file is a ZIP archive; t
 3. Use `pizzip` to unzip the buffer and extract the `<w:body>` XML
 4. Use `pizzip` to unzip the user's template
 5. Replace the `<w:body>` in the template's `word/document.xml` with the generated body, preserving the template's `<w:sectPr>` (page margins, orientation, header/footer links)
-6. Apply `{title}` text substitution across all XML files in the template ZIP (body, headers, footers)
-7. Repack and write to the output path
+6. Repack and write to the output path
 
 Because only the body content is replaced, the output file inherits the template's styles, fonts, margins, page setup, headers, and footers.
 
-**Template contract**: The user's template `.docx` requires no special structure. Optionally, place a `{title}` text tag anywhere — in the document body, a cover page, or a running header — and it will be replaced with the `title` parameter.
+**Template contract**: The user's template `.docx` requires no special structure and no placeholder tags of any kind — it is simply a `.docx` file with the desired styles, margins, page setup, and headers/footers defined. The document title should be the first `# H1` heading in the Markdown `content`, which renders as a "Heading 1" paragraph at the top of the generated document.
 
 **Style name matching**: Content is generated using Word's standard built-in style names ("Heading 1"–"Heading 6", "Normal", "List Paragraph"). Templates using these standard names will render correctly. Templates with fully custom style names for body/headings will fall back gracefully — the text appears correctly but without the custom style applied. Custom style name mapping is a future enhancement.
 
