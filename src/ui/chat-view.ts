@@ -12,6 +12,10 @@ import { ItemView, MarkdownRenderer, Modal, Notice, setIcon, type WorkspaceLeaf 
 import type NotorPlugin from "../main";
 import type { ConversationMode, Message, LLMProviderType, ModelInfo, Checkpoint, Persona } from "../types";
 import type { Attachment } from "../context/attachment";
+import {
+	createVaultNoteAttachment,
+	createVaultNoteSectionAttachment,
+} from "../context/attachment";
 import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
 import { buildPersonaPicker } from "./persona-picker";
@@ -635,26 +639,56 @@ export class NotorChatView extends ItemView {
 			document.execCommand("insertText", false, text);
 		});
 
-		// Watch for inline wikilink token spans being removed from the input
-		// (e.g. via Backspace). When a token is deleted, remove its corresponding
-		// attachment from pendingAttachments.
+		// Collect all Elements with data-attachment-id at or under a given node.
+		const collectTokenElements = (node: Node): Element[] => {
+			const results: Element[] = [];
+			if (node instanceof Element) {
+				if (node.hasAttribute("data-attachment-id")) results.push(node);
+				node
+					.querySelectorAll("[data-attachment-id]")
+					.forEach((el) => results.push(el));
+			}
+			return results;
+		};
+
+		// Watch for inline wikilink token spans being added or removed.
+		//
+		// Removal (Backspace / Delete): remove the attachment from pendingAttachments.
+		//
+		// Addition (Undo after deletion): the browser restores the span to the DOM
+		// but pendingAttachments was already cleared — reconstruct the attachment
+		// from the metadata attributes stored on the span and re-add it.
+		// The dedup check (some(a => a.id === id)) prevents double-adding on the
+		// normal insertion path, where addWikilinkAttachment() fires synchronously
+		// before this microtask observer callback runs.
 		this.tokenObserver = new MutationObserver((mutations) => {
 			for (const mutation of mutations) {
 				for (const removed of Array.from(mutation.removedNodes)) {
-					const candidates: Element[] = [];
-					if (removed instanceof Element) {
-						candidates.push(removed);
-						removed
-							.querySelectorAll("[data-attachment-id]")
-							.forEach((el) => candidates.push(el));
-					}
-					for (const el of candidates) {
+					for (const el of collectTokenElements(removed)) {
 						const id = el.getAttribute("data-attachment-id");
 						if (id) {
 							this.pendingAttachments = this.pendingAttachments.filter(
 								(a) => a.id !== id
 							);
 						}
+					}
+				}
+				for (const added of Array.from(mutation.addedNodes)) {
+					for (const el of collectTokenElements(added)) {
+						const id = el.getAttribute("data-attachment-id");
+						const path = el.getAttribute("data-attachment-path");
+						const type = el.getAttribute("data-attachment-type");
+						const section = el.getAttribute("data-attachment-section");
+						if (!id || !path || !type) continue;
+						// Already tracked — normal insertion path, skip.
+						if (this.pendingAttachments.some((a) => a.id === id)) continue;
+						// Undo path: reconstruct and re-add with the original id.
+						const attachment =
+							type === "vault_note_section" && section
+								? createVaultNoteSectionAttachment(path, section)
+								: createVaultNoteAttachment(path);
+						attachment.id = id;
+						this.pendingAttachments.push(attachment);
 					}
 				}
 			}

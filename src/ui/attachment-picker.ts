@@ -86,12 +86,20 @@ export function insertWikilinkToken(
 	}
 
 	// Insert the styled token span.
+	// Store path/type/section so the MutationObserver can reconstruct the
+	// attachment if Undo restores the span after a Backspace deletion.
+	const tokenAttr: Record<string, string> = {
+		contenteditable: "false",
+		"data-attachment-id": attachment.id,
+		"data-attachment-path": attachment.path,
+		"data-attachment-type": attachment.type,
+	};
+	if (attachment.section) {
+		tokenAttr["data-attachment-section"] = attachment.section;
+	}
 	const tokenSpan = inputEl.createSpan({
 		cls: "notor-wikilink-token",
-		attr: {
-			contenteditable: "false",
-			"data-attachment-id": attachment.id,
-		},
+		attr: tokenAttr,
 		text: `[[${attachment.display_name}]]`,
 	});
 
