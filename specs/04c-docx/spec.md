@@ -66,7 +66,7 @@ This specification covers:
 - Path resolution follows the shared utility (FR-74): vault-relative paths are resolved from vault root; absolute paths are used as-is.
 - The resolved path must be within the vault root or one of the `read_file_allowed_paths` entries; otherwise returns error `"Path '...' is outside the allowed paths."`.
 - If the file does not exist, returns error `"File not found: ..."`.
-- Binary file detection: after reading, check the first 8 KB of content for null bytes (`\0`). If found, return error `"read_file only supports text-based files. For Word documents, use read_docx instead."`.
+- Binary file detection: read the file as a raw `Buffer` (no encoding argument to `fs.promises.readFile`). Inspect the first 8 KB of the buffer for null bytes (`\0`). If found, return error `"read_file only supports text-based files. For Word documents, use read_docx instead."`. If no null bytes are found, decode the buffer using the requested encoding (default `utf-8`) and return the string. (Note: reading as a decoded string first and checking for Unicode replacement characters `\uFFFD` is unreliable — binary files with valid UTF-8 byte sequences produce no replacement characters, causing false negatives; `\uFFFD` can also appear legitimately in text files.)
 - Any Node.js I/O error (e.g., unrecognised encoding, permission denied) is caught and returned verbatim as the tool result error string so the LLM and user can diagnose the failure.
 - Returns the full file contents as the tool result string on success.
 - Auto-approve default: `false`.
@@ -166,6 +166,7 @@ This specification covers:
 | Tables | `Table`, `TableRow`, `TableCell` |
 | Horizontal rules | Thematic break paragraph |
 | Blockquotes | Indented paragraph |
+| `[text](url)` links | `ExternalHyperlink` wrapping a `TextRun`; URL stored as the hyperlink relationship target in the document |
 
 **No-template path:**
 
@@ -185,6 +186,14 @@ This specification covers:
 8. Write the final buffer to the output path via `fs.promises.writeFile`.
 
 **`<w:sectPr>` preservation:** The template's `<w:sectPr>` block encodes page margins, page size/orientation, and header/footer relationship IDs. It must survive the body replacement so the output file inherits all of the template's page layout settings. Any `<w:sectPr>` carried over from the generated temp doc's body is discarded.
+
+**XML manipulation approach (v1 — regex-based):** `<w:body>` contents and `<w:sectPr>` are located and replaced using regular expressions. The expected patterns are:
+
+- Extract the template `<w:sectPr>`: match `/<w:sectPr[\s\S]*?<\/w:sectPr>/` against the template's `word/document.xml`.
+- Extract the generated body content (excluding the outer `<w:body>` tags): match the contents between `<w:body>` and `</w:body>` from the temp buffer's XML.
+- Reconstruct the template's `word/document.xml` by replacing its `<w:body>…</w:body>` with `<w:body>` + generated content (stripped of any `<w:sectPr>`) + template `<w:sectPr>` + `</w:body>`.
+
+**Limitation:** Regex-based XML manipulation is fragile against edge cases — XML comments inside `<w:body>`, unusual namespace prefix declarations, or non-standard serialization from some Word processors may cause incorrect extraction. A future enhancement should replace this with a proper XML DOM parser (e.g., `@xmldom/xmldom`) for robustness. The acceptance criterion for the malformed-template error (missing `<w:body>`) is the primary safety net for v1.
 
 **Style name matching:** Content paragraphs reference Word's standard built-in style IDs (`Heading1`–`Heading6`, `Normal`, `ListParagraph`). Templates using these standard style names render correctly. Templates with fully custom heading/body style names will display the text with fallback styling; custom style name mapping is a future enhancement.
 
@@ -344,8 +353,9 @@ export function isPathWithin(target: string, base: string): boolean
 
 **Acceptance criteria:**
 
-- After reading the file buffer, inspect the first 8 KB for null bytes (`\0`).
-- If null bytes are detected, return error: `"read_file only supports text-based files. For Word documents, use read_docx instead."`.
+- Read the file as a raw `Buffer` (no encoding argument to `fs.promises.readFile`). Inspect the first 8 KB of the buffer for null bytes (`\0`).
+- If null bytes are detected, return error: `"read_file only supports text-based files. For Word documents, use read_docx instead."` without decoding.
+- If no null bytes are detected, decode the buffer using the requested encoding (default `utf-8`) and return the string content.
 - This null-byte heuristic is sufficient for v1. No MIME-type detection library is needed.
 
 ---
