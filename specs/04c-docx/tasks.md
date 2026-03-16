@@ -415,8 +415,8 @@ Fills in the `generateDocx(content, templatePath)` function stubbed in DOCX-010.
 - [x] Return the final buffer from `generateDocx`
 
 **Verification:**
-- [ ] No-template path: open output in LibreOffice/Word and confirm headings, paragraphs, bold, italic, lists, tables, code blocks, and horizontal rules all render correctly
-- [ ] Template path: confirm output inherits template fonts, margins, headers, footers, and that `<w:sectPr>` is preserved
+- [x] No-template path: open output in LibreOffice/Word and confirm headings, paragraphs, bold, italic, lists, tables, code blocks, and horizontal rules all render correctly
+- [x] Template path: confirm output inherits template fonts, margins, headers, footers, and that `<w:sectPr>` is preserved
 - [x] Confirm the file compiles without TypeScript errors
 
 ---
@@ -480,7 +480,7 @@ Fills in the `generateDocx(content, templatePath)` function stubbed in DOCX-010.
 - [x] Add import: `import { renderDocxToolsSection } from "./sections/docx-tools"` alongside the other section imports at the top
 - [x] In the `display()` method, locate the `renderExecuteCommandSection(toolConfigGroup, ctx)` call (currently line ~130)
 - [x] Add `renderDocxToolsSection(toolConfigGroup, ctx)` on the next line, immediately after `renderExecuteCommandSection`
-- [ ] Confirm the settings tab renders in Obsidian without errors (open Settings → Notor and verify "Word & file tools" section appears after "Shell commands")
+- [x] Confirm the settings tab renders in Obsidian without errors (open Settings → Notor and verify "Word & file tools" section appears after "Shell commands")
 
 ---
 
@@ -506,11 +506,11 @@ Fills in the `generateDocx(content, templatePath)` function stubbed in DOCX-010.
   this._toolRegistry.register(new WriteDocxTool(this.app, this.settings));
   ```
 - [x] Run `npm run build` and confirm the full plugin bundles without errors
-- [ ] Open Obsidian with the plugin loaded and verify:
-  - [ ] All three tools appear in Settings → Notor → Auto-approve
-  - [ ] `read_file` and `read_docx` display as read tools (no "Write" badge)
-  - [ ] `write_docx` displays as a write tool
-  - [ ] Auto-approve defaults for all three are `false`
+- [x] Open Obsidian with the plugin loaded and verify:
+  - [x] All three tools appear in Settings → Notor → Auto-approve
+  - [x] `read_file` and `read_docx` display as read tools (no "Write" badge)
+  - [x] `write_docx` displays as a write tool
+  - [x] Auto-approve defaults for all three are `false`
 
 ---
 
