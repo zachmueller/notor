@@ -113,29 +113,27 @@ Pushing the tag triggers the GitHub Actions release workflow (`.github/workflows
 
 ---
 
-## Step 8: Verify the release was created
+## Step 8: Draft the CHANGELOG summary
 
-Check that the GitHub Actions workflow ran successfully by running:
-
-```bash
-gh run list --limit 5
-```
-
-Once the workflow completes, confirm that a **draft release** for `{NEW_VERSION}` exists with all three assets attached (`main.js`, `manifest.json`, `styles.css`):
+Review all commits since the previous release tag and draft a CHANGELOG entry summarizing what was implemented. Get the commit list with:
 
 ```bash
-gh release view {NEW_VERSION}
+git log --oneline {PREV_VERSION}..{NEW_VERSION}
 ```
+
+Read the commit messages carefully and group related changes into meaningful categories (e.g. **New Features**, **Bug Fixes**, **Settings**, **UI Polish**). Omit spec/docs-only commits unless they represent user-visible changes.
+
+Present the full CHANGELOG entry to the user in the chat **inside a Markdown code fence block** so it can be easily copied and pasted into the GitHub release notes.
 
 ---
 
 ## Step 9: Publish the release (manual step)
 
-The release is created as a draft to allow review before publishing. **This step is intentionally left for the human to complete in the GitHub UI:**
+The release is created as a draft to allow review before publishing. **This step is intentionally left for the human to complete in the GitHub UI** — do NOT use the `gh` CLI tool for this.
 
 1. Go to `https://github.com/zachmueller/notor/releases`
 2. Find the draft release for `{NEW_VERSION}`
-3. Add or paste the changelog/release notes
+3. Paste the CHANGELOG summary drafted in Step 8 into the release notes
 4. Select **Publish release**
 
 > The release must be published (not just draft) before it can be submitted to the Obsidian community plugin catalog.
