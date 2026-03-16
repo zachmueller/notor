@@ -15,91 +15,13 @@
 
 import { Platform } from "obsidian";
 import type { App } from "obsidian";
-import { normalize, resolve, isAbsolute } from "path";
 import type { Tool, ToolResult } from "./tool";
 import type { NotorSettings } from "../settings";
 import { executeShellCommand } from "../shell/shell-executor";
 import { logger } from "../utils/logger";
+import { resolveAndValidatePath } from "../utils/path-validation";
 
 const log = logger("ExecuteCommandTool");
-
-// ---------------------------------------------------------------------------
-// Working directory validation
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve and validate a working directory for command execution.
- *
- * Resolution rules:
- * - Empty/undefined → vault root
- * - Relative path → resolve from vault root
- * - Absolute path → use as-is
- *
- * Validation: the resolved path must be within the vault root or one
- * of the user-configured allowed paths. The vault root is always
- * implicitly allowed.
- *
- * @returns `{ valid: true, resolvedPath }` or `{ valid: false, error }`.
- */
-export function resolveAndValidateWorkingDir(
-	workingDirectory: string | undefined,
-	vaultRoot: string,
-	allowedPaths: string[]
-): { valid: true; resolvedPath: string } | { valid: false; error: string } {
-	let resolved: string;
-
-	if (!workingDirectory || workingDirectory.trim() === "") {
-		resolved = vaultRoot;
-	} else if (isAbsolute(workingDirectory)) {
-		resolved = normalize(workingDirectory);
-	} else {
-		resolved = resolve(vaultRoot, workingDirectory);
-	}
-
-	// Normalize for consistent comparison
-	resolved = normalize(resolved);
-	const normalizedVaultRoot = normalize(vaultRoot);
-
-	// Check if within vault root
-	if (isPathWithin(resolved, normalizedVaultRoot)) {
-		return { valid: true, resolvedPath: resolved };
-	}
-
-	// Check if within any allowed path
-	for (const allowed of allowedPaths) {
-		const trimmed = allowed.trim();
-		if (!trimmed) continue;
-		const normalizedAllowed = normalize(trimmed);
-		if (isPathWithin(resolved, normalizedAllowed)) {
-			return { valid: true, resolvedPath: resolved };
-		}
-	}
-
-	return {
-		valid: false,
-		error:
-			`Working directory '${workingDirectory}' is outside the allowed paths. ` +
-			`Allowed: vault root and configured paths.`,
-	};
-}
-
-/**
- * Check if `target` is within (or equal to) `base`.
- * Uses normalized path prefix comparison with separator boundary check.
- */
-function isPathWithin(target: string, base: string): boolean {
-	const normalTarget = normalize(target);
-	const normalBase = normalize(base);
-
-	if (normalTarget === normalBase) return true;
-
-	// Ensure base ends with separator for prefix check
-	const baseWithSep = normalBase.endsWith("/") || normalBase.endsWith("\\")
-		? normalBase
-		: normalBase + "/";
-
-	return normalTarget.startsWith(baseWithSep);
-}
 
 // ---------------------------------------------------------------------------
 // Tool implementation (TOOL-014 + TOOL-015)
@@ -185,22 +107,25 @@ export class ExecuteCommandTool implements Tool {
 		}
 
 		// Validate working directory
-		const cwdResult = resolveAndValidateWorkingDir(
+		const cwdResult = resolveAndValidatePath(
 			workingDirectory,
 			vaultRoot,
 			this.settings.execute_command_allowed_paths
 		);
 
 		if (!cwdResult.valid) {
+			const error =
+				`Working directory '${workingDirectory}' is outside the allowed paths. ` +
+				`Allowed: vault root and configured paths.`;
 			log.info("Working directory rejected", {
 				workingDirectory,
-				error: cwdResult.error,
+				error,
 			});
 			return {
 				tool_name: this.name,
 				success: false,
 				result: "",
-				error: cwdResult.error,
+				error,
 			};
 		}
 

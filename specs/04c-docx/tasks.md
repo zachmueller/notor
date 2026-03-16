@@ -68,22 +68,22 @@ Extract the path resolution and validation logic from `execute-command.ts` into 
 
 **Files created:** `src/utils/path-validation.ts`
 
-- [ ] Create the file `src/utils/path-validation.ts` with a file-level JSDoc referencing FR-74
-- [ ] Add imports: `normalize`, `resolve`, `isAbsolute` from `"path"`
-- [ ] Implement and export `isPathWithin(target: string, base: string): boolean`:
-  - [ ] Normalize both `target` and `base` with `normalize()`
-  - [ ] Return `true` if they are equal after normalization
-  - [ ] Ensure `base` ends with a path separator before doing a `startsWith` prefix check (to prevent `/foo/bar` matching `/foo/baz`)
-  - [ ] Return `true` if `normalTarget.startsWith(baseWithSep)`; otherwise `false`
-- [ ] Implement and export `resolveAndValidatePath(inputPath, vaultRoot, allowedPaths)` returning the discriminated union `{ valid: true; resolvedPath: string } | { valid: false; error: string }`:
-  - [ ] If `inputPath` is empty/undefined/whitespace-only, set `resolved = vaultRoot`
-  - [ ] Else if `isAbsolute(inputPath)`, set `resolved = normalize(inputPath)`
-  - [ ] Else (relative path), set `resolved = resolve(vaultRoot, inputPath)` then `normalize()`
-  - [ ] Normalize `vaultRoot` and check `isPathWithin(resolved, normalizedVaultRoot)` → return `{ valid: true, resolvedPath: resolved }` if true
-  - [ ] Loop over `allowedPaths`: skip empty/whitespace entries; normalize each; if `isPathWithin(resolved, normalizedAllowed)` → return `{ valid: true, resolvedPath: resolved }`
-  - [ ] If no match found, return `{ valid: false, error: "Path '${inputPath}' is outside the allowed paths." }`
-- [ ] Add JSDoc comments on both exported functions matching the signatures in the spec (FR-74)
-- [ ] Confirm the file compiles without TypeScript errors
+- [x] Create the file `src/utils/path-validation.ts` with a file-level JSDoc referencing FR-74
+- [x] Add imports: `normalize`, `resolve`, `isAbsolute` from `"path"`
+- [x] Implement and export `isPathWithin(target: string, base: string): boolean`:
+  - [x] Normalize both `target` and `base` with `normalize()`
+  - [x] Return `true` if they are equal after normalization
+  - [x] Ensure `base` ends with a path separator before doing a `startsWith` prefix check (to prevent `/foo/bar` matching `/foo/baz`)
+  - [x] Return `true` if `normalTarget.startsWith(baseWithSep)`; otherwise `false`
+- [x] Implement and export `resolveAndValidatePath(inputPath, vaultRoot, allowedPaths)` returning the discriminated union `{ valid: true; resolvedPath: string } | { valid: false; error: string }`:
+  - [x] If `inputPath` is empty/undefined/whitespace-only, set `resolved = vaultRoot`
+  - [x] Else if `isAbsolute(inputPath)`, set `resolved = normalize(inputPath)`
+  - [x] Else (relative path), set `resolved = resolve(vaultRoot, inputPath)` then `normalize()`
+  - [x] Normalize `vaultRoot` and check `isPathWithin(resolved, normalizedVaultRoot)` → return `{ valid: true, resolvedPath: resolved }` if true
+  - [x] Loop over `allowedPaths`: skip empty/whitespace entries; normalize each; if `isPathWithin(resolved, normalizedAllowed)` → return `{ valid: true, resolvedPath: resolved }`
+  - [x] If no match found, return `{ valid: false, error: "Path '${inputPath}' is outside the allowed paths." }`
+- [x] Add JSDoc comments on both exported functions matching the signatures in the spec (FR-74)
+- [x] Confirm the file compiles without TypeScript errors
 
 ---
 
@@ -93,12 +93,12 @@ Remove the now-duplicated path logic from `execute-command.ts` and delegate to t
 
 **Files modified:** `src/tools/execute-command.ts`
 
-- [ ] Add import of `resolveAndValidatePath` and `isPathWithin` from `"../utils/path-validation"` at the top of the file
-- [ ] Delete the local `resolveAndValidateWorkingDir` function (lines ~44–84)
-- [ ] Delete the local `isPathWithin` function (lines ~90–102)
-- [ ] In `execute()`, replace the `resolveAndValidateWorkingDir(...)` call with `resolveAndValidatePath(workingDirectory, vaultRoot, this.settings.execute_command_allowed_paths)`
-- [ ] After the call, if the result is `{ valid: false }`, replace the generic error string with the original working-directory-specific wording before returning: `"Working directory '${workingDirectory}' is outside the allowed paths. Allowed: vault root and configured paths."` — this preserves the existing user-facing message unchanged
-- [ ] Confirm `npm run build` passes and the external behavior of `execute_command` is unchanged
+- [x] Add import of `resolveAndValidatePath` from `"../utils/path-validation"` at the top of the file
+- [x] Delete the local `resolveAndValidateWorkingDir` function (lines ~44–84)
+- [x] Delete the local `isPathWithin` function (lines ~90–102)
+- [x] In `execute()`, replace the `resolveAndValidateWorkingDir(...)` call with `resolveAndValidatePath(workingDirectory, vaultRoot, this.settings.execute_command_allowed_paths)`
+- [x] After the call, if the result is `{ valid: false }`, replace the generic error string with the original working-directory-specific wording before returning: `"Working directory '${workingDirectory}' is outside the allowed paths. Allowed: vault root and configured paths."` — this preserves the existing user-facing message unchanged
+- [x] Confirm `npm run build` passes and the external behavior of `execute_command` is unchanged
 
 ---
 

@@ -12,7 +12,7 @@ import type { ConversationMode, ToolCall, ToolResult } from "../types";
 import type { StreamChunk } from "../providers/provider";
 import type { NotorSettings } from "../settings";
 import { isDomainBlocked } from "../tools/fetch-webpage";
-import { resolveAndValidateWorkingDir } from "../tools/execute-command";
+import { resolveAndValidatePath } from "../utils/path-validation";
 import { resolveAutoApprove } from "../personas/auto-approve-resolver";
 import { isMcpTool, McpRegisteredTool } from "../mcp/mcp-tool-adapter";
 import { logger } from "../utils/logger";
@@ -354,7 +354,7 @@ export class ToolDispatcher {
 		// 3b. execute_command: working directory validation
 		if (toolName === "execute_command" && this.settings && this.vaultRootPath) {
 			const workingDir = parameters["working_directory"] as string | undefined;
-			const cwdResult = resolveAndValidateWorkingDir(
+			const cwdResult = resolveAndValidatePath(
 				workingDir,
 				this.vaultRootPath,
 				this.settings.execute_command_allowed_paths
@@ -363,14 +363,17 @@ export class ToolDispatcher {
 				toolCall.status = "error";
 				this.events.onToolCallStatusChanged?.(toolCall, messageId);
 
+				const error =
+					`Working directory '${workingDir}' is outside the allowed paths. ` +
+					`Allowed: vault root and configured paths.`;
 				const result: ToolResult = {
 					tool_name: toolName,
 					success: false,
 					result: "",
-					error: cwdResult.error,
+					error,
 				};
 
-				log.info("Working directory rejected", { toolName, workingDir, error: cwdResult.error });
+				log.info("Working directory rejected", { toolName, workingDir, error });
 				this.events.onToolCallResult?.(toolCall, result, messageId);
 				return result;
 			}
