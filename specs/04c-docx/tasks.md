@@ -28,13 +28,13 @@ Add the four new production dependencies to `package.json` and install them.
 
 **Files modified:** `package.json`, `package-lock.json`
 
-- [ ] Add `"mammoth": "^1.8.0"` to `dependencies` in `package.json`
-- [ ] Add `"docx": "^9.6.1"` to `dependencies` in `package.json`
-- [ ] Add `"pizzip": "^3.1.7"` to `dependencies` in `package.json`
-- [ ] Add `"marked": "^17.0.0"` to `dependencies` in `package.json`
-- [ ] Run `npm install` and confirm all four packages appear in `node_modules`
-- [ ] Run `npm run build` (or equivalent esbuild command) and confirm the bundle compiles without errors
-- [ ] If any package causes an ESM-only resolution error, add it to the esbuild `external` list or switch to the CJS-compatible import path, then re-verify the build passes
+- [x] Add `"mammoth": "^1.8.0"` to `dependencies` in `package.json`
+- [x] Add `"docx": "^9.6.1"` to `dependencies` in `package.json`
+- [x] Add `"pizzip": "^3.1.7"` to `dependencies` in `package.json`
+- [x] Add `"marked": "^17.0.0"` to `dependencies` in `package.json`
+- [x] Run `npm install` and confirm all four packages appear in `node_modules`
+- [x] Run `npm run build` (or equivalent esbuild command) and confirm the bundle compiles without errors
+- [x] If any package causes an ESM-only resolution error, add it to the esbuild `external` list or switch to the CJS-compatible import path, then re-verify the build passes
 
 ---
 
@@ -44,17 +44,17 @@ Ensure TypeScript can type-check `mammoth` imports.
 
 **Files created/modified:** `src/mammoth.d.ts` (if no `@types/mammoth`) or `package.json` dev dependency (if `@types/mammoth` exists)
 
-- [ ] Check npm for `@types/mammoth`: run `npm info @types/mammoth` (or check [npmjs.com](https://www.npmjs.com/package/@types/mammoth))
-- [ ] **If `@types/mammoth` exists:** add it as a dev dependency (`npm install --save-dev @types/mammoth`) and confirm TypeScript picks it up; skip remaining items
-- [ ] **If `@types/mammoth` does not exist:** create `src/mammoth.d.ts` with a `declare module "mammoth"` block
-- [ ] In that declaration, export at minimum:
+- [x] Check npm for `@types/mammoth`: run `npm info @types/mammoth` (or check [npmjs.com](https://www.npmjs.com/package/@types/mammoth))
+- [x] **If `@types/mammoth` exists:** add it as a dev dependency (`npm install --save-dev @types/mammoth`) and confirm TypeScript picks it up; skip remaining items
+- [x] **If `@types/mammoth` does not exist:** create `src/mammoth.d.ts` with a `declare module "mammoth"` block
+- [x] In that declaration, export at minimum:
   ```typescript
   export function convertToHtml(
       input: { buffer: Buffer },
       options?: Record<string, unknown>
   ): Promise<{ value: string; messages: unknown[] }>;
   ```
-- [ ] Confirm `import mammoth from "mammoth"` (or named import) resolves without TypeScript errors after the declaration is in place
+- [x] Confirm `import mammoth from "mammoth"` (or named import) resolves without TypeScript errors after the declaration is in place
 
 ---
 
