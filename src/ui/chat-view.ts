@@ -34,6 +34,22 @@ const log = logger("ChatView");
 export const CHAT_VIEW_TYPE = "notor-chat-view";
 
 /**
+ * Extract the `<attachments>…</attachments>` XML block from a message string.
+ *
+ * Returns the raw block and the remaining text (with leading/trailing whitespace
+ * stripped). If no block is present, `attachmentsXml` is `null` and `remainder`
+ * equals the original content unchanged.
+ */
+function extractAttachmentsBlock(content: string): { attachmentsXml: string | null; remainder: string } {
+	const ATTACHMENTS_RE = /<attachments>([\s\S]*?)<\/attachments>/;
+	const match = ATTACHMENTS_RE.exec(content);
+	if (!match) return { attachmentsXml: null, remainder: content };
+	const attachmentsXml = match[0];
+	const remainder = (content.slice(0, match.index) + content.slice(match.index + match[0].length)).trim();
+	return { attachmentsXml, remainder };
+}
+
+/**
  * Chat panel ItemView for Notor.
  *
  * Layout:
@@ -789,11 +805,18 @@ export class NotorChatView extends ItemView {
 		const msgEl = this.messageListEl.createDiv({ cls: "notor-message notor-message-user" });
 		const contentEl = msgEl.createDiv({ cls: "notor-message-content" });
 
+		// Extract <attachments> block (if any) and render as collapsed <details>
+		const { attachmentsXml, remainder } = extractAttachmentsBlock(message.content);
+		if (attachmentsXml !== null) {
+			this.renderAttachmentsBlock(contentEl, attachmentsXml);
+		}
+		const textToRender = attachmentsXml !== null ? remainder : message.content;
+
 		// E-014: Detect <workflow_instructions> block and render as collapsible <details>
 		if (message.is_workflow_message) {
-			this.renderWorkflowMessage(contentEl, message.content);
-		} else {
-			contentEl.createEl("p", { text: message.content });
+			this.renderWorkflowMessage(contentEl, textToRender);
+		} else if (textToRender) {
+			contentEl.createEl("p", { text: textToRender });
 		}
 
 		this.scrollToBottom();
@@ -867,6 +890,16 @@ export class NotorChatView extends ItemView {
 		const pre = details.createEl("pre", { cls: "notor-hook-injection-content" });
 		pre.createEl("code", { text: message.content });
 		this.scrollToBottom();
+	}
+
+	/**
+	 * Render an `<attachments>` XML block as a collapsed `<details>` element.
+	 */
+	private renderAttachmentsBlock(container: HTMLElement, xml: string): void {
+		const details = container.createEl("details", { cls: "notor-attachments-details" });
+		details.createEl("summary", { text: "Attachments" });
+		const pre = details.createEl("pre", { cls: "notor-attachments-content" });
+		pre.createEl("code", { text: xml });
 	}
 
 	/**

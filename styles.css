@@ -1466,6 +1466,66 @@
 	color: var(--text-normal);
 }
 
+/* Attachments — collapsed <details> for <attachments> XML blocks */
+.notor-attachments-details {
+	margin: 4px 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary-alt);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-attachments-details summary {
+	padding: 5px 10px;
+	cursor: pointer;
+	color: var(--text-muted);
+	font-weight: var(--font-medium);
+	user-select: none;
+	list-style: none;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.notor-attachments-details summary::-webkit-details-marker {
+	display: none;
+}
+
+.notor-attachments-details summary::before {
+	content: "▶";
+	font-size: 10px;
+	transition: transform 0.15s ease;
+	flex-shrink: 0;
+}
+
+.notor-attachments-details[open] summary::before {
+	transform: rotate(90deg);
+}
+
+.notor-attachments-details summary:hover {
+	color: var(--text-normal);
+}
+
+.notor-attachments-content {
+	margin: 0;
+	padding: 8px 10px;
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	border-radius: 0 0 var(--radius-s) var(--radius-s);
+	overflow-x: auto;
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-attachments-content code {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	background: none;
+	padding: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: var(--text-normal);
+}
+
 /* ==========================================================================
    Hook Injection (ACI-002)
    ========================================================================== */
