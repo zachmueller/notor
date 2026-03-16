@@ -58,8 +58,11 @@ Do not implement. Do not review.
 - `notor-hat-default-publishes` — event emitted if hat doesn't call emit_event
 - `notor-hat-persona` — optional persona name for system prompt
 - `notor-hat-model` — optional model override (uses active provider)
-- `notor-hat-mcp-servers` — *(future)* MCP server configs active for this hat's turns; Ralph
-  supports per-hat `mcp_servers` and Notor has MCP infrastructure (`src/mcp/`) already in place
+- `notor-hat-mcp-servers` — *(future)* MCP servers active for this hat's turns. **Absent** (property
+  not present): hat inherits all MCP servers from the user's global config. **Present but empty**
+  (`notor-hat-mcp-servers: []`): hat sees no MCP servers. **Present with entries**: hat sees only
+  the listed servers. Ralph supports per-hat `mcp_servers` with the same semantics; Notor has MCP
+  infrastructure (`src/mcp/`) already in place.
 
 ---
 
@@ -112,8 +115,9 @@ phases automatically.
 - `notor-guardrails` — list of constraints injected into every hat's system prompt
 - `notor-backpressure-gates` — instructs the LLM which commands to run before emitting
   `build.done`; the engine validates evidence strings in the payload (not executing the
-  commands itself). Notor could optionally execute these commands directly since it has
-  shell execution capability — a design choice distinct from Ralph's approach.
+  commands itself). The LLM is responsible for running the checks and reporting results
+  in the payload; the engine validates that the required evidence is present and passes
+  before routing the event.
 
 ---
 
@@ -220,7 +224,7 @@ These are regular vault notes:
 
 A lightweight task tracking system for subtasks within an orchestration.
 
-### Option A: Vault Notes (Recommended)
+### Option A: Vault Notes (chosen approach)
 
 ```
 notor/orchestrations/sessions/{session_id}/tasks/
@@ -257,9 +261,34 @@ Add `--verbose` flag to the CLI entry point with focused tests.
 - `orchestration_task_show(task_id)` — read task details
 - `orchestration_task_list(session_id, status?)` — list tasks
 
-### Option B: In-Memory + SQLite
+**Why vault notes over SQLite:**
 
-Add `orchestration_tasks` table to the DB:
+1. **Single source of truth for crash recovery.** Task notes on disk are authoritative
+   state. The session recovery algorithm (see Session Event Log section) can reconstruct
+   task state by scanning task notes — no sync required between a DB and the file system.
+   A hybrid (vault + SQLite index) introduces two sources that can diverge on crash, making
+   recovery ambiguous.
+
+2. **Manual intervention is a real escape hatch.** If an orchestration gets stuck, an operator
+   can open `tasks/step-03.md` in Obsidian, read why it's blocked, and flip the status field
+   to `closed` directly. A SQLite-only approach hides this state behind a binary file.
+
+3. **Hats can read their own tasks via `<include_note>`.** Hat instructions already support
+   pulling in vault note content. Task notes fit naturally into that pattern; DB rows do not.
+
+4. **Query load is low at typical scale.** Orchestrations generate 10–50 tasks at most.
+   Scanning 50 frontmatter files to list tasks by status is fast enough that a SQLite query
+   layer adds no measurable benefit.
+
+5. **Vault-native consistency.** Tasks scoped to `sessions/{id}/tasks/` stay out of the main
+   vault but remain visible in Obsidian's search and sidebar. SQLite tasks are invisible to
+   the user until they build a separate UI for them.
+
+A SQLite index could be added later as an optimization if real-world usage reveals query
+performance issues — but the vault notes remain authoritative in that case too.
+
+### Option B: SQLite (not chosen)
+
 ```sql
 CREATE TABLE orchestration_tasks (
   id TEXT PRIMARY KEY,
@@ -274,11 +303,10 @@ CREATE TABLE orchestration_tasks (
 );
 ```
 
-**Pros:** Fast queries, no vault clutter
-**Cons:** Not visible in Obsidian graph view, not version-controlled
-
-**Recommendation:** Option A (vault notes) for visibility and Obsidian integration,
-with a SQLite index for fast queries during orchestration.
+**Pros:** Fast structured queries, atomic status transitions, no vault file I/O.
+**Cons:** Invisible to Obsidian; not version-controlled; complicates crash recovery by
+introducing a second source of truth alongside the session log; undermines the vault-native
+design philosophy without a meaningful performance benefit at typical orchestration scale.
 
 ---
 
