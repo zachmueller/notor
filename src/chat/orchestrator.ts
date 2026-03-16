@@ -993,6 +993,14 @@ export class ChatOrchestrator {
 			await this.newConversation();
 		}
 
+		// Guard: require a model to be selected before doing any work
+		if (!this.getActiveModelId()) {
+			this.view?.showError(
+				"No model selected. Open the model picker and choose a model before sending a message."
+			);
+			return;
+		}
+
 		const mode = this.conversationManager.getMode();
 
 		// Phase 3 (ATT-008): Resolve attachments and build XML block
@@ -1767,6 +1775,9 @@ export class ChatOrchestrator {
 					break;
 				case "CONTEXT_LENGTH_EXCEEDED":
 					suggestion = " Try starting a new conversation or reducing message length.";
+					break;
+				case "MODEL_NOT_FOUND":
+					suggestion = " Check that a model is selected in the model picker, or verify the model ID in Settings → Notor.";
 					break;
 				default:
 					suggestion = "";
