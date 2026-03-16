@@ -257,4 +257,18 @@ export interface NotorSettings {
 	 * Default: "error" (production-quiet). Set to "debug" for development.
 	 */
 	log_level: LogLevel;
+
+	// Phase 4c: docx & file tools
+
+	/**
+	 * Additional filesystem paths allowed for `read_file`, `read_docx`, and `write_docx`.
+	 * Vault root is always implicitly allowed.
+	 */
+	read_file_allowed_paths: string[];
+
+	/** Default output directory for `write_docx`. Vault-relative or absolute. */
+	write_docx_default_output_dir: string;
+
+	/** Default template `.docx` path for `write_docx`. Vault-relative or absolute. */
+	write_docx_default_template_path: string;
 }

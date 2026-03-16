@@ -110,12 +110,12 @@ Remove the now-duplicated path logic from `execute-command.ts` and delegate to t
 
 **Files modified:** `src/settings/types.ts`
 
-- [ ] Locate the end of the `NotorSettings` interface (after the `mcp_servers` and `log_level` fields)
-- [ ] Add a `// Phase 4c: docx & file tools` comment block
-- [ ] Add field `read_file_allowed_paths: string[]` with a JSDoc comment: "Additional filesystem paths allowed for `read_file`, `read_docx`, and `write_docx`. Vault root is always implicitly allowed."
-- [ ] Add field `write_docx_default_output_dir: string` with a JSDoc comment: "Default output directory for `write_docx`. Vault-relative or absolute."
-- [ ] Add field `write_docx_default_template_path: string` with a JSDoc comment: "Default template `.docx` path for `write_docx`. Vault-relative or absolute."
-- [ ] Confirm the file compiles without TypeScript errors
+- [x] Locate the end of the `NotorSettings` interface (after the `mcp_servers` and `log_level` fields)
+- [x] Add a `// Phase 4c: docx & file tools` comment block
+- [x] Add field `read_file_allowed_paths: string[]` with a JSDoc comment: "Additional filesystem paths allowed for `read_file`, `read_docx`, and `write_docx`. Vault root is always implicitly allowed."
+- [x] Add field `write_docx_default_output_dir: string` with a JSDoc comment: "Default output directory for `write_docx`. Vault-relative or absolute."
+- [x] Add field `write_docx_default_template_path: string` with a JSDoc comment: "Default template `.docx` path for `write_docx`. Vault-relative or absolute."
+- [x] Confirm the file compiles without TypeScript errors
 
 ---
 
@@ -123,15 +123,15 @@ Remove the now-duplicated path logic from `execute-command.ts` and delegate to t
 
 **Files modified:** `src/settings/defaults.ts`
 
-- [ ] In `DEFAULT_AUTO_APPROVE`, add three new entries after `execute_command: false`:
-  - [ ] `read_file: false`
-  - [ ] `read_docx: false`
-  - [ ] `write_docx: false`
-- [ ] In `createDefaultSettings()`, add a `// Phase 4c: docx & file tools` comment block and three new fields:
-  - [ ] `read_file_allowed_paths: []`
-  - [ ] `write_docx_default_output_dir: ""`
-  - [ ] `write_docx_default_template_path: ""`
-- [ ] Confirm the file compiles and the `NotorSettings` type is fully satisfied (no missing fields)
+- [x] In `DEFAULT_AUTO_APPROVE`, add three new entries after `execute_command: false`:
+  - [x] `read_file: false`
+  - [x] `read_docx: false`
+  - [x] `write_docx: false`
+- [x] In `createDefaultSettings()`, add a `// Phase 4c: docx & file tools` comment block and three new fields:
+  - [x] `read_file_allowed_paths: []`
+  - [x] `write_docx_default_output_dir: ""`
+  - [x] `write_docx_default_template_path: ""`
+- [x] Confirm the file compiles and the `NotorSettings` type is fully satisfied (no missing fields)
 
 ---
 
@@ -139,7 +139,7 @@ Remove the now-duplicated path logic from `execute-command.ts` and delegate to t
 
 **Files modified:** `src/settings/constants.ts`
 
-- [ ] Add the `read_file` entry to `TOOL_DISPLAY_NAMES` after `execute_command`:
+- [x] Add the `read_file` entry to `TOOL_DISPLAY_NAMES` after `execute_command`:
   ```typescript
   read_file: {
       name: "Read file",
@@ -147,7 +147,7 @@ Remove the now-duplicated path logic from `execute-command.ts` and delegate to t
       isWrite: false,
   },
   ```
-- [ ] Add the `read_docx` entry:
+- [x] Add the `read_docx` entry:
   ```typescript
   read_docx: {
       name: "Read Word doc",
@@ -155,7 +155,7 @@ Remove the now-duplicated path logic from `execute-command.ts` and delegate to t
       isWrite: false,
   },
   ```
-- [ ] Add the `write_docx` entry:
+- [x] Add the `write_docx` entry:
   ```typescript
   write_docx: {
       name: "Write Word doc",
@@ -163,7 +163,7 @@ Remove the now-duplicated path logic from `execute-command.ts` and delegate to t
       isWrite: true,
   },
   ```
-- [ ] Confirm the file compiles without TypeScript errors
+- [x] Confirm the file compiles without TypeScript errors
 
 ---
 

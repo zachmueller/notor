@@ -56,6 +56,9 @@ export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	update_frontmatter: false,
 	manage_tags: false,
 	execute_command: false,
+	read_file: false,
+	read_docx: false,
+	write_docx: false,
 };
 
 /** Default empty hook configuration. */
@@ -147,5 +150,10 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 
 	// Developer escape hatch
 	log_level: "error",
+
+	// Phase 4c: docx & file tools
+	read_file_allowed_paths: [],
+	write_docx_default_output_dir: "",
+	write_docx_default_template_path: "",
 	};
 }

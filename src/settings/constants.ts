@@ -80,4 +80,19 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Execute a shell command on the user's system (desktop only).",
 		isWrite: true,
 	},
+	read_file: {
+		name: "Read file",
+		desc: "Read a text file from the filesystem (desktop only).",
+		isWrite: false,
+	},
+	read_docx: {
+		name: "Read Word doc",
+		desc: "Read a .docx file and return its content as Markdown (desktop only).",
+		isWrite: false,
+	},
+	write_docx: {
+		name: "Write Word doc",
+		desc: "Convert Markdown to a .docx file on the filesystem (desktop only).",
+		isWrite: true,
+	},
 };
