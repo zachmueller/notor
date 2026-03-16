@@ -586,7 +586,6 @@
 	line-height: 1.4;
 	white-space: pre-wrap;
 	word-break: break-word;
-	-webkit-user-modify: read-write-plaintext-only;
 }
 
 .notor-text-input:focus {
@@ -1183,6 +1182,24 @@
 .notor-diff-removed {
 	background: rgba(220, 53, 69, 0.12);
 	color: var(--color-red);
+}
+
+/* Inline wikilink token — vault note / section references embedded in the
+   chat input. Has contenteditable="false" so the browser treats it as an
+   atomic unit: arrow keys skip over it, Backspace removes the whole token. */
+
+.notor-wikilink-token {
+	display: inline-block;
+	background: rgba(var(--color-accent-rgb, 130, 80, 255), 0.12);
+	border: 1px solid rgba(var(--color-accent-rgb, 130, 80, 255), 0.35);
+	border-radius: var(--radius-s);
+	padding: 0 4px;
+	color: var(--text-accent);
+	font-size: 0.9em;
+	cursor: default;
+	white-space: nowrap;
+	vertical-align: middle;
+	line-height: 1.4;
 }
 
 /* ==========================================================================

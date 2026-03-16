@@ -85,6 +85,7 @@ export class NotorChatView extends ItemView {
 	private pendingAttachments: Attachment[] = [];
 	private attachmentChipManager!: AttachmentChipManager;
 	private vaultNoteSuggest?: VaultNoteSuggest;
+	private tokenObserver?: MutationObserver;
 
 	// Workflow slash-command state (E-010, E-011, E-012)
 	private workflowSuggest?: WorkflowSlashSuggest;
@@ -470,6 +471,10 @@ export class NotorChatView extends ItemView {
 	onClose(): Promise<void> {
 		this.abortController?.abort();
 
+		// Disconnect the inline token mutation observer
+		this.tokenObserver?.disconnect();
+		this.tokenObserver = undefined;
+
 		// H-002: Clean up workflow activity indicator DOM and callbacks
 		this.workflowActivityIndicator?.destroy();
 		this.workflowActivityIndicator = undefined;
@@ -621,11 +626,50 @@ export class NotorChatView extends ItemView {
 			}
 		});
 
-		// Initialize vault note suggest (lazy — created once, reused)
+		// Force plain-text pastes so rich-text content cannot pollute the input
+		// (required since we removed -webkit-user-modify: read-write-plaintext-only
+		// to allow contenteditable="false" spans to behave as atomic units).
+		this.textInputEl.addEventListener("paste", (e) => {
+			e.preventDefault();
+			const text = e.clipboardData?.getData("text/plain") ?? "";
+			document.execCommand("insertText", false, text);
+		});
+
+		// Watch for inline wikilink token spans being removed from the input
+		// (e.g. via Backspace). When a token is deleted, remove its corresponding
+		// attachment from pendingAttachments.
+		this.tokenObserver = new MutationObserver((mutations) => {
+			for (const mutation of mutations) {
+				for (const removed of Array.from(mutation.removedNodes)) {
+					const candidates: Element[] = [];
+					if (removed instanceof Element) {
+						candidates.push(removed);
+						removed
+							.querySelectorAll("[data-attachment-id]")
+							.forEach((el) => candidates.push(el));
+					}
+					for (const el of candidates) {
+						const id = el.getAttribute("data-attachment-id");
+						if (id) {
+							this.pendingAttachments = this.pendingAttachments.filter(
+								(a) => a.id !== id
+							);
+						}
+					}
+				}
+			}
+		});
+		this.tokenObserver.observe(this.textInputEl, {
+			childList: true,
+			subtree: true,
+		});
+
+		// Initialize vault note suggest (lazy — created once, reused).
+		// Uses addWikilinkAttachment (no chip — token is rendered inline).
 		this.vaultNoteSuggest = new VaultNoteSuggest(
 			this.app,
 			this.textInputEl,
-			(attachment: Attachment) => this.addAttachment(attachment),
+			(attachment: Attachment) => this.addWikilinkAttachment(attachment),
 			() => this.pendingAttachments
 		);
 
@@ -1276,6 +1320,19 @@ export class NotorChatView extends ItemView {
 	// -----------------------------------------------------------------------
 	// Attachment management
 	// -----------------------------------------------------------------------
+
+	/**
+	 * Add a vault-note attachment that was inserted as an inline wikilink token.
+	 * No chip is created — the visual representation is the token span itself.
+	 */
+	private addWikilinkAttachment(attachment: Attachment): void {
+		this.pendingAttachments.push(attachment);
+		log.debug("Wikilink attachment added", {
+			id: attachment.id,
+			type: attachment.type,
+			display: attachment.display_name,
+		});
+	}
 
 	/**
 	 * Add an attachment to the pending list and render its chip.

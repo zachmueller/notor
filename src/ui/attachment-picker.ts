@@ -30,6 +30,87 @@ import {
 	readExternalFile,
 	isDuplicate,
 } from "../context/attachment";
+
+// ---------------------------------------------------------------------------
+// Inline wikilink token insertion
+// ---------------------------------------------------------------------------
+
+/**
+ * Replace the `[[query` text in a contenteditable input with a styled inline
+ * token span. The span has `contenteditable="false"` so the browser treats it
+ * as an atomic unit: arrow keys skip over it in one keystroke, and Backspace
+ * while it is selected removes the whole token in one keystroke.
+ *
+ * @param inputEl   - The contenteditable chat input div.
+ * @param attachment - The attachment whose display name and id to embed.
+ */
+export function insertWikilinkToken(
+	inputEl: HTMLDivElement,
+	attachment: Attachment
+): void {
+	const fullText = inputEl.textContent ?? "";
+	const triggerIdx = fullText.lastIndexOf("[[");
+	if (triggerIdx === -1) return;
+
+	// Walk text nodes to find which one contains triggerIdx and at what offset
+	// within that node.
+	const walker = document.createTreeWalker(inputEl, NodeFilter.SHOW_TEXT);
+	let accumulated = 0;
+	let targetTextNode: Text | null = null;
+	let offsetInNode = 0;
+
+	let node = walker.nextNode() as Text | null;
+	while (node) {
+		const len = node.length;
+		if (accumulated + len > triggerIdx) {
+			targetTextNode = node;
+			offsetInNode = triggerIdx - accumulated;
+			break;
+		}
+		accumulated += len;
+		node = walker.nextNode() as Text | null;
+	}
+
+	if (!targetTextNode) return;
+
+	// Split the text node at triggerIdx so splitNode starts with "[[query..."
+	const splitNode = targetTextNode.splitText(offsetInNode);
+
+	// Remove splitNode and every DOM node that comes after it (there should be
+	// nothing after it since the user is typing at the end, but be safe).
+	let sibling: ChildNode | null = splitNode;
+	while (sibling) {
+		const next: ChildNode | null = sibling.nextSibling;
+		sibling.parentNode?.removeChild(sibling);
+		sibling = next;
+	}
+
+	// Insert the styled token span.
+	const tokenSpan = inputEl.createSpan({
+		cls: "notor-wikilink-token",
+		attr: {
+			contenteditable: "false",
+			"data-attachment-id": attachment.id,
+		},
+		text: `[[${attachment.display_name}]]`,
+	});
+
+	// A trailing regular-space text node lets the cursor sit after the token.
+	const spacer = document.createTextNode(" ");
+	inputEl.appendChild(spacer);
+
+	// Move cursor to after the spacer.
+	const range = document.createRange();
+	range.setStart(spacer, 1);
+	range.collapse(true);
+	const sel = window.getSelection();
+	sel?.removeAllRanges();
+	sel?.addRange(range);
+
+	// Silence the unused-variable lint for tokenSpan (it is already appended
+	// to the DOM by createSpan above).
+	void tokenSpan;
+}
 import { logger } from "../utils/logger";
 
 const log = logger("AttachmentPicker");
@@ -200,17 +281,25 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 		// Check for duplicate
 		if (isDuplicate(existing, { path: suggestion.file.path })) {
 			new Notice("This note is already attached");
-			this.cleanupTriggerText();
+			// Clean up `[[query` text without creating a token
+			const text = this.chatInputEl.textContent ?? "";
+			const triggerIdx = text.lastIndexOf("[[");
+			if (triggerIdx !== -1) {
+				this.chatInputEl.textContent = text.slice(0, triggerIdx);
+			}
 			this.deactivate();
 			return;
 		}
 
 		// Create the attachment
 		const attachment = createVaultNoteAttachment(suggestion.file.path);
+
+		// Insert inline token (replaces `[[query` text with a styled span)
+		insertWikilinkToken(this.chatInputEl, attachment);
+
+		// Notify chat-view to track the attachment (no chip needed — token is inline)
 		this.onAttachmentAdded(attachment);
 
-		// Clean up the `[[query` text from the input
-		this.cleanupTriggerText();
 		this.deactivate();
 
 		log.debug("Vault note attached", { path: suggestion.file.path });
@@ -229,16 +318,6 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 
 		// Extract everything after `[[`
 		return inputStr.slice(triggerIdx + 2);
-	}
-
-	/** Remove the `[[query` text from the contenteditable input. */
-	private cleanupTriggerText(): void {
-		const el = this.chatInputEl;
-		const text = el.textContent ?? "";
-		const triggerIdx = text.lastIndexOf("[[");
-		if (triggerIdx !== -1) {
-			el.textContent = text.slice(0, triggerIdx);
-		}
 	}
 }
 
@@ -343,15 +422,12 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 			suggestion.filePath,
 			suggestion.heading
 		);
-		this.onAttachmentAdded(attachment);
 
-		// Clean up input text
-		const el = this.chatInputEl;
-		const text = el.textContent ?? "";
-		const triggerIdx = text.lastIndexOf("[[");
-		if (triggerIdx !== -1) {
-			el.textContent = text.slice(0, triggerIdx);
-		}
+		// Insert inline token (replaces `[[query` text with a styled span)
+		insertWikilinkToken(this.chatInputEl, attachment);
+
+		// Notify chat-view to track the attachment (no chip needed — token is inline)
+		this.onAttachmentAdded(attachment);
 
 		this.deactivate();
 		log.debug("Section attached", {
