@@ -11,7 +11,7 @@ Notor brings AI-powered assistance directly into your Obsidian workflow. It give
 ## What Notor can do
 
 - **Chat with an AI inside Obsidian** — side panel chat with streaming responses, multiple LLM providers (local, Anthropic, OpenAI, AWS Bedrock), dynamic model selection, and conversation history
-- **[Read, write, and edit notes](docs/vault-tools.md)** — 10 built-in vault tools including search, frontmatter editing, tag management, web fetching, and shell command execution
+- **[Read, write, and edit notes](docs/vault-tools.md)** — 13 built-in tools including vault note operations, web fetching, shell command execution, and filesystem read/write with Word (`.docx`) support
 - **[Safety-first approval model](docs/safety.md)** — Plan/Act mode, diff previews with per-hunk accept/reject, approval gates for write operations, and automatic checkpoints for rollback
 - **[Note and file attachments](docs/context.md)** — attach vault notes (with section-level references) or external files directly to messages; ambient workspace context injected automatically
 - **[Vault-level instruction files](docs/rules.md)** — store Markdown rule files under `notor/rules/` that inject instructions automatically based on note directory or tag
@@ -83,6 +83,7 @@ For full setup walkthroughs — including creating your first persona, workflow,
 | **Phase 3** | Context & intelligence: note/file attachment, auto-context injection, auto-compaction, web fetching, shell execution, LLM interaction hooks | ✅ Complete |
 | **Phase 4** | Workflows & personas: file-based personas, reusable workflow notes, `<include_note>` tag, vault event hooks | ✅ Complete |
 | **Phase 4.1** | Custom MCP servers: stdio/SSE/Streamable HTTP transports, tool discovery, uniform dispatch, read/write classification, Plan/Act signaling, auto-approve, chat panel status indicator | ✅ Complete |
+| **Phase 4c** | Word & file tools: `read_file`, `read_docx`, `write_docx` with optional template grafting; shared path-validation utility; settings UI | ✅ Complete |
 | **Phase 5** | Advanced & multi-agent: parallel agents, agent monitor panel, background agents, browser capabilities | 🔜 Planned |
 
 ---
