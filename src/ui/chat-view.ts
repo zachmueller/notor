@@ -519,6 +519,7 @@ export class NotorChatView extends ItemView {
 		setIcon(newBtn, "message-square-plus");
 		newBtn.addEventListener("click", () => {
 			this.onNewConversation?.();
+			this.textInputEl.focus();
 		});
 
 		// Settings gear
