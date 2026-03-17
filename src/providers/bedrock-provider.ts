@@ -123,6 +123,14 @@ function toBedrockMessages(
 		});
 	}
 
+	log.info("Bedrock messages prepared", {
+		systemCount: system.length,
+		messageCount: bedrockMessages.length,
+		firstRole: bedrockMessages[0]?.role ?? "none",
+		lastRole: bedrockMessages[bedrockMessages.length - 1]?.role ?? "none",
+		roles: bedrockMessages.map((m) => m.role),
+	});
+
 	return { system, messages: bedrockMessages };
 }
 

@@ -1421,6 +1421,15 @@ export class ChatOrchestrator {
 		const pendingMessages = this.extractPendingMessages(messages);
 		const completedMessages = messages.slice(0, messages.length - pendingMessages.length);
 
+		log.info("Compaction message split", {
+			totalMessages: messages.length,
+			pendingCount: pendingMessages.length,
+			completedCount: completedMessages.length,
+			firstPendingRole: pendingMessages[0]?.role ?? "none",
+			firstCompletedRole: completedMessages[0]?.role ?? "none",
+			lastCompletedRole: completedMessages[completedMessages.length - 1]?.role ?? "none",
+		});
+
 		// Show compacting indicator in chat UI
 		const messagesContainer = this.view?.getMessagesContainer?.();
 		let indicator: HTMLElement | null = null;
@@ -1809,6 +1818,14 @@ export class ChatOrchestrator {
 					break;
 			}
 		}
+
+		log.info("ChatMessages built for provider", {
+			totalCount: chatMessages.length,
+			firstRole: chatMessages[0]?.role ?? "none",
+			secondRole: chatMessages[1]?.role ?? "none",
+			lastRole: chatMessages[chatMessages.length - 1]?.role ?? "none",
+			roles: chatMessages.map((m) => m.role),
+		});
 
 		return chatMessages;
 	}

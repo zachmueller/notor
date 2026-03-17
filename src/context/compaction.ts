@@ -114,14 +114,14 @@ export function shouldCompact(
 
 	const shouldTrigger = totalTokens >= threshold;
 
-	if (shouldTrigger) {
-		log.info("Compaction threshold reached", {
-			totalTokens,
-			threshold,
-			contextWindow,
-			thresholdFraction: settings.compaction_threshold,
-		});
-	}
+	log.info("Compaction threshold check", {
+		modelId,
+		totalTokens,
+		threshold,
+		contextWindow,
+		thresholdFraction: settings.compaction_threshold,
+		shouldTrigger,
+	});
 
 	return shouldTrigger;
 }
@@ -247,6 +247,14 @@ export async function performCompaction(
 	chatMessages.push({
 		role: "user",
 		content: "Please summarize the conversation above.",
+	});
+
+	log.info("Compaction summarization request structure", {
+		inputMessageCount: messages.length,
+		chatMessageCount: chatMessages.length,
+		firstChatRole: chatMessages[0]?.role ?? "none",
+		lastChatRole: chatMessages[chatMessages.length - 1]?.role ?? "none",
+		chatRoles: chatMessages.map((m) => m.role),
 	});
 
 	try {

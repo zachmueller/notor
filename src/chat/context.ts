@@ -132,6 +132,15 @@ export class ContextManager {
 
 		let truncatedCount = 0;
 
+		log.info("Context window assessment", {
+			messageCount: messages.length,
+			totalTokens,
+			tokenBudget,
+			contextLimit,
+			needsTruncation: totalTokens > tokenBudget,
+			firstNonSystemRole: messages.find((m) => m.role !== "system")?.role ?? "none",
+		});
+
 		// If under budget, no truncation needed
 		if (totalTokens <= tokenBudget) {
 			return {
@@ -170,6 +179,13 @@ export class ContextManager {
 			tokensToRemove -= (tokenCounts[i] ?? 0);
 			truncatedCount++;
 		}
+
+		log.info("Context window after truncation", {
+			truncatedCount,
+			remainingCount: messages.filter((m) => !m.truncated).length,
+			firstRemainingNonSystemRole: messages.filter((m) => !m.truncated && m.role !== "system")[0]?.role ?? "none",
+			roles: messages.filter((m) => !m.truncated && m.role !== "system").map((m) => m.role),
+		});
 
 		// Recalculate total for non-truncated messages
 		let remainingTokens = 0;
