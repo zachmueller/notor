@@ -1202,6 +1202,30 @@
 	line-height: 1.4;
 }
 
+/* Inline workflow token — workflow slash-command reference embedded in the
+   chat input. Purple-tinted to distinguish from note attachment tokens.
+   Has contenteditable="false" so Backspace removes the whole token at once. */
+
+.notor-workflow-token {
+	display: inline-block;
+	background: rgba(124, 58, 237, 0.1);
+	border: 1px solid rgba(124, 58, 237, 0.35);
+	border-radius: var(--radius-s);
+	padding: 0 4px;
+	color: var(--color-purple, #7c3aed);
+	font-size: 0.9em;
+	cursor: default;
+	white-space: nowrap;
+	vertical-align: middle;
+	line-height: 1.4;
+}
+
+.theme-dark .notor-workflow-token {
+	background: rgba(167, 139, 250, 0.12);
+	border-color: rgba(167, 139, 250, 0.35);
+	color: var(--color-purple, #a78bfa);
+}
+
 /* ==========================================================================
    Attachment System (Phase 3 — ATT-005, ATT-006, ATT-007)
    ========================================================================== */

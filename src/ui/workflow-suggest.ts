@@ -237,13 +237,13 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 
 	/**
 	 * Handle workflow selection:
-	 * 1. Remove the `/query` text from the input.
-	 * 2. Call the `onSelect` callback (adds a workflow chip).
+	 * 1. Replace the `/query` text with an inline workflow token.
+	 * 2. Call the `onSelect` callback (tracks the workflow in state).
 	 * 3. Deactivate the suggest.
 	 */
 	selectSuggestion(suggestion: WorkflowSuggestion, _evt?: MouseEvent | KeyboardEvent): void {
+		this.insertToken(suggestion.workflow);
 		this.deactivate();
-		this.cleanupTriggerText();
 		this.onWorkflowSelect(suggestion.workflow);
 		this.close();
 		log.debug("Workflow selected from slash suggest", {
@@ -279,125 +279,77 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 	}
 
 	/**
-	 * Remove the `/query` prefix from the contenteditable input,
-	 * preserving any text before the trigger character.
+	 * Replace the `/query` text in the contenteditable input with a styled
+	 * inline workflow token span. The span has `contenteditable="false"` so
+	 * the browser treats it as atomic: Backspace removes the whole token in
+	 * one keystroke.
+	 *
+	 * Data attributes stored on the span allow the MutationObserver in
+	 * chat-view.ts to reconstruct the workflow state if Undo restores the
+	 * token after a Backspace deletion.
 	 */
-	private cleanupTriggerText(): void {
+	private insertToken(workflow: Workflow): void {
 		const el = this.chatInputEl;
-		const text = el.textContent ?? "";
-		if (this.triggerStartIndex >= 0) {
-			el.textContent = text.slice(0, this.triggerStartIndex);
+		const triggerIdx = this.triggerStartIndex;
+		if (triggerIdx < 0) return;
+
+		// Walk text nodes to find which one contains triggerIdx and the offset
+		// within that node (same algorithm as insertWikilinkToken).
+		const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+		let accumulated = 0;
+		let targetTextNode: Text | null = null;
+		let offsetInNode = 0;
+
+		let node = walker.nextNode() as Text | null;
+		while (node) {
+			const len = node.length;
+			if (accumulated + len > triggerIdx) {
+				targetTextNode = node;
+				offsetInNode = triggerIdx - accumulated;
+				break;
+			}
+			accumulated += len;
+			node = walker.nextNode() as Text | null;
 		}
+
+		if (!targetTextNode) return;
+
+		// Split at triggerIdx so splitNode starts with "/query..."
+		const splitNode = targetTextNode.splitText(offsetInNode);
+
+		// Remove splitNode and all following siblings (the "/query" text).
+		let sibling: ChildNode | null = splitNode;
+		while (sibling) {
+			const next: ChildNode | null = sibling.nextSibling;
+			sibling.parentNode?.removeChild(sibling);
+			sibling = next;
+		}
+
+		// Insert the styled token span with data attributes for undo reconstruction.
+		const tokenSpan = el.createSpan({
+			cls: "notor-workflow-token",
+			attr: {
+				contenteditable: "false",
+				"data-workflow-path": workflow.file_path,
+				"data-workflow-name": workflow.display_name,
+			},
+			text: `/${workflow.display_name}`,
+		});
+
+		// Trailing space lets the cursor sit after the token.
+		const spacer = document.createTextNode(" ");
+		el.appendChild(spacer);
+
+		// Move cursor to after the spacer.
+		const range = document.createRange();
+		range.setStart(spacer, 1);
+		range.collapse(true);
+		const sel = window.getSelection();
+		sel?.removeAllRanges();
+		sel?.addRange(range);
+
+		// Silence the unused-variable lint (span is already in the DOM via createSpan).
+		void tokenSpan;
 	}
 }
 
-// ---------------------------------------------------------------------------
-// E-011: WorkflowChipManager — chip rendering
-// ---------------------------------------------------------------------------
-
-/**
- * Manages the single workflow chip rendered in the chat input chip container.
- *
- * At most **one** workflow chip is shown at a time. Selecting a new workflow
- * replaces the existing chip. The chip is rendered in the same
- * `notor-attachment-chips` container used by `AttachmentChipManager`.
- *
- * Visual design:
- * - Shares `.notor-attachment-chip` base class for layout consistency.
- * - Adds `.notor-workflow-chip` for the purple-tinted border/background
- *   (defined in `styles.css`).
- * - `📋` icon distinguishes it from note-attachment chips.
- *
- * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-011
- */
-export class WorkflowChipManager {
-	private readonly containerEl: HTMLElement;
-	private readonly onRemove: () => void;
-	private chipEl: HTMLElement | null = null;
-	private currentWorkflow: Workflow | null = null;
-
-	/**
-	 * @param containerEl — The `notor-attachment-chips` container element.
-	 * @param onRemove — Callback fired when the chip × button is clicked.
-	 */
-	constructor(containerEl: HTMLElement, onRemove: () => void) {
-		this.containerEl = containerEl;
-		this.onRemove = onRemove;
-	}
-
-	/**
-	 * Render a workflow chip for `workflow`.
-	 *
-	 * Any existing workflow chip is replaced. The container is made
-	 * visible if it was hidden.
-	 */
-	setChip(workflow: Workflow): void {
-		// Replace any existing workflow chip
-		this.removeChip();
-
-		this.currentWorkflow = workflow;
-		this.containerEl.removeClass("notor-hidden");
-
-		const chipEl = this.containerEl.createDiv({
-			cls: "notor-attachment-chip notor-workflow-chip",
-			attr: { "data-workflow-path": workflow.file_path },
-		});
-
-		chipEl.createSpan({
-			cls: "notor-attachment-chip-icon",
-			text: "📋",
-		});
-
-		chipEl.createSpan({
-			cls: "notor-attachment-chip-label",
-			text: workflow.display_name,
-		});
-
-		const removeBtn = chipEl.createSpan({
-			cls: "notor-attachment-chip-remove",
-			attr: { "aria-label": `Remove workflow ${workflow.display_name}` },
-		});
-		removeBtn.textContent = "×";
-		removeBtn.addEventListener("click", (e) => {
-			e.stopPropagation();
-			this.removeChip();
-			this.onRemove();
-		});
-
-		this.chipEl = chipEl;
-
-		log.debug("Workflow chip added", { display_name: workflow.display_name });
-	}
-
-	/**
-	 * Remove the current workflow chip from the DOM and reset internal state.
-	 *
-	 * Hides the container if no other chips (attachment chips) remain.
-	 */
-	removeChip(): void {
-		if (this.chipEl) {
-			this.chipEl.remove();
-			this.chipEl = null;
-		}
-		this.currentWorkflow = null;
-
-		// Hide the container only when entirely empty
-		if (this.containerEl.childElementCount === 0) {
-			this.containerEl.addClass("notor-hidden");
-		}
-	}
-
-	/**
-	 * Returns the currently attached workflow, or `null` if no chip is shown.
-	 */
-	getSelectedWorkflow(): Workflow | null {
-		return this.currentWorkflow;
-	}
-
-	/**
-	 * Remove the chip and reset state — called after the message is sent.
-	 */
-	clear(): void {
-		this.removeChip();
-	}
-}

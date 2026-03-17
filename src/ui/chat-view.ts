@@ -26,7 +26,7 @@ import {
 } from "./diff-view";
 import { VaultNoteSuggest, createAttachmentButton } from "./attachment-picker";
 import { AttachmentChipManager, createAttachmentChipContainer } from "./attachment-chips";
-import { WorkflowSlashSuggest, WorkflowChipManager, detectSlashTrigger } from "./workflow-suggest";
+import { WorkflowSlashSuggest, detectSlashTrigger } from "./workflow-suggest";
 import { WorkflowActivityIndicator } from "./workflow-activity-indicator";
 import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tracker";
 import type { Workflow } from "../types";
@@ -91,9 +91,8 @@ export class NotorChatView extends ItemView {
 	private vaultNoteSuggest?: VaultNoteSuggest;
 	private tokenObserver?: MutationObserver;
 
-	// Workflow slash-command state (E-010, E-011, E-012)
+	// Workflow slash-command state (E-010, E-012)
 	private workflowSuggest?: WorkflowSlashSuggest;
-	private workflowChipManager?: WorkflowChipManager;
 	private pendingWorkflow: Workflow | null = null;
 	private getWorkflowsCallback?: () => Workflow[];
 
@@ -616,7 +615,7 @@ export class NotorChatView extends ItemView {
 			this.detectSlashCommandTrigger();
 		});
 
-		// Enter to send, Shift+Enter for newline; Tab to select workflow suggestion; Backspace to dismiss workflow chip (E-012)
+		// Enter to send, Shift+Enter for newline; Tab to select workflow suggestion (E-012)
 		this.textInputEl.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
@@ -625,13 +624,6 @@ export class NotorChatView extends ItemView {
 				if (this.workflowSuggest?.active) {
 					e.preventDefault();
 					this.workflowSuggest.selectFirst();
-				}
-			} else if (e.key === "Backspace") {
-				// When the input is empty and a workflow chip is present, remove the chip
-				const isEmpty = !(this.textInputEl.textContent ?? "").trim();
-				if (isEmpty && this.workflowChipManager?.getSelectedWorkflow()) {
-					this.removeWorkflow();
-					e.preventDefault();
 				}
 			}
 		});
@@ -657,6 +649,18 @@ export class NotorChatView extends ItemView {
 			return results;
 		};
 
+		// Collect all Elements with data-workflow-path at or under a given node.
+		const collectWorkflowTokenElements = (node: Node): Element[] => {
+			const results: Element[] = [];
+			if (node instanceof Element) {
+				if (node.hasAttribute("data-workflow-path")) results.push(node);
+				node
+					.querySelectorAll("[data-workflow-path]")
+					.forEach((el) => results.push(el));
+			}
+			return results;
+		};
+
 		// Watch for inline wikilink token spans being added or removed.
 		//
 		// Removal (Backspace / Delete): remove the attachment from pendingAttachments.
@@ -667,6 +671,9 @@ export class NotorChatView extends ItemView {
 		// The dedup check (some(a => a.id === id)) prevents double-adding on the
 		// normal insertion path, where addWikilinkAttachment() fires synchronously
 		// before this microtask observer callback runs.
+		//
+		// Workflow tokens (data-workflow-path) are also handled here: removal clears
+		// pendingWorkflow; addition (undo) looks up the workflow by path and re-attaches.
 		this.tokenObserver = new MutationObserver((mutations) => {
 			for (const mutation of mutations) {
 				for (const removed of Array.from(mutation.removedNodes)) {
@@ -676,6 +683,11 @@ export class NotorChatView extends ItemView {
 							this.pendingAttachments = this.pendingAttachments.filter(
 								(a) => a.id !== id
 							);
+						}
+					}
+					for (const el of collectWorkflowTokenElements(removed)) {
+						if (el.hasAttribute("data-workflow-path")) {
+							this.removeWorkflow();
 						}
 					}
 				}
@@ -696,6 +708,18 @@ export class NotorChatView extends ItemView {
 						attachment.id = id;
 						this.pendingAttachments.push(attachment);
 					}
+					for (const el of collectWorkflowTokenElements(added)) {
+						const workflowPath = el.getAttribute("data-workflow-path");
+						if (!workflowPath) continue;
+						// Already tracked — normal insertion path (attachWorkflow fires
+						// synchronously before this observer callback), skip.
+						if (this.pendingWorkflow?.file_path === workflowPath) continue;
+						// Undo path: look up the workflow by path and re-attach.
+						const workflow = this.getWorkflowsCallback?.().find(
+							(w) => w.file_path === workflowPath
+						);
+						if (workflow) this.attachWorkflow(workflow);
+					}
 				}
 			}
 		});
@@ -713,11 +737,7 @@ export class NotorChatView extends ItemView {
 			() => this.pendingAttachments
 		);
 
-		// Initialize workflow slash suggest and chip manager (E-010, E-011, E-012)
-		this.workflowChipManager = new WorkflowChipManager(
-			this.attachmentChipContainerEl,
-			() => this.removeWorkflow()
-		);
+		// Initialize workflow slash suggest (E-010, E-012)
 		this.workflowSuggest = new WorkflowSlashSuggest(
 			this.app,
 			this.textInputEl,
@@ -765,12 +785,15 @@ export class NotorChatView extends ItemView {
 		// Re-engage auto-scroll for the new exchange so the user sees the response as it streams in.
 		this.autoScroll = true;
 
-		const content = (this.textInputEl.textContent ?? "").trim();
-
 		// Capture pending workflow before clearing state (E-012)
 		const pendingWorkflow = this.pendingWorkflow;
 
-		// A workflow send requires a workflow chip; guard: no content AND no workflow AND no attachments
+		// Supplementary text is the input content minus the inline workflow token text.
+		// (The workflow token span is contenteditable=false so its text is included
+		// in textContent — we exclude it so the executor receives only what the user typed.)
+		const content = this.getInputContentExcludingWorkflowToken();
+
+		// Guard: no content AND no workflow AND no attachments
 		if (!content && this.pendingAttachments.length === 0 && !pendingWorkflow) return;
 
 		// Capture and clear attachments before sending
@@ -778,9 +801,8 @@ export class NotorChatView extends ItemView {
 		this.pendingAttachments = [];
 		this.attachmentChipManager.clear();
 
-		// Clear the workflow chip (E-012)
+		// Clear workflow state (E-012) — token is removed when textContent is cleared below
 		this.pendingWorkflow = null;
-		this.workflowChipManager?.clear();
 
 		this.textInputEl.textContent = "";
 		this.textInputEl.setCssProps({ '--notor-input-height': 'auto' });
@@ -1403,28 +1425,44 @@ export class NotorChatView extends ItemView {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Attach a workflow chip from the slash-command suggest selection.
+	 * Track the selected workflow in state.
 	 *
-	 * Sets `pendingWorkflow` and renders the chip in the container.
-	 * Replaces any previously attached workflow.
+	 * Called after the inline workflow token is inserted into the input.
+	 * The token itself is the visual representation; no separate chip is rendered.
 	 */
 	private attachWorkflow(workflow: Workflow): void {
 		this.pendingWorkflow = workflow;
-		this.workflowChipManager?.setChip(workflow);
 		log.debug("Workflow attached via slash command", {
 			display_name: workflow.display_name,
 		});
 	}
 
 	/**
-	 * Remove the workflow chip and clear `pendingWorkflow`.
+	 * Clear `pendingWorkflow`.
 	 *
-	 * Called by the chip × button, the backspace handler, and after send.
+	 * Called by the MutationObserver when the inline workflow token is removed
+	 * (Backspace) or by handleSend after capturing the workflow for dispatch.
 	 */
 	private removeWorkflow(): void {
 		this.pendingWorkflow = null;
-		this.workflowChipManager?.removeChip();
-		log.debug("Workflow chip removed");
+		log.debug("Workflow token removed");
+	}
+
+	/**
+	 * Read the chat input text content, skipping the inline workflow token span.
+	 *
+	 * `textInputEl.textContent` includes the text of `contenteditable="false"`
+	 * spans (e.g. `/daily-review`). We exclude the workflow token so the
+	 * supplementaryText passed to the executor contains only what the user typed,
+	 * not the slash-command trigger text.
+	 */
+	private getInputContentExcludingWorkflowToken(): string {
+		let text = "";
+		for (const node of Array.from(this.textInputEl.childNodes)) {
+			if (node instanceof HTMLElement && node.hasAttribute("data-workflow-path")) continue;
+			text += node.textContent ?? "";
+		}
+		return text.trim();
 	}
 
 	/**
