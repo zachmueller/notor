@@ -10,13 +10,14 @@
  * @see design/research/obsidian-vault-api-frontmatter.md — frontmatter preservation strategy
  */
 
-import { TFile, TFolder, getFrontMatterInfo } from "obsidian";
+import { TFolder, getFrontMatterInfo } from "obsidian";
 import type { App } from "obsidian";
 import type { Tool, ToolResult } from "./tool";
 import type { StaleContentTracker } from "../chat/stale-tracker";
 import type { NoteOpener } from "./note-opener";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { logger } from "../utils/logger";
+import { resolveNote } from "../utils/resolve-note";
 
 const log = logger("WriteNoteTool");
 
@@ -45,7 +46,7 @@ export class WriteNoteTool implements Tool {
 			path: {
 				type: "string",
 				description:
-					"Path to the note relative to vault root (e.g., 'Projects/Website Redesign.md')",
+					"Path to the note relative to vault root. The '.md' extension is optional and will be added automatically for new notes (e.g., 'Projects/Website Redesign' or 'Projects/Website Redesign.md').",
 			},
 			content: {
 				type: "string",
@@ -87,45 +88,41 @@ export class WriteNoteTool implements Tool {
 
 		log.debug("Writing note", { path, contentLength: content.length });
 
-		const existingFile = this.app.vault.getFileByPath(path);
+		// Resolve file — supports bare names, missing .md extension, and exact paths
+		const existingFile = resolveNote(path, this.app.vault, this.app.metadataCache);
 
 		try {
 			if (!existingFile) {
 				// ---------------------------------------------------------------
 				// New file: create with intermediate directories
 				// ---------------------------------------------------------------
-				await this.ensureDirectoryExists(path);
-				await this.app.vault.create(path, content);
+				// Auto-append .md if not present so we never create extensionless notes
+				const createPath = path.endsWith(".md") ? path : path + ".md";
+				await this.ensureDirectoryExists(createPath);
+				await this.app.vault.create(createPath, content);
 
-				log.info("Created new note", { path, chars: content.length });
+				log.info("Created new note", { path: createPath, chars: content.length });
 
 				// Open in editor
-				await this.noteOpener?.openNote(path);
+				await this.noteOpener?.openNote(createPath);
 
 				return {
 					tool_name: this.name,
 					success: true,
-					result: `Note created: ${path} (${content.length} characters)`,
+					result: `Note created: ${createPath} (${content.length} characters)`,
 				};
 			}
 
 			// ---------------------------------------------------------------
 			// Existing file: stale content check then frontmatter-safe write
 			// ---------------------------------------------------------------
-			if (!(existingFile instanceof TFile)) {
-				return {
-					tool_name: this.name,
-					success: false,
-					result: "",
-					error: `Path is not a file: ${path}`,
-				};
-			}
 
 			// Read current content for stale check and frontmatter merge
 			const currentContent = await this.app.vault.read(existingFile);
 
-			// Stale content check (before checkpoint — no point snapshotting if stale)
-			const staleResult = this.staleTracker.check(path, currentContent);
+			// Stale content check (before checkpoint — no point snapshotting if stale).
+			// Use existingFile.path (canonical) so stale checks work regardless of input spelling.
+			const staleResult = this.staleTracker.check(existingFile.path, currentContent);
 			if (staleResult.isStale) {
 				return {
 					tool_name: this.name,
@@ -138,7 +135,7 @@ export class WriteNoteTool implements Tool {
 			}
 
 			// Checkpoint: snapshot existing content before overwriting
-			await this.checkpointManager?.createCheckpoint(path, this.name, "");
+			await this.checkpointManager?.createCheckpoint(existingFile.path, this.name, "");
 
 			// Frontmatter preservation: if existing note has frontmatter but
 			// new content doesn't, prepend the existing frontmatter block.
@@ -160,17 +157,17 @@ export class WriteNoteTool implements Tool {
 			await this.app.vault.process(existingFile, () => finalContent);
 
 			// Update stale tracker so subsequent writes don't falsely detect staleness
-			this.staleTracker.updateAfterWrite(path, finalContent);
+			this.staleTracker.updateAfterWrite(existingFile.path, finalContent);
 
-			log.info("Modified existing note", { path, chars: finalContent.length });
+			log.info("Modified existing note", { path: existingFile.path, chars: finalContent.length });
 
 			// Open in editor
-			await this.noteOpener?.openNote(path);
+			await this.noteOpener?.openNote(existingFile.path);
 
 			return {
 				tool_name: this.name,
 				success: true,
-				result: `Note updated: ${path} (${finalContent.length} characters)`,
+				result: `Note updated: ${existingFile.path} (${finalContent.length} characters)`,
 			};
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);

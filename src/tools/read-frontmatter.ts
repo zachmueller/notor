@@ -12,6 +12,7 @@
 import type { App } from "obsidian";
 import type { Tool, ToolResult } from "./tool";
 import { logger } from "../utils/logger";
+import { resolveNote } from "../utils/resolve-note";
 
 const log = logger("ReadFrontmatterTool");
 
@@ -35,7 +36,7 @@ export class ReadFrontmatterTool implements Tool {
 		properties: {
 			path: {
 				type: "string",
-				description: "Path to the note relative to vault root",
+				description: "Path to the note relative to vault root. The '.md' extension is optional (e.g., 'Research/Climate' or 'Research/Climate.md'). A bare note name is also accepted.",
 			},
 		},
 		required: ["path"],
@@ -57,8 +58,8 @@ export class ReadFrontmatterTool implements Tool {
 
 		log.debug("Reading frontmatter", { path });
 
-		// Verify the file exists
-		const file = this.app.vault.getFileByPath(path);
+		// Resolve file — supports bare names, missing .md extension, and exact paths
+		const file = resolveNote(path, this.app.vault, this.app.metadataCache);
 		if (!file) {
 			return Promise.resolve({
 				tool_name: this.name,

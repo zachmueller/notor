@@ -13,6 +13,7 @@ import type { App } from "obsidian";
 import type { Tool, ToolResult } from "./tool";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { logger } from "../utils/logger";
+import { resolveNote } from "../utils/resolve-note";
 
 const log = logger("UpdateFrontmatterTool");
 
@@ -38,7 +39,7 @@ export class UpdateFrontmatterTool implements Tool {
 		properties: {
 			path: {
 				type: "string",
-				description: "Path to the note relative to vault root",
+				description: "Path to the note relative to vault root. The '.md' extension is optional (e.g., 'Research/Climate' or 'Research/Climate.md'). A bare note name is also accepted.",
 			},
 			set: {
 				type: "object",
@@ -91,7 +92,8 @@ export class UpdateFrontmatterTool implements Tool {
 			removeKeys: remove ?? [],
 		});
 
-		const file = this.app.vault.getFileByPath(path);
+		// Resolve file — supports bare names, missing .md extension, and exact paths
+		const file = resolveNote(path, this.app.vault, this.app.metadataCache);
 		if (!file) {
 			return {
 				tool_name: this.name,
@@ -102,7 +104,7 @@ export class UpdateFrontmatterTool implements Tool {
 		}
 
 		// Create checkpoint before modifying (non-fatal if it fails)
-		await this.checkpointManager?.createCheckpoint(path, this.name, "");
+		await this.checkpointManager?.createCheckpoint(file.path, this.name, "");
 
 		try {
 			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {

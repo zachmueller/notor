@@ -9,13 +9,13 @@
  * @see design/research/obsidian-vault-api-frontmatter.md — vault.process atomic operations
  */
 
-import { TFile } from "obsidian";
 import type { App } from "obsidian";
 import type { Tool, ToolResult } from "./tool";
 import type { StaleContentTracker } from "../chat/stale-tracker";
 import type { NoteOpener } from "./note-opener";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { logger } from "../utils/logger";
+import { resolveNote } from "../utils/resolve-note";
 
 const log = logger("ReplaceInNoteTool");
 
@@ -135,8 +135,8 @@ export class ReplaceInNoteTool implements Tool {
 
 		log.debug("Replacing in note", { path, changeCount: changes.length });
 
-		// Resolve file
-		const file = this.app.vault.getFileByPath(path);
+		// Resolve file — supports bare names, missing .md extension, and exact paths
+		const file = resolveNote(path, this.app.vault, this.app.metadataCache);
 
 		if (!file) {
 			return {
@@ -144,15 +144,6 @@ export class ReplaceInNoteTool implements Tool {
 				success: false,
 				result: "",
 				error: `Note not found: ${path}`,
-			};
-		}
-
-		if (!(file instanceof TFile)) {
-			return {
-				tool_name: this.name,
-				success: false,
-				result: "",
-				error: `Path is not a file: ${path}`,
 			};
 		}
 
@@ -170,7 +161,8 @@ export class ReplaceInNoteTool implements Tool {
 			};
 		}
 
-		const staleResult = this.staleTracker.check(path, currentContent);
+		// Use file.path (canonical) so stale checks work regardless of input spelling.
+		const staleResult = this.staleTracker.check(file.path, currentContent);
 		if (staleResult.isStale) {
 			return {
 				tool_name: this.name,
@@ -183,7 +175,7 @@ export class ReplaceInNoteTool implements Tool {
 		}
 
 		// Checkpoint: snapshot existing content before applying changes
-		await this.checkpointManager?.createCheckpoint(path, this.name, "");
+		await this.checkpointManager?.createCheckpoint(file.path, this.name, "");
 
 		// Apply changes atomically via vault.process
 		// If any search block doesn't match, the callback throws and
@@ -245,19 +237,20 @@ export class ReplaceInNoteTool implements Tool {
 		}
 
 		// Update stale tracker with the new content
-		// We need to re-read since vault.process returns the written content
+		// We need to re-read since vault.process returns the written content.
+		// Use file.path (canonical) for consistency with recordRead.
 		try {
 			const newContent = await this.app.vault.read(file);
-			this.staleTracker.updateAfterWrite(path, newContent);
+			this.staleTracker.updateAfterWrite(file.path, newContent);
 		} catch {
 			// Non-fatal: stale tracker may cause a re-read next time
-			this.staleTracker.invalidate(path);
+			this.staleTracker.invalidate(file.path);
 		}
 
 		log.info("Applied replacements", { path, count: changes.length });
 
 		// Open in editor
-		await this.noteOpener?.openNote(path);
+		await this.noteOpener?.openNote(file.path);
 
 		return {
 			tool_name: this.name,

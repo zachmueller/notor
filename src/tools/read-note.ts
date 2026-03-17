@@ -9,12 +9,13 @@
  * @see design/research/obsidian-vault-api-frontmatter.md — vault.read, getFrontMatterInfo
  */
 
-import { TFile, getFrontMatterInfo } from "obsidian";
+import { getFrontMatterInfo } from "obsidian";
 import type { App } from "obsidian";
 import type { Tool, ToolResult } from "./tool";
 import type { StaleContentTracker } from "../chat/stale-tracker";
 import type { NoteOpener } from "./note-opener";
 import { logger } from "../utils/logger";
+import { resolveNote } from "../utils/resolve-note";
 
 const log = logger("ReadNoteTool");
 
@@ -40,7 +41,7 @@ export class ReadNoteTool implements Tool {
 			path: {
 				type: "string",
 				description:
-					"Path to the note relative to vault root (e.g., 'Research/Climate.md')",
+					"Path to the note relative to vault root. The '.md' extension is optional (e.g., 'Research/Climate' or 'Research/Climate.md'). A bare note name is also accepted.",
 			},
 			include_frontmatter: {
 				type: "boolean",
@@ -73,8 +74,8 @@ export class ReadNoteTool implements Tool {
 
 		log.debug("Reading note", { path, includeFrontmatter });
 
-		// Resolve file
-		const file = this.app.vault.getFileByPath(path);
+		// Resolve file — supports bare names, missing .md extension, and exact paths
+		const file = resolveNote(path, this.app.vault, this.app.metadataCache);
 
 		if (!file) {
 			return {
@@ -82,15 +83,6 @@ export class ReadNoteTool implements Tool {
 				success: false,
 				result: "",
 				error: `Note not found: ${path}`,
-			};
-		}
-
-		if (!(file instanceof TFile)) {
-			return {
-				tool_name: this.name,
-				success: false,
-				result: "",
-				error: `Path is not a Markdown note: ${path}`,
 			};
 		}
 
@@ -123,11 +115,12 @@ export class ReadNoteTool implements Tool {
 			}
 
 			// Update stale content tracker with full content (not stripped)
-			// so write tools can compare against the actual file state
-			this.staleTracker.recordRead(path, fullContent);
+			// so write tools can compare against the actual file state.
+			// Use file.path (canonical) so stale checks work regardless of input spelling.
+			this.staleTracker.recordRead(file.path, fullContent);
 
 			// Open the note in the editor if configured
-			await this.noteOpener?.openNote(path);
+			await this.noteOpener?.openNote(file.path);
 
 			log.debug("Read note successfully", {
 				path,
