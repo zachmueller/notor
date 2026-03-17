@@ -616,11 +616,16 @@ export class NotorChatView extends ItemView {
 			this.detectSlashCommandTrigger();
 		});
 
-		// Enter to send, Shift+Enter for newline; Backspace to dismiss workflow chip (E-012)
+		// Enter to send, Shift+Enter for newline; Tab to select workflow suggestion; Backspace to dismiss workflow chip (E-012)
 		this.textInputEl.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
 				void this.handleSend();
+			} else if (e.key === "Tab") {
+				if (this.workflowSuggest?.active) {
+					e.preventDefault();
+					this.workflowSuggest.selectFirst();
+				}
 			} else if (e.key === "Backspace") {
 				// When the input is empty and a workflow chip is present, remove the chip
 				const isEmpty = !(this.textInputEl.textContent ?? "").trim();

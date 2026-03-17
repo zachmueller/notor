@@ -61,7 +61,7 @@ export interface WorkflowSuggestion {
  *
  * Valid trigger positions:
  * 1. `/` is the first character (`index === 0`).
- * 2. `/` is immediately preceded by a newline (`text[index - 1] === "\n"`).
+ * 2. `/` is immediately preceded by any whitespace character (space, tab, newline).
  *
  * False-positive prevention:
  * - A `/` in the middle of a word, URL, or file path is NOT a trigger.
@@ -78,9 +78,9 @@ export function detectSlashTrigger(text: string): number | null {
 	if (slashIdx === -1) return null;
 
 	const isAtStart = slashIdx === 0;
-	const isAfterNewline = slashIdx > 0 && text[slashIdx - 1] === "\n";
+	const isAfterWhitespace = slashIdx > 0 && /\s/.test(text[slashIdx - 1]);
 
-	if (!isAtStart && !isAfterNewline) return null;
+	if (!isAtStart && !isAfterWhitespace) return null;
 
 	// Guard: if the text after `/` contains another `/`, it looks like a
 	// file path — don't trigger.
@@ -125,6 +125,7 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 	private readonly getWorkflows: () => Workflow[];
 	private isActive = false;
 	private triggerStartIndex = -1;
+	private currentSuggestions: WorkflowSuggestion[] = [];
 
 	constructor(
 		app: App,
@@ -155,6 +156,19 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 	deactivate(): void {
 		this.isActive = false;
 		this.triggerStartIndex = -1;
+		this.currentSuggestions = [];
+	}
+
+	/** Whether the suggest overlay is currently active. */
+	get active(): boolean {
+		return this.isActive;
+	}
+
+	/** Select the first suggestion in the current list, if any. Used for Tab-key selection. */
+	selectFirst(): void {
+		if (this.currentSuggestions.length > 0) {
+			this.selectSuggestion(this.currentSuggestions[0]);
+		}
 	}
 
 	/**
@@ -178,10 +192,11 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 
 		if (!query) {
 			// No query text yet — list all workflows up to the limit.
-			return workflows.slice(0, this.limit).map((w) => ({
+			this.currentSuggestions = workflows.slice(0, this.limit).map((w) => ({
 				workflow: w,
 				score: null,
 			}));
+			return this.currentSuggestions;
 		}
 
 		// Fuzzy match against display_name
@@ -196,7 +211,8 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 		}
 
 		results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-		return results.slice(0, this.limit);
+		this.currentSuggestions = results.slice(0, this.limit);
+		return this.currentSuggestions;
 	}
 
 	/**
@@ -224,10 +240,11 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 	 * 2. Call the `onSelect` callback (adds a workflow chip).
 	 * 3. Deactivate the suggest.
 	 */
-	selectSuggestion(suggestion: WorkflowSuggestion): void {
+	selectSuggestion(suggestion: WorkflowSuggestion, _evt?: MouseEvent | KeyboardEvent): void {
+		this.deactivate();
 		this.cleanupTriggerText();
 		this.onWorkflowSelect(suggestion.workflow);
-		this.deactivate();
+		this.close();
 		log.debug("Workflow selected from slash suggest", {
 			display_name: suggestion.workflow.display_name,
 		});
