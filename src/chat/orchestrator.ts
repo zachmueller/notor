@@ -1412,6 +1412,11 @@ export class ChatOrchestrator {
 			return;
 		}
 
+		// Capture pending messages (after last assistant turn) before compaction
+		// wipes the conversation. They must be re-appended afterward so the
+		// context still ends on a user turn (required by Bedrock and similar).
+		const pendingMessages = this.extractPendingMessages(messages);
+
 		// Show compacting indicator in chat UI
 		const messagesContainer = this.view?.getMessagesContainer?.();
 		let indicator: HTMLElement | null = null;
@@ -1438,6 +1443,19 @@ export class ChatOrchestrator {
 			if (result.success && result.newMessages && result.record) {
 				// Replace conversation messages with compacted context
 				this.conversationManager.replaceMessages(result.newMessages);
+
+				// Re-append pending messages so the conversation ends with a user
+				// turn. Without this, providers like Bedrock reject the next call
+				// because the last message in the compacted context is an assistant
+				// acknowledgment ("Understood. I have the context…").
+				for (const pending of pendingMessages) {
+					this.conversationManager.addMessage({
+						role: pending.role,
+						content: pending.content,
+						tool_call: pending.tool_call ?? undefined,
+						tool_result: pending.tool_result ?? undefined,
+					});
+				}
 
 				// Log compaction record to JSONL
 				await this.historyManager.appendMessage(conv, {
@@ -1500,6 +1518,9 @@ export class ChatOrchestrator {
 
 		const modelId = this.getActiveModelId();
 
+		// Capture pending messages before compaction (same reason as auto-compaction).
+		const pendingMessages = this.extractPendingMessages(messages);
+
 		// Show compacting indicator
 		const messagesContainer = this.view?.getMessagesContainer?.();
 		let indicator: HTMLElement | null = null;
@@ -1520,6 +1541,16 @@ export class ChatOrchestrator {
 
 			if (result.success && result.newMessages && result.record) {
 				this.conversationManager.replaceMessages(result.newMessages);
+
+				// Re-append any pending messages so the conversation ends on a user turn.
+				for (const pending of pendingMessages) {
+					this.conversationManager.addMessage({
+						role: pending.role,
+						content: pending.content,
+						tool_call: pending.tool_call ?? undefined,
+						tool_result: pending.tool_result ?? undefined,
+					});
+				}
 
 				await this.historyManager.appendMessage(conv, {
 					id: result.record.id,
@@ -1689,6 +1720,25 @@ export class ChatOrchestrator {
 	/**
 	 * Convert internal Message objects to ChatMessage format for the provider.
 	 */
+	/**
+	 * Extract messages that follow the last assistant turn.
+	 *
+	 * These are "pending" messages the LLM hasn't responded to yet (typically
+	 * the current user message, or tool_call + tool_result during a tool loop).
+	 * They must be re-appended after compaction so the conversation ends on a
+	 * user turn, as required by providers like Bedrock that reject assistant
+	 * message prefill.
+	 */
+	private extractPendingMessages(messages: Message[]): Message[] {
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].role === "assistant") {
+				return messages.slice(i + 1);
+			}
+		}
+		// No prior assistant response — all messages are pending
+		return [...messages];
+	}
+
 	private toChatMessages(messages: Message[], systemPrompt: string): ChatMessage[] {
 		const chatMessages: ChatMessage[] = [];
 
