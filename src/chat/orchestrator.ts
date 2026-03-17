@@ -1731,7 +1731,7 @@ export class ChatOrchestrator {
 	 */
 	private extractPendingMessages(messages: Message[]): Message[] {
 		for (let i = messages.length - 1; i >= 0; i--) {
-			if (messages[i].role === "assistant") {
+			if (messages[i]?.role === "assistant") {
 				return messages.slice(i + 1);
 			}
 		}
