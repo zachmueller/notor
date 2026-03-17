@@ -180,6 +180,22 @@ export class ContextManager {
 			truncatedCount++;
 		}
 
+		// Ensure the first remaining non-system message is "user".
+		// The token loop above may have stopped mid-pair (e.g., after removing a
+		// user message but before its paired assistant response), leaving an
+		// assistant/tool_call/tool_result at the front — which Bedrock rejects
+		// ("A conversation must start with a user message").
+		// Walk forward past any such orphaned messages.
+		for (let i = 0; i < messages.length; i++) {
+			const m = messages[i];
+			if (!m || m.truncated || m.role === "system") continue;
+			if (m.role === "user") break; // first non-system is user — good
+			// Leading non-user non-system message: mark truncated
+			m.truncated = true;
+			tokensToRemove -= (tokenCounts[i] ?? 0); // track for logging
+			truncatedCount++;
+		}
+
 		log.info("Context window after truncation", {
 			truncatedCount,
 			remainingCount: messages.filter((m) => !m.truncated).length,

@@ -69,19 +69,28 @@ export function getCompactionPrompt(settings: NotorSettings): string {
 export function estimateConversationTokens(messages: Message[]): number {
 	let total = 0;
 	for (const msg of messages) {
-		total += estimateTokens(msg.content);
+		// Prefer actual LLM-reported token counts over character estimation.
+		// ContextManager uses the same priority so both estimates stay in sync,
+		// preventing truncation from firing before compaction gets a chance to.
+		if (msg.role === "assistant" && msg.output_tokens) {
+			total += msg.output_tokens;
+		} else if (msg.input_tokens) {
+			total += msg.input_tokens;
+		} else {
+			total += estimateTokens(msg.content);
 
-		// Include tool call parameters in estimation
-		if (msg.tool_call) {
-			total += estimateTokens(JSON.stringify(msg.tool_call.parameters));
-		}
+			// Include tool call parameters in estimation
+			if (msg.tool_call) {
+				total += estimateTokens(JSON.stringify(msg.tool_call.parameters));
+			}
 
-		// Include tool result content in estimation
-		if (msg.tool_result) {
-			const result = msg.tool_result.result;
-			total += estimateTokens(
-				typeof result === "string" ? result : JSON.stringify(result)
-			);
+			// Include tool result content in estimation
+			if (msg.tool_result) {
+				const result = msg.tool_result.result;
+				total += estimateTokens(
+					typeof result === "string" ? result : JSON.stringify(result)
+				);
+			}
 		}
 	}
 	return total;

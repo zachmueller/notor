@@ -36,7 +36,7 @@ import { execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { chromium, type Page, type ElementHandle } from "playwright-core";
+import { chromium, type Page, type Browser } from "playwright-core";
 import {
 	launchObsidian,
 	closeObsidian,
@@ -59,6 +59,34 @@ const RESPONSE_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 1_500;
 
 // ---------------------------------------------------------------------------
+// Page finder — search all contexts for the vault renderer
+// ---------------------------------------------------------------------------
+
+/**
+ * Find the Obsidian vault page across all CDP contexts.
+ *
+ * When Obsidian starts it spawns multiple Electron renderer processes
+ * (e.g., title-bar windows, preload helpers). The first context is not
+ * always the vault renderer. This helper polls every 500 ms until a page
+ * containing `.notor-chat-container` is found or the timeout expires.
+ */
+async function findVaultPage(browser: Browser, timeout = 20_000): Promise<Page> {
+	const deadline = Date.now() + timeout;
+	while (Date.now() < deadline) {
+		for (const ctx of browser.contexts()) {
+			for (const p of ctx.pages()) {
+				try {
+					const el = await p.$(".notor-chat-container");
+					if (el) return p;
+				} catch { /* page may be closed or not ready */ }
+			}
+		}
+		await new Promise(r => setTimeout(r, 500));
+	}
+	throw new Error("Could not find vault page with .notor-chat-container within timeout");
+}
+
+// ---------------------------------------------------------------------------
 // Test infrastructure (same pattern as compaction-test.ts)
 // ---------------------------------------------------------------------------
 
@@ -75,9 +103,6 @@ async function screenshot(page: Page, name: string): Promise<string> {
 	return file;
 }
 
-async function waitForSelector(page: Page, sel: string, ms = 8_000): Promise<ElementHandle | null> {
-	try { return await page.waitForSelector(sel, { timeout: ms }); } catch { return null; }
-}
 
 async function waitForResponse(page: Page, ms = RESPONSE_TIMEOUT_MS): Promise<boolean> {
 	const start = Date.now();
@@ -156,6 +181,7 @@ function buildSettings(overrides?: Record<string, unknown>): Record<string, unkn
 		auto_context_open_notes: false,
 		auto_context_vault_structure: false,
 		auto_context_os: false,
+		log_level: "debug",
 		compaction_threshold: 0.8,
 		compaction_prompt_override: "",
 		fetch_webpage_timeout: 15,
@@ -506,16 +532,10 @@ async function main() {
 
 		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
 		let browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
-		let page = browser.contexts()[0]?.pages()[0];
-		if (!page) throw new Error("No page found");
 
 		collector = new LogCollector({ outputDir: LOGS_DIR });
+		let page = await findVaultPage(browser, 20_000);
 		collector.attach(page);
-		await page.waitForLoadState("domcontentloaded");
-		await page.waitForTimeout(5_000);
-
-		const chat = await waitForSelector(page, ".notor-chat-container", 10_000);
-		if (!chat) throw new Error("Chat panel not visible");
 		pass("Chat panel ready (session 1)", "Plugin loaded");
 
 		await scenarioA(page, collector);
@@ -533,14 +553,11 @@ async function main() {
 
 		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
 		browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
-		page = browser.contexts()[0]?.pages()[0];
-		if (!page) throw new Error("No page found");
 
 		// New collector to avoid mixing sessions
 		const collector2 = new LogCollector({ outputDir: LOGS_DIR });
+		page = await findVaultPage(browser, 20_000);
 		collector2.attach(page);
-		await page.waitForLoadState("domcontentloaded");
-		await page.waitForTimeout(5_000);
 
 		await scenarioB(page, collector2);
 
@@ -557,13 +574,10 @@ async function main() {
 
 		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
 		browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
-		page = browser.contexts()[0]?.pages()[0];
-		if (!page) throw new Error("No page found");
 
 		const collector3 = new LogCollector({ outputDir: LOGS_DIR });
+		page = await findVaultPage(browser, 20_000);
 		collector3.attach(page);
-		await page.waitForLoadState("domcontentloaded");
-		await page.waitForTimeout(5_000);
 
 		await scenarioC(page, collector3);
 
