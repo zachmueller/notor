@@ -1412,10 +1412,14 @@ export class ChatOrchestrator {
 			return;
 		}
 
-		// Capture pending messages (after last assistant turn) before compaction
-		// wipes the conversation. They must be re-appended afterward so the
-		// context still ends on a user turn (required by Bedrock and similar).
+		// Separate pending messages (after last assistant turn) from the completed
+		// conversation. Only the completed part is sent to performCompaction — this
+		// avoids consecutive user messages at the end of the summarization request
+		// (the pending question + "Please summarize…" would both be user role).
+		// Pending messages are re-appended after compaction so the conversation
+		// still ends on a user turn, as required by Bedrock and similar providers.
 		const pendingMessages = this.extractPendingMessages(messages);
+		const completedMessages = messages.slice(0, messages.length - pendingMessages.length);
 
 		// Show compacting indicator in chat UI
 		const messagesContainer = this.view?.getMessagesContainer?.();
@@ -1432,7 +1436,7 @@ export class ChatOrchestrator {
 		try {
 			const provider = this.providerRegistry.getActiveProvider();
 			const result = await performCompaction(
-				messages,
+				completedMessages,
 				provider,
 				this.settings,
 				modelId,
@@ -1518,8 +1522,11 @@ export class ChatOrchestrator {
 
 		const modelId = this.getActiveModelId();
 
-		// Capture pending messages before compaction (same reason as auto-compaction).
+		// Separate pending messages from the completed conversation (same reason
+		// as auto-compaction: avoids consecutive user messages in the summarization
+		// request and preserves the pending turn after compaction).
 		const pendingMessages = this.extractPendingMessages(messages);
+		const completedMessages = messages.slice(0, messages.length - pendingMessages.length);
 
 		// Show compacting indicator
 		const messagesContainer = this.view?.getMessagesContainer?.();
@@ -1531,7 +1538,7 @@ export class ChatOrchestrator {
 		try {
 			const provider = this.providerRegistry.getActiveProvider();
 			const result = await performCompaction(
-				messages,
+				completedMessages,
 				provider,
 				this.settings,
 				modelId,
