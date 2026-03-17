@@ -78,7 +78,7 @@ export function detectSlashTrigger(text: string): number | null {
 	if (slashIdx === -1) return null;
 
 	const isAtStart = slashIdx === 0;
-	const isAfterWhitespace = slashIdx > 0 && /\s/.test(text[slashIdx - 1]);
+	const isAfterWhitespace = slashIdx > 0 && /\s/.test(text[slashIdx - 1] ?? "");
 
 	if (!isAtStart && !isAfterWhitespace) return null;
 
@@ -166,8 +166,9 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 
 	/** Select the first suggestion in the current list, if any. Used for Tab-key selection. */
 	selectFirst(): void {
-		if (this.currentSuggestions.length > 0) {
-			this.selectSuggestion(this.currentSuggestions[0]);
+		const first = this.currentSuggestions[0];
+		if (first !== undefined) {
+			this.selectSuggestion(first);
 		}
 	}
 
