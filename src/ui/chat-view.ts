@@ -615,7 +615,7 @@ export class NotorChatView extends ItemView {
 			this.detectSlashCommandTrigger();
 		});
 
-		// Enter to send, Shift+Enter for newline; Tab to select workflow suggestion (E-012)
+		// Enter to send, Shift+Enter for newline; Tab to select workflow or note suggestion (E-012)
 		this.textInputEl.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
@@ -624,6 +624,9 @@ export class NotorChatView extends ItemView {
 				if (this.workflowSuggest?.active) {
 					e.preventDefault();
 					this.workflowSuggest.selectFirst();
+				} else if (this.vaultNoteSuggest?.active) {
+					e.preventDefault();
+					this.vaultNoteSuggest.selectFirst();
 				}
 			}
 		});

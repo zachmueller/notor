@@ -169,6 +169,7 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	private chatInputEl: HTMLDivElement;
 	private isActive = false;
 	private triggerStartIndex = -1;
+	private currentSuggestions: VaultNoteSuggestion[] = [];
 
 	constructor(
 		app: App,
@@ -193,6 +194,20 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	deactivate(): void {
 		this.isActive = false;
 		this.triggerStartIndex = -1;
+		this.currentSuggestions = [];
+	}
+
+	/** Whether the suggest overlay is currently active. */
+	get active(): boolean {
+		return this.isActive;
+	}
+
+	/** Select the first suggestion in the current list, if any. Used for Tab-key selection. */
+	selectFirst(): void {
+		const first = this.currentSuggestions[0];
+		if (first !== undefined) {
+			this.selectSuggestion(first);
+		}
 	}
 
 	getSuggestions(inputStr: string): VaultNoteSuggestion[] {
@@ -211,11 +226,12 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 
 		if (!query) {
 			// No query yet — show all files (up to limit)
-			return files.slice(0, this.limit).map((file) => ({
+			this.currentSuggestions = files.slice(0, this.limit).map((file) => ({
 				file,
 				display: file.basename,
 				match: null,
 			}));
+			return this.currentSuggestions;
 		}
 
 		// Fuzzy match against filenames
@@ -240,7 +256,8 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 			return scoreB - scoreA;
 		});
 
-		return results.slice(0, this.limit);
+		this.currentSuggestions = results.slice(0, this.limit);
+		return this.currentSuggestions;
 	}
 
 	renderSuggestion(suggestion: VaultNoteSuggestion, el: HTMLElement): void {
