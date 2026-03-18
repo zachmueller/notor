@@ -313,6 +313,7 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 				this.chatInputEl.textContent = text.slice(0, triggerIdx);
 			}
 			this.deactivate();
+			this.close();
 			return;
 		}
 
@@ -326,6 +327,7 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 		this.onAttachmentAdded(attachment);
 
 		this.deactivate();
+		this.close();
 
 		log.debug("Vault note attached", { path: suggestion.file.path });
 	}
