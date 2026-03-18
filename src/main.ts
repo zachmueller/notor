@@ -8,7 +8,7 @@
  * tab, and initializes all managers with clean unload support.
  */
 
-import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { Notice, Plugin, WorkspaceLeaf, TFile, TAbstractFile, normalizePath } from "obsidian";
 import { MarkdownView } from "obsidian";
 import { createDefaultSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
@@ -128,6 +128,9 @@ export default class NotorPlugin extends Plugin {
 
 	/** Cached workflow discovery results (C-008). In-memory only — always re-discovered from vault. */
 	private _discoveredWorkflows: Workflow[] = [];
+
+	/** Debounce timer for vault-triggered workflow rescans. */
+	private _workflowRescanTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// -----------------------------------------------------------------------
 	// Group F: Vault event hook components (F-023)
@@ -305,6 +308,7 @@ export default class NotorPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			try {
 				this.rescanWorkflows();
+				this.registerWorkflowVaultWatcher();
 			} catch (e) {
 				log.warn("Initial workflow discovery failed", { error: String(e) });
 			}
@@ -1124,6 +1128,67 @@ export default class NotorPlugin extends Plugin {
 		}
 
 		return workflows;
+	}
+
+	/**
+	 * Returns true if `file` is a Markdown note inside the workflows
+	 * subdirectory of the configured notor directory.
+	 */
+	private isWorkflowFile(file: TAbstractFile): boolean {
+		const workflowDir = normalizePath(`${this.settings.notor_dir}/workflows`);
+		return (
+			file instanceof TFile &&
+			file.extension === "md" &&
+			file.path.startsWith(workflowDir + "/")
+		);
+	}
+
+	/**
+	 * Debounced wrapper around `rescanWorkflows()` for vault event handlers.
+	 * Coalesces rapid bursts (e.g. bulk sync) into a single rescan.
+	 */
+	private scheduleWorkflowRescan(): void {
+		if (this._workflowRescanTimer !== null) {
+			clearTimeout(this._workflowRescanTimer);
+		}
+		this._workflowRescanTimer = setTimeout(() => {
+			this._workflowRescanTimer = null;
+			try {
+				this.rescanWorkflows();
+			} catch (e) {
+				log.warn("Vault-triggered workflow rescan failed", { error: String(e) });
+			}
+		}, 300);
+	}
+
+	/**
+	 * Register vault and metadata-cache event listeners that keep the workflow
+	 * cache fresh when notes are created, renamed, deleted, or edited.
+	 *
+	 * All four listeners are automatically torn down on plugin unload via
+	 * `registerEvent()`.
+	 */
+	private registerWorkflowVaultWatcher(): void {
+		this.registerEvent(
+			this.app.vault.on("create", (f) => {
+				if (this.isWorkflowFile(f)) this.scheduleWorkflowRescan();
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("delete", (f) => {
+				if (this.isWorkflowFile(f)) this.scheduleWorkflowRescan();
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("rename", (f) => {
+				if (this.isWorkflowFile(f)) this.scheduleWorkflowRescan();
+			})
+		);
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (f) => {
+				if (this.isWorkflowFile(f)) this.scheduleWorkflowRescan();
+			})
+		);
 	}
 
 	// -----------------------------------------------------------------------
