@@ -361,11 +361,18 @@ export default class NotorPlugin extends Plugin {
 	// -----------------------------------------------------------------------
 
 	async loadSettings() {
-		this.settings = Object.assign(
+		const loaded = Object.assign(
 			{},
 			createDefaultSettings(this.app.vault.configDir),
 			await this.loadData()
 		);
+		if (this.settings) {
+			// Mutate the existing object so all components that captured a reference
+			// (e.g. ReadFileTool, ExecuteCommandTool) see the updated values.
+			Object.assign(this.settings, loaded);
+		} else {
+			this.settings = loaded;
+		}
 	}
 
 	// -----------------------------------------------------------------------

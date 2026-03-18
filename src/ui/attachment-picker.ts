@@ -450,10 +450,32 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Get the absolute filesystem path for a File object.
+ *
+ * Tries `webUtils.getPathForFile()` (Electron 28+, the current recommended API)
+ * and falls back to the legacy `File.path` property for older Electron versions.
+ */
+function getAbsoluteFilePath(file: File): string | undefined {
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		const { webUtils } = require("electron") as {
+			webUtils?: { getPathForFile?: (f: File) => string };
+		};
+		if (webUtils?.getPathForFile) {
+			return webUtils.getPathForFile(file) || undefined;
+		}
+	} catch {
+		// electron not available — shouldn't happen on desktop
+	}
+	return (file as File & { path?: string }).path || undefined;
+}
+
+/**
  * Open the OS-native file dialog for selecting external files.
  *
  * Uses a hidden `<input type="file">` element with programmatic `.click()`
- * per R-2 findings. Reads absolute paths from Electron's `File.path` property.
+ * per R-2 findings. Reads absolute paths via `webUtils.getPathForFile()` (Electron 28+)
+ * with fallback to the legacy `File.path` property.
  *
  * Desktop-only: gated behind `Platform.isDesktopApp`.
  *
@@ -487,8 +509,7 @@ export function openExternalFileDialog(
 		const pendingConfirmation: PendingFile[] = [];
 
 		for (const file of files) {
-			// Electron-specific `File.path` for absolute path access
-			const absolutePath = (file as File & { path?: string }).path;
+			const absolutePath = getAbsoluteFilePath(file);
 			if (!absolutePath) {
 				new Notice(`Cannot read file path for: ${file.name}`);
 				continue;

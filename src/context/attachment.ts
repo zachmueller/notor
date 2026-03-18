@@ -346,8 +346,8 @@ export interface ExternalFileReadResult {
 /**
  * Read and validate an external file for attachment.
  *
- * Uses `fs.readFileSync` with the Electron-specific `File.path` property
- * for absolute path access (per R-2 findings).
+ * Uses `fs.readFileSync` with an absolute path obtained by the caller
+ * via `webUtils.getPathForFile()` (Electron 28+) or the legacy `File.path`.
  *
  * Validates:
  * - UTF-8 encoding (rejects binary files)
