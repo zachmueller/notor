@@ -98,3 +98,17 @@ To connect a remote HTTP server instead:
 1. Click **Add server**, select transport **Streamable HTTP** (or **SSE**)
 2. Enter the server's URL and any required headers (mark `Authorization` values as **Sensitive** to store them encrypted)
 3. Save — the server connects and tools are discovered automatically; HTTP servers auto-reconnect if the connection drops
+
+## Configure Word & file tools
+
+> **Desktop only.** These tools are unavailable on mobile.
+
+The `read_file`, `read_docx`, and `write_docx` tools let the AI read text files, read Word documents as Markdown, and generate new `.docx` files. All three require at least one allowed path before they can access anything outside the vault. See [vault-tools.md](vault-tools.md#word--file-tools) for the full tool reference.
+
+1. Open **Settings → Notor → Word & file tools**
+2. Under **Allowed read/write paths**, click **Add path** and enter a directory the tools should be able to access (e.g. `~/Documents`). The vault root is always implicitly allowed — no need to add it.
+3. Optionally set a **Default output directory** — a vault-relative or absolute path where `write_docx` saves files when no `output_path` is specified per call (e.g. `exports` or `/Users/you/Documents/reports`).
+4. Optionally set a **Default template path** — a path to a `.docx` file whose fonts, margins, headers, and footers will be applied to every generated document unless overridden. The field validates on blur and shows an inline error if the file doesn't exist or isn't a `.docx`.
+5. Open the Notor chat panel and try it out:
+   - "Read `~/Documents/report.docx` and summarize the key points."
+   - "Write a project brief based on my notes and save it as `brief.docx`."

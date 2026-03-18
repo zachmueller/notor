@@ -96,7 +96,7 @@ src/
   types.ts             # Shared TypeScript types
   chat/                # Conversation orchestration, history, context management, system prompt
   providers/           # LLM provider integrations (Anthropic, OpenAI, Bedrock, local)
-  tools/               # Vault tool implementations (including fetch_webpage, execute_command)
+  tools/               # Vault tool implementations (including fetch_webpage, execute_command, read_file, read_docx, write_docx)
   checkpoints/         # Checkpoint storage and management
   context/             # Auto-context injection, attachment handling, message assembly, compaction
   hooks/               # LLM lifecycle hook configuration, execution engine, event dispatch
@@ -110,7 +110,7 @@ src/
   ui/                  # Chat panel, diff view, approval UI, tool call display, attachment chips,
                        #   compaction markers, persona picker, workflow activity indicator,
                        #   workflow slash-command suggest
-  utils/               # Logging, token utilities, secret helpers
+  utils/               # Logging, token utilities, secret helpers, shared path-validation
 specs/                 # Detailed specifications for each development phase
 design/                # Architecture, UX, tool design, and roadmap documents
 e2e/                   # End-to-end test scripts and Playwright configuration
