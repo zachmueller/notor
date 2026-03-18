@@ -631,11 +631,21 @@ export class NotorChatView extends ItemView {
 			} else if (e.key === "ArrowDown") {
 				// Shadow-track arrow navigation so Tab picks the highlighted item.
 				// Do NOT preventDefault — Obsidian's scope must also receive it for visual highlight.
-				if (this.workflowSuggest?.active) this.workflowSuggest.navigateSelection(1);
-				else if (this.vaultNoteSuggest?.active) this.vaultNoteSuggest.navigateSelection(1);
+				if (this.workflowSuggest?.active) {
+					log.debug("ChatView keydown ArrowDown → workflowSuggest.navigateSelection");
+					this.workflowSuggest.navigateSelection(1);
+				} else if (this.vaultNoteSuggest?.active) {
+					log.debug("ChatView keydown ArrowDown → vaultNoteSuggest.navigateSelection");
+					this.vaultNoteSuggest.navigateSelection(1);
+				}
 			} else if (e.key === "ArrowUp") {
-				if (this.workflowSuggest?.active) this.workflowSuggest.navigateSelection(-1);
-				else if (this.vaultNoteSuggest?.active) this.vaultNoteSuggest.navigateSelection(-1);
+				if (this.workflowSuggest?.active) {
+					log.debug("ChatView keydown ArrowUp → workflowSuggest.navigateSelection");
+					this.workflowSuggest.navigateSelection(-1);
+				} else if (this.vaultNoteSuggest?.active) {
+					log.debug("ChatView keydown ArrowUp → vaultNoteSuggest.navigateSelection");
+					this.vaultNoteSuggest.navigateSelection(-1);
+				}
 			}
 		});
 

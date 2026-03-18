@@ -152,6 +152,7 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 		this.isActive = true;
 		this.triggerStartIndex = triggerStartIndex;
 		this.selectedIndex = -1;
+		log.debug("WorkflowSlashSuggest activated", { triggerStartIndex });
 	}
 
 	/** Deactivate and reset internal state. */
@@ -160,6 +161,7 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 		this.triggerStartIndex = -1;
 		this.currentSuggestions = [];
 		this.selectedIndex = -1;
+		log.debug("WorkflowSlashSuggest deactivated");
 	}
 
 	/** Whether the suggest overlay is currently active. */
@@ -174,18 +176,35 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 	 */
 	navigateSelection(delta: 1 | -1): void {
 		const len = this.currentSuggestions.length;
-		if (len === 0) return;
+		if (len === 0) {
+			log.debug("WorkflowSlashSuggest navigateSelection skipped: no suggestions");
+			return;
+		}
+		const prev = this.selectedIndex;
 		if (this.selectedIndex === -1) {
 			this.selectedIndex = delta === 1 ? 0 : len - 1;
 		} else {
 			this.selectedIndex = (this.selectedIndex + delta + len) % len;
 		}
+		log.debug("WorkflowSlashSuggest navigateSelection", {
+			delta,
+			prev,
+			next: this.selectedIndex,
+			listLength: len,
+			item: this.currentSuggestions[this.selectedIndex]?.workflow.display_name,
+		});
 	}
 
 	/** Select the currently highlighted suggestion (or the first if none navigated). Used for Tab-key selection. */
 	selectFirst(): void {
 		const idx = this.selectedIndex >= 0 ? this.selectedIndex : 0;
 		const item = this.currentSuggestions[idx];
+		log.debug("WorkflowSlashSuggest selectFirst", {
+			selectedIndex: this.selectedIndex,
+			resolvedIdx: idx,
+			item: item?.workflow.display_name ?? null,
+			listLength: this.currentSuggestions.length,
+		});
 		if (item !== undefined) {
 			this.selectSuggestion(item);
 		}
@@ -217,6 +236,7 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 				score: null,
 			}));
 			this.selectedIndex = -1;
+			log.debug("WorkflowSlashSuggest suggestions updated (no query)", { count: this.currentSuggestions.length });
 			return this.currentSuggestions;
 		}
 
@@ -234,6 +254,7 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 		results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 		this.currentSuggestions = results.slice(0, this.limit);
 		this.selectedIndex = -1;
+		log.debug("WorkflowSlashSuggest suggestions updated (query)", { query, count: this.currentSuggestions.length });
 		return this.currentSuggestions;
 	}
 

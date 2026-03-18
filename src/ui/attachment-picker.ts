@@ -190,6 +190,7 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 		this.isActive = true;
 		this.triggerStartIndex = triggerStartIndex;
 		this.selectedIndex = -1;
+		log.debug("VaultNoteSuggest activated", { triggerStartIndex });
 	}
 
 	/** Deactivate and reset. */
@@ -198,6 +199,7 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 		this.triggerStartIndex = -1;
 		this.currentSuggestions = [];
 		this.selectedIndex = -1;
+		log.debug("VaultNoteSuggest deactivated");
 	}
 
 	/** Whether the suggest overlay is currently active. */
@@ -212,18 +214,35 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	 */
 	navigateSelection(delta: 1 | -1): void {
 		const len = this.currentSuggestions.length;
-		if (len === 0) return;
+		if (len === 0) {
+			log.debug("VaultNoteSuggest navigateSelection skipped: no suggestions");
+			return;
+		}
+		const prev = this.selectedIndex;
 		if (this.selectedIndex === -1) {
 			this.selectedIndex = delta === 1 ? 0 : len - 1;
 		} else {
 			this.selectedIndex = (this.selectedIndex + delta + len) % len;
 		}
+		log.debug("VaultNoteSuggest navigateSelection", {
+			delta,
+			prev,
+			next: this.selectedIndex,
+			listLength: len,
+			item: this.currentSuggestions[this.selectedIndex]?.file.path,
+		});
 	}
 
 	/** Select the currently highlighted suggestion (or the first if none navigated). Used for Tab-key selection. */
 	selectFirst(): void {
 		const idx = this.selectedIndex >= 0 ? this.selectedIndex : 0;
 		const item = this.currentSuggestions[idx];
+		log.debug("VaultNoteSuggest selectFirst", {
+			selectedIndex: this.selectedIndex,
+			resolvedIdx: idx,
+			item: item?.file.path ?? null,
+			listLength: this.currentSuggestions.length,
+		});
 		if (item !== undefined) {
 			this.selectSuggestion(item);
 		}
@@ -251,6 +270,7 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 				match: null,
 			}));
 			this.selectedIndex = -1;
+			log.debug("VaultNoteSuggest suggestions updated (no query)", { count: this.currentSuggestions.length });
 			return this.currentSuggestions;
 		}
 
@@ -278,6 +298,7 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 
 		this.currentSuggestions = results.slice(0, this.limit);
 		this.selectedIndex = -1;
+		log.debug("VaultNoteSuggest suggestions updated (query)", { query, count: this.currentSuggestions.length });
 		return this.currentSuggestions;
 	}
 
