@@ -1478,6 +1478,10 @@ export class NotorChatView extends ItemView {
 		// Don't activate if the wikilink suggest is active
 		if (this.vaultNoteSuggest?.["isActive"]) return;
 
+		// Don't activate if a workflow token is already present — only one workflow
+		// can be attached per message.
+		if (this.textInputEl.querySelector("[data-workflow-path]")) return;
+
 		const text = this.textInputEl.textContent ?? "";
 		const slashIdx = detectSlashTrigger(text);
 
