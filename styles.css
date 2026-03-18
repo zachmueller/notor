@@ -610,6 +610,7 @@
 	display: flex;
 	gap: 4px;
 	align-items: center;
+	position: relative;
 }
 
 .notor-send-btn,
