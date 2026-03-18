@@ -306,37 +306,7 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 		// Check for duplicate
 		if (isDuplicate(existing, { path: suggestion.file.path })) {
 			new Notice("This note is already attached");
-			// Clean up `[[query` text without creating a token.
-			// Use TreeWalker (not .textContent=) so existing wikilink token spans
-			// are not destroyed.
-			const fullText = this.chatInputEl.textContent ?? "";
-			const triggerIdx = fullText.lastIndexOf("[[");
-			if (triggerIdx !== -1) {
-				const walker = document.createTreeWalker(this.chatInputEl, NodeFilter.SHOW_TEXT);
-				let accumulated = 0;
-				let targetTextNode: Text | null = null;
-				let offsetInNode = 0;
-				let node = walker.nextNode() as Text | null;
-				while (node) {
-					const len = node.length;
-					if (accumulated + len > triggerIdx) {
-						targetTextNode = node;
-						offsetInNode = triggerIdx - accumulated;
-						break;
-					}
-					accumulated += len;
-					node = walker.nextNode() as Text | null;
-				}
-				if (targetTextNode) {
-					const splitNode = targetTextNode.splitText(offsetInNode);
-					let sibling: ChildNode | null = splitNode;
-					while (sibling) {
-						const next: ChildNode | null = sibling.nextSibling;
-						sibling.parentNode?.removeChild(sibling);
-						sibling = next;
-					}
-				}
-			}
+			// Leave the typed text intact — just dismiss the popover.
 			this.deactivate();
 			this.close();
 			return;
