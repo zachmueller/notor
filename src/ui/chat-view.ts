@@ -631,9 +631,14 @@ export class NotorChatView extends ItemView {
 		// Force plain-text pastes so rich-text content cannot pollute the input
 		// (required since we removed -webkit-user-modify: read-write-plaintext-only
 		// to allow contenteditable="false" spans to behave as atomic units).
+		// If the pasted text contains an inline workflow reference (/name or /name.md)
+		// that exactly matches a known workflow, convert it to a workflow token.
 		this.textInputEl.addEventListener("paste", (e) => {
 			e.preventDefault();
 			const text = e.clipboardData?.getData("text/plain") ?? "";
+			if (!this.textInputEl.querySelector("[data-workflow-path]")) {
+				if (this.tryInsertPastedWorkflowToken(text)) return;
+			}
 			document.execCommand("insertText", false, text);
 		});
 
@@ -1446,6 +1451,90 @@ export class NotorChatView extends ItemView {
 	private removeWorkflow(): void {
 		this.pendingWorkflow = null;
 		log.debug("Workflow token removed");
+	}
+
+	/**
+	 * Parse pasted text for an inline workflow reference (`/name` or `/name.md`)
+	 * and, if an exact match is found, insert the workflow token with surrounding text.
+	 *
+	 * Only the first matching reference is converted. References with no exact
+	 * match are left as plain text (caller falls through to execCommand).
+	 *
+	 * @returns true if a workflow token was inserted (caller should skip plain insert).
+	 */
+	private tryInsertPastedWorkflowToken(text: string): boolean {
+		const workflows = this.getWorkflowsCallback?.() ?? [];
+		if (workflows.length === 0) return false;
+
+		// Match /word at start of string or after whitespace.
+		// Group 1: preceding whitespace char (or "" at start of string).
+		// Group 2: the word after /.
+		const pattern = /(^|\s)\/(\S+)/g;
+		let match: RegExpExecArray | null;
+		let foundWorkflow: Workflow | null = null;
+		let matchStart = -1;
+		let matchEnd = -1;
+
+		while ((match = pattern.exec(text)) !== null) {
+			const ref = match[2] ?? "";
+			const name = ref.endsWith(".md") ? ref.slice(0, -3) : ref;
+			const workflow = workflows.find((w) => w.display_name === name) ?? null;
+			if (workflow) {
+				foundWorkflow = workflow;
+				// Skip the leading whitespace captured in group 1 so matchStart
+				// points at the "/" character itself.
+				matchStart = match.index + (match[1]?.length ?? 0);
+				matchEnd = match.index + match[0].length;
+				break;
+			}
+		}
+
+		if (!foundWorkflow) return false;
+
+		const beforeText = text.slice(0, matchStart);
+		const afterText = text.slice(matchEnd);
+
+		if (beforeText) document.execCommand("insertText", false, beforeText);
+		this.insertWorkflowTokenAtCursor(foundWorkflow);
+		if (afterText) document.execCommand("insertText", false, afterText);
+
+		return true;
+	}
+
+	/**
+	 * Insert a workflow token span at the current cursor position.
+	 * Called from `tryInsertPastedWorkflowToken` after any preceding text is inserted.
+	 */
+	private insertWorkflowTokenAtCursor(workflow: Workflow): void {
+		const sel = window.getSelection();
+		if (!sel || sel.rangeCount === 0) return;
+
+		const range = sel.getRangeAt(0);
+		range.deleteContents();
+
+		const tokenSpan = document.createElement("span");
+		tokenSpan.className = "notor-workflow-token";
+		tokenSpan.contentEditable = "false";
+		tokenSpan.setAttribute("data-workflow-path", workflow.file_path);
+		tokenSpan.setAttribute("data-workflow-name", workflow.display_name);
+		tokenSpan.textContent = `/${workflow.display_name}`;
+		range.insertNode(tokenSpan);
+
+		// Trailing space so the cursor can sit after the token.
+		const spacer = document.createTextNode(" ");
+		tokenSpan.after(spacer);
+
+		// Move cursor to after the spacer.
+		const newRange = document.createRange();
+		newRange.setStart(spacer, 1);
+		newRange.collapse(true);
+		sel.removeAllRanges();
+		sel.addRange(newRange);
+
+		this.attachWorkflow(workflow);
+		log.debug("Workflow token inserted from paste", {
+			display_name: workflow.display_name,
+		});
 	}
 
 	/**
