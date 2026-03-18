@@ -1135,12 +1135,16 @@ export default class NotorPlugin extends Plugin {
 	 * subdirectory of the configured notor directory.
 	 */
 	private isWorkflowFile(file: TAbstractFile): boolean {
+		return file instanceof TFile && this.isWorkflowPath(file.path);
+	}
+
+	/**
+	 * Returns true if a vault-relative path points to a Markdown file inside
+	 * the workflows subdirectory. Used to check the old path in rename events.
+	 */
+	private isWorkflowPath(filePath: string): boolean {
 		const workflowDir = normalizePath(`${this.settings.notor_dir}/workflows`);
-		return (
-			file instanceof TFile &&
-			file.extension === "md" &&
-			file.path.startsWith(workflowDir + "/")
-		);
+		return filePath.endsWith(".md") && filePath.startsWith(workflowDir + "/");
 	}
 
 	/**
@@ -1180,8 +1184,10 @@ export default class NotorPlugin extends Plugin {
 			})
 		);
 		this.registerEvent(
-			this.app.vault.on("rename", (f) => {
-				if (this.isWorkflowFile(f)) this.scheduleWorkflowRescan();
+			this.app.vault.on("rename", (f, oldPath) => {
+				if (this.isWorkflowFile(f) || this.isWorkflowPath(oldPath)) {
+					this.scheduleWorkflowRescan();
+				}
 			})
 		);
 		this.registerEvent(
