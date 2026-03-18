@@ -126,6 +126,7 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 	private isActive = false;
 	private triggerStartIndex = -1;
 	private currentSuggestions: WorkflowSuggestion[] = [];
+	private selectedIndex = -1;
 
 	constructor(
 		app: App,
@@ -150,6 +151,7 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 	activate(triggerStartIndex: number): void {
 		this.isActive = true;
 		this.triggerStartIndex = triggerStartIndex;
+		this.selectedIndex = -1;
 	}
 
 	/** Deactivate and reset internal state. */
@@ -157,6 +159,7 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 		this.isActive = false;
 		this.triggerStartIndex = -1;
 		this.currentSuggestions = [];
+		this.selectedIndex = -1;
 	}
 
 	/** Whether the suggest overlay is currently active. */
@@ -164,11 +167,27 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 		return this.isActive;
 	}
 
-	/** Select the first suggestion in the current list, if any. Used for Tab-key selection. */
+	/**
+	 * Move the tracked selection index by `delta` (+1 down, −1 up), wrapping at
+	 * the list boundaries. Called by the chat-view keydown handler for ArrowDown/Up
+	 * so that Tab-key selection honours the user's navigation.
+	 */
+	navigateSelection(delta: 1 | -1): void {
+		const len = this.currentSuggestions.length;
+		if (len === 0) return;
+		if (this.selectedIndex === -1) {
+			this.selectedIndex = delta === 1 ? 0 : len - 1;
+		} else {
+			this.selectedIndex = (this.selectedIndex + delta + len) % len;
+		}
+	}
+
+	/** Select the currently highlighted suggestion (or the first if none navigated). Used for Tab-key selection. */
 	selectFirst(): void {
-		const first = this.currentSuggestions[0];
-		if (first !== undefined) {
-			this.selectSuggestion(first);
+		const idx = this.selectedIndex >= 0 ? this.selectedIndex : 0;
+		const item = this.currentSuggestions[idx];
+		if (item !== undefined) {
+			this.selectSuggestion(item);
 		}
 	}
 
@@ -197,6 +216,7 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 				workflow: w,
 				score: null,
 			}));
+			this.selectedIndex = -1;
 			return this.currentSuggestions;
 		}
 
@@ -213,6 +233,7 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 
 		results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 		this.currentSuggestions = results.slice(0, this.limit);
+		this.selectedIndex = -1;
 		return this.currentSuggestions;
 	}
 
