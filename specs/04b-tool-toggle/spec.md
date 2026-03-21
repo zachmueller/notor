@@ -163,7 +163,9 @@ execute_command:
   - Include the text "right-click to jump to note" so users know they can navigate directly to the source.
   - Trigger a jump to the relevant note when right-clicked.
 
-> **Research required (RT-3):** The BRAT plugin implements a right-click action on Obsidian Notices that triggers navigation. Research how BRAT achieves this before finalizing the Notice implementation — this mechanism is not part of Obsidian's standard Notice API.
+> **RT-3 resolved** — see [`research/RT-3-notice-right-click.md`](research/RT-3-notice-right-click.md).
+>
+> The `Notice` class exposes a `noticeEl: HTMLElement` property. BRAT attaches a plain DOM `oncontextmenu` handler to it: `notice.noticeEl.oncontextmenu = () => callback()`. No private API is involved. For Notor the callback calls `app.workspace.openLinkText(sourceFile, "", false)` to navigate to the source note. The jump hint and handler must be gated on `Platform.isDesktop` (imported from `obsidian`) since right-click has no mobile equivalent.
 
 ### FR-83: Dispatcher blocking for disabled tools
 
@@ -447,4 +449,4 @@ The following are explicitly excluded from Phase 4b and deferred to later iterat
 |---|---|
 | RT-1 | Per-tool path argument inspection: research how each built-in tool represents path arguments in its schema, to support dispatch-time `allowed_paths` / `blocked_paths` enforcement (FR-84) |
 | RT-2 | Regex vs. line-by-line parser for `<notor_tool_config>` extraction: benchmark both approaches for performance on large source files before finalizing the implementation (FR-81) |
-| RT-3 | BRAT plugin right-click Notice behavior: research how BRAT implements right-click-to-navigate on Obsidian Notices before finalizing the validation warning UX (FR-82) |
+| RT-3 | ~~BRAT plugin right-click Notice behavior: research how BRAT implements right-click-to-navigate on Obsidian Notices before finalizing the validation warning UX (FR-82)~~ **Complete** — see [`research/RT-3-notice-right-click.md`](research/RT-3-notice-right-click.md) |
