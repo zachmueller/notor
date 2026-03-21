@@ -29,6 +29,15 @@ This specification covers:
 
 The per-persona auto-approve overrides introduced in Phase 4 (`persona_auto_approve`) remain in place and are unaffected by this phase. The Settings-backed `persona_tool_enabled` structure previously proposed for Phase 4b is replaced entirely by the `<notor_tool_config>` tag mechanism.
 
+## Clarifications
+
+### Session 2026-03-22
+
+- Q: Can multiple workflows be active simultaneously, and if so which takes precedence within the workflow layer? → A: Only one workflow can be active at a time; invoking a second workflow replaces the first.
+- Q: When a workflow ends mid-conversation, how does the tool config revert — recompute from active sources or restore a snapshot? → A: Workflows do not end mid-conversation; a workflow remains active for the duration of the conversation thread. The only way to clear the active workflow is to start a new conversation (or invoke a different workflow, which replaces it).
+- Q: Do MCP tools support `allowed_paths`/`blocked_paths` enforcement, or `enabled`/`auto_approve` only? → A: MCP tools support `enabled` and `auto_approve` only. Specifying `allowed_paths` or `blocked_paths` for an MCP tool emits a Notice indicating the fields are not yet implemented for MCP tools. Path enforcement for MCP tools is deferred to a future phase.
+- Q: How does the pre-flight inspector evaluate rule trigger conditions without a real conversation? → A: Rule trigger conditions are evaluated using the same keyword/condition matching functions used during normal prompt processing — the inspector is built entirely on top of these shared functions with a synthetic prompt as input. No separate or duplicated logic exists anywhere in the inspector code path.
+
 ## User stories
 
 ### Persona-scoped tool configuration
@@ -117,6 +126,8 @@ execute_command:
 
 **Acceptance criteria:**
 - The precedence order is (highest first): `workflow > persona > rule > global defaults`.
+- Only one workflow may be active at a time. Invoking a second workflow while one is already active replaces the first workflow's config entirely — there is no stacking of multiple workflow configs.
+- A workflow remains active for the full duration of the conversation thread. Workflows do not expire or revert mid-conversation. The workflow layer is cleared only when a new conversation starts, or when a new workflow is invoked (replacing the current one).
 - Merging is field-by-field (sparse): a field omitted at a higher-priority level does not override a value set at a lower-priority level.
 - The global defaults layer is the base of the hierarchy:
   - For `enabled`: hardcoded as all tools enabled. There is no Settings UI to change global tool enabled state — the `<notor_tool_config>` tag is the only mechanism.
@@ -158,6 +169,7 @@ execute_command:
 - `auto_approve` not a boolean → Notice; skips that field.
 - `allowed_paths` not an array of strings → Notice; skips that field.
 - `blocked_paths` not an array of strings → Notice; skips that field.
+- `allowed_paths` or `blocked_paths` specified for an MCP tool → Notice stating that path enforcement for MCP tools is not yet implemented; skips those fields. The tool's `enabled` and `auto_approve` values (if present) are still applied.
 - All Obsidian Notices for validation errors must:
   - Identify the source file by name.
   - Include the text "right-click to jump to note" so users know they can navigate directly to the source.
@@ -193,7 +205,7 @@ execute_command:
 
 > **RT-1 resolved** — see [`research/RT-1-path-argument-inspection.md`](research/RT-1-path-argument-inspection.md).
 >
-> All 13 built-in tools fall into three groups: (1) vault-namespace tools with a `path` param (vault-relative string prefix matching), (2) filesystem-namespace tools — `read_file`, `read_docx`, `write_docx`, `execute_command` — where `write_docx` has two path params (`output_path` and `template_path`) and `execute_command` uses `working_directory`, both requiring absolute-path comparison via the existing `resolveAndValidatePath` / `isPathWithin` utilities, and (3) `fetch_webpage`, which has no path param and is exempt from `allowed_paths` / `blocked_paths` enforcement. A static `TOOL_PATH_PARAMS` descriptor table in the dispatcher maps each tool name to its path parameter names and namespace.
+> `allowed_paths` and `blocked_paths` enforcement applies to **built-in tools only**. MCP tools are exempt from path enforcement in this phase (path control for MCP tools is deferred; specifying these fields for an MCP tool emits a Notice — see FR-82). All 13 built-in tools fall into three groups: (1) vault-namespace tools with a `path` param (vault-relative string prefix matching), (2) filesystem-namespace tools — `read_file`, `read_docx`, `write_docx`, `execute_command` — where `write_docx` has two path params (`output_path` and `template_path`) and `execute_command` uses `working_directory`, both requiring absolute-path comparison via the existing `resolveAndValidatePath` / `isPathWithin` utilities, and (3) `fetch_webpage`, which has no path param and is exempt from `allowed_paths` / `blocked_paths` enforcement. A static `TOOL_PATH_PARAMS` descriptor table in the dispatcher maps each tool name to its path parameter names and namespace.
 
 ### FR-85: Tag versioning
 
@@ -245,7 +257,7 @@ execute_command:
 - **Pre-flight mode:** the user selects a persona and/or workflow (and optionally types a prompt to evaluate rule trigger conditions) before starting a conversation. The inspector displays the merged effective config that would result, giving an accurate starting-point view without an actual LLM conversation.
 - **Live in-chat mode:** the inspector can be opened at any point during a real conversation. Each field shows its current effective value and a source link to the specific note driving it, making it easy to diagnose unexpected tool behavior mid-conversation.
 - **Conversation history metadata:** the parsed tool config contributed by each source file is captured in conversation history metadata as configs are attached. The live inspector correctly reflects the full accumulated state even as additional tool configs are ingested mid-conversation (e.g., when a workflow is invoked after conversation start).
-- **Critical:** both pre-flight and live modes invoke the exact same resolution functions used during real prompt assembly — no separate logic path that could drift from production behavior.
+- **Critical:** the entire inspector — rule trigger evaluation, tool config parsing, precedence merging, and effective config resolution — is built exclusively on top of the shared functions used during real prompt assembly. No inspector-specific logic duplicates any part of this pipeline. Pre-flight mode passes a synthetic prompt through the same rule trigger evaluation function that real conversations use. Any change to prompt parsing or resolution behavior automatically reflects in the inspector.
 
 ## Non-functional requirements
 
@@ -283,8 +295,9 @@ execute_command:
 **Description:** The Effective Config Inspector (FR-88) must always reflect the true effective tool config computed by the real resolution pipeline.
 
 **Acceptance criteria:**
-- The inspector uses the identical `EffectiveToolConfig` resolver functions used during prompt assembly. No separate or duplicated resolution logic exists in the inspector code path.
-- Any change to resolution behavior (e.g., a schema update, new precedence rule) automatically reflects in the inspector without separate inspector-side updates.
+- The inspector is built entirely on top of the shared functions used during real prompt assembly: rule trigger evaluation, `<notor_tool_config>` parsing, precedence merging, and `EffectiveToolConfig` resolution. No inspector-specific logic duplicates any part of this pipeline.
+- Pre-flight mode evaluates rule trigger conditions by passing the user's typed prompt through the same rule activation function used during real conversations. No special pre-flight evaluation path exists.
+- Any change to prompt parsing, rule evaluation, or resolution behavior automatically reflects in the inspector without separate inspector-side updates.
 - The inspector's source attribution (which note drives each field) is derived directly from the structured `ParsedToolConfig` objects produced during ingestion, not reconstructed separately.
 
 ## User scenarios & testing
@@ -301,7 +314,7 @@ execute_command:
 1. User creates a workflow note containing a `<notor_tool_config>` block setting `write_note` with `allowed_paths: ["Projects/Active/"]`.
 2. User invokes the workflow. During execution, `write_note` is restricted to `Projects/Active/`.
 3. The AI attempts to write a note to `Archive/` — the dispatcher blocks the call and returns a path-blocked error.
-4. The workflow completes and path restrictions are lifted for the subsequent conversation.
+4. The path restrictions remain active for the rest of the conversation. They are lifted only when a new conversation starts or a different workflow is invoked.
 
 ### Primary flow: Bootstrapping a persona config with the helper button
 
@@ -369,7 +382,7 @@ execute_command:
 ## Success criteria
 
 1. **Personas are self-contained** — a persona folder with a `<notor_tool_config>` block in its system prompt is portable across vaults without any settings changes.
-2. **Workflows can declare their tool requirements** — a workflow note with a `<notor_tool_config>` block correctly restricts or adjusts the tool set for its duration, reverting to prior config when the workflow ends.
+2. **Workflows can declare their tool requirements** — a workflow note with a `<notor_tool_config>` block correctly restricts or adjusts the tool set for the duration of the conversation. The workflow config persists until the conversation ends or a new workflow replaces it.
 3. **Rule files can enforce tool constraints** — a rule file with a `<notor_tool_config>` block correctly applies when the rule is active.
 4. **The LLM never sees the config block** — the tag and its contents are fully stripped from source content before it reaches the LLM in all supported contexts.
 5. **Precedence merging is correct** — workflow > persona > rule > global, with field-by-field merging and replace semantics for path lists.
@@ -436,6 +449,7 @@ The following are explicitly excluded from Phase 4b and deferred to later iterat
 - **Global tool enabled/disabled toggles in Settings UI**: tool enabled state lives exclusively in `<notor_tool_config>` tags. A global Settings toggle for individual tools is not provided.
 - **Tool groups or categories**: grouping tools into named bundles that can be toggled as a unit. All configuration is per-tool.
 - **Enabling/disabling tools from the chat panel**: tool configuration is a file-editing concern in Phase 4b. There is no quick-toggle in the chat panel UI.
+- **`allowed_paths`/`blocked_paths` enforcement for MCP tools**: MCP tools support `enabled` and `auto_approve` only. Path enforcement for MCP tools is deferred to a future phase; specifying path fields for an MCP tool emits a "not yet implemented" Notice.
 - **`<include_note>` inside `<notor_tool_config>` blocks**: explicitly unsupported (see Edge Cases above).
 - **Version migration tooling**: when the schema is updated to a new major version, a migration prompt or automated migration is deferred. Silent backward-compat behavior vs. explicit migration notices is an open question (OQ-5) to be resolved when a major version bump is actually needed.
 
