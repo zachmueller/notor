@@ -132,7 +132,7 @@ execute_command:
 **Acceptance criteria:**
 - `<include_note>` tags are resolved **first**, then `<notor_tool_config>` blocks are extracted and stripped. This ordering allows a shared note containing a `<notor_tool_config>` block to be pulled into multiple persona or workflow notes via `<include_note>`.
 - `<include_note>` tags appearing *inside* a `<notor_tool_config>` block are explicitly unsupported and result in YAML parse errors or unexpected behavior (no special handling required).
-- The extraction regex captures the full opening tag (for attribute extraction) and the inner YAML body: `/<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/g`.
+- The extraction regex captures the full opening tag (for attribute extraction) and the inner YAML body: `/^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm`. The `^` anchor (with the `m` flag) restricts matching to line-boundary occurrences, which matches the block-level authoring contract and eliminates a pathological slowdown when content contains many inline `<notor_tool_config>` occurrences (e.g., in code examples).
 - For each matched block, the plugin:
   1. Parses the `version` attribute from the opening tag.
   2. If `version` major is unrecognized (higher than the maximum supported) → emits a console warning and skips the block.
@@ -450,5 +450,5 @@ The following are explicitly excluded from Phase 4b and deferred to later iterat
 | # | Task |
 |---|---|
 | RT-1 | ~~Per-tool path argument inspection: research how each built-in tool represents path arguments in its schema, to support dispatch-time `allowed_paths` / `blocked_paths` enforcement (FR-84)~~ **Complete** — see [`research/RT-1-path-argument-inspection.md`](research/RT-1-path-argument-inspection.md) |
-| RT-2 | Regex vs. line-by-line parser for `<notor_tool_config>` extraction: benchmark both approaches for performance on large source files before finalizing the implementation (FR-81) |
+| RT-2 | ~~Regex vs. line-by-line parser for `<notor_tool_config>` extraction: benchmark both approaches for performance on large source files before finalizing the implementation (FR-81)~~ **Complete** — see [`research/RT-2-extraction-parser-benchmark.md`](research/RT-2-extraction-parser-benchmark.md) |
 | RT-3 | ~~BRAT plugin right-click Notice behavior: research how BRAT implements right-click-to-navigate on Obsidian Notices before finalizing the validation warning UX (FR-82)~~ **Complete** — see [`research/RT-3-notice-right-click.md`](research/RT-3-notice-right-click.md) |
