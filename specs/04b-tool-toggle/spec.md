@@ -191,7 +191,9 @@ execute_command:
 - When `allowed_paths` is empty, no path allowlist restriction applies for that tool.
 - When `blocked_paths` is empty, no path blocklist restriction applies for that tool.
 
-> **Research required (RT-1):** Research how each built-in tool represents path arguments in its schema to support per-tool path argument inspection logic before finalizing this implementation.
+> **RT-1 resolved** — see [`research/RT-1-path-argument-inspection.md`](research/RT-1-path-argument-inspection.md).
+>
+> All 13 built-in tools fall into three groups: (1) vault-namespace tools with a `path` param (vault-relative string prefix matching), (2) filesystem-namespace tools — `read_file`, `read_docx`, `write_docx`, `execute_command` — where `write_docx` has two path params (`output_path` and `template_path`) and `execute_command` uses `working_directory`, both requiring absolute-path comparison via the existing `resolveAndValidatePath` / `isPathWithin` utilities, and (3) `fetch_webpage`, which has no path param and is exempt from `allowed_paths` / `blocked_paths` enforcement. A static `TOOL_PATH_PARAMS` descriptor table in the dispatcher maps each tool name to its path parameter names and namespace.
 
 ### FR-85: Tag versioning
 
@@ -447,6 +449,6 @@ The following are explicitly excluded from Phase 4b and deferred to later iterat
 
 | # | Task |
 |---|---|
-| RT-1 | Per-tool path argument inspection: research how each built-in tool represents path arguments in its schema, to support dispatch-time `allowed_paths` / `blocked_paths` enforcement (FR-84) |
+| RT-1 | ~~Per-tool path argument inspection: research how each built-in tool represents path arguments in its schema, to support dispatch-time `allowed_paths` / `blocked_paths` enforcement (FR-84)~~ **Complete** — see [`research/RT-1-path-argument-inspection.md`](research/RT-1-path-argument-inspection.md) |
 | RT-2 | Regex vs. line-by-line parser for `<notor_tool_config>` extraction: benchmark both approaches for performance on large source files before finalizing the implementation (FR-81) |
 | RT-3 | ~~BRAT plugin right-click Notice behavior: research how BRAT implements right-click-to-navigate on Obsidian Notices before finalizing the validation warning UX (FR-82)~~ **Complete** — see [`research/RT-3-notice-right-click.md`](research/RT-3-notice-right-click.md) |
