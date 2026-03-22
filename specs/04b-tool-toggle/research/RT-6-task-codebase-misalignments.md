@@ -8,7 +8,7 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
-**Resolved:** 9 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6, RT-6.7, RT-6.8, RT-6.9)
+**Resolved:** 10 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6, RT-6.7, RT-6.8, RT-6.9, RT-6.10)
 
 ---
 
@@ -187,7 +187,9 @@ If the merger works correctly, every registered tool will have an entry in `Effe
 
 ---
 
-### RT-6.10: DISP-003 implicit dependency on `vaultRootPath`
+### RT-6.10: ~~DISP-003 implicit dependency on `vaultRootPath`~~ **RESOLVED**
+
+**Status:** Resolved — fallback note added to DISP-003 AC.
 
 **Affected task:** DISP-003
 
@@ -195,7 +197,10 @@ DISP-003 AC 2 says `enforcePathConstraints()` is called with "vault root path." 
 
 The plan handles this with `this.vaultRootPath ?? ""` as a fallback, but the task doesn't specify this behavior.
 
-**Fix:** Add a note to DISP-003: "Uses `this.vaultRootPath ?? ''` as fallback when vault root path is not set."
+**Changes applied:**
+- `tasks.md`: DISP-003 AC 2 gains fallback note: "Uses `this.vaultRootPath ?? ''` as fallback when vault root path is not set."
+- `spec.md`: No changes needed — the fallback is an implementation detail already documented in the plan's code example.
+- `plan.md`: No changes needed — the `this.vaultRootPath ?? ""` fallback is already present in the dispatcher code example.
 
 ---
 

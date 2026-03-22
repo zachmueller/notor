@@ -131,7 +131,7 @@
 **Dependencies:** DISP-001, PATH-001
 **Acceptance Criteria:**
 - [ ] Path enforcement runs after approve/mode checks, before `tool.execute()`
-- [ ] Calls `enforcePathConstraints()` with tool name, parameters, resolved config entry, and vault root path
+- [ ] Calls `enforcePathConstraints()` with tool name, parameters, resolved config entry, and vault root path. Uses `this.vaultRootPath ?? ''` as fallback when vault root path is not set.
 - [ ] If path blocked: `toolCall.status = "error"`, `onToolCallStatusChanged` emitted, `ToolResult` returned with `success: false` and blocked path error message
 - [ ] Built-in tools only; MCP tools exempted via `TOOL_PATH_PARAMS` lookup
 
