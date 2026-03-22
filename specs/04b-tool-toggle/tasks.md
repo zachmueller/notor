@@ -3,7 +3,7 @@
 **Created:** 2026-03-22
 **Implementation Plan:** [plan.md](plan.md)
 **Specification:** [spec.md](spec.md)
-**Status:** Planning
+**Status:** In Progress
 
 ## Task Summary
 
@@ -22,13 +22,13 @@
 - Create `src/tool-config/types.ts`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `ParsedToolConfig` interface exported with fields: `source`, `sourceFile`, `documentPosition`, `tools`
-- [ ] `ToolConfigEntry` interface exported with optional fields: `enabled`, `auto_approve`, `allowed_paths`, `blocked_paths`
-- [ ] `EffectiveToolConfig` interface exported with `tools: Record<string, ResolvedToolConfigEntry>`
-- [ ] `ResolvedToolConfigEntry` interface exported with all non-optional fields: `enabled`, `auto_approve`, `allowed_paths`, `blocked_paths`
-- [ ] `PathNamespace` type (`"vault" | "filesystem"`) and `ToolPathParam` interface exported
-- [ ] `ToolConfigValidationError` interface exported with fields: `sourceFile: string`, `detail: string`
-- [ ] TypeScript compilation succeeds with no errors
+- [x] `ParsedToolConfig` interface exported with fields: `source`, `sourceFile`, `documentPosition`, `tools`
+- [x] `ToolConfigEntry` interface exported with optional fields: `enabled`, `auto_approve`, `allowed_paths`, `blocked_paths`
+- [x] `EffectiveToolConfig` interface exported with `tools: Record<string, ResolvedToolConfigEntry>`
+- [x] `ResolvedToolConfigEntry` interface exported with all non-optional fields: `enabled`, `auto_approve`, `allowed_paths`, `blocked_paths`
+- [x] `PathNamespace` type (`"vault" | "filesystem"`) and `ToolPathParam` interface exported
+- [x] `ToolConfigValidationError` interface exported with fields: `sourceFile: string`, `detail: string`
+- [x] TypeScript compilation succeeds with no errors
 
 ---
 
