@@ -8,7 +8,7 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
-**Resolved:** 8 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6, RT-6.7, RT-6.8)
+**Resolved:** 9 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6, RT-6.7, RT-6.8, RT-6.9)
 
 ---
 
@@ -169,7 +169,9 @@ MCP tool naming convention uses `__` separator — see `src/chat/dispatcher.ts:3
 
 ---
 
-### RT-6.9: REG-001 defensive check vs merger guarantee
+### RT-6.9: ~~REG-001 defensive check vs merger guarantee~~ **RESOLVED**
+
+**Status:** Resolved — clarifying note added to REG-001 AC 4.
 
 **Affected task:** REG-001
 
@@ -178,7 +180,10 @@ MERGE-001 AC 5 says the merger fills defaults for ALL tools not mentioned in any
 
 If the merger works correctly, every registered tool will have an entry in `EffectiveToolConfig.tools`. REG-001 AC 4 describes a condition the merger guarantees can't happen. This is defensive coding (fine), but could confuse implementers about whether the merger's guarantee is reliable.
 
-**Fix:** Add a note to REG-001 AC 4: "This is a defensive fallback — the merger should always produce entries for all tools, but this handles the edge case gracefully."
+**Changes applied:**
+- `tasks.md`: REG-001 AC 4 gains clarifying note: "This is a defensive fallback — the merger should always produce entries for all tools, but this handles the edge case gracefully."
+- `spec.md`: No changes needed — the defensive behavior is an implementation detail not described in the spec.
+- `plan.md`: No changes needed — `getFilteredToolDefinitions()` contract does not describe this edge case behavior.
 
 ---
 

@@ -154,7 +154,7 @@
 - [ ] New method `getFilteredToolDefinitions(config: EffectiveToolConfig): ToolDefinition[]` added
 - [ ] Only tools with `enabled: true` in the config are included in the returned array
 - [ ] Existing `getToolDefinitions()` method unchanged (backward compatible)
-- [ ] Handles empty `EffectiveToolConfig.tools` gracefully (returns all tools if tool not in config)
+- [ ] Handles empty `EffectiveToolConfig.tools` gracefully (returns all tools if tool not in config). _This is a defensive fallback — the merger should always produce entries for all tools, but this handles the edge case gracefully._
 
 ---
 
