@@ -157,28 +157,32 @@
 
 ## Phase 3: Integration — Pipeline Modifications
 
-### SYS-001: Modify `SystemPromptBuilder.assemble()` signature
-**Description:** Change the builder to accept `matchedRules: VaultRule[]` instead of `vaultRuleContent?: string`, and return `SystemPromptAssemblyResult` instead of `Promise<string>`.
+### SYS-001: Split `SystemPromptBuilder` into two-phase API
+**Description:** Split the builder into a config-extraction phase and a prompt-building phase to resolve the circular dependency between `assemble()` and `resolveEffectiveConfig()` (RT-6.1). The extraction phase resolves `<include_note>` tags, extracts `<notor_tool_config>` blocks, and caches stripped content internally. The prompt-building phase uses cached stripped content and the now-available filtered `toolDefinitions`.
 **Files:**
 - Modify `src/chat/system-prompt.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Parameter changed from `vaultRuleContent?: string` to `matchedRules?: VaultRule[]`
-- [ ] Return type changed from `Promise<string>` to `Promise<SystemPromptAssemblyResult>`
-- [ ] `SystemPromptAssemblyResult` contains: `prompt: string`, `personaToolConfigs: ParsedToolConfig[]`, `ruleToolConfigs: ParsedToolConfig[]`
-- [ ] TypeScript compilation succeeds (all call sites updated — see ORCH-001)
+- [ ] New method `extractSourceToolConfigs(matchedRules?: VaultRule[], persona?: Persona | null): Promise<ExtractedToolConfigResult>` added
+- [ ] `ExtractedToolConfigResult` contains: `personaToolConfigs: ParsedToolConfig[]`, `ruleToolConfigs: ParsedToolConfig[]`
+- [ ] Extraction phase resolves `<include_note>` tags for persona and each matched rule, then runs `extractToolConfigs()` on each source
+- [ ] Stripped content cached internally on the builder instance for use in the subsequent `assemble()` call
+- [ ] `assemble()` parameter changed from `vaultRuleContent?: string` to `matchedRules?: VaultRule[]` (no longer used for content — rules content comes from cache; parameter retained for backward compatibility if needed, or removed)
+- [ ] `assemble()` continues to return `Promise<string>` (no return type change needed — tool configs are returned by the extraction phase)
+- [ ] `assemble()` uses cached stripped content from `extractSourceToolConfigs()` and receives filtered `toolDefinitions` from the orchestrator
+- [ ] TypeScript compilation succeeds (all call sites updated — see ORCH-001, ORCH-002)
 
-### SYS-002: Implement tool config extraction in SystemPromptBuilder
-**Description:** Add `<notor_tool_config>` extraction for persona content and per-rule content within the builder.
+### SYS-002: Implement tool config extraction in `extractSourceToolConfigs()`
+**Description:** Implement `<notor_tool_config>` extraction for persona content and per-rule content within the new `extractSourceToolConfigs()` method (phase 1 of the two-phase builder).
 **Files:**
 - Modify `src/chat/system-prompt.ts`
 **Dependencies:** SYS-001, PARSE-001
 **Acceptance Criteria:**
-- [ ] After `resolveIncludeNotesIfAvailable()` for persona content → `extractToolConfigs(resolved, "persona", persona.system_prompt_path)` called
-- [ ] For each matched rule → `<include_note>` tags resolved, then `extractToolConfigs(resolved, "rule", rule.file_path)` called
-- [ ] Stripped content goes into the prompt; `ParsedToolConfig[]` arrays returned in result
+- [ ] In `extractSourceToolConfigs()`: after `resolveIncludeNotesIfAvailable()` for persona content → `extractToolConfigs(resolved, "persona", persona.system_prompt_path)` called
+- [ ] In `extractSourceToolConfigs()`: for each matched rule → `<include_note>` tags resolved, then `extractToolConfigs(resolved, "rule", rule.file_path)` called
+- [ ] Stripped persona content and stripped per-rule contents cached on the builder instance
 - [ ] `<include_note>` resolution runs **before** `<notor_tool_config>` extraction in all cases
-- [ ] Builder accepts filtered `toolDefinitions` from `resolveEffectiveConfig()` step 7
+- [ ] `assemble()` (phase 2) uses cached stripped content and receives filtered `toolDefinitions` from the orchestrator — no re-extraction occurs in `assemble()`
 
 ### RULE-001: Add `getMatchedRules()` to VaultRuleManager
 **Description:** Expose the existing private rule evaluation logic as a public API. Deprecate `getActiveRuleContent()`.
@@ -209,30 +213,30 @@
 ## Phase 4: Integration — Orchestrator & main.ts Wiring
 
 ### ORCH-001: Implement `resolveEffectiveConfig()` in ChatOrchestrator
-**Description:** Add the private method that collects tool configs from all sources, merges them, injects into dispatcher, and computes filtered tool definitions.
+**Description:** Add the private method that collects tool configs from all sources, merges them, injects into dispatcher, and computes filtered tool definitions. Uses the two-phase builder split (RT-6.1 resolution): extraction runs *before* merge/filter, then `assemble()` runs *after* with the filtered tool definitions.
 **Files:**
 - Modify `src/chat/orchestrator.ts`
 **Dependencies:** MERGE-001, DISP-001, REG-001, SYS-001
 **Acceptance Criteria:**
 - [ ] Private method `resolveEffectiveConfig()` added
-- [ ] Collects `personaToolConfigs` and `ruleToolConfigs` from `SystemPromptBuilder.assemble()` result
+- [ ] Calls `systemPromptBuilder.extractSourceToolConfigs(matchedRules, persona)` first (phase 1) to get `{ personaToolConfigs, ruleToolConfigs }` — this caches stripped content on the builder
 - [ ] Collects `workflowToolConfigs` from active workflow's `WorkflowAssemblyResult.toolConfigs`
 - [ ] Calls `mergeToolConfigs()` with all configs, `globalAutoApprove`, and `allToolNames`
 - [ ] Stores contributing `ParsedToolConfig[]` as `this.activeParsedConfigs`
 - [ ] Stores merged result as `this.effectiveToolConfig`
 - [ ] Calls `dispatcher.setEffectiveToolConfig(result)`
 - [ ] Computes filtered tool definitions via `this.getToolDefinitionsCallback(result)`
-- [ ] Returns filtered tool definitions for use in both `assemble()` and `sendMessage()`
+- [ ] Returns filtered tool definitions for use in both `assemble()` (phase 2) and `sendMessage()`
 
 ### ORCH-002: Wire `resolveEffectiveConfig()` into foreground `responseLoop()`
-**Description:** Remove `toolDefinitions` parameter from `responseLoop()` and compute tool definitions fresh on each iteration using `resolveEffectiveConfig()`.
+**Description:** Remove `toolDefinitions` parameter from `responseLoop()` and compute tool definitions fresh on each iteration using the two-phase builder pattern: extract → merge → filter → assemble.
 **Files:**
 - Modify `src/chat/orchestrator.ts`
 **Dependencies:** ORCH-001, SYS-002, RULE-001
 **Acceptance Criteria:**
 - [ ] `toolDefinitions` parameter removed from `responseLoop()`
-- [ ] `resolveEffectiveConfig()` called inside the while-loop **before each `provider.sendMessage()` call**
-- [ ] `vaultRuleManager.getMatchedRules()` called per iteration and passed to `assemble(matchedRules)`
+- [ ] Per-iteration flow inside the while-loop: (1) call `resolveEffectiveConfig()` which internally calls `extractSourceToolConfigs()` + merge + filter, (2) call `assemble()` with the filtered tool definitions returned by step 1
+- [ ] `vaultRuleManager.getMatchedRules()` called per iteration and passed into `resolveEffectiveConfig()` (which forwards to `extractSourceToolConfigs(matchedRules, persona)`)
 - [ ] Filtered tool definitions from `resolveEffectiveConfig()` passed to both `assemble()` and `sendMessage()`
 - [ ] Callers of `responseLoop()` (`handleUserMessage()`, `executeWorkflow()`) no longer pass `toolDefinitions`
 - [ ] Migrated from `getActiveRuleContent()` to `getMatchedRules()`
@@ -442,7 +446,7 @@ ENV-001
 (no deps) RULE-001
 (no deps) UI-002
 
-SYS-001 (+ ENV-001) → SYS-002 (+ PARSE-001)
+SYS-001 (+ ENV-001) → SYS-002 (+ PARSE-001)    [two-phase builder: extractSourceToolConfigs → assemble]
 WF-001 (+ PARSE-001)
 
 ORCH-001 (+ MERGE-001, DISP-001, REG-001, SYS-001)

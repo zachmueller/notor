@@ -8,41 +8,30 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
+**Resolved:** 1 (RT-6.1)
+
 ---
 
 ## Critical
 
-### RT-6.1: Circular dependency in ORCH-001 / ORCH-002 / SYS-002
+### RT-6.1: ~~Circular dependency in ORCH-001 / ORCH-002 / SYS-002~~ **RESOLVED**
 
-**Affected tasks:** ORCH-001, ORCH-002, SYS-002
+**Status:** Resolved — Option 1 (two-phase builder split)
 
-**Tasks say:**
-- SYS-002: `assemble()` extracts tool configs and returns them in `SystemPromptAssemblyResult`
-- ORCH-001 AC 2–3: `resolveEffectiveConfig()` collects configs **from** `assemble()` result
-- ORCH-001 AC 7: Computes filtered tool definitions via `getToolDefinitionsCallback(result)`
-- ORCH-002 AC 4: "Filtered tool definitions from `resolveEffectiveConfig()` passed to both `assemble()` and `sendMessage()`"
-- SYS-002 AC 5: "Builder accepts filtered `toolDefinitions` from `resolveEffectiveConfig()` step 7"
+**Affected tasks:** SYS-001, SYS-002, ORCH-001, ORCH-002
 
 **The circular dependency:** `assemble()` both (a) produces configs that `resolveEffectiveConfig()` needs and (b) needs filtered tool definitions that `resolveEffectiveConfig()` produces. You cannot call both first.
 
-**Current code flow** in `src/chat/orchestrator.ts`:
-- `responseLoop()` (line 1116–1119): accepts `toolDefinitions` param
-- Line 1131–1133: calls `vaultRuleManager.getActiveRuleContent()`
-- Line 1141–1147: calls `systemPromptBuilder.assemble(mode, toolDefinitions, vaultRuleContent, autoContext, activePersona)` — returns `Promise<string>`
-- Line 1193: calls `provider.sendMessage(chatMessages, toolDefinitions, ...)`
+**Resolution:** Split `SystemPromptBuilder` into a two-phase API:
+1. **`extractSourceToolConfigs(matchedRules?, persona?)`** — resolves `<include_note>` tags, extracts `<notor_tool_config>` blocks from persona and rule sources, caches stripped content internally. Returns `{ personaToolConfigs, ruleToolConfigs }`.
+2. **`assemble(mode, filteredToolDefinitions, autoContext?)`** — builds the prompt using cached stripped content and the filtered tool definitions.
 
-**Relevant locations:**
-- `src/chat/system-prompt.ts:66-146` — current `assemble()` signature and full flow
-- `src/chat/orchestrator.ts:1116-1147` — responseLoop tool definitions usage
-- `src/chat/orchestrator.ts:474-475` — executeWorkflow's toolDefinitions capture
+Orchestrator per-iteration flow: extract (phase 1) → merge → filter → assemble (phase 2).
 
-**Resolution options:**
-1. **Split `assemble()` into two phases:** a config-extraction pass (returns `ParsedToolConfig[]` without building the prompt) and a prompt-building pass (takes filtered `toolDefinitions`). Orchestrator calls extract → merge → filter → build prompt.
-2. **Call `assemble()` twice per iteration:** once to extract configs, discard the prompt; then again with filtered defs to build the actual prompt. Wasteful.
-3. **Decouple extraction from assembly:** Move `extractToolConfigs()` calls out of `assemble()` into the orchestrator. The orchestrator calls `resolveIncludeNotes()` + `extractToolConfigs()` for persona and each rule, then passes stripped content + filtered defs to a simplified `assemble()`.
-4. **Accept prompt/tool-list desync:** The system prompt documents tools based on the *previous* iteration's config, while the API call uses the *current* iteration's filtered list. The LLM can't call tools not in the API list regardless of what the prompt says. First iteration uses unfiltered defs.
-
-**Recommendation:** Option 1 or 4. Option 4 is simplest (prompt lists all enabled tools from last iteration; actual tool list is correct). The desync is harmless because the LLM is constrained by the actual tool list, not the prompt text.
+**Changes applied:**
+- `tasks.md`: SYS-001 updated to describe two-phase split; SYS-002 updated to target `extractSourceToolConfigs()`; ORCH-001 updated to call extract → merge → filter → assemble; ORCH-002 updated to reflect two-call pattern
+- `plan.md`: SystemPromptBuilder contract rewritten for two-phase API; ChatOrchestrator `resolveEffectiveConfig()` flow updated; integration points table updated; risk assessment and readiness notes updated
+- `spec.md`: FR-81 updated to describe two-phase builder; new assumption added
 
 ---
 
