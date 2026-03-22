@@ -33,7 +33,7 @@ This feature is entirely within the existing TypeScript/Obsidian plugin stack:
 |---|---|
 | `SystemPromptBuilder` | Owns `<notor_tool_config>` extraction for both persona content and per-rule content. Receives `matchedRules: VaultRule[]` instead of a pre-merged string; runs `extractToolConfigs()` on each source with per-file attribution. Returns `{ prompt, personaToolConfigs, ruleToolConfigs }` |
 | `VaultRuleManager` | Exposes `getMatchedRules(): VaultRule[]` — stateless dynamic evaluation of rules against current `accessedNotes`. No tool config awareness; extraction is handled by `SystemPromptBuilder` |
-| `WorkflowExecutor` | Inside `assembleWorkflowPrompt()`, between include resolution (step 2) and XML wrapping (step 4), extract and strip tool config from the resolved body; pass stripped content to the XML wrapper; include `ParsedToolConfig` in `WorkflowAssemblyResult` |
+| `WorkflowExecutor` | Inside `assembleWorkflowPrompt()`, between include resolution (step 2) and XML wrapping (step 4), extract and strip tool config from the resolved body; pass stripped content to the XML wrapper; include `ParsedToolConfig[]` (plural) in `WorkflowAssemblyResult.toolConfigs` |
 | `ToolDispatcher` | New `setEffectiveToolConfig()` method; enabled check + path enforcement in `dispatch()` |
 | `ToolRegistry` | New `getFilteredToolDefinitions(config)` method called before each LLM call |
 | `ChatOrchestrator` | Owns `resolveEffectiveConfig()`: collects `ParsedToolConfig[]` from `SystemPromptBuilder.assemble()` result (persona + rule configs) and active workflow's `WorkflowAssemblyResult`, merges into `EffectiveToolConfig`, injects into dispatcher, and calls `getFilteredToolDefinitions()` before each provider call in `responseLoop()`. Passes `VaultRuleManager.getMatchedRules()` to the builder on each iteration. |
@@ -342,8 +342,8 @@ No changes to `VaultRule` struct, `loadRuleFile()`, or `evaluateRules()` interna
 
 #### Modified: `src/workflows/workflow-executor.ts`
 
-- `WorkflowAssemblyResult` gets a new optional field: `toolConfig: ParsedToolConfig | null`.
-- `assembleWorkflowPrompt()` is modified internally: after `<include_note>` resolution (step 2) and non-empty validation (step 3), but **before** the resolved body is wrapped in `<workflow_instructions>` XML (step 4), insert a call to `extractToolConfigs(resolvedBody, "workflow", workflow.file.path)`. Pass `strippedContent` — not the original resolved body — to the XML wrapper. Attach `configs[0]` (merged within-file per FR-78) or `null` to `WorkflowAssemblyResult`. This insertion point is critical: the resolved body is consumed by the XML wrapper in step 4, so extraction must happen between steps 3 and 4.
+- `WorkflowAssemblyResult` gets a new field: `toolConfigs: ParsedToolConfig[]`.
+- `assembleWorkflowPrompt()` is modified internally: after `<include_note>` resolution (step 2) and non-empty validation (step 3), but **before** the resolved body is wrapped in `<workflow_instructions>` XML (step 4), insert a call to `extractToolConfigs(resolvedBody, "workflow", workflow.file.path)`. Pass `strippedContent` — not the original resolved body — to the XML wrapper. Attach the full `configs` array (not just `configs[0]`) to `WorkflowAssemblyResult.toolConfigs`. The caller (`resolveEffectiveConfig()` in the orchestrator) feeds the full array into `mergeToolConfigs()`, which handles within-file document-order merge natively via `documentPosition` sorting. This is consistent with how persona and rule sources already produce `ParsedToolConfig[]` arrays. This insertion point is critical: the resolved body is consumed by the XML wrapper in step 4, so extraction must happen between steps 3 and 4.
 
 ---
 
@@ -351,7 +351,7 @@ No changes to `VaultRule` struct, `loadRuleFile()`, or `evaluateRules()` interna
 
 Add a private `resolveEffectiveConfig()` method that:
 1. Collects `personaToolConfigs` and `ruleToolConfigs` from the most recent `SystemPromptBuilder.assemble()` result (the builder now extracts tool configs from both persona content and per-rule content, returning both arrays).
-2. Collects `workflowToolConfig` from the active workflow's `WorkflowAssemblyResult.toolConfigs` (if any).
+2. Collects `workflowToolConfigs` from the active workflow's `WorkflowAssemblyResult.toolConfigs` (if any).
 3. Reads `personaAutoApprove` from the active persona's Phase 4 overrides (if any).
 4. Merges via `mergeToolConfigs([...workflowConfigs, ...personaToolConfigs, ...ruleToolConfigs], globalAutoApprove, personaAutoApprove, allToolNames)`.
 5. Stores the contributing `ParsedToolConfig[]` as `this.activeParsedConfigs` (a flat private field on the orchestrator, exposed to the inspector via a getter method).

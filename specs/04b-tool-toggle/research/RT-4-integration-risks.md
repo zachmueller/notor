@@ -1,6 +1,6 @@
 # RT-4 — Integration Risks: Phase 4b vs. Current Codebase
 
-**Status:** In progress — working through resolutions iteratively (Risks 1–6 resolved; 7–10 open)
+**Status:** In progress — working through resolutions iteratively (Risks 1–7 resolved; 8–10 open)
 **Created:** 2026-03-22
 **Source:** Codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md)
 
@@ -171,7 +171,7 @@ B. Perform a within-file pre-merge inside `assembleWorkflowPrompt()` using `merg
 
 C. Extend `extractToolConfigs()` to return a single `ParsedToolConfig | null` (pre-merging blocks within the file), making the result singular everywhere. The per-block `documentPosition` ordering is handled internally. This is a different API shape than the current plan but self-contained.
 
-**Resolution:** _Open_
+**Resolution:** **Option A** — Change `WorkflowAssemblyResult.toolConfig` to `toolConfigs: ParsedToolConfig[]` (plural). Pass the full array from `extractToolConfigs()` directly — no within-file pre-merge. The caller (`resolveEffectiveConfig()` in the orchestrator) feeds all items into `mergeToolConfigs()`, which handles document-order merge natively via `documentPosition` sorting. This is consistent with how persona and rule sources already work: they produce `ParsedToolConfig[]` arrays that flow into the merger unchanged. Per-block `documentPosition` and `sourceFile` attribution are preserved all the way to the merger, which the inspector (FR-88) can use for per-block source attribution. No merge logic is introduced into `assembleWorkflowPrompt()`.
 
 ---
 
@@ -258,7 +258,7 @@ Use this section to record agreed resolutions as we work through each risk. Upda
 | 4 | MCP `autoApprove[]` discarded | HIGH | **Option B** — pre-flatten MCP server `autoApprove[]` into `globalAutoApprove` map |
 | 5 | `Conversation` is DB-persisted | MEDIUM | **Option C** — flat private fields on `ChatOrchestrator`; `Conversation` untouched |
 | 6 | Workflow extraction invasiveness | MEDIUM | **Option A** — insert `extractToolConfigs()` inside `assembleWorkflowPrompt()` between steps 2 and 4 |
-| 7 | `toolConfig` singular vs. multi-block | MEDIUM | _Open_ |
+| 7 | `toolConfig` singular vs. multi-block | MEDIUM | **Option A** — `toolConfigs: ParsedToolConfig[]` (plural); merger handles document-order merge |
 | 8 | `parseYAML` non-throwing edge cases | MEDIUM | _Open_ |
 | 9 | `tag_include` unevaluable in pre-flight | MEDIUM | _Open_ |
 | 10 | `vaultRootPath` injection undefined | LOW | _Open_ |
