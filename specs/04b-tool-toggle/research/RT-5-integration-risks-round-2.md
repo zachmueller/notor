@@ -1,6 +1,6 @@
 # RT-5 — Integration Risks Round 2: Deeper Codebase Scan
 
-**Status:** Open — 11 risks identified, 3 resolved
+**Status:** Open — 11 risks identified, 4 resolved
 **Created:** 2026-03-22
 **Source:** Full codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md), building on the resolved risks in [RT-4](RT-4-integration-risks.md)
 
@@ -70,9 +70,13 @@ The same `toolDefinitions` array flows to two consumers inside `responseLoop()`:
 
 ---
 
-## Risk 4 (MEDIUM) — `responseLoop()` receives `toolDefinitions` as a parameter, not per-iteration
+## Risk 4 (MEDIUM) — `responseLoop()` receives `toolDefinitions` as a parameter, not per-iteration — RESOLVED
 
-**Finding:**
+**Status:** Resolved (plan and spec amendment)
+
+**Resolution:** The `toolDefinitions` parameter is removed from `responseLoop()`, `handleUserMessage()`, and `executeWorkflow()`. Tool definitions are no longer captured once and threaded through — they are computed fresh inside the `responseLoop()` while-loop body on each iteration, immediately after `resolveEffectiveConfig()` runs. The orchestrator calls `getToolDefinitionsCallback(effectiveConfig)` per iteration, and the same filtered array flows to both `systemPromptBuilder.assemble()` and `provider.sendMessage()`. Callers of `responseLoop()` (`handleUserMessage()`, `executeWorkflow()`, `_backgroundResponseLoop()`) no longer pass or capture `toolDefinitions`. The plan's orchestrator section and spec FR-81 are updated to reflect this change.
+
+**Original Finding:**
 ```typescript
 // src/chat/orchestrator.ts:1116-1118
 private async responseLoop(
@@ -84,14 +88,6 @@ private async responseLoop(
 Tool definitions are passed in once at loop entry and reused for every LLM call within the loop. The same pattern exists in `handleUserMessage()` (line 988) and `executeWorkflow()` (line 474), which capture `toolDefinitions` once and pass them to `responseLoop()`.
 
 > Relevant files: `src/chat/orchestrator.ts` (lines 474, 988, 1116-1118, 1143, 1197)
-
-**Conflict:**
-The plan requires recomputing `EffectiveToolConfig` before each LLM call (spec clarification Q5: dynamic rule activation/deactivation). If rules change mid-loop and disable a tool, the tool list on subsequent iterations won't reflect that — `toolDefinitions` was captured at entry.
-
-**Note:** RT-4 Risk 1 identified the "captured once at send time" problem and resolved it by moving `resolveEffectiveConfig()` into the orchestrator. However, the resolution assumed the orchestrator would recompute tool definitions inside the loop. The current code still threads `toolDefinitions` as a loop parameter — the parameter itself needs to be removed or overwritten inside the loop body.
-
-**Recommendation:**
-Remove `toolDefinitions` as a parameter to `responseLoop()`. Instead, compute it fresh inside the while-loop body immediately after `resolveEffectiveConfig()` runs. The orchestrator calls `toolRegistry.getFilteredToolDefinitions(effectiveConfig)` on each iteration.
 
 ---
 
@@ -257,7 +253,7 @@ No action needed. Informational only — the stripping happens before `assemble(
 | 1 | `persona_auto_approve` three-state → boolean conversion unstated | HIGH | Resolved (removed) |
 | 2 | Orchestrator lacks direct `ToolRegistry` reference | HIGH | Resolved (callback) |
 | 3 | Filtered tool defs must go to both `assemble()` and `sendMessage()` | MEDIUM | Resolved (plan+spec) |
-| 4 | `toolDefinitions` captured once at loop entry, not per-iteration | MEDIUM | Open |
+| 4 | `toolDefinitions` captured once at loop entry, not per-iteration | MEDIUM | Resolved (plan+spec) |
 | 5 | `<include_note>` resolution ownership leaves dual code paths | MEDIUM | Open |
 | 6 | Parser needs MCP server config for FR-82 inactive-server Notice | MEDIUM | Open |
 | 7 | MCP auto-approve path needs `effectiveToolConfig` bypass too | MEDIUM | Open |
