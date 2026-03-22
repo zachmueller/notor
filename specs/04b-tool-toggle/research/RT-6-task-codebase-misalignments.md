@@ -8,7 +8,7 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
-**Resolved:** 5 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5)
+**Resolved:** 6 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6)
 
 ---
 
@@ -114,7 +114,9 @@ This is a non-trivial responsibility shift that isn't called out as a distinct a
 
 ---
 
-### RT-6.6: Background loop pre-dispatch auto-approve check not addressed
+### RT-6.6: ~~Background loop pre-dispatch auto-approve check not addressed~~ **RESOLVED**
+
+**Status:** Resolved — AC added to ORCH-003; plan.md updated.
 
 **Affected task:** ORCH-003
 
@@ -129,7 +131,10 @@ This check only uses global settings — ignores persona overrides, rule overrid
 
 **Impact:** After Phase 4b, the background workflow's UI status indicator would still reflect only global auto-approve settings, potentially showing `"waiting_approval"` when the effective config auto-approves the tool (or vice versa).
 
-**Fix:** Add an AC to ORCH-003: "Pre-dispatch auto-approve status check (line ~846) updated to use `effectiveToolConfig.tools[toolName]?.auto_approve` instead of `this.settings.auto_approve[toolName]`."
+**Changes applied:**
+- `tasks.md`: ORCH-003 gains new AC: "Pre-dispatch auto-approve status check (line ~846) updated to use `effectiveToolConfig.tools[toolName]?.auto_approve` instead of `this.settings.auto_approve[toolName]`, so the concurrency manager UI status reflects the effective config, not just global settings."
+- `plan.md`: Background response loop section updated to describe the auto-approve status check migration.
+- `spec.md`: No changes needed — FR-81 already mandates that both loops compute `resolveEffectiveConfig()` per-iteration, which implicitly covers all auto-approve checks.
 
 ---
 

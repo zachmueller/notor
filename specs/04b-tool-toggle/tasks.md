@@ -254,6 +254,7 @@
 - [ ] `resolveEffectiveConfig()` called per-iteration inside the background loop
 - [ ] Background loop uses workflow's `WorkflowAssemblyResult.toolConfigs`
 - [ ] Background loop's `getActiveRuleContent()` call migrated to `getMatchedRules()`
+- [ ] Pre-dispatch auto-approve status check (line ~846) updated to use `effectiveToolConfig.tools[toolName]?.auto_approve` instead of `this.settings.auto_approve[toolName]`, so the concurrency manager UI status (`"waiting_approval"` vs `"running"`) reflects the effective config, not just global settings
 - [ ] Background workflow execution has same tool config behavior as foreground path
 
 ### ORCH-004: Add inspector getter methods to ChatOrchestrator
