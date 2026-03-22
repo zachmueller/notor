@@ -230,13 +230,13 @@ execute_command:
 - When clicked, the button generates a `<notor_tool_config>` snippet containing only the tools whose current auto-approve settings **differ from global defaults** — not a full scaffold of every registered tool. This reinforces the sparse configuration model.
 - A comment at the top of the generated block notes that unlisted tools inherit global defaults.
 - The generated snippet is copied to the clipboard.
-- **Example output** (assuming only `execute_command` has been changed from defaults):
+- **Example output** (assuming only `execute_command` has auto-approve enabled, differing from the default `false`):
 ```xml
 <notor_tool_config version="1.0">
 # Only tools that differ from global defaults are listed.
 # Unlisted tools inherit their settings from global defaults.
 execute_command:
-  enabled: false
+  auto_approve: true
 </notor_tool_config>
 ```
 
@@ -470,4 +470,5 @@ The following are explicitly excluded from Phase 4b and deferred to later iterat
 | RT-1 | ~~Per-tool path argument inspection: research how each built-in tool represents path arguments in its schema, to support dispatch-time `allowed_paths` / `blocked_paths` enforcement (FR-84)~~ **Complete** — see [`research/RT-1-path-argument-inspection.md`](research/RT-1-path-argument-inspection.md) |
 | RT-2 | ~~Regex vs. line-by-line parser for `<notor_tool_config>` extraction: benchmark both approaches for performance on large source files before finalizing the implementation (FR-81)~~ **Complete** — see [`research/RT-2-extraction-parser-benchmark.md`](research/RT-2-extraction-parser-benchmark.md) |
 | RT-3 | ~~BRAT plugin right-click Notice behavior: research how BRAT implements right-click-to-navigate on Obsidian Notices before finalizing the validation warning UX (FR-82)~~ **Complete** — see [`research/RT-3-notice-right-click.md`](research/RT-3-notice-right-click.md) |
-| RT-4 | Integration risk audit: codebase scan to identify unstated risks in the spec and plan before implementation. **In progress** — see [`research/RT-4-integration-risks.md`](research/RT-4-integration-risks.md) |
+| RT-4 | ~~Integration risk audit: codebase scan to identify unstated risks in the spec and plan before implementation~~ **Complete** — see [`research/RT-4-integration-risks.md`](research/RT-4-integration-risks.md) |
+| RT-5 | ~~Integration risks round 2: deeper codebase scan building on RT-4 findings~~ **Complete** (3 LOW/informational risks remain open) — see [`research/RT-5-integration-risks-round-2.md`](research/RT-5-integration-risks-round-2.md) |

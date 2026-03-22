@@ -201,8 +201,8 @@ function mergeToolConfigs(
 ```
 
 Merge algorithm:
-1. Sort `configs` by precedence level (workflow=0, persona=1, rule=2), then by `documentPosition` ascending within the same source type.
-2. For each tool across all configs, iterate in sort order; for each field, the last non-undefined value wins (sparse merge).
+1. Sort `configs` by precedence level (rule=0, persona=1, workflow=2), then by `documentPosition` ascending within the same source type. This ensures higher-priority sources sort last.
+2. For each tool across all configs, iterate in sort order; for each field, the last non-undefined value wins (sparse merge). Because workflow sorts last, it has highest effective priority — matching the spec's `workflow > persona > rule > global` precedence.
 3. For `allowed_paths` / `blocked_paths`, use replace semantics: the highest-priority config that sets the field completely replaces lower-level values.
 4. Fill in defaults for any tool not mentioned in any config: `enabled: true`, `auto_approve: globalAutoApprove[toolName] ?? false` (where `globalAutoApprove` includes both built-in defaults from Settings and MCP server-level `autoApprove[]` entries pre-flattened into namespaced keys), `allowed_paths: []`, `blocked_paths: []`.
 5. Return `{ tools: ... }`.
@@ -320,6 +320,8 @@ The builder owns `<notor_tool_config>` extraction for both persona and rule sour
 
 Stripped content goes into the prompt; `ParsedToolConfig[]` arrays are returned for the precedence merge.
 
+**Note:** The existing `toolDefinitions` parameter on `assemble()` now receives the filtered `ToolDefinition[]` from `resolveEffectiveConfig()` step 7 (rather than the unfiltered list captured once at loop entry). This ensures the system prompt only documents tools the LLM can actually call.
+
 ---
 
 #### Modified: `src/rules/vault-rules.ts` — `VaultRuleManager`
@@ -411,7 +413,7 @@ Implements FR-87. UI section with:
 Add a **"Copy tool config YAML"** button (FR-86) at the top of the Tools & permissions section.
 
 When clicked:
-1. Identify tools whose current `auto_approve` setting differs from the hardcoded global default (all `false`). Only non-default entries go in the snippet; any tool set to `true` is listed.
+1. Identify tools whose current auto-approve setting in **Settings → Tools & permissions** is `true` (differs from the default `false`). Only non-default entries go in the snippet.
 2. Build the snippet:
    ```
    <notor_tool_config version="1.0">
