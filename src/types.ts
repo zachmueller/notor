@@ -719,4 +719,11 @@ export interface WorkflowAssemblyResult {
 		section: string | null;
 		content: string;
 	}>;
+	/**
+	 * Tool configs extracted from `<notor_tool_config>` blocks in the workflow body.
+	 * Empty array if no config blocks were found.
+	 *
+	 * @see specs/04b-tool-toggle/tasks.md — WF-001
+	 */
+	toolConfigs: import("./tool-config/types").ParsedToolConfig[];
 }

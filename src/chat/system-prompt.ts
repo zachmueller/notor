@@ -11,8 +11,11 @@
  */
 
 import type { MetadataCache, Vault } from "obsidian";
-import type { ConversationMode, Persona } from "../types";
+import { parseYaml } from "obsidian";
+import type { ConversationMode, Persona, VaultRule } from "../types";
 import type { ToolDefinition } from "../providers/provider";
+import type { ParsedToolConfig } from "../tool-config/types";
+import { extractToolConfigs } from "../tool-config/parser";
 import { estimateTokenCount } from "../utils/tokens";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt";
 import { resolveIncludeNotes } from "../include-note/resolver";
@@ -24,9 +27,35 @@ const log = logger("SystemPromptBuilder");
 const MAX_SYSTEM_PROMPT_TOKENS = 8000;
 
 /**
+ * Result of the extraction phase (phase 1 of the two-phase builder).
+ *
+ * Contains tool configs extracted from persona and rule sources.
+ * Stripped content is cached internally on the builder instance.
+ *
+ * @see specs/04b-tool-toggle/tasks.md — SYS-001
+ */
+export interface ExtractedToolConfigResult {
+	personaToolConfigs: ParsedToolConfig[];
+	ruleToolConfigs: ParsedToolConfig[];
+}
+
+/**
  * Builds and assembles the complete system prompt for LLM calls.
  */
 export class SystemPromptBuilder {
+	/**
+	 * Cached stripped persona content from `extractSourceToolConfigs()`.
+	 * Used by `assemble()` so tool config blocks are not sent to the LLM.
+	 */
+	private cachedStrippedPersonaContent: string | null = null;
+
+	/**
+	 * Cached stripped per-rule contents from `extractSourceToolConfigs()`.
+	 * Keyed in the same order as the matched rules array. Joined with
+	 * separators in `assemble()`.
+	 */
+	private cachedStrippedRuleContents: string[] | null = null;
+
 	constructor(
 		private readonly vault: Vault,
 		private notorDir: string,
@@ -38,6 +67,119 @@ export class SystemPromptBuilder {
 	 */
 	setNotorDir(notorDir: string): void {
 		this.notorDir = notorDir;
+	}
+
+	/**
+	 * Phase 1: Extract tool configs from persona and rule sources.
+	 *
+	 * Resolves `<include_note>` tags, then extracts `<notor_tool_config>` blocks
+	 * from persona content and each matched rule. Stripped content is cached
+	 * internally for use in the subsequent `assemble()` call.
+	 *
+	 * Must be called before `assemble()` on each iteration of the response loop.
+	 *
+	 * @param matchedRules - Rules matched by VaultRuleManager for the current context.
+	 * @param persona      - Active persona, or null/undefined for no persona.
+	 * @returns Extracted tool configs from persona and rule sources.
+	 *
+	 * @see specs/04b-tool-toggle/tasks.md — SYS-001, SYS-002
+	 */
+	async extractSourceToolConfigs(
+		matchedRules?: VaultRule[],
+		persona?: Persona | null
+	): Promise<ExtractedToolConfigResult> {
+		const personaToolConfigs: ParsedToolConfig[] = [];
+		const ruleToolConfigs: ParsedToolConfig[] = [];
+
+		// --- Persona extraction ---
+		if (persona && persona.prompt_content.trim()) {
+			// Resolve <include_note> tags first
+			const resolvedPersonaContent = await this.resolveIncludeNotesIfAvailable(
+				persona.prompt_content,
+				persona.system_prompt_path,
+				"system_prompt"
+			);
+
+			// Extract <notor_tool_config> blocks
+			const personaResult = extractToolConfigs(
+				resolvedPersonaContent,
+				"persona",
+				persona.system_prompt_path,
+				undefined, // knownToolNames — validated downstream by the merger
+				parseYaml,
+			);
+
+			personaToolConfigs.push(...personaResult.configs);
+			this.cachedStrippedPersonaContent = personaResult.strippedContent;
+
+			// Log validation errors (callers surface as Notices)
+			for (const error of personaResult.errors) {
+				log.warn("Tool config validation error in persona", {
+					sourceFile: error.sourceFile,
+					detail: error.detail,
+				});
+			}
+		} else {
+			this.cachedStrippedPersonaContent = persona?.prompt_content ?? null;
+		}
+
+		// --- Per-rule extraction ---
+		const strippedRuleContents: string[] = [];
+
+		if (matchedRules && matchedRules.length > 0) {
+			for (const rule of matchedRules) {
+				const trimmed = rule.content.trim();
+				if (trimmed.length === 0) {
+					strippedRuleContents.push("");
+					continue;
+				}
+
+				try {
+					// Resolve <include_note> tags per-rule
+					const resolvedRuleContent = await this.resolveIncludeNotesIfAvailable(
+						trimmed,
+						rule.file_path,
+						"vault_rule"
+					);
+
+					// Extract <notor_tool_config> blocks
+					const ruleResult = extractToolConfigs(
+						resolvedRuleContent,
+						"rule",
+						rule.file_path,
+						undefined,
+						parseYaml,
+					);
+
+					ruleToolConfigs.push(...ruleResult.configs);
+					strippedRuleContents.push(ruleResult.strippedContent);
+
+					for (const error of ruleResult.errors) {
+						log.warn("Tool config validation error in rule", {
+							sourceFile: error.sourceFile,
+							detail: error.detail,
+						});
+					}
+				} catch (e) {
+					// On resolution failure, use the original content so the rule
+					// still applies. Log the error for debugging.
+					log.warn("Failed to resolve <include_note> tags in rule", {
+						filePath: rule.file_path,
+						error: String(e),
+					});
+					strippedRuleContents.push(trimmed);
+				}
+			}
+		}
+
+		this.cachedStrippedRuleContents = strippedRuleContents;
+
+		log.debug("Tool configs extracted from sources", {
+			personaConfigs: personaToolConfigs.length,
+			ruleConfigs: ruleToolConfigs.length,
+		});
+
+		return { personaToolConfigs, ruleToolConfigs };
 	}
 
 	/**
@@ -54,14 +196,15 @@ export class SystemPromptBuilder {
 	 * behavior is unchanged.
 	 *
 	 * @param mode - Current Plan/Act mode
-	 * @param toolDefinitions - Tool definitions from the tool registry
-	 * @param vaultRuleContent - Pre-evaluated vault rule content to inject
+	 * @param toolDefinitions - Tool definitions from the tool registry (filtered when effective config is active)
+	 * @param vaultRuleContent - Pre-evaluated vault rule content to inject (legacy path — used when `extractSourceToolConfigs()` was not called)
 	 * @param autoContextBlock - Dynamic `<auto-context>` XML block (rebuilt before each LLM call)
 	 * @param persona - Active persona, or null/undefined for no persona
 	 * @returns Complete system prompt string
 	 *
 	 * @see specs/03-workflows-personas/spec.md — FR-38
 	 * @see specs/03-workflows-personas/tasks/group-a-tasks.md — A-006
+	 * @see specs/04b-tool-toggle/tasks.md — SYS-001 (two-phase builder)
 	 */
 	async assemble(
 		mode: ConversationMode,
@@ -72,18 +215,32 @@ export class SystemPromptBuilder {
 	): Promise<string> {
 		const parts: string[] = [];
 
+		// Determine persona content to use:
+		// - If extractSourceToolConfigs() was called, use cached stripped content
+		//   (tool config blocks already removed)
+		// - Otherwise, resolve <include_note> tags directly (legacy path)
+		const useCache = this.cachedStrippedPersonaContent !== null
+			|| this.cachedStrippedRuleContents !== null;
+
 		// 1. Base system prompt — depends on persona prompt_mode
 		if (persona && persona.prompt_mode === "replace") {
 			// Replace mode: persona prompt replaces the global system prompt
 			// entirely. Use persona prompt as the base (may be empty).
 			if (persona.prompt_content.trim()) {
-				// D-010: Resolve <include_note> tags in persona prompt (replace mode).
-				const resolvedPersonaPrompt = await this.resolveIncludeNotesIfAvailable(
-					persona.prompt_content,
-					persona.system_prompt_path,
-					"system_prompt"
-				);
-				parts.push(resolvedPersonaPrompt);
+				let personaContent: string;
+				if (useCache && this.cachedStrippedPersonaContent !== null) {
+					personaContent = this.cachedStrippedPersonaContent;
+				} else {
+					// D-010: Resolve <include_note> tags in persona prompt (replace mode).
+					personaContent = await this.resolveIncludeNotesIfAvailable(
+						persona.prompt_content,
+						persona.system_prompt_path,
+						"system_prompt"
+					);
+				}
+				if (personaContent.trim()) {
+					parts.push(personaContent);
+				}
 			}
 			log.debug("Using persona prompt in replace mode", {
 				persona: persona.name,
@@ -97,16 +254,23 @@ export class SystemPromptBuilder {
 			// Append persona prompt as a labeled section (if persona active
 			// and has non-empty content)
 			if (persona && persona.prompt_content.trim()) {
-				// D-010: Resolve <include_note> tags in persona prompt (append mode).
-				const resolvedPersonaContent = await this.resolveIncludeNotesIfAvailable(
-					persona.prompt_content,
-					persona.system_prompt_path,
-					"system_prompt"
-				);
-				parts.push(this.buildPersonaSection({
-					...persona,
-					prompt_content: resolvedPersonaContent,
-				}));
+				let personaContent: string;
+				if (useCache && this.cachedStrippedPersonaContent !== null) {
+					personaContent = this.cachedStrippedPersonaContent;
+				} else {
+					// D-010: Resolve <include_note> tags in persona prompt (append mode).
+					personaContent = await this.resolveIncludeNotesIfAvailable(
+						persona.prompt_content,
+						persona.system_prompt_path,
+						"system_prompt"
+					);
+				}
+				if (personaContent.trim()) {
+					parts.push(this.buildPersonaSection({
+						...persona,
+						prompt_content: personaContent,
+					}));
+				}
 			}
 		}
 
@@ -120,7 +284,16 @@ export class SystemPromptBuilder {
 		parts.push(this.buildModeSection(mode));
 
 		// 4. Vault-level rules (always applied regardless of persona prompt_mode)
-		if (vaultRuleContent && vaultRuleContent.trim()) {
+		// Use cached stripped rule contents if available (two-phase path),
+		// otherwise fall back to the legacy vaultRuleContent parameter.
+		if (useCache && this.cachedStrippedRuleContents !== null) {
+			const ruleContent = this.cachedStrippedRuleContents
+				.filter((c) => c.trim().length > 0)
+				.join("\n\n---\n\n");
+			if (ruleContent.trim()) {
+				parts.push(this.buildRulesSection(ruleContent));
+			}
+		} else if (vaultRuleContent && vaultRuleContent.trim()) {
 			parts.push(this.buildRulesSection(vaultRuleContent));
 		}
 
@@ -141,6 +314,11 @@ export class SystemPromptBuilder {
 			// Truncate from the end (rules section is the most variable)
 			assembled = this.truncateToTokenLimit(assembled, MAX_SYSTEM_PROMPT_TOKENS);
 		}
+
+		// Clear cached state so the next iteration must call extractSourceToolConfigs()
+		// before assemble() to get fresh data.
+		this.cachedStrippedPersonaContent = null;
+		this.cachedStrippedRuleContents = null;
 
 		return assembled;
 	}

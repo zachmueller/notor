@@ -162,6 +162,31 @@ export class VaultRuleManager {
 	// -----------------------------------------------------------------------
 
 	/**
+	 * Get the list of currently matched (applicable) rule objects.
+	 *
+	 * Re-loads rule files from disk if the cache is stale.
+	 * Evaluates trigger conditions against accessed notes.
+	 *
+	 * This is the preferred API for callers that need access to individual
+	 * rule objects (e.g., for `<notor_tool_config>` extraction). The builder
+	 * handles `<include_note>` resolution and tool config extraction per-rule.
+	 *
+	 * @returns Array of matched `VaultRule` objects, or empty array if none apply.
+	 *
+	 * @see specs/04b-tool-toggle/tasks.md — RULE-001
+	 */
+	async getMatchedRules(): Promise<VaultRule[]> {
+		// Reload rule files if cache is stale
+		if (this.dirty) {
+			await this.loadRules();
+		}
+
+		if (this.rules.length === 0) return [];
+
+		return this.evaluateRules();
+	}
+
+	/**
 	 * Get the combined content of all currently applicable rule files.
 	 *
 	 * Re-loads rule files from disk if the cache is stale.
@@ -169,6 +194,9 @@ export class VaultRuleManager {
 	 *
 	 * @returns Combined rule body content to inject into the system prompt,
 	 *          or empty string if no rules apply.
+	 *
+	 * @deprecated Use `getMatchedRules()` instead. This method will be removed
+	 *             once all call sites are migrated to the two-phase builder pattern.
 	 */
 	async getActiveRuleContent(): Promise<string> {
 		// Reload rule files if cache is stale

@@ -18,7 +18,7 @@
  * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-002..E-009
  */
 
-import { App, FuzzySuggestModal, getFrontMatterInfo, Notice, TFile, type MetadataCache, type Vault } from "obsidian";
+import { App, FuzzySuggestModal, getFrontMatterInfo, Notice, parseYaml, TFile, type MetadataCache, type Vault } from "obsidian";
 import type {
 	IncludeNoteResolutionResult,
 	TriggerContext,
@@ -28,6 +28,7 @@ import type {
 } from "../types";
 import type { PersonaManager } from "../personas/persona-manager";
 import { resolveIncludeNotes } from "../include-note/resolver";
+import { extractToolConfigs } from "../tool-config/parser";
 import { assembleUserMessage } from "../context/message-assembler";
 import { logger } from "../utils/logger";
 
@@ -289,8 +290,28 @@ export async function assembleWorkflowPrompt(
 	);
 	const resolvedBody = includeResult.inlineContent;
 
-	// Step 3: Validate non-empty content
-	if (!validateWorkflowContent(resolvedBody)) {
+	// Step 2b: Extract <notor_tool_config> blocks (after include resolution, before validation)
+	// Extraction runs on the resolved body so configs embedded via <include_note> are captured.
+	// Validation runs on the stripped content, so a config-only workflow correctly fails as empty.
+	const toolConfigResult = extractToolConfigs(
+		resolvedBody,
+		"workflow",
+		workflow.file_path,
+		undefined, // knownToolNames — validated downstream by the merger
+		parseYaml,
+	);
+	const strippedBody = toolConfigResult.strippedContent;
+
+	// Log any tool config validation errors (callers surface as Notices)
+	for (const error of toolConfigResult.errors) {
+		log.warn("Tool config validation error in workflow", {
+			sourceFile: error.sourceFile,
+			detail: error.detail,
+		});
+	}
+
+	// Step 3: Validate non-empty content (uses stripped content)
+	if (!validateWorkflowContent(strippedBody)) {
 		log.warn("Workflow body is empty after resolution, aborting", {
 			file_path: workflow.file_path,
 		});
@@ -298,8 +319,8 @@ export async function assembleWorkflowPrompt(
 		return null;
 	}
 
-	// Step 4: Wrap in <workflow_instructions>
-	const workflowInstructions = wrapWorkflowInstructions(resolvedBody, workflow.file_name);
+	// Step 4: Wrap in <workflow_instructions> (uses stripped content)
+	const workflowInstructions = wrapWorkflowInstructions(strippedBody, workflow.file_name);
 
 	// Step 5: Build <trigger_context> block (event-triggered workflows only)
 	const triggerContextBlock =
@@ -330,6 +351,7 @@ export async function assembleWorkflowPrompt(
 		assembledMessage,
 		workflowName: workflow.display_name,
 		attachments: includeResult.attachments,
+		toolConfigs: toolConfigResult.configs,
 	};
 }
 

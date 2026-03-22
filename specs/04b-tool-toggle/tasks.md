@@ -169,15 +169,15 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/chat/system-prompt.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] New method `extractSourceToolConfigs(matchedRules?: VaultRule[], persona?: Persona | null): Promise<ExtractedToolConfigResult>` added
-- [ ] `ExtractedToolConfigResult` contains: `personaToolConfigs: ParsedToolConfig[]`, `ruleToolConfigs: ParsedToolConfig[]`
-- [ ] Extraction phase resolves `<include_note>` tags for persona and each matched rule, then runs `extractToolConfigs()` on each source
-- [ ] Stripped content cached internally on the builder instance for use in the subsequent `assemble()` call
-- [ ] `assemble()` parameter changed from `vaultRuleContent?: string` to `matchedRules?: VaultRule[]` (no longer used for content — rules content comes from cache; parameter retained for backward compatibility if needed, or removed)
-- [ ] `assemble()` continues to return `Promise<string>` (no return type change needed — tool configs are returned by the extraction phase)
-- [ ] `assemble()` uses cached stripped content from `extractSourceToolConfigs()` and receives filtered `toolDefinitions` from the orchestrator
-- [ ] Parameters `mode`, `toolDefinitions`, `autoContextBlock`, and `persona` on `assemble()` remain unchanged. `toolDefinitions` now receives the filtered list from `resolveEffectiveConfig()` rather than the unfiltered list captured at loop entry (see ORCH-001).
-- [ ] TypeScript compilation succeeds (all call sites updated — see ORCH-001, ORCH-002)
+- [x] New method `extractSourceToolConfigs(matchedRules?: VaultRule[], persona?: Persona | null): Promise<ExtractedToolConfigResult>` added
+- [x] `ExtractedToolConfigResult` contains: `personaToolConfigs: ParsedToolConfig[]`, `ruleToolConfigs: ParsedToolConfig[]`
+- [x] Extraction phase resolves `<include_note>` tags for persona and each matched rule, then runs `extractToolConfigs()` on each source
+- [x] Stripped content cached internally on the builder instance for use in the subsequent `assemble()` call
+- [x] `assemble()` parameter changed from `vaultRuleContent?: string` to `matchedRules?: VaultRule[]` (no longer used for content — rules content comes from cache; parameter retained for backward compatibility if needed, or removed)
+- [x] `assemble()` continues to return `Promise<string>` (no return type change needed — tool configs are returned by the extraction phase)
+- [x] `assemble()` uses cached stripped content from `extractSourceToolConfigs()` and receives filtered `toolDefinitions` from the orchestrator
+- [x] Parameters `mode`, `toolDefinitions`, `autoContextBlock`, and `persona` on `assemble()` remain unchanged. `toolDefinitions` now receives the filtered list from `resolveEffectiveConfig()` rather than the unfiltered list captured at loop entry (see ORCH-001).
+- [x] TypeScript compilation succeeds (all call sites updated — see ORCH-001, ORCH-002)
 
 ### SYS-002: Implement tool config extraction in `extractSourceToolConfigs()`
 **Description:** Implement `<notor_tool_config>` extraction for persona content and per-rule content within the new `extractSourceToolConfigs()` method (phase 1 of the two-phase builder).
@@ -185,13 +185,13 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/chat/system-prompt.ts`
 **Dependencies:** SYS-001, PARSE-001
 **Acceptance Criteria:**
-- [ ] In `extractSourceToolConfigs()`: after `resolveIncludeNotesIfAvailable()` for persona content → `extractToolConfigs(resolved, "persona", persona.system_prompt_path)` called
-- [ ] In `extractSourceToolConfigs()`: for each matched rule → `<include_note>` tags resolved, then `extractToolConfigs(resolved, "rule", rule.file_path)` called
-- [ ] `<include_note>` resolution for individual rules migrates from `VaultRuleManager.getActiveRuleContent()` to the builder. The builder iterates each `VaultRule`, resolves includes via `resolveIncludeNotesIfAvailable()`, extracts tool configs, and concatenates stripped content. Error handling per-rule follows the existing try/catch pattern in `vault-rules.ts:202-210`.
-- [ ] Stripped persona content and stripped per-rule contents cached on the builder instance
-- [ ] `<include_note>` resolution runs **before** `<notor_tool_config>` extraction in all cases
-- [ ] The builder must have `metadataCache` set (guaranteed by the current `main.ts` constructor at `getSystemPromptBuilder()`) for rule `<include_note>` resolution to work. If `metadataCache` is absent and rules contain `<include_note>` tags, a warning log should be emitted (the builder's `resolveIncludeNotesIfAvailable()` silently returns unresolved text without `metadataCache`).
-- [ ] `assemble()` (phase 2) uses cached stripped content and receives filtered `toolDefinitions` from the orchestrator — no re-extraction occurs in `assemble()`
+- [x] In `extractSourceToolConfigs()`: after `resolveIncludeNotesIfAvailable()` for persona content → `extractToolConfigs(resolved, "persona", persona.system_prompt_path)` called
+- [x] In `extractSourceToolConfigs()`: for each matched rule → `<include_note>` tags resolved, then `extractToolConfigs(resolved, "rule", rule.file_path)` called
+- [x] `<include_note>` resolution for individual rules migrates from `VaultRuleManager.getActiveRuleContent()` to the builder. The builder iterates each `VaultRule`, resolves includes via `resolveIncludeNotesIfAvailable()`, extracts tool configs, and concatenates stripped content. Error handling per-rule follows the existing try/catch pattern in `vault-rules.ts:202-210`.
+- [x] Stripped persona content and stripped per-rule contents cached on the builder instance
+- [x] `<include_note>` resolution runs **before** `<notor_tool_config>` extraction in all cases
+- [x] The builder must have `metadataCache` set (guaranteed by the current `main.ts` constructor at `getSystemPromptBuilder()`) for rule `<include_note>` resolution to work. If `metadataCache` is absent and rules contain `<include_note>` tags, a warning log should be emitted (the builder's `resolveIncludeNotesIfAvailable()` silently returns unresolved text without `metadataCache`).
+- [x] `assemble()` (phase 2) uses cached stripped content and receives filtered `toolDefinitions` from the orchestrator — no re-extraction occurs in `assemble()`
 
 ### RULE-001: Add `getMatchedRules()` to VaultRuleManager
 **Description:** Expose the existing private rule evaluation logic as a public API. Deprecate `getActiveRuleContent()`.
@@ -199,12 +199,12 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/rules/vault-rules.ts`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] New public method `getMatchedRules(): Promise<VaultRule[]>` added
-- [ ] Method exposes existing `evaluateRules()` logic
-- [ ] `getMatchedRules()` checks the `dirty` flag and calls `loadRules()` if stale before calling `evaluateRules()`, mirroring the lazy-reload pattern in `getActiveRuleContent()` (lines 174–177). This ensures rule file changes made mid-conversation are picked up.
-- [ ] `getActiveRuleContent()` marked as deprecated (not deleted yet — removed when all call sites migrated)
-- [ ] No changes to `VaultRule` struct, `loadRuleFile()`, or `evaluateRules()` internals
-- [ ] Rule manager has zero knowledge of `<notor_tool_config>` — extraction handled downstream
+- [x] New public method `getMatchedRules(): Promise<VaultRule[]>` added
+- [x] Method exposes existing `evaluateRules()` logic
+- [x] `getMatchedRules()` checks the `dirty` flag and calls `loadRules()` if stale before calling `evaluateRules()`, mirroring the lazy-reload pattern in `getActiveRuleContent()` (lines 174–177). This ensures rule file changes made mid-conversation are picked up.
+- [x] `getActiveRuleContent()` marked as deprecated (not deleted yet — removed when all call sites migrated)
+- [x] No changes to `VaultRule` struct, `loadRuleFile()`, or `evaluateRules()` internals
+- [x] Rule manager has zero knowledge of `<notor_tool_config>` — extraction handled downstream
 
 ### WF-001: Implement tool config extraction in WorkflowExecutor
 **Description:** Modify `assembleWorkflowPrompt()` to extract and strip `<notor_tool_config>` blocks, adding `toolConfigs` to `WorkflowAssemblyResult`.
@@ -212,11 +212,11 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/workflows/workflow-executor.ts`
 **Dependencies:** PARSE-001
 **Acceptance Criteria:**
-- [ ] `WorkflowAssemblyResult` gets new field: `toolConfigs: ParsedToolConfig[]`
-- [ ] Extraction happens after `<include_note>` resolution (step 2) but **before** validation (step 3) and XML wrapping (step 4). Validation runs on the stripped content, so a config-only workflow (entire body is a `<notor_tool_config>` block) correctly fails validation as empty.
-- [ ] `extractToolConfigs(resolvedBody, "workflow", workflow.file.path)` called
-- [ ] `strippedContent` (not original resolved body) passed to XML wrapper
-- [ ] Full `configs` array (not just `configs[0]`) attached to result
+- [x] `WorkflowAssemblyResult` gets new field: `toolConfigs: ParsedToolConfig[]`
+- [x] Extraction happens after `<include_note>` resolution (step 2) but **before** validation (step 3) and XML wrapping (step 4). Validation runs on the stripped content, so a config-only workflow (entire body is a `<notor_tool_config>` block) correctly fails validation as empty.
+- [x] `extractToolConfigs(resolvedBody, "workflow", workflow.file.path)` called
+- [x] `strippedContent` (not original resolved body) passed to XML wrapper
+- [x] Full `configs` array (not just `configs[0]`) attached to result
 
 ---
 
