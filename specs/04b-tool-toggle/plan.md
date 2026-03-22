@@ -501,7 +501,7 @@ function showToolConfigError(
 - **Assumption:** `parseYAML` is available as a named export from `obsidian`. If not available, fall back to `js-yaml.load()` which is transitively available in the Obsidian bundler environment.
 - **Assumption:** `ToolRegistry.getToolDefinitions()` continues to return all registered tools unfiltered (per spec Assumptions). `getFilteredToolDefinitions()` is a new additive method — existing callers are unchanged.
 - **Assumption:** Provider implementations handle an empty `tools` array correctly (no tools in request body). Verified as a spec assumption — no defensive code needed in the provider layer.
-- **External dependency:** `MCP tool names` follow the `server__tool` namespacing convention already in place. The MCP-server-inactive Notice (FR-82) requires checking whether a tool name prefix matches a configured-but-inactive MCP server in settings.
+- **External dependency:** `MCP tool names` follow the `server__tool` namespacing convention already in place. Unrecognized tool names (including inactive MCP tools) receive a generic "not found" Notice — no MCP server config lookup is needed in the parser.
 
 ---
 

@@ -1,6 +1,6 @@
 # RT-5 — Integration Risks Round 2: Deeper Codebase Scan
 
-**Status:** Open — 11 risks identified, 5 resolved
+**Status:** Open — 11 risks identified, 6 resolved
 **Created:** 2026-03-22
 **Source:** Full codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md), building on the resolved risks in [RT-4](RT-4-integration-risks.md)
 
@@ -113,9 +113,13 @@ RT-4 Risk 3 resolved this by introducing `getMatchedRules()` returning raw `Vaul
 
 ---
 
-## Risk 6 (MEDIUM) — Parser needs MCP server config for FR-82 inactive-server Notice
+## Risk 6 (MEDIUM) — Parser needs MCP server config for FR-82 inactive-server Notice — RESOLVED
 
-**Finding:**
+**Status:** Resolved (spec simplification)
+
+**Resolution:** The MCP-server-specific Notice variant is removed from FR-82. All unrecognized tool names now receive the same generic Notice: "Tool '{name}' not found." This eliminates the parser's need for MCP server configuration, keeping `extractToolConfigs()` pure and free of external dependencies. The spec's FR-82 acceptance criteria and the "Alternative flow: Unrecognized tool name (inactive MCP server)" scenario are updated accordingly.
+
+**Original Finding:**
 FR-82 requires: if an unrecognized tool name matches a configured-but-inactive MCP server, emit a specific Notice ("MCP server 'X' is not currently enabled") rather than a generic "tool not found" message.
 
 The plan's `extractToolConfigs()` signature is:
@@ -130,12 +134,6 @@ function extractToolConfigs(
 No MCP server configuration is passed in.
 
 > Relevant files: plan § `src/tool-config/parser.ts`, spec FR-82
-
-**Conflict:**
-The parser cannot distinguish between a completely unknown tool name and a tool belonging to a known-but-disabled MCP server without access to MCP configuration.
-
-**Recommendation:**
-Either (a) add a `registeredToolNames: string[]` and `configuredMcpServerNames: string[]` parameter to `extractToolConfigs()` so validation can distinguish the two cases inline, or (b) split validation out of the parser entirely — have the parser skip validation of tool names and defer it to a separate validation pass in the orchestrator where MCP config is accessible. Option (b) keeps the parser pure and testable.
 
 ---
 
@@ -253,7 +251,7 @@ No action needed. Informational only — the stripping happens before `assemble(
 | 3 | Filtered tool defs must go to both `assemble()` and `sendMessage()` | MEDIUM | Resolved (plan+spec) |
 | 4 | `toolDefinitions` captured once at loop entry, not per-iteration | MEDIUM | Resolved (plan+spec) |
 | 5 | `<include_note>` resolution ownership leaves dual code paths | MEDIUM | Resolved (plan amendment) |
-| 6 | Parser needs MCP server config for FR-82 inactive-server Notice | MEDIUM | Open |
+| 6 | Parser needs MCP server config for FR-82 inactive-server Notice | MEDIUM | Resolved (simplified) |
 | 7 | MCP auto-approve path needs `effectiveToolConfig` bypass too | MEDIUM | Open |
 | 8 | Background workflow path needs `toolConfigs` extraction | MEDIUM | Open |
 | 9 | `parseYAML` unused and untested in codebase | LOW | Open |

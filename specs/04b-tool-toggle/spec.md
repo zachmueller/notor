@@ -165,10 +165,7 @@ execute_command:
 
 **Acceptance criteria:**
 - YAML parse failure → emits an Obsidian Notice with the source file name; skips the block.
-- Unrecognized top-level key (tool name not in the registry):
-  - If the name matches a tool belonging to a configured but currently inactive MCP server → Notice specifically states the MCP server is not toggled on (not a generic "tool not found" message); skips that tool entry.
-  - Otherwise → Notice states the tool name was not recognized; skips that tool entry.
-  - In both cases, processing continues for the rest of the block.
+- Unrecognized top-level key (tool name not in the registry) → Notice states the tool name was not found; skips that tool entry. Processing continues for the rest of the block.
 - Unrecognized field within a tool entry (e.g., `auto_aprove` typo) → Notice; skips that field.
 - `enabled` not a boolean → Notice; skips that field.
 - `auto_approve` not a boolean → Notice; skips that field.
@@ -347,10 +344,10 @@ execute_command:
 4. The block is skipped; the rest of the persona's system prompt is sent to the LLM normally. The tool set falls back to global defaults for any tools that block would have configured.
 5. User right-clicks the Notice, is navigated to the system prompt note, and fixes the YAML error.
 
-### Alternative flow: Unrecognized tool name (inactive MCP server)
+### Alternative flow: Unrecognized tool name
 
-1. User's `<notor_tool_config>` block references `my-mcp-server__search`, but the "my-mcp-server" MCP server is currently disabled.
-2. An Obsidian Notice appears: "[workflow.md] Tool 'my-mcp-server__search' could not be configured — MCP server 'my-mcp-server' is not currently enabled. Right-click to jump to note."
+1. User's `<notor_tool_config>` block references `my-mcp-server__search`, but the tool is not currently registered (e.g., the MCP server is disabled).
+2. An Obsidian Notice appears: "[workflow.md] notor_tool_config: Tool 'my-mcp-server__search' not found. Right-click to jump to note."
 3. That tool entry is skipped; the rest of the block is applied normally.
 
 ### Alternative flow: Unrecognized major version
