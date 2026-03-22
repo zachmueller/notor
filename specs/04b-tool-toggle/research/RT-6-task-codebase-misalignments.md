@@ -8,7 +8,7 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
-**Resolved:** 4 (RT-6.1, RT-6.2, RT-6.3, RT-6.4)
+**Resolved:** 5 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5)
 
 ---
 
@@ -97,28 +97,20 @@ This is a non-trivial responsibility shift that isn't called out as a distinct a
 
 ---
 
-### RT-6.5: PARSE-002 `showToolConfigError()` needs App access but parser has no dependency injection
+### RT-6.5: ~~PARSE-002 `showToolConfigError()` needs App access but parser has no dependency injection~~ **RESOLVED**
+
+**Status:** Resolved — Option 3 (return structured error data; callers emit Notices).
 
 **Affected tasks:** PARSE-001, PARSE-002
 
-**Plan shows** helper signature: `showToolConfigError(plugin: NotorPlugin, sourceFile, detail)` — needs `plugin.app.workspace.openLinkText()` for right-click navigation (RT-3 pattern).
+**The misalignment:** The plan's `showToolConfigError(plugin, sourceFile, detail)` helper needs `plugin.app.workspace.openLinkText()` for right-click navigation (RT-3 pattern), but the parser module (`src/tool-config/parser.ts`) is designed as a pure data-processing module with no Obsidian dependency injection point.
 
-**Task PARSE-001** defines: `extractToolConfigs(text, source, sourceFile)` — no `app`/`plugin` parameter.
-**Task PARSE-002 AC 11** says: `showToolConfigError()` is "reusable across all validation call sites."
+**Resolution:** The parser returns validation errors as structured `ToolConfigValidationError[]` data (with `sourceFile` and `detail` fields) alongside configs and stripped content. The parser has no `obsidian` import. Callers (`SystemPromptBuilder.extractSourceToolConfigs()`, `WorkflowExecutor.assembleWorkflowPrompt()`) iterate the returned errors and emit Obsidian Notices via a shared `showToolConfigError()` helper in `src/tool-config/notices.ts`. This keeps the parser pure and testable without mocking Obsidian APIs.
 
-The parser module (`src/tool-config/parser.ts`) is designed as a pure data-processing module. It has no Obsidian dependency injection point in its public API. The Notice helper requires `App` to create right-click-to-navigate handlers.
-
-**Current patterns in codebase:**
-- `src/workflows/workflow-executor.ts:297` — creates `new Notice(...)` without navigation
-- `src/include-note/resolver.ts` — doesn't create Notices; returns/logs errors
-- `src/chat/system-prompt.ts:354-360` — logs warnings, doesn't create Notices
-
-**Fix:** Either:
-1. Add `app: App` parameter to `extractToolConfigs()` and thread it through
-2. Accept a callback `onValidationError?: (sourceFile: string, detail: string) => void` so the caller provides the Notice logic
-3. Return validation errors as structured data and let the caller (builder/orchestrator) create Notices
-
-Option 3 is cleanest for testability — the parser stays pure, the caller handles UI.
+**Changes applied:**
+- `tasks.md`: ENV-001 gains `ToolConfigValidationError` type export. PARSE-001 return type updated to include `errors: ToolConfigValidationError[]`; YAML parse failure ACs updated to say "error added" instead of "Notice". PARSE-002 reworked: validation errors collected as structured data, `showToolConfigError()` moved to `src/tool-config/notices.ts`, callers responsible for emitting Notices.
+- `plan.md`: `types.ts` contract updated to export `ToolConfigValidationError`. `parser.ts` contract updated: return type gains `errors` field, internal steps updated to add errors instead of emitting Notices. `showToolConfigError()` section rewritten as `src/tool-config/notices.ts` module. `SystemPromptBuilder` and `WorkflowExecutor` sections note that callers emit Notices for returned errors.
+- `spec.md`: FR-81 updated: parser returns structured errors, callers emit Notices. FR-82 description and ACs updated to describe the parser→caller error flow. `ToolConfigValidationError` added to Key entities section.
 
 ---
 

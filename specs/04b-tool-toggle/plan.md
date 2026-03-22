@@ -132,7 +132,16 @@ const TOOL_PATH_PARAMS: Record<string, ToolPathParam[]> = {
 
 #### New module: `src/tool-config/types.ts`
 
-Export all type definitions: `ParsedToolConfig`, `ToolConfigEntry`, `EffectiveToolConfig`, `ResolvedToolConfigEntry`, `PathNamespace`, `ToolPathParam`.
+Export all type definitions: `ParsedToolConfig`, `ToolConfigEntry`, `EffectiveToolConfig`, `ResolvedToolConfigEntry`, `PathNamespace`, `ToolPathParam`, `ToolConfigValidationError`.
+
+`ToolConfigValidationError` is a structured error type returned by the parser:
+
+```typescript
+interface ToolConfigValidationError {
+  sourceFile: string;  // vault-relative path to the source note
+  detail: string;      // human-readable error description
+}
+```
 
 ---
 
@@ -144,8 +153,12 @@ Primary public API:
 /**
  * Extract and strip all <notor_tool_config> blocks from a text string.
  *
- * Returns the stripped content (for passing to the LLM) and the
- * list of ParsedToolConfig objects (for the precedence merge).
+ * Returns the stripped content (for passing to the LLM), the
+ * list of ParsedToolConfig objects (for the precedence merge),
+ * and any validation errors encountered during parsing.
+ *
+ * The parser is a pure data-processing module with no Obsidian dependency.
+ * Callers are responsible for surfacing returned errors as Notices.
  *
  * Ordering: <include_note> resolution MUST run before calling this.
  */
@@ -156,6 +169,7 @@ function extractToolConfigs(
 ): {
   strippedContent: string;
   configs: ParsedToolConfig[];
+  errors: ToolConfigValidationError[];
 }
 ```
 
@@ -163,11 +177,11 @@ Internal steps:
 1. Run the hardened regex over `text` to find all `<notor_tool_config>` blocks.
 2. For each match:
    a. Parse `version` attribute from the opening tag. If major > max supported → `console.warn` and skip.
-   b. Parse YAML body via `parseYAML` (Obsidian built-in). After parsing, apply an explicit type guard: if the result is `null`, `undefined`, `typeof parsed !== 'object'`, or `Array.isArray(parsed)` → emit Notice via `showToolConfigError()` and skip the block. This covers non-throwing non-object returns (`parseYAML` returns `null`/`undefined` for empty input, bare scalars for non-object YAML). The `try/catch` around the call handles structurally invalid YAML that throws.
-   c. Validate structure — emit `Notice` per FR-82 for each invalid field; skip invalid entries, continue processing valid ones.
+   b. Parse YAML body via `parseYAML` (Obsidian built-in). After parsing, apply an explicit type guard: if the result is `null`, `undefined`, `typeof parsed !== 'object'`, or `Array.isArray(parsed)` → add a `ToolConfigValidationError` to the `errors` array and skip the block. This covers non-throwing non-object returns (`parseYAML` returns `null`/`undefined` for empty input, bare scalars for non-object YAML). The `try/catch` around the call handles structurally invalid YAML that throws.
+   c. Validate structure — add a `ToolConfigValidationError` per FR-82 for each invalid field; skip invalid entries, continue processing valid ones.
    d. Build `ParsedToolConfig` with `documentPosition` = match index.
 3. Replace each matched block with `""` in the working text.
-4. Return `{ strippedContent, configs }`.
+4. Return `{ strippedContent, configs, errors }`.
 
 ---
 
@@ -324,8 +338,8 @@ async extractSourceToolConfigs(
 ```
 
 The extraction phase:
-- After `resolveIncludeNotesIfAvailable()` for persona content → `extractToolConfigs(resolved, "persona", persona.system_prompt_path)`. Caches stripped persona content.
-- For each matched rule → resolve `<include_note>` tags (currently done in `VaultRuleManager.getActiveRuleContent()`), then `extractToolConfigs(resolved, "rule", rule.file_path)`. Caches stripped per-rule content.
+- After `resolveIncludeNotesIfAvailable()` for persona content → `extractToolConfigs(resolved, "persona", persona.system_prompt_path)`. Caches stripped persona content. Emits Notices for any returned `errors` via `showToolConfigError()`.
+- For each matched rule → resolve `<include_note>` tags (currently done in `VaultRuleManager.getActiveRuleContent()`), then `extractToolConfigs(resolved, "rule", rule.file_path)`. Caches stripped per-rule content. Emits Notices for any returned `errors` via `showToolConfigError()`.
 
 **Phase 2 — Prompt assembly (modified existing method):**
 
@@ -368,7 +382,7 @@ No changes to `VaultRule` struct, `loadRuleFile()`, or `evaluateRules()` interna
 #### Modified: `src/workflows/workflow-executor.ts`
 
 - `WorkflowAssemblyResult` gets a new field: `toolConfigs: ParsedToolConfig[]`.
-- `assembleWorkflowPrompt()` is modified internally: after `<include_note>` resolution (step 2) and non-empty validation (step 3), but **before** the resolved body is wrapped in `<workflow_instructions>` XML (step 4), insert a call to `extractToolConfigs(resolvedBody, "workflow", workflow.file.path)`. Pass `strippedContent` — not the original resolved body — to the XML wrapper. Attach the full `configs` array (not just `configs[0]`) to `WorkflowAssemblyResult.toolConfigs`. The caller (`resolveEffectiveConfig()` in the orchestrator) feeds the full array into `mergeToolConfigs()`, which handles within-file document-order merge natively via `documentPosition` sorting. This is consistent with how persona and rule sources already produce `ParsedToolConfig[]` arrays. This insertion point is critical: the resolved body is consumed by the XML wrapper in step 4, so extraction must happen between steps 3 and 4.
+- `assembleWorkflowPrompt()` is modified internally: after `<include_note>` resolution (step 2) and non-empty validation (step 3), but **before** the resolved body is wrapped in `<workflow_instructions>` XML (step 4), insert a call to `extractToolConfigs(resolvedBody, "workflow", workflow.file.path)`. Pass `strippedContent` — not the original resolved body — to the XML wrapper. Attach the full `configs` array (not just `configs[0]`) to `WorkflowAssemblyResult.toolConfigs`. Emit Notices for any returned `errors` via `showToolConfigError()`. The caller (`resolveEffectiveConfig()` in the orchestrator) feeds the full array into `mergeToolConfigs()`, which handles within-file document-order merge natively via `documentPosition` sorting. This is consistent with how persona and rule sources already produce `ParsedToolConfig[]` arrays. This insertion point is critical: the resolved body is consumed by the XML wrapper in step 4, so extraction must happen between steps 3 and 4.
 
 ---
 
@@ -471,7 +485,9 @@ Implements FR-88. A `ItemView` registered under a unique view type (e.g., `"noto
 
 ### Validation Notice helper
 
-Shared helper in `src/tool-config/parser.ts` (or a new `src/tool-config/notices.ts`):
+#### New module: `src/tool-config/notices.ts`
+
+Shared helper for callers to surface parser validation errors as Obsidian Notices. The parser itself does not import from `obsidian` — it returns structured `ToolConfigValidationError[]` data. Callers (e.g., `SystemPromptBuilder.extractSourceToolConfigs()`, `WorkflowExecutor.assembleWorkflowPrompt()`) iterate the returned errors and call this helper for each entry:
 
 ```typescript
 function showToolConfigError(

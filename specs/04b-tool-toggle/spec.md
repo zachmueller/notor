@@ -152,9 +152,10 @@ execute_command:
 - For each matched block, the plugin:
   1. Parses the `version` attribute from the opening tag.
   2. If `version` major is unrecognized (higher than the maximum supported) → emits a console warning and skips the block.
-  3. Otherwise → parses the inner body as YAML. If the result is `null`, `undefined`, not a plain object, or an array (non-throwing non-object returns from `parseYAML`) → emits a Notice (same as a YAML parse failure) and skips the block.
-  4. Validates the parsed structure (per FR-82).
+  3. Otherwise → parses the inner body as YAML. If the result is `null`, `undefined`, not a plain object, or an array (non-throwing non-object returns from `parseYAML`) → adds a structured validation error and skips the block.
+  4. Validates the parsed structure (per FR-82). Validation errors are collected as structured `ToolConfigValidationError` data (not emitted as Notices by the parser).
   5. Stores the parsed config alongside its source context (`persona` / `workflow` / `rule`) and document position for within-file merge ordering.
+- The parser returns structured validation errors alongside the parsed configs and stripped content. The parser module has no Obsidian dependency — it is a pure data-processing layer. Callers (e.g., `SystemPromptBuilder`, `WorkflowExecutor`) are responsible for iterating the returned errors and emitting Obsidian Notices via a shared `showToolConfigError()` helper.
 - Each full tag (opening tag + body + closing tag) is replaced with an empty string in the content passed downstream to the LLM.
 - After all source files are processed, the precedence merge runs to produce the `EffectiveToolConfig` for this message.
 - The `EffectiveToolConfig` is recomputed before each LLM call (to reflect dynamic rule activation/deactivation), applied to the tool registry and dispatcher, and reverted to global defaults when the conversation ends. To resolve the circular dependency between config extraction (which produces tool configs) and tool definition filtering (which needs the merged config), the `SystemPromptBuilder` exposes a two-phase API: (1) `extractSourceToolConfigs()` resolves `<include_note>` tags, extracts `<notor_tool_config>` blocks from persona and rule sources, and caches stripped content internally; (2) `assemble()` builds the prompt using cached stripped content and the now-available filtered tool definitions. The orchestrator calls phase 1, runs the precedence merge, computes filtered tool definitions, then calls phase 2. The filtered tool definitions (reflecting enabled/disabled state) are computed fresh inside the response loop on each iteration (not captured once at loop entry) and passed to both system prompt assembly (so the prompt only documents available tools) and the provider call (the actual tool list sent to the LLM). Callers of the response loop do not pass or pre-compute tool definitions. This applies equally to both the foreground `responseLoop()` and the background `_backgroundResponseLoop()` used for background workflow execution — both paths compute `resolveEffectiveConfig()` per-iteration and use the workflow's `toolConfigs` from its `WorkflowAssemblyResult`.
@@ -162,17 +163,17 @@ execute_command:
 
 ### FR-82: Validation and error reporting
 
-**Description:** Invalid YAML or unrecognized fields should not crash the plugin. All validation errors are reported to the user with enough context to locate and fix the source.
+**Description:** Invalid YAML or unrecognized fields should not crash the plugin. All validation errors are reported to the user with enough context to locate and fix the source. The parser itself is a pure data-processing module with no Obsidian dependency — it returns validation errors as structured data (`ToolConfigValidationError[]`). Callers are responsible for surfacing these errors as Obsidian Notices via the shared `showToolConfigError()` helper.
 
 **Acceptance criteria:**
-- YAML parse failure → emits an Obsidian Notice with the source file name; skips the block.
-- Unrecognized top-level key (tool name not in the registry) → Notice states the tool name was not found; skips that tool entry. Processing continues for the rest of the block.
-- Unrecognized field within a tool entry (e.g., `auto_aprove` typo) → Notice; skips that field.
-- `enabled` not a boolean → Notice; skips that field.
-- `auto_approve` not a boolean → Notice; skips that field.
-- `allowed_paths` not an array of strings → Notice; skips that field.
-- `blocked_paths` not an array of strings → Notice; skips that field.
-- `allowed_paths` or `blocked_paths` specified for an MCP tool → Notice stating that path enforcement for MCP tools is not yet implemented; skips those fields. The tool's `enabled` and `auto_approve` values (if present) are still applied.
+- YAML parse failure → parser records a structured error; caller emits an Obsidian Notice with the source file name; skips the block.
+- Unrecognized top-level key (tool name not in the registry) → parser records a structured error; caller emits Notice stating the tool name was not found; skips that tool entry. Processing continues for the rest of the block.
+- Unrecognized field within a tool entry (e.g., `auto_aprove` typo) → error recorded; caller emits Notice; skips that field.
+- `enabled` not a boolean → error recorded; caller emits Notice; skips that field.
+- `auto_approve` not a boolean → error recorded; caller emits Notice; skips that field.
+- `allowed_paths` not an array of strings → error recorded; caller emits Notice; skips that field.
+- `blocked_paths` not an array of strings → error recorded; caller emits Notice; skips that field.
+- `allowed_paths` or `blocked_paths` specified for an MCP tool → error recorded; caller emits Notice stating that path enforcement for MCP tools is not yet implemented; skips those fields. The tool's `enabled` and `auto_approve` values (if present) are still applied.
 - All Obsidian Notices for validation errors must:
   - Identify the source file by name.
   - Include the text "right-click to jump to note" so users know they can navigate directly to the source.
@@ -416,6 +417,17 @@ interface ToolConfigEntry {
 ```
 
 All fields on `ToolConfigEntry` are optional, supporting the sparse configuration model.
+
+### ToolConfigValidationError
+
+A structured validation error returned by the parser. The parser collects these without importing from `obsidian`; callers surface them as Notices.
+
+```typescript
+interface ToolConfigValidationError {
+  sourceFile: string;  // vault-relative path to the source note
+  detail: string;      // human-readable error description
+}
+```
 
 ### EffectiveToolConfig
 

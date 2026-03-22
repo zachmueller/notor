@@ -27,6 +27,7 @@
 - [ ] `EffectiveToolConfig` interface exported with `tools: Record<string, ResolvedToolConfigEntry>`
 - [ ] `ResolvedToolConfigEntry` interface exported with all non-optional fields: `enabled`, `auto_approve`, `allowed_paths`, `blocked_paths`
 - [ ] `PathNamespace` type (`"vault" | "filesystem"`) and `ToolPathParam` interface exported
+- [ ] `ToolConfigValidationError` interface exported with fields: `sourceFile: string`, `detail: string`
 - [ ] TypeScript compilation succeeds with no errors
 
 ---
@@ -42,29 +43,30 @@
 - [ ] Hardened regex `/^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm` used for extraction (RT-2 confirmed)
 - [ ] `version` attribute parsed from opening tag; major > max supported → `console.warn` and skip block
 - [ ] YAML body parsed via `parseYAML` from `obsidian`
-- [ ] Explicit type guard after `parseYAML`: `null`, `undefined`, non-object, or array → Notice + skip block
-- [ ] `try/catch` around `parseYAML` for structurally invalid YAML → Notice + skip block
+- [ ] Explicit type guard after `parseYAML`: `null`, `undefined`, non-object, or array → error added to `errors` array + skip block
+- [ ] `try/catch` around `parseYAML` for structurally invalid YAML → error added to `errors` array + skip block
 - [ ] Multiple `<notor_tool_config>` blocks per file supported; merged in document order (last occurrence per field wins within a file)
 - [ ] Matched blocks replaced with empty string in returned `strippedContent`
-- [ ] Returns `{ strippedContent, configs: ParsedToolConfig[] }`
+- [ ] Returns `{ strippedContent, configs: ParsedToolConfig[], errors: ToolConfigValidationError[] }` — errors are structured data (sourceFile + detail), not Notices. The parser has no Obsidian dependency; callers are responsible for surfacing errors as Notices.
 
 ### PARSE-002: Implement validation and error reporting
-**Description:** Implement per-field validation logic within the parser and the shared `showToolConfigError()` Notice helper.
+**Description:** Implement per-field validation logic within the parser (returning structured errors) and a separate `showToolConfigError()` Notice helper for callers.
 **Files:**
 - `src/tool-config/parser.ts` (validation logic within `extractToolConfigs`)
+- Create `src/tool-config/notices.ts` (`showToolConfigError()` helper)
 **Dependencies:** PARSE-001
 **Acceptance Criteria:**
-- [ ] Unrecognized top-level key (tool name not in registry) → Notice stating tool not found; skip that tool entry (FR-82)
-- [ ] Unrecognized field within a tool entry → Notice; skip that field
-- [ ] `enabled` not a boolean → Notice; skip field
-- [ ] `auto_approve` not a boolean → Notice; skip field
-- [ ] `allowed_paths` not an array of strings → Notice; skip field
-- [ ] `blocked_paths` not an array of strings → Notice; skip field
-- [ ] `allowed_paths`/`blocked_paths` specified for MCP tool → Notice stating path enforcement not yet implemented for MCP; skip those fields (keep `enabled`/`auto_approve`)
-- [ ] All Notices include source file name and "right-click to jump to note" text
-- [ ] Right-click handler (`notice.noticeEl.oncontextmenu`) navigates to source note via `app.workspace.openLinkText()` (RT-3 confirmed)
-- [ ] Jump hint and handler gated on `Platform.isDesktop`
-- [ ] `showToolConfigError()` helper function is reusable across all validation call sites
+- [ ] Unrecognized top-level key (tool name not in registry) → error added to `errors` array; skip that tool entry (FR-82)
+- [ ] Unrecognized field within a tool entry → error added; skip that field
+- [ ] `enabled` not a boolean → error added; skip field
+- [ ] `auto_approve` not a boolean → error added; skip field
+- [ ] `allowed_paths` not an array of strings → error added; skip field
+- [ ] `blocked_paths` not an array of strings → error added; skip field
+- [ ] `allowed_paths`/`blocked_paths` specified for MCP tool → error added stating path enforcement not yet implemented for MCP; skip those fields (keep `enabled`/`auto_approve`)
+- [ ] All errors returned as `ToolConfigValidationError[]` (structured data with `sourceFile` and `detail` fields) — the parser does **not** import from `obsidian` and does **not** create Notices
+- [ ] `showToolConfigError(plugin, sourceFile, detail)` helper in `src/tool-config/notices.ts` creates Obsidian Notices with source file name, "right-click to jump to note" text, right-click handler (`notice.noticeEl.oncontextmenu`) navigating via `app.workspace.openLinkText()` (RT-3 confirmed), gated on `Platform.isDesktop`
+- [ ] `showToolConfigError()` is reusable across all call sites that surface parser errors (SystemPromptBuilder, WorkflowExecutor)
+- [ ] Callers iterate the returned `errors` array and call `showToolConfigError()` for each entry
 
 ### MERGE-001: Implement precedence merge engine
 **Description:** Implement `mergeToolConfigs()` that merges multiple `ParsedToolConfig` objects into a single `EffectiveToolConfig` using defined precedence order.
