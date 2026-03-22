@@ -1,6 +1,6 @@
 # RT-5 — Integration Risks Round 2: Deeper Codebase Scan
 
-**Status:** Open — 11 risks identified, 7 resolved
+**Status:** Open — 11 risks identified, 8 resolved
 **Created:** 2026-03-22
 **Source:** Full codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md), building on the resolved risks in [RT-4](RT-4-integration-risks.md)
 
@@ -159,9 +159,13 @@ if (isMcpTool(toolName)) {
 
 ---
 
-## Risk 8 (MEDIUM) — Background workflow execution path also needs `toolConfigs` extraction
+## Risk 8 (MEDIUM) — Background workflow execution path also needs `toolConfigs` extraction — RESOLVED
 
-**Finding:**
+**Status:** Resolved (plan and spec amendment)
+
+**Resolution:** The plan's orchestrator section now explicitly describes `_backgroundResponseLoop()` as receiving the same `resolveEffectiveConfig()` treatment as the foreground `responseLoop()`. Specifically: (1) the `toolDefinitions` parameter is removed from `_backgroundResponseLoop()` — tool definitions are computed fresh per-iteration, not captured once at loop entry; (2) `resolveEffectiveConfig()` is called per-iteration inside the background loop, using the workflow's `WorkflowAssemblyResult.toolConfigs` stored from the initial `assembleWorkflowPrompt()` call; (3) the background loop's `getActiveRuleContent()` call is migrated to `getMatchedRules()`, matching the foreground loop's deprecation of `getActiveRuleContent()` (RT-5 Risk 5). The spec's FR-81 is updated to clarify that both foreground and background response loops apply per-iteration `resolveEffectiveConfig()` with the workflow's tool configs.
+
+**Original Finding:**
 `assembleWorkflowPrompt()` results are consumed in at least two distinct code paths in the orchestrator:
 
 1. `executeWorkflow()` (line ~379) — foreground workflow execution
@@ -170,12 +174,6 @@ if (isMcpTool(toolName)) {
 Both paths call `assembleWorkflowPrompt()` and use the result. Background execution has its own response loop that builds tool definitions independently (line ~644).
 
 > Relevant files: `src/chat/orchestrator.ts` (lines ~379, ~536, ~644)
-
-**Conflict:**
-The plan's workflow integration discussion only covers the foreground `executeWorkflow()` path. The background path also needs to feed `WorkflowAssemblyResult.toolConfigs` into `resolveEffectiveConfig()` and use filtered tool definitions.
-
-**Recommendation:**
-Ensure `_backgroundResponseLoop()` also calls `resolveEffectiveConfig()` before each provider call, using the workflow's `toolConfigs` from the assembly result. The same pattern applied to the foreground loop should be mirrored in the background loop.
 
 ---
 
@@ -251,7 +249,7 @@ No action needed. Informational only — the stripping happens before `assemble(
 | 5 | `<include_note>` resolution ownership leaves dual code paths | MEDIUM | Resolved (plan amendment) |
 | 6 | Parser needs MCP server config for FR-82 inactive-server Notice | MEDIUM | Resolved (simplified) |
 | 7 | MCP auto-approve path needs `effectiveToolConfig` bypass too | MEDIUM | Resolved (plan+spec) |
-| 8 | Background workflow path needs `toolConfigs` extraction | MEDIUM | Open |
+| 8 | Background workflow path needs `toolConfigs` extraction | MEDIUM | Resolved (plan+spec) |
 | 9 | `parseYAML` unused and untested in codebase | LOW | Open |
 | 10 | Dispatcher maintains separate tool map from ToolRegistry | LOW | Open |
 | 11 | System prompt token ceiling interaction with stripped content | LOW | Open |
