@@ -39,7 +39,7 @@
 - Create `src/tool-config/parser.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Hardened regex `/^<notor_tool_config([^>]*)>[\s\S]*?<\/notor_tool_config>/gm` used for extraction (RT-2 confirmed)
+- [ ] Hardened regex `/^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm` used for extraction (RT-2 confirmed)
 - [ ] `version` attribute parsed from opening tag; major > max supported → `console.warn` and skip block
 - [ ] YAML body parsed via `parseYAML` from `obsidian`
 - [ ] Explicit type guard after `parseYAML`: `null`, `undefined`, non-object, or array → Notice + skip block

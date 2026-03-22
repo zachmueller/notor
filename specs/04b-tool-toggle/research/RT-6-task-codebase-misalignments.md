@@ -8,7 +8,7 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
-**Resolved:** 1 (RT-6.1)
+**Resolved:** 2 (RT-6.1, RT-6.2)
 
 ---
 
@@ -35,17 +35,16 @@ Orchestrator per-iteration flow: extract (phase 1) → merge → filter → asse
 
 ---
 
-### RT-6.2: PARSE-001 regex missing body capture group
+### RT-6.2: ~~PARSE-001 regex missing body capture group~~ **RESOLVED**
+
+**Status:** Resolved — PARSE-001 AC 1 regex updated to include body capture group.
 
 **Affected task:** PARSE-001 AC 1
 
-**Task says:** `/^<notor_tool_config([^>]*)>[\s\S]*?<\/notor_tool_config>/gm`
-**Spec FR-81 says:** `/^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm`
-**Plan parser.ts section says:** Same as spec (with body capture group)
+**The misalignment:** The task regex had only 1 capture group (attributes): `/^<notor_tool_config([^>]*)>[\s\S]*?<\/notor_tool_config>/gm`. The spec (FR-81) and plan both have 2 capture groups (attributes + body): `/^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm`. Without the second capture group, the parser cannot extract the YAML body content for parsing.
 
-The task regex has only 1 capture group (attributes). The spec and plan regex both have 2 capture groups (attributes + body). Without the second capture group `([\s\S]*?)`, the parser cannot extract the YAML body content for parsing.
-
-**Fix:** Update PARSE-001 AC 1 to use the spec/plan regex with the body capture group.
+**Changes applied:**
+- `tasks.md`: PARSE-001 AC 1 regex updated to include the body capture group `([\s\S]*?)`
 
 ---
 
