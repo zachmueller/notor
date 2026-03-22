@@ -294,7 +294,7 @@ if (this.effectiveToolConfig) {
 }
 ```
 
-Also expose `auto_approve` from `effectiveToolConfig` in the auto-approve resolution: when `effectiveToolConfig` is set and the tool has an entry, the config's `auto_approve` value takes precedence over the `resolveAutoApprove()` result. The dispatcher does not need to consult `resolveAutoApprove()` at all when `effectiveToolConfig` is active.
+Also expose `auto_approve` from `effectiveToolConfig` in the auto-approve resolution. The dispatcher currently has two separate auto-approve code paths: `resolveAutoApprove()` for built-in tools and `resolveMcpAutoApprove()` for MCP tools (selected via an `isMcpTool()` branch). When `effectiveToolConfig` is active, a unified early-return **before** the MCP/built-in branching checks `effectiveToolConfig.tools[toolName]?.auto_approve` and uses that value directly, bypassing both `resolveAutoApprove()` and `resolveMcpAutoApprove()`. The existing MCP/built-in branching remains as the fallback when `effectiveToolConfig` is null. This works because `globalAutoApprove` (fed into the merger) already includes MCP server-level `autoApprove[]` entries pre-flattened into namespaced keys — so the merged `auto_approve` value correctly reflects MCP server defaults when no higher-priority source overrides them.
 
 ---
 

@@ -1,6 +1,6 @@
 # RT-5 — Integration Risks Round 2: Deeper Codebase Scan
 
-**Status:** Open — 11 risks identified, 6 resolved
+**Status:** Open — 11 risks identified, 7 resolved
 **Created:** 2026-03-22
 **Source:** Full codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md), building on the resolved risks in [RT-4](RT-4-integration-risks.md)
 
@@ -137,9 +137,13 @@ No MCP server configuration is passed in.
 
 ---
 
-## Risk 7 (MEDIUM) — MCP auto-approve code path in dispatcher also needs `effectiveToolConfig` bypass
+## Risk 7 (MEDIUM) — MCP auto-approve code path in dispatcher also needs `effectiveToolConfig` bypass — RESOLVED
 
-**Finding:**
+**Status:** Resolved (plan and spec amendment)
+
+**Resolution:** The plan's dispatcher section now explicitly describes a unified early-return that checks `effectiveToolConfig.tools[toolName]?.auto_approve` **before** the existing MCP/built-in branching logic (`resolveMcpAutoApprove()` / `resolveAutoApprove()`). When `effectiveToolConfig` is active, neither branch is consulted — the merged `auto_approve` value is used directly. The existing branching remains as the fallback when `effectiveToolConfig` is null. This works because `globalAutoApprove` (fed into the merger) already includes MCP server-level `autoApprove[]` entries pre-flattened into namespaced keys, so the merged value correctly reflects MCP server defaults. The spec's FR-80 is updated with an explicit acceptance criterion for this dispatcher behavior.
+
+**Original Finding:**
 The dispatcher has two separate auto-approve resolution paths:
 
 ```typescript
@@ -152,12 +156,6 @@ if (isMcpTool(toolName)) {
 ```
 
 > Relevant files: `src/chat/dispatcher.ts` (lines 382-425)
-
-**Conflict:**
-The plan says: "the dispatcher does not need to consult `resolveAutoApprove()` at all when `effectiveToolConfig` is active." This only explicitly mentions the built-in path. The MCP path through `resolveMcpAutoApprove()` is a separate branch that must also be bypassed, or MCP tools will ignore the merged `auto_approve` from `effectiveToolConfig`.
-
-**Recommendation:**
-In the dispatcher modification, check `effectiveToolConfig.tools[toolName]?.auto_approve` **before** the MCP/built-in branching logic, as a unified early-return. This ensures both tool types use the merged config when active. The existing MCP/built-in branching remains as the fallback when `effectiveToolConfig` is null.
 
 ---
 
@@ -252,7 +250,7 @@ No action needed. Informational only — the stripping happens before `assemble(
 | 4 | `toolDefinitions` captured once at loop entry, not per-iteration | MEDIUM | Resolved (plan+spec) |
 | 5 | `<include_note>` resolution ownership leaves dual code paths | MEDIUM | Resolved (plan amendment) |
 | 6 | Parser needs MCP server config for FR-82 inactive-server Notice | MEDIUM | Resolved (simplified) |
-| 7 | MCP auto-approve path needs `effectiveToolConfig` bypass too | MEDIUM | Open |
+| 7 | MCP auto-approve path needs `effectiveToolConfig` bypass too | MEDIUM | Resolved (plan+spec) |
 | 8 | Background workflow path needs `toolConfigs` extraction | MEDIUM | Open |
 | 9 | `parseYAML` unused and untested in codebase | LOW | Open |
 | 10 | Dispatcher maintains separate tool map from ToolRegistry | LOW | Open |
