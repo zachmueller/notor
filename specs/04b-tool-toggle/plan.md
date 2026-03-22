@@ -371,7 +371,7 @@ Add one new public method:
 async getMatchedRules(): Promise<VaultRule[]>
 ```
 
-This exposes the existing private `evaluateRules()` logic as a public API. The rule manager has zero knowledge of `<notor_tool_config>` — extraction is handled downstream by `SystemPromptBuilder`.
+This exposes the existing private `evaluateRules()` logic as a public API. The method checks the `dirty` flag and calls `loadRules()` if stale before calling `evaluateRules()`, mirroring the lazy-reload pattern in `getActiveRuleContent()` (lines 174–177). This ensures rule file changes made mid-conversation (e.g., user edits a rule file in another tab) are picked up on each call. The rule manager has zero knowledge of `<notor_tool_config>` — extraction is handled downstream by `SystemPromptBuilder`.
 
 `getActiveRuleContent()` is deprecated in Phase 4b and must not be called by any Phase 4b code path. All orchestrator call sites (`responseLoop`, `_backgroundResponseLoop`) migrate to `getMatchedRules()` so the builder can process each rule individually (per-file `<include_note>` resolution + per-file tool config extraction with source attribution). This prevents dual code paths where `<notor_tool_config>` blocks embedded via `<include_note>` would survive unextracted (see RT-5 Risk 5).
 

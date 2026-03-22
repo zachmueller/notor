@@ -197,6 +197,7 @@
 **Acceptance Criteria:**
 - [ ] New public method `getMatchedRules(): Promise<VaultRule[]>` added
 - [ ] Method exposes existing `evaluateRules()` logic
+- [ ] `getMatchedRules()` checks the `dirty` flag and calls `loadRules()` if stale before calling `evaluateRules()`, mirroring the lazy-reload pattern in `getActiveRuleContent()` (lines 174–177). This ensures rule file changes made mid-conversation are picked up.
 - [ ] `getActiveRuleContent()` marked as deprecated (not deleted yet — removed when all call sites migrated)
 - [ ] No changes to `VaultRule` struct, `loadRuleFile()`, or `evaluateRules()` internals
 - [ ] Rule manager has zero knowledge of `<notor_tool_config>` — extraction handled downstream

@@ -8,7 +8,7 @@
 
 8 additional misalignments identified between the implementation tasks and the current codebase/spec/plan. 0 critical, 4 moderate, 4 minor.
 
-**Resolved:** 3
+**Resolved:** 4
 
 ---
 
@@ -183,7 +183,7 @@ Neither task specifies whether the clear happens in `main.ts`'s callback (which 
 
 ### RT-6.16: `getMatchedRules()` must include dirty-check lazy-reload
 
-**Status:** Open
+**Status:** Resolved
 
 **Affected task:** RULE-001
 
@@ -219,6 +219,8 @@ The `dirty` flag is set to `true` when the file watcher detects changes to rule 
 **Impact:** If an implementer creates `getMatchedRules()` that just calls `this.evaluateRules()`, rule file changes made mid-conversation (e.g., user edits a rule file in another tab) won't be picked up. This breaks the existing behavior where rules are re-evaluated fresh each turn.
 
 **Suggested resolution:** Add AC to RULE-001: "`getMatchedRules()` checks the `dirty` flag and calls `loadRules()` if stale, mirroring the lazy-reload pattern in `getActiveRuleContent()` (lines 174–177), before calling `evaluateRules()`."
+
+**Resolution:** Applied suggested resolution. New AC added to RULE-001 in `tasks.md` specifying that `getMatchedRules()` checks the `dirty` flag and calls `loadRules()` if stale before calling `evaluateRules()`. `plan.md` VaultRuleManager section updated to document the dirty-check lazy-reload pattern in the `getMatchedRules()` contract.
 
 ---
 
