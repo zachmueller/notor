@@ -40,14 +40,14 @@
 - Create `src/tool-config/parser.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Hardened regex `/^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm` used for extraction (RT-2 confirmed)
-- [ ] `version` attribute parsed from opening tag; major > max supported → `console.warn` and skip block
-- [ ] YAML body parsed via `parseYAML` from `obsidian`
-- [ ] Explicit type guard after `parseYAML`: `null`, `undefined`, non-object, or array → error added to `errors` array + skip block
-- [ ] `try/catch` around `parseYAML` for structurally invalid YAML → error added to `errors` array + skip block
-- [ ] Multiple `<notor_tool_config>` blocks per file supported; merged in document order (last occurrence per field wins within a file)
-- [ ] Matched blocks replaced with empty string in returned `strippedContent`
-- [ ] Returns `{ strippedContent, configs: ParsedToolConfig[], errors: ToolConfigValidationError[] }` — errors are structured data (sourceFile + detail), not Notices. The parser has no Obsidian dependency; callers are responsible for surfacing errors as Notices.
+- [x] Hardened regex `/^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm` used for extraction (RT-2 confirmed)
+- [x] `version` attribute parsed from opening tag; major > max supported → `console.warn` and skip block
+- [x] YAML body parsed via `parseYAML` from `obsidian`
+- [x] Explicit type guard after `parseYAML`: `null`, `undefined`, non-object, or array → error added to `errors` array + skip block
+- [x] `try/catch` around `parseYAML` for structurally invalid YAML → error added to `errors` array + skip block
+- [x] Multiple `<notor_tool_config>` blocks per file supported; merged in document order (last occurrence per field wins within a file)
+- [x] Matched blocks replaced with empty string in returned `strippedContent`
+- [x] Returns `{ strippedContent, configs: ParsedToolConfig[], errors: ToolConfigValidationError[] }` — errors are structured data (sourceFile + detail), not Notices. The parser has no Obsidian dependency; callers are responsible for surfacing errors as Notices.
 
 ### PARSE-002: Implement validation and error reporting
 **Description:** Implement per-field validation logic within the parser (returning structured errors) and a separate `showToolConfigError()` Notice helper for callers.
@@ -56,17 +56,17 @@
 - Create `src/tool-config/notices.ts` (`showToolConfigError()` helper)
 **Dependencies:** PARSE-001
 **Acceptance Criteria:**
-- [ ] Unrecognized top-level key (tool name not in registry) → error added to `errors` array; skip that tool entry (FR-82)
-- [ ] Unrecognized field within a tool entry → error added; skip that field
-- [ ] `enabled` not a boolean → error added; skip field
-- [ ] `auto_approve` not a boolean → error added; skip field
-- [ ] `allowed_paths` not an array of strings → error added; skip field
-- [ ] `blocked_paths` not an array of strings → error added; skip field
-- [ ] `allowed_paths`/`blocked_paths` specified for MCP tool → error added stating path enforcement not yet implemented for MCP; skip those fields (keep `enabled`/`auto_approve`)
-- [ ] All errors returned as `ToolConfigValidationError[]` (structured data with `sourceFile` and `detail` fields) — the parser does **not** import from `obsidian` and does **not** create Notices
-- [ ] `showToolConfigError(plugin, sourceFile, detail)` helper in `src/tool-config/notices.ts` creates Obsidian Notices with source file name, "right-click to jump to note" text, right-click handler (`notice.noticeEl.oncontextmenu`) navigating via `app.workspace.openLinkText()` (RT-3 confirmed), gated on `Platform.isDesktop`
-- [ ] `showToolConfigError()` is reusable across all call sites that surface parser errors (SystemPromptBuilder, WorkflowExecutor)
-- [ ] Callers iterate the returned `errors` array and call `showToolConfigError()` for each entry
+- [x] Unrecognized top-level key (tool name not in registry) → error added to `errors` array; skip that tool entry (FR-82)
+- [x] Unrecognized field within a tool entry → error added; skip that field
+- [x] `enabled` not a boolean → error added; skip field
+- [x] `auto_approve` not a boolean → error added; skip field
+- [x] `allowed_paths` not an array of strings → error added; skip field
+- [x] `blocked_paths` not an array of strings → error added; skip field
+- [x] `allowed_paths`/`blocked_paths` specified for MCP tool → error added stating path enforcement not yet implemented for MCP; skip those fields (keep `enabled`/`auto_approve`)
+- [x] All errors returned as `ToolConfigValidationError[]` (structured data with `sourceFile` and `detail` fields) — the parser does **not** import from `obsidian` and does **not** create Notices
+- [x] `showToolConfigError(plugin, sourceFile, detail)` helper in `src/tool-config/notices.ts` creates Obsidian Notices with source file name, "right-click to jump to note" text, right-click handler (`notice.noticeEl.oncontextmenu`) navigating via `app.workspace.openLinkText()` (RT-3 confirmed), gated on `Platform.isDesktop`
+- [x] `showToolConfigError()` is reusable across all call sites that surface parser errors (SystemPromptBuilder, WorkflowExecutor)
+- [x] Callers iterate the returned `errors` array and call `showToolConfigError()` for each entry
 
 ### MERGE-001: Implement precedence merge engine
 **Description:** Implement `mergeToolConfigs()` that merges multiple `ParsedToolConfig` objects into a single `EffectiveToolConfig` using defined precedence order.
@@ -74,14 +74,14 @@
 - Create `src/tool-config/merger.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Precedence order: workflow (highest) > persona > rule > global defaults
-- [ ] Configs sorted by precedence level (rule=0, persona=1, workflow=2), then by `documentPosition` ascending within same source type
-- [ ] Field-by-field sparse merge: last non-undefined value wins per field
-- [ ] `allowed_paths` and `blocked_paths` use replace semantics (highest-priority level replaces entirely)
-- [ ] Default fill for tools not mentioned: `enabled: true`, `auto_approve: globalAutoApprove[toolName] ?? false`, `allowed_paths: []`, `blocked_paths: []`
-- [ ] `globalAutoApprove` map includes both built-in defaults and pre-flattened MCP server-level `autoApprove[]` entries
-- [ ] `allToolNames` uses the same namespaced `server__tool` format as `globalAutoApprove` keys for MCP tools, so default fill lookups match correctly
-- [ ] Returns `EffectiveToolConfig` with all fields non-optional on every tool entry
+- [x] Precedence order: workflow (highest) > persona > rule > global defaults
+- [x] Configs sorted by precedence level (rule=0, persona=1, workflow=2), then by `documentPosition` ascending within same source type
+- [x] Field-by-field sparse merge: last non-undefined value wins per field
+- [x] `allowed_paths` and `blocked_paths` use replace semantics (highest-priority level replaces entirely)
+- [x] Default fill for tools not mentioned: `enabled: true`, `auto_approve: globalAutoApprove[toolName] ?? false`, `allowed_paths: []`, `blocked_paths: []`
+- [x] `globalAutoApprove` map includes both built-in defaults and pre-flattened MCP server-level `autoApprove[]` entries
+- [x] `allToolNames` uses the same namespaced `server__tool` format as `globalAutoApprove` keys for MCP tools, so default fill lookups match correctly
+- [x] Returns `EffectiveToolConfig` with all fields non-optional on every tool entry
 
 ### PATH-001: Implement path constraint enforcement
 **Description:** Implement `enforcePathConstraints()` and the `TOOL_PATH_PARAMS` descriptor table for dispatch-time path enforcement.
@@ -89,15 +89,15 @@
 - Create `src/tool-config/path-enforcer.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `TOOL_PATH_PARAMS` table maps all 13 built-in tools to their path parameters and namespaces (RT-1 confirmed)
-- [ ] Vault-namespace tools: string prefix matching on vault-relative path
-- [ ] Filesystem-namespace tools: resolve to absolute path via `resolveAndValidatePath` / `isPathWithin` from `src/utils/path-validation.ts`
-- [ ] `blocked_paths` takes precedence over `allowed_paths` (path in both → blocked)
-- [ ] When `allowed_paths` is empty → no allowlist restriction
-- [ ] When `blocked_paths` is empty → no blocklist restriction
-- [ ] `fetch_webpage` (empty params entry) → skip enforcement
-- [ ] MCP tools (not in `TOOL_PATH_PARAMS`) → skip enforcement
-- [ ] Returns `null` if allowed, or error message string if blocked
+- [x] `TOOL_PATH_PARAMS` table maps all 13 built-in tools to their path parameters and namespaces (RT-1 confirmed)
+- [x] Vault-namespace tools: string prefix matching on vault-relative path
+- [x] Filesystem-namespace tools: resolve to absolute path via `resolveAndValidatePath` / `isPathWithin` from `src/utils/path-validation.ts`
+- [x] `blocked_paths` takes precedence over `allowed_paths` (path in both → blocked)
+- [x] When `allowed_paths` is empty → no allowlist restriction
+- [x] When `blocked_paths` is empty → no blocklist restriction
+- [x] `fetch_webpage` (empty params entry) → skip enforcement
+- [x] MCP tools (not in `TOOL_PATH_PARAMS`) → skip enforcement
+- [x] Returns `null` if allowed, or error message string if blocked
 
 ---
 
