@@ -8,7 +8,7 @@
 
 8 additional misalignments identified between the implementation tasks and the current codebase/spec/plan. 0 critical, 4 moderate, 4 minor.
 
-**Resolved:** 5
+**Resolved:** 6
 
 ---
 
@@ -247,7 +247,7 @@ The `dirty` flag is set to `true` when the file watcher detects changes to rule 
 
 ### RT-6.17: `resolveIncludeNotesIfAvailable()` silently skips without metadataCache
 
-**Status:** Open
+**Status:** Resolved
 
 **Affected task:** SYS-002
 
@@ -270,6 +270,8 @@ In practice, `main.ts` always passes `metadataCache` when constructing the build
 **Impact:** If a future code path constructs a `SystemPromptBuilder` without `metadataCache`, rule `<include_note>` tags would silently stop resolving — a silent regression from current behavior.
 
 **Suggested resolution:** Add clarifying note to SYS-002: "The builder must have `metadataCache` set (guaranteed by the current `main.ts` constructor at `getSystemPromptBuilder()`) for rule `<include_note>` resolution to work. Consider adding a warning log if `metadataCache` is absent and rules contain `<include_note>` tags."
+
+**Resolution:** Applied suggested resolution. Clarifying note added to `tasks.md` SYS-002 ACs specifying that the builder must have `metadataCache` set and that a warning log should be emitted if absent when rules contain `<include_note>` tags. `spec.md` FR-81 updated with the `metadataCache` requirement and silent degradation note. `plan.md` SystemPromptBuilder extraction phase updated with a `metadataCache` requirement paragraph documenting the silent skip behavior and the changed failure mode from the VaultRuleManager path.
 
 ---
 

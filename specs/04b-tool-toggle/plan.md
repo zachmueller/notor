@@ -340,6 +340,7 @@ async extractSourceToolConfigs(
 The extraction phase:
 - After `resolveIncludeNotesIfAvailable()` for persona content → `extractToolConfigs(resolved, "persona", persona.system_prompt_path)`. Caches stripped persona content. Emits Notices for any returned `errors` via `showToolConfigError()`.
 - For each matched rule → resolve `<include_note>` tags (currently done in `VaultRuleManager.getActiveRuleContent()`), then `extractToolConfigs(resolved, "rule", rule.file_path)`. Caches stripped per-rule content. Emits Notices for any returned `errors` via `showToolConfigError()`.
+- **`metadataCache` requirement:** `resolveIncludeNotesIfAvailable()` silently returns unresolved text when `metadataCache` is absent (line ~342–344 of `system-prompt.ts`). The builder must have `metadataCache` set — guaranteed by the current `main.ts` constructor at `getSystemPromptBuilder()`. If `metadataCache` is absent and rules contain `<include_note>` tags, a warning log should be emitted to surface this silent degradation (changing the failure mode from the current `VaultRuleManager` path, which always has `app.metadataCache` access, to the builder path).
 
 **Phase 2 — Prompt assembly (modified existing method):**
 

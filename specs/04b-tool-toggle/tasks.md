@@ -187,6 +187,7 @@
 - [ ] `<include_note>` resolution for individual rules migrates from `VaultRuleManager.getActiveRuleContent()` to the builder. The builder iterates each `VaultRule`, resolves includes via `resolveIncludeNotesIfAvailable()`, extracts tool configs, and concatenates stripped content. Error handling per-rule follows the existing try/catch pattern in `vault-rules.ts:202-210`.
 - [ ] Stripped persona content and stripped per-rule contents cached on the builder instance
 - [ ] `<include_note>` resolution runs **before** `<notor_tool_config>` extraction in all cases
+- [ ] The builder must have `metadataCache` set (guaranteed by the current `main.ts` constructor at `getSystemPromptBuilder()`) for rule `<include_note>` resolution to work. If `metadataCache` is absent and rules contain `<include_note>` tags, a warning log should be emitted (the builder's `resolveIncludeNotesIfAvailable()` silently returns unresolved text without `metadataCache`).
 - [ ] `assemble()` (phase 2) uses cached stripped content and receives filtered `toolDefinitions` from the orchestrator — no re-extraction occurs in `assemble()`
 
 ### RULE-001: Add `getMatchedRules()` to VaultRuleManager
