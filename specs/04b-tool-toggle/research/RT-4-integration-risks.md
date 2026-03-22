@@ -118,7 +118,7 @@ B. Add a `ConversationRuntimeState` interface to `src/types.ts` (clearly marked 
 
 C. Store `activeParsedConfigs` directly in the orchestrator as a flat field (no container struct), cleared on conversation end. Simplest, but less structured.
 
-**Resolution:** _Open_
+**Resolution:** **Option C** — Store `activeParsedConfigs` and `effectiveToolConfig` as flat private fields directly on `ChatOrchestrator` (e.g., `private activeParsedConfigs: ParsedToolConfig[] = []` and `private effectiveToolConfig: EffectiveToolConfig | null = null`), cleared on conversation end. The orchestrator already uses flat private fields for all its state (e.g., `workflowPreviousPersona`, `getToolDefinitionsCallback`); a container struct would introduce a pattern that doesn't exist elsewhere in the class. The inspector accesses these via getter methods on the orchestrator. The `Conversation` interface and JSONL persistence layer are untouched — `activeParsedConfigs` is fully derived state, reconstructable from persona/rule/workflow sources on any conversation reload.
 
 ---
 
@@ -256,7 +256,7 @@ Use this section to record agreed resolutions as we work through each risk. Upda
 | 2 | `resolveEffectiveConfig()` placement | HIGH | **Resolved by Risk 1 Option A** — orchestrator owns all ingredients |
 | 3 | No per-rule activation state | HIGH | **Approach 3+4 hybrid** — `getMatchedRules()` on VaultRuleManager; extraction in SystemPromptBuilder |
 | 4 | MCP `autoApprove[]` discarded | HIGH | **Option B** — pre-flatten MCP server `autoApprove[]` into `globalAutoApprove` map |
-| 5 | `Conversation` is DB-persisted | MEDIUM | _Open_ |
+| 5 | `Conversation` is DB-persisted | MEDIUM | **Option C** — flat private fields on `ChatOrchestrator`; `Conversation` untouched |
 | 6 | Workflow extraction invasiveness | MEDIUM | _Open_ |
 | 7 | `toolConfig` singular vs. multi-block | MEDIUM | _Open_ |
 | 8 | `parseYAML` non-throwing edge cases | MEDIUM | _Open_ |

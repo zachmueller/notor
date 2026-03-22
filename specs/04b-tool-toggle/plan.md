@@ -13,7 +13,7 @@
 | Config extraction layer | New `src/tool-config/` module | Keeps parsing, merging, and enforcement logic isolated and testable; avoids scattering tool-config concerns across existing modules |
 | YAML parsing | `js-yaml` (already a transitive dep via Obsidian's bundled environment; use `parseYAML` from `obsidian` if available, otherwise `js-yaml`) | The spec bodies are already YAML; a dedicated parser handles edge cases cleanly; avoid rolling a hand-written parser for structured data |
 | Regex approach for tag extraction | Hardened regex: `/^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm` | RT-2 confirmed: ~4× faster than line-by-line on all realistic input; `^`+`m` hardening eliminates pathological backtracking |
-| `EffectiveToolConfig` scope | Recomputed before each LLM call; stored on the active conversation context as `activeParsedConfigs: ParsedToolConfig[]` + resolved `EffectiveToolConfig`; cleared on conversation end | Per-message recomputation reflects dynamic rule activation/deactivation (spec clarification Q5); no persistence between conversations |
+| `EffectiveToolConfig` scope | Recomputed before each LLM call; stored as flat private fields on `ChatOrchestrator` (`activeParsedConfigs: ParsedToolConfig[]` + `effectiveToolConfig: EffectiveToolConfig | null`); cleared on conversation end; inspector accesses via getter methods | Per-message recomputation reflects dynamic rule activation/deactivation (spec clarification Q5); no persistence between conversations; `Conversation` interface untouched |
 | `ToolRegistry.getFilteredToolDefinitions()` | New method alongside existing `getToolDefinitions()` | Additive change; existing callers unaffected; filtered variant called before each LLM call in `ChatOrchestrator.responseLoop()` |
 | Dispatcher enforcement | `setEffectiveToolConfig()` injected before each LLM call; enabled check runs first in `dispatch()`, path enforcement runs after mode/approve checks | Matches FR-83 (enabled check first) and FR-84 (path enforcement before execution) |
 | Tool config extraction ownership | `SystemPromptBuilder` owns extraction for persona and rule sources; `WorkflowExecutor` owns extraction for workflow source | Builder already processes each source in distinct labeled code paths (persona content, per-rule content) so source attribution (`"persona"` / `"rule"`) is natural. VaultRuleManager stays extraction-unaware; it just exposes `getMatchedRules()` for stateless dynamic evaluation. See RT-4 Risk 3 resolution. |
@@ -354,7 +354,7 @@ Add a private `resolveEffectiveConfig()` method that:
 2. Collects `workflowToolConfig` from the active workflow's `WorkflowAssemblyResult.toolConfigs` (if any).
 3. Reads `personaAutoApprove` from the active persona's Phase 4 overrides (if any).
 4. Merges via `mergeToolConfigs([...workflowConfigs, ...personaToolConfigs, ...ruleToolConfigs], globalAutoApprove, personaAutoApprove, allToolNames)`.
-5. Stores the contributing `ParsedToolConfig[]` as `activeParsedConfigs` on the orchestrator's runtime state (accessible to the inspector).
+5. Stores the contributing `ParsedToolConfig[]` as `this.activeParsedConfigs` (a flat private field on the orchestrator, exposed to the inspector via a getter method).
 6. Calls `dispatcher.setEffectiveToolConfig(result)`.
 7. Uses `toolRegistry.getFilteredToolDefinitions(result)` when building the tool list for the `provider.sendMessage()` call.
 
@@ -370,7 +370,7 @@ The orchestrator receives the following dependencies (injected from `main.ts` at
 #### Modified: `src/main.ts`
 
 - Builds a unified `globalAutoApprove: Record<string, boolean>` map that merges built-in tool defaults (from `settings.auto_approve`) with MCP server-level `autoApprove[]` lists (iterates all configured MCP servers, expands each server's `autoApprove: string[]` into namespaced `server__tool` keys set to `true`). Injects this along with `toolRegistry` and `personaAutoApprove` into the orchestrator (via constructor params or setters) so the orchestrator can call `resolveEffectiveConfig()` independently.
-- On conversation end, calls `dispatcher.setEffectiveToolConfig(null)` and clears `activeParsedConfigs` to revert to global defaults.
+- On conversation end, calls `dispatcher.setEffectiveToolConfig(null)` and tells the orchestrator to clear its `activeParsedConfigs` and `effectiveToolConfig` fields to revert to global defaults.
 - No longer owns `resolveEffectiveConfig()` — that logic now lives in the orchestrator where it has direct access to `assemble()` output and the per-loop call cadence.
 
 ---
@@ -415,7 +415,7 @@ Implements FR-88. A `ItemView` registered under a unique view type (e.g., `"noto
 - On any selection change: calls `resolveEffectiveConfig()` (the same shared function from `main.ts`) with the selected persona/workflow/rules and displays the result.
 
 **Live in-chat mode** (active conversation):
-- Reads the `EffectiveToolConfig` and `activeParsedConfigs: ParsedToolConfig[]` from the conversation context object.
+- Reads the `EffectiveToolConfig` and `activeParsedConfigs: ParsedToolConfig[]` from the orchestrator via getter methods (e.g., `orchestrator.getEffectiveToolConfig()`, `orchestrator.getActiveParsedConfigs()`).
 - Displays each tool's resolved values with source attribution — the source file name comes from `ParsedToolConfig.sourceFile` in `activeParsedConfigs`. The display updates automatically as `activeParsedConfigs` changes between messages (e.g., when rules activate/deactivate).
 
 **Display format**: a table per tool showing `enabled`, `auto_approve`, `allowed_paths`, `blocked_paths`, and the source note link for each field. Fields at global defaults shown in muted style.
