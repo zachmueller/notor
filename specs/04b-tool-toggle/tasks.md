@@ -180,6 +180,7 @@
 **Acceptance Criteria:**
 - [ ] In `extractSourceToolConfigs()`: after `resolveIncludeNotesIfAvailable()` for persona content → `extractToolConfigs(resolved, "persona", persona.system_prompt_path)` called
 - [ ] In `extractSourceToolConfigs()`: for each matched rule → `<include_note>` tags resolved, then `extractToolConfigs(resolved, "rule", rule.file_path)` called
+- [ ] `<include_note>` resolution for individual rules migrates from `VaultRuleManager.getActiveRuleContent()` to the builder. The builder iterates each `VaultRule`, resolves includes via `resolveIncludeNotesIfAvailable()`, extracts tool configs, and concatenates stripped content. Error handling per-rule follows the existing try/catch pattern in `vault-rules.ts:202-210`.
 - [ ] Stripped persona content and stripped per-rule contents cached on the builder instance
 - [ ] `<include_note>` resolution runs **before** `<notor_tool_config>` extraction in all cases
 - [ ] `assemble()` (phase 2) uses cached stripped content and receives filtered `toolDefinitions` from the orchestrator — no re-extraction occurs in `assemble()`

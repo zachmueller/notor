@@ -8,7 +8,7 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
-**Resolved:** 2 (RT-6.1, RT-6.2)
+**Resolved:** 3 (RT-6.1, RT-6.2, RT-6.3)
 
 ---
 
@@ -50,7 +50,9 @@ Orchestrator per-iteration flow: extract (phase 1) → merge → filter → asse
 
 ## Moderate
 
-### RT-6.3: SYS-002 implicitly migrates `<include_note>` resolution for rules
+### RT-6.3: ~~SYS-002 implicitly migrates `<include_note>` resolution for rules~~ **RESOLVED**
+
+**Status:** Resolved — explicit AC added to SYS-002.
 
 **Affected task:** SYS-002
 
@@ -68,7 +70,9 @@ The builder (`src/chat/system-prompt.ts`) currently receives pre-resolved rule c
 
 This is a non-trivial responsibility shift that isn't called out as a distinct acceptance criterion. The builder will also need error handling per-rule (matching the existing try/catch at `vault-rules.ts:202-210`).
 
-**Fix:** Add an explicit AC to SYS-002: "`<include_note>` resolution for individual rules migrates from `VaultRuleManager.getActiveRuleContent()` to the builder. The builder iterates each `VaultRule`, resolves includes, extracts tool configs, and concatenates stripped content. Error handling per-rule follows the existing pattern in `vault-rules.ts:202-210`."
+**Changes applied:**
+- `tasks.md`: SYS-002 gains explicit AC: "`<include_note>` resolution for individual rules migrates from `VaultRuleManager.getActiveRuleContent()` to the builder. The builder iterates each `VaultRule`, resolves includes via `resolveIncludeNotesIfAvailable()`, extracts tool configs, and concatenates stripped content. Error handling per-rule follows the existing try/catch pattern in `vault-rules.ts:202-210`."
+- `spec.md` and `plan.md`: Already describe this migration correctly (FR-81 two-phase API; plan § SystemPromptBuilder phase 1 extraction). No changes needed.
 
 ---
 
