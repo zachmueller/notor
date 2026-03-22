@@ -1,6 +1,6 @@
 # RT-5 — Integration Risks Round 2: Deeper Codebase Scan
 
-**Status:** Open — 11 risks identified, 4 resolved
+**Status:** Open — 11 risks identified, 5 resolved
 **Created:** 2026-03-22
 **Source:** Full codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md), building on the resolved risks in [RT-4](RT-4-integration-risks.md)
 
@@ -91,9 +91,13 @@ Tool definitions are passed in once at loop entry and reused for every LLM call 
 
 ---
 
-## Risk 5 (MEDIUM) — `<include_note>` resolution ownership transfer leaves dual code paths
+## Risk 5 (MEDIUM) — `<include_note>` resolution ownership transfer leaves dual code paths — RESOLVED
 
-**Finding:**
+**Status:** Resolved (plan amendment)
+
+**Resolution:** `getActiveRuleContent()` is deprecated outright in Phase 4b. All orchestrator call sites (`responseLoop` at line 1132, `_backgroundResponseLoop` at line 728) migrate to `getMatchedRules()` so the builder can process each rule individually (per-file `<include_note>` resolution + per-file tool config extraction with source attribution). No code path in Phase 4b calls `getActiveRuleContent()`, eliminating the dual-path risk where `<notor_tool_config>` blocks embedded via `<include_note>` would survive unextracted. The plan's backward-compatibility language for `getActiveRuleContent()` is replaced with an explicit deprecation statement. This resolution also addresses the background workflow aspect of Risk 8.
+
+**Original Finding:**
 Currently, `getActiveRuleContent()` resolves `<include_note>` tags internally for each matched rule:
 
 ```typescript
@@ -106,12 +110,6 @@ const resolved = await resolveIncludeNotes(
 RT-4 Risk 3 resolved this by introducing `getMatchedRules()` returning raw `VaultRule[]`, with the builder taking over include resolution. The plan says `getActiveRuleContent()` "remains available for backward compatibility."
 
 > Relevant files: `src/rules/vault-rules.ts` (lines 173-223)
-
-**Conflict:**
-If any code path (background workflows, future callers) still uses `getActiveRuleContent()`, includes get resolved inside the rule manager. Any `<notor_tool_config>` blocks embedded via `<include_note>` would survive into the final content unextracted — the builder's extraction pass never runs on that path. The two methods have subtly different semantics for the same underlying rules.
-
-**Recommendation:**
-Either deprecate `getActiveRuleContent()` outright in this phase (make the orchestrator the sole caller of `getMatchedRules()`), or have `getActiveRuleContent()` internally call `getMatchedRules()` + builder-style processing so both paths produce identical results. Add a code comment marking the old method as legacy if kept.
 
 ---
 
@@ -254,7 +252,7 @@ No action needed. Informational only — the stripping happens before `assemble(
 | 2 | Orchestrator lacks direct `ToolRegistry` reference | HIGH | Resolved (callback) |
 | 3 | Filtered tool defs must go to both `assemble()` and `sendMessage()` | MEDIUM | Resolved (plan+spec) |
 | 4 | `toolDefinitions` captured once at loop entry, not per-iteration | MEDIUM | Resolved (plan+spec) |
-| 5 | `<include_note>` resolution ownership leaves dual code paths | MEDIUM | Open |
+| 5 | `<include_note>` resolution ownership leaves dual code paths | MEDIUM | Resolved (plan amendment) |
 | 6 | Parser needs MCP server config for FR-82 inactive-server Notice | MEDIUM | Open |
 | 7 | MCP auto-approve path needs `effectiveToolConfig` bypass too | MEDIUM | Open |
 | 8 | Background workflow path needs `toolConfigs` extraction | MEDIUM | Open |
