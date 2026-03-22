@@ -1,6 +1,6 @@
 # RT-4 — Integration Risks: Phase 4b vs. Current Codebase
 
-**Status:** Open — working through resolutions iteratively
+**Status:** In progress — working through resolutions iteratively
 **Created:** 2026-03-22
 **Source:** Codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md)
 
@@ -30,7 +30,7 @@ B. Give the orchestrator a `getFilteredToolDefinitions: () => ToolDefinition[]` 
 
 C. Relax the per-loop recomputation requirement: accept that rule-based tool config changes take effect on the next user message, not mid-loop. This weakens the spec clarification Q5 contract but significantly simplifies the integration.
 
-**Resolution:** _Open_
+**Resolution:** **Option A** — Move `resolveEffectiveConfig()` into `ChatOrchestrator`. The orchestrator already re-calls `systemPromptBuilder.assemble()` on each loop iteration; it will call `resolveEffectiveConfig()` at the same point and pass filtered tool defs to the provider. This also resolves Risk 2 (the orchestrator owns all the ingredients: it calls `assemble()`, holds the rule manager reference, and knows the active persona).
 
 ---
 
@@ -52,7 +52,7 @@ B. Add an observer/callback on the orchestrator: `onPersonaToolConfigsExtracted:
 
 C. Change `SystemPromptBuilder.assemble()` return type as the plan describes, but collect and forward `personaToolConfigs` through the orchestrator's existing return/event surface rather than back to `main.ts`.
 
-**Resolution:** _Open_
+**Resolution:** **Resolved by Risk 1 Option A** — `resolveEffectiveConfig()` lives in the orchestrator, which already calls `assemble()` and has direct access to `personaToolConfigs`. No upward surface needed.
 
 ---
 
@@ -252,8 +252,8 @@ Use this section to record agreed resolutions as we work through each risk. Upda
 
 | # | Risk | Severity | Resolution |
 |---|---|---|---|
-| 1 | Tool defs captured once per send | HIGH | _Open_ |
-| 2 | `resolveEffectiveConfig()` placement | HIGH | _Open_ |
+| 1 | Tool defs captured once per send | HIGH | **Option A** — `resolveEffectiveConfig()` moves to `ChatOrchestrator` |
+| 2 | `resolveEffectiveConfig()` placement | HIGH | **Resolved by Risk 1 Option A** — orchestrator owns all ingredients |
 | 3 | No per-rule activation state | HIGH | _Open_ |
 | 4 | MCP `autoApprove[]` discarded | HIGH | _Open_ |
 | 5 | `Conversation` is DB-persisted | MEDIUM | _Open_ |

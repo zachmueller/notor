@@ -440,7 +440,7 @@ Unlike `ParsedToolConfig`, all fields on `ResolvedToolConfigEntry` are present a
 
 - `<include_note>` resolution runs before `<notor_tool_config>` extraction in the ingestion pipeline. This is a firm ordering constraint.
 - Tool enabled/disabled state is **not** exposed in the global Settings UI. The `<notor_tool_config>` tag is the only mechanism for customizing which tools are enabled. This is by design — see the design plan for motivation.
-- The existing `ToolRegistry.getToolDefinitions()` returns all registered tools unfiltered. Filtering using `getFilteredToolDefinitions()` is applied by this feature at the call sites in `main.ts` that consume tool definitions.
+- The existing `ToolRegistry.getToolDefinitions()` returns all registered tools unfiltered. Filtering using `getFilteredToolDefinitions()` is applied by this feature inside `ChatOrchestrator` before each LLM call (since the orchestrator owns the per-loop response cycle and calls `resolveEffectiveConfig()`).
 - Provider implementations handle empty `tools` arrays correctly (no tools in request body), consistent with how providers behave when no tools are registered.
 - The `EffectiveToolConfig` is recomputed before each LLM call (to reflect dynamic rule activation/deactivation) and does not persist between conversations.
 - The Notor top-level directory value (used by FR-87 to locate persona folders) is the value configured in plugin settings.

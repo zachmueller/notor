@@ -14,9 +14,9 @@
 | YAML parsing | `js-yaml` (already a transitive dep via Obsidian's bundled environment; use `parseYAML` from `obsidian` if available, otherwise `js-yaml`) | The spec bodies are already YAML; a dedicated parser handles edge cases cleanly; avoid rolling a hand-written parser for structured data |
 | Regex approach for tag extraction | Hardened regex: `/^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm` | RT-2 confirmed: ~4× faster than line-by-line on all realistic input; `^`+`m` hardening eliminates pathological backtracking |
 | `EffectiveToolConfig` scope | Recomputed before each LLM call; stored on the active conversation context as `activeParsedConfigs: ParsedToolConfig[]` + resolved `EffectiveToolConfig`; cleared on conversation end | Per-message recomputation reflects dynamic rule activation/deactivation (spec clarification Q5); no persistence between conversations |
-| `ToolRegistry.getFilteredToolDefinitions()` | New method alongside existing `getToolDefinitions()` | Additive change; existing callers unaffected; filtered variant called before each LLM call in `main.ts` |
+| `ToolRegistry.getFilteredToolDefinitions()` | New method alongside existing `getToolDefinitions()` | Additive change; existing callers unaffected; filtered variant called before each LLM call in `ChatOrchestrator.responseLoop()` |
 | Dispatcher enforcement | `setEffectiveToolConfig()` injected before each LLM call; enabled check runs first in `dispatch()`, path enforcement runs after mode/approve checks | Matches FR-83 (enabled check first) and FR-84 (path enforcement before execution) |
-| Inspector code sharing | Pre-flight and live modes both call the same `resolveEffectiveConfig()` function used by `main.ts` | NFR-25 mandate: no duplicate logic; inspector is a pure consumer of shared pipeline functions |
+| Inspector code sharing | Pre-flight and live modes both call the same `resolveEffectiveConfig()` function used by `ChatOrchestrator` | NFR-25 mandate: no duplicate logic; inspector is a pure consumer of shared pipeline functions |
 
 ### Technology Stack
 
@@ -35,7 +35,8 @@ This feature is entirely within the existing TypeScript/Obsidian plugin stack:
 | `WorkflowExecutor` | After resolving `<include_note>` in workflow body, extract and strip tool config; include `ParsedToolConfig` in `WorkflowAssemblyResult` |
 | `ToolDispatcher` | New `setEffectiveToolConfig()` method; enabled check + path enforcement in `dispatch()` |
 | `ToolRegistry` | New `getFilteredToolDefinitions(config)` method called before each LLM call |
-| `main.ts` | Orchestrates collection of `ParsedToolConfig[]` from all active sources, merges into `EffectiveToolConfig`, injects into dispatcher and registry call sites |
+| `ChatOrchestrator` | Owns `resolveEffectiveConfig()`: collects `ParsedToolConfig[]` from all active sources (persona via `assemble()`, rules via `VaultRuleManager`, workflow via `WorkflowAssemblyResult`), merges into `EffectiveToolConfig`, injects into dispatcher, and calls `getFilteredToolDefinitions()` before each provider call in `responseLoop()` |
+| `main.ts` | Injects dependencies into the orchestrator (tool registry, vault rule manager, global/persona auto-approve maps); clears `effectiveToolConfig` on conversation end |
 
 ---
 
@@ -321,19 +322,32 @@ After `resolveIncludeNotesIfAvailable()` is called for persona content, pipe the
 
 ---
 
-#### Modified: `src/main.ts`
+#### Modified: `src/chat/orchestrator.ts` — `ChatOrchestrator`
 
-Add a `resolveEffectiveConfig()` helper that:
-1. Collects `personaToolConfigs` from `SystemPromptBuilder.assemble()` result.
+Add a private `resolveEffectiveConfig()` method that:
+1. Collects `personaToolConfigs` from the most recent `SystemPromptBuilder.assemble()` result (the orchestrator already calls `assemble()` and holds the result).
 2. Collects `ruleToolConfigs` from `VaultRuleManager.getActiveRuleToolConfigs()`.
-3. Collects `workflowToolConfig` from the active workflow's `WorkflowAssemblyResult.toolConfig` (if any).
+3. Collects `workflowToolConfig` from the active workflow's `WorkflowAssemblyResult.toolConfigs` (if any).
 4. Reads `personaAutoApprove` from the active persona's Phase 4 overrides (if any).
 5. Merges via `mergeToolConfigs([...workflowConfigs, ...personaConfigs, ...ruleConfigs], globalAutoApprove, personaAutoApprove, allToolNames)`.
-6. Stores the contributing `ParsedToolConfig[]` as `activeParsedConfigs` on the conversation context object.
+6. Stores the contributing `ParsedToolConfig[]` as `activeParsedConfigs` on the orchestrator's runtime state (accessible to the inspector).
 7. Calls `dispatcher.setEffectiveToolConfig(result)`.
-8. Uses `toolRegistry.getFilteredToolDefinitions(result)` when building the tool list for the provider call.
+8. Uses `toolRegistry.getFilteredToolDefinitions(result)` when building the tool list for the `provider.sendMessage()` call.
 
-Call `resolveEffectiveConfig()` **before each LLM call** (not just at conversation start), so that dynamic rule activation/deactivation is reflected in the effective config. On conversation end, call `dispatcher.setEffectiveToolConfig(null)` and clear `activeParsedConfigs` to revert to global defaults.
+Call `resolveEffectiveConfig()` inside `responseLoop()` **before each `provider.sendMessage()` call** (at the same point where `systemPromptBuilder.assemble()` is already called per-iteration). This ensures dynamic rule activation/deactivation is reflected in the effective config on every loop iteration, not just at conversation start.
+
+The orchestrator receives the following dependencies (injected from `main.ts` at construction or via setters):
+- `toolRegistry: ToolRegistry`
+- `globalAutoApprove: Record<string, boolean>`
+- `personaAutoApprove: Record<string, boolean>`
+
+---
+
+#### Modified: `src/main.ts`
+
+- Injects `toolRegistry`, `globalAutoApprove`, and `personaAutoApprove` into the orchestrator (via constructor params or setters) so the orchestrator can call `resolveEffectiveConfig()` independently.
+- On conversation end, calls `dispatcher.setEffectiveToolConfig(null)` and clears `activeParsedConfigs` to revert to global defaults.
+- No longer owns `resolveEffectiveConfig()` — that logic now lives in the orchestrator where it has direct access to `assemble()` output and the per-loop call cadence.
 
 ---
 
@@ -436,14 +450,14 @@ function showToolConfigError(
 ### Technical Risks
 
 - **Medium:** `parseYAML` from `obsidian` package behavior under malformed input needs verification — confirm it throws rather than returning `undefined` on invalid YAML, so the try/catch in the parser catches it correctly.
-- **Medium:** `SystemPromptBuilder.assemble()` return type change is a breaking signature change — all call sites in `main.ts` (and any tests) must be updated. Strictly additive to the returned object, so runtime compatibility is not a concern, but TypeScript compilation will surface all sites.
+- **Medium:** `SystemPromptBuilder.assemble()` return type change is a breaking signature change — the orchestrator (primary call site) and any tests must be updated. Strictly additive to the returned object, so runtime compatibility is not a concern, but TypeScript compilation will surface all sites.
 - **Low:** `EffectiveToolConfig` is recomputed before each LLM call (spec clarification Q5). This subsumes the workflow-invocation recomputation concern — `resolveEffectiveConfig()` runs every message, so workflow changes and rule activation/deactivation are picked up automatically. The per-message overhead is negligible (NFR-22: O(t × l) merge with t ≤ ~15 tools and l ≤ 4 levels).
 - **Low:** Inspector pre-flight rule evaluation uses a synthetic prompt. The existing `ruleMatches()` function in `VaultRuleManager` currently uses `accessedNotes` (a Set of vault paths), not prompt text. A thin adapter in the inspector will map the typed prompt into a synthetic accessed-notes set (e.g., extract note path mentions). This is documented in the spec clarification and does not require changes to `ruleMatches()` itself.
 
 ### Mitigation Strategies
 
 - Verify `parseYAML` behavior with a targeted unit test before wiring into the parser.
-- Update `main.ts` call sites immediately after changing `SystemPromptBuilder.assemble()` — treat this as an atomic change.
+- Update orchestrator call sites immediately after changing `SystemPromptBuilder.assemble()` — treat this as an atomic change.
 - `resolveEffectiveConfig()` runs before each LLM call, so no special `WorkflowInvokedEvent` call site is needed — workflow and rule changes are picked up automatically.
 
 ### Dependencies and Assumptions
@@ -483,6 +497,6 @@ Suggested task groups:
 | **A** | New `src/tool-config/` module: `types.ts`, `parser.ts`, `merger.ts`, `path-enforcer.ts` |
 | **B** | Dispatcher modifications: `setEffectiveToolConfig()`, enabled check, path enforcement |
 | **C** | Ingestion pipeline modifications: `SystemPromptBuilder`, `VaultRuleManager`, `WorkflowExecutor` |
-| **D** | `ToolRegistry.getFilteredToolDefinitions()` + `main.ts` wiring |
+| **D** | `ToolRegistry.getFilteredToolDefinitions()` + `ChatOrchestrator` wiring (`resolveEffectiveConfig()`, `responseLoop()` integration) + `main.ts` dependency injection |
 | **E** | Settings UI: "Copy tool config YAML" button + Settings → Personas section |
 | **F** | Effective Config Inspector leaf view |
