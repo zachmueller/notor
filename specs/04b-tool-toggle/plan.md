@@ -417,6 +417,8 @@ Callers of `responseLoop()` (`handleUserMessage()`, `executeWorkflow()`) no long
 - The pre-dispatch auto-approve status check (line ~846: `this.settings.auto_approve[toolName] ?? false`) is updated to use `effectiveToolConfig.tools[toolName]?.auto_approve` (with fallback to global settings when `effectiveToolConfig` is null). This ensures the concurrency manager UI status (`"waiting_approval"` vs `"running"`) reflects the effective config — including persona, rule, and workflow overrides — not just global settings.
 - This ensures background workflow execution has the same two-phase tool config extraction, precedence merging, and per-iteration recomputation as the foreground path.
 
+**Conversation-end cleanup:** `orchestrator.newConversation()` is the single cleanup site for tool config state. It clears `activeParsedConfigs` and `effectiveToolConfig`, and calls `dispatcher.setEffectiveToolConfig(null)` to revert the dispatcher to global defaults. This is co-located with existing conversation-end cleanup (persona revert, message clearing) already performed by `newConversation()`.
+
 The orchestrator receives the following dependencies (injected from `main.ts` at construction or via setters):
 - `getToolDefinitionsCallback: (config?: EffectiveToolConfig) => ToolDefinition[]` — the existing callback signature is widened to accept an optional `EffectiveToolConfig`. When a config is passed, `main.ts` delegates to `toolRegistry.getFilteredToolDefinitions(config)`; when omitted, it falls back to `toolRegistry.getToolDefinitions()`. This preserves the existing loose coupling (no direct `ToolRegistry` dependency on the orchestrator).
 
@@ -427,7 +429,7 @@ Note: `globalAutoApprove` is **not** injected as a static dependency. Instead, i
 #### Modified: `src/main.ts`
 
 - Updates the existing `getToolDefinitionsCallback` to accept an optional `EffectiveToolConfig` parameter: when provided, it delegates to `toolRegistry.getFilteredToolDefinitions(config)`; when omitted, it falls back to `toolRegistry.getToolDefinitions()`. Note: `globalAutoApprove` is no longer built or injected by `main.ts` — the orchestrator builds it per-iteration inside `resolveEffectiveConfig()` from `this.settings` (RT-6.14 resolution).
-- On conversation end, calls `dispatcher.setEffectiveToolConfig(null)` and tells the orchestrator to clear its `activeParsedConfigs` and `effectiveToolConfig` fields to revert to global defaults.
+- Conversation-end cleanup of `effectiveToolConfig` and `activeParsedConfigs` is **not** performed by `main.ts`. Instead, it is owned by `orchestrator.newConversation()` (see ChatOrchestrator section below), which clears both fields and calls `dispatcher.setEffectiveToolConfig(null)`. This keeps all orchestrator internal state cleanup in a single method that already handles persona revert and conversation reset.
 - No longer owns `resolveEffectiveConfig()` — that logic now lives in the orchestrator where it has direct access to `assemble()` output and the per-loop call cadence.
 
 ---

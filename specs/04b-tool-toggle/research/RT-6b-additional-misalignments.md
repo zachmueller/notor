@@ -8,7 +8,7 @@
 
 8 additional misalignments identified between the implementation tasks and the current codebase/spec/plan. 0 critical, 4 moderate, 4 minor.
 
-**Resolved:** 2
+**Resolved:** 3
 
 ---
 
@@ -127,7 +127,7 @@ Option (a) is recommended.
 
 ### RT-6.15: Conversation-end cleanup location unspecified
 
-**Status:** Open
+**Status:** Resolved
 
 **Affected tasks:** ORCH-004, MAIN-001
 
@@ -176,6 +176,8 @@ Neither task specifies whether the clear happens in `main.ts`'s callback (which 
 **Impact:** If cleanup is added to the wrong location, the effective config might not be cleared before the new conversation's first `resolveEffectiveConfig()` call. The `main.ts` callback's async `loadSettings()` chain creates a timing consideration — if `dispatcher.setEffectiveToolConfig(null)` is placed after `loadSettings()`, there's a window where stale config remains.
 
 **Suggested resolution:** Specify that `orchestrator.newConversation()` clears `activeParsedConfigs`, `effectiveToolConfig`, and calls `dispatcher.setEffectiveToolConfig(null)` — since it already owns orchestrator internal state cleanup (persona revert, etc.). Update both ORCH-004 AC 3 and MAIN-001 AC 4 to point to `orchestrator.newConversation()` as the single cleanup site.
+
+**Resolution:** Applied suggested resolution. `orchestrator.newConversation()` is now specified as the single cleanup site for conversation-end tool config state. Changes applied: `spec.md` FR-81 and FR-88 updated to specify `newConversation()` as the cleanup location; `plan.md` orchestrator section updated with a "Conversation-end cleanup" paragraph documenting that `newConversation()` clears `activeParsedConfigs`, `effectiveToolConfig`, and calls `dispatcher.setEffectiveToolConfig(null)`, and `main.ts` section updated to note it does not perform separate cleanup; `tasks.md` ORCH-004 AC 3 updated to specify `newConversation()` as cleanup site including `dispatcher.setEffectiveToolConfig(null)` call, MAIN-001 AC updated to note cleanup is owned by `orchestrator.newConversation()` not `main.ts`.
 
 ---
 
