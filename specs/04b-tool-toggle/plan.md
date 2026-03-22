@@ -210,7 +210,7 @@ Primary public API:
 function mergeToolConfigs(
   configs: ParsedToolConfig[],
   globalAutoApprove: Record<string, boolean>,
-  allToolNames: string[],
+  allToolNames: string[],  // MCP tools use namespaced server__tool format, matching globalAutoApprove keys
 ): EffectiveToolConfig
 ```
 

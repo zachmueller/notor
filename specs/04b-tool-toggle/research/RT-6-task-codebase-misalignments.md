@@ -8,7 +8,7 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
-**Resolved:** 7 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6, RT-6.7)
+**Resolved:** 8 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6, RT-6.7, RT-6.8)
 
 ---
 
@@ -152,7 +152,9 @@ This check only uses global settings — ignores persona overrides, rule overrid
 
 ---
 
-### RT-6.8: MERGE-001 doesn't specify MCP tool name format for `allToolNames`
+### RT-6.8: ~~MERGE-001 doesn't specify MCP tool name format for `allToolNames`~~ **RESOLVED**
+
+**Status:** Resolved — note added to MERGE-001 and plan.md merger contract.
 
 **Affected task:** MERGE-001
 
@@ -160,7 +162,10 @@ MERGE-001 AC 5 says default fill uses `globalAutoApprove[toolName]`. AC 6 says `
 
 MCP tool naming convention uses `__` separator — see `src/chat/dispatcher.ts:386` where `isMcpTool(toolName)` checks for this pattern. If `allToolNames` contains MCP tools in a different format, the default fill won't match `globalAutoApprove` keys.
 
-**Fix:** Add a note to MERGE-001 that `allToolNames` must use the same namespaced `server__tool` format as `globalAutoApprove` keys.
+**Changes applied:**
+- `tasks.md`: MERGE-001 gains new AC: "`allToolNames` uses the same namespaced `server__tool` format as `globalAutoApprove` keys for MCP tools, so default fill lookups match correctly."
+- `plan.md`: `mergeToolConfigs()` signature comment on `allToolNames` parameter notes the `server__tool` format requirement.
+- `spec.md`: No changes needed — FR-80 already describes `globalAutoApprove` with pre-flattened namespaced `server__tool` keys, and the format contract is implicitly consistent.
 
 ---
 

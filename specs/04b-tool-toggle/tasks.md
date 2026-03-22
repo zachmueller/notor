@@ -80,6 +80,7 @@
 - [ ] `allowed_paths` and `blocked_paths` use replace semantics (highest-priority level replaces entirely)
 - [ ] Default fill for tools not mentioned: `enabled: true`, `auto_approve: globalAutoApprove[toolName] ?? false`, `allowed_paths: []`, `blocked_paths: []`
 - [ ] `globalAutoApprove` map includes both built-in defaults and pre-flattened MCP server-level `autoApprove[]` entries
+- [ ] `allToolNames` uses the same namespaced `server__tool` format as `globalAutoApprove` keys for MCP tools, so default fill lookups match correctly
 - [ ] Returns `EffectiveToolConfig` with all fields non-optional on every tool entry
 
 ### PATH-001: Implement path constraint enforcement
