@@ -228,16 +228,16 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/chat/orchestrator.ts`
 **Dependencies:** MERGE-001, DISP-001, REG-001, SYS-001
 **Acceptance Criteria:**
-- [ ] Private method `resolveEffectiveConfig()` added
-- [ ] Calls `systemPromptBuilder.extractSourceToolConfigs(matchedRules, persona)` first (phase 1) to get `{ personaToolConfigs, ruleToolConfigs }` — this caches stripped content on the builder
-- [ ] Collects `workflowToolConfigs` from active workflow's `WorkflowAssemblyResult.toolConfigs`
-- [ ] Builds `globalAutoApprove: Record<string, boolean>` per-iteration by reading `this.settings.auto_approve` (built-in defaults) and `this.settings.mcp_servers` (expanding each non-disabled server's `autoApprove[]` into namespaced `server__tool` keys). This is rebuilt on every call, not cached.
-- [ ] Calls `mergeToolConfigs()` with all configs, the freshly-built `globalAutoApprove`, and `allToolNames`
-- [ ] Stores contributing `ParsedToolConfig[]` as `this.activeParsedConfigs`
-- [ ] Stores merged result as `this.effectiveToolConfig`
-- [ ] Calls `dispatcher.setEffectiveToolConfig(result)`
-- [ ] Computes filtered tool definitions via `this.getToolDefinitionsCallback(result)`
-- [ ] Returns filtered tool definitions for use in both `assemble()` (phase 2) and `sendMessage()`
+- [x] Private method `resolveEffectiveConfig()` added
+- [x] Calls `systemPromptBuilder.extractSourceToolConfigs(matchedRules, persona)` first (phase 1) to get `{ personaToolConfigs, ruleToolConfigs }` — this caches stripped content on the builder
+- [x] Collects `workflowToolConfigs` from active workflow's `WorkflowAssemblyResult.toolConfigs`
+- [x] Builds `globalAutoApprove: Record<string, boolean>` per-iteration by reading `this.settings.auto_approve` (built-in defaults) and `this.settings.mcp_servers` (expanding each non-disabled server's `autoApprove[]` into namespaced `server__tool` keys). This is rebuilt on every call, not cached.
+- [x] Calls `mergeToolConfigs()` with all configs, the freshly-built `globalAutoApprove`, and `allToolNames`
+- [x] Stores contributing `ParsedToolConfig[]` as `this.activeParsedConfigs`
+- [x] Stores merged result as `this.effectiveToolConfig`
+- [x] Calls `dispatcher.setEffectiveToolConfig(result)`
+- [x] Computes filtered tool definitions via `this.getToolDefinitionsCallback(result)`
+- [x] Returns filtered tool definitions for use in both `assemble()` (phase 2) and `sendMessage()`
 
 ### ORCH-002: Wire `resolveEffectiveConfig()` into foreground `responseLoop()`
 **Description:** Remove `toolDefinitions` parameter from `responseLoop()` and compute tool definitions fresh on each iteration using the two-phase builder pattern: extract → merge → filter → assemble.
@@ -245,15 +245,15 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/chat/orchestrator.ts`
 **Dependencies:** ORCH-001, SYS-002, RULE-001
 **Acceptance Criteria:**
-- [ ] `toolDefinitions` parameter removed from `responseLoop()`
-- [ ] Per-iteration flow inside the while-loop: (1) call `resolveEffectiveConfig()` which internally calls `extractSourceToolConfigs()` + merge + filter, (2) call `assemble()` with the filtered tool definitions returned by step 1
-- [ ] `vaultRuleManager.getMatchedRules()` called per iteration and passed into `resolveEffectiveConfig()` (which forwards to `extractSourceToolConfigs(matchedRules, persona)`)
-- [ ] Filtered tool definitions from `resolveEffectiveConfig()` passed to both `assemble()` and `sendMessage()`
-- [ ] Callers of `responseLoop()` (`handleUserMessage()`, `executeWorkflow()`) no longer pass `toolDefinitions`
-- [ ] `handleUserMessage()` public signature updated to remove `toolDefinitions` parameter (it is no longer accepted from external callers)
-- [ ] The `main.ts` `setOnSendMessage` callback updated to call `handleUserMessage(content, attachments)` without tool definitions
-- [ ] `executeWorkflow()` no longer captures `toolDefinitions` via `getToolDefinitionsCallback()` before calling `responseLoop()`
-- [ ] Migrated from `getActiveRuleContent()` to `getMatchedRules()`
+- [x] `toolDefinitions` parameter removed from `responseLoop()`
+- [x] Per-iteration flow inside the while-loop: (1) call `resolveEffectiveConfig()` which internally calls `extractSourceToolConfigs()` + merge + filter, (2) call `assemble()` with the filtered tool definitions returned by step 1
+- [x] `vaultRuleManager.getMatchedRules()` called per iteration and passed into `resolveEffectiveConfig()` (which forwards to `extractSourceToolConfigs(matchedRules, persona)`)
+- [x] Filtered tool definitions from `resolveEffectiveConfig()` passed to both `assemble()` and `sendMessage()`
+- [x] Callers of `responseLoop()` (`handleUserMessage()`, `executeWorkflow()`) no longer pass `toolDefinitions`
+- [x] `handleUserMessage()` public signature updated to remove `toolDefinitions` parameter (it is no longer accepted from external callers)
+- [x] The `main.ts` `setOnSendMessage` callback updated to call `handleUserMessage(content, attachments)` without tool definitions
+- [x] `executeWorkflow()` no longer captures `toolDefinitions` via `getToolDefinitionsCallback()` before calling `responseLoop()`
+- [x] Migrated from `getActiveRuleContent()` to `getMatchedRules()`
 
 ### ORCH-003: Wire `resolveEffectiveConfig()` into background `_backgroundResponseLoop()`
 **Description:** Apply the same per-iteration `resolveEffectiveConfig()` pattern to the background workflow execution path.
@@ -261,13 +261,13 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/chat/orchestrator.ts`
 **Dependencies:** ORCH-001
 **Acceptance Criteria:**
-- [ ] `toolDefinitions` parameter removed from `_backgroundResponseLoop()`
-- [ ] The background execution caller (in `executeWorkflow()` / background path) no longer captures `toolDefinitions` via `getToolDefinitionsCallback()` before calling `_backgroundResponseLoop()`
-- [ ] `resolveEffectiveConfig()` called per-iteration inside the background loop
-- [ ] Background loop uses workflow's `WorkflowAssemblyResult.toolConfigs`
-- [ ] Background loop's `getActiveRuleContent()` call migrated to `getMatchedRules()`
-- [ ] Pre-dispatch auto-approve status check (line ~846) updated to use `effectiveToolConfig.tools[toolName]?.auto_approve` instead of `this.settings.auto_approve[toolName]`, so the concurrency manager UI status (`"waiting_approval"` vs `"running"`) reflects the effective config, not just global settings
-- [ ] Background workflow execution has same tool config behavior as foreground path
+- [x] `toolDefinitions` parameter removed from `_backgroundResponseLoop()`
+- [x] The background execution caller (in `executeWorkflow()` / background path) no longer captures `toolDefinitions` via `getToolDefinitionsCallback()` before calling `_backgroundResponseLoop()`
+- [x] `resolveEffectiveConfig()` called per-iteration inside the background loop
+- [x] Background loop uses workflow's `WorkflowAssemblyResult.toolConfigs`
+- [x] Background loop's `getActiveRuleContent()` call migrated to `getMatchedRules()`
+- [x] Pre-dispatch auto-approve status check (line ~846) updated to use `effectiveToolConfig.tools[toolName]?.auto_approve` instead of `this.settings.auto_approve[toolName]`, so the concurrency manager UI status (`"waiting_approval"` vs `"running"`) reflects the effective config, not just global settings
+- [x] Background workflow execution has same tool config behavior as foreground path
 
 ### ORCH-004: Add inspector getter methods to ChatOrchestrator
 **Description:** Add getter methods for the live inspector to read effective config state.
@@ -275,10 +275,10 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/chat/orchestrator.ts`
 **Dependencies:** ORCH-001
 **Acceptance Criteria:**
-- [ ] `getEffectiveToolConfig(): EffectiveToolConfig | null` getter added
-- [ ] `getActiveParsedConfigs(): ParsedToolConfig[]` getter added
-- [ ] Both fields cleared in `orchestrator.newConversation()` — the single cleanup site for conversation-end tool config state. `newConversation()` also calls `dispatcher.setEffectiveToolConfig(null)` to revert the dispatcher to global defaults.
-- [ ] Fields are fully derived runtime values — not persisted to conversation history
+- [x] `getEffectiveToolConfig(): EffectiveToolConfig | null` getter added
+- [x] `getActiveParsedConfigs(): ParsedToolConfig[]` getter added
+- [x] Both fields cleared in `orchestrator.newConversation()` — the single cleanup site for conversation-end tool config state. `newConversation()` also calls `dispatcher.setEffectiveToolConfig(null)` to revert the dispatcher to global defaults.
+- [x] Fields are fully derived runtime values — not persisted to conversation history
 
 ### MAIN-001: Wire `globalAutoApprove` and callback widening in main.ts
 **Description:** Build the unified `globalAutoApprove` map, widen `getToolDefinitionsCallback`, and handle conversation-end cleanup.
@@ -286,9 +286,9 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/main.ts`
 **Dependencies:** ORCH-001, REG-001
 **Acceptance Criteria:**
-- [ ] `globalAutoApprove` is **not** built or injected as a static map. Instead, the orchestrator builds it per-iteration inside `resolveEffectiveConfig()` by reading `this.settings.auto_approve` and `this.settings.mcp_servers` at call time (see ORCH-001). This ensures MCP server `autoApprove[]` changes and settings reloads are always reflected without requiring a rebuild trigger. Disabled servers (`config.disabled === true`) may be skipped when building `globalAutoApprove`, since their tools are never registered. Including them is functionally harmless (unused keys in the map are ignored by the merger's default fill, which only fills entries for tools in `allToolNames`).
-- [ ] `getToolDefinitionsCallback` widened to accept optional `EffectiveToolConfig`: when provided → `toolRegistry.getFilteredToolDefinitions(config)`; when omitted → `toolRegistry.getToolDefinitions()`
-- [ ] Conversation-end cleanup is owned by `orchestrator.newConversation()` (see ORCH-004 AC 3) — `main.ts` does **not** perform separate cleanup of `effectiveToolConfig` or `activeParsedConfigs`
+- [x] `globalAutoApprove` is **not** built or injected as a static map. Instead, the orchestrator builds it per-iteration inside `resolveEffectiveConfig()` by reading `this.settings.auto_approve` and `this.settings.mcp_servers` at call time (see ORCH-001). This ensures MCP server `autoApprove[]` changes and settings reloads are always reflected without requiring a rebuild trigger. Disabled servers (`config.disabled === true`) may be skipped when building `globalAutoApprove`, since their tools are never registered. Including them is functionally harmless (unused keys in the map are ignored by the merger's default fill, which only fills entries for tools in `allToolNames`).
+- [x] `getToolDefinitionsCallback` widened to accept optional `EffectiveToolConfig`: when provided → `toolRegistry.getFilteredToolDefinitions(config)`; when omitted → `toolRegistry.getToolDefinitions()`
+- [x] Conversation-end cleanup is owned by `orchestrator.newConversation()` (see ORCH-004 AC 3) — `main.ts` does **not** perform separate cleanup of `effectiveToolConfig` or `activeParsedConfigs`
 
 ---
 

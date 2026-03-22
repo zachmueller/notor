@@ -32,8 +32,10 @@ import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-overrid
 import { shouldCompact, performCompaction } from "../context/compaction";
 import { showCompactingIndicator, showCompactionMarker } from "../ui/compaction-marker";
 import { revertWorkflowPersona, switchWorkflowPersona, assembleWorkflowPrompt } from "../workflows/workflow-executor";
-import type { Workflow, WorkflowExecutionRequest } from "../types";
+import type { Workflow, WorkflowExecutionRequest, WorkflowAssemblyResult, VaultRule } from "../types";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
+import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
+import { mergeToolConfigs } from "../tool-config/merger";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatOrchestrator");
@@ -80,6 +82,30 @@ export class ChatOrchestrator {
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-008
 	 */
 	private workflowPreviousPersona: string | null | undefined = undefined;
+
+	/**
+	 * Contributing `ParsedToolConfig[]` from the current iteration's
+	 * `resolveEffectiveConfig()` call. Used by the inspector to show
+	 * source provenance for each tool field.
+	 *
+	 * @see specs/04b-tool-toggle/tasks.md — ORCH-001, ORCH-004
+	 */
+	private activeParsedConfigs: ParsedToolConfig[] = [];
+
+	/**
+	 * Merged effective tool config for the current iteration. Stored for
+	 * inspector access and cleared on `newConversation()`.
+	 *
+	 * @see specs/04b-tool-toggle/tasks.md — ORCH-001, ORCH-004
+	 */
+	private effectiveToolConfig: EffectiveToolConfig | null = null;
+
+	/**
+	 * Active workflow assembly result, stored when `executeWorkflow()` or
+	 * `executeBackgroundWorkflow()` completes assembly. Provides
+	 * `toolConfigs` for `resolveEffectiveConfig()`.
+	 */
+	private activeWorkflowAssemblyResult: WorkflowAssemblyResult | null = null;
 
 	constructor(
 		private readonly app: App,
@@ -183,6 +209,31 @@ export class ChatOrchestrator {
 	}
 
 	// -----------------------------------------------------------------------
+	// Tool config inspector (ORCH-004)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Get the current effective tool config (for the inspector view).
+	 *
+	 * Returns null when no conversation is active or no tool config has
+	 * been resolved yet.
+	 *
+	 * @see specs/04b-tool-toggle/tasks.md — ORCH-004
+	 */
+	getEffectiveToolConfig(): EffectiveToolConfig | null {
+		return this.effectiveToolConfig;
+	}
+
+	/**
+	 * Get the parsed tool configs contributing to the current effective config.
+	 *
+	 * @see specs/04b-tool-toggle/tasks.md — ORCH-004
+	 */
+	getActiveParsedConfigs(): ParsedToolConfig[] {
+		return this.activeParsedConfigs;
+	}
+
+	// -----------------------------------------------------------------------
 	// Conversation lifecycle
 	// -----------------------------------------------------------------------
 
@@ -196,6 +247,12 @@ export class ChatOrchestrator {
 	async newConversation(): Promise<void> {
 		// E-008: Revert workflow persona before leaving this conversation
 		await this.maybeRevertWorkflowPersona();
+
+		// Phase 4b: Clear tool config state for the new conversation
+		this.activeParsedConfigs = [];
+		this.effectiveToolConfig = null;
+		this.activeWorkflowAssemblyResult = null;
+		this.dispatcher.setEffectiveToolConfig(null);
 
 		const providerType = this.providerRegistry.getActiveType();
 		const providerConfig = this.providerRegistry.getConfig(providerType);
@@ -469,10 +526,12 @@ export class ChatOrchestrator {
 			});
 		}
 
-		// Step 9: Start the response loop
+		// Step 9: Store workflow assembly result for tool config resolution
+		this.activeWorkflowAssemblyResult = assemblyResult;
+
+		// Step 10: Start the response loop
 		try {
-			const toolDefinitions = this.getToolDefinitionsCallback?.() ?? [];
-			await this.responseLoop(toolDefinitions, currentMode);
+			await this.responseLoop(currentMode);
 		} catch (e) {
 			this.handleError(e);
 		} finally {
@@ -641,10 +700,9 @@ export class ChatOrchestrator {
 		let errorMessage: string | undefined;
 
 		try {
-			const toolDefinitions = this.getToolDefinitionsCallback?.() ?? [];
 			await this._backgroundResponseLoop(
 				bgConversationManager,
-				toolDefinitions,
+				assemblyResult,
 				mode,
 				execution,
 				concurrencyManager,
@@ -703,7 +761,7 @@ export class ChatOrchestrator {
 	 * `ConversationManager` and never renders to the view.
 	 *
 	 * @param bgConvManager      - Isolated conversation manager for this execution.
-	 * @param toolDefinitions    - Available tool definitions.
+	 * @param workflowAssembly  - Workflow assembly result with tool configs.
 	 * @param mode               - Conversation mode (plan/act).
 	 * @param execution          - Execution record for status tracking.
 	 * @param concurrencyManager - Concurrency manager for status updates.
@@ -711,7 +769,7 @@ export class ChatOrchestrator {
 	 */
 	private async _backgroundResponseLoop(
 		bgConvManager: import("./conversation").ConversationManager,
-		toolDefinitions: import("../providers/provider").ToolDefinition[],
+		workflowAssembly: WorkflowAssemblyResult,
 		mode: ConversationMode,
 		execution: WorkflowExecution,
 		concurrencyManager: WorkflowConcurrencyManager,
@@ -720,13 +778,20 @@ export class ChatOrchestrator {
 		let continueLoop = true;
 		const vaultRootPath = this.getVaultRootPath();
 
+		// Temporarily store workflow assembly result for resolveEffectiveConfig()
+		const previousAssemblyResult = this.activeWorkflowAssemblyResult;
+		this.activeWorkflowAssemblyResult = workflowAssembly;
+
+		try {
 		while (continueLoop) {
 			continueLoop = false;
 
-			// 1. Build system prompt
-			const vaultRuleContent = this.vaultRuleManager
-				? await this.vaultRuleManager.getActiveRuleContent()
+			// 1. Evaluate vault rules + resolve effective tool config
+			const matchedRules = this.vaultRuleManager
+				? await this.vaultRuleManager.getMatchedRules()
 				: undefined;
+
+			const toolDefinitions = await this.resolveEffectiveConfig(matchedRules);
 
 			const { buildAutoContextBlock } = await import("../context/auto-context");
 			const autoContext = buildAutoContextBlock(this.app, this.settings);
@@ -734,7 +799,7 @@ export class ChatOrchestrator {
 			const systemPrompt = await this.systemPromptBuilder.assemble(
 				mode,
 				toolDefinitions,
-				vaultRuleContent,
+				undefined, // vaultRuleContent — now handled via cached stripped content
 				autoContext ?? undefined,
 				activePersona
 			);
@@ -843,8 +908,10 @@ export class ChatOrchestrator {
 				});
 
 				// Update status to waiting_approval if the tool is not auto-approved
-				const isAutoApproved =
-					this.settings.auto_approve[toolName] ?? false;
+				// Use effective config when available, fallback to global settings
+				const isAutoApproved = this.effectiveToolConfig
+					? (this.effectiveToolConfig.tools[toolName]?.auto_approve ?? false)
+					: (this.settings.auto_approve[toolName] ?? false);
 
 				if (!isAutoApproved) {
 					concurrencyManager.updateStatus(execution.id, "waiting_approval");
@@ -933,6 +1000,10 @@ export class ChatOrchestrator {
 				});
 			}
 		}
+		} finally {
+			// Restore previous assembly result so the foreground path is unaffected
+			this.activeWorkflowAssemblyResult = previousAssemblyResult;
+		}
 	}
 
 	/**
@@ -954,7 +1025,7 @@ export class ChatOrchestrator {
 	 *
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-015
 	 */
-	private getToolDefinitionsCallback?: () => import("../providers/provider").ToolDefinition[];
+	private getToolDefinitionsCallback?: (config?: EffectiveToolConfig) => import("../providers/provider").ToolDefinition[];
 
 	/**
 	 * Set the callback that provides tool definitions for the response loop.
@@ -962,10 +1033,96 @@ export class ChatOrchestrator {
 	 * Called by main.ts during view wiring so `executeWorkflow()` can start
 	 * the response loop without a direct reference to the tool registry.
 	 *
+	 * When an `EffectiveToolConfig` is provided, returns filtered tool
+	 * definitions (disabled tools excluded). When omitted, returns all tools.
+	 *
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-015
+	 * @see specs/04b-tool-toggle/tasks.md — MAIN-001
 	 */
-	setGetToolDefinitions(callback: () => import("../providers/provider").ToolDefinition[]): void {
+	setGetToolDefinitions(callback: (config?: EffectiveToolConfig) => import("../providers/provider").ToolDefinition[]): void {
 		this.getToolDefinitionsCallback = callback;
+	}
+
+	// -----------------------------------------------------------------------
+	// Tool config resolution (Phase 4b)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Resolve the effective tool config for the current iteration.
+	 *
+	 * Two-phase builder pattern (RT-6.1):
+	 * 1. Call `extractSourceToolConfigs()` on the builder → extracts tool configs
+	 *    from persona and rules, caches stripped content internally.
+	 * 2. Collect workflow tool configs from the active assembly result.
+	 * 3. Build `globalAutoApprove` from current settings.
+	 * 4. Merge all configs via `mergeToolConfigs()`.
+	 * 5. Inject into dispatcher via `setEffectiveToolConfig()`.
+	 * 6. Compute filtered tool definitions.
+	 *
+	 * @param matchedRules - Rules matched by VaultRuleManager for the current context.
+	 * @returns Filtered tool definitions for use in `assemble()` and `sendMessage()`.
+	 *
+	 * @see specs/04b-tool-toggle/tasks.md — ORCH-001
+	 */
+	private async resolveEffectiveConfig(
+		matchedRules?: VaultRule[],
+	): Promise<ToolDefinition[]> {
+		const activePersona = this.personaManager?.getActivePersona() ?? null;
+
+		// Phase 1: Extract tool configs from persona and rules
+		const { personaToolConfigs, ruleToolConfigs } =
+			await this.systemPromptBuilder.extractSourceToolConfigs(matchedRules, activePersona);
+
+		// Collect workflow tool configs from active assembly result
+		const workflowToolConfigs = this.activeWorkflowAssemblyResult?.toolConfigs ?? [];
+
+		// Collect all parsed configs
+		const allConfigs: ParsedToolConfig[] = [
+			...ruleToolConfigs,
+			...personaToolConfigs,
+			...workflowToolConfigs,
+		];
+
+		// Build globalAutoApprove per-iteration from current settings
+		const globalAutoApprove: Record<string, boolean> = {
+			...this.settings.auto_approve,
+		};
+
+		// Expand MCP server-level autoApprove[] into namespaced keys
+		if (this.settings.mcp_servers) {
+			for (const [serverName, serverConfig] of Object.entries(this.settings.mcp_servers)) {
+				if (serverConfig.disabled) continue;
+				if (serverConfig.autoApprove) {
+					for (const rawToolName of serverConfig.autoApprove) {
+						globalAutoApprove[`${serverName}__${rawToolName}`] = true;
+					}
+				}
+			}
+		}
+
+		// Get all registered tool names for default fill
+		const allToolNames = this.dispatcher.getRegisteredToolNames();
+
+		// Merge all configs
+		const effective = mergeToolConfigs(allConfigs, globalAutoApprove, allToolNames);
+
+		// Store for inspector access
+		this.activeParsedConfigs = allConfigs;
+		this.effectiveToolConfig = effective;
+
+		// Inject into dispatcher
+		this.dispatcher.setEffectiveToolConfig(effective);
+
+		// Compute filtered tool definitions
+		const filteredToolDefs = this.getToolDefinitionsCallback?.(effective) ?? [];
+
+		log.debug("Effective tool config resolved", {
+			totalConfigs: allConfigs.length,
+			enabledTools: filteredToolDefs.length,
+			totalTools: allToolNames.length,
+		});
+
+		return filteredToolDefs;
 	}
 
 	// -----------------------------------------------------------------------
@@ -981,11 +1138,10 @@ export class ChatOrchestrator {
 	 * Handle a user message — the main entry point for the send/receive loop.
 	 *
 	 * @param content - User message text
-	 * @param toolDefinitions - Available tool definitions
+	 * @param attachments - Optional file attachments
 	 */
 	async handleUserMessage(
 		content: string,
-		toolDefinitions: ToolDefinition[],
 		attachments?: Attachment[]
 	): Promise<void> {
 		// Ensure we have an active conversation
@@ -1097,7 +1253,7 @@ export class ChatOrchestrator {
 
 		// Start the response loop (vault rules evaluated dynamically inside)
 		try {
-			await this.responseLoop(toolDefinitions, mode);
+			await this.responseLoop(mode);
 		} catch (e) {
 			this.handleError(e);
 		} finally {
@@ -1109,12 +1265,13 @@ export class ChatOrchestrator {
 	 * The main response loop — sends messages to the LLM and processes
 	 * the response. Loops when tool calls are made.
 	 *
-	 * Vault rules are re-evaluated before each LLM turn so that rules
-	 * triggered by notes accessed in earlier tool calls take effect
-	 * on the next message sent to the LLM.
+	 * Per-iteration: evaluates vault rules, resolves effective tool config
+	 * (which extracts tool configs and caches stripped content), then
+	 * assembles the system prompt with filtered tool definitions.
+	 *
+	 * @see specs/04b-tool-toggle/tasks.md — ORCH-002
 	 */
 	private async responseLoop(
-		toolDefinitions: ToolDefinition[],
 		mode: ConversationMode
 	): Promise<void> {
 		let continueLoop = true;
@@ -1128,20 +1285,26 @@ export class ChatOrchestrator {
 				await this.checkAndPerformCompaction();
 
 				// 1. Evaluate vault rules (re-evaluated each turn after tool calls)
-				const vaultRuleContent = this.vaultRuleManager
-					? await this.vaultRuleManager.getActiveRuleContent()
+				const matchedRules = this.vaultRuleManager
+					? await this.vaultRuleManager.getMatchedRules()
 					: undefined;
 
-				// 1b. ACI-001: Build fresh auto-context before each LLM call
+				// 1b. Resolve effective tool config (extracts tool configs from
+				// persona + rules + workflow, merges, injects into dispatcher,
+				// and returns filtered tool definitions)
+				const toolDefinitions = await this.resolveEffectiveConfig(matchedRules);
+
+				// 1c. ACI-001: Build fresh auto-context before each LLM call
 				// so open-notes and vault structure reflect the latest state.
 				const autoContext = buildAutoContextBlock(this.app, this.settings);
 
-				// 2. Assemble system prompt (now includes auto-context and active persona)
+				// 2. Assemble system prompt (uses cached stripped content from
+				// extractSourceToolConfigs, and receives filtered tool definitions)
 				const activePersona = this.personaManager?.getActivePersona() ?? null;
 				const systemPrompt = await this.systemPromptBuilder.assemble(
 					mode,
 					toolDefinitions,
-					vaultRuleContent,
+					undefined, // vaultRuleContent — now handled via cached stripped content
 					autoContext ?? undefined,
 					activePersona
 				);

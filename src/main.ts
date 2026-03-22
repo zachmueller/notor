@@ -1258,9 +1258,13 @@ export default class NotorPlugin extends Plugin {
 			log.warn("Failed to restore active persona from settings", { error: String(e) });
 		});
 
-		// E-015: Wire tool definitions callback so executeWorkflow() can
-		// start the response loop without a direct tool registry reference.
-		orchestrator.setGetToolDefinitions(() => {
+		// E-015 / MAIN-001: Wire tool definitions callback. When an
+		// EffectiveToolConfig is provided, returns filtered tool definitions
+		// (disabled tools excluded). When omitted, returns all tools.
+		orchestrator.setGetToolDefinitions((config) => {
+			if (config) {
+				return toolRegistry.getFilteredToolDefinitions(config) as import("./providers/provider").ToolDefinition[];
+			}
 			return toolRegistry.getToolDefinitions() as import("./providers/provider").ToolDefinition[];
 		});
 
@@ -1277,12 +1281,10 @@ export default class NotorPlugin extends Plugin {
 		view.setGetWorkflows(() => this.getDiscoveredWorkflows());
 
 		// Send message (with optional attachments from the chat view)
+		// MAIN-001: Tool definitions are now computed per-iteration inside
+		// responseLoop() via resolveEffectiveConfig() — no longer passed externally.
 		view.setOnSendMessage(async (content: string, attachments?) => {
-			// Cast is safe: both ToolDefinition types are structurally identical —
-			// the only difference is JSONSchemaProperty.type being string | undefined
-			// vs string. Provider implementations handle undefined type gracefully.
-			const toolDefinitions = toolRegistry.getToolDefinitions() as import("./providers/provider").ToolDefinition[];
-			await orchestrator.handleUserMessage(content, toolDefinitions, attachments);
+			await orchestrator.handleUserMessage(content, attachments);
 		});
 
 		// Stop response
