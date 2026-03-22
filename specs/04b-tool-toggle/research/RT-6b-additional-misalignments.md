@@ -8,7 +8,7 @@
 
 8 additional misalignments identified between the implementation tasks and the current codebase/spec/plan. 0 critical, 4 moderate, 4 minor.
 
-**Resolved:** 7
+**Resolved:** 8
 
 ---
 
@@ -316,7 +316,7 @@ Option (a) is recommended. This would change the insertion point to: "after `<in
 
 ### RT-6.19: Combined dispatch ordering across DISP-002/003/004 not documented
 
-**Status:** Open
+**Status:** Resolved
 
 **Affected tasks:** DISP-001, DISP-002, DISP-003, DISP-004
 
@@ -355,3 +355,5 @@ Each DISP task describes its insertion point relative to existing checks, but th
 **Impact:** Low — the ordering is logically derivable from the three tasks. But an implementer working on multiple DISP tasks needs to mentally compose the full ordering, which increases the chance of misordering.
 
 **Suggested resolution:** Add a note to DISP-001 (the base task that all others depend on): "After all DISP-00x tasks, the full `dispatch()` check ordering is: lookup → enabled (DISP-002) → Plan/Act → domain/cwd checks → auto-approve (DISP-004 + fallback) → user approval → path enforcement (DISP-003) → execute."
+
+**Resolution:** Applied suggested resolution. Combined `dispatch()` check ordering documented in three places: `tasks.md` DISP-001 note listing the full 10-step ordering after all DISP tasks are applied; `plan.md` dispatcher section with a numbered list showing the combined ordering with line-number references; `spec.md` FR-83 with an inline combined ordering reference across FR-83, FR-80, and FR-84.

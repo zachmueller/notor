@@ -113,6 +113,9 @@
 - [ ] Public method `setEffectiveToolConfig(config: EffectiveToolConfig | null): void` added
 - [ ] No changes to existing dispatch behavior when `effectiveToolConfig` is null
 
+**Note — combined `dispatch()` ordering after all DISP-00x tasks:**
+After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` check ordering is: tool lookup → **enabled check** (DISP-002) → Plan/Act mode → domain/cwd checks → **unified auto-approve** (DISP-004 + existing fallback) → user approval → **path enforcement** (DISP-003) → tool execution. Each DISP task describes its insertion point relative to existing checks; this note documents the combined result for implementer reference.
+
 ### DISP-002: Implement disabled-tool blocking in dispatcher
 **Description:** Add the FR-83 enabled check as the first check in `dispatch()`, before mode/approve checks.
 **Files:**

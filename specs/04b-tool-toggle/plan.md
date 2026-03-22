@@ -310,6 +310,18 @@ if (this.effectiveToolConfig) {
 
 Also expose `auto_approve` from `effectiveToolConfig` in the auto-approve resolution. The dispatcher currently has two separate auto-approve code paths: `resolveAutoApprove()` for built-in tools and `resolveMcpAutoApprove()` for MCP tools (selected via an `isMcpTool()` branch). When `effectiveToolConfig` is active, a unified early-return **before** the MCP/built-in branching checks `effectiveToolConfig.tools[toolName]?.auto_approve` and uses that value directly, bypassing both `resolveAutoApprove()` and `resolveMcpAutoApprove()`. The existing MCP/built-in branching remains as the fallback when `effectiveToolConfig` is null. This works because `globalAutoApprove` (fed into the merger) already includes MCP server-level `autoApprove[]` entries pre-flattened into namespaced keys — so the merged `auto_approve` value correctly reflects MCP server defaults when no higher-priority source overrides them.
 
+**Combined `dispatch()` check ordering** (after all dispatcher modifications are applied):
+1. Tool lookup (existing, line ~280)
+2. **Enabled check** (FR-83 — new, before Plan/Act)
+3. Plan/Act mode check (existing, line ~302)
+4. `fetch_webpage` domain denylist (existing, line ~326)
+5. `execute_command` working dir validation (existing, line ~355)
+6. **Unified auto-approve from `effectiveToolConfig`** (FR-80 — new, before existing branching)
+7. MCP/built-in auto-approve fallback (existing, line ~385)
+8. User approval request (existing, line ~402)
+9. **Path enforcement** (FR-84 — new, after approval, before execution)
+10. Tool execution (existing, line ~432)
+
 ---
 
 #### Modified: `src/chat/system-prompt.ts` — `SystemPromptBuilder`

@@ -194,6 +194,7 @@ execute_command:
   - `error: "Tool '{toolName}' is disabled and cannot be used in this context."`
 - A disabled tool is never executed regardless of auto-approve settings or any other state.
 - Log entry emitted at `info` level: "Blocked disabled tool" with `toolName`.
+- **Combined `dispatch()` check ordering** (for reference across FR-83, FR-80 unified auto-approve, and FR-84): tool lookup → **enabled check** (FR-83) → Plan/Act mode → domain/cwd checks → **unified auto-approve from `effectiveToolConfig`** (FR-80) + existing MCP/built-in fallback → user approval → **path enforcement** (FR-84) → tool execution.
 
 ### FR-84: `allowed_paths` and `blocked_paths` enforcement
 
