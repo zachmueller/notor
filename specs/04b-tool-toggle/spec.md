@@ -150,7 +150,7 @@ execute_command:
 - For each matched block, the plugin:
   1. Parses the `version` attribute from the opening tag.
   2. If `version` major is unrecognized (higher than the maximum supported) → emits a console warning and skips the block.
-  3. Otherwise → parses the inner body as YAML.
+  3. Otherwise → parses the inner body as YAML. If the result is `null`, `undefined`, not a plain object, or an array (non-throwing non-object returns from `parseYAML`) → emits a Notice (same as a YAML parse failure) and skips the block.
   4. Validates the parsed structure (per FR-82).
   5. Stores the parsed config alongside its source context (`persona` / `workflow` / `rule`) and document position for within-file merge ordering.
 - Each full tag (opening tag + body + closing tag) is replaced with an empty string in the content passed downstream to the LLM.

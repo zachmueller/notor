@@ -1,6 +1,6 @@
 # RT-4 — Integration Risks: Phase 4b vs. Current Codebase
 
-**Status:** In progress — working through resolutions iteratively (Risks 1–7 resolved; 8–10 open)
+**Status:** In progress — working through resolutions iteratively (Risks 1–8 resolved; 9–10 open)
 **Created:** 2026-03-22
 **Source:** Codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md)
 
@@ -193,7 +193,7 @@ B. Wrap the result in a schema validator (e.g., a hand-written check that the to
 
 C. Use `js-yaml.load()` directly (available in the Obsidian bundler environment) instead of `parseYAML`, since its behavior under edge inputs is better documented in the js-yaml source. Add both `try/catch` and type guard.
 
-**Resolution:** _Open_ — Option A is the minimal fix and should be added to the parser spec regardless of which YAML function is used.
+**Resolution:** **Option A** — After every `parseYAML()` call in the parser, add an explicit type guard: `if (parsed === null || parsed === undefined || typeof parsed !== 'object' || Array.isArray(parsed))` → emit a Notice (via `showToolConfigError()`) identifying the source file, skip the block, and continue processing. This covers all non-throwing non-object returns from `parseYAML` (`null` for empty input, `undefined` for null YAML documents, bare scalars, and arrays). The existing `try/catch` continues to handle structurally invalid YAML that throws `YAMLException`. Together the two checks provide full coverage of `parseYAML`'s return space.
 
 ---
 
@@ -259,6 +259,6 @@ Use this section to record agreed resolutions as we work through each risk. Upda
 | 5 | `Conversation` is DB-persisted | MEDIUM | **Option C** — flat private fields on `ChatOrchestrator`; `Conversation` untouched |
 | 6 | Workflow extraction invasiveness | MEDIUM | **Option A** — insert `extractToolConfigs()` inside `assembleWorkflowPrompt()` between steps 2 and 4 |
 | 7 | `toolConfig` singular vs. multi-block | MEDIUM | **Option A** — `toolConfigs: ParsedToolConfig[]` (plural); merger handles document-order merge |
-| 8 | `parseYAML` non-throwing edge cases | MEDIUM | _Open_ |
+| 8 | `parseYAML` non-throwing edge cases | MEDIUM | **Option A** — explicit type guard after `parseYAML()` for null/undefined/non-object/array returns |
 | 9 | `tag_include` unevaluable in pre-flight | MEDIUM | _Open_ |
 | 10 | `vaultRootPath` injection undefined | LOW | _Open_ |

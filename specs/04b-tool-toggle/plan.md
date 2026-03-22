@@ -163,7 +163,7 @@ Internal steps:
 1. Run the hardened regex over `text` to find all `<notor_tool_config>` blocks.
 2. For each match:
    a. Parse `version` attribute from the opening tag. If major > max supported → `console.warn` and skip.
-   b. Parse YAML body via `parseYAML` (Obsidian built-in).
+   b. Parse YAML body via `parseYAML` (Obsidian built-in). After parsing, apply an explicit type guard: if the result is `null`, `undefined`, `typeof parsed !== 'object'`, or `Array.isArray(parsed)` → emit Notice via `showToolConfigError()` and skip the block. This covers non-throwing non-object returns (`parseYAML` returns `null`/`undefined` for empty input, bare scalars for non-object YAML). The `try/catch` around the call handles structurally invalid YAML that throws.
    c. Validate structure — emit `Notice` per FR-82 for each invalid field; skip invalid entries, continue processing valid ones.
    d. Build `ParsedToolConfig` with `documentPosition` = match index.
 3. Replace each matched block with `""` in the working text.
@@ -473,14 +473,14 @@ function showToolConfigError(
 
 ### Technical Risks
 
-- **Medium:** `parseYAML` from `obsidian` package behavior under malformed input needs verification — confirm it throws rather than returning `undefined` on invalid YAML, so the try/catch in the parser catches it correctly.
+- **Medium (mitigated):** `parseYAML` from `obsidian` package can return `null`/`undefined`/non-object without throwing for certain inputs. Mitigated by an explicit type guard after every `parseYAML()` call (see RT-4 Risk 8 resolution): the guard catches non-throwing non-object returns, while the existing `try/catch` handles structurally invalid YAML that throws.
 - **Medium:** `SystemPromptBuilder.assemble()` return type change is a breaking signature change — the orchestrator (primary call site) and any tests must be updated. Strictly additive to the returned object, so runtime compatibility is not a concern, but TypeScript compilation will surface all sites.
 - **Low:** `EffectiveToolConfig` is recomputed before each LLM call (spec clarification Q5). This subsumes the workflow-invocation recomputation concern — `resolveEffectiveConfig()` runs every message, so workflow changes and rule activation/deactivation are picked up automatically. The per-message overhead is negligible (NFR-22: O(t × l) merge with t ≤ ~15 tools and l ≤ 4 levels).
 - **Low:** Inspector pre-flight rule evaluation uses a synthetic prompt. The existing `ruleMatches()` function in `VaultRuleManager` currently uses `accessedNotes` (a Set of vault paths), not prompt text. A thin adapter in the inspector will map the typed prompt into a synthetic accessed-notes set (e.g., extract note path mentions). This is documented in the spec clarification and does not require changes to `ruleMatches()` itself.
 
 ### Mitigation Strategies
 
-- Verify `parseYAML` behavior with a targeted unit test before wiring into the parser.
+- `parseYAML` non-object returns handled by explicit type guard (RT-4 Risk 8). Unit test should still verify the guard fires for edge inputs (`null`, bare string, array).
 - Update orchestrator call sites immediately after changing `SystemPromptBuilder.assemble()` — treat this as an atomic change.
 - `resolveEffectiveConfig()` runs before each LLM call, so no special `WorkflowInvokedEvent` call site is needed — workflow and rule changes are picked up automatically.
 
