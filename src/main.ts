@@ -92,6 +92,7 @@ import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
 
 // UI
 import { NotorChatView, CHAT_VIEW_TYPE } from "./ui/chat-view";
+import { EffectiveConfigInspectorView, INSPECTOR_VIEW_TYPE } from "./ui/effective-config-inspector";
 
 const log = logger("Main");
 
@@ -214,6 +215,13 @@ export default class NotorPlugin extends Plugin {
 			return view;
 		});
 
+		// 3b. Register the tool config inspector view type (UI-003 / FR-88)
+		this.registerView(INSPECTOR_VIEW_TYPE, (leaf) => {
+			const inspectorView = new EffectiveConfigInspectorView(leaf);
+			inspectorView.setOrchestrator(this.getOrchestrator());
+			return inspectorView;
+		});
+
 		// 4. Register commands
 		this.addCommand({
 			id: "open-chat-panel",
@@ -237,6 +245,13 @@ export default class NotorPlugin extends Plugin {
 					new Notice(`Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
 				});
 			},
+		});
+
+		// UI-003: Open the tool config inspector (FR-88)
+		this.addCommand({
+			id: "open-tool-config-inspector",
+			name: "Open tool config inspector",
+			callback: () => this.openInspector(),
 		});
 
 		// E-009: "Notor: Run workflow" command palette entry.
@@ -1518,6 +1533,30 @@ export default class NotorPlugin extends Plugin {
 	// -----------------------------------------------------------------------
 	// Commands
 	// -----------------------------------------------------------------------
+
+	/**
+	 * Open (or reveal) the tool config inspector view (UI-003 / FR-88).
+	 *
+	 * Opens alongside the chat panel. If already open, reveals the existing leaf.
+	 */
+	private async openInspector(): Promise<void> {
+		const { workspace } = this.app;
+
+		const existing = workspace.getLeavesOfType(INSPECTOR_VIEW_TYPE);
+		if (existing.length > 0) {
+			void workspace.revealLeaf(existing[0] as WorkspaceLeaf);
+			// Refresh content when re-revealed
+			const view = existing[0]?.view as EffectiveConfigInspectorView | undefined;
+			view?.refresh();
+			return;
+		}
+
+		const leaf = workspace.getRightLeaf(false);
+		if (leaf) {
+			await leaf.setViewState({ type: INSPECTOR_VIEW_TYPE, active: true });
+			void workspace.revealLeaf(leaf);
+		}
+	}
 
 	/** Open (or reveal) the Notor chat panel. */
 	private async openChatPanel(): Promise<void> {

@@ -331,12 +331,12 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/settings/sections/auto-approve.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] "Copy tool config YAML" button appears in Settings → Tools & permissions
-- [ ] Snippet contains only tools whose auto-approve differs from default `false`
-- [ ] Comment at top notes unlisted tools inherit global defaults
-- [ ] Generated snippet includes `version="1.0"` attribute
-- [ ] Snippet copied to clipboard via `navigator.clipboard.writeText()`
-- [ ] If no tools differ from defaults, snippet contains just the comment block with no tool entries
+- [x] "Copy tool config YAML" button appears in Settings → Tools & permissions
+- [x] Snippet contains only tools whose auto-approve differs from default `false`
+- [x] Comment at top notes unlisted tools inherit global defaults
+- [x] Generated snippet includes `version="1.0"` attribute
+- [x] Snippet copied to clipboard via `navigator.clipboard.writeText()`
+- [x] If no tools differ from defaults, snippet contains just the comment block with no tool entries
 
 ### UI-002 [P]: Settings → Personas section
 **Description:** Add a new top-level Settings → Personas section with persona creation and listing.
@@ -345,13 +345,13 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/settings/settings-tab.ts` (register new section)
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] New **Settings → Personas** section at top level of plugin settings
-- [ ] "Create new persona" button prompts for name, creates skeleton `system-prompt.md` at `{notor_dir}/personas/{name}/system-prompt.md`
-- [ ] Skeleton includes placeholder `<notor_tool_config>` block
-- [ ] Existing personas list shows all personas from `{notor_dir}/personas/`
-- [ ] Each entry has persona name and "Open system prompt" button that opens the note in the editor
-- [ ] List populated at settings open time (no live-update while open)
-- [ ] Section does not replicate tool configuration controls
+- [x] New **Settings → Personas** section at top level of plugin settings
+- [x] "Create new persona" button prompts for name, creates skeleton `system-prompt.md` at `{notor_dir}/personas/{name}/system-prompt.md`
+- [x] Skeleton includes placeholder `<notor_tool_config>` block
+- [x] Existing personas list shows all personas from `{notor_dir}/personas/`
+- [x] Each entry has persona name and "Open system prompt" button that opens the note in the editor
+- [x] List populated at settings open time (no live-update while open)
+- [x] Section does not replicate tool configuration controls
 
 ### UI-003: Effective Config Inspector leaf view
 **Description:** Implement the FR-88 standalone leaf view for inspecting the merged effective tool config during live conversations.
@@ -360,16 +360,16 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/main.ts` (register view type)
 **Dependencies:** ORCH-004
 **Acceptance Criteria:**
-- [ ] `ItemView` registered under view type `"notor-tool-config-inspector"`
-- [ ] Openable alongside chat panel via button or command palette action
-- [ ] **Live in-chat mode:** reads `EffectiveToolConfig` and `activeParsedConfigs` from orchestrator getter methods
-- [ ] Each tool field shows effective value and source link to the specific note driving it
-- [ ] Display updates as `activeParsedConfigs` changes between messages
-- [ ] When no conversation is active, displays a "requires active conversation" message
-- [ ] Table per tool: `enabled`, `auto_approve`, `allowed_paths`, `blocked_paths`, source note link
-- [ ] Fields at global defaults shown in muted style
-- [ ] Built entirely on shared resolution functions — no inspector-specific duplicate logic (NFR-25)
-- [ ] Pre-flight mode deferred (not implemented in this phase)
+- [x] `ItemView` registered under view type `"notor-tool-config-inspector"`
+- [x] Openable alongside chat panel via button or command palette action
+- [x] **Live in-chat mode:** reads `EffectiveToolConfig` and `activeParsedConfigs` from orchestrator getter methods
+- [x] Each tool field shows effective value and source link to the specific note driving it
+- [x] Display updates as `activeParsedConfigs` changes between messages
+- [x] When no conversation is active, displays a "requires active conversation" message
+- [x] Table per tool: `enabled`, `auto_approve`, `allowed_paths`, `blocked_paths`, source note link
+- [x] Fields at global defaults shown in muted style
+- [x] Built entirely on shared resolution functions — no inspector-specific duplicate logic (NFR-25)
+- [x] Pre-flight mode deferred (not implemented in this phase)
 
 ---
 

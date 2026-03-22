@@ -33,6 +33,7 @@ import { renderHistorySection } from "./sections/history";
 import { renderCheckpointSection } from "./sections/checkpoints";
 import { renderModelPricingSection } from "./sections/model-pricing";
 import { renderMcpServersSection } from "./sections/mcp-servers";
+import { renderPersonasSection } from "./sections/personas";
 import { createSettingsGroup } from "./helpers";
 
 /**
@@ -88,6 +89,10 @@ export class NotorSettingTab extends PluginSettingTab {
 		renderGeneralSection(conversationGroup, ctx);
 		renderAutoContextSection(conversationGroup, ctx);
 		renderCompactionSection(conversationGroup, ctx);
+
+		// --- Personas (collapsed by default) ---
+		const personasGroup = createSettingsGroup(containerEl, "Personas");
+		renderPersonasSection(personasGroup, ctx);
 
 		// --- Tools & Permissions (expanded by default) ---
 		const toolsGroup = createSettingsGroup(containerEl, "Tools & permissions", true);
