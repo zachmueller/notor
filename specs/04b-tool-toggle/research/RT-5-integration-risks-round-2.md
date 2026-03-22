@@ -1,6 +1,6 @@
 # RT-5 — Integration Risks Round 2: Deeper Codebase Scan
 
-**Status:** Open — 11 risks identified, 2 resolved
+**Status:** Open — 11 risks identified, 3 resolved
 **Created:** 2026-03-22
 **Source:** Full codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md), building on the resolved risks in [RT-4](RT-4-integration-risks.md)
 
@@ -54,21 +54,19 @@ orchestrator.setGetToolDefinitions(() => {
 
 ---
 
-## Risk 3 (MEDIUM) — Filtered tool definitions must flow to both `assemble()` and `sendMessage()`
+## Risk 3 (MEDIUM) — Filtered tool definitions must flow to both `assemble()` and `sendMessage()` — RESOLVED
 
-**Finding:**
+**Status:** Resolved (plan and spec amendment)
+
+**Resolution:** The plan's orchestrator `resolveEffectiveConfig()` step 7 now explicitly states that filtered tool definitions are computed once per iteration via `getToolDefinitionsCallback(config)` and the same filtered array is passed to both `systemPromptBuilder.assemble()` and `provider.sendMessage()`. The spec's FR-81 is updated to clarify that filtered tool definitions flow to both system prompt assembly and the provider call. This single-computation-dual-use pattern ensures the system prompt only documents tools the LLM can actually call.
+
+**Original Finding:**
 The same `toolDefinitions` array flows to two consumers inside `responseLoop()`:
 
 1. `systemPromptBuilder.assemble(mode, toolDefinitions, ...)` — builds tool documentation in the system prompt (line ~1143)
 2. `provider.sendMessage(chatMessages, toolDefinitions, ...)` — the actual tool list sent to the LLM (line ~1197)
 
 > Relevant files: `src/chat/orchestrator.ts` (lines 1143, 1197)
-
-**Conflict:**
-The plan only explicitly mentions filtering for `sendMessage()`. If unfiltered definitions go to `assemble()` but filtered definitions go to the provider, the system prompt will document tools the LLM cannot call, causing confusion and wasted tokens.
-
-**Recommendation:**
-Compute filtered tool definitions once via `getFilteredToolDefinitions()` at the top of each loop iteration, then pass the same filtered array to both `assemble()` and `sendMessage()`.
 
 ---
 
@@ -258,7 +256,7 @@ No action needed. Informational only — the stripping happens before `assemble(
 |---|------|----------|--------|
 | 1 | `persona_auto_approve` three-state → boolean conversion unstated | HIGH | Resolved (removed) |
 | 2 | Orchestrator lacks direct `ToolRegistry` reference | HIGH | Resolved (callback) |
-| 3 | Filtered tool defs must go to both `assemble()` and `sendMessage()` | MEDIUM | Open |
+| 3 | Filtered tool defs must go to both `assemble()` and `sendMessage()` | MEDIUM | Resolved (plan+spec) |
 | 4 | `toolDefinitions` captured once at loop entry, not per-iteration | MEDIUM | Open |
 | 5 | `<include_note>` resolution ownership leaves dual code paths | MEDIUM | Open |
 | 6 | Parser needs MCP server config for FR-82 inactive-server Notice | MEDIUM | Open |
