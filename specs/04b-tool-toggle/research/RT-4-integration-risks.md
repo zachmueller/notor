@@ -1,6 +1,6 @@
 # RT-4 — Integration Risks: Phase 4b vs. Current Codebase
 
-**Status:** In progress — working through resolutions iteratively (Risks 1–9 resolved; 10 open)
+**Status:** Complete — all 10 risks resolved
 **Created:** 2026-03-22
 **Source:** Codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md)
 
@@ -242,7 +242,7 @@ B. Add a `setVaultRootPath(path: string): void` method on `ToolDispatcher` (matc
 
 C. Pass `vaultRootPath` as a parameter to `enforcePathConstraints()` at call time (retrieved fresh from the plugin on each dispatch). Avoids adding state to the dispatcher.
 
-**Resolution:** _Open_ — Option B matches existing initialization patterns in the dispatcher.
+**Resolution:** **Option B (already implemented)** — `setVaultRootPath(path: string)` already exists on `ToolDispatcher` (`src/chat/dispatcher.ts:156`), with the private field at line 110. It is injected from `main.ts:974` via `this._toolDispatcher.setVaultRootPath(adapter.basePath)` and already used for `execute_command` path validation (`dispatcher.ts:355`). The new `enforcePathConstraints()` method can use `this.vaultRootPath` directly — no additional wiring needed.
 
 ---
 
@@ -261,4 +261,4 @@ Use this section to record agreed resolutions as we work through each risk. Upda
 | 7 | `toolConfig` singular vs. multi-block | MEDIUM | **Option A** — `toolConfigs: ParsedToolConfig[]` (plural); merger handles document-order merge |
 | 8 | `parseYAML` non-throwing edge cases | MEDIUM | **Option A** — explicit type guard after `parseYAML()` for null/undefined/non-object/array returns |
 | 9 | `tag_include` unevaluable in pre-flight | MEDIUM | **Defer pre-flight mode** — MVP inspector is live-in-chat only |
-| 10 | `vaultRootPath` injection undefined | LOW | _Open_ |
+| 10 | `vaultRootPath` injection undefined | LOW | **Option B (already implemented)** — `setVaultRootPath()` exists; no new wiring needed |
