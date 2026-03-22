@@ -9,6 +9,7 @@
  */
 
 import type { Tool, ToolDefinition } from "./tool";
+import type { EffectiveToolConfig } from "../tool-config/types";
 import { logger } from "../utils/logger";
 
 const log = logger("ToolRegistry");
@@ -110,6 +111,28 @@ export class ToolRegistry {
 			description: tool.description,
 			input_schema: tool.input_schema,
 		}));
+	}
+
+	/**
+	 * Get tool definitions filtered by an effective tool config.
+	 *
+	 * Only tools with `enabled: true` (or not present in the config)
+	 * are included in the returned array.
+	 *
+	 * @see specs/04b-tool-toggle/spec.md — FR-83
+	 */
+	getFilteredToolDefinitions(config: EffectiveToolConfig): ToolDefinition[] {
+		return Array.from(this.tools.values())
+			.filter((tool) => {
+				const entry = config.tools[tool.name];
+				// If tool not in config, include it (defensive fallback)
+				return entry === undefined || entry.enabled;
+			})
+			.map((tool) => ({
+				name: tool.name,
+				description: tool.description,
+				input_schema: tool.input_schema,
+			}));
 	}
 
 	// -----------------------------------------------------------------------

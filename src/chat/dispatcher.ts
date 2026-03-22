@@ -11,8 +11,10 @@
 import type { ConversationMode, ToolCall, ToolResult } from "../types";
 import type { StreamChunk } from "../providers/provider";
 import type { NotorSettings } from "../settings";
+import type { EffectiveToolConfig } from "../tool-config/types";
 import { isDomainBlocked } from "../tools/fetch-webpage";
 import { resolveAndValidatePath } from "../utils/path-validation";
+import { enforcePathConstraints } from "../tool-config/path-enforcer";
 import { resolveAutoApprove } from "../personas/auto-approve-resolver";
 import { isMcpTool, McpRegisteredTool } from "../mcp/mcp-tool-adapter";
 import { logger } from "../utils/logger";
@@ -99,6 +101,9 @@ export class ToolDispatcher {
 
 	/** Per-persona per-tool auto-approve overrides from settings. */
 	private personaAutoApprove: Record<string, Record<string, string>> = {};
+
+	/** Effective tool config from `<notor_tool_config>` merge (null = use global defaults). */
+	private effectiveToolConfig: EffectiveToolConfig | null = null;
 
 	/** Currently active persona name (null = no persona). */
 	private activePersonaName: string | null = null;
@@ -196,6 +201,24 @@ export class ToolDispatcher {
 	setActivePersonaName(name: string | null): void {
 		this.activePersonaName = name;
 		log.debug("Updated active persona for auto-approve", { persona: name });
+	}
+
+	/**
+	 * Set the effective tool config from `<notor_tool_config>` merge.
+	 *
+	 * When set, the dispatcher uses this config for enabled checks,
+	 * auto-approve resolution, and path enforcement. When null, the
+	 * dispatcher falls back to existing global defaults.
+	 *
+	 * @param config - Merged effective config, or null to revert to defaults
+	 * @see specs/04b-tool-toggle/spec.md — FR-83, FR-84
+	 */
+	setEffectiveToolConfig(config: EffectiveToolConfig | null): void {
+		this.effectiveToolConfig = config;
+		log.debug("Updated effective tool config", {
+			active: config !== null,
+			toolCount: config ? Object.keys(config.tools).length : 0,
+		});
 	}
 
 	// -----------------------------------------------------------------------
@@ -298,7 +321,27 @@ export class ToolDispatcher {
 		// Emit started event
 		this.events.onToolCallStarted?.(toolCall, messageId);
 
-		// 2. Check Plan/Act mode — block write tools in Plan mode
+		// 2. Enabled check — block disabled tools before any other check (FR-83)
+		if (this.effectiveToolConfig) {
+			const toolEntry = this.effectiveToolConfig.tools[toolName];
+			if (toolEntry && !toolEntry.enabled) {
+				toolCall.status = "error";
+				this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+				const result: ToolResult = {
+					tool_name: toolName,
+					success: false,
+					result: "",
+					error: `Tool '${toolName}' is disabled and cannot be used in this context.`,
+				};
+
+				log.info("Blocked disabled tool", { toolName });
+				this.events.onToolCallResult?.(toolCall, result, messageId);
+				return result;
+			}
+		}
+
+		// 3. Check Plan/Act mode — block write tools in Plan mode
 		if (mode === "plan" && tool.mode === "write") {
 			toolCall.status = "error";
 			this.events.onToolCallStatusChanged?.(toolCall, messageId);
@@ -380,23 +423,31 @@ export class ToolDispatcher {
 		}
 
 		// 4. Check auto-approve settings
-		// For MCP tools: persona override → server-level per-tool → default false (FEAT-002)
-		// For built-in tools: persona override → global setting (B-003)
+		// When effectiveToolConfig is active, use its merged auto_approve as unified early-return
+		// before consulting legacy MCP/built-in branching (DISP-004)
 		let isAutoApproved: boolean;
-		if (isMcpTool(toolName) && tool instanceof McpRegisteredTool) {
-			isAutoApproved = resolveMcpAutoApprove(
-				toolName,
-				tool,
-				this.activePersonaName,
-				this.personaAutoApprove
-			);
+		if (this.effectiveToolConfig) {
+			const toolEntry = this.effectiveToolConfig.tools[toolName];
+			isAutoApproved = toolEntry?.auto_approve ?? false;
 		} else {
-			isAutoApproved = resolveAutoApprove(
-				toolName,
-				this.activePersonaName,
-				this.personaAutoApprove,
-				this.autoApprove
-			);
+			// Fallback: legacy MCP/built-in branching when no effective config
+			// For MCP tools: persona override → server-level per-tool → default false (FEAT-002)
+			// For built-in tools: persona override → global setting (B-003)
+			if (isMcpTool(toolName) && tool instanceof McpRegisteredTool) {
+				isAutoApproved = resolveMcpAutoApprove(
+					toolName,
+					tool,
+					this.activePersonaName,
+					this.personaAutoApprove
+				);
+			} else {
+				isAutoApproved = resolveAutoApprove(
+					toolName,
+					this.activePersonaName,
+					this.personaAutoApprove,
+					this.autoApprove
+				);
+			}
 		}
 
 		if (!isAutoApproved) {
@@ -428,7 +479,35 @@ export class ToolDispatcher {
 		toolCall.status = "approved";
 		this.events.onToolCallStatusChanged?.(toolCall, messageId);
 
-		// 4. Execute tool
+		// 5. Path enforcement — check allowed_paths/blocked_paths (FR-84)
+		if (this.effectiveToolConfig) {
+			const toolEntry = this.effectiveToolConfig.tools[toolName];
+			if (toolEntry) {
+				const pathError = enforcePathConstraints(
+					toolName,
+					parameters,
+					toolEntry,
+					this.vaultRootPath ?? "",
+				);
+				if (pathError) {
+					toolCall.status = "error";
+					this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+					const result: ToolResult = {
+						tool_name: toolName,
+						success: false,
+						result: "",
+						error: pathError,
+					};
+
+					log.info("Blocked tool by path constraint", { toolName, error: pathError });
+					this.events.onToolCallResult?.(toolCall, result, messageId);
+					return result;
+				}
+			}
+		}
+
+		// 6. Execute tool
 		const startTime = Date.now();
 		try {
 			const result = await tool.execute(parameters);

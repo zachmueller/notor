@@ -109,9 +109,9 @@
 - Modify `src/chat/dispatcher.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Private field `effectiveToolConfig: EffectiveToolConfig | null = null` added
-- [ ] Public method `setEffectiveToolConfig(config: EffectiveToolConfig | null): void` added
-- [ ] No changes to existing dispatch behavior when `effectiveToolConfig` is null
+- [x] Private field `effectiveToolConfig: EffectiveToolConfig | null = null` added
+- [x] Public method `setEffectiveToolConfig(config: EffectiveToolConfig | null): void` added
+- [x] No changes to existing dispatch behavior when `effectiveToolConfig` is null
 
 **Note — combined `dispatch()` ordering after all DISP-00x tasks:**
 After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` check ordering is: tool lookup → **enabled check** (DISP-002) → Plan/Act mode → domain/cwd checks → **unified auto-approve** (DISP-004 + existing fallback) → user approval → **path enforcement** (DISP-003) → tool execution. Each DISP task describes its insertion point relative to existing checks; this note documents the combined result for implementer reference.
@@ -122,10 +122,10 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/chat/dispatcher.ts`
 **Dependencies:** DISP-001
 **Acceptance Criteria:**
-- [ ] Enabled check runs **before** existing mode check in `dispatch()`
-- [ ] If tool disabled: `toolCall.status = "error"`, `onToolCallStatusChanged` emitted, `ToolResult` returned with `success: false` and error message: `"Tool '{toolName}' is disabled and cannot be used in this context."`
-- [ ] Disabled tool is never executed regardless of auto-approve or any other state
-- [ ] Log entry at `info` level: "Blocked disabled tool" with `toolName`
+- [x] Enabled check runs **before** existing mode check in `dispatch()`
+- [x] If tool disabled: `toolCall.status = "error"`, `onToolCallStatusChanged` emitted, `ToolResult` returned with `success: false` and error message: `"Tool '{toolName}' is disabled and cannot be used in this context."`
+- [x] Disabled tool is never executed regardless of auto-approve or any other state
+- [x] Log entry at `info` level: "Blocked disabled tool" with `toolName`
 
 ### DISP-003: Implement path enforcement in dispatcher
 **Description:** Add FR-84 path enforcement after mode/approve checks but before `tool.execute()`.
@@ -133,10 +133,10 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/chat/dispatcher.ts`
 **Dependencies:** DISP-001, PATH-001
 **Acceptance Criteria:**
-- [ ] Path enforcement runs after approve/mode checks, before `tool.execute()`
-- [ ] Calls `enforcePathConstraints()` with tool name, parameters, resolved config entry, and vault root path. Uses `this.vaultRootPath ?? ''` as fallback when vault root path is not set.
-- [ ] If path blocked: `toolCall.status = "error"`, `onToolCallStatusChanged` emitted, `ToolResult` returned with `success: false` and blocked path error message
-- [ ] Built-in tools only; MCP tools exempted via `TOOL_PATH_PARAMS` lookup
+- [x] Path enforcement runs after approve/mode checks, before `tool.execute()`
+- [x] Calls `enforcePathConstraints()` with tool name, parameters, resolved config entry, and vault root path. Uses `this.vaultRootPath ?? ''` as fallback when vault root path is not set.
+- [x] If path blocked: `toolCall.status = "error"`, `onToolCallStatusChanged` emitted, `ToolResult` returned with `success: false` and blocked path error message
+- [x] Built-in tools only; MCP tools exempted via `TOOL_PATH_PARAMS` lookup
 
 ### DISP-004: Implement unified auto-approve from effective config
 **Description:** When `effectiveToolConfig` is active, use its merged `auto_approve` value as a unified early-return before the existing MCP/built-in auto-approve branching logic.
@@ -144,9 +144,9 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/chat/dispatcher.ts`
 **Dependencies:** DISP-001
 **Acceptance Criteria:**
-- [ ] When `effectiveToolConfig` is active, `effectiveToolConfig.tools[toolName]?.auto_approve` is checked as a unified early-return **before** the MCP/built-in branching (`resolveMcpAutoApprove()` / `resolveAutoApprove()`)
-- [ ] Neither `resolveMcpAutoApprove()` nor `resolveAutoApprove()` is consulted when effective config provides a value
-- [ ] Existing MCP/built-in branching remains as fallback when `effectiveToolConfig` is null
+- [x] When `effectiveToolConfig` is active, `effectiveToolConfig.tools[toolName]?.auto_approve` is checked as a unified early-return **before** the MCP/built-in branching (`resolveMcpAutoApprove()` / `resolveAutoApprove()`)
+- [x] Neither `resolveMcpAutoApprove()` nor `resolveAutoApprove()` is consulted when effective config provides a value
+- [x] Existing MCP/built-in branching remains as fallback when `effectiveToolConfig` is null
 
 ### REG-001: Add `getFilteredToolDefinitions()` to ToolRegistry
 **Description:** Add the new method that filters tool definitions based on the effective tool config.
@@ -154,10 +154,10 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `src/tools/index.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] New method `getFilteredToolDefinitions(config: EffectiveToolConfig): ToolDefinition[]` added
-- [ ] Only tools with `enabled: true` in the config are included in the returned array
-- [ ] Existing `getToolDefinitions()` method unchanged (backward compatible)
-- [ ] Handles empty `EffectiveToolConfig.tools` gracefully (returns all tools if tool not in config). _This is a defensive fallback — the merger should always produce entries for all tools, but this handles the edge case gracefully._
+- [x] New method `getFilteredToolDefinitions(config: EffectiveToolConfig): ToolDefinition[]` added
+- [x] Only tools with `enabled: true` in the config are included in the returned array
+- [x] Existing `getToolDefinitions()` method unchanged (backward compatible)
+- [x] Handles empty `EffectiveToolConfig.tools` gracefully (returns all tools if tool not in config). _This is a defensive fallback — the merger should always produce entries for all tools, but this handles the edge case gracefully._
 
 ---
 
