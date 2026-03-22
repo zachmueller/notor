@@ -14,7 +14,9 @@
 		"e2e:run:quick": "npx tsx e2e/run-and-collect.ts --duration 10",
 		"e2e:setup-vault": "npx tsx e2e/scripts/setup-vault.ts",
 		"e2e:tools": "npx tsx e2e/scripts/tool-interaction-test.ts",
-		"e2e:workflow-watcher": "npx tsx e2e/scripts/workflow-watcher-test.ts"
+		"e2e:workflow-watcher": "npx tsx e2e/scripts/workflow-watcher-test.ts",
+		"test": "vitest run",
+		"test:watch": "vitest"
 	},
 	"keywords": [],
 	"license": "0-BSD",
@@ -31,7 +33,8 @@
 		"tslib": "2.4.0",
 		"tsx": "^4.19.0",
 		"typescript": "^5.8.3",
-		"typescript-eslint": "8.35.1"
+		"typescript-eslint": "8.35.1",
+		"vitest": "^4.1.0"
 	},
 	"dependencies": {
 		"@aws-sdk/client-bedrock": "^3.1003.0",

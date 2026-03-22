@@ -381,13 +381,13 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Create test file for `src/tool-config/parser.ts`
 **Dependencies:** PARSE-001, PARSE-002
 **Acceptance Criteria:**
-- [ ] Valid single-block extraction and stripping
-- [ ] Multiple blocks per file (document-order merge)
-- [ ] Version attribute parsing: missing, valid, unsupported major
-- [ ] YAML parse failures: malformed YAML, null/undefined/array/scalar returns from `parseYAML`
-- [ ] Field validation: unrecognized tool name, unrecognized field, wrong types for each field
-- [ ] MCP tool path field Notice
-- [ ] Content fully stripped from output
+- [x] Valid single-block extraction and stripping
+- [x] Multiple blocks per file (document-order merge)
+- [x] Version attribute parsing: missing, valid, unsupported major
+- [x] YAML parse failures: malformed YAML, null/undefined/array/scalar returns from `parseYAML`
+- [x] Field validation: unrecognized tool name, unrecognized field, wrong types for each field
+- [x] MCP tool path field Notice
+- [x] Content fully stripped from output
 
 ### TEST-002 [P]: Unit tests for merger
 **Description:** Test `mergeToolConfigs()` covering precedence, sparse merge, and defaults.
@@ -395,12 +395,12 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Create test file for `src/tool-config/merger.ts`
 **Dependencies:** MERGE-001
 **Acceptance Criteria:**
-- [ ] Precedence order: workflow > persona > rule > global
-- [ ] Sparse merge: higher-priority omitted field does not override lower-priority value
-- [ ] Replace semantics for `allowed_paths` / `blocked_paths`
-- [ ] Default fill for unmentioned tools
-- [ ] `globalAutoApprove` correctly applied (built-in + MCP server-level)
-- [ ] Document position ordering within same source type
+- [x] Precedence order: workflow > persona > rule > global
+- [x] Sparse merge: higher-priority omitted field does not override lower-priority value
+- [x] Replace semantics for `allowed_paths` / `blocked_paths`
+- [x] Default fill for unmentioned tools
+- [x] `globalAutoApprove` correctly applied (built-in + MCP server-level)
+- [x] Document position ordering within same source type
 
 ### TEST-003 [P]: Unit tests for path enforcer
 **Description:** Test `enforcePathConstraints()` for all tool types and path scenarios.
@@ -408,14 +408,14 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Create test file for `src/tool-config/path-enforcer.ts`
 **Dependencies:** PATH-001
 **Acceptance Criteria:**
-- [ ] Vault-namespace: prefix match allows, non-match blocks
-- [ ] Filesystem-namespace: absolute path resolution and comparison
-- [ ] `blocked_paths` overrides `allowed_paths`
-- [ ] Empty `allowed_paths` → no restriction
-- [ ] Empty `blocked_paths` → no restriction
-- [ ] `fetch_webpage` exempt
-- [ ] MCP tools exempt
-- [ ] `write_docx` dual path params (`output_path` + `template_path`) both enforced
+- [x] Vault-namespace: prefix match allows, non-match blocks
+- [x] Filesystem-namespace: absolute path resolution and comparison
+- [x] `blocked_paths` overrides `allowed_paths`
+- [x] Empty `allowed_paths` → no restriction
+- [x] Empty `blocked_paths` → no restriction
+- [x] `fetch_webpage` exempt
+- [x] MCP tools exempt
+- [x] `write_docx` dual path params (`output_path` + `template_path`) both enforced
 
 ### TEST-004: Integration test — end-to-end tool config flow
 **Description:** Test the full pipeline from tag in source file through to dispatcher enforcement.
@@ -423,12 +423,12 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Create integration test file
 **Dependencies:** All Phase 2–4 tasks
 **Acceptance Criteria:**
-- [ ] Persona with `<notor_tool_config>` disabling tools → LLM tool list excludes disabled tools
-- [ ] Workflow overriding persona config → correct precedence applied
-- [ ] Rule activating mid-conversation → config recomputed on next message
-- [ ] Disabled tool call → blocked with correct error message
-- [ ] Path-restricted tool call → blocked when path outside allowed range
-- [ ] `<include_note>` embedding a shared config → extracted correctly post-resolution
+- [x] Persona with `<notor_tool_config>` disabling tools → LLM tool list excludes disabled tools
+- [x] Workflow overriding persona config → correct precedence applied
+- [x] Rule activating mid-conversation → config recomputed on next message
+- [x] Disabled tool call → blocked with correct error message
+- [x] Path-restricted tool call → blocked when path outside allowed range
+- [x] `<include_note>` embedding a shared config → extracted correctly post-resolution
 
 ---
 
