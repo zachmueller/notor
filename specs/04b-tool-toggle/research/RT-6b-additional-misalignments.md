@@ -8,7 +8,7 @@
 
 8 additional misalignments identified between the implementation tasks and the current codebase/spec/plan. 0 critical, 4 moderate, 4 minor.
 
-**Resolved:** 6
+**Resolved:** 7
 
 ---
 
@@ -277,7 +277,7 @@ In practice, `main.ts` always passes `metadataCache` when constructing the build
 
 ### RT-6.18: WF-001 extraction after validation means config-only workflows produce empty body
 
-**Status:** Open
+**Status:** Resolved
 
 **Affected task:** WF-001
 
@@ -309,6 +309,8 @@ The result: an empty workflow instruction block sent to the LLM.
 - **(b)** Add AC to WF-001: "If stripped content is empty after extraction, treat as validation failure and abort with the same notice as step 3."
 
 Option (a) is recommended. This would change the insertion point to: "after `<include_note>` resolution (step 2) but **before** validation (step 3)."
+
+**Resolution:** Applied option (a). Extraction now happens after `<include_note>` resolution (step 2) but **before** validation (step 3), so `validateWorkflowContent()` checks the stripped content. A config-only workflow correctly fails validation as empty, preserving the existing user experience. Changes applied: `tasks.md` WF-001 AC updated to specify extraction before validation (step 3) not after; `plan.md` WorkflowExecutor section updated to match the new insertion point, with `strippedContent` passed to both validation and XML wrapping.
 
 ---
 

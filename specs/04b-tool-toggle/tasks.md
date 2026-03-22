@@ -210,7 +210,7 @@
 **Dependencies:** PARSE-001
 **Acceptance Criteria:**
 - [ ] `WorkflowAssemblyResult` gets new field: `toolConfigs: ParsedToolConfig[]`
-- [ ] Extraction happens after `<include_note>` resolution (step 2) and validation (step 3), but **before** XML wrapping (step 4)
+- [ ] Extraction happens after `<include_note>` resolution (step 2) but **before** validation (step 3) and XML wrapping (step 4). Validation runs on the stripped content, so a config-only workflow (entire body is a `<notor_tool_config>` block) correctly fails validation as empty.
 - [ ] `extractToolConfigs(resolvedBody, "workflow", workflow.file.path)` called
 - [ ] `strippedContent` (not original resolved body) passed to XML wrapper
 - [ ] Full `configs` array (not just `configs[0]`) attached to result
