@@ -96,7 +96,7 @@ B. Pre-compute a single unified `globalAutoApprove` map in `main.ts`/orchestrato
 
 C. Keep `resolveMcpAutoApprove()` active in the dispatcher even when `effectiveToolConfig` is set — only bypass `resolveAutoApprove()` for built-ins. This requires conditional branching in the dispatcher's approve resolution path.
 
-**Resolution:** _Open_
+**Resolution:** **Option B** — Pre-flatten MCP server `autoApprove[]` lists into the `globalAutoApprove` map before passing it to `mergeToolConfigs()`. The orchestrator (or `main.ts` at injection time) iterates all configured MCP servers, expands each server's `autoApprove: string[]` into namespaced `server__tool` keys set to `true`, and merges them into the same `globalAutoApprove: Record<string, boolean>` map that already carries built-in tool defaults. The merger signature stays unchanged; `mergeToolConfigs()` already accepts string-keyed tool names covering both built-in and MCP tools. The default fill order becomes: `personaAutoApprove → globalAutoApprove (now includes MCP server-level) → false`. No changes to `resolveMcpAutoApprove()` are needed — it is simply bypassed (along with `resolveAutoApprove()`) when `effectiveToolConfig` is active, as the plan already states.
 
 ---
 
@@ -255,7 +255,7 @@ Use this section to record agreed resolutions as we work through each risk. Upda
 | 1 | Tool defs captured once per send | HIGH | **Option A** — `resolveEffectiveConfig()` moves to `ChatOrchestrator` |
 | 2 | `resolveEffectiveConfig()` placement | HIGH | **Resolved by Risk 1 Option A** — orchestrator owns all ingredients |
 | 3 | No per-rule activation state | HIGH | **Approach 3+4 hybrid** — `getMatchedRules()` on VaultRuleManager; extraction in SystemPromptBuilder |
-| 4 | MCP `autoApprove[]` discarded | HIGH | _Open_ |
+| 4 | MCP `autoApprove[]` discarded | HIGH | **Option B** — pre-flatten MCP server `autoApprove[]` into `globalAutoApprove` map |
 | 5 | `Conversation` is DB-persisted | MEDIUM | _Open_ |
 | 6 | Workflow extraction invasiveness | MEDIUM | _Open_ |
 | 7 | `toolConfig` singular vs. multi-block | MEDIUM | _Open_ |

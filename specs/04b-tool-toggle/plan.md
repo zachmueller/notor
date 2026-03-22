@@ -185,6 +185,9 @@ Primary public API:
  * Field merge is sparse (field-by-field); path lists use replace semantics.
  *
  * For auto_approve defaults: personaAutoApprove > globalAutoApprove > false.
+ * globalAutoApprove includes both built-in tool defaults (from Settings)
+ * and MCP server-level autoApprove[] lists (pre-flattened by the caller
+ * into namespaced server__tool keys).
  */
 function mergeToolConfigs(
   configs: ParsedToolConfig[],
@@ -198,7 +201,7 @@ Merge algorithm:
 1. Sort `configs` by precedence level (workflow=0, persona=1, rule=2), then by `documentPosition` ascending within the same source type.
 2. For each tool across all configs, iterate in sort order; for each field, the last non-undefined value wins (sparse merge).
 3. For `allowed_paths` / `blocked_paths`, use replace semantics: the highest-priority config that sets the field completely replaces lower-level values.
-4. Fill in defaults for any tool not mentioned in any config: `enabled: true`, `auto_approve: personaAutoApprove[toolName] ?? globalAutoApprove[toolName] ?? false`, `allowed_paths: []`, `blocked_paths: []`.
+4. Fill in defaults for any tool not mentioned in any config: `enabled: true`, `auto_approve: personaAutoApprove[toolName] ?? globalAutoApprove[toolName] ?? false` (where `globalAutoApprove` includes both built-in defaults from Settings and MCP server-level `autoApprove[]` entries pre-flattened into namespaced keys), `allowed_paths: []`, `blocked_paths: []`.
 5. Return `{ tools: ... }`.
 
 ---
@@ -359,14 +362,14 @@ Call `resolveEffectiveConfig()` inside `responseLoop()` **before each `provider.
 
 The orchestrator receives the following dependencies (injected from `main.ts` at construction or via setters):
 - `toolRegistry: ToolRegistry`
-- `globalAutoApprove: Record<string, boolean>`
+- `globalAutoApprove: Record<string, boolean>` — includes both built-in tool defaults (from Settings → Tools & permissions) and MCP server-level `autoApprove[]` lists pre-flattened into namespaced `server__tool` keys. `main.ts` builds this unified map before injection.
 - `personaAutoApprove: Record<string, boolean>`
 
 ---
 
 #### Modified: `src/main.ts`
 
-- Injects `toolRegistry`, `globalAutoApprove`, and `personaAutoApprove` into the orchestrator (via constructor params or setters) so the orchestrator can call `resolveEffectiveConfig()` independently.
+- Builds a unified `globalAutoApprove: Record<string, boolean>` map that merges built-in tool defaults (from `settings.auto_approve`) with MCP server-level `autoApprove[]` lists (iterates all configured MCP servers, expands each server's `autoApprove: string[]` into namespaced `server__tool` keys set to `true`). Injects this along with `toolRegistry` and `personaAutoApprove` into the orchestrator (via constructor params or setters) so the orchestrator can call `resolveEffectiveConfig()` independently.
 - On conversation end, calls `dispatcher.setEffectiveToolConfig(null)` and clears `activeParsedConfigs` to revert to global defaults.
 - No longer owns `resolveEffectiveConfig()` — that logic now lives in the orchestrator where it has direct access to `assemble()` output and the per-loop call cadence.
 
