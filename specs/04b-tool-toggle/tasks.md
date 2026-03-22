@@ -439,12 +439,12 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 **Files:** All modified and created files
 **Dependencies:** All previous tasks
 **Acceptance Criteria:**
-- [ ] TypeScript compilation succeeds with no errors
-- [ ] All FRs covered: FR-78 (tag syntax), FR-79 (supported contexts), FR-80 (precedence), FR-81 (pipeline), FR-82 (validation), FR-83 (disabled blocking), FR-84 (path enforcement), FR-85 (versioning), FR-86 (copy helper), FR-87 (personas section), FR-88 (inspector)
-- [ ] All NFRs satisfied: NFR-22 (performance), NFR-23 (portability), NFR-24 (robustness), NFR-25 (inspector fidelity)
-- [ ] No remaining references to deprecated `persona_auto_approve`
-- [ ] No remaining calls to deprecated `getActiveRuleContent()` in Phase 4b code paths
-- [ ] `<notor_tool_config>` tags fully stripped before LLM sees content in all contexts
+- [x] TypeScript compilation succeeds with no errors
+- [x] All FRs covered: FR-78 (tag syntax), FR-79 (supported contexts), FR-80 (precedence), FR-81 (pipeline), FR-82 (validation), FR-83 (disabled blocking), FR-84 (path enforcement), FR-85 (versioning), FR-86 (copy helper), FR-87 (personas section), FR-88 (inspector)
+- [x] All NFRs satisfied: NFR-22 (performance), NFR-23 (portability), NFR-24 (robustness), NFR-25 (inspector fidelity)
+- [x] No remaining references to deprecated `persona_auto_approve`
+- [x] No remaining calls to deprecated `getActiveRuleContent()` in Phase 4b code paths
+- [x] `<notor_tool_config>` tags fully stripped before LLM sees content in all contexts
 
 ---
 

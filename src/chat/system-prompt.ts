@@ -237,6 +237,8 @@ export class SystemPromptBuilder {
 						persona.system_prompt_path,
 						"system_prompt"
 					);
+					// Safety: strip any <notor_tool_config> blocks (legacy fallback path).
+					personaContent = extractToolConfigs(personaContent, "persona", persona.system_prompt_path).strippedContent;
 				}
 				if (personaContent.trim()) {
 					parts.push(personaContent);
@@ -264,6 +266,8 @@ export class SystemPromptBuilder {
 						persona.system_prompt_path,
 						"system_prompt"
 					);
+					// Safety: strip any <notor_tool_config> blocks (legacy fallback path).
+					personaContent = extractToolConfigs(personaContent, "persona", persona.system_prompt_path).strippedContent;
 				}
 				if (personaContent.trim()) {
 					parts.push(this.buildPersonaSection({
