@@ -1,6 +1,6 @@
 # RT-5 — Integration Risks Round 2: Deeper Codebase Scan
 
-**Status:** Open — 11 risks identified, 0 resolved
+**Status:** Open — 11 risks identified, 1 resolved
 **Created:** 2026-03-22
 **Source:** Full codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md), building on the resolved risks in [RT-4](RT-4-integration-risks.md)
 
@@ -11,9 +11,13 @@ Each risk entry has:
 
 ---
 
-## Risk 1 (HIGH) — `persona_auto_approve` three-state type not converted before merger
+## Risk 1 (HIGH) — `persona_auto_approve` three-state type not converted before merger — RESOLVED
 
-**Finding:**
+**Status:** Resolved (spec amendment)
+
+**Resolution:** `persona_auto_approve` is removed entirely in Phase 4b. The `<notor_tool_config>` `auto_approve` field in persona notes is the sole mechanism for per-persona auto-approve configuration. The `mergeToolConfigs()` signature no longer accepts a `personaAutoApprove` parameter; the default fill order simplifies to `globalAutoApprove[toolName] ?? false`. The three-state conversion is no longer needed.
+
+**Original Finding:**
 The plan's `mergeToolConfigs()` accepts `personaAutoApprove: Record<string, boolean>`, but the actual settings type is:
 
 ```typescript
@@ -23,15 +27,7 @@ persona_auto_approve: Record<string, Record<string, string>>
 
 Outer key = persona name, inner key = tool name, value = `AutoApproveState` (`"global"` | `"approve"` | `"deny"`). This is a nested, three-state structure — not a flat boolean map.
 
-The existing `resolveAutoApprove()` in `src/personas/auto-approve-resolver.ts` already handles this conversion (persona name lookup → three-state resolution → boolean). The plan says the dispatcher bypasses `resolveAutoApprove()` when `effectiveToolConfig` is active, but nobody performs the equivalent conversion for the merger's `personaAutoApprove` parameter.
-
 > Relevant files: `src/settings/types.ts` (line 201), `src/personas/auto-approve-resolver.ts` (lines 47-77), plan § `mergeToolConfigs()` signature
-
-**Conflict:**
-The plan assumes `personaAutoApprove` is already a `Record<string, boolean>` when passed to the merger. No conversion step is described anywhere in the pipeline.
-
-**Recommendation:**
-Add an explicit flattening step in the orchestrator's `resolveEffectiveConfig()`. Before calling `mergeToolConfigs()`, extract the active persona's overrides from `settings.persona_auto_approve[activePersonaName]` and convert each entry: `"approve"` → `true`, `"deny"` → `false`, `"global"` or absent → omit (let the merger fall through to `globalAutoApprove`). Reuse the resolution logic from `resolveAutoApprove()` or extract a shared helper.
 
 ---
 
@@ -262,7 +258,7 @@ No action needed. Informational only — the stripping happens before `assemble(
 
 | # | Risk | Severity | Status |
 |---|------|----------|--------|
-| 1 | `persona_auto_approve` three-state → boolean conversion unstated | HIGH | Open |
+| 1 | `persona_auto_approve` three-state → boolean conversion unstated | HIGH | Resolved (removed) |
 | 2 | Orchestrator lacks direct `ToolRegistry` reference | HIGH | Open |
 | 3 | Filtered tool defs must go to both `assemble()` and `sendMessage()` | MEDIUM | Open |
 | 4 | `toolDefinitions` captured once at loop entry, not per-iteration | MEDIUM | Open |

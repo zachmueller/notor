@@ -37,7 +37,7 @@ This feature is entirely within the existing TypeScript/Obsidian plugin stack:
 | `ToolDispatcher` | New `setEffectiveToolConfig()` method; enabled check + path enforcement in `dispatch()` |
 | `ToolRegistry` | New `getFilteredToolDefinitions(config)` method called before each LLM call |
 | `ChatOrchestrator` | Owns `resolveEffectiveConfig()`: collects `ParsedToolConfig[]` from `SystemPromptBuilder.assemble()` result (persona + rule configs) and active workflow's `WorkflowAssemblyResult`, merges into `EffectiveToolConfig`, injects into dispatcher, and calls `getFilteredToolDefinitions()` before each provider call in `responseLoop()`. Passes `VaultRuleManager.getMatchedRules()` to the builder on each iteration. |
-| `main.ts` | Injects dependencies into the orchestrator (tool registry, vault rule manager, global/persona auto-approve maps); clears `effectiveToolConfig` on conversation end |
+| `main.ts` | Injects dependencies into the orchestrator (tool registry, vault rule manager, global auto-approve map); clears `effectiveToolConfig` on conversation end |
 
 ---
 
@@ -184,15 +184,18 @@ Primary public API:
  * Within a source type, document position determines order (last wins).
  * Field merge is sparse (field-by-field); path lists use replace semantics.
  *
- * For auto_approve defaults: personaAutoApprove > globalAutoApprove > false.
+ * For auto_approve defaults: globalAutoApprove > false.
  * globalAutoApprove includes both built-in tool defaults (from Settings)
  * and MCP server-level autoApprove[] lists (pre-flattened by the caller
  * into namespaced server__tool keys).
+ *
+ * Note: Phase 4's persona_auto_approve (settings UI) is removed in Phase 4b.
+ * Per-persona auto-approve is now configured exclusively via <notor_tool_config>
+ * auto_approve fields in persona notes.
  */
 function mergeToolConfigs(
   configs: ParsedToolConfig[],
   globalAutoApprove: Record<string, boolean>,
-  personaAutoApprove: Record<string, boolean>,
   allToolNames: string[],
 ): EffectiveToolConfig
 ```
@@ -201,7 +204,7 @@ Merge algorithm:
 1. Sort `configs` by precedence level (workflow=0, persona=1, rule=2), then by `documentPosition` ascending within the same source type.
 2. For each tool across all configs, iterate in sort order; for each field, the last non-undefined value wins (sparse merge).
 3. For `allowed_paths` / `blocked_paths`, use replace semantics: the highest-priority config that sets the field completely replaces lower-level values.
-4. Fill in defaults for any tool not mentioned in any config: `enabled: true`, `auto_approve: personaAutoApprove[toolName] ?? globalAutoApprove[toolName] ?? false` (where `globalAutoApprove` includes both built-in defaults from Settings and MCP server-level `autoApprove[]` entries pre-flattened into namespaced keys), `allowed_paths: []`, `blocked_paths: []`.
+4. Fill in defaults for any tool not mentioned in any config: `enabled: true`, `auto_approve: globalAutoApprove[toolName] ?? false` (where `globalAutoApprove` includes both built-in defaults from Settings and MCP server-level `autoApprove[]` entries pre-flattened into namespaced keys), `allowed_paths: []`, `blocked_paths: []`.
 5. Return `{ tools: ... }`.
 
 ---
@@ -291,7 +294,7 @@ if (this.effectiveToolConfig) {
 }
 ```
 
-Also expose `auto_approve` from `effectiveToolConfig` in the auto-approve resolution: when `effectiveToolConfig` is set and the tool has an entry, the config's `auto_approve` value takes precedence over the `resolveAutoApprove()` result. The merger already incorporates Phase 4 `persona_auto_approve` into its defaults (see `mergeToolConfigs()` signature), so the dispatcher does not need to consult `resolveAutoApprove()` at all when `effectiveToolConfig` is active.
+Also expose `auto_approve` from `effectiveToolConfig` in the auto-approve resolution: when `effectiveToolConfig` is set and the tool has an entry, the config's `auto_approve` value takes precedence over the `resolveAutoApprove()` result. The dispatcher does not need to consult `resolveAutoApprove()` at all when `effectiveToolConfig` is active.
 
 ---
 
@@ -352,8 +355,7 @@ No changes to `VaultRule` struct, `loadRuleFile()`, or `evaluateRules()` interna
 Add a private `resolveEffectiveConfig()` method that:
 1. Collects `personaToolConfigs` and `ruleToolConfigs` from the most recent `SystemPromptBuilder.assemble()` result (the builder now extracts tool configs from both persona content and per-rule content, returning both arrays).
 2. Collects `workflowToolConfigs` from the active workflow's `WorkflowAssemblyResult.toolConfigs` (if any).
-3. Reads `personaAutoApprove` from the active persona's Phase 4 overrides (if any).
-4. Merges via `mergeToolConfigs([...workflowConfigs, ...personaToolConfigs, ...ruleToolConfigs], globalAutoApprove, personaAutoApprove, allToolNames)`.
+3. Merges via `mergeToolConfigs([...workflowConfigs, ...personaToolConfigs, ...ruleToolConfigs], globalAutoApprove, allToolNames)`.
 5. Stores the contributing `ParsedToolConfig[]` as `this.activeParsedConfigs` (a flat private field on the orchestrator, exposed to the inspector via a getter method).
 6. Calls `dispatcher.setEffectiveToolConfig(result)`.
 7. Uses `toolRegistry.getFilteredToolDefinitions(result)` when building the tool list for the `provider.sendMessage()` call.
@@ -363,15 +365,28 @@ Call `resolveEffectiveConfig()` inside `responseLoop()` **before each `provider.
 The orchestrator receives the following dependencies (injected from `main.ts` at construction or via setters):
 - `toolRegistry: ToolRegistry`
 - `globalAutoApprove: Record<string, boolean>` — includes both built-in tool defaults (from Settings → Tools & permissions) and MCP server-level `autoApprove[]` lists pre-flattened into namespaced `server__tool` keys. `main.ts` builds this unified map before injection.
-- `personaAutoApprove: Record<string, boolean>`
 
 ---
 
 #### Modified: `src/main.ts`
 
-- Builds a unified `globalAutoApprove: Record<string, boolean>` map that merges built-in tool defaults (from `settings.auto_approve`) with MCP server-level `autoApprove[]` lists (iterates all configured MCP servers, expands each server's `autoApprove: string[]` into namespaced `server__tool` keys set to `true`). Injects this along with `toolRegistry` and `personaAutoApprove` into the orchestrator (via constructor params or setters) so the orchestrator can call `resolveEffectiveConfig()` independently.
+- Builds a unified `globalAutoApprove: Record<string, boolean>` map that merges built-in tool defaults (from `settings.auto_approve`) with MCP server-level `autoApprove[]` lists (iterates all configured MCP servers, expands each server's `autoApprove: string[]` into namespaced `server__tool` keys set to `true`). Injects this along with `toolRegistry` into the orchestrator (via constructor params or setters) so the orchestrator can call `resolveEffectiveConfig()` independently.
 - On conversation end, calls `dispatcher.setEffectiveToolConfig(null)` and tells the orchestrator to clear its `activeParsedConfigs` and `effectiveToolConfig` fields to revert to global defaults.
 - No longer owns `resolveEffectiveConfig()` — that logic now lives in the orchestrator where it has direct access to `assemble()` output and the per-loop call cadence.
+
+---
+
+#### Removed: Phase 4 `persona_auto_approve` infrastructure
+
+The following Phase 4 artifacts are removed as part of this phase (replaced by `<notor_tool_config>` `auto_approve` in persona notes):
+
+- `persona_auto_approve` field from `NotorSettings` type (`src/settings/types.ts`) and defaults (`src/settings/defaults.ts`)
+- `src/settings/sections/persona-auto-approve.ts` — delete entire file (settings UI section)
+- Storage helpers in `src/personas/auto-approve-resolver.ts` — delete `getPersonaOverrides()`, `setPersonaToolOverride()`, `removePersonaOverrides()`, `getStaleToolNames()`; simplify `resolveAutoApprove()` to remove persona branch (only used as fallback when `effectiveToolConfig` is null)
+- `setPersonaAutoApprove()` method on `ToolDispatcher` (`src/chat/dispatcher.ts`) and its field `personaAutoApprove`
+- Call sites in `src/main.ts` (3 calls) and `src/chat/orchestrator.ts` (1 call) that invoke `setPersonaAutoApprove()`
+- References in settings tab renderer that call `renderPersonaAutoApproveSection()`
+- E2E test references in `e2e/scripts/auto-approve-test.ts`, `e2e/scripts/mcp-auto-approve-test.ts`, `e2e/scripts/workflow-hooks-test.ts`
 
 ---
 
