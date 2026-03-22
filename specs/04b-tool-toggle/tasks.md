@@ -226,7 +226,8 @@
 - [ ] Private method `resolveEffectiveConfig()` added
 - [ ] Calls `systemPromptBuilder.extractSourceToolConfigs(matchedRules, persona)` first (phase 1) to get `{ personaToolConfigs, ruleToolConfigs }` — this caches stripped content on the builder
 - [ ] Collects `workflowToolConfigs` from active workflow's `WorkflowAssemblyResult.toolConfigs`
-- [ ] Calls `mergeToolConfigs()` with all configs, `globalAutoApprove`, and `allToolNames`
+- [ ] Builds `globalAutoApprove: Record<string, boolean>` per-iteration by reading `this.settings.auto_approve` (built-in defaults) and `this.settings.mcp_servers` (expanding each non-disabled server's `autoApprove[]` into namespaced `server__tool` keys). This is rebuilt on every call, not cached.
+- [ ] Calls `mergeToolConfigs()` with all configs, the freshly-built `globalAutoApprove`, and `allToolNames`
 - [ ] Stores contributing `ParsedToolConfig[]` as `this.activeParsedConfigs`
 - [ ] Stores merged result as `this.effectiveToolConfig`
 - [ ] Calls `dispatcher.setEffectiveToolConfig(result)`
@@ -280,8 +281,7 @@
 - Modify `src/main.ts`
 **Dependencies:** ORCH-001, REG-001
 **Acceptance Criteria:**
-- [ ] `globalAutoApprove: Record<string, boolean>` built by merging built-in defaults (`settings.auto_approve`) with MCP server-level `autoApprove[]` lists (expanded into namespaced `server__tool` keys)
-- [ ] `globalAutoApprove` injected into orchestrator
+- [ ] `globalAutoApprove` is **not** built or injected as a static map. Instead, the orchestrator builds it per-iteration inside `resolveEffectiveConfig()` by reading `this.settings.auto_approve` and `this.settings.mcp_servers` at call time (see ORCH-001). This ensures MCP server `autoApprove[]` changes and settings reloads are always reflected without requiring a rebuild trigger.
 - [ ] `getToolDefinitionsCallback` widened to accept optional `EffectiveToolConfig`: when provided → `toolRegistry.getFilteredToolDefinitions(config)`; when omitted → `toolRegistry.getToolDefinitions()`
 - [ ] On conversation end: `dispatcher.setEffectiveToolConfig(null)` called and orchestrator's `activeParsedConfigs`/`effectiveToolConfig` cleared
 

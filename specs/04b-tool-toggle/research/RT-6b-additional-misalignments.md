@@ -8,7 +8,7 @@
 
 8 additional misalignments identified between the implementation tasks and the current codebase/spec/plan. 0 critical, 4 moderate, 4 minor.
 
-**Resolved:** 1
+**Resolved:** 2
 
 ---
 
@@ -84,7 +84,7 @@ await this._backgroundResponseLoop(
 
 ### RT-6.14: No spec for when `globalAutoApprove` is rebuilt
 
-**Status:** Open
+**Status:** Resolved
 
 **Affected task:** MAIN-001
 
@@ -120,6 +120,8 @@ Settings changes propagate through `saveSettings()` (`main.ts:720-747`), and the
 - **(c)** The merger accepts a callback rather than a static map, resolving defaults lazily.
 
 Option (a) is recommended.
+
+**Resolution:** Applied option (a). `globalAutoApprove` is no longer built as a static map by `main.ts` and injected into the orchestrator. Instead, the orchestrator builds it per-iteration inside `resolveEffectiveConfig()` by reading `this.settings.auto_approve` and `this.settings.mcp_servers` at call time. Changes applied: `spec.md` FR-80 updated with per-iteration rebuild clarification; `plan.md` orchestrator section updated to show `globalAutoApprove` construction as step 3 of `resolveEffectiveConfig()`, dependency injection list updated to note `globalAutoApprove` is not injected, `main.ts` section and Integration Points table updated to remove static build/injection; `tasks.md` MAIN-001 ACs updated to reflect no static map, ORCH-001 AC added for per-iteration `globalAutoApprove` construction.
 
 ---
 

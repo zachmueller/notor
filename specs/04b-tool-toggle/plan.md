@@ -37,7 +37,7 @@ This feature is entirely within the existing TypeScript/Obsidian plugin stack:
 | `ToolDispatcher` | New `setEffectiveToolConfig()` method; enabled check + path enforcement in `dispatch()` |
 | `ToolRegistry` | New `getFilteredToolDefinitions(config)` method called before each LLM call |
 | `ChatOrchestrator` | Owns `resolveEffectiveConfig()`: calls `SystemPromptBuilder.extractSourceToolConfigs()` (phase 1) to collect `ParsedToolConfig[]` from persona + rule sources, combines with active workflow's `WorkflowAssemblyResult.toolConfigs`, merges into `EffectiveToolConfig`, injects into dispatcher, computes filtered tool definitions via `getToolDefinitionsCallback(config)`, then passes filtered definitions to `assemble()` (phase 2) and `sendMessage()`. Two-phase builder call per iteration (RT-6.1). |
-| `main.ts` | Widens the existing `getToolDefinitionsCallback` to accept an optional `EffectiveToolConfig` (closing over `toolRegistry`); injects `globalAutoApprove` into the orchestrator; clears `effectiveToolConfig` on conversation end |
+| `main.ts` | Widens the existing `getToolDefinitionsCallback` to accept an optional `EffectiveToolConfig` (closing over `toolRegistry`); clears `effectiveToolConfig` on conversation end. (`globalAutoApprove` is built per-iteration by the orchestrator, not injected by `main.ts` — see RT-6.14 resolution.) |
 
 ---
 
@@ -391,11 +391,12 @@ No changes to `VaultRule` struct, `loadRuleFile()`, or `evaluateRules()` interna
 Add a private `resolveEffectiveConfig()` method that implements the two-phase builder pattern (RT-6.1 resolution):
 1. Calls `systemPromptBuilder.extractSourceToolConfigs(matchedRules, persona)` — phase 1 of the builder. This resolves `<include_note>` tags, extracts `<notor_tool_config>` blocks from persona and rule sources, and caches stripped content on the builder for the subsequent `assemble()` call. Returns `{ personaToolConfigs, ruleToolConfigs }`.
 2. Collects `workflowToolConfigs` from the active workflow's `WorkflowAssemblyResult.toolConfigs` (if any).
-3. Merges via `mergeToolConfigs([...workflowConfigs, ...personaToolConfigs, ...ruleToolConfigs], globalAutoApprove, allToolNames)`.
-4. Stores the contributing `ParsedToolConfig[]` as `this.activeParsedConfigs` (a flat private field on the orchestrator, exposed to the inspector via a getter method).
-5. Calls `dispatcher.setEffectiveToolConfig(result)`.
-6. Computes filtered tool definitions once per iteration via `this.getToolDefinitionsCallback(result)` (the callback delegates to `toolRegistry.getFilteredToolDefinitions(result)` inside `main.ts`).
-7. Returns the filtered tool definitions. The caller then passes them to both `systemPromptBuilder.assemble()` (phase 2 — so the system prompt only documents tools the LLM can call) and `provider.sendMessage()` (the actual tool list sent to the LLM). This single-computation-dual-use pattern ensures the system prompt and provider tool list are always in sync.
+3. Builds `globalAutoApprove: Record<string, boolean>` fresh by reading `this.settings.auto_approve` (built-in defaults) and `this.settings.mcp_servers` (expanding each non-disabled server's `autoApprove[]` into namespaced `server__tool` keys set to `true`). This per-iteration rebuild ensures MCP server `autoApprove[]` changes and settings reloads are always reflected (RT-6.14 resolution).
+4. Merges via `mergeToolConfigs([...workflowConfigs, ...personaToolConfigs, ...ruleToolConfigs], globalAutoApprove, allToolNames)`.
+5. Stores the contributing `ParsedToolConfig[]` as `this.activeParsedConfigs` (a flat private field on the orchestrator, exposed to the inspector via a getter method).
+6. Calls `dispatcher.setEffectiveToolConfig(result)`.
+7. Computes filtered tool definitions once per iteration via `this.getToolDefinitionsCallback(result)` (the callback delegates to `toolRegistry.getFilteredToolDefinitions(result)` inside `main.ts`).
+8. Returns the filtered tool definitions. The caller then passes them to both `systemPromptBuilder.assemble()` (phase 2 — so the system prompt only documents tools the LLM can call) and `provider.sendMessage()` (the actual tool list sent to the LLM). This single-computation-dual-use pattern ensures the system prompt and provider tool list are always in sync.
 
 **Parameter change:** Remove `toolDefinitions` as a parameter from `responseLoop()` **and** `_backgroundResponseLoop()`. The current codebase passes `toolDefinitions: ToolDefinition[]` into both loops (captured once at loop entry by `handleUserMessage()`, `executeWorkflow()`, and the background execution path). This parameter is removed from both — tool definitions are no longer threaded through from callers. Instead, they are computed fresh inside each loop's while-loop body on each iteration.
 
@@ -418,13 +419,14 @@ Callers of `responseLoop()` (`handleUserMessage()`, `executeWorkflow()`) no long
 
 The orchestrator receives the following dependencies (injected from `main.ts` at construction or via setters):
 - `getToolDefinitionsCallback: (config?: EffectiveToolConfig) => ToolDefinition[]` — the existing callback signature is widened to accept an optional `EffectiveToolConfig`. When a config is passed, `main.ts` delegates to `toolRegistry.getFilteredToolDefinitions(config)`; when omitted, it falls back to `toolRegistry.getToolDefinitions()`. This preserves the existing loose coupling (no direct `ToolRegistry` dependency on the orchestrator).
-- `globalAutoApprove: Record<string, boolean>` — includes both built-in tool defaults (from Settings → Tools & permissions) and MCP server-level `autoApprove[]` lists pre-flattened into namespaced `server__tool` keys. `main.ts` builds this unified map before injection.
+
+Note: `globalAutoApprove` is **not** injected as a static dependency. Instead, it is built per-iteration inside `resolveEffectiveConfig()` from `this.settings.auto_approve` and `this.settings.mcp_servers` (RT-6.14 resolution). The orchestrator already has access to `this.settings` (updated via `updateSettings()`), so no new dependency is needed.
 
 ---
 
 #### Modified: `src/main.ts`
 
-- Builds a unified `globalAutoApprove: Record<string, boolean>` map that merges built-in tool defaults (from `settings.auto_approve`) with MCP server-level `autoApprove[]` lists (iterates all configured MCP servers, expands each server's `autoApprove: string[]` into namespaced `server__tool` keys set to `true`). Injects `globalAutoApprove` into the orchestrator (via constructor params or setters). Updates the existing `getToolDefinitionsCallback` to accept an optional `EffectiveToolConfig` parameter: when provided, it delegates to `toolRegistry.getFilteredToolDefinitions(config)`; when omitted, it falls back to `toolRegistry.getToolDefinitions()`.
+- Updates the existing `getToolDefinitionsCallback` to accept an optional `EffectiveToolConfig` parameter: when provided, it delegates to `toolRegistry.getFilteredToolDefinitions(config)`; when omitted, it falls back to `toolRegistry.getToolDefinitions()`. Note: `globalAutoApprove` is no longer built or injected by `main.ts` — the orchestrator builds it per-iteration inside `resolveEffectiveConfig()` from `this.settings` (RT-6.14 resolution).
 - On conversation end, calls `dispatcher.setEffectiveToolConfig(null)` and tells the orchestrator to clear its `activeParsedConfigs` and `effectiveToolConfig` fields to revert to global defaults.
 - No longer owns `resolveEffectiveConfig()` — that logic now lives in the orchestrator where it has direct access to `assemble()` output and the per-loop call cadence.
 
