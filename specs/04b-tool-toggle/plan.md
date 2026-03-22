@@ -14,7 +14,7 @@
 | YAML parsing | `js-yaml` (already a transitive dep via Obsidian's bundled environment; use `parseYAML` from `obsidian` if available, otherwise `js-yaml`) | The spec bodies are already YAML; a dedicated parser handles edge cases cleanly; avoid rolling a hand-written parser for structured data |
 | Regex approach for tag extraction | Hardened regex: `/^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm` | RT-2 confirmed: ~4× faster than line-by-line on all realistic input; `^`+`m` hardening eliminates pathological backtracking |
 | `EffectiveToolConfig` scope | Recomputed before each LLM call; stored as flat private fields on `ChatOrchestrator` (`activeParsedConfigs: ParsedToolConfig[]` + `effectiveToolConfig: EffectiveToolConfig | null`); cleared on conversation end; inspector accesses via getter methods | Per-message recomputation reflects dynamic rule activation/deactivation (spec clarification Q5); no persistence between conversations; `Conversation` interface untouched |
-| `ToolRegistry.getFilteredToolDefinitions()` | New method alongside existing `getToolDefinitions()` | Additive change; existing callers unaffected; filtered variant called before each LLM call in `ChatOrchestrator.responseLoop()` |
+| `ToolRegistry.getFilteredToolDefinitions()` | New method alongside existing `getToolDefinitions()` | Additive change; existing callers unaffected; orchestrator accesses it via the widened `getToolDefinitionsCallback` (no direct `ToolRegistry` dependency on the orchestrator) |
 | Dispatcher enforcement | `setEffectiveToolConfig()` injected before each LLM call; enabled check runs first in `dispatch()`, path enforcement runs after mode/approve checks | Matches FR-83 (enabled check first) and FR-84 (path enforcement before execution) |
 | Tool config extraction ownership | `SystemPromptBuilder` owns extraction for persona and rule sources; `WorkflowExecutor` owns extraction for workflow source | Builder already processes each source in distinct labeled code paths (persona content, per-rule content) so source attribution (`"persona"` / `"rule"`) is natural. VaultRuleManager stays extraction-unaware; it just exposes `getMatchedRules()` for stateless dynamic evaluation. See RT-4 Risk 3 resolution. |
 | Inspector code sharing | Live mode reads `EffectiveToolConfig` and `activeParsedConfigs` from orchestrator getter methods; pre-flight mode deferred | NFR-25 mandate: no duplicate logic; inspector is a pure consumer of orchestrator state. Pre-flight deferred per RT-4 Risk 9 resolution |
@@ -36,8 +36,8 @@ This feature is entirely within the existing TypeScript/Obsidian plugin stack:
 | `WorkflowExecutor` | Inside `assembleWorkflowPrompt()`, between include resolution (step 2) and XML wrapping (step 4), extract and strip tool config from the resolved body; pass stripped content to the XML wrapper; include `ParsedToolConfig[]` (plural) in `WorkflowAssemblyResult.toolConfigs` |
 | `ToolDispatcher` | New `setEffectiveToolConfig()` method; enabled check + path enforcement in `dispatch()` |
 | `ToolRegistry` | New `getFilteredToolDefinitions(config)` method called before each LLM call |
-| `ChatOrchestrator` | Owns `resolveEffectiveConfig()`: collects `ParsedToolConfig[]` from `SystemPromptBuilder.assemble()` result (persona + rule configs) and active workflow's `WorkflowAssemblyResult`, merges into `EffectiveToolConfig`, injects into dispatcher, and calls `getFilteredToolDefinitions()` before each provider call in `responseLoop()`. Passes `VaultRuleManager.getMatchedRules()` to the builder on each iteration. |
-| `main.ts` | Injects dependencies into the orchestrator (tool registry, vault rule manager, global auto-approve map); clears `effectiveToolConfig` on conversation end |
+| `ChatOrchestrator` | Owns `resolveEffectiveConfig()`: collects `ParsedToolConfig[]` from `SystemPromptBuilder.assemble()` result (persona + rule configs) and active workflow's `WorkflowAssemblyResult`, merges into `EffectiveToolConfig`, injects into dispatcher, and calls `getToolDefinitionsCallback(config)` before each provider call in `responseLoop()`. Passes `VaultRuleManager.getMatchedRules()` to the builder on each iteration. |
+| `main.ts` | Widens the existing `getToolDefinitionsCallback` to accept an optional `EffectiveToolConfig` (closing over `toolRegistry`); injects `globalAutoApprove` into the orchestrator; clears `effectiveToolConfig` on conversation end |
 
 ---
 
@@ -358,19 +358,19 @@ Add a private `resolveEffectiveConfig()` method that:
 3. Merges via `mergeToolConfigs([...workflowConfigs, ...personaToolConfigs, ...ruleToolConfigs], globalAutoApprove, allToolNames)`.
 5. Stores the contributing `ParsedToolConfig[]` as `this.activeParsedConfigs` (a flat private field on the orchestrator, exposed to the inspector via a getter method).
 6. Calls `dispatcher.setEffectiveToolConfig(result)`.
-7. Uses `toolRegistry.getFilteredToolDefinitions(result)` when building the tool list for the `provider.sendMessage()` call.
+7. Uses `this.getToolDefinitionsCallback(result)` when building the tool list for the `provider.sendMessage()` call (the callback delegates to `toolRegistry.getFilteredToolDefinitions(result)` inside `main.ts`).
 
 Call `resolveEffectiveConfig()` inside `responseLoop()` **before each `provider.sendMessage()` call** (at the same point where `systemPromptBuilder.assemble()` is already called per-iteration). The orchestrator calls `vaultRuleManager.getMatchedRules()` and passes the result to `assemble(matchedRules)` on each iteration, so the builder can process each rule individually. This ensures dynamic rule activation/deactivation is reflected in the effective config on every loop iteration, not just at conversation start.
 
 The orchestrator receives the following dependencies (injected from `main.ts` at construction or via setters):
-- `toolRegistry: ToolRegistry`
+- `getToolDefinitionsCallback: (config?: EffectiveToolConfig) => ToolDefinition[]` — the existing callback signature is widened to accept an optional `EffectiveToolConfig`. When a config is passed, `main.ts` delegates to `toolRegistry.getFilteredToolDefinitions(config)`; when omitted, it falls back to `toolRegistry.getToolDefinitions()`. This preserves the existing loose coupling (no direct `ToolRegistry` dependency on the orchestrator).
 - `globalAutoApprove: Record<string, boolean>` — includes both built-in tool defaults (from Settings → Tools & permissions) and MCP server-level `autoApprove[]` lists pre-flattened into namespaced `server__tool` keys. `main.ts` builds this unified map before injection.
 
 ---
 
 #### Modified: `src/main.ts`
 
-- Builds a unified `globalAutoApprove: Record<string, boolean>` map that merges built-in tool defaults (from `settings.auto_approve`) with MCP server-level `autoApprove[]` lists (iterates all configured MCP servers, expands each server's `autoApprove: string[]` into namespaced `server__tool` keys set to `true`). Injects this along with `toolRegistry` into the orchestrator (via constructor params or setters) so the orchestrator can call `resolveEffectiveConfig()` independently.
+- Builds a unified `globalAutoApprove: Record<string, boolean>` map that merges built-in tool defaults (from `settings.auto_approve`) with MCP server-level `autoApprove[]` lists (iterates all configured MCP servers, expands each server's `autoApprove: string[]` into namespaced `server__tool` keys set to `true`). Injects `globalAutoApprove` into the orchestrator (via constructor params or setters). Updates the existing `getToolDefinitionsCallback` to accept an optional `EffectiveToolConfig` parameter: when provided, it delegates to `toolRegistry.getFilteredToolDefinitions(config)`; when omitted, it falls back to `toolRegistry.getToolDefinitions()`.
 - On conversation end, calls `dispatcher.setEffectiveToolConfig(null)` and tells the orchestrator to clear its `activeParsedConfigs` and `effectiveToolConfig` fields to revert to global defaults.
 - No longer owns `resolveEffectiveConfig()` — that logic now lives in the orchestrator where it has direct access to `assemble()` output and the per-loop call cadence.
 
@@ -531,6 +531,6 @@ Suggested task groups:
 | **A** | New `src/tool-config/` module: `types.ts`, `parser.ts`, `merger.ts`, `path-enforcer.ts` |
 | **B** | Dispatcher modifications: `setEffectiveToolConfig()`, enabled check, path enforcement |
 | **C** | Ingestion pipeline modifications: `SystemPromptBuilder`, `VaultRuleManager`, `WorkflowExecutor` |
-| **D** | `ToolRegistry.getFilteredToolDefinitions()` + `ChatOrchestrator` wiring (`resolveEffectiveConfig()`, `responseLoop()` integration) + `main.ts` dependency injection |
+| **D** | `ToolRegistry.getFilteredToolDefinitions()` + `ChatOrchestrator` wiring (`resolveEffectiveConfig()`, `responseLoop()` integration) + `main.ts` callback widening and `globalAutoApprove` injection |
 | **E** | Settings UI: "Copy tool config YAML" button + Settings → Personas section |
 | **F** | Effective Config Inspector leaf view |

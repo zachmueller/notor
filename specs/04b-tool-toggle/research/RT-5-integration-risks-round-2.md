@@ -1,6 +1,6 @@
 # RT-5 — Integration Risks Round 2: Deeper Codebase Scan
 
-**Status:** Open — 11 risks identified, 1 resolved
+**Status:** Open — 11 risks identified, 2 resolved
 **Created:** 2026-03-22
 **Source:** Full codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md), building on the resolved risks in [RT-4](RT-4-integration-risks.md)
 
@@ -31,9 +31,13 @@ Outer key = persona name, inner key = tool name, value = `AutoApproveState` (`"g
 
 ---
 
-## Risk 2 (HIGH) — Orchestrator has no direct `ToolRegistry` reference
+## Risk 2 (HIGH) — Orchestrator has no direct `ToolRegistry` reference — RESOLVED
 
-**Finding:**
+**Status:** Resolved (callback signature change)
+
+**Resolution:** The orchestrator's existing `getToolDefinitionsCallback` signature is widened from `() => ToolDefinition[]` to `(config?: EffectiveToolConfig) => ToolDefinition[]`. `main.ts` closes over the registry in the callback: when a config is passed, it delegates to `toolRegistry.getFilteredToolDefinitions(config)`; otherwise it falls back to `toolRegistry.getToolDefinitions()`. This preserves the existing loose coupling (the orchestrator has no direct `ToolRegistry` dependency) while giving it access to filtered tool definitions. The plan and spec are updated to reflect this approach — the orchestrator no longer lists `toolRegistry: ToolRegistry` as an injected dependency.
+
+**Original Finding:**
 The plan says the orchestrator calls `toolRegistry.getFilteredToolDefinitions(config)`, but the orchestrator currently has no reference to `ToolRegistry`. Tool definitions arrive via an opaque callback:
 
 ```typescript
@@ -47,12 +51,6 @@ orchestrator.setGetToolDefinitions(() => {
 ```
 
 > Relevant files: `src/chat/orchestrator.ts` (lines 957-968), `src/main.ts` (lines 1263-1265)
-
-**Conflict:**
-The plan lists `toolRegistry: ToolRegistry` as an injected dependency on the orchestrator, but this doesn't exist today. The orchestrator cannot call `getFilteredToolDefinitions()` without a reference to the registry.
-
-**Recommendation:**
-Either inject `toolRegistry` directly into the orchestrator constructor (alongside existing deps like `dispatcher`, `systemPromptBuilder`, etc.), or change the callback signature to accept an `EffectiveToolConfig` parameter: `(config?: EffectiveToolConfig) => ToolDefinition[]` — and have `main.ts` close over the registry's `getFilteredToolDefinitions()`.
 
 ---
 
@@ -259,7 +257,7 @@ No action needed. Informational only — the stripping happens before `assemble(
 | # | Risk | Severity | Status |
 |---|------|----------|--------|
 | 1 | `persona_auto_approve` three-state → boolean conversion unstated | HIGH | Resolved (removed) |
-| 2 | Orchestrator lacks direct `ToolRegistry` reference | HIGH | Open |
+| 2 | Orchestrator lacks direct `ToolRegistry` reference | HIGH | Resolved (callback) |
 | 3 | Filtered tool defs must go to both `assemble()` and `sendMessage()` | MEDIUM | Open |
 | 4 | `toolDefinitions` captured once at loop entry, not per-iteration | MEDIUM | Open |
 | 5 | `<include_note>` resolution ownership leaves dual code paths | MEDIUM | Open |
