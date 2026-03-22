@@ -4,39 +4,46 @@ import globals from "globals";
 import { globalIgnores } from "eslint/config";
 
 export default tseslint.config(
+	// Spread the plugin's recommended config (includes js recommended,
+	// typescript-eslint recommendedTypeChecked, @microsoft/sdl, import,
+	// depend, no-console, no-restricted-globals, and all obsidianmd rules)
+	...obsidianmd.configs.recommended,
+
+	// Enable type-checked linting and browser globals for TS files
 	{
-		files: ["src/**/*.ts"],
-		plugins: {
-			"@typescript-eslint": tseslint.plugin,
-		},
+		files: ["**/*.ts", "**/*.tsx"],
 		languageOptions: {
-			parser: tseslint.parser,
 			globals: {
 				...globals.browser,
+				...globals.node,
+				// Obsidian globals (injected at runtime)
+				activeDocument: "readonly",
+				activeWindow: "readonly",
+				createDiv: "readonly",
+				createSpan: "readonly",
+				createEl: "readonly",
+				createFragment: "readonly",
+				createSvg: "readonly",
+				// TypeScript built-in types that no-undef doesn't know about
+				AsyncIterable: "readonly",
+				NodeJS: "readonly",
+				BufferEncoding: "readonly",
 			},
 			parserOptions: {
 				projectService: true,
 				tsconfigRootDir: import.meta.dirname,
-				extraFileExtensions: ['.json']
 			},
 		},
+	},
+
+	// Project-specific rule overrides for src/**/*.ts
+	{
+		files: ["src/**/*.ts"],
 		rules: {
 			"@typescript-eslint/no-unused-vars": ["error", {
 				varsIgnorePattern: "^_",
 				argsIgnorePattern: "^_",
 			}],
-			"@typescript-eslint/no-require-imports": "error",
-			"no-restricted-globals": ["error", {
-				name: "fetch",
-				message: "Use Obsidian's requestUrl instead of fetch for cross-platform compatibility. Only disable this rule when fetch is strictly required (e.g. streaming responses).",
-			}],
-		},
-	},
-	{
-		files: ["src/**/*.ts"],
-		plugins: { obsidianmd },
-		rules: {
-			...obsidianmd.configs.recommended,
 			"obsidianmd/ui/sentence-case": ["error", {
 				enforceCamelCaseLower: true,
 				brands: [
@@ -69,6 +76,7 @@ export default tseslint.config(
 			}],
 		},
 	},
+
 	globalIgnores([
 		"node_modules",
 		"build",
@@ -80,5 +88,6 @@ export default tseslint.config(
 		"version-bump.mjs",
 		"versions.json",
 		"main.js",
+		"vitest.config.ts",
 	]),
 );
