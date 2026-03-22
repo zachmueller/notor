@@ -37,6 +37,9 @@ The per-persona auto-approve overrides introduced in Phase 4 (`persona_auto_appr
 - Q: When a workflow ends mid-conversation, how does the tool config revert — recompute from active sources or restore a snapshot? → A: Workflows do not end mid-conversation; a workflow remains active for the duration of the conversation thread. The only way to clear the active workflow is to start a new conversation (or invoke a different workflow, which replaces it).
 - Q: Do MCP tools support `allowed_paths`/`blocked_paths` enforcement, or `enabled`/`auto_approve` only? → A: MCP tools support `enabled` and `auto_approve` only. Specifying `allowed_paths` or `blocked_paths` for an MCP tool emits a Notice indicating the fields are not yet implemented for MCP tools. Path enforcement for MCP tools is deferred to a future phase.
 - Q: How does the pre-flight inspector evaluate rule trigger conditions without a real conversation? → A: Rule trigger conditions are evaluated using the same keyword/condition matching functions used during normal prompt processing — the inspector is built entirely on top of these shared functions with a synthetic prompt as input. No separate or duplicated logic exists anywhere in the inspector code path.
+- Q: If a rule activates mid-conversation (trigger keyword appears in a later message), should the EffectiveToolConfig be recomputed per-message to reflect rule changes, or remain static for the conversation duration? → A: Recompute per-message. The EffectiveToolConfig is recomputed before each LLM call, picking up rule activation/deactivation changes dynamically. This matches FR-79's "applies whenever the rule is active" contract and aligns with how rules already work for prompt content.
+- Q: How should Phase 4's `persona_auto_approve` be incorporated into the merger so it isn't bypassed by the merger's default fill for tools not configured in any `<notor_tool_config>` block? → A: Pass both `globalAutoApprove` and `personaAutoApprove` to `mergeToolConfigs()`. Default fill order: `personaAutoApprove` (if active persona has an override) → `globalAutoApprove` → `false`. This keeps Phase 4 behavior intact without sentinel values.
+- Q: What structure should hold parsed tool config metadata for the live inspector's source attribution? → A: A top-level `activeParsedConfigs: ParsedToolConfig[]` field on the conversation context object, updated whenever EffectiveToolConfig is recomputed. The inspector reads this directly.
 
 ## User stories
 
@@ -131,7 +134,7 @@ execute_command:
 - Merging is field-by-field (sparse): a field omitted at a higher-priority level does not override a value set at a lower-priority level.
 - The global defaults layer is the base of the hierarchy:
   - For `enabled`: hardcoded as all tools enabled. There is no Settings UI to change global tool enabled state — the `<notor_tool_config>` tag is the only mechanism.
-  - For `auto_approve`: the per-tool auto-approve toggles in **Settings → Tools & permissions** are the global defaults. The existing per-persona auto-approve overrides (Phase 4) sit above global defaults and below any `<notor_tool_config>`-driven config.
+  - For `auto_approve`: the per-tool auto-approve toggles in **Settings → Tools & permissions** are the global defaults. The existing per-persona auto-approve overrides (Phase 4) sit above global defaults and below any `<notor_tool_config>`-driven config. The precedence merge accepts both `globalAutoApprove` and `personaAutoApprove` parameters; default fill order is: `personaAutoApprove` (if active persona has an override for the tool) → `globalAutoApprove` → `false`.
 - `allowed_paths` and `blocked_paths` use **replace semantics**: the highest-priority level that specifies the field replaces all lower-level values entirely (no merging of path lists).
 - `blocked_paths` always takes precedence over `allowed_paths` within the same effective config level: if a path matches both lists, the blocked effect wins.
 - **Example:** With global default `write_note` enabled and not auto-approved; a rule setting `auto_approve: true`; a persona setting `allowed_paths: ["Projects/"]`; and a workflow setting `enabled: false` — the effective config during that workflow is: `enabled: false` (workflow), `auto_approve: true` (rule), `allowed_paths: ["Projects/"]` (persona), no blocked paths.
@@ -151,8 +154,9 @@ execute_command:
   4. Validates the parsed structure (per FR-82).
   5. Stores the parsed config alongside its source context (`persona` / `workflow` / `rule`) and document position for within-file merge ordering.
 - Each full tag (opening tag + body + closing tag) is replaced with an empty string in the content passed downstream to the LLM.
-- After all source files are processed, the precedence merge runs to produce the `EffectiveToolConfig` for this conversation or execution.
-- The `EffectiveToolConfig` is applied to the tool registry and dispatcher for this interaction and reverted to global defaults when the conversation ends.
+- After all source files are processed, the precedence merge runs to produce the `EffectiveToolConfig` for this message.
+- The `EffectiveToolConfig` is recomputed before each LLM call (to reflect dynamic rule activation/deactivation), applied to the tool registry and dispatcher, and reverted to global defaults when the conversation ends.
+- The active `ParsedToolConfig[]` contributing to the current `EffectiveToolConfig` are stored on the conversation context object as `activeParsedConfigs`, updated on each recomputation. The live inspector reads this field for source attribution.
 
 ### FR-82: Validation and error reporting
 
@@ -256,7 +260,7 @@ execute_command:
 - The inspector is a standalone leaf view that can be opened alongside the Notor chat panel via a button in the chat panel or a command palette action.
 - **Pre-flight mode:** the user selects a persona and/or workflow (and optionally types a prompt to evaluate rule trigger conditions) before starting a conversation. The inspector displays the merged effective config that would result, giving an accurate starting-point view without an actual LLM conversation.
 - **Live in-chat mode:** the inspector can be opened at any point during a real conversation. Each field shows its current effective value and a source link to the specific note driving it, making it easy to diagnose unexpected tool behavior mid-conversation.
-- **Conversation history metadata:** the parsed tool config contributed by each source file is captured in conversation history metadata as configs are attached. The live inspector correctly reflects the full accumulated state even as additional tool configs are ingested mid-conversation (e.g., when a workflow is invoked after conversation start).
+- **Conversation history metadata:** the parsed tool config contributed by each source file is stored as an `activeParsedConfigs: ParsedToolConfig[]` field on the conversation context object, updated each time the `EffectiveToolConfig` is recomputed. The live inspector reads this field directly for source attribution, correctly reflecting the full accumulated state even as additional tool configs are ingested mid-conversation (e.g., when a workflow is invoked after conversation start, or when rules activate/deactivate).
 - **Critical:** the entire inspector — rule trigger evaluation, tool config parsing, precedence merging, and effective config resolution — is built exclusively on top of the shared functions used during real prompt assembly. No inspector-specific logic duplicates any part of this pipeline. Pre-flight mode passes a synthetic prompt through the same rule trigger evaluation function that real conversations use. Any change to prompt parsing or resolution behavior automatically reflects in the inspector.
 
 ## Non-functional requirements
@@ -438,7 +442,7 @@ Unlike `ParsedToolConfig`, all fields on `ResolvedToolConfigEntry` are present a
 - Tool enabled/disabled state is **not** exposed in the global Settings UI. The `<notor_tool_config>` tag is the only mechanism for customizing which tools are enabled. This is by design — see the design plan for motivation.
 - The existing `ToolRegistry.getToolDefinitions()` returns all registered tools unfiltered. Filtering using `getFilteredToolDefinitions()` is applied by this feature at the call sites in `main.ts` that consume tool definitions.
 - Provider implementations handle empty `tools` arrays correctly (no tools in request body), consistent with how providers behave when no tools are registered.
-- The `EffectiveToolConfig` is computed fresh at conversation/execution start time and does not persist between conversations.
+- The `EffectiveToolConfig` is recomputed before each LLM call (to reflect dynamic rule activation/deactivation) and does not persist between conversations.
 - The Notor top-level directory value (used by FR-87 to locate persona folders) is the value configured in plugin settings.
 
 ## Out of scope
