@@ -423,7 +423,7 @@ The following Phase 4 artifacts are removed as part of this phase (replaced by `
 - `setPersonaAutoApprove()` method on `ToolDispatcher` (`src/chat/dispatcher.ts`) and its field `personaAutoApprove`
 - Call sites in `src/main.ts` (3 calls) and `src/chat/orchestrator.ts` (1 call) that invoke `setPersonaAutoApprove()`
 - References in settings tab renderer that call `renderPersonaAutoApproveSection()`
-- E2E test references in `e2e/scripts/auto-approve-test.ts`, `e2e/scripts/mcp-auto-approve-test.ts`, `e2e/scripts/workflow-hooks-test.ts`
+- E2E test references in `e2e/scripts/auto-approve-test.ts`, `e2e/scripts/mcp-auto-approve-test.ts`, `e2e/scripts/workflow-hooks-test.ts`, `e2e/scripts/activity-indicator-test.ts`
 
 ---
 

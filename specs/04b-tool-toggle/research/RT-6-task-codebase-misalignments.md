@@ -8,7 +8,7 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
-**Resolved:** 3 (RT-6.1, RT-6.2, RT-6.3)
+**Resolved:** 4 (RT-6.1, RT-6.2, RT-6.3, RT-6.4)
 
 ---
 
@@ -76,11 +76,13 @@ This is a non-trivial responsibility shift that isn't called out as a distinct a
 
 ---
 
-### RT-6.4: CLEAN-001 missing e2e test file modifications
+### RT-6.4: ~~CLEAN-001 missing e2e test file modifications~~ **RESOLVED**
+
+**Status:** Resolved — all 4 e2e files added to CLEAN-001 Files section; explicit AC added; plan.md updated.
 
 **Affected task:** CLEAN-001
 
-**Task CLEAN-001 Files section** lists 8 source files to modify/delete. The plan lists 3 e2e files.
+**Task CLEAN-001 Files section** listed 8 source files to modify/delete. The plan listed 3 e2e files.
 
 **Actual files containing `persona_auto_approve`** in the e2e directory (4 files):
 - `e2e/scripts/auto-approve-test.ts`
@@ -88,7 +90,10 @@ This is a non-trivial responsibility shift that isn't called out as a distinct a
 - `e2e/scripts/workflow-hooks-test.ts`
 - `e2e/scripts/activity-indicator-test.ts` ← missed by both the task and the plan
 
-**Fix:** Add all 4 e2e files to CLEAN-001's Files section and add an AC: "No remaining references to `persona_auto_approve` in e2e test files."
+**Changes applied:**
+- `tasks.md`: CLEAN-001 Files section gains all 4 e2e files; new AC: "No remaining references to `persona_auto_approve` in e2e test files."
+- `plan.md`: `activity-indicator-test.ts` added to the e2e file list under "Removed: Phase 4 `persona_auto_approve` infrastructure"
+- `spec.md`: No changes needed (does not reference e2e files)
 
 ---
 

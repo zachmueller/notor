@@ -291,6 +291,10 @@
 - Modify `src/main.ts` (remove 3 call sites to `setPersonaAutoApprove()`)
 - Modify `src/chat/orchestrator.ts` (remove 1 call site to `setPersonaAutoApprove()`)
 - Modify `src/settings/settings-tab.ts` (remove `renderPersonaAutoApproveSection()` reference)
+- Modify `e2e/scripts/auto-approve-test.ts` (remove `persona_auto_approve` references)
+- Modify `e2e/scripts/mcp-auto-approve-test.ts` (remove `persona_auto_approve` references)
+- Modify `e2e/scripts/workflow-hooks-test.ts` (remove `persona_auto_approve` references)
+- Modify `e2e/scripts/activity-indicator-test.ts` (remove `persona_auto_approve` references)
 **Dependencies:** ORCH-002, MAIN-001
 **Acceptance Criteria:**
 - [ ] `persona_auto_approve` field removed from `NotorSettings` type and defaults
@@ -299,6 +303,7 @@
 - [ ] `setPersonaAutoApprove()` removed from dispatcher
 - [ ] All call sites in main.ts and orchestrator.ts removed
 - [ ] Settings tab no longer renders persona auto-approve section
+- [ ] No remaining references to `persona_auto_approve` in e2e test files
 - [ ] TypeScript compilation succeeds with no errors
 - [ ] No remaining references to `persona_auto_approve` in codebase
 
