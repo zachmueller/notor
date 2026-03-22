@@ -282,7 +282,7 @@
 - Modify `src/main.ts`
 **Dependencies:** ORCH-001, REG-001
 **Acceptance Criteria:**
-- [ ] `globalAutoApprove` is **not** built or injected as a static map. Instead, the orchestrator builds it per-iteration inside `resolveEffectiveConfig()` by reading `this.settings.auto_approve` and `this.settings.mcp_servers` at call time (see ORCH-001). This ensures MCP server `autoApprove[]` changes and settings reloads are always reflected without requiring a rebuild trigger.
+- [ ] `globalAutoApprove` is **not** built or injected as a static map. Instead, the orchestrator builds it per-iteration inside `resolveEffectiveConfig()` by reading `this.settings.auto_approve` and `this.settings.mcp_servers` at call time (see ORCH-001). This ensures MCP server `autoApprove[]` changes and settings reloads are always reflected without requiring a rebuild trigger. Disabled servers (`config.disabled === true`) may be skipped when building `globalAutoApprove`, since their tools are never registered. Including them is functionally harmless (unused keys in the map are ignored by the merger's default fill, which only fills entries for tools in `allToolNames`).
 - [ ] `getToolDefinitionsCallback` widened to accept optional `EffectiveToolConfig`: when provided → `toolRegistry.getFilteredToolDefinitions(config)`; when omitted → `toolRegistry.getToolDefinitions()`
 - [ ] Conversation-end cleanup is owned by `orchestrator.newConversation()` (see ORCH-004 AC 3) — `main.ts` does **not** perform separate cleanup of `effectiveToolConfig` or `activeParsedConfigs`
 

@@ -8,7 +8,7 @@
 
 8 additional misalignments identified between the implementation tasks and the current codebase/spec/plan. 0 critical, 4 moderate, 4 minor.
 
-**Resolved:** 4
+**Resolved:** 5
 
 ---
 
@@ -228,7 +228,7 @@ The `dirty` flag is set to `true` when the file watcher detects changes to rule 
 
 ### RT-6.13: `globalAutoApprove` may include disabled MCP servers
 
-**Status:** Open
+**Status:** Resolved
 
 **Affected task:** MAIN-001
 
@@ -240,6 +240,8 @@ The `dirty` flag is set to `true` when the file watcher detects changes to rule 
 **Impact:** Low — unused keys in `globalAutoApprove` are ignored by the merger's default fill (it only fills entries for tools in `allToolNames`).
 
 **Suggested resolution:** Add clarifying note to MAIN-001 AC 1: "Disabled servers (`config.disabled === true`) may be skipped when building `globalAutoApprove`, since their tools are never registered. Including them is functionally harmless."
+
+**Resolution:** Applied suggested resolution. Clarifying note added to `tasks.md` MAIN-001 AC 1, `spec.md` FR-80 `globalAutoApprove` description, and `plan.md` orchestrator `resolveEffectiveConfig()` step 3 — all noting that disabled servers may be skipped during `autoApprove[]` expansion since their tools are never registered, and including them is functionally harmless.
 
 ---
 
