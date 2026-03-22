@@ -399,6 +399,8 @@ Add a private `resolveEffectiveConfig()` method that implements the two-phase bu
 
 **Parameter change:** Remove `toolDefinitions` as a parameter from `responseLoop()` **and** `_backgroundResponseLoop()`. The current codebase passes `toolDefinitions: ToolDefinition[]` into both loops (captured once at loop entry by `handleUserMessage()`, `executeWorkflow()`, and the background execution path). This parameter is removed from both — tool definitions are no longer threaded through from callers. Instead, they are computed fresh inside each loop's while-loop body on each iteration.
 
+**Public API change:** `handleUserMessage()` currently accepts `toolDefinitions: ToolDefinition[]` as its second parameter (called from `main.ts`'s `setOnSendMessage` callback). This parameter is removed — `handleUserMessage()` no longer accepts tool definitions from external callers. The `main.ts` `setOnSendMessage` callback is updated to call `handleUserMessage(content, attachments)` without tool definitions. Similarly, `executeWorkflow()` and the background execution caller no longer capture `toolDefinitions` via `getToolDefinitionsCallback()` before entering their respective loops.
+
 Call `resolveEffectiveConfig()` inside `responseLoop()` **before each `provider.sendMessage()` call**. The per-iteration flow is:
 1. `matchedRules = await vaultRuleManager.getMatchedRules()`
 2. `filteredToolDefs = await resolveEffectiveConfig(matchedRules, persona)` — internally calls `extractSourceToolConfigs()` (phase 1) + merge + filter

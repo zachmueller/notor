@@ -244,6 +244,9 @@
 - [ ] `vaultRuleManager.getMatchedRules()` called per iteration and passed into `resolveEffectiveConfig()` (which forwards to `extractSourceToolConfigs(matchedRules, persona)`)
 - [ ] Filtered tool definitions from `resolveEffectiveConfig()` passed to both `assemble()` and `sendMessage()`
 - [ ] Callers of `responseLoop()` (`handleUserMessage()`, `executeWorkflow()`) no longer pass `toolDefinitions`
+- [ ] `handleUserMessage()` public signature updated to remove `toolDefinitions` parameter (it is no longer accepted from external callers)
+- [ ] The `main.ts` `setOnSendMessage` callback updated to call `handleUserMessage(content, attachments)` without tool definitions
+- [ ] `executeWorkflow()` no longer captures `toolDefinitions` via `getToolDefinitionsCallback()` before calling `responseLoop()`
 - [ ] Migrated from `getActiveRuleContent()` to `getMatchedRules()`
 
 ### ORCH-003: Wire `resolveEffectiveConfig()` into background `_backgroundResponseLoop()`
@@ -253,6 +256,7 @@
 **Dependencies:** ORCH-001
 **Acceptance Criteria:**
 - [ ] `toolDefinitions` parameter removed from `_backgroundResponseLoop()`
+- [ ] The background execution caller (in `executeWorkflow()` / background path) no longer captures `toolDefinitions` via `getToolDefinitionsCallback()` before calling `_backgroundResponseLoop()`
 - [ ] `resolveEffectiveConfig()` called per-iteration inside the background loop
 - [ ] Background loop uses workflow's `WorkflowAssemblyResult.toolConfigs`
 - [ ] Background loop's `getActiveRuleContent()` call migrated to `getMatchedRules()`

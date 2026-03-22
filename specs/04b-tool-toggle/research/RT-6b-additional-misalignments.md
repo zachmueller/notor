@@ -8,7 +8,7 @@
 
 8 additional misalignments identified between the implementation tasks and the current codebase/spec/plan. 0 critical, 4 moderate, 4 minor.
 
-**Resolved:** 0
+**Resolved:** 1
 
 ---
 
@@ -16,7 +16,7 @@
 
 ### RT-6.12: `handleUserMessage()` public signature change not mentioned
 
-**Status:** Open
+**Status:** Resolved
 
 **Affected tasks:** ORCH-002, MAIN-001
 
@@ -77,6 +77,8 @@ await this._backgroundResponseLoop(
 - "`handleUserMessage()` public signature updated to remove `toolDefinitions` parameter."
 - "The `main.ts` `setOnSendMessage` callback (lines 1280–1286) updated to call `handleUserMessage(content, attachments)` without tool definitions."
 - "The `executeWorkflow()` method (line 474) and background execution caller (line 644) no longer capture `toolDefinitions` via `getToolDefinitionsCallback()`."
+
+**Resolution:** Applied suggested resolution. Three new ACs added to ORCH-002 in `tasks.md` covering `handleUserMessage()` signature removal, `main.ts` `setOnSendMessage` callback update, and `executeWorkflow()` no longer capturing `toolDefinitions`. Also added a clarifying AC to ORCH-003 for the background execution caller. `plan.md` updated with an explicit "Public API change" paragraph in the orchestrator section documenting the `handleUserMessage()` signature change and caller updates.
 
 ---
 
