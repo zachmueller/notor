@@ -74,7 +74,7 @@ B. Track activation state: update `VaultRule` with an `isActive: boolean` field 
 
 C. Extract and cache `toolConfigs: ParsedToolConfig[]` at `loadRuleFile()` time (per-file), then in `getActiveRuleToolConfigs()` re-run trigger evaluation against the current `accessedNotes` to determine which rules are active at call time.
 
-**Resolution:** _Open_
+**Resolution:** **Approach 3+4 hybrid** — `VaultRuleManager` exposes a new public `getMatchedRules(): VaultRule[]` method that dynamically evaluates rules against current `accessedNotes` (the same stateless filter `evaluateRules()` already performs). No persistent "active" state is added to `VaultRule`. `SystemPromptBuilder.assemble()` receives `matchedRules: VaultRule[]` instead of a pre-merged `vaultRuleContent: string`, runs `extractToolConfigs()` on each matched rule's resolved content with per-file `sourceFile` attribution, then concatenates the stripped content for the rules section. The rule manager has zero knowledge of tool configs. The builder owns extraction for both persona and rule sources, producing labeled `ParsedToolConfig` objects that feed directly into the precedence merge.
 
 ---
 
@@ -254,7 +254,7 @@ Use this section to record agreed resolutions as we work through each risk. Upda
 |---|---|---|---|
 | 1 | Tool defs captured once per send | HIGH | **Option A** — `resolveEffectiveConfig()` moves to `ChatOrchestrator` |
 | 2 | `resolveEffectiveConfig()` placement | HIGH | **Resolved by Risk 1 Option A** — orchestrator owns all ingredients |
-| 3 | No per-rule activation state | HIGH | _Open_ |
+| 3 | No per-rule activation state | HIGH | **Approach 3+4 hybrid** — `getMatchedRules()` on VaultRuleManager; extraction in SystemPromptBuilder |
 | 4 | MCP `autoApprove[]` discarded | HIGH | _Open_ |
 | 5 | `Conversation` is DB-persisted | MEDIUM | _Open_ |
 | 6 | Workflow extraction invasiveness | MEDIUM | _Open_ |

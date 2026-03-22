@@ -16,6 +16,7 @@
 | `EffectiveToolConfig` scope | Recomputed before each LLM call; stored on the active conversation context as `activeParsedConfigs: ParsedToolConfig[]` + resolved `EffectiveToolConfig`; cleared on conversation end | Per-message recomputation reflects dynamic rule activation/deactivation (spec clarification Q5); no persistence between conversations |
 | `ToolRegistry.getFilteredToolDefinitions()` | New method alongside existing `getToolDefinitions()` | Additive change; existing callers unaffected; filtered variant called before each LLM call in `ChatOrchestrator.responseLoop()` |
 | Dispatcher enforcement | `setEffectiveToolConfig()` injected before each LLM call; enabled check runs first in `dispatch()`, path enforcement runs after mode/approve checks | Matches FR-83 (enabled check first) and FR-84 (path enforcement before execution) |
+| Tool config extraction ownership | `SystemPromptBuilder` owns extraction for persona and rule sources; `WorkflowExecutor` owns extraction for workflow source | Builder already processes each source in distinct labeled code paths (persona content, per-rule content) so source attribution (`"persona"` / `"rule"`) is natural. VaultRuleManager stays extraction-unaware; it just exposes `getMatchedRules()` for stateless dynamic evaluation. See RT-4 Risk 3 resolution. |
 | Inspector code sharing | Pre-flight and live modes both call the same `resolveEffectiveConfig()` function used by `ChatOrchestrator` | NFR-25 mandate: no duplicate logic; inspector is a pure consumer of shared pipeline functions |
 
 ### Technology Stack
@@ -30,12 +31,12 @@ This feature is entirely within the existing TypeScript/Obsidian plugin stack:
 
 | Integration | Description |
 |---|---|
-| `SystemPromptBuilder` | After resolving `<include_note>` in persona content, extract and strip tool config blocks before returning content to assembler |
-| `VaultRuleManager` | After resolving `<include_note>` in rule bodies, extract and strip tool config blocks; expose `getParsedToolConfigs()` for active rules |
+| `SystemPromptBuilder` | Owns `<notor_tool_config>` extraction for both persona content and per-rule content. Receives `matchedRules: VaultRule[]` instead of a pre-merged string; runs `extractToolConfigs()` on each source with per-file attribution. Returns `{ prompt, personaToolConfigs, ruleToolConfigs }` |
+| `VaultRuleManager` | Exposes `getMatchedRules(): VaultRule[]` — stateless dynamic evaluation of rules against current `accessedNotes`. No tool config awareness; extraction is handled by `SystemPromptBuilder` |
 | `WorkflowExecutor` | After resolving `<include_note>` in workflow body, extract and strip tool config; include `ParsedToolConfig` in `WorkflowAssemblyResult` |
 | `ToolDispatcher` | New `setEffectiveToolConfig()` method; enabled check + path enforcement in `dispatch()` |
 | `ToolRegistry` | New `getFilteredToolDefinitions(config)` method called before each LLM call |
-| `ChatOrchestrator` | Owns `resolveEffectiveConfig()`: collects `ParsedToolConfig[]` from all active sources (persona via `assemble()`, rules via `VaultRuleManager`, workflow via `WorkflowAssemblyResult`), merges into `EffectiveToolConfig`, injects into dispatcher, and calls `getFilteredToolDefinitions()` before each provider call in `responseLoop()` |
+| `ChatOrchestrator` | Owns `resolveEffectiveConfig()`: collects `ParsedToolConfig[]` from `SystemPromptBuilder.assemble()` result (persona + rule configs) and active workflow's `WorkflowAssemblyResult`, merges into `EffectiveToolConfig`, injects into dispatcher, and calls `getFilteredToolDefinitions()` before each provider call in `responseLoop()`. Passes `VaultRuleManager.getMatchedRules()` to the builder on each iteration. |
 | `main.ts` | Injects dependencies into the orchestrator (tool registry, vault rule manager, global/persona auto-approve maps); clears `effectiveToolConfig` on conversation end |
 
 ---
@@ -293,25 +294,46 @@ Also expose `auto_approve` from `effectiveToolConfig` in the auto-approve resolu
 
 #### Modified: `src/chat/system-prompt.ts` — `SystemPromptBuilder`
 
-`assemble()` currently returns `Promise<string>`. Change return type to:
+`assemble()` currently accepts `vaultRuleContent?: string` and returns `Promise<string>`. Two changes:
+
+1. **Parameter change:** Replace `vaultRuleContent?: string` with `matchedRules?: VaultRule[]`. The builder receives individual matched rule objects (from `VaultRuleManager.getMatchedRules()`) instead of a pre-merged content string. For each matched rule, the builder resolves `<include_note>` tags, runs `extractToolConfigs()` with the rule's `file_path` for per-file source attribution, then concatenates stripped content for the rules section.
+
+2. **Return type change:** Change from `Promise<string>` to:
 
 ```typescript
 interface SystemPromptAssemblyResult {
   prompt: string;
   personaToolConfigs: ParsedToolConfig[];  // extracted from persona content
+  ruleToolConfigs: ParsedToolConfig[];     // extracted from matched rule content (per-file attributed)
 }
 ```
 
-After `resolveIncludeNotesIfAvailable()` is called for persona content, pipe the result through `extractToolConfigs(resolvedContent, "persona", persona.system_prompt_path)`. Use `strippedContent` as the persona content going into the prompt; accumulate `configs` in `personaToolConfigs`.
+The builder owns `<notor_tool_config>` extraction for both persona and rule sources:
+- After `resolveIncludeNotesIfAvailable()` for persona content → `extractToolConfigs(resolved, "persona", persona.system_prompt_path)`.
+- For each matched rule → resolve `<include_note>` tags (currently done in `VaultRuleManager.getActiveRuleContent()`), then `extractToolConfigs(resolved, "rule", rule.file_path)`.
+
+Stripped content goes into the prompt; `ParsedToolConfig[]` arrays are returned for the precedence merge.
 
 ---
 
 #### Modified: `src/rules/vault-rules.ts` — `VaultRuleManager`
 
-- In `loadRuleFile()`: after reading the rule body, also call `extractToolConfigs(body, "rule", filePath)` and store the resulting `configs` on the `VaultRule` object.
-- Add field to the in-memory `VaultRule` struct: `toolConfigs: ParsedToolConfig[]`.
-- Add public method: `getActiveRuleToolConfigs(): ParsedToolConfig[]` — returns all `ParsedToolConfig` objects from currently active rules.
-- `getActiveRuleContent()` continues to operate on the stripped content (tool config blocks already removed before the rule body is assembled).
+Add one new public method:
+
+```typescript
+/**
+ * Get the VaultRule objects that match the current accessedNotes context.
+ * Stateless — evaluates triggers dynamically each time, no persistent
+ * "active" flag on VaultRule. Reloads from disk if cache is stale.
+ */
+async getMatchedRules(): Promise<VaultRule[]>
+```
+
+This exposes the existing private `evaluateRules()` logic as a public API. The rule manager has zero knowledge of `<notor_tool_config>` — extraction is handled downstream by `SystemPromptBuilder`.
+
+`getActiveRuleContent()` remains available for backward compatibility but the orchestrator will shift to calling `getMatchedRules()` so the builder can process each rule individually (per-file `<include_note>` resolution + per-file tool config extraction with source attribution).
+
+No changes to `VaultRule` struct, `loadRuleFile()`, or `evaluateRules()` internals.
 
 ---
 
@@ -325,16 +347,15 @@ After `resolveIncludeNotesIfAvailable()` is called for persona content, pipe the
 #### Modified: `src/chat/orchestrator.ts` — `ChatOrchestrator`
 
 Add a private `resolveEffectiveConfig()` method that:
-1. Collects `personaToolConfigs` from the most recent `SystemPromptBuilder.assemble()` result (the orchestrator already calls `assemble()` and holds the result).
-2. Collects `ruleToolConfigs` from `VaultRuleManager.getActiveRuleToolConfigs()`.
-3. Collects `workflowToolConfig` from the active workflow's `WorkflowAssemblyResult.toolConfigs` (if any).
-4. Reads `personaAutoApprove` from the active persona's Phase 4 overrides (if any).
-5. Merges via `mergeToolConfigs([...workflowConfigs, ...personaConfigs, ...ruleConfigs], globalAutoApprove, personaAutoApprove, allToolNames)`.
-6. Stores the contributing `ParsedToolConfig[]` as `activeParsedConfigs` on the orchestrator's runtime state (accessible to the inspector).
-7. Calls `dispatcher.setEffectiveToolConfig(result)`.
-8. Uses `toolRegistry.getFilteredToolDefinitions(result)` when building the tool list for the `provider.sendMessage()` call.
+1. Collects `personaToolConfigs` and `ruleToolConfigs` from the most recent `SystemPromptBuilder.assemble()` result (the builder now extracts tool configs from both persona content and per-rule content, returning both arrays).
+2. Collects `workflowToolConfig` from the active workflow's `WorkflowAssemblyResult.toolConfigs` (if any).
+3. Reads `personaAutoApprove` from the active persona's Phase 4 overrides (if any).
+4. Merges via `mergeToolConfigs([...workflowConfigs, ...personaToolConfigs, ...ruleToolConfigs], globalAutoApprove, personaAutoApprove, allToolNames)`.
+5. Stores the contributing `ParsedToolConfig[]` as `activeParsedConfigs` on the orchestrator's runtime state (accessible to the inspector).
+6. Calls `dispatcher.setEffectiveToolConfig(result)`.
+7. Uses `toolRegistry.getFilteredToolDefinitions(result)` when building the tool list for the `provider.sendMessage()` call.
 
-Call `resolveEffectiveConfig()` inside `responseLoop()` **before each `provider.sendMessage()` call** (at the same point where `systemPromptBuilder.assemble()` is already called per-iteration). This ensures dynamic rule activation/deactivation is reflected in the effective config on every loop iteration, not just at conversation start.
+Call `resolveEffectiveConfig()` inside `responseLoop()` **before each `provider.sendMessage()` call** (at the same point where `systemPromptBuilder.assemble()` is already called per-iteration). The orchestrator calls `vaultRuleManager.getMatchedRules()` and passes the result to `assemble(matchedRules)` on each iteration, so the builder can process each rule individually. This ensures dynamic rule activation/deactivation is reflected in the effective config on every loop iteration, not just at conversation start.
 
 The orchestrator receives the following dependencies (injected from `main.ts` at construction or via setters):
 - `toolRegistry: ToolRegistry`
