@@ -17,7 +17,7 @@
 | `ToolRegistry.getFilteredToolDefinitions()` | New method alongside existing `getToolDefinitions()` | Additive change; existing callers unaffected; filtered variant called before each LLM call in `ChatOrchestrator.responseLoop()` |
 | Dispatcher enforcement | `setEffectiveToolConfig()` injected before each LLM call; enabled check runs first in `dispatch()`, path enforcement runs after mode/approve checks | Matches FR-83 (enabled check first) and FR-84 (path enforcement before execution) |
 | Tool config extraction ownership | `SystemPromptBuilder` owns extraction for persona and rule sources; `WorkflowExecutor` owns extraction for workflow source | Builder already processes each source in distinct labeled code paths (persona content, per-rule content) so source attribution (`"persona"` / `"rule"`) is natural. VaultRuleManager stays extraction-unaware; it just exposes `getMatchedRules()` for stateless dynamic evaluation. See RT-4 Risk 3 resolution. |
-| Inspector code sharing | Pre-flight and live modes both call the same `resolveEffectiveConfig()` function used by `ChatOrchestrator` | NFR-25 mandate: no duplicate logic; inspector is a pure consumer of shared pipeline functions |
+| Inspector code sharing | Live mode reads `EffectiveToolConfig` and `activeParsedConfigs` from orchestrator getter methods; pre-flight mode deferred | NFR-25 mandate: no duplicate logic; inspector is a pure consumer of orchestrator state. Pre-flight deferred per RT-4 Risk 9 resolution |
 
 ### Technology Stack
 
@@ -406,17 +406,12 @@ If no tools differ from defaults, copy a snippet with just the comment block and
 
 #### New: `src/ui/effective-config-inspector.ts` — Effective Config Inspector
 
-Implements FR-88. A `ItemView` registered under a unique view type (e.g., `"notor-tool-config-inspector"`).
-
-**Pre-flight mode** (no active conversation):
-- Persona picker dropdown — calls `personaManager.getDiscoveredPersonas()`.
-- Workflow picker dropdown — calls `workflowDiscovery.discoverWorkflows()`.
-- Optional prompt input field — fed to the existing rule trigger evaluation function in `VaultRuleManager` (same `ruleMatches()` logic, called with a synthetic accessed-notes context derived from prompt keyword analysis, per the clarification in spec.md § Session 2026-03-22).
-- On any selection change: calls `resolveEffectiveConfig()` (the same shared function from `main.ts`) with the selected persona/workflow/rules and displays the result.
+Implements FR-88. A `ItemView` registered under a unique view type (e.g., `"notor-tool-config-inspector"`). MVP supports live-in-chat mode only; pre-flight mode is deferred (see RT-4 Risk 9 resolution).
 
 **Live in-chat mode** (active conversation):
 - Reads the `EffectiveToolConfig` and `activeParsedConfigs: ParsedToolConfig[]` from the orchestrator via getter methods (e.g., `orchestrator.getEffectiveToolConfig()`, `orchestrator.getActiveParsedConfigs()`).
 - Displays each tool's resolved values with source attribution — the source file name comes from `ParsedToolConfig.sourceFile` in `activeParsedConfigs`. The display updates automatically as `activeParsedConfigs` changes between messages (e.g., when rules activate/deactivate).
+- When no conversation is active, displays a message indicating the inspector requires an active conversation.
 
 **Display format**: a table per tool showing `enabled`, `auto_approve`, `allowed_paths`, `blocked_paths`, and the source note link for each field. Fields at global defaults shown in muted style.
 
@@ -463,7 +458,7 @@ function showToolConfigError(
 
 - [x] Architecture supports NFR-23 (portability) — no config stored in `data.json`
 - [x] NFR-24 (graceful degradation) addressed — parse errors skip the block, never crash
-- [x] NFR-25 (inspector fidelity) addressed — inspector shares `resolveEffectiveConfig()` directly
+- [x] NFR-25 (inspector fidelity) addressed — live inspector reads orchestrator state directly; pre-flight deferred
 - [x] MCP tool exemption from path enforcement documented at every enforcement call site
 - [x] `<include_note>` ordering constraint enforced — extraction always runs after resolution
 
@@ -476,7 +471,7 @@ function showToolConfigError(
 - **Medium (mitigated):** `parseYAML` from `obsidian` package can return `null`/`undefined`/non-object without throwing for certain inputs. Mitigated by an explicit type guard after every `parseYAML()` call (see RT-4 Risk 8 resolution): the guard catches non-throwing non-object returns, while the existing `try/catch` handles structurally invalid YAML that throws.
 - **Medium:** `SystemPromptBuilder.assemble()` return type change is a breaking signature change — the orchestrator (primary call site) and any tests must be updated. Strictly additive to the returned object, so runtime compatibility is not a concern, but TypeScript compilation will surface all sites.
 - **Low:** `EffectiveToolConfig` is recomputed before each LLM call (spec clarification Q5). This subsumes the workflow-invocation recomputation concern — `resolveEffectiveConfig()` runs every message, so workflow changes and rule activation/deactivation are picked up automatically. The per-message overhead is negligible (NFR-22: O(t × l) merge with t ≤ ~15 tools and l ≤ 4 levels).
-- **Low:** Inspector pre-flight rule evaluation uses a synthetic prompt. The existing `ruleMatches()` function in `VaultRuleManager` currently uses `accessedNotes` (a Set of vault paths), not prompt text. A thin adapter in the inspector will map the typed prompt into a synthetic accessed-notes set (e.g., extract note path mentions). This is documented in the spec clarification and does not require changes to `ruleMatches()` itself.
+- **Low (deferred):** Inspector pre-flight mode is deferred to a future iteration (see RT-4 Risk 9 resolution). The MVP inspector operates in live-in-chat mode only, reading effective config directly from orchestrator state.
 
 ### Mitigation Strategies
 

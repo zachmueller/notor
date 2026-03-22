@@ -36,7 +36,7 @@ The per-persona auto-approve overrides introduced in Phase 4 (`persona_auto_appr
 - Q: Can multiple workflows be active simultaneously, and if so which takes precedence within the workflow layer? → A: Only one workflow can be active at a time; invoking a second workflow replaces the first.
 - Q: When a workflow ends mid-conversation, how does the tool config revert — recompute from active sources or restore a snapshot? → A: Workflows do not end mid-conversation; a workflow remains active for the duration of the conversation thread. The only way to clear the active workflow is to start a new conversation (or invoke a different workflow, which replaces it).
 - Q: Do MCP tools support `allowed_paths`/`blocked_paths` enforcement, or `enabled`/`auto_approve` only? → A: MCP tools support `enabled` and `auto_approve` only. Specifying `allowed_paths` or `blocked_paths` for an MCP tool emits a Notice indicating the fields are not yet implemented for MCP tools. Path enforcement for MCP tools is deferred to a future phase.
-- Q: How does the pre-flight inspector evaluate rule trigger conditions without a real conversation? → A: Rule trigger conditions are evaluated using the same keyword/condition matching functions used during normal prompt processing — the inspector is built entirely on top of these shared functions with a synthetic prompt as input. No separate or duplicated logic exists anywhere in the inspector code path.
+- Q: How does the pre-flight inspector evaluate rule trigger conditions without a real conversation? → A: Pre-flight mode is deferred to a future iteration. The MVP inspector operates in live-in-chat mode only, reading the effective tool config directly from the orchestrator during active conversations. This sidesteps the `tag_include` evaluation limitation entirely (see RT-4 Risk 9).
 - Q: If a rule activates mid-conversation (trigger keyword appears in a later message), should the EffectiveToolConfig be recomputed per-message to reflect rule changes, or remain static for the conversation duration? → A: Recompute per-message. The EffectiveToolConfig is recomputed before each LLM call, picking up rule activation/deactivation changes dynamically. This matches FR-79's "applies whenever the rule is active" contract and aligns with how rules already work for prompt content.
 - Q: How should Phase 4's `persona_auto_approve` be incorporated into the merger so it isn't bypassed by the merger's default fill for tools not configured in any `<notor_tool_config>` block? → A: Pass both `globalAutoApprove` and `personaAutoApprove` to `mergeToolConfigs()`. Default fill order: `personaAutoApprove` (if active persona has an override) → `globalAutoApprove` → `false`. This keeps Phase 4 behavior intact without sentinel values.
 - Q: What structure should hold parsed tool config metadata for the live inspector's source attribution? → A: Flat private fields on `ChatOrchestrator` (`activeParsedConfigs: ParsedToolConfig[]` and `effectiveToolConfig: EffectiveToolConfig | null`), updated whenever EffectiveToolConfig is recomputed and cleared on conversation end. The inspector reads these via getter methods on the orchestrator. The `Conversation` interface is not modified — these are fully derived runtime values reconstructable from persona/rule/workflow sources on any conversation reload.
@@ -254,14 +254,14 @@ execute_command:
 
 ### FR-88: Effective Config Inspector
 
-**Description:** A standalone leaf view for inspecting the merged effective tool config, available both before a conversation starts (pre-flight mode) and during a live conversation.
+**Description:** A standalone leaf view for inspecting the merged effective tool config during a live conversation.
 
 **Acceptance criteria:**
 - The inspector is a standalone leaf view that can be opened alongside the Notor chat panel via a button in the chat panel or a command palette action.
-- **Pre-flight mode:** the user selects a persona and/or workflow (and optionally types a prompt to evaluate rule trigger conditions) before starting a conversation. The inspector displays the merged effective config that would result, giving an accurate starting-point view without an actual LLM conversation.
 - **Live in-chat mode:** the inspector can be opened at any point during a real conversation. Each field shows its current effective value and a source link to the specific note driving it, making it easy to diagnose unexpected tool behavior mid-conversation.
 - **Runtime tool config state:** the parsed tool config contributed by each source file is stored as flat private fields on `ChatOrchestrator` (`activeParsedConfigs: ParsedToolConfig[]` and `effectiveToolConfig: EffectiveToolConfig | null`), updated each time the `EffectiveToolConfig` is recomputed and cleared on conversation end. The live inspector reads these via getter methods on the orchestrator, correctly reflecting the full accumulated state even as additional tool configs are ingested mid-conversation (e.g., when a workflow is invoked after conversation start, or when rules activate/deactivate). These are fully derived runtime values — they are not persisted to the JSONL conversation history and are reconstructed from persona/rule/workflow sources when a conversation is reopened.
-- **Critical:** the entire inspector — rule trigger evaluation, tool config parsing, precedence merging, and effective config resolution — is built exclusively on top of the shared functions used during real prompt assembly. No inspector-specific logic duplicates any part of this pipeline. Pre-flight mode passes a synthetic prompt through the same rule trigger evaluation function that real conversations use. Any change to prompt parsing or resolution behavior automatically reflects in the inspector.
+- **Critical:** the inspector is built on top of the shared functions used during real prompt assembly: tool config parsing, precedence merging, and effective config resolution. No inspector-specific logic duplicates any part of this pipeline. Any change to resolution behavior automatically reflects in the inspector.
+- **Deferred:** pre-flight mode (selecting a persona/workflow before starting a conversation to preview the merged config) is planned for a future iteration.
 
 ## Non-functional requirements
 
@@ -299,9 +299,8 @@ execute_command:
 **Description:** The Effective Config Inspector (FR-88) must always reflect the true effective tool config computed by the real resolution pipeline.
 
 **Acceptance criteria:**
-- The inspector is built entirely on top of the shared functions used during real prompt assembly: rule trigger evaluation, `<notor_tool_config>` parsing, precedence merging, and `EffectiveToolConfig` resolution. No inspector-specific logic duplicates any part of this pipeline.
-- Pre-flight mode evaluates rule trigger conditions by passing the user's typed prompt through the same rule activation function used during real conversations. No special pre-flight evaluation path exists.
-- Any change to prompt parsing, rule evaluation, or resolution behavior automatically reflects in the inspector without separate inspector-side updates.
+- The inspector is built entirely on top of the shared functions used during real prompt assembly: `<notor_tool_config>` parsing, precedence merging, and `EffectiveToolConfig` resolution. No inspector-specific logic duplicates any part of this pipeline.
+- Any change to resolution behavior automatically reflects in the inspector without separate inspector-side updates.
 - The inspector's source attribution (which note drives each field) is derived directly from the structured `ParsedToolConfig` objects produced during ingestion, not reconstructed separately.
 
 ## User scenarios & testing
@@ -359,7 +358,9 @@ execute_command:
 2. The plugin's maximum supported major version is `1`. A console warning is emitted: "Skipping notor_tool_config block with unsupported version '2.0' in [file]."
 3. The block is skipped entirely; no tool configuration from it is applied.
 
-### Alternative flow: Pre-flight inspection
+### Alternative flow: Pre-flight inspection (deferred)
+
+> **Deferred to a future iteration.** The MVP inspector supports live-in-chat mode only. The following scenario describes planned future behavior.
 
 1. User opens the Effective Config Inspector before starting a conversation.
 2. User selects the "researcher" persona and the "daily-review" workflow.
@@ -391,7 +392,7 @@ execute_command:
 4. **The LLM never sees the config block** — the tag and its contents are fully stripped from source content before it reaches the LLM in all supported contexts.
 5. **Precedence merging is correct** — workflow > persona > rule > global, with field-by-field merging and replace semantics for path lists.
 6. **Validation errors are surfaced clearly** — malformed or unrecognized blocks produce actionable Notices without crashing the plugin or silently misconfiguring the tool set.
-7. **The Effective Config Inspector is accurate** — both pre-flight and live modes reflect the true merged config using the real resolution pipeline.
+7. **The Effective Config Inspector is accurate** — live mode reflects the true merged config using the real resolution pipeline. Pre-flight mode is deferred to a future iteration.
 
 ## Key entities
 

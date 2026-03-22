@@ -1,6 +1,6 @@
 # RT-4 — Integration Risks: Phase 4b vs. Current Codebase
 
-**Status:** In progress — working through resolutions iteratively (Risks 1–8 resolved; 9–10 open)
+**Status:** In progress — working through resolutions iteratively (Risks 1–9 resolved; 10 open)
 **Created:** 2026-03-22
 **Source:** Codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md)
 
@@ -220,7 +220,7 @@ B. Add a "Simulated accessed notes" multi-picker to the pre-flight inspector UI.
 
 C. In the pre-flight inspector, show all rules that have `tag_include` triggers as "conditionally active — depends on accessed notes" with their tool config displayed but visually distinguished. Users can see what would apply if those rules triggered, without false certainty about whether they will.
 
-**Resolution:** _Open_
+**Resolution:** **Defer pre-flight mode** — MVP inspector is live-in-chat only (Tier 2 simplification). The inspector reads `activeParsedConfigs` and `effectiveToolConfig` from the orchestrator's getter methods during active conversations. No synthetic prompt evaluation, no persona/workflow pickers, no rule trigger simulation. This eliminates Risk 9 entirely — `tag_include` evaluation is only problematic in pre-flight mode; live mode uses real `accessedNotes` from the conversation. Pre-flight mode (with its `tag_include` limitation and the broader UI surface of persona/workflow pickers) is deferred to a future iteration.
 
 ---
 
@@ -260,5 +260,5 @@ Use this section to record agreed resolutions as we work through each risk. Upda
 | 6 | Workflow extraction invasiveness | MEDIUM | **Option A** — insert `extractToolConfigs()` inside `assembleWorkflowPrompt()` between steps 2 and 4 |
 | 7 | `toolConfig` singular vs. multi-block | MEDIUM | **Option A** — `toolConfigs: ParsedToolConfig[]` (plural); merger handles document-order merge |
 | 8 | `parseYAML` non-throwing edge cases | MEDIUM | **Option A** — explicit type guard after `parseYAML()` for null/undefined/non-object/array returns |
-| 9 | `tag_include` unevaluable in pre-flight | MEDIUM | _Open_ |
+| 9 | `tag_include` unevaluable in pre-flight | MEDIUM | **Defer pre-flight mode** — MVP inspector is live-in-chat only |
 | 10 | `vaultRootPath` injection undefined | LOW | _Open_ |
