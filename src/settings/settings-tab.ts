@@ -10,7 +10,6 @@
 
 import { App, PluginSettingTab } from "obsidian";
 import type NotorPlugin from "../main";
-import type { Persona } from "../types";
 import type { SettingsContext } from "./sections/context";
 
 // Section renderers
@@ -30,7 +29,6 @@ import { renderCompactionSection } from "./sections/compaction";
 import { renderProviderModelReferenceSection } from "./sections/provider-reference";
 import { renderGeneralSection } from "./sections/general";
 import { renderAutoApproveSection } from "./sections/auto-approve";
-import { renderPersonaAutoApproveSection, triggerPersonaRescan } from "./sections/persona-auto-approve";
 import { renderHistorySection } from "./sections/history";
 import { renderCheckpointSection } from "./sections/checkpoints";
 import { renderModelPricingSection } from "./sections/model-pricing";
@@ -45,12 +43,6 @@ import { createSettingsGroup } from "./helpers";
  */
 export class NotorSettingTab extends PluginSettingTab {
 	plugin: NotorPlugin;
-
-	/** Cached personas from the most recent discovery scan. */
-	private cachedPersonas: Persona[] = [];
-
-	/** Container element for the persona auto-approve section. */
-	private personaAutoApproveSectionEl: HTMLElement | null = null;
 
 	/** Cleanup functions registered by section renderers (e.g. McpHub subscriptions). */
 	private cleanupFns: Array<() => void> = [];
@@ -100,28 +92,6 @@ export class NotorSettingTab extends PluginSettingTab {
 		// --- Tools & Permissions (expanded by default) ---
 		const toolsGroup = createSettingsGroup(containerEl, "Tools & permissions", true);
 		renderAutoApproveSection(toolsGroup, ctx);
-
-		// Persona auto-approve section with async rescan
-		this.personaAutoApproveSectionEl = toolsGroup.createDiv();
-		const rerenderPersonaSection = (personas: Persona[]) => {
-			this.cachedPersonas = personas;
-			if (this.personaAutoApproveSectionEl) {
-				this.personaAutoApproveSectionEl.empty();
-				renderPersonaAutoApproveSection(
-					this.personaAutoApproveSectionEl,
-					personas,
-					ctx,
-					rerenderPersonaSection
-				);
-			}
-		};
-		renderPersonaAutoApproveSection(
-			this.personaAutoApproveSectionEl,
-			this.cachedPersonas,
-			ctx,
-			rerenderPersonaSection
-		);
-		triggerPersonaRescan(ctx, rerenderPersonaSection);
 
 		renderMcpServersSection(toolsGroup, ctx);
 

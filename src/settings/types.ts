@@ -190,16 +190,6 @@ export interface NotorSettings {
 	/** Name of the currently active persona (empty string = no persona active). */
 	active_persona: string;
 
-	/**
-	 * Per-persona per-tool auto-approve overrides.
-	 *
-	 * Outer key: persona name. Inner key: tool name.
-	 * Value: `"global"` | `"approve"` | `"deny"`.
-	 *
-	 * @see specs/03-workflows-personas/data-model.md — PersonaAutoApproveConfig
-	 */
-	persona_auto_approve: Record<string, Record<string, string>>;
-
 	// -------------------------------------------------------------------
 	// Group F: Vault event hook settings
 	// -------------------------------------------------------------------

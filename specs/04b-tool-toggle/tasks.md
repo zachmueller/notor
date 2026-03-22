@@ -311,15 +311,15 @@ After DISP-002, DISP-003, and DISP-004 are all applied, the full `dispatch()` ch
 - Modify `e2e/scripts/activity-indicator-test.ts` (remove `persona_auto_approve` references)
 **Dependencies:** ORCH-002, MAIN-001
 **Acceptance Criteria:**
-- [ ] `persona_auto_approve` field removed from `NotorSettings` type and defaults
-- [ ] `src/settings/sections/persona-auto-approve.ts` deleted
-- [ ] Storage helpers in auto-approve-resolver.ts deleted; `resolveAutoApprove()` simplified
-- [ ] `setPersonaAutoApprove()` removed from dispatcher
-- [ ] All call sites in main.ts and orchestrator.ts removed
-- [ ] Settings tab no longer renders persona auto-approve section
-- [ ] No remaining references to `persona_auto_approve` in e2e test files
-- [ ] TypeScript compilation succeeds with no errors
-- [ ] No remaining references to `persona_auto_approve` in codebase
+- [x] `persona_auto_approve` field removed from `NotorSettings` type and defaults
+- [x] `src/settings/sections/persona-auto-approve.ts` deleted
+- [x] Storage helpers in auto-approve-resolver.ts deleted; `resolveAutoApprove()` simplified
+- [x] `setPersonaAutoApprove()` removed from dispatcher
+- [x] All call sites in main.ts and orchestrator.ts removed
+- [x] Settings tab no longer renders persona auto-approve section
+- [x] No remaining references to `persona_auto_approve` in e2e test files
+- [x] TypeScript compilation succeeds with no errors
+- [x] No remaining references to `persona_auto_approve` in codebase
 
 ---
 

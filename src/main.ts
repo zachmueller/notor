@@ -731,13 +731,6 @@ export default class NotorPlugin extends Plugin {
 			this._personaManager.updateSettings(this.settings);
 		}
 
-		// B-007: Propagate persona auto-approve config changes to dispatcher
-		// so changes from the Settings UI take effect on the next dispatch()
-		// without requiring a plugin reload.
-		if (this._toolDispatcher) {
-			this._toolDispatcher.setPersonaAutoApprove(this.settings.persona_auto_approve);
-		}
-
 		// Group F: Propagate debounce cooldown change to live debounce engine
 		if (this._vaultEventDebounce) {
 			this._vaultEventDebounce.setCooldown(
@@ -962,8 +955,6 @@ export default class NotorPlugin extends Plugin {
 			this._toolDispatcher.setAutoApprove(this.settings.auto_approve);
 			this._toolDispatcher.setSettings(this.settings);
 
-			// B-007: Initialize persona auto-approve state on dispatcher
-			this._toolDispatcher.setPersonaAutoApprove(this.settings.persona_auto_approve);
 			this._toolDispatcher.setActivePersonaName(
 				this.settings.active_persona || null
 			);
@@ -1305,8 +1296,6 @@ export default class NotorPlugin extends Plugin {
 			this.loadSettings().then(() => {
 				// Propagate refreshed auto-approve settings to the dispatcher
 				toolDispatcher.setAutoApprove(this.settings.auto_approve);
-				// B-007: Also propagate persona auto-approve on settings reload
-				toolDispatcher.setPersonaAutoApprove(this.settings.persona_auto_approve);
 				toolDispatcher.setActivePersonaName(
 					this.settings.active_persona || null
 				);

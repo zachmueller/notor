@@ -265,7 +265,6 @@ function buildSettings(overrides: Record<string, unknown> = {}): Record<string, 
 		hook_timeout: 10,
 		hook_env_truncation_chars: 10000,
 		active_persona: "",
-		persona_auto_approve: {},
 		vault_event_hooks: {
 			on_note_open: [],
 			on_note_create: [],

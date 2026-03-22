@@ -28,44 +28,29 @@ const log = logger("ToolDispatcher");
 /**
  * Resolve the effective auto-approve decision for an MCP tool call.
  *
- * MCP auto-approve precedence (FR-60):
- * 1. Active persona override → "approve" → true, "deny" → false, "global"/absent → fall through
- * 2. Server-level: raw tool name (without namespace) in `McpServerConfig.autoApprove[]` → true
- * 3. Global default: false (all MCP tools require manual approval unless configured)
+ * MCP auto-approve precedence:
+ * 1. Server-level: raw tool name (without namespace) in `McpServerConfig.autoApprove[]` → true
+ * 2. Global default: false (all MCP tools require manual approval unless configured)
  *
- * @param namespacedToolName - Full `server__tool` name
+ * Per-persona overrides removed in Phase 4b (CLEAN-001) — now handled by
+ * `<notor_tool_config>` via the effective config path.
+ *
  * @param tool - The McpRegisteredTool instance (exposes server config and raw name)
- * @param activePersonaName - Currently active persona name, or null
- * @param personaOverrides - Full persona auto-approve config from settings
  * @returns true if auto-approved, false if manual approval required
  *
  * @see specs/04-mcp/tasks.md — FEAT-002
  */
 function resolveMcpAutoApprove(
-	namespacedToolName: string,
 	tool: McpRegisteredTool,
-	activePersonaName: string | null,
-	personaOverrides: Record<string, Record<string, string>>
 ): boolean {
-	// 1. Check persona override (uses namespaced name for lookup, same as built-in tools)
-	if (activePersonaName !== null) {
-		const overrides = personaOverrides[activePersonaName];
-		if (overrides) {
-			const state = overrides[namespacedToolName];
-			if (state === "approve") return true;
-			if (state === "deny") return false;
-			// "global" or absent → fall through to server-level
-		}
-	}
-
-	// 2. Server-level: check McpServerConfig.autoApprove array (raw tool name)
+	// 1. Server-level: check McpServerConfig.autoApprove array (raw tool name)
 	const config = tool.getServerConfig();
 	const rawToolName = tool.getRawToolName();
 	if (config.autoApprove && config.autoApprove.includes(rawToolName)) {
 		return true;
 	}
 
-	// 3. Global default: require approval for all MCP tools
+	// 2. Global default: require approval for all MCP tools
 	return false;
 }
 
@@ -98,9 +83,6 @@ export class ToolDispatcher {
 
 	/** Auto-approve settings per tool name (global defaults). */
 	private autoApprove: Record<string, boolean> = {};
-
-	/** Per-persona per-tool auto-approve overrides from settings. */
-	private personaAutoApprove: Record<string, Record<string, string>> = {};
 
 	/** Effective tool config from `<notor_tool_config>` merge (null = use global defaults). */
 	private effectiveToolConfig: EffectiveToolConfig | null = null;
@@ -170,22 +152,6 @@ export class ToolDispatcher {
 	/** Set event handlers for UI updates. */
 	setEvents(events: DispatcherEvents): void {
 		this.events = events;
-	}
-
-	/**
-	 * Update the per-persona auto-approve overrides.
-	 *
-	 * Called on plugin load with the full `settings.persona_auto_approve`
-	 * config, and again whenever persona auto-approve settings are saved
-	 * via the Settings UI.
-	 *
-	 * @see specs/03-workflows-personas/tasks/group-b-tasks.md — B-003
-	 */
-	setPersonaAutoApprove(overrides: Record<string, Record<string, string>>): void {
-		this.personaAutoApprove = overrides;
-		log.debug("Updated persona auto-approve overrides", {
-			personaCount: Object.keys(overrides).length,
-		});
 	}
 
 	/**
@@ -431,22 +397,12 @@ export class ToolDispatcher {
 			isAutoApproved = toolEntry?.auto_approve ?? false;
 		} else {
 			// Fallback: legacy MCP/built-in branching when no effective config
-			// For MCP tools: persona override → server-level per-tool → default false (FEAT-002)
-			// For built-in tools: persona override → global setting (B-003)
+			// For MCP tools: server-level per-tool → default false (FEAT-002)
+			// For built-in tools: global setting
 			if (isMcpTool(toolName) && tool instanceof McpRegisteredTool) {
-				isAutoApproved = resolveMcpAutoApprove(
-					toolName,
-					tool,
-					this.activePersonaName,
-					this.personaAutoApprove
-				);
+				isAutoApproved = resolveMcpAutoApprove(tool);
 			} else {
-				isAutoApproved = resolveAutoApprove(
-					toolName,
-					this.activePersonaName,
-					this.personaAutoApprove,
-					this.autoApprove
-				);
+				isAutoApproved = resolveAutoApprove(toolName, this.autoApprove);
 			}
 		}
 

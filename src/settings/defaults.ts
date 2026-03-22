@@ -137,7 +137,6 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 
 	// Phase 4: Personas
 	active_persona: "",
-	persona_auto_approve: {},
 
 	// Group F: Vault event hooks
 	vault_event_hooks: DEFAULT_VAULT_EVENT_HOOKS,

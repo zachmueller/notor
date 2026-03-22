@@ -147,23 +147,21 @@ async function injectSimulatedMcpServer(
 
 /**
  * Resolve auto-approve for an MCP tool using the same logic as the dispatcher.
- * Precedence: persona override → server-level autoApprove[] → global default (false).
+ * Precedence: server-level autoApprove[] → global default (false).
  */
 async function resolveAutoApprove(
 	page: Page,
 	serverName: string,
 	rawToolName: string,
-	personaName: string | null
+	_personaName: string | null
 ): Promise<boolean> {
 	return page.evaluate(
 		({
 			server,
 			tool,
-			persona,
 		}: {
 			server: string;
 			tool: string;
-			persona: string | null;
 		}) => {
 			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 			if (!plugin) return false;
@@ -171,24 +169,13 @@ async function resolveAutoApprove(
 			const settings = plugin.settings;
 			const serverConfig = settings.mcp_servers?.[server];
 
-			// Persona override check
-			if (persona) {
-				const overrides = settings.persona_auto_approve?.[persona];
-				const namespacedKey = `${server}__${tool}`;
-				const rawKey = tool;
-				const state = overrides?.[namespacedKey] ?? overrides?.[rawKey];
-				if (state === "approve") return true;
-				if (state === "deny") return false;
-				// "global" or absent → fall through to server-level
-			}
-
 			// Server-level autoApprove list
 			if (serverConfig?.autoApprove?.includes(tool)) return true;
 
 			// Global default for MCP tools: require approval
 			return false;
 		},
-		{ server: serverName, tool: rawToolName, persona: personaName }
+		{ server: serverName, tool: rawToolName }
 	);
 }
 
@@ -239,7 +226,6 @@ function buildBaseSettings(): Record<string, unknown> {
 		checkpoint_max_age_days: 30,
 		model_pricing: {},
 		mcp_servers: {},
-		persona_auto_approve: {},
 		active_persona: "",
 	};
 }
@@ -307,108 +293,6 @@ async function testMcpGlobalDefault(page: Page): Promise<void> {
 		pass("MCP global default requires approval", "Unknown MCP tool not in autoApprove[] → false (require approval)");
 	} else {
 		fail("MCP global default requires approval", `Expected false, got ${result}`);
-	}
-}
-
-/**
- * Test 5: Persona "approve" override → auto-approves even when NOT in server autoApprove[].
- */
-async function testPersonaApproveOverride(page: Page): Promise<void> {
-	console.log("\nTest 5: Persona 'approve' override → auto-approve despite server default");
-
-	// Set persona override: approve MANUAL_APPROVE_TOOL (which is NOT in server autoApprove[])
-	await page.evaluate(
-		({ personaName, toolKey, value }: { personaName: string; toolKey: string; value: string }) => {
-			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			if (!plugin) return;
-			plugin.settings.persona_auto_approve = plugin.settings.persona_auto_approve ?? {};
-			plugin.settings.persona_auto_approve[personaName] = plugin.settings.persona_auto_approve[personaName] ?? {};
-			plugin.settings.persona_auto_approve[personaName][toolKey] = value;
-			// Propagate to dispatcher
-			plugin._toolDispatcher?.setPersonaAutoApprove(plugin.settings.persona_auto_approve);
-			plugin._toolDispatcher?.setActivePersonaName(personaName);
-		},
-		{ personaName: "mcp-tester", toolKey: MANUAL_APPROVE_TOOL, value: "approve" }
-	);
-
-	const result = await resolveAutoApprove(page, SERVER_NAME, MANUAL_APPROVE_TOOL, "mcp-tester");
-
-	if (result === true) {
-		pass("Persona 'approve' overrides server default", `${MANUAL_APPROVE_TOOL}: persona='approve' → true (despite not in server autoApprove[])`);
-	} else {
-		fail("Persona 'approve' overrides server default", `Expected true, got ${result}`);
-	}
-}
-
-/**
- * Test 6: Persona "deny" override → requires approval even when tool IS in server autoApprove[].
- */
-async function testPersonaDenyOverride(page: Page): Promise<void> {
-	console.log("\nTest 6: Persona 'deny' override → requires approval despite server auto-approve");
-
-	// Set persona override: deny AUTO_APPROVED_TOOL (which IS in server autoApprove[])
-	await page.evaluate(
-		({ personaName, toolKey, value }: { personaName: string; toolKey: string; value: string }) => {
-			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			if (!plugin) return;
-			plugin.settings.persona_auto_approve = plugin.settings.persona_auto_approve ?? {};
-			plugin.settings.persona_auto_approve[personaName] = plugin.settings.persona_auto_approve[personaName] ?? {};
-			plugin.settings.persona_auto_approve[personaName][toolKey] = value;
-			plugin._toolDispatcher?.setPersonaAutoApprove(plugin.settings.persona_auto_approve);
-		},
-		{ personaName: "mcp-tester", toolKey: AUTO_APPROVED_TOOL, value: "deny" }
-	);
-
-	const result = await resolveAutoApprove(page, SERVER_NAME, AUTO_APPROVED_TOOL, "mcp-tester");
-
-	if (result === false) {
-		pass("Persona 'deny' overrides server auto-approve", `${AUTO_APPROVED_TOOL}: persona='deny' → false (despite in server autoApprove[])`);
-	} else {
-		fail("Persona 'deny' overrides server auto-approve", `Expected false, got ${result}`);
-	}
-}
-
-/**
- * Test 7: Persona "global" / absent → falls through to server-level setting.
- */
-async function testPersonaGlobalFallback(page: Page): Promise<void> {
-	console.log("\nTest 7: Persona 'global' fallback → uses server-level auto-approve");
-
-	// Set persona override: "global" for AUTO_APPROVED_TOOL (which IS in server autoApprove[])
-	await page.evaluate(
-		({ personaName, toolKey }: { personaName: string; toolKey: string }) => {
-			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			if (!plugin) return;
-			plugin.settings.persona_auto_approve = plugin.settings.persona_auto_approve ?? {};
-			plugin.settings.persona_auto_approve[personaName] = plugin.settings.persona_auto_approve[personaName] ?? {};
-			plugin.settings.persona_auto_approve[personaName][toolKey] = "global";
-		},
-		{ personaName: "mcp-tester", toolKey: AUTO_APPROVED_TOOL }
-	);
-
-	// With "global" → should fall through to server auto-approve (true for AUTO_APPROVED_TOOL)
-	const resultAutoApproved = await resolveAutoApprove(page, SERVER_NAME, AUTO_APPROVED_TOOL, "mcp-tester");
-	if (resultAutoApproved === true) {
-		pass("Persona 'global' falls through to server (auto-approve)", `${AUTO_APPROVED_TOOL}: persona='global' → server says true`);
-	} else {
-		fail("Persona 'global' falls through to server (auto-approve)", `Expected true, got ${resultAutoApproved}`);
-	}
-
-	// With "global" for MANUAL_APPROVE_TOOL → server says false
-	await page.evaluate(
-		({ personaName, toolKey }: { personaName: string; toolKey: string }) => {
-			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			if (!plugin) return;
-			plugin.settings.persona_auto_approve[personaName][toolKey] = "global";
-		},
-		{ personaName: "mcp-tester", toolKey: MANUAL_APPROVE_TOOL }
-	);
-
-	const resultManual = await resolveAutoApprove(page, SERVER_NAME, MANUAL_APPROVE_TOOL, "mcp-tester");
-	if (resultManual === false) {
-		pass("Persona 'global' falls through to server (require approval)", `${MANUAL_APPROVE_TOOL}: persona='global' → server says false`);
-	} else {
-		fail("Persona 'global' falls through to server (require approval)", `Expected false, got ${resultManual}`);
 	}
 }
 
@@ -506,69 +390,6 @@ async function testPlanModeBlocksWriteRegardlessOfAutoApprove(page: Page): Promi
 }
 
 /**
- * Test 10: Stale MCP tool handling — after tools are unregistered, persona overrides preserved.
- */
-async function testStaleMcpToolHandling(page: Page): Promise<void> {
-	console.log("\nTest 10: Stale MCP tool handling — persona overrides preserved after unregister");
-
-	const personaName = "mcp-tester";
-	const namespacedTool = `${SERVER_NAME}__${AUTO_APPROVED_TOOL}`;
-
-	// Set a persona override for a namespaced tool
-	await page.evaluate(
-		({ persona, toolKey, value }: { persona: string; toolKey: string; value: string }) => {
-			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			if (!plugin) return;
-			plugin.settings.persona_auto_approve = plugin.settings.persona_auto_approve ?? {};
-			plugin.settings.persona_auto_approve[persona] = plugin.settings.persona_auto_approve[persona] ?? {};
-			plugin.settings.persona_auto_approve[persona][toolKey] = value;
-		},
-		{ persona: personaName, toolKey: namespacedTool, value: "approve" }
-	);
-
-	// Simulate server disconnect — unregister tools from registry
-	await page.evaluate((serverName: string) => {
-		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-		if (!plugin?._toolRegistry || !plugin?._toolDispatcher) return;
-		const toolNames = plugin._toolRegistry.getNames().filter((n: string) => n.startsWith(`${serverName}__`));
-		for (const name of toolNames) {
-			plugin._toolRegistry.unregister(name);
-			plugin._toolDispatcher.unregisterTool(name);
-		}
-	}, SERVER_NAME);
-
-	await page.waitForTimeout(500);
-
-	// Verify tools are gone from registry
-	const registeredAfterDisconnect = await page.evaluate((serverName: string) => {
-		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-		return plugin?._toolRegistry?.getNames().filter((n: string) => n.startsWith(`${serverName}__`)) ?? [];
-	}, SERVER_NAME);
-
-	if (registeredAfterDisconnect.length === 0) {
-		pass("Tools unregistered on disconnect", "No MCP tools in registry after disconnect");
-	} else {
-		fail("Tools unregistered on disconnect", `${registeredAfterDisconnect.length} tools still in registry`);
-	}
-
-	// Persona override entries should be PRESERVED (stale but not deleted)
-	const personaOverrides = await page.evaluate(
-		({ persona, toolKey }: { persona: string; toolKey: string }) => {
-			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			return plugin?.settings?.persona_auto_approve?.[persona]?.[toolKey] ?? null;
-		},
-		{ persona: personaName, toolKey: namespacedTool }
-	);
-
-	const shot = await screenshot(page, "10-stale-tool");
-	if (personaOverrides === "approve") {
-		pass("Stale tool override preserved", `Persona override for '${namespacedTool}' preserved after server disconnect`, shot);
-	} else {
-		fail("Stale tool override preserved", `Expected 'approve', got '${personaOverrides}'`, shot);
-	}
-}
-
-/**
  * Test 11: Auto-approve changes take effect immediately (no reload required).
  */
 async function testAutoApproveChangesImmediateEffect(page: Page): Promise<void> {
@@ -609,55 +430,6 @@ async function testAutoApproveChangesImmediateEffect(page: Page): Promise<void> 
 		},
 		{ serverName: SERVER_NAME }
 	);
-}
-
-/**
- * Test 12: Persona auto-approve UI lists MCP tools in settings (INT-004).
- */
-async function testPersonaAutoApproveUiShowsMcpTools(page: Page): Promise<void> {
-	console.log("\nTest 12: Persona auto-approve UI lists MCP tools (INT-004)");
-
-	// Re-register the simulated tools so they appear in the registry
-	await injectSimulatedMcpServer(page, SERVER_NAME, [AUTO_APPROVED_TOOL]);
-
-	// Open Settings → Notor
-	await page.keyboard.press("Meta+,");
-	await page.waitForTimeout(1_500);
-
-	const notorOpened = await page.evaluate(() => {
-		const items = Array.from(document.querySelectorAll(".vertical-tab-nav-item"));
-		for (const item of items) {
-			if (item.textContent?.trim() === "Notor") {
-				(item as HTMLElement).click();
-				return true;
-			}
-		}
-		return false;
-	});
-
-	if (!notorOpened) {
-		pass("Persona auto-approve UI (skipped)", "Could not open Notor settings");
-		return;
-	}
-
-	await page.waitForTimeout(1_500);
-	const shot = await screenshot(page, "12-persona-aa-ui");
-
-	// Check if MCP tools appear in the persona auto-approve section
-	const mcpToolInUI = await page.evaluate((serverName: string) => {
-		const allText = document.body.textContent ?? "";
-		return allText.includes(serverName) || allText.includes("__");
-	}, SERVER_NAME);
-
-	if (mcpToolInUI) {
-		pass("Persona auto-approve UI shows MCP server/tools", `Server name '${SERVER_NAME}' found in settings UI`, shot);
-	} else {
-		pass("Persona auto-approve UI (MCP tools not visible)", "MCP server name not found in settings UI — INT-004 grouping may render differently", shot);
-	}
-
-	// Close settings
-	await page.keyboard.press("Escape");
-	await page.waitForTimeout(500);
 }
 
 /**
@@ -740,14 +512,9 @@ async function main() {
 		await testServerLevelAutoApproveEnabled(page);
 		await testServerLevelAutoApproveDisabled(page);
 		await testMcpGlobalDefault(page);
-		await testPersonaApproveOverride(page);
-		await testPersonaDenyOverride(page);
-		await testPersonaGlobalFallback(page);
 		await testNoPersonaFallback(page);
 		await testPlanModeBlocksWriteRegardlessOfAutoApprove(page);
-		await testStaleMcpToolHandling(page);
 		await testAutoApproveChangesImmediateEffect(page);
-		await testPersonaAutoApproveUiShowsMcpTools(page);
 		await testNoAutoApproveErrors(page, collector);
 
 		console.log("\n=== Collecting final logs ===");
