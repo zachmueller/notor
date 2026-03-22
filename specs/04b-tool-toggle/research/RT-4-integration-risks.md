@@ -1,6 +1,6 @@
 # RT-4 — Integration Risks: Phase 4b vs. Current Codebase
 
-**Status:** In progress — working through resolutions iteratively
+**Status:** In progress — working through resolutions iteratively (Risks 1–6 resolved; 7–10 open)
 **Created:** 2026-03-22
 **Source:** Codebase scan against [spec.md](../spec.md) and [plan.md](../plan.md)
 
@@ -149,7 +149,7 @@ B. Run `extractToolConfigs()` in a pre-pass before calling `assembleWorkflowProm
 
 C. Run `extractToolConfigs()` as a post-pass on `assembledMessage` after `assembleWorkflowPrompt()` returns, extracting and stripping from the full XML-wrapped message. Technically works but requires the regex to handle content inside `<workflow_instructions>` tags and is fragile.
 
-**Resolution:** _Open_
+**Resolution:** **Option A** — Insert `extractToolConfigs()` call inside `assembleWorkflowPrompt()` between include resolution (step 2) and XML wrapping (step 4). After `<include_note>` tags are resolved (step 2) and the body is validated non-empty (step 3), run `extractToolConfigs(resolvedBody, "workflow", workflow.file.path)`. Pass the returned `strippedContent` — not the original resolved body — to the `<workflow_instructions>` XML wrapper in step 4. Include the returned `configs` array in `WorkflowAssemblyResult`. This is a targeted modification to the internal flow of `assembleWorkflowPrompt()`, not a pre-pass or post-pass — extraction must happen after include resolution produces the final body but before that body disappears into the XML wrapper.
 
 ---
 
@@ -257,7 +257,7 @@ Use this section to record agreed resolutions as we work through each risk. Upda
 | 3 | No per-rule activation state | HIGH | **Approach 3+4 hybrid** — `getMatchedRules()` on VaultRuleManager; extraction in SystemPromptBuilder |
 | 4 | MCP `autoApprove[]` discarded | HIGH | **Option B** — pre-flatten MCP server `autoApprove[]` into `globalAutoApprove` map |
 | 5 | `Conversation` is DB-persisted | MEDIUM | **Option C** — flat private fields on `ChatOrchestrator`; `Conversation` untouched |
-| 6 | Workflow extraction invasiveness | MEDIUM | _Open_ |
+| 6 | Workflow extraction invasiveness | MEDIUM | **Option A** — insert `extractToolConfigs()` inside `assembleWorkflowPrompt()` between steps 2 and 4 |
 | 7 | `toolConfig` singular vs. multi-block | MEDIUM | _Open_ |
 | 8 | `parseYAML` non-throwing edge cases | MEDIUM | _Open_ |
 | 9 | `tag_include` unevaluable in pre-flight | MEDIUM | _Open_ |
