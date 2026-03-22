@@ -8,7 +8,7 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
-**Resolved:** 10 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6, RT-6.7, RT-6.8, RT-6.9, RT-6.10)
+**Resolved:** 11 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6, RT-6.7, RT-6.8, RT-6.9, RT-6.10, RT-6.11)
 
 ---
 
@@ -204,7 +204,9 @@ The plan handles this with `this.vaultRootPath ?? ""` as a fallback, but the tas
 
 ---
 
-### RT-6.11: SYS-001 doesn't mention unchanged parameters
+### RT-6.11: ~~SYS-001 doesn't mention unchanged parameters~~ **RESOLVED**
+
+**Status:** Resolved — note added to SYS-001.
 
 **Affected task:** SYS-001
 
@@ -222,4 +224,7 @@ async assemble(
 
 The other parameters (`mode`, `toolDefinitions`, `autoContextBlock`, `persona`) are not mentioned. Given that `toolDefinitions` is involved in the circular dependency (RT-6.1), its continued presence as a parameter is relevant.
 
-**Fix:** Add a note to SYS-001: "Parameters `mode`, `toolDefinitions`, `autoContextBlock`, and `persona` remain unchanged."
+**Changes applied:**
+- `tasks.md`: SYS-001 gains new AC: "Parameters `mode`, `toolDefinitions`, `autoContextBlock`, and `persona` on `assemble()` remain unchanged. `toolDefinitions` now receives the filtered list from `resolveEffectiveConfig()` rather than the unfiltered list captured at loop entry."
+- `spec.md`: No changes needed — FR-81 already describes the two-phase API at the appropriate level of abstraction; individual parameter names are implementation detail covered by the plan.
+- `plan.md`: No changes needed — the `assemble()` contract section already notes that `toolDefinitions` receives the filtered list from `resolveEffectiveConfig()`.

@@ -173,6 +173,7 @@
 - [ ] `assemble()` parameter changed from `vaultRuleContent?: string` to `matchedRules?: VaultRule[]` (no longer used for content — rules content comes from cache; parameter retained for backward compatibility if needed, or removed)
 - [ ] `assemble()` continues to return `Promise<string>` (no return type change needed — tool configs are returned by the extraction phase)
 - [ ] `assemble()` uses cached stripped content from `extractSourceToolConfigs()` and receives filtered `toolDefinitions` from the orchestrator
+- [ ] Parameters `mode`, `toolDefinitions`, `autoContextBlock`, and `persona` on `assemble()` remain unchanged. `toolDefinitions` now receives the filtered list from `resolveEffectiveConfig()` rather than the unfiltered list captured at loop entry (see ORCH-001).
 - [ ] TypeScript compilation succeeds (all call sites updated — see ORCH-001, ORCH-002)
 
 ### SYS-002: Implement tool config extraction in `extractSourceToolConfigs()`
