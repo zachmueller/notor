@@ -8,7 +8,7 @@
 
 11 misalignments identified between the implementation tasks and the current codebase/spec/plan. 2 critical, 4 moderate, 5 minor.
 
-**Resolved:** 6 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6)
+**Resolved:** 7 (RT-6.1, RT-6.2, RT-6.3, RT-6.4, RT-6.5, RT-6.6, RT-6.7)
 
 ---
 
@@ -140,13 +140,15 @@ This check only uses global settings — ignores persona overrides, rule overrid
 
 ## Minor
 
-### RT-6.7: ORCH-001 step numbering gap
+### RT-6.7: ~~ORCH-001 step numbering gap~~ **RESOLVED**
+
+**Status:** Resolved — no changes needed; gap was already corrected by RT-6.1 resolution.
 
 **Affected task:** ORCH-001
 
-Acceptance criteria numbering jumps from step 3 ("Collects `workflowToolConfigs`...") to step 5 ("Stores contributing `ParsedToolConfig[]`..."). Step 4 is missing. The plan (`plan.md`) has the same gap. All 7 logical steps are present — purely a numbering typo.
+**Original issue:** Acceptance criteria numbering jumped from step 3 ("Collects `workflowToolConfigs`...") to step 5 ("Stores contributing `ParsedToolConfig[]`..."). Step 4 was missing.
 
-**Fix:** Renumber steps 5–7 to 4–6, or insert a placeholder step 4.
+**Resolution:** The RT-6.1 resolution rewrote the ORCH-001 acceptance criteria and plan.md orchestrator section. The current state has no gap: tasks.md ORCH-001 uses unnumbered checkboxes with all 9 logical steps present (including the `mergeToolConfigs()` call between "Collects workflowToolConfigs" and "Stores activeParsedConfigs"), and plan.md steps 1–7 are correctly numbered with no gap. No file changes needed.
 
 ---
 
