@@ -19,31 +19,15 @@
  *   npx tsx e2e/scripts/chat-scroll-test.ts
  */
 
-import { execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright-core";
+import type { Page } from "playwright-core";
+import { runTest, type TestContext } from "../lib/test-harness";
 import {
-	launchObsidian,
-	closeObsidian,
-	type ObsidianProcess,
-} from "../lib/obsidian-launcher";
-import { LogCollector } from "../lib/log-collector";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ---------------------------------------------------------------------------
-// Paths
-// ---------------------------------------------------------------------------
-const VAULT_PATH = path.resolve(__dirname, "..", "test-vault");
-const CDP_PORT = 9222;
-const RESULTS_DIR = path.resolve(__dirname, "..", "results");
-const SCREENSHOTS_DIR = path.join(RESULTS_DIR, "screenshots", "chat-scroll");
-const LOGS_DIR = path.join(RESULTS_DIR, "logs");
-const BUILD_DIR = path.resolve(__dirname, "..", "..", "build");
-const PLUGIN_DATA_PATH = path.join(BUILD_DIR, "data.json");
+	buildDefaultSettings,
+	newConversation,
+	VAULT_PATH,
+} from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Timing
@@ -52,36 +36,8 @@ const RESPONSE_TIMEOUT_MS = 90_000;
 const POLL_INTERVAL_MS = 1_000;
 
 // ---------------------------------------------------------------------------
-// Test results
+// Local helpers (unique to this test)
 // ---------------------------------------------------------------------------
-interface TestResult {
-	name: string;
-	passed: boolean;
-	detail: string;
-	screenshot?: string;
-}
-
-const results: TestResult[] = [];
-
-function pass(name: string, detail: string, screenshot?: string): void {
-	console.log(`  ✓ PASS: ${name} — ${detail}`);
-	results.push({ name, passed: true, detail, screenshot });
-}
-
-function fail(name: string, detail: string, screenshot?: string): void {
-	console.error(`  ✗ FAIL: ${name} — ${detail}`);
-	results.push({ name, passed: false, detail, screenshot });
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-async function screenshot(page: Page, name: string): Promise<string> {
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	const file = path.join(SCREENSHOTS_DIR, `${name}.png`);
-	await page.screenshot({ path: file, fullPage: true });
-	return file;
-}
 
 /** Send a message and return immediately (do not wait for response). */
 async function sendMessageNoWait(page: Page, message: string): Promise<void> {
@@ -102,15 +58,13 @@ async function sendMessageNoWait(page: Page, message: string): Promise<void> {
 	console.log(`    → Sent: "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
 }
 
-/** Send a message and wait for the response to complete. */
-async function sendMessage(page: Page, message: string): Promise<boolean> {
-	await sendMessageNoWait(page, message);
-	return waitForResponse(page);
-}
-
 /**
  * Wait until the chat input is re-enabled (response complete).
  * Returns true if completed within timeout.
+ *
+ * NOTE: This local version checks `.disabled` rather than `contenteditable`,
+ * which the shared helper uses. Scroll behaviour tests may depend on this
+ * specific implementation.
  */
 async function waitForResponse(page: Page, timeoutMs = RESPONSE_TIMEOUT_MS): Promise<boolean> {
 	const start = Date.now();
@@ -123,6 +77,12 @@ async function waitForResponse(page: Page, timeoutMs = RESPONSE_TIMEOUT_MS): Pro
 		if (inputEnabled) return true;
 	}
 	return false;
+}
+
+/** Send a message and wait for the response to complete. */
+async function sendMessage(page: Page, message: string): Promise<boolean> {
+	await sendMessageNoWait(page, message);
+	return waitForResponse(page);
 }
 
 /** Wait for at least one streaming text chunk to appear in the last assistant message. */
@@ -184,88 +144,6 @@ async function scrollToBottom(page: Page): Promise<void> {
 	await page.waitForTimeout(150);
 }
 
-/** Start a fresh conversation. */
-async function newConversation(page: Page): Promise<void> {
-	const btn = await page.$(".notor-chat-header-btn[aria-label='New conversation']");
-	if (btn) {
-		await btn.click();
-		await page.waitForTimeout(1_500);
-	}
-}
-
-/** Switch to Act mode (required for write tools). */
-async function setActMode(page: Page): Promise<void> {
-	const toggle = await page.$(".notor-mode-toggle");
-	if (!toggle) throw new Error("Mode toggle not found");
-	const current = await toggle.textContent();
-	if (current?.trim() !== "Act") {
-		await toggle.click();
-		await page.waitForTimeout(400);
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Settings
-// ---------------------------------------------------------------------------
-function buildSettings(writeAutoApprove: boolean): Record<string, unknown> {
-	return {
-		notor_dir: "notor/",
-		active_provider: "bedrock",
-		providers: [
-			{
-				type: "local",
-				enabled: false,
-				display_name: "Local (OpenAI-compatible)",
-				endpoint: "http://localhost:11434/v1",
-			},
-			{
-				type: "anthropic",
-				enabled: false,
-				display_name: "Anthropic",
-				endpoint: "https://api.anthropic.com",
-			},
-			{
-				type: "openai",
-				enabled: false,
-				display_name: "OpenAI",
-				endpoint: "https://api.openai.com",
-			},
-			{
-				type: "bedrock",
-				enabled: true,
-				display_name: "AWS Bedrock",
-				aws_auth_method: "profile",
-				aws_profile: "default",
-				region: "us-east-1",
-				model_id: "deepseek.v3.2",
-			},
-		],
-		auto_approve: {
-			read_note: true,
-			search_vault: true,
-			list_vault: true,
-			read_frontmatter: true,
-			write_note: writeAutoApprove,
-			replace_in_note: writeAutoApprove,
-			update_frontmatter: writeAutoApprove,
-			manage_tags: writeAutoApprove,
-		},
-		mode: "plan",
-		open_notes_on_access: true,
-		history_path: ".obsidian/plugins/notor/history/",
-		history_max_size_mb: 500,
-		history_max_age_days: 90,
-		checkpoint_path: ".obsidian/plugins/notor/checkpoints/",
-		checkpoint_max_per_conversation: 100,
-		checkpoint_max_age_days: 30,
-		model_pricing: {},
-	};
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 /**
  * Inject a transparent spacer into the message list to force it to overflow.
  * Returns a cleanup function that removes the spacer.
@@ -287,6 +165,21 @@ async function injectScrollSpacer(page: Page, heightPx = 600): Promise<() => Pro
 	};
 }
 
+/** Switch to Act mode (required for write tools). */
+async function setActMode(page: Page): Promise<void> {
+	const toggle = await page.$(".notor-mode-toggle");
+	if (!toggle) throw new Error("Mode toggle not found");
+	const current = await toggle.textContent();
+	if (current?.trim() !== "Act") {
+		await toggle.click();
+		await page.waitForTimeout(400);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 /**
  * Test 1: Scroll position is preserved when the user scrolls up mid-stream.
  *
@@ -294,7 +187,8 @@ async function injectScrollSpacer(page: Page, heightPx = 600): Promise<() => Pro
  * then send a short message. While the response streams in, scroll up and
  * verify the position does not snap back to the bottom.
  */
-async function testScrollPreservedDuringStreaming(page: Page): Promise<void> {
+async function testScrollPreservedDuringStreaming(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── Scroll Test 1: scroll preserved during streaming ────────────");
 	await newConversation(page);
 
@@ -313,13 +207,13 @@ async function testScrollPreservedDuringStreaming(page: Page): Promise<void> {
 	// Wait for streaming to begin
 	const streamingStarted = await waitForStreamingStart(page, 45_000);
 	if (!streamingStarted) {
-		const shot = await screenshot(page, "01-no-stream");
-		fail("streaming — streaming started", "No assistant text appeared within 45s", shot);
+		const shot = await ctx.screenshot("01-no-stream");
+		ctx.fail("streaming — streaming started", "No assistant text appeared within 45s", shot);
 		await removeSpacerT1();
 		await waitForResponse(page, 60_000);
 		return;
 	}
-	pass("streaming — streaming started", "Assistant is actively streaming text");
+	ctx.pass("streaming — streaming started", "Assistant is actively streaming text");
 
 	// Confirm the message list is now overflowing (spacer + user msg + streaming response)
 	const scrollDims = await page.evaluate(() => {
@@ -329,19 +223,19 @@ async function testScrollPreservedDuringStreaming(page: Page): Promise<void> {
 	console.log(`    [scroll dims] scrollHeight=${scrollDims.scrollHeight} clientHeight=${scrollDims.clientHeight} overflow=${scrollDims.scrollHeight - scrollDims.clientHeight}px`);
 
 	if (scrollDims.scrollHeight <= scrollDims.clientHeight) {
-		fail("streaming — message list overflowing", `No overflow even with spacer (scrollHeight=${scrollDims.scrollHeight}, clientHeight=${scrollDims.clientHeight})`);
+		ctx.fail("streaming — message list overflowing", `No overflow even with spacer (scrollHeight=${scrollDims.scrollHeight}, clientHeight=${scrollDims.clientHeight})`);
 		await removeSpacerT1();
 		await waitForResponse(page, RESPONSE_TIMEOUT_MS);
 		return;
 	}
-	pass("streaming — message list overflowing", `${scrollDims.scrollHeight - scrollDims.clientHeight}px overflow`);
+	ctx.pass("streaming — message list overflowing", `${scrollDims.scrollHeight - scrollDims.clientHeight}px overflow`);
 
 	// Scroll up while the response is streaming — this should disable autoScroll.
 	await scrollUp(page, 400);
 	const stateAfterScroll = await getScrollState(page);
 	const scrollTopAfterManualScroll = stateAfterScroll.scrollTop;
 
-	const shot1 = await screenshot(page, "01-scrolled-up-mid-stream");
+	await ctx.screenshot("01-scrolled-up-mid-stream");
 
 	// Wait 2 seconds; without the fix, scrollToBottom() would fire every chunk
 	// and snap us back down. With the fix, we should stay put.
@@ -351,16 +245,16 @@ async function testScrollPreservedDuringStreaming(page: Page): Promise<void> {
 	const distanceFromBottom = stateAfterWait.scrollHeight - stateAfterWait.scrollTop - stateAfterWait.clientHeight;
 	const wasSnappedToBottom = distanceFromBottom < 10;
 
-	const shot2 = await screenshot(page, "01-after-wait");
+	const shot2 = await ctx.screenshot("01-after-wait");
 
 	if (wasSnappedToBottom) {
-		fail(
+		ctx.fail(
 			"streaming — scroll preserved mid-stream",
 			`Scroll snapped to bottom during streaming (scrollTop: ${scrollTopAfterManualScroll} → ${stateAfterWait.scrollTop}, distanceFromBottom: ${distanceFromBottom}px)`,
 			shot2
 		);
 	} else {
-		pass(
+		ctx.pass(
 			"streaming — scroll preserved mid-stream",
 			`Scroll held at ${Math.round(stateAfterWait.scrollTop)}px (${Math.round(distanceFromBottom)}px from bottom, not snapped)`,
 			shot2
@@ -379,7 +273,8 @@ async function testScrollPreservedDuringStreaming(page: Page): Promise<void> {
  * (re-enabling autoScroll), and verify that new streaming content tracks
  * to the bottom.
  */
-async function testAutoScrollReengagesOnScrollDown(page: Page): Promise<void> {
+async function testAutoScrollReengagesOnScrollDown(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── Scroll Test 2: auto-scroll re-engages on scroll-to-bottom ──");
 	await newConversation(page);
 
@@ -391,13 +286,13 @@ async function testAutoScrollReengagesOnScrollDown(page: Page): Promise<void> {
 
 	const streamingStarted = await waitForStreamingStart(page, 45_000);
 	if (!streamingStarted) {
-		const shot = await screenshot(page, "02-no-stream");
-		fail("re-engage — streaming started", "No assistant text appeared within 45s", shot);
+		const shot = await ctx.screenshot("02-no-stream");
+		ctx.fail("re-engage — streaming started", "No assistant text appeared within 45s", shot);
 		await removeSpacerT2();
 		await waitForResponse(page, 60_000);
 		return;
 	}
-	pass("re-engage — streaming started", "Assistant is actively streaming text");
+	ctx.pass("re-engage — streaming started", "Assistant is actively streaming text");
 
 	// Scroll up to disable auto-scroll, then back to bottom to re-enable it.
 	await scrollUp(page, 400);
@@ -407,7 +302,7 @@ async function testAutoScrollReengagesOnScrollDown(page: Page): Promise<void> {
 	const distanceScrolledUp = stateScrolledUp.scrollHeight - stateScrolledUp.scrollTop - stateScrolledUp.clientHeight;
 
 	if (distanceScrolledUp < 10) {
-		pass("re-engage — content not overflowing", "Spacer may not have been enough; skipping re-engage check");
+		ctx.pass("re-engage — content not overflowing", "Spacer may not have been enough; skipping re-engage check");
 		await removeSpacerT2();
 		await waitForResponse(page, RESPONSE_TIMEOUT_MS);
 		return;
@@ -427,18 +322,18 @@ async function testAutoScrollReengagesOnScrollDown(page: Page): Promise<void> {
 	const stateAfterMoreContent = await getScrollState(page);
 	const distanceAfterMore = stateAfterMoreContent.scrollHeight - stateAfterMoreContent.scrollTop - stateAfterMoreContent.clientHeight;
 
-	const shot = await screenshot(page, "02-re-engaged");
+	const shot = await ctx.screenshot("02-re-engaged");
 
 	if (stateAfterMoreContent.scrollHeight > heightBefore && distanceAfterMore <= 50) {
-		pass(
+		ctx.pass(
 			"re-engage — auto-scroll re-engaged after scrolling to bottom",
 			`New content streamed (+${stateAfterMoreContent.scrollHeight - heightBefore}px) and panel tracked to bottom (${Math.round(distanceAfterMore)}px from bottom)`,
 			shot
 		);
 	} else if (stateAfterMoreContent.scrollHeight === heightBefore) {
-		pass("re-engage — response complete before re-engage check", "Response finished; re-engage not testable at this point");
+		ctx.pass("re-engage — response complete before re-engage check", "Response finished; re-engage not testable at this point");
 	} else {
-		fail(
+		ctx.fail(
 			"re-engage — auto-scroll re-engaged after scrolling to bottom",
 			`Content grew by ${stateAfterMoreContent.scrollHeight - heightBefore}px but panel is ${Math.round(distanceAfterMore)}px from bottom`,
 			shot
@@ -456,7 +351,8 @@ async function testAutoScrollReengagesOnScrollDown(page: Page): Promise<void> {
  * appears, scroll up. Verify that the panel does NOT snap back to the bottom
  * repeatedly while waiting for approval.
  */
-async function testScrollPreservedDuringDiffApproval(page: Page): Promise<void> {
+async function testScrollPreservedDuringDiffApproval(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── Scroll Test 3: scroll preserved during diff approval ────────");
 	await newConversation(page);
 	await setActMode(page);
@@ -478,13 +374,13 @@ async function testScrollPreservedDuringDiffApproval(page: Page): Promise<void> 
 
 	const approvalAppeared = await waitForApprovalUI(page, 90_000);
 	if (!approvalAppeared) {
-		const shot = await screenshot(page, "03-no-approval-ui");
-		fail("diff approval — approval UI appeared", "Diff/approval UI did not appear within 90s", shot);
+		const shot = await ctx.screenshot("03-no-approval-ui");
+		ctx.fail("diff approval — approval UI appeared", "Diff/approval UI did not appear within 90s", shot);
 		await waitForResponse(page, 30_000);
 		return;
 	}
 
-	pass("diff approval — approval UI appeared", "Diff view is visible");
+	ctx.pass("diff approval — approval UI appeared", "Diff view is visible");
 
 	// Scroll up to see the top of the diff
 	await scrollUp(page, 600);
@@ -493,11 +389,11 @@ async function testScrollPreservedDuringDiffApproval(page: Page): Promise<void> 
 	const distanceFromBottomAfterScroll =
 		stateAfterScroll.scrollHeight - stateAfterScroll.scrollTop - stateAfterScroll.clientHeight;
 
-	const shot1 = await screenshot(page, "03-scrolled-up-during-diff");
+	await ctx.screenshot("03-scrolled-up-during-diff");
 
 	if (distanceFromBottomAfterScroll < 10) {
 		// Content not tall enough
-		pass("diff approval — content scrollable", "Diff content too short to scroll meaningfully; skipping snap check");
+		ctx.pass("diff approval — content scrollable", "Diff content too short to scroll meaningfully; skipping snap check");
 	} else {
 		// Wait 1.5 seconds (previously 3 poll-scroll ticks would have fired)
 		await page.waitForTimeout(1_500);
@@ -507,16 +403,16 @@ async function testScrollPreservedDuringDiffApproval(page: Page): Promise<void> 
 			stateAfterWait.scrollHeight - stateAfterWait.scrollTop - stateAfterWait.clientHeight;
 		const wasSnapped = distanceFromBottomAfterWait < 10;
 
-		const shot2 = await screenshot(page, "03-after-wait-during-diff");
+		const shot2 = await ctx.screenshot("03-after-wait-during-diff");
 
 		if (wasSnapped) {
-			fail(
+			ctx.fail(
 				"diff approval — scroll preserved during approval wait",
 				`Scroll snapped to bottom while diff was pending (scrollTop: ${scrollTopAfterManualScroll} → ${stateAfterWait.scrollTop}, distanceFromBottom: ${distanceFromBottomAfterWait}px)`,
 				shot2
 			);
 		} else {
-			pass(
+			ctx.pass(
 				"diff approval — scroll preserved during approval wait",
 				`Scroll held at ${Math.round(stateAfterWait.scrollTop)}px (${Math.round(distanceFromBottomAfterWait)}px from bottom, not snapped)`,
 				shot2
@@ -544,15 +440,16 @@ async function testScrollPreservedDuringDiffApproval(page: Page): Promise<void> 
  * Scroll up during a response, then send a new message. The new response
  * should auto-scroll to the bottom so the user sees it.
  */
-async function testNewMessageResetsAutoScroll(page: Page): Promise<void> {
+async function testNewMessageResetsAutoScroll(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── Scroll Test 4: new message resets auto-scroll ───────────────");
 	await newConversation(page);
 
 	// First message — get some content
 	const responded = await sendMessage(page, "Reply with exactly the text: First response complete.");
 	if (!responded) {
-		const shot = await screenshot(page, "04-no-first-response");
-		fail("new-message reset — first response received", "First response timed out");
+		await ctx.screenshot("04-no-first-response");
+		ctx.fail("new-message reset — first response received", "First response timed out");
 		return;
 	}
 
@@ -575,16 +472,16 @@ async function testNewMessageResetsAutoScroll(page: Page): Promise<void> {
 	const distanceFromBottomAfterSend =
 		stateAfterSend.scrollHeight - stateAfterSend.scrollTop - stateAfterSend.clientHeight;
 
-	const shot = await screenshot(page, "04-after-new-message-send");
+	const shot = await ctx.screenshot("04-after-new-message-send");
 
 	if (distanceFromBottomAfterSend <= 50) {
-		pass(
+		ctx.pass(
 			"new-message reset — panel scrolled to bottom on new send",
 			`Panel at bottom after send (${Math.round(distanceFromBottomAfterSend)}px from bottom)`,
 			shot
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"new-message reset — panel scrolled to bottom on new send",
 			`Panel is ${Math.round(distanceFromBottomAfterSend)}px from bottom after new message send`,
 			shot
@@ -595,142 +492,35 @@ async function testNewMessageResetsAutoScroll(page: Page): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main — run via shared test harness
 // ---------------------------------------------------------------------------
-async function main() {
-	console.log("=== Notor Chat Panel Scroll Behaviour Test ===\n");
-	console.log("Provider:  AWS Bedrock");
-	console.log("Auth:      AWS profile (default)");
-	console.log("Region:    us-east-1");
-	console.log("Model:     deepseek.v3.2\n");
 
-	// ── Step 0: Build ──────────────────────────────────────────────────
-	console.log("[0/4] Building plugin...");
-	execSync("npm run build", {
-		cwd: path.resolve(__dirname, "..", ".."),
-		stdio: "inherit",
-	});
-	console.log("Build complete.\n");
+runTest(
+	{
+		name: "chat-scroll",
+		settings: buildDefaultSettings(),
+		cleanupFiles: ["Scroll-Test-Diff.md"],
+	},
+	async (ctx) => {
+		const { page } = ctx;
 
-	// ── Step 1: Inject settings ────────────────────────────────────────
-	console.log("[1/4] Injecting settings (write tools require manual approval)...");
-	const settings = buildSettings(/*writeAutoApprove=*/ false);
-	fs.mkdirSync(BUILD_DIR, { recursive: true });
-	fs.mkdirSync(LOGS_DIR, { recursive: true });
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-
-	let existingData: string | null = null;
-	if (fs.existsSync(PLUGIN_DATA_PATH)) {
-		existingData = fs.readFileSync(PLUGIN_DATA_PATH, "utf8");
-	}
-	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	console.log(`  Settings written to ${PLUGIN_DATA_PATH}\n`);
-
-	let obsidian: ObsidianProcess | undefined;
-	let collector: LogCollector | undefined;
-
-	try {
-		// ── Step 2: Launch Obsidian ──────────────────────────────────────
-		console.log("[2/4] Launching Obsidian...");
-		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
-
-		// ── Step 3: Connect Playwright ───────────────────────────────────
-		console.log("[3/4] Connecting Playwright...");
-		const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
-		const contexts = browser.contexts();
-		const page = contexts[0]?.pages()[0];
-		if (!page) throw new Error("No page found");
-
-		collector = new LogCollector({ outputDir: LOGS_DIR });
-		collector.attach(page);
-
-		await page.waitForLoadState("domcontentloaded");
-		await page.waitForTimeout(5_000);
-
-		// ── Step 4: Verify chat panel ────────────────────────────────────
-		console.log("[4/4] Running scroll behaviour tests...");
-		{
-			const chatContainer = await page.waitForSelector(".notor-chat-container", { timeout: 10_000 }).catch(() => null);
-			if (!chatContainer) {
-				const shot = await screenshot(page, "00-no-chat-panel");
-				fail("Chat panel visible", ".notor-chat-container not found", shot);
-				throw new Error("Chat panel not visible — cannot run scroll tests");
-			}
-			const shot = await screenshot(page, "00-chat-ready");
-			pass("Chat panel ready", "Plugin loaded and chat container found", shot);
+		// Verify chat panel is visible
+		const chatContainer = await page.waitForSelector(".notor-chat-container", { timeout: 10_000 }).catch(() => null);
+		if (!chatContainer) {
+			const shot = await ctx.screenshot("00-no-chat-panel");
+			ctx.fail("Chat panel visible", ".notor-chat-container not found", shot);
+			throw new Error("Chat panel not visible — cannot run scroll tests");
 		}
+		const shot = await ctx.screenshot("00-chat-ready");
+		ctx.pass("Chat panel ready", "Plugin loaded and chat container found", shot);
 
-		// ── Run scroll tests ─────────────────────────────────────────────
-		// Brief settle between tests to let any pending LLM activity clear.
-		await testScrollPreservedDuringStreaming(page);
+		// Run scroll tests with brief settle between them
+		await testScrollPreservedDuringStreaming(ctx);
 		await page.waitForTimeout(2_000);
-		await testAutoScrollReengagesOnScrollDown(page);
+		await testAutoScrollReengagesOnScrollDown(ctx);
 		await page.waitForTimeout(2_000);
-		await testScrollPreservedDuringDiffApproval(page);
+		await testScrollPreservedDuringDiffApproval(ctx);
 		await page.waitForTimeout(2_000);
-		await testNewMessageResetsAutoScroll(page);
-
-		// ── Final screenshot ─────────────────────────────────────────────
-		await screenshot(page, "99-final");
-
-		// ── Collect logs ─────────────────────────────────────────────────
-		console.log("\n=== Collecting final logs ===");
-		await page.waitForTimeout(1_000);
-		const summaryPath = await collector.writeSummary();
-		console.log(`Log summary: ${summaryPath}`);
-
-		const errors = collector.getLogsByLevel("error");
-		if (errors.length > 0) {
-			console.log(`\nPlugin errors captured (${errors.length}):`);
-			for (const e of errors.slice(-10)) {
-				console.log(`  [${e.source}] ${e.message}`, e.data ?? "");
-			}
-		}
-
-		await browser.close().catch(() => {});
-
-	} catch (err) {
-		console.error("\nFatal error:", err);
-		if (collector) await collector.dispose().catch(() => {});
-	} finally {
-		if (obsidian) await closeObsidian(obsidian);
-
-		// Restore original data.json
-		if (existingData !== null) {
-			fs.writeFileSync(PLUGIN_DATA_PATH, existingData);
-			console.log("\nRestored original data.json");
-		} else {
-			try { fs.unlinkSync(PLUGIN_DATA_PATH); } catch { /* ignore */ }
-			console.log("\nRemoved injected data.json");
-		}
-	}
-
-	// ── Print summary ──────────────────────────────────────────────────
-	const passed = results.filter((r) => r.passed).length;
-	const failed = results.filter((r) => !r.passed).length;
-
-	console.log("\n=== Test Results ===");
-	console.log(`Passed: ${passed}/${results.length}`);
-	console.log(`Failed: ${failed}/${results.length}`);
-
-	if (failed > 0) {
-		console.log("\nFailed tests:");
-		for (const r of results.filter((r) => !r.passed)) {
-			console.log(`  ✗ ${r.name}: ${r.detail}`);
-		}
-	}
-
-	const resultsPath = path.join(RESULTS_DIR, "chat-scroll-results.json");
-	fs.writeFileSync(
-		resultsPath,
-		JSON.stringify({ passed, failed, total: results.length, results }, null, 2)
-	);
-	console.log(`\nResults written to: ${resultsPath}`);
-
-	if (failed > 0) process.exit(1);
-}
-
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+		await testNewMessageResetsAutoScroll(ctx);
+	},
+);

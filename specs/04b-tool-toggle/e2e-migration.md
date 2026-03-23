@@ -35,13 +35,19 @@ A migrated script:
 
 ## Migration Inventory
 
-### Already Migrated (3 scripts)
+### Already Migrated (9 scripts)
 
 | Script | Lines | Notes |
 |--------|-------|-------|
 | `interaction-test.ts` | 490 | Uses `runTest`, `waitForSelector` from helpers |
 | `tool-config-inspector-test.ts` | 552 | Uses `runTest`, `waitForSelector`, `VAULT_PATH` |
 | `tool-config-settings-ui-test.ts` | 580 | Uses `runTest`, `waitForSelector`, `VAULT_PATH` |
+| `llm-interaction-test.ts` | 587→398 | Phase 1. Uses `runTest`, `buildDefaultSettings` with custom providers (no model_id for live list selection) |
+| `plan-mode-enforcement-test.ts` | 900→599 | Phase 1. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Imports `sendMessage`, `setMode`, `newConversation` from helpers |
+| `chat-scroll-test.ts` | 736→526 | Phase 1. Uses `runTest`, `buildDefaultSettings`. Retains local scroll helpers (`sendMessageNoWait`, `waitForStreamingStart`, `getScrollState`, etc.) |
+| `compaction-test.ts` | 376→219 | Phase 1. Uses `runTest`, `buildDefaultSettings({ compaction_threshold: 0.3 })`. Retains local `findCompactionRecord` |
+| `compaction-debug-test.ts` | 621→541 | Phase 1 — partial. Multi-session lifecycle incompatible with `runTest`; imported shared constants, `findVaultPage`, `buildDefaultSettings` only |
+| `auto-approve-test.ts` | 422→261 | Phase 1. Uses `runTest`, `buildDefaultSettings`, `setupVault` for persona fixtures |
 
 ### Not a Test (exclude)
 
@@ -49,20 +55,11 @@ A migrated script:
 |--------|-------|-------|
 | `setup-vault.ts` | 208 | Vault setup utility — not a test script |
 
-### Needs Migration (31 scripts)
+### Needs Migration (25 scripts)
 
-#### Tier 1 — Simple (no custom vault setup, no mid-test settings changes, no approval handling)
+#### ~~Tier 1 — Simple~~ ✅ COMPLETE
 
-These scripts follow the standard pattern: build, inject settings, launch, run assertions, teardown. Straight mapping to `runTest()`.
-
-| Script | Lines | Key Notes |
-|--------|-------|-----------|
-| `llm-interaction-test.ts` | 587 | Opens settings popover to verify provider; selects model from live list. No writes. |
-| `plan-mode-enforcement-test.ts` | 900 | Tests mode toggle behavior; all read-only operations |
-| `chat-scroll-test.ts` | 736 | Tests scroll behavior; no tool calls |
-| `compaction-test.ts` | 376 | Tests compaction trigger and UI |
-| `compaction-debug-test.ts` | 621 | Extended compaction diagnostics |
-| `auto-approve-test.ts` | 422 | Tests approval dialogs for various tools |
+All 6 Tier 1 scripts migrated. Total lines removed: **1,098** (3,642→2,544).
 
 #### Tier 2 — Medium (custom vault fixtures or approval handling)
 
@@ -180,8 +177,8 @@ Each script migration is a single commit. Scripts within a tier can be done in a
 
 | Batch | Scripts | Est. Lines Removed |
 |-------|---------|-------------------|
-| 1 | `llm-interaction-test`, `plan-mode-enforcement-test`, `chat-scroll-test` | ~450 |
-| 2 | `compaction-test`, `compaction-debug-test`, `auto-approve-test` | ~300 |
+| ~~1~~ | ~~`llm-interaction-test`, `plan-mode-enforcement-test`, `chat-scroll-test`~~ | ✅ 700 |
+| ~~2~~ | ~~`compaction-test`, `compaction-debug-test`, `auto-approve-test`~~ | ✅ 398 |
 | 3 | `persona-test`, `diff-approval-test`, `stale-content-test` | ~500 |
 | 4 | `include-note-test`, `attachment-test`, `fetch-webpage-test` | ~400 |
 | 5 | `abort-and-error-test`, `activity-indicator-test`, `execute-command-test` | ~500 |

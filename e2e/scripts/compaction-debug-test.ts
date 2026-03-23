@@ -35,56 +35,29 @@
 import { execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { fileURLToPath } from "node:url";
-import { chromium, type Page, type Browser } from "playwright-core";
+import { chromium, type Page } from "playwright-core";
 import {
 	launchObsidian,
 	closeObsidian,
 	type ObsidianProcess,
 } from "../lib/obsidian-launcher";
 import { LogCollector, type LogEntry } from "../lib/log-collector";
+import {
+	PROJECT_ROOT,
+	BUILD_DIR,
+	VAULT_PATH,
+	PLUGIN_DATA_PATH,
+	RESULTS_DIR,
+	LOGS_DIR,
+	CDP_PORT,
+	findVaultPage,
+	buildDefaultSettings,
+} from "../lib/test-helpers";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const VAULT_PATH = path.resolve(__dirname, "..", "test-vault");
-const CDP_PORT = 9222;
-const RESULTS_DIR = path.resolve(__dirname, "..", "results");
 const SCREENSHOTS_DIR = path.join(RESULTS_DIR, "screenshots", "compaction-debug");
-const LOGS_DIR = path.join(RESULTS_DIR, "logs");
-const BUILD_DIR = path.resolve(__dirname, "..", "..", "build");
-const PLUGIN_DATA_PATH = path.join(BUILD_DIR, "data.json");
 
 const RESPONSE_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 1_500;
-
-// ---------------------------------------------------------------------------
-// Page finder — search all contexts for the vault renderer
-// ---------------------------------------------------------------------------
-
-/**
- * Find the Obsidian vault page across all CDP contexts.
- *
- * When Obsidian starts it spawns multiple Electron renderer processes
- * (e.g., title-bar windows, preload helpers). The first context is not
- * always the vault renderer. This helper polls every 500 ms until a page
- * containing `.notor-chat-container` is found or the timeout expires.
- */
-async function findVaultPage(browser: Browser, timeout = 20_000): Promise<Page> {
-	const deadline = Date.now() + timeout;
-	while (Date.now() < deadline) {
-		for (const ctx of browser.contexts()) {
-			for (const p of ctx.pages()) {
-				try {
-					const el = await p.$(".notor-chat-container");
-					if (el) return p;
-				} catch { /* page may be closed or not ready */ }
-			}
-		}
-		await new Promise(r => setTimeout(r, 500));
-	}
-	throw new Error("Could not find vault page with .notor-chat-container within timeout");
-}
 
 // ---------------------------------------------------------------------------
 // Test infrastructure (same pattern as compaction-test.ts)
@@ -146,59 +119,6 @@ function getLogsAfterIndex(logs: LogEntry[], afterIndex: number, source: string,
 
 function data(entry: LogEntry): LogData {
 	return (entry.data as LogData) ?? {};
-}
-
-// ---------------------------------------------------------------------------
-// Settings builder
-// ---------------------------------------------------------------------------
-
-function buildSettings(overrides?: Record<string, unknown>): Record<string, unknown> {
-	return {
-		notor_dir: "notor/",
-		active_provider: "bedrock",
-		providers: [
-			{ type: "local", enabled: false, display_name: "Local", endpoint: "http://localhost:11434/v1" },
-			{
-				type: "bedrock", enabled: true, display_name: "AWS Bedrock",
-				aws_auth_method: "profile", aws_profile: "default",
-				region: "us-east-1", model_id: "deepseek.v3.2",
-			},
-		],
-		auto_approve: {
-			read_note: true, search_vault: true, list_vault: true, read_frontmatter: true,
-			fetch_webpage: true, write_note: false, replace_in_note: false,
-			update_frontmatter: false, manage_tags: false, execute_command: false,
-		},
-		mode: "plan",
-		open_notes_on_access: true,
-		history_path: ".obsidian/plugins/notor/history/",
-		history_max_size_mb: 500,
-		history_max_age_days: 90,
-		checkpoint_path: ".obsidian/plugins/notor/checkpoints/",
-		checkpoint_max_per_conversation: 100,
-		checkpoint_max_age_days: 30,
-		model_pricing: {},
-		auto_context_open_notes: false,
-		auto_context_vault_structure: false,
-		auto_context_os: false,
-		log_level: "debug",
-		compaction_threshold: 0.8,
-		compaction_prompt_override: "",
-		fetch_webpage_timeout: 15,
-		fetch_webpage_max_download_mb: 5,
-		fetch_webpage_max_output_chars: 50000,
-		domain_denylist: [],
-		execute_command_timeout: 30,
-		execute_command_max_output_chars: 50000,
-		execute_command_allowed_paths: [],
-		execute_command_shell: "",
-		execute_command_shell_args: [],
-		external_file_size_threshold_mb: 1,
-		hooks: { pre_send: [], on_tool_call: [], on_tool_result: [], after_completion: [] },
-		hook_timeout: 10,
-		hook_env_truncation_chars: 10000,
-		...overrides,
-	};
 }
 
 // ---------------------------------------------------------------------------
@@ -506,7 +426,7 @@ async function main() {
 	console.log("=== Notor Compaction Diagnostics E2E Test ===\n");
 
 	console.log("[0/5] Building plugin…");
-	execSync("npm run build", { cwd: path.resolve(__dirname, "..", ".."), stdio: "inherit" });
+	execSync("npm run build", { cwd: PROJECT_ROOT, stdio: "inherit" });
 
 	fs.mkdirSync(LOGS_DIR, { recursive: true });
 	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
@@ -528,7 +448,7 @@ async function main() {
 
 		// --- Session 1: Scenario A (compaction disabled) ---
 		console.log("\n[1/5] Starting Obsidian — Scenario A (threshold=1.1, compaction disabled)…");
-		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildSettings({ compaction_threshold: 1.1 }), null, 2));
+		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildDefaultSettings({ compaction_threshold: 1.1 }), null, 2));
 
 		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
 		let browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
@@ -549,7 +469,7 @@ async function main() {
 
 		// --- Session 2: Scenario B (normal threshold) ---
 		console.log("\n[2/5] Starting Obsidian — Scenario B (threshold=0.8)…");
-		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildSettings({ compaction_threshold: 0.8 }), null, 2));
+		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildDefaultSettings({ compaction_threshold: 0.8 }), null, 2));
 
 		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
 		browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
@@ -570,7 +490,7 @@ async function main() {
 
 		// --- Session 3: Scenario C (very low threshold) ---
 		console.log("\n[3/5] Starting Obsidian — Scenario C (threshold=0.05)…");
-		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildSettings({ compaction_threshold: 0.05 }), null, 2));
+		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildDefaultSettings({ compaction_threshold: 0.05 }), null, 2));
 
 		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
 		browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
