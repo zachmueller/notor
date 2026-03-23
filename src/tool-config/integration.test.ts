@@ -14,7 +14,7 @@ vi.mock("../mcp/mcp-tool-adapter", () => ({
 import { extractToolConfigs } from "./parser";
 import { mergeToolConfigs } from "./merger";
 import { enforcePathConstraints } from "./path-enforcer";
-import type { ParsedToolConfig, EffectiveToolConfig } from "./types";
+import type { ParsedToolConfig } from "./types";
 
 // ---------------------------------------------------------------------------
 // Helpers
