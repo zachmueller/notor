@@ -42,7 +42,7 @@ export class EffectiveConfigInspectorView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Tool Config Inspector";
+		return "Tool config inspector";
 	}
 
 	getIcon(): string {
@@ -106,7 +106,7 @@ export class EffectiveConfigInspectorView extends ItemView {
 		effective: EffectiveToolConfig,
 		parsed: ParsedToolConfig[]
 	): void {
-		container.createEl("h4", { text: "Effective Tool Configuration" });
+		container.createEl("h4", { text: "Effective tool configuration" });
 
 		if (parsed.length > 0) {
 			const sourceInfo = container.createEl("p", {
@@ -204,7 +204,7 @@ export class EffectiveConfigInspectorView extends ItemView {
 				this.app.workspace.openLinkText(source.sourceFile, "");
 			});
 		} else {
-			sourceCell.setText("global defaults");
+			sourceCell.setText("Global defaults");
 			sourceCell.addClass("notor-config-inspector-muted");
 		}
 
