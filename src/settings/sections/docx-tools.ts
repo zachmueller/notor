@@ -111,42 +111,44 @@ export function renderDocxToolsSection(
 					}
 				});
 
-			text.inputEl.addEventListener("blur", async () => {
-				const value = ctx.settings.write_docx_default_template_path;
+			text.inputEl.addEventListener("blur", () => {
+				void (async () => {
+					const value = ctx.settings.write_docx_default_template_path;
 
-				// Clear previous error
-				if (templateErrorEl) {
-					templateErrorEl.remove();
-					templateErrorEl = null;
-				}
-
-				if (!value) return;
-
-				let errorMessage: string | null = null;
-
-				if (extname(value).toLowerCase() !== ".docx") {
-					errorMessage = "Template must be a .docx file.";
-				} else {
-					try {
-						const adapter = ctx.app.vault.adapter as {
-							basePath?: string;
-						};
-						const vaultRoot = adapter.basePath ?? "";
-						const resolvedPath = isAbsolute(value)
-							? value
-							: resolve(vaultRoot, value);
-						await fs.promises.stat(resolvedPath);
-					} catch {
-						errorMessage = `Template file not found: ${value}`;
+					// Clear previous error
+					if (templateErrorEl) {
+						templateErrorEl.remove();
+						templateErrorEl = null;
 					}
-				}
 
-				if (errorMessage) {
-					templateErrorEl = templateSetting.controlEl.createEl("p", {
-						text: errorMessage,
-						cls: "setting-item-description mod-warning",
-					});
-				}
+					if (!value) return;
+
+					let errorMessage: string | null = null;
+
+					if (extname(value).toLowerCase() !== ".docx") {
+						errorMessage = "Template must be a .docx file.";
+					} else {
+						try {
+							const adapter = ctx.app.vault.adapter as {
+								basePath?: string;
+							};
+							const vaultRoot = adapter.basePath ?? "";
+							const resolvedPath = isAbsolute(value)
+								? value
+								: resolve(vaultRoot, value);
+							await fs.promises.stat(resolvedPath);
+						} catch {
+							errorMessage = `Template file not found: ${value}`;
+						}
+					}
+
+					if (errorMessage) {
+						templateErrorEl = templateSetting.controlEl.createEl("p", {
+							text: errorMessage,
+							cls: "setting-item-description mod-warning",
+						});
+					}
+				})();
 			});
 		});
 }
