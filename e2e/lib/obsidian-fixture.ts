@@ -31,7 +31,6 @@ const __dirname = path.dirname(__filename);
  * Standard vaults always use ".obsidian". This fixture creates the vault on
  * disk before Obsidian launches, so `app.vault.configDir` is not yet available.
  */
-// eslint-disable-next-line obsidianmd/hardcoded-config-path -- pre-launch fixture creates the vault directory; Vault#configDir is unavailable before Obsidian starts
 const OBSIDIAN_CONFIG_DIR = ".obsidian";
 
 /** Default test vault path — can be overridden with E2E_VAULT_PATH env var */
