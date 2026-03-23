@@ -287,7 +287,7 @@ export async function runTest(
 		// 12. Collect logs
 		console.log("\n=== Collecting final logs ===");
 		await page.waitForTimeout(1_000);
-		const summaryPath = await collector.writeSummary();
+		const summaryPath = collector.writeSummary();
 		console.log(`Log summary: ${summaryPath}`);
 
 		const errors = collector.getLogsByLevel("error");

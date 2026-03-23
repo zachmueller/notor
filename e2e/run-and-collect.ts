@@ -161,7 +161,7 @@ async function main() {
 
 		// Step 5: Write summary and close
 		console.debug("\n[5/5] Writing summary and shutting down...");
-		const summaryPath = await collector.writeSummary();
+		const summaryPath = collector.writeSummary();
 
 		const logs = collector.getStructuredLogs();
 		const errors = collector.getLogsByLevel("error");

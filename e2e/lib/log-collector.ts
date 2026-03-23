@@ -203,7 +203,7 @@ export class LogCollector {
 		if (this.disposed) return;
 		this.disposed = true;
 
-		await this.writeSummary();
+		this.writeSummary();
 
 		return new Promise((resolve) => {
 			this.structuredStream.end(() => {
