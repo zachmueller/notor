@@ -660,7 +660,7 @@ export class NotorChatView extends ItemView {
 			if (!this.textInputEl.querySelector("[data-workflow-path]")) {
 				if (this.tryInsertPastedWorkflowToken(text)) return;
 			}
-			document.execCommand("insertText", false, text);
+			this.insertTextAtCursor(text);
 		});
 
 		// Collect all Elements with data-attachment-id at or under a given node.
@@ -1479,7 +1479,7 @@ export class NotorChatView extends ItemView {
 	 * and, if an exact match is found, insert the workflow token with surrounding text.
 	 *
 	 * Only the first matching reference is converted. References with no exact
-	 * match are left as plain text (caller falls through to execCommand).
+	 * match are left as plain text (caller falls through to insertTextAtCursor).
 	 *
 	 * @returns true if a workflow token was inserted (caller should skip plain insert).
 	 */
@@ -1515,9 +1515,9 @@ export class NotorChatView extends ItemView {
 		const beforeText = text.slice(0, matchStart);
 		const afterText = text.slice(matchEnd);
 
-		if (beforeText) document.execCommand("insertText", false, beforeText);
+		if (beforeText) this.insertTextAtCursor(beforeText);
 		this.insertWorkflowTokenAtCursor(foundWorkflow);
-		if (afterText) document.execCommand("insertText", false, afterText);
+		if (afterText) this.insertTextAtCursor(afterText);
 
 		return true;
 	}
@@ -1556,6 +1556,29 @@ export class NotorChatView extends ItemView {
 		log.debug("Workflow token inserted from paste", {
 			display_name: workflow.display_name,
 		});
+	}
+
+	/**
+	 * Insert plain text at the current cursor position using the Selection/Range
+	 * API.  This replaces the deprecated `document.execCommand("insertText")`
+	 * while remaining consistent with `insertWorkflowTokenAtCursor`.
+	 */
+	private insertTextAtCursor(text: string): void {
+		const sel = window.getSelection();
+		if (!sel || sel.rangeCount === 0) return;
+
+		const range = sel.getRangeAt(0);
+		range.deleteContents();
+
+		const node = document.createTextNode(text);
+		range.insertNode(node);
+
+		// Move cursor to the end of the inserted text.
+		const newRange = document.createRange();
+		newRange.setStart(node, node.length);
+		newRange.collapse(true);
+		sel.removeAllRanges();
+		sel.addRange(newRange);
 	}
 
 	/**
