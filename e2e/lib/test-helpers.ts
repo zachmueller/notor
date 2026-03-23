@@ -6,7 +6,6 @@
  */
 
 import * as path from "node:path";
-import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Page, Browser, ElementHandle } from "playwright-core";
 
