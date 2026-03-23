@@ -240,8 +240,6 @@ runTest(
 	{
 		name: "attachment-test",
 		settings: buildDefaultSettings({
-			active_provider: "local",
-			providers: [{ type: "local", enabled: true, display_name: "Local", endpoint: "http://localhost:11434/v1" }],
 			auto_context_open_notes: true,
 			auto_context_vault_structure: true,
 			auto_context_os: true,
