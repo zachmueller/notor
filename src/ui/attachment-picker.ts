@@ -513,7 +513,7 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
  */
 function getAbsoluteFilePath(file: File): string | undefined {
 	try {
-		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		// eslint-disable-next-line @typescript-eslint/no-require-imports -- runtime require needed to access Electron's webUtils which has no static import path in Obsidian's plugin environment
 		const { webUtils } = require("electron") as {
 			webUtils?: { getPathForFile?: (f: File) => string };
 		};
