@@ -10,12 +10,12 @@ The project has 35 e2e test scripts (`e2e/scripts/*.ts`) totaling ~32,800 lines.
 | `e2e/lib/test-helpers.ts` | Shared constants (`PROJECT_ROOT`, `VAULT_PATH`, etc.), element helpers (`waitForSelector`), LLM interaction helpers (`sendMessage`, `waitForResponse`, `sendMessageWithApprovalHandling`, `getLastAssistantMessage`, `getLastToolCallNames`), UI action helpers (`newConversation`, `setMode`, `selectPersona`), and `buildDefaultSettings()` |
 | `e2e/lib/vault-reset.ts` | `resetVault()` — deletes known test artifacts while preserving base fixtures |
 
-**Only 3 scripts were initially migrated**; 12 more have since been migrated:
+**Only 3 scripts were initially migrated**; 15 more have since been migrated:
 - `interaction-test.ts` (490 lines)
 - `tool-config-inspector-test.ts` (552 lines)
 - `tool-config-settings-ui-test.ts` (580 lines)
 
-The remaining **32 scripts** (excluding `setup-vault.ts` which is a utility, not a test) all duplicate the same boilerplate inline.
+The remaining **29 scripts** (excluding `setup-vault.ts` which is a utility, not a test) all duplicate the same boilerplate inline.
 
 ---
 
@@ -35,7 +35,7 @@ A migrated script:
 
 ## Migration Inventory
 
-### Already Migrated (15 scripts)
+### Already Migrated (18 scripts)
 
 | Script | Lines | Notes |
 |--------|-------|-------|
@@ -54,6 +54,9 @@ A migrated script:
 | `stale-content-test.ts` | 721→554 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `scanHistoryFiles`, `parseHistoryFile`, `HISTORY_PATH` |
 | `include-note-test.ts` | 811→664 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local log helpers (`getResolverLogs`, `findLogWithData`, etc.), `dumpRelevantLogs`. Imports `LogCollector`/`LogEntry` from log-collector |
 | `attachment-test.ts` | 422→253 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `getLatestUserMessage`, `HISTORY_DIR` |
+| `fetch-webpage-test.ts` | 840→546 | Phase 2. Uses `runTest`, `buildDefaultSettings`. Retains local `getLastFetchWebpageResult`, `injectSettings` for mid-test settings+reload. No vault fixtures. |
+| `abort-and-error-test.ts` | 846→557 | Phase 2. Uses `runTest`, `buildDefaultSettings`. Imports `setMode`, `newConversation`, `getLastAssistantMessage` from helpers. Retains local `waitForInputEnabled`, `waitForStopButton`, `sendMessageNoWait`, `sendMessage`, `getCurrentMode`. Multi-phase: Bedrock abort tests → UI provider switch → error tests. |
+| `activity-indicator-test.ts` | 1613→1312 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `safeRun` (error-catching wrapper), `dismissNotices`, structured log helpers, background workflow helpers. Mid-test settings change via `PLUGIN_DATA_PATH`. |
 
 ### Not a Test (exclude)
 
@@ -61,7 +64,7 @@ A migrated script:
 |--------|-------|-------|
 | `setup-vault.ts` | 208 | Vault setup utility — not a test script |
 
-### Needs Migration (19 scripts)
+### Needs Migration (16 scripts)
 
 #### ~~Tier 1 — Simple~~ ✅ COMPLETE
 
@@ -73,9 +76,9 @@ These need `setupVault` callback and/or use `sendMessageWithApprovalHandling`. M
 
 | Script | Lines | Key Notes |
 |--------|-------|-----------|
-| `fetch-webpage-test.ts` | 840 | No vault fixtures but uses approval handling for fetch tool. |
-| `abort-and-error-test.ts` | 846 | Tests abort/stop behavior; needs careful timing. |
-| `activity-indicator-test.ts` | 1613 | Has its own local `runTest` function (different from harness). Large script with many UI timing tests. |
+| ~~`fetch-webpage-test.ts`~~ | ~~840~~ | ✅ Migrated. |
+| ~~`abort-and-error-test.ts`~~ | ~~846~~ | ✅ Migrated. |
+| ~~`activity-indicator-test.ts`~~ | ~~1613~~ | ✅ Migrated. |
 | `auto-context-test.ts` | 2543 | Largest script. Creates vault fixtures; tests auto-context feature. |
 | `execute-command-test.ts` | 329 | Mid-test settings changes (`execute_command_timeout`, `execute_command_max_output_chars`) + page reload. See special handling below. |
 | `tool-config-auto-approve-test.ts` | 1075 | Creates persona fixtures; tests auto-approve overrides via persona tool config. |
@@ -181,8 +184,8 @@ Each script migration is a single commit. Scripts within a tier can be done in a
 | ~~2~~ | ~~`compaction-test`, `compaction-debug-test`, `auto-approve-test`~~ | ✅ 398 |
 | ~~3~~ | ~~`persona-test`, `tool-interaction-test`, `diff-approval-test`~~ | ✅ 810 |
 | ~~3b~~ | ~~`stale-content-test`~~ | ✅ 167 |
-| 4 | ~~`include-note-test`, `attachment-test`~~, `fetch-webpage-test` | ✅ 316 (2/3 done) |
-| 5 | `abort-and-error-test`, `activity-indicator-test`, `execute-command-test` | ~500 |
+| ~~4~~ | ~~`include-note-test`, `attachment-test`, `fetch-webpage-test`~~ | ✅ 610 |
+| 5 | ~~`abort-and-error-test`, `activity-indicator-test`~~, `execute-command-test` | ✅ 590 (2/3 done) |
 | 6 | `tool-config-auto-approve-test`, `tool-config-disabled-tool-test`, `tool-config-parse-strip-test` | ~500 |
 | 7 | `tool-config-path-enforce-test`, `tool-config-precedence-test`, `mcp-auto-approve-test` | ~550 |
 | 8 | `auto-context-test` | ~250 |
