@@ -480,6 +480,13 @@ async function tests(ctx: TestContext) {
 			if (selected) {
 				await page.waitForTimeout(2000);
 
+				// Dismiss any Obsidian Notice toasts that may block clicks
+				// (e.g. "Provider 'anthropic' not available; using default.")
+				await page.evaluate(() => {
+					document.querySelectorAll(".notice-container .notice").forEach((n) => (n as HTMLElement).click());
+				});
+				await page.waitForTimeout(300);
+
 				// Close popover
 				await settingsBtn.click();
 				await page.waitForTimeout(500);
@@ -735,8 +742,17 @@ async function tests(ctx: TestContext) {
 			await page.waitForTimeout(1500);
 
 			// Look for the "Provider & model identifiers" heading
+			// Obsidian's Setting API with .setHeading() renders a
+			// .setting-item.setting-item-heading div, not an <h2>.
+			// Scroll to the bottom first so the section is in the DOM viewport.
+			await page.evaluate(() => {
+				const content = document.querySelector(".vertical-tab-content");
+				if (content) content.scrollTop = content.scrollHeight;
+			});
+			await page.waitForTimeout(500);
+
 			const hasRefSection = await page.evaluate(() => {
-				const headings = document.querySelectorAll(".vertical-tab-content h2");
+				const headings = document.querySelectorAll(".vertical-tab-content .setting-item-heading .setting-item-name");
 				for (const h of headings) {
 					if (h.textContent?.includes("Provider & model identifiers")) {
 						return true;
