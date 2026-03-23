@@ -519,12 +519,12 @@ class WorkflowPickerModal extends FuzzySuggestModal<Workflow> {
  *
  * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-009
  */
-export async function showWorkflowPicker(
+export function showWorkflowPicker(
 	app: App,
 	rescanWorkflows: () => Workflow[],
 	onSelect: (workflow: Workflow) => void,
 	notorDir: string
-): Promise<void> {
+): void {
 	log.debug("Opening workflow picker — rescanning workflows");
 
 	let workflows: Workflow[];

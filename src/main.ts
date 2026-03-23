@@ -261,30 +261,32 @@ export default class NotorPlugin extends Plugin {
 			id: "run-workflow",
 			name: "Run workflow",
 			callback: () => {
-				showWorkflowPicker(
-					this.app,
-					() => this.rescanWorkflows(),
-					(workflow) => {
-						// Open the chat panel if not already open, then execute the workflow.
-						this.openChatPanel().then(() => {
-							log.info("Workflow selected from command palette", {
-								display_name: workflow.display_name,
-								file_path: workflow.file_path,
+				try {
+					showWorkflowPicker(
+						this.app,
+						() => this.rescanWorkflows(),
+						(workflow) => {
+							// Open the chat panel if not already open, then execute the workflow.
+							this.openChatPanel().then(() => {
+								log.info("Workflow selected from command palette", {
+									display_name: workflow.display_name,
+									file_path: workflow.file_path,
+								});
+								// E-013: Execute the workflow via the orchestrator.
+								return this.getOrchestrator().executeWorkflow(workflow);
+							}).catch((e) => {
+								log.error("Failed to execute workflow from command palette", {
+									error: String(e),
+								});
+								new Notice(`Workflow execution failed: ${e instanceof Error ? e.message : String(e)}`);
 							});
-							// E-013: Execute the workflow via the orchestrator.
-							return this.getOrchestrator().executeWorkflow(workflow);
-						}).catch((e) => {
-							log.error("Failed to execute workflow from command palette", {
-								error: String(e),
-							});
-							new Notice(`Workflow execution failed: ${e instanceof Error ? e.message : String(e)}`);
-						});
-					},
-					this.settings.notor_dir
-				).catch((e) => {
+						},
+						this.settings.notor_dir
+					);
+				} catch (e) {
 					log.error("Run workflow command failed", { error: String(e) });
 					new Notice(`Failed to open workflow picker: ${e instanceof Error ? e.message : String(e)}`);
-				});
+				}
 			},
 		});
 
