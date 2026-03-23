@@ -35,7 +35,7 @@ A migrated script:
 
 ## Migration Inventory
 
-### Already Migrated (22 scripts)
+### Already Migrated (25 scripts)
 
 | Script | Lines | Notes |
 |--------|-------|-------|
@@ -61,6 +61,9 @@ A migrated script:
 | `tool-config-auto-approve-test.ts` | 1075→619 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local approval-rejection polling loop in Test 2. Imports `sendMessage`, `selectPersona`, `getLastAssistantMessage`, `getLastToolCallNames`, `waitForResponse`, `newConversation`, `setMode` from helpers. |
 | `tool-config-disabled-tool-test.ts` | 1002→559 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Uses `sendMessageWithApprovalHandling` from helpers for Test 10. Imports `sendMessage`, `selectPersona`, `getLastAssistantMessage`, `getLastToolCallNames`, `newConversation`, `setMode` from helpers. |
 | `tool-config-parse-strip-test.ts` | 643→486 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `sendMessageNoWait` (differs from shared `sendMessage`), `dismissNotices`. Imports `selectPersona`, `waitForSelector` from helpers. |
+| `tool-config-path-enforce-test.ts` | 1255→868 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `executeWorkflow`. Imports `sendMessage`, `sendMessageWithApprovalHandling`, `selectPersona`, `getLastAssistantMessage`, `getLastToolCallNames`, `newConversation`, `setMode`, `waitForResponse` from helpers. |
+| `tool-config-precedence-test.ts` | 1263→850 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `executeWorkflow`. Imports `sendMessage`, `waitForResponse`, `selectPersona`, `getLastAssistantMessage`, `getLastToolCallNames`, `newConversation`, `setMode` from helpers. |
+| `mcp-auto-approve-test.ts` | 569→409 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `injectSimulatedMcpServer`, `resolveAutoApprove`, and all test functions. Imports `waitForSelector` from helpers. |
 
 ### Not a Test (exclude)
 
@@ -68,7 +71,7 @@ A migrated script:
 |--------|-------|-------|
 | `setup-vault.ts` | 208 | Vault setup utility — not a test script |
 
-### Needs Migration (12 scripts)
+### Needs Migration (9 scripts)
 
 #### ~~Tier 1 — Simple~~ ✅ COMPLETE
 
@@ -88,9 +91,9 @@ These need `setupVault` callback and/or use `sendMessageWithApprovalHandling`. M
 | ~~`tool-config-auto-approve-test.ts`~~ | ~~1075~~ | ✅ Migrated. |
 | ~~`tool-config-disabled-tool-test.ts`~~ | ~~1002~~ | ✅ Migrated. |
 | ~~`tool-config-parse-strip-test.ts`~~ | ~~643~~ | ✅ Migrated. |
-| `tool-config-path-enforce-test.ts` | 1255 | Creates persona fixtures + test notes; tests path enforcement. |
-| `tool-config-precedence-test.ts` | 1263 | Creates persona fixtures + test notes; tests config precedence. |
-| `mcp-auto-approve-test.ts` | 569 | Tests MCP tool auto-approve. |
+| ~~`tool-config-path-enforce-test.ts`~~ | ~~1255~~ | ✅ Migrated. |
+| ~~`tool-config-precedence-test.ts`~~ | ~~1263~~ | ✅ Migrated. |
+| ~~`mcp-auto-approve-test.ts`~~ | ~~569~~ | ✅ Migrated. |
 
 #### Tier 3 — Complex (hooks, workflows, MCP servers, or heavily custom lifecycle)
 
@@ -191,7 +194,7 @@ Each script migration is a single commit. Scripts within a tier can be done in a
 | ~~4~~ | ~~`include-note-test`, `attachment-test`, `fetch-webpage-test`~~ | ✅ 610 |
 | ~~5~~ | ~~`abort-and-error-test`, `activity-indicator-test`, `execute-command-test`~~ | ✅ 731 |
 | ~~6~~ | ~~`tool-config-auto-approve-test`, `tool-config-disabled-tool-test`, `tool-config-parse-strip-test`~~ | ✅ 1,056 |
-| 7 | `tool-config-path-enforce-test`, `tool-config-precedence-test`, `mcp-auto-approve-test` | ~550 |
+| ~~7~~ | ~~`tool-config-path-enforce-test`, `tool-config-precedence-test`, `mcp-auto-approve-test`~~ | ✅ 960 |
 | 8 | `auto-context-test` | ~250 |
 | 9 | `hook-execution-test`, `vault-event-hooks-test` | ~500 |
 | 10 | `workflow-discovery-test`, `workflow-execution-test`, `workflow-hooks-test`, `workflow-watcher-test` | ~700 |
