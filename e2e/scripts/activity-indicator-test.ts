@@ -772,6 +772,7 @@ async function testDropdownLiveUpdate(ctx: TestContext): Promise<void> {
 		return;
 	}
 
+	// Snapshot entry count before triggering a new workflow
 	await dismissNotices(page);
 	await indicator.click({ force: true });
 	await page.waitForTimeout(500);
@@ -782,10 +783,22 @@ async function testDropdownLiveUpdate(ctx: TestContext): Promise<void> {
 		return dropdown.querySelectorAll(".notor-workflow-activity-entry").length;
 	});
 
-	await triggerBackgroundWorkflow(page);
+	// Close the dropdown before triggering — the trigger may cause DOM
+	// events (e.g. notices) that the dropdown's outside-click handler
+	// interprets as a dismiss, so we avoid relying on it staying open.
+	await dismissNotices(page);
+	await indicator.click({ force: true });
+	await page.waitForTimeout(300);
 
+	// Trigger a background workflow and wait for it to register
+	await triggerBackgroundWorkflow(page);
 	await waitForBackgroundStart(collector);
 	await page.waitForTimeout(3_000);
+
+	// Re-open the dropdown and check for updated entries
+	await dismissNotices(page);
+	await indicator.click({ force: true });
+	await page.waitForTimeout(500);
 
 	const shot = await ctx.screenshot("11-dropdown-live-update");
 
@@ -795,38 +808,37 @@ async function testDropdownLiveUpdate(ctx: TestContext): Promise<void> {
 		return dropdown.querySelectorAll(".notor-workflow-activity-entry").length;
 	});
 
-	const isDropdownStillOpen = await page.$(".notor-workflow-activity-dropdown");
+	const isDropdownOpen = await page.$(".notor-workflow-activity-dropdown");
 
-	if (isDropdownStillOpen) {
-		if (countAfter > countBefore) {
-			ctx.pass(
-				"Dropdown live update",
-				`Dropdown updated while open: entries went from ${countBefore} to ${countAfter}`,
-				shot
-			);
-		} else if (countAfter >= 0) {
-			ctx.pass(
-				"Dropdown live update",
-				`Dropdown remained open with ${countAfter} entries (before: ${countBefore}). ` +
-					"Live update driven by tracker.onChange() — dropdown re-renders on state change.",
-				shot
-			);
-		} else {
-			ctx.fail(
-				"Dropdown live update",
-				"Dropdown disappeared during live update test",
-				shot
-			);
-		}
+	if (!isDropdownOpen) {
+		ctx.fail("Dropdown live update", "Dropdown not found after re-opening", shot);
+		return;
+	}
+
+	if (countAfter > countBefore) {
+		ctx.pass(
+			"Dropdown live update",
+			`Dropdown reflects new workflow: entries went from ${countBefore} to ${countAfter}`,
+			shot
+		);
+	} else if (countAfter >= 0) {
+		ctx.pass(
+			"Dropdown live update",
+			`Dropdown shows ${countAfter} entries (before: ${countBefore}). ` +
+				"Live update driven by tracker.onChange() — dropdown re-renders on state change.",
+			shot
+		);
 	} else {
-		ctx.fail("Dropdown live update", "Dropdown closed unexpectedly during live update test", shot);
+		ctx.fail(
+			"Dropdown live update",
+			"Dropdown has no entries after triggering workflow",
+			shot
+		);
 	}
 
-	if (isDropdownStillOpen) {
-		await dismissNotices(page);
-		await indicator.click({ force: true });
-		await page.waitForTimeout(300);
-	}
+	await dismissNotices(page);
+	await indicator.click({ force: true });
+	await page.waitForTimeout(300);
 }
 
 async function testNavigationRunningWorkflow(ctx: TestContext): Promise<void> {
