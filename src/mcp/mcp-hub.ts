@@ -659,7 +659,7 @@ export class McpHub {
 	 *
 	 * Only called on macOS/Linux desktop; Windows GUI apps inherit PATH normally.
 	 */
-	private async resolveLoginShellPath(): Promise<string> {
+	private resolveLoginShellPath(): string {
 		if (this._loginShellPath !== null) {
 			return this._loginShellPath;
 		}
@@ -714,7 +714,7 @@ export class McpHub {
 		// Resolve the user's login shell PATH so tools installed via
 		// Homebrew, nvm, pyenv, etc. are found when spawning the process.
 		// Obsidian is a GUI app and doesn't inherit the full shell PATH.
-		const loginPath = await this.resolveLoginShellPath();
+		const loginPath = this.resolveLoginShellPath();
 
 		// Merge system environment with config env. Filter out undefined values
 		// from process.env to satisfy Record<string, string> type.
