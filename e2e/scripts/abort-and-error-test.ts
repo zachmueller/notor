@@ -44,14 +44,14 @@ import {
 // Local helpers (abort-specific — not in shared module)
 // ---------------------------------------------------------------------------
 
-/** Wait until the textarea is re-enabled (response/abort complete). */
+/** Wait until the contenteditable input is re-enabled (response/abort complete). */
 async function waitForInputEnabled(page: Page, timeoutMs = RESPONSE_TIMEOUT_MS): Promise<boolean> {
 	const start = Date.now();
 	while (Date.now() - start < timeoutMs) {
 		await page.waitForTimeout(POLL_INTERVAL_MS);
 		const enabled = await page.evaluate(() => {
-			const ta = document.querySelector(".notor-text-input") as HTMLTextAreaElement | null;
-			return ta !== null && !ta.disabled;
+			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+			return el !== null && el.getAttribute("contenteditable") === "true";
 		});
 		if (enabled) return true;
 	}
@@ -73,9 +73,10 @@ async function waitForStopButton(page: Page, timeoutMs = 15_000): Promise<boolea
 }
 
 async function sendMessageNoWait(page: Page, message: string): Promise<void> {
-	const textarea = await page.$(".notor-text-input");
-	if (!textarea) throw new Error("Textarea not found");
-	await textarea.fill(message);
+	const input = await page.$(".notor-text-input");
+	if (!input) throw new Error("Chat input not found");
+	await input.click();
+	await page.keyboard.type(message);
 	await page.waitForTimeout(200);
 	await page.keyboard.press("Enter");
 	await page.waitForTimeout(400);
@@ -114,8 +115,8 @@ async function testStopButtonAborts(ctx: TestContext): Promise<void> {
 
 	if (!stopAppeared) {
 		const inputEnabled = await page.evaluate(() => {
-			const ta = document.querySelector(".notor-text-input") as HTMLTextAreaElement | null;
-			return ta !== null && !ta.disabled;
+			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+			return el !== null && el.getAttribute("contenteditable") === "true";
 		});
 		if (inputEnabled) {
 			const errMsg = await page.$(".notor-chat-error");
@@ -150,8 +151,8 @@ async function testStopButtonAborts(ctx: TestContext): Promise<void> {
 	const shot2 = await ctx.screenshot("01b-after-stop");
 
 	const inputEnabled = await page.evaluate(() => {
-		const ta = document.querySelector(".notor-text-input") as HTMLTextAreaElement | null;
-		return ta !== null && !ta.disabled;
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		return el !== null && el.getAttribute("contenteditable") === "true";
 	});
 
 	if (inputEnabled) {
@@ -294,8 +295,8 @@ async function testUnreachableProviderShowsError(ctx: TestContext): Promise<void
 		}
 	} else if (!responded) {
 		const inputEnabled = await page.evaluate(() => {
-			const ta = document.querySelector(".notor-text-input") as HTMLTextAreaElement | null;
-			return ta !== null && !ta.disabled;
+			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+			return el !== null && el.getAttribute("contenteditable") === "true";
 		});
 		if (inputEnabled) {
 			ctx.pass("error handling — input usable after timeout", "Input re-enabled even though no response was received");
@@ -343,8 +344,8 @@ async function testInputReEnabledAfterError(ctx: TestContext): Promise<void> {
 	console.log("\n── Error Test 6: input re-enabled after provider error ──────────");
 
 	const inputEnabled = await page.evaluate(() => {
-		const ta = document.querySelector(".notor-text-input") as HTMLTextAreaElement | null;
-		return ta !== null && !ta.disabled;
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		return el !== null && el.getAttribute("contenteditable") === "true";
 	});
 
 	const shot = await ctx.screenshot("06-input-after-error");
