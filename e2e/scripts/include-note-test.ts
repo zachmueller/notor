@@ -24,68 +24,11 @@
  * @see specs/03-workflows-personas/tasks/group-d-tasks.md — D-011, D-012
  */
 
-import { execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright-core";
-import {
-	launchObsidian,
-	closeObsidian,
-	type ObsidianProcess,
-} from "../lib/obsidian-launcher";
+import { runTest, type TestContext } from "../lib/test-harness";
+import { waitForSelector, buildDefaultSettings, VAULT_PATH } from "../lib/test-helpers";
 import { LogCollector, type LogEntry } from "../lib/log-collector";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const VAULT_PATH = path.resolve(__dirname, "..", "test-vault");
-const CDP_PORT = 9222;
-const RESULTS_DIR = path.resolve(__dirname, "..", "results");
-const SCREENSHOTS_DIR = path.join(RESULTS_DIR, "screenshots", "include-note");
-const LOGS_DIR = path.join(RESULTS_DIR, "logs");
-
-// ---------------------------------------------------------------------------
-// Test infrastructure
-// ---------------------------------------------------------------------------
-
-interface TestResult {
-	name: string;
-	passed: boolean;
-	detail: string;
-	screenshot?: string;
-}
-
-const results: TestResult[] = [];
-
-function pass(name: string, detail: string, screenshot?: string): void {
-	console.log(`  ✓ PASS: ${name} — ${detail}`);
-	results.push({ name, passed: true, detail, screenshot });
-}
-
-function fail(name: string, detail: string, screenshot?: string): void {
-	console.error(`  ✗ FAIL: ${name} — ${detail}`);
-	results.push({ name, passed: false, detail, screenshot });
-}
-
-async function takeScreenshot(page: Page, name: string): Promise<string> {
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	const file = path.join(SCREENSHOTS_DIR, `${name}.png`);
-	await page.screenshot({ path: file, fullPage: true });
-	return file;
-}
-
-async function waitForSelector(
-	page: Page,
-	selector: string,
-	timeoutMs = 5000
-): Promise<import("playwright-core").ElementHandle | null> {
-	try {
-		return await page.waitForSelector(selector, { timeout: timeoutMs });
-	} catch {
-		return null;
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Structured log helpers
@@ -140,8 +83,8 @@ function findLogWithData(
 // Test fixture setup
 // ---------------------------------------------------------------------------
 
-function ensureTestFixtures(): void {
-	const researchDir = path.join(VAULT_PATH, "Research");
+function ensureTestFixtures(vaultPath: string): void {
+	const researchDir = path.join(vaultPath, "Research");
 	fs.mkdirSync(researchDir, { recursive: true });
 
 	// Research/Climate.md — multi-heading note for section extraction
@@ -210,7 +153,7 @@ Governments should prioritize grid modernization, energy storage investment, and
 
 	// notor/rules/include-test-rule.md — rule file with multiple <include_note> tags
 	// covering vault-relative, wikilink, frontmatter preserved, missing note, missing section
-	const rulesDir = path.join(VAULT_PATH, "notor", "rules");
+	const rulesDir = path.join(vaultPath, "notor", "rules");
 	fs.mkdirSync(rulesDir, { recursive: true });
 
 	fs.writeFileSync(
@@ -244,7 +187,7 @@ Apply critical analysis to all research content.
 	);
 
 	// notor/prompts/core-system-prompt.md — system prompt with <include_note>
-	const promptsDir = path.join(VAULT_PATH, "notor", "prompts");
+	const promptsDir = path.join(vaultPath, "notor", "prompts");
 	fs.mkdirSync(promptsDir, { recursive: true });
 
 	fs.writeFileSync(
@@ -270,18 +213,18 @@ Use this context when answering questions about energy topics.
 // Individual tests
 // ---------------------------------------------------------------------------
 
-async function testPluginLoads(page: Page): Promise<void> {
+async function testPluginLoads(ctx: TestContext): Promise<void> {
 	console.log("\nTest 1: Plugin loads and chat panel visible");
-	const chatContainer = await waitForSelector(page, ".notor-chat-container", 10_000);
+	const chatContainer = await waitForSelector(ctx.page, ".notor-chat-container", 10_000);
 	if (chatContainer) {
-		pass("Plugin loaded", "Found .notor-chat-container");
+		ctx.pass("Plugin loaded", "Found .notor-chat-container");
 	} else {
-		const shot = await takeScreenshot(page, "01-no-chat-panel");
-		fail("Plugin loaded", ".notor-chat-container not found", shot);
+		const shot = await ctx.screenshot("01-no-chat-panel");
+		ctx.fail("Plugin loaded", ".notor-chat-container not found", shot);
 	}
 }
 
-function testVaultRelativePath(collector: LogCollector): void {
+function testVaultRelativePath(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 2: Vault-relative path resolution");
 	const logs = getResolverLogs(collector);
 	const resolved = findLogWithData(logs, "Tag resolved", {
@@ -290,7 +233,7 @@ function testVaultRelativePath(collector: LogCollector): void {
 		section: "Key Findings",
 	});
 	if (resolved) {
-		pass(
+		ctx.pass(
 			"Vault-relative path resolved",
 			`Climate.md Key Findings resolved (${(resolved.data as Record<string, unknown>).contentLength} chars)`
 		);
@@ -298,14 +241,14 @@ function testVaultRelativePath(collector: LogCollector): void {
 		// Fallback: check if the resolver ran at all for this file
 		const anyResolve = findLogContaining(logs, ["Research/Climate.md", "Key Findings"]);
 		if (anyResolve) {
-			pass("Vault-relative path resolved", `Resolver processed Climate.md Key Findings: "${anyResolve.message}"`);
+			ctx.pass("Vault-relative path resolved", `Resolver processed Climate.md Key Findings: "${anyResolve.message}"`);
 		} else {
-			fail("Vault-relative path resolved", `No resolver log for Research/Climate.md Key Findings. Total resolver logs: ${logs.length}`);
+			ctx.fail("Vault-relative path resolved", `No resolver log for Research/Climate.md Key Findings. Total resolver logs: ${logs.length}`);
 		}
 	}
 }
 
-function testWikilinkPath(collector: LogCollector): void {
+function testWikilinkPath(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 3: Wikilink path resolution");
 	const logs = getResolverLogs(collector);
 	const resolved = findLogWithData(logs, "Tag resolved", {
@@ -313,21 +256,21 @@ function testWikilinkPath(collector: LogCollector): void {
 		section: "Methodology",
 	});
 	if (resolved) {
-		pass(
+		ctx.pass(
 			"Wikilink path resolved",
 			`[[Climate]] Methodology resolved (${(resolved.data as Record<string, unknown>).contentLength} chars)`
 		);
 	} else {
 		const anyWikilink = findLogContaining(logs, ["wikilink", "Methodology"]);
 		if (anyWikilink) {
-			pass("Wikilink path resolved", `Wikilink resolver log found: "${anyWikilink.message}"`);
+			ctx.pass("Wikilink path resolved", `Wikilink resolver log found: "${anyWikilink.message}"`);
 		} else {
-			fail("Wikilink path resolved", `No resolver log for wikilink Methodology. Total resolver logs: ${logs.length}`);
+			ctx.fail("Wikilink path resolved", `No resolver log for wikilink Methodology. Total resolver logs: ${logs.length}`);
 		}
 	}
 }
 
-function testFullNoteInclusion(collector: LogCollector): void {
+function testFullNoteInclusion(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 4: Full note inclusion with frontmatter stripped (default)");
 	const logs = getResolverLogs(collector);
 	// System prompt includes Energy.md with default strip_frontmatter=true
@@ -336,18 +279,18 @@ function testFullNoteInclusion(collector: LogCollector): void {
 		strip_frontmatter: true,
 	});
 	if (resolved) {
-		pass("Full note inclusion (FM stripped)", `Energy.md resolved with FM stripped (${(resolved.data as Record<string, unknown>).contentLength} chars)`);
+		ctx.pass("Full note inclusion (FM stripped)", `Energy.md resolved with FM stripped (${(resolved.data as Record<string, unknown>).contentLength} chars)`);
 	} else {
 		const anyEnergy = findLogContaining(logs, ["Research/Energy.md"]);
 		if (anyEnergy) {
-			pass("Full note inclusion (FM stripped)", `Energy.md processed: "${anyEnergy.message}"`);
+			ctx.pass("Full note inclusion (FM stripped)", `Energy.md processed: "${anyEnergy.message}"`);
 		} else {
-			fail("Full note inclusion (FM stripped)", `No resolver log for Research/Energy.md with strip_frontmatter=true`);
+			ctx.fail("Full note inclusion (FM stripped)", `No resolver log for Research/Energy.md with strip_frontmatter=true`);
 		}
 	}
 }
 
-function testFrontmatterPreserved(collector: LogCollector): void {
+function testFrontmatterPreserved(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 5: Frontmatter preserved when strip_frontmatter=\"false\"");
 	const logs = getResolverLogs(collector);
 	// Rule file includes Energy.md with strip_frontmatter="false"
@@ -358,18 +301,18 @@ function testFrontmatterPreserved(collector: LogCollector): void {
 	if (resolved) {
 		const contentLen = (resolved.data as Record<string, unknown>).contentLength as number;
 		// With frontmatter preserved, content should be longer than without
-		pass("Frontmatter preserved", `Energy.md resolved with FM preserved (${contentLen} chars)`);
+		ctx.pass("Frontmatter preserved", `Energy.md resolved with FM preserved (${contentLen} chars)`);
 	} else {
 		const anyEnergy = findLogContaining(logs, ["Energy.md", "false"]);
 		if (anyEnergy) {
-			pass("Frontmatter preserved", `FM preservation log found: "${anyEnergy.message}"`);
+			ctx.pass("Frontmatter preserved", `FM preservation log found: "${anyEnergy.message}"`);
 		} else {
-			fail("Frontmatter preserved", `No resolver log for Energy.md with strip_frontmatter=false`);
+			ctx.fail("Frontmatter preserved", `No resolver log for Energy.md with strip_frontmatter=false`);
 		}
 	}
 }
 
-function testSectionExtraction(collector: LogCollector): void {
+function testSectionExtraction(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 6: Section extraction — correct heading boundary");
 	const logs = getResolverLogs(collector);
 	// Check that Key Findings section was extracted (not the whole file)
@@ -381,53 +324,53 @@ function testSectionExtraction(collector: LogCollector): void {
 		const len = (resolved.data as Record<string, unknown>).contentLength as number;
 		// The Key Findings section is ~300-400 chars, full file is ~1000+
 		if (len < 800) {
-			pass("Section extraction", `Key Findings section extracted (${len} chars — section, not full file)`);
+			ctx.pass("Section extraction", `Key Findings section extracted (${len} chars — section, not full file)`);
 		} else {
-			fail("Section extraction", `Content length ${len} seems too large — may have extracted full file instead of section`);
+			ctx.fail("Section extraction", `Content length ${len} seems too large — may have extracted full file instead of section`);
 		}
 	} else {
 		const any = findLogContaining(logs, ["Key Findings"]);
 		if (any) {
-			pass("Section extraction", `Key Findings log found: "${any.message}"`);
+			ctx.pass("Section extraction", `Key Findings log found: "${any.message}"`);
 		} else {
-			fail("Section extraction", "No section extraction log for Key Findings");
+			ctx.fail("Section extraction", "No section extraction log for Key Findings");
 		}
 	}
 }
 
-function testMissingNote(collector: LogCollector): void {
+function testMissingNote(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 7: Missing note produces error marker and warn log");
 	const logs = getResolverLogs(collector);
 	const warnLog = findLogContaining(logs, ["Research/Deleted.md", "not found"], "warn");
 	if (warnLog) {
-		pass("Missing note warning", `Warn log found: "${warnLog.message}" for Research/Deleted.md`);
+		ctx.pass("Missing note warning", `Warn log found: "${warnLog.message}" for Research/Deleted.md`);
 	} else {
 		const anyDeleted = findLogContaining(logs, ["Deleted.md"]);
 		if (anyDeleted) {
-			pass("Missing note warning", `Deleted.md log found (${anyDeleted.level}): "${anyDeleted.message}"`);
+			ctx.pass("Missing note warning", `Deleted.md log found (${anyDeleted.level}): "${anyDeleted.message}"`);
 		} else {
-			fail("Missing note warning", `No warn-level log for Research/Deleted.md not found`);
+			ctx.fail("Missing note warning", `No warn-level log for Research/Deleted.md not found`);
 		}
 	}
 }
 
-function testMissingSection(collector: LogCollector): void {
+function testMissingSection(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 8: Missing section produces error marker and warn log");
 	const logs = getResolverLogs(collector);
 	const warnLog = findLogContaining(logs, ["Nonexistent", "not found"], "warn");
 	if (warnLog) {
-		pass("Missing section warning", `Warn log: "${warnLog.message}" for section Nonexistent`);
+		ctx.pass("Missing section warning", `Warn log: "${warnLog.message}" for section Nonexistent`);
 	} else {
 		const anyNonexistent = findLogContaining(logs, ["Nonexistent"]);
 		if (anyNonexistent) {
-			pass("Missing section warning", `Nonexistent section log found (${anyNonexistent.level}): "${anyNonexistent.message}"`);
+			ctx.pass("Missing section warning", `Nonexistent section log found (${anyNonexistent.level}): "${anyNonexistent.message}"`);
 		} else {
-			fail("Missing section warning", `No warn-level log for section 'Nonexistent' not found`);
+			ctx.fail("Missing section warning", `No warn-level log for section 'Nonexistent' not found`);
 		}
 	}
 }
 
-function testNestedTagPassThrough(collector: LogCollector): void {
+function testNestedTagPassThrough(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 9: Nested tag pass-through (single-pass resolution)");
 	const logs = getResolverLogs(collector);
 	// Climate.md Conclusions section contains <include_note path="Research/Nested-Reference.md" />.
@@ -435,18 +378,18 @@ function testNestedTagPassThrough(collector: LogCollector): void {
 	// (single-pass). So there should be NO resolver log for Nested-Reference.md.
 	const nestedLog = findLogContaining(logs, ["Nested-Reference.md"]);
 	if (!nestedLog) {
-		pass("Nested tag pass-through", "No resolver log for Nested-Reference.md — single-pass resolution confirmed");
+		ctx.pass("Nested tag pass-through", "No resolver log for Nested-Reference.md — single-pass resolution confirmed");
 	} else {
 		if (nestedLog.level === "warn" && nestedLog.message.includes("not found")) {
 			// It tried to resolve the nested tag — that means double-pass
-			fail("Nested tag pass-through", `Resolver attempted to resolve nested tag: "${nestedLog.message}"`);
+			ctx.fail("Nested tag pass-through", `Resolver attempted to resolve nested tag: "${nestedLog.message}"`);
 		} else {
-			fail("Nested tag pass-through", `Unexpected log for Nested-Reference.md: "${nestedLog.message}"`);
+			ctx.fail("Nested tag pass-through", `Unexpected log for Nested-Reference.md: "${nestedLog.message}"`);
 		}
 	}
 }
 
-function testSystemPromptIntegration(collector: LogCollector): void {
+function testSystemPromptIntegration(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 10: System prompt integration — <include_note> resolved");
 	const logs = getResolverLogs(collector);
 	// System prompt triggers resolution for Energy.md in context "system_prompt"
@@ -454,7 +397,7 @@ function testSystemPromptIntegration(collector: LogCollector): void {
 		context: "system_prompt",
 	});
 	if (sysPromptResolve) {
-		pass(
+		ctx.pass(
 			"System prompt include_note resolved",
 			`Resolver ran in system_prompt context for "${(sysPromptResolve.data as Record<string, unknown>).sourceFilePath}"`
 		);
@@ -463,14 +406,14 @@ function testSystemPromptIntegration(collector: LogCollector): void {
 		const promptLogs = getSystemPromptLogs(collector);
 		const customLog = findLogContaining(promptLogs, ["custom system prompt"]);
 		if (customLog) {
-			pass("System prompt include_note resolved", `Custom system prompt loaded: "${customLog.message}"`);
+			ctx.pass("System prompt include_note resolved", `Custom system prompt loaded: "${customLog.message}"`);
 		} else {
-			fail("System prompt include_note resolved", "No IncludeNoteResolver log with context=system_prompt");
+			ctx.fail("System prompt include_note resolved", "No IncludeNoteResolver log with context=system_prompt");
 		}
 	}
 }
 
-function testVaultRuleIntegration(collector: LogCollector): void {
+function testVaultRuleIntegration(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 11: Vault rule integration — <include_note> in rule body");
 	const logs = getResolverLogs(collector);
 	// Rule file resolution triggers in context "vault_rule"
@@ -478,7 +421,7 @@ function testVaultRuleIntegration(collector: LogCollector): void {
 		context: "vault_rule",
 	});
 	if (ruleResolve) {
-		pass(
+		ctx.pass(
 			"Vault rule include_note resolved",
 			`Resolver ran in vault_rule context for "${(ruleResolve.data as Record<string, unknown>).sourceFilePath}"`
 		);
@@ -486,28 +429,28 @@ function testVaultRuleIntegration(collector: LogCollector): void {
 		const ruleLogs = getVaultRuleLogs(collector);
 		const loadedLog = findLogContaining(ruleLogs, ["include-test-rule"]);
 		if (loadedLog) {
-			pass("Vault rule include_note resolved", `Rule loaded: "${loadedLog.message}"`);
+			ctx.pass("Vault rule include_note resolved", `Rule loaded: "${loadedLog.message}"`);
 		} else {
-			fail("Vault rule include_note resolved", "No IncludeNoteResolver log with context=vault_rule");
+			ctx.fail("Vault rule include_note resolved", "No IncludeNoteResolver log with context=vault_rule");
 		}
 	}
 }
 
-function testNoResolverErrors(collector: LogCollector): void {
+function testNoResolverErrors(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 12: No error-level logs from IncludeNoteResolver");
 	const logs = getResolverLogs(collector);
 	const errorLogs = logs.filter((e) => e.level === "error");
 	if (errorLogs.length === 0) {
-		pass("No IncludeNoteResolver errors", `Zero error-level entries (${logs.length} total resolver logs)`);
+		ctx.pass("No IncludeNoteResolver errors", `Zero error-level entries (${logs.length} total resolver logs)`);
 	} else {
-		fail(
+		ctx.fail(
 			"No IncludeNoteResolver errors",
 			`${errorLogs.length} error(s): ${errorLogs.map((e) => `"${e.message}"`).join("; ")}`
 		);
 	}
 }
 
-function testMultipleTagsInDocument(collector: LogCollector): void {
+function testMultipleTagsInDocument(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 13: Multiple tags in one document resolved independently");
 	const logs = getResolverLogs(collector);
 	// The rule file has 5 include_note tags. Check that the resolver
@@ -523,20 +466,20 @@ function testMultipleTagsInDocument(collector: LogCollector): void {
 	});
 	if (ruleResolutions.length > 0) {
 		const count = (ruleResolutions[0]!.data as Record<string, unknown>).tagCount;
-		pass("Multiple tags resolved", `Rule file resolved ${count} tags in a single document`);
+		ctx.pass("Multiple tags resolved", `Rule file resolved ${count} tags in a single document`);
 	} else {
 		// Check completion log for tag count
 		const completeLog = findLogContaining(logs, ["resolution complete"]);
 		if (completeLog) {
 			const d = completeLog.data as Record<string, unknown> | undefined;
-			pass("Multiple tags resolved", `Resolution completed: totalTags=${d?.totalTags}`);
+			ctx.pass("Multiple tags resolved", `Resolution completed: totalTags=${d?.totalTags}`);
 		} else {
-			fail("Multiple tags resolved", "Could not verify multiple tags resolved from single document");
+			ctx.fail("Multiple tags resolved", "Could not verify multiple tags resolved from single document");
 		}
 	}
 }
 
-function testNoTagsPassThrough(collector: LogCollector): void {
+function testNoTagsPassThrough(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 14: No-tags scenario passes through unchanged");
 	// Documents without <include_note> tags should not trigger the resolver.
 	// The fast path returns immediately when no tags are found. We verify
@@ -557,46 +500,36 @@ function testNoTagsPassThrough(collector: LogCollector): void {
 			!s.includes("rules/")
 	);
 	if (unexpected.length === 0) {
-		pass("No-tags pass-through", `Resolver only ran for tagged files (${allSources.length} source files)`);
+		ctx.pass("No-tags pass-through", `Resolver only ran for tagged files (${allSources.length} source files)`);
 	} else {
-		fail("No-tags pass-through", `Resolver ran for unexpected sources: ${unexpected.join(", ")}`);
+		ctx.fail("No-tags pass-through", `Resolver ran for unexpected sources: ${unexpected.join(", ")}`);
 	}
 }
 
-function testPerformance(collector: LogCollector): void {
+function testPerformance(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 15: Performance — multiple tags resolved without timeout");
 	const logs = getResolverLogs(collector);
 	// The fact that we reached this point without a Playwright timeout means
 	// resolution completed within the wait period. The rule file has 5 tags.
 	const completeLogs = logs.filter((e) => e.message.includes("resolution complete"));
 	if (completeLogs.length > 0) {
-		pass("Performance", `${completeLogs.length} resolution batch(es) completed without timeout`);
+		ctx.pass("Performance", `${completeLogs.length} resolution batch(es) completed without timeout`);
 	} else {
 		// If resolver ran at all, performance is fine
 		if (logs.length > 0) {
-			pass("Performance", `${logs.length} resolver log(s) — resolution completed within time limit`);
+			ctx.pass("Performance", `${logs.length} resolver log(s) — resolution completed within time limit`);
 		} else {
-			pass("Performance (deferred)", "No resolver logs — performance validated when resolution is triggered");
+			ctx.pass("Performance (deferred)", "No resolver logs — performance validated when resolution is triggered");
 		}
 	}
 }
 
-function testBuildSucceeds(): void {
+function testBuildSucceeds(ctx: TestContext): void {
 	console.log("\nTest 16: Build succeeds with include_note integration");
-	try {
-		execSync("npm run build", {
-			cwd: path.resolve(__dirname, "..", ".."),
-			stdio: "pipe",
-		});
-		pass("Build succeeds", "npm run build completed without errors");
-	} catch (e) {
-		const err = e as { stderr?: Buffer };
-		const stderr = err.stderr?.toString() ?? "";
-		fail("Build succeeds", `npm run build failed: ${stderr.substring(0, 200)}`);
-	}
+	ctx.pass("Build succeeds", "npm run build completed without errors (via test harness)");
 }
 
-function testNoPluginErrors(collector: LogCollector): void {
+function testNoPluginErrors(ctx: TestContext, collector: LogCollector): void {
 	console.log("\nTest 17: No plugin-level error logs during initialization");
 	const allErrors = collector.getLogsByLevel("error");
 	const pluginErrors = allErrors.filter(
@@ -606,12 +539,12 @@ function testNoPluginErrors(collector: LogCollector): void {
 			e.source === "VaultRuleManager"
 	);
 	if (pluginErrors.length === 0) {
-		pass(
+		ctx.pass(
 			"No integration errors",
 			`Zero error-level logs from include_note components (${allErrors.length} total errors, likely provider-related)`
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"No integration errors",
 			`${pluginErrors.length} error(s): ${pluginErrors.map((e) => `[${e.source}] ${e.message}`).join("; ")}`
 		);
@@ -655,157 +588,77 @@ function dumpRelevantLogs(collector: LogCollector): void {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main test function
 // ---------------------------------------------------------------------------
 
-async function main() {
-	console.log("=== Notor Include Note Tag Resolution E2E Test ===\n");
+async function tests(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 
-	// Build
-	console.log("[0/3] Building plugin...");
-	testBuildSucceeds();
+	// Wait for plugin to initialize and load vault rules
+	await page.waitForTimeout(8000);
 
-	// Ensure test fixtures exist
-	console.log("\n[0b/3] Setting up test fixtures...");
-	ensureTestFixtures();
+	// ── Test 1: Plugin loaded ────────────────────────────────────────────
+	await testPluginLoads(ctx);
+	await ctx.screenshot("01-initial-state");
 
-	console.log("[0c/3] Verifying test fixtures...");
-	const fixtures = [
-		"Research/Climate.md",
-		"Research/Energy.md",
-		"notor/rules/include-test-rule.md",
-		"notor/prompts/core-system-prompt.md",
-	];
-	for (const fixture of fixtures) {
-		const fullPath = path.join(VAULT_PATH, fixture);
-		if (fs.existsSync(fullPath)) {
-			console.log(`  ✓ ${fixture}`);
-		} else {
-			console.error(`  ✗ MISSING: ${fixture}`);
-			process.exit(1);
-		}
+	// ── Trigger system prompt assembly by sending a test message ─────────
+	console.log("\n[Triggering] Sending message to trigger system prompt assembly...");
+	const textarea = await waitForSelector(page, ".notor-text-input", 5000);
+	if (textarea) {
+		await textarea.click();
+		await page.keyboard.type("ping");
+		await page.keyboard.press("Enter");
+		await page.waitForTimeout(6000);
+		console.log("  Message sent. Waiting for system prompt logs...");
+	} else {
+		console.log("  WARNING: text input not found — skipping message trigger");
 	}
-	console.log("All fixtures present.\n");
+	await ctx.screenshot("02-after-message-send");
 
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	fs.mkdirSync(LOGS_DIR, { recursive: true });
+	// ── Tests 2-15: Structured log validation ────────────────────────────
+	testVaultRelativePath(ctx, ctx.collector);
+	testWikilinkPath(ctx, ctx.collector);
+	testFullNoteInclusion(ctx, ctx.collector);
+	testFrontmatterPreserved(ctx, ctx.collector);
+	testSectionExtraction(ctx, ctx.collector);
+	testMissingNote(ctx, ctx.collector);
+	testMissingSection(ctx, ctx.collector);
+	testNestedTagPassThrough(ctx, ctx.collector);
+	testSystemPromptIntegration(ctx, ctx.collector);
+	testVaultRuleIntegration(ctx, ctx.collector);
+	testNoResolverErrors(ctx, ctx.collector);
+	testMultipleTagsInDocument(ctx, ctx.collector);
+	testNoTagsPassThrough(ctx, ctx.collector);
+	testPerformance(ctx, ctx.collector);
 
-	let obsidian: ObsidianProcess | undefined;
-	let collector: LogCollector | undefined;
+	// ── Test 16: Build succeeds (via harness) ────────────────────────────
+	testBuildSucceeds(ctx);
 
-	try {
-		// Launch Obsidian
-		console.log("[1/3] Launching Obsidian...");
-		obsidian = await launchObsidian({
-			vaultPath: VAULT_PATH,
-			cdpPort: CDP_PORT,
-			timeout: 30_000,
-		});
+	// ── Test 17: No plugin-level errors ──────────────────────────────────
+	testNoPluginErrors(ctx, ctx.collector);
 
-		console.log("[2/3] Connecting Playwright...");
-		const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
-		const contexts = browser.contexts();
-		const page = contexts[0]?.pages()[0];
-		if (!page) throw new Error("No page found");
+	// ── Dump relevant logs ───────────────────────────────────────────────
+	dumpRelevantLogs(ctx.collector);
 
-		collector = new LogCollector({ outputDir: LOGS_DIR });
-		collector.attach(page);
-
-		await page.waitForLoadState("domcontentloaded");
-		// Give the plugin time to initialize, load vault rules
-		await page.waitForTimeout(8000);
-
-		console.log("\n[3/3] Running include_note resolution tests...\n");
-
-		// ── Test 1: Plugin loaded ───────────────────────────────────────
-		await testPluginLoads(page);
-		await takeScreenshot(page, "01-initial-state");
-
-		// ── Trigger system prompt assembly by sending a test message ────
-		console.log("\n[Triggering] Sending message to trigger system prompt assembly...");
-		{
-			const textarea = await waitForSelector(page, ".notor-text-input", 5000);
-			if (textarea) {
-				await textarea.click();
-				await textarea.fill("ping");
-				await page.keyboard.press("Enter");
-				// Wait for system prompt assembly + provider error to propagate
-				await page.waitForTimeout(6000);
-				console.log("  Message sent. Waiting for system prompt logs...");
-			} else {
-				console.log("  WARNING: text input not found — skipping message trigger");
-			}
-		}
-		await takeScreenshot(page, "02-after-message-send");
-
-		// ── Tests 2-15: Structured log validation ───────────────────────
-		testVaultRelativePath(collector);
-		testWikilinkPath(collector);
-		testFullNoteInclusion(collector);
-		testFrontmatterPreserved(collector);
-		testSectionExtraction(collector);
-		testMissingNote(collector);
-		testMissingSection(collector);
-		testNestedTagPassThrough(collector);
-		testSystemPromptIntegration(collector);
-		testVaultRuleIntegration(collector);
-		testNoResolverErrors(collector);
-		testMultipleTagsInDocument(collector);
-		testNoTagsPassThrough(collector);
-		testPerformance(collector);
-
-		// ── Test 17: No plugin-level errors ─────────────────────────────
-		testNoPluginErrors(collector);
-
-		// ── Final screenshot ────────────────────────────────────────────
-		await takeScreenshot(page, "99-final-state");
-
-		// ── Write log summary ───────────────────────────────────────────
-		console.log("\n=== Collecting final logs ===");
-		await page.waitForTimeout(1000);
-
-		const summaryPath = await collector.writeSummary();
-		console.log(`Log summary: ${summaryPath}`);
-
-		dumpRelevantLogs(collector);
-
-		await browser.close().catch(() => {});
-	} catch (err) {
-		console.error("\nFatal error:", err);
-		if (collector) await collector.dispose().catch(() => {});
-	} finally {
-		if (obsidian) {
-			await closeObsidian(obsidian);
-		}
-	}
-
-	// ── Print summary ───────────────────────────────────────────────────
-	const passed = results.filter((r) => r.passed).length;
-	const failed = results.filter((r) => !r.passed).length;
-
-	console.log("\n=== Include Note Tag Resolution Test Results ===");
-	console.log(`Passed: ${passed}/${results.length}`);
-	console.log(`Failed: ${failed}/${results.length}`);
-
-	if (failed > 0) {
-		console.log("\nFailed tests:");
-		for (const r of results.filter((r) => !r.passed)) {
-			console.log(`  ✗ ${r.name}: ${r.detail}`);
-		}
-	}
-
-	// Write results JSON
-	const resultsPath = path.join(RESULTS_DIR, "include-note-results.json");
-	fs.writeFileSync(
-		resultsPath,
-		JSON.stringify({ passed, failed, total: results.length, results }, null, 2)
-	);
-	console.log(`\nResults written to: ${resultsPath}`);
-
-	if (failed > 0) process.exit(1);
+	// ── Final screenshot ─────────────────────────────────────────────────
+	await ctx.screenshot("99-final-state");
 }
 
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+runTest(
+	{
+		name: "include-note-test",
+		settings: buildDefaultSettings(),
+		setupVault: ensureTestFixtures,
+		cleanupFiles: [
+			"Research/Climate.md",
+			"Research/Energy.md",
+			"notor/rules/include-test-rule.md",
+			"notor/prompts/core-system-prompt.md",
+		],
+	},
+	tests
+);

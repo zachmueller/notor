@@ -22,104 +22,24 @@
  *   npx tsx e2e/scripts/stale-content-test.ts
  */
 
-import { execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { fileURLToPath } from "node:url";
-import { chromium, type Page, type ElementHandle } from "playwright-core";
-import { launchObsidian, closeObsidian, type ObsidianProcess } from "../lib/obsidian-launcher";
-import { LogCollector } from "../lib/log-collector";
+import { runTest, type TestContext } from "../lib/test-harness";
+import {
+	waitForSelector,
+	sendMessage,
+	getLastAssistantMessage,
+	newConversation,
+	setMode,
+	buildDefaultSettings,
+	VAULT_PATH,
+} from "../lib/test-helpers";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const VAULT_PATH = path.resolve(__dirname, "..", "test-vault");
-const CDP_PORT = 9222;
-const RESULTS_DIR = path.resolve(__dirname, "..", "results");
-const SCREENSHOTS_DIR = path.join(RESULTS_DIR, "screenshots", "stale-content");
-const LOGS_DIR = path.join(RESULTS_DIR, "logs");
-const BUILD_DIR = path.resolve(__dirname, "..", "..", "build");
-const PLUGIN_DATA_PATH = path.join(BUILD_DIR, "data.json");
 const HISTORY_PATH = path.join(VAULT_PATH, ".obsidian", "plugins", "notor", "history");
 
-const RESPONSE_TIMEOUT_MS = 90_000;
-const POLL_INTERVAL_MS = 1_500;
-
-interface TestResult { name: string; passed: boolean; detail: string; screenshot?: string; }
-const results: TestResult[] = [];
-
-function pass(name: string, detail: string, screenshot?: string): void {
-	console.log(`  ✓ PASS: ${name} — ${detail}`);
-	results.push({ name, passed: true, detail, screenshot });
-}
-function fail(name: string, detail: string, screenshot?: string): void {
-	console.error(`  ✗ FAIL: ${name} — ${detail}`);
-	results.push({ name, passed: false, detail, screenshot });
-}
-
-async function screenshot(page: Page, name: string): Promise<string> {
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	const file = path.join(SCREENSHOTS_DIR, `${name}.png`);
-	await page.screenshot({ path: file, fullPage: true });
-	return file;
-}
-
-async function waitForSelector(page: Page, selector: string, timeoutMs = 8_000): Promise<ElementHandle | null> {
-	try { return await page.waitForSelector(selector, { timeout: timeoutMs }); }
-	catch { return null; }
-}
-
-async function waitForResponse(page: Page, timeoutMs = RESPONSE_TIMEOUT_MS): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		await page.waitForTimeout(POLL_INTERVAL_MS);
-		const enabled = await page.evaluate(() => {
-			const ta = document.querySelector(".notor-text-input") as HTMLTextAreaElement | null;
-			return ta !== null && !ta.disabled;
-		});
-		if (enabled) return true;
-		const lastMsg = await page.$(".notor-message-assistant:last-child");
-		if (lastMsg) {
-			const partial = await lastMsg.textContent();
-			const elapsed = Math.round((Date.now() - start) / 1000);
-			if (partial?.trim()) console.log(`    [${elapsed}s] Streaming: "${partial.trim().substring(0, 80)}..."`);
-		}
-	}
-	return false;
-}
-
-async function sendMessage(page: Page, message: string): Promise<boolean> {
-	const textarea = await page.$(".notor-text-input");
-	if (!textarea) throw new Error("Textarea not found");
-	await textarea.fill(message);
-	await page.waitForTimeout(200);
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(600);
-	console.log(`    → Sent: "${message.substring(0, 100)}${message.length > 100 ? "..." : ""}"`);
-	return waitForResponse(page);
-}
-
-async function getLastAssistantMessage(page: Page): Promise<string> {
-	const msgs = await page.$$(".notor-message-assistant");
-	if (msgs.length === 0) return "";
-	return (await msgs[msgs.length - 1]!.textContent()) ?? "";
-}
-
-async function newConversation(page: Page): Promise<void> {
-	const btn = await page.$(".notor-chat-header-btn[aria-label='New conversation']");
-	if (btn) { await btn.click(); await page.waitForTimeout(1_500); }
-}
-
-async function setMode(page: Page, mode: "Plan" | "Act"): Promise<void> {
-	const toggle = await page.$(".notor-mode-toggle");
-	if (!toggle) throw new Error("Mode toggle not found");
-	const current = await toggle.textContent();
-	if (current?.trim() === mode) return;
-	await toggle.click();
-	await page.waitForTimeout(400);
-	const updated = await toggle.textContent();
-	if (updated?.trim() !== mode) throw new Error(`Failed to switch to ${mode} mode`);
-}
+// ---------------------------------------------------------------------------
+// Local helpers
+// ---------------------------------------------------------------------------
 
 function scanHistoryFiles(): Array<{ file: string; lines: number; mtimeMs: number }> {
 	if (!fs.existsSync(HISTORY_PATH)) return [];
@@ -146,31 +66,12 @@ function parseHistoryFile(filename: string): unknown[] {
 	return records;
 }
 
-function buildSettings(): Record<string, unknown> {
-	return {
-		notor_dir: "notor/",
-		active_provider: "bedrock",
-		providers: [
-			{ type: "local", enabled: false, display_name: "Local (OpenAI-compatible)", endpoint: "http://localhost:11434/v1" },
-			{ type: "anthropic", enabled: false, display_name: "Anthropic", endpoint: "https://api.anthropic.com" },
-			{ type: "openai", enabled: false, display_name: "OpenAI", endpoint: "https://api.openai.com" },
-			{ type: "bedrock", enabled: true, display_name: "AWS Bedrock", aws_auth_method: "profile", aws_profile: "default", region: "us-east-1", model_id: "deepseek.v3.2" },
-		],
-		auto_approve: { read_note: true, search_vault: true, list_vault: true, read_frontmatter: true, write_note: true, replace_in_note: true, update_frontmatter: true, manage_tags: true },
-		mode: "act",
-		open_notes_on_access: true,
-		history_path: ".obsidian/plugins/notor/history/",
-		history_max_size_mb: 500,
-		history_max_age_days: 90,
-		checkpoint_path: ".obsidian/plugins/notor/checkpoints/",
-		checkpoint_max_per_conversation: 100,
-		checkpoint_max_age_days: 30,
-		model_pricing: {},
-	};
-}
+// ---------------------------------------------------------------------------
+// Vault setup
+// ---------------------------------------------------------------------------
 
-function setupTestVault(): void {
-	const notePath = path.join(VAULT_PATH, "Stale-Content-Test.md");
+function setupTestVault(vaultPath: string): void {
+	const notePath = path.join(vaultPath, "Stale-Content-Test.md");
 	fs.mkdirSync(path.dirname(notePath), { recursive: true });
 	fs.writeFileSync(notePath, `---\ntitle: Stale Content Test\nstatus: original\n---\n\n# Stale Content Test Note\n\nThis note is used by the stale-content E2E test.\n\n## Target Section\n\nOriginal target content that the LLM will try to replace.\n\n## Stable Section\n\nThis section will not be modified by the test.\n`, "utf8");
 	console.log("    Created: Stale-Content-Test.md");
@@ -187,7 +88,8 @@ function setupTestVault(): void {
 // Part A: Stale Content Tests
 // ---------------------------------------------------------------------------
 
-async function testStaleContentBlocksWrite(page: Page): Promise<void> {
+async function testStaleContentBlocksWrite(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── Stale Test 1: stale content blocks replace_in_note ──────────");
 	await newConversation(page);
 	await setMode(page, "Act");
@@ -198,8 +100,8 @@ async function testStaleContentBlocksWrite(page: Page): Promise<void> {
 
 	// Step 1: LLM reads the note — populates StaleContentTracker cache
 	const readOk = await sendMessage(page, "Please use read_note to read 'Stale-Content-Test.md' and tell me the first heading.");
-	if (!readOk) { fail("stale content — read phase", `No response within ${RESPONSE_TIMEOUT_MS / 1000}s`); return; }
-	pass("stale content — LLM read note", "LLM successfully read the note");
+	if (!readOk) { ctx.fail("stale content — read phase", `No response within 90s`); return; }
+	ctx.pass("stale content — LLM read note", "LLM successfully read the note");
 
 	// Step 2: Externally modify the note — cache is now stale
 	await page.waitForTimeout(500);
@@ -216,8 +118,8 @@ async function testStaleContentBlocksWrite(page: Page): Promise<void> {
 		"with 'Replaced by stale-content test — should fail.'."
 	);
 
-	const shot = await screenshot(page, "01-stale-write-attempt");
-	if (!writeOk) { fail("stale content — write phase response", `No response within ${RESPONSE_TIMEOUT_MS / 1000}s`, shot); return; }
+	const shot = await ctx.screenshot("01-stale-write-attempt");
+	if (!writeOk) { ctx.fail("stale content — write phase response", `No response within 90s`, shot); return; }
 
 	const currentContent = fs.readFileSync(notePath, "utf8");
 	const response = await getLastAssistantMessage(page);
@@ -225,16 +127,16 @@ async function testStaleContentBlocksWrite(page: Page): Promise<void> {
 
 	// Primary: stale replacement must NOT appear in the file
 	if (currentContent.includes("Replaced by stale-content test — should fail")) {
-		fail("stale content — write blocked", "File contains stale write text — stale detection did not fire", shot);
+		ctx.fail("stale content — write blocked", "File contains stale write text — stale detection did not fire", shot);
 	} else {
-		pass("stale content — write blocked", "File does not contain the stale replacement text", shot);
+		ctx.pass("stale content — write blocked", "File does not contain the stale replacement text", shot);
 	}
 
 	// The externally-added text should still be present
 	if (currentContent.includes("Concurrently modified by an external editor")) {
-		pass("stale content — external edit preserved", "External edit intact after blocked write attempt");
+		ctx.pass("stale content — external edit preserved", "External edit intact after blocked write attempt");
 	} else {
-		pass("stale content — file not overwritten with stale data", "Externally-modified file was not corrupted");
+		ctx.pass("stale content — file not overwritten with stale data", "Externally-modified file was not corrupted");
 	}
 
 	// LLM should acknowledge the issue in some way
@@ -245,15 +147,16 @@ async function testStaleContentBlocksWrite(page: Page): Promise<void> {
 		lowerResp.includes("couldn't find") || lowerResp.includes("could not find");
 
 	if (mentionsConflict) {
-		pass("stale content — LLM acknowledges conflict", `Response: "${response.trim().substring(0, 120)}"`, shot);
+		ctx.pass("stale content — LLM acknowledges conflict", `Response: "${response.trim().substring(0, 120)}"`, shot);
 	} else if (response.trim().length > 0) {
-		pass("stale content — LLM responded", `Response: "${response.trim().substring(0, 120)}"`, shot);
+		ctx.pass("stale content — LLM responded", `Response: "${response.trim().substring(0, 120)}"`, shot);
 	} else {
-		fail("stale content — LLM responded", "No assistant message after stale write attempt");
+		ctx.fail("stale content — LLM responded", "No assistant message after stale write attempt");
 	}
 }
 
-async function testFreshWriteSucceeds(page: Page): Promise<void> {
+async function testFreshWriteSucceeds(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── Stale Test 2: write succeeds without external edit ──────────");
 	await newConversation(page);
 	await setMode(page, "Act");
@@ -271,21 +174,22 @@ async function testFreshWriteSucceeds(page: Page): Promise<void> {
 		"'Fresh write test content here.' with 'Successfully replaced on fresh read.'."
 	);
 
-	const shot = await screenshot(page, "02-fresh-write");
-	if (!responded) { fail("fresh write — response", `No response within ${RESPONSE_TIMEOUT_MS / 1000}s`, shot); return; }
+	const shot = await ctx.screenshot("02-fresh-write");
+	if (!responded) { ctx.fail("fresh write — response", `No response within 90s`, shot); return; }
 
 	const currentContent = fs.readFileSync(notePath, "utf8");
 	if (currentContent.includes("Successfully replaced on fresh read")) {
-		pass("fresh write — write succeeded", "Replacement text found in file after read+write", shot);
+		ctx.pass("fresh write — write succeeded", "Replacement text found in file after read+write", shot);
 	} else if (!currentContent.includes("Fresh write test content here.")) {
-		pass("fresh write — original text replaced", "Original text no longer present (write applied)", shot);
+		ctx.pass("fresh write — original text replaced", "Original text no longer present (write applied)", shot);
 	} else {
 		const response = await getLastAssistantMessage(page);
-		fail("fresh write — write succeeded", `Original text still present. Response: "${response.trim().substring(0, 120)}"`, shot);
+		ctx.fail("fresh write — write succeeded", `Original text still present. Response: "${response.trim().substring(0, 120)}"`, shot);
 	}
 }
 
-async function testStaleContentRecovery(page: Page): Promise<void> {
+async function testStaleContentRecovery(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── Stale Test 3: recovery — re-read then write succeeds ────────");
 	await newConversation(page);
 	await setMode(page, "Act");
@@ -299,7 +203,7 @@ async function testStaleContentRecovery(page: Page): Promise<void> {
 
 	// LLM reads
 	const readOk = await sendMessage(page, "Please read 'Stale-Content-Test.md' using read_note so you know its current state.");
-	if (!readOk) { fail("recovery — read phase", "No response to read request"); return; }
+	if (!readOk) { ctx.fail("recovery — read phase", "No response to read request"); return; }
 
 	// Externally modify after the LLM has cached the content
 	await page.waitForTimeout(300);
@@ -313,24 +217,24 @@ async function testStaleContentRecovery(page: Page): Promise<void> {
 		"the file and try the replacement again with the correct current text."
 	);
 
-	const shot = await screenshot(page, "03-stale-recovery");
-	if (!recoveryOk) { fail("recovery — response", `No response within ${RESPONSE_TIMEOUT_MS / 1000}s`, shot); return; }
+	const shot = await ctx.screenshot("03-stale-recovery");
+	if (!recoveryOk) { ctx.fail("recovery — response", `No response within 90s`, shot); return; }
 
 	const finalContent = fs.readFileSync(notePath, "utf8");
 	const response = await getLastAssistantMessage(page);
 
 	if (finalContent.includes("Recovery write applied")) {
-		pass("recovery — write succeeded after re-read", "File contains the recovery replacement text", shot);
+		ctx.pass("recovery — write succeeded after re-read", "File contains the recovery replacement text", shot);
 	} else if (finalContent.includes("Concurrently modified")) {
-		pass("recovery — stale error surfaced correctly", "External edit intact; LLM was notified of stale content", shot);
+		ctx.pass("recovery — stale error surfaced correctly", "External edit intact; LLM was notified of stale content", shot);
 	} else {
-		pass("recovery — note not corrupted", `File does not contain stale replacement. Response: "${response.trim().substring(0, 120)}"`, shot);
+		ctx.pass("recovery — note not corrupted", `File does not contain stale replacement. Response: "${response.trim().substring(0, 120)}"`, shot);
 	}
 
 	if (response.trim().length > 0) {
-		pass("recovery — LLM responded", `Response: "${response.trim().substring(0, 120)}"`, shot);
+		ctx.pass("recovery — LLM responded", `Response: "${response.trim().substring(0, 120)}"`, shot);
 	} else {
-		fail("recovery — LLM responded", "No assistant message during recovery test");
+		ctx.fail("recovery — LLM responded", "No assistant message during recovery test");
 	}
 }
 
@@ -338,7 +242,8 @@ async function testStaleContentRecovery(page: Page): Promise<void> {
 // Part B: Conversation History Persistence Tests
 // ---------------------------------------------------------------------------
 
-async function testHistoryFileCreated(page: Page): Promise<void> {
+async function testHistoryFileCreated(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── History Test 4: JSONL file created after conversation ───────");
 	await newConversation(page);
 	await setMode(page, "Plan");
@@ -347,37 +252,37 @@ async function testHistoryFileCreated(page: Page): Promise<void> {
 	console.log(`    JSONL files before: ${historyBefore.length}`);
 
 	const responded = await sendMessage(page, "Please say hello and confirm you can hear me. This is a history persistence test.");
-	const shot = await screenshot(page, "04-history-file");
+	const shot = await ctx.screenshot("04-history-file");
 
-	if (!responded) { fail("history — file created", `No response within ${RESPONSE_TIMEOUT_MS / 1000}s`, shot); return; }
+	if (!responded) { ctx.fail("history — file created", `No response within 90s`, shot); return; }
 
 	await page.waitForTimeout(1_000);
 	const historyAfter = scanHistoryFiles();
 	console.log(`    JSONL files after: ${historyAfter.length}`);
 
 	if (historyAfter.length > historyBefore.length) {
-		pass("history — JSONL file created", `History file count: ${historyBefore.length} → ${historyAfter.length}`, shot);
+		ctx.pass("history — JSONL file created", `History file count: ${historyBefore.length} → ${historyAfter.length}`, shot);
 	} else if (historyAfter.length > 0) {
 		const maxLines = Math.max(...historyAfter.map((h) => h.lines));
-		pass("history — JSONL file exists with content", `${historyAfter.length} file(s); largest has ${maxLines} lines`, shot);
+		ctx.pass("history — JSONL file exists with content", `${historyAfter.length} file(s); largest has ${maxLines} lines`, shot);
 	} else {
-		fail("history — JSONL file created", `No JSONL files found in ${HISTORY_PATH}`, shot);
+		ctx.fail("history — JSONL file created", `No JSONL files found in ${HISTORY_PATH}`, shot);
 	}
 }
 
-async function testHistoryFileStructure(page: Page): Promise<void> {
+async function testHistoryFileStructure(ctx: TestContext): Promise<void> {
 	console.log("\n── History Test 5: JSONL records have correct structure ────────");
 
 	const historyFiles = scanHistoryFiles();
-	if (historyFiles.length === 0) { fail("history — file structure", `No JSONL files found in ${HISTORY_PATH}`); return; }
+	if (historyFiles.length === 0) { ctx.fail("history — file structure", `No JSONL files found in ${HISTORY_PATH}`); return; }
 
 	const mostRecent = [...historyFiles].sort((a, b) => b.mtimeMs - a.mtimeMs)[0]!;
 	console.log(`    Inspecting: ${mostRecent.file} (${mostRecent.lines} lines)`);
 
 	const records = parseHistoryFile(mostRecent.file) as Array<Record<string, unknown>>;
-	if (records.length === 0) { fail("history — JSONL parseable", `File has no parseable JSON lines: ${mostRecent.file}`); return; }
+	if (records.length === 0) { ctx.fail("history — JSONL parseable", `File has no parseable JSON lines: ${mostRecent.file}`); return; }
 
-	pass("history — JSONL file parseable", `${records.length} JSON record(s) from ${mostRecent.file}`);
+	ctx.pass("history — JSONL file parseable", `${records.length} JSON record(s) from ${mostRecent.file}`);
 
 	const validRoles = new Set(["user", "assistant", "tool_call", "tool_result", "system"]);
 	const missingFields: string[] = [];
@@ -390,27 +295,28 @@ async function testHistoryFileStructure(page: Page): Promise<void> {
 	}
 
 	if (missingFields.length === 0) {
-		pass("history — all records well-formed", `All ${records.length} record(s) have id, valid role, and content/type`);
+		ctx.pass("history — all records well-formed", `All ${records.length} record(s) have id, valid role, and content/type`);
 	} else if (missingFields.length <= 2) {
-		pass("history — records mostly well-formed", `${records.length} records, ${missingFields.length} minor gap(s): ${missingFields.join("; ")}`);
+		ctx.pass("history — records mostly well-formed", `${records.length} records, ${missingFields.length} minor gap(s): ${missingFields.join("; ")}`);
 	} else {
-		fail("history — records well-formed", `${missingFields.length} field gap(s) across ${records.length} records: ${missingFields.slice(0, 4).join("; ")}`);
+		ctx.fail("history — records well-formed", `${missingFields.length} field gap(s) across ${records.length} records: ${missingFields.slice(0, 4).join("; ")}`);
 	}
 
 	const hasUser = records.some((r) => r.role === "user");
 	const hasAssistant = records.some((r) => r.role === "assistant");
 	if (hasUser && hasAssistant) {
-		pass("history — user and assistant records present", "JSONL contains both user and assistant message types");
+		ctx.pass("history — user and assistant records present", "JSONL contains both user and assistant message types");
 	} else {
-		fail("history — user and assistant records present", `hasUser=${hasUser}, hasAssistant=${hasAssistant}`);
+		ctx.fail("history — user and assistant records present", `hasUser=${hasUser}, hasAssistant=${hasAssistant}`);
 	}
 }
 
-async function testHistoryPanelShowsConversations(page: Page): Promise<void> {
+async function testHistoryPanelShowsConversations(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── History Test 6: history panel lists saved conversations ─────");
 
 	const histBtn = await page.$(".notor-chat-header-btn[aria-label='Conversation history']");
-	if (!histBtn) { fail("history panel — button found", "Conversation history button not found"); return; }
+	if (!histBtn) { ctx.fail("history panel — button found", "Conversation history button not found"); return; }
 
 	// Ensure panel is closed before opening
 	const listAlreadyVisible = await page.evaluate(() => {
@@ -422,42 +328,42 @@ async function testHistoryPanelShowsConversations(page: Page): Promise<void> {
 	await histBtn.click();
 	await page.waitForTimeout(600);
 
-	const shot = await screenshot(page, "06-history-panel");
+	const shot = await ctx.screenshot("06-history-panel");
 	const listEl = await page.$(".notor-conversation-list");
 
 	if (!listEl) {
-		fail("history panel — list rendered", ".notor-conversation-list not found", shot);
+		ctx.fail("history panel — list rendered", ".notor-conversation-list not found", shot);
 		await histBtn.click();
 		return;
 	}
 
 	const isHidden = await listEl.evaluate((el) => el.classList.contains("notor-hidden"));
 	if (isHidden) {
-		fail("history panel — list visible", ".notor-conversation-list is hidden after click", shot);
+		ctx.fail("history panel — list visible", ".notor-conversation-list is hidden after click", shot);
 		await histBtn.click();
 		return;
 	}
 
-	pass("history panel — list visible", "Conversation list is open", shot);
+	ctx.pass("history panel — list visible", "Conversation list is open", shot);
 
 	const items = await page.$$(".notor-conversation-list-item");
 	if (items.length > 0) {
-		pass("history panel — conversations listed", `${items.length} conversation item(s) in list`);
+		ctx.pass("history panel — conversations listed", `${items.length} conversation item(s) in list`);
 
 		// Verify each item has visible text (title/date)
 		const firstItemText = await items[0]!.textContent();
 		if (firstItemText && firstItemText.trim().length > 0) {
-			pass("history panel — items have text", `First item: "${firstItemText.trim().substring(0, 80)}"`);
+			ctx.pass("history panel — items have text", `First item: "${firstItemText.trim().substring(0, 80)}"`);
 		} else {
-			fail("history panel — items have text", "First conversation item has no visible text");
+			ctx.fail("history panel — items have text", "First conversation item has no visible text");
 		}
 	} else {
 		// The list may show a "no conversations" empty state
 		const listText = await listEl.textContent();
 		if (listText && listText.trim().length > 0) {
-			pass("history panel — list has content", `List text: "${listText.trim().substring(0, 80)}"`, shot);
+			ctx.pass("history panel — list has content", `List text: "${listText.trim().substring(0, 80)}"`, shot);
 		} else {
-			fail("history panel — conversations listed", "No conversation items and list is empty", shot);
+			ctx.fail("history panel — conversations listed", "No conversation items and list is empty", shot);
 		}
 	}
 
@@ -466,7 +372,8 @@ async function testHistoryPanelShowsConversations(page: Page): Promise<void> {
 	await page.waitForTimeout(400);
 }
 
-async function testSwitchToHistoryConversation(page: Page): Promise<void> {
+async function testSwitchToHistoryConversation(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── History Test 7: switching to past conversation reloads messages");
 
 	// Create a second conversation so we have something to switch back to
@@ -477,26 +384,26 @@ async function testSwitchToHistoryConversation(page: Page): Promise<void> {
 	// Start a new conversation and send a message in it
 	await newConversation(page);
 	const responded = await sendMessage(page, "This is a second conversation for history switching test.");
-	const shot1 = await screenshot(page, "07a-second-conversation");
+	const shot1 = await ctx.screenshot("07a-second-conversation");
 
 	if (!responded) {
-		fail("history switch — second conversation", `No response within ${RESPONSE_TIMEOUT_MS / 1000}s`, shot1);
+		ctx.fail("history switch — second conversation", `No response within 90s`, shot1);
 		return;
 	}
-	pass("history switch — second conversation created", "Sent a message in the second conversation");
+	ctx.pass("history switch — second conversation created", "Sent a message in the second conversation");
 
 	// Open conversation history
 	const histBtn = await page.$(".notor-chat-header-btn[aria-label='Conversation history']");
-	if (!histBtn) { fail("history switch — history button", "History button not found"); return; }
+	if (!histBtn) { ctx.fail("history switch — history button", "History button not found"); return; }
 
 	await histBtn.click();
 	await page.waitForTimeout(600);
 
 	const items = await page.$$(".notor-conversation-list-item");
-	const shot2 = await screenshot(page, "07b-history-before-switch");
+	const shot2 = await ctx.screenshot("07b-history-before-switch");
 
 	if (items.length < 2) {
-		fail(
+		ctx.fail(
 			"history switch — multiple conversations in list",
 			`Expected ≥2 conversations, got ${items.length}`,
 			shot2
@@ -505,13 +412,13 @@ async function testSwitchToHistoryConversation(page: Page): Promise<void> {
 		return;
 	}
 
-	pass("history switch — multiple conversations in list", `${items.length} conversations available`);
+	ctx.pass("history switch — multiple conversations in list", `${items.length} conversations available`);
 
 	// Click the second item (the older conversation)
 	await items[1]!.click();
 	await page.waitForTimeout(1_000);
 
-	const shot3 = await screenshot(page, "07c-after-switch");
+	const shot3 = await ctx.screenshot("07c-after-switch");
 
 	// The history list should now be hidden (switched to chat view)
 	const listHidden = await page.evaluate(() => {
@@ -520,21 +427,22 @@ async function testSwitchToHistoryConversation(page: Page): Promise<void> {
 	});
 
 	if (listHidden) {
-		pass("history switch — list closed after switch", "Conversation list closed, chat view active");
+		ctx.pass("history switch — list closed after switch", "Conversation list closed, chat view active");
 	} else {
-		fail("history switch — list closed after switch", "List still visible after clicking conversation item", shot3);
+		ctx.fail("history switch — list closed after switch", "List still visible after clicking conversation item", shot3);
 	}
 
 	// The chat view should contain messages from the selected conversation
 	const msgsAfterSwitch = await page.$$(".notor-message-user, .notor-message-assistant");
 	if (msgsAfterSwitch.length > 0) {
-		pass("history switch — messages loaded", `${msgsAfterSwitch.length} message(s) loaded from switched conversation`, shot3);
+		ctx.pass("history switch — messages loaded", `${msgsAfterSwitch.length} message(s) loaded from switched conversation`, shot3);
 	} else {
-		fail("history switch — messages loaded", "No messages visible after switching conversation", shot3);
+		ctx.fail("history switch — messages loaded", "No messages visible after switching conversation", shot3);
 	}
 }
 
-async function testNewConversationPreservesHistory(page: Page): Promise<void> {
+async function testNewConversationPreservesHistory(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 	console.log("\n── History Test 8: new conversation does not overwrite JSONL ───");
 
 	const filesBefore = scanHistoryFiles();
@@ -548,10 +456,10 @@ async function testNewConversationPreservesHistory(page: Page): Promise<void> {
 	await setMode(page, "Plan");
 
 	const responded = await sendMessage(page, "Short message to create a new JSONL entry.");
-	const shot = await screenshot(page, "08-new-conv-history");
+	const shot = await ctx.screenshot("08-new-conv-history");
 
 	if (!responded) {
-		fail("history isolation — response", `No response within ${RESPONSE_TIMEOUT_MS / 1000}s`, shot);
+		ctx.fail("history isolation — response", `No response within 90s`, shot);
 		return;
 	}
 
@@ -565,157 +473,82 @@ async function testNewConversationPreservesHistory(page: Page): Promise<void> {
 	for (const [filename, linesBefore] of snapshotBefore.entries()) {
 		const after = filesAfter.find((f) => f.file === filename);
 		if (!after) {
-			fail("history isolation — old file preserved", `File ${filename} disappeared after new conversation`);
+			ctx.fail("history isolation — old file preserved", `File ${filename} disappeared after new conversation`);
 			existingFilesIntact = false;
 		} else if (after.lines < linesBefore) {
-			fail("history isolation — old file not truncated", `File ${filename} shrank: ${linesBefore} → ${after.lines} lines`);
+			ctx.fail("history isolation — old file not truncated", `File ${filename} shrank: ${linesBefore} → ${after.lines} lines`);
 			existingFilesIntact = false;
 		}
 	}
 
 	if (existingFilesIntact) {
-		pass("history isolation — old files preserved", "No prior JSONL file was overwritten or truncated");
+		ctx.pass("history isolation — old files preserved", "No prior JSONL file was overwritten or truncated");
 	}
 
 	if (filesAfter.length > filesBefore.length) {
-		pass("history isolation — new JSONL file created", `New conversation produced a new file (${filesBefore.length} → ${filesAfter.length})`);
+		ctx.pass("history isolation — new JSONL file created", `New conversation produced a new file (${filesBefore.length} → ${filesAfter.length})`);
 	} else if (filesAfter.length === filesBefore.length && filesAfter.length > 0) {
-		pass("history isolation — file count stable", "File count unchanged; new conversation may share a file");
+		ctx.pass("history isolation — file count stable", "File count unchanged; new conversation may share a file");
 	} else if (filesAfter.length === 0) {
-		fail("history isolation — JSONL files exist", "No JSONL files after new conversation");
+		ctx.fail("history isolation — JSONL files exist", "No JSONL files after new conversation");
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main test function
 // ---------------------------------------------------------------------------
-async function main() {
-	console.log("=== Notor Stale Content & History Persistence Test ===\n");
-	console.log("Provider:  AWS Bedrock");
-	console.log("Auth:      AWS profile (default)");
-	console.log("Region:    us-east-1");
-	console.log("Model:     deepseek.v3.2\n");
 
-	console.log("[0/5] Building plugin...");
-	execSync("npm run build", { cwd: path.resolve(__dirname, "..", ".."), stdio: "inherit" });
-	console.log("Build complete.\n");
+async function tests(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 
-	console.log("[1/5] Setting up test vault...");
-	setupTestVault();
-	console.log("");
+	// Wait for plugin init
+	await page.waitForTimeout(5_000);
 
-	console.log("[2/5] Injecting settings (Act mode, all tools auto-approved)...");
-	const settings = buildSettings();
-	fs.mkdirSync(BUILD_DIR, { recursive: true });
-
-	let existingData: string | null = null;
-	if (fs.existsSync(PLUGIN_DATA_PATH)) {
-		existingData = fs.readFileSync(PLUGIN_DATA_PATH, "utf8");
-		console.log("  Backed up existing data.json");
+	// Verify chat panel
+	const chatContainer = await waitForSelector(page, ".notor-chat-container", 10_000);
+	if (!chatContainer) {
+		const shot = await ctx.screenshot("00-no-chat-panel");
+		ctx.fail("Chat panel visible", ".notor-chat-container not found", shot);
+		throw new Error("Chat panel not visible — cannot run tests");
 	}
-	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	console.log(`  Wrote settings to ${PLUGIN_DATA_PATH}\n`);
+	const shot = await ctx.screenshot("00-chat-ready");
+	ctx.pass("Chat panel ready", "Plugin loaded and chat container found", shot);
 
-	fs.mkdirSync(LOGS_DIR, { recursive: true });
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+	// Part A: Stale Content
+	await testStaleContentBlocksWrite(ctx);
+	await testFreshWriteSucceeds(ctx);
+	await testStaleContentRecovery(ctx);
 
-	let obsidian: ObsidianProcess | undefined;
-	let collector: LogCollector | undefined;
-
-	try {
-		console.log("[3/5] Launching Obsidian...");
-		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
-
-		console.log("[4/5] Connecting Playwright...");
-		const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
-		const contexts = browser.contexts();
-		const page = contexts[0]?.pages()[0];
-		if (!page) throw new Error("No page found");
-
-		collector = new LogCollector({ outputDir: LOGS_DIR });
-		collector.attach(page);
-
-		await page.waitForLoadState("domcontentloaded");
-		await page.waitForTimeout(5_000);
-
-		console.log("[5/5] Verifying chat panel and running tests...");
-		{
-			const chatContainer = await waitForSelector(page, ".notor-chat-container", 10_000);
-			if (!chatContainer) {
-				const shot = await screenshot(page, "00-no-chat-panel");
-				fail("Chat panel visible", ".notor-chat-container not found", shot);
-				throw new Error("Chat panel not visible — cannot run tests");
-			}
-			const shot = await screenshot(page, "00-chat-ready");
-			pass("Chat panel ready", "Plugin loaded and chat container found", shot);
-		}
-
-		// Part A: Stale Content
-		await testStaleContentBlocksWrite(page);
-		await testFreshWriteSucceeds(page);
-		await testStaleContentRecovery(page);
-
-		// Part B: History Persistence
-		await testHistoryFileCreated(page);
-		await testHistoryFileStructure(page);
-		await testHistoryPanelShowsConversations(page);
-		await testSwitchToHistoryConversation(page);
-		await testNewConversationPreservesHistory(page);
-
-		await screenshot(page, "99-final");
-
-		console.log("\n=== Collecting final logs ===");
-		await page.waitForTimeout(1_000);
-		const summaryPath = await collector.writeSummary();
-		console.log(`Log summary: ${summaryPath}`);
-
-		const errors = collector.getLogsByLevel("error");
-		if (errors.length > 0) {
-			console.log(`\nPlugin errors captured (${errors.length}):`);
-			for (const e of errors.slice(-10)) {
-				console.log(`  [${e.source}] ${e.message}`, e.data ?? "");
-			}
-		}
-
-		await browser.close().catch(() => {});
-
-	} catch (err) {
-		console.error("\nFatal error:", err);
-		if (collector) await collector.dispose().catch(() => {});
-	} finally {
-		if (obsidian) await closeObsidian(obsidian);
-
-		if (existingData !== null) {
-			fs.writeFileSync(PLUGIN_DATA_PATH, existingData);
-			console.log("\nRestored original data.json");
-		} else {
-			try { fs.unlinkSync(PLUGIN_DATA_PATH); } catch { /* ignore */ }
-			console.log("\nRemoved injected data.json");
-		}
-	}
-
-	const passed = results.filter((r) => r.passed).length;
-	const failed = results.filter((r) => !r.passed).length;
-
-	console.log("\n=== Test Results ===");
-	console.log(`Passed: ${passed}/${results.length}`);
-	console.log(`Failed: ${failed}/${results.length}`);
-
-	if (failed > 0) {
-		console.log("\nFailed tests:");
-		for (const r of results.filter((r) => !r.passed)) {
-			console.log(`  ✗ ${r.name}: ${r.detail}`);
-		}
-	}
-
-	const resultsPath = path.join(RESULTS_DIR, "stale-content-results.json");
-	fs.writeFileSync(resultsPath, JSON.stringify({ passed, failed, total: results.length, results }, null, 2));
-	console.log(`\nResults written to: ${resultsPath}`);
-
-	if (failed > 0) process.exit(1);
+	// Part B: History Persistence
+	await testHistoryFileCreated(ctx);
+	await testHistoryFileStructure(ctx);
+	await testHistoryPanelShowsConversations(ctx);
+	await testSwitchToHistoryConversation(ctx);
+	await testNewConversationPreservesHistory(ctx);
 }
 
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+runTest(
+	{
+		name: "stale-content",
+		settings: buildDefaultSettings({
+			mode: "act",
+			auto_approve: {
+				read_note: true,
+				search_vault: true,
+				list_vault: true,
+				read_frontmatter: true,
+				write_note: true,
+				replace_in_note: true,
+				update_frontmatter: true,
+				manage_tags: true,
+			},
+		}),
+		setupVault: setupTestVault,
+		cleanupFiles: ["Stale-Content-Test.md"],
+	},
+	tests,
+);
