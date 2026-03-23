@@ -329,6 +329,7 @@ export function buildDefaultSettings(overrides?: Record<string, unknown>): Recor
 			read_note: true, search_vault: true, list_vault: true, read_frontmatter: true,
 			fetch_webpage: true, write_note: false, replace_in_note: false,
 			update_frontmatter: false, manage_tags: false, execute_command: false,
+			read_file: false, read_docx: false, write_docx: false,
 		},
 		mode: "plan",
 		open_notes_on_access: true,
@@ -358,6 +359,18 @@ export function buildDefaultSettings(overrides?: Record<string, unknown>): Recor
 		hooks: { pre_send: [], on_tool_call: [], on_tool_result: [], after_completion: [] },
 		hook_timeout: 10,
 		hook_env_truncation_chars: 10000,
+		active_persona: "",
+		vault_event_hooks: {
+			on_note_open: [], on_note_create: [], on_save: [],
+			on_manual_save: [], on_tag_change: [], on_schedule: [],
+		},
+		vault_event_debounce_seconds: 5,
+		workflow_concurrency_limit: 3,
+		workflow_activity_indicator_count: 5,
+		mcp_servers: {},
+		read_file_allowed_paths: [],
+		write_docx_default_output_dir: "",
+		write_docx_default_template_path: "",
 	};
 
 	if (!overrides) return base;

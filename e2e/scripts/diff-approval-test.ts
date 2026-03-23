@@ -254,8 +254,9 @@ async function testWriteNoteApprove(ctx: TestContext): Promise<void> {
 	}
 
 	// Verify tool call status shows success/approved
-	const toolSuccess = await page.$(".notor-tool-call.notor-tool-success, .notor-tool-call[data-status='success'], .notor-tool-call[data-status='approved']");
-	const toolError = await page.$(".notor-tool-call.notor-tool-error, .notor-tool-call[data-status='error']");
+	// The plugin renders status as `.notor-tool-status-{status}` on an inner badge element.
+	const toolSuccess = await page.$(".notor-tool-status-success, .notor-tool-status-approved");
+	const toolError = await page.$(".notor-tool-status-error, .notor-tool-result-error");
 	if (toolSuccess) {
 		ctx.pass("write_note approve — tool call shows success", "Tool call card has success status");
 	} else if (!toolError) {
@@ -372,9 +373,11 @@ async function testReplaceInNoteApprovalUI(ctx: TestContext): Promise<void> {
 	ctx.pass("replace_in_note — approval UI appeared", "Approval or diff UI present", shot);
 
 	// Look for per-change controls
-	const perChangeControls = await page.$$(".notor-diff-change-approve, .notor-diff-accept-change, [data-change-index]");
-	const acceptAllBtn = await page.$(".notor-accept-all-btn, [aria-label='Accept all']");
-	const rejectAllBtn = await page.$(".notor-reject-all-btn, [aria-label='Reject all']");
+	// The plugin renders per-block toggle buttons as `.notor-diff-block-toggle`
+	// and bulk action buttons as `.notor-diff-accept-btn` / `.notor-diff-reject-btn`.
+	const perChangeControls = await page.$$(".notor-diff-block-toggle");
+	const acceptAllBtn = await page.$(".notor-diff-accept-btn");
+	const rejectAllBtn = await page.$(".notor-diff-reject-btn");
 	const approveBtn = await page.$(".notor-approve-btn");
 	const rejectBtn = await page.$(".notor-reject-btn");
 	const diffLines = await page.$$(".notor-diff-add, .notor-diff-del");
@@ -444,7 +447,7 @@ async function testReplaceInNoteApprove(ctx: TestContext): Promise<void> {
 	await ctx.screenshot("05-replace-approve-before");
 
 	// Approve the change
-	const acceptAllBtn = await page.$(".notor-accept-all-btn, [aria-label='Accept all']");
+	const acceptAllBtn = await page.$(".notor-diff-accept-btn");
 	const approveBtn = await page.$(".notor-approve-btn");
 
 	if (acceptAllBtn) {
