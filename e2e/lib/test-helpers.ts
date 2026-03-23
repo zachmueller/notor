@@ -117,13 +117,23 @@ export async function waitForResponse(
 /**
  * Send a chat message and wait for the response.
  * The input is a contenteditable div.
+ *
+ * Uses `page.evaluate()` to set the contenteditable div's text directly,
+ * avoiding `keyboard.type()` which dispatches Enter keydown events for `\n`
+ * characters — those would trigger the plugin's Enter-to-send handler and
+ * prematurely send a partial message.
  */
 export async function sendMessage(page: Page, message: string): Promise<boolean> {
-	const input = await page.$(".notor-text-input");
-	if (!input) throw new Error("Chat input not found");
+	const found = await page.evaluate((msg) => {
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		if (!el) return false;
+		el.focus();
+		el.textContent = msg;
+		el.dispatchEvent(new Event("input", { bubbles: true }));
+		return true;
+	}, message);
+	if (!found) throw new Error("Chat input not found");
 
-	await input.click();
-	await page.keyboard.type(message);
 	await page.waitForTimeout(300);
 
 	const sendBtn = await page.$(".notor-send-btn");
@@ -141,6 +151,11 @@ export async function sendMessage(page: Page, message: string): Promise<boolean>
 
 /**
  * Send a message and auto-approve any approval dialog that appears mid-response.
+ *
+ * Uses `page.evaluate()` to set the contenteditable div's text directly,
+ * avoiding `keyboard.type()` which dispatches Enter keydown events for `\n`
+ * characters — those would trigger the plugin's Enter-to-send handler and
+ * prematurely send a partial message.
  */
 export async function sendMessageWithApprovalHandling(
 	page: Page,
@@ -148,11 +163,16 @@ export async function sendMessageWithApprovalHandling(
 	timeoutMs = RESPONSE_TIMEOUT_MS,
 	pollMs = POLL_INTERVAL_MS,
 ): Promise<{ responded: boolean; approved: boolean }> {
-	const input = await page.$(".notor-text-input");
-	if (!input) throw new Error("Chat input not found");
+	const found = await page.evaluate((msg) => {
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		if (!el) return false;
+		el.focus();
+		el.textContent = msg;
+		el.dispatchEvent(new Event("input", { bubbles: true }));
+		return true;
+	}, message);
+	if (!found) throw new Error("Chat input not found");
 
-	await input.click();
-	await page.keyboard.type(message);
 	await page.waitForTimeout(300);
 
 	const sendBtn = await page.$(".notor-send-btn");

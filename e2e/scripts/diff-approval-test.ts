@@ -62,13 +62,23 @@ async function waitForApprovalUI(page: Page, timeoutMs = 30_000): Promise<boolea
 /**
  * Send a chat message and return (without waiting for the full response so the
  * caller can intercept the approval UI mid-flight).
+ *
+ * Uses `page.evaluate()` to set the contenteditable div's text directly,
+ * avoiding `keyboard.type()` which dispatches Enter keydown events for `\n`
+ * characters — those would trigger the plugin's Enter-to-send handler and
+ * prematurely send a partial message.
  */
 async function sendMessageNoWait(page: Page, message: string): Promise<void> {
-	const input = await page.$(".notor-text-input");
-	if (!input) throw new Error("Chat input not found");
+	const found = await page.evaluate((msg) => {
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		if (!el) return false;
+		el.focus();
+		el.textContent = msg;
+		el.dispatchEvent(new Event("input", { bubbles: true }));
+		return true;
+	}, message);
+	if (!found) throw new Error("Chat input not found");
 
-	await input.click();
-	await page.keyboard.type(message);
 	await page.waitForTimeout(300);
 
 	const sendBtn = await page.$(".notor-send-btn");
@@ -165,8 +175,8 @@ async function testWriteNoteApprovalUIAppears(ctx: TestContext): Promise<void> {
 		return btn ? btn.disabled || btn.classList.contains("notor-hidden") : true;
 	});
 	const textareaDisabled = await page.evaluate(() => {
-		const ta = document.querySelector(".notor-text-input") as HTMLTextAreaElement | null;
-		return ta ? ta.disabled : false;
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		return el ? el.getAttribute("contenteditable") === "false" : false;
 	});
 
 	if (sendDisabled || textareaDisabled) {
@@ -490,16 +500,10 @@ async function testAutoApproveDiffCollapsed(ctx: TestContext): Promise<void> {
 	if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
 
 	// With auto-approve ON the response completes without any approval prompt
-	const input = await page.$(".notor-text-input");
-	if (!input) throw new Error("Chat input not found");
-	await input.click();
-	await page.keyboard.type("Please create a note at 'Diff-AutoApproved.md' with content:\n\n# Auto Approved\n\nThis note was auto-approved.\n");
-	await page.waitForTimeout(300);
-	const sendBtn = await page.$(".notor-send-btn");
-	if (sendBtn) await sendBtn.click();
-	else await page.keyboard.press("Enter");
-	await page.waitForTimeout(600);
-	console.log(`    → Sent auto-approve test message`);
+	await sendMessageNoWait(
+		page,
+		"Please create a note at 'Diff-AutoApproved.md' with content:\n\n# Auto Approved\n\nThis note was auto-approved.\n"
+	);
 
 	const responded = await waitForResponse(page);
 
