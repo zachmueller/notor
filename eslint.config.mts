@@ -36,6 +36,25 @@ export default tseslint.config(
 		},
 	},
 
+	// Allow fetch in provider files — requestUrl does not support streaming;
+	// fetch is required for SSE/chunked inference responses
+	{
+		files: ["src/providers/**/*.ts"],
+		rules: {
+			"no-restricted-globals": [
+				"error",
+				{
+					name: "app",
+					message: "Avoid using the global app object. Instead use the reference provided by your plugin instance.",
+				},
+				{
+					name: "localStorage",
+					message: "Prefer `App#saveLocalStorage` / `App#loadLocalStorage` functions to write / read localStorage data that's unique to a vault.",
+				},
+			],
+		},
+	},
+
 	// Project-specific rule overrides for src/**/*.ts
 	{
 		files: ["src/**/*.ts"],

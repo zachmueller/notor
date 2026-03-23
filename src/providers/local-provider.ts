@@ -53,7 +53,6 @@ async function fetchWithTimeout(
 		: timeoutController.signal;
 
 	try {
-		// eslint-disable-next-line no-restricted-globals -- requestUrl does not support streaming; fetch is required for SSE/chunked inference responses
 		return await fetch(url, { ...init, signal: combinedSignal });
 	} finally {
 		clearTimeout(timer);
@@ -189,7 +188,6 @@ export class LocalProvider implements LLMProvider {
 
 		let response: Response;
 		try {
-			// eslint-disable-next-line no-restricted-globals -- requestUrl does not support streaming; fetch is required for SSE/chunked inference responses
 			response = await fetch(url, {
 				method: "POST",
 				headers,
@@ -333,7 +331,6 @@ export class LocalProvider implements LLMProvider {
 
 		let response: Response;
 		try {
-			// eslint-disable-next-line no-restricted-globals -- fetch used here for API consistency with the streaming inference calls in this provider class
 			response = await fetch(url, { headers });
 		} catch (e: unknown) {
 			throw new ProviderError(
