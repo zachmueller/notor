@@ -34,7 +34,7 @@ The design is based on research into the Ralph orchestrator as a reference imple
 **Acceptance Criteria:**
 - Hat notes are discovered by Notor from the `{notor_dir}/orchestrations/hats/` directory.
 - The frontmatter schema includes:
-  - `notor-type: hat` (required; marks the note as a hat definition). Note: this introduces a new `notor-type` discriminator convention; existing workflows use `notor-workflow: true` instead. The `notor-type` pattern is preferred for orchestration entities and may be adopted by other note types in the future.
+  - `notor-type: hat` (required; marks the note as a hat definition). Note: this introduces a new `notor-type` discriminator convention; existing workflows use `notor-workflow: true` instead. The `notor-type` pattern is the standard going forward — existing workflows will migrate from `notor-workflow: true` to `notor-type: workflow` in a follow-up change outside Phase 5 scope.
   - `notor-hat-name` — display name (required; may include emoji)
   - `notor-hat-description` — one-line description (required; displayed in preset picker and topology table)
   - `notor-hat-triggers` — list of event topics that activate this hat (required)
