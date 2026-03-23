@@ -334,7 +334,7 @@ async function generateDocx(
 
 	templateZip.file("word/document.xml", newTemplateXml);
 
-	return templateZip.generate({ type: "nodebuffer" }) as Buffer;
+	return templateZip.generate({ type: "nodebuffer" });
 }
 
 // ---------------------------------------------------------------------------
