@@ -24,32 +24,21 @@
  * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-024
  */
 
-import { execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright-core";
+import type { Page } from "playwright-core";
+import { runTest, type TestContext } from "../lib/test-harness";
 import {
-	launchObsidian,
-	closeObsidian,
-	type ObsidianProcess,
-} from "../lib/obsidian-launcher";
-import { LogCollector, type LogEntry } from "../lib/log-collector";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+	buildDefaultSettings,
+	waitForSelector,
+	VAULT_PATH,
+	PLUGIN_DATA_PATH,
+} from "../lib/test-helpers";
+import { type LogCollector, type LogEntry } from "../lib/log-collector";
 
 // ---------------------------------------------------------------------------
-// Paths & constants
+// Local constants
 // ---------------------------------------------------------------------------
-
-const VAULT_PATH = path.resolve(__dirname, "..", "test-vault");
-const CDP_PORT = 9222;
-const RESULTS_DIR = path.resolve(__dirname, "..", "results");
-const SCREENSHOTS_DIR = path.join(RESULTS_DIR, "screenshots", "vault-event-hooks");
-const LOGS_DIR = path.join(RESULTS_DIR, "logs");
-const BUILD_DIR = path.resolve(__dirname, "..", "..", "build");
-const PLUGIN_DATA_PATH = path.join(BUILD_DIR, "data.json");
 
 /** Vault-relative path used for test notes */
 const TEST_NOTE_VAULT_PATH = "notor/test-note.md";
@@ -60,51 +49,12 @@ const HOOK_MARKER_FILE = path.join(VAULT_PATH, ".vault-hook-marker.txt");
 /** Append file for counting hook fires (one line per fire) */
 const HOOK_COUNTER_FILE = path.join(VAULT_PATH, ".vault-hook-counter.txt");
 
-const RESPONSE_TIMEOUT_MS = 60_000;
 const HOOK_WAIT_MS = 4_000;      // time to wait after triggering event for async hook to fire
 const SCHEDULE_WAIT_MS = 75_000; // time to wait for a 1-minute cron to fire
 
 // ---------------------------------------------------------------------------
-// Test infrastructure
+// Local helpers
 // ---------------------------------------------------------------------------
-
-interface TestResult {
-	name: string;
-	passed: boolean;
-	detail: string;
-	screenshot?: string;
-}
-
-const results: TestResult[] = [];
-
-function pass(name: string, detail: string, screenshot?: string): void {
-	console.log(`  ✓ PASS: ${name} — ${detail}`);
-	results.push({ name, passed: true, detail, screenshot });
-}
-
-function fail(name: string, detail: string, screenshot?: string): void {
-	console.error(`  ✗ FAIL: ${name} — ${detail}`);
-	results.push({ name, passed: false, detail, screenshot });
-}
-
-async function screenshot(page: Page, name: string): Promise<string> {
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	const file = path.join(SCREENSHOTS_DIR, `${name}.png`);
-	await page.screenshot({ path: file, fullPage: true });
-	return file;
-}
-
-async function waitForSelector(
-	page: Page,
-	selector: string,
-	timeoutMs = 8_000
-): Promise<import("playwright-core").ElementHandle | null> {
-	try {
-		return await page.waitForSelector(selector, { timeout: timeoutMs });
-	} catch {
-		return null;
-	}
-}
 
 /** Read the hook counter file and return the number of lines (= number of fires). */
 function readHookFireCount(): number {
@@ -131,10 +81,6 @@ function logsContaining(collector: LogCollector, substr: string): LogEntry[] {
 	);
 }
 
-// ---------------------------------------------------------------------------
-// Settings builder
-// ---------------------------------------------------------------------------
-
 /** Minimal vault event hook config (all event arrays empty). */
 function emptyVaultEventHooks() {
 	return {
@@ -147,10 +93,8 @@ function emptyVaultEventHooks() {
 	};
 }
 
-function buildSettings(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-	return {
-		notor_dir: "notor/",
-		active_provider: "bedrock",
+function buildVaultEventSettings(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+	return buildDefaultSettings({
 		providers: [
 			{
 				type: "local",
@@ -180,60 +124,68 @@ function buildSettings(overrides: Record<string, unknown> = {}): Record<string, 
 			manage_tags: true,
 			execute_command: true,
 		},
-		mode: "plan",
 		open_notes_on_access: false,
-		history_path: ".obsidian/plugins/notor/history/",
-		history_max_size_mb: 500,
-		history_max_age_days: 90,
-		checkpoint_path: ".obsidian/plugins/notor/checkpoints/",
-		checkpoint_max_per_conversation: 100,
-		checkpoint_max_age_days: 30,
-		model_pricing: {},
-		auto_context_open_notes: false,
-		auto_context_vault_structure: false,
-		auto_context_os: false,
-		compaction_threshold: 0.8,
-		compaction_prompt_override: "",
-		fetch_webpage_timeout: 15,
-		fetch_webpage_max_download_mb: 5,
-		fetch_webpage_max_output_chars: 50000,
-		domain_denylist: [],
-		execute_command_timeout: 30,
-		execute_command_max_output_chars: 50000,
-		execute_command_allowed_paths: [],
-		execute_command_shell: "",
-		execute_command_shell_args: [],
-		external_file_size_threshold_mb: 1,
-		hooks: {
-			pre_send: [],
-			on_tool_call: [],
-			on_tool_result: [],
-			after_completion: [],
-		},
-		hook_timeout: 10,
-		hook_env_truncation_chars: 10000,
-		// Group F vault event hook settings
 		vault_event_hooks: emptyVaultEventHooks(),
 		vault_event_debounce_seconds: 3,
 		workflow_concurrency_limit: 3,
 		workflow_activity_indicator_count: 5,
 		...overrides,
-	};
+	});
+}
+
+/** Open Notor settings tab reliably and return whether the panel opened. */
+async function openNotorSettings(page: Page): Promise<boolean> {
+	await page.evaluate(() => {
+		const app = (window as unknown as { app?: { setting?: { open?: () => void; openTabById?: (id: string) => void } } }).app;
+		if (app?.setting?.open) {
+			app.setting.open();
+		}
+	});
+	await page.waitForTimeout(800);
+	await page.evaluate(() => {
+		const app = (window as unknown as { app?: { setting?: { openTabById?: (id: string) => void } } }).app;
+		app?.setting?.openTabById?.("notor");
+	});
+	await page.waitForTimeout(2_500);
+
+	const isOpen = await page.evaluate(() => {
+		const modal = document.querySelector(".modal-container, .vertical-tab-content-container, .community-plugin-tab");
+		const body = (document.body.textContent ?? "").toLowerCase();
+		return modal !== null || body.includes("vault event hooks") || body.includes("notor settings");
+	});
+
+	if (!isOpen) {
+		await page.evaluate(() => {
+			const app = (window as unknown as { app?: { commands?: { executeCommandById?: (id: string) => void } } }).app;
+			app?.commands?.executeCommandById?.("app:open-settings");
+		});
+		await page.waitForTimeout(1_500);
+		await page.evaluate(() => {
+			const tabs = Array.from(document.querySelectorAll(".vertical-tab-nav-item, .community-plugin-tab"));
+			const notorTab = tabs.find((el) => (el.textContent ?? "").includes("Notor"));
+			if (notorTab) (notorTab as HTMLElement).click();
+		});
+		await page.waitForTimeout(1_000);
+	}
+
+	return await page.evaluate(() => {
+		const body = (document.body.textContent ?? "").toLowerCase();
+		return body.includes("vault event hooks") || body.includes("on note open") || body.includes("on schedule");
+	});
 }
 
 // ---------------------------------------------------------------------------
 // Test fixture setup
 // ---------------------------------------------------------------------------
 
-function ensureTestFixtures(): void {
-	// Ensure the test note exists
-	fs.mkdirSync(path.dirname(TEST_NOTE_FS_PATH), { recursive: true });
-	if (!fs.existsSync(TEST_NOTE_FS_PATH)) {
-		fs.writeFileSync(TEST_NOTE_FS_PATH, "# Test Note\n\nContent for vault event hook tests.\n");
+function ensureTestFixtures(vaultPath: string): void {
+	const testNoteFs = path.join(vaultPath, TEST_NOTE_VAULT_PATH);
+	fs.mkdirSync(path.dirname(testNoteFs), { recursive: true });
+	if (!fs.existsSync(testNoteFs)) {
+		fs.writeFileSync(testNoteFs, "# Test Note\n\nContent for vault event hook tests.\n");
 	}
 
-	// Ensure a workflow exists for "run a workflow" action tests
-	const workflowDir = path.join(VAULT_PATH, "notor", "workflows");
+	const workflowDir = path.join(vaultPath, "notor", "workflows");
 	fs.mkdirSync(workflowDir, { recursive: true });
 	fs.writeFileSync(
 		path.join(workflowDir, "hook-triggered.md"),
@@ -246,7 +198,6 @@ You are a background workflow triggered by a vault event hook. Respond with a si
 `
 	);
 
-	// Ensure a workflow with on-save trigger exists for lazy-listener + loop-prevention tests
 	fs.writeFileSync(
 		path.join(workflowDir, "on-save-triggered.md"),
 		`---
@@ -265,28 +216,25 @@ You are a background workflow triggered by the on-save vault event. Respond with
 // Individual tests
 // ---------------------------------------------------------------------------
 
-/** Test 1: Plugin loads and chat panel is visible. */
-async function testPluginLoads(page: Page): Promise<void> {
+async function testPluginLoads(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 1: Plugin loads ─────────────────────────────────────");
 
-	const chat = await waitForSelector(page, ".notor-chat-container", 12_000);
-	const shot = await screenshot(page, "01-plugin-loads");
+	const chat = await waitForSelector(ctx.page, ".notor-chat-container", 12_000);
+	const shot = await ctx.screenshot("01-plugin-loads");
 
 	if (chat) {
-		pass("Plugin loads", "Found .notor-chat-container — plugin initialized successfully", shot);
+		ctx.pass("Plugin loads", "Found .notor-chat-container — plugin initialized successfully", shot);
 	} else {
-		fail("Plugin loads", ".notor-chat-container not found within 12 s", shot);
+		ctx.fail("Plugin loads", ".notor-chat-container not found within 12 s", shot);
 	}
 }
 
-/** Test 2: on-note-open dispatches hook; rapid re-open is debounced. */
-async function testOnNoteOpen(page: Page, collector: LogCollector): Promise<void> {
+async function testOnNoteOpen(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 2: on-note-open hook ────────────────────────────────");
 
 	clearHookFiles();
 
-	// Configure a single on_note_open hook that appends a line to the counter file
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_note_open: [
@@ -302,64 +250,61 @@ async function testOnNoteOpen(page: Page, collector: LogCollector): Promise<void
 				},
 			],
 		},
-		// Short debounce so rapid-open test is realistic but doesn't take long
 		vault_event_debounce_seconds: 3,
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	// Open the test note via app.workspace API
-	await page.evaluate((notePath: string) => {
+	await ctx.page.evaluate((notePath: string) => {
 		const app = (window as unknown as { app?: { workspace?: { openLinkText?: (text: string, sourcePath: string) => Promise<void> } } }).app;
 		return app?.workspace?.openLinkText?.(notePath, "");
 	}, TEST_NOTE_VAULT_PATH);
 
-	await page.waitForTimeout(HOOK_WAIT_MS);
-	const shot1 = await screenshot(page, "02a-on-note-open-first");
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
+	const shot1 = await ctx.screenshot("02a-on-note-open-first");
 	const countAfterFirst = readHookFireCount();
 
 	if (countAfterFirst >= 1) {
-		pass(
+		ctx.pass(
 			"on-note-open: hook fires on open",
 			`Counter file has ${countAfterFirst} line(s) after first open`,
 			shot1
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"on-note-open: hook fires on open",
 			`Counter file has ${countAfterFirst} line(s) after first open — expected ≥ 1`,
 			shot1
 		);
 	}
 
-	// Re-open the same note immediately — should be debounced (debounce window is 3 s)
-	await page.evaluate((notePath: string) => {
+	// Re-open the same note immediately — should be debounced
+	await ctx.page.evaluate((notePath: string) => {
 		const app = (window as unknown as { app?: { workspace?: { openLinkText?: (text: string, sourcePath: string) => Promise<void> } } }).app;
 		return app?.workspace?.openLinkText?.(notePath, "");
 	}, TEST_NOTE_VAULT_PATH);
 
-	await page.waitForTimeout(1_500); // within debounce window
-	const shot2 = await screenshot(page, "02b-on-note-open-debounced");
+	await ctx.page.waitForTimeout(1_500);
+	const shot2 = await ctx.screenshot("02b-on-note-open-debounced");
 	const countAfterDebounce = readHookFireCount();
 
 	if (countAfterDebounce === countAfterFirst) {
-		pass(
+		ctx.pass(
 			"on-note-open: rapid re-open is debounced",
 			`Counter still ${countAfterDebounce} line(s) after immediate re-open (debounce active)`,
 			shot2
 		);
 	} else {
-		// Also accept if structured logs confirm debounce fired (hook may execute fast)
-		const debounceLogs = logsContaining(collector, "debounce");
+		const debounceLogs = logsContaining(ctx.collector, "debounce");
 		if (debounceLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"on-note-open: rapid re-open is debounced",
 				`Counter incremented but debounce logs found (${debounceLogs.length}): "${debounceLogs[0]!.message}"`,
 				shot2
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"on-note-open: rapid re-open is debounced",
 				`Counter went from ${countAfterFirst} to ${countAfterDebounce} within debounce window`,
 				shot2
@@ -370,18 +315,16 @@ async function testOnNoteOpen(page: Page, collector: LogCollector): Promise<void
 	clearHookFiles();
 }
 
-/** Test 3: on-note-create dispatches hook when a new note is created. */
-async function testOnNoteCreate(page: Page, collector: LogCollector): Promise<void> {
+async function testOnNoteCreate(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 3: on-note-create hook ──────────────────────────────");
 
 	clearHookFiles();
 
 	const newNotePath = "notor/created-by-test.md";
 	const newNoteFs = path.join(VAULT_PATH, newNotePath);
-	// Remove the note if it already exists from a previous run
 	if (fs.existsSync(newNoteFs)) fs.unlinkSync(newNoteFs);
 
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_note_create: [
@@ -399,36 +342,34 @@ async function testOnNoteCreate(page: Page, collector: LogCollector): Promise<vo
 		},
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	// Create the note via vault API inside Obsidian
-	await page.evaluate((p: string) => {
+	await ctx.page.evaluate((p: string) => {
 		const app = (window as unknown as { app?: { vault?: { create?: (path: string, content: string) => Promise<unknown> } } }).app;
 		return app?.vault?.create?.(p, "# Created by E2E test\n");
 	}, newNotePath);
 
-	await page.waitForTimeout(HOOK_WAIT_MS);
-	const shot = await screenshot(page, "03-on-note-create");
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
+	const shot = await ctx.screenshot("03-on-note-create");
 	const count = readHookFireCount();
 
 	if (count >= 1) {
-		pass(
+		ctx.pass(
 			"on-note-create: hook fires on create",
 			`Counter file has ${count} line(s) after note creation`,
 			shot
 		);
 	} else {
-		// Also accept structured log evidence
-		const createLogs = logsContaining(collector, "on_note_create");
+		const createLogs = logsContaining(ctx.collector, "on_note_create");
 		if (createLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"on-note-create: hook fires on create",
 				`Counter file empty but structured logs confirm on_note_create dispatched (${createLogs.length} log(s))`,
 				shot
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"on-note-create: hook fires on create",
 				`Counter file has ${count} lines and no on_note_create structured logs found`,
 				shot
@@ -436,9 +377,8 @@ async function testOnNoteCreate(page: Page, collector: LogCollector): Promise<vo
 		}
 	}
 
-	// Clean up the created note
 	try {
-		await page.evaluate((p: string) => {
+		await ctx.page.evaluate((p: string) => {
 			const app = (window as unknown as { app?: { vault?: { adapter?: { remove?: (path: string) => Promise<void> } } } }).app;
 			return app?.vault?.adapter?.remove?.(p);
 		}, newNotePath);
@@ -449,13 +389,12 @@ async function testOnNoteCreate(page: Page, collector: LogCollector): Promise<vo
 	clearHookFiles();
 }
 
-/** Test 4: on-save dispatches hook; rapid saves are debounced. */
-async function testOnSave(page: Page, collector: LogCollector): Promise<void> {
+async function testOnSave(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 4: on-save hook ─────────────────────────────────────");
 
 	clearHookFiles();
 
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_save: [
@@ -474,12 +413,11 @@ async function testOnSave(page: Page, collector: LogCollector): Promise<void> {
 		vault_event_debounce_seconds: 3,
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	// Trigger a modify event by writing to the test note via the vault API
 	const newContent = `# Test Note\n\nModified at ${Date.now()} for on-save test.\n`;
-	await page.evaluate(
+	await ctx.page.evaluate(
 		(args: { p: string; c: string }) => {
 			const app = (window as unknown as { app?: { vault?: { adapter?: { write?: (path: string, data: string) => Promise<void> } } } }).app;
 			return app?.vault?.adapter?.write?.(args.p, args.c);
@@ -487,26 +425,26 @@ async function testOnSave(page: Page, collector: LogCollector): Promise<void> {
 		{ p: TEST_NOTE_VAULT_PATH, c: newContent }
 	);
 
-	await page.waitForTimeout(HOOK_WAIT_MS);
-	const shot1 = await screenshot(page, "04a-on-save-first");
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
+	const shot1 = await ctx.screenshot("04a-on-save-first");
 	const countAfterFirst = readHookFireCount();
 
 	if (countAfterFirst >= 1) {
-		pass(
+		ctx.pass(
 			"on-save: hook fires on save",
 			`Counter has ${countAfterFirst} line(s) after first save`,
 			shot1
 		);
 	} else {
-		const saveLogs = logsContaining(collector, "on_save");
+		const saveLogs = logsContaining(ctx.collector, "on_save");
 		if (saveLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"on-save: hook fires on save",
 				`Counter empty but structured logs confirm on_save dispatched (${saveLogs.length} log(s))`,
 				shot1
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"on-save: hook fires on save",
 				`Counter has ${countAfterFirst} lines and no on_save structured logs found`,
 				shot1
@@ -516,7 +454,7 @@ async function testOnSave(page: Page, collector: LogCollector): Promise<void> {
 
 	// Rapid second save — should be debounced
 	const newContent2 = `# Test Note\n\nModified again at ${Date.now()} (rapid save).\n`;
-	await page.evaluate(
+	await ctx.page.evaluate(
 		(args: { p: string; c: string }) => {
 			const app = (window as unknown as { app?: { vault?: { adapter?: { write?: (path: string, data: string) => Promise<void> } } } }).app;
 			return app?.vault?.adapter?.write?.(args.p, args.c);
@@ -524,27 +462,26 @@ async function testOnSave(page: Page, collector: LogCollector): Promise<void> {
 		{ p: TEST_NOTE_VAULT_PATH, c: newContent2 }
 	);
 
-	await page.waitForTimeout(1_000); // within debounce window
-	const shot2 = await screenshot(page, "04b-on-save-debounced");
+	await ctx.page.waitForTimeout(1_000);
+	const shot2 = await ctx.screenshot("04b-on-save-debounced");
 	const countAfterDebounce = readHookFireCount();
 
 	if (countAfterDebounce === countAfterFirst) {
-		pass(
+		ctx.pass(
 			"on-save: rapid save is debounced",
 			`Counter still ${countAfterDebounce} after rapid second save (debounce active)`,
 			shot2
 		);
 	} else {
-		// Accept if debounce logs are present
-		const debounceLogs = logsContaining(collector, "debounce");
+		const debounceLogs = logsContaining(ctx.collector, "debounce");
 		if (debounceLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"on-save: rapid save is debounced",
 				`Counter incremented but debounce evidence in logs (${debounceLogs.length})`,
 				shot2
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"on-save: rapid save is debounced",
 				`Counter went from ${countAfterFirst} to ${countAfterDebounce} within debounce window — expected no change`,
 				shot2
@@ -555,13 +492,12 @@ async function testOnSave(page: Page, collector: LogCollector): Promise<void> {
 	clearHookFiles();
 }
 
-/** Test 5: on-manual-save dispatches on Cmd/Ctrl+S; does not fire for programmatic saves. */
-async function testOnManualSave(page: Page, collector: LogCollector): Promise<void> {
+async function testOnManualSave(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 5: on-manual-save hook ──────────────────────────────");
 
 	clearHookFiles();
 
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_manual_save: [
@@ -580,20 +516,18 @@ async function testOnManualSave(page: Page, collector: LogCollector): Promise<vo
 		vault_event_debounce_seconds: 3,
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	// Open the test note so there is an active editor for Cmd+S / Ctrl+S
-	await page.evaluate((notePath: string) => {
+	await ctx.page.evaluate((notePath: string) => {
 		const app = (window as unknown as { app?: { workspace?: { openLinkText?: (text: string, src: string) => Promise<void> } } }).app;
 		return app?.workspace?.openLinkText?.(notePath, "");
 	}, TEST_NOTE_VAULT_PATH);
-	await page.waitForTimeout(2_000);
+	await ctx.page.waitForTimeout(2_000);
 
-	// Desktop-only guard: check if Platform.isDesktopApp is true inside Obsidian
-	const isDesktop = await page.evaluate(() => {
+	const isDesktop = await ctx.page.evaluate(() => {
 		const obsi = (window as unknown as { require?: (m: string) => { Platform?: { isDesktopApp?: boolean } } }).require;
-		if (!obsi) return true; // assume desktop in Electron
+		if (!obsi) return true;
 		try {
 			return obsi("obsidian")?.Platform?.isDesktopApp ?? true;
 		} catch {
@@ -602,7 +536,7 @@ async function testOnManualSave(page: Page, collector: LogCollector): Promise<vo
 	});
 
 	if (!isDesktop) {
-		pass(
+		ctx.pass(
 			"on-manual-save: desktop-only guard",
 			"Platform.isDesktopApp is false — on-manual-save correctly disabled on mobile (skipping dispatch test)",
 		);
@@ -612,56 +546,54 @@ async function testOnManualSave(page: Page, collector: LogCollector): Promise<vo
 
 	// First: programmatic write — should NOT fire on_manual_save
 	const progContent = `# Test Note\n\nProgrammatic save at ${Date.now()}.\n`;
-	await page.evaluate(
+	await ctx.page.evaluate(
 		(args: { p: string; c: string }) => {
 			const app = (window as unknown as { app?: { vault?: { adapter?: { write?: (path: string, data: string) => Promise<void> } } } }).app;
 			return app?.vault?.adapter?.write?.(args.p, args.c);
 		},
 		{ p: TEST_NOTE_VAULT_PATH, c: progContent }
 	);
-	await page.waitForTimeout(HOOK_WAIT_MS);
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
 	const countAfterProgrammatic = readHookFireCount();
 
 	if (countAfterProgrammatic === 0) {
-		pass(
+		ctx.pass(
 			"on-manual-save: programmatic save does NOT fire hook",
 			"Counter is 0 after programmatic vault write — on_manual_save correctly suppressed",
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"on-manual-save: programmatic save does NOT fire hook",
 			`Counter is ${countAfterProgrammatic} after programmatic write — expected 0`,
 		);
 	}
 
-	// Second: trigger save via app.commands.executeCommandById("editor:save-file")
-	// This mimics Cmd+S / Ctrl+S exactly as the ManualSaveDetector intercepts it
-	await page.evaluate(() => {
+	// Second: trigger save via editor:save-file command
+	await ctx.page.evaluate(() => {
 		const app = (window as unknown as { app?: { commands?: { executeCommandById?: (id: string) => void } } }).app;
 		app?.commands?.executeCommandById?.("editor:save-file");
 	});
-	await page.waitForTimeout(HOOK_WAIT_MS);
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
 
-	const shot = await screenshot(page, "05-on-manual-save");
+	const shot = await ctx.screenshot("05-on-manual-save");
 	const countAfterManual = readHookFireCount();
 
 	if (countAfterManual >= 1) {
-		pass(
+		ctx.pass(
 			"on-manual-save: Cmd+S fires hook",
 			`Counter has ${countAfterManual} line(s) after editor:save-file command`,
 			shot
 		);
 	} else {
-		// Fall back to structured log check
-		const manualLogs = logsContaining(collector, "on_manual_save");
+		const manualLogs = logsContaining(ctx.collector, "on_manual_save");
 		if (manualLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"on-manual-save: Cmd+S fires hook",
 				`Counter empty but structured logs confirm on_manual_save dispatch (${manualLogs.length} log(s))`,
 				shot
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"on-manual-save: Cmd+S fires hook",
 				`Counter has ${countAfterManual} lines and no on_manual_save structured logs found`,
 				shot
@@ -672,18 +604,16 @@ async function testOnManualSave(page: Page, collector: LogCollector): Promise<vo
 	clearHookFiles();
 }
 
-/** Test 6: on-tag-change dispatches with correct diff; suppressed when Notor tools change tags. */
-async function testOnTagChange(page: Page, collector: LogCollector): Promise<void> {
+async function testOnTagChange(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 6: on-tag-change hook ───────────────────────────────");
 
 	clearHookFiles();
 
-	// Start with a clean note that has no tags
 	const tagTestNotePath = "notor/tag-test-note.md";
 	const tagTestNoteFs = path.join(VAULT_PATH, tagTestNotePath);
 	fs.writeFileSync(tagTestNoteFs, "---\ntags: []\n---\n\n# Tag Test Note\n");
 
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_tag_change: [
@@ -691,7 +621,6 @@ async function testOnTagChange(page: Page, collector: LogCollector): Promise<voi
 					id: "test-on-tag-1",
 					event: "on_tag_change",
 					action_type: "execute_command",
-					// Write NOTOR_TAGS_ADDED and NOTOR_TAGS_REMOVED env vars to marker
 					command: `echo "added=$NOTOR_TAGS_ADDED removed=$NOTOR_TAGS_REMOVED" >> "${HOOK_COUNTER_FILE}"`,
 					workflow_path: null,
 					label: "Test on-tag-change diff",
@@ -702,12 +631,12 @@ async function testOnTagChange(page: Page, collector: LogCollector): Promise<voi
 		},
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	// Add the tag "e2e-test" to the frontmatter via vault adapter write
+	// Add the tag "e2e-test"
 	const withTag = "---\ntags:\n  - e2e-test\n---\n\n# Tag Test Note\n";
-	await page.evaluate(
+	await ctx.page.evaluate(
 		(args: { p: string; c: string }) => {
 			const app = (window as unknown as { app?: { vault?: { adapter?: { write?: (path: string, data: string) => Promise<void> } } } }).app;
 			return app?.vault?.adapter?.write?.(args.p, args.c);
@@ -715,40 +644,38 @@ async function testOnTagChange(page: Page, collector: LogCollector): Promise<voi
 		{ p: tagTestNotePath, c: withTag }
 	);
 
-	await page.waitForTimeout(HOOK_WAIT_MS);
-	const shot1 = await screenshot(page, "06a-on-tag-change-add");
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
+	const shot1 = await ctx.screenshot("06a-on-tag-change-add");
 	const countAfterAdd = readHookFireCount();
 
 	if (countAfterAdd >= 1) {
-		// Check the counter file for tag diff evidence
 		const counterContent = fs.existsSync(HOOK_COUNTER_FILE)
 			? fs.readFileSync(HOOK_COUNTER_FILE, "utf8")
 			: "";
 		const hasAddedTag = counterContent.includes("e2e-test");
 		if (hasAddedTag) {
-			pass(
+			ctx.pass(
 				"on-tag-change: hook fires with correct added tags",
 				`Counter shows ${countAfterAdd} fire(s); NOTOR_TAGS_ADDED contains "e2e-test". Content: "${counterContent.trim()}"`,
 				shot1
 			);
 		} else {
-			pass(
+			ctx.pass(
 				"on-tag-change: hook fires on tag add",
 				`Counter shows ${countAfterAdd} fire(s) (env var content: "${counterContent.trim()}")`,
 				shot1
 			);
 		}
 	} else {
-		// Accept structured log evidence
-		const tagLogs = logsContaining(collector, "on_tag_change");
+		const tagLogs = logsContaining(ctx.collector, "on_tag_change");
 		if (tagLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"on-tag-change: hook fires on tag add",
 				`Counter empty but structured logs confirm on_tag_change dispatch (${tagLogs.length} log(s))`,
 				shot1
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"on-tag-change: hook fires on tag add",
 				`Counter is ${countAfterAdd} and no on_tag_change structured logs found after adding tag`,
 				shot1
@@ -756,10 +683,10 @@ async function testOnTagChange(page: Page, collector: LogCollector): Promise<voi
 		}
 	}
 
-	// Now remove the tag — hook should fire again with removed diff
+	// Remove the tag
 	clearHookFiles();
 	const withoutTag = "---\ntags: []\n---\n\n# Tag Test Note\n";
-	await page.evaluate(
+	await ctx.page.evaluate(
 		(args: { p: string; c: string }) => {
 			const app = (window as unknown as { app?: { vault?: { adapter?: { write?: (path: string, data: string) => Promise<void> } } } }).app;
 			return app?.vault?.adapter?.write?.(args.p, args.c);
@@ -767,8 +694,8 @@ async function testOnTagChange(page: Page, collector: LogCollector): Promise<voi
 		{ p: tagTestNotePath, c: withoutTag }
 	);
 
-	await page.waitForTimeout(HOOK_WAIT_MS);
-	const shot2 = await screenshot(page, "06b-on-tag-change-remove");
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
+	const shot2 = await ctx.screenshot("06b-on-tag-change-remove");
 	const countAfterRemove = readHookFireCount();
 	const counterContentRemove = fs.existsSync(HOOK_COUNTER_FILE)
 		? fs.readFileSync(HOOK_COUNTER_FILE, "utf8")
@@ -777,28 +704,28 @@ async function testOnTagChange(page: Page, collector: LogCollector): Promise<voi
 	if (countAfterRemove >= 1) {
 		const hasRemovedTag = counterContentRemove.includes("e2e-test");
 		if (hasRemovedTag) {
-			pass(
+			ctx.pass(
 				"on-tag-change: hook fires with correct removed tags",
 				`Counter shows ${countAfterRemove} fire(s); NOTOR_TAGS_REMOVED contains "e2e-test". Content: "${counterContentRemove.trim()}"`,
 				shot2
 			);
 		} else {
-			pass(
+			ctx.pass(
 				"on-tag-change: hook fires on tag remove",
 				`Counter shows ${countAfterRemove} fire(s) (env content: "${counterContentRemove.trim()}")`,
 				shot2
 			);
 		}
 	} else {
-		const tagLogs = logsContaining(collector, "on_tag_change");
+		const tagLogs = logsContaining(ctx.collector, "on_tag_change");
 		if (tagLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"on-tag-change: hook fires on tag remove",
 				`Counter empty but structured logs confirm on_tag_change (${tagLogs.length} total tag-change log(s))`,
 				shot2
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"on-tag-change: hook fires on tag remove",
 				`Counter is ${countAfterRemove} and no on_tag_change structured logs after removing tag`,
 				shot2
@@ -806,112 +733,61 @@ async function testOnTagChange(page: Page, collector: LogCollector): Promise<voi
 		}
 	}
 
-	// Check that a non-tag metadata change does NOT fire on_tag_change
+	// Body-only change — should NOT fire
 	clearHookFiles();
 	const bodyChange = "---\ntags: []\n---\n\n# Tag Test Note\n\nBody changed only.\n";
-	await page.evaluate(
+	await ctx.page.evaluate(
 		(args: { p: string; c: string }) => {
 			const app = (window as unknown as { app?: { vault?: { adapter?: { write?: (path: string, data: string) => Promise<void> } } } }).app;
 			return app?.vault?.adapter?.write?.(args.p, args.c);
 		},
 		{ p: tagTestNotePath, c: bodyChange }
 	);
-	await page.waitForTimeout(HOOK_WAIT_MS);
-	const shot3 = await screenshot(page, "06c-on-tag-change-no-fire-body");
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
+	const shot3 = await ctx.screenshot("06c-on-tag-change-no-fire-body");
 	const countAfterBodyChange = readHookFireCount();
 
 	if (countAfterBodyChange === 0) {
-		pass(
+		ctx.pass(
 			"on-tag-change: body-only change does NOT fire hook",
 			"Counter is 0 after body-only modification — shadow cache diff correctly empty",
 			shot3
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"on-tag-change: body-only change does NOT fire hook",
 			`Counter is ${countAfterBodyChange} after body-only change — expected 0 (no tag diff)`,
 			shot3
 		);
 	}
 
-	// Clean up
 	if (fs.existsSync(tagTestNoteFs)) fs.unlinkSync(tagTestNoteFs);
 	clearHookFiles();
 }
 
-/** Open Notor settings tab reliably and return whether the panel opened. */
-async function openNotorSettings(page: Page): Promise<boolean> {
-	// Try multiple approaches to open the Notor settings tab
-	await page.evaluate(() => {
-		const app = (window as unknown as { app?: { setting?: { open?: () => void; openTabById?: (id: string) => void } } }).app;
-		if (app?.setting?.open) {
-			app.setting.open();
-		}
-	});
-	await page.waitForTimeout(800);
-	await page.evaluate(() => {
-		const app = (window as unknown as { app?: { setting?: { openTabById?: (id: string) => void } } }).app;
-		app?.setting?.openTabById?.("notor");
-	});
-	await page.waitForTimeout(2_500);
-
-	// Verify the settings modal is open by checking for the settings container
-	const isOpen = await page.evaluate(() => {
-		// Check if the settings modal is open
-		const modal = document.querySelector(".modal-container, .vertical-tab-content-container, .community-plugin-tab");
-		const body = (document.body.textContent ?? "").toLowerCase();
-		return modal !== null || body.includes("vault event hooks") || body.includes("notor settings");
-	});
-
-	if (!isOpen) {
-		// Fallback: try command palette
-		await page.evaluate(() => {
-			const app = (window as unknown as { app?: { commands?: { executeCommandById?: (id: string) => void } } }).app;
-			app?.commands?.executeCommandById?.("app:open-settings");
-		});
-		await page.waitForTimeout(1_500);
-		// Click the Notor tab if visible
-		await page.evaluate(() => {
-			const tabs = Array.from(document.querySelectorAll(".vertical-tab-nav-item, .community-plugin-tab"));
-			const notorTab = tabs.find((el) => (el.textContent ?? "").includes("Notor"));
-			if (notorTab) (notorTab as HTMLElement).click();
-		});
-		await page.waitForTimeout(1_000);
-	}
-
-	return await page.evaluate(() => {
-		const body = (document.body.textContent ?? "").toLowerCase();
-		return body.includes("vault event hooks") || body.includes("on note open") || body.includes("on schedule");
-	});
-}
-
-/** Test 7: on-schedule dispatches after cron fires; settings UI validates cron + shows next-run. */
-async function testOnSchedule(page: Page, collector: LogCollector): Promise<void> {
+async function testOnSchedule(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 7: on-schedule hook (cron) ──────────────────────────");
 
-	// Part A: Settings UI — cron validation and next-run preview
-	// Open Notor settings and verify the on_schedule subsection renders cron fields
-	const settingsOpened = await openNotorSettings(page);
-
-	const shot1 = await screenshot(page, "07a-settings-open");
+	// Part A: Settings UI
+	const settingsOpened = await openNotorSettings(ctx.page);
+	const shot1 = await ctx.screenshot("07a-settings-open");
 
 	if (settingsOpened) {
-		pass(
+		ctx.pass(
 			"on-schedule: settings UI has schedule section",
 			"Settings tab opened and vault event hooks / schedule section confirmed in DOM",
 			shot1
 		);
 	} else {
-		// Check page body as fallback
-		const settingsText = await page.evaluate(() => document.body.textContent ?? "");
+		const settingsText = await ctx.page.evaluate(() => document.body.textContent ?? "");
 		if (settingsText.toLowerCase().includes("schedule") || settingsText.toLowerCase().includes("cron")) {
-			pass(
+			ctx.pass(
 				"on-schedule: settings UI has schedule section",
 				"'schedule'/'cron' text found in settings page body",
 				shot1
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"on-schedule: settings UI has schedule section",
 				"No schedule-related content found in settings UI (settings tab may not have opened)",
 				shot1
@@ -919,15 +795,13 @@ async function testOnSchedule(page: Page, collector: LogCollector): Promise<void
 		}
 	}
 
-	// Close settings
-	await page.keyboard.press("Escape");
-	await page.waitForTimeout(500);
+	await ctx.page.keyboard.press("Escape");
+	await ctx.page.waitForTimeout(500);
 
-	// Part B: Cron dispatch — configure a 1-minute cron and wait for it to fire
-	// Using "* * * * *" (every minute) — we may wait up to SCHEDULE_WAIT_MS
+	// Part B: Cron dispatch
 	clearHookFiles();
 
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_schedule: [
@@ -945,18 +819,17 @@ async function testOnSchedule(page: Page, collector: LogCollector): Promise<void
 		},
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
 	console.log(`    Waiting up to ${SCHEDULE_WAIT_MS / 1000}s for cron to fire...`);
 
-	// Poll for up to SCHEDULE_WAIT_MS
 	const pollInterval = 5_000;
 	const maxPolls = Math.ceil(SCHEDULE_WAIT_MS / pollInterval);
 	let fired = false;
 
 	for (let i = 0; i < maxPolls; i++) {
-		await page.waitForTimeout(pollInterval);
+		await ctx.page.waitForTimeout(pollInterval);
 		const count = readHookFireCount();
 		if (count >= 1) {
 			fired = true;
@@ -967,26 +840,25 @@ async function testOnSchedule(page: Page, collector: LogCollector): Promise<void
 		}
 	}
 
-	const shot2 = await screenshot(page, "07b-on-schedule-fired");
+	const shot2 = await ctx.screenshot("07b-on-schedule-fired");
 	const finalCount = readHookFireCount();
 
 	if (fired || finalCount >= 1) {
-		pass(
+		ctx.pass(
 			"on-schedule: cron fires hook",
 			`Counter file has ${finalCount} line(s) — cron job fired as expected`,
 			shot2
 		);
 	} else {
-		// Accept structured log evidence as fallback
-		const schedLogs = logsContaining(collector, "on_schedule");
+		const schedLogs = logsContaining(ctx.collector, "on_schedule");
 		if (schedLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"on-schedule: cron fires hook",
 				`Counter empty but structured logs confirm on_schedule dispatch (${schedLogs.length} log(s))`,
 				shot2
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"on-schedule: cron fires hook",
 				`No cron fire detected after ${SCHEDULE_WAIT_MS / 1000}s — counter is ${finalCount}, no structured logs`,
 				shot2
@@ -997,11 +869,10 @@ async function testOnSchedule(page: Page, collector: LogCollector): Promise<void
 	clearHookFiles();
 }
 
-/** Test 8: "Run a workflow" action type triggers background workflow execution. */
-async function testRunWorkflowAction(page: Page, collector: LogCollector): Promise<void> {
+async function testRunWorkflowAction(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 8: run_workflow action type ─────────────────────────");
 
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_note_open: [
@@ -1020,18 +891,13 @@ async function testRunWorkflowAction(page: Page, collector: LogCollector): Promi
 		vault_event_debounce_seconds: 3,
 	});
 
-	// Capture logsBefore BEFORE the reload so we catch any logs emitted during
-	// Obsidian's auto-open of the last active note (which fires on_note_open).
-	const logsBefore = collector.getStructuredLogs().length;
+	const logsBefore = ctx.collector.getStructuredLogs().length;
 
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	// Wait for full plugin init + workflow discovery + any auto-triggered hook to settle
-	await page.waitForTimeout(10_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(10_000);
 
-	// At this point the on_note_open from auto-open may have already fired.
-	// Capture intermediate log count — if workflow dispatch already happened, we pass early.
-	const logsAfterReload = collector.getStructuredLogs().slice(logsBefore);
+	const logsAfterReload = ctx.collector.getStructuredLogs().slice(logsBefore);
 	const earlyExecLogs = logsAfterReload.filter(
 		(e) =>
 			e.source === "VaultEventDispatcher" ||
@@ -1041,8 +907,8 @@ async function testRunWorkflowAction(page: Page, collector: LogCollector): Promi
 	);
 
 	if (earlyExecLogs.length > 0) {
-		const shot = await screenshot(page, "08-run-workflow-action");
-		pass(
+		const shot = await ctx.screenshot("08-run-workflow-action");
+		ctx.pass(
 			"run_workflow: background execution triggered",
 			`Found ${earlyExecLogs.length} execution log(s) from auto-open during reload: "${earlyExecLogs[0]!.message}"`,
 			shot
@@ -1050,27 +916,23 @@ async function testRunWorkflowAction(page: Page, collector: LogCollector): Promi
 		return;
 	}
 
-	// Debounce has now expired (10s > 3s debounce). Open a different note first to avoid same-path debounce.
 	const altNotePath = "notor/alt-run-workflow-note.md";
 	const altNoteFs = path.join(VAULT_PATH, altNotePath);
 	fs.writeFileSync(altNoteFs, "# Alt note for run_workflow test\n");
 
-	const logsBeforeOpen = collector.getStructuredLogs().length;
+	const logsBeforeOpen = ctx.collector.getStructuredLogs().length;
 
-	// Open the alt note to trigger the on_note_open hook on a fresh path
-	await page.evaluate((notePath: string) => {
+	await ctx.page.evaluate((notePath: string) => {
 		const app = (window as unknown as { app?: { workspace?: { openLinkText?: (text: string, src: string) => Promise<void> } } }).app;
 		return app?.workspace?.openLinkText?.(notePath, "");
 	}, altNotePath);
 
-	// Wait for workflow dispatch and background execution to begin
-	await page.waitForTimeout(HOOK_WAIT_MS + 2_000);
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS + 2_000);
 
-	const shot = await screenshot(page, "08-run-workflow-action");
+	const shot = await ctx.screenshot("08-run-workflow-action");
 
-	// Check structured logs for workflow execution evidence (from either the reload or manual open)
-	const allNewLogs = collector.getStructuredLogs().slice(logsBefore);
-	const logsAfterOpen = collector.getStructuredLogs().slice(logsBeforeOpen);
+	const allNewLogs = ctx.collector.getStructuredLogs().slice(logsBefore);
+	const logsAfterOpen = ctx.collector.getStructuredLogs().slice(logsBeforeOpen);
 
 	const execLogs = allNewLogs.filter(
 		(e) =>
@@ -1087,37 +949,35 @@ async function testRunWorkflowAction(page: Page, collector: LogCollector): Promi
 			JSON.stringify(e.data ?? {}).toLowerCase().includes("workflow")
 	);
 
-	// Clean up
 	if (fs.existsSync(altNoteFs)) fs.unlinkSync(altNoteFs);
 
 	if (execLogs.length > 0) {
-		pass(
+		ctx.pass(
 			"run_workflow: background execution triggered",
 			`Found ${execLogs.length} execution-related log(s) after hook trigger: "${execLogs[0]!.message}"`,
 			shot
 		);
 	} else if (workflowLogs.length > 0) {
-		pass(
+		ctx.pass(
 			"run_workflow: background execution triggered",
 			`Found ${workflowLogs.length} workflow-related log(s) after hook trigger: "${workflowLogs[0]!.message}"`,
 			shot
 		);
 	} else {
-		// Check for Notice DOM element as a last resort
-		const hasNotice = await page.evaluate(() => {
+		const hasNotice = await ctx.page.evaluate(() => {
 			const notices = document.querySelectorAll(".notice");
 			return Array.from(notices).some((n) =>
 				(n.textContent ?? "").toLowerCase().includes("workflow")
 			);
 		});
 		if (hasNotice) {
-			pass(
+			ctx.pass(
 				"run_workflow: background execution triggered",
 				"Workflow-related Notice appeared in the UI after hook trigger",
 				shot
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"run_workflow: background execution triggered",
 				`No execution logs or workflow Notice found after on_note_open with run_workflow action. ` +
 					`Total new logs since reload: ${allNewLogs.length}, since open: ${logsAfterOpen.length}`,
@@ -1127,12 +987,10 @@ async function testRunWorkflowAction(page: Page, collector: LogCollector): Promi
 	}
 }
 
-/** Test 9: Concurrency manager queues overflow; single-instance guard skips duplicates. */
-async function testConcurrencyManager(page: Page, collector: LogCollector): Promise<void> {
+async function testConcurrencyManager(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 9: Concurrency manager ──────────────────────────────");
 
-	// Set concurrency limit to 1 so it's easy to trigger the queue
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_note_open: [
@@ -1152,35 +1010,32 @@ async function testConcurrencyManager(page: Page, collector: LogCollector): Prom
 		workflow_concurrency_limit: 1,
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(8_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(8_000);
 
-	const logsBefore = collector.getStructuredLogs().length;
+	const logsBefore = ctx.collector.getStructuredLogs().length;
 
-	// Trigger the hook twice in rapid succession by opening two different notes
-	// (second open of same note would be debounced, so open test note then switch back)
 	const altNotePath = "notor/alt-note.md";
 	const altNoteFs = path.join(VAULT_PATH, altNotePath);
 	fs.writeFileSync(altNoteFs, "# Alt note for concurrency test\n");
 
-	await page.evaluate((p: string) => {
+	await ctx.page.evaluate((p: string) => {
 		const app = (window as unknown as { app?: { workspace?: { openLinkText?: (text: string, src: string) => Promise<void> } } }).app;
 		return app?.workspace?.openLinkText?.(p, "");
 	}, TEST_NOTE_VAULT_PATH);
-	await page.waitForTimeout(500);
+	await ctx.page.waitForTimeout(500);
 
-	await page.evaluate((p: string) => {
+	await ctx.page.evaluate((p: string) => {
 		const app = (window as unknown as { app?: { workspace?: { openLinkText?: (text: string, src: string) => Promise<void> } } }).app;
 		return app?.workspace?.openLinkText?.(p, "");
 	}, altNotePath);
-	await page.waitForTimeout(500);
+	await ctx.page.waitForTimeout(500);
 
-	await page.waitForTimeout(HOOK_WAIT_MS);
-	const shot = await screenshot(page, "09-concurrency-manager");
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
+	const shot = await ctx.screenshot("09-concurrency-manager");
 
-	const logsAfter = collector.getStructuredLogs().slice(logsBefore);
+	const logsAfter = ctx.collector.getStructuredLogs().slice(logsBefore);
 
-	// Look for queuing evidence in structured logs
 	const queueLogs = logsAfter.filter(
 		(e) =>
 			e.message.toLowerCase().includes("queue") ||
@@ -1188,7 +1043,6 @@ async function testConcurrencyManager(page: Page, collector: LogCollector): Prom
 			JSON.stringify(e.data ?? {}).toLowerCase().includes("queue")
 	);
 
-	// Look for single-instance guard / skip evidence
 	const skipLogs = logsAfter.filter(
 		(e) =>
 			e.message.toLowerCase().includes("already running") ||
@@ -1196,8 +1050,7 @@ async function testConcurrencyManager(page: Page, collector: LogCollector): Prom
 			e.message.toLowerCase().includes("single-instance")
 	);
 
-	// Check for any Notice about "already running" or queued
-	const noticeText = await page.evaluate(() => {
+	const noticeText = await ctx.page.evaluate(() => {
 		const notices = Array.from(document.querySelectorAll(".notice"));
 		return notices.map((n) => n.textContent ?? "").join(" | ");
 	});
@@ -1207,21 +1060,19 @@ async function testConcurrencyManager(page: Page, collector: LogCollector): Prom
 		noticeText.toLowerCase().includes("workflow");
 
 	if (queueLogs.length > 0 || skipLogs.length > 0) {
-		pass(
+		ctx.pass(
 			"Concurrency manager: queuing or skip guard triggered",
 			`Found ${queueLogs.length} queue log(s) and ${skipLogs.length} skip log(s) after rapid double-trigger`,
 			shot
 		);
 	} else if (hasSkipNotice) {
-		pass(
+		ctx.pass(
 			"Concurrency manager: skip Notice shown",
 			`Notice text: "${noticeText.substring(0, 200)}"`,
 			shot
 		);
 	} else {
-		// Soft pass: if no evidence of overflow, the two executions may have serialized
-		// (both started before the second dispatch, so limit=1 may already be respected)
-		pass(
+		ctx.pass(
 			"Concurrency manager: no overflow evidence (both dispatches may have serialized)",
 			`${logsAfter.length} new log(s); no queue/skip evidence but no errors either. ` +
 				`This is acceptable if both workflows completed before the second dispatch.`,
@@ -1229,20 +1080,15 @@ async function testConcurrencyManager(page: Page, collector: LogCollector): Prom
 		);
 	}
 
-	// Clean up alt note
 	if (fs.existsSync(altNoteFs)) fs.unlinkSync(altNoteFs);
 }
 
-/** Test 10: Loop prevention — on-save → workflow → write-note does NOT re-trigger on-save. */
-async function testLoopPrevention(page: Page, collector: LogCollector): Promise<void> {
+async function testLoopPrevention(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 10: Loop prevention ──────────────────────────────────");
 
 	clearHookFiles();
 
-	// Configure an on_save hook that writes to the counter file.
-	// This simulates the scenario where an on-save hook triggers and
-	// potentially re-triggers — loop prevention should block the cycle.
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_save: [
@@ -1250,7 +1096,6 @@ async function testLoopPrevention(page: Page, collector: LogCollector): Promise<
 					id: "test-loop-counter",
 					event: "on_save",
 					action_type: "execute_command",
-					// Write the NOTOR_NOTE_PATH so we can track which paths triggered
 					command: `echo "$NOTOR_NOTE_PATH" >> "${HOOK_COUNTER_FILE}"`,
 					workflow_path: null,
 					label: "Loop prevention counter",
@@ -1262,14 +1107,13 @@ async function testLoopPrevention(page: Page, collector: LogCollector): Promise<
 		vault_event_debounce_seconds: 1,
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	const logsBefore = collector.getStructuredLogs().length;
+	const logsBefore = ctx.collector.getStructuredLogs().length;
 
-	// Trigger an on_save by writing to the test note
 	const content = `# Test Note\n\nModified at ${Date.now()} for loop prevention test.\n`;
-	await page.evaluate(
+	await ctx.page.evaluate(
 		(args: { p: string; c: string }) => {
 			const app = (window as unknown as { app?: { vault?: { adapter?: { write?: (path: string, data: string) => Promise<void> } } } }).app;
 			return app?.vault?.adapter?.write?.(args.p, args.c);
@@ -1277,17 +1121,15 @@ async function testLoopPrevention(page: Page, collector: LogCollector): Promise<
 		{ p: TEST_NOTE_VAULT_PATH, c: content }
 	);
 
-	// Wait enough time for potential re-triggering chain
-	await page.waitForTimeout(HOOK_WAIT_MS * 2);
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS * 2);
 
-	const shot = await screenshot(page, "10-loop-prevention");
+	const shot = await ctx.screenshot("10-loop-prevention");
 	const fireCount = readHookFireCount();
 	const counterContent = fs.existsSync(HOOK_COUNTER_FILE)
 		? fs.readFileSync(HOOK_COUNTER_FILE, "utf8")
 		: "";
 
-	// Check structured logs for loop-prevention evidence
-	const logsAfter = collector.getStructuredLogs().slice(logsBefore);
+	const logsAfter = ctx.collector.getStructuredLogs().slice(logsBefore);
 	const cycleLogs = logsAfter.filter(
 		(e) =>
 			e.message.toLowerCase().includes("cycle") ||
@@ -1297,22 +1139,20 @@ async function testLoopPrevention(page: Page, collector: LogCollector): Promise<
 	);
 
 	if (cycleLogs.length > 0) {
-		pass(
+		ctx.pass(
 			"Loop prevention: cycle detection log found",
 			`Found ${cycleLogs.length} cycle/loop/chain log(s): "${cycleLogs[0]!.message}"`,
 			shot
 		);
 	} else if (fireCount <= 2) {
-		// Allow up to 2 fires (initial + one potential re-trigger before chain kicks in),
-		// but not 3+ which would indicate an infinite loop
-		pass(
+		ctx.pass(
 			"Loop prevention: fire count within bounds",
 			`Hook fired ${fireCount} time(s) — no infinite loop detected (≤ 2 is acceptable). ` +
 				`Note paths: "${counterContent.trim()}"`,
 			shot
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"Loop prevention: potential infinite loop",
 			`Hook fired ${fireCount} time(s) — expected ≤ 2 but got more, indicating loop prevention may not be working. ` +
 				`Paths: "${counterContent.trim()}"`,
@@ -1323,22 +1163,18 @@ async function testLoopPrevention(page: Page, collector: LogCollector): Promise<
 	clearHookFiles();
 }
 
-/** Test 11: Settings UI — all six event type subsections render; CRUD operations work. */
-async function testSettingsUI(page: Page): Promise<void> {
+async function testSettingsUI(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 11: Settings UI ──────────────────────────────────────");
 
-	// Reload with baseline (empty) settings so the settings UI is clean
-	const settings = buildSettings();
+	const settings = buildVaultEventSettings();
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	// Open Notor settings tab using the reliable helper
-	await openNotorSettings(page);
+	await openNotorSettings(ctx.page);
 
-	const shot1 = await screenshot(page, "11a-settings-ui-open");
+	const shot1 = await ctx.screenshot("11a-settings-ui-open");
 
-	// Check that all six event-type subsections are present in the settings DOM
 	const eventTypes = [
 		{ label: "on note open", key: "on_note_open" },
 		{ label: "on note create", key: "on_note_create" },
@@ -1348,7 +1184,7 @@ async function testSettingsUI(page: Page): Promise<void> {
 		{ label: "on schedule", key: "on_schedule" },
 	];
 
-	const sectionResults = await page.evaluate((types: Array<{ label: string; key: string }>) => {
+	const sectionResults = await ctx.page.evaluate((types: Array<{ label: string; key: string }>) => {
 		const bodyText = (document.body.textContent ?? "").toLowerCase();
 		return types.map((t) => ({
 			key: t.key,
@@ -1360,28 +1196,26 @@ async function testSettingsUI(page: Page): Promise<void> {
 	const missingKeys = sectionResults.filter((r) => !r.found).map((r) => r.key);
 
 	if (foundCount === eventTypes.length) {
-		pass(
+		ctx.pass(
 			"Settings UI: all six event-type sections render",
 			`All 6 vault event hook sections found in settings page`,
 			shot1
 		);
 	} else if (foundCount >= 4) {
-		pass(
+		ctx.pass(
 			"Settings UI: most event-type sections render",
 			`${foundCount}/6 sections found. Missing: ${missingKeys.join(", ")}`,
 			shot1
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"Settings UI: event-type sections render",
 			`Only ${foundCount}/6 sections found. Missing: ${missingKeys.join(", ")}`,
 			shot1
 		);
 	}
 
-	// Check for debounce and concurrency limit inputs
-	const hasDebounceInput = await page.evaluate(() => {
-		const inputs = Array.from(document.querySelectorAll("input[type='number'], input[type='text']"));
+	const hasDebounceInput = await ctx.page.evaluate(() => {
 		const labels = Array.from(document.querySelectorAll(".setting-item-name, label"));
 		const labelTexts = labels.map((l) => (l.textContent ?? "").toLowerCase());
 		return (
@@ -1391,36 +1225,32 @@ async function testSettingsUI(page: Page): Promise<void> {
 	});
 
 	if (hasDebounceInput) {
-		pass(
+		ctx.pass(
 			"Settings UI: debounce and/or concurrency inputs present",
 			"Found debounce or concurrency setting labels in settings UI",
 			shot1
 		);
 	} else {
-		// Soft fail — layout may vary
-		const shot2 = await screenshot(page, "11b-settings-no-debounce");
-		fail(
+		const shot2 = await ctx.screenshot("11b-settings-no-debounce");
+		ctx.fail(
 			"Settings UI: debounce/concurrency inputs present",
 			"No debounce or concurrency setting labels found in settings UI",
 			shot2
 		);
 	}
 
-	// Try adding a hook via the UI: find the first "Add" button in the vault-event-hooks section
-	// and try to interact with it
-	const addButtonCount = await page.evaluate(() => {
+	const addButtonCount = await ctx.page.evaluate(() => {
 		const buttons = Array.from(document.querySelectorAll("button"));
 		return buttons.filter((b) => (b.textContent ?? "").toLowerCase().trim() === "add").length;
 	});
 
 	if (addButtonCount > 0) {
-		pass(
+		ctx.pass(
 			"Settings UI: Add hook buttons present",
 			`Found ${addButtonCount} "Add" button(s) in the vault event hooks settings section`,
 		);
 	} else {
-		// Acceptable if UI uses a different affordance (e.g., "+" icon)
-		const hasAddAffordance = await page.evaluate(() => {
+		const hasAddAffordance = await ctx.page.evaluate(() => {
 			const btns = Array.from(document.querySelectorAll("button, .clickable-icon"));
 			return btns.some((b) => {
 				const t = (b.textContent ?? "").toLowerCase();
@@ -1429,20 +1259,19 @@ async function testSettingsUI(page: Page): Promise<void> {
 			});
 		});
 		if (hasAddAffordance) {
-			pass(
+			ctx.pass(
 				"Settings UI: Add hook affordance present",
 				"Found add hook button/icon in settings UI (different selector than 'Add' text)",
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"Settings UI: Add hook buttons present",
 				`No "Add" buttons found in settings UI — vault event hook CRUD UI may not be rendering`,
 			);
 		}
 	}
 
-	// Check for cron expression input in the on_schedule section (action type dropdown)
-	const hasCronInput = await page.evaluate(() => {
+	const hasCronInput = await ctx.page.evaluate(() => {
 		const labels = Array.from(document.querySelectorAll(".setting-item-name, label, span, summary"));
 		return labels.some((el) => {
 			const t = (el.textContent ?? "").toLowerCase();
@@ -1451,30 +1280,28 @@ async function testSettingsUI(page: Page): Promise<void> {
 	});
 
 	if (hasCronInput) {
-		pass(
+		ctx.pass(
 			"Settings UI: cron expression section present",
 			"Found cron/schedule/expression reference in settings UI",
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"Settings UI: cron expression section present",
 			"No cron expression UI found — on_schedule cron input may not be rendering",
 		);
 	}
 
-	// Close settings
-	await page.keyboard.press("Escape");
-	await page.waitForTimeout(500);
+	await ctx.page.keyboard.press("Escape");
+	await ctx.page.waitForTimeout(500);
 }
 
-/** Test 12: Lazy listeners — disabling hooks unregisters listener; re-enabling registers it. */
-async function testLazyListeners(page: Page, collector: LogCollector): Promise<void> {
+async function testLazyListeners(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 12: Lazy listeners ───────────────────────────────────");
 
 	clearHookFiles();
 
-	// Step 1: Load with a single enabled on_save hook — listener should be registered
-	const settingsEnabled = buildSettings({
+	// Step 1: enabled hook — listener should be registered
+	const settingsEnabled = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_save: [
@@ -1493,53 +1320,51 @@ async function testLazyListeners(page: Page, collector: LogCollector): Promise<v
 		vault_event_debounce_seconds: 2,
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settingsEnabled, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	const logsBefore = collector.getStructuredLogs().length;
+	const logsBefore = ctx.collector.getStructuredLogs().length;
 
-	// Trigger a save to confirm the listener is active
 	const content1 = `# Test Note\n\nLazy listener test at ${Date.now()}.\n`;
-	await page.evaluate(
+	await ctx.page.evaluate(
 		(args: { p: string; c: string }) => {
 			const app = (window as unknown as { app?: { vault?: { adapter?: { write?: (path: string, data: string) => Promise<void> } } } }).app;
 			return app?.vault?.adapter?.write?.(args.p, args.c);
 		},
 		{ p: TEST_NOTE_VAULT_PATH, c: content1 }
 	);
-	await page.waitForTimeout(HOOK_WAIT_MS);
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
 
 	const countWithEnabled = readHookFireCount();
 
 	if (countWithEnabled >= 1) {
-		pass(
+		ctx.pass(
 			"Lazy listeners: listener active when hook enabled",
 			`Counter has ${countWithEnabled} fire(s) — on_save listener is registered and active`,
 		);
 	} else {
-		// Check structured logs for listener registration
-		const listenerLogs = collector.getStructuredLogs().slice(logsBefore).filter(
+		const listenerLogs = ctx.collector.getStructuredLogs().slice(logsBefore).filter(
 			(e) =>
 				e.message.toLowerCase().includes("listener") ||
 				e.message.toLowerCase().includes("register")
 		);
 		if (listenerLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"Lazy listeners: listener active when hook enabled",
 				`Counter empty but listener registration logs found: "${listenerLogs[0]!.message}"`,
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"Lazy listeners: listener active when hook enabled",
 				`Counter is ${countWithEnabled} and no listener registration logs — on_save listener may not be registered`,
 			);
 		}
 	}
 
-	// Step 2: Disable the hook — listener should be unregistered
+	// Step 2: disabled hook — listener should be unregistered
 	clearHookFiles();
 
-	const settingsDisabled = buildSettings({
+	const settingsDisabled = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_save: [
@@ -1550,7 +1375,7 @@ async function testLazyListeners(page: Page, collector: LogCollector): Promise<v
 					command: `echo "lazy-fired" >> "${HOOK_COUNTER_FILE}"`,
 					workflow_path: null,
 					label: "Lazy listener test",
-					enabled: false, // disabled
+					enabled: false,
 					schedule: null,
 				},
 			],
@@ -1558,42 +1383,40 @@ async function testLazyListeners(page: Page, collector: LogCollector): Promise<v
 		vault_event_debounce_seconds: 2,
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settingsDisabled, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	// Trigger a save — should NOT fire because listener is unregistered
 	const content2 = `# Test Note\n\nLazy listener DISABLED test at ${Date.now()}.\n`;
-	await page.evaluate(
+	await ctx.page.evaluate(
 		(args: { p: string; c: string }) => {
 			const app = (window as unknown as { app?: { vault?: { adapter?: { write?: (path: string, data: string) => Promise<void> } } } }).app;
 			return app?.vault?.adapter?.write?.(args.p, args.c);
 		},
 		{ p: TEST_NOTE_VAULT_PATH, c: content2 }
 	);
-	await page.waitForTimeout(HOOK_WAIT_MS);
+	await ctx.page.waitForTimeout(HOOK_WAIT_MS);
 
-	const shot = await screenshot(page, "12-lazy-listeners");
+	const shot = await ctx.screenshot("12-lazy-listeners");
 	const countWithDisabled = readHookFireCount();
 
 	if (countWithDisabled === 0) {
-		pass(
+		ctx.pass(
 			"Lazy listeners: listener unregistered when all hooks disabled",
 			"Counter is 0 after save with disabled hook — lazy listener correctly inactive",
 			shot
 		);
 	} else {
-		// Check structured logs for evaluate/unregister evidence
-		const unregLogs = logsContaining(collector, "unregister").concat(
-			logsContaining(collector, "evaluate")
+		const unregLogs = logsContaining(ctx.collector, "unregister").concat(
+			logsContaining(ctx.collector, "evaluate")
 		);
 		if (unregLogs.length > 0) {
-			fail(
+			ctx.fail(
 				"Lazy listeners: listener unregistered when all hooks disabled",
 				`Counter is ${countWithDisabled} (expected 0) — listener may still be active despite all hooks disabled`,
 				shot
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"Lazy listeners: listener unregistered when all hooks disabled",
 				`Counter is ${countWithDisabled} after reload with disabled hook — expected 0`,
 				shot
@@ -1604,15 +1427,12 @@ async function testLazyListeners(page: Page, collector: LogCollector): Promise<v
 	clearHookFiles();
 }
 
-/** Test 13: Plugin unload — no errors; all resources cleaned up. */
-async function testPluginUnload(page: Page, collector: LogCollector): Promise<void> {
+async function testPluginUnload(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 13: Plugin unload ────────────────────────────────────");
 
-	// Capture error count before unload/reload cycle
-	const errorsBefore = collector.getLogsByLevel("error").length;
+	const errorsBefore = ctx.collector.getLogsByLevel("error").length;
 
-	// Reload settings with a few active hooks to ensure there's something to clean up
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		vault_event_hooks: {
 			...emptyVaultEventHooks(),
 			on_note_open: [
@@ -1636,17 +1456,16 @@ async function testPluginUnload(page: Page, collector: LogCollector): Promise<vo
 					workflow_path: null,
 					label: "Unload test cron",
 					enabled: true,
-					schedule: "*/5 * * * *", // every 5 minutes — won't fire during test
+					schedule: "*/5 * * * *",
 				},
 			],
 		},
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	// Disable and re-enable the plugin via Obsidian's community plugins API to trigger onunload/onload
-	const unloadResult = await page.evaluate(() => {
+	const unloadResult = await ctx.page.evaluate(() => {
 		const app = (window as unknown as {
 			app?: {
 				plugins?: {
@@ -1668,44 +1487,39 @@ async function testPluginUnload(page: Page, collector: LogCollector): Promise<vo
 			.catch((e: unknown) => `error: ${String(e)}`);
 	});
 
-	await page.waitForTimeout(5_000); // allow re-initialization
+	await ctx.page.waitForTimeout(5_000);
 
-	const shot = await screenshot(page, "13-plugin-unload");
-	const errorsAfter = collector.getLogsByLevel("error").length;
+	const shot = await ctx.screenshot("13-plugin-unload");
+	const errorsAfter = ctx.collector.getLogsByLevel("error").length;
 	const newErrors = errorsAfter - errorsBefore;
 
-	// Check for Group F destroy logs in structured logs
-	const destroyLogs = logsContaining(collector, "destroy").concat(
-		logsContaining(collector, "unload"),
-		logsContaining(collector, "cleanup")
+	const destroyLogs = logsContaining(ctx.collector, "destroy").concat(
+		logsContaining(ctx.collector, "unload"),
+		logsContaining(ctx.collector, "cleanup")
 	);
 
 	if (unloadResult === "api-unavailable") {
-		// Cannot trigger unload via API — check that page reload doesn't produce errors instead
-		pass(
+		ctx.pass(
 			"Plugin unload: API unavailable (acceptable)",
 			"Obsidian plugins API not accessible from CDP — unload cycle skipped. " +
 				"Verified via page reload that no new errors occurred.",
 			shot
 		);
 	} else if (unloadResult === "success" && newErrors === 0) {
-		pass(
+		ctx.pass(
 			"Plugin unload: clean unload/reload cycle",
 			`Plugin disabled then re-enabled without new errors (${destroyLogs.length} destroy/cleanup log(s))`,
 			shot
 		);
 	} else if (unloadResult === "success" && newErrors > 0) {
-		const errorDetails = collector.getLogsByLevel("error").slice(errorsBefore);
-		fail(
+		const errorDetails = ctx.collector.getLogsByLevel("error").slice(errorsBefore);
+		ctx.fail(
 			"Plugin unload: errors during unload/reload",
 			`${newErrors} new error(s) after disable/enable cycle: ` +
 				errorDetails.map((e) => `[${e.source}] "${e.message}"`).join("; "),
 			shot
 		);
 	} else {
-		// Error during disable/enable — distinguish known non-fatal API restrictions
-		// from real failures. The `manifests` TypeError occurs when Obsidian restricts
-		// plugin self-management in some versions — treat it as api-unavailable.
 		const resultStr = String(unloadResult);
 		const isApiRestriction =
 			resultStr.includes("manifests") ||
@@ -1713,20 +1527,20 @@ async function testPluginUnload(page: Page, collector: LogCollector): Promise<vo
 			resultStr.includes("plugins") ||
 			resultStr.includes("api-unavailable");
 		if (isApiRestriction) {
-			pass(
+			ctx.pass(
 				"Plugin unload: API restricted (acceptable)",
 				`Obsidian API restricted plugin self-management (${resultStr.substring(0, 120)}). ` +
 					"This is expected in some Obsidian versions — clean unload verified via page reload.",
 				shot
 			);
 		} else if (resultStr.includes("error")) {
-			fail(
+			ctx.fail(
 				"Plugin unload: unload cycle failed",
 				`Plugin disable/enable returned: "${resultStr}"`,
 				shot
 			);
 		} else {
-			pass(
+			ctx.pass(
 				"Plugin unload: no critical errors",
 				`Unload result: "${resultStr}". New errors: ${newErrors}`,
 				shot
@@ -1735,24 +1549,20 @@ async function testPluginUnload(page: Page, collector: LogCollector): Promise<vo
 	}
 }
 
-/** Test 14: Backward compatibility — Phase 3 hooks without action_type execute as execute_command. */
-async function testBackwardCompatibility(page: Page, collector: LogCollector): Promise<void> {
+async function testBackwardCompatibility(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 14: Backward compatibility ──────────────────────────");
 
 	clearHookFiles();
 
-	// Configure a Phase 3 pre_send hook WITHOUT action_type field
-	// This simulates an existing hook saved before Group F was introduced
 	const legacyHook = {
 		id: "legacy-pre-send",
 		event: "pre_send",
-		// Deliberately omitting action_type — should default to "execute_command"
 		command: `echo "legacy-executed" >> "${HOOK_COUNTER_FILE}"`,
 		label: "Legacy hook without action_type",
 		enabled: true,
 	};
 
-	const settings = buildSettings({
+	const settings = buildVaultEventSettings({
 		hooks: {
 			pre_send: [legacyHook],
 			on_tool_call: [],
@@ -1761,63 +1571,59 @@ async function testBackwardCompatibility(page: Page, collector: LogCollector): P
 		},
 	});
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	await page.reload();
-	await page.waitForTimeout(6_000);
+	await ctx.page.reload();
+	await ctx.page.waitForTimeout(6_000);
 
-	// Check that the plugin loaded without errors related to the legacy hook
-	const loadErrors = collector.getLogsByLevel("error").filter(
+	const loadErrors = ctx.collector.getLogsByLevel("error").filter(
 		(e) => e.message.toLowerCase().includes("action_type") ||
 			e.message.toLowerCase().includes("hook") ||
 			e.message.toLowerCase().includes("undefined")
 	);
 
 	if (loadErrors.length === 0) {
-		pass(
+		ctx.pass(
 			"Backward compatibility: legacy hook (no action_type) loads without errors",
 			"No load errors related to missing action_type field",
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"Backward compatibility: legacy hook (no action_type) loads without errors",
 			`${loadErrors.length} error(s) during load with legacy hook: ` +
 				loadErrors.map((e) => `[${e.source}] "${e.message}"`).join("; "),
 		);
 	}
 
-	// Now send a message to trigger the pre_send hook
-	// Open the chat panel
-	await page.evaluate(() => {
+	await ctx.page.evaluate(() => {
 		const app = (window as unknown as { app?: { commands?: { executeCommandById?: (id: string) => void } } }).app;
 		app?.commands?.executeCommandById?.("notor:open-chat-panel");
 	});
-	await page.waitForTimeout(2_000);
+	await ctx.page.waitForTimeout(2_000);
 
-	const input = await page.$(".notor-text-input");
+	const input = await ctx.page.$(".notor-text-input");
 	if (input) {
 		await input.click();
 		await input.evaluate((el, m) => {
 			el.textContent = m;
 			el.dispatchEvent(new Event("input", { bubbles: true }));
 		}, "Test backward compat — legacy hook");
-		await page.waitForTimeout(200);
-		await page.keyboard.press("Enter");
-		await page.waitForTimeout(HOOK_WAIT_MS);
+		await ctx.page.waitForTimeout(200);
+		await ctx.page.keyboard.press("Enter");
+		await ctx.page.waitForTimeout(HOOK_WAIT_MS);
 	}
 
-	const shot = await screenshot(page, "14-backward-compat");
+	const shot = await ctx.screenshot("14-backward-compat");
 	const fireCount = readHookFireCount();
 
 	if (fireCount >= 1) {
-		pass(
+		ctx.pass(
 			"Backward compatibility: legacy hook executes as execute_command",
 			`Counter has ${fireCount} fire(s) — hook without action_type ran as execute_command`,
 			shot
 		);
 	} else {
-		// Check structured logs for hook execution
-		const hookLogs = logsContaining(collector, "pre_send").concat(
-			logsContaining(collector, "execute_command"),
-			logsContaining(collector, "hook")
+		const hookLogs = logsContaining(ctx.collector, "pre_send").concat(
+			logsContaining(ctx.collector, "execute_command"),
+			logsContaining(ctx.collector, "hook")
 		);
 		const executedLogs = hookLogs.filter(
 			(e) =>
@@ -1827,14 +1633,13 @@ async function testBackwardCompatibility(page: Page, collector: LogCollector): P
 		);
 
 		if (executedLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"Backward compatibility: legacy hook executes as execute_command",
 				`Counter empty but ${executedLogs.length} hook execution log(s) found: "${executedLogs[0]!.message}"`,
 				shot
 			);
 		} else {
-			// Soft pass — the message dispatch may not have completed (LLM not available in all envs)
-			pass(
+			ctx.pass(
 				"Backward compatibility: legacy hook loaded without errors",
 				`Counter is ${fireCount} (message may not have been sent to LLM). ` +
 					`No errors about missing action_type. Hook structure is backward-compatible.`,
@@ -1850,119 +1655,41 @@ async function testBackwardCompatibility(page: Page, collector: LogCollector): P
 // Main
 // ---------------------------------------------------------------------------
 
-async function main() {
-	console.log("=== Notor Vault Event Hooks E2E Test (F-024) ===\n");
+async function tests(ctx: TestContext): Promise<void> {
+	await ctx.page.waitForTimeout(8_000);
 
-	console.log("[0/3] Building plugin...");
-	execSync("npm run build", {
-		cwd: path.resolve(__dirname, "..", ".."),
-		stdio: "inherit",
-	});
-	console.log("Build complete.\n");
-
-	console.log("[0b/3] Setting up test fixtures...");
-	ensureTestFixtures();
-
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	fs.mkdirSync(LOGS_DIR, { recursive: true });
-
-	// Save original plugin data to restore after tests
-	let existingData: string | null = null;
-	if (fs.existsSync(PLUGIN_DATA_PATH)) {
-		existingData = fs.readFileSync(PLUGIN_DATA_PATH, "utf8");
-	}
-
-	// Write baseline settings
-	fs.writeFileSync(
-		PLUGIN_DATA_PATH,
-		JSON.stringify(buildSettings(), null, 2)
-	);
-
-	clearHookFiles();
-
-	let obsidian: ObsidianProcess | undefined;
-	let collector: LogCollector | undefined;
-
-	try {
-		console.log("\n[1/3] Launching Obsidian...");
-		obsidian = await launchObsidian({
-			vaultPath: VAULT_PATH,
-			cdpPort: CDP_PORT,
-			timeout: 30_000,
-		});
-
-		console.log("[2/3] Connecting Playwright via CDP...");
-		const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
-		const contexts = browser.contexts();
-		const page = contexts[0]?.pages()[0];
-		if (!page) throw new Error("No Playwright page found after CDP connect");
-
-		collector = new LogCollector({ outputDir: LOGS_DIR });
-		collector.attach(page);
-
-		await page.waitForLoadState("domcontentloaded");
-		await page.waitForTimeout(8_000); // allow plugin full init + layout-ready callbacks
-
-		console.log("\n[3/3] Running vault event hook tests...\n");
-
-		await testPluginLoads(page);
-		await testOnNoteOpen(page, collector);
-		await testOnNoteCreate(page, collector);
-		await testOnSave(page, collector);
-		await testOnManualSave(page, collector);
-		await testOnTagChange(page, collector);
-		await testOnSchedule(page, collector);
-		await testRunWorkflowAction(page, collector);
-		await testConcurrencyManager(page, collector);
-		await testLoopPrevention(page, collector);
-		await testSettingsUI(page);
-		await testLazyListeners(page, collector);
-		await testPluginUnload(page, collector);
-		await testBackwardCompatibility(page, collector);
-
-		await screenshot(page, "99-final");
-		await page.waitForTimeout(1_000);
-
-		const summaryPath = await collector.writeSummary();
-		console.log(`\nLog summary: ${summaryPath}`);
-
-		await browser.close().catch(() => {});
-	} catch (err) {
-		console.error("\nFatal error:", err);
-		if (collector) await collector.dispose().catch(() => {});
-	} finally {
-		if (obsidian) await closeObsidian(obsidian);
-		// Restore original plugin data
-		if (existingData !== null) {
-			fs.writeFileSync(PLUGIN_DATA_PATH, existingData);
-		} else {
-			try { fs.unlinkSync(PLUGIN_DATA_PATH); } catch { /* ignore */ }
-		}
-		clearHookFiles();
-	}
-
-	const passed = results.filter((r) => r.passed).length;
-	const failed = results.filter((r) => !r.passed).length;
-
-	console.log(`\n=== Results: ${passed}/${results.length} passed, ${failed} failed ===`);
-	if (failed > 0) {
-		console.log("\nFailed tests:");
-		for (const r of results.filter((r) => !r.passed)) {
-			console.log(`  ✗ ${r.name}: ${r.detail}`);
-		}
-	}
-
-	const resultsPath = path.join(RESULTS_DIR, "vault-event-hooks-results.json");
-	fs.writeFileSync(
-		resultsPath,
-		JSON.stringify({ passed, failed, total: results.length, results }, null, 2)
-	);
-	console.log(`Results written to: ${resultsPath}`);
-
-	if (failed > 0) process.exit(1);
+	await testPluginLoads(ctx);
+	await testOnNoteOpen(ctx);
+	await testOnNoteCreate(ctx);
+	await testOnSave(ctx);
+	await testOnManualSave(ctx);
+	await testOnTagChange(ctx);
+	await testOnSchedule(ctx);
+	await testRunWorkflowAction(ctx);
+	await testConcurrencyManager(ctx);
+	await testLoopPrevention(ctx);
+	await testSettingsUI(ctx);
+	await testLazyListeners(ctx);
+	await testPluginUnload(ctx);
+	await testBackwardCompatibility(ctx);
 }
 
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+runTest(
+	{
+		name: "vault-event-hooks",
+		settings: buildVaultEventSettings(),
+		setupVault: ensureTestFixtures,
+		cleanupFiles: [
+			".vault-hook-marker.txt",
+			".vault-hook-counter.txt",
+			"notor/test-note.md",
+			"notor/tag-test-note.md",
+			"notor/created-by-test.md",
+			"notor/alt-note.md",
+			"notor/alt-run-workflow-note.md",
+			"notor/workflows/hook-triggered.md",
+			"notor/workflows/on-save-triggered.md",
+		],
+	},
+	tests,
+);

@@ -10,12 +10,12 @@ The project has 35 e2e test scripts (`e2e/scripts/*.ts`) totaling ~32,800 lines.
 | `e2e/lib/test-helpers.ts` | Shared constants (`PROJECT_ROOT`, `VAULT_PATH`, etc.), element helpers (`waitForSelector`), LLM interaction helpers (`sendMessage`, `waitForResponse`, `sendMessageWithApprovalHandling`, `getLastAssistantMessage`, `getLastToolCallNames`), UI action helpers (`newConversation`, `setMode`, `selectPersona`), and `buildDefaultSettings()` |
 | `e2e/lib/vault-reset.ts` | `resetVault()` — deletes known test artifacts while preserving base fixtures |
 
-**Only 3 scripts were initially migrated**; 20 more have since been migrated:
+**Only 3 scripts were initially migrated**; 22 more have since been migrated:
 - `interaction-test.ts` (490 lines)
 - `tool-config-inspector-test.ts` (552 lines)
 - `tool-config-settings-ui-test.ts` (580 lines)
 
-The remaining **11 scripts** (excluding `setup-vault.ts` which is a utility, not a test) all duplicate the same boilerplate inline.
+The remaining **9 scripts** (excluding `setup-vault.ts` which is a utility, not a test) all duplicate the same boilerplate inline.
 
 ---
 
@@ -35,7 +35,7 @@ A migrated script:
 
 ## Migration Inventory
 
-### Already Migrated (26 scripts)
+### Already Migrated (28 scripts)
 
 | Script | Lines | Notes |
 |--------|-------|-------|
@@ -65,6 +65,8 @@ A migrated script:
 | `tool-config-precedence-test.ts` | 1263→850 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `executeWorkflow`. Imports `sendMessage`, `waitForResponse`, `selectPersona`, `getLastAssistantMessage`, `getLastToolCallNames`, `newConversation`, `setMode` from helpers. |
 | `mcp-auto-approve-test.ts` | 569→409 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `injectSimulatedMcpServer`, `resolveAutoApprove`, and all test functions. Imports `waitForSelector` from helpers. |
 | `auto-context-test.ts` | 2543→2282 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local JSONL history helpers, system prompt log helpers, note-tab helpers (openNoteInNewTab, activateNote, etc.), parsing helpers. Mid-test settings changes via `PLUGIN_DATA_PATH`. |
+| `hook-execution-test.ts` | 770→573 | Phase 3. Uses `runTest`, `buildDefaultSettings`, `cleanupFiles`. Retains local `sendMessageLocal` (uses `el.textContent` assignment), `buildHookSettings`, JSONL history helpers (`getLatestUserMessage`, `getAllMessages`). Mid-test settings changes via `PLUGIN_DATA_PATH`. |
+| `vault-event-hooks-test.ts` | 1968→1695 | Phase 3. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `buildVaultEventSettings`, `emptyVaultEventHooks`, `openNotorSettings`, `readHookFireCount`, `clearHookFiles`, `logsBySource`, `logsContaining`. Mid-test settings changes via `PLUGIN_DATA_PATH`. |
 
 ### Not a Test (exclude)
 
@@ -72,7 +74,7 @@ A migrated script:
 |--------|-------|-------|
 | `setup-vault.ts` | 208 | Vault setup utility — not a test script |
 
-### Needs Migration (8 scripts)
+### Needs Migration (6 scripts)
 
 #### ~~Tier 1 — Simple~~ ✅ COMPLETE
 
@@ -102,8 +104,8 @@ These have significant custom setup beyond vault fixtures (external processes, f
 
 | Script | Lines | Key Notes |
 |--------|-------|-----------|
-| `hook-execution-test.ts` | 770 | Creates hook script files; tests hook lifecycle. |
-| `vault-event-hooks-test.ts` | 1968 | Creates hook scripts + test notes; tests vault event hooks. Very large. |
+| ~~`hook-execution-test.ts`~~ | ~~770~~ | ✅ Migrated. |
+| ~~`vault-event-hooks-test.ts`~~ | ~~1968~~ | ✅ Migrated. |
 | `workflow-discovery-test.ts` | 806 | Creates workflow YAML files. |
 | `workflow-execution-test.ts` | 1751 | Creates workflows + sends LLM messages to execute them. |
 | `workflow-hooks-test.ts` | 1547 | Creates workflow + hook files; tests integration. |
@@ -197,7 +199,7 @@ Each script migration is a single commit. Scripts within a tier can be done in a
 | ~~6~~ | ~~`tool-config-auto-approve-test`, `tool-config-disabled-tool-test`, `tool-config-parse-strip-test`~~ | ✅ 1,056 |
 | ~~7~~ | ~~`tool-config-path-enforce-test`, `tool-config-precedence-test`, `mcp-auto-approve-test`~~ | ✅ 960 |
 | ~~8~~ | ~~`auto-context-test`~~ | ✅ 261 |
-| 9 | `hook-execution-test`, `vault-event-hooks-test` | ~500 |
+| ~~9~~ | ~~`hook-execution-test`, `vault-event-hooks-test`~~ | ✅ 470 |
 | 10 | `workflow-discovery-test`, `workflow-execution-test`, `workflow-hooks-test`, `workflow-watcher-test` | ~700 |
 | 11 | `mcp-http-test`, `mcp-stdio-test`, `checkpoint-test` | ~500 |
 
