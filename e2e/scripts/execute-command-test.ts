@@ -58,13 +58,45 @@ async function testPlanModeBlocked(ctx: TestContext): Promise<void> {
 	await newConversation(page);
 	await setMode(page, "Plan");
 
+	// Snapshot log count before sending so we only inspect logs from this test
+	const logCountBefore = ctx.collector.getStructuredLogs().length;
+
 	const responded = await sendMessage(page, "Please execute the command: echo test");
 	const shot = await ctx.screenshot("02-plan-mode");
 
-	if (responded) {
-		ctx.pass("Plan mode blocked", "Response received — LLM should report Plan mode restriction", shot);
-	} else {
+	if (!responded) {
 		ctx.fail("Plan mode blocked", "No response within timeout", shot);
+		return;
+	}
+
+	ctx.pass("Plan mode response", "Response received", shot);
+
+	// Verify dispatcher actually blocked the write tool in Plan mode
+	const recentLogs = ctx.collector.getStructuredLogs().slice(logCountBefore);
+
+	const blockedLogs = recentLogs.filter(
+		(entry) =>
+			entry.source === "ToolDispatcher" &&
+			entry.message.includes("Blocked write tool in Plan mode") &&
+			JSON.stringify(entry.data ?? "").includes("execute_command")
+	);
+
+	if (blockedLogs.length > 0) {
+		ctx.pass("Plan mode dispatcher block", `Dispatcher blocked execute_command (${blockedLogs.length} log entries)`);
+	} else {
+		// The LLM may have respected the system prompt and never attempted the tool call.
+		// Check that execute_command was NOT actually executed either way.
+		const executionLogs = recentLogs.filter(
+			(entry) =>
+				entry.source === "ExecuteCommandTool" &&
+				entry.message.includes("Executing command")
+		);
+
+		if (executionLogs.length === 0) {
+			ctx.pass("Plan mode enforced", "execute_command was not executed (LLM respected system prompt or dispatcher blocked)");
+		} else {
+			ctx.fail("Plan mode NOT enforced", `execute_command was executed ${executionLogs.length} time(s) despite Plan mode`);
+		}
 	}
 }
 
