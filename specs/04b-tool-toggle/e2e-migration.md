@@ -35,7 +35,7 @@ A migrated script:
 
 ## Migration Inventory
 
-### Already Migrated (9 scripts)
+### Already Migrated (12 scripts)
 
 | Script | Lines | Notes |
 |--------|-------|-------|
@@ -48,6 +48,9 @@ A migrated script:
 | `compaction-test.ts` | 376→219 | Phase 1. Uses `runTest`, `buildDefaultSettings({ compaction_threshold: 0.3 })`. Retains local `findCompactionRecord` |
 | `compaction-debug-test.ts` | 621→541 | Phase 1 — partial. Multi-session lifecycle incompatible with `runTest`; imported shared constants, `findVaultPage`, `buildDefaultSettings` only |
 | `auto-approve-test.ts` | 422→261 | Phase 1. Uses `runTest`, `buildDefaultSettings`, `setupVault` for persona fixtures |
+| `persona-test.ts` | 922→806 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault` for persona fixtures, `cleanupFiles`. Retains local `ensureTestPersonas` |
+| `tool-interaction-test.ts` | 1277→892 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Imports `sendMessage`, `getLastAssistantMessage`, `getLastToolCallNames`, `newConversation`, `setMode`. Retains local `getLastError`, `VAULT_NOTES` |
+| `diff-approval-test.ts` | 915→606 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `waitForApprovalUI`, `sendMessageNoWait`, `getLastError`. Mid-test settings change via `PLUGIN_DATA_PATH` |
 
 ### Not a Test (exclude)
 
@@ -55,7 +58,7 @@ A migrated script:
 |--------|-------|-------|
 | `setup-vault.ts` | 208 | Vault setup utility — not a test script |
 
-### Needs Migration (25 scripts)
+### Needs Migration (22 scripts)
 
 #### ~~Tier 1 — Simple~~ ✅ COMPLETE
 
@@ -67,9 +70,6 @@ These need `setupVault` callback and/or use `sendMessageWithApprovalHandling`. M
 
 | Script | Lines | Key Notes |
 |--------|-------|-----------|
-| `persona-test.ts` | 922 | Creates test persona fixtures (`ensureTestPersonas`); no LLM calls. Map fixture creation to `setupVault` callback. |
-| `tool-interaction-test.ts` | 1277 | LLM-driven tool calls with approval handling. Uses `sendMessageWithApprovalHandling`. |
-| `diff-approval-test.ts` | 915 | Tests diff-based approval UI. Approval handling needed. |
 | `stale-content-test.ts` | 721 | Creates test notes as fixtures; verifies stale content detection. |
 | `include-note-test.ts` | 811 | Creates `@include` test notes as fixtures. |
 | `attachment-test.ts` | 422 | Creates attachment fixture files. |
@@ -179,7 +179,8 @@ Each script migration is a single commit. Scripts within a tier can be done in a
 |-------|---------|-------------------|
 | ~~1~~ | ~~`llm-interaction-test`, `plan-mode-enforcement-test`, `chat-scroll-test`~~ | ✅ 700 |
 | ~~2~~ | ~~`compaction-test`, `compaction-debug-test`, `auto-approve-test`~~ | ✅ 398 |
-| 3 | `persona-test`, `diff-approval-test`, `stale-content-test` | ~500 |
+| ~~3~~ | ~~`persona-test`, `tool-interaction-test`, `diff-approval-test`~~ | ✅ 810 |
+| 3b | `stale-content-test` | ~170 |
 | 4 | `include-note-test`, `attachment-test`, `fetch-webpage-test` | ~400 |
 | 5 | `abort-and-error-test`, `activity-indicator-test`, `execute-command-test` | ~500 |
 | 6 | `tool-config-auto-approve-test`, `tool-config-disabled-tool-test`, `tool-config-parse-strip-test` | ~500 |
