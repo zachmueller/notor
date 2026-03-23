@@ -142,11 +142,9 @@ function promptForName(containerEl: HTMLElement): Promise<string | null> {
 			type: "text",
 			placeholder: "Persona name (e.g. researcher)",
 		});
-		input.style.marginRight = "8px";
 
 		const ok = wrapper.createEl("button", { text: "OK" });
 		const cancel = wrapper.createEl("button", { text: "Cancel" });
-		cancel.style.marginLeft = "4px";
 
 		const cleanup = (value: string | null) => {
 			wrapper.remove();
