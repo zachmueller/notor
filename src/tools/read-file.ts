@@ -134,7 +134,7 @@ export class ReadFileTool implements Tool {
 			const buf = await fs.promises.readFile(resolvedPath);
 
 			// Detect binary via null bytes in first 8 KB
-			if (buf.slice(0, 8192).includes(0)) {
+			if (buf.subarray(0, 8192).includes(0)) {
 				return {
 					tool_name: this.name,
 					success: false,
