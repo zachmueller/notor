@@ -75,8 +75,8 @@ export function enforcePathConstraints(
 
 	for (const param of pathParams) {
 		const rawValue = parameters[param.paramName];
-		if (rawValue === undefined || rawValue === null) continue;
-		const pathValue = String(rawValue);
+		if (typeof rawValue !== "string") continue;
+		const pathValue = rawValue;
 		if (pathValue.trim() === "") continue;
 
 		const error = checkPath(pathValue, param.namespace, entry, vaultRootPath);
