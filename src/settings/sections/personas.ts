@@ -109,7 +109,7 @@ export function renderPersonasSection(
 						btn
 							.setButtonText("Open system prompt")
 							.onClick(() => {
-								ctx.app.workspace.openLinkText(
+								void ctx.app.workspace.openLinkText(
 									persona.system_prompt_path,
 									""
 								);

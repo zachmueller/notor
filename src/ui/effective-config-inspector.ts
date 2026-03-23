@@ -201,7 +201,7 @@ export class EffectiveConfigInspectorView extends ItemView {
 			});
 			link.addEventListener("click", (e) => {
 				e.preventDefault();
-				this.app.workspace.openLinkText(source.sourceFile, "");
+				void this.app.workspace.openLinkText(source.sourceFile, "");
 			});
 		} else {
 			sourceCell.setText("Global defaults");

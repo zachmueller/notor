@@ -34,7 +34,7 @@ export function showToolConfigError(
 
 	if (Platform.isDesktop) {
 		notice.noticeEl.oncontextmenu = () => {
-			plugin.app.workspace.openLinkText(sourceFile, "", false);
+			void plugin.app.workspace.openLinkText(sourceFile, "", false);
 		};
 	}
 }
