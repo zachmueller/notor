@@ -54,7 +54,7 @@ export class EffectiveConfigInspectorView extends ItemView {
 		this.orchestrator = orchestrator;
 	}
 
-	async onOpen(): Promise<void> {
+	onOpen(): Promise<void> {
 		const container = this.containerEl.children[1] as HTMLElement;
 		container.empty();
 		container.addClass("notor-config-inspector");
@@ -64,10 +64,12 @@ export class EffectiveConfigInspectorView extends ItemView {
 		});
 
 		this.refresh();
+		return Promise.resolve();
 	}
 
-	async onClose(): Promise<void> {
+	onClose(): Promise<void> {
 		this.contentEl_ = null;
+		return Promise.resolve();
 	}
 
 	/** Re-render the inspector with the latest effective config. */
