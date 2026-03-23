@@ -33,7 +33,7 @@ export function showToolConfigError(
 	const notice = new Notice(message, 8000);
 
 	if (Platform.isDesktop) {
-		notice.noticeEl.oncontextmenu = () => {
+		notice.messageEl.oncontextmenu = () => {
 			void plugin.app.workspace.openLinkText(sourceFile, "", false);
 		};
 	}
