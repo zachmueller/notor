@@ -24,72 +24,19 @@
  *   - Plugin built via `npm run build`
  */
 
-import { execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright-core";
+import type { Page } from "playwright-core";
+import { runTest, type TestContext } from "../lib/test-harness";
 import {
-	launchObsidian,
-	closeObsidian,
-	type ObsidianProcess,
-} from "../lib/obsidian-launcher";
-import { LogCollector } from "../lib/log-collector";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const VAULT_PATH = path.resolve(__dirname, "..", "test-vault");
-const CDP_PORT = 9222;
-const RESULTS_DIR = path.resolve(__dirname, "..", "results");
-const SCREENSHOTS_DIR = path.join(RESULTS_DIR, "screenshots", "workflow-watcher");
-const LOGS_DIR = path.join(RESULTS_DIR, "logs");
+	buildDefaultSettings,
+	waitForSelector,
+	VAULT_PATH,
+} from "../lib/test-helpers";
 
 /** How long to wait after a vault operation before checking the cache.
  *  300 ms debounce + 400 ms buffer for metadata cache to settle = 700 ms. */
 const RESCAN_WAIT_MS = 700;
-
-// ---------------------------------------------------------------------------
-// Test infrastructure
-// ---------------------------------------------------------------------------
-
-interface TestResult {
-	name: string;
-	passed: boolean;
-	detail: string;
-	screenshot?: string;
-}
-
-const results: TestResult[] = [];
-
-function pass(name: string, detail: string, screenshot?: string): void {
-	console.log(`  ✓ PASS: ${name} — ${detail}`);
-	results.push({ name, passed: true, detail, screenshot });
-}
-
-function fail(name: string, detail: string, screenshot?: string): void {
-	console.error(`  ✗ FAIL: ${name} — ${detail}`);
-	results.push({ name, passed: false, detail, screenshot });
-}
-
-async function screenshot(page: Page, name: string): Promise<string> {
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	const file = path.join(SCREENSHOTS_DIR, `${name}.png`);
-	await page.screenshot({ path: file, fullPage: true });
-	return file;
-}
-
-async function waitForSelector(
-	page: Page,
-	selector: string,
-	timeoutMs = 5000
-): Promise<import("playwright-core").ElementHandle | null> {
-	try {
-		return await page.waitForSelector(selector, { timeout: timeoutMs });
-	} catch {
-		return null;
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Plugin access helpers
@@ -216,83 +163,35 @@ async function vaultModify(
 }
 
 // ---------------------------------------------------------------------------
-// Fixture setup
-// ---------------------------------------------------------------------------
-
-function ensureTestWorkflows(): void {
-	const workflowsDir = path.join(VAULT_PATH, "notor", "workflows");
-	fs.mkdirSync(workflowsDir, { recursive: true });
-
-	const dailyDir = path.join(workflowsDir, "daily");
-	fs.mkdirSync(dailyDir, { recursive: true });
-	fs.writeFileSync(
-		path.join(dailyDir, "review.md"),
-		`---
-notor-workflow: true
-notor-trigger: manual
-notor-workflow-persona: "organizer"
----
-
-# Daily review workflow
-`
-	);
-
-	fs.writeFileSync(
-		path.join(workflowsDir, "auto-tag.md"),
-		`---
-notor-workflow: true
-notor-trigger: on-save
----
-
-# Auto-tag workflow
-`
-	);
-
-	// Remove any leftover temp files from a previous test run
-	for (const name of [
-		"watcher-test-new.md",
-		"watcher-test-renamed.md",
-		"watcher-test-moved-in.md",
-	]) {
-		const fp = path.join(workflowsDir, name);
-		if (fs.existsSync(fp)) fs.unlinkSync(fp);
-	}
-	const nonWorkflowFp = path.join(VAULT_PATH, "watcher-test-outside.md");
-	if (fs.existsSync(nonWorkflowFp)) fs.unlinkSync(nonWorkflowFp);
-
-	console.log("  Test workflow fixtures ensured in test vault.");
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-async function testPluginLoads(page: Page): Promise<void> {
+async function testPluginLoads(ctx: TestContext): Promise<void> {
 	console.log("Test 1: Plugin loads and chat panel visible");
-	const el = await waitForSelector(page, ".notor-chat-container", 10_000);
+	const el = await waitForSelector(ctx.page, ".notor-chat-container", 10_000);
 	if (el) {
-		pass("Plugin loaded", "Found .notor-chat-container");
+		ctx.pass("Plugin loaded", "Found .notor-chat-container");
 	} else {
-		const shot = await screenshot(page, "01-no-chat-panel");
-		fail("Plugin loaded", ".notor-chat-container not found after 10 s", shot);
+		const shot = await ctx.screenshot("01-no-chat-panel");
+		ctx.fail("Plugin loaded", ".notor-chat-container not found after 10 s", shot);
 	}
 }
 
-async function testInitialCount(page: Page): Promise<number> {
+async function testInitialCount(ctx: TestContext): Promise<number> {
 	console.log("\nTest 2: Initial workflow count is known");
-	const names = await getWorkflowNames(page);
+	const names = await getWorkflowNames(ctx.page);
 	if (names === null) {
-		fail("Initial workflow count", "getDiscoveredWorkflows() not accessible via plugin API");
+		ctx.fail("Initial workflow count", "getDiscoveredWorkflows() not accessible via plugin API");
 		return -1;
 	}
 	// We expect at least the two fixtures we just wrote (daily/review, auto-tag)
 	if (names.length >= 2) {
-		pass(
+		ctx.pass(
 			"Initial workflow count",
 			`${names.length} workflow(s) discovered: ${names.join(", ")}`
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"Initial workflow count",
 			`Expected ≥ 2 workflows from fixtures, got ${names.length}: ${names.join(", ")}`
 		);
@@ -300,7 +199,7 @@ async function testInitialCount(page: Page): Promise<number> {
 	return names.length;
 }
 
-async function testCreateAddsWorkflow(page: Page, beforeCount: number): Promise<void> {
+async function testCreateAddsWorkflow(ctx: TestContext, beforeCount: number): Promise<void> {
 	console.log("\nTest 3: CREATE — new workflow appears in cache");
 
 	const newPath = "notor/workflows/watcher-test-new.md";
@@ -312,30 +211,30 @@ notor-trigger: manual
 # Watcher test workflow
 `;
 
-	const ok = await vaultCreate(page, newPath, content);
+	const ok = await vaultCreate(ctx.page, newPath, content);
 	if (!ok) {
-		fail("CREATE adds workflow", "vault.create() returned false — API not reachable");
+		ctx.fail("CREATE adds workflow", "vault.create() returned false — API not reachable");
 		return;
 	}
 
-	await page.waitForTimeout(RESCAN_WAIT_MS);
+	await ctx.page.waitForTimeout(RESCAN_WAIT_MS);
 
-	const names = await getWorkflowNames(page);
+	const names = await getWorkflowNames(ctx.page);
 	if (names === null) {
-		fail("CREATE adds workflow", "getDiscoveredWorkflows() not accessible after create");
+		ctx.fail("CREATE adds workflow", "getDiscoveredWorkflows() not accessible after create");
 		return;
 	}
 
-	const shot = await screenshot(page, "03-after-create");
+	const shot = await ctx.screenshot("03-after-create");
 
 	if (names.length === beforeCount + 1 && names.includes("watcher-test-new")) {
-		pass(
+		ctx.pass(
 			"CREATE adds workflow",
 			`Count went ${beforeCount} → ${names.length}; "watcher-test-new" present`,
 			shot
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"CREATE adds workflow",
 			`Expected ${beforeCount + 1} workflows including "watcher-test-new", got ${names.length}: [${names.join(", ")}]`,
 			shot
@@ -343,34 +242,34 @@ notor-trigger: manual
 	}
 }
 
-async function testDeleteRemovesWorkflow(page: Page, beforeCount: number): Promise<void> {
+async function testDeleteRemovesWorkflow(ctx: TestContext, beforeCount: number): Promise<void> {
 	console.log("\nTest 4: DELETE — removed workflow disappears from cache");
 
 	const targetPath = "notor/workflows/watcher-test-new.md";
-	const ok = await vaultDelete(page, targetPath);
+	const ok = await vaultDelete(ctx.page, targetPath);
 	if (!ok) {
-		fail("DELETE removes workflow", `vault.delete("${targetPath}") returned false`);
+		ctx.fail("DELETE removes workflow", `vault.delete("${targetPath}") returned false`);
 		return;
 	}
 
-	await page.waitForTimeout(RESCAN_WAIT_MS);
+	await ctx.page.waitForTimeout(RESCAN_WAIT_MS);
 
-	const names = await getWorkflowNames(page);
+	const names = await getWorkflowNames(ctx.page);
 	if (names === null) {
-		fail("DELETE removes workflow", "getDiscoveredWorkflows() not accessible after delete");
+		ctx.fail("DELETE removes workflow", "getDiscoveredWorkflows() not accessible after delete");
 		return;
 	}
 
-	const shot = await screenshot(page, "04-after-delete");
+	const shot = await ctx.screenshot("04-after-delete");
 
 	if (names.length === beforeCount && !names.includes("watcher-test-new")) {
-		pass(
+		ctx.pass(
 			"DELETE removes workflow",
 			`Count back to ${beforeCount}; "watcher-test-new" absent`,
 			shot
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"DELETE removes workflow",
 			`Expected ${beforeCount} workflows without "watcher-test-new", got ${names.length}: [${names.join(", ")}]`,
 			shot
@@ -378,7 +277,7 @@ async function testDeleteRemovesWorkflow(page: Page, beforeCount: number): Promi
 	}
 }
 
-async function testRenameInAddsWorkflow(page: Page, beforeCount: number): Promise<void> {
+async function testRenameInAddsWorkflow(ctx: TestContext, beforeCount: number): Promise<void> {
 	console.log("\nTest 5: RENAME-IN — moving a .md file into workflows folder adds it");
 
 	// Create an .md file OUTSIDE the workflows directory first
@@ -392,37 +291,37 @@ notor-trigger: manual
 # Moved-in workflow
 `;
 
-	const created = await vaultCreate(page, outsidePath, content);
+	const created = await vaultCreate(ctx.page, outsidePath, content);
 	if (!created) {
-		fail("RENAME-IN adds workflow", "vault.create() for outside file returned false");
+		ctx.fail("RENAME-IN adds workflow", "vault.create() for outside file returned false");
 		return;
 	}
 	// Brief pause so the create event doesn't interfere with the rename test timing
-	await page.waitForTimeout(RESCAN_WAIT_MS);
+	await ctx.page.waitForTimeout(RESCAN_WAIT_MS);
 
-	const namesBeforeMove = await getWorkflowNames(page);
+	const namesBeforeMove = await getWorkflowNames(ctx.page);
 	const countBeforeMove = namesBeforeMove?.length ?? beforeCount;
 
-	const ok = await vaultRename(page, outsidePath, insidePath);
+	const ok = await vaultRename(ctx.page, outsidePath, insidePath);
 	if (!ok) {
-		fail("RENAME-IN adds workflow", `vault.rename() to inside path returned false`);
-		await vaultDelete(page, outsidePath).catch(() => {});
+		ctx.fail("RENAME-IN adds workflow", `vault.rename() to inside path returned false`);
+		await vaultDelete(ctx.page, outsidePath).catch(() => {});
 		return;
 	}
 
-	await page.waitForTimeout(RESCAN_WAIT_MS);
+	await ctx.page.waitForTimeout(RESCAN_WAIT_MS);
 
-	const names = await getWorkflowNames(page);
-	const shot = await screenshot(page, "05-after-rename-in");
+	const names = await getWorkflowNames(ctx.page);
+	const shot = await ctx.screenshot("05-after-rename-in");
 
 	if (names !== null && names.length === countBeforeMove + 1 && names.includes("watcher-test-moved-in")) {
-		pass(
+		ctx.pass(
 			"RENAME-IN adds workflow",
 			`Count went ${countBeforeMove} → ${names.length}; "watcher-test-moved-in" present`,
 			shot
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"RENAME-IN adds workflow",
 			`Expected ${countBeforeMove + 1} workflows including "watcher-test-moved-in", got ${names?.length}: [${names?.join(", ")}]`,
 			shot
@@ -430,40 +329,40 @@ notor-trigger: manual
 	}
 }
 
-async function testRenameWithinUpdatesWorkflow(page: Page): Promise<void> {
+async function testRenameWithinUpdatesWorkflow(ctx: TestContext): Promise<void> {
 	console.log("\nTest 6: RENAME-WITHIN — renaming a workflow updates its display_name");
 
 	const oldPath = "notor/workflows/watcher-test-moved-in.md";
 	const newPath = "notor/workflows/watcher-test-renamed.md";
 
-	const namesBefore = await getWorkflowNames(page);
+	const namesBefore = await getWorkflowNames(ctx.page);
 	if (!namesBefore?.includes("watcher-test-moved-in")) {
-		fail("RENAME-WITHIN updates workflow", `Precondition failed: "watcher-test-moved-in" not in cache: [${namesBefore?.join(", ")}]`);
+		ctx.fail("RENAME-WITHIN updates workflow", `Precondition failed: "watcher-test-moved-in" not in cache: [${namesBefore?.join(", ")}]`);
 		return;
 	}
 
-	const ok = await vaultRename(page, oldPath, newPath);
+	const ok = await vaultRename(ctx.page, oldPath, newPath);
 	if (!ok) {
-		fail("RENAME-WITHIN updates workflow", "vault.rename() returned false");
+		ctx.fail("RENAME-WITHIN updates workflow", "vault.rename() returned false");
 		return;
 	}
 
-	await page.waitForTimeout(RESCAN_WAIT_MS);
+	await ctx.page.waitForTimeout(RESCAN_WAIT_MS);
 
-	const names = await getWorkflowNames(page);
-	const shot = await screenshot(page, "06-after-rename-within");
+	const names = await getWorkflowNames(ctx.page);
+	const shot = await ctx.screenshot("06-after-rename-within");
 
 	const hasNew = names?.includes("watcher-test-renamed");
 	const hasOld = names?.includes("watcher-test-moved-in");
 
 	if (hasNew && !hasOld) {
-		pass(
+		ctx.pass(
 			"RENAME-WITHIN updates workflow",
 			`"watcher-test-moved-in" → "watcher-test-renamed" reflected in cache`,
 			shot
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"RENAME-WITHIN updates workflow",
 			`Expected "watcher-test-renamed" present and "watcher-test-moved-in" absent. ` +
 				`hasNew=${hasNew} hasOld=${hasOld} names=[${names?.join(", ")}]`,
@@ -472,40 +371,40 @@ async function testRenameWithinUpdatesWorkflow(page: Page): Promise<void> {
 	}
 }
 
-async function testRenameOutRemovesWorkflow(page: Page, beforeCount: number): Promise<void> {
+async function testRenameOutRemovesWorkflow(ctx: TestContext, beforeCount: number): Promise<void> {
 	console.log("\nTest 7: RENAME-OUT — moving a workflow out of workflows folder removes it");
 
 	const insidePath = "notor/workflows/watcher-test-renamed.md";
 	const outsidePath = "watcher-test-outside-moved.md";
 
-	const namesBefore = await getWorkflowNames(page);
+	const namesBefore = await getWorkflowNames(ctx.page);
 	if (!namesBefore?.includes("watcher-test-renamed")) {
-		fail("RENAME-OUT removes workflow", `Precondition failed: "watcher-test-renamed" not in cache: [${namesBefore?.join(", ")}]`);
+		ctx.fail("RENAME-OUT removes workflow", `Precondition failed: "watcher-test-renamed" not in cache: [${namesBefore?.join(", ")}]`);
 		return;
 	}
 
-	const ok = await vaultRename(page, insidePath, outsidePath);
+	const ok = await vaultRename(ctx.page, insidePath, outsidePath);
 	if (!ok) {
-		fail("RENAME-OUT removes workflow", "vault.rename() returned false");
+		ctx.fail("RENAME-OUT removes workflow", "vault.rename() returned false");
 		return;
 	}
 
-	await page.waitForTimeout(RESCAN_WAIT_MS);
+	await ctx.page.waitForTimeout(RESCAN_WAIT_MS);
 
-	const names = await getWorkflowNames(page);
-	const shot = await screenshot(page, "07-after-rename-out");
+	const names = await getWorkflowNames(ctx.page);
+	const shot = await ctx.screenshot("07-after-rename-out");
 
 	// Clean up the moved file
-	await vaultDelete(page, outsidePath).catch(() => {});
+	await vaultDelete(ctx.page, outsidePath).catch(() => {});
 
 	if (names !== null && !names.includes("watcher-test-renamed")) {
-		pass(
+		ctx.pass(
 			"RENAME-OUT removes workflow",
 			`"watcher-test-renamed" absent after moving out of workflows folder. Count: ${names.length}`,
 			shot
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"RENAME-OUT removes workflow",
 			`Expected "watcher-test-renamed" to be removed. names=[${names?.join(", ")}]`,
 			shot
@@ -513,7 +412,7 @@ async function testRenameOutRemovesWorkflow(page: Page, beforeCount: number): Pr
 	}
 }
 
-async function testMetadataEditUpdatesCache(page: Page): Promise<void> {
+async function testMetadataEditUpdatesCache(ctx: TestContext): Promise<void> {
 	console.log("\nTest 8: METADATA-EDIT — editing frontmatter of existing workflow reflects in cache");
 
 	// Create a workflow, wait for it to appear, then modify its trigger via vault.modify()
@@ -533,35 +432,35 @@ notor-trigger: on-note-open
 # Meta edit test (updated trigger)
 `;
 
-	const created = await vaultCreate(page, wfPath, initialContent);
+	const created = await vaultCreate(ctx.page, wfPath, initialContent);
 	if (!created) {
-		fail("METADATA-EDIT updates cache", "vault.create() returned false");
+		ctx.fail("METADATA-EDIT updates cache", "vault.create() returned false");
 		return;
 	}
-	await page.waitForTimeout(RESCAN_WAIT_MS);
+	await ctx.page.waitForTimeout(RESCAN_WAIT_MS);
 
-	const namesAfterCreate = await getWorkflowNames(page);
+	const namesAfterCreate = await getWorkflowNames(ctx.page);
 	if (!namesAfterCreate?.includes("watcher-test-meta")) {
-		fail(
+		ctx.fail(
 			"METADATA-EDIT updates cache",
 			`Precondition: "watcher-test-meta" not found after create. names=[${namesAfterCreate?.join(", ")}]`
 		);
-		await vaultDelete(page, wfPath).catch(() => {});
+		await vaultDelete(ctx.page, wfPath).catch(() => {});
 		return;
 	}
 
 	// Now modify the file to change the trigger
-	const modified = await vaultModify(page, wfPath, updatedContent);
+	const modified = await vaultModify(ctx.page, wfPath, updatedContent);
 	if (!modified) {
-		fail("METADATA-EDIT updates cache", "vault.modify() returned false");
-		await vaultDelete(page, wfPath).catch(() => {});
+		ctx.fail("METADATA-EDIT updates cache", "vault.modify() returned false");
+		await vaultDelete(ctx.page, wfPath).catch(() => {});
 		return;
 	}
 
-	await page.waitForTimeout(RESCAN_WAIT_MS);
+	await ctx.page.waitForTimeout(RESCAN_WAIT_MS);
 
 	// Query discovered workflows and verify the trigger changed
-	const triggerAfter = await page.evaluate((p: string) => {
+	const triggerAfter = await ctx.page.evaluate((p: string) => {
 		type App = {
 			plugins?: {
 				plugins?: {
@@ -577,19 +476,19 @@ notor-trigger: on-note-open
 		return wf?.trigger ?? null;
 	}, wfPath);
 
-	const shot = await screenshot(page, "08-after-metadata-edit");
+	const shot = await ctx.screenshot("08-after-metadata-edit");
 
 	// Clean up
-	await vaultDelete(page, wfPath).catch(() => {});
+	await vaultDelete(ctx.page, wfPath).catch(() => {});
 
 	if (triggerAfter === "on-note-open") {
-		pass(
+		ctx.pass(
 			"METADATA-EDIT updates cache",
 			`Trigger correctly updated to "on-note-open" after frontmatter edit`,
 			shot
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"METADATA-EDIT updates cache",
 			`Expected trigger "on-note-open", got "${triggerAfter}"`,
 			shot
@@ -598,125 +497,98 @@ notor-trigger: on-note-open
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main test function
 // ---------------------------------------------------------------------------
 
-async function main() {
-	console.log("=== Notor Workflow Vault Watcher E2E Test ===\n");
+async function tests(ctx: TestContext) {
+	const { page } = ctx;
+	await page.waitForTimeout(8000);
 
-	console.log("[0/3] Building plugin...");
-	execSync("npm run build", {
-		cwd: path.resolve(__dirname, "..", ".."),
-		stdio: "inherit",
-	});
-	console.log("Build complete.\n");
+	// ── Test 1: Plugin loaded ───────────────────────────────────────────
+	await testPluginLoads(ctx);
+	await ctx.screenshot("01-initial-state");
 
-	console.log("[0b/3] Setting up test workflow fixtures...");
-	ensureTestWorkflows();
-	console.log("Fixtures ready.\n");
-
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	fs.mkdirSync(LOGS_DIR, { recursive: true });
-
-	let obsidian: ObsidianProcess | undefined;
-	let collector: LogCollector | undefined;
-
-	try {
-		console.log("[1/3] Launching Obsidian...");
-		obsidian = await launchObsidian({
-			vaultPath: VAULT_PATH,
-			cdpPort: CDP_PORT,
-			timeout: 30_000,
-		});
-
-		console.log("[2/3] Connecting Playwright...");
-		const browser = await chromium.connectOverCDP(
-			`http://127.0.0.1:${CDP_PORT}`
-		);
-		const contexts = browser.contexts();
-		const page = contexts[0]?.pages()[0];
-		if (!page) throw new Error("No page found");
-
-		collector = new LogCollector({ outputDir: LOGS_DIR });
-		collector.attach(page);
-
-		await page.waitForLoadState("domcontentloaded");
-		// Wait for plugin initialization + initial workflow discovery
-		await page.waitForTimeout(8000);
-
-		console.log("\n[3/3] Running vault watcher tests...\n");
-
-		// ── Test 1: Plugin loaded ───────────────────────────────────────────
-		await testPluginLoads(page);
-		await screenshot(page, "01-initial-state");
-
-		// ── Test 2: Baseline count ──────────────────────────────────────────
-		const initialCount = await testInitialCount(page);
-		if (initialCount < 0) {
-			console.error("\nCannot continue — plugin API not accessible.");
-			process.exit(1);
-		}
-
-		// ── Test 3: CREATE adds workflow ────────────────────────────────────
-		await testCreateAddsWorkflow(page, initialCount);
-
-		// ── Test 4: DELETE removes workflow ─────────────────────────────────
-		await testDeleteRemovesWorkflow(page, initialCount);
-
-		// ── Test 5: RENAME-IN adds workflow ─────────────────────────────────
-		await testRenameInAddsWorkflow(page, initialCount);
-
-		// ── Test 6: RENAME-WITHIN updates display_name ──────────────────────
-		await testRenameWithinUpdatesWorkflow(page);
-
-		// ── Test 7: RENAME-OUT removes workflow ─────────────────────────────
-		await testRenameOutRemovesWorkflow(page, initialCount);
-
-		// ── Test 8: METADATA-EDIT updates cache ─────────────────────────────
-		await testMetadataEditUpdatesCache(page);
-
-		// ── Final screenshot ─────────────────────────────────────────────────
-		await screenshot(page, "99-final-state");
-
-		const summaryPath = await collector.writeSummary();
-		console.log(`\nLog summary: ${summaryPath}`);
-
-		await browser.close().catch(() => {});
-	} catch (err) {
-		console.error("\nFatal error:", err);
-		if (collector) await collector.dispose().catch(() => {});
-	} finally {
-		if (obsidian) {
-			await closeObsidian(obsidian);
-		}
+	// ── Test 2: Baseline count ──────────────────────────────────────────
+	const initialCount = await testInitialCount(ctx);
+	if (initialCount < 0) {
+		console.error("\nCannot continue — plugin API not accessible.");
+		process.exit(1);
 	}
 
-	// ── Print summary ───────────────────────────────────────────────────────
-	const passed = results.filter((r) => r.passed).length;
-	const failed = results.filter((r) => !r.passed).length;
+	// ── Test 3: CREATE adds workflow ────────────────────────────────────
+	await testCreateAddsWorkflow(ctx, initialCount);
 
-	console.log("\n=== Workflow Vault Watcher Test Results ===");
-	console.log(`Passed: ${passed}/${results.length}`);
-	console.log(`Failed: ${failed}/${results.length}`);
+	// ── Test 4: DELETE removes workflow ─────────────────────────────────
+	await testDeleteRemovesWorkflow(ctx, initialCount);
 
-	if (failed > 0) {
-		console.log("\nFailed tests:");
-		for (const r of results.filter((r) => !r.passed)) {
-			console.log(`  ✗ ${r.name}: ${r.detail}`);
-		}
-	}
+	// ── Test 5: RENAME-IN adds workflow ─────────────────────────────────
+	await testRenameInAddsWorkflow(ctx, initialCount);
 
-	const resultsPath = path.join(RESULTS_DIR, "workflow-watcher-results.json");
-	fs.writeFileSync(
-		resultsPath,
-		JSON.stringify({ passed, failed, total: results.length, results }, null, 2)
-	);
-	console.log(`\nResults written to: ${resultsPath}`);
+	// ── Test 6: RENAME-WITHIN updates display_name ──────────────────────
+	await testRenameWithinUpdatesWorkflow(ctx);
 
-	if (failed > 0) process.exit(1);
+	// ── Test 7: RENAME-OUT removes workflow ─────────────────────────────
+	await testRenameOutRemovesWorkflow(ctx, initialCount);
+
+	// ── Test 8: METADATA-EDIT updates cache ─────────────────────────────
+	await testMetadataEditUpdatesCache(ctx);
 }
 
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+runTest(
+	{
+		name: "workflow-watcher",
+		settings: buildDefaultSettings(),
+		setupVault: (vaultPath) => {
+			const workflowsDir = path.join(vaultPath, "notor", "workflows");
+			fs.mkdirSync(workflowsDir, { recursive: true });
+
+			const dailyDir = path.join(workflowsDir, "daily");
+			fs.mkdirSync(dailyDir, { recursive: true });
+			fs.writeFileSync(
+				path.join(dailyDir, "review.md"),
+				`---
+notor-workflow: true
+notor-trigger: manual
+notor-workflow-persona: "organizer"
+---
+
+# Daily review workflow
+`
+			);
+
+			fs.writeFileSync(
+				path.join(workflowsDir, "auto-tag.md"),
+				`---
+notor-workflow: true
+notor-trigger: on-save
+---
+
+# Auto-tag workflow
+`
+			);
+
+			// Remove any leftover temp files from a previous test run
+			for (const name of [
+				"watcher-test-new.md",
+				"watcher-test-renamed.md",
+				"watcher-test-moved-in.md",
+			]) {
+				const fp = path.join(workflowsDir, name);
+				if (fs.existsSync(fp)) fs.unlinkSync(fp);
+			}
+			const nonWorkflowFp = path.join(vaultPath, "watcher-test-outside.md");
+			if (fs.existsSync(nonWorkflowFp)) fs.unlinkSync(nonWorkflowFp);
+
+			console.log("  Test workflow fixtures ensured in test vault.");
+		},
+		cleanupFiles: [
+			"notor/workflows/watcher-test-new.md",
+			"notor/workflows/watcher-test-renamed.md",
+			"notor/workflows/watcher-test-moved-in.md",
+			"notor/workflows/watcher-test-meta.md",
+			"watcher-test-outside.md",
+			"watcher-test-outside-moved.md",
+		],
+	},
+	tests,
+);

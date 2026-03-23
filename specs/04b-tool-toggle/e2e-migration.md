@@ -15,7 +15,7 @@ The project has 35 e2e test scripts (`e2e/scripts/*.ts`) totaling ~32,800 lines.
 - `tool-config-inspector-test.ts` (552 lines)
 - `tool-config-settings-ui-test.ts` (580 lines)
 
-The remaining **9 scripts** (excluding `setup-vault.ts` which is a utility, not a test) all duplicate the same boilerplate inline.
+The remaining **5 scripts** (excluding `setup-vault.ts` which is a utility, not a test) all duplicate the same boilerplate inline.
 
 ---
 
@@ -35,7 +35,7 @@ A migrated script:
 
 ## Migration Inventory
 
-### Already Migrated (28 scripts)
+### Already Migrated (32 scripts)
 
 | Script | Lines | Notes |
 |--------|-------|-------|
@@ -67,6 +67,10 @@ A migrated script:
 | `auto-context-test.ts` | 2543→2282 | Phase 2. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local JSONL history helpers, system prompt log helpers, note-tab helpers (openNoteInNewTab, activateNote, etc.), parsing helpers. Mid-test settings changes via `PLUGIN_DATA_PATH`. |
 | `hook-execution-test.ts` | 770→573 | Phase 3. Uses `runTest`, `buildDefaultSettings`, `cleanupFiles`. Retains local `sendMessageLocal` (uses `el.textContent` assignment), `buildHookSettings`, JSONL history helpers (`getLatestUserMessage`, `getAllMessages`). Mid-test settings changes via `PLUGIN_DATA_PATH`. |
 | `vault-event-hooks-test.ts` | 1968→1695 | Phase 3. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `buildVaultEventSettings`, `emptyVaultEventHooks`, `openNotorSettings`, `readHookFireCount`, `clearHookFiles`, `logsBySource`, `logsContaining`. Mid-test settings changes via `PLUGIN_DATA_PATH`. |
+| `workflow-discovery-test.ts` | 806→578 | Phase 3. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `getWorkflowDiscoveryLogs`, `findLogMatching`, `findDiscoveryCompletionLog` structured log helpers. |
+| `workflow-execution-test.ts` | 1751→1631 | Phase 3. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `getWorkflowExecutorLogs`, `getChatOrchestratorLogs`, `getIncludeNoteResolverLogs`, `getPersonaManagerLogs` structured log helpers and 21 test functions. |
+| `workflow-hooks-test.ts` | 1547→1326 | Phase 3. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local `sendMessageLocal`, `newConversationLocal`, `clearHookFiles`, `readHookFireCount`, structured log helpers. Mid-test settings changes via `PLUGIN_DATA_PATH`. |
+| `workflow-watcher-test.ts` | 722→594 | Phase 3. Uses `runTest`, `buildDefaultSettings`, `setupVault`, `cleanupFiles`. Retains local vault API helpers (`getWorkflowNames`, `vaultCreate`, `vaultDelete`, `vaultRename`, `vaultModify`), `RESCAN_WAIT_MS`. |
 
 ### Not a Test (exclude)
 
@@ -74,7 +78,7 @@ A migrated script:
 |--------|-------|-------|
 | `setup-vault.ts` | 208 | Vault setup utility — not a test script |
 
-### Needs Migration (6 scripts)
+### Needs Migration (3 scripts)
 
 #### ~~Tier 1 — Simple~~ ✅ COMPLETE
 
@@ -106,10 +110,10 @@ These have significant custom setup beyond vault fixtures (external processes, f
 |--------|-------|-----------|
 | ~~`hook-execution-test.ts`~~ | ~~770~~ | ✅ Migrated. |
 | ~~`vault-event-hooks-test.ts`~~ | ~~1968~~ | ✅ Migrated. |
-| `workflow-discovery-test.ts` | 806 | Creates workflow YAML files. |
-| `workflow-execution-test.ts` | 1751 | Creates workflows + sends LLM messages to execute them. |
-| `workflow-hooks-test.ts` | 1547 | Creates workflow + hook files; tests integration. |
-| `workflow-watcher-test.ts` | 722 | Tests file watcher for workflow changes. |
+| ~~`workflow-discovery-test.ts`~~ | ~~806~~ | ✅ Migrated. |
+| ~~`workflow-execution-test.ts`~~ | ~~1751~~ | ✅ Migrated. |
+| ~~`workflow-hooks-test.ts`~~ | ~~1547~~ | ✅ Migrated. |
+| ~~`workflow-watcher-test.ts`~~ | ~~722~~ | ✅ Migrated. |
 | `mcp-http-test.ts` | 712 | Spins up external HTTP MCP server. |
 | `mcp-stdio-test.ts` | 884 | Spins up external stdio MCP server. |
 | `checkpoint-test.ts` | 1190 | Reads/counts checkpoint files on disk; tests restore UI flow. Custom helpers: `countCheckpointFiles`, `readAllCheckpoints`, `openCheckpointsSection`. |
@@ -200,7 +204,7 @@ Each script migration is a single commit. Scripts within a tier can be done in a
 | ~~7~~ | ~~`tool-config-path-enforce-test`, `tool-config-precedence-test`, `mcp-auto-approve-test`~~ | ✅ 960 |
 | ~~8~~ | ~~`auto-context-test`~~ | ✅ 261 |
 | ~~9~~ | ~~`hook-execution-test`, `vault-event-hooks-test`~~ | ✅ 470 |
-| 10 | `workflow-discovery-test`, `workflow-execution-test`, `workflow-hooks-test`, `workflow-watcher-test` | ~700 |
+| ~~10~~ | ~~`workflow-discovery-test`, `workflow-execution-test`, `workflow-hooks-test`, `workflow-watcher-test`~~ | ✅ 696 |
 | 11 | `mcp-http-test`, `mcp-stdio-test`, `checkpoint-test` | ~500 |
 
 **Total estimated boilerplate removal: ~5,000-6,000 lines across 31 scripts.**

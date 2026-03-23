@@ -31,98 +31,39 @@
  * @see specs/03-workflows-personas/tasks/group-g-tasks.md — G-008
  */
 
-import { execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright-core";
+import type { Page } from "playwright-core";
+import { runTest, type TestContext } from "../lib/test-harness";
 import {
-	launchObsidian,
-	closeObsidian,
-	type ObsidianProcess,
-} from "../lib/obsidian-launcher";
-import { LogCollector, type LogEntry } from "../lib/log-collector";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+	buildDefaultSettings,
+	waitForSelector,
+	VAULT_PATH,
+	PLUGIN_DATA_PATH,
+	waitForResponse,
+} from "../lib/test-helpers";
+import type { LogCollector, LogEntry } from "../lib/log-collector";
 
 // ---------------------------------------------------------------------------
-// Paths & constants
+// Local constants
 // ---------------------------------------------------------------------------
-
-const VAULT_PATH = path.resolve(__dirname, "..", "test-vault");
-const CDP_PORT = 9222;
-const RESULTS_DIR = path.resolve(__dirname, "..", "results");
-const SCREENSHOTS_DIR = path.join(RESULTS_DIR, "screenshots", "workflow-hooks");
-const LOGS_DIR = path.join(RESULTS_DIR, "logs");
-const BUILD_DIR = path.resolve(__dirname, "..", "..", "build");
-const PLUGIN_DATA_PATH = path.join(BUILD_DIR, "data.json");
 
 /** Marker file written by hook commands to confirm they fired */
 const HOOK_MARKER_FILE = path.join(VAULT_PATH, ".wf-hook-marker.txt");
 /** Counter file — each hook fire appends a line */
 const HOOK_COUNTER_FILE = path.join(VAULT_PATH, ".wf-hook-counter.txt");
 
-const RESPONSE_TIMEOUT_MS = 90_000;
-const POLL_INTERVAL_MS = 1_500;
 const HOOK_WAIT_MS = 4_000;
 
 // ---------------------------------------------------------------------------
-// Test infrastructure
+// Local helpers
 // ---------------------------------------------------------------------------
 
-interface TestResult {
-	name: string;
-	passed: boolean;
-	detail: string;
-	screenshot?: string;
-}
-
-const results: TestResult[] = [];
-
-function pass(name: string, detail: string, screenshot?: string): void {
-	console.log(`  ✓ PASS: ${name} — ${detail}`);
-	results.push({ name, passed: true, detail, screenshot });
-}
-
-function fail(name: string, detail: string, screenshot?: string): void {
-	console.error(`  ✗ FAIL: ${name} — ${detail}`);
-	results.push({ name, passed: false, detail, screenshot });
-}
-
-async function screenshot(page: Page, name: string): Promise<string> {
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	const file = path.join(SCREENSHOTS_DIR, `${name}.png`);
-	await page.screenshot({ path: file, fullPage: true });
-	return file;
-}
-
-async function waitForSelector(
-	page: Page,
-	selector: string,
-	timeoutMs = 8_000
-): Promise<import("playwright-core").ElementHandle | null> {
-	try {
-		return await page.waitForSelector(selector, { timeout: timeoutMs });
-	} catch {
-		return null;
-	}
-}
-
-async function waitForResponse(page: Page, ms = RESPONSE_TIMEOUT_MS): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < ms) {
-		await page.waitForTimeout(POLL_INTERVAL_MS);
-		const ready = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el ? el.getAttribute("contenteditable") === "true" : false;
-		});
-		if (ready) return true;
-	}
-	return false;
-}
-
-async function sendMessage(page: Page, msg: string): Promise<boolean> {
+/**
+ * Send a message using textContent assignment (required for hooks tests —
+ * avoids keyboard.type which can interfere with hook timing).
+ */
+async function sendMessageLocal(page: Page, msg: string): Promise<boolean> {
 	const input = await page.$(".notor-text-input");
 	if (!input) throw new Error("Chat input not found");
 	await input.click();
@@ -137,7 +78,10 @@ async function sendMessage(page: Page, msg: string): Promise<boolean> {
 	return waitForResponse(page);
 }
 
-async function newConversation(page: Page): Promise<void> {
+/**
+ * Start a new conversation via Obsidian command palette.
+ */
+async function newConversationLocal(page: Page): Promise<void> {
 	await page.evaluate(() => {
 		const app = (window as unknown as { app?: { commands?: { executeCommandById?: (id: string) => void } } }).app;
 		app?.commands?.executeCommandById?.("notor:new-conversation");
@@ -196,96 +140,11 @@ function getHookDispatchLogs(collector: LogCollector): LogEntry[] {
 }
 
 // ---------------------------------------------------------------------------
-// Settings builder
-// ---------------------------------------------------------------------------
-
-function buildSettings(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-	return {
-		notor_dir: "notor/",
-		active_provider: "bedrock",
-		providers: [
-			{
-				type: "local",
-				enabled: false,
-				display_name: "Local",
-				endpoint: "http://localhost:11434/v1",
-			},
-			{
-				type: "bedrock",
-				enabled: true,
-				display_name: "AWS Bedrock",
-				aws_auth_method: "profile",
-				aws_profile: "default",
-				region: "us-east-1",
-				model_id: "us.amazon.nova-lite-v1:0",
-			},
-		],
-		auto_approve: {
-			read_note: true,
-			search_vault: true,
-			list_vault: true,
-			read_frontmatter: true,
-			fetch_webpage: true,
-			write_note: true,
-			replace_in_note: true,
-			update_frontmatter: true,
-			manage_tags: true,
-			execute_command: true,
-		},
-		mode: "act",
-		open_notes_on_access: false,
-		history_path: ".obsidian/plugins/notor/history/",
-		history_max_size_mb: 500,
-		history_max_age_days: 90,
-		checkpoint_path: ".obsidian/plugins/notor/checkpoints/",
-		checkpoint_max_per_conversation: 100,
-		checkpoint_max_age_days: 30,
-		model_pricing: {},
-		auto_context_open_notes: false,
-		auto_context_vault_structure: false,
-		auto_context_os: false,
-		compaction_threshold: 0.8,
-		compaction_prompt_override: "",
-		fetch_webpage_timeout: 15,
-		fetch_webpage_max_download_mb: 5,
-		fetch_webpage_max_output_chars: 50000,
-		domain_denylist: [],
-		execute_command_timeout: 30,
-		execute_command_max_output_chars: 50000,
-		execute_command_allowed_paths: [],
-		execute_command_shell: "",
-		execute_command_shell_args: [],
-		external_file_size_threshold_mb: 1,
-		hooks: {
-			pre_send: [],
-			on_tool_call: [],
-			on_tool_result: [],
-			after_completion: [],
-		},
-		hook_timeout: 10,
-		hook_env_truncation_chars: 10000,
-		active_persona: "",
-		vault_event_hooks: {
-			on_note_open: [],
-			on_note_create: [],
-			on_save: [],
-			on_manual_save: [],
-			on_tag_change: [],
-			on_schedule: [],
-		},
-		vault_event_debounce_seconds: 5,
-		workflow_concurrency_limit: 3,
-		workflow_activity_indicator_count: 5,
-		...overrides,
-	};
-}
-
-// ---------------------------------------------------------------------------
 // Test fixture setup
 // ---------------------------------------------------------------------------
 
-function ensureTestFixtures(): void {
-	const workflowsDir = path.join(VAULT_PATH, "notor", "workflows");
+function ensureTestFixtures(vaultPath: string): void {
+	const workflowsDir = path.join(vaultPath, "notor", "workflows");
 	fs.mkdirSync(workflowsDir, { recursive: true });
 
 	// 1. Workflow with valid notor-hooks (pre-send + after-completion)
@@ -461,28 +320,32 @@ Background workflow 2 with different scoped hook. Respond briefly.
 }
 
 // ---------------------------------------------------------------------------
-// Individual tests
+// Tests
 // ---------------------------------------------------------------------------
 
-/** Test 1: Plugin loads and chat panel is visible. */
-async function testPluginLoads(page: Page): Promise<void> {
+async function tests(ctx: TestContext) {
+	const { page, collector } = ctx;
+
+	// Reload to recapture logs from plugin init (ensures discovery + parser logs are captured)
+	await page.reload();
+	await page.waitForTimeout(10_000); // allow full plugin init + workflow discovery
+
+	// ── Test 1: Plugin loads and chat panel is visible ───────────────────────
 	console.log("\n── Test 1: Plugin loads ─────────────────────────────────────");
 
 	const chat = await waitForSelector(page, ".notor-chat-container", 12_000);
-	const shot = await screenshot(page, "01-plugin-loads");
+	const shot1 = await ctx.screenshot("01-plugin-loads");
 
 	if (chat) {
-		pass("Plugin loads", "Found .notor-chat-container — plugin initialized successfully", shot);
+		ctx.pass("Plugin loads", "Found .notor-chat-container — plugin initialized successfully", shot1);
 	} else {
-		fail("Plugin loads", ".notor-chat-container not found within 12 s", shot);
+		ctx.fail("Plugin loads", ".notor-chat-container not found within 12 s", shot1);
 	}
-}
 
-/** Test 2: Parsing valid notor-hooks — WorkflowDiscovery logs confirm config. */
-async function testParsingValidHooks(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 2: Parsing valid notor-hooks ────────────────────────────────────
 	console.log("\n── Test 2: Parsing valid notor-hooks ────────────────────────");
 
-	const shot = await screenshot(page, "02-parsing-valid-hooks");
+	const shot2 = await ctx.screenshot("02-parsing-valid-hooks");
 
 	// WorkflowDiscovery should have logged discovery with hooks for hooked-workflow.md
 	const discoveryLogs = getWorkflowDiscoveryLogs(collector);
@@ -491,8 +354,8 @@ async function testParsingValidHooks(page: Page, collector: LogCollector): Promi
 	);
 
 	// Check parser logs — valid hooks should NOT produce warnings for hooked-workflow
-	const parserLogs = getWorkflowHookParserLogs(collector);
-	const hookedWorkflowWarns = parserLogs.filter(
+	const parserLogs2 = getWorkflowHookParserLogs(collector);
+	const hookedWorkflowWarns = parserLogs2.filter(
 		(e) =>
 			e.level === "warn" &&
 			JSON.stringify(e.data ?? {}).includes("hooked-workflow")
@@ -503,54 +366,52 @@ async function testParsingValidHooks(page: Page, collector: LogCollector): Promi
 		const data = discoveredLog.data as Record<string, unknown> | undefined;
 		const foundCount = (data?.found as number) ?? 0;
 		if (foundCount > 0 && hookedWorkflowWarns.length === 0) {
-			pass(
+			ctx.pass(
 				"Parsing valid notor-hooks",
 				`Discovery found ${foundCount} workflow(s); no parser warnings for hooked-workflow. ` +
 					`Both execute_command and run_workflow action types accepted.`,
-				shot
+				shot2
 			);
 		} else if (foundCount > 0) {
-			pass(
+			ctx.pass(
 				"Parsing valid notor-hooks",
 				`Discovery found ${foundCount} workflow(s); ${hookedWorkflowWarns.length} parser warning(s) ` +
 					`for hooked-workflow (may be benign)`,
-				shot
+				shot2
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"Parsing valid notor-hooks",
 				`Discovery found 0 workflows — hooked-workflow.md may not have been detected`,
-				shot
+				shot2
 			);
 		}
 	} else {
 		// Fallback: check if any discovery logs exist at all
 		if (discoveryLogs.length > 0) {
-			pass(
+			ctx.pass(
 				"Parsing valid notor-hooks",
 				`${discoveryLogs.length} WorkflowDiscovery log(s) found but no "discovery complete" log. ` +
 					`First: "${discoveryLogs[0]!.message}"`,
-				shot
+				shot2
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"Parsing valid notor-hooks",
 				"No WorkflowDiscovery structured logs found — discovery may not have run",
-				shot
+				shot2
 			);
 		}
 	}
-}
 
-/** Test 3: Parsing invalid hooks — warn-level logs; valid entries still apply. */
-async function testParsingInvalidHooks(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 3: Parsing invalid hooks ────────────────────────────────────────
 	console.log("\n── Test 3: Parsing invalid hooks ────────────────────────────");
 
-	const shot = await screenshot(page, "03-parsing-invalid-hooks");
+	const shot3 = await ctx.screenshot("03-parsing-invalid-hooks");
 
 	// Parser should emit a warn for the missing command entry in invalid-hooks-workflow.md
-	const parserLogs = getWorkflowHookParserLogs(collector);
-	const missingCommandWarns = parserLogs.filter(
+	const parserLogs3 = getWorkflowHookParserLogs(collector);
+	const missingCommandWarns = parserLogs3.filter(
 		(e) =>
 			e.level === "warn" &&
 			(e.message.includes("missing") || e.message.includes("command")) &&
@@ -558,48 +419,46 @@ async function testParsingInvalidHooks(page: Page, collector: LogCollector): Pro
 	);
 
 	// The workflow should still be discovered (valid entries survive)
-	const discoveryLogs = getWorkflowDiscoveryLogs(collector);
-	const discoveredLog = discoveryLogs.find(
+	const discoveryLogs3 = getWorkflowDiscoveryLogs(collector);
+	const discoveredLog3 = discoveryLogs3.find(
 		(e) => e.message.includes("Workflow discovery complete")
 	);
-	const foundCount = (discoveredLog?.data as Record<string, unknown> | undefined)?.found as number ?? 0;
+	const foundCount3 = (discoveredLog3?.data as Record<string, unknown> | undefined)?.found as number ?? 0;
 
 	if (missingCommandWarns.length > 0) {
-		pass(
+		ctx.pass(
 			"Parsing invalid hooks — warn logged",
 			`Found ${missingCommandWarns.length} warn-level log(s) for missing command in invalid-hooks-workflow. ` +
-				`Workflow still discovered (total: ${foundCount}).`,
-			shot
+				`Workflow still discovered (total: ${foundCount3}).`,
+			shot3
 		);
 	} else {
 		// Check for any parser warnings at all
-		const allWarns = parserLogs.filter((e) => e.level === "warn");
+		const allWarns = parserLogs3.filter((e) => e.level === "warn");
 		if (allWarns.length > 0) {
-			pass(
+			ctx.pass(
 				"Parsing invalid hooks — warn logged",
 				`${allWarns.length} parser warning(s) found (may include invalid-hooks-workflow). ` +
 					`First: "${allWarns[0]!.message}"`,
-				shot
+				shot3
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"Parsing invalid hooks — warn logged",
 				"No warn-level WorkflowHookParser logs found for invalid hook entries",
-				shot
+				shot3
 			);
 		}
 	}
-}
 
-/** Test 4: Parsing unsupported event names — warn for vault event names. */
-async function testParsingUnsupportedEvents(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 4: Parsing unsupported event names ───────────────────────────────
 	console.log("\n── Test 4: Parsing unsupported event names ──────────────────");
 
-	const shot = await screenshot(page, "04-parsing-unsupported-events");
+	const shot4 = await ctx.screenshot("04-parsing-unsupported-events");
 
 	// Parser should warn about "on-note-open" being an unrecognised event name
-	const parserLogs = getWorkflowHookParserLogs(collector);
-	const unsupportedEventWarns = parserLogs.filter(
+	const parserLogs4 = getWorkflowHookParserLogs(collector);
+	const unsupportedEventWarns = parserLogs4.filter(
 		(e) =>
 			e.level === "warn" &&
 			(e.message.includes("unrecognised") || e.message.includes("unrecognized") ||
@@ -608,40 +467,52 @@ async function testParsingUnsupportedEvents(page: Page, collector: LogCollector)
 	);
 
 	if (unsupportedEventWarns.length > 0) {
-		pass(
+		ctx.pass(
 			"Parsing unsupported event names — warn logged",
 			`Found ${unsupportedEventWarns.length} warn-level log(s) for unsupported "on-note-open" event. ` +
 				`Valid "pre-send" entries should still be parsed.`,
-			shot
+			shot4
 		);
 	} else {
 		// Broader check for any warn mentioning event names
-		const eventWarns = parserLogs.filter(
+		const eventWarns = parserLogs4.filter(
 			(e) => e.level === "warn" && e.message.includes("event")
 		);
 		if (eventWarns.length > 0) {
-			pass(
+			ctx.pass(
 				"Parsing unsupported event names — warn logged",
 				`${eventWarns.length} event-related parser warning(s) found. First: "${eventWarns[0]!.message}"`,
-				shot
+				shot4
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"Parsing unsupported event names — warn logged",
 				"No warn-level logs found for unsupported vault event name in notor-hooks",
-				shot
+				shot4
 			);
 		}
 	}
-}
 
-/** Test 5: Override activation — manual workflow fires scoped pre-send hook. */
-async function testOverrideActivationManual(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 5: Override activation — manual workflow fires scoped pre-send hook
 	console.log("\n── Test 5: Override activation — manual workflow ─────────────");
 
 	// Configure a global pre-send hook so we can verify it gets replaced by the scoped one
 	clearHookFiles();
-	const settings = buildSettings({
+	const settings5 = buildDefaultSettings({
+		mode: "act",
+		open_notes_on_access: false,
+		auto_approve: {
+			read_note: true,
+			search_vault: true,
+			list_vault: true,
+			read_frontmatter: true,
+			fetch_webpage: true,
+			write_note: true,
+			replace_in_note: true,
+			update_frontmatter: true,
+			manage_tags: true,
+			execute_command: true,
+		},
 		hooks: {
 			pre_send: [
 				{
@@ -657,11 +528,11 @@ async function testOverrideActivationManual(page: Page, collector: LogCollector)
 			after_completion: [],
 		},
 	});
-	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
+	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings5, null, 2));
 	await page.reload();
 	await page.waitForTimeout(8_000);
 
-	const logsBefore = collector.getStructuredLogs().length;
+	const logsBefore5 = collector.getStructuredLogs().length;
 
 	// Execute the hooked-workflow via command palette
 	await page.evaluate(() => {
@@ -673,55 +544,55 @@ async function testOverrideActivationManual(page: Page, collector: LogCollector)
 	// Filter for hooked-workflow and select it
 	await page.keyboard.type("hooked-workflow");
 	await page.waitForTimeout(600);
-	const suggestion = await page.$(".suggestion-item");
-	if (suggestion) {
-		await suggestion.click();
+	const suggestion5 = await page.$(".suggestion-item");
+	if (suggestion5) {
+		await suggestion5.click();
 	} else {
 		await page.keyboard.press("Enter");
 	}
 	await page.waitForTimeout(HOOK_WAIT_MS + 2_000);
 
-	const shot = await screenshot(page, "05-override-activation");
+	const shot5 = await ctx.screenshot("05-override-activation");
 
 	// Check structured logs for WorkflowHookOverride activation
-	const overrideLogs = collector.getStructuredLogs().slice(logsBefore);
-	const activationLogs = overrideLogs.filter(
+	const overrideLogs5 = collector.getStructuredLogs().slice(logsBefore5);
+	const activationLogs5 = overrideLogs5.filter(
 		(e) =>
 			e.source === "WorkflowHookOverride" &&
 			e.message.includes("activated")
 	);
 
 	// Check HookEvents logs for scoped dispatch
-	const hookEventLogs = overrideLogs.filter(
+	const hookEventLogs5 = overrideLogs5.filter(
 		(e) =>
 			e.source === "HookEvents" &&
 			(JSON.stringify(e.data ?? {}).includes("scoped") ||
 			 JSON.stringify(e.data ?? {}).includes('"scoped":true'))
 	);
 
-	if (activationLogs.length > 0) {
-		pass(
+	if (activationLogs5.length > 0) {
+		ctx.pass(
 			"Override activation — manual workflow",
-			`Found ${activationLogs.length} activation log(s): "${activationLogs[0]!.message}". ` +
-				`Scoped hook dispatch logs: ${hookEventLogs.length}`,
-			shot
+			`Found ${activationLogs5.length} activation log(s): "${activationLogs5[0]!.message}". ` +
+				`Scoped hook dispatch logs: ${hookEventLogs5.length}`,
+			shot5
 		);
 	} else {
 		// Fallback: check if any override-related logs exist
-		const anyOverrideLogs = overrideLogs.filter(
+		const anyOverrideLogs5 = overrideLogs5.filter(
 			(e) => e.source === "WorkflowHookOverride"
 		);
-		if (anyOverrideLogs.length > 0) {
-			pass(
+		if (anyOverrideLogs5.length > 0) {
+			ctx.pass(
 				"Override activation — manual workflow",
-				`${anyOverrideLogs.length} WorkflowHookOverride log(s) found. First: "${anyOverrideLogs[0]!.message}"`,
-				shot
+				`${anyOverrideLogs5.length} WorkflowHookOverride log(s) found. First: "${anyOverrideLogs5[0]!.message}"`,
+				shot5
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"Override activation — manual workflow",
 				"No WorkflowHookOverride activation logs found after triggering hooked workflow",
-				shot
+				shot5
 			);
 		}
 	}
@@ -729,16 +600,28 @@ async function testOverrideActivationManual(page: Page, collector: LogCollector)
 	await page.keyboard.press("Escape");
 	await page.waitForTimeout(500);
 	clearHookFiles();
-}
 
-/** Test 6: Non-overridden events use global hooks during workflow execution. */
-async function testNonOverriddenEventsUseGlobal(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 6: Non-overridden events use global hooks during workflow execution
 	console.log("\n── Test 6: Non-overridden events use global hooks ───────────");
 
 	// Configure a global pre-send hook. The partial-override-workflow only overrides
 	// after-completion, so pre-send should still use global hooks.
 	clearHookFiles();
-	const settings = buildSettings({
+	const settings6 = buildDefaultSettings({
+		mode: "act",
+		open_notes_on_access: false,
+		auto_approve: {
+			read_note: true,
+			search_vault: true,
+			list_vault: true,
+			read_frontmatter: true,
+			fetch_webpage: true,
+			write_note: true,
+			replace_in_note: true,
+			update_frontmatter: true,
+			manage_tags: true,
+			execute_command: true,
+		},
 		hooks: {
 			pre_send: [
 				{
@@ -762,11 +645,11 @@ async function testNonOverriddenEventsUseGlobal(page: Page, collector: LogCollec
 			],
 		},
 	});
-	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
+	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings6, null, 2));
 	await page.reload();
 	await page.waitForTimeout(8_000);
 
-	const logsBefore = collector.getStructuredLogs().length;
+	const logsBefore6 = collector.getStructuredLogs().length;
 
 	// Execute the partial-override-workflow
 	await page.evaluate(() => {
@@ -776,49 +659,49 @@ async function testNonOverriddenEventsUseGlobal(page: Page, collector: LogCollec
 	await page.waitForTimeout(2_000);
 	await page.keyboard.type("partial-override");
 	await page.waitForTimeout(600);
-	const suggestion = await page.$(".suggestion-item");
-	if (suggestion) await suggestion.click();
+	const suggestion6 = await page.$(".suggestion-item");
+	if (suggestion6) await suggestion6.click();
 	else await page.keyboard.press("Enter");
 	await page.waitForTimeout(HOOK_WAIT_MS + 2_000);
 
-	const shot = await screenshot(page, "06-non-overridden-events");
+	const shot6 = await ctx.screenshot("06-non-overridden-events");
 
 	// Check logs: pre_send should show scoped=false (global), after_completion should show scoped=true
-	const newLogs = collector.getStructuredLogs().slice(logsBefore);
-	const preSendLogs = newLogs.filter(
+	const newLogs6 = collector.getStructuredLogs().slice(logsBefore6);
+	const preSendLogs6 = newLogs6.filter(
 		(e) =>
 			e.source === "HookEvents" &&
 			e.message.includes("pre_send")
 	);
-	const overrideActiveLogs = newLogs.filter(
+	const overrideActiveLogs6 = newLogs6.filter(
 		(e) =>
 			e.source === "WorkflowHookOverride" &&
 			(e.message.includes("does not cover event") || e.message.includes("global hooks"))
 	);
 
-	if (preSendLogs.length > 0 || overrideActiveLogs.length > 0) {
-		pass(
+	if (preSendLogs6.length > 0 || overrideActiveLogs6.length > 0) {
+		ctx.pass(
 			"Non-overridden events use global hooks",
-			`Pre-send dispatch logs: ${preSendLogs.length}; global-fallback logs: ${overrideActiveLogs.length}. ` +
+			`Pre-send dispatch logs: ${preSendLogs6.length}; global-fallback logs: ${overrideActiveLogs6.length}. ` +
 				`Partial override correctly falls back to global for non-overridden events.`,
-			shot
+			shot6
 		);
 	} else {
 		// Accept if override was activated (partial override only covers after-completion)
-		const anyActivation = newLogs.filter(
+		const anyActivation6 = newLogs6.filter(
 			(e) => e.source === "WorkflowHookOverride" && e.message.includes("activated")
 		);
-		if (anyActivation.length > 0) {
-			pass(
+		if (anyActivation6.length > 0) {
+			ctx.pass(
 				"Non-overridden events use global hooks",
 				`Override activated for partial-override-workflow. Non-covered events use global hooks by design.`,
-				shot
+				shot6
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"Non-overridden events use global hooks",
 				"No HookEvents pre_send or WorkflowHookOverride fallback logs found",
-				shot
+				shot6
 			);
 		}
 	}
@@ -826,217 +709,205 @@ async function testNonOverriddenEventsUseGlobal(page: Page, collector: LogCollec
 	await page.keyboard.press("Escape");
 	await page.waitForTimeout(500);
 	clearHookFiles();
-}
 
-/** Test 7: Revert on success — global hooks fire after workflow completes. */
-async function testRevertOnSuccess(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 7: Revert on success ─────────────────────────────────────────────
 	console.log("\n── Test 7: Revert on success ─────────────────────────────────");
 
 	// After a workflow conversation completes, a new conversation should use global hooks.
 	// Check for deactivation logs from the previous workflow execution (tests 5/6).
-	const overrideLogs = getWorkflowHookOverrideLogs(collector);
-	const deactivationLogs = overrideLogs.filter(
+	const overrideLogsAll7 = getWorkflowHookOverrideLogs(collector);
+	const deactivationLogs7 = overrideLogsAll7.filter(
 		(e) => e.message.includes("deactivated")
 	);
 
-	const shot = await screenshot(page, "07-revert-on-success");
+	const shot7 = await ctx.screenshot("07-revert-on-success");
 
-	if (deactivationLogs.length > 0) {
-		pass(
+	if (deactivationLogs7.length > 0) {
+		ctx.pass(
 			"Revert on success",
-			`Found ${deactivationLogs.length} deactivation log(s): "${deactivationLogs[0]!.message}". ` +
+			`Found ${deactivationLogs7.length} deactivation log(s): "${deactivationLogs7[0]!.message}". ` +
 				`Override correctly reverted after workflow completion.`,
-			shot
+			shot7
 		);
 	} else {
 		// Verify that no override is active by starting a new conversation and checking logs
-		const logsBefore = collector.getStructuredLogs().length;
-		await newConversation(page);
-		await sendMessage(page, "Test message after workflow — should use global hooks");
+		const logsBefore7 = collector.getStructuredLogs().length;
+		await newConversationLocal(page);
+		await sendMessageLocal(page, "Test message after workflow — should use global hooks");
 		await page.waitForTimeout(HOOK_WAIT_MS);
 
-		const newLogs = collector.getStructuredLogs().slice(logsBefore);
-		const scopedDispatch = newLogs.filter(
+		const newLogs7 = collector.getStructuredLogs().slice(logsBefore7);
+		const scopedDispatch7 = newLogs7.filter(
 			(e) =>
 				e.source === "HookEvents" &&
 				JSON.stringify(e.data ?? {}).includes('"scoped":true')
 		);
 
-		if (scopedDispatch.length === 0) {
-			pass(
+		if (scopedDispatch7.length === 0) {
+			ctx.pass(
 				"Revert on success",
 				"No scoped hook dispatch in new conversation — global hooks correctly restored",
-				shot
+				shot7
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"Revert on success",
-				`${scopedDispatch.length} scoped dispatch log(s) found in new conversation — override may not have reverted`,
-				shot
+				`${scopedDispatch7.length} scoped dispatch log(s) found in new conversation — override may not have reverted`,
+				shot7
 			);
 		}
 	}
-}
 
-/** Test 8: Revert on failure — global hooks resume after LLM error. */
-async function testRevertOnFailure(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 8: Revert on failure ─────────────────────────────────────────────
 	console.log("\n── Test 8: Revert on failure ─────────────────────────────────");
 
 	// This is verified via structured logs — the try/finally pattern ensures deactivation
 	// on all exit paths including LLM errors.
-	const overrideLogs = getWorkflowHookOverrideLogs(collector);
-	const deactivationLogs = overrideLogs.filter(
+	const overrideLogsAll8 = getWorkflowHookOverrideLogs(collector);
+	const deactivationLogs8 = overrideLogsAll8.filter(
 		(e) => e.message.includes("deactivated")
 	);
 
-	const shot = await screenshot(page, "08-revert-on-failure");
+	const shot8 = await ctx.screenshot("08-revert-on-failure");
 
 	// The try/finally pattern in orchestrator guarantees this — verify via code structure
 	// or check that deactivation logs exist (from previous tests)
-	if (deactivationLogs.length > 0) {
-		pass(
+	if (deactivationLogs8.length > 0) {
+		ctx.pass(
 			"Revert on failure",
-			`${deactivationLogs.length} deactivation log(s) confirm try/finally pattern is working. ` +
+			`${deactivationLogs8.length} deactivation log(s) confirm try/finally pattern is working. ` +
 				`Workflow errors trigger the same deactivation path.`,
-			shot
+			shot8
 		);
 	} else {
 		// Acceptable — if no workflow has failed yet, the pattern is verified by code review.
 		// Check that the override manager at least has the deactivate method wired
-		const anyOverrideLogs = overrideLogs.length;
-		pass(
+		const anyOverrideLogs8 = overrideLogsAll8.length;
+		ctx.pass(
 			"Revert on failure",
-			`${anyOverrideLogs} WorkflowHookOverride log(s) found. try/finally deactivation pattern ` +
+			`${anyOverrideLogs8} WorkflowHookOverride log(s) found. try/finally deactivation pattern ` +
 				`ensures revert on failure — verified by code structure (G-005).`,
-			shot
+			shot8
 		);
 	}
-}
 
-/** Test 9: Revert on user stop — global hooks resume after stopping workflow. */
-async function testRevertOnUserStop(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 9: Revert on user stop ───────────────────────────────────────────
 	console.log("\n── Test 9: Revert on user stop ───────────────────────────────");
 
 	// User stop triggers the same try/finally deactivation path as success/failure.
 	// This is structurally guaranteed by G-005's implementation.
-	const overrideLogs = getWorkflowHookOverrideLogs(collector);
-	const shot = await screenshot(page, "09-revert-on-user-stop");
+	const overrideLogsAll9 = getWorkflowHookOverrideLogs(collector);
+	const shot9 = await ctx.screenshot("09-revert-on-user-stop");
 
 	// Verify deactivation exists for at least one conversation
-	const deactivationLogs = overrideLogs.filter(
+	const deactivationLogs9 = overrideLogsAll9.filter(
 		(e) => e.message.includes("deactivated")
 	);
 
-	if (deactivationLogs.length > 0) {
-		pass(
+	if (deactivationLogs9.length > 0) {
+		ctx.pass(
 			"Revert on user stop",
-			`${deactivationLogs.length} deactivation log(s) confirm cleanup works on all exit paths. ` +
+			`${deactivationLogs9.length} deactivation log(s) confirm cleanup works on all exit paths. ` +
 				`User stop shares the try/finally deactivation path.`,
-			shot
+			shot9
 		);
 	} else {
-		pass(
+		ctx.pass(
 			"Revert on user stop",
 			`try/finally deactivation pattern ensures revert on user stop — ` +
-				`structurally guaranteed by G-005. ${overrideLogs.length} total override log(s).`,
-			shot
+				`structurally guaranteed by G-005. ${overrideLogsAll9.length} total override log(s).`,
+			shot9
 		);
 	}
-}
 
-/** Test 10: Background workflow override isolation. */
-async function testBackgroundOverrideIsolation(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 10: Background workflow override isolation ───────────────────────
 	console.log("\n── Test 10: Background workflow override isolation ───────────");
 
 	// Background workflows use different conversation IDs, so their overrides are isolated.
 	// Verify via discovery logs that both bg-hooked-workflow and bg-hooked-workflow-2 are discovered.
-	const discoveryLogs = getWorkflowDiscoveryLogs(collector);
-	const discoveredLog = discoveryLogs.find(
+	const discoveryLogs10 = getWorkflowDiscoveryLogs(collector);
+	const discoveredLog10 = discoveryLogs10.find(
 		(e) => e.message.includes("Workflow discovery complete")
 	);
-	const foundCount = (discoveredLog?.data as Record<string, unknown> | undefined)?.found as number ?? 0;
+	const foundCount10 = (discoveredLog10?.data as Record<string, unknown> | undefined)?.found as number ?? 0;
 
-	const shot = await screenshot(page, "10-bg-override-isolation");
+	const shot10 = await ctx.screenshot("10-bg-override-isolation");
 
 	// Check that the override manager uses conversation-keyed state (structural verification)
-	const overrideLogs = getWorkflowHookOverrideLogs(collector);
-	const activationLogs = overrideLogs.filter(
+	const overrideLogs10 = getWorkflowHookOverrideLogs(collector);
+	const activationLogs10 = overrideLogs10.filter(
 		(e) => e.message.includes("activated")
 	);
 
 	// Extract unique conversation IDs from activation logs
-	const conversationIds = new Set(
-		activationLogs
+	const conversationIds10 = new Set(
+		activationLogs10
 			.map((e) => (e.data as Record<string, unknown> | undefined)?.conversationId as string)
 			.filter(Boolean)
 	);
 
-	if (conversationIds.size >= 2) {
-		pass(
+	if (conversationIds10.size >= 2) {
+		ctx.pass(
 			"Background override isolation",
-			`Found activations for ${conversationIds.size} distinct conversation IDs — ` +
+			`Found activations for ${conversationIds10.size} distinct conversation IDs — ` +
 				`overrides are correctly isolated per conversation.`,
-			shot
+			shot10
 		);
-	} else if (foundCount > 0) {
+	} else if (foundCount10 > 0) {
 		// Background workflows may not have been triggered in this test run
-		pass(
+		ctx.pass(
 			"Background override isolation",
-			`${foundCount} workflows discovered (including background-trigger variants). ` +
+			`${foundCount10} workflows discovered (including background-trigger variants). ` +
 				`Override manager uses Map<conversationId, config> — isolation guaranteed by design.`,
-			shot
+			shot10
 		);
 	} else {
-		pass(
+		ctx.pass(
 			"Background override isolation",
 			`Override manager keyed by conversationId ensures isolation. ` +
-				`${activationLogs.length} activation log(s) found.`,
-			shot
+				`${activationLogs10.length} activation log(s) found.`,
+			shot10
 		);
 	}
-}
 
-/** Test 11: Background workflow does not affect foreground. */
-async function testBackgroundDoesNotAffectForeground(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 11: Background workflow does not affect foreground ───────────────
 	console.log("\n── Test 11: Background does not affect foreground ────────────");
 
 	// Send a message in the foreground — should use global hooks (not any background override)
-	const logsBefore = collector.getStructuredLogs().length;
-	await newConversation(page);
+	const logsBefore11 = collector.getStructuredLogs().length;
+	await newConversationLocal(page);
 	clearHookFiles();
-	await sendMessage(page, "Foreground message — should use global hooks, not background overrides");
+	await sendMessageLocal(page, "Foreground message — should use global hooks, not background overrides");
 	await page.waitForTimeout(HOOK_WAIT_MS);
 
-	const shot = await screenshot(page, "11-bg-no-affect-foreground");
+	const shot11 = await ctx.screenshot("11-bg-no-affect-foreground");
 
-	const newLogs = collector.getStructuredLogs().slice(logsBefore);
-	const scopedDispatch = newLogs.filter(
+	const newLogs11 = collector.getStructuredLogs().slice(logsBefore11);
+	const scopedDispatch11 = newLogs11.filter(
 		(e) =>
 			e.source === "HookEvents" &&
 			JSON.stringify(e.data ?? {}).includes('"scoped":true')
 	);
 
-	if (scopedDispatch.length === 0) {
-		pass(
+	if (scopedDispatch11.length === 0) {
+		ctx.pass(
 			"Background does not affect foreground",
 			"No scoped hook dispatch in foreground conversation — background overrides correctly isolated",
-			shot
+			shot11
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"Background does not affect foreground",
-			`${scopedDispatch.length} scoped dispatch log(s) found in foreground — ` +
+			`${scopedDispatch11.length} scoped dispatch log(s) found in foreground — ` +
 				`background override may be leaking`,
-			shot
+			shot11
 		);
 	}
-}
 
-/** Test 12: Workflow without notor-hooks — global hooks fire throughout. */
-async function testWorkflowWithoutHooks(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 12: Workflow without notor-hooks ─────────────────────────────────
 	console.log("\n── Test 12: Workflow without notor-hooks ─────────────────────");
 
-	const logsBefore = collector.getStructuredLogs().length;
+	const logsBefore12 = collector.getStructuredLogs().length;
 
 	// Execute the no-hooks-workflow
 	await page.evaluate(() => {
@@ -1046,44 +917,42 @@ async function testWorkflowWithoutHooks(page: Page, collector: LogCollector): Pr
 	await page.waitForTimeout(2_000);
 	await page.keyboard.type("no-hooks-workflow");
 	await page.waitForTimeout(600);
-	const suggestion = await page.$(".suggestion-item");
-	if (suggestion) await suggestion.click();
+	const suggestion12 = await page.$(".suggestion-item");
+	if (suggestion12) await suggestion12.click();
 	else await page.keyboard.press("Enter");
 	await page.waitForTimeout(HOOK_WAIT_MS + 2_000);
 
-	const shot = await screenshot(page, "12-workflow-without-hooks");
+	const shot12 = await ctx.screenshot("12-workflow-without-hooks");
 
 	// No WorkflowHookOverride activation logs should appear for this workflow
-	const newLogs = collector.getStructuredLogs().slice(logsBefore);
-	const activationLogs = newLogs.filter(
+	const newLogs12 = collector.getStructuredLogs().slice(logsBefore12);
+	const activationLogs12 = newLogs12.filter(
 		(e) =>
 			e.source === "WorkflowHookOverride" &&
 			e.message.includes("activated")
 	);
 
-	if (activationLogs.length === 0) {
-		pass(
+	if (activationLogs12.length === 0) {
+		ctx.pass(
 			"Workflow without notor-hooks",
 			"No WorkflowHookOverride activation logs — global hooks fire throughout as expected",
-			shot
+			shot12
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"Workflow without notor-hooks",
-			`${activationLogs.length} unexpected activation log(s) for workflow without notor-hooks`,
-			shot
+			`${activationLogs12.length} unexpected activation log(s) for workflow without notor-hooks`,
+			shot12
 		);
 	}
 
 	await page.keyboard.press("Escape");
 	await page.waitForTimeout(500);
-}
 
-/** Test 13: run_workflow action in scoped hooks. */
-async function testRunWorkflowScopedAction(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 13: run_workflow action in scoped hooks ──────────────────────────
 	console.log("\n── Test 13: run_workflow action in scoped hooks ──────────────");
 
-	const logsBefore = collector.getStructuredLogs().length;
+	const logsBefore13 = collector.getStructuredLogs().length;
 
 	// Execute run-workflow-hook which has after-completion: action: run_workflow
 	await page.evaluate(() => {
@@ -1093,64 +962,64 @@ async function testRunWorkflowScopedAction(page: Page, collector: LogCollector):
 	await page.waitForTimeout(2_000);
 	await page.keyboard.type("run-workflow-hook");
 	await page.waitForTimeout(600);
-	const suggestion = await page.$(".suggestion-item");
-	if (suggestion) await suggestion.click();
+	const suggestion13 = await page.$(".suggestion-item");
+	if (suggestion13) await suggestion13.click();
 	else await page.keyboard.press("Enter");
 	await page.waitForTimeout(HOOK_WAIT_MS + 4_000); // Extra time for chained workflow
 
-	const shot = await screenshot(page, "13-run-workflow-scoped-action");
+	const shot13 = await ctx.screenshot("13-run-workflow-scoped-action");
 
 	// Check for evidence that the scoped run_workflow hook fired
-	const newLogs = collector.getStructuredLogs().slice(logsBefore);
-	const routingLogs = newLogs.filter(
+	const newLogs13 = collector.getStructuredLogs().slice(logsBefore13);
+	const routingLogs13 = newLogs13.filter(
 		(e) =>
 			e.source === "HookEvents" &&
 			e.message.includes("run_workflow")
 	);
-	const executorLogs = newLogs.filter(
+	const executorLogs13 = newLogs13.filter(
 		(e) =>
 			e.source === "WorkflowExecutor" &&
 			JSON.stringify(e.data ?? {}).includes("hook-target")
 	);
 
-	if (routingLogs.length > 0 || executorLogs.length > 0) {
-		pass(
+	if (routingLogs13.length > 0 || executorLogs13.length > 0) {
+		ctx.pass(
 			"run_workflow scoped action",
-			`Found ${routingLogs.length} routing log(s) and ${executorLogs.length} executor log(s). ` +
+			`Found ${routingLogs13.length} routing log(s) and ${executorLogs13.length} executor log(s). ` +
 				`Scoped run_workflow action triggered hook-target workflow via standard pipeline.`,
-			shot
+			shot13
 		);
 	} else {
 		// Check for any workflow-related logs from the scoped hook
-		const anyWorkflowLogs = newLogs.filter(
+		const anyWorkflowLogs13 = newLogs13.filter(
 			(e) =>
 				e.message.toLowerCase().includes("hook-target") ||
 				e.message.toLowerCase().includes("run_workflow") ||
 				JSON.stringify(e.data ?? {}).toLowerCase().includes("hook-target")
 		);
-		if (anyWorkflowLogs.length > 0) {
-			pass(
+		if (anyWorkflowLogs13.length > 0) {
+			ctx.pass(
 				"run_workflow scoped action",
-				`Found ${anyWorkflowLogs.length} hook-target/run_workflow log(s): "${anyWorkflowLogs[0]!.message}"`,
-				shot
+				`Found ${anyWorkflowLogs13.length} hook-target/run_workflow log(s): "${anyWorkflowLogs13[0]!.message}"`,
+				shot13
 			);
 		} else {
 			// The workflow may not have completed yet (LLM response pending)
 			// Check for override activation which confirms the scoped hooks were configured
-			const activationLogs = newLogs.filter(
+			const activationLogs13 = newLogs13.filter(
 				(e) => e.source === "WorkflowHookOverride" && e.message.includes("activated")
 			);
-			if (activationLogs.length > 0) {
-				pass(
+			if (activationLogs13.length > 0) {
+				ctx.pass(
 					"run_workflow scoped action",
 					`Override activated for run-workflow-hook workflow. run_workflow action will fire on completion.`,
-					shot
+					shot13
 				);
 			} else {
-				fail(
+				ctx.fail(
 					"run_workflow scoped action",
 					"No run_workflow routing or hook-target execution logs found",
-					shot
+					shot13
 				);
 			}
 		}
@@ -1158,39 +1027,35 @@ async function testRunWorkflowScopedAction(page: Page, collector: LogCollector):
 
 	await page.keyboard.press("Escape");
 	await page.waitForTimeout(500);
-}
 
-/** Test 14: Timeout behavior — execute_command respects timeout; run_workflow exempt. */
-async function testTimeoutBehavior(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 14: Timeout behavior ─────────────────────────────────────────────
 	console.log("\n── Test 14: Timeout behavior ──────────────────────────────────");
 
-	const shot = await screenshot(page, "14-timeout-behavior");
+	const shot14 = await ctx.screenshot("14-timeout-behavior");
 
 	// Verify structurally: execute_command scoped hooks use executeHook() which applies hook_timeout.
 	// run_workflow scoped hooks use executeRunWorkflowAction() which is NOT subject to hook_timeout.
 	// Check HookEvents logs for both action types being dispatched with correct semantics.
-	const hookEventsLogs = getHookEventsLogs(collector);
-	const timeoutLogs = hookEventsLogs.filter(
+	const hookEventsLogs14 = getHookEventsLogs(collector);
+	const timeoutLogs14 = hookEventsLogs14.filter(
 		(e) => e.message.includes("timeout") || e.message.includes("Timeout")
 	);
 
 	// The structural guarantee is in the code: executeScopedCommandHook() calls executeHook()
 	// (which enforces hook_timeout), while executeScopedWorkflowHook() calls
 	// executeRunWorkflowAction() (no timeout per FR-51).
-	pass(
+	ctx.pass(
 		"Timeout behavior",
 		`execute_command scoped hooks use executeHook() with hook_timeout=${10}s (settings default). ` +
 			`run_workflow scoped hooks use executeRunWorkflowAction() — exempt from timeout per FR-51. ` +
-			`${timeoutLogs.length} timeout-related log(s) found.`,
-		shot
+			`${timeoutLogs14.length} timeout-related log(s) found.`,
+		shot14
 	);
-}
 
-/** Test 15: Edge case — empty notor-hooks mapping. */
-async function testEmptyHooksMapping(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 15: Empty notor-hooks mapping ────────────────────────────────────
 	console.log("\n── Test 15: Empty notor-hooks mapping ────────────────────────");
 
-	const logsBefore = collector.getStructuredLogs().length;
+	const logsBefore15 = collector.getStructuredLogs().length;
 
 	// Execute the empty-hooks-workflow (notor-hooks: {})
 	await page.evaluate(() => {
@@ -1200,48 +1065,46 @@ async function testEmptyHooksMapping(page: Page, collector: LogCollector): Promi
 	await page.waitForTimeout(2_000);
 	await page.keyboard.type("empty-hooks");
 	await page.waitForTimeout(600);
-	const suggestion = await page.$(".suggestion-item");
-	if (suggestion) await suggestion.click();
+	const suggestion15 = await page.$(".suggestion-item");
+	if (suggestion15) await suggestion15.click();
 	else await page.keyboard.press("Enter");
 	await page.waitForTimeout(HOOK_WAIT_MS);
 
-	const shot = await screenshot(page, "15-empty-hooks-mapping");
+	const shot15 = await ctx.screenshot("15-empty-hooks-mapping");
 
 	// No override should be activated for empty hooks
-	const newLogs = collector.getStructuredLogs().slice(logsBefore);
-	const activationLogs = newLogs.filter(
+	const newLogs15 = collector.getStructuredLogs().slice(logsBefore15);
+	const activationLogs15 = newLogs15.filter(
 		(e) =>
 			e.source === "WorkflowHookOverride" &&
 			e.message.includes("activated")
 	);
 
-	if (activationLogs.length === 0) {
-		pass(
+	if (activationLogs15.length === 0) {
+		ctx.pass(
 			"Empty notor-hooks mapping",
 			"No override activated for empty notor-hooks: {} — global hooks apply as expected",
-			shot
+			shot15
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"Empty notor-hooks mapping",
-			`${activationLogs.length} unexpected activation log(s) for empty notor-hooks mapping`,
-			shot
+			`${activationLogs15.length} unexpected activation log(s) for empty notor-hooks mapping`,
+			shot15
 		);
 	}
 
 	await page.keyboard.press("Escape");
 	await page.waitForTimeout(500);
-}
 
-/** Test 16: Edge case — notor-hooks is not a mapping. */
-async function testHooksNotAMapping(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 16: notor-hooks is not a mapping ─────────────────────────────────
 	console.log("\n── Test 16: notor-hooks is not a mapping ─────────────────────");
 
-	const shot = await screenshot(page, "16-hooks-not-a-mapping");
+	const shot16 = await ctx.screenshot("16-hooks-not-a-mapping");
 
 	// The scalar-hooks-workflow has notor-hooks: "invalid" — parser should log a warning
-	const parserLogs = getWorkflowHookParserLogs(collector);
-	const invalidTypeWarns = parserLogs.filter(
+	const parserLogs16 = getWorkflowHookParserLogs(collector);
+	const invalidTypeWarns16 = parserLogs16.filter(
 		(e) =>
 			e.level === "warn" &&
 			(e.message.includes("invalid") || e.message.includes("YAML mapping") ||
@@ -1249,72 +1112,66 @@ async function testHooksNotAMapping(page: Page, collector: LogCollector): Promis
 			JSON.stringify(e.data ?? {}).includes("scalar-hooks-workflow")
 	);
 
-	if (invalidTypeWarns.length > 0) {
-		pass(
+	if (invalidTypeWarns16.length > 0) {
+		ctx.pass(
 			"notor-hooks is not a mapping — warn logged",
-			`Found ${invalidTypeWarns.length} warn-level log(s) for scalar notor-hooks value: ` +
-				`"${invalidTypeWarns[0]!.message}". No override activated.`,
-			shot
+			`Found ${invalidTypeWarns16.length} warn-level log(s) for scalar notor-hooks value: ` +
+				`"${invalidTypeWarns16[0]!.message}". No override activated.`,
+			shot16
 		);
 	} else {
 		// Broader check for any parser warning about non-mapping types
-		const typeWarns = parserLogs.filter(
+		const typeWarns16 = parserLogs16.filter(
 			(e) =>
 				e.level === "warn" &&
 				(e.message.includes("mapping") || e.message.includes("type") ||
 				 JSON.stringify(e.data ?? {}).includes("string"))
 		);
-		if (typeWarns.length > 0) {
-			pass(
+		if (typeWarns16.length > 0) {
+			ctx.pass(
 				"notor-hooks is not a mapping — warn logged",
-				`${typeWarns.length} type-related parser warning(s) found. First: "${typeWarns[0]!.message}"`,
-				shot
+				`${typeWarns16.length} type-related parser warning(s) found. First: "${typeWarns16[0]!.message}"`,
+				shot16
 			);
 		} else {
-			fail(
+			ctx.fail(
 				"notor-hooks is not a mapping — warn logged",
 				"No warn-level logs found for scalar notor-hooks value in scalar-hooks-workflow",
-				shot
+				shot16
 			);
 		}
 	}
-}
 
-/** Test 17: No error-level logs from WorkflowHookOverride or HookEvents. */
-async function testNoErrorLevelLogs(collector: LogCollector): Promise<void> {
+	// ── Test 17: No error-level logs ──────────────────────────────────────────
 	console.log("\n── Test 17: No error-level logs ──────────────────────────────");
 
-	const hookSources = ["WorkflowHookOverride", "HookEvents", "WorkflowHookParser", "HookDispatch"];
-	const allLogs = collector.getStructuredLogs();
-	const errorLogs = allLogs.filter(
+	const hookSources17 = ["WorkflowHookOverride", "HookEvents", "WorkflowHookParser", "HookDispatch"];
+	const allLogs17 = collector.getStructuredLogs();
+	const errorLogs17 = allLogs17.filter(
 		(e) =>
 			e.level === "error" &&
-			hookSources.includes(e.source) &&
+			hookSources17.includes(e.source) &&
 			// Exclude provider auth errors which are unrelated to hook logic
 			!e.message.includes("Provider error") &&
 			!e.message.includes("AUTH_FAILED") &&
 			!e.message.includes("API key not configured")
 	);
 
-	if (errorLogs.length === 0) {
-		pass(
+	if (errorLogs17.length === 0) {
+		ctx.pass(
 			"No error-level logs",
-			`Zero error-level logs from ${hookSources.join(", ")} during normal test flows`
+			`Zero error-level logs from ${hookSources17.join(", ")} during normal test flows`
 		);
 	} else {
-		fail(
+		ctx.fail(
 			"No error-level logs",
-			`${errorLogs.length} error-level log(s) from hook sources: ` +
-				errorLogs.map((e) => `[${e.source}] "${e.message}"`).join("; ")
+			`${errorLogs17.length} error-level log(s) from hook sources: ` +
+				errorLogs17.map((e) => `[${e.source}] "${e.message}"`).join("; ")
 		);
 	}
-}
 
-/** Test 18: No leaked override state after plugin disable/enable cycle. */
-async function testNoLeakedOverrideState(page: Page, collector: LogCollector): Promise<void> {
+	// ── Test 18: No leaked override state after plugin disable/enable cycle ───
 	console.log("\n── Test 18: No leaked override state ─────────────────────────");
-
-	const errorsBefore = collector.getLogsByLevel("error").length;
 
 	// Disable and re-enable the plugin to trigger onunload → destroy()
 	const unloadResult = await page.evaluate(() => {
@@ -1341,207 +1198,129 @@ async function testNoLeakedOverrideState(page: Page, collector: LogCollector): P
 
 	await page.waitForTimeout(5_000);
 
-	const shot = await screenshot(page, "18-no-leaked-state");
+	const shot18 = await ctx.screenshot("18-no-leaked-state");
 
 	// After re-enable, check that no override activation logs appear without a workflow trigger
-	const overrideLogs = getWorkflowHookOverrideLogs(collector);
-	const destroyLogs = overrideLogs.filter(
+	const overrideLogs18 = getWorkflowHookOverrideLogs(collector);
+	const destroyLogs18 = overrideLogs18.filter(
 		(e) => e.message.includes("destroyed") || e.message.includes("destroy")
 	);
 
-	const resultStr = String(unloadResult);
-	const isApiRestriction =
-		resultStr.includes("manifests") ||
-		resultStr.includes("Cannot read properties") ||
-		resultStr.includes("api-unavailable");
+	const resultStr18 = String(unloadResult);
+	const isApiRestriction18 =
+		resultStr18.includes("manifests") ||
+		resultStr18.includes("Cannot read properties") ||
+		resultStr18.includes("api-unavailable");
 
-	if (isApiRestriction) {
-		pass(
+	if (isApiRestriction18) {
+		ctx.pass(
 			"No leaked override state",
-			`Plugin API restricted self-management (${resultStr.substring(0, 80)}). ` +
+			`Plugin API restricted self-management (${resultStr18.substring(0, 80)}). ` +
 				`destroy() is called in onunload() — verified by code structure. ` +
-				`${destroyLogs.length} destroy log(s) found.`,
-			shot
+				`${destroyLogs18.length} destroy log(s) found.`,
+			shot18
 		);
 	} else if (unloadResult === "success") {
-		if (destroyLogs.length > 0) {
-			pass(
+		if (destroyLogs18.length > 0) {
+			ctx.pass(
 				"No leaked override state",
-				`Plugin disable/enable cycle completed. ${destroyLogs.length} destroy log(s) confirm ` +
+				`Plugin disable/enable cycle completed. ${destroyLogs18.length} destroy log(s) confirm ` +
 					`WorkflowHookOverrideManager state was cleared.`,
-				shot
+				shot18
 			);
 		} else {
-			pass(
+			ctx.pass(
 				"No leaked override state",
 				`Plugin disable/enable cycle completed successfully. ` +
 					`destroy() called in onunload() — no override state can survive reload.`,
-				shot
+				shot18
 			);
 		}
 	} else {
-		pass(
+		ctx.pass(
 			"No leaked override state",
-			`Unload result: "${resultStr}". destroy() is called unconditionally in onunload(). ` +
-				`${overrideLogs.length} total override log(s).`,
-			shot
+			`Unload result: "${resultStr18}". destroy() is called unconditionally in onunload(). ` +
+				`${overrideLogs18.length} total override log(s).`,
+			shot18
 		);
 	}
+
+	// ── Post-test: dump key structured logs for debugging ─────────────────────
+	const finalOverrideLogs = getWorkflowHookOverrideLogs(collector);
+	console.log(`\n--- WorkflowHookOverride structured logs (${finalOverrideLogs.length}) ---`);
+	for (const entry of finalOverrideLogs) {
+		console.log(
+			`  [${entry.level}] ${entry.message}` +
+				(entry.data ? ` | data=${JSON.stringify(entry.data)}` : "")
+		);
+	}
+	console.log("--- end WorkflowHookOverride logs ---");
+
+	const finalParserLogs = getWorkflowHookParserLogs(collector);
+	console.log(`\n--- WorkflowHookParser structured logs (${finalParserLogs.length}) ---`);
+	for (const entry of finalParserLogs) {
+		console.log(
+			`  [${entry.level}] ${entry.message}` +
+				(entry.data ? ` | data=${JSON.stringify(entry.data)}` : "")
+		);
+	}
+	console.log("--- end WorkflowHookParser logs ---");
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Entry point
 // ---------------------------------------------------------------------------
 
-async function main() {
-	console.log("=== Notor Workflow Frontmatter Hooks E2E Test (G-008) ===\n");
-
-	console.log("[0/3] Building plugin...");
-	execSync("npm run build", {
-		cwd: path.resolve(__dirname, "..", ".."),
-		stdio: "inherit",
-	});
-	console.log("Build complete.\n");
-
-	console.log("[0b/3] Setting up test fixtures...");
-	ensureTestFixtures();
-
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	fs.mkdirSync(LOGS_DIR, { recursive: true });
-
-	let existingData: string | null = null;
-	if (fs.existsSync(PLUGIN_DATA_PATH)) {
-		existingData = fs.readFileSync(PLUGIN_DATA_PATH, "utf8");
-	}
-
-	// Write baseline settings
-	const baselineSettings = buildSettings();
-	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(baselineSettings, null, 2));
-
-	clearHookFiles();
-
-	let obsidian: ObsidianProcess | undefined;
-	let collector: LogCollector | undefined;
-
-	try {
-		console.log("\n[1/3] Launching Obsidian...");
-		obsidian = await launchObsidian({
-			vaultPath: VAULT_PATH,
-			cdpPort: CDP_PORT,
-			timeout: 30_000,
-		});
-
-		console.log("[2/3] Connecting Playwright via CDP...");
-		const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
-		const contexts = browser.contexts();
-		const page = contexts[0]?.pages()[0];
-		if (!page) throw new Error("No Playwright page found after CDP connect");
-
-		collector = new LogCollector({ outputDir: LOGS_DIR });
-		collector.attach(page);
-
-		await page.waitForLoadState("domcontentloaded");
-		// Reload the page so that plugin re-initializes with the log collector
-		// already attached — ensures discovery + parser logs are captured.
-		await page.reload();
-		await page.waitForTimeout(10_000); // allow full plugin init + workflow discovery
-
-		console.log("\n[3/3] Running workflow hook tests...\n");
-
-		// ── Tests 1–4: Plugin load & parsing validation ─────────────────────
-		await testPluginLoads(page);
-		await testParsingValidHooks(page, collector);
-		await testParsingInvalidHooks(page, collector);
-		await testParsingUnsupportedEvents(page, collector);
-
-		// ── Tests 5–7: Override activation, non-overridden events, revert ────
-		await testOverrideActivationManual(page, collector);
-		await testNonOverriddenEventsUseGlobal(page, collector);
-		await testRevertOnSuccess(page, collector);
-
-		// ── Tests 8–9: Revert on failure & user stop ────────────────────────
-		await testRevertOnFailure(page, collector);
-		await testRevertOnUserStop(page, collector);
-
-		// ── Tests 10–12: Background isolation & no-hooks workflow ────────────
-		await testBackgroundOverrideIsolation(page, collector);
-		await testBackgroundDoesNotAffectForeground(page, collector);
-		await testWorkflowWithoutHooks(page, collector);
-
-		// ── Tests 13–16: run_workflow action, timeout, edge cases ────────────
-		await testRunWorkflowScopedAction(page, collector);
-		await testTimeoutBehavior(page, collector);
-		await testEmptyHooksMapping(page, collector);
-		await testHooksNotAMapping(page, collector);
-
-		// ── Tests 17–18: Error logs & leaked state ──────────────────────────
-		await testNoErrorLevelLogs(collector);
-		await testNoLeakedOverrideState(page, collector);
-
-		// ── Final screenshot & log summary ──────────────────────────────────
-		await screenshot(page, "99-final");
-		await page.waitForTimeout(1_000);
-
-		const summaryPath = await collector.writeSummary();
-		console.log(`\nLog summary: ${summaryPath}`);
-
-		// Dump key structured logs for debugging
-		const overrideLogs = getWorkflowHookOverrideLogs(collector);
-		console.log(`\n--- WorkflowHookOverride structured logs (${overrideLogs.length}) ---`);
-		for (const entry of overrideLogs) {
-			console.log(
-				`  [${entry.level}] ${entry.message}` +
-					(entry.data ? ` | data=${JSON.stringify(entry.data)}` : "")
-			);
-		}
-		console.log("--- end WorkflowHookOverride logs ---");
-
-		const parserLogs = getWorkflowHookParserLogs(collector);
-		console.log(`\n--- WorkflowHookParser structured logs (${parserLogs.length}) ---`);
-		for (const entry of parserLogs) {
-			console.log(
-				`  [${entry.level}] ${entry.message}` +
-					(entry.data ? ` | data=${JSON.stringify(entry.data)}` : "")
-			);
-		}
-		console.log("--- end WorkflowHookParser logs ---");
-
-		await browser.close().catch(() => {});
-	} catch (err) {
-		console.error("\nFatal error:", err);
-		if (collector) await collector.dispose().catch(() => {});
-	} finally {
-		if (obsidian) await closeObsidian(obsidian);
-		if (existingData !== null) {
-			fs.writeFileSync(PLUGIN_DATA_PATH, existingData);
-		} else {
-			try { fs.unlinkSync(PLUGIN_DATA_PATH); } catch { /* ignore */ }
-		}
-		clearHookFiles();
-	}
-
-	const passed = results.filter((r) => r.passed).length;
-	const failed = results.filter((r) => !r.passed).length;
-
-	console.log(`\n=== Results: ${passed}/${results.length} passed, ${failed} failed ===`);
-	if (failed > 0) {
-		console.log("\nFailed tests:");
-		for (const r of results.filter((r) => !r.passed)) {
-			console.log(`  ✗ ${r.name}: ${r.detail}`);
-		}
-	}
-
-	const resultsPath = path.join(RESULTS_DIR, "workflow-hooks-results.json");
-	fs.writeFileSync(
-		resultsPath,
-		JSON.stringify({ passed, failed, total: results.length, results }, null, 2)
-	);
-	console.log(`Results written to: ${resultsPath}`);
-
-	if (failed > 0) process.exit(1);
-}
-
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+runTest(
+	{
+		name: "workflow-hooks",
+		settings: buildDefaultSettings({
+			mode: "act",
+			open_notes_on_access: false,
+			auto_approve: {
+				read_note: true,
+				search_vault: true,
+				list_vault: true,
+				read_frontmatter: true,
+				fetch_webpage: true,
+				write_note: true,
+				replace_in_note: true,
+				update_frontmatter: true,
+				manage_tags: true,
+				execute_command: true,
+			},
+			active_persona: "",
+			vault_event_hooks: {
+				on_note_open: [],
+				on_note_create: [],
+				on_save: [],
+				on_manual_save: [],
+				on_tag_change: [],
+				on_schedule: [],
+			},
+			vault_event_debounce_seconds: 5,
+			workflow_concurrency_limit: 3,
+			workflow_activity_indicator_count: 5,
+		}),
+		setupVault: (vaultPath) => {
+			clearHookFiles();
+			ensureTestFixtures(vaultPath);
+		},
+		cleanupFiles: [
+			"notor/workflows/hooked-workflow.md",
+			"notor/workflows/invalid-hooks-workflow.md",
+			"notor/workflows/unsupported-event-workflow.md",
+			"notor/workflows/partial-override-workflow.md",
+			"notor/workflows/no-hooks-workflow.md",
+			"notor/workflows/run-workflow-hook.md",
+			"notor/workflows/hook-target.md",
+			"notor/workflows/empty-hooks-workflow.md",
+			"notor/workflows/scalar-hooks-workflow.md",
+			"notor/workflows/bg-hooked-workflow.md",
+			"notor/workflows/bg-hooked-workflow-2.md",
+			".wf-hook-marker.txt",
+			".wf-hook-counter.txt",
+		],
+	},
+	tests,
+);
