@@ -172,7 +172,7 @@ export class EffectiveConfigInspectorView extends ItemView {
 		if (!entry.enabled) enabledCell.addClass("notor-config-inspector-disabled");
 
 		// Auto-approve
-		const autoCell = row.createEl("td", {
+		row.createEl("td", {
 			text: entry.auto_approve ? "Yes" : "No",
 		});
 
