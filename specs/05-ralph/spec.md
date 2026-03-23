@@ -34,15 +34,16 @@ The design is based on research into the Ralph orchestrator as a reference imple
 **Acceptance Criteria:**
 - Hat notes are discovered by Notor from the `{notor_dir}/orchestrations/hats/` directory.
 - The frontmatter schema includes:
-  - `notor-type: hat` (required; marks the note as a hat definition)
+  - `notor-type: hat` (required; marks the note as a hat definition). Note: this introduces a new `notor-type` discriminator convention; existing workflows use `notor-workflow: true` instead. The `notor-type` pattern is preferred for orchestration entities and may be adopted by other note types in the future.
   - `notor-hat-name` — display name (required; may include emoji)
   - `notor-hat-description` — one-line description (required; displayed in preset picker and topology table)
   - `notor-hat-triggers` — list of event topics that activate this hat (required)
   - `notor-hat-publishes` — list of event topics this hat may emit (required)
   - `notor-hat-default-publishes` — event emitted automatically if the hat completes its turn without emitting an event (optional; prevents stalled loops)
-  - `notor-hat-persona` — name of a Notor persona to activate for this hat's turns (optional)
+  - `notor-hat-persona` — persona name string matching a subdirectory name under `{notor_dir}/personas/` (optional; e.g., `"researcher"` resolves to `{notor_dir}/personas/researcher/system-prompt.md`)
   - `notor-hat-model` — model identifier override for this hat's turns (optional)
 - The note body contains the hat's instructions, which are injected into the structured system prompt scaffold at execution time.
+- Hat note bodies may contain `<notor_tool_config>` blocks following the same syntax as workflow notes, allowing per-hat tool enable/disable, auto-approve overrides, and path constraints.
 - Reserved trigger topics `task.start` and `task.resume` are rejected at preset load time with a clear error message; only the orchestration coordinator uses these.
 - Each trigger topic must be assigned to at most one hat per preset; ambiguous routing (two hats with the same trigger) is rejected at preset load time with a clear error.
 - Hat notes may use `<include_note>` tags in their body to pull in reference documentation or context from other vault notes, consistent with Notor's existing workflow note system.
@@ -56,7 +57,7 @@ The design is based on research into the Ralph orchestrator as a reference imple
 **Acceptance Criteria:**
 - Preset notes are discovered from `{notor_dir}/orchestrations/presets/`.
 - The frontmatter schema includes:
-  - `notor-type: orchestration-preset` (required)
+  - `notor-type: orchestration-preset` (required; uses the same `notor-type` discriminator convention introduced in FR-60)
   - `notor-preset-name` — display name (required)
   - `notor-preset-description` — brief description of the workflow (optional)
   - `notor-loop-starting-event` — the first event published when the preset starts (required)
@@ -92,7 +93,11 @@ The design is based on research into the Ralph orchestrator as a reference imple
 **Description:** Each hat turn is executed as a full LLM session using Notor's existing provider, persona, and tool systems, with a structured system prompt that wraps the hat's instructions.
 
 **Acceptance Criteria:**
-- Each hat turn calls the existing `sendMessage()` pipeline — tool approvals, auto-approve settings, streaming output, and checkpoint protection all apply normally.
+- Each hat turn uses the existing LLM send pipeline (`ChatOrchestrator.responseLoop()`) — tool approvals, auto-approve settings, streaming output, and checkpoint protection all apply normally. The orchestration engine calls `responseLoop()` (or a dedicated variant) rather than `handleUserMessage()`, since the latter also handles conversation creation, attachment resolution, and pre-send hook dispatch which are managed separately by the orchestration layer.
+- Orchestration sessions always run in Act mode (`ConversationMode = "act"`); Plan mode's write-tool blocking would prevent hats from performing their work. The entire orchestration session uses a single conversation, so checkpoints span all hat turns within the session.
+- Vault rules (from `{notor_dir}/rules/`) are evaluated and injected into each hat turn's system prompt, consistent with normal chat behavior. Vault rules take precedence over preset-level guardrails.
+- Existing LLM lifecycle hooks (`pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`) fire normally during hat turns, consistent with the regular chat pipeline.
+- If a hat note contains `<notor_tool_config>` blocks, they are parsed and merged into the effective tool configuration for that hat's turn. Merge precedence follows the existing chain: vault rules > hat persona > hat tool config > global defaults.
 - The system prompt for each hat turn is assembled by a structured scaffold containing:
   - **Orientation** — role context and state management guidance
   - **Tool discipline** — instructions for using workspace notes, task tools, and memory
@@ -104,7 +109,7 @@ The design is based on research into the Ralph orchestrator as a reference imple
   - **Pending events** — the triggering event topic and payload
 - The "must emit" rule is always injected into the Report section even when the hat has explicit custom instructions; omitting it causes LLMs to regularly forget to emit and the loop stalls silently.
 - Each hat turn's output is displayed in the chat view as an assistant message, labeled with the hat name and iteration number.
-- If a hat's persona or model override is configured, it is activated for the duration of that hat's turn and restored afterward.
+- If a hat's persona or model override is configured, it is activated for the duration of that hat's turn and restored afterward using the existing `savePersonaState()` / `restorePersonaState()` mechanism.
 - The `emit_event` tool is injected into the tool set for every hat turn and removed when the turn ends; it is not available outside orchestration.
 
 ---
@@ -239,7 +244,7 @@ The design is based on research into the Ralph orchestrator as a reference imple
   - `block`: treat as a fatal error, terminate the loop.
   - `suspend`: pause the loop pending human approval, then continue or abort.
 - Each hook receives a JSON payload on stdin with session ID, iteration number, active hat, open task count, and elapsed time.
-- Hooks are distinct from Notor's existing vault event hooks (on-save, on-open, etc.) and from hat event routing; they are a meta-layer for observability and external integration only.
+- Hooks are distinct from both (a) Notor's existing vault event hooks (on-save, on-open, etc.) and (b) the existing LLM lifecycle hooks (`pre_send`, `on_tool_call`, `on_tool_result`, `after_completion` configured in settings). The existing LLM lifecycle hooks fire normally during hat turns as part of the standard pipeline (see FR-63); orchestration lifecycle hooks are an additional meta-layer for loop-level observability and external integration only.
 - A default timeout of 30 seconds applies per hook command.
 
 ---
@@ -422,6 +427,7 @@ The design is based on research into the Ralph orchestrator as a reference imple
 - Parallel orchestration (multiple loops running simultaneously on separate git worktrees) is not in scope for this phase.
 - The existing Notor context compaction system applies within hat turns; very long hat turns may compact earlier tool results.
 - Workspace notes created during a session are not automatically deleted when the session ends; they remain in the vault for the user's reference.
+- The existing background workflow execution infrastructure (`executeBackgroundWorkflow()`, `WorkflowConcurrencyManager`, activity indicator UI) is not used by Phase 1 orchestration, which runs in the foreground chat view. Future phases may leverage this infrastructure for headless or background orchestration execution.
 
 ## Out of Scope
 
