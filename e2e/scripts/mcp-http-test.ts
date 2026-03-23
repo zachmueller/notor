@@ -23,27 +23,13 @@
  * @see specs/04-mcp/spec.md — FR-55, FR-62, FR-63
  */
 
-import { execSync } from "node:child_process";
-import * as path from "node:path";
-import * as fs from "node:fs";
-import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright-core";
-import { launchObsidian, closeObsidian, type ObsidianProcess } from "../lib/obsidian-launcher";
-import { LogCollector } from "../lib/log-collector";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import type { Page } from "playwright-core";
+import { runTest, type TestContext } from "../lib/test-harness";
+import { buildDefaultSettings, waitForSelector } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
-// Paths & constants
+// Local constants
 // ---------------------------------------------------------------------------
-const VAULT_PATH = path.resolve(__dirname, "..", "test-vault");
-const CDP_PORT = 9222;
-const RESULTS_DIR = path.resolve(__dirname, "..", "results");
-const SCREENSHOTS_DIR = path.join(RESULTS_DIR, "screenshots", "mcp-http");
-const LOGS_DIR = path.join(RESULTS_DIR, "logs");
-const BUILD_DIR = path.resolve(__dirname, "..", "..", "build");
-const PLUGIN_DATA_PATH = path.join(BUILD_DIR, "data.json");
 
 /** Server slug for the HTTP test server. */
 const HTTP_SERVER_NAME = "test-http-server";
@@ -56,48 +42,8 @@ const CONNECT_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 500;
 
 // ---------------------------------------------------------------------------
-// Test result tracking
+// Local helpers
 // ---------------------------------------------------------------------------
-interface TestResult {
-	name: string;
-	passed: boolean;
-	detail: string;
-	screenshot?: string;
-}
-
-const results: TestResult[] = [];
-
-function pass(name: string, detail: string, screenshot?: string): void {
-	console.log(`  ✓ PASS: ${name} — ${detail}`);
-	results.push({ name, passed: true, detail, screenshot });
-}
-
-function fail(name: string, detail: string, screenshot?: string): void {
-	console.error(`  ✗ FAIL: ${name} — ${detail}`);
-	results.push({ name, passed: false, detail, screenshot });
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-async function screenshot(page: Page, name: string): Promise<string> {
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-	const file = path.join(SCREENSHOTS_DIR, `${name}.png`);
-	await page.screenshot({ path: file, fullPage: true });
-	return file;
-}
-
-async function waitForSelector(
-	page: Page,
-	selector: string,
-	timeoutMs = 8_000
-): Promise<import("playwright-core").ElementHandle | null> {
-	try {
-		return await page.waitForSelector(selector, { timeout: timeoutMs });
-	} catch {
-		return null;
-	}
-}
 
 async function pollUntil(
 	predicate: () => Promise<boolean>,
@@ -151,32 +97,6 @@ async function disconnectMcpServer(page: Page, serverName: string): Promise<void
 	}, serverName);
 }
 
-function buildBaseSettings(mcpServers: Record<string, unknown> = {}): Record<string, unknown> {
-	return {
-		notor_dir: "notor/",
-		active_provider: "local",
-		providers: [
-			{
-				type: "local",
-				enabled: true,
-				display_name: "Local (OpenAI-compatible)",
-				endpoint: "http://localhost:11434/v1",
-			},
-		],
-		auto_approve: {},
-		mode: "plan",
-		open_notes_on_access: false,
-		history_path: ".obsidian/plugins/notor/history/",
-		history_max_size_mb: 500,
-		history_max_age_days: 90,
-		checkpoint_path: ".obsidian/plugins/notor/checkpoints/",
-		checkpoint_max_per_conversation: 100,
-		checkpoint_max_age_days: 30,
-		model_pricing: {},
-		mcp_servers: mcpServers,
-	};
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -184,14 +104,14 @@ function buildBaseSettings(mcpServers: Record<string, unknown> = {}): Record<str
 /**
  * Test 1: Plugin loads with no HTTP servers — chat panel available.
  */
-async function testPluginLoads(page: Page): Promise<void> {
+async function testPluginLoads(ctx: TestContext): Promise<void> {
 	console.log("\nTest 1: Plugin loads cleanly");
-	const chatContainer = await waitForSelector(page, ".notor-chat-container", 10_000);
+	const chatContainer = await waitForSelector(ctx.page, ".notor-chat-container", 10_000);
 	if (chatContainer) {
-		pass("Plugin loads", "Chat container found");
+		ctx.pass("Plugin loads", "Chat container found");
 	} else {
-		const shot = await screenshot(page, "01-no-chat");
-		fail("Plugin loads", ".notor-chat-container not found", shot);
+		const shot = await ctx.screenshot("01-no-chat");
+		ctx.fail("Plugin loads", ".notor-chat-container not found", shot);
 	}
 }
 
@@ -202,8 +122,9 @@ async function testPluginLoads(page: Page): Promise<void> {
  *   - Error is handled gracefully (error/disconnected status, no crash)
  *   - Error message is stored on connection
  */
-async function testHttpServerErrorHandling(page: Page): Promise<void> {
+async function testHttpServerErrorHandling(ctx: TestContext): Promise<void> {
 	console.log("\nTest 2: HTTP server connection error handled gracefully");
+	const { page } = ctx;
 
 	await injectMcpServerConfig(page, HTTP_SERVER_NAME, {
 		type: "streamableHttp",
@@ -226,7 +147,7 @@ async function testHttpServerErrorHandling(page: Page): Promise<void> {
 	}, CONNECT_TIMEOUT_MS);
 
 	const finalStatus = await getMcpServerStatus(page, HTTP_SERVER_NAME);
-	const shot = await screenshot(page, "02-http-error");
+	const shot = await ctx.screenshot("02-http-error");
 
 	if (settled) {
 		const errorMsg = await page.evaluate((name: string) => {
@@ -235,14 +156,14 @@ async function testHttpServerErrorHandling(page: Page): Promise<void> {
 			return conn?.error ?? null;
 		}, HTTP_SERVER_NAME);
 
-		pass(
+		ctx.pass(
 			"HTTP server error handled gracefully",
 			`Status: ${finalStatus}, error recorded: ${!!errorMsg}`,
 			shot
 		);
 	} else {
 		// May still be "connecting" — also acceptable (URL not reachable)
-		pass(
+		ctx.pass(
 			"HTTP server connection attempt",
 			`Status: ${finalStatus ?? "unknown"} — unreachable URL handled without crash`,
 			shot
@@ -252,17 +173,18 @@ async function testHttpServerErrorHandling(page: Page): Promise<void> {
 	// Plugin must still be responsive
 	const chatPanel = await page.$(".notor-chat-container");
 	if (chatPanel) {
-		pass("Plugin intact after HTTP error", "Chat panel present after HTTP connection failure");
+		ctx.pass("Plugin intact after HTTP error", "Chat panel present after HTTP connection failure");
 	} else {
-		fail("Plugin intact after HTTP error", "Chat panel gone after HTTP connection failure");
+		ctx.fail("Plugin intact after HTTP error", "Chat panel gone after HTTP connection failure");
 	}
 }
 
 /**
  * Test 3: MCP status indicator visible in chat panel when ≥1 server configured (FR-63).
  */
-async function testStatusIndicatorVisible(page: Page): Promise<void> {
+async function testStatusIndicatorVisible(ctx: TestContext): Promise<void> {
 	console.log("\nTest 3: MCP status indicator visible with ≥1 server configured");
+	const { page } = ctx;
 
 	// At this point, HTTP_SERVER_NAME is configured (from Test 2)
 	const configCount = await page.evaluate(() => {
@@ -271,7 +193,7 @@ async function testStatusIndicatorVisible(page: Page): Promise<void> {
 	});
 	console.log(`    Configured servers: ${configCount}`);
 
-	const shot = await screenshot(page, "03-status-indicator");
+	const shot = await ctx.screenshot("03-status-indicator");
 
 	// Look for any MCP status indicator element
 	const indicatorPresent = await page.evaluate(() => {
@@ -286,10 +208,10 @@ async function testStatusIndicatorVisible(page: Page): Promise<void> {
 	});
 
 	if (indicatorPresent) {
-		pass("MCP status indicator visible", "Found MCP indicator in chat panel header", shot);
+		ctx.pass("MCP status indicator visible", "Found MCP indicator in chat panel header", shot);
 	} else {
 		// FR-63 (INT-005): indicator should be present. Log as informational.
-		pass(
+		ctx.pass(
 			"MCP status indicator (not found)",
 			`configCount=${configCount} — indicator element not found; INT-005 implementation may use different selector`,
 			shot
@@ -300,8 +222,9 @@ async function testStatusIndicatorVisible(page: Page): Promise<void> {
 /**
  * Test 4: Status indicator shows warning state when a server is in error.
  */
-async function testStatusIndicatorWarningState(page: Page): Promise<void> {
+async function testStatusIndicatorWarningState(ctx: TestContext): Promise<void> {
 	console.log("\nTest 4: Status indicator reflects warning state (errored server)");
+	const { page } = ctx;
 
 	const finalStatus = await getMcpServerStatus(page, HTTP_SERVER_NAME);
 	const isErrored = finalStatus === "error" || finalStatus === "disconnected";
@@ -325,25 +248,26 @@ async function testStatusIndicatorWarningState(page: Page): Promise<void> {
 			);
 		});
 
-		const shot = await screenshot(page, "04-indicator-warning");
+		const shot = await ctx.screenshot("04-indicator-warning");
 		if (warningState === true) {
-			pass("Status indicator shows warning state", "Indicator has warning styling for errored server", shot);
+			ctx.pass("Status indicator shows warning state", "Indicator has warning styling for errored server", shot);
 		} else if (warningState === null) {
-			pass("Status indicator warning (element not found)", "Cannot verify warning state — indicator element absent", shot);
+			ctx.pass("Status indicator warning (element not found)", "Cannot verify warning state — indicator element absent", shot);
 		} else {
 			// Indicator present but warning not reflected via checked attributes
-			pass("Status indicator warning state (unverified)", `Server errored but warning styling not detected via checked attributes`, shot);
+			ctx.pass("Status indicator warning state (unverified)", `Server errored but warning styling not detected via checked attributes`, shot);
 		}
 	} else {
-		pass("Status indicator warning state (skipped)", `Server status: ${finalStatus} — not in error state`);
+		ctx.pass("Status indicator warning state (skipped)", `Server status: ${finalStatus} — not in error state`);
 	}
 }
 
 /**
  * Test 5: Popover opens on click and lists servers with status dots.
  */
-async function testStatusPopoverOpens(page: Page): Promise<void> {
+async function testStatusPopoverOpens(ctx: TestContext): Promise<void> {
 	console.log("\nTest 5: MCP status popover opens on click");
+	const { page } = ctx;
 
 	// Try clicking the MCP indicator if it exists
 	const clicked = await page.evaluate(() => {
@@ -360,12 +284,12 @@ async function testStatusPopoverOpens(page: Page): Promise<void> {
 	});
 
 	if (!clicked) {
-		pass("MCP popover (skipped)", "MCP indicator not found — popover test skipped");
+		ctx.pass("MCP popover (skipped)", "MCP indicator not found — popover test skipped");
 		return;
 	}
 
 	await page.waitForTimeout(500);
-	const shot = await screenshot(page, "05-popover-open");
+	const shot = await ctx.screenshot("05-popover-open");
 
 	const popoverVisible = await page.evaluate(() => {
 		return !!(
@@ -377,7 +301,7 @@ async function testStatusPopoverOpens(page: Page): Promise<void> {
 	});
 
 	if (popoverVisible) {
-		pass("MCP status popover opens", "Found popover element after click", shot);
+		ctx.pass("MCP status popover opens", "Found popover element after click", shot);
 
 		// Check for server list entries in the popover
 		const serverEntries = await page.evaluate(() => {
@@ -387,24 +311,25 @@ async function testStatusPopoverOpens(page: Page): Promise<void> {
 			return items.length;
 		});
 		if (serverEntries > 0) {
-			pass("Server entries in popover", `Found ${serverEntries} server entry/entries in popover`);
+			ctx.pass("Server entries in popover", `Found ${serverEntries} server entry/entries in popover`);
 		} else {
-			pass("Server entries in popover (not detected)", "Popover open but server entry selector may differ");
+			ctx.pass("Server entries in popover (not detected)", "Popover open but server entry selector may differ");
 		}
 
 		// Close popover
 		await page.keyboard.press("Escape");
 		await page.waitForTimeout(300);
 	} else {
-		pass("MCP popover (UI not rendered)", "Popover element not found — INT-005 indicator UI may use different selectors", shot);
+		ctx.pass("MCP popover (UI not rendered)", "Popover element not found — INT-005 indicator UI may use different selectors", shot);
 	}
 }
 
 /**
  * Test 6: Enable/disable toggle from popover updates settings (FR-63).
  */
-async function testPopoverToggle(page: Page): Promise<void> {
+async function testPopoverToggle(ctx: TestContext): Promise<void> {
 	console.log("\nTest 6: Enable/disable toggle in popover syncs with settings");
+	const { page } = ctx;
 
 	// Verify the server starts enabled
 	const initialDisabled = await page.evaluate((name: string) => {
@@ -426,12 +351,12 @@ async function testPopoverToggle(page: Page): Promise<void> {
 	await page.waitForTimeout(500);
 
 	const afterDisable = await getMcpServerStatus(page, HTTP_SERVER_NAME);
-	const shot1 = await screenshot(page, "06-server-disabled");
+	const shot1 = await ctx.screenshot("06-server-disabled");
 
 	if (afterDisable === "disconnected" || afterDisable === null) {
-		pass("Server disabled via toggle", `Status after disable: ${afterDisable ?? "no connection"}`, shot1);
+		ctx.pass("Server disabled via toggle", `Status after disable: ${afterDisable ?? "no connection"}`, shot1);
 	} else {
-		fail("Server disabled via toggle", `Expected disconnected, got: ${afterDisable}`, shot1);
+		ctx.fail("Server disabled via toggle", `Expected disconnected, got: ${afterDisable}`, shot1);
 	}
 
 	// Re-enable
@@ -442,7 +367,7 @@ async function testPopoverToggle(page: Page): Promise<void> {
 		}
 	}, HTTP_SERVER_NAME);
 
-	pass("Server re-enabled", "disabled flag set back to false");
+	ctx.pass("Server re-enabled", "disabled flag set back to false");
 }
 
 /**
@@ -451,8 +376,9 @@ async function testPopoverToggle(page: Page): Promise<void> {
  * Note: Uses page.evaluate with a string expression to avoid tsx/esbuild
  * injecting __name helpers into arrow functions inside evaluate callbacks.
  */
-async function testToolDisplayNameFormatting(page: Page): Promise<void> {
+async function testToolDisplayNameFormatting(ctx: TestContext): Promise<void> {
 	console.log("\nTest 7: Tool display name formatting (FR-62)");
+	const { page } = ctx;
 
 	// Verify the formatToolDisplayName helper converts server__tool → server/tool.
 	// Use page.evaluate with a plain expression string to avoid tsx __name injection.
@@ -471,9 +397,9 @@ async function testToolDisplayNameFormatting(page: Page): Promise<void> {
 	) as boolean;
 
 	if (formattingResult) {
-		pass("Tool display name formatting", "server__tool → server/tool transformation correct for all test cases");
+		ctx.pass("Tool display name formatting", "server__tool → server/tool transformation correct for all test cases");
 	} else {
-		fail("Tool display name formatting", "server__tool → server/tool transformation produced incorrect results");
+		ctx.fail("Tool display name formatting", "server__tool → server/tool transformation produced incorrect results");
 	}
 
 	// Verify isMcpTool identification (tool name contains "__")
@@ -485,17 +411,18 @@ async function testToolDisplayNameFormatting(page: Page): Promise<void> {
 	) as boolean;
 
 	if (mcpToolResult) {
-		pass("isMcpTool identification", "MCP tool names correctly identified via __ separator");
+		ctx.pass("isMcpTool identification", "MCP tool names correctly identified via __ separator");
 	} else {
-		fail("isMcpTool identification", "isMcpTool logic produced unexpected results");
+		ctx.fail("isMcpTool identification", "isMcpTool logic produced unexpected results");
 	}
 }
 
 /**
  * Test 8: Multiple servers — one connected, one errored — status indicator accuracy.
  */
-async function testMultipleServersStatus(page: Page): Promise<void> {
+async function testMultipleServersStatus(ctx: TestContext): Promise<void> {
 	console.log("\nTest 8: Multiple servers — status tracking across servers");
+	const { page } = ctx;
 
 	// Add a second (also unreachable) server
 	const secondServer = "test-http-server-2";
@@ -518,13 +445,13 @@ async function testMultipleServersStatus(page: Page): Promise<void> {
 		})) ?? [];
 	});
 
-	const shot = await screenshot(page, "08-multiple-servers");
+	const shot = await ctx.screenshot("08-multiple-servers");
 	console.log(`    All connections: ${JSON.stringify(allConnections)}`);
 
 	if (allConnections.length >= 2) {
-		pass("Multiple servers tracked", `getAllConnections() returns ${allConnections.length} entries`, shot);
+		ctx.pass("Multiple servers tracked", `getAllConnections() returns ${allConnections.length} entries`, shot);
 	} else {
-		fail("Multiple servers tracked", `Expected ≥2 connections, got ${allConnections.length}`, shot);
+		ctx.fail("Multiple servers tracked", `Expected ≥2 connections, got ${allConnections.length}`, shot);
 	}
 
 	// Clean up second server
@@ -540,8 +467,9 @@ async function testMultipleServersStatus(page: Page): Promise<void> {
 /**
  * Test 9: Auto-reconnect with exponential backoff — HTTP transport reconnects.
  */
-async function testHttpAutoReconnect(page: Page): Promise<void> {
+async function testHttpAutoReconnect(ctx: TestContext): Promise<void> {
 	console.log("\nTest 9: HTTP transport auto-reconnect behavior");
+	const { page } = ctx;
 
 	// The reconnect logic is already in place (McpHub scheduleReconnect).
 	// We validate it via structured logs rather than waiting for all retries.
@@ -558,18 +486,19 @@ async function testHttpAutoReconnect(page: Page): Promise<void> {
 	);
 
 	if (reconnectLogs.length > 0) {
-		pass("HTTP auto-reconnect scheduled", `${reconnectLogs.length} reconnect log(s) found`);
+		ctx.pass("HTTP auto-reconnect scheduled", `${reconnectLogs.length} reconnect log(s) found`);
 	} else {
 		// Reconnect logs may not be accessible this way — check via collector
-		pass("HTTP auto-reconnect (logs not captured)", "Reconnect scheduling not verifiable via window object — validated by code review of McpHub.scheduleReconnect()");
+		ctx.pass("HTTP auto-reconnect (logs not captured)", "Reconnect scheduling not verifiable via window object — validated by code review of McpHub.scheduleReconnect()");
 	}
 }
 
 /**
  * Test 10: No catastrophic errors logged from MCP HTTP subsystem.
  */
-async function testNoUnexpectedErrors(page: Page, collector: LogCollector): Promise<void> {
+async function testNoUnexpectedErrors(ctx: TestContext): Promise<void> {
 	console.log("\nTest 10: No unexpected fatal errors from MCP HTTP subsystem");
+	const { page, collector } = ctx;
 
 	const errors = collector.getLogsByLevel("error");
 	const mcpFatal = errors.filter((e) => {
@@ -589,124 +518,51 @@ async function testNoUnexpectedErrors(page: Page, collector: LogCollector): Prom
 		return src.includes("Mcp") || src.includes("McpHub") || msg.includes("mcp");
 	});
 
-	const shot = await screenshot(page, "10-final");
+	const shot = await ctx.screenshot("10-final");
 	if (mcpFatal.length === 0) {
-		pass("No unexpected MCP errors", `Zero unexpected error-level MCP logs (connection errors expected and filtered)`, shot);
+		ctx.pass("No unexpected MCP errors", `Zero unexpected error-level MCP logs (connection errors expected and filtered)`, shot);
 	} else {
-		fail("No unexpected MCP errors", `${mcpFatal.length} unexpected error(s): ${mcpFatal.map((e) => `[${e.source}] ${e.message}`).join("; ")}`, shot);
+		ctx.fail("No unexpected MCP errors", `${mcpFatal.length} unexpected error(s): ${mcpFatal.map((e) => `[${e.source}] ${e.message}`).join("; ")}`, shot);
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main test function
 // ---------------------------------------------------------------------------
-async function main() {
-	console.log("=== Notor MCP HTTP Server + Chat Panel Status E2E Test (TEST-002) ===\n");
-	console.log("Tests: HTTP transport error handling, status indicator, popover, tool naming\n");
 
-	// Build
-	console.log("[0/4] Building plugin...");
-	execSync("npm run build", {
-		cwd: path.resolve(__dirname, "..", ".."),
-		stdio: "inherit",
-	});
-	console.log("Build complete.\n");
+async function tests(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
 
-	// Inject settings
-	console.log("[1/4] Injecting settings...");
-	const settings = buildBaseSettings();
-	fs.mkdirSync(BUILD_DIR, { recursive: true });
+	// Wait for plugin to fully initialize
+	await page.waitForTimeout(5_000);
 
-	let existingData: string | null = null;
-	if (fs.existsSync(PLUGIN_DATA_PATH)) {
-		existingData = fs.readFileSync(PLUGIN_DATA_PATH, "utf8");
-		console.log("  Backed up existing data.json");
-	}
-	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(settings, null, 2));
-	console.log(`  Wrote settings to ${PLUGIN_DATA_PATH}\n`);
-
-	fs.mkdirSync(LOGS_DIR, { recursive: true });
-	fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-
-	let obsidian: ObsidianProcess | undefined;
-	let collector: LogCollector | undefined;
-
-	try {
-		console.log("[2/4] Launching Obsidian...");
-		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
-
-		console.log("[3/4] Connecting Playwright...");
-		const browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
-		const contexts = browser.contexts();
-		const page = contexts[0]?.pages()[0];
-		if (!page) throw new Error("No page found");
-
-		collector = new LogCollector({ outputDir: LOGS_DIR });
-		collector.attach(page);
-
-		await page.waitForLoadState("domcontentloaded");
-		await page.waitForTimeout(5_000);
-
-		console.log("[4/4] Running MCP HTTP tests...\n");
-
-		await testPluginLoads(page);
-		await testHttpServerErrorHandling(page);
-		await testStatusIndicatorVisible(page);
-		await testStatusIndicatorWarningState(page);
-		await testStatusPopoverOpens(page);
-		await testPopoverToggle(page);
-		await testToolDisplayNameFormatting(page);
-		await testMultipleServersStatus(page);
-		await testHttpAutoReconnect(page);
-		await testNoUnexpectedErrors(page, collector);
-
-		console.log("\n=== Collecting final logs ===");
-		await page.waitForTimeout(1_000);
-		const summaryPath = await collector.writeSummary();
-		console.log(`Log summary: ${summaryPath}`);
-
-		await browser.close().catch(() => {});
-
-	} catch (err) {
-		console.error("\nFatal error:", err);
-		if (collector) await collector.dispose().catch(() => {});
-	} finally {
-		if (obsidian) await closeObsidian(obsidian);
-
-		if (existingData !== null) {
-			fs.writeFileSync(PLUGIN_DATA_PATH, existingData);
-			console.log("\nRestored original data.json");
-		} else {
-			try { fs.unlinkSync(PLUGIN_DATA_PATH); } catch { /* ignore */ }
-		}
-	}
-
-	// Print summary
-	const passed = results.filter((r) => r.passed).length;
-	const failed = results.filter((r) => !r.passed).length;
-
-	console.log("\n=== MCP HTTP Test Results ===");
-	console.log(`Passed: ${passed}/${results.length}`);
-	console.log(`Failed: ${failed}/${results.length}`);
-
-	if (failed > 0) {
-		console.log("\nFailed tests:");
-		for (const r of results.filter((r) => !r.passed)) {
-			console.log(`  ✗ ${r.name}: ${r.detail}`);
-		}
-	}
-
-	const resultsPath = path.join(RESULTS_DIR, "mcp-http-results.json");
-	fs.writeFileSync(
-		resultsPath,
-		JSON.stringify({ passed, failed, total: results.length, results }, null, 2)
-	);
-	console.log(`\nResults written to: ${resultsPath}`);
-
-	if (failed > 0) process.exit(1);
+	await testPluginLoads(ctx);
+	await testHttpServerErrorHandling(ctx);
+	await testStatusIndicatorVisible(ctx);
+	await testStatusIndicatorWarningState(ctx);
+	await testStatusPopoverOpens(ctx);
+	await testPopoverToggle(ctx);
+	await testToolDisplayNameFormatting(ctx);
+	await testMultipleServersStatus(ctx);
+	await testHttpAutoReconnect(ctx);
+	await testNoUnexpectedErrors(ctx);
 }
 
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
+// ---------------------------------------------------------------------------
+// Settings & entry point
+// ---------------------------------------------------------------------------
+
+const settings = buildDefaultSettings({
+	active_provider: "local",
+	providers: [
+		{
+			type: "local",
+			enabled: true,
+			display_name: "Local (OpenAI-compatible)",
+			endpoint: "http://localhost:11434/v1",
+		},
+	],
+	mcp_servers: {},
 });
+
+runTest({ name: "mcp-http", settings }, tests);
