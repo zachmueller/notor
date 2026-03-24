@@ -11,6 +11,9 @@
 import { Notice, Setting } from "obsidian";
 import type { SettingsContext } from "./context";
 import { getProvider } from "../helpers";
+import { logger } from "../../utils/logger";
+
+const log = logger("ConnectionTest");
 
 /**
  * Render a "Test connection" button for a provider section.
@@ -69,6 +72,10 @@ export function renderConnectionTestButton(
 			} catch (e) {
 				const message =
 					e instanceof Error ? e.message : String(e);
+				log.error("Test connection failed", {
+					provider: providerType,
+					error: e instanceof Error ? { message: e.message, stack: e.stack } : String(e),
+				});
 				statusEl.textContent = `✗ ${message}`;
 				statusEl.className =
 					"notor-connection-status notor-connection-status--error";
@@ -172,6 +179,9 @@ function renderBedrockConnectionTestButton(
 				} catch (e) {
 					const message =
 						e instanceof Error ? e.message : String(e);
+					log.error("Bedrock test connection failed", {
+						error: e instanceof Error ? { message: e.message, stack: e.stack } : String(e),
+					});
 					statusEl.textContent = `✗ ${message}`;
 					statusEl.className =
 						"notor-connection-status notor-connection-status--error";
