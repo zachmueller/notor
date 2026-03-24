@@ -207,11 +207,13 @@ async function tests(ctx: TestContext) {
 		console.log(`\nTest 4: Send real prompt to ${selectedModelId}`);
 		{
 			const TEST_PROMPT = "Hello! Please respond with exactly: 'Notor LLM test successful.' and nothing else.";
-			const textarea = await page.$(".notor-text-input");
-			if (!textarea) {
-				ctx.fail("Send real prompt", "Textarea not found");
+			const textInput = await page.$(".notor-text-input");
+			if (!textInput) {
+				ctx.fail("Send real prompt", "Text input not found");
 			} else {
-				await textarea.fill(TEST_PROMPT);
+				// contenteditable div — click, clear, and type instead of fill()
+				await textInput.click();
+				await page.keyboard.type(TEST_PROMPT);
 				await page.waitForTimeout(100);
 
 				console.log(`  Sending: "${TEST_PROMPT}"`);
@@ -254,9 +256,10 @@ async function tests(ctx: TestContext) {
 						const errorMsg = await page.$(".notor-chat-error");
 
 						// Check if input is re-enabled (responding state ended)
+						// The text input is a contenteditable div; contenteditable="false" while responding.
 						const inputEnabled = await page.evaluate(() => {
-							const textarea = document.querySelector(".notor-text-input") as HTMLTextAreaElement;
-							return textarea && !textarea.disabled;
+							const el = document.querySelector(".notor-text-input");
+							return el && el.getAttribute("contenteditable") === "true";
 						});
 
 						if ((assistantMsg || errorMsg) && inputEnabled) {
@@ -305,8 +308,8 @@ async function tests(ctx: TestContext) {
 				console.log("\nTest 7: Input state restored after response");
 				{
 					const isEnabled = await page.evaluate(() => {
-						const ta = document.querySelector(".notor-text-input") as HTMLTextAreaElement;
-						return ta && !ta.disabled;
+						const el = document.querySelector(".notor-text-input");
+						return el && el.getAttribute("contenteditable") === "true";
 					});
 					const stopHidden = await page.evaluate(() => {
 						const btn = document.querySelector(".notor-stop-btn");
@@ -344,9 +347,15 @@ async function tests(ctx: TestContext) {
 				// ── Test 9: Second message in same conversation ──────────
 				console.log("\nTest 9: Follow-up message in same conversation");
 				{
-					const textarea2 = await page.$(".notor-text-input");
-					if (textarea2) {
-						await textarea2.fill("What is 2 + 2?");
+					const textInput2 = await page.$(".notor-text-input");
+					if (textInput2) {
+						// contenteditable div — clear and type instead of fill()
+						await textInput2.click();
+						await page.evaluate(() => {
+							const el = document.querySelector(".notor-text-input");
+							if (el) el.textContent = "";
+						});
+						await page.keyboard.type("What is 2 + 2?");
 						await page.keyboard.press("Enter");
 						await page.waitForTimeout(500);
 
@@ -355,8 +364,8 @@ async function tests(ctx: TestContext) {
 						while (Date.now() - start2 < 30_000) {
 							await page.waitForTimeout(1000);
 							const inputEnabled2 = await page.evaluate(() => {
-								const ta = document.querySelector(".notor-text-input") as HTMLTextAreaElement;
-								return ta && !ta.disabled;
+								const el = document.querySelector(".notor-text-input");
+								return el && el.getAttribute("contenteditable") === "true";
 							});
 							if (inputEnabled2) break;
 						}
