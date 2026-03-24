@@ -1016,6 +1016,17 @@
 	color: var(--text-success, var(--color-green));
 }
 
+/* Ensure success text is always visible regardless of theme variable resolution */
+.theme-dark .notor-connection-status--success {
+	background: rgba(68, 207, 110, 0.15);
+	color: #5ddb6d;
+}
+
+.theme-light .notor-connection-status--success {
+	background: rgba(68, 207, 110, 0.1);
+	color: #1a8a2e;
+}
+
 .notor-connection-status--error {
 	background: var(--background-modifier-error, rgba(220, 53, 69, 0.15));
 	color: var(--text-error, var(--color-red));
