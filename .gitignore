@@ -30,3 +30,6 @@ e2e/external-test-files/
 e2e/dist/
 test-results/
 playwright-report/
+
+# Private scratch directory
+private/
