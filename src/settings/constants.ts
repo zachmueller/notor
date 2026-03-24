@@ -95,4 +95,9 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Convert Markdown to a .docx file on the filesystem (desktop only).",
 		isWrite: true,
 	},
+	extract_docx_comments: {
+		name: "Extract Word doc comments",
+		desc: "Extract review comments from a .docx file into a structured note (desktop only).",
+		isWrite: true,
+	},
 };
