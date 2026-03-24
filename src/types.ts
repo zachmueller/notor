@@ -217,6 +217,8 @@ export interface LLMProviderConfig {
 	aws_auth_method?: AWSAuthMethod | null;
 	/** Currently selected model ID. */
 	model_id?: string | null;
+	/** Whether to use the extended (1M) context window beta for the selected model. */
+	use_extended_context?: boolean;
 	/** Cached model list from last fetch. */
 	model_cache?: ModelInfo[] | null;
 	/** When the model list was last fetched (ISO 8601). */

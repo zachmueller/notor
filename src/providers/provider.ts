@@ -80,6 +80,8 @@ export interface SendMessageOptions {
 	stop_sequences?: string[];
 	/** Signal for aborting the request (e.g., user clicks Stop). */
 	abort_signal?: AbortSignal;
+	/** Whether to use the extended (1M) context window beta (Bedrock only). */
+	use_extended_context?: boolean;
 }
 
 // ---------------------------------------------------------------------------

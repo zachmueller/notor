@@ -833,6 +833,7 @@ export class ChatOrchestrator {
 			const stream = provider.sendMessage(chatMessages, toolDefinitions, {
 				model: modelId,
 				abort_signal: abortController.signal,
+				use_extended_context: this.getActiveUseExtendedContext(),
 			});
 
 			// 6. Process stream (background — no UI rendering)
@@ -1351,6 +1352,7 @@ export class ChatOrchestrator {
 				const options: SendMessageOptions = {
 					model: this.getActiveModelId(),
 					abort_signal: abortController.signal,
+					use_extended_context: this.getActiveUseExtendedContext(),
 				};
 
 				const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
@@ -2043,6 +2045,12 @@ export class ChatOrchestrator {
 		const providerType = this.providerRegistry.getActiveType();
 		const config = this.providerRegistry.getConfig(providerType);
 		return config?.model_id ?? "";
+	}
+
+	private getActiveUseExtendedContext(): boolean {
+		const providerType = this.providerRegistry.getActiveType();
+		const config = this.providerRegistry.getConfig(providerType);
+		return config?.use_extended_context ?? false;
 	}
 
 	private calculateCost(inputTokens: number, outputTokens: number): number | null {

@@ -12,6 +12,7 @@ import type { App } from "obsidian";
 import type { LLMProviderConfig, LLMProviderType, ModelInfo } from "../types";
 import type { LLMProvider } from "./provider";
 import { ProviderError } from "./provider";
+import { enrichModelInfo } from "./model-metadata";
 import { logger } from "../utils/logger";
 
 const log = logger("ProviderRegistry");
@@ -264,7 +265,8 @@ export class ProviderRegistry {
 	): Promise<ModelInfo[]> {
 		try {
 			const provider = this.getProvider(type);
-			const models = await provider.listModels();
+			const raw = await provider.listModels();
+			const models = raw.map(enrichModelInfo);
 			this.modelCaches.set(type, {
 				models,
 				fetchedAt: Date.now(),
