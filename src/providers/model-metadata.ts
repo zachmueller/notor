@@ -24,6 +24,17 @@ import type { ModelInfo } from "../types";
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 
 /**
+ * Extended context configuration for models that support
+ * the 1M context window beta header on Bedrock.
+ */
+interface ExtendedContext {
+	context_window: number;
+	beta_flag: string;
+	input_price_per_1k?: number;
+	output_price_per_1k?: number;
+}
+
+/**
  * Metadata entry for a known model.
  * Only includes fields not available from provider list APIs.
  */
@@ -32,6 +43,7 @@ interface ModelMetadataEntry {
 	input_price_per_1k: number | null;
 	output_price_per_1k: number | null;
 	display_name?: string;
+	extended_context?: ExtendedContext;
 }
 
 /**
@@ -216,39 +228,57 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
 		output_price_per_1k: 0.075,
-		display_name: "US Claude Opus 4.6 (Bedrock)",
 	},
 	"global.anthropic.claude-opus-4-6-v1": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
 		output_price_per_1k: 0.075,
-		display_name: "Global Claude Opus 4.6 (Bedrock)",
 	},
 
-	// Claude Sonnet 4.6
+	// Claude Sonnet 4.6 — 1M context beta supported
 	"us.anthropic.claude-sonnet-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "US Claude Sonnet 4.6 (Bedrock)",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.006,
+			output_price_per_1k: 0.030,
+		},
 	},
 	"eu.anthropic.claude-sonnet-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "EU Claude Sonnet 4.6 (Bedrock)",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.006,
+			output_price_per_1k: 0.030,
+		},
 	},
 	"apac.anthropic.claude-sonnet-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "APAC Claude Sonnet 4.6 (Bedrock)",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.006,
+			output_price_per_1k: 0.030,
+		},
 	},
 	"global.anthropic.claude-sonnet-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "Global Claude Sonnet 4.6 (Bedrock)",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.006,
+			output_price_per_1k: 0.030,
+		},
 	},
 
 	// Claude Sonnet 4.5
@@ -256,25 +286,21 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "US Claude Sonnet 4.5 (Bedrock)",
 	},
 	"eu.anthropic.claude-sonnet-4-5-20250929-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "EU Claude Sonnet 4.5 (Bedrock)",
 	},
 	"apac.anthropic.claude-sonnet-4-5-20250929-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "APAC Claude Sonnet 4.5 (Bedrock)",
 	},
 	"global.anthropic.claude-sonnet-4-5-20250929-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "Global Claude Sonnet 4.5 (Bedrock)",
 	},
 
 	// Claude Haiku 4.5
@@ -282,51 +308,67 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 200_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.004,
-		display_name: "US Claude Haiku 4.5 (Bedrock)",
 	},
 	"eu.anthropic.claude-haiku-4-5-20251001-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.004,
-		display_name: "EU Claude Haiku 4.5 (Bedrock)",
 	},
 	"apac.anthropic.claude-haiku-4-5-20251001-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.004,
-		display_name: "APAC Claude Haiku 4.5 (Bedrock)",
 	},
 	"global.anthropic.claude-haiku-4-5-20251001-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.004,
-		display_name: "Global Claude Haiku 4.5 (Bedrock)",
 	},
 
-	// Claude Sonnet 4
+	// Claude Sonnet 4 — 1M context beta supported
 	"us.anthropic.claude-sonnet-4-20250514-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "US Claude Sonnet 4 (Bedrock)",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.006,
+			output_price_per_1k: 0.030,
+		},
 	},
 	"eu.anthropic.claude-sonnet-4-20250514-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "EU Claude Sonnet 4 (Bedrock)",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.006,
+			output_price_per_1k: 0.030,
+		},
 	},
 	"apac.anthropic.claude-sonnet-4-20250514-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "APAC Claude Sonnet 4 (Bedrock)",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.006,
+			output_price_per_1k: 0.030,
+		},
 	},
 	"global.anthropic.claude-sonnet-4-20250514-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "Global Claude Sonnet 4 (Bedrock)",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.006,
+			output_price_per_1k: 0.030,
+		},
 	},
 
 	// Claude Opus 4
@@ -334,19 +376,16 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
 		output_price_per_1k: 0.075,
-		display_name: "US Claude Opus 4 (Bedrock)",
 	},
 	"eu.anthropic.claude-opus-4-20250514-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
 		output_price_per_1k: 0.075,
-		display_name: "EU Claude Opus 4 (Bedrock)",
 	},
 	"global.anthropic.claude-opus-4-20250514-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
 		output_price_per_1k: 0.075,
-		display_name: "Global Claude Opus 4 (Bedrock)",
 	},
 
 	// Claude 3.7 Sonnet
@@ -354,19 +393,16 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "US Claude 3.7 Sonnet (Bedrock)",
 	},
 	"eu.anthropic.claude-3-7-sonnet-20250219-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "EU Claude 3.7 Sonnet (Bedrock)",
 	},
 	"apac.anthropic.claude-3-7-sonnet-20250219-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "APAC Claude 3.7 Sonnet (Bedrock)",
 	},
 
 	// Claude 3.5 Sonnet v2
@@ -374,19 +410,16 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "US Claude 3.5 Sonnet v2 (Bedrock)",
 	},
 	"eu.anthropic.claude-3-5-sonnet-20241022-v2:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "EU Claude 3.5 Sonnet v2 (Bedrock)",
 	},
 	"apac.anthropic.claude-3-5-sonnet-20241022-v2:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.003,
 		output_price_per_1k: 0.015,
-		display_name: "APAC Claude 3.5 Sonnet v2 (Bedrock)",
 	},
 
 	// Claude 3.5 Haiku
@@ -394,19 +427,16 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 200_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.004,
-		display_name: "US Claude 3.5 Haiku (Bedrock)",
 	},
 	"eu.anthropic.claude-3-5-haiku-20241022-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.004,
-		display_name: "EU Claude 3.5 Haiku (Bedrock)",
 	},
 	"apac.anthropic.claude-3-5-haiku-20241022-v1:0": {
 		context_window: 200_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.004,
-		display_name: "APAC Claude 3.5 Haiku (Bedrock)",
 	},
 
 	// -----------------------------------------------------------------------
@@ -418,7 +448,6 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 1_000_000,
 		input_price_per_1k: 0.0025,
 		output_price_per_1k: 0.0125,
-		display_name: "US Nova Premier (Bedrock)",
 	},
 
 	// Nova Pro
@@ -426,19 +455,16 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 300_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.0032,
-		display_name: "US Nova Pro (Bedrock)",
 	},
 	"eu.amazon.nova-pro-v1:0": {
 		context_window: 300_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.0032,
-		display_name: "EU Nova Pro (Bedrock)",
 	},
 	"apac.amazon.nova-pro-v1:0": {
 		context_window: 300_000,
 		input_price_per_1k: 0.0008,
 		output_price_per_1k: 0.0032,
-		display_name: "APAC Nova Pro (Bedrock)",
 	},
 
 	// Nova Lite
@@ -446,19 +472,16 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 300_000,
 		input_price_per_1k: 0.00006,
 		output_price_per_1k: 0.00024,
-		display_name: "US Nova Lite (Bedrock)",
 	},
 	"eu.amazon.nova-lite-v1:0": {
 		context_window: 300_000,
 		input_price_per_1k: 0.00006,
 		output_price_per_1k: 0.00024,
-		display_name: "EU Nova Lite (Bedrock)",
 	},
 	"apac.amazon.nova-lite-v1:0": {
 		context_window: 300_000,
 		input_price_per_1k: 0.00006,
 		output_price_per_1k: 0.00024,
-		display_name: "APAC Nova Lite (Bedrock)",
 	},
 
 	// Nova Micro
@@ -466,19 +489,16 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 128_000,
 		input_price_per_1k: 0.000035,
 		output_price_per_1k: 0.00014,
-		display_name: "US Nova Micro (Bedrock)",
 	},
 	"eu.amazon.nova-micro-v1:0": {
 		context_window: 128_000,
 		input_price_per_1k: 0.000035,
 		output_price_per_1k: 0.00014,
-		display_name: "EU Nova Micro (Bedrock)",
 	},
 	"apac.amazon.nova-micro-v1:0": {
 		context_window: 128_000,
 		input_price_per_1k: 0.000035,
 		output_price_per_1k: 0.00014,
-		display_name: "APAC Nova Micro (Bedrock)",
 	},
 
 	// Nova 2 Lite (global only as of July 2026)
@@ -486,7 +506,6 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 300_000,
 		input_price_per_1k: 0.00006,
 		output_price_per_1k: 0.00024,
-		display_name: "Global Nova 2 Lite (Bedrock)",
 	},
 
 	// -----------------------------------------------------------------------
@@ -496,13 +515,11 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 128_000,
 		input_price_per_1k: 0.00024,
 		output_price_per_1k: 0.00024,
-		display_name: "US Llama 4 Maverick 17B (Bedrock)",
 	},
 	"us.meta.llama4-scout-17b-instruct-v1:0": {
 		context_window: 128_000,
 		input_price_per_1k: 0.00017,
 		output_price_per_1k: 0.00017,
-		display_name: "US Llama 4 Scout 17B (Bedrock)",
 	},
 
 	// -----------------------------------------------------------------------
@@ -512,7 +529,6 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 64_000,
 		input_price_per_1k: 0.00135,
 		output_price_per_1k: 0.0054,
-		display_name: "US DeepSeek R1 (Bedrock)",
 	},
 };
 
@@ -540,12 +556,18 @@ export function getModelMetadata(modelId: string): ModelInfo | null {
  * Get the context window size for a model.
  *
  * Falls back to DEFAULT_CONTEXT_WINDOW (128,000) for unknown models.
+ * When `useExtendedContext` is true and the model supports the 1M beta,
+ * returns the extended context window instead.
  *
  * @param modelId - The model identifier
+ * @param useExtendedContext - Whether to use the extended (1M) context window
  * @returns Context window size in tokens
  */
-export function getContextWindow(modelId: string): number {
+export function getContextWindow(modelId: string, useExtendedContext?: boolean): number {
 	const entry = MODEL_METADATA[modelId];
+	if (useExtendedContext && entry?.extended_context?.context_window) {
+		return entry.extended_context.context_window;
+	}
 	return entry?.context_window ?? DEFAULT_CONTEXT_WINDOW;
 }
 
@@ -575,6 +597,16 @@ export function enrichModelInfo(model: ModelInfo): ModelInfo {
 		output_price_per_1k:
 			model.output_price_per_1k ?? entry.output_price_per_1k,
 	};
+}
+
+/**
+ * Get the extended context configuration for a model, if available.
+ *
+ * @param modelId - The model identifier
+ * @returns ExtendedContext config, or undefined if not supported
+ */
+export function getModelExtendedContext(modelId: string): ExtendedContext | undefined {
+	return MODEL_METADATA[modelId]?.extended_context;
 }
 
 /**

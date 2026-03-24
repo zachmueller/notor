@@ -60,6 +60,13 @@ export interface Conversation {
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
 	 */
 	is_background?: boolean;
+	/**
+	 * Whether the 1M extended context window beta was active when this
+	 * conversation was created. Omitted (= false) for back-compat.
+	 *
+	 * @see private/bedrock-model-picker-overhaul.md — Phase 2e
+	 */
+	use_extended_context?: boolean;
 }
 
 /** Plan/Act mode. */
@@ -217,6 +224,8 @@ export interface LLMProviderConfig {
 	aws_auth_method?: AWSAuthMethod | null;
 	/** Currently selected model ID. */
 	model_id?: string | null;
+	/** Whether to use the extended (1M) context window beta for the selected model. */
+	use_extended_context?: boolean;
 	/** Cached model list from last fetch. */
 	model_cache?: ModelInfo[] | null;
 	/** When the model list was last fetched (ISO 8601). */

@@ -265,7 +265,8 @@ export class ChatOrchestrator {
 		const conversation = this.conversationManager.createConversation(
 			providerType,
 			modelId,
-			currentMode
+			currentMode,
+			providerConfig?.use_extended_context ? { use_extended_context: true } : undefined
 		);
 
 		await this.historyManager.createConversationFile(conversation);
@@ -482,6 +483,7 @@ export class ChatOrchestrator {
 				persona_name: activePersonaName,
 				is_background: false,
 				title: `Workflow: ${workflow.display_name}`,
+				use_extended_context: providerConfig?.use_extended_context ?? false,
 			}
 		);
 
@@ -661,6 +663,7 @@ export class ChatOrchestrator {
 				persona_name: activePersonaName,
 				is_background: true,
 				title: `Workflow: ${workflow.display_name}`,
+				use_extended_context: providerConfig?.use_extended_context ?? false,
 			}
 		);
 
@@ -819,7 +822,7 @@ export class ChatOrchestrator {
 			const modelId = this.providerRegistry.getConfig(
 				this.providerRegistry.getActiveType()
 			)?.model_id ?? "";
-			const contextResult = contextMgr.assembleContextWindow(allMessages, modelId);
+			const contextResult = contextMgr.assembleContextWindow(allMessages, modelId, this.getActiveUseExtendedContext());
 
 			// 4. Convert to ChatMessage format
 			const chatMessages = this._bgToChatMessages(
@@ -833,6 +836,7 @@ export class ChatOrchestrator {
 			const stream = provider.sendMessage(chatMessages, toolDefinitions, {
 				model: modelId,
 				abort_signal: abortController.signal,
+				use_extended_context: this.getActiveUseExtendedContext(),
 			});
 
 			// 6. Process stream (background — no UI rendering)
@@ -1328,7 +1332,8 @@ export class ChatOrchestrator {
 				// 4. Assemble context window (truncate if needed)
 				const contextResult = this.contextManager.assembleContextWindow(
 					allMessages,
-					this.getActiveModelId()
+					this.getActiveModelId(),
+					this.getActiveUseExtendedContext()
 				);
 
 				if (contextResult.wasTruncated) {
@@ -1351,6 +1356,7 @@ export class ChatOrchestrator {
 				const options: SendMessageOptions = {
 					model: this.getActiveModelId(),
 					abort_signal: abortController.signal,
+					use_extended_context: this.getActiveUseExtendedContext(),
 				};
 
 				const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
@@ -1567,7 +1573,8 @@ export class ChatOrchestrator {
 		const messages = this.conversationManager.getMessages();
 		const modelId = this.getActiveModelId();
 
-		if (!shouldCompact(messages, this.settings, modelId)) {
+		const useExtendedContext = this.getActiveUseExtendedContext();
+		if (!shouldCompact(messages, this.settings, modelId, useExtendedContext)) {
 			return;
 		}
 
@@ -1609,7 +1616,8 @@ export class ChatOrchestrator {
 				this.settings,
 				modelId,
 				conv.id,
-				"automatic"
+				"automatic",
+				useExtendedContext
 			);
 
 			if (result.success && result.newMessages && result.record) {
@@ -1689,6 +1697,7 @@ export class ChatOrchestrator {
 		}
 
 		const modelId = this.getActiveModelId();
+		const useExtendedContext = this.getActiveUseExtendedContext();
 
 		// Separate pending messages from the completed conversation (same reason
 		// as auto-compaction: avoids consecutive user messages in the summarization
@@ -1711,7 +1720,8 @@ export class ChatOrchestrator {
 				this.settings,
 				modelId,
 				conv.id,
-				"manual"
+				"manual",
+				useExtendedContext
 			);
 
 			if (result.success && result.newMessages && result.record) {
@@ -2043,6 +2053,12 @@ export class ChatOrchestrator {
 		const providerType = this.providerRegistry.getActiveType();
 		const config = this.providerRegistry.getConfig(providerType);
 		return config?.model_id ?? "";
+	}
+
+	private getActiveUseExtendedContext(): boolean {
+		const providerType = this.providerRegistry.getActiveType();
+		const config = this.providerRegistry.getConfig(providerType);
+		return config?.use_extended_context ?? false;
 	}
 
 	private calculateCost(inputTokens: number, outputTokens: number): number | null {

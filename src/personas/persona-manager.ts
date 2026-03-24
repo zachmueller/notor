@@ -310,7 +310,7 @@ export class PersonaManager {
 					cachedModels.some((m) => m.id === persona.preferred_model);
 
 				if (modelAvailable) {
-					const updated = { ...config, model_id: persona.preferred_model };
+					const updated = { ...config, model_id: persona.preferred_model, use_extended_context: false };
 					this.providerRegistry.updateConfig(updated);
 					log.info("Switched model for persona", {
 						persona: persona.name,
@@ -349,7 +349,7 @@ export class PersonaManager {
 			});
 		}
 
-		// Revert model to global default (from the provider's stored config)
+		// Revert model and use_extended_context to global defaults (from the provider's stored config)
 		const globalProvider = this.settings.active_provider as LLMProviderType;
 		const providerSettings = this.settings.providers.find(
 			(p) => p.type === globalProvider
@@ -357,10 +357,15 @@ export class PersonaManager {
 		if (providerSettings?.model_id) {
 			const currentConfig = this.providerRegistry.getConfig(globalProvider);
 			if (currentConfig) {
-				const reverted = { ...currentConfig, model_id: providerSettings.model_id };
+				const reverted = {
+					...currentConfig,
+					model_id: providerSettings.model_id,
+					use_extended_context: providerSettings.use_extended_context ?? false,
+				};
 				this.providerRegistry.updateConfig(reverted);
 				log.debug("Reverted model to global default", {
 					model: providerSettings.model_id,
+					use_extended_context: providerSettings.use_extended_context ?? false,
 				});
 			}
 		}

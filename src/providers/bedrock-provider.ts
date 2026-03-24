@@ -32,6 +32,7 @@ import type {
 import { ProviderError } from "./provider";
 import { getSecret, SECRET_IDS } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
+import { getModelExtendedContext } from "./model-metadata";
 import { logger } from "../utils/logger";
 
 // AWS SDK imports — these are bundled by esbuild
@@ -267,6 +268,17 @@ export class BedrockProvider implements LLMProvider {
 			input.toolConfig = toolConfig;
 		}
 
+		// Inject 1M context beta header when extended context is active
+		if (options.use_extended_context) {
+			const extCtx = getModelExtendedContext(options.model);
+			if (extCtx?.beta_flag) {
+				input.additionalModelRequestFields = {
+					...input.additionalModelRequestFields as Record<string, DocumentType>,
+					anthropic_beta: [extCtx.beta_flag],
+				};
+			}
+		}
+
 		let response;
 		try {
 			response = await client.send(
@@ -315,6 +327,18 @@ export class BedrockProvider implements LLMProvider {
 					"Model not available on AWS Bedrock. Check that the model is enabled in your region.",
 					"bedrock",
 					"MODEL_NOT_FOUND",
+					e instanceof Error ? e : undefined
+				);
+			}
+			if (
+				errName === "ValidationException" &&
+				errMsg.includes("invalid beta flag") &&
+				options.use_extended_context
+			) {
+				throw new ProviderError(
+					"The 1M context beta flag was rejected by Bedrock. The beta may have been updated or revoked — check for a plugin update.",
+					"bedrock",
+					"PROVIDER_ERROR",
 					e instanceof Error ? e : undefined
 				);
 			}
@@ -536,7 +560,7 @@ export class BedrockProvider implements LLMProvider {
 
 				allProfiles.push({
 					id: profileId,
-					display_name: profile.inferenceProfileName ?? profileId,
+					display_name: profileId,
 					context_window: null,
 					input_price_per_1k: null,
 					output_price_per_1k: null,

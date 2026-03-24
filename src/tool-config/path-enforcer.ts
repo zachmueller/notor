@@ -31,6 +31,10 @@ export const TOOL_PATH_PARAMS: Record<string, ToolPathParam[]> = {
 	read_frontmatter:   [{ paramName: "path", namespace: "vault" }],
 	update_frontmatter: [{ paramName: "path", namespace: "vault" }],
 	manage_tags:        [{ paramName: "path", namespace: "vault" }],
+	move_note:          [
+		{ paramName: "path", namespace: "vault" },
+		{ paramName: "new_path", namespace: "vault" },
+	],
 	search_vault:       [{ paramName: "path", namespace: "vault" }],
 	list_vault:         [{ paramName: "path", namespace: "vault" }],
 	read_file:          [{ paramName: "path", namespace: "filesystem" }],

@@ -22,7 +22,7 @@ import type { ParsedToolConfig } from "./types";
 
 const ALL_TOOLS = [
 	"read_note", "write_note", "replace_in_note",
-	"read_frontmatter", "update_frontmatter", "manage_tags",
+	"read_frontmatter", "update_frontmatter", "manage_tags", "move_note",
 	"search_vault", "list_vault",
 	"read_file", "read_docx", "write_docx",
 	"execute_command", "fetch_webpage",

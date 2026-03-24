@@ -50,6 +50,7 @@ import { ProviderRegistry } from "./providers/index";
 import { LocalProvider } from "./providers/local-provider";
 import { AnthropicProvider } from "./providers/anthropic-provider";
 import { OpenAIProvider } from "./providers/openai-provider";
+import { parseOptionValue, buildOptionValue } from "./providers/model-grouping";
 import type { LLMProviderType } from "./types";
 
 // Tools
@@ -60,8 +61,11 @@ import { ReplaceInNoteTool } from "./tools/replace-in-note";
 import { SearchVaultTool } from "./tools/search-vault";
 import { ListVaultTool } from "./tools/list-vault";
 import { ReadFrontmatterTool } from "./tools/read-frontmatter";
+import { GetBacklinksTool } from "./tools/get-backlinks";
+import { GetOutlinksTool } from "./tools/get-outlinks";
 import { UpdateFrontmatterTool } from "./tools/update-frontmatter";
 import { ManageTagsTool } from "./tools/manage-tags";
+import { MoveNoteTool } from "./tools/move-note";
 import { FetchWebpageTool } from "./tools/fetch-webpage";
 import { ExecuteCommandTool } from "./tools/execute-command";
 import { ReadFileTool } from "./tools/read-file";
@@ -926,6 +930,8 @@ export default class NotorPlugin extends Plugin {
 			this._toolRegistry.register(new SearchVaultTool(this.app));
 			this._toolRegistry.register(new ListVaultTool(this.app));
 			this._toolRegistry.register(new ReadFrontmatterTool(this.app));
+			this._toolRegistry.register(new GetBacklinksTool(this.app));
+			this._toolRegistry.register(new GetOutlinksTool(this.app));
 
 			// Write tools
 			this._toolRegistry.register(
@@ -939,6 +945,9 @@ export default class NotorPlugin extends Plugin {
 			);
 			this._toolRegistry.register(
 				new ManageTagsTool(this.app, checkpointManager)
+			);
+			this._toolRegistry.register(
+				new MoveNoteTool(this.app, checkpointManager)
 			);
 
 			// Phase 3: New tools
@@ -1384,12 +1393,14 @@ export default class NotorPlugin extends Plugin {
 			});
 		});
 
-		// Model change
-		view.setOnModelChange((modelId) => {
+		// Model change — parses ::1m suffix to set use_extended_context
+		view.setOnModelChange((selectedValue) => {
+			const { modelId, isExtendedContext } = parseOptionValue(selectedValue);
+
 			const activeType = providerRegistry.getActiveType();
 			const config = providerRegistry.getConfig(activeType);
 			if (config) {
-				const updated = { ...config, model_id: modelId };
+				const updated = { ...config, model_id: modelId, use_extended_context: isExtendedContext };
 				providerRegistry.updateConfig(updated);
 				// Update settings
 				const idx = this.settings.providers.findIndex(
@@ -1454,11 +1465,12 @@ export default class NotorPlugin extends Plugin {
 			return providerRegistry.getActiveType();
 		});
 
-		// Current model
+		// Current model — reconstructs ::1m composite value for picker selection
 		view.setGetCurrentModel(() => {
 			const activeType = providerRegistry.getActiveType();
 			const config = providerRegistry.getConfig(activeType);
-			return config?.model_id ?? "";
+			const modelId = config?.model_id ?? "";
+			return buildOptionValue(modelId, config?.use_extended_context ?? false);
 		});
 
 		// Checkpoint callbacks
