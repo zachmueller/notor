@@ -556,12 +556,18 @@ export function getModelMetadata(modelId: string): ModelInfo | null {
  * Get the context window size for a model.
  *
  * Falls back to DEFAULT_CONTEXT_WINDOW (128,000) for unknown models.
+ * When `useExtendedContext` is true and the model supports the 1M beta,
+ * returns the extended context window instead.
  *
  * @param modelId - The model identifier
+ * @param useExtendedContext - Whether to use the extended (1M) context window
  * @returns Context window size in tokens
  */
-export function getContextWindow(modelId: string): number {
+export function getContextWindow(modelId: string, useExtendedContext?: boolean): number {
 	const entry = MODEL_METADATA[modelId];
+	if (useExtendedContext && entry?.extended_context?.context_window) {
+		return entry.extended_context.context_window;
+	}
 	return entry?.context_window ?? DEFAULT_CONTEXT_WINDOW;
 }
 

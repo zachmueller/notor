@@ -106,14 +106,16 @@ export function estimateConversationTokens(messages: Message[]): number {
  * @param messages - All messages in the conversation.
  * @param settings - Plugin settings (for threshold).
  * @param modelId - Active model ID (for context window lookup).
+ * @param useExtendedContext - Whether to use the extended (1M) context window.
  * @returns True if the conversation should be compacted.
  */
 export function shouldCompact(
 	messages: Message[],
 	settings: NotorSettings,
-	modelId: string
+	modelId: string,
+	useExtendedContext?: boolean
 ): boolean {
-	const contextWindow = getContextWindowForModel(modelId);
+	const contextWindow = getContextWindowForModel(modelId, useExtendedContext);
 	if (contextWindow === null) {
 		return false;
 	}
@@ -142,11 +144,11 @@ export function shouldCompact(
  * returns null for truly unknown models so compaction can fall back
  * to truncation.
  */
-function getContextWindowForModel(modelId: string): number | null {
+function getContextWindowForModel(modelId: string, useExtendedContext?: boolean): number | null {
 	if (!modelId) return null;
 	// getContextWindow returns DEFAULT_CONTEXT_WINDOW (128000) for unknown models.
 	// We use it as-is since the default is a reasonable assumption.
-	return getContextWindow(modelId);
+	return getContextWindow(modelId, useExtendedContext);
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +203,7 @@ export interface CompactionResult {
  * @param modelId - Active model ID.
  * @param conversationId - Current conversation UUID.
  * @param trigger - Whether this was automatic or manual.
+ * @param useExtendedContext - Whether to use the extended (1M) context window.
  * @returns Compaction result with new messages or error.
  */
 export async function performCompaction(
@@ -209,10 +212,11 @@ export async function performCompaction(
 	settings: NotorSettings,
 	modelId: string,
 	conversationId: string,
-	trigger: "automatic" | "manual"
+	trigger: "automatic" | "manual",
+	useExtendedContext?: boolean
 ): Promise<CompactionResult> {
 	const compactionPrompt = getCompactionPrompt(settings);
-	const contextWindow = getContextWindow(modelId);
+	const contextWindow = getContextWindow(modelId, useExtendedContext);
 	const tokenCount = estimateConversationTokens(messages);
 
 	log.info("Starting compaction", {

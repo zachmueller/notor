@@ -109,10 +109,11 @@ export class ContextManager {
 	 *
 	 * @param messages - All messages in the conversation (mutated: truncated flag set)
 	 * @param modelId - The active model ID for context window lookup
+	 * @param useExtendedContext - Whether to use the extended (1M) context window
 	 * @returns Context window assembly result
 	 */
-	assembleContextWindow(messages: Message[], modelId: string): ContextWindowResult {
-		const contextLimit = getContextWindow(modelId);
+	assembleContextWindow(messages: Message[], modelId: string, useExtendedContext?: boolean): ContextWindowResult {
+		const contextLimit = getContextWindow(modelId, useExtendedContext);
 		const tokenBudget = Math.floor(contextLimit * this.threshold);
 
 		// Reset all truncation flags
@@ -232,24 +233,25 @@ export class ContextManager {
 	/**
 	 * Check if the context window is approaching the limit.
 	 *
+	 * @param useExtendedContext - Whether to use the extended (1M) context window
 	 * @returns True if total tokens exceed the threshold
 	 */
-	isApproachingLimit(messages: Message[], modelId: string): boolean {
+	isApproachingLimit(messages: Message[], modelId: string, useExtendedContext?: boolean): boolean {
 		const totalTokens = this.estimateTotalTokens(messages);
-		const contextLimit = getContextWindow(modelId);
+		const contextLimit = getContextWindow(modelId, useExtendedContext);
 		return totalTokens > contextLimit * this.threshold;
 	}
 
 	/**
 	 * Get a human-readable context usage summary.
 	 */
-	getUsageSummary(messages: Message[], modelId: string): {
+	getUsageSummary(messages: Message[], modelId: string, useExtendedContext?: boolean): {
 		usedTokens: number;
 		contextLimit: number;
 		percentUsed: number;
 	} {
 		const usedTokens = this.estimateTotalTokens(messages);
-		const contextLimit = getContextWindow(modelId);
+		const contextLimit = getContextWindow(modelId, useExtendedContext);
 		const percentUsed = contextLimit > 0 ? Math.round((usedTokens / contextLimit) * 100) : 0;
 
 		return { usedTokens, contextLimit, percentUsed };

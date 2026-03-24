@@ -822,7 +822,7 @@ export class ChatOrchestrator {
 			const modelId = this.providerRegistry.getConfig(
 				this.providerRegistry.getActiveType()
 			)?.model_id ?? "";
-			const contextResult = contextMgr.assembleContextWindow(allMessages, modelId);
+			const contextResult = contextMgr.assembleContextWindow(allMessages, modelId, this.getActiveUseExtendedContext());
 
 			// 4. Convert to ChatMessage format
 			const chatMessages = this._bgToChatMessages(
@@ -1332,7 +1332,8 @@ export class ChatOrchestrator {
 				// 4. Assemble context window (truncate if needed)
 				const contextResult = this.contextManager.assembleContextWindow(
 					allMessages,
-					this.getActiveModelId()
+					this.getActiveModelId(),
+					this.getActiveUseExtendedContext()
 				);
 
 				if (contextResult.wasTruncated) {
@@ -1572,7 +1573,8 @@ export class ChatOrchestrator {
 		const messages = this.conversationManager.getMessages();
 		const modelId = this.getActiveModelId();
 
-		if (!shouldCompact(messages, this.settings, modelId)) {
+		const useExtendedContext = this.getActiveUseExtendedContext();
+		if (!shouldCompact(messages, this.settings, modelId, useExtendedContext)) {
 			return;
 		}
 
@@ -1614,7 +1616,8 @@ export class ChatOrchestrator {
 				this.settings,
 				modelId,
 				conv.id,
-				"automatic"
+				"automatic",
+				useExtendedContext
 			);
 
 			if (result.success && result.newMessages && result.record) {
@@ -1694,6 +1697,7 @@ export class ChatOrchestrator {
 		}
 
 		const modelId = this.getActiveModelId();
+		const useExtendedContext = this.getActiveUseExtendedContext();
 
 		// Separate pending messages from the completed conversation (same reason
 		// as auto-compaction: avoids consecutive user messages in the summarization
@@ -1716,7 +1720,8 @@ export class ChatOrchestrator {
 				this.settings,
 				modelId,
 				conv.id,
-				"manual"
+				"manual",
+				useExtendedContext
 			);
 
 			if (result.success && result.newMessages && result.record) {
