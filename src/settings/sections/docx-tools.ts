@@ -21,8 +21,8 @@ export function renderDocxToolsSection(
 	new Setting(containerEl).setHeading().setName("Word & file tools");
 	containerEl.createEl("p", {
 		text:
-			"Settings for the read_file, read_docx, and write_docx tools. " +
-			"All three tools are desktop-only. write_docx requires Act mode.",
+			"Settings for the read_file, read_docx, write_docx, and extract_docx_comments tools. " +
+			"All four tools are desktop-only. write_docx and extract_docx_comments require Act mode.",
 		cls: "setting-item-description",
 	});
 
@@ -30,7 +30,7 @@ export function renderDocxToolsSection(
 	new Setting(containerEl).setHeading().setName("Allowed read/write paths");
 	containerEl.createEl("p", {
 		text:
-			"Additional filesystem paths allowed for read_file, read_docx, and write_docx. " +
+			"Additional filesystem paths allowed for read_file, read_docx, write_docx, and extract_docx_comments. " +
 			"The vault root is always implicitly allowed.",
 		cls: "setting-item-description",
 	});

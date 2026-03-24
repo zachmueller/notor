@@ -43,6 +43,7 @@
 		"@aws-sdk/client-sts": "^3.1005.0",
 		"@aws-sdk/credential-providers": "^3.1003.0",
 		"@modelcontextprotocol/sdk": "^1.27.1",
+		"@xmldom/xmldom": "^0.8.11",
 		"croner": "^10.0.1",
 		"docx": "^9.6.1",
 		"mammoth": "^1.12.0",
