@@ -56,8 +56,6 @@ You are a research assistant focused on accuracy.
 		path.join(organizerDir, "system-prompt.md"),
 		`---
 notor-persona-prompt-mode: append
-notor-preferred-provider: "anthropic"
-notor-preferred-model: "claude-sonnet-4-20250514"
 ---
 
 You are an organizational assistant.
@@ -85,16 +83,8 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 2: Close settings ──────────────────────────────────────────
-	console.log("\nTest 8: Close settings");
-	{
-		await page.keyboard.press("Escape");
-		await page.waitForTimeout(1000);
-		ctx.pass("Settings closed", "Pressed Escape to close settings panel");
-	}
-
-	// ── Test 9: Activate organizer persona via settings popover ─────────
-	console.log("\nTest 9: Activate organizer persona");
+	// ── Test 2: Activate organizer persona via settings popover ─────────
+	console.log("\nTest 2: Activate organizer persona");
 	{
 		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
 		if (settingsBtn) {
@@ -120,12 +110,19 @@ async function tests(ctx: TestContext) {
 
 			if (selected) {
 				await page.waitForTimeout(2000);
+
+				// Dismiss any Obsidian Notice toasts that may block clicks
+				await page.evaluate(() => {
+					document.querySelectorAll(".notice-container .notice").forEach((n) => (n as HTMLElement).click());
+				});
+				await page.waitForTimeout(300);
+
 				await settingsBtn.click();
 				await page.waitForTimeout(500);
 
 				const label = await page.$(".notor-persona-label");
 				const text = label ? await label.textContent() : "";
-				const shot = await ctx.screenshot("09-organizer-activated");
+				const shot = await ctx.screenshot("02-organizer-activated");
 
 				if (text?.includes("organizer")) {
 					ctx.pass("Organizer persona activated", `Label: "${text?.trim()}"`, shot);
@@ -142,8 +139,8 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 10: Structured logs confirm dispatcher persona state ────────
-	console.log("\nTest 10: Structured logs confirm dispatcher persona state");
+	// ── Test 3: Structured logs confirm dispatcher persona state ────────
+	console.log("\nTest 3: Structured logs confirm dispatcher persona state");
 	{
 		const allLogs = ctx.collector.getStructuredLogs();
 
@@ -178,8 +175,8 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 11: Deactivate persona ─────────────────────────────────────
-	console.log("\nTest 11: Deactivate persona → revert to global-only");
+	// ── Test 4: Deactivate persona ─────────────────────────────────────
+	console.log("\nTest 4: Deactivate persona → revert to global-only");
 	{
 		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
 		if (settingsBtn) {
@@ -206,7 +203,7 @@ async function tests(ctx: TestContext) {
 			// Verify persona label hidden
 			const label = await page.$(".notor-persona-label");
 			const isHidden = !label || (await label.evaluate((el) => el.classList.contains("notor-hidden")));
-			const shot = await ctx.screenshot("11-deactivated");
+			const shot = await ctx.screenshot("04-deactivated");
 
 			if (isHidden) {
 				ctx.pass("Persona deactivated", "Label hidden after deactivation", shot);
@@ -218,14 +215,14 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 12: Build verification ─────────────────────────────────────
-	console.log("\nTest 12: Build verification (already passed in setup)");
+	// ── Test 5: Build verification ─────────────────────────────────────
+	console.log("\nTest 5: Build verification (already passed in setup)");
 	{
 		ctx.pass("Build succeeds", "npm run build completed successfully during setup phase");
 	}
 
-	// ── Test 13: No error-level structured logs ─────────────────────────
-	console.log("\nTest 13: No persona/auto-approve related error logs");
+	// ── Test 6: No error-level structured logs ─────────────────────────
+	console.log("\nTest 6: No persona/auto-approve related error logs");
 	{
 		const errors = ctx.collector.getLogsByLevel("error");
 		const relevantErrors = errors.filter(
