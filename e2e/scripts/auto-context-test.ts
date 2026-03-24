@@ -205,18 +205,12 @@ function getLatestSystemPrompt(collector: LogCollector): string | null {
 
 /** Auto-context-specific overrides on top of shared defaults. */
 const BASE_OVERRIDES: Record<string, unknown> = {
-	active_provider: "local",
-	providers: [
-		{
-			type: "local",
-			enabled: true,
-			display_name: "Local (OpenAI-compatible)",
-			endpoint: "http://localhost:11434/v1",
-		},
-	],
 	auto_context_open_notes: true,
 	auto_context_vault_structure: true,
 	auto_context_os: true,
+	// Disable open_notes_on_access so LLM tool calls (read_note, etc.) don't
+	// open additional tabs that pollute the open-notes state between sub-tests.
+	open_notes_on_access: false,
 };
 
 function buildSettings(overrides?: Record<string, unknown>): Record<string, unknown> {
@@ -1198,9 +1192,16 @@ async function testActiveMarkerMatchesFocusedLeaf(ctx: TestContext): Promise<voi
 		await openNoteInNewTab(page, note, false);
 	}
 
-	// Activate the LAST note (the one we want to confirm as active)
+	// Activate the LAST note (the one we want to confirm as active).
+	// We must activate a DIFFERENT note first, wait for the active-leaf-change
+	// event to fire and update the _lastActiveMarkdownPath cache, then switch
+	// to the target note. This two-step approach guarantees a real leaf-change
+	// event is emitted (activating an already-active leaf is a no-op).
 	const expectedActive = notes[notes.length - 1]!;
+	await activateNote(page, notes[0]!);
+	await page.waitForTimeout(500);
 	await activateNote(page, expectedActive);
+	await page.waitForTimeout(500);
 
 	// Query the workspace directly to confirm Obsidian's view of the active leaf
 	const obsidianActiveLeaf = await page.evaluate((): string | null => {
@@ -1569,9 +1570,12 @@ async function testClosedTabNotDetected(ctx: TestContext): Promise<void> {
 	await sendMessage(page, "ACI-TEST-002-d setup: both notes open");
 	await page.waitForTimeout(500);
 
-	// Now close the second note
+	// Activate the note we're keeping BEFORE closing the other tab, so the
+	// active-leaf-change event fires while the keeper leaf is still present.
+	// Then close the unwanted tab and wait for Obsidian to fully detach it.
+	await activateNote(page, noteToKeep);
 	await closeNoteTab(page, noteToClose);
-	await page.waitForTimeout(300);
+	await page.waitForTimeout(800);
 
 	// Second message — only noteToKeep should be present
 	const responded = await sendMessage(
