@@ -60,6 +60,8 @@ import { ReplaceInNoteTool } from "./tools/replace-in-note";
 import { SearchVaultTool } from "./tools/search-vault";
 import { ListVaultTool } from "./tools/list-vault";
 import { ReadFrontmatterTool } from "./tools/read-frontmatter";
+import { GetBacklinksTool } from "./tools/get-backlinks";
+import { GetOutlinksTool } from "./tools/get-outlinks";
 import { UpdateFrontmatterTool } from "./tools/update-frontmatter";
 import { ManageTagsTool } from "./tools/manage-tags";
 import { MoveNoteTool } from "./tools/move-note";
@@ -927,6 +929,8 @@ export default class NotorPlugin extends Plugin {
 			this._toolRegistry.register(new SearchVaultTool(this.app));
 			this._toolRegistry.register(new ListVaultTool(this.app));
 			this._toolRegistry.register(new ReadFrontmatterTool(this.app));
+			this._toolRegistry.register(new GetBacklinksTool(this.app));
+			this._toolRegistry.register(new GetOutlinksTool(this.app));
 
 			// Write tools
 			this._toolRegistry.register(
