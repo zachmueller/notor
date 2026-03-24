@@ -190,7 +190,7 @@ describe("enforcePathConstraints", () => {
 			for (const tool of expectedTools) {
 				expect(TOOL_PATH_PARAMS).toHaveProperty(tool);
 			}
-			expect(Object.keys(TOOL_PATH_PARAMS)).toHaveLength(13);
+			expect(Object.keys(TOOL_PATH_PARAMS)).toHaveLength(14);
 		});
 	});
 

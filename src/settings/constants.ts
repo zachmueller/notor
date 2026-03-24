@@ -70,6 +70,11 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Add or remove tags on a note.",
 		isWrite: true,
 	},
+	move_note: {
+		name: "Move note",
+		desc: "Move and/or rename a note within the vault.",
+		isWrite: true,
+	},
 	fetch_webpage: {
 		name: "Fetch webpage",
 		desc: "Fetch a webpage by URL and return its content as Markdown.",

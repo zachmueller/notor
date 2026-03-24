@@ -62,6 +62,7 @@ import { ListVaultTool } from "./tools/list-vault";
 import { ReadFrontmatterTool } from "./tools/read-frontmatter";
 import { UpdateFrontmatterTool } from "./tools/update-frontmatter";
 import { ManageTagsTool } from "./tools/manage-tags";
+import { MoveNoteTool } from "./tools/move-note";
 import { FetchWebpageTool } from "./tools/fetch-webpage";
 import { ExecuteCommandTool } from "./tools/execute-command";
 import { ReadFileTool } from "./tools/read-file";
@@ -939,6 +940,9 @@ export default class NotorPlugin extends Plugin {
 			);
 			this._toolRegistry.register(
 				new ManageTagsTool(this.app, checkpointManager)
+			);
+			this._toolRegistry.register(
+				new MoveNoteTool(this.app, checkpointManager)
 			);
 
 			// Phase 3: New tools
