@@ -62,9 +62,9 @@ async function sendMessageNoWait(page: Page, message: string): Promise<void> {
  * Wait until the chat input is re-enabled (response complete).
  * Returns true if completed within timeout.
  *
- * NOTE: This local version checks `.disabled` rather than `contenteditable`,
- * which the shared helper uses. Scroll behaviour tests may depend on this
- * specific implementation.
+ * Checks `contenteditable` attribute — the plugin sets it to "false"
+ * while responding and back to "true" when done (the input is a
+ * contenteditable div, not an <input>, so `.disabled` doesn't apply).
  */
 async function waitForResponse(page: Page, timeoutMs = RESPONSE_TIMEOUT_MS): Promise<boolean> {
 	const start = Date.now();
@@ -72,7 +72,7 @@ async function waitForResponse(page: Page, timeoutMs = RESPONSE_TIMEOUT_MS): Pro
 		await page.waitForTimeout(POLL_INTERVAL_MS);
 		const inputEnabled = await page.evaluate(() => {
 			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && !(el as HTMLInputElement).disabled;
+			return el !== null && el.getAttribute("contenteditable") === "true";
 		});
 		if (inputEnabled) return true;
 	}
