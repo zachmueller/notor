@@ -115,7 +115,9 @@ async function testStaleContentBlocksWrite(ctx: TestContext): Promise<void> {
 	const writeOk = await sendMessage(page,
 		"Now use replace_in_note on 'Stale-Content-Test.md' to replace " +
 		"'Original target content that the LLM will try to replace.' " +
-		"with 'Replaced by stale-content test — should fail.'."
+		"with 'Replaced by stale-content test — should fail.'. " +
+		"Do NOT re-read the note first — you already read it. " +
+		"Call replace_in_note directly with the text from your previous read."
 	);
 
 	const shot = await ctx.screenshot("01-stale-write-attempt");
