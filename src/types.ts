@@ -60,6 +60,13 @@ export interface Conversation {
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
 	 */
 	is_background?: boolean;
+	/**
+	 * Whether the 1M extended context window beta was active when this
+	 * conversation was created. Omitted (= false) for back-compat.
+	 *
+	 * @see private/bedrock-model-picker-overhaul.md — Phase 2e
+	 */
+	use_extended_context?: boolean;
 }
 
 /** Plan/Act mode. */

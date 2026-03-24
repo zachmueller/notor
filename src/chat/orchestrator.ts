@@ -265,7 +265,8 @@ export class ChatOrchestrator {
 		const conversation = this.conversationManager.createConversation(
 			providerType,
 			modelId,
-			currentMode
+			currentMode,
+			providerConfig?.use_extended_context ? { use_extended_context: true } : undefined
 		);
 
 		await this.historyManager.createConversationFile(conversation);
@@ -482,6 +483,7 @@ export class ChatOrchestrator {
 				persona_name: activePersonaName,
 				is_background: false,
 				title: `Workflow: ${workflow.display_name}`,
+				use_extended_context: providerConfig?.use_extended_context ?? false,
 			}
 		);
 
@@ -661,6 +663,7 @@ export class ChatOrchestrator {
 				persona_name: activePersonaName,
 				is_background: true,
 				title: `Workflow: ${workflow.display_name}`,
+				use_extended_context: providerConfig?.use_extended_context ?? false,
 			}
 		);
 

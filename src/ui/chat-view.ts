@@ -20,6 +20,7 @@ import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
 import { buildPersonaPicker } from "./persona-picker";
 import { logger } from "../utils/logger";
+import { groupModels, formatVariantLabel, buildOptionValue, type ModelGroup } from "../providers/model-grouping";
 import {
 	renderWriteNoteDiffPreview,
 	renderReplaceInNoteDiffPreview,
@@ -1754,16 +1755,22 @@ export class NotorChatView extends ItemView {
 		const currentModel = this.getCurrentModel?.() ?? "";
 
 		if (models.length > 0) {
-			// Dropdown mode
 			const modelSelect = wrapper.createEl("select", { cls: "notor-settings-select" });
+			const groups = groupModels(models);
 
-			for (const m of models) {
-				const opt = modelSelect.createEl("option", {
-					text: m.display_name || m.id,
-					attr: { value: m.id },
-				});
-				if (m.id === currentModel) {
-					opt.selected = true;
+			// Use optgroup for groups with multiple variants; flat options for single-variant groups
+			if (groups.some((g) => g.variants.length > 1)) {
+				this.renderGroupedModelOptions(modelSelect, groups, currentModel);
+			} else {
+				// All groups have single variants — render flat (non-Bedrock providers)
+				for (const m of models) {
+					const opt = modelSelect.createEl("option", {
+						text: m.display_name || m.id,
+						attr: { value: m.id },
+					});
+					if (m.id === currentModel) {
+						opt.selected = true;
+					}
 				}
 			}
 
@@ -1784,6 +1791,48 @@ export class NotorChatView extends ItemView {
 			modelInput.addEventListener("change", () => {
 				this.onModelChange?.(modelInput.value);
 			});
+		}
+	}
+
+	/**
+	 * Render grouped model options using `<optgroup>` elements.
+	 *
+	 * Each ModelGroup becomes an `<optgroup>` with its variants as `<option>`s.
+	 * The `::1m` suffix is used as an internal encoding for extended context
+	 * variants — parsed in the `onModelChange` handler in main.ts.
+	 */
+	private renderGroupedModelOptions(
+		select: HTMLSelectElement,
+		groups: ModelGroup[],
+		currentModel: string
+	): void {
+		for (const group of groups) {
+			if (group.variants.length === 1) {
+				// Single variant — render as a flat option (no optgroup needed)
+				const variant = group.variants[0]!;
+				const opt = select.createEl("option", {
+					text: group.label,
+					attr: { value: variant.optionValue },
+				});
+				if (variant.optionValue === currentModel) {
+					opt.selected = true;
+				}
+			} else {
+				// Multiple variants — use optgroup
+				const optgroup = select.createEl("optgroup", {
+					attr: { label: group.label },
+				});
+				for (const variant of group.variants) {
+					const label = formatVariantLabel(variant);
+					const opt = optgroup.createEl("option", {
+						text: label,
+						attr: { value: variant.optionValue },
+					});
+					if (variant.optionValue === currentModel) {
+						opt.selected = true;
+					}
+				}
+			}
 		}
 	}
 

@@ -50,6 +50,7 @@ import { ProviderRegistry } from "./providers/index";
 import { LocalProvider } from "./providers/local-provider";
 import { AnthropicProvider } from "./providers/anthropic-provider";
 import { OpenAIProvider } from "./providers/openai-provider";
+import { parseOptionValue, buildOptionValue } from "./providers/model-grouping";
 import type { LLMProviderType } from "./types";
 
 // Tools
@@ -1392,12 +1393,14 @@ export default class NotorPlugin extends Plugin {
 			});
 		});
 
-		// Model change
-		view.setOnModelChange((modelId) => {
+		// Model change — parses ::1m suffix to set use_extended_context
+		view.setOnModelChange((selectedValue) => {
+			const { modelId, isExtendedContext } = parseOptionValue(selectedValue);
+
 			const activeType = providerRegistry.getActiveType();
 			const config = providerRegistry.getConfig(activeType);
 			if (config) {
-				const updated = { ...config, model_id: modelId };
+				const updated = { ...config, model_id: modelId, use_extended_context: isExtendedContext };
 				providerRegistry.updateConfig(updated);
 				// Update settings
 				const idx = this.settings.providers.findIndex(
@@ -1462,11 +1465,12 @@ export default class NotorPlugin extends Plugin {
 			return providerRegistry.getActiveType();
 		});
 
-		// Current model
+		// Current model — reconstructs ::1m composite value for picker selection
 		view.setGetCurrentModel(() => {
 			const activeType = providerRegistry.getActiveType();
 			const config = providerRegistry.getConfig(activeType);
-			return config?.model_id ?? "";
+			const modelId = config?.model_id ?? "";
+			return buildOptionValue(modelId, config?.use_extended_context ?? false);
 		});
 
 		// Checkpoint callbacks

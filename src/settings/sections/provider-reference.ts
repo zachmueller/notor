@@ -6,6 +6,7 @@
 
 import { Setting } from "obsidian";
 import type { SettingsContext } from "./context";
+import { groupModels, formatVariantLabel } from "../../providers/model-grouping";
 
 /**
  * Render a "Provider & model identifiers" reference section in Settings.
@@ -70,8 +71,25 @@ export function renderProviderModelReferenceSection(
 		// Models list from cached model data in the provider config
 		const cachedModels = providerConfig.model_cache;
 		if (cachedModels && cachedModels.length > 0) {
-			for (const model of cachedModels) {
-				renderModelRefItem(group, model.display_name || model.id, model.id);
+			const groups = groupModels(cachedModels);
+			const hasMultiVariant = groups.some((g) => g.variants.length > 1);
+
+			if (hasMultiVariant) {
+				// Grouped display (Bedrock) — show group heading + variants
+				for (const modelGroup of groups) {
+					const groupHeading = group.createDiv({ cls: "notor-model-ref-group-heading" });
+					groupHeading.createEl("em", { text: modelGroup.label });
+
+					for (const variant of modelGroup.variants) {
+						const label = formatVariantLabel(variant);
+						renderModelRefItem(group, `${label}`, variant.model.id);
+					}
+				}
+			} else {
+				// Flat display (non-Bedrock) — render each model directly
+				for (const model of cachedModels) {
+					renderModelRefItem(group, model.display_name || model.id, model.id);
+				}
 			}
 		} else if (providerConfig.model_id) {
 			// Show the single configured model_id if no cache

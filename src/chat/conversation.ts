@@ -80,6 +80,7 @@ export class ConversationManager {
 			persona_name?: string | null;
 			is_background?: boolean;
 			title?: string;
+			use_extended_context?: boolean;
 		}
 	): Conversation {
 		const now = new Date().toISOString();
@@ -108,6 +109,9 @@ export class ConversationManager {
 			}),
 			...(workflowMetadata?.title !== undefined && {
 				title: workflowMetadata.title,
+			}),
+			...(workflowMetadata?.use_extended_context && {
+				use_extended_context: workflowMetadata.use_extended_context,
 			}),
 		};
 
