@@ -124,6 +124,7 @@ export class NotorChatView extends ItemView {
 	private onStopResponse?: () => void;
 	private onNewConversation?: () => void;
 	private onSwitchConversation?: (filename: string) => void;
+	private onExportConversation?: (filename: string) => void;
 	private onSwitchToConversationById?: (conversationId: string) => Promise<boolean>;
 	private onOpenConversationList?: () => Promise<ConversationListEntry[]>;
 	private onModeToggle?: (mode: ConversationMode) => void;
@@ -176,6 +177,10 @@ export class NotorChatView extends ItemView {
 
 	setOnSwitchConversation(callback: (filename: string) => void): void {
 		this.onSwitchConversation = callback;
+	}
+
+	setOnExportConversation(callback: (filename: string) => void): void {
+		this.onExportConversation = callback;
 	}
 
 	/**
@@ -1397,17 +1402,28 @@ export class NotorChatView extends ItemView {
 				cls: "notor-conversation-list-item",
 			});
 
-			const titleEl = item.createDiv({ cls: "notor-conversation-list-title" });
+			const contentCol = item.createDiv({ cls: "notor-conversation-list-content" });
+
+			const titleEl = contentCol.createDiv({ cls: "notor-conversation-list-title" });
 			titleEl.textContent = entry.title ?? "Untitled";
 
-			const metaEl = item.createDiv({ cls: "notor-conversation-list-meta" });
+			const metaEl = contentCol.createDiv({ cls: "notor-conversation-list-meta" });
 			const date = new Date(entry.updated_at);
 			metaEl.textContent = this.formatRelativeTime(date);
 
 			if (entry.preview) {
-				const previewEl = item.createDiv({ cls: "notor-conversation-list-preview" });
+				const previewEl = contentCol.createDiv({ cls: "notor-conversation-list-preview" });
 				previewEl.textContent = entry.preview;
 			}
+
+			// Export button
+			const exportBtn = item.createDiv({ cls: "notor-conversation-export-btn" });
+			setIcon(exportBtn, "download");
+			exportBtn.setAttribute("aria-label", "Export conversation");
+			exportBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this.onExportConversation?.(entry.filename);
+			});
 
 			item.addEventListener("click", () => {
 				this.onSwitchConversation?.(entry.filename);

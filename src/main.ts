@@ -26,6 +26,11 @@ import { WorkflowHookOverrideManager } from "./hooks/workflow-hook-override";
 // Group H: Workflow activity tracker
 import { WorkflowActivityTracker } from "./workflows/workflow-activity-tracker";
 
+// Export
+import { ExportModal, type ExportFormat } from "./export/export-modal";
+import { exportToMarkdown } from "./export/markdown-exporter";
+import { exportToHtml } from "./export/html-exporter";
+
 // Group F: Vault event hooks
 import { TagShadowCache } from "./hooks/tag-change-detector";
 import { TagChangeSuppressionManager } from "./hooks/tag-change-detector";
@@ -291,6 +296,28 @@ export default class NotorPlugin extends Plugin {
 				} catch (e) {
 					log.error("Run workflow command failed", { error: String(e) });
 					new Notice(`Failed to open workflow picker: ${e instanceof Error ? e.message : String(e)}`);
+				}
+			},
+		});
+
+		// Export active conversation
+		this.addCommand({
+			id: "export-conversation",
+			name: "Export conversation",
+			callback: () => {
+				try {
+					const orchestrator = this.getOrchestrator();
+					const convManager = orchestrator.getConversationManager();
+					const conversation = convManager.getActiveConversation();
+					const messages = convManager.getMessages();
+					if (!conversation) {
+						new Notice("No active conversation to export");
+						return;
+					}
+					this.showExportModal(conversation, messages);
+				} catch (e) {
+					log.error("Export conversation command failed", { error: String(e) });
+					new Notice(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
 				}
 			},
 		});
@@ -1370,6 +1397,16 @@ export default class NotorPlugin extends Plugin {
 			});
 		});
 
+		// Export conversation from history list
+		view.setOnExportConversation((filename: string) => {
+			historyManager.loadConversation(filename).then(({ conversation, messages }) => {
+				this.showExportModal(conversation, messages);
+			}).catch((e) => {
+				log.error("Failed to load conversation for export", { error: String(e) });
+				new Notice(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+			});
+		});
+
 		// Mode toggle
 		view.setOnModeToggle((mode) => {
 			const convManager = orchestrator.getConversationManager();
@@ -1630,4 +1667,55 @@ export default class NotorPlugin extends Plugin {
 			log.error("Failed to open chat panel", { error: String(e) });
 		});
 	}
+
+	// -----------------------------------------------------------------------
+	// Export helpers
+	// -----------------------------------------------------------------------
+
+	private showExportModal(conversation: import("./types").Conversation, messages: import("./types").Message[]): void {
+		new ExportModal(this.app, conversation, async (format: ExportFormat, folderPath: string) => {
+			try {
+				const content = format === "markdown"
+					? exportToMarkdown(conversation, messages)
+					: exportToHtml(conversation, messages);
+
+				const ext = format === "markdown" ? "md" : "html";
+				const sanitized = sanitizeFilename(conversation.title);
+				const now = new Date();
+				const ts = [
+					now.getFullYear(),
+					String(now.getMonth() + 1).padStart(2, "0"),
+					String(now.getDate()).padStart(2, "0"),
+					"_",
+					String(now.getHours()).padStart(2, "0"),
+					String(now.getMinutes()).padStart(2, "0"),
+					String(now.getSeconds()).padStart(2, "0"),
+				].join("");
+				const filename = `${sanitized}_${ts}.${ext}`;
+				const fullPath = folderPath ? `${folderPath}/${filename}` : filename;
+
+				// Check for existing file
+				const existing = this.app.vault.getAbstractFileByPath(fullPath);
+				if (existing) {
+					new Notice(`File already exists: ${fullPath}`);
+					return;
+				}
+
+				await this.app.vault.create(fullPath, content);
+				new Notice(`Exported to ${fullPath}`);
+				log.info("Conversation exported", { format, path: fullPath });
+			} catch (e) {
+				log.error("Export failed", { error: String(e) });
+				new Notice(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		}).open();
+	}
+}
+
+function sanitizeFilename(title?: string): string {
+	return (title || "Untitled-conversation")
+		.replace(/[^a-zA-Z0-9\s\-_]/g, "")
+		.replace(/\s+/g, "-")
+		.substring(0, 60)
+		|| "Untitled-conversation";
 }

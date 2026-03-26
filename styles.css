@@ -218,10 +218,46 @@
 	border-radius: var(--radius-s);
 	cursor: pointer;
 	margin-bottom: 2px;
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
 }
 
 .notor-conversation-list-item:hover {
 	background: var(--background-modifier-hover);
+}
+
+.notor-conversation-list-content {
+	flex: 1;
+	min-width: 0;
+}
+
+.notor-conversation-export-btn {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: var(--radius-s);
+	color: var(--text-faint);
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.notor-conversation-list-item:hover .notor-conversation-export-btn {
+	opacity: 1;
+}
+
+.notor-conversation-export-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.notor-conversation-export-btn svg {
+	width: 14px;
+	height: 14px;
 }
 
 .notor-conversation-list-title {
@@ -1212,6 +1248,38 @@
 .notor-diff-removed {
 	background: rgba(220, 53, 69, 0.12);
 	color: var(--color-red);
+}
+
+/* ==========================================================================
+   Export modal
+   ========================================================================== */
+
+.notor-export-modal .notor-export-modal-info {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin-bottom: 16px;
+}
+
+.notor-export-modal .notor-export-modal-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 16px;
+}
+
+.notor-export-modal .notor-export-modal-row label {
+	font-size: var(--font-ui-small);
+	white-space: nowrap;
+}
+
+.notor-export-modal .notor-export-modal-select {
+	flex: 1;
+	padding: 4px 8px;
+	border-radius: var(--radius-s);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
 }
 
 /* Inline wikilink token — vault note / section references embedded in the
