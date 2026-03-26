@@ -15,10 +15,13 @@ import {
 	AbstractInputSuggest,
 	type App,
 	type FuzzyMatch,
+	type SearchResult,
 	type TFile,
+	renderMatches,
 	Platform,
 	Notice,
 	prepareFuzzySearch,
+	parseFrontMatterAliases,
 	setIcon,
 } from "obsidian";
 import { ConfirmModal } from "./confirm-modal";
@@ -142,6 +145,10 @@ interface VaultNoteSuggestion {
 	display: string;
 	/** Fuzzy match result for highlighting. */
 	match: FuzzyMatch<TFile> | null;
+	/** What the match was against — used to show context in the suggestion row. */
+	matchSource: "name" | "path" | "alias";
+	/** The alias that matched (only set when matchSource is "alias"). */
+	matchedAlias?: string;
 }
 
 /** Suggestion item for section header picker. */
@@ -268,23 +275,49 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 				file,
 				display: file.basename,
 				match: null,
+				matchSource: "name" as const,
 			}));
 			this.selectedIndex = -1;
 			log.debug("VaultNoteSuggest suggestions updated (no query)", { count: this.currentSuggestions.length });
 			return this.currentSuggestions;
 		}
 
-		// Fuzzy match against filenames
+		// Fuzzy match against filenames, paths, and aliases
 		const fuzzySearch = prepareFuzzySearch(query);
 		const results: VaultNoteSuggestion[] = [];
 
 		for (const file of files) {
-			const result = fuzzySearch(file.basename);
-			if (result) {
+			type Candidate = { score: number; result: SearchResult; source: "name" | "path" | "alias"; alias?: string };
+			const candidates: Candidate[] = [];
+
+			const nameResult = fuzzySearch(file.basename);
+			if (nameResult) {
+				candidates.push({ score: nameResult.score, result: nameResult, source: "name" });
+			}
+
+			const pathResult = fuzzySearch(file.path);
+			if (pathResult) {
+				candidates.push({ score: pathResult.score, result: pathResult, source: "path" });
+			}
+
+			const cache = this.app.metadataCache.getFileCache(file);
+			const aliases = parseFrontMatterAliases(cache?.frontmatter) ?? [];
+			for (const alias of aliases) {
+				const aliasResult = fuzzySearch(alias);
+				if (aliasResult) {
+					candidates.push({ score: aliasResult.score, result: aliasResult, source: "alias", alias });
+				}
+			}
+
+			candidates.sort((a, b) => b.score - a.score);
+			const best = candidates[0];
+			if (best) {
 				results.push({
 					file,
 					display: file.basename,
-					match: { item: file, match: result },
+					match: { item: file, match: best.result },
+					matchSource: best.source,
+					matchedAlias: best.alias,
 				});
 			}
 		}
@@ -305,40 +338,35 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	renderSuggestion(suggestion: VaultNoteSuggestion, el: HTMLElement): void {
 		const container = el.createDiv({ cls: "notor-suggest-item" });
 
-		// Show file path in a subtle way
-		const pathParts = suggestion.file.path.split("/");
-		if (pathParts.length > 1) {
-			const folderPath = pathParts.slice(0, -1).join("/");
-			container.createSpan({
-				cls: "notor-suggest-path",
-				text: folderPath + "/",
-			});
-		}
-
-		// Filename with match highlighting
-		const nameEl = container.createSpan({ cls: "notor-suggest-name" });
-		if (suggestion.match?.match.matches) {
-			// Render with fuzzy match highlights
-			const text = suggestion.display;
-			const matches = suggestion.match.match.matches;
-			let lastIndex = 0;
-
-			for (const [start, end] of matches) {
-				if (start > lastIndex) {
-					nameEl.appendText(text.slice(lastIndex, start));
-				}
-				nameEl.createSpan({
-					cls: "notor-suggest-highlight",
-					text: text.slice(start, end),
-				});
-				lastIndex = end;
-			}
-
-			if (lastIndex < text.length) {
-				nameEl.appendText(text.slice(lastIndex));
-			}
+		if (suggestion.matchSource === "path" && suggestion.match?.match.matches) {
+			// Path match: render the full path with highlights
+			const pathEl = container.createSpan({ cls: "notor-suggest-name" });
+			renderMatches(pathEl, suggestion.file.path, suggestion.match.match.matches);
 		} else {
-			nameEl.textContent = suggestion.display;
+			// Show file path in a subtle way
+			const pathParts = suggestion.file.path.split("/");
+			if (pathParts.length > 1) {
+				const folderPath = pathParts.slice(0, -1).join("/");
+				container.createSpan({
+					cls: "notor-suggest-path",
+					text: folderPath + "/",
+				});
+			}
+
+			// Filename (with highlights for name matches)
+			const nameEl = container.createSpan({ cls: "notor-suggest-name" });
+			if (suggestion.matchSource === "name" && suggestion.match?.match.matches) {
+				renderMatches(nameEl, suggestion.display, suggestion.match.match.matches);
+			} else {
+				nameEl.textContent = suggestion.display;
+			}
+
+			// Alias match: show the matched alias with highlights
+			if (suggestion.matchSource === "alias" && suggestion.matchedAlias && suggestion.match?.match.matches) {
+				const aliasEl = container.createSpan({ cls: "notor-suggest-alias" });
+				aliasEl.createSpan({ cls: "notor-suggest-alias-label", text: "aka " });
+				renderMatches(aliasEl, suggestion.matchedAlias, suggestion.match.match.matches);
+			}
 		}
 	}
 
