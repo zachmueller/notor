@@ -259,29 +259,16 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 6: Snippet reflects current auto-approve state ─────────────
-	console.log("\n── Test 6: Snippet reflects current auto-approve state ──");
+	// ── Test 6: Snippet lists all built-in tools ────────────────────────
+	console.log("\n── Test 6: Snippet lists all built-in tools ──");
 	{
-		const snippetInfo = await page.evaluate(() => {
-			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			if (!plugin?.settings?.auto_approve) return null;
-			const autoApprove = plugin.settings.auto_approve as Record<string, boolean>;
-
-			const TOOL_WRITE_FLAGS: Record<string, boolean> = {
-				read_note: false, search_vault: false, list_vault: false,
-				read_frontmatter: false, fetch_webpage: false, read_file: false,
-				read_docx: false, write_note: true, replace_in_note: true,
-				update_frontmatter: true, manage_tags: true, execute_command: true,
-				write_docx: true,
-			};
-			const nonDefault: string[] = [];
-			for (const [tool, isWrite] of Object.entries(TOOL_WRITE_FLAGS)) {
-				const defaultVal = !isWrite;
-				const currentVal = autoApprove[tool] ?? defaultVal;
-				if (currentVal !== defaultVal) nonDefault.push(tool);
-			}
-			return { nonDefault, autoApprove };
-		});
+		const allTools = [
+			"read_note", "search_vault", "list_vault", "read_frontmatter",
+			"fetch_webpage", "read_file", "read_docx",
+			"write_note", "replace_in_note", "update_frontmatter",
+			"manage_tags", "move_note", "execute_command",
+			"write_docx", "extract_docx_comments",
+		];
 
 		let clipboardContent: string | null = null;
 		try {
@@ -290,24 +277,31 @@ async function tests(ctx: TestContext) {
 
 		const shot = await ctx.screenshot("06-snippet-reflects-state");
 
-		if (snippetInfo && clipboardContent) {
-			let allPresent = true;
+		if (clipboardContent) {
 			const missing: string[] = [];
-			for (const tool of snippetInfo.nonDefault) {
+			for (const tool of allTools) {
 				if (!clipboardContent.includes(`${tool}:`)) {
-					allPresent = false;
 					missing.push(tool);
 				}
 			}
-			if (allPresent) {
-				ctx.pass("Snippet reflects current auto-approve state", `All ${snippetInfo.nonDefault.length} non-default tools present in snippet`, shot);
+			if (missing.length === 0) {
+				ctx.pass("Snippet lists all built-in tools", `All ${allTools.length} tools present in snippet`, shot);
 			} else {
-				ctx.fail("Snippet reflects current auto-approve state", `Missing tools in snippet: ${missing.join(", ")}`, shot);
+				ctx.fail("Snippet lists all built-in tools", `Missing tools in snippet: ${missing.join(", ")}`, shot);
 			}
-		} else if (snippetInfo && !clipboardContent) {
-			ctx.pass("Snippet reflects current auto-approve state", "Clipboard not readable (Electron restriction); button click verified in test 4", shot);
 		} else {
-			ctx.fail("Snippet reflects current auto-approve state", "Could not read plugin settings", shot);
+			const noticeVisible = await page.evaluate(() => {
+				const notices = document.querySelectorAll(".notice");
+				for (const n of notices) {
+					if (n.textContent?.includes("clipboard")) return true;
+				}
+				return false;
+			});
+			if (noticeVisible) {
+				ctx.pass("Snippet lists all built-in tools", "Clipboard not readable (Electron restriction); button click verified in test 4", shot);
+			} else {
+				ctx.fail("Snippet lists all built-in tools", "Could not read clipboard and no confirming Notice found", shot);
+			}
 		}
 	}
 
