@@ -69,6 +69,8 @@ export class NotorChatView extends ItemView {
 	private headerEl!: HTMLElement;
 	private messageListEl!: HTMLElement;
 	private inputAreaEl!: HTMLElement;
+	private inputToolbarEl!: HTMLElement;
+	private resizeHandler?: () => void;
 	private textInputEl!: HTMLDivElement;
 	private sendButtonEl!: HTMLButtonElement;
 	private stopButtonEl!: HTMLButtonElement;
@@ -415,13 +417,17 @@ export class NotorChatView extends ItemView {
 	updatePersonaLabel(persona: Persona | null): void {
 		if (!this.personaLabelEl) {
 			// Create the label element if it doesn't exist yet.
-			// Inserted at the start of the input area, before the mode toggle.
-			if (this.inputAreaEl) {
-				this.personaLabelEl = this.inputAreaEl.createDiv({
+			// Inserted into the toolbar row, after the mode toggle.
+			const toolbar = this.inputToolbarEl ?? this.inputAreaEl;
+			if (toolbar) {
+				this.personaLabelEl = toolbar.createDiv({
 					cls: "notor-persona-label notor-hidden",
 				});
-				// Move it to be the first child of the input area
-				this.inputAreaEl.insertBefore(this.personaLabelEl, this.inputAreaEl.firstChild);
+				// Place after the mode toggle (second child of toolbar)
+				const modeToggle = toolbar.querySelector(".notor-mode-toggle");
+				if (modeToggle?.nextSibling) {
+					toolbar.insertBefore(this.personaLabelEl, modeToggle.nextSibling);
+				}
 			} else {
 				return;
 			}
@@ -478,6 +484,12 @@ export class NotorChatView extends ItemView {
 		// Disconnect the inline token mutation observer
 		this.tokenObserver?.disconnect();
 		this.tokenObserver = undefined;
+
+		// Clean up window resize listener
+		if (this.resizeHandler) {
+			window.removeEventListener("resize", this.resizeHandler);
+			this.resizeHandler = undefined;
+		}
 
 		// H-002: Clean up workflow activity indicator DOM and callbacks
 		this.workflowActivityIndicator?.destroy();
@@ -570,18 +582,28 @@ export class NotorChatView extends ItemView {
 		});
 	}
 
+	/**
+	 * Recalculate the text input height. The input grows to fit its content up
+	 * to the greater of 10% of the window height or 3 full lines of text.
+	 */
+	private recalcInputHeight(): void {
+		this.textInputEl.setCssProps({ '--notor-input-height': 'auto' });
+		const lineHeight = parseFloat(getComputedStyle(this.textInputEl).lineHeight) || 20;
+		const padding = 12 + 2; // 6px top + 6px bottom padding + 2px border
+		const threeLines = (lineHeight * 3) + padding;
+		const tenPercent = window.innerHeight * 0.1;
+		const maxH = Math.max(tenPercent, threeLines);
+		const newHeight = Math.min(this.textInputEl.scrollHeight, maxH);
+		this.textInputEl.setCssProps({
+			'--notor-input-height': newHeight + 'px',
+			'--notor-input-max-height': maxH + 'px',
+		});
+	}
+
 	private buildInputArea(container: HTMLElement): void {
 		this.inputAreaEl = container.createDiv({ cls: "notor-input-area" });
 
-		// Mode toggle
-		this.modeToggleEl = this.inputAreaEl.createEl("button", {
-			cls: "notor-mode-toggle notor-mode-plan",
-			text: "Plan",
-			attr: { "aria-label": "Toggle plan/act mode" },
-		});
-		this.modeToggleEl.addEventListener("click", () => this.handleModeToggle());
-
-		// Text input wrapper
+		// Text input wrapper (full width, above toolbar)
 		const inputWrapper = this.inputAreaEl.createDiv({ cls: "notor-input-wrapper" });
 
 		// Attachment chip container (above the text input)
@@ -606,8 +628,7 @@ export class NotorChatView extends ItemView {
 
 		// Auto-resize contenteditable div
 		this.textInputEl.addEventListener("input", () => {
-			this.textInputEl.setCssProps({ '--notor-input-height': 'auto' });
-			this.textInputEl.setCssProps({ '--notor-input-height': Math.min(this.textInputEl.scrollHeight, 200) + 'px' });
+			this.recalcInputHeight();
 
 			// Detect `[[` trigger for vault note autocomplete
 			this.detectWikilinkTrigger();
@@ -615,6 +636,10 @@ export class NotorChatView extends ItemView {
 			// Detect `/` trigger for workflow slash-command autocomplete (E-012)
 			this.detectSlashCommandTrigger();
 		});
+
+		// Recalculate max height when the window is resized
+		this.resizeHandler = () => this.recalcInputHeight();
+		window.addEventListener("resize", this.resizeHandler);
 
 		// Enter to send, Shift+Enter for newline; Tab to select workflow or note suggestion (E-012)
 		this.textInputEl.addEventListener("keydown", (e) => {
@@ -772,8 +797,19 @@ export class NotorChatView extends ItemView {
 			() => this.getWorkflowsCallback?.() ?? []
 		);
 
-		// Button wrapper
-		const buttonWrapper = this.inputAreaEl.createDiv({ cls: "notor-input-buttons" });
+		// Toolbar row below the input (mode toggle left, buttons right)
+		this.inputToolbarEl = this.inputAreaEl.createDiv({ cls: "notor-input-toolbar" });
+
+		// Mode toggle (left side of toolbar)
+		this.modeToggleEl = this.inputToolbarEl.createEl("button", {
+			cls: "notor-mode-toggle notor-mode-plan",
+			text: "Plan",
+			attr: { "aria-label": "Toggle plan/act mode" },
+		});
+		this.modeToggleEl.addEventListener("click", () => this.handleModeToggle());
+
+		// Button wrapper (right side of toolbar)
+		const buttonWrapper = this.inputToolbarEl.createDiv({ cls: "notor-input-buttons" });
 
 		// Attachment button
 		createAttachmentButton(
@@ -832,7 +868,7 @@ export class NotorChatView extends ItemView {
 		this.pendingWorkflow = null;
 
 		this.textInputEl.textContent = "";
-		this.textInputEl.setCssProps({ '--notor-input-height': 'auto' });
+		this.textInputEl.setCssProps({ '--notor-input-height': 'auto', '--notor-input-max-height': '' });
 
 		try {
 			if (pendingWorkflow && this.onSendWorkflow) {
