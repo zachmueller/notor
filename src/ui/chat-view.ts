@@ -528,16 +528,12 @@ export class NotorChatView extends ItemView {
 		setIcon(listBtn, "list");
 		listBtn.addEventListener("click", () => this.toggleConversationList());
 
-		// New conversation button
-		const newBtn = actions.createEl("button", {
-			cls: "notor-chat-header-btn clickable-icon",
-			attr: { "aria-label": "New conversation" },
-		});
-		setIcon(newBtn, "message-square-plus");
-		newBtn.addEventListener("click", () => {
-			this.onNewConversation?.();
-			this.textInputEl.focus();
-		});
+		// Workflow activity indicator is inserted after this button (see workflow-activity-indicator.ts)
+
+		// INT-005: MCP status indicator — rendered into the actions bar.
+		// Only visible when ≥1 MCP server is configured.
+		this.mcpStatusIndicator = new McpStatusIndicator(actions, this.plugin);
+		this.mcpStatusIndicator.render();
 
 		// Settings gear
 		const settingsBtn = actions.createEl("button", {
@@ -549,10 +545,16 @@ export class NotorChatView extends ItemView {
 			this.toggleSettingsPopover();
 		});
 
-		// INT-005: MCP status indicator — rendered into the actions bar.
-		// Only visible when ≥1 MCP server is configured.
-		this.mcpStatusIndicator = new McpStatusIndicator(actions, this.plugin);
-		this.mcpStatusIndicator.render();
+		// New conversation button
+		const newBtn = actions.createEl("button", {
+			cls: "notor-chat-header-btn clickable-icon",
+			attr: { "aria-label": "New conversation" },
+		});
+		setIcon(newBtn, "message-square-plus");
+		newBtn.addEventListener("click", () => {
+			this.onNewConversation?.();
+			this.textInputEl.focus();
+		});
 	}
 
 	private buildConversationList(container: HTMLElement): void {

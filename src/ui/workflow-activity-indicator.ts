@@ -97,11 +97,13 @@ export class WorkflowActivityIndicator {
 		});
 
 		// Insert the indicator into the header actions area.
-		// Position it before the first existing button (conversation history)
-		// so it appears on the left side of the header actions.
+		// Position it after the first existing button (conversation history)
+		// so it appears as the second icon in the header actions.
 		const actionsEl = this.containerEl.querySelector(".notor-chat-header-actions");
 		if (actionsEl) {
-			actionsEl.insertBefore(this.indicatorEl, actionsEl.firstChild);
+			const firstChild = actionsEl.firstChild;
+			const secondChild = firstChild?.nextSibling ?? null;
+			actionsEl.insertBefore(this.indicatorEl, secondChild);
 		} else {
 			// Fallback: append to the container
 			this.containerEl.appendChild(this.indicatorEl);
