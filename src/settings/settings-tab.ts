@@ -48,6 +48,9 @@ export class NotorSettingTab extends PluginSettingTab {
 	/** Cleanup functions registered by section renderers (e.g. McpHub subscriptions). */
 	private cleanupFns: Array<() => void> = [];
 
+	/** Guard to suppress toggle persistence during programmatic state restoration. */
+	private isRestoring = false;
+
 	constructor(app: App, plugin: NotorPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
@@ -77,8 +80,15 @@ export class NotorSettingTab extends PluginSettingTab {
 			addCleanup: (fn) => this.cleanupFns.push(fn),
 		};
 
+		const persisted = ctx.settings.settings_collapsed_sections;
+		const onToggle = (title: string, open: boolean) => {
+			if (this.isRestoring) return;
+			ctx.settings.settings_collapsed_sections[title] = open;
+			ctx.saveSettings();
+		};
+
 		// --- Provider Setup (expanded by default) ---
-		const providerGroup = createSettingsGroup(containerEl, "Provider setup", true);
+		const providerGroup = createSettingsGroup(containerEl, "Provider setup", true, persisted, onToggle);
 		renderActiveProviderSection(providerGroup, ctx);
 		renderLocalProviderSection(providerGroup, ctx);
 		renderAnthropicProviderSection(providerGroup, ctx);
@@ -86,45 +96,47 @@ export class NotorSettingTab extends PluginSettingTab {
 		renderBedrockProviderSection(providerGroup, ctx);
 
 		// --- Conversation (expanded by default) ---
-		const conversationGroup = createSettingsGroup(containerEl, "Conversation", true);
+		const conversationGroup = createSettingsGroup(containerEl, "Conversation", true, persisted, onToggle);
 		renderGeneralSection(conversationGroup, ctx);
 		renderAutoContextSection(conversationGroup, ctx);
 		renderCompactionSection(conversationGroup, ctx);
 
 		// --- Personas (collapsed by default) ---
-		const personasGroup = createSettingsGroup(containerEl, "Personas");
+		const personasGroup = createSettingsGroup(containerEl, "Personas", false, persisted, onToggle);
 		renderPersonasSection(personasGroup, ctx);
 
 		// --- Built-in Tools (expanded by default) ---
-		const toolsGroup = createSettingsGroup(containerEl, "Built-in tools", true);
+		const toolsGroup = createSettingsGroup(containerEl, "Built-in tools", true, persisted, onToggle);
 		renderAutoApproveSection(toolsGroup, ctx);
 
 		// --- MCP Servers (expanded by default) ---
-		const mcpGroup = createSettingsGroup(containerEl, "MCP servers", true);
+		const mcpGroup = createSettingsGroup(containerEl, "MCP servers", true, persisted, onToggle);
 		renderMcpServersSection(mcpGroup, ctx);
 
 		// --- Tool Configuration (collapsed by default) ---
-		const toolConfigGroup = createSettingsGroup(containerEl, "Tool configuration");
+		const toolConfigGroup = createSettingsGroup(containerEl, "Tool configuration", false, persisted, onToggle);
 		renderFetchWebpageSection(toolConfigGroup, ctx);
 		renderExecuteCommandSection(toolConfigGroup, ctx);
 		renderDocxToolsSection(toolConfigGroup, ctx);
 		renderFileAttachmentsSection(toolConfigGroup, ctx);
 
 		// --- Automation (collapsed by default) ---
-		const automationGroup = createSettingsGroup(containerEl, "Automation");
+		const automationGroup = createSettingsGroup(containerEl, "Automation", false, persisted, onToggle);
 		renderHooksSection(automationGroup, ctx);
 		renderVaultEventHooksSection(automationGroup, ctx);
 
 		// --- Storage (collapsed by default) ---
-		const storageGroup = createSettingsGroup(containerEl, "Storage");
+		const storageGroup = createSettingsGroup(containerEl, "Storage", false, persisted, onToggle);
 		renderHistorySection(storageGroup, ctx);
 		renderCheckpointSection(storageGroup, ctx);
 
 		// --- Reference (collapsed by default) ---
-		const referenceGroup = createSettingsGroup(containerEl, "Reference");
+		const referenceGroup = createSettingsGroup(containerEl, "Reference", false, persisted, onToggle);
 		renderProviderModelReferenceSection(referenceGroup, ctx);
 		renderModelPricingSection(referenceGroup, ctx);
 
+		this.isRestoring = true;
 		restoreDetailsState(containerEl, detailsState);
+		this.isRestoring = false;
 	}
 }

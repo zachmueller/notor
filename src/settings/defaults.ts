@@ -147,6 +147,9 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	// Phase 4.1: MCP servers
 	mcp_servers: {},
 
+	// Settings UI state
+	settings_collapsed_sections: {},
+
 	// Developer escape hatch
 	log_level: "error",
 

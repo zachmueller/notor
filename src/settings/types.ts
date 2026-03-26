@@ -261,4 +261,15 @@ export interface NotorSettings {
 
 	/** Default template `.docx` path for `write_docx`. Vault-relative or absolute. */
 	write_docx_default_template_path: string;
+
+	// -------------------------------------------------------------------
+	// Settings UI state
+	// -------------------------------------------------------------------
+
+	/**
+	 * Persisted expand/collapse state for top-level settings groups.
+	 * Keys are group titles, values are `true` (open) / `false` (collapsed).
+	 * Groups not present in this record use their hardcoded defaults.
+	 */
+	settings_collapsed_sections: Record<string, boolean>;
 }

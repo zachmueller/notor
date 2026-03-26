@@ -83,16 +83,26 @@ export function restoreDetailsState(
 export function createSettingsGroup(
 	containerEl: HTMLElement,
 	title: string,
-	open = false
+	defaultOpen = false,
+	persistedState?: Record<string, boolean>,
+	onToggle?: (title: string, open: boolean) => void
 ): HTMLElement {
+	const isOpen = persistedState && title in persistedState
+		? persistedState[title]!
+		: defaultOpen;
 	const details = containerEl.createEl("details", {
 		cls: "notor-settings-group",
 	});
-	if (open) details.setAttribute("open", "");
+	if (isOpen) details.setAttribute("open", "");
 	const summary = details.createEl("summary", {
 		cls: "notor-settings-group-summary",
 	});
 	summary.createEl("span", { text: title });
+	if (onToggle) {
+		details.addEventListener("toggle", () => {
+			onToggle(title, details.open);
+		});
+	}
 	return details.createDiv({ cls: "notor-settings-group-body" });
 }
 
