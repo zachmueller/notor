@@ -1979,7 +1979,7 @@ export class ChatOrchestrator {
 								// Must match the tool_call.id used above for the same call.
 								tool_call_id: msg.tool_result.tool_call_id ?? msg.id,
 								tool_name: msg.tool_result.tool_name,
-								result: resultStr,
+								result: resultStr || msg.tool_result.error || "",
 								is_error: !msg.tool_result.success,
 							},
 						});
