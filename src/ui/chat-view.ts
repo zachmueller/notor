@@ -28,6 +28,8 @@ import {
 import { VaultNoteSuggest, createAttachmentButton } from "./attachment-picker";
 import { AttachmentChipManager, createAttachmentChipContainer } from "./attachment-chips";
 import { WorkflowSlashSuggest, detectSlashTrigger } from "./workflow-suggest";
+import { resolveNote } from "../utils/resolve-note";
+import { findExistingLeaf } from "../tools/note-opener";
 import { WorkflowActivityIndicator } from "./workflow-activity-indicator";
 import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tracker";
 import type { Workflow } from "../types";
@@ -1115,6 +1117,7 @@ export class NotorChatView extends ItemView {
 			"",
 			this
 		);
+		this.activateInternalLinks(contentEl);
 
 		// Add token annotation if available
 		if (message.input_tokens || message.output_tokens) {
@@ -1126,6 +1129,40 @@ export class NotorChatView extends ItemView {
 		}
 
 		this.scrollToBottom();
+	}
+
+	/**
+	 * Attach click handlers to internal links within a rendered message element.
+	 * Resolves note paths via resolveNote() and opens/focuses the target note.
+	 */
+	private activateInternalLinks(containerEl: HTMLElement): void {
+		const handleLinkClick = (e: MouseEvent) => {
+			const link = (e.target as HTMLElement).closest("a.internal-link");
+			if (!link) return;
+			e.preventDefault();
+			const href = link.getAttribute("data-href");
+			if (href) this.openInternalLink(href);
+		};
+
+		containerEl.addEventListener("click", handleLinkClick);
+		containerEl.addEventListener("auxclick", (e) => {
+			if (e.button !== 1) return; // middle-click only
+			handleLinkClick(e);
+		});
+	}
+
+	private openInternalLink(href: string): void {
+		const file = resolveNote(href, this.app.vault, this.app.metadataCache);
+		if (!file) {
+			new Notice(`Note not found: ${href}`);
+			return;
+		}
+		const existingLeaf = findExistingLeaf(this.app, file);
+		if (existingLeaf) {
+			this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+		} else {
+			void this.app.workspace.openLinkText(href, "", true);
+		}
 	}
 
 	/**

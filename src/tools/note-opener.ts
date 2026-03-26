@@ -10,7 +10,7 @@
  */
 
 import { TFile } from "obsidian";
-import type { App } from "obsidian";
+import type { App, WorkspaceLeaf } from "obsidian";
 import { logger } from "../utils/logger";
 
 const log = logger("NoteOpener");
@@ -92,14 +92,21 @@ export class NoteOpener {
 	 * Returns null if the file is not currently open in any leaf.
 	 */
 	private findExistingLeaf(file: TFile) {
-		let found = null;
-		this.app.workspace.iterateAllLeaves((leaf) => {
-			const view = leaf.view;
-			// Check if this leaf has a file view with our target file
-			if ("file" in view && (view as { file?: TFile }).file === file) {
-				found = leaf;
-			}
-		});
-		return found;
+		return findExistingLeaf(this.app, file);
 	}
+}
+
+/**
+ * Find an existing workspace leaf that has the given file open.
+ * Returns null if the file is not currently open in any leaf.
+ */
+export function findExistingLeaf(app: App, file: TFile): WorkspaceLeaf | null {
+	let found: WorkspaceLeaf | null = null;
+	app.workspace.iterateAllLeaves((leaf) => {
+		const view = leaf.view;
+		if ("file" in view && (view as { file?: TFile }).file === file) {
+			found = leaf;
+		}
+	});
+	return found;
 }
