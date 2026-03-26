@@ -95,11 +95,13 @@ export class NotorSettingTab extends PluginSettingTab {
 		const personasGroup = createSettingsGroup(containerEl, "Personas");
 		renderPersonasSection(personasGroup, ctx);
 
-		// --- Tools & Permissions (expanded by default) ---
-		const toolsGroup = createSettingsGroup(containerEl, "Tools & permissions", true);
+		// --- Built-in Tools (expanded by default) ---
+		const toolsGroup = createSettingsGroup(containerEl, "Built-in tools", true);
 		renderAutoApproveSection(toolsGroup, ctx);
 
-		renderMcpServersSection(toolsGroup, ctx);
+		// --- MCP Servers (expanded by default) ---
+		const mcpGroup = createSettingsGroup(containerEl, "MCP servers", true);
+		renderMcpServersSection(mcpGroup, ctx);
 
 		// --- Tool Configuration (collapsed by default) ---
 		const toolConfigGroup = createSettingsGroup(containerEl, "Tool configuration");
