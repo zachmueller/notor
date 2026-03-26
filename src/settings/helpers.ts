@@ -37,6 +37,42 @@ export function updateProvider(settings: NotorSettings, updated: LLMProviderConf
 // Settings UI layout helpers
 // ---------------------------------------------------------------------------
 
+/** Extract a stable key from a <details> element's summary. */
+function getDetailsKey(details: HTMLDetailsElement): string | null {
+	const summary = details.querySelector("summary");
+	if (!summary) return null;
+	// Use specific child elements for stable keys (avoids dynamic text like "(3 hooks)")
+	const nameEl =
+		summary.querySelector(".notor-mcp-server-name") ??
+		summary.querySelector("strong") ??
+		summary.querySelector("span");
+	return nameEl?.textContent?.trim() ?? null;
+}
+
+/** Snapshot open/closed state of all <details> elements under a container. */
+export function snapshotDetailsState(containerEl: HTMLElement): Map<string, boolean> {
+	const state = new Map<string, boolean>();
+	containerEl.querySelectorAll<HTMLDetailsElement>("details").forEach((details) => {
+		const key = getDetailsKey(details);
+		if (key) state.set(key, details.open);
+	});
+	return state;
+}
+
+/** Restore open/closed state of <details> elements from a snapshot. */
+export function restoreDetailsState(
+	containerEl: HTMLElement,
+	state: Map<string, boolean>
+): void {
+	if (state.size === 0) return;
+	containerEl.querySelectorAll<HTMLDetailsElement>("details").forEach((details) => {
+		const key = getDetailsKey(details);
+		if (key !== null && state.has(key)) {
+			details.open = state.get(key)!;
+		}
+	});
+}
+
 /**
  * Creates a top-level collapsible group in the settings pane.
  *

@@ -34,7 +34,7 @@ import { renderCheckpointSection } from "./sections/checkpoints";
 import { renderModelPricingSection } from "./sections/model-pricing";
 import { renderMcpServersSection } from "./sections/mcp-servers";
 import { renderPersonasSection } from "./sections/personas";
-import { createSettingsGroup } from "./helpers";
+import { createSettingsGroup, snapshotDetailsState, restoreDetailsState } from "./helpers";
 
 /**
  * Notor settings tab registered in Obsidian's Settings panel.
@@ -65,6 +65,7 @@ export class NotorSettingTab extends PluginSettingTab {
 	display(): void {
 		this.runCleanups();
 		const { containerEl } = this;
+		const detailsState = snapshotDetailsState(containerEl);
 		containerEl.empty();
 
 		const ctx: SettingsContext = {
@@ -121,5 +122,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		const referenceGroup = createSettingsGroup(containerEl, "Reference");
 		renderProviderModelReferenceSection(referenceGroup, ctx);
 		renderModelPricingSection(referenceGroup, ctx);
+
+		restoreDetailsState(containerEl, detailsState);
 	}
 }
