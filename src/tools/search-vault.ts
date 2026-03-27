@@ -28,6 +28,9 @@ interface MatchResult {
 interface FileResult {
 	path: string;
 	matches: MatchResult[];
+	match_count: number;
+	backlink_count: number;
+	modified: string;
 }
 
 /** Structured result returned from search_vault. */
@@ -51,7 +54,9 @@ export class SearchVaultTool implements Tool {
 
 	readonly description =
 		"Search across notes in the vault using regex or text patterns, returning matches " +
-		"with surrounding context lines. Results are grouped by file with line numbers.";
+		"with surrounding context lines. Results are grouped by file with line numbers. " +
+		"Results can be sorted by match count (default), backlink count (to find hub/authoritative notes), " +
+		"or last modified time. Each result includes match_count, backlink_count, and modified metadata.";
 
 	readonly input_schema = {
 		type: "object",
@@ -78,6 +83,14 @@ export class SearchVaultTool implements Tool {
 					"Glob pattern to filter which files to search. Defaults to '*.md'.",
 				default: "*.md",
 			},
+			sort_by: {
+				type: "string",
+				description:
+					"Sort order for result files: 'match_count' (most matches first, default), " +
+					"'backlinks' (most backlinks first), or 'modified' (most recently edited first).",
+				enum: ["match_count", "backlinks", "modified"],
+				default: "match_count",
+			},
 		},
 		required: ["query"],
 	};
@@ -92,6 +105,10 @@ export class SearchVaultTool implements Tool {
 			Math.min(10, Math.floor((params["context_lines"] as number | undefined) ?? 3))
 		);
 		const filePattern = ((params["file_pattern"] as string | undefined) ?? "*.md").trim();
+		const sortBy = ((params["sort_by"] as string | undefined) ?? "match_count") as
+			| "match_count"
+			| "backlinks"
+			| "modified";
 
 		if (!query || typeof query !== "string") {
 			return {
@@ -123,13 +140,22 @@ export class SearchVaultTool implements Tool {
 		const fileResults: FileResult[] = [];
 		let totalMatches = 0;
 
+		// Build backlink counts once (O(n) in-memory pass over resolvedLinks)
+		const backlinkCounts = this.getBacklinkCounts();
+
 		for (const file of candidates) {
 			try {
 				const content = await this.app.vault.cachedRead(file);
 				const matches = this.searchFile(content, regex, contextLines);
 
 				if (matches.length > 0) {
-					fileResults.push({ path: file.path, matches });
+					fileResults.push({
+						path: file.path,
+						matches,
+						match_count: matches.length,
+						backlink_count: backlinkCounts.get(file.path) ?? 0,
+						modified: new Date(file.stat.mtime).toISOString(),
+					});
 					totalMatches += matches.length;
 				}
 			} catch (e) {
@@ -144,16 +170,19 @@ export class SearchVaultTool implements Tool {
 			regex.lastIndex = 0;
 		}
 
+		// Sort results by the selected field
+		const sortedResults = this.sortFileResults(fileResults, sortBy);
+
 		log.debug("Search complete", {
 			query,
 			totalMatches,
 			filesSearched: candidates.length,
-			filesWithMatches: fileResults.length,
+			filesWithMatches: sortedResults.length,
 		});
 
 		const result: SearchResult = {
 			total_matches: totalMatches,
-			files: fileResults,
+			files: sortedResults,
 		};
 
 		return {
@@ -210,6 +239,44 @@ export class SearchVaultTool implements Tool {
 			// Fallback: exact match
 			return filename === pattern;
 		}
+	}
+
+	/**
+	 * Build a map of file path → backlink count from Obsidian's resolved links.
+	 * O(n) in-memory pass — no disk I/O.
+	 */
+	private getBacklinkCounts(): Map<string, number> {
+		const counts = new Map<string, number>();
+		for (const [sourcePath, links] of Object.entries(
+			this.app.metadataCache.resolvedLinks
+		)) {
+			for (const targetPath of Object.keys(links)) {
+				if (targetPath !== sourcePath) {
+					counts.set(targetPath, (counts.get(targetPath) ?? 0) + 1);
+				}
+			}
+		}
+		return counts;
+	}
+
+	/**
+	 * Sort file results by the specified field, descending.
+	 */
+	private sortFileResults(
+		results: FileResult[],
+		sortBy: "match_count" | "backlinks" | "modified"
+	): FileResult[] {
+		return [...results].sort((a, b) => {
+			switch (sortBy) {
+				case "backlinks":
+					return b.backlink_count - a.backlink_count;
+				case "modified":
+					return new Date(b.modified).getTime() - new Date(a.modified).getTime();
+				case "match_count":
+				default:
+					return b.match_count - a.match_count;
+			}
+		});
 	}
 
 	/**
