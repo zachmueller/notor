@@ -1381,6 +1381,11 @@ export default class NotorPlugin extends Plugin {
 			return historyManager.listConversations();
 		});
 
+		// Search conversations by query
+		view.setOnSearchConversations((query: string) => {
+			return historyManager.searchConversations(query);
+		});
+
 		// Switch conversation
 		view.setOnSwitchConversation((filename: string) => {
 			orchestrator.switchConversation(filename).then(() => {

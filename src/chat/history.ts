@@ -397,6 +397,97 @@ export class HistoryManager {
 		return entries;
 	}
 
+	/**
+	 * Search conversations by matching query against title, preview, and
+	 * full message content. Returns matching entries ordered by most recent
+	 * activity.
+	 */
+	async searchConversations(query: string): Promise<ConversationListEntry[]> {
+		if (!query.trim()) {
+			return this.listConversations();
+		}
+
+		await this.ensureDirectory();
+
+		const needle = query.toLowerCase();
+		const entries: ConversationListEntry[] = [];
+		const files = await this.vault.adapter.list(normalizePath(this.historyPath));
+
+		for (const file of files.files) {
+			if (!file.endsWith(".jsonl")) continue;
+
+			try {
+				const content = await this.vault.adapter.read(file);
+				const firstNewline = content.indexOf("\n");
+				const headerLine = firstNewline >= 0 ? content.substring(0, firstNewline) : content;
+
+				if (!headerLine.trim()) continue;
+
+				const headerObj = JSON.parse(headerLine) as Record<string, unknown>;
+				if (headerObj._type !== "conversation") continue;
+
+				const convId = headerObj.id as string | undefined;
+				const convUpdatedAt = headerObj.updated_at as string | undefined;
+				const convCreatedAt = headerObj.created_at as string | undefined;
+				const convProviderId = headerObj.provider_id as string | undefined;
+				const convModelId = headerObj.model_id as string | undefined;
+
+				if (!convId || !convUpdatedAt || !convCreatedAt || !convProviderId || !convModelId) {
+					continue;
+				}
+
+				// Check if title matches
+				const title = headerObj.title as string | undefined;
+				let matched = !!title && title.toLowerCase().includes(needle);
+
+				// Check message content for matches
+				let preview: string | undefined;
+				const contentLines = content.split("\n");
+				for (let i = 1; i < contentLines.length; i++) {
+					const msgLine = contentLines[i];
+					if (!msgLine || !msgLine.trim()) continue;
+					try {
+						const msg = JSON.parse(msgLine) as Record<string, unknown>;
+						if (msg.role === "user" && typeof msg.content === "string" && !preview) {
+							preview = msg.content.substring(0, 120);
+						}
+						if (!matched && typeof msg.content === "string" && msg.content.toLowerCase().includes(needle)) {
+							matched = true;
+						}
+					} catch {
+						// skip malformed lines
+					}
+					// Once we have both preview and a match, stop scanning
+					if (preview && matched) break;
+				}
+
+				if (!matched) continue;
+
+				const filename = file.split("/").pop() ?? file;
+
+				entries.push({
+					id: convId,
+					title,
+					updated_at: convUpdatedAt,
+					created_at: convCreatedAt,
+					preview,
+					provider_id: convProviderId,
+					model_id: convModelId,
+					filename,
+				});
+			} catch (e) {
+				log.warn("Failed to search conversation", {
+					file,
+					error: String(e),
+				});
+			}
+		}
+
+		entries.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+
+		return entries;
+	}
+
 	// -----------------------------------------------------------------------
 	// Retention policy
 	// -----------------------------------------------------------------------

@@ -78,6 +78,7 @@ export class NotorChatView extends ItemView {
 	private stopButtonEl!: HTMLButtonElement;
 	private modeToggleEl!: HTMLButtonElement;
 	private conversationListEl!: HTMLElement;
+	private conversationSearchInputEl!: HTMLInputElement;
 	private loadingIndicatorEl!: HTMLElement;
 	private tokenFooterEl!: HTMLElement;
 	private attachmentChipContainerEl!: HTMLElement;
@@ -129,6 +130,7 @@ export class NotorChatView extends ItemView {
 	private onExportConversation?: (filename: string) => void;
 	private onSwitchToConversationById?: (conversationId: string) => Promise<boolean>;
 	private onOpenConversationList?: () => Promise<ConversationListEntry[]>;
+	private onSearchConversations?: (query: string) => Promise<ConversationListEntry[]>;
 	private onModeToggle?: (mode: ConversationMode) => void;
 	private onSettingsOpen?: () => void;
 	private onProviderChange?: (providerId: LLMProviderType) => void;
@@ -204,6 +206,10 @@ export class NotorChatView extends ItemView {
 
 	setOnOpenConversationList(callback: () => Promise<ConversationListEntry[]>): void {
 		this.onOpenConversationList = callback;
+	}
+
+	setOnSearchConversations(callback: (query: string) => Promise<ConversationListEntry[]>): void {
+		this.onSearchConversations = callback;
 	}
 
 	setOnModeToggle(callback: (mode: ConversationMode) => void): void {
@@ -560,6 +566,36 @@ export class NotorChatView extends ItemView {
 	}
 
 	private buildConversationList(container: HTMLElement): void {
+		// Search input (sibling above the scrollable list, hidden together)
+		const searchWrapper = container.createDiv({
+			cls: "notor-conversation-search notor-hidden",
+		});
+		this.conversationSearchInputEl = searchWrapper.createEl("input", {
+			type: "text",
+			placeholder: "Search conversations…",
+			cls: "notor-conversation-search-input",
+		});
+		this.conversationSearchInputEl.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				const query = this.conversationSearchInputEl.value.trim();
+				if (!query) {
+					// Empty query — reload full list
+					this.onOpenConversationList?.().then((entries) => {
+						this.renderConversationList(entries);
+					}).catch((err) => {
+						log.error("Failed to load conversation list", { error: String(err) });
+					});
+				} else {
+					this.onSearchConversations?.(query).then((entries) => {
+						this.renderConversationList(entries);
+					}).catch((err) => {
+						log.error("Failed to search conversations", { error: String(err) });
+					});
+				}
+			}
+		});
+
 		this.conversationListEl = container.createDiv({
 			cls: "notor-conversation-list notor-hidden",
 		});
@@ -907,9 +943,14 @@ export class NotorChatView extends ItemView {
 
 	private toggleConversationList(): void {
 		this.showConversationList = !this.showConversationList;
+		const searchWrapper = this.conversationSearchInputEl.parentElement;
 		if (this.showConversationList) {
+			searchWrapper?.removeClass("notor-hidden");
 			this.conversationListEl.removeClass("notor-hidden");
 			this.messageListEl.addClass("notor-hidden");
+			// Clear search and focus input
+			this.conversationSearchInputEl.value = "";
+			this.conversationSearchInputEl.focus();
 			// Refresh the list from disk every time the panel opens
 			if (this.onOpenConversationList) {
 				this.onOpenConversationList().then((entries) => {
@@ -919,6 +960,7 @@ export class NotorChatView extends ItemView {
 				});
 			}
 		} else {
+			searchWrapper?.addClass("notor-hidden");
 			this.conversationListEl.addClass("notor-hidden");
 			this.messageListEl.removeClass("notor-hidden");
 		}
