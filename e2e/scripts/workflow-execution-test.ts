@@ -9,10 +9,9 @@
  *  3. Workflow picker opens with discovered workflows
  *  4. Workflow selection creates a new conversation with <details> rendering
  *  5. Slash-command "/" in input activates workflow autocomplete popup
- *  6. Workflow chip renders in chip container after selection
- *  7. Chip "×" button removes the chip
- *  8. Backspace with empty input removes the workflow chip
- *  9. Chip is cleared after sending a message
+ *  6. Workflow inline token renders in input after selection
+ *  7. Backspace removes the inline workflow token
+ *  8. Workflow token is cleared after sending a message
  * 10. "/" in the middle of text does NOT trigger autocomplete
  * 11. Empty workflow body aborts execution (no conversation created)
  * 12. <details> element is collapsed by default and expands on click
@@ -280,12 +279,12 @@ async function testSlashCommandInMiddleNoTrigger(page: Page, ctx: TestContext): 
 	await page.keyboard.press("Escape");
 }
 
-async function testWorkflowChipRendered(page: Page, ctx: TestContext, collector: LogCollector): Promise<void> {
-	console.log("\nTest 6: Workflow chip renders in chip container after slash-command selection");
+async function testWorkflowTokenRendered(page: Page, ctx: TestContext, collector: LogCollector): Promise<void> {
+	console.log("\nTest 6: Workflow inline token renders after slash-command selection");
 
 	const textInput = await waitForSelector(page, ".notor-text-input", 5000);
 	if (!textInput) {
-		ctx.fail("Workflow chip rendered", "Text input not found");
+		ctx.fail("Workflow token rendered", "Text input not found");
 		return;
 	}
 	await textInput.click();
@@ -308,37 +307,37 @@ async function testWorkflowChipRendered(page: Page, ctx: TestContext, collector:
 		await page.waitForTimeout(400);
 	}
 
-	const shot = await ctx.screenshot("06-workflow-chip");
+	const shot = await ctx.screenshot("06-workflow-token");
 
-	// Check for workflow chip in the attachment chip container
-	const chip = await page.$(".notor-workflow-chip");
-	if (chip) {
-		const chipText = await chip.textContent();
-		ctx.pass("Workflow chip rendered", `Found .notor-workflow-chip with text: "${chipText?.trim()}"`, shot);
+	// Check for inline workflow token in the contenteditable input
+	const token = await page.$(".notor-workflow-token");
+	if (token) {
+		const tokenText = await token.textContent();
+		const workflowPath = await token.getAttribute("data-workflow-path");
+		ctx.pass("Workflow token rendered", `Found .notor-workflow-token with text: "${tokenText?.trim()}", path: "${workflowPath}"`, shot);
 	} else {
-		// Also check for the chip container having any chip
-		const anyChip = await page.$(".notor-attachment-chip");
-		if (anyChip) {
-			const chipText = await anyChip.textContent();
-			ctx.pass("Workflow chip rendered", `Found .notor-attachment-chip (may be workflow chip): "${chipText?.trim()}"`, shot);
+		// Also check via data attribute in case class name changed
+		const dataToken = await page.$(".notor-text-input [data-workflow-path]");
+		if (dataToken) {
+			const tokenText = await dataToken.textContent();
+			ctx.pass("Workflow token rendered", `Found [data-workflow-path] token: "${tokenText?.trim()}"`, shot);
 		} else {
-			ctx.fail("Workflow chip rendered", "No .notor-workflow-chip found after workflow selection", shot);
+			ctx.fail("Workflow token rendered", "No .notor-workflow-token found after workflow selection", shot);
 		}
 	}
 }
 
-async function testChipRemoveButton(page: Page, ctx: TestContext): Promise<void> {
-	console.log("\nTest 7: Chip '×' button removes the workflow chip");
+async function testBackspaceRemovesToken(page: Page, ctx: TestContext): Promise<void> {
+	console.log("\nTest 7: Backspace removes the inline workflow token");
 
-	// Check if a chip currently exists (from previous test)
-	let chip = await page.$(".notor-workflow-chip");
-	if (!chip) {
+	// Check if a token currently exists (from previous test)
+	let token = await page.$(".notor-workflow-token");
+	if (!token) {
 		// Try to create one first
 		const textInput = await page.$(".notor-text-input");
 		if (textInput) {
 			await textInput.click();
 			await page.waitForTimeout(200);
-			// Ensure input is empty
 			await page.evaluate(() => {
 				const el = document.querySelector(".notor-text-input") as HTMLElement | null;
 				if (el) el.textContent = "";
@@ -354,53 +353,56 @@ async function testChipRemoveButton(page: Page, ctx: TestContext): Promise<void>
 				await page.keyboard.press("Enter");
 				await page.waitForTimeout(400);
 			}
-			chip = await page.$(".notor-workflow-chip");
+			token = await page.$(".notor-workflow-token");
 		}
 	}
 
-	if (!chip) {
-		ctx.fail("Chip remove button", "Could not create a workflow chip to test removal");
+	if (!token) {
+		ctx.fail("Backspace removes token", "Could not create a workflow token to test removal");
 		return;
 	}
 
-	// Dismiss any open suggestion popup that could intercept pointer events
+	// Dismiss any open suggestion popup
 	await page.keyboard.press("Escape");
 	await page.waitForTimeout(300);
 
-	// Re-query chip after popup dismiss (same element should still be there)
-	chip = await page.$(".notor-workflow-chip");
-	if (!chip) {
-		ctx.fail("Chip remove button", "Workflow chip disappeared after dismissing suggestion popup");
-		return;
-	}
+	// Place cursor at the end of the input (after the token + trailing space)
+	await page.evaluate(() => {
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		if (!el) return;
+		el.focus();
+		const range = document.createRange();
+		range.selectNodeContents(el);
+		range.collapse(false);
+		const sel = window.getSelection();
+		sel?.removeAllRanges();
+		sel?.addRange(range);
+	});
+	await page.waitForTimeout(200);
 
-	// Click the × remove button using force to bypass any remaining overlay
-	const removeBtn = await chip.$(".notor-attachment-chip-remove");
-	if (!removeBtn) {
-		ctx.fail("Chip remove button", "No .notor-attachment-chip-remove button found in chip");
-		return;
-	}
-
-	await removeBtn.click({ force: true });
+	// Backspace once to remove trailing space, again to remove the atomic token
+	await page.keyboard.press("Backspace");
+	await page.waitForTimeout(200);
+	await page.keyboard.press("Backspace");
 	await page.waitForTimeout(300);
 
-	const shot = await ctx.screenshot("07-chip-removed");
+	const shot = await ctx.screenshot("07-token-removed");
 
-	const chipAfter = await page.$(".notor-workflow-chip");
-	if (!chipAfter) {
-		ctx.pass("Chip remove button works", "Workflow chip removed after clicking ×", shot);
+	const tokenAfter = await page.$(".notor-workflow-token");
+	if (!tokenAfter) {
+		ctx.pass("Backspace removes token", "Workflow token removed after Backspace", shot);
 	} else {
-		ctx.fail("Chip remove button works", ".notor-workflow-chip still present after clicking ×", shot);
+		ctx.fail("Backspace removes token", ".notor-workflow-token still present after Backspace", shot);
 	}
 }
 
-async function testBackspaceRemovesChip(page: Page, ctx: TestContext): Promise<void> {
-	console.log("\nTest 8: Backspace with empty input removes workflow chip");
+async function testTokenClearedAfterSend(page: Page, ctx: TestContext): Promise<void> {
+	console.log("\nTest 8: Workflow token is cleared after sending a message");
 
-	// Create a chip first
+	// Create a token
 	const textInput = await page.$(".notor-text-input");
 	if (!textInput) {
-		ctx.fail("Backspace removes chip", "Text input not found");
+		ctx.fail("Token cleared after send", "Text input not found");
 		return;
 	}
 	await textInput.click();
@@ -425,29 +427,39 @@ async function testBackspaceRemovesChip(page: Page, ctx: TestContext): Promise<v
 	}
 	await page.waitForTimeout(400);
 
-	// Verify chip exists
-	const chipBefore = await page.$(".notor-workflow-chip, .notor-attachment-chip");
-	if (!chipBefore) {
-		ctx.fail("Backspace removes chip", "Could not create workflow chip for backspace test");
+	// Verify token exists before send
+	const tokenBefore = await page.$(".notor-workflow-token");
+	if (!tokenBefore) {
+		ctx.fail("Token cleared after send", "Could not create workflow token for send test");
 		return;
 	}
 
-	// Ensure input is empty and press Backspace
-	await page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		if (el) el.textContent = "";
-	});
-	await page.waitForTimeout(100);
-	await page.keyboard.press("Backspace");
+	// Dismiss popup and send the message (Enter submits the workflow)
+	await page.keyboard.press("Escape");
 	await page.waitForTimeout(300);
 
-	const shot = await ctx.screenshot("08-backspace-chip");
+	// Focus the input and press Enter to send
+	await page.evaluate(() => {
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		if (el) el.focus();
+	});
+	await page.waitForTimeout(200);
 
-	const chipAfter = await page.$(".notor-workflow-chip");
-	if (!chipAfter) {
-		ctx.pass("Backspace removes chip", "Workflow chip removed by Backspace on empty input", shot);
+	const sendBtn = await page.$(".notor-send-btn");
+	if (sendBtn) {
+		await sendBtn.click();
 	} else {
-		ctx.fail("Backspace removes chip", ".notor-workflow-chip still present after Backspace", shot);
+		await page.keyboard.press("Enter");
+	}
+	await page.waitForTimeout(2000);
+
+	const shot = await ctx.screenshot("08-token-cleared-after-send");
+
+	const tokenAfter = await page.$(".notor-workflow-token");
+	if (!tokenAfter) {
+		ctx.pass("Token cleared after send", "Workflow token cleared from input after sending", shot);
+	} else {
+		ctx.fail("Token cleared after send", ".notor-workflow-token still present in input after send", shot);
 	}
 }
 
@@ -1438,14 +1450,14 @@ async function tests(ctx: TestContext) {
 	// ── Test 5: Slash in middle no trigger ─────────────────────────────
 	await testSlashCommandInMiddleNoTrigger(page, ctx);
 
-	// ── Test 6: Workflow chip renders ───────────────────────────────────
-	await testWorkflowChipRendered(page, ctx, collector);
+	// ── Test 6: Workflow inline token renders ───────────────────────────
+	await testWorkflowTokenRendered(page, ctx, collector);
 
-	// ── Test 7: Chip × button removes chip ─────────────────────────────
-	await testChipRemoveButton(page, ctx);
+	// ── Test 7: Backspace removes inline token ─────────────────────────
+	await testBackspaceRemovesToken(page, ctx);
 
-	// ── Test 8: Backspace removes chip ─────────────────────────────────
-	await testBackspaceRemovesChip(page, ctx);
+	// ── Test 8: Token cleared after send ───────────────────────────────
+	await testTokenClearedAfterSend(page, ctx);
 
 	// ── Test 9: <details> rendering (via command palette execution) ─────
 	await testDetailsRendering(page, ctx, collector);
@@ -1615,6 +1627,59 @@ Respond with a brief confirmation.
 `
 			);
 
+			// Create referenced vault notes for <include_note> resolution tests
+			const researchDir = path.join(vaultPath, "Research");
+			fs.mkdirSync(researchDir, { recursive: true });
+
+			fs.writeFileSync(
+				path.join(researchDir, "Climate.md"),
+				`---
+title: Climate Research
+---
+
+# Climate Research
+
+## Introduction
+
+This note contains climate research findings.
+
+## Key Findings
+
+- Global temperatures have risen by 1.1°C since pre-industrial times
+- Arctic sea ice has declined by 13% per decade
+- Sea levels are rising at 3.6mm per year
+- CO2 concentrations have reached 421 ppm
+
+## Methodology
+
+Data collected from satellite observations and ground stations.
+`
+			);
+
+			fs.writeFileSync(
+				path.join(researchDir, "Energy.md"),
+				`---
+title: Energy Research
+---
+
+# Energy Research
+
+## Overview
+
+This note covers renewable energy trends and analysis.
+
+## Key Statistics
+
+- Solar capacity grew 26% year-over-year
+- Wind energy now provides 7% of global electricity
+- Battery storage costs have fallen 89% since 2010
+
+## Conclusions
+
+Renewable energy adoption is accelerating across all major economies.
+`
+			);
+
 			console.log("  Test workflow fixtures ensured in test vault.");
 		},
 		cleanupFiles: [
@@ -1625,6 +1690,7 @@ Respond with a brief confirmation.
 			"notor/workflows/include-note-workflow.md",
 			"notor/workflows/attached-include-workflow.md",
 			"notor/workflows/missing-persona-workflow.md",
+			"Research",
 		],
 	},
 	tests,
