@@ -1073,8 +1073,34 @@ async function testEmptyWorkflowAbort(page: Page, ctx: TestContext, collector: L
 async function testWikilinkCoexistence(page: Page, ctx: TestContext): Promise<void> {
 	console.log("\nTest 19: Coexistence with [[ autocomplete validated");
 
-	// Start a fresh new conversation to ensure the input is editable and
-	// not in a responding state from previous workflow executions.
+	// Previous tests trigger LLM responses that disable the input
+	// (contenteditable="false"). Wait for any active response to finish,
+	// or abort it via the stop button, before creating a new conversation.
+	const inputReady = await page.evaluate(() => {
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		return el?.getAttribute("contenteditable") === "true";
+	});
+	if (!inputReady) {
+		// Click the stop button if visible to cancel any in-progress response
+		const stopBtn = await page.$(".notor-stop-btn:not(.notor-hidden)");
+		if (stopBtn) {
+			await stopBtn.click();
+			console.log("    Clicked stop button to cancel active response");
+			await page.waitForTimeout(1000);
+		}
+		// Poll until the input becomes editable (response finished or aborted)
+		const deadline = Date.now() + 30_000;
+		while (Date.now() < deadline) {
+			const editable = await page.evaluate(() => {
+				const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+				return el?.getAttribute("contenteditable") === "true";
+			});
+			if (editable) break;
+			await page.waitForTimeout(1000);
+		}
+	}
+
+	// Now create a fresh conversation with a guaranteed-idle input
 	await page.evaluate(() => {
 		const app = (window as unknown as { app?: { commands?: { executeCommandById?: (id: string) => void } } }).app;
 		app?.commands?.executeCommandById?.("notor:new-conversation");
@@ -1083,16 +1109,12 @@ async function testWikilinkCoexistence(page: Page, ctx: TestContext): Promise<vo
 
 	const textInput = await waitForSelector(page, ".notor-text-input[contenteditable='true']", 5000);
 	if (!textInput) {
-		// Fallback to any text input
-		const fallback = await waitForSelector(page, ".notor-text-input", 5000);
-		if (!fallback) {
-			ctx.fail("Wikilink coexistence", "Text input not found");
-			return;
-		}
+		ctx.fail("Wikilink coexistence", "Text input not editable after new conversation");
+		return;
 	}
 
 	// Focus and clear
-	await page.click(".notor-text-input");
+	await textInput.click();
 	await page.evaluate(() => {
 		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
 		if (el) {
