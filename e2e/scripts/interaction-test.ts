@@ -20,7 +20,7 @@
  */
 
 import { runTest, type TestContext } from "../lib/test-harness";
-import { waitForSelector } from "../lib/test-helpers";
+import { waitForSelector, waitForResponse } from "../lib/test-helpers";
 
 async function tests(ctx: TestContext) {
 	const { page } = ctx;
@@ -133,9 +133,16 @@ async function tests(ctx: TestContext) {
 	{
 		const textarea = await page.$(".notor-text-input");
 		if (textarea) {
-			await textarea.click();
-			await textarea.fill("Hello from interaction test");
-			const value = await textarea.inputValue();
+			await page.evaluate(() => {
+				const el = document.querySelector(".notor-text-input") as HTMLElement;
+				el.focus();
+				el.textContent = "Hello from interaction test";
+				el.dispatchEvent(new Event("input", { bubbles: true }));
+			});
+			const value = await page.evaluate(() => {
+				const el = document.querySelector(".notor-text-input") as HTMLElement;
+				return el?.textContent ?? "";
+			});
 			if (value === "Hello from interaction test") {
 				ctx.pass("Type in textarea", `Value set correctly: "${value}"`);
 			} else {
@@ -153,8 +160,11 @@ async function tests(ctx: TestContext) {
 		if (textarea) {
 			await textarea.click();
 			await page.keyboard.press("Shift+Enter");
-			await textarea.type("line 2");
-			const value = await textarea.inputValue();
+			await page.keyboard.type("line 2");
+			const value = await page.evaluate(() => {
+				const el = document.querySelector(".notor-text-input") as HTMLElement;
+				return el?.innerText ?? "";
+			});
 			const hasNewline = value.includes("\n");
 			if (hasNewline) {
 				ctx.pass("Shift+Enter inserts newline", `Value contains newline: ${JSON.stringify(value)}`);
@@ -171,7 +181,12 @@ async function tests(ctx: TestContext) {
 	{
 		const textarea = await page.$(".notor-text-input");
 		if (textarea) {
-			await textarea.fill("List my vault contents");
+			await page.evaluate(() => {
+				const el = document.querySelector(".notor-text-input") as HTMLElement;
+				el.focus();
+				el.textContent = "List my vault contents";
+				el.dispatchEvent(new Event("input", { bubbles: true }));
+			});
 			await page.waitForTimeout(100);
 
 			const sendBtn = await page.$(".notor-send-btn");
@@ -205,7 +220,8 @@ async function tests(ctx: TestContext) {
 	}
 
 	// ── Wait for response to settle (provider error or success) ────────
-	await page.waitForTimeout(5000);
+	console.log("  Waiting for LLM response to complete...");
+	await waitForResponse(page, 90_000);
 	await ctx.screenshot("09b-post-send");
 
 	// ── Test 10: User message rendered in chat ─────────────────────────
@@ -242,7 +258,7 @@ async function tests(ctx: TestContext) {
 	{
 		const textarea = await page.$(".notor-text-input");
 		if (textarea) {
-			const isDisabled = await textarea.evaluate((el) => (el as HTMLTextAreaElement).disabled);
+			const isDisabled = await textarea.evaluate((el) => el.getAttribute("contenteditable") !== "true");
 			const stopHidden = await page.evaluate(() => {
 				const btn = document.querySelector(".notor-stop-btn");
 				return !btn || btn.classList.contains("notor-hidden");
@@ -368,9 +384,22 @@ async function tests(ctx: TestContext) {
 	// ── Test 16: Plan mode type and send a second message ─────────────
 	console.log("\nTest 16: Second message send in Plan mode");
 	{
-		const textarea = await page.$(".notor-text-input");
-		if (textarea) {
-			await textarea.fill("What notes do I have in my vault?");
+		// Ensure input is ready (not still disabled from prior response)
+		await waitForResponse(page, 30_000);
+
+		const inputReady = await page.evaluate(() => {
+			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+			return el !== null && el.getAttribute("contenteditable") === "true";
+		});
+
+		if (inputReady) {
+			await page.evaluate(() => {
+				const el = document.querySelector(".notor-text-input") as HTMLElement;
+				el.focus();
+				el.textContent = "What notes do I have in my vault?";
+				el.dispatchEvent(new Event("input", { bubbles: true }));
+			});
+			await page.waitForTimeout(300);
 			await page.keyboard.press("Enter");
 			await page.waitForTimeout(1000);
 
@@ -382,11 +411,13 @@ async function tests(ctx: TestContext) {
 				ctx.fail("Second message sends correctly", "No user messages found after send", shot);
 			}
 		} else {
-			ctx.fail("Second message sends correctly", "Textarea not found");
+			ctx.fail("Second message sends correctly", "Input not ready — still disabled from prior response");
 		}
 	}
 
-	await page.waitForTimeout(5000);
+	// Wait for second message response to complete
+	console.log("  Waiting for second message response...");
+	await waitForResponse(page, 90_000);
 
 	// ── Test 17: Token footer visibility after message exchange ────────
 	console.log("\nTest 17: Token footer present after message exchange");
@@ -444,7 +475,12 @@ async function tests(ctx: TestContext) {
 
 			const textarea = await page.$(".notor-text-input");
 			if (textarea) {
-				await textarea.fill("Second test conversation");
+				await page.evaluate(() => {
+					const el = document.querySelector(".notor-text-input") as HTMLElement;
+					el.focus();
+					el.textContent = "Second test conversation";
+					el.dispatchEvent(new Event("input", { bubbles: true }));
+				});
 				await page.keyboard.press("Enter");
 				await page.waitForTimeout(2000);
 			}
