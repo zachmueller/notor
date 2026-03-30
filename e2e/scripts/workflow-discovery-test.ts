@@ -419,6 +419,10 @@ runTest(
 		settings: buildDefaultSettings(),
 		setupVault: (vaultPath) => {
 			const workflowsDir = path.join(vaultPath, "notor", "workflows");
+			// Wipe the entire workflows directory so only our fixtures are discovered
+			if (fs.existsSync(workflowsDir)) {
+				fs.rmSync(workflowsDir, { recursive: true, force: true });
+			}
 			fs.mkdirSync(workflowsDir, { recursive: true });
 
 			// daily/review.md — manual trigger, persona assignment, nested subdirectory
