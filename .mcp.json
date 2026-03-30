@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "git": {
+      "command": "zm-mcp-git",
+      "args": ["--name", "Claude"]
+    }
+  }
+}
