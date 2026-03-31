@@ -464,24 +464,7 @@ export class ToolDispatcher {
 			}
 		}
 
-		// 6. Abort check — if the user cancelled while waiting for approval, don't execute
-		if (abortSignal?.aborted) {
-			toolCall.status = "error";
-			this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-			const result: ToolResult = {
-				tool_name: toolName,
-				success: false,
-				result: "",
-				error: "Tool call cancelled by user.",
-			};
-
-			log.info("Tool call cancelled before execution", { toolName });
-			this.events.onToolCallResult?.(toolCall, result, messageId);
-			return result;
-		}
-
-		// 7. Execute tool
+		// 6. Execute tool
 		const startTime = Date.now();
 		try {
 			const result = await tool.execute(parameters);

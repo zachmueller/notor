@@ -1474,17 +1474,11 @@ export class ChatOrchestrator {
 					this.view?.renderToolResult(toolResultMessage);
 
 					// If the user cancelled during tool dispatch, stop the loop
-					// instead of sending the result back to the LLM for another turn.
+					// without adding a "[Response cancelled]" message. The
+					// tool_result (rejected/error) is already in the conversation,
+					// so the history is valid. The user can send a follow-up
+					// message and the LLM will see: tool_call → tool_result → new user message.
 					if (abortController.signal.aborted) {
-						const cancelledContent = "*[Response cancelled]*";
-						const cancelledMsg = this.conversationManager.addMessage({
-							role: "assistant",
-							content: cancelledContent,
-						});
-						const el = this.view?.createAssistantMessagePlaceholder();
-						if (el) {
-							await this.view?.finalizeAssistantMessage(el, cancelledMsg);
-						}
 						break;
 					}
 
