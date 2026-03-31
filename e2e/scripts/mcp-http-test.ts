@@ -126,21 +126,8 @@ async function testHttpServerErrorHandling(ctx: TestContext): Promise<void> {
 	console.log("\nTest 2: HTTP server connection error handled gracefully");
 	const { page } = ctx;
 
-	await injectMcpServerConfig(page, HTTP_SERVER_NAME, {
-		type: "streamableHttp",
-		url: UNREACHABLE_URL,
-		disabled: false,
-		timeout: 5,
-	});
-
-	connectMcpServer(page, HTTP_SERVER_NAME);
-
-	// Status should start as "connecting"
-	await page.waitForTimeout(200);
-	const connectingStatus = await getMcpServerStatus(page, HTTP_SERVER_NAME);
-	console.log(`    Initial status after connect call: ${connectingStatus}`);
-
-	// Wait for settled state (error or disconnected — connection refused to unreachable URL)
+	// Server was pre-configured in initial settings — McpHub auto-connects on init.
+	// After the 5s init wait, it should already be in error/disconnected state.
 	const settled = await pollUntil(async () => {
 		const s = await getMcpServerStatus(page, HTTP_SERVER_NAME);
 		return s === "error" || s === "disconnected";
@@ -162,10 +149,9 @@ async function testHttpServerErrorHandling(ctx: TestContext): Promise<void> {
 			shot
 		);
 	} else {
-		// May still be "connecting" — also acceptable (URL not reachable)
-		ctx.pass(
-			"HTTP server connection attempt",
-			`Status: ${finalStatus ?? "unknown"} — unreachable URL handled without crash`,
+		ctx.fail(
+			"HTTP server error handling",
+			`Expected error/disconnected, got: ${finalStatus ?? "unknown"}`,
 			shot
 		);
 	}
@@ -210,10 +196,9 @@ async function testStatusIndicatorVisible(ctx: TestContext): Promise<void> {
 	if (indicatorPresent) {
 		ctx.pass("MCP status indicator visible", "Found MCP indicator in chat panel header", shot);
 	} else {
-		// FR-63 (INT-005): indicator should be present. Log as informational.
-		ctx.pass(
-			"MCP status indicator (not found)",
-			`configCount=${configCount} — indicator element not found; INT-005 implementation may use different selector`,
+		ctx.fail(
+			"MCP status indicator not found",
+			`configCount=${configCount} — expected .notor-mcp-status-btn or [aria-label*='MCP']`,
 			shot
 		);
 	}
@@ -252,7 +237,7 @@ async function testStatusIndicatorWarningState(ctx: TestContext): Promise<void> 
 		if (warningState === true) {
 			ctx.pass("Status indicator shows warning state", "Indicator has warning styling for errored server", shot);
 		} else if (warningState === null) {
-			ctx.pass("Status indicator warning (element not found)", "Cannot verify warning state — indicator element absent", shot);
+			ctx.fail("Status indicator warning state", "Indicator element not found — cannot verify warning state", shot);
 		} else {
 			// Indicator present but warning not reflected via checked attributes
 			ctx.pass("Status indicator warning state (unverified)", `Server errored but warning styling not detected via checked attributes`, shot);
@@ -320,7 +305,7 @@ async function testStatusPopoverOpens(ctx: TestContext): Promise<void> {
 		await page.keyboard.press("Escape");
 		await page.waitForTimeout(300);
 	} else {
-		ctx.pass("MCP popover (UI not rendered)", "Popover element not found — INT-005 indicator UI may use different selectors", shot);
+		ctx.fail("MCP popover not rendered", "Popover element not found after clicking indicator", shot);
 	}
 }
 
@@ -469,15 +454,9 @@ async function testMultipleServersStatus(ctx: TestContext): Promise<void> {
  */
 async function testHttpAutoReconnect(ctx: TestContext): Promise<void> {
 	console.log("\nTest 9: HTTP transport auto-reconnect behavior");
-	const { page } = ctx;
+	const { collector } = ctx;
 
-	// The reconnect logic is already in place (McpHub scheduleReconnect).
-	// We validate it via structured logs rather than waiting for all retries.
-	const allLogs = (await page.evaluate(() => {
-		// Collect any McpHub reconnect logs from console (structured log entries)
-		return (window as any).__notorStructuredLogs ?? [];
-	})) as Array<{ source: string; message: string; level: string }>;
-
+	const allLogs = collector.getStructuredLogs();
 	const reconnectLogs = allLogs.filter(
 		(e) => e.source === "McpHub" && (
 			e.message.toLowerCase().includes("reconnect") ||
@@ -488,8 +467,7 @@ async function testHttpAutoReconnect(ctx: TestContext): Promise<void> {
 	if (reconnectLogs.length > 0) {
 		ctx.pass("HTTP auto-reconnect scheduled", `${reconnectLogs.length} reconnect log(s) found`);
 	} else {
-		// Reconnect logs may not be accessible this way — check via collector
-		ctx.pass("HTTP auto-reconnect (logs not captured)", "Reconnect scheduling not verifiable via window object — validated by code review of McpHub.scheduleReconnect()");
+		ctx.fail("HTTP auto-reconnect not detected", "No reconnect/scheduling logs found in collector");
 	}
 }
 
@@ -562,7 +540,15 @@ const settings = buildDefaultSettings({
 			endpoint: "http://localhost:11434/v1",
 		},
 	],
-	mcp_servers: {},
+	mcp_servers: {
+		[HTTP_SERVER_NAME]: {
+			name: HTTP_SERVER_NAME,
+			type: "streamableHttp",
+			url: UNREACHABLE_URL,
+			disabled: false,
+			timeout: 5,
+		},
+	},
 });
 
 runTest({ name: "mcp-http", settings }, tests);
