@@ -931,7 +931,12 @@ export class NotorChatView extends ItemView {
 	private handleStop(): void {
 		this.abortController?.abort();
 		this.onStopResponse?.();
-		this.setRespondingState(false);
+		// Do NOT call setRespondingState(false) here — the finally block in
+		// orchestrator.handleUserMessage() already does this after the response
+		// loop fully completes (including storing the cancelled assistant message).
+		// Calling it here re-enables input before the cancellation is processed,
+		// creating a race where the next user message can be inserted before the
+		// cancelled assistant message is stored.
 	}
 
 	private handleModeToggle(): void {

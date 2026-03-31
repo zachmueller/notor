@@ -1944,6 +1944,13 @@ export class ChatOrchestrator {
 					break;
 
 				case "assistant":
+					// Defensive: skip assistant messages with blank content.
+					// Providers like Bedrock reject empty text fields. This can
+					// happen if a response is cancelled before any text arrives.
+					if (!msg.content?.trim()) {
+						log.warn("Skipping assistant message with empty content", { id: msg.id });
+						break;
+					}
 					chatMessages.push({
 						role: "assistant",
 						content: msg.content,

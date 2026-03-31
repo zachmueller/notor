@@ -23,6 +23,7 @@ import {
 	waitForSelector,
 	buildDefaultSettings,
 	sendMessage,
+	waitForResponse,
 	newConversation,
 	VAULT_PATH,
 } from "../lib/test-helpers";
@@ -70,10 +71,21 @@ async function testAutoCompactionTriggered(ctx: TestContext): Promise<void> {
 	for (let i = 1; i <= 5; i++) {
 		const longMessage = `Message ${i}: Please write a detailed paragraph about topic ${i}. ` +
 			"Include as many details as possible. ".repeat(20);
-		const responded = await sendMessage(ctx.page, longMessage);
-		if (!responded) {
-			console.log(`    Message ${i} — no response within timeout, continuing...`);
-			await ctx.page.waitForTimeout(2_000);
+		try {
+			const responded = await sendMessage(ctx.page, longMessage);
+			if (!responded) {
+				console.log(`    Message ${i} — no response within timeout, cancelling...`);
+				const stopBtn = await ctx.page.$(".notor-stop-btn:not(.notor-hidden)");
+				if (stopBtn) await stopBtn.click();
+				await ctx.page.waitForTimeout(1_000);
+				await waitForResponse(ctx.page, 10_000);
+			}
+		} catch (err) {
+			console.log(`    Message ${i} — error: ${err instanceof Error ? err.message : String(err)}`);
+			const stopBtn = await ctx.page.$(".notor-stop-btn:not(.notor-hidden)");
+			if (stopBtn) await stopBtn.click().catch(() => {});
+			await ctx.page.waitForTimeout(1_000);
+			await waitForResponse(ctx.page, 10_000).catch(() => {});
 		}
 		await ctx.page.waitForTimeout(1_000);
 	}
@@ -199,7 +211,7 @@ async function testCompactionFailureFallback(ctx: TestContext): Promise<void> {
 runTest(
 	{
 		name: "compaction",
-		settings: buildDefaultSettings({ compaction_threshold: 0.3 }),
+		settings: buildDefaultSettings({ compaction_threshold: 0.3, mode: "act" }),
 		setupVault: (_vaultPath: string) => {
 			if (fs.existsSync(HISTORY_DIR)) fs.rmSync(HISTORY_DIR, { recursive: true, force: true });
 		},

@@ -235,6 +235,10 @@ export async function performCompaction(
 	for (const msg of messages) {
 		if (msg.role === "system") continue; // Skip system messages
 		if (msg.role === "user" || msg.role === "assistant") {
+			// Skip messages with blank content — providers like Bedrock reject
+			// empty text fields. This can happen if a response was cancelled
+			// before any text arrived.
+			if (!msg.content?.trim()) continue;
 			chatMessages.push({
 				role: msg.role,
 				content: msg.content,
