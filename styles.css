@@ -187,6 +187,54 @@
 	padding: 0 18px 10px;
 }
 
+/* ==========================================================================
+   Unified Tools section
+   ========================================================================== */
+
+.notor-tool-row-disabled {
+	opacity: 0.5;
+}
+
+.notor-tool-column-headers {
+	display: flex;
+	justify-content: flex-end;
+	gap: 12px;
+	padding: 0 18px 4px;
+}
+
+.notor-tool-column-spacer {
+	flex: 1;
+}
+
+.notor-tool-column-label {
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	text-align: center;
+	width: 40px;
+}
+
+.notor-tool-divider {
+	margin: 16px 0;
+	border: none;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.notor-tool-mcp-server-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 18px 4px;
+}
+
+.notor-tool-mcp-server-name {
+	font-weight: var(--font-semibold);
+	font-size: var(--font-ui-medium);
+}
+
+.notor-tool-mcp-note {
+	padding-left: 18px;
+}
+
 /* Fixed-width variants for inline settings inputs */
 .notor-input-w-80 { width: 80px; }
 .notor-input-w-120 { width: 120px; }

@@ -44,6 +44,9 @@ export const DEFAULT_PROVIDERS: LLMProviderConfig[] = [
 	},
 ];
 
+/** Default tool enabled state — empty means all tools enabled. */
+export const DEFAULT_TOOL_ENABLED: Record<string, boolean> = {};
+
 /** Default auto-approve settings per tool. */
 export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	read_note: true,
@@ -95,6 +98,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	active_provider: "local",
 	providers: DEFAULT_PROVIDERS,
 	auto_approve: DEFAULT_AUTO_APPROVE,
+	tool_enabled: DEFAULT_TOOL_ENABLED,
 	mode: "plan",
 	open_notes_on_access: true,
 	history_path: `${configDir}/plugins/notor/history/`,

@@ -49,11 +49,14 @@ const PRECEDENCE: Record<string, number> = {
  *                            entries (pre-flattened into namespaced keys).
  * @param allToolNames     - All registered tool names (built-in + MCP in
  *                            `server__tool` format).
+ * @param globalEnabled    - Per-tool enabled defaults from Settings.
+ *                            Absent keys default to `true`.
  */
 export function mergeToolConfigs(
 	configs: ParsedToolConfig[],
 	globalAutoApprove: Record<string, boolean>,
 	allToolNames: string[],
+	globalEnabled: Record<string, boolean> = {},
 ): EffectiveToolConfig {
 	// Sort by precedence level ascending, then by documentPosition ascending.
 	// This ensures higher-priority sources sort last → last non-undefined wins.
@@ -81,7 +84,7 @@ export function mergeToolConfigs(
 	for (const toolName of allToolNames) {
 		const partial = merged[toolName] ?? {};
 		tools[toolName] = {
-			enabled: partial.enabled ?? true,
+			enabled: partial.enabled ?? (globalEnabled[toolName] ?? true),
 			auto_approve: partial.auto_approve ?? (globalAutoApprove[toolName] ?? false),
 			allowed_paths: partial.allowed_paths ?? [],
 			blocked_paths: partial.blocked_paths ?? [],

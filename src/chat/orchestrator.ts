@@ -1083,9 +1083,12 @@ export class ChatOrchestrator {
 			...workflowToolConfigs,
 		];
 
-		// Build globalAutoApprove per-iteration from current settings
+		// Build globalAutoApprove and globalEnabled per-iteration from current settings
 		const globalAutoApprove: Record<string, boolean> = {
 			...this.settings.auto_approve,
+		};
+		const globalEnabled: Record<string, boolean> = {
+			...this.settings.tool_enabled,
 		};
 
 		// Expand MCP server-level autoApprove[] into namespaced keys
@@ -1104,7 +1107,7 @@ export class ChatOrchestrator {
 		const allToolNames = this.dispatcher.getRegisteredToolNames();
 
 		// Merge all configs
-		const effective = mergeToolConfigs(allConfigs, globalAutoApprove, allToolNames);
+		const effective = mergeToolConfigs(allConfigs, globalAutoApprove, allToolNames, globalEnabled);
 
 		// Store for inspector access
 		this.activeParsedConfigs = allConfigs;

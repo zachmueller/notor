@@ -28,7 +28,7 @@ import { renderFileAttachmentsSection } from "./sections/file-attachments";
 import { renderCompactionSection } from "./sections/compaction";
 import { renderProviderModelReferenceSection } from "./sections/provider-reference";
 import { renderGeneralSection } from "./sections/general";
-import { renderAutoApproveSection } from "./sections/auto-approve";
+import { renderToolsSection } from "./sections/tools";
 import { renderHistorySection } from "./sections/history";
 import { renderCheckpointSection } from "./sections/checkpoints";
 import { renderModelPricingSection } from "./sections/model-pricing";
@@ -81,6 +81,14 @@ export class NotorSettingTab extends PluginSettingTab {
 		};
 
 		const persisted = ctx.settings.settings_collapsed_sections;
+
+		// Migrate persisted collapsed-section key from old name to new
+		if ("Built-in tools" in persisted && !("Tools" in persisted)) {
+			persisted["Tools"] = persisted["Built-in tools"];
+			delete persisted["Built-in tools"];
+			ctx.saveSettings();
+		}
+
 		const onToggle = (title: string, open: boolean) => {
 			if (this.isRestoring) return;
 			ctx.settings.settings_collapsed_sections[title] = open;
@@ -105,9 +113,9 @@ export class NotorSettingTab extends PluginSettingTab {
 		const personasGroup = createSettingsGroup(containerEl, "Personas", false, persisted, onToggle);
 		renderPersonasSection(personasGroup, ctx);
 
-		// --- Built-in Tools (expanded by default) ---
-		const toolsGroup = createSettingsGroup(containerEl, "Built-in tools", true, persisted, onToggle);
-		renderAutoApproveSection(toolsGroup, ctx);
+		// --- Tools (expanded by default) ---
+		const toolsGroup = createSettingsGroup(containerEl, "Tools", true, persisted, onToggle);
+		renderToolsSection(toolsGroup, ctx);
 
 		// --- MCP Servers (expanded by default) ---
 		const mcpGroup = createSettingsGroup(containerEl, "MCP servers", true, persisted, onToggle);

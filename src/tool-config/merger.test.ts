@@ -190,6 +190,49 @@ describe("mergeToolConfigs", () => {
 		});
 	});
 
+	describe("globalEnabled correctly applied", () => {
+		it("uses globalEnabled for default enabled values", () => {
+			const globalEnabled: Record<string, boolean> = {
+				read_note: true,
+				write_note: false,
+				execute_command: false,
+			};
+
+			const result = mergeToolConfigs([], {}, ALL_TOOLS, globalEnabled);
+
+			expect(result.tools.read_note!.enabled).toBe(true);
+			expect(result.tools.write_note!.enabled).toBe(false);
+			expect(result.tools.execute_command!.enabled).toBe(false);
+			// Not in globalEnabled → defaults to true
+			expect(result.tools.fetch_webpage!.enabled).toBe(true);
+		});
+
+		it("config overrides globalEnabled", () => {
+			const globalEnabled = { read_note: false };
+			const configs: ParsedToolConfig[] = [
+				makeConfig("persona", "p.md", {
+					read_note: { enabled: true },
+				}),
+			];
+
+			const result = mergeToolConfigs(configs, {}, ALL_TOOLS, globalEnabled);
+			expect(result.tools.read_note!.enabled).toBe(true);
+		});
+
+		it("handles MCP tool enabled in namespaced format", () => {
+			const mcpTools = [...ALL_TOOLS, "myserver__list", "myserver__search"];
+			const globalEnabled = {
+				"myserver__list": false,
+				"myserver__search": true,
+			};
+
+			const result = mergeToolConfigs([], {}, mcpTools, globalEnabled);
+
+			expect(result.tools["myserver__list"]!.enabled).toBe(false);
+			expect(result.tools["myserver__search"]!.enabled).toBe(true);
+		});
+	});
+
 	describe("empty configs list", () => {
 		it("returns defaults for all tools when no configs provided", () => {
 			const result = mergeToolConfigs([], {}, ALL_TOOLS);

@@ -78,6 +78,9 @@ export interface NotorSettings {
 	/** Per-tool auto-approve settings. */
 	auto_approve: Record<string, boolean>;
 
+	/** Per-tool enabled/disabled state. Tools default to enabled when absent. */
+	tool_enabled: Record<string, boolean>;
+
 	/** Current Plan/Act mode. */
 	mode: ConversationMode;
 

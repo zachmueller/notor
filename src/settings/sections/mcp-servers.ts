@@ -5,7 +5,7 @@
  * - Server list with status indicators and enable/disable toggles (INT-001)
  * - "Add server" form with transport-specific fields (INT-001)
  * - Expandable per-server detail view with editable config (INT-002)
- * - Per-tool classification and auto-approve controls (INT-002)
+ * - Discovered tools summary (controls moved to unified Tools section)
  * - Sensitive env var / header credential management (INT-003)
  *
  * @see specs/04-mcp/tasks.md — INT-001, INT-002, INT-003
@@ -282,9 +282,9 @@ function renderServerDetail(
 		renderHttpFields(containerEl, serverName, config, ctx);
 	}
 
-	// Refresh tools button + tools list (only when connected)
+	// Discovered tools summary (only when connected)
 	if (conn?.status === "connected") {
-		renderToolsSubsection(containerEl, serverName, config, ctx, mcpHub, refresh);
+		renderToolsSummary(containerEl, serverName, mcpHub, refresh);
 	}
 
 	// Remove server button
@@ -579,21 +579,19 @@ function renderKeyValueRow(
 }
 
 // ---------------------------------------------------------------------------
-// Tools subsection (INT-002)
+// Tools summary (simplified — full controls are in the unified Tools section)
 // ---------------------------------------------------------------------------
 
-function renderToolsSubsection(
+function renderToolsSummary(
 	containerEl: HTMLElement,
 	serverName: string,
-	config: McpServerConfig,
-	ctx: SettingsContext,
 	mcpHub: McpHub | undefined,
 	refresh: () => void
 ): void {
 	containerEl.createEl("hr", { cls: "notor-mcp-divider" });
 
 	const toolsHeader = containerEl.createDiv({ cls: "notor-mcp-tools-header" });
-	new Setting(toolsHeader).setHeading().setName("Tools");
+	new Setting(toolsHeader).setHeading().setName("Discovered tools");
 
 	// Refresh tools button
 	const refreshBtn = toolsHeader.createEl("button", {
@@ -628,72 +626,19 @@ function renderToolsSubsection(
 		return;
 	}
 
-	// Classification advisory note
 	containerEl.createEl("p", {
-		text: "Server-reported hints are not verified. Your override takes precedence.",
-		cls: "setting-item-description notor-mcp-classification-note",
+		text: `${tools.length} tool${tools.length === 1 ? "" : "s"} discovered. Configure enabled state, classification, and auto-approve in the Tools section above.`,
+		cls: "setting-item-description",
 	});
 
 	const toolListEl = containerEl.createDiv({ cls: "notor-mcp-tool-list" });
-
 	for (const tool of tools) {
-		const rawName = tool.name;
-		const defaultMode = tool.annotations?.readOnlyHint === true ? "read" : "write";
-		const currentMode = config.toolClassifications?.[rawName] ?? defaultMode;
-		const isAutoApproved = (config.autoApprove ?? []).includes(rawName);
-
 		const toolRowEl = toolListEl.createDiv({ cls: "notor-mcp-tool-row" });
 		const toolMeta = toolRowEl.createDiv({ cls: "notor-mcp-tool-meta" });
-		toolMeta.createSpan({ cls: "notor-mcp-tool-name", text: rawName });
+		toolMeta.createSpan({ cls: "notor-mcp-tool-name", text: tool.name });
 		if (tool.description) {
 			toolMeta.createSpan({ cls: "notor-mcp-tool-desc", text: tool.description });
 		}
-
-		const toolControls = toolRowEl.createDiv({ cls: "notor-mcp-tool-controls" });
-
-		// Classification dropdown
-		const classSelect = toolControls.createEl("select", { cls: "notor-mcp-class-select" });
-		const readOpt = classSelect.createEl("option", { value: "read", text: "Read-only" });
-		const writeOpt = classSelect.createEl("option", { value: "write", text: "Write" });
-		if (currentMode === "read") readOpt.selected = true;
-		else writeOpt.selected = true;
-
-		// Show badge if server reported a hint
-		if (tool.annotations?.readOnlyHint !== undefined) {
-			const hintText = tool.annotations.readOnlyHint ? "server: read" : "server: write";
-			toolControls.createSpan({ cls: "notor-mcp-hint-badge", text: hintText });
-		}
-
-		classSelect.addEventListener("change", () => {
-			void (async () => {
-				const val = classSelect.value as "read" | "write";
-				if (!config.toolClassifications) config.toolClassifications = {};
-				if (val === defaultMode) {
-					delete config.toolClassifications[rawName];
-				} else {
-					config.toolClassifications[rawName] = val;
-				}
-				await ctx.saveSettings();
-			})();
-		});
-
-		// Auto-approve toggle
-		const autoApproveLabel = toolControls.createEl("label", { cls: "notor-mcp-aa-label" });
-		const autoApproveCheck = autoApproveLabel.createEl("input", { type: "checkbox" });
-		autoApproveCheck.checked = isAutoApproved;
-		autoApproveLabel.createSpan({ text: " Auto-approve" });
-
-		autoApproveCheck.addEventListener("change", () => {
-			void (async () => {
-				if (!config.autoApprove) config.autoApprove = [];
-				if (autoApproveCheck.checked) {
-					if (!config.autoApprove.includes(rawName)) config.autoApprove.push(rawName);
-				} else {
-					config.autoApprove = config.autoApprove.filter((n) => n !== rawName);
-				}
-				await ctx.saveSettings();
-			})();
-		});
 	}
 }
 
