@@ -1600,6 +1600,13 @@
 	white-space: nowrap;
 }
 
+.notor-workflow-suggest-alias {
+	color: var(--text-faint);
+	font-size: var(--font-smallest);
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
 /* Workflow details — collapsible <details> for <workflow_instructions> blocks */
 .notor-workflow-details {
 	margin: 4px 0;

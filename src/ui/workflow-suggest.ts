@@ -53,6 +53,8 @@ export interface WorkflowSuggestion {
 	workflow: Workflow;
 	/** Fuzzy match score (null when no query text has been typed yet). */
 	score: number | null;
+	/** When the best match came from an alias rather than display_name, the matched alias. */
+	matchedAlias?: string;
 }
 
 /**
@@ -240,14 +242,29 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 			return this.currentSuggestions;
 		}
 
-		// Fuzzy match against display_name
+		// Fuzzy match against display_name and aliases, taking the best score
 		const fuzzySearch = prepareFuzzySearch(query);
 		const results: WorkflowSuggestion[] = [];
 
 		for (const workflow of workflows) {
-			const result = fuzzySearch(workflow.display_name);
-			if (result) {
-				results.push({ workflow, score: result.score });
+			let bestScore: number | null = null;
+			let matchedAlias: string | undefined;
+
+			const nameResult = fuzzySearch(workflow.display_name);
+			if (nameResult) {
+				bestScore = nameResult.score;
+			}
+
+			for (const alias of workflow.aliases) {
+				const aliasResult = fuzzySearch(alias);
+				if (aliasResult && (bestScore === null || aliasResult.score > bestScore)) {
+					bestScore = aliasResult.score;
+					matchedAlias = alias;
+				}
+			}
+
+			if (bestScore !== null) {
+				results.push({ workflow, score: bestScore, matchedAlias });
 			}
 		}
 
@@ -275,6 +292,13 @@ export class WorkflowSlashSuggest extends AbstractInputSuggest<WorkflowSuggestio
 			cls: "notor-workflow-suggest-name",
 			text: suggestion.workflow.display_name,
 		});
+
+		if (suggestion.matchedAlias) {
+			container.createSpan({
+				cls: "notor-workflow-suggest-alias",
+				text: `(${suggestion.matchedAlias})`,
+			});
+		}
 	}
 
 	/**

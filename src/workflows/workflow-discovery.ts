@@ -367,6 +367,14 @@ function parseWorkflowFile(
 		: file.name;
 	const displayName = relativePath.replace(/\.md$/, "");
 
+	// Parse standard Obsidian `aliases` frontmatter (string | string[] | undefined)
+	const rawAliases = frontmatter["aliases"];
+	const aliases: string[] = Array.isArray(rawAliases)
+		? rawAliases.filter((a): a is string => typeof a === "string" && a.trim() !== "")
+		: typeof rawAliases === "string" && rawAliases.trim() !== ""
+			? [rawAliases.trim()]
+			: [];
+
 	// Log non-fatal validation errors as warnings
 	for (const error of validation.errors) {
 		// Skip errors we've already handled (trigger-related ones)
@@ -382,6 +390,7 @@ function parseWorkflowFile(
 		file_path: file.path,
 		file_name: file.name,
 		display_name: displayName,
+		aliases,
 		trigger,
 		schedule,
 		persona_name: personaName,

@@ -299,6 +299,7 @@ export async function executeRunWorkflowAction(
 		file_name: workflowFile.name,
 		display_name: (fm["notor-display-name"] as string | undefined)
 			?? workflowFile.basename,
+		aliases: [],
 		trigger: (fm["notor-trigger"] as import("../types").WorkflowTrigger | undefined)
 			?? "manual",
 		schedule: (fm["notor-schedule"] as string | null | undefined) ?? null,

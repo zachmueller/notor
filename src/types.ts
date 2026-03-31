@@ -415,6 +415,8 @@ export interface Workflow {
 	file_name: string;
 	/** Human-readable display name (e.g., `review` or `daily/review` for nested workflows). */
 	display_name: string;
+	/** Alternative names from the standard Obsidian `aliases` frontmatter property. */
+	aliases: string[];
 	/** Trigger type from `notor-trigger` frontmatter. */
 	trigger: WorkflowTrigger;
 	/** Cron expression from `notor-schedule` (required when trigger is `"scheduled"`). */
