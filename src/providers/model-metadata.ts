@@ -223,16 +223,28 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 	// Covers us., eu., apac., and global. geographic prefixes.
 	// -----------------------------------------------------------------------
 
-	// Claude Opus 4.6
+	// Claude Opus 4.6 — 1M context beta supported
 	"us.anthropic.claude-opus-4-6-v1": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
 		output_price_per_1k: 0.075,
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030,
+			output_price_per_1k: 0.150,
+		},
 	},
 	"global.anthropic.claude-opus-4-6-v1": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
 		output_price_per_1k: 0.075,
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030,
+			output_price_per_1k: 0.150,
+		},
 	},
 
 	// Claude Sonnet 4.6 — 1M context beta supported

@@ -18,9 +18,8 @@ describe("getContextWindow", () => {
 		expect(getContextWindow("us.anthropic.claude-sonnet-4-6", true)).toBe(1_000_000);
 	});
 
-	it("returns base context window when useExtendedContext is true but model has no extended_context", () => {
-		// Opus 4.6 does not have extended_context in metadata
-		expect(getContextWindow("us.anthropic.claude-opus-4-6-v1", true)).toBe(200_000);
+	it("returns extended context window when useExtendedContext is true for Opus 4.6", () => {
+		expect(getContextWindow("us.anthropic.claude-opus-4-6-v1", true)).toBe(1_000_000);
 	});
 
 	it("returns default for unknown model even with useExtendedContext true", () => {
@@ -33,6 +32,8 @@ describe("getContextWindow", () => {
 			"eu.anthropic.claude-sonnet-4-6",
 			"apac.anthropic.claude-sonnet-4-6",
 			"global.anthropic.claude-sonnet-4-6",
+			"us.anthropic.claude-opus-4-6-v1",
+			"global.anthropic.claude-opus-4-6-v1",
 		];
 		for (const id of variants) {
 			expect(getContextWindow(id, true)).toBe(1_000_000);
