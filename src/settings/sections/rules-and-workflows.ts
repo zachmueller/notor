@@ -9,30 +9,74 @@
 import { Notice, Setting, TFile, TFolder, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
 import { discoverWorkflows } from "../../workflows/workflow-discovery";
-import { promptForName, ensureDirectory } from "./shared";
+import type { CreationField } from "./shared";
+import { promptForCreation, ensureDirectory } from "./shared";
 import { logger } from "../../utils/logger";
 
 const log = logger("RulesAndWorkflowsSection");
 
-const RULE_SKELETON_CONTENT = `---
-notor-always-include: true
-# notor-directory-include: path/to/directory
-# notor-tag-include: my-tag
----
+// ---------------------------------------------------------------------------
+// Rule skeleton builder
+// ---------------------------------------------------------------------------
 
-<!-- Your rule instructions here. The AI will follow these when the trigger conditions are met. -->
-`;
+const RULE_TRIGGER_OPTIONS: Array<{ value: string; label: string }> = [
+	{ value: "always-include", label: "Always include" },
+	{ value: "directory", label: "Directory (path-based)" },
+	{ value: "tag", label: "Tag (tag-based)" },
+];
 
-const WORKFLOW_SKELETON_CONTENT = `---
-notor-workflow: true
-notor-trigger: manual
-# notor-trigger options: manual, on-note-open, on-note-create, on-save, on-manual-save, on-tag-change, scheduled
-# notor-schedule: "0 9 * * *"
-# notor-workflow-persona: researcher
----
+function buildRuleSkeleton(trigger: string, triggerValue: string): string {
+	const lines: string[] = ["---"];
+	if (trigger === "always-include") {
+		lines.push("notor-always-include: true");
+		lines.push("# notor-directory-include: path/to/directory");
+		lines.push("# notor-tag-include: my-tag");
+	} else if (trigger === "directory") {
+		lines.push("# notor-always-include: true");
+		lines.push(`notor-directory-include: ${triggerValue || "path/to/directory"}`);
+		lines.push("# notor-tag-include: my-tag");
+	} else if (trigger === "tag") {
+		lines.push("# notor-always-include: true");
+		lines.push("# notor-directory-include: path/to/directory");
+		lines.push(`notor-tag-include: ${triggerValue || "my-tag"}`);
+	}
+	lines.push("---");
+	lines.push("");
+	lines.push("<!-- Your rule instructions here. The AI will follow these when the trigger conditions are met. -->");
+	lines.push("");
+	return lines.join("\n");
+}
 
-<!-- Workflow instructions here. This is the prompt sent to the AI when the workflow runs. -->
-`;
+// ---------------------------------------------------------------------------
+// Workflow skeleton builder
+// ---------------------------------------------------------------------------
+
+const WORKFLOW_TRIGGER_OPTIONS: Array<{ value: string; label: string }> = [
+	{ value: "manual", label: "Manual" },
+	{ value: "on-note-open", label: "On note open" },
+	{ value: "on-note-create", label: "On note create" },
+	{ value: "on-save", label: "On save (auto or manual)" },
+	{ value: "on-manual-save", label: "On manual save (Cmd/Ctrl+S)" },
+	{ value: "on-tag-change", label: "On tag change" },
+	{ value: "scheduled", label: "Scheduled (cron)" },
+];
+
+function buildWorkflowSkeleton(trigger: string, schedule: string): string {
+	const lines: string[] = ["---"];
+	lines.push("notor-workflow: true");
+	lines.push(`notor-trigger: ${trigger}`);
+	if (trigger === "scheduled") {
+		lines.push(`notor-schedule: "${schedule || "0 9 * * *"}"`);
+	} else {
+		lines.push('# notor-schedule: "0 9 * * *"');
+	}
+	lines.push("# notor-workflow-persona: researcher");
+	lines.push("---");
+	lines.push("");
+	lines.push("<!-- Workflow instructions here. This is the prompt sent to the AI when the workflow runs. -->");
+	lines.push("");
+	return lines.join("\n");
+}
 
 /** Render the "Rules and workflows" settings section. */
 export function renderRulesAndWorkflowsSection(
@@ -66,37 +110,51 @@ function renderRulesSubsection(
 	});
 
 	// "Create new rule" button
+	const ruleFields: CreationField[] = [
+		{ type: "text", key: "name", placeholder: "Rule name (e.g. coding-style)" },
+		{ type: "select", key: "trigger", options: RULE_TRIGGER_OPTIONS },
+		{ type: "text", key: "directory_value", placeholder: "path/to/directory", showWhen: { key: "trigger", value: "directory" } },
+		{ type: "text", key: "tag_value", placeholder: "tag-name", showWhen: { key: "trigger", value: "tag" } },
+	];
+
 	new Setting(section)
 		.setName("Create new rule")
 		.setDesc(
-			"Creates a skeleton rule file with always-include enabled."
+			"Creates a skeleton rule file with your chosen trigger type."
 		)
 		.addButton((btn) =>
 			btn.setButtonText("Create").onClick(async () => {
-				const name = await promptForName(
-					section,
-					"Rule name (e.g. coding-style)"
-				);
-				if (!name) return;
+				const result = await promptForCreation(section, ruleFields);
+				if (!result) return;
 
 				const rulesDir = normalizePath(
 					`${ctx.settings.notor_dir}/rules`
 				);
-				const filePath = normalizePath(`${rulesDir}/${name}.md`);
+				const filePath = normalizePath(`${rulesDir}/${result["name"]}.md`);
 
 				if (ctx.app.vault.getAbstractFileByPath(filePath)) {
-					new Notice(`Rule "${name}" already exists.`);
+					new Notice(`Rule "${result["name"]}" already exists.`);
 					return;
 				}
 
+				const trigger = result["trigger"] || "always-include";
+				const triggerValue = trigger === "directory"
+					? result["directory_value"] || ""
+					: trigger === "tag"
+						? result["tag_value"] || ""
+						: "";
+
 				try {
 					await ensureDirectory(ctx, rulesDir);
-					await ctx.app.vault.create(filePath, RULE_SKELETON_CONTENT);
-					new Notice(`Rule "${name}" created.`);
+					await ctx.app.vault.create(
+						filePath,
+						buildRuleSkeleton(trigger, triggerValue)
+					);
+					new Notice(`Rule "${result["name"]}" created.`);
 					ctx.redisplay();
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
-					log.error("Failed to create rule", { name, error: msg });
+					log.error("Failed to create rule", { name: result["name"], error: msg });
 					new Notice(`Failed to create rule: ${msg}`);
 				}
 			})
@@ -160,41 +218,47 @@ function renderWorkflowsSubsection(
 	});
 
 	// "Create new workflow" button
+	const workflowFields: CreationField[] = [
+		{ type: "text", key: "name", placeholder: "Workflow name (e.g. daily-review)" },
+		{ type: "select", key: "trigger", options: WORKFLOW_TRIGGER_OPTIONS },
+		{ type: "text", key: "schedule", placeholder: "Cron expression (e.g. 0 9 * * *)", showWhen: { key: "trigger", value: "scheduled" } },
+	];
+
 	new Setting(section)
 		.setName("Create new workflow")
 		.setDesc(
-			"Creates a skeleton workflow file with manual trigger."
+			"Creates a skeleton workflow file with your chosen trigger."
 		)
 		.addButton((btn) =>
 			btn.setButtonText("Create").onClick(async () => {
-				const name = await promptForName(
-					section,
-					"Workflow name (e.g. daily-review)"
-				);
-				if (!name) return;
+				const result = await promptForCreation(section, workflowFields);
+				if (!result) return;
 
 				const workflowsDir = normalizePath(
 					`${ctx.settings.notor_dir}/workflows`
 				);
-				const filePath = normalizePath(`${workflowsDir}/${name}.md`);
+				const filePath = normalizePath(`${workflowsDir}/${result["name"]}.md`);
 
 				if (ctx.app.vault.getAbstractFileByPath(filePath)) {
-					new Notice(`Workflow "${name}" already exists.`);
+					new Notice(`Workflow "${result["name"]}" already exists.`);
 					return;
 				}
+
+				const trigger = result["trigger"] || "manual";
+				const schedule = result["schedule"] || "";
 
 				try {
 					await ensureDirectory(ctx, workflowsDir);
 					await ctx.app.vault.create(
 						filePath,
-						WORKFLOW_SKELETON_CONTENT
+						buildWorkflowSkeleton(trigger, schedule)
 					);
-					new Notice(`Workflow "${name}" created.`);
+					new Notice(`Workflow "${result["name"]}" created.`);
 					ctx.redisplay();
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
 					log.error("Failed to create workflow", {
-						name,
+						name: result["name"],
 						error: msg,
 					});
 					new Notice(`Failed to create workflow: ${msg}`);
