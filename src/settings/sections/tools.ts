@@ -68,6 +68,7 @@ export function renderToolsSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
+	containerEl.addClass("notor-tools-section");
 	new Setting(containerEl).setHeading().setName("Tools");
 	containerEl.createEl("p", {
 		text:
@@ -118,17 +119,16 @@ function renderBuiltinTools(containerEl: HTMLElement, ctx: SettingsContext): voi
 		([, meta]) => meta.isWrite
 	);
 
-	// Column headers
-	renderColumnHeaders(containerEl);
-
 	// Read-only tools
 	new Setting(containerEl).setHeading().setName("Read-only tools");
+	renderColumnHeaders(containerEl);
 	for (const [toolId, meta] of readTools) {
 		renderBuiltinToolRow(containerEl, toolId, meta, ctx, true);
 	}
 
 	// Write tools
 	new Setting(containerEl).setHeading().setName("Write tools");
+	renderColumnHeaders(containerEl);
 	for (const [toolId, meta] of writeTools) {
 		renderBuiltinToolRow(containerEl, toolId, meta, ctx, false);
 	}
@@ -138,6 +138,7 @@ function renderColumnHeaders(containerEl: HTMLElement): void {
 	const headerEl = containerEl.createDiv({ cls: "notor-tool-column-headers" });
 	headerEl.createSpan({ cls: "notor-tool-column-spacer" });
 	headerEl.createSpan({ cls: "notor-tool-column-label", text: "Enabled" });
+	headerEl.createSpan({ cls: "notor-tool-column-divider" });
 	headerEl.createSpan({ cls: "notor-tool-column-label", text: "Auto-approve" });
 }
 
@@ -261,6 +262,7 @@ function renderMcpServerTools(
 		return;
 	}
 
+	renderColumnHeaders(containerEl);
 	for (const tool of tools) {
 		renderMcpToolRow(containerEl, serverName, tool, config, ctx);
 	}

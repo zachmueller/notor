@@ -198,7 +198,8 @@
 .notor-tool-column-headers {
 	display: flex;
 	justify-content: flex-end;
-	gap: 12px;
+	align-items: center;
+	gap: 8px;
 	padding: 0 18px 4px;
 }
 
@@ -211,6 +212,21 @@
 	color: var(--text-muted);
 	text-align: center;
 	width: 40px;
+}
+
+.notor-tool-column-divider {
+	width: 1px;
+	height: 14px;
+	background: var(--background-modifier-border);
+}
+
+/* Insert a vertical divider between the two toggles in each tool row.
+   Obsidian's Setting places controls inside .setting-item-control as
+   a flex container, so we target adjacent toggle siblings. */
+.notor-tools-section .setting-item .setting-item-control .checkbox-container + .checkbox-container {
+	margin-left: 8px;
+	padding-left: 12px;
+	border-left: 1px solid var(--background-modifier-border);
 }
 
 .notor-tool-divider {
