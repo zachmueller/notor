@@ -128,6 +128,7 @@ export class NotorChatView extends ItemView {
 	private onNewConversation?: () => void;
 	private onSwitchConversation?: (filename: string) => void;
 	private onExportConversation?: (filename: string) => void;
+	private onImportConversation?: (htmlContent: string) => Promise<void>;
 	private onSwitchToConversationById?: (conversationId: string) => Promise<boolean>;
 	private onOpenConversationList?: () => Promise<ConversationListEntry[]>;
 	private onSearchConversations?: (query: string) => Promise<ConversationListEntry[]>;
@@ -185,6 +186,10 @@ export class NotorChatView extends ItemView {
 
 	setOnExportConversation(callback: (filename: string) => void): void {
 		this.onExportConversation = callback;
+	}
+
+	setOnImportConversation(callback: (htmlContent: string) => Promise<void>): void {
+		this.onImportConversation = callback;
 	}
 
 	/**
@@ -596,9 +601,56 @@ export class NotorChatView extends ItemView {
 			}
 		});
 
+		// Import conversation button
+		const importBtn = searchWrapper.createDiv({
+			cls: "notor-conversation-import-btn",
+			attr: { "aria-label": "Import conversation from HTML" },
+		});
+		setIcon(importBtn, "upload");
+		importBtn.addEventListener("click", () => {
+			this.openImportFilePicker();
+		});
+
 		this.conversationListEl = container.createDiv({
 			cls: "notor-conversation-list notor-hidden",
 		});
+	}
+
+	/**
+	 * Open a file picker for importing a conversation from an exported HTML file.
+	 * Reads the selected file via FileReader and passes the content to the
+	 * import callback.
+	 */
+	private openImportFilePicker(): void {
+		const input = document.createElement("input");
+		input.type = "file";
+		input.accept = ".html";
+		input.style.display = "none";
+		document.body.appendChild(input);
+
+		input.addEventListener("change", () => {
+			const file = input.files?.[0];
+			if (!file) {
+				input.remove();
+				return;
+			}
+
+			const reader = new FileReader();
+			reader.onload = () => {
+				const htmlContent = reader.result as string;
+				this.onImportConversation?.(htmlContent)?.catch((err) => {
+					log.error("Failed to import conversation", { error: String(err) });
+				});
+				input.remove();
+			};
+			reader.onerror = () => {
+				log.error("Failed to read imported file", { error: String(reader.error) });
+				input.remove();
+			};
+			reader.readAsText(file);
+		});
+
+		input.click();
 	}
 
 	private buildMessageList(container: HTMLElement): void {

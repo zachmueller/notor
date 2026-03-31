@@ -26,10 +26,11 @@ import { WorkflowHookOverrideManager } from "./hooks/workflow-hook-override";
 // Group H: Workflow activity tracker
 import { WorkflowActivityTracker } from "./workflows/workflow-activity-tracker";
 
-// Export
+// Export / Import
 import { ExportModal, type ExportFormat } from "./export/export-modal";
 import { exportToMarkdown } from "./export/markdown-exporter";
 import { exportToHtml } from "./export/html-exporter";
+import { extractJsonlFromHtml, reassignIds } from "./export/html-importer";
 
 // Group F: Vault event hooks
 import { TagShadowCache } from "./hooks/tag-change-detector";
@@ -319,6 +320,59 @@ export default class NotorPlugin extends Plugin {
 					log.error("Export conversation command failed", { error: String(e) });
 					new Notice(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
 				}
+			},
+		});
+
+		// Import conversation from exported HTML file
+		this.addCommand({
+			id: "import-conversation",
+			name: "Import conversation from HTML",
+			callback: () => {
+				const input = document.createElement("input");
+				input.type = "file";
+				input.accept = ".html";
+				input.style.display = "none";
+				document.body.appendChild(input);
+
+				input.addEventListener("change", () => {
+					const file = input.files?.[0];
+					if (!file) {
+						input.remove();
+						return;
+					}
+
+					const reader = new FileReader();
+					reader.onload = async () => {
+						try {
+							const htmlContent = reader.result as string;
+							const extracted = extractJsonlFromHtml(htmlContent);
+							if (!extracted) {
+								new Notice("This HTML file does not contain embedded conversation data");
+								return;
+							}
+							const { conversation, messages } = reassignIds(
+								extracted.conversation,
+								extracted.messages
+							);
+							const filename = await this.getHistoryManager().importConversation(conversation, messages);
+							await this.getOrchestrator().switchConversation(filename);
+							new Notice(`Imported conversation: ${conversation.title ?? "Untitled"}`);
+						} catch (e) {
+							log.error("Import conversation command failed", { error: String(e) });
+							new Notice(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+						} finally {
+							input.remove();
+						}
+					};
+					reader.onerror = () => {
+						log.error("Failed to read imported file", { error: String(reader.error) });
+						new Notice("Failed to read selected file");
+						input.remove();
+					};
+					reader.readAsText(file);
+				});
+
+				input.click();
 			},
 		});
 
@@ -1410,6 +1464,27 @@ export default class NotorPlugin extends Plugin {
 				log.error("Failed to load conversation for export", { error: String(e) });
 				new Notice(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
 			});
+		});
+
+		// Import conversation from exported HTML
+		view.setOnImportConversation(async (htmlContent: string) => {
+			const extracted = extractJsonlFromHtml(htmlContent);
+			if (!extracted) {
+				new Notice("This HTML file does not contain embedded conversation data");
+				return;
+			}
+			const { conversation, messages } = reassignIds(
+				extracted.conversation,
+				extracted.messages
+			);
+			try {
+				const filename = await historyManager.importConversation(conversation, messages);
+				await orchestrator.switchConversation(filename);
+				new Notice(`Imported conversation: ${conversation.title ?? "Untitled"}`);
+			} catch (e) {
+				log.error("Failed to import conversation", { error: String(e) });
+				new Notice(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+			}
 		});
 
 		// Mode toggle

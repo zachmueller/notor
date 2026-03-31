@@ -28,6 +28,8 @@ export function exportToHtml(conversation: Conversation, messages: Message[]): s
 
 	const tokenInfo = buildTokenInfo(conversation);
 
+	const jsonlBlock = buildJsonlBlock(conversation, messages);
+
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -47,6 +49,7 @@ ${messageSections}
   </div>
 ${tokenInfo}
 </div>
+${jsonlBlock}
 </body>
 </html>`;
 }
@@ -504,4 +507,30 @@ function escapeHtml(str: string): string {
 
 function formatTimestamp(iso: string): string {
 	return new Date(iso).toLocaleString();
+}
+
+// ─── Embedded JSONL data block ──────────────────────────────────────────
+
+/**
+ * Build a hidden `<script type="application/jsonl">` block containing the
+ * raw conversation data in the same JSONL format used by HistoryManager.
+ *
+ * This enables re-importing the conversation into another Notor instance.
+ * The `type="application/jsonl"` ensures the browser does not execute the
+ * script tag — it serves purely as a data container.
+ */
+function buildJsonlBlock(conversation: Conversation, messages: Message[]): string {
+	const lines: string[] = [];
+
+	lines.push(JSON.stringify({ _type: "conversation", ...conversation }));
+
+	for (const msg of messages) {
+		lines.push(JSON.stringify({ _type: "message", ...msg }));
+	}
+
+	// Escape </ sequences so that </script> in message content
+	// does not prematurely close the script tag.
+	const escaped = lines.join("\n").replace(/<\//g, "<\\/");
+
+	return `<script type="application/jsonl" id="notor-conversation-data">\n${escaped}\n</script>`;
 }

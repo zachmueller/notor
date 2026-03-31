@@ -221,6 +221,40 @@ export class HistoryManager {
 		});
 	}
 
+	/**
+	 * Import a full conversation (header + messages) as a single batch write.
+	 *
+	 * Used when importing a conversation from an exported HTML file.
+	 * Returns the generated filename so the caller can immediately switch to it.
+	 */
+	async importConversation(
+		conversation: Conversation,
+		messages: Message[]
+	): Promise<string> {
+		const filename = this.getFilename(conversation);
+		const filePath = this.getFilePath(filename);
+
+		await this.ensureDirectory();
+
+		return this.enqueueWrite(filePath, async () => {
+			const lines: string[] = [];
+
+			lines.push(JSON.stringify({ _type: "conversation", ...conversation }));
+
+			for (const msg of messages) {
+				lines.push(JSON.stringify({ _type: "message", ...msg }));
+			}
+
+			await this.vault.adapter.write(filePath, lines.join("\n") + "\n");
+
+			log.info("Imported conversation", {
+				id: conversation.id,
+				messageCount: messages.length,
+				path: filePath,
+			});
+		}).then(() => filename);
+	}
+
 	// -----------------------------------------------------------------------
 	// Read operations
 	// -----------------------------------------------------------------------
