@@ -298,18 +298,34 @@ export class FetchWebpageTool implements Tool {
 			mimeType = fetchResult.mimeType;
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);
+
+			// Diagnostic: when requestUrl fails, probe with native fetch to
+			// isolate whether the problem is Obsidian's API or the Electron
+			// network stack itself.
+			let nativeFetchResult: string;
+			try {
+				const probe = await fetch(url, {
+					method: "HEAD",
+					signal: AbortSignal.timeout(5000),
+				});
+				nativeFetchResult = `native fetch OK (status ${probe.status})`;
+			} catch (probeErr) {
+				nativeFetchResult = `native fetch also failed: ${probeErr instanceof Error ? probeErr.message : String(probeErr)}`;
+			}
+
 			log.warn("Fetch failed", {
 				url,
 				hostname: parsedUrl.hostname,
 				error: message,
 				errorName: e instanceof Error ? e.name : "Unknown",
+				nativeFetchResult,
 				...(e instanceof Error && e.stack ? { stack: e.stack } : {}),
 			});
 			return {
 				tool_name: this.name,
 				success: false,
 				result: "",
-				error: message,
+				error: `${message} [diagnostic: ${nativeFetchResult}]`,
 			};
 		}
 
