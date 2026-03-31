@@ -464,10 +464,35 @@ export class ToolDispatcher {
 			}
 		}
 
-		// 6. Execute tool
+		// 6. Execute tool — race against abort signal so the user is unblocked
+		//    immediately when they click Stop. The tool may continue running in
+		//    the background but its result is discarded.
 		const startTime = Date.now();
 		try {
-			const result = await tool.execute(parameters);
+			const executePromise = tool.execute(parameters);
+
+			let result: ToolResult;
+			if (abortSignal) {
+				const abortPromise = new Promise<ToolResult>((resolve) => {
+					if (abortSignal.aborted) {
+						resolve({
+							tool_name: toolName, success: false, result: "",
+							error: "Tool call cancelled by user.",
+						});
+						return;
+					}
+					abortSignal.addEventListener("abort", () => {
+						resolve({
+							tool_name: toolName, success: false, result: "",
+							error: "Tool call cancelled by user.",
+						});
+					}, { once: true });
+				});
+				result = await Promise.race([executePromise, abortPromise]);
+			} else {
+				result = await executePromise;
+			}
+
 			const duration = Date.now() - startTime;
 			result.duration_ms = duration;
 
