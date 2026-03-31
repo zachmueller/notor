@@ -217,20 +217,9 @@ async function testStatusIndicatorWarningState(ctx: TestContext): Promise<void> 
 	if (isErrored) {
 		// Check if the indicator shows a warning state
 		const warningState = await page.evaluate(() => {
-			const indicator =
-				document.querySelector(".notor-mcp-status") ||
-				document.querySelector(".notor-mcp-indicator") ||
-				document.querySelector(".notor-mcp-status-btn");
+			const indicator = document.querySelector(".notor-mcp-status-btn");
 			if (!indicator) return null;
-			// Check for warning class or aria-label containing 'warning'/'error'/'disconnected'
-			return (
-				indicator.classList.contains("notor-mcp-warning") ||
-				indicator.classList.contains("notor-mcp-error") ||
-				indicator.getAttribute("aria-label")?.toLowerCase().includes("warn") ||
-				indicator.getAttribute("aria-label")?.toLowerCase().includes("error") ||
-				indicator.getAttribute("data-status") === "warning" ||
-				indicator.getAttribute("data-status") === "error"
-			);
+			return indicator.classList.contains("notor-mcp-status-warning");
 		});
 
 		const shot = await ctx.screenshot("04-indicator-warning");
@@ -239,8 +228,7 @@ async function testStatusIndicatorWarningState(ctx: TestContext): Promise<void> 
 		} else if (warningState === null) {
 			ctx.fail("Status indicator warning state", "Indicator element not found — cannot verify warning state", shot);
 		} else {
-			// Indicator present but warning not reflected via checked attributes
-			ctx.pass("Status indicator warning state (unverified)", `Server errored but warning styling not detected via checked attributes`, shot);
+			ctx.fail("Status indicator warning state", "Indicator found but notor-mcp-status-warning class not present", shot);
 		}
 	} else {
 		ctx.pass("Status indicator warning state (skipped)", `Server status: ${finalStatus} — not in error state`);
@@ -256,11 +244,7 @@ async function testStatusPopoverOpens(ctx: TestContext): Promise<void> {
 
 	// Try clicking the MCP indicator if it exists
 	const clicked = await page.evaluate(() => {
-		const indicator =
-			document.querySelector<HTMLElement>(".notor-mcp-status") ||
-			document.querySelector<HTMLElement>(".notor-mcp-indicator") ||
-			document.querySelector<HTMLElement>(".notor-mcp-status-btn") ||
-			document.querySelector<HTMLElement>("[aria-label*='MCP']");
+		const indicator = document.querySelector<HTMLElement>(".notor-mcp-status-btn");
 		if (indicator) {
 			indicator.click();
 			return true;
@@ -269,7 +253,7 @@ async function testStatusPopoverOpens(ctx: TestContext): Promise<void> {
 	});
 
 	if (!clicked) {
-		ctx.pass("MCP popover (skipped)", "MCP indicator not found — popover test skipped");
+		ctx.fail("MCP popover", "MCP indicator button (.notor-mcp-status-btn) not found");
 		return;
 	}
 
@@ -277,12 +261,7 @@ async function testStatusPopoverOpens(ctx: TestContext): Promise<void> {
 	const shot = await ctx.screenshot("05-popover-open");
 
 	const popoverVisible = await page.evaluate(() => {
-		return !!(
-			document.querySelector(".notor-mcp-popover") ||
-			document.querySelector(".notor-mcp-server-list") ||
-			document.querySelector("[class*='mcp-popover']") ||
-			document.querySelector("[class*='mcp-status-popup']")
-		);
+		return !!document.querySelector(".notor-mcp-popover");
 	});
 
 	if (popoverVisible) {
@@ -290,15 +269,12 @@ async function testStatusPopoverOpens(ctx: TestContext): Promise<void> {
 
 		// Check for server list entries in the popover
 		const serverEntries = await page.evaluate(() => {
-			const items = Array.from(
-				document.querySelectorAll(".notor-mcp-popover .notor-mcp-server-item, .notor-mcp-server-list .notor-mcp-server-entry, [class*='mcp-server']")
-			);
-			return items.length;
+			return document.querySelectorAll(".notor-mcp-popover-row").length;
 		});
 		if (serverEntries > 0) {
 			ctx.pass("Server entries in popover", `Found ${serverEntries} server entry/entries in popover`);
 		} else {
-			ctx.pass("Server entries in popover (not detected)", "Popover open but server entry selector may differ");
+			ctx.fail("Server entries in popover", "No .notor-mcp-popover-row elements found in popover");
 		}
 
 		// Close popover
