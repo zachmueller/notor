@@ -27,15 +27,18 @@ function getMcpHub(ctx: SettingsContext): McpHub | undefined {
 }
 
 /**
- * Generate a `<notor_tool_config>` YAML snippet listing all built-in tools
- * with their current enabled and auto-approve settings.
+ * Generate a `<notor_tool_config>` YAML snippet listing all built-in and
+ * MCP tools with their current enabled and auto-approve settings.
  */
 export function generateToolConfigSnippet(
 	autoApprove: Record<string, boolean>,
 	toolEnabled: Record<string, boolean>,
+	mcpServers: Record<string, McpServerConfig>,
+	mcpHub: McpHub | undefined,
 ): string {
 	const lines: string[] = [];
 
+	// Built-in tools
 	for (const [toolId, meta] of Object.entries(TOOL_DISPLAY_NAMES)) {
 		const defaultAutoApprove = !meta.isWrite;
 		const currentAutoApprove = autoApprove[toolId] ?? defaultAutoApprove;
@@ -43,6 +46,21 @@ export function generateToolConfigSnippet(
 		lines.push(`${toolId}:`);
 		lines.push(`  enabled: ${currentEnabled}`);
 		lines.push(`  auto_approve: ${currentAutoApprove}`);
+	}
+
+	// MCP tools (namespaced as server__tool in the YAML)
+	for (const [serverName, config] of Object.entries(mcpServers)) {
+		if (config.disabled) continue;
+		const conn = mcpHub?.getConnection(serverName);
+		const tools = conn?.tools ?? [];
+		for (const tool of tools) {
+			const namespacedName = `${serverName}__${tool.name}`;
+			const currentEnabled = toolEnabled[namespacedName] ?? true;
+			const currentAutoApprove = (config.autoApprove ?? []).includes(tool.name);
+			lines.push(`${namespacedName}:`);
+			lines.push(`  enabled: ${currentEnabled}`);
+			lines.push(`  auto_approve: ${currentAutoApprove}`);
+		}
 	}
 
 	return `<notor_tool_config version="1.0">\n${lines.join("\n")}\n</notor_tool_config>`;
@@ -89,7 +107,7 @@ export function renderToolsSection(
 	new Setting(containerEl)
 		.setName("Copy tool config YAML")
 		.setDesc(
-			"Generate a <notor_tool_config> snippet listing all built-in tools with their " +
+			"Generate a <notor_tool_config> snippet listing all built-in and MCP tools with their " +
 			"current enabled and auto-approve settings, and copy it to your clipboard. Paste into a " +
 			"persona, workflow, or rule note to override tool behaviour per context."
 		)
@@ -100,6 +118,8 @@ export function renderToolsSection(
 					const snippet = generateToolConfigSnippet(
 						ctx.settings.auto_approve,
 						ctx.settings.tool_enabled,
+						ctx.settings.mcp_servers ?? {},
+						getMcpHub(ctx),
 					);
 					await navigator.clipboard.writeText(snippet);
 					new Notice("Tool config YAML copied to clipboard.");
