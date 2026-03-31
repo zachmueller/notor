@@ -29,6 +29,8 @@ After connecting, Notor queries the server for its available tools and input sch
 
 **Namespaced tool names** — MCP tools are registered as `{serverName}__{toolName}` (e.g., `filesystem__read_file`) to prevent collisions with built-in tools or tools from other servers. The chat UI displays the friendlier `server/tool` format for readability.
 
+MCP tools appear alongside built-in tools in the unified **Settings → Notor → Tools** section with per-tool Enabled and Auto-approve toggles and a status dot showing server health. Per-context overrides via `<notor_tool_config>` blocks use the `server__tool` naming convention. See [Per-context tool configuration](vault-tools.md#per-context-tool-configuration).
+
 ## Plan/Act enforcement and approval
 
 MCP tool calls go through the same pipeline as built-in tools:

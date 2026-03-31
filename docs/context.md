@@ -10,6 +10,10 @@ You can provide the AI with specific content directly — no `read_note` tool ca
 - **Graceful failures** — if an attached note is deleted or renamed after the chip is added, the message still sends without that attachment and an inline warning is shown.
 - Attachment contents are embedded in the message context sent to the LLM but are not rendered in full in the chat thread (chips only).
 
+## Searching chat history
+
+The conversation history panel supports text search across past conversations. Searches match against conversation titles, message previews, and full message content. Matching is case-insensitive, and results are ordered by most recent activity.
+
 ## Ambient workspace context (auto-context)
 
 Every message automatically includes a snapshot of your current workspace state in the system prompt — no manual effort required:

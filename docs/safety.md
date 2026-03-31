@@ -19,8 +19,12 @@ Every proposed write shows a before/after diff before being applied. For edits t
 
 - **Write tools** require explicit approval by default before execution.
 - **Read-only tools** default to auto-approved.
-- Per-tool auto-approve settings are configurable in **Settings → Notor** — you can promote any tool to auto-approve or demote it to require approval.
+- Per-tool **Enabled** and **Auto-approve** settings are configurable in the unified **Settings → Notor → Tools** section — you can enable/disable any tool or promote it to auto-approve. See [Enabling and disabling tools](vault-tools.md#enabling-and-disabling-tools) for details.
 - [Per-persona auto-approve overrides](personas.md) let you configure different approval behavior per persona.
+
+## Cancellation
+
+Clicking **Stop** in the chat panel immediately returns control to the user. Any in-flight tool executions complete in the background, but their results are not appended to the conversation. There is no orphaned tool-call state — subsequent messages work normally.
 
 ## Checkpoints
 

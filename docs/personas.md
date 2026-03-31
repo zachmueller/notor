@@ -42,6 +42,8 @@ Configure per-tool approval behavior per persona in **Settings → Notor → Per
 
 Unconfigured tools fall back to global defaults. Configuration is stored in plugin settings data, not in persona frontmatter. Per-persona overrides extend to [MCP tools](mcp-servers.md) alongside built-in tools.
 
+For more fine-grained control, personas also support `<notor_tool_config>` blocks in the `system-prompt.md` body to manage tool enabled/disabled state, auto-approve, and path restrictions declaratively. Persona-level tool config takes precedence over workflow and rule configs. See [Per-context tool configuration](vault-tools.md#per-context-tool-configuration) for the full syntax reference.
+
 ## Notes
 
 - Personas are regular Obsidian notes — fully visible in the file explorer, searchable, and editable.

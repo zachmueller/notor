@@ -17,11 +17,27 @@ Workflow notes are stored under `notor/workflows/` and identified by `notor-work
 
 Subdirectories under `notor/workflows/` are supported. The plugin rescans workflows on plugin load and when the workflow list is opened.
 
+Workflows can also be created from **Settings → Notor → Rules & Workflows** using the **Create** button, which prompts for a name and trigger type and generates a skeleton file with the appropriate frontmatter.
+
 ## Running a workflow manually
 
 **From the command palette:** The **Notor: Run workflow** command opens a quick-pick list of all discovered workflows. Selecting one assembles the workflow prompt, resolves any [`<include_note>`](include-note.md) tags, and sends it to the LLM as a new conversation in the chat panel with full transparency: streaming responses, inline tool calls, diff previews, and approval prompts all work as normal.
 
 **Via slash-command attachment:** Type `/` at the start of the Notor chat input to open a fuzzy-search autocomplete list of workflows. Selecting one inserts a chip in the input area (like a note attachment). You can type additional context alongside the chip. At most one workflow can be attached per message.
+
+## Workflow aliases
+
+Workflows support the standard Obsidian `aliases` frontmatter property (a single string or a YAML array). When using the `/` slash-command in chat, fuzzy search matches against both the workflow's display name and its aliases. When matched via an alias, the suggestion displays the alias in parentheses — e.g., `Daily Review (dr)`.
+
+This lets you invoke workflows with short abbreviations:
+
+```yaml
+---
+notor-workflow: true
+notor-trigger: manual
+aliases: [dr, review]
+---
+```
 
 ## Workflow instructions rendering
 
@@ -53,3 +69,4 @@ If a hook-triggered workflow would re-trigger the same hook (e.g., an `on-tag-ch
 
 - Workflows are regular Obsidian notes — visible, searchable, and editable.
 - Use [`<include_note>`](include-note.md) tags in workflow bodies to dynamically inject vault content at execution time.
+- Tool availability can be customized per-workflow using `<notor_tool_config>` blocks. See [Per-context tool configuration](vault-tools.md#per-context-tool-configuration) for syntax and precedence.

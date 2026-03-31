@@ -26,6 +26,73 @@ Tools marked **Act only** are blocked in Plan mode. See [safety.md](safety.md) f
 
 Tools marked **desktop only** are unavailable on mobile and return an error if invoked there.
 
+## Enabling and disabling tools
+
+The unified **Settings → Notor → Tools** section gives you per-tool control over all built-in and MCP tools in one place. Each tool has two toggles:
+
+- **Enabled** — whether the tool is available to the AI at all. Disabling a tool removes it from the AI's tool set entirely; it will not appear in tool listings or be invocable.
+- **Auto-approve** — whether the tool executes without manual approval (same behavior as before, now co-located).
+
+Tools are grouped into **Read-only tools** and **Write tools** subsections with column headers repeated per section. MCP tools appear alongside built-in tools, each showing:
+
+- A status dot indicating server health (green = connected, yellow = connecting, grey = disconnected, red = error)
+- The originating server name
+
+All tools are enabled by default. The **Copy tool config YAML** button at the bottom of the section generates a `<notor_tool_config>` snippet reflecting your current global settings — useful as a starting point for per-context overrides (see below).
+
+## Per-context tool configuration
+
+You can override global tool settings on a per-context basis by embedding a `<notor_tool_config>` block in a persona's `system-prompt.md`, a workflow note, or a rule file. This lets you, for example, disable `execute_command` in a research-only persona or auto-approve `search_vault` in a specific workflow.
+
+**Format:**
+
+```xml
+<notor_tool_config>
+search_vault:
+  enabled: true
+  auto_approve: true
+execute_command:
+  enabled: false
+filesystem__read_file:
+  enabled: true
+  allowed_paths:
+    - reports/
+  blocked_paths:
+    - private/
+</notor_tool_config>
+```
+
+**Available fields per tool:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | boolean | Whether the tool is available |
+| `auto_approve` | boolean | Whether the tool auto-approves |
+| `allowed_paths` | string[] | Allowed filesystem paths (file tools only) |
+| `blocked_paths` | string[] | Blocked filesystem paths (file tools only) |
+
+**Key behaviors:**
+
+- **Sparse merge** — omitted fields inherit from the next lower priority level. You only need to specify overrides.
+- **Precedence** (highest first): workflow → persona → rule → global defaults.
+- **MCP tools** use `server__tool` naming (e.g., `filesystem__read_file`).
+- **`allowed_paths` / `blocked_paths`** use replace semantics: the highest-priority config that sets the field completely replaces lower-level values.
+- [`<include_note>`](include-note.md) tags are resolved before tool config blocks are extracted.
+
+Use the **Copy tool config YAML** button in **Settings → Notor → Tools** to generate a starting snippet with your current settings.
+
+## Vault search
+
+The `search_vault` tool supports an optional `sort_by` parameter to control result ordering:
+
+| Value | Description |
+|-------|-------------|
+| `"match_count"` | Sort by number of matches per file, descending (default) |
+| `"backlinks"` | Sort by backlink count — useful for finding hub or authoritative notes |
+| `"modified"` | Sort by last modification time, most recent first |
+
+Each result includes metadata fields: `match_count`, `backlink_count`, and `modified` (ISO 8601 timestamp).
+
 ## Web fetching
 
 The `fetch_webpage` tool lets the AI retrieve external content:
@@ -35,6 +102,7 @@ The `fetch_webpage` tool lets the AI retrieve external content:
 - Configurable domain denylist — add entries in **Settings → Notor** to prevent the AI from fetching specific domains.
 - Configurable size limits: raw download cap (default: 5 MB) and output character cap (default: 50,000 characters). Pages exceeding the output cap are truncated with a notice to the AI.
 - Defaults to auto-approved (read-only tool, available in Plan and Act modes).
+- When a fetch fails, actionable error hints are shown for common Chromium `net::ERR_*` codes (DNS resolution failure, connection refused, timeout, SSL/TLS errors, and others). If the primary `requestUrl` method fails, an automatic diagnostic probe using native `fetch` runs to help distinguish Obsidian-specific issues from network-level problems.
 
 ## Shell command execution
 

@@ -37,6 +37,8 @@ npm run dev
 4. Select a model from the dropdown (or type a model ID if the list is unavailable)
 5. Open the Notor chat panel from the sidebar ribbon and start a conversation
 
+You can control which tools are available and configure auto-approve in **Settings → Notor → Tools**. See [vault-tools.md](vault-tools.md#enabling-and-disabling-tools) for details.
+
 ## Create your first persona
 
 Personas let you define specialized AI personalities with their own system prompt, model preferences, and approval behavior. See [personas.md](personas.md) for the full reference.
@@ -74,6 +76,8 @@ Workflows are reusable instruction sets stored as vault notes that guide the AI 
    Summarize the action items found across all matching notes.
    ```
 3. Open the command palette → **Notor: Run workflow** → select your workflow
+
+> You can also create workflows (and rules) from **Settings → Notor → Rules & Workflows** instead of creating files manually.
 
 ## Connect your first MCP server
 
