@@ -3,18 +3,22 @@
  * Cancel Tool Call E2E Test
  *
  * Validates that the chat panel remains functional after a user cancels
- * (stops) a response mid-tool-call. The specific failure mode:
+ * (stops) a response mid-tool-call. The specific failure mode this guards
+ * against:
  *
  *   1. LLM responds with a tool_use block
  *   2. User clicks Stop before the tool_result is recorded
- *   3. Conversation history now has an orphaned tool_call (no matching tool_result)
+ *   3. Without the fix, conversation history has an orphaned tool_call
  *   4. Next message send fails with Bedrock validation error:
  *      "tool_use ids were found without tool_result blocks immediately after"
  *
  * Scenarios:
  *   1. Cancel during auto-approved tool execution, then send follow-up
  *   2. Cancel during tool approval dialog, then send follow-up
- *   3. New conversation after cancel recovers normally
+ *   3. After cancel, approval UI elements are cleaned up
+ *   4. Conversation history has no orphaned tool_calls
+ *   5. New conversation after cancel works normally
+ *   6. No orphaned tool_use errors in logs
  *
  * Prerequisites:
  *   - ~/.aws/credentials with a [default] profile
@@ -124,33 +128,6 @@ async function waitForApprovalButton(page: Page, timeoutMs = 30_000): Promise<bo
 }
 
 /**
- * Force-recover the UI when it's stuck (e.g., after cancel during approval).
- * Attempts new conversation via plugin internals, then falls back to UI button.
- */
-async function forceRecover(page: Page): Promise<void> {
-	// Try to click new conversation button directly
-	const newConvBtn = await page.$(".notor-chat-header-btn[aria-label='New conversation']");
-	if (newConvBtn) {
-		try {
-			await newConvBtn.click({ timeout: 5_000 });
-			await page.waitForTimeout(2_000);
-			console.log("    → Clicked new conversation button to recover");
-		} catch {
-			// Button might not be clickable; try via evaluate
-			await page.evaluate(() => {
-				const btn = document.querySelector(".notor-chat-header-btn[aria-label='New conversation']") as HTMLElement | null;
-				btn?.click();
-			});
-			await page.waitForTimeout(2_000);
-			console.log("    → Force-clicked new conversation via evaluate");
-		}
-	}
-
-	// Wait briefly for input to re-enable
-	await waitForInputEnabled(page, 5_000);
-}
-
-/**
  * Check conversation history for orphaned tool_calls (tool_call without
  * a following tool_result). Accesses plugin internals via page.evaluate.
  */
@@ -194,22 +171,15 @@ async function clickStopButton(page: Page): Promise<boolean> {
 }
 
 /**
- * Check the latest error or assistant message for the orphaned tool_result error.
+ * Check the latest error element for the orphaned tool_result error.
  * Returns the error text if found, empty string otherwise.
  */
 async function checkForToolResultError(page: Page): Promise<string> {
-	// Check error elements
 	const errEl = await page.$(".notor-chat-error");
 	if (errEl) {
 		const text = (await errEl.textContent()) ?? "";
-		if (text.includes("tool_use") && text.includes("tool_result")) {
-			return text.trim();
-		}
-		// Any error after cancel + send is suspicious
 		if (text.trim().length > 0) return text.trim();
 	}
-
-	// Also check collector for structured errors with the keyword
 	return "";
 }
 
@@ -222,8 +192,7 @@ async function checkForToolResultError(page: Page): Promise<string> {
  *
  * Uses Act mode with read_note auto-approved. Asks the LLM to read a note
  * (triggers an auto-approved tool call). Clicks Stop as soon as the tool call
- * card appears, then sends another message and checks for the Bedrock
- * validation error.
+ * card appears, then sends another message and verifies it works.
  */
 async function testCancelAutoApprovedTool(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
@@ -251,21 +220,18 @@ async function testCancelAutoApprovedTool(ctx: TestContext): Promise<void> {
 		// Click stop to abort mid-tool-call
 		const stopped = await clickStopButton(page);
 		if (!stopped) {
-			// Maybe response already completed
 			const inputReady = await waitForInputEnabled(page, 10_000);
 			if (inputReady) {
 				ctx.pass(
 					"cancel auto-approved — response completed before stop",
 					"LLM finished before stop could be clicked (fast execution)"
 				);
-				// Still proceed to send follow-up to check for errors
 			} else {
 				ctx.fail("cancel auto-approved — could not stop", "Stop button not clickable and input not ready", shot1);
 				return;
 			}
 		}
 	} else {
-		// Check if response completed very quickly
 		const inputReady = await waitForInputEnabled(page, 15_000);
 		if (inputReady) {
 			ctx.pass(
@@ -284,54 +250,33 @@ async function testCancelAutoApprovedTool(ctx: TestContext): Promise<void> {
 
 	if (!inputReady) {
 		ctx.fail("cancel auto-approved — input re-enabled after stop", "Input still disabled after cancel", shot2);
-
-		// Check for orphaned tool_call in conversation history
-		const orphanCheck = await checkConversationForOrphan(page);
-		console.log(`    Conversation messages: ${orphanCheck.messageCount}, roles: [${orphanCheck.roles.join(", ")}]`);
-		if (orphanCheck.hasOrphan) {
-			ctx.fail(
-				"cancel auto-approved — orphaned tool_call in history",
-				`Conversation has orphaned tool_call without tool_result. Roles: [${orphanCheck.roles.join(", ")}]`,
-				shot2
-			);
-		}
-
-		// Force-recover for subsequent tests
-		console.log("    → Force-recovering...");
-		await forceRecover(page);
 		return;
 	}
 
+	ctx.pass("cancel auto-approved — input re-enabled after stop", "Input re-enabled after cancel", shot2);
+
 	console.log("    → Input re-enabled, sending follow-up message...");
 
-	// Now send a follow-up message — this is where the orphaned tool_use error should surface
+	// Send a follow-up message — this is where the orphaned tool_use error would surface
 	await sendMessageNoWait(page, "Thanks. Now just say the word 'recovered' and nothing else.");
 
 	// Wait for response or error
 	const followUpComplete = await waitForInputEnabled(page, 60_000);
 	const shot3 = await ctx.screenshot("03-follow-up-result");
 
-	// Check for the specific error
 	const errorText = await checkForToolResultError(page);
 	const lastMsg = await getLastAssistantMessage(page);
 
-	// Also check collector logs for the specific Bedrock error
-	const errorLogs = ctx.collector.getLogsByLevel("error");
-	const bedrockToolError = errorLogs.find(
-		(e) => e.message.includes("tool_use") || e.message.includes("tool_result")
-	);
-
-	if (errorText.includes("tool_use") || errorText.includes("tool_result") || bedrockToolError) {
-		const detail = errorText || bedrockToolError?.message || "Unknown";
+	if (errorText.includes("tool_use") || errorText.includes("tool_result")) {
 		ctx.fail(
 			"cancel auto-approved — follow-up succeeds",
-			`Orphaned tool_use error after cancel: "${detail.substring(0, 200)}"`,
+			`Orphaned tool_use error after cancel: "${errorText.substring(0, 200)}"`,
 			shot3
 		);
 	} else if (errorText.length > 0) {
 		ctx.fail(
 			"cancel auto-approved — follow-up succeeds",
-			`Error after follow-up (may be related): "${errorText.substring(0, 200)}"`,
+			`Error after follow-up: "${errorText.substring(0, 200)}"`,
 			shot3
 		);
 	} else if (followUpComplete && lastMsg.trim().length > 0) {
@@ -341,27 +286,12 @@ async function testCancelAutoApprovedTool(ctx: TestContext): Promise<void> {
 			shot3
 		);
 	} else {
-		// Timeout or empty response — check if orphaned tool_call caused a silent failure
-		const orphanCheck = await checkConversationForOrphan(page);
-		console.log(`    Conversation after follow-up: roles=[${orphanCheck.roles.join(", ")}]`);
-
-		if (orphanCheck.hasOrphan) {
-			ctx.fail(
-				"cancel auto-approved — follow-up succeeds",
-				`Follow-up blocked by orphaned tool_call in history. Roles: [${orphanCheck.roles.join(", ")}]`,
-				shot3
-			);
-		} else {
-			ctx.fail(
-				"cancel auto-approved — follow-up succeeds",
-				`Follow-up did not produce a response (timeout=${!followUpComplete}, lastMsg="${lastMsg.trim().substring(0, 80)}")`,
-				shot3
-			);
-		}
+		ctx.fail(
+			"cancel auto-approved — follow-up succeeds",
+			`Follow-up did not produce a response (timeout=${!followUpComplete}, lastMsg="${lastMsg.trim().substring(0, 80)}")`,
+			shot3
+		);
 	}
-
-	// Force-recover after Test 1 regardless of outcome, so Test 2 starts clean
-	await forceRecover(page);
 }
 
 /**
@@ -369,27 +299,15 @@ async function testCancelAutoApprovedTool(ctx: TestContext): Promise<void> {
  *
  * Uses Act mode with write_note NOT auto-approved. Asks the LLM to write
  * a note (triggers approval dialog). Clicks Stop instead of Approve, then
- * sends another message.
+ * verifies: input re-enables, approval UI is removed, and follow-up works.
  */
 async function testCancelDuringApproval(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
 	console.log("\n── Test 2: Cancel during tool approval dialog ──────────────────");
 
-	// Ensure UI is usable (force-recover handles prior test failures)
-	await forceRecover(page);
 	await newConversation(page);
 	await setMode(page, "Act");
 	await page.waitForTimeout(1_000);
-
-	// Verify input is usable before proceeding
-	const inputCheck = await page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		return el !== null && el.getAttribute("contenteditable") === "true";
-	});
-	if (!inputCheck) {
-		ctx.fail("cancel during approval — setup", "Input not usable at start of Test 2 despite recovery");
-		return;
-	}
 
 	// Send a message that will trigger a write_note tool (requires approval)
 	await sendMessageNoWait(
@@ -398,7 +316,7 @@ async function testCancelDuringApproval(ctx: TestContext): Promise<void> {
 		"Use the write_note tool to do this."
 	);
 
-	// Wait for the approval button OR tool call card
+	// Wait for the approval button
 	const approvalAppeared = await waitForApprovalButton(page, 45_000);
 	const shot1 = await ctx.screenshot("04-approval-dialog");
 
@@ -406,8 +324,6 @@ async function testCancelDuringApproval(ctx: TestContext): Promise<void> {
 		// The LLM might have used an auto-approved tool, or finished without tool call
 		const inputReady = await waitForInputEnabled(page, 10_000);
 		if (inputReady) {
-			const lastMsg = await getLastAssistantMessage(page);
-			// Check if a tool call card appeared (tool was auto-approved or LLM didn't use write_note)
 			const toolCards = await page.$$(".notor-tool-call");
 			if (toolCards.length > 0) {
 				ctx.pass(
@@ -415,6 +331,7 @@ async function testCancelDuringApproval(ctx: TestContext): Promise<void> {
 					"Tool executed without approval dialog (may be auto-approved); skipping approval-cancel test"
 				);
 			} else {
+				const lastMsg = await getLastAssistantMessage(page);
 				ctx.pass(
 					"cancel during approval — no tool triggered",
 					`LLM responded without tool call: "${lastMsg.trim().substring(0, 80)}"`
@@ -438,57 +355,46 @@ async function testCancelDuringApproval(ctx: TestContext): Promise<void> {
 		// Click stop instead of approve
 		const stopped = await clickStopButton(page);
 		if (!stopped) {
-			// Stop button might not be visible during approval; try to find it differently
-			// or the UI might not show stop during approval state
-			ctx.pass(
-				"cancel during approval — stop not available during approval",
-				"Stop button not accessible during approval dialog; cannot cancel this way"
+			ctx.fail(
+				"cancel during approval — stop button clickable",
+				"Stop button not accessible during approval dialog",
+				shot1
 			);
-			// Reject instead to unblock
+			// Reject to unblock so subsequent tests can run
 			const rejectBtn = await page.$(".notor-reject-btn");
 			if (rejectBtn) {
 				await rejectBtn.click();
-				console.log("    → Clicked reject instead");
+				console.log("    → Clicked reject to unblock");
 			}
 			await waitForInputEnabled(page, 10_000);
 			return;
 		}
 	}
 
-	// Wait for input to re-enable
+	// Wait for input to re-enable — this is the core fix assertion
 	const inputReady = await waitForInputEnabled(page, 15_000);
 	const shot2 = await ctx.screenshot("05-after-approval-cancel");
 
 	if (!inputReady) {
 		ctx.fail("cancel during approval — input re-enabled", "Input still disabled after cancel during approval", shot2);
-
-		// Check the conversation history for orphaned tool_calls before recovering
-		const orphanCheck = await checkConversationForOrphan(page);
-
-		console.log(`    Conversation messages: ${orphanCheck.messageCount}, roles: [${orphanCheck.roles.join(", ")}]`);
-
-		if (orphanCheck.hasOrphan) {
-			ctx.fail(
-				"cancel during approval — orphaned tool_call in history",
-				`Conversation has orphaned tool_call without tool_result. Roles: [${orphanCheck.roles.join(", ")}]`,
-				shot2
-			);
-		} else if (orphanCheck.roles.includes("tool_call")) {
-			ctx.pass(
-				"cancel during approval — tool_call has matching result",
-				`Tool call found but has matching result. Roles: [${orphanCheck.roles.join(", ")}]`
-			);
-		}
-
-		// Force-recover so subsequent tests can run
-		console.log("    → Force-recovering via new conversation...");
-		await forceRecover(page);
 		return;
+	}
+
+	ctx.pass("cancel during approval — input re-enabled", "Input re-enabled after cancelling during approval dialog", shot2);
+
+	// Verify approval UI elements were cleaned up
+	const approvalStillVisible = await page.evaluate(() => {
+		return document.querySelector(".notor-approval-prompt") !== null;
+	});
+	if (approvalStillVisible) {
+		ctx.fail("cancel during approval — approval UI cleaned up", "Approval prompt still visible after cancel");
+	} else {
+		ctx.pass("cancel during approval — approval UI cleaned up", "Approval prompt removed from DOM after cancel");
 	}
 
 	console.log("    → Input re-enabled, sending follow-up message...");
 
-	// Send follow-up
+	// Send follow-up — verifies conversation history is valid (no orphaned tool_call)
 	await sendMessageNoWait(page, "Never mind the note. Just say 'recovered' and nothing else.");
 
 	const followUpComplete = await waitForInputEnabled(page, 60_000);
@@ -497,16 +403,10 @@ async function testCancelDuringApproval(ctx: TestContext): Promise<void> {
 	const errorText = await checkForToolResultError(page);
 	const lastMsg = await getLastAssistantMessage(page);
 
-	const errorLogs = ctx.collector.getLogsByLevel("error");
-	const bedrockToolError = errorLogs.find(
-		(e) => e.message.includes("tool_use") || e.message.includes("tool_result")
-	);
-
-	if (errorText.includes("tool_use") || errorText.includes("tool_result") || bedrockToolError) {
-		const detail = errorText || bedrockToolError?.message || "Unknown";
+	if (errorText.includes("tool_use") || errorText.includes("tool_result")) {
 		ctx.fail(
 			"cancel during approval — follow-up succeeds",
-			`Orphaned tool_use error after approval cancel: "${detail.substring(0, 200)}"`,
+			`Orphaned tool_use error after approval cancel: "${errorText.substring(0, 200)}"`,
 			shot3
 		);
 	} else if (errorText.length > 0) {
@@ -531,63 +431,38 @@ async function testCancelDuringApproval(ctx: TestContext): Promise<void> {
 }
 
 /**
- * Test 3: New conversation after cancel should recover normally.
+ * Test 3: Verify conversation history has no orphaned tool_calls.
  *
- * If the follow-up in the same conversation failed (due to orphaned tool_use),
- * starting a new conversation should clear the message history and allow
- * normal interaction.
+ * After the cancel tests, inspect the active conversation to confirm
+ * every tool_call has a matching tool_result.
+ */
+async function testNoOrphanedToolCalls(ctx: TestContext): Promise<void> {
+	console.log("\n── Test 3: No orphaned tool_calls in conversation history ───────");
+
+	const orphanCheck = await checkConversationForOrphan(ctx.page);
+	console.log(`    Conversation: ${orphanCheck.messageCount} messages, roles: [${orphanCheck.roles.join(", ")}]`);
+
+	if (orphanCheck.hasOrphan) {
+		ctx.fail(
+			"history — no orphaned tool_calls",
+			`Orphaned tool_call found. Roles: [${orphanCheck.roles.join(", ")}]`
+		);
+	} else {
+		ctx.pass(
+			"history — no orphaned tool_calls",
+			`All tool_calls have matching tool_results (${orphanCheck.messageCount} messages)`
+		);
+	}
+}
+
+/**
+ * Test 4: New conversation after cancel works normally.
  */
 async function testNewConversationRecovers(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
-	console.log("\n── Test 3: New conversation recovers after cancel ──────────────");
+	console.log("\n── Test 4: New conversation recovers after cancel ──────────────");
 
-	// Force-recover: re-enable responding state via DOM manipulation + plugin API
-	await page.evaluate(() => {
-		// Method 1: Direct DOM manipulation to re-enable input
-		const input = document.querySelector(".notor-text-input") as HTMLElement | null;
-		if (input) {
-			input.setAttribute("contenteditable", "true");
-			input.classList.remove("notor-text-input--disabled");
-		}
-		const sendBtn = document.querySelector(".notor-send-btn") as HTMLElement | null;
-		if (sendBtn) sendBtn.classList.remove("notor-hidden");
-		const stopBtn = document.querySelector(".notor-stop-btn") as HTMLElement | null;
-		if (stopBtn) stopBtn.classList.add("notor-hidden");
-		const loading = document.querySelector(".notor-loading-indicator") as HTMLElement | null;
-		if (loading) loading.classList.add("notor-hidden");
-
-		// Method 2: Try plugin API
-		const app = (window as any).app;
-		const leaves = app?.workspace?.getLeavesOfType?.("notor-chat-view");
-		if (leaves?.length > 0) {
-			const view = leaves[0]?.view;
-			if (view?.setRespondingState) {
-				view.setRespondingState(false);
-			}
-		}
-	});
-	await page.waitForTimeout(1_000);
-
-	// Now try new conversation
-	await forceRecover(page);
-	await page.waitForTimeout(1_000);
-
-	// Check if input is usable
-	const inputUsable = await page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		return el !== null && el.getAttribute("contenteditable") === "true";
-	});
-
-	if (!inputUsable) {
-		const shot = await ctx.screenshot("07-still-stuck");
-		ctx.fail(
-			"new conversation — UI recoverable",
-			"Input still disabled even after force-recovering responding state and new conversation",
-			shot
-		);
-		return;
-	}
-
+	await newConversation(page);
 	await setMode(page, "Plan");
 	await page.waitForTimeout(500);
 
@@ -605,7 +480,7 @@ async function testNewConversationRecovers(ctx: TestContext): Promise<void> {
 	if (errorText.length > 0) {
 		ctx.fail(
 			"new conversation — no errors",
-			`Error persisted into new conversation: "${errorText.substring(0, 200)}"`,
+			`Error in new conversation: "${errorText.substring(0, 200)}"`,
 			shot
 		);
 	} else if (lastMsg.trim().length > 0) {
@@ -624,14 +499,13 @@ async function testNewConversationRecovers(ctx: TestContext): Promise<void> {
 }
 
 /**
- * Test 4: Check structured logs for orphaned tool_use errors.
+ * Test 5: Check structured logs for orphaned tool_use errors.
  *
  * Scans all captured logs for Bedrock validation errors related to
- * tool_use/tool_result pairing, providing a definitive signal even if
- * the UI error element was dismissed or not captured.
+ * tool_use/tool_result pairing.
  */
 async function testCheckLogsForOrphanedToolError(ctx: TestContext): Promise<void> {
-	console.log("\n── Test 4: Check logs for orphaned tool_use errors ─────────────");
+	console.log("\n── Test 5: Check logs for orphaned tool_use errors ─────────────");
 
 	const allLogs = ctx.collector.getStructuredLogs();
 	const errors = ctx.collector.getLogsByLevel("error");
@@ -695,6 +569,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	// Run scenarios
 	await testCancelAutoApprovedTool(ctx);
 	await testCancelDuringApproval(ctx);
+	await testNoOrphanedToolCalls(ctx);
 	await testNewConversationRecovers(ctx);
 	await testCheckLogsForOrphanedToolError(ctx);
 }

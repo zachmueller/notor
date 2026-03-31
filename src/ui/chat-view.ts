@@ -937,6 +937,11 @@ export class NotorChatView extends ItemView {
 		// Calling it here re-enables input before the cancellation is processed,
 		// creating a race where the next user message can be inserted before the
 		// cancelled assistant message is stored.
+
+		// Clean up any pending approval prompts so the user gets visual feedback
+		// that the cancel took effect. The abort signal will resolve the approval
+		// Promise via Promise.race in the callback, but the DOM elements linger.
+		this.messageListEl.querySelectorAll(".notor-approval-prompt").forEach((el) => el.remove());
 	}
 
 	private handleModeToggle(): void {

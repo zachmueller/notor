@@ -62,7 +62,7 @@ export interface DispatchableTool {
 }
 
 /** Callback for requesting user approval of a tool call. */
-export type ApprovalCallback = (toolCall: ToolCall) => Promise<"approved" | "rejected">;
+export type ApprovalCallback = (toolCall: ToolCall, abortSignal?: AbortSignal) => Promise<"approved" | "rejected">;
 
 /** Events emitted by the dispatcher for UI updates. */
 export interface DispatcherEvents {
@@ -263,7 +263,8 @@ export class ToolDispatcher {
 		toolName: string,
 		parameters: Record<string, unknown>,
 		mode: ConversationMode,
-		messageId: string
+		messageId: string,
+		abortSignal?: AbortSignal
 	): Promise<ToolResult> {
 		// 1. Look up tool in registry
 		const tool = this.tools.get(toolName);
@@ -411,7 +412,7 @@ export class ToolDispatcher {
 			if (!this.approvalCallback) {
 				log.warn("No approval callback set, auto-approving", { toolName });
 			} else {
-				const decision = await this.approvalCallback(toolCall);
+				const decision = await this.approvalCallback(toolCall, abortSignal);
 
 				if (decision === "rejected") {
 					toolCall.status = "rejected";
@@ -463,7 +464,24 @@ export class ToolDispatcher {
 			}
 		}
 
-		// 6. Execute tool
+		// 6. Abort check — if the user cancelled while waiting for approval, don't execute
+		if (abortSignal?.aborted) {
+			toolCall.status = "error";
+			this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+			const result: ToolResult = {
+				tool_name: toolName,
+				success: false,
+				result: "",
+				error: "Tool call cancelled by user.",
+			};
+
+			log.info("Tool call cancelled before execution", { toolName });
+			this.events.onToolCallResult?.(toolCall, result, messageId);
+			return result;
+		}
+
+		// 7. Execute tool
 		const startTime = Date.now();
 		try {
 			const result = await tool.execute(parameters);

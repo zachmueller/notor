@@ -1529,22 +1529,36 @@ export default class NotorPlugin extends Plugin {
 		});
 
 		// Wire approval callback for tool dispatcher
-		toolDispatcher.setApprovalCallback(async (toolCall) => {
+		toolDispatcher.setApprovalCallback(async (toolCall, abortSignal?) => {
 			// Find the most recent tool call element in the view for the approval UI.
 			// The view tracks the last rendered tool call element via getLastToolCallEl().
 			const toolCallEl = view.getLastToolCallEl();
-			if (toolCallEl) {
-				// For write_note and replace_in_note, render a full diff preview.
-				// For all other tools, use the plain approve/reject prompt.
-				return view.renderDiffApprovalPrompt(
-					toolCallEl,
-					toolCall.tool_name,
-					toolCall.parameters ?? {}
-				);
+			if (!toolCallEl) {
+				// Fallback: auto-approve if no UI element available
+				log.warn("No tool call element for approval prompt, auto-approving");
+				return "approved";
 			}
-			// Fallback: auto-approve if no UI element available
-			log.warn("No tool call element for approval prompt, auto-approving");
-			return "approved";
+
+			// For write_note and replace_in_note, render a full diff preview.
+			// For all other tools, use the plain approve/reject prompt.
+			const approvalPromise = view.renderDiffApprovalPrompt(
+				toolCallEl,
+				toolCall.tool_name,
+				toolCall.parameters ?? {}
+			);
+
+			// If no abort signal, just await the approval normally
+			if (!abortSignal) return approvalPromise;
+
+			// Race the approval against the abort signal so that clicking Stop
+			// unblocks the pending approval promise instead of hanging forever.
+			return Promise.race([
+				approvalPromise,
+				new Promise<"rejected">((resolve) => {
+					if (abortSignal.aborted) { resolve("rejected"); return; }
+					abortSignal.addEventListener("abort", () => resolve("rejected"), { once: true });
+				}),
+			]);
 		});
 
 		// Load conversation history and render it

@@ -9,7 +9,7 @@
  */
 
 import { type App, Notice } from "obsidian";
-import type { ConversationMode, Message, WorkflowExecution, ExecutionChain } from "../types";
+import type { ConversationMode, Message, ToolResult, WorkflowExecution, ExecutionChain } from "../types";
 import type { ChatMessage, ToolDefinition, StreamChunk, SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
@@ -1421,13 +1421,31 @@ export class ChatOrchestrator {
 						);
 					}
 
-					// Dispatch through the tool dispatcher
-					const toolResult = await this.dispatcher.dispatch(
-						result.toolName,
-						result.parameters,
-						mode,
-						toolCallMessage.id
-					);
+					// Dispatch through the tool dispatcher (with abort signal so
+					// approval dialogs can be cancelled via the Stop button).
+					let toolResult: ToolResult;
+					try {
+						toolResult = await this.dispatcher.dispatch(
+							result.toolName,
+							result.parameters,
+							mode,
+							toolCallMessage.id,
+							abortController.signal
+						);
+					} catch (dispatchError) {
+						// Ensure the orphaned tool_call gets a matching tool_result
+						// so the conversation history stays valid for the provider.
+						toolResult = {
+							tool_name: result.toolName,
+							success: false,
+							result: "",
+							error: `Tool call failed: ${dispatchError instanceof Error ? dispatchError.message : String(dispatchError)}`,
+						};
+						log.warn("Tool dispatch threw, injecting error tool_result", {
+							toolName: result.toolName,
+							error: String(dispatchError),
+						});
+					}
 
 					// Update tool call status badge in the UI
 					if (toolCallEl) {
@@ -1454,6 +1472,21 @@ export class ChatOrchestrator {
 					});
 
 					this.view?.renderToolResult(toolResultMessage);
+
+					// If the user cancelled during tool dispatch, stop the loop
+					// instead of sending the result back to the LLM for another turn.
+					if (abortController.signal.aborted) {
+						const cancelledContent = "*[Response cancelled]*";
+						const cancelledMsg = this.conversationManager.addMessage({
+							role: "assistant",
+							content: cancelledContent,
+						});
+						const el = this.view?.createAssistantMessagePlaceholder();
+						if (el) {
+							await this.view?.finalizeAssistantMessage(el, cancelledMsg);
+						}
+						break;
+					}
 
 					// Phase 3 (HOOK-005): Fire on_tool_result hooks after execution
 					// G-004: Pass override manager so workflow-scoped hooks are used when active
@@ -1995,15 +2028,43 @@ export class ChatOrchestrator {
 			}
 		}
 
+		// Safety net: ensure every tool_call has a matching tool_result.
+		// Providers (Bedrock, Anthropic) reject conversations where a tool_use
+		// block is not immediately followed by a tool_result block.
+		const repaired: ChatMessage[] = [];
+		for (let i = 0; i < chatMessages.length; i++) {
+			repaired.push(chatMessages[i]!);
+			if (chatMessages[i]!.role === "tool_call" && chatMessages[i]!.tool_call) {
+				const next = chatMessages[i + 1];
+				if (!next || next.role !== "tool_result") {
+					const tc = chatMessages[i]!.tool_call!;
+					repaired.push({
+						role: "tool_result",
+						content: "",
+						tool_result: {
+							tool_call_id: tc.id,
+							tool_name: tc.tool_name,
+							result: "Tool call was cancelled by the user.",
+							is_error: true,
+						},
+					});
+					log.warn("Injected synthetic tool_result for orphaned tool_call", {
+						toolName: tc.tool_name,
+						toolCallId: tc.id,
+					});
+				}
+			}
+		}
+
 		log.info("ChatMessages built for provider", {
-			totalCount: chatMessages.length,
-			firstRole: chatMessages[0]?.role ?? "none",
-			secondRole: chatMessages[1]?.role ?? "none",
-			lastRole: chatMessages[chatMessages.length - 1]?.role ?? "none",
-			roles: chatMessages.map((m) => m.role),
+			totalCount: repaired.length,
+			firstRole: repaired[0]?.role ?? "none",
+			secondRole: repaired[1]?.role ?? "none",
+			lastRole: repaired[repaired.length - 1]?.role ?? "none",
+			roles: repaired.map((m) => m.role),
 		});
 
-		return chatMessages;
+		return repaired;
 	}
 
 	// -----------------------------------------------------------------------
