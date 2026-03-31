@@ -44,7 +44,6 @@ import {
 import { LogCollector, type LogEntry } from "../lib/log-collector";
 import {
 	PROJECT_ROOT,
-	BUILD_DIR,
 	VAULT_PATH,
 	PLUGIN_DATA_PATH,
 	RESULTS_DIR,
@@ -52,12 +51,14 @@ import {
 	CDP_PORT,
 	findVaultPage,
 	buildDefaultSettings,
+	sendMessage,
+	waitForResponse,
+	newConversation,
 } from "../lib/test-helpers";
 
 const SCREENSHOTS_DIR = path.join(RESULTS_DIR, "screenshots", "compaction-debug");
 
-const RESPONSE_TIMEOUT_MS = 120_000;
-const POLL_INTERVAL_MS = 1_500;
+const SCENARIO_TIMEOUT_MS = 480_000; // 8 min per scenario safety net
 
 // ---------------------------------------------------------------------------
 // Test infrastructure (same pattern as compaction-test.ts)
@@ -76,35 +77,34 @@ async function screenshot(page: Page, name: string): Promise<string> {
 	return file;
 }
 
-
-async function waitForResponse(page: Page, ms = RESPONSE_TIMEOUT_MS): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < ms) {
-		await page.waitForTimeout(POLL_INTERVAL_MS);
-		const ready = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el ? el.getAttribute("contenteditable") === "true" : false;
-		});
-		if (ready) return true;
+/**
+ * After a message timeout, click the stop button (if visible) to cancel the
+ * in-flight LLM request, then wait for the input to become re-enabled so the
+ * next sendMessage call won't be silently swallowed by the isResponding guard.
+ */
+async function cancelAndWaitForIdle(page: Page): Promise<void> {
+	const stopBtn = await page.$(".notor-stop-btn:not(.notor-hidden)");
+	if (stopBtn) {
+		console.log("      → Clicking stop button to cancel in-flight request…");
+		await stopBtn.click();
 	}
-	return false;
+	await page.waitForTimeout(1_000);
+	// Wait for the input to be re-enabled (up to 10s)
+	await waitForResponse(page, 10_000);
 }
 
-async function sendMessage(page: Page, msg: string): Promise<boolean> {
-	const input = await page.$(".notor-text-input");
-	if (!input) throw new Error("Chat input not found");
-	await input.click();
-	await input.evaluate((el, m) => { el.textContent = m; el.dispatchEvent(new Event("input", { bubbles: true })); }, msg);
-	await page.waitForTimeout(200);
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(600);
-	console.log(`    → Sent: "${msg.substring(0, 60)}…" (${msg.length} chars)`);
-	return waitForResponse(page);
-}
-
-async function newConversation(page: Page): Promise<void> {
-	const btn = await page.$(".notor-chat-header-btn[aria-label='New conversation']");
-	if (btn) { await btn.click(); await page.waitForTimeout(1_500); }
+/**
+ * Run an async function with a timeout. Rejects with an error if the function
+ * does not complete within the given duration.
+ */
+function withTimeout<T>(fn: () => Promise<T>, ms: number, label: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`${label}: timed out after ${ms / 1000}s`)), ms);
+		fn().then(
+			(v) => { clearTimeout(timer); resolve(v); },
+			(e) => { clearTimeout(timer); reject(e); },
+		);
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -134,21 +134,21 @@ function data(entry: LogEntry): LogData {
 async function scenarioA(page: Page, collector: LogCollector): Promise<void> {
 	console.log("\n── Scenario 1: Hypothesis A — Truncation boundary bug ─────────────────");
 
-	// Restart with compaction disabled
 	await newConversation(page);
 	const startIdx = collector.getStructuredLogs().length;
 
 	// Large repeated phrase to maximise token accumulation per message.
-	const FILLER = "The quick brown fox jumps over the lazy dog. ".repeat(60); // ~2520 chars
-	const NUM_MESSAGES = 12;
+	// ~18 000 chars ≈ ~4 500 tokens each; 15 messages ≈ ~67 500 user tokens + responses.
+	const FILLER = "The quick brown fox jumps over the lazy dog. ".repeat(400);
+	const NUM_MESSAGES = 15;
 
 	console.log(`    Sending ${NUM_MESSAGES} messages (~${FILLER.length} chars each)…`);
 	for (let i = 1; i <= NUM_MESSAGES; i++) {
 		const msg = `Message ${i}: ${FILLER}`;
 		const responded = await sendMessage(page, msg);
 		if (!responded) {
-			console.log(`      Message ${i}: no response within timeout, continuing`);
-			await page.waitForTimeout(2_000);
+			console.log(`      Message ${i}: no response within timeout, cancelling…`);
+			await cancelAndWaitForIdle(page);
 		}
 		// Brief pause to let logs flush
 		await page.waitForTimeout(500);
@@ -253,16 +253,17 @@ async function scenarioB(page: Page, collector: LogCollector): Promise<void> {
 	await newConversation(page);
 	const startIdx = collector.getStructuredLogs().length;
 
-	const FILLER = "Please write a short poem about the number ".repeat(20); // ~900 chars
-	const NUM_MESSAGES = 8;
+	// ~9 000 chars ≈ ~2 250 tokens each; 10 messages should give enough data points.
+	const FILLER = "Please write a short poem about the number ".repeat(200);
+	const NUM_MESSAGES = 10;
 
 	console.log(`    Sending ${NUM_MESSAGES} messages with normal threshold (0.8)…`);
 	for (let i = 1; i <= NUM_MESSAGES; i++) {
 		const msg = `Message ${i}: ${FILLER}${i}.`;
 		const responded = await sendMessage(page, msg);
 		if (!responded) {
-			console.log(`      Message ${i}: no response within timeout, continuing`);
-			await page.waitForTimeout(2_000);
+			console.log(`      Message ${i}: no response within timeout, cancelling…`);
+			await cancelAndWaitForIdle(page);
 		}
 		await page.waitForTimeout(500);
 	}
@@ -351,13 +352,13 @@ async function scenarioC(page: Page, collector: LogCollector): Promise<void> {
 	await newConversation(page);
 	const startIdx = collector.getStructuredLogs().length;
 
-	const NUM_MESSAGES = 4;
+	const NUM_MESSAGES = 6;
 	console.log(`    Sending ${NUM_MESSAGES} messages with very low threshold (0.05)…`);
 	for (let i = 1; i <= NUM_MESSAGES; i++) {
 		const responded = await sendMessage(page, `Message ${i}: Please write a short sentence about the number ${i}.`);
 		if (!responded) {
-			console.log(`      Message ${i}: no response within timeout, continuing`);
-			await page.waitForTimeout(2_000);
+			console.log(`      Message ${i}: no response within timeout, cancelling…`);
+			await cancelAndWaitForIdle(page);
 		}
 		await page.waitForTimeout(500);
 	}
@@ -448,7 +449,7 @@ async function main() {
 
 		// --- Session 1: Scenario A (compaction disabled) ---
 		console.log("\n[1/5] Starting Obsidian — Scenario A (threshold=1.1, compaction disabled)…");
-		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildDefaultSettings({ compaction_threshold: 1.1 }), null, 2));
+		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildDefaultSettings({ compaction_threshold: 1.1, mode: "act" }), null, 2));
 
 		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
 		let browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
@@ -458,7 +459,7 @@ async function main() {
 		collector.attach(page);
 		pass("Chat panel ready (session 1)", "Plugin loaded");
 
-		await scenarioA(page, collector);
+		await withTimeout(() => scenarioA(page, collector), SCENARIO_TIMEOUT_MS, "Scenario A");
 
 		await screenshot(page, "session1-final");
 		collector.writeSummary();
@@ -469,7 +470,7 @@ async function main() {
 
 		// --- Session 2: Scenario B (normal threshold) ---
 		console.log("\n[2/5] Starting Obsidian — Scenario B (threshold=0.8)…");
-		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildDefaultSettings({ compaction_threshold: 0.8 }), null, 2));
+		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildDefaultSettings({ compaction_threshold: 0.8, mode: "act" }), null, 2));
 
 		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
 		browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
@@ -479,7 +480,7 @@ async function main() {
 		page = await findVaultPage(browser, 20_000);
 		collector2.attach(page);
 
-		await scenarioB(page, collector2);
+		await withTimeout(() => scenarioB(page, collector2), SCENARIO_TIMEOUT_MS, "Scenario B");
 
 		await screenshot(page, "session2-final");
 		collector2.writeSummary();
@@ -490,7 +491,7 @@ async function main() {
 
 		// --- Session 3: Scenario C (very low threshold) ---
 		console.log("\n[3/5] Starting Obsidian — Scenario C (threshold=0.05)…");
-		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildDefaultSettings({ compaction_threshold: 0.05 }), null, 2));
+		fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(buildDefaultSettings({ compaction_threshold: 0.05, mode: "act" }), null, 2));
 
 		obsidian = await launchObsidian({ vaultPath: VAULT_PATH, cdpPort: CDP_PORT, timeout: 30_000 });
 		browser = await chromium.connectOverCDP(`http://127.0.0.1:${CDP_PORT}`);
@@ -499,7 +500,7 @@ async function main() {
 		page = await findVaultPage(browser, 20_000);
 		collector3.attach(page);
 
-		await scenarioC(page, collector3);
+		await withTimeout(() => scenarioC(page, collector3), SCENARIO_TIMEOUT_MS, "Scenario C");
 
 		await screenshot(page, "session3-final");
 		collector3.writeSummary();
@@ -508,7 +509,9 @@ async function main() {
 		obsidian = undefined;
 
 	} catch (err) {
-		console.error("\nFatal error:", err);
+		const errMsg = err instanceof Error ? err.message : String(err);
+		console.error("\nFatal error:", errMsg);
+		fail("Fatal error", errMsg);
 		if (collector) collector.writeSummary();
 	} finally {
 		if (obsidian) await closeObsidian(obsidian);
