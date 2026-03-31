@@ -129,6 +129,62 @@ export function isDomainBlocked(
 const USER_AGENT = "Notor/1.0";
 
 // ---------------------------------------------------------------------------
+// Chromium net error diagnostic hints
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps common Chromium `net::ERR_*` error code substrings to human-readable
+ * diagnostic hints. When `requestUrl()` fails at the network level, the raw
+ * error message typically contains one of these codes with no further context.
+ *
+ * Order matters: more-specific codes must appear before `ERR_FAILED` (the
+ * catch-all) so the first match wins.
+ */
+const CHROMIUM_NET_ERROR_HINTS: Record<string, string> = {
+	ERR_NAME_NOT_RESOLVED:
+		"DNS lookup failed — check the hostname or your network connection",
+	ERR_CONNECTION_REFUSED:
+		"Connection refused — the server may be down or blocking requests",
+	ERR_CONNECTION_TIMED_OUT:
+		"Connection timed out — the server took too long to respond",
+	ERR_CONNECTION_RESET:
+		"Connection reset by the server — it may have dropped the connection",
+	ERR_INTERNET_DISCONNECTED: "No internet connection detected",
+	ERR_SSL_PROTOCOL_ERROR:
+		"SSL/TLS handshake failed — the site may have a certificate issue",
+	ERR_CERT_AUTHORITY_INVALID:
+		"SSL certificate not trusted — the certificate may be self-signed or expired",
+	ERR_CERT_DATE_INVALID:
+		"SSL certificate has expired or is not yet valid",
+	ERR_BLOCKED_BY_CLIENT:
+		"Request blocked by a browser extension or content policy",
+	ERR_TOO_MANY_REDIRECTS:
+		"Too many redirects — the URL may be in a redirect loop",
+	ERR_INVALID_URL: "The URL is malformed or not supported by the network stack",
+	ERR_NETWORK_CHANGED:
+		"Network changed during the request — try again",
+	ERR_ADDRESS_UNREACHABLE:
+		"The server address is unreachable — it may be on a private or unavailable network",
+	ERR_EMPTY_RESPONSE: "The server returned an empty response",
+	// ERR_FAILED is Chromium's catch-all — keep last so specific codes match first
+	ERR_FAILED:
+		"Generic network failure — check your internet connection, proxy settings, or try again",
+};
+
+/**
+ * Extract a human-readable hint for a Chromium `net::ERR_*` code embedded in
+ * an error message. Returns `null` if no known code is found.
+ */
+function getNetErrorHint(errorMessage: string): string | null {
+	for (const [code, hint] of Object.entries(CHROMIUM_NET_ERROR_HINTS)) {
+		if (errorMessage.includes(code)) {
+			return hint;
+		}
+	}
+	return null;
+}
+
+// ---------------------------------------------------------------------------
 // Tool implementation (TOOL-010 + TOOL-012)
 // ---------------------------------------------------------------------------
 
@@ -242,7 +298,13 @@ export class FetchWebpageTool implements Tool {
 			mimeType = fetchResult.mimeType;
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);
-			log.warn("Fetch failed", { url, error: message });
+			log.warn("Fetch failed", {
+				url,
+				hostname: parsedUrl.hostname,
+				error: message,
+				errorName: e instanceof Error ? e.name : "Unknown",
+				...(e instanceof Error && e.stack ? { stack: e.stack } : {}),
+			});
 			return {
 				tool_name: this.name,
 				success: false,
@@ -361,9 +423,12 @@ export class FetchWebpageTool implements Tool {
 				timeoutPromise,
 			]);
 		} catch (e) {
-			throw new Error(
-				`Failed to fetch URL: ${e instanceof Error ? e.message : String(e)}`
-			);
+			const rawMessage = e instanceof Error ? e.message : String(e);
+			const hint = getNetErrorHint(rawMessage);
+			const enhanced = hint
+				? `Failed to fetch URL: ${rawMessage} — ${hint}`
+				: `Failed to fetch URL: ${rawMessage}`;
+			throw new Error(enhanced);
 		}
 
 		if (response.status < 200 || response.status >= 300) {
