@@ -54,8 +54,11 @@ function renderRulesSubsection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	new Setting(containerEl).setHeading().setName("Rules");
-	containerEl.createEl("p", {
+	// Wrap in a scoped div so the inline name prompt appears within this subsection
+	const section = containerEl.createDiv({ cls: "notor-rules-subsection" });
+
+	new Setting(section).setHeading().setName("Rules");
+	section.createEl("p", {
 		text:
 			"Rules inject instructions into the system prompt based on trigger conditions " +
 			"(always, directory, or tag). Each rule is a Markdown file in the notor rules folder.",
@@ -63,7 +66,7 @@ function renderRulesSubsection(
 	});
 
 	// "Create new rule" button
-	new Setting(containerEl)
+	new Setting(section)
 		.setName("Create new rule")
 		.setDesc(
 			"Creates a skeleton rule file with always-include enabled."
@@ -71,7 +74,7 @@ function renderRulesSubsection(
 		.addButton((btn) =>
 			btn.setButtonText("Create").onClick(async () => {
 				const name = await promptForName(
-					containerEl,
+					section,
 					"Rule name (e.g. coding-style)"
 				);
 				if (!name) return;
@@ -100,7 +103,7 @@ function renderRulesSubsection(
 		);
 
 	// List existing rules
-	const listContainer = containerEl.createDiv({ cls: "notor-rules-list" });
+	const listContainer = section.createDiv({ cls: "notor-rules-list" });
 
 	const rulesDir = normalizePath(`${ctx.settings.notor_dir}/rules`);
 	const rulesDirFile = ctx.app.vault.getAbstractFileByPath(rulesDir);
@@ -145,8 +148,11 @@ function renderWorkflowsSubsection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	new Setting(containerEl).setHeading().setName("Workflows");
-	containerEl.createEl("p", {
+	// Wrap in a scoped div so the inline name prompt appears within this subsection
+	const section = containerEl.createDiv({ cls: "notor-workflows-subsection" });
+
+	new Setting(section).setHeading().setName("Workflows");
+	section.createEl("p", {
 		text:
 			"Workflows are AI-driven automations triggered by events or manual commands. " +
 			"Each workflow is a Markdown file in the notor workflows folder.",
@@ -154,7 +160,7 @@ function renderWorkflowsSubsection(
 	});
 
 	// "Create new workflow" button
-	new Setting(containerEl)
+	new Setting(section)
 		.setName("Create new workflow")
 		.setDesc(
 			"Creates a skeleton workflow file with manual trigger."
@@ -162,7 +168,7 @@ function renderWorkflowsSubsection(
 		.addButton((btn) =>
 			btn.setButtonText("Create").onClick(async () => {
 				const name = await promptForName(
-					containerEl,
+					section,
 					"Workflow name (e.g. daily-review)"
 				);
 				if (!name) return;
@@ -197,7 +203,7 @@ function renderWorkflowsSubsection(
 		);
 
 	// List existing workflows
-	const listContainer = containerEl.createDiv({
+	const listContainer = section.createDiv({
 		cls: "notor-workflows-list",
 	});
 
