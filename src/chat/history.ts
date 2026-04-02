@@ -638,7 +638,7 @@ export class HistoryManager {
 	}
 
 	/** Delete a conversation file. */
-	private async deleteConversationFile(filename: string): Promise<void> {
+	async deleteConversationFile(filename: string): Promise<void> {
 		const path = this.getFilePath(filename);
 		try {
 			await this.vault.adapter.remove(path);

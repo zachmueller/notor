@@ -361,7 +361,7 @@
 	min-width: 0;
 }
 
-.notor-conversation-export-btn {
+.notor-conversation-action-btn {
 	flex-shrink: 0;
 	display: flex;
 	align-items: center;
@@ -375,16 +375,16 @@
 	transition: opacity 0.15s ease, color 0.15s ease;
 }
 
-.notor-conversation-list-item:hover .notor-conversation-export-btn {
+.notor-conversation-list-item:hover .notor-conversation-action-btn {
 	opacity: 1;
 }
 
-.notor-conversation-export-btn:hover {
+.notor-conversation-action-btn:hover {
 	color: var(--text-normal);
 	background: var(--background-modifier-hover);
 }
 
-.notor-conversation-export-btn svg {
+.notor-conversation-action-btn svg {
 	width: 14px;
 	height: 14px;
 }

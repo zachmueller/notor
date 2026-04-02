@@ -28,6 +28,7 @@ import { WorkflowActivityTracker } from "./workflows/workflow-activity-tracker";
 
 // Export / Import
 import { ExportModal, type ExportFormat } from "./export/export-modal";
+import { ConfirmModal } from "./ui/confirm-modal";
 import { exportToMarkdown } from "./export/markdown-exporter";
 import { exportToHtml } from "./export/html-exporter";
 import { extractJsonlFromHtml, reassignIds } from "./export/html-importer";
@@ -1470,6 +1471,42 @@ export default class NotorPlugin extends Plugin {
 				log.error("Failed to load conversation for export", { error: String(e) });
 				new Notice(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
 			});
+		});
+
+		// Delete conversation with confirmation
+		view.setOnDeleteConversation((filename: string) => {
+			new ConfirmModal(
+				this.app,
+				"Delete conversation",
+				"This conversation will be permanently deleted. This action cannot be undone.",
+				async () => {
+					const convManager = orchestrator.getConversationManager();
+					const activeConv = convManager.getActiveConversation();
+					await historyManager.deleteConversationFile(filename);
+					// Refresh the conversation list
+					const entries = await historyManager.listConversations();
+					view.renderConversationList(entries);
+					// If the deleted conversation was the active one, switch to another
+					const nextEntry = entries[0];
+					if (activeConv && nextEntry && filename.includes(activeConv.id)) {
+						await orchestrator.switchConversation(nextEntry.filename);
+						const conv = convManager.getActiveConversation();
+						if (conv) {
+							checkpointManager.setConversationId(conv.id);
+							view.setActiveConversationId(conv.id);
+						}
+					} else if (entries.length === 0) {
+						await orchestrator.newConversation();
+						const conv = convManager.getActiveConversation();
+						if (conv) {
+							checkpointManager.setConversationId(conv.id);
+							view.setActiveConversationId(conv.id);
+						}
+					}
+				},
+				"Delete",
+				true
+			).open();
 		});
 
 		// Import conversation from exported HTML

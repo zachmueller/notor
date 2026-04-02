@@ -131,6 +131,7 @@ export class NotorChatView extends ItemView {
 	private onNewConversation?: () => void;
 	private onSwitchConversation?: (filename: string) => void;
 	private onExportConversation?: (filename: string) => void;
+	private onDeleteConversation?: (filename: string) => void;
 	private onImportConversation?: (htmlContent: string) => Promise<void>;
 	private onSwitchToConversationById?: (conversationId: string) => Promise<boolean>;
 	private onOpenConversationList?: () => Promise<ConversationListEntry[]>;
@@ -193,6 +194,10 @@ export class NotorChatView extends ItemView {
 
 	setOnExportConversation(callback: (filename: string) => void): void {
 		this.onExportConversation = callback;
+	}
+
+	setOnDeleteConversation(callback: (filename: string) => void): void {
+		this.onDeleteConversation = callback;
 	}
 
 	setOnImportConversation(callback: (htmlContent: string) => Promise<void>): void {
@@ -1569,12 +1574,21 @@ export class NotorChatView extends ItemView {
 			}
 
 			// Export button
-			const exportBtn = item.createDiv({ cls: "notor-conversation-export-btn" });
+			const exportBtn = item.createDiv({ cls: "notor-conversation-action-btn" });
 			setIcon(exportBtn, "download");
 			exportBtn.setAttribute("aria-label", "Export conversation");
 			exportBtn.addEventListener("click", (e) => {
 				e.stopPropagation();
 				this.onExportConversation?.(entry.filename);
+			});
+
+			// Delete button
+			const deleteBtn = item.createDiv({ cls: "notor-conversation-action-btn" });
+			setIcon(deleteBtn, "trash-2");
+			deleteBtn.setAttribute("aria-label", "Delete conversation");
+			deleteBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this.onDeleteConversation?.(entry.filename);
 			});
 
 			item.addEventListener("click", () => {
