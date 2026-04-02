@@ -381,9 +381,7 @@ export class NotorChatView extends ItemView {
 
 		// Close conversation list if it was open
 		if (this.showConversationList) {
-			this.showConversationList = false;
-			this.conversationListEl.addClass("notor-hidden");
-			this.messageListEl.removeClass("notor-hidden");
+			this.toggleConversationList();
 		}
 
 		if (!this.onSwitchToConversationById) {
@@ -572,6 +570,9 @@ export class NotorChatView extends ItemView {
 		});
 		setIcon(newBtn, "message-square-plus");
 		newBtn.addEventListener("click", () => {
+			if (this.showConversationList) {
+				this.toggleConversationList();
+			}
 			this.onNewConversation?.();
 			this.textInputEl.focus();
 		});
@@ -1857,6 +1858,9 @@ export class NotorChatView extends ItemView {
 
 	private openSettingsPopover(): void {
 		this.closeSettingsPopover();
+		if (this.showConversationList) {
+			this.toggleConversationList();
+		}
 		this.isSettingsOpen = true;
 
 		this.settingsPopoverEl = this.headerEl.createDiv({ cls: "notor-settings-popover" });
