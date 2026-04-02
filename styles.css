@@ -346,6 +346,16 @@
 	background: var(--background-modifier-hover);
 }
 
+.notor-conversation-list-item.is-active {
+	background: hsla(var(--interactive-accent-hsl), 0.15);
+	border-left: 2px solid var(--interactive-accent);
+	padding-left: 8px;
+}
+
+.notor-conversation-list-item.is-active:hover {
+	background: hsla(var(--interactive-accent-hsl), 0.22);
+}
+
 .notor-conversation-list-content {
 	flex: 1;
 	min-width: 0;

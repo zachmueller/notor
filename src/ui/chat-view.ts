@@ -122,6 +122,9 @@ export class NotorChatView extends ItemView {
 	// MCP status indicator (INT-005)
 	private mcpStatusIndicator?: McpStatusIndicator;
 
+	// Active conversation tracking
+	private activeConversationId: string | null = null;
+
 	// Callbacks (set by orchestrator)
 	private onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
 	private onStopResponse?: () => void;
@@ -167,6 +170,10 @@ export class NotorChatView extends ItemView {
 	// -----------------------------------------------------------------------
 	// Callback setters (wired by orchestrator / main.ts)
 	// -----------------------------------------------------------------------
+
+	setActiveConversationId(id: string | null): void {
+		this.activeConversationId = id;
+	}
 
 	setOnSendMessage(callback: (content: string, attachments?: Attachment[]) => Promise<void>): void {
 		this.onSendMessage = callback;
@@ -1541,8 +1548,9 @@ export class NotorChatView extends ItemView {
 		}
 
 		for (const entry of entries) {
+			const isActive = entry.id === this.activeConversationId;
 			const item = this.conversationListEl.createDiv({
-				cls: "notor-conversation-list-item",
+				cls: `notor-conversation-list-item${isActive ? " is-active" : ""}`,
 			});
 
 			const contentCol = item.createDiv({ cls: "notor-conversation-list-content" });

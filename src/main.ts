@@ -1336,7 +1336,11 @@ export default class NotorPlugin extends Plugin {
 		// switchToConversation(conversationId) on the view, which delegates
 		// to this callback to find and load the conversation from history.
 		view.setOnSwitchToConversationById(async (conversationId: string) => {
-			return orchestrator.switchToConversationById(conversationId);
+			const result = await orchestrator.switchToConversationById(conversationId);
+			if (result) {
+				view.setActiveConversationId(conversationId);
+			}
+			return result;
 		});
 
 		// Wire persona manager to view (A-013: picker + label)
@@ -1423,6 +1427,7 @@ export default class NotorPlugin extends Plugin {
 				const conv = convManager.getActiveConversation();
 				if (conv) {
 					checkpointManager.setConversationId(conv.id);
+					view.setActiveConversationId(conv.id);
 				}
 			}).catch((e) => {
 				log.error("Failed to create new conversation", { error: String(e) });
@@ -1447,6 +1452,7 @@ export default class NotorPlugin extends Plugin {
 				const conv = convManager.getActiveConversation();
 				if (conv) {
 					checkpointManager.setConversationId(conv.id);
+					view.setActiveConversationId(conv.id);
 				}
 				// Clear stale tracker and vault rule accessed notes when switching
 				this.getStaleTracker().clear?.();
@@ -1646,6 +1652,7 @@ export default class NotorPlugin extends Plugin {
 					const conv = orchestrator.getConversationManager().getActiveConversation();
 					if (conv) {
 						checkpointManager.setConversationId(conv.id);
+						view.setActiveConversationId(conv.id);
 					}
 				}).catch((e) => {
 					log.error("Failed to start initial conversation", { error: String(e) });
@@ -1658,6 +1665,7 @@ export default class NotorPlugin extends Plugin {
 						const conv = orchestrator.getConversationManager().getActiveConversation();
 						if (conv) {
 							checkpointManager.setConversationId(conv.id);
+							view.setActiveConversationId(conv.id);
 						}
 					}).catch(() => {
 						// Fallback to new conversation on load error
@@ -1665,6 +1673,7 @@ export default class NotorPlugin extends Plugin {
 							const conv = orchestrator.getConversationManager().getActiveConversation();
 							if (conv) {
 								checkpointManager.setConversationId(conv.id);
+								view.setActiveConversationId(conv.id);
 							}
 						}).catch(() => {});
 					});
@@ -1736,6 +1745,10 @@ export default class NotorPlugin extends Plugin {
 				this.getOrchestrator()
 					.newConversation()
 					.then(() => {
+						const conv = this.getOrchestrator().getConversationManager().getActiveConversation();
+						if (conv) {
+							view.setActiveConversationId(conv.id);
+						}
 						// Refresh conversation list
 						this.getHistoryManager()
 							.listConversations()
