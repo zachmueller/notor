@@ -98,9 +98,19 @@ Add a new public method to the `ConversationManager` class (after `loadConversat
  *
  * Does NOT modify the active conversation state.
  *
+ * The caller (ChatOrchestrator) passes the currently active provider,
+ * model, and mode so the fork reflects the user's current session
+ * settings rather than the parent conversation's (potentially stale)
+ * values.
+ *
  * @returns Fork data, or null if the message ID is not found.
  */
-prepareFork(forkAtMessageId: string): {
+prepareFork(
+    forkAtMessageId: string,
+    currentProviderId: string,
+    currentModelId: string,
+    currentMode: ConversationMode
+): {
     conversation: Conversation;
     messages: Message[];
 } | null
@@ -120,14 +130,26 @@ prepareFork(forkAtMessageId: string): {
    const now = new Date().toISOString();
    const newConversationId = crypto.randomUUID();
 
+   // Title: prefer "Fork of {title}", fall back to first 8 chars of
+   // parent conversation ID so the fork is identifiable.
+   const forkTitle = original.title
+       ? `Fork of ${original.title}`
+       : `Fork of ${original.id.substring(0, 8)}`;
+
    const forkedConversation: Conversation = {
        id: newConversationId,
+       // created_at is "now" (when the fork was created), NOT copied
+       // from the parent. This differs from reassignIds() which
+       // preserves the original created_at for full imports.
        created_at: now,
        updated_at: now,
-       title: original.title ? `Fork of ${original.title}` : undefined,
-       provider_id: original.provider_id,
-       model_id: original.model_id,
-       mode: original.mode,
+       title: forkTitle,
+       // Use the CURRENT session's provider, model, and mode — not
+       // the parent conversation's values. The user may have changed
+       // settings since the parent was created.
+       provider_id: currentProviderId,
+       model_id: currentModelId,
+       mode: currentMode,
        // Re-sum tokens from sliced messages (not copied from parent)
        total_input_tokens: slicedMessages.reduce(
            (sum, m) => sum + (m.input_tokens ?? 0), 0
@@ -141,12 +163,15 @@ prepareFork(forkAtMessageId: string): {
        // Fork provenance
        forked_from_conversation_id: original.id,
        forked_from_message_id: forkAtMessageId,
-       // Preserve workflow metadata for provenance
+       // Preserve ALL workflow metadata for provenance
        ...(original.workflow_path !== undefined && {
            workflow_path: original.workflow_path,
        }),
        ...(original.workflow_name !== undefined && {
            workflow_name: original.workflow_name,
+       }),
+       ...(original.persona_name !== undefined && {
+           persona_name: original.persona_name,
        }),
        // Clear is_background — forked conversations are always foreground
        is_background: false,
@@ -156,7 +181,7 @@ prepareFork(forkAtMessageId: string): {
    };
    ```
 
-5. **Assign fresh IDs.** Same pattern as `reassignIds()` in [`src/export/html-importer.ts:78-98`](../src/export/html-importer.ts):
+5. **Assign fresh IDs.** Similar to `reassignIds()` in [`src/export/html-importer.ts:78-98`](../src/export/html-importer.ts), but note that `reassignIds()` is designed for full imports (preserves `created_at`), whereas forking sets `created_at` to "now" (see step 4). Only the message ID reassignment pattern is reused:
 
    ```typescript
    const newMessages = slicedMessages.map((msg) => ({
@@ -185,7 +210,12 @@ Add a new public method (alongside `newConversation` and `switchConversation`):
  * switches to it.
  */
 async forkConversation(forkAtMessageId: string): Promise<void> {
-    const forkData = this.conversationManager.prepareFork(forkAtMessageId);
+    const forkData = this.conversationManager.prepareFork(
+        forkAtMessageId,
+        this.currentProviderId,
+        this.currentModelId,
+        this.conversationManager.getActiveConversation()?.mode ?? "act"
+    );
     if (!forkData) {
         new Notice("Cannot fork: message not found (it may have been compacted).");
         return;
@@ -209,23 +239,27 @@ This follows the exact same pattern used by the import flow in [`src/main.ts:353
 
 #### 3.4.1 Message ID Tracking
 
-Add a `data-message-id` attribute to each rendered message element so the context menu can identify the message. Four touch points:
+Add a `data-message-id` attribute to each rendered message element so the context menu can identify the message.
+
+**Note on assistant messages:** The `.notor-message-assistant` wrapper div is created in `createAssistantMessagePlaceholder()` ([`src/ui/chat-view.ts:1192`](../src/ui/chat-view.ts)), which returns only the inner `contentEl`. The message ID is not yet known at placeholder creation time (it's assigned after the LLM response completes). The ID must therefore be set in `finalizeAssistantMessage()` by navigating up to the parent element via `contentEl.parentElement`.
 
 | Method | Line | Element | Change |
 |--------|------|---------|--------|
 | `renderUserMessage()` | 1087 | `msgEl` (`.notor-message-user`) | `msgEl.dataset.messageId = message.id;` |
-| `finalizeAssistantMessage()` | 1215 | The parent `.notor-message-assistant` div | `parentEl.dataset.messageId = message.id;` |
+| `finalizeAssistantMessage()` | 1215 | `contentEl.parentElement` (the `.notor-message-assistant` wrapper created in `createAssistantMessagePlaceholder` at line 1192) | `contentEl.parentElement!.dataset.messageId = message.id;` |
 | `renderToolCall()` | 1308 | `toolEl` (`.notor-tool-call`) | `toolEl.dataset.messageId = message.id;` |
 | `renderToolResult()` | 1346 | `resultEl` (`.notor-tool-result`) | `resultEl.dataset.messageId = message.id;` |
 
 #### 3.4.2 Context Menu
 
-Register a single `contextmenu` listener on `this.messageListEl` (the scrollable message container) that uses event delegation to find the closest `[data-message-id]` ancestor of the click target:
+Register a single `contextmenu` listener on `this.messageListEl` (the scrollable message container) that uses event delegation to find the closest `[data-message-id]` ancestor of the click target.
+
+**Streaming guard:** The fork option must be suppressed for the **currently streaming** assistant message. While a response is in progress, earlier (completed) messages in the conversation are still forkable — only the in-progress reply is blocked. The guard identifies the streaming message by checking whether the target element is (or is inside) the most recently created assistant placeholder that has not yet been finalized (i.e., it has no `data-message-id` attribute, since that is set in `finalizeAssistantMessage()`). This means the guard is automatic: unfinalized messages simply won't match `[data-message-id]`, so the context menu won't fire for them.
 
 ```typescript
 this.messageListEl.addEventListener("contextmenu", (evt: MouseEvent) => {
     const target = (evt.target as HTMLElement).closest("[data-message-id]");
-    if (!target) return;
+    if (!target) return; // No message ID → unfinalized or non-message element
 
     const messageId = (target as HTMLElement).dataset.messageId;
     if (!messageId) return;
@@ -260,14 +294,38 @@ setOnForkConversation(callback: (messageId: string) => Promise<void>): void {
 
 #### 3.4.4 Fork Lineage in Conversation List
 
-In the conversation list rendering section (where `entries.push(...)` builds list items from `ConversationListEntry[]`), when `entry.forked_from_conversation_id` is present, append a subtle visual indicator:
+**File: [`src/ui/chat-view.ts`](../src/ui/chat-view.ts) — `renderConversationList()` method (lines 1532–1576)**
+
+The conversation list is a sidebar panel toggled via the header "list" icon. Individual entries are rendered in `renderConversationList()`, where each `ConversationListEntry` becomes a `.notor-conversation-list-item` div. The title is set at line 1551 (`titleEl.textContent = entry.title ?? "Untitled"`).
+
+Immediately after the title is set, when `entry.forked_from_conversation_id` is present, append a **clickable** fork lineage indicator. Clicking the badge navigates to the parent conversation. Before rendering the badge, verify the parent conversation still exists (it may have been deleted by the retention policy):
 
 ```typescript
 if (entry.forked_from_conversation_id) {
-    const forkBadge = titleEl.createSpan({ cls: "notor-fork-badge" });
-    forkBadge.textContent = "⑂"; // or use setIcon("git-branch-plus")
+    // Only show the badge if the parent conversation still exists
+    // on the user's system (it may have been purged by retention).
+    const parentExists = entries.some(
+        (e) => e.id === entry.forked_from_conversation_id
+    );
+    if (parentExists) {
+        const forkBadge = titleEl.createSpan({ cls: "notor-fork-badge" });
+        setIcon(forkBadge, "git-branch-plus");
+        forkBadge.setAttribute("aria-label", "Go to parent conversation");
+        forkBadge.addEventListener("click", (e) => {
+            e.stopPropagation(); // Don't trigger the item's own click handler
+            const parent = entries.find(
+                (e) => e.id === entry.forked_from_conversation_id
+            );
+            if (parent) {
+                this.onSwitchConversation?.(parent.filename);
+                this.toggleConversationList();
+            }
+        });
+    }
 }
 ```
+
+**Note:** The `parentExists` check operates against the already-loaded `entries` array (which contains all conversations visible in the list). This is an O(n) scan per forked entry but is negligible given typical conversation counts. For the search path (`searchConversations`), the parent may not be in the filtered results — in that case, the badge is simply not shown, which is acceptable since the parent can still be found via the full list.
 
 ### 3.5 Wiring in main.ts
 
@@ -302,7 +360,7 @@ entries.push({
 });
 ```
 
-Apply the same extraction in `searchConversations()` which has an identical entry-building block.
+**Important:** The same field extraction must also be applied in `searchConversations()` ([`src/chat/history.ts:439`](../src/chat/history.ts)), which has an identical entry-building block at lines 502–511. Both `listConversations()` and `searchConversations()` must include `forked_from_conversation_id` in their `entries.push(...)` calls for the fork badge to appear consistently regardless of whether the user is browsing or searching.
 
 ### 3.7 CSS
 
@@ -313,6 +371,11 @@ Apply the same extraction in `searchConversations()` which has an identical entr
     margin-left: 4px;
     opacity: 0.5;
     font-size: 0.85em;
+    cursor: pointer;
+}
+
+.notor-fork-badge:hover {
+    opacity: 0.8;
 }
 ```
 
@@ -324,20 +387,39 @@ Apply the same extraction in `searchConversations()` which has an identical entr
 
 If the fork-point message has `role === "tool_call"`, the LLM provider expects a paired `tool_result` in the conversation history. Without it, the next API call after the user continues the fork would fail.
 
-**Solution:** `prepareFork()` auto-extends the slice to include the paired `tool_result` if it is the immediately following message (see §3.2 step 3). If no paired result exists (tool was never executed), the orchestrator's existing `toChatMessages` safety net injects a synthetic "cancelled by user" tool_result, so the fork still works.
+**Solution:** `prepareFork()` auto-extends the slice to include the paired `tool_result` if it is the immediately following message (see §3.2 step 3). If no paired result exists (tool was never executed), the orchestrator's existing `toChatMessages` safety net ([`src/chat/orchestrator.ts:2028-2054`](../src/chat/orchestrator.ts)) injects a synthetic "cancelled by user" tool_result, so the fork still works.
+
+**Multi-tool-call sequences:** The LLM can issue multiple consecutive tool calls (e.g., `tool_call A` → `tool_result A` → `tool_call B` → `tool_result B`). The fork slices at the **exact** user-selected message — no lookahead beyond the single tool_call/tool_result pairing rule:
+
+| Fork point | Slice includes | Notes |
+|------------|---------------|-------|
+| `tool_call A` | …through `tool_result A` (auto-extended) | `tool_call B` and beyond are excluded |
+| `tool_result A` | …through `tool_result A` exactly | `tool_call B` is excluded; this is a clean boundary |
+| `tool_call B` | …through `tool_result B` (auto-extended) | Full sequence included |
+
+**Interaction with `toChatMessages`:** The `toChatMessages` safety net operates on the `ChatMessage[]` sent to the provider, not on the persisted `Message[]`. If a fork ends up with an orphaned `tool_call` (e.g., the auto-extension didn't find a paired result), the safety net injects a synthetic `tool_result` at provider-call time. The orphaned `tool_call` is still persisted in the JSONL — it's only patched in-memory during the API call.
+
+**E2E test coverage required:** Given the complexity of tool_call boundaries, the following scenarios must be covered by dedicated E2E tests:
+
+1. Fork at a `tool_call` message → verify the paired `tool_result` is included in fork JSONL
+2. Fork at a `tool_result` message → verify the next `tool_call` (if any) is NOT included
+3. Fork at a `tool_call` with no paired result (interrupted execution) → verify the fork is still continuable (safety net injects synthetic result)
+4. Fork in the middle of a multi-tool sequence → verify only messages up to and including the fork point (+ auto-extension) are present
+5. Continue a forked conversation after a tool_call boundary → verify the LLM receives a valid message sequence and responds without error
 
 ### 4.2 Compacted Conversations
 
 When a conversation has been compacted ([`src/context/compaction.ts`](../src/context/compaction.ts)), older messages are replaced by a compaction summary (a system message with `CompactionRecord` JSON). The compacted-away messages no longer exist in the in-memory `messages[]` array.
 
 - **Forking after compaction:** The fork contains the compaction summary + all messages from the summary onward up to the fork point. This is correct — the summary represents the available context.
+- **Compaction summary content:** The compaction summary system message contains a serialized `CompactionRecord` JSON that references the *original* conversation's ID. This is left as-is in the fork — the summary is purely informational context for the LLM and does not need to reference the fork's conversation ID.
 - **Forking at a compacted-away message:** The message ID will not be found in the array. `prepareFork()` returns `null`, and the user sees a notice: "Cannot fork: message not found (it may have been compacted)."
 
 ### 4.3 Workflow Conversations
 
 Workflow conversations ([`src/types.ts:33-62`](../src/types.ts)) have `workflow_path`, `workflow_name`, `persona_name`, and `is_background` fields.
 
-- `workflow_path` and `workflow_name` are preserved in the fork for provenance tracking.
+- `workflow_path`, `workflow_name`, and `persona_name` are all preserved in the fork for provenance tracking.
 - `is_background` is cleared to `false` — the fork is always a foreground conversation.
 - `is_workflow_message` flag on the first user message is preserved, so the `<workflow_instructions>` block still renders correctly in the fork.
 - No persona switch is triggered — forking is a data operation, not a workflow execution.
@@ -364,6 +446,18 @@ If the user forks at the very first message, the fork contains exactly one messa
 
 The forked conversation's `total_input_tokens`, `total_output_tokens`, and `estimated_cost` are **re-summed** from the sliced messages, not copied from the parent. This ensures accuracy since the parent's totals include messages after the fork point.
 
+### 4.9 Imported Conversations
+
+Any conversation loaded into the user's system can be forked, including conversations imported from HTML exports. Imported conversations have already been through `reassignIds()`, so their IDs are local. The fork's `forked_from_conversation_id` will reference the *imported copy's* ID (not the original pre-import ID), which is the correct behavior since that's the version the user has on their system.
+
+### 4.10 Forking During Active Streaming
+
+While the assistant is streaming a response, the user may still fork from any **earlier, completed** message in the conversation. Only the in-progress assistant reply is blocked from forking. This is enforced naturally by the `data-message-id` mechanism: the ID is set in `finalizeAssistantMessage()`, so unfinalized (still-streaming) messages have no `data-message-id` attribute and the context menu won't fire for them (see §3.4.2).
+
+### 4.11 Fork Badge and Deleted Parent Conversations
+
+The fork badge in the conversation list (§3.4.4) is only displayed when the parent conversation still exists in the user's history. If the parent has been purged by the retention policy or manually deleted, the badge is not rendered. The `forked_from_conversation_id` metadata remains on the fork's JSONL header for historical reference, but no UI element references a nonexistent conversation.
+
 ---
 
 ## 5. What This Design Intentionally Does NOT Do
@@ -372,9 +466,9 @@ The forked conversation's `total_input_tokens`, `total_output_tokens`, and `esti
 |----------|-----------|
 | **No conversation tree structure** | Forked conversations are fully independent. The `forked_from_*` fields are informational metadata, not structural links. Building a tree would add significant complexity for marginal UX gain. |
 | **No "edit and regenerate" inline** | Forking replaces this by creating a fresh conversation. A future "edit message" feature could build on the same `data-message-id` infrastructure. |
-| **No forking of a conversation you're not actively viewing** | The user must load the conversation first (which they'd need to do anyway to pick a fork point). |
-| **No multi-fork tracking UI** | No tree visualization or branch navigator. The conversation list shows a simple fork badge. If users want to see all forks of a conversation, they can search by the original title. |
+| **No multi-fork tracking UI** | No tree visualization or branch navigator. The conversation list shows a clickable fork badge that navigates to the parent (see §3.4.4). If users want to see all forks *of* a conversation, they can search by the original title. |
 | **No checkpoint migration** | See §4.4. |
+| **No forking of conversations not actively loaded** | The user must load the conversation first (which they'd need to do anyway to pick a fork point). Any loaded conversation — including imports — can be forked (see §4.9). |
 
 ---
 
@@ -389,13 +483,19 @@ The forked conversation's `total_input_tokens`, `total_output_tokens`, and `esti
 - Token/cost totals are re-summed from sliced messages
 - Fork metadata (`forked_from_conversation_id`, `forked_from_message_id`) is set correctly
 - Tool call pairing: fork at `tool_call` includes paired `tool_result`
+- Tool call pairing: fork at `tool_result` does NOT include next `tool_call`
+- Multi-tool sequence: fork mid-sequence includes only messages up to fork point (+ auto-extension)
 - Returns `null` for unknown message ID
 - Preserves original timestamps on messages
-- Preserves workflow metadata, clears `is_background`
-- Title is `"Fork of {original}"`
+- Preserves workflow metadata (`workflow_path`, `workflow_name`, `persona_name`), clears `is_background`
+- Title is `"Fork of {original}"` when original has a title
+- Title falls back to `"Fork of {first 8 chars of conversation ID}"` when original has no title
+- Uses passed-in `currentProviderId`, `currentModelId`, and `currentMode` (not parent values)
+- `created_at` is set to "now", not copied from parent
 
 ### 6.2 E2E Test (Playwright script in [`e2e/scripts/`](../e2e/scripts/))
 
+**Core fork functionality:**
 1. Create a conversation with several user/assistant exchanges
 2. Fork at message N
 3. Verify the fork JSONL file exists with correct message count
@@ -405,12 +505,29 @@ The forked conversation's `total_input_tokens`, `total_output_tokens`, and `esti
 7. Verify the conversation list shows the fork with lineage indicator
 8. Verify forking a compacted conversation includes the compaction summary
 
+**Tool call boundary tests (see §4.1):**
+9. Fork at a `tool_call` message → verify the paired `tool_result` is included in fork JSONL
+10. Fork at a `tool_result` message → verify the next `tool_call` (if any) is NOT included
+11. Fork at a `tool_call` with no paired result → verify the fork is continuable (send a message → get valid response)
+12. Fork in the middle of a multi-tool sequence → verify exact message count matches expectation
+13. Continue a forked conversation after a tool_call boundary → verify the LLM responds without API errors
+
+**Fork badge and navigation:**
+14. Verify the fork badge is clickable and navigates to the parent conversation
+15. Delete the parent conversation → verify the fork badge is no longer shown
+16. Fork an imported conversation → verify `forked_from_conversation_id` references the import's local ID
+
+**Streaming interaction:**
+17. While assistant is streaming, right-click an earlier completed message → verify "Fork conversation from here" appears
+18. While assistant is streaming, right-click the in-progress message → verify no context menu appears
+
 ### 6.3 Manual Testing
 
 - Right-click a user message → "Fork conversation from here" → verify fork opens with correct history
 - Right-click an assistant message → same flow
 - Right-click a tool call → verify tool_result is included
-- Check conversation list shows fork badge
+- Check conversation list shows fork badge; click it → navigates to parent
 - Continue chatting in the fork → verify messages are independent of original
 - Switch back to original → verify it's unchanged
-- Fork a workflow conversation → verify workflow metadata preserved
+- Fork a workflow conversation → verify workflow metadata preserved (including `persona_name`)
+- Fork with a different provider/model selected → verify fork header uses current session values, not parent's
