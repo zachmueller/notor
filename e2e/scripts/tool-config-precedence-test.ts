@@ -159,8 +159,7 @@ Summarize the contents of the vault. Do not modify any files.
 	fs.writeFileSync(
 		path.join(rulesDir, "readonly-rule.md"),
 		`---
-notor-rule: true
-notor-rule-active-note: "^Archive/"
+notor-directory-include: Archive
 ---
 
 This note is archived. Do not modify it.

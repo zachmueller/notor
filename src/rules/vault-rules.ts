@@ -366,7 +366,7 @@ export class VaultRuleManager {
 		if (rule.directory_include) {
 			const dirPrefix = rule.directory_include.replace(/\/$/, "") + "/";
 			for (const notePath of this.accessedNotes) {
-				if (notePath.startsWith(dirPrefix) || notePath.startsWith(rule.directory_include)) {
+				if (notePath.startsWith(dirPrefix)) {
 					return true;
 				}
 			}
