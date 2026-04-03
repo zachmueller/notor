@@ -497,6 +497,12 @@
 	text-align: right;
 }
 
+.notor-settings-link {
+	cursor: pointer;
+	color: var(--link-color);
+	text-decoration-line: underline;
+}
+
 /* ==========================================================================
    Tool Calls
    ========================================================================== */

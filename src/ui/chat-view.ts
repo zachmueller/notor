@@ -1327,17 +1327,31 @@ export class NotorChatView extends ItemView {
 	/**
 	 * Attach click handlers to settings deep-links (notor-settings:// URLs)
 	 * within a rendered message element. Opens Obsidian settings to the target group.
+	 *
+	 * Must attach directly to the `<a>` elements rather than using event delegation,
+	 * because Obsidian's own click handler on rendered external links intercepts
+	 * the event and stops propagation before a container-level listener can see it.
 	 */
 	private activateSettingsLinks(containerEl: HTMLElement): void {
-		containerEl.addEventListener("click", (e: MouseEvent) => {
-			const link = (e.target as HTMLElement).closest("a");
-			if (!link) return;
-			const href = link.getAttribute("href");
-			if (!href?.startsWith("notor-settings://")) return;
-			e.preventDefault();
-			const groupTitle = decodeURIComponent(href.replace("notor-settings://", ""));
-			this.onOpenSettingsGroup?.(groupTitle);
-		});
+		const prefix = "notor-settings://";
+		for (const link of containerEl.querySelectorAll<HTMLAnchorElement>("a")) {
+			const href = link.getAttribute("href") ?? link.getAttribute("data-href") ?? "";
+			if (!href.startsWith(prefix)) continue;
+
+			const groupTitle = decodeURIComponent(href.slice(prefix.length));
+
+			// Attach directly so it fires before Obsidian's external-link handler.
+			link.addEventListener("click", (e: MouseEvent) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.onOpenSettingsGroup?.(groupTitle);
+			});
+
+			// Remove href so Obsidian doesn't also try to open it externally.
+			link.removeAttribute("href");
+			link.dataset.notorSettingsGroup = groupTitle;
+			link.classList.add("notor-settings-link");
+		}
 	}
 
 	private openInternalLink(href: string): void {
