@@ -20,6 +20,7 @@ import { renderOpenAIProviderSection } from "./sections/provider-openai";
 import { renderBedrockProviderSection } from "./sections/provider-bedrock";
 import { renderAutoContextSection } from "./sections/auto-context";
 import { renderFetchWebpageSection } from "./sections/fetch-webpage";
+import { renderWebSearchSection } from "./sections/web-search";
 import { renderExecuteCommandSection } from "./sections/execute-command";
 import { renderDocxToolsSection } from "./sections/docx-tools";
 import { renderHooksSection } from "./sections/hooks";
@@ -129,6 +130,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		// --- Tool Configuration (collapsed by default) ---
 		const toolConfigGroup = createSettingsGroup(containerEl, "Tool configuration", false, persisted, onToggle);
 		renderFetchWebpageSection(toolConfigGroup, ctx);
+		renderWebSearchSection(toolConfigGroup, ctx);
 		renderExecuteCommandSection(toolConfigGroup, ctx);
 		renderDocxToolsSection(toolConfigGroup, ctx);
 		renderFileAttachmentsSection(toolConfigGroup, ctx);

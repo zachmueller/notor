@@ -55,8 +55,8 @@ The foundational tool class, parsing logic, and registration — enough to make 
 ### Phase 1 verification
 
 - [x] Build succeeds (`npm run build`)
-- [ ] Tool appears in `getToolRegistry().getNames()`
-- [ ] Manual test: ask LLM to search for something → tool call appears in UI, results returned
+- [x] Tool appears in `getToolRegistry().getNames()`
+- [x] Manual test: ask LLM to search for something → tool call appears in UI, results returned
 
 ---
 
@@ -66,19 +66,19 @@ New settings fields, default values, and settings UI section.
 
 ### 2.1 Add settings fields to `NotorSettings`
 
-- [ ] In `src/settings/types.ts`, add:
+- [x] In `src/settings/types.ts`, add:
   - `web_search_timeout: number` — HTTP request timeout in seconds
   - `web_search_default_num_results: number` — default result count
 
 ### 2.2 Add default values
 
-- [ ] In `src/settings/defaults.ts` `createDefaultSettings()`, add:
+- [x] In `src/settings/defaults.ts` `createDefaultSettings()`, add:
   - `web_search_timeout: 10`
   - `web_search_default_num_results: 5`
 
 ### 2.3 Create settings UI section
 
-- [ ] Create `src/settings/sections/web-search.ts`
+- [x] Create `src/settings/sections/web-search.ts`
   - Export `renderWebSearchSection(containerEl: HTMLElement, ctx: SettingsContext): void`
   - Follow `src/settings/sections/fetch-webpage.ts` as template
   - Setting: "Request timeout (seconds)" — text input, numeric, bound to `web_search_timeout`
@@ -87,11 +87,11 @@ New settings fields, default values, and settings UI section.
 
 ### 2.4 Wire section into settings tab
 
-- [ ] In `src/settings/settings-tab.ts`, import and call `renderWebSearchSection()` in the "Tool configuration" group, after `renderFetchWebpageSection()`
+- [x] In `src/settings/settings-tab.ts`, import and call `renderWebSearchSection()` in the "Tool configuration" group, after `renderFetchWebpageSection()`
 
 ### Phase 2 verification
 
-- [ ] Settings tab shows "Web search" section with two controls
+- [x] Settings tab shows "Web search" section with two controls
 - [ ] Changing values persists across plugin reload
 - [ ] Tool respects configured timeout and result count
 
