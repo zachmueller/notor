@@ -19,6 +19,7 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `read_file` | Read a text file from the filesystem (desktop only) | Plan & Act |
 | `read_docx` | Read a `.docx` file and return its content as Markdown (desktop only) | Plan & Act |
 | `write_docx` | Convert Markdown to a `.docx` file on the filesystem (desktop only) | Act only |
+| `use_subagent` | Spawn a focused [sub-agent](sub-agents.md) child conversation for a specific task | Plan & Act |
 
 Every tool call is displayed inline in the chat thread — name, parameters, result, and status — so you always see exactly what the AI is doing.
 

@@ -4,14 +4,14 @@
 
 Notor brings AI-powered assistance directly into your Obsidian workflow. It gives you a full AI chat panel with the ability to read, search, create, and surgically edit notes in your vault — with full transparency into every AI action, a safety-first approval model, diff previews for proposed changes, and rollback via checkpoints.
 
-> **Status:** Phases 0–4.1 of the roadmap implemented.
+> **Status:** Phases 0–5 of the roadmap implemented.
 
 ---
 
 ## What Notor can do
 
 - **Chat with an AI inside Obsidian** — side panel chat with streaming responses, multiple LLM providers (local, Anthropic, OpenAI, AWS Bedrock), dynamic model selection, and conversation history
-- **[Read, write, and edit notes](docs/vault-tools.md)** — 13 built-in tools including vault note operations, web fetching, shell command execution, and filesystem read/write with Word (`.docx`) support
+- **[Read, write, and edit notes](docs/vault-tools.md)** — 14 built-in tools including vault note operations, web fetching, shell command execution, filesystem read/write with Word (`.docx`) support, and sub-agent dispatch
 - **[Safety-first approval model](docs/safety.md)** — Plan/Act mode, diff previews with per-hunk accept/reject, approval gates for write operations, and automatic checkpoints for rollback
 - **[Note and file attachments](docs/context.md)** — attach vault notes (with section-level references) or external files directly to messages; ambient workspace context injected automatically
 - **[Vault-level instruction files](docs/rules.md)** — store Markdown rule files under `notor/rules/` that inject instructions automatically based on note directory or tag
@@ -21,6 +21,7 @@ Notor brings AI-powered assistance directly into your Obsidian workflow. It give
 - **[LLM interaction hooks](docs/hooks.md)** — shell commands or workflows that fire at key conversation lifecycle events (pre-send, on-tool-call, after-completion, etc.)
 - **[Vault event hooks](docs/hooks.md#vault-event-hooks)** — hooks triggered by vault events: note open/save/create, tag changes, and cron schedules
 - **[Custom MCP tool servers](docs/mcp-servers.md)** — connect stdio or HTTP MCP servers to extend the AI's tool set; uniform dispatch with Plan/Act enforcement and approval UI
+- **[Sub-agents](docs/sub-agents.md)** — spawn focused child conversations for vault search, web lookup, or custom tasks; isolated context, default-deny tool access, concurrent execution (up to 3), and three built-in profiles (`search-vault`, `search-web`, `notor-help`)
 - **Auto-compaction** — automatic context summarization when conversations approach the model's context window limit
 
 ---
@@ -84,7 +85,8 @@ For full setup walkthroughs — including creating your first persona, workflow,
 | **Phase 4** | Workflows & personas: file-based personas, reusable workflow notes, `<include_note>` tag, vault event hooks | ✅ Complete |
 | **Phase 4.1** | Custom MCP servers: stdio/SSE/Streamable HTTP transports, tool discovery, uniform dispatch, read/write classification, Plan/Act signaling, auto-approve, chat panel status indicator | ✅ Complete |
 | **Phase 4c** | Word & file tools: `read_file`, `read_docx`, `write_docx` with optional template grafting; shared path-validation utility; settings UI | ✅ Complete |
-| **Phase 5** | Advanced & multi-agent: parallel agents, agent monitor panel, background agents, browser capabilities | 🔜 Planned |
+| **Phase 5** | Sub-agents: `use_subagent` tool, isolated child conversations, built-in profiles (`search-vault`, `search-web`, `notor-help`), default-deny tool access, concurrency control, progress UI | ✅ Complete |
+| **Phase 6** | Advanced & multi-agent: agent monitor panel, background agents, browser capabilities | 🔜 Planned |
 
 ---
 
@@ -106,6 +108,7 @@ src/
   rules/               # Vault-level instruction file evaluation
   shell/               # Shell executor, shell resolver, output buffer (shared by execute_command and hooks)
   mcp/                 # MCP server hub, tool adapter, and type definitions
+  sub-agents/          # Sub-agent profile discovery, manager, built-in profiles, preamble, semaphore
   settings/            # Settings interface, defaults, tab UI, per-section UI components
   ui/                  # Chat panel, diff view, approval UI, tool call display, attachment chips,
                        #   compaction markers, persona picker, workflow activity indicator,

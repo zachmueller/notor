@@ -33,6 +33,16 @@ Before any write operation, the affected note is automatically snapshotted as a 
 - You can preview, compare (diff), or restore any checkpoint from the conversation timeline.
 - Checkpoint data is stored in `.obsidian/plugins/notor/checkpoints/` and is not visible as vault notes.
 
+## Sub-agent security
+
+[Sub-agents](sub-agents.md) operate under a stricter security model than the main conversation:
+
+- **Default-deny tool access** — a sub-agent has NO tools unless explicitly enabled in its profile.
+- **Intersection enforcement** — the effective tool set is the intersection of the parent's enabled tools and the sub-agent's profile config. A sub-agent can never access a tool the parent doesn't have.
+- **Plan/Act inheritance** — sub-agents always inherit the parent's mode. A sub-agent cannot escalate to Act mode when the parent is in Plan mode.
+- **No nesting** — sub-agents cannot spawn other sub-agents.
+- **Read tools auto-approved** — read-only tool calls within sub-agents are auto-approved by default (configurable). Write tools surface approval prompts in the main chat.
+
 ## Stale-content protection
 
 If you edit a note directly in Obsidian while the AI has it queued for modification, Notor detects the conflict and fails the write. The AI is prompted to re-read the current content before retrying, preventing it from overwriting your changes with a stale version.

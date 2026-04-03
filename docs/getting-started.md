@@ -103,6 +103,22 @@ To connect a remote HTTP server instead:
 2. Enter the server's URL and any required headers (mark `Authorization` values as **Sensitive** to store them encrypted)
 3. Save — the server connects and tools are discovered automatically; HTTP servers auto-reconnect if the connection drops
 
+## Set up sub-agents
+
+Sub-agents let the AI spawn focused child conversations for tasks like vault search or web research. Three built-in profiles are ready to use out of the box. See [sub-agents.md](sub-agents.md) for the full reference.
+
+The built-in profiles (`search-vault`, `search-web`, `notor-help`) are enabled by default — the AI will use them automatically when appropriate. To create your own:
+
+1. Open **Settings → Notor → Sub-agents** and click **Create new sub-agent**
+2. Enter a name — Notor creates the profile directory and skeleton file
+3. Edit the `system-prompt.md` that opens:
+   - Write a `notor-description` in the frontmatter (so the AI knows when to use it)
+   - Add a system prompt describing the agent's purpose
+   - Add a `<notor_tool_config>` block enabling only the tools the agent needs
+4. The profile is immediately available — ask the AI something that would benefit from focused investigation
+
+> Sub-agents use default-deny tool access. A sub-agent can only use tools that are both enabled in its profile AND enabled in the parent conversation. See [sub-agents.md](sub-agents.md#tool-access) for details.
+
 ## Configure Word & file tools
 
 > **Desktop only.** These tools are unavailable on mobile.
