@@ -1334,14 +1334,33 @@ export class NotorChatView extends ItemView {
 	 */
 	private activateSettingsLinks(containerEl: HTMLElement): void {
 		const prefix = "notor-settings://";
-		for (const link of containerEl.querySelectorAll<HTMLAnchorElement>("a")) {
+		const allLinks = containerEl.querySelectorAll<HTMLAnchorElement>("a");
+		log.debug("activateSettingsLinks: scanning rendered content", {
+			totalAnchors: allLinks.length,
+			hasCallback: !!this.onOpenSettingsGroup,
+		});
+
+		// Log all anchor attributes for diagnostics
+		for (const link of allLinks) {
+			const href = link.getAttribute("href");
+			const dataHref = link.getAttribute("data-href");
+			const cls = link.className;
+			const text = link.textContent?.substring(0, 60);
+			log.debug("activateSettingsLinks: anchor found", { href, dataHref, cls, text });
+		}
+
+		let matched = 0;
+		for (const link of allLinks) {
 			const href = link.getAttribute("href") ?? link.getAttribute("data-href") ?? "";
 			if (!href.startsWith(prefix)) continue;
+			matched++;
 
 			const groupTitle = decodeURIComponent(href.slice(prefix.length));
+			log.debug("activateSettingsLinks: matched settings link", { groupTitle, href });
 
 			// Attach directly so it fires before Obsidian's external-link handler.
 			link.addEventListener("click", (e: MouseEvent) => {
+				log.debug("activateSettingsLinks: click fired", { groupTitle });
 				e.preventDefault();
 				e.stopPropagation();
 				this.onOpenSettingsGroup?.(groupTitle);
@@ -1352,6 +1371,8 @@ export class NotorChatView extends ItemView {
 			link.dataset.notorSettingsGroup = groupTitle;
 			link.classList.add("notor-settings-link");
 		}
+
+		log.debug("activateSettingsLinks: scan complete", { matched, total: allLinks.length });
 	}
 
 	private openInternalLink(href: string): void {
