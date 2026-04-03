@@ -27,12 +27,12 @@ The import/export system already implements the core operation: taking a `Conver
 
 | Component | File | Reusable Functionality |
 |-----------|------|----------------------|
-| `reassignIds()` | [`src/export/html-importer.ts:78-98`](../src/export/html-importer.ts) | Generates fresh UUID for conversation + all messages, preserves original timestamps. Fork needs this exact pattern. |
+| `reassignIds()` | [`src/export/html-importer.ts:78-98`](../src/export/html-importer.ts) | Generates fresh UUID for conversation + all messages, preserves original timestamps. Fork reuses the **message ID reassignment pattern** but not the function itself — `reassignIds()` preserves `created_at`, whereas fork sets it to "now" (see §3.2 step 5). |
 | `importConversation()` | [`src/chat/history.ts:230-256`](../src/chat/history.ts) | Batch-writes a conversation header + message array as a new JSONL file. Fork can call this directly. |
 | `switchConversation()` | [`src/chat/orchestrator.ts:286`](../src/chat/orchestrator.ts) | Loads a JSONL file, populates in-memory state, re-renders all messages. Fork switches to the new conversation using this. |
 | `loadConversation()` | [`src/chat/conversation.ts:137-147`](../src/chat/conversation.ts) | Loads conversation + messages into active memory. Already called by `switchConversation`. |
 
-**Conclusion:** Forking is essentially "slice the current conversation's message array at a chosen point, run `reassignIds`, call `importConversation`, then `switchConversation`." No new persistence mechanisms are needed.
+**Conclusion:** Forking is essentially "slice the current conversation's message array at a chosen point, apply the `reassignIds` pattern (with a fork-specific `created_at`), call `importConversation`, then `switchConversation`." No new persistence mechanisms are needed.
 
 ### 2.2 What Does Not Exist Yet
 
@@ -193,7 +193,11 @@ prepareFork(
    }));
    ```
 
+   **Note:** `crypto.randomUUID()` is used directly here (consistent with `reassignIds()` in `html-importer.ts`). The `ConversationManager` uses a local `generateId()` wrapper ([`src/chat/conversation.ts:18-19`](../src/chat/conversation.ts)) that delegates to `crypto.randomUUID()` — either approach is equivalent, and the implementation may use whichever is more convenient for the file's import structure.
+
    Original timestamps are preserved so the fork displays with its original chronology.
+
+   **Provider tool_call ID preservation:** The spread operator preserves `tool_call.id` (provider-assigned, e.g. Bedrock `toolUseId`) and `tool_result.tool_call_id` on their respective messages. Only the message-level `id` is reassigned. This is correctness-critical — providers like Bedrock and Anthropic require `tool_call.id` and `tool_result.tool_call_id` to match when replaying conversation history. The spread-based reassignment preserves this correlation automatically.
 
 6. **Return** `{ conversation: forkedConversation, messages: newMessages }`.
 
@@ -257,18 +261,20 @@ Add a `data-message-id` attribute to each rendered message element so the contex
 
 **Note on assistant messages:** The `.notor-message-assistant` wrapper div is created in `createAssistantMessagePlaceholder()` ([`src/ui/chat-view.ts:1204`](../src/ui/chat-view.ts)), which returns only the inner `contentEl`. The message ID is not yet known at placeholder creation time (it's assigned after the LLM response completes). The ID must therefore be set in `finalizeAssistantMessage()` by navigating up to the parent element via `contentEl.parentElement`.
 
+**Note on tool call messages:** `renderToolCall()` creates the tool call element *before* the tool is dispatched. A pending/running tool call should not be forkable (same rationale as the streaming assistant guard — the message is not yet "complete"). Therefore, `data-message-id` is **not** set in `renderToolCall()`. Instead, it is set by the orchestrator on the `toolEl` after dispatch completes, alongside the `updateToolCallStatus()` call. The orchestrator already has both the `toolEl` reference (returned by `renderToolCall()`) and the `message.id` at that point ([`src/chat/orchestrator.ts:1454-1459`](../src/chat/orchestrator.ts)).
+
 | Method | Line | Element | Change |
 |--------|------|---------|--------|
 | `renderUserMessage()` | 1094 | `msgEl` (`.notor-message-user`) | `msgEl.dataset.messageId = message.id;` |
 | `finalizeAssistantMessage()` | 1228 | `contentEl.parentElement` (the `.notor-message-assistant` wrapper created in `createAssistantMessagePlaceholder` at line 1204) | `contentEl.parentElement!.dataset.messageId = message.id;` |
-| `renderToolCall()` | 1317 | `toolEl` (`.notor-tool-call`) | `toolEl.dataset.messageId = message.id;` |
+| Orchestrator (after `updateToolCallStatus`) | ~1459 | `toolEl` (`.notor-tool-call`) | `toolEl.dataset.messageId = toolCallMessage.id;` — set in the orchestrator after dispatch completes, **not** in `renderToolCall()` |
 | `renderToolResult()` | 1355 | `resultEl` (`.notor-tool-result`) | `resultEl.dataset.messageId = message.id;` |
 
 #### 3.4.2 Context Menu
 
 Register a single `contextmenu` listener on `this.messageListEl` (the scrollable message container) that uses event delegation to find the closest `[data-message-id]` ancestor of the click target.
 
-**Streaming guard:** The fork option must be suppressed for the **currently streaming** assistant message. While a response is in progress, earlier (completed) messages in the conversation are still forkable — only the in-progress reply is blocked. The guard identifies the streaming message by checking whether the target element is (or is inside) the most recently created assistant placeholder that has not yet been finalized (i.e., it has no `data-message-id` attribute, since that is set in `finalizeAssistantMessage()`). This means the guard is automatic: unfinalized messages simply won't match `[data-message-id]`, so the context menu won't fire for them.
+**In-progress message guard:** The fork option must be suppressed for any message that is not yet "complete" — specifically, the **currently streaming** assistant message and any **pending/running tool call**. While a response is in progress, earlier (completed) messages in the conversation are still forkable — only in-progress elements are blocked. The guard works automatically via the `data-message-id` mechanism: both unfinalized assistant messages (ID set in `finalizeAssistantMessage()`) and pending tool calls (ID set by the orchestrator after dispatch completes — see §3.4.1) lack `data-message-id`, so they won't match `[data-message-id]` and the context menu won't fire for them.
 
 ```typescript
 this.messageListEl.addEventListener("contextmenu", (evt: MouseEvent) => {
@@ -459,7 +465,7 @@ Checkpoints ([`src/checkpoints/checkpoint.ts`](../src/checkpoints/checkpoint.ts)
 
 ### 4.5 Hook Injection Messages
 
-Messages with `is_hook_injection: true` are rendered differently in the UI ([`src/ui/chat-view.ts:1095-1097`](../src/ui/chat-view.ts) dispatches to `renderHookInjection` at [`src/ui/chat-view.ts:1181-1188`](../src/ui/chat-view.ts)). The `is_hook_injection` flag is preserved during fork (it's part of the message spread), so these messages render correctly in the forked conversation. The context menu is not shown on hook injection messages because `data-message-id` is only added to the four main render methods (`renderUserMessage`, `finalizeAssistantMessage`, `renderToolCall`, `renderToolResult`) — `renderHookInjection` does not set it, so the `[data-message-id]` event delegation in the context menu handler (§3.4.2) naturally skips these elements.
+Messages with `is_hook_injection: true` are rendered differently in the UI ([`src/ui/chat-view.ts:1095-1097`](../src/ui/chat-view.ts) dispatches to `renderHookInjection` at [`src/ui/chat-view.ts:1181-1188`](../src/ui/chat-view.ts)). The `is_hook_injection` flag is preserved during fork (it's part of the message spread), so these messages render correctly in the forked conversation. The context menu is not shown on hook injection messages because `renderHookInjection` does not set `data-message-id`, so the `[data-message-id]` event delegation in the context menu handler (§3.4.2) naturally skips these elements.
 
 ### 4.6 System Messages
 
@@ -479,13 +485,22 @@ The forked conversation's `total_input_tokens`, `total_output_tokens`, and `esti
 
 Any conversation loaded into the user's system can be forked, including conversations imported from HTML exports. Imported conversations have already been through `reassignIds()`, so their IDs are local. The fork's `forked_from_conversation_id` will reference the *imported copy's* ID (not the original pre-import ID), which is the correct behavior since that's the version the user has on their system.
 
-### 4.10 Forking During Active Streaming
+### 4.10 Forking During Active Streaming or Tool Execution
 
-While the assistant is streaming a response, the user may still fork from any **earlier, completed** message in the conversation. Only the in-progress assistant reply is blocked from forking. This is enforced naturally by the `data-message-id` mechanism: the ID is set in `finalizeAssistantMessage()`, so unfinalized (still-streaming) messages have no `data-message-id` attribute and the context menu won't fire for them (see §3.4.2).
+While the assistant is streaming a response or a tool call is pending/executing, the user may still fork from any **earlier, completed** message in the conversation. Only in-progress elements are blocked from forking:
+
+- **Streaming assistant message:** The ID is set in `finalizeAssistantMessage()`, so unfinalized messages have no `data-message-id` attribute and the context menu won't fire for them.
+- **Pending/running tool call:** The ID is set by the orchestrator after dispatch completes (alongside `updateToolCallStatus()`), so pending tool calls have no `data-message-id` attribute either.
+
+Both guards use the same `data-message-id` absence mechanism (see §3.4.2).
 
 ### 4.11 Fork Badge and Deleted Parent Conversations
 
 The fork badge in the conversation list (§3.4.4) is only displayed when the parent conversation still exists in the user's history. If the parent has been purged by the retention policy or manually deleted, the badge is not rendered. The `forked_from_conversation_id` metadata remains on the fork's JSONL header for historical reference, but no UI element references a nonexistent conversation.
+
+### 4.12 Truncated Messages
+
+Messages in the parent conversation may have `truncated: true` set by the context window manager. This flag is copied into the fork via the spread operator. This is **harmless**: `assembleContextWindow()` ([`src/context/context.ts:120-122`](../src/chat/context.ts)) resets all `truncated` flags to `false` before recalculating on every LLM call. The stale `truncated` value in the fork's JSONL is overwritten in-memory before it has any effect.
 
 ---
 
@@ -548,9 +563,11 @@ The fork badge in the conversation list (§3.4.4) is only displayed when the par
 15. Delete the parent conversation → verify the fork badge is no longer shown
 16. Fork an imported conversation → verify `forked_from_conversation_id` references the import's local ID
 
-**Streaming interaction:**
+**Streaming and in-progress message interaction:**
 17. While assistant is streaming, right-click an earlier completed message → verify "Fork conversation from here" appears
 18. While assistant is streaming, right-click the in-progress message → verify no context menu appears
+19. While a tool call is pending/executing, right-click the pending tool call element → verify no context menu appears
+20. While a tool call is pending/executing, right-click an earlier completed message → verify "Fork conversation from here" appears
 
 ### 6.3 Manual Testing
 
