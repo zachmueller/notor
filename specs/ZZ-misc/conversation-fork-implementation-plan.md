@@ -105,7 +105,7 @@ Add `data-message-id` attributes to rendered messages and implement both the con
 Show a clickable fork lineage badge next to forked conversations in the sidebar list, enabling navigation to the parent conversation.
 
 ### 4.1 Render fork badge in conversation list
-- [ ] In `renderConversationList()` ([chat-view.ts](../src/ui/chat-view.ts) ~line 1545-1599), after setting `titleEl.textContent`:
+- [x] In `renderConversationList()` ([chat-view.ts](../src/ui/chat-view.ts) ~line 1545-1599), after setting `titleEl.textContent`:
   - Check if `entry.forked_from_conversation_id` is present
   - Verify parent still exists by scanning the `entries` array
   - If parent exists, create a `span` with class `notor-fork-badge`

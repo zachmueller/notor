@@ -1614,6 +1614,23 @@ export class NotorChatView extends ItemView {
 			const titleEl = contentCol.createDiv({ cls: "notor-conversation-list-title" });
 			titleEl.textContent = entry.title ?? "Untitled";
 
+			// Fork lineage badge — clickable link to parent conversation
+			if (entry.forked_from_conversation_id) {
+				const parentEntry = entries.find(
+					(e) => e.id === entry.forked_from_conversation_id
+				);
+				if (parentEntry) {
+					const badge = titleEl.createSpan({ cls: "notor-fork-badge" });
+					setIcon(badge, "git-branch-plus");
+					badge.setAttribute("aria-label", "Go to parent conversation");
+					badge.addEventListener("click", (e) => {
+						e.stopPropagation();
+						this.onSwitchConversation?.(parentEntry.filename);
+						this.toggleConversationList();
+					});
+				}
+			}
+
 			const metaEl = contentCol.createDiv({ cls: "notor-conversation-list-meta" });
 			const date = new Date(entry.updated_at);
 			metaEl.textContent = this.formatRelativeTime(date);
