@@ -497,6 +497,9 @@ Multiple tool calls rendered simultaneously need clear visual grouping:
 | `/Volumes/workplace/notor/src/chat/tool-orchestration.ts` | **New file:** partitioning + parallel execution |
 | [`/Volumes/workplace/notor/src/ui/chat-view.ts`](/Volumes/workplace/notor/src/ui/chat-view.ts) | Visual grouping for multi-tool turns |
 
+**Test files:**
+| [`/Volumes/workplace/notor/e2e/scripts/parallel-tool-execution-test.ts`](/Volumes/workplace/notor/e2e/scripts/parallel-tool-execution-test.ts) | **New file:** E2E test — 7 scenarios covering Phases 1-4 (see Section 8 "E2E Tests") |
+
 **Additional files to verify** (not structurally changed but may need attention):
 - History persistence layer — ensure concurrent `onMessageAdded` callbacks are safe
 - Compaction logic — verify it handles consecutive tool_call messages correctly
@@ -561,6 +564,24 @@ If the user clicks Stop while 3 tools are running in parallel:
 - Abort mid-batch: Start a multi-tool turn, abort during execution, verify all tool_calls have matching tool_results
 - Provider round-trip: Verify that the coalesced ChatMessage format is correctly consumed by each provider (Anthropic, OpenAI, Bedrock) on the next LLM turn
 - Compaction round-trip: Trigger compaction after a multi-tool turn, verify `extractPendingMessages()` correctly identifies tool_call/tool_result messages as pending and re-appends them after compaction
+
+### E2E Tests
+
+**Script:** [`/Volumes/workplace/notor/e2e/scripts/parallel-tool-execution-test.ts`](/Volumes/workplace/notor/e2e/scripts/parallel-tool-execution-test.ts)
+
+Launches real Obsidian + Playwright/CDP, sends LLM prompts designed to trigger multi-tool turns, and validates behavior end-to-end:
+
+| # | Scenario | Validates |
+|---|----------|-----------|
+| 1 | Parallel `read_note` × 3 | Multiple read tools batched in one LLM turn; all results referenced in response (Phase 1 stream collection + Phase 4 concurrent execution) |
+| 2 | `list_vault` + `search_vault` in parallel | Different read tool types batched together as concurrent (Phase 4 partitioning) |
+| 3 | `read_note` + `write_note` mixed | Read batch executes before serial write; file created on disk (Phase 4 batch ordering) |
+| 4 | Token count capture | `inputTokens`/`outputTokens` non-zero after multi-tool turn — previously lost due to early `processStream()` return (Phase 1 fix) |
+| 5 | Conversation continuity | Follow-up message references prior multi-tool results — validates coalesced messages round-trip through provider API (Phase 3 coalescing) |
+| 6 | Message coalescing structure | Internal state has grouped `tool_call` ordering, consecutive runs ≥ 2, no orphaned `tool_call`s (Phase 2 grouped ordering + Phase 3 coalescing + safety net) |
+| 7 | No unexpected errors | Structured log review for errors during parallel execution |
+
+Run with: `npx tsx e2e/scripts/parallel-tool-execution-test.ts`
 
 ### Manual Testing
 - Verify UI shows all tool calls grouped in a single turn
