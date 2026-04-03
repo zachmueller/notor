@@ -1494,12 +1494,27 @@ export class ChatOrchestrator {
 						result.calls,
 						this.dispatcher,
 					);
+
+					// Phase 8.1: Build progress callbacks for tool calls
+					// that support onProgress (e.g., use_subagent).
+					const onProgressMap = new Map<string, (status: string) => void>();
+					for (const entry of toolCallEntries) {
+						if (entry.el) {
+							const el = entry.el;
+							onProgressMap.set(entry.call.toolCallId, (status: string) => {
+								this.view?.updateToolCallProgress(el, status);
+							});
+						}
+					}
+
 					const batchResults = await executeToolBatches(
 						batches,
 						this.dispatcher,
 						mode,
 						messageIdMap,
 						abortController.signal,
+						undefined, // concurrencyCap — use default
+						onProgressMap,
 					);
 
 					// Map results back to entries for UI updates

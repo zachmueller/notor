@@ -559,6 +559,22 @@
 	user-select: text;
 }
 
+/* --------------------------------------------------------------------------
+   Tool Call Progress (Phase 8: sub-agent progress visibility)
+   -------------------------------------------------------------------------- */
+
+.notor-tool-call-progress {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	padding: 4px 0 0;
+	animation: notor-progress-fade 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes notor-progress-fade {
+	from { opacity: 0.5; }
+	to   { opacity: 1; }
+}
+
 /* ==========================================================================
    Tool Results
    ========================================================================== */

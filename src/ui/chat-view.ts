@@ -1357,6 +1357,26 @@ export class NotorChatView extends ItemView {
 		if (!statusEl) return;
 		statusEl.className = `notor-tool-call-status notor-tool-status-${status}`;
 		statusEl.textContent = status;
+
+		// Remove progress indicator on completion
+		const progressEl = toolEl.querySelector(".notor-tool-call-progress");
+		if (progressEl) progressEl.remove();
+	}
+
+	/**
+	 * Update the progress text on an in-flight tool call card.
+	 *
+	 * Called by the orchestrator via the `onProgressMap` wired through
+	 * `executeToolBatches()` → dispatcher → `tool.execute()`.
+	 * Used by long-running tools like `use_subagent` (Phase 8.1).
+	 */
+	updateToolCallProgress(toolEl: HTMLElement, status: string): void {
+		let progressEl = toolEl.querySelector(".notor-tool-call-progress") as HTMLElement | null;
+		if (!progressEl) {
+			progressEl = toolEl.createDiv({ cls: "notor-tool-call-progress" });
+		}
+		progressEl.textContent = status;
+		this.scrollToBottom();
 	}
 
 	/**

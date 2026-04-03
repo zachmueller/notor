@@ -630,19 +630,19 @@ Section 7.1: follows the Personas settings pattern in `src/settings/sections/per
 
 Section 6.1: show sub-agent activity in the tool call UI element. Phase 5.1 added the `onProgress` plumbing through the dispatch chain (ToolExecuteOptions → dispatcher → tool). This phase wires the view layer to produce and consume those callbacks.
 
-- [ ] When `use_subagent` tool call is rendered, show a spinner/status indicator
-- [ ] Wire the orchestrator to supply `onProgress` callbacks when dispatching tool calls:
-  - [ ] In `ChatOrchestrator`, when calling `executeToolBatches()`, build an `onProgress` map for `use_subagent` tool calls that routes status text to the view's tool call UI element
-  - [ ] View renders progress updates as status text below the spinner (e.g., "Searching vault... (turn 3/10)")
-- [ ] On completion: replace spinner with the sub-agent's final response text in the tool result area
+- [x] When `use_subagent` tool call is rendered, show a spinner/status indicator
+- [x] Wire the orchestrator to supply `onProgress` callbacks when dispatching tool calls:
+  - [x] In `ChatOrchestrator`, when calling `executeToolBatches()`, build an `onProgress` map for `use_subagent` tool calls that routes status text to the view's tool call UI element
+  - [x] View renders progress updates as status text below the spinner (e.g., "Searching vault... (turn 3/10)")
+- [x] On completion: replace spinner with the sub-agent's final response text in the tool result area
 
 ### 8.2 Cancellation UX
 
 Section 6.2: Stop button propagates to sub-agents.
 
-- [ ] Verify the abort propagation from Phase 4.3 correctly stops in-flight sub-agents
-- [ ] When a sub-agent is cancelled, show partial results (if any) with a "[Cancelled]" marker
-- [ ] The parent LLM receives the partial result and can decide how to proceed
+- [x] Verify the abort propagation from Phase 4.3 correctly stops in-flight sub-agents
+- [x] When a sub-agent is cancelled, show partial results (if any) with a "[Cancelled]" marker
+- [x] The parent LLM receives the partial result and can decide how to proceed
 
 ---
 
