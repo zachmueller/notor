@@ -15,12 +15,12 @@ export default defineConfig({
 	timeout: 60_000,
 	retries: 0,
 	workers: 1, // Serial — only one Obsidian instance at a time
-	reporter: [["list"], ["json", { outputFile: "e2e/results/test-results.json" }]],
+	reporter: [["list"], ["json", { outputFile: "results/test-results.json" }]],
 	use: {
 		// No default browserName — we connect via CDP in the test fixtures
 		trace: "retain-on-failure",
 		screenshot: "on",
 		video: "retain-on-failure",
 	},
-	outputDir: "e2e/results/artifacts",
+	outputDir: "results/artifacts",
 });

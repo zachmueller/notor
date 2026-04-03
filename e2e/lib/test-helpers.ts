@@ -136,12 +136,10 @@ export async function sendMessage(page: Page, message: string): Promise<boolean>
 
 	await page.waitForTimeout(300);
 
-	const sendBtn = await page.$(".notor-send-btn");
-	if (sendBtn) {
-		await sendBtn.click();
-	} else {
-		await page.keyboard.press("Enter");
-	}
+	// Use keyboard Enter to send — more reliable than clicking the send button
+	// which may not be visible depending on UI state
+	await page.focus(".notor-text-input");
+	await page.keyboard.press("Enter");
 	await page.waitForTimeout(600);
 
 	console.log(`    → Sent: "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);

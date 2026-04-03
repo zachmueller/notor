@@ -96,7 +96,7 @@ type ObsidianFixtures = {
 };
 
 export const test = base.extend<ObsidianFixtures>({
-	obsidianPage: async (_, use) => {
+	obsidianPage: async ({}, use) => {
 		const vaultPath = getVaultPath();
 		ensureTestVault(vaultPath);
 
