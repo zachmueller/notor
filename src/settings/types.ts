@@ -276,6 +276,36 @@ export interface NotorSettings {
 	write_docx_default_template_path: string;
 
 	// -------------------------------------------------------------------
+	// Sub-agent settings
+	// -------------------------------------------------------------------
+
+	/**
+	 * Per-profile visibility toggle for sub-agents.
+	 * Keys are profile names, values are whether the profile is available
+	 * to the LLM via the `use_subagent` tool. Profiles not present default
+	 * to visible (true).
+	 *
+	 * @see specs/ZZ-misc/sub-agents-design.md — Section 7.2
+	 */
+	sub_agent_visibility: Record<string, boolean>;
+
+	/**
+	 * Whether read-only tools in sub-agents are auto-approved without
+	 * user confirmation. Default: true.
+	 *
+	 * @see specs/ZZ-misc/sub-agents-design.md — Section 9.7
+	 */
+	sub_agent_auto_approve_reads: boolean;
+
+	/**
+	 * Maximum concurrent sub-agent executions. Executions beyond this
+	 * limit wait until a slot is available.
+	 *
+	 * @see specs/ZZ-misc/sub-agents-design.md — Section 9.3
+	 */
+	sub_agent_concurrency_cap: number;
+
+	// -------------------------------------------------------------------
 	// Settings UI state
 	// -------------------------------------------------------------------
 

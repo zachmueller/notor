@@ -13,7 +13,7 @@
 // ---------------------------------------------------------------------------
 
 /** The source context type that a tool config block was extracted from. */
-export type ToolConfigSource = "persona" | "workflow" | "rule";
+export type ToolConfigSource = "persona" | "workflow" | "rule" | "subagent";
 
 // ---------------------------------------------------------------------------
 // Parsed Tool Config (per-block output from the parser)

@@ -156,6 +156,11 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	// Phase 4.1: MCP servers
 	mcp_servers: {},
 
+	// Sub-agents
+	sub_agent_visibility: {},
+	sub_agent_auto_approve_reads: true,
+	sub_agent_concurrency_cap: 3,
+
 	// Settings UI state
 	settings_collapsed_sections: {},
 

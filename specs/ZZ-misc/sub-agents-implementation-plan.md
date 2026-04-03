@@ -87,7 +87,7 @@ Mirror the Personas directory convention for sub-agent profiles.
 
 ### 3.1 Define sub-agent profile types
 
-- [ ] Create `src/sub-agents/types.ts` with:
+- [x] Create `src/sub-agents/types.ts` with:
   ```typescript
   interface SubAgentProfile {
     name: string;
@@ -106,42 +106,42 @@ Mirror the Personas directory convention for sub-agent profiles.
 
 Follow the pattern from `src/personas/persona-discovery.ts` — stateless discovery function, not a manager class.
 
-- [ ] Create `src/sub-agents/discovery.ts`
-  - [ ] Discovery path: `{notor_dir}/sub-agents/{agent-name}/system-prompt.md`
-  - [ ] Parse YAML frontmatter for: `notor-preferred-provider`, `notor-preferred-model`, `notor-description`
-  - [ ] Extract `<notor_tool_config>` blocks using existing `extractToolConfigs()` from `src/tool-config/parser.ts`
-  - [ ] Strip frontmatter from prompt content (same regex pattern as persona discovery)
-  - [ ] Return `SubAgentProfile[]`
-- [ ] Write unit tests for discovery
-  - [ ] Test: discovers profiles in correct directory
-  - [ ] Test: parses frontmatter properties correctly
-  - [ ] Test: extracts tool config blocks
-  - [ ] Test: handles missing optional fields gracefully
-  - [ ] Test: ignores directories without `system-prompt.md`
+- [x] Create `src/sub-agents/discovery.ts`
+  - [x] Discovery path: `{notor_dir}/sub-agents/{agent-name}/system-prompt.md`
+  - [x] Parse YAML frontmatter for: `notor-preferred-provider`, `notor-preferred-model`, `notor-description`
+  - [x] Extract `<notor_tool_config>` blocks using existing `extractToolConfigs()` from `src/tool-config/parser.ts`
+  - [x] Strip frontmatter from prompt content (same regex pattern as persona discovery)
+  - [x] Return `SubAgentProfile[]`
+- [x] Write unit tests for discovery
+  - [x] Test: discovers profiles in correct directory
+  - [x] Test: parses frontmatter properties correctly
+  - [x] Test: extracts tool config blocks
+  - [x] Test: handles missing optional fields gracefully
+  - [x] Test: ignores directories without `system-prompt.md`
 
 ### 3.3 Implement built-in profile constants
 
 Section 7.3: default system prompts stored as constants, vault files created on first "Open" click.
 
-- [ ] Create `src/sub-agents/builtin-profiles.ts`
-  - [ ] Define `BUILTIN_SUBAGENT_PROFILES` map with entries for `search-vault` and `search-web`
-  - [ ] Each entry: `{ name, description, systemPrompt, toolConfig }` — the full content that would go in `system-prompt.md`
-- [ ] Write `search-vault` system prompt and tool config
-  - [ ] System prompt: focused vault search behavior, concise result formatting
-  - [ ] Tool config: enable `search_vault`, `read_note`, `list_vault` (read-only tools)
-- [ ] Write `search-web` system prompt and tool config
-  - [ ] System prompt: focused web search behavior, source attribution
-  - [ ] Tool config: enable `fetch_webpage` and any web search tools available
+- [x] Create `src/sub-agents/builtin-profiles.ts`
+  - [x] Define `BUILTIN_SUBAGENT_PROFILES` map with entries for `search-vault` and `search-web`
+  - [x] Each entry: `{ name, description, systemPrompt, toolConfig }` — the full content that would go in `system-prompt.md`
+- [x] Write `search-vault` system prompt and tool config
+  - [x] System prompt: focused vault search behavior, concise result formatting
+  - [x] Tool config: enable `search_vault`, `read_note`, `list_vault` (read-only tools)
+- [x] Write `search-web` system prompt and tool config
+  - [x] System prompt: focused web search behavior, source attribution
+  - [x] Tool config: enable `fetch_webpage` and any web search tools available
 
 ### 3.4 Implement sub-agent profile manager
 
-- [ ] Create `src/sub-agents/manager.ts` with `SubAgentManager` class
-  - [ ] `discoverProfiles(): Promise<SubAgentProfile[]>` — combines built-in + user-created profiles
-  - [ ] `getVisibleProfiles(): SubAgentProfile[]` — filters by visibility toggle setting
-  - [ ] `getProfile(name: string): SubAgentProfile | null`
-  - [ ] `ensureBuiltinVaultFile(name: string): Promise<string>` — creates vault file from constant on first access, returns path
-  - [ ] `resetToDefault(name: string): Promise<void>` — overwrites vault file with built-in constant
-  - [ ] Visibility state stored in `NotorSettings` (e.g., `sub_agent_visibility: Record<string, boolean>`)
+- [x] Create `src/sub-agents/manager.ts` with `SubAgentManager` class
+  - [x] `discoverProfiles(): Promise<SubAgentProfile[]>` — combines built-in + user-created profiles
+  - [x] `getVisibleProfiles(): SubAgentProfile[]` — filters by visibility toggle setting
+  - [x] `getProfile(name: string): SubAgentProfile | null`
+  - [x] `ensureBuiltinVaultFile(name: string): Promise<string>` — creates vault file from constant on first access, returns path
+  - [x] `resetToDefault(name: string): Promise<void>` — overwrites vault file with built-in constant
+  - [x] Visibility state stored in `NotorSettings` (e.g., `sub_agent_visibility: Record<string, boolean>`)
 
 ---
 
