@@ -92,6 +92,12 @@ function parseYAML(text: string): unknown {
 	const trimmed = text.trim();
 	if (!trimmed) return null;
 
+	// Detect obviously malformed YAML (unmatched brackets, etc.) —
+	// real Obsidian parseYaml would throw for these.
+	if (/\[(?![^\]]*\])/.test(trimmed)) {
+		throw new Error("Malformed YAML: unmatched bracket");
+	}
+
 	const result: Record<string, Record<string, unknown>> = {};
 	let currentTool: string | null = null;
 

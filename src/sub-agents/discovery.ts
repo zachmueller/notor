@@ -143,19 +143,32 @@ async function parseProfile(
 
 	// Get frontmatter from metadata cache
 	const fileCache = metadataCache.getFileCache(promptFile);
-	const frontmatter = fileCache?.frontmatter;
+	let frontmatter = fileCache?.frontmatter;
 
-	// Detect malformed YAML (same pattern as persona discovery)
-	if (!frontmatter && rawContent.trimStart().startsWith("---")) {
+	// If the metadata cache hasn't indexed the file yet (common during early
+	// plugin load), attempt manual YAML parsing before assuming malformed.
+	if (!frontmatter && rawContent.trimStart().startsWith("---") && parseYAML) {
 		const afterOpener = rawContent.indexOf("\n", rawContent.indexOf("---"));
 		if (afterOpener !== -1) {
 			const closerIdx = rawContent.indexOf("\n---", afterOpener);
 			if (closerIdx !== -1) {
-				log.warn(
-					"Sub-agent profile has malformed YAML frontmatter, excluding from discovery",
-					{ name, path: promptFile.path },
-				);
-				return null;
+				const yamlBody = rawContent.substring(afterOpener + 1, closerIdx);
+				try {
+					const parsed = parseYAML(yamlBody);
+					if (parsed && typeof parsed === "object") {
+						frontmatter = parsed as Record<string, unknown>;
+					} else {
+						// Empty or non-object frontmatter (e.g., `---\n---`)
+						// Treat as no frontmatter — not malformed, just empty
+						frontmatter = undefined;
+					}
+				} catch {
+					log.warn(
+						"Sub-agent profile has malformed YAML frontmatter, excluding from discovery",
+						{ name, path: promptFile.path },
+					);
+					return null;
+				}
 			}
 		}
 	}

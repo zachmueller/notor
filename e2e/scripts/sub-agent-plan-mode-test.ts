@@ -535,6 +535,7 @@ runTest(
 				write_note: true,
 				replace_in_note: true,
 				fetch_webpage: true,
+				use_subagent: true,
 			},
 			sub_agent_visibility: {},
 			sub_agent_auto_approve_reads: true,

@@ -224,18 +224,18 @@ export class SubAgentRunner {
 				}
 
 				// --- Tool calls → dispatch and continue ---
-				// Add assistant message with tool calls to history
-				for (const call of streamResult.toolCalls) {
-					messages.push({
-						role: "tool_call",
-						content: "",
-						tool_calls: [{
-							id: call.toolCallId,
-							tool_name: call.toolName,
-							parameters: call.parameters,
-						}],
-					});
-				}
+				// Add a single assistant message with ALL tool calls (Bedrock requires
+				// all tool_use blocks in one assistant message, matched by a single
+				// user message with all tool_result blocks).
+				messages.push({
+					role: "tool_call",
+					content: streamResult.text || "",
+					tool_calls: streamResult.toolCalls.map(call => ({
+						id: call.toolCallId,
+						tool_name: call.toolName,
+						parameters: call.parameters,
+					})),
+				});
 
 				// Dispatch tools using the same batch/parallel infrastructure
 				const batches = partitionToolCalls(streamResult.toolCalls, this.dispatcher);
@@ -254,23 +254,23 @@ export class SubAgentRunner {
 					this.abortController.signal,
 				);
 
-				// Add tool results to messages
-				for (const { call, result } of batchResults) {
-					const resultStr = typeof result.result === "string"
-						? result.result
-						: JSON.stringify(result.result);
-
-					messages.push({
-						role: "tool_result",
-						content: "",
-						tool_results: [{
+				// Add a single tool_result message with ALL results (matches the
+				// single tool_call message above — required by Bedrock).
+				messages.push({
+					role: "tool_result",
+					content: "",
+					tool_results: batchResults.map(({ call, result }) => {
+						const resultStr = typeof result.result === "string"
+							? result.result
+							: JSON.stringify(result.result);
+						return {
 							tool_call_id: call.toolCallId,
 							tool_name: call.toolName,
 							result: resultStr || result.error || "",
 							is_error: !result.success,
-						}],
-					});
-				}
+						};
+					}),
+				});
 
 				// Report progress with tool names
 				const toolNames = streamResult.toolCalls.map(c => c.toolName).join(", ");

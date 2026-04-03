@@ -261,10 +261,14 @@ async function testTokenUsageRollup(ctx: TestContext): Promise<void> {
 		const orchestrator = plugin.getOrchestrator?.() ?? plugin._orchestrator;
 		if (!orchestrator) return null;
 
-		const convoManager = orchestrator._conversationManager ?? orchestrator.conversationManager;
+		// Try public method first, then private field access
+		const convoManager = orchestrator.getConversationManager?.()
+			?? orchestrator.conversationManager;
 		if (!convoManager) return null;
 
-		const convo = convoManager.getConversation?.() ?? convoManager._conversation;
+		const convo = convoManager.getActiveConversation?.()
+			?? convoManager.getConversation?.()
+			?? convoManager._conversation;
 		if (!convo) return null;
 
 		return {
@@ -346,10 +350,13 @@ async function testDisabledProfileRejected(ctx: TestContext): Promise<void> {
 
 	const logCountBefore = ctx.collector.getStructuredLogs().length;
 
-	const responded = await sendMessage(
+	// Use approval-handling helper since use_subagent may need approval,
+	// and allow extra time for the tool-error → LLM-retry cycle.
+	const { responded } = await sendMessageWithApprovalHandling(
 		page,
 		"Search my vault using the search-vault sub-agent profile. " +
 		"Specifically invoke use_subagent with profile='search-vault'.",
+		RESPONSE_TIMEOUT_MS + 30_000,
 	);
 
 	const shot = await ctx.screenshot("07-disabled-profile");
@@ -471,6 +478,7 @@ runTest(
 				list_vault: true,
 				read_frontmatter: true,
 				fetch_webpage: true,
+				use_subagent: true,
 			},
 			sub_agent_visibility: {},
 			sub_agent_auto_approve_reads: true,
