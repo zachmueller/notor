@@ -253,7 +253,7 @@ function partitionToolCalls(
 **Algorithm** (same as Claude Code):
 1. For each call, look up the tool in the registry and check `tool.mode`.
 2. `mode === "read"` → concurrency-safe. `mode === "write"` → non-concurrent.
-3. MCP tools ([`/Volumes/workplace/notor/src/mcp/mcp-tool-adapter.ts`](/Volumes/workplace/notor/src/mcp/mcp-tool-adapter.ts)) **always default to non-concurrent**, regardless of their `mode` property. MCP tools execute arbitrary server-side code and even a `mode: "read"` MCP tool could have side effects the plugin doesn't know about. The partitioning must check tool provenance (built-in vs MCP) separately from mode. Future extension: an explicit `concurrent_safe` flag in `McpServerConfig` to opt in specific MCP servers.
+3. MCP tools ([`/Volumes/workplace/notor/src/mcp/mcp-tool-adapter.ts`](/Volumes/workplace/notor/src/mcp/mcp-tool-adapter.ts)) **default to non-concurrent**, because MCP tools execute arbitrary server-side code and even a `mode: "read"` MCP tool could have side effects the plugin doesn't know about. However, if the user has **explicitly classified** an MCP tool as `"read"` via `McpServerConfig.toolClassifications`, that tool is treated as concurrency-safe — the explicit user override signals informed opt-in. Server-reported `readOnlyHint` alone is NOT sufficient for concurrency (only the user override counts).
 4. Consecutive concurrency-safe calls are grouped. Non-concurrent calls get their own batch.
 5. If tool lookup fails or mode cannot be determined, conservatively treat as non-concurrent (matching Claude Code's pattern at toolOrchestration.ts lines 96-108).
 
@@ -472,7 +472,7 @@ Multiple tool calls rendered simultaneously need clear visual grouping:
 
 ### Phase 4: Parallel Execution (Higher Risk) — ✅ COMPLETE (2026-04-03)
 1. ✅ Created `src/chat/tool-orchestration.ts` with `partitionToolCalls()` and `executeToolBatches()` functions
-2. ✅ Concurrency-safety determination: built-in `mode === "read"` tools are concurrent; MCP tools always non-concurrent; unknown tools conservatively non-concurrent
+2. ✅ Concurrency-safety determination: built-in `mode === "read"` tools are concurrent; MCP tools non-concurrent by default but opt-in via explicit user `toolClassifications` override to `"read"`; unknown tools conservatively non-concurrent
 3. ✅ Wired into `responseLoop()` — serial dispatch loop replaced with `partitionToolCalls()` → `executeToolBatches()` pipeline
 4. ✅ Concurrency cap of 5 (default) enforced via semaphore in `runConcurrentBatch()`
 
@@ -516,7 +516,7 @@ Claude Code has two paths: batch (`toolOrchestration.ts`) and streaming (`Stream
 
 Claude Code uses an explicit `isConcurrencySafe(input)` method that can inspect the tool's parsed input to decide (e.g., a Bash tool running `ls` is safe, but `rm -rf` is not).
 
-**Recommendation for Notor:** Use `tool.mode === "read"` as the concurrency signal for built-in tools. This is simpler and correct — all Notor read tools genuinely don't mutate state (confirmed by audit of all 18 tools). For MCP tools, **always treat as non-concurrent regardless of mode** — MCP tools execute arbitrary server-side code where even "read" operations could have side effects. Add an optional `isConcurrencySafe?: boolean` to the `Tool` interface for future fine-grained control.
+**Recommendation for Notor:** Use `tool.mode === "read"` as the concurrency signal for built-in tools. This is simpler and correct — all Notor read tools genuinely don't mutate state (confirmed by audit of all 18 tools). For MCP tools, **default to non-concurrent** but allow user opt-in: if a user explicitly classifies an MCP tool as `"read"` in `McpServerConfig.toolClassifications`, that tool is treated as concurrency-safe. This piggybacks on the existing classification UI — no new config fields or settings needed. Server-reported `readOnlyHint` alone is not sufficient (only the explicit user override counts, since it signals informed opt-in).
 
 ### 7.3 Internal Message Model: Extend vs Restructure
 

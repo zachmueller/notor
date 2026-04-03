@@ -544,6 +544,22 @@ export class ToolDispatcher {
 	}
 
 	/**
+	 * Check if an MCP tool has an explicit user classification of "read".
+	 *
+	 * Used by tool orchestration to allow concurrency for MCP tools that
+	 * the user has explicitly marked as read-only (via toolClassifications
+	 * in the MCP server config). Without an explicit override, MCP tools
+	 * are conservatively treated as non-concurrent.
+	 */
+	hasExplicitUserReadClassification(toolName: string): boolean {
+		const tool = this.tools.get(toolName);
+		if (!(tool instanceof McpRegisteredTool)) return false;
+		const config = tool.getServerConfig();
+		const rawName = tool.getRawToolName();
+		return config.toolClassifications?.[rawName] === "read";
+	}
+
+	/**
 	 * Get all registered tool names.
 	 */
 	getRegisteredToolNames(): string[] {

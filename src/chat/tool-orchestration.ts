@@ -79,14 +79,17 @@ export function partitionToolCalls(
  * concurrency-safe tools.
  */
 function isConcurrencySafe(toolName: string, dispatcher: ToolDispatcher): boolean {
-	// MCP tools are always non-concurrent regardless of mode
-	if (isMcpTool(toolName)) {
-		return false;
-	}
-
 	// Unknown tools are conservatively non-concurrent
 	if (!dispatcher.hasTool(toolName)) {
 		return false;
+	}
+
+	// MCP tools are non-concurrent by default, but users can opt in by
+	// explicitly classifying a tool as "read" in the server's
+	// toolClassifications config. This signals that the user has verified
+	// the tool is safe to run concurrently.
+	if (isMcpTool(toolName)) {
+		return dispatcher.hasExplicitUserReadClassification(toolName);
 	}
 
 	// Built-in read tools are safe; write tools are not
