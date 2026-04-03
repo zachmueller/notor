@@ -120,14 +120,14 @@ Show a clickable fork lineage badge next to forked conversations in the sidebar 
 Add styles for the fork badge in the conversation list and the hover fork button on messages.
 
 ### 5.1 Fork badge styles
-- [ ] Add `.notor-fork-badge` styles to [styles.css](../styles.css): `margin-left: 4px`, `opacity: 0.5`, `font-size: 0.85em`, `cursor: pointer`
-- [ ] Add `.notor-fork-badge:hover` styles: `opacity: 0.8`
+- [x] Add `.notor-fork-badge` styles to [styles.css](../styles.css): `margin-left: 4px`, `opacity: 0.5`, `font-size: 0.85em`, `cursor: pointer`
+- [x] Add `.notor-fork-badge:hover` styles: `opacity: 0.8`
 
 ### 5.2 Hover fork button styles
-- [ ] Ensure `.notor-message` (or equivalent message wrapper classes) has `position: relative`
-- [ ] Add `.notor-fork-btn` styles: `position: absolute`, `top: 4px`, `right: 4px`, `opacity: 0`, `cursor: pointer`, `padding: 2px`, `border-radius: var(--radius-s)`, `transition: opacity 150ms ease`
-- [ ] Add `.notor-message:hover .notor-fork-btn` (or per-role selectors as needed): `opacity: 0.4`
-- [ ] Add `.notor-fork-btn:hover`: `opacity: 0.8`, `background: var(--background-modifier-hover)`
+- [x] Ensure `.notor-message` (or equivalent message wrapper classes) has `position: relative`
+- [x] Add `.notor-fork-btn` styles: `position: absolute`, `top: 4px`, `right: 4px`, `opacity: 0`, `cursor: pointer`, `padding: 2px`, `border-radius: var(--radius-s)`, `transition: opacity 150ms ease`
+- [x] Add `.notor-message:hover .notor-fork-btn` (or per-role selectors as needed): `opacity: 0.4`
+- [x] Add `.notor-fork-btn:hover`: `opacity: 0.8`, `background: var(--background-modifier-hover)`
 
 ---
 

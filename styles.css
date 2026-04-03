@@ -436,6 +436,7 @@
 	padding: 8px 12px;
 	border-radius: var(--radius-m);
 	line-height: 1.5;
+	position: relative;
 }
 
 .notor-message-user {
@@ -480,6 +481,7 @@
 	border-radius: var(--radius-m);
 	padding: 8px 12px;
 	font-size: var(--font-ui-small);
+	position: relative;
 }
 
 .notor-tool-call-header {
@@ -565,6 +567,7 @@
 	padding: 4px 12px;
 	font-size: var(--font-ui-smaller);
 	user-select: text;
+	position: relative;
 }
 
 .notor-tool-result-summary {
@@ -2825,4 +2828,43 @@
 	.notor-workflow-activity-entry .status-badge.status-running .status-icon svg {
 		animation: none;
 	}
+}
+
+/* ==========================================================================
+   Conversation Fork (Phase 5)
+   ========================================================================== */
+
+/* Fork badge — shown next to forked conversations in the sidebar list */
+.notor-fork-badge {
+	margin-left: 4px;
+	opacity: 0.5;
+	font-size: 0.85em;
+	cursor: pointer;
+}
+
+.notor-fork-badge:hover {
+	opacity: 0.8;
+}
+
+/* Hover fork button — absolutely positioned in message/tool elements */
+.notor-fork-btn {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	opacity: 0;
+	cursor: pointer;
+	padding: 2px;
+	border-radius: var(--radius-s);
+	transition: opacity 150ms ease;
+}
+
+.notor-message:hover > .notor-fork-btn,
+.notor-tool-call:hover > .notor-fork-btn,
+.notor-tool-result:hover > .notor-fork-btn {
+	opacity: 0.4;
+}
+
+.notor-fork-btn:hover {
+	opacity: 0.8;
+	background: var(--background-modifier-hover);
 }
