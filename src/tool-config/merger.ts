@@ -95,6 +95,104 @@ export function mergeToolConfigs(
 }
 
 // ---------------------------------------------------------------------------
+// Sub-Agent Intersection Merge
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the effective tool config for a sub-agent by intersecting the
+ * parent's resolved config with the sub-agent profile's config.
+ *
+ * Uses AND/intersection semantics — distinct from the precedence-based
+ * `mergeToolConfigs()` above:
+ * - A tool must be enabled in BOTH parent and sub-agent config to be enabled
+ * - Tools not mentioned in the sub-agent config are disabled (default-deny)
+ * - `allowed_paths`: intersection (empty = no restriction, so empty ∩ X = X)
+ * - `blocked_paths`: union (either block applies)
+ * - `auto_approve`: forced `true` for read-mode tools; write tools inherit parent
+ *
+ * @param parentEffective - The parent conversation's fully resolved config.
+ * @param subAgentConfig  - The sub-agent profile's parsed tool config.
+ * @param toolModes       - Map of tool name → "read" | "write" for auto-approve logic.
+ *
+ * @see specs/ZZ-misc/sub-agents-design.md — Section 3.2
+ */
+export function intersectToolConfig(
+	parentEffective: EffectiveToolConfig,
+	subAgentConfig: ParsedToolConfig,
+	toolModes: Record<string, "read" | "write">,
+): EffectiveToolConfig {
+	const tools: Record<string, ResolvedToolConfigEntry> = {};
+
+	// Default-deny: only tools explicitly mentioned in the sub-agent config
+	// are candidates. Everything else is disabled.
+	for (const [toolName, subEntry] of Object.entries(subAgentConfig.tools)) {
+		const parentEntry = parentEffective.tools[toolName];
+
+		// If parent doesn't know about this tool, it's disabled
+		if (!parentEntry) {
+			tools[toolName] = {
+				enabled: false,
+				auto_approve: false,
+				allowed_paths: [],
+				blocked_paths: [],
+			};
+			continue;
+		}
+
+		// enabled: AND — must be enabled in both
+		const enabled = parentEntry.enabled && (subEntry.enabled ?? true);
+
+		// allowed_paths: intersection (empty = no restriction)
+		const allowedPaths = intersectPaths(
+			parentEntry.allowed_paths,
+			subEntry.allowed_paths ?? [],
+		);
+
+		// blocked_paths: union
+		const blockedPaths = unionPaths(
+			parentEntry.blocked_paths,
+			subEntry.blocked_paths ?? [],
+		);
+
+		// auto_approve: read tools → true; write tools → parent's value
+		const mode = toolModes[toolName];
+		const autoApprove = mode === "read" ? true : parentEntry.auto_approve;
+
+		tools[toolName] = {
+			enabled,
+			auto_approve: autoApprove,
+			allowed_paths: allowedPaths,
+			blocked_paths: blockedPaths,
+		};
+	}
+
+	return { tools };
+}
+
+/**
+ * Intersect two `allowed_paths` arrays.
+ *
+ * Empty array = "no restriction" (any path allowed).
+ * - empty ∩ X = X (the restricted set wins)
+ * - X ∩ empty = X
+ * - empty ∩ empty = empty (no restrictions)
+ * - [a, b] ∩ [b, c] = [b] (only paths in both)
+ */
+function intersectPaths(a: string[], b: string[]): string[] {
+	if (a.length === 0) return b;
+	if (b.length === 0) return a;
+	const setB = new Set(b);
+	return a.filter((p) => setB.has(p));
+}
+
+/** Union two `blocked_paths` arrays, deduplicating. */
+function unionPaths(a: string[], b: string[]): string[] {
+	if (a.length === 0) return b;
+	if (b.length === 0) return a;
+	return [...new Set([...a, ...b])];
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

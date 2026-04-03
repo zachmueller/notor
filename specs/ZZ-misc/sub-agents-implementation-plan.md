@@ -54,29 +54,29 @@ Implement the security model before any sub-agent can execute tools. This is the
 
 The design doc (Section 3.2) requires AND/intersection semantics — distinct from the existing precedence-based `mergeToolConfigs()` in `src/tool-config/merger.ts`.
 
-- [ ] Add `intersectToolConfig()` function to `src/tool-config/merger.ts`
-  - [ ] Signature: `intersectToolConfig(parentEffective: EffectiveToolConfig, subAgentConfig: ParsedToolConfig, toolModes: Record<string, "read" | "write">): EffectiveToolConfig`
-  - [ ] Per-tool logic:
+- [x] Add `intersectToolConfig()` function to `src/tool-config/merger.ts`
+  - [x] Signature: `intersectToolConfig(parentEffective: EffectiveToolConfig, subAgentConfig: ParsedToolConfig, toolModes: Record<string, "read" | "write">): EffectiveToolConfig`
+  - [x] Per-tool logic:
     - `enabled = parent.enabled AND subagent.enabled` (tool must be enabled in both)
     - `allowed_paths = intersection(parent.allowed_paths, subagent.allowed_paths)` — paths must appear in both (empty = no restriction, so empty ∩ X = X)
     - `blocked_paths = union(parent.blocked_paths, subagent.blocked_paths)` — either block applies
     - `auto_approve`: force `true` for tools with `mode === "read"`; use parent's value for write tools
-  - [ ] Tools not mentioned in the sub-agent config are disabled (default-deny per Section 3.1)
-  - [ ] Do NOT modify existing `mergeToolConfigs()` — this is a new function
-- [ ] Write unit tests for `intersectToolConfig()`
-  - [ ] Test: sub-agent enables tool that parent disabled → tool is disabled
-  - [ ] Test: sub-agent enables tool that parent enabled → tool is enabled
-  - [ ] Test: tool not mentioned in sub-agent config → disabled
-  - [ ] Test: path intersection logic (both have paths, one empty, both empty)
-  - [ ] Test: blocked paths union
-  - [ ] Test: read tools get auto_approve=true regardless of parent config
-  - [ ] Test: write tools inherit parent's auto_approve
+  - [x] Tools not mentioned in the sub-agent config are disabled (default-deny per Section 3.1)
+  - [x] Do NOT modify existing `mergeToolConfigs()` — this is a new function
+- [x] Write unit tests for `intersectToolConfig()`
+  - [x] Test: sub-agent enables tool that parent disabled → tool is disabled
+  - [x] Test: sub-agent enables tool that parent enabled → tool is enabled
+  - [x] Test: tool not mentioned in sub-agent config → disabled
+  - [x] Test: path intersection logic (both have paths, one empty, both empty)
+  - [x] Test: blocked paths union
+  - [x] Test: read tools get auto_approve=true regardless of parent config
+  - [x] Test: write tools inherit parent's auto_approve
 
 ### 2.2 Filter `use_subagent` from sub-agent tool lists
 
 Section 3.3 requires defense-in-depth against recursive sub-agents.
 
-- [ ] When building the sub-agent's tool list, always exclude `use_subagent` by name
+- [x] When building the sub-agent's tool list, always exclude `use_subagent` by name
 - [ ] Add a guard in the `use_subagent` tool's `execute()`: if called from within a sub-agent context, return an error result immediately
 
 ---
