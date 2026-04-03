@@ -50,6 +50,16 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Read parsed YAML frontmatter from a note.",
 		isWrite: false,
 	},
+	get_backlinks: {
+		name: "Get backlinks",
+		desc: "List all notes that link to a given note.",
+		isWrite: false,
+	},
+	get_outlinks: {
+		name: "Get outlinks",
+		desc: "List all notes that a given note links to.",
+		isWrite: false,
+	},
 	write_note: {
 		name: "Write note",
 		desc: "Create a new note or overwrite an existing note's full content.",
@@ -109,5 +119,10 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		name: "Extract Word doc comments",
 		desc: "Extract review comments from a .docx file into a structured note (desktop only).",
 		isWrite: true,
+	},
+	use_subagent: {
+		name: "Use sub-agent",
+		desc: "Spawn a sub-agent to handle a delegated task.",
+		isWrite: false,
 	},
 };

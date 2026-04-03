@@ -53,6 +53,8 @@ export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	search_vault: true,
 	list_vault: true,
 	read_frontmatter: true,
+	get_backlinks: true,
+	get_outlinks: true,
 	fetch_webpage: true,
 	web_search: true,
 	write_note: false,
@@ -63,6 +65,7 @@ export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	read_file: false,
 	read_docx: false,
 	write_docx: false,
+	use_subagent: false,
 };
 
 /** Default empty hook configuration. */
