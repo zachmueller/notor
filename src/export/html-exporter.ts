@@ -8,21 +8,40 @@
 
 import type { Conversation, Message, ToolCall, ToolResult } from "../types";
 import { formatToolDisplayName } from "../ui/tool-call-ui";
+import { USE_SUBAGENT_TOOL_NAME } from "../sub-agents/constants";
 import { marked } from "marked";
 
 const WORKFLOW_RE = /<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/;
 const ATTACHMENTS_RE = /<attachments>([\s\S]*?)<\/attachments>/;
 
 /**
- * Export a conversation to a self-contained HTML document.
+ * Sub-agent conversation data for HTML export rendering.
+ *
+ * Keyed by JSONL filename (from `ToolResult.sub_agent_metadata.jsonl_filename`).
+ * Loaded by the caller before invoking `exportToHtml()`.
+ *
+ * @see specs/ZZ-misc/sub-agents-design.md — Section 5.3
  */
-export function exportToHtml(conversation: Conversation, messages: Message[]): string {
+export type SubAgentConversationMap = Map<string, Message[]>;
+
+/**
+ * Export a conversation to a self-contained HTML document.
+ *
+ * @param subAgentConversations - Optional map of sub-agent conversation
+ *   messages, keyed by JSONL filename. When provided, `use_subagent` tool
+ *   results render an expandable section with the full sub-agent conversation.
+ */
+export function exportToHtml(
+	conversation: Conversation,
+	messages: Message[],
+	subAgentConversations?: SubAgentConversationMap,
+): string {
 	const title = escapeHtml(conversation.title ?? "Untitled conversation");
 	const date = new Date(conversation.created_at).toLocaleString();
 	const model = escapeHtml(`${conversation.provider_id} / ${conversation.model_id}`);
 
 	const messageSections = messages
-		.map((msg) => renderMessage(msg))
+		.map((msg) => renderMessage(msg, subAgentConversations))
 		.filter(Boolean)
 		.join("\n");
 
@@ -325,11 +344,32 @@ details pre {
   font-size: 0.82em;
   color: var(--text-muted);
 }
+
+/* ── Sub-agent conversation detail ─────────────────────── */
+
+.sub-agent-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sub-agent-msg {
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.88em;
+  border-left: 2px solid var(--border);
+}
+
+.sub-agent-system { color: var(--text-muted); font-size: 0.82em; }
+.sub-agent-user { border-left-color: var(--accent-user); }
+.sub-agent-assistant { border-left-color: var(--accent-assistant); }
+.sub-agent-tool-call { border-left-color: var(--accent-tool); }
+.sub-agent-tool-result { border-left-color: var(--accent-success); }
 </style>`;
 
 // ─── Message rendering ───────────────────────────────────────────────────
 
-function renderMessage(msg: Message): string | null {
+function renderMessage(msg: Message, subAgentConversations?: SubAgentConversationMap): string | null {
 	switch (msg.role) {
 		case "system":
 			return null;
@@ -340,7 +380,7 @@ function renderMessage(msg: Message): string | null {
 		case "tool_call":
 			return renderToolCallHtml(msg);
 		case "tool_result":
-			return renderToolResultHtml(msg);
+			return renderToolResultHtml(msg, subAgentConversations);
 		default:
 			return null;
 	}
@@ -430,7 +470,7 @@ ${paramsHtml}
     </div>`;
 }
 
-function renderToolResultHtml(msg: Message): string {
+function renderToolResultHtml(msg: Message, subAgentConversations?: SubAgentConversationMap): string {
 	const tr: ToolResult | undefined | null = msg.tool_result;
 	if (!tr) return "";
 
@@ -459,11 +499,88 @@ function renderToolResultHtml(msg: Message): string {
 		}
 	}
 
+	// Phase 6.3: Expandable sub-agent conversation detail
+	let subAgentDetail = "";
+	if (
+		tr.tool_name === USE_SUBAGENT_TOOL_NAME &&
+		tr.sub_agent_metadata?.jsonl_filename &&
+		subAgentConversations
+	) {
+		const subMessages = subAgentConversations.get(tr.sub_agent_metadata.jsonl_filename);
+		if (subMessages && subMessages.length > 0) {
+			subAgentDetail = renderSubAgentDetail(tr.sub_agent_metadata, subMessages);
+		}
+	}
+
 	return `    <div class="tool-result${errorClass}">
       <div class="tool-result-summary">
         <span class="${iconClass}">${icon}</span> <strong>${displayName}</strong>: ${resultBody}
       </div>
+${subAgentDetail}
     </div>`;
+}
+
+/**
+ * Render an expandable `<details>` section containing the full sub-agent
+ * conversation, formatted in the same style as the parent messages.
+ *
+ * @see specs/ZZ-misc/sub-agents-design.md — Section 5.3
+ */
+function renderSubAgentDetail(
+	metadata: NonNullable<ToolResult["sub_agent_metadata"]>,
+	messages: Message[],
+): string {
+	const profileLabel = escapeHtml(metadata.profile_name);
+	const tokenInfo = `${metadata.token_usage.input.toLocaleString()} in / ${metadata.token_usage.output.toLocaleString()} out`;
+	const iterInfo = `${metadata.iteration_count} turn${metadata.iteration_count !== 1 ? "s" : ""}`;
+	const capWarning = metadata.was_cap_reached ? " (iteration limit reached)" : "";
+	const summaryText = `Sub-agent: ${profileLabel} — ${iterInfo}, ${tokenInfo}${capWarning}`;
+
+	const renderedMessages = messages
+		.map((msg) => renderSubAgentMessage(msg))
+		.filter(Boolean)
+		.join("\n");
+
+	return detailsBlock(summaryText, `<div class="sub-agent-conversation">\n${renderedMessages}\n</div>`);
+}
+
+/**
+ * Render a single sub-agent message for the expandable detail section.
+ * Simplified version of the parent message renderers.
+ */
+function renderSubAgentMessage(msg: Message): string | null {
+	switch (msg.role) {
+		case "system":
+			return `<div class="sub-agent-msg sub-agent-system"><em>System:</em> <pre>${escapeHtml(msg.content.substring(0, 200))}${msg.content.length > 200 ? "…" : ""}</pre></div>`;
+		case "user":
+			return `<div class="sub-agent-msg sub-agent-user"><strong>Task:</strong> ${escapeHtml(msg.content)}</div>`;
+		case "assistant":
+			return `<div class="sub-agent-msg sub-agent-assistant"><strong>Assistant:</strong> <div class="message-content">${marked.parse(msg.content, { async: false }) as string}</div></div>`;
+		case "tool_call": {
+			const tc = msg.tool_call;
+			if (!tc) return null;
+			const displayName = escapeHtml(formatToolDisplayName(tc.tool_name));
+			const hasParams = Object.keys(tc.parameters).length > 0;
+			const params = hasParams
+				? `<pre>${escapeHtml(JSON.stringify(tc.parameters, null, 2))}</pre>`
+				: "";
+			return `<div class="sub-agent-msg sub-agent-tool-call"><span class="tool-name">${displayName}</span>${params}</div>`;
+		}
+		case "tool_result": {
+			const tr = msg.tool_result;
+			if (!tr) return null;
+			const displayName = escapeHtml(formatToolDisplayName(tr.tool_name));
+			const resultStr = typeof tr.result === "string" ? tr.result : JSON.stringify(tr.result, null, 2);
+			const preview = resultStr.length > 200
+				? escapeHtml(resultStr.substring(0, 200)) + "…"
+				: escapeHtml(resultStr);
+			const iconClass = tr.success ? "result-icon-success" : "result-icon-error";
+			const icon = tr.success ? "✓" : "✗";
+			return `<div class="sub-agent-msg sub-agent-tool-result"><span class="${iconClass}">${icon}</span> <strong>${displayName}</strong>: ${preview}</div>`;
+		}
+		default:
+			return null;
+	}
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────

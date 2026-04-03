@@ -51,6 +51,7 @@
 import { normalizePath, type Vault } from "obsidian";
 import type { Conversation, Message } from "../types";
 import type { CompactionRecord } from "../context/compaction";
+import { isSubAgentFilename } from "./sub-agent-history";
 import { logger } from "../utils/logger";
 
 const log = logger("HistoryManager");
@@ -257,6 +258,96 @@ export class HistoryManager {
 		}).then(() => filename);
 	}
 
+	/**
+	 * Write a sub-agent conversation to a JSONL file with a specific filename.
+	 *
+	 * Sub-agent files use the naming convention:
+	 * `{parent_timestamp}_{parent_id}_subagent_{invocation_id}.jsonl`
+	 *
+	 * The header line uses `_type: "sub_agent_conversation"` so that
+	 * `listConversations()` naturally skips them (it checks for
+	 * `_type === "conversation"`). The `isSubAgentFilename()` check
+	 * provides an additional filter.
+	 *
+	 * @see specs/ZZ-misc/sub-agents-design.md — Section 5.1
+	 */
+	async writeSubAgentConversation(
+		filename: string,
+		metadata: {
+			id: string;
+			parent_conversation_id: string;
+			sub_agent_name: string;
+			provider_id: string;
+			model_id: string;
+			total_input_tokens: number;
+			total_output_tokens: number;
+			iteration_count: number;
+			was_cap_reached: boolean;
+			created_at: string;
+		},
+		messages: Message[],
+	): Promise<void> {
+		const filePath = this.getFilePath(filename);
+
+		await this.ensureDirectory();
+
+		return this.enqueueWrite(filePath, async () => {
+			const lines: string[] = [];
+
+			lines.push(JSON.stringify({
+				_type: "sub_agent_conversation",
+				...metadata,
+			}));
+
+			for (const msg of messages) {
+				lines.push(JSON.stringify({ _type: "message", ...msg }));
+			}
+
+			await this.vault.adapter.write(filePath, lines.join("\n") + "\n");
+
+			log.info("Wrote sub-agent conversation", {
+				id: metadata.id,
+				parent: metadata.parent_conversation_id,
+				subAgent: metadata.sub_agent_name,
+				messageCount: messages.length,
+				path: filePath,
+			});
+		});
+	}
+
+	/**
+	 * Load a sub-agent conversation's messages from a JSONL file.
+	 *
+	 * Returns just the messages (not the header metadata) for use in
+	 * HTML export rendering.
+	 *
+	 * @see specs/ZZ-misc/sub-agents-design.md — Section 5.3
+	 */
+	async loadSubAgentMessages(filename: string): Promise<Message[]> {
+		const path = this.getFilePath(filename);
+		const content = await this.vault.adapter.read(path);
+		const lines = content.split("\n").filter((l) => l.trim().length > 0);
+
+		const messages: Message[] = [];
+		for (let i = 1; i < lines.length; i++) {
+			const line = lines[i];
+			if (!line) continue;
+			try {
+				const obj = JSON.parse(line);
+				const { _type: _msgType, ...messageData } = obj;
+				messages.push(messageData as Message);
+			} catch (e) {
+				log.warn("Failed to parse sub-agent message line", {
+					file: filename,
+					line: i,
+					error: String(e),
+				});
+			}
+		}
+
+		return messages;
+	}
+
 	// -----------------------------------------------------------------------
 	// Read operations
 	// -----------------------------------------------------------------------
@@ -370,6 +461,10 @@ export class HistoryManager {
 		for (const file of files.files) {
 			if (!file.endsWith(".jsonl")) continue;
 
+			// Skip sub-agent conversation files (Phase 6)
+			const fname = file.split("/").pop() ?? file;
+			if (isSubAgentFilename(fname)) continue;
+
 			try {
 				const content = await this.vault.adapter.read(file);
 				const firstNewline = content.indexOf("\n");
@@ -452,6 +547,10 @@ export class HistoryManager {
 
 		for (const file of files.files) {
 			if (!file.endsWith(".jsonl")) continue;
+
+			// Skip sub-agent conversation files (Phase 6)
+			const fname = file.split("/").pop() ?? file;
+			if (isSubAgentFilename(fname)) continue;
 
 			try {
 				const content = await this.vault.adapter.read(file);

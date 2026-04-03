@@ -20,7 +20,8 @@ import type { NotorSettings } from "../settings/types";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { ParsedToolConfig } from "../tool-config/types";
 import type { ApprovalCallback } from "../chat/dispatcher";
-import type { LLMProviderType } from "../types";
+import type { Conversation, LLMProviderType } from "../types";
+import type { HistoryManager } from "../chat/history";
 import { ToolDispatcher } from "../chat/dispatcher";
 import { SubAgentRunner } from "../chat/sub-agent-runner";
 import { intersectToolConfig } from "../tool-config/merger";
@@ -30,6 +31,10 @@ import {
 	SUB_AGENT_ITERATION_CAP,
 } from "../sub-agents/constants";
 import { Semaphore } from "../sub-agents/semaphore";
+import {
+	generateSubAgentFilename,
+	chatMessagesToMessages,
+} from "../chat/sub-agent-history";
 import { logger } from "../utils/logger";
 
 const log = logger("UseSubagentTool");
@@ -67,6 +72,8 @@ export class UseSubagentTool implements Tool {
 		private readonly toolRegistry: ToolRegistry,
 		private readonly settings: NotorSettings,
 		private readonly getParentEffectiveConfig: () => EffectiveToolConfig | null,
+		private readonly historyManager?: HistoryManager,
+		private readonly getParentConversation?: () => Conversation | null,
 	) {
 		this.semaphore = new Semaphore(
 			settings.sub_agent_concurrency_cap ?? 3,
@@ -339,7 +346,7 @@ export class UseSubagentTool implements Tool {
 
 		const result = await runner.run(task);
 
-		// Step 10: Format and return ToolResult
+		// Step 10: Write sub-agent JSONL and return ToolResult with metadata
 		log.info("Sub-agent completed", {
 			profile: profile.name,
 			iterations: result.iterationCount,
@@ -347,10 +354,60 @@ export class UseSubagentTool implements Tool {
 			tokenUsage: result.tokenUsage,
 		});
 
+		// Phase 6.1: Persist sub-agent conversation to its own JSONL file
+		let jsonlFilename: string | null = null;
+		const parentConversation = this.getParentConversation?.();
+		if (this.historyManager && parentConversation) {
+			try {
+				const invocationId = crypto.randomUUID();
+				jsonlFilename = generateSubAgentFilename(
+					parentConversation.created_at,
+					parentConversation.id,
+					invocationId,
+				);
+
+				const subAgentConversationId = crypto.randomUUID();
+				const persistedMessages = chatMessagesToMessages(
+					result.messages,
+					subAgentConversationId,
+				);
+
+				await this.historyManager.writeSubAgentConversation(
+					jsonlFilename,
+					{
+						id: subAgentConversationId,
+						parent_conversation_id: parentConversation.id,
+						sub_agent_name: profile.name,
+						provider_id: providerType,
+						model_id: model,
+						total_input_tokens: result.tokenUsage.input,
+						total_output_tokens: result.tokenUsage.output,
+						iteration_count: result.iterationCount,
+						was_cap_reached: result.wasCapReached,
+						created_at: new Date().toISOString(),
+					},
+					persistedMessages,
+				);
+			} catch (e) {
+				log.warn("Failed to write sub-agent history", {
+					profile: profile.name,
+					error: String(e),
+				});
+				// Non-fatal: sub-agent result is still returned to the parent
+			}
+		}
+
 		return {
 			tool_name: USE_SUBAGENT_TOOL_NAME,
 			success: true,
 			result: result.text,
+			sub_agent_metadata: jsonlFilename ? {
+				jsonl_filename: jsonlFilename,
+				token_usage: result.tokenUsage,
+				iteration_count: result.iterationCount,
+				was_cap_reached: result.wasCapReached,
+				profile_name: profile.name,
+			} : null,
 		};
 	}
 

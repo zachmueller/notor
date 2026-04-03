@@ -994,10 +994,14 @@ export class ChatOrchestrator {
 				}
 
 				// Add tool result message
+				// Phase 6.2: Roll up sub-agent tokens into parent totals
+				const bgSubAgentTokens = toolResult.sub_agent_metadata?.token_usage;
 				bgConvManager.addMessage({
 					role: "tool_result",
 					content: "",
 					tool_result: toolResult,
+					input_tokens: bgSubAgentTokens?.input,
+					output_tokens: bgSubAgentTokens?.output,
 				});
 
 				// Add token tracking message if available
@@ -1531,10 +1535,14 @@ export class ChatOrchestrator {
 							this.vaultRuleManager.recordNoteAccess(notePath);
 						}
 
+						// Phase 6.2: Roll up sub-agent tokens into parent totals
+						const subAgentTokens = toolResult.sub_agent_metadata?.token_usage;
 						const toolResultMessage = this.conversationManager.addMessage({
 							role: "tool_result",
 							content: "",
 							tool_result: toolResult,
+							input_tokens: subAgentTokens?.input,
+							output_tokens: subAgentTokens?.output,
 						});
 
 						this.view?.renderToolResult(toolResultMessage);

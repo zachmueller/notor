@@ -30,7 +30,8 @@ import { WorkflowActivityTracker } from "./workflows/workflow-activity-tracker";
 import { ExportModal, type ExportFormat } from "./export/export-modal";
 import { ConfirmModal } from "./ui/confirm-modal";
 import { exportToMarkdown } from "./export/markdown-exporter";
-import { exportToHtml } from "./export/html-exporter";
+import { exportToHtml, type SubAgentConversationMap } from "./export/html-exporter";
+import { USE_SUBAGENT_TOOL_NAME } from "./sub-agents/constants";
 import { extractJsonlFromHtml, reassignIds } from "./export/html-importer";
 
 // Group F: Vault event hooks
@@ -1053,13 +1054,15 @@ export default class NotorPlugin extends Plugin {
 			this._toolRegistry.register(new WriteDocxTool(this.app, this.settings));
 			this._toolRegistry.register(new ExtractDocxCommentsTool(this.app, this.settings));
 
-			// Sub-agent tool (Phase 5)
+			// Sub-agent tool (Phase 5 + Phase 6 history/token tracking)
 			const useSubagentTool = new UseSubagentTool(
 				this.getSubAgentManager(),
 				this.getProviderRegistry(),
 				this._toolRegistry,
 				this.settings,
 				() => this.getOrchestrator()?.getEffectiveToolConfig() ?? null,
+				this.getHistoryManager(),
+				() => this.getOrchestrator()?.getConversationManager()?.getActiveConversation() ?? null,
 			);
 			const adapter = this.app.vault.adapter as { basePath?: string };
 			if (adapter.basePath) {
@@ -1872,12 +1875,51 @@ export default class NotorPlugin extends Plugin {
 	// Export helpers
 	// -----------------------------------------------------------------------
 
+	/**
+	 * Load sub-agent conversation messages for all `use_subagent` tool results
+	 * in the given message list. Returns a map keyed by JSONL filename.
+	 *
+	 * @see specs/ZZ-misc/sub-agents-design.md — Section 5.3
+	 */
+	private async loadSubAgentConversations(
+		messages: import("./types").Message[],
+	): Promise<SubAgentConversationMap> {
+		const map: SubAgentConversationMap = new Map();
+		const historyManager = this.getHistoryManager();
+
+		for (const msg of messages) {
+			if (
+				msg.role === "tool_result" &&
+				msg.tool_result?.tool_name === USE_SUBAGENT_TOOL_NAME &&
+				msg.tool_result.sub_agent_metadata?.jsonl_filename
+			) {
+				const filename = msg.tool_result.sub_agent_metadata.jsonl_filename;
+				try {
+					const subMessages = await historyManager.loadSubAgentMessages(filename);
+					map.set(filename, subMessages);
+				} catch (e) {
+					log.warn("Failed to load sub-agent conversation for export", {
+						filename,
+						error: String(e),
+					});
+				}
+			}
+		}
+
+		return map;
+	}
+
 	private showExportModal(conversation: import("./types").Conversation, messages: import("./types").Message[]): void {
 		new ExportModal(this.app, conversation, async (format: ExportFormat, folderPath: string) => {
 			try {
-				const content = format === "markdown"
-					? exportToMarkdown(conversation, messages)
-					: exportToHtml(conversation, messages);
+				let content: string;
+				if (format === "markdown") {
+					content = exportToMarkdown(conversation, messages);
+				} else {
+					// Phase 6.3: Load sub-agent conversations for HTML export
+					const subAgentConversations = await this.loadSubAgentConversations(messages);
+					content = exportToHtml(conversation, messages, subAgentConversations);
+				}
 
 				const ext = format === "markdown" ? "md" : "html";
 				const sanitized = sanitizeFilename(conversation.title);

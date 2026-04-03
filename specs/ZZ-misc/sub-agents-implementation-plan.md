@@ -559,30 +559,30 @@ Wire `UseSubagentTool` into the plugin initialization and dispatch pipeline.
 
 Section 5.1: separate file per sub-agent invocation.
 
-- [ ] Generate sub-agent history filename: `{parent_timestamp}_{parent_id}_subagent_{invocation_id}.jsonl`
-  - [ ] `invocation_id`: UUID generated per `use_subagent` call
-- [ ] Write sub-agent conversation to its own JSONL file using `HistoryManager`
-  - [ ] Header line: conversation metadata (sub-agent name, parent reference, provider/model used)
-  - [ ] Message lines: all messages from `SubAgentResult.messages`
-- [ ] Store JSONL file path reference in parent's `tool_result` message metadata
+- [x] Generate sub-agent history filename: `{parent_timestamp}_{parent_id}_subagent_{invocation_id}.jsonl`
+  - [x] `invocation_id`: UUID generated per `use_subagent` call
+- [x] Write sub-agent conversation to its own JSONL file using `HistoryManager`
+  - [x] Header line: conversation metadata (sub-agent name, parent reference, provider/model used)
+  - [x] Message lines: all messages from `SubAgentResult.messages`
+- [x] Store JSONL file path reference in parent's `tool_result` message metadata
 
 ### 6.2 Token roll-up
 
 Section 9.2: aggregate sub-agent tokens into parent totals.
 
-- [ ] When adding the `tool_result` message for `use_subagent` to the parent conversation:
-  - [ ] Include `SubAgentResult.tokenUsage` in message metadata
-  - [ ] Roll `input` and `output` tokens into `Conversation.total_input_tokens` / `total_output_tokens`
-- [ ] Token footer in chat view shows rolled-up total (no UI changes needed — existing footer reads from conversation totals)
+- [x] When adding the `tool_result` message for `use_subagent` to the parent conversation:
+  - [x] Include `SubAgentResult.tokenUsage` in message metadata
+  - [x] Roll `input` and `output` tokens into `Conversation.total_input_tokens` / `total_output_tokens`
+- [x] Token footer in chat view shows rolled-up total (no UI changes needed — existing footer reads from conversation totals)
 
 ### 6.3 Export handling
 
 Section 5.3: markdown export gets summary only, HTML export gets expandable detail.
 
-- [ ] Markdown export: include only the sub-agent's summary text in the `tool_result` block
-- [ ] HTML export: render an expandable `<details>` section containing the full sub-agent conversation
-  - [ ] Load sub-agent JSONL from the referenced file path
-  - [ ] Format messages in the same style as the parent conversation
+- [x] Markdown export: include only the sub-agent's summary text in the `tool_result` block
+- [x] HTML export: render an expandable `<details>` section containing the full sub-agent conversation
+  - [x] Load sub-agent JSONL from the referenced file path
+  - [x] Format messages in the same style as the parent conversation
 
 ---
 

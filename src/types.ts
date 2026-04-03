@@ -186,6 +186,27 @@ export interface ToolResult {
 	 * providers like Bedrock can validate the conversation history.
 	 */
 	tool_call_id?: string;
+	/**
+	 * Metadata from a sub-agent execution (Phase 6).
+	 *
+	 * Present only on `use_subagent` tool results. Contains the JSONL
+	 * filename for the sub-agent's conversation history and token usage
+	 * for roll-up into the parent conversation totals.
+	 *
+	 * @see specs/ZZ-misc/sub-agents-design.md — Section 5.1, 9.2
+	 */
+	sub_agent_metadata?: {
+		/** JSONL filename (relative to history directory) for the sub-agent conversation. */
+		jsonl_filename: string;
+		/** Token usage from the sub-agent execution. */
+		token_usage: { input: number; output: number };
+		/** Number of LLM turns the sub-agent executed. */
+		iteration_count: number;
+		/** Whether the sub-agent hit its iteration cap. */
+		was_cap_reached: boolean;
+		/** Name of the sub-agent profile used. */
+		profile_name: string;
+	} | null;
 }
 
 // ---------------------------------------------------------------------------
