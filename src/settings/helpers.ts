@@ -92,6 +92,7 @@ export function createSettingsGroup(
 		: defaultOpen;
 	const details = containerEl.createEl("details", {
 		cls: "notor-settings-group",
+		attr: { "data-notor-group": title },
 	});
 	if (isOpen) details.setAttribute("open", "");
 	const summary = details.createEl("summary", {

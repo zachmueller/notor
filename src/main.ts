@@ -131,6 +131,7 @@ export default class NotorPlugin extends Plugin {
 	private _staleTracker?: StaleContentTracker;
 	private _personaManager?: PersonaManager;
 	private _subAgentManager?: SubAgentManager;
+	private _settingTab?: NotorSettingTab;
 
 	// -----------------------------------------------------------------------
 	// Phase 4.1: MCP (ARCH-005)
@@ -224,7 +225,8 @@ export default class NotorPlugin extends Plugin {
 		log.debug("Settings loaded", { settings: this.settings });
 
 		// 2. Register the settings tab
-		this.addSettingTab(new NotorSettingTab(this.app, this));
+		this._settingTab = new NotorSettingTab(this.app, this);
+		this.addSettingTab(this._settingTab);
 
 		// 3. Register the chat panel view type
 		this.registerView(CHAT_VIEW_TYPE, (leaf) => {
@@ -1601,6 +1603,17 @@ export default class NotorPlugin extends Plugin {
 			(this.app as import("obsidian").App & {
 				setting?: { open: () => void; openTabById: (id: string) => void };
 			}).setting?.openTabById("notor");
+		});
+
+		// Settings deep-link: open settings tab and scroll to a specific group
+		view.setOnOpenSettingsGroup((groupTitle: string) => {
+			(this.app as import("obsidian").App & {
+				setting?: { open: () => void; openTabById: (id: string) => void };
+			}).setting?.openTabById("notor");
+			// Defer scrollToGroup to next tick so the settings DOM renders first
+			setTimeout(() => {
+				this._settingTab?.scrollToGroup(groupTitle);
+			}, 100);
 		});
 
 		// Provider change

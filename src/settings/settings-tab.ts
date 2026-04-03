@@ -68,6 +68,19 @@ export class NotorSettingTab extends PluginSettingTab {
 		this.runCleanups();
 	}
 
+	/**
+	 * Scroll to and expand a specific settings group by title.
+	 * Used by settings deep-links from chat messages.
+	 */
+	scrollToGroup(groupTitle: string): void {
+		const details = this.containerEl.querySelector<HTMLDetailsElement>(
+			`details[data-notor-group="${CSS.escape(groupTitle)}"]`
+		);
+		if (!details) return;
+		details.open = true;
+		details.scrollIntoView({ behavior: "smooth", block: "start" });
+	}
+
 	display(): void {
 		this.runCleanups();
 		const { containerEl } = this;

@@ -149,6 +149,9 @@ export class NotorChatView extends ItemView {
 	// Fork callback
 	private onForkConversation?: (messageId: string) => Promise<void>;
 
+	// Settings deep-link callback
+	private onOpenSettingsGroup?: (groupTitle: string) => void;
+
 	// Checkpoint callbacks
 	private onListCheckpoints?: () => Promise<Checkpoint[]>;
 	private onRestoreCheckpoint?: (checkpointId: string) => Promise<boolean>;
@@ -282,6 +285,10 @@ export class NotorChatView extends ItemView {
 
 	setOnForkConversation(callback: (messageId: string) => Promise<void>): void {
 		this.onForkConversation = callback;
+	}
+
+	setOnOpenSettingsGroup(callback: (groupTitle: string) => void): void {
+		this.onOpenSettingsGroup = callback;
 	}
 
 	// -----------------------------------------------------------------------
@@ -1283,6 +1290,7 @@ export class NotorChatView extends ItemView {
 			this
 		);
 		this.activateInternalLinks(contentEl);
+		this.activateSettingsLinks(contentEl);
 
 		// Add token annotation if available
 		if (message.input_tokens || message.output_tokens) {
@@ -1313,6 +1321,22 @@ export class NotorChatView extends ItemView {
 		containerEl.addEventListener("auxclick", (e) => {
 			if (e.button !== 1) return; // middle-click only
 			handleLinkClick(e);
+		});
+	}
+
+	/**
+	 * Attach click handlers to settings deep-links (notor-settings:// URLs)
+	 * within a rendered message element. Opens Obsidian settings to the target group.
+	 */
+	private activateSettingsLinks(containerEl: HTMLElement): void {
+		containerEl.addEventListener("click", (e: MouseEvent) => {
+			const link = (e.target as HTMLElement).closest("a");
+			if (!link) return;
+			const href = link.getAttribute("href");
+			if (!href?.startsWith("notor-settings://")) return;
+			e.preventDefault();
+			const groupTitle = decodeURIComponent(href.replace("notor-settings://", ""));
+			this.onOpenSettingsGroup?.(groupTitle);
 		});
 	}
 
