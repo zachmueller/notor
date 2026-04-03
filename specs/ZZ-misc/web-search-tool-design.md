@@ -138,7 +138,10 @@ The User-Agent and headers come directly from `tryDuckDuckGoSearch()` in [`web-s
 
 Web-search-mcp uses Cheerio for parsing ([`web-search-mcp/src/search-engine.ts:894–932`](../web-search-mcp/src/search-engine.ts)). In Obsidian (Electron renderer), we use `DOMParser` instead — no new dependency:
 
+> **Important:** Use the **browser-native global `DOMParser`** — do NOT import from `@xmldom/xmldom`. The native `DOMParser` (available in Electron's renderer context) supports `text/html` parsing. `@xmldom/xmldom` (used elsewhere in the codebase for XML in [`src/tools/docx-comment-parser.ts`](../src/tools/docx-comment-parser.ts)) is an XML-only parser and does **not** support `text/html` — it would silently produce incorrect results. No import statement is needed; `DOMParser` is a global.
+
 ```typescript
+// Browser-native DOMParser (global) — NOT @xmldom/xmldom
 const parser = new DOMParser();
 const doc = parser.parseFromString(response.text, "text/html");
 ```
@@ -221,6 +224,10 @@ const check = isDomainBlocked(url, this.settings.domain_denylist);
 if (check.blocked) continue;  // Skip this result silently
 ```
 
+> **Note — why filtering is inside `execute()`, not in the dispatcher:**
+>
+> For `fetch_webpage`, the domain denylist is enforced in the dispatcher ([`src/chat/dispatcher.ts:335–362`](../src/chat/dispatcher.ts)) *before* the tool runs, because the URL is an **input** parameter known at dispatch time. For `web_search`, the URLs are **outputs** — they don't exist until DuckDuckGo returns results. The dispatcher cannot pre-check what it doesn't yet have. Therefore, denylist filtering for `web_search` must happen inside `execute()`, after parsing results but before returning them to the LLM.
+
 ### 4.5 Output Format
 
 Return results as a markdown list, matching the text-heavy format the LLM can easily read. Example output:
@@ -300,9 +307,12 @@ The following parts of web-search-mcp are intentionally excluded:
 
 ### 7.1 DuckDuckGo bot detection
 
-DuckDuckGo may return a CAPTCHA or empty results page if it detects automated traffic. The POST approach with realistic headers (per §4.1) mitigates this. If detected, the tool should return a descriptive error rather than empty results.
+DuckDuckGo may return a CAPTCHA or empty results page if it detects automated traffic. The POST approach with realistic headers (per §4.1) mitigates this.
 
-**Detection heuristic:** After parsing, if `results.length === 0` but the response was 200 OK, check if the HTML contains `"robot"` or `"captcha"` and return a specific error message.
+**Error handling:** Do not attempt to guess *why* results are empty — heuristics like string-matching for "robot" or "captcha" are fragile and would false-positive on legitimate results about those topics. Instead:
+- Non-200 status codes → return an error with the status code
+- 0 parsed results → return a descriptive message: `"No results found for query: {query}"`
+- The message should be informative enough for the user to diagnose (e.g., try a different query, check network)
 
 ### 7.2 DuckDuckGo HTML structure changes
 
@@ -350,6 +360,7 @@ The default 10-second timeout is generous but finite. DDG's HTML endpoint typica
 | `src/settings/constants.ts` | **Modify** — add `web_search: { auto_approve: true }` to `DEFAULT_TOOL_SETTINGS` |
 | `src/settings/sections/web-search.ts` | **Create** — settings UI section renderer |
 | `src/settings/tab.ts` | **Modify** — call `renderWebSearchSection()` in settings tab |
+| `src/chat/default-system-prompt.ts` | **Modify** — add `## Web search` section describing: when to use `web_search` (search queries) vs `fetch_webpage` (known URLs); the search-then-fetch workflow (search for results, then `fetch_webpage` on specific ones for full content); that results are snippets only, not full page content; don't search repeatedly for the same query; domain denylist applies to results |
 
 ---
 
