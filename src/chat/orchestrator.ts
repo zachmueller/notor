@@ -1432,7 +1432,12 @@ export class ChatOrchestrator {
 						);
 					}
 				} else if (result.type === "tool_calls") {
-					// Tool calls — dispatch each serially and loop
+					// Tool calls — add all tool_call messages first, dispatch
+					// serially, then add all tool_result messages.  Grouped
+					// ordering is required by the Anthropic/Bedrock API format
+					// (one assistant message with N tool_use blocks followed by
+					// one user message with N tool_result blocks).
+
 					// Track tokens from message_end (now correctly captured
 					// because processStream consumes the full stream).
 					if (result.inputTokens || result.outputTokens) {
@@ -1444,6 +1449,13 @@ export class ChatOrchestrator {
 							cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens),
 						});
 					}
+
+					// --- Step 1: Add all tool_call messages and render UI ---
+					const toolCallEntries: Array<{
+						call: ToolCallInfo;
+						message: Message;
+						el?: HTMLElement;
+					}> = [];
 
 					for (const call of result.calls) {
 						const toolCallMessage = this.conversationManager.addMessage({
@@ -1459,7 +1471,7 @@ export class ChatOrchestrator {
 
 						const toolCallEl = this.view?.renderToolCall(toolCallMessage);
 
-						// Phase 3 (HOOK-005): Fire on_tool_call hooks after approval, before execution
+						// HOOK-005: Fire on_tool_call hooks sequentially
 						// G-004: Pass override manager so workflow-scoped hooks are used when active
 						const currentConv = this.conversationManager.getActiveConversation();
 						if (currentConv && vaultRootPath) {
@@ -1477,54 +1489,82 @@ export class ChatOrchestrator {
 							);
 						}
 
-						// Dispatch through the tool dispatcher (with abort signal so
-						// approval dialogs can be cancelled via the Stop button).
+						toolCallEntries.push({
+							call,
+							message: toolCallMessage,
+							el: toolCallEl,
+						});
+					}
+
+					// --- Step 2: Dispatch each tool serially, collecting results ---
+					const toolResults: ToolResult[] = [];
+
+					for (const entry of toolCallEntries) {
+						if (abortController.signal.aborted) {
+							// Produce synthetic error results for remaining calls
+							toolResults.push({
+								tool_name: entry.call.toolName,
+								success: false,
+								result: "",
+								error: "Tool call was cancelled by the user.",
+								tool_call_id: entry.call.toolCallId,
+							});
+							continue;
+						}
+
 						let toolResult: ToolResult;
 						try {
 							toolResult = await this.dispatcher.dispatch(
-								call.toolName,
-								call.parameters,
+								entry.call.toolName,
+								entry.call.parameters,
 								mode,
-								toolCallMessage.id,
+								entry.message.id,
 								abortController.signal
 							);
 						} catch (dispatchError) {
 							// Ensure the orphaned tool_call gets a matching tool_result
 							// so the conversation history stays valid for the provider.
 							toolResult = {
-								tool_name: call.toolName,
+								tool_name: entry.call.toolName,
 								success: false,
 								result: "",
 								error: `Tool call failed: ${dispatchError instanceof Error ? dispatchError.message : String(dispatchError)}`,
 							};
 							log.warn("Tool dispatch threw, injecting error tool_result", {
-								toolName: call.toolName,
+								toolName: entry.call.toolName,
 								error: String(dispatchError),
 							});
 						}
 
+						// Propagate the provider tool call ID so the result can be correlated
+						toolResult.tool_call_id = entry.call.toolCallId;
+
 						// Update tool call status badge in the UI
-						if (toolCallEl) {
+						if (entry.el) {
 							this.view?.updateToolCallStatus(
-								toolCallEl,
+								entry.el,
 								toolResult.success ? "success" : "error"
 							);
 							// Set message ID after dispatch completes so only
 							// finished tool calls are forkable (not pending ones)
-							toolCallEl.dataset.messageId = toolCallMessage.id;
-							this.view?.appendForkButton(toolCallEl);
+							entry.el.dataset.messageId = entry.message.id;
+							this.view?.appendForkButton(entry.el);
 						}
 
-						// Propagate the provider tool call ID so the result can be correlated
-						toolResult.tool_call_id = call.toolCallId;
+						toolResults.push(toolResult);
+					}
+
+					// --- Step 3: Add all tool_result messages ---
+					for (let i = 0; i < toolCallEntries.length; i++) {
+						const entry = toolCallEntries[i]!;
+						const toolResult = toolResults[i]!;
 
 						// Record note access for vault rule re-evaluation
-						const notePath = call.parameters["path"] as string | undefined;
+						const notePath = entry.call.parameters["path"] as string | undefined;
 						if (notePath && this.vaultRuleManager) {
 							this.vaultRuleManager.recordNoteAccess(notePath);
 						}
 
-						// Add tool result message
 						const toolResultMessage = this.conversationManager.addMessage({
 							role: "tool_result",
 							content: "",
@@ -1533,12 +1573,7 @@ export class ChatOrchestrator {
 
 						this.view?.renderToolResult(toolResultMessage);
 
-						// If the user cancelled during tool dispatch, stop the loop
-						if (abortController.signal.aborted) {
-							break;
-						}
-
-						// Phase 3 (HOOK-005): Fire on_tool_result hooks after execution
+						// HOOK-005: Fire on_tool_result hooks sequentially
 						// G-004: Pass override manager so workflow-scoped hooks are used when active
 						const convForToolResult = this.conversationManager.getActiveConversation();
 						if (convForToolResult && vaultRootPath) {
@@ -1550,8 +1585,8 @@ export class ChatOrchestrator {
 								{
 									conversationId: convForToolResult.id,
 									timestamp: new Date().toISOString(),
-									toolName: call.toolName,
-									toolParams: call.parameters,
+									toolName: entry.call.toolName,
+									toolParams: entry.call.parameters,
 									toolResult: toolResultStr,
 									toolStatus: toolResult.success ? "success" : "error",
 								},
@@ -2088,26 +2123,70 @@ export class ChatOrchestrator {
 		// Safety net: ensure every tool_call has a matching tool_result.
 		// Providers (Bedrock, Anthropic) reject conversations where a tool_use
 		// block is not immediately followed by a tool_result block.
+		//
+		// With grouped ordering (Phase 2), consecutive tool_calls are followed
+		// by consecutive tool_results:
+		//   [tool_call_A, tool_call_B, tool_result_A, tool_result_B]
+		// We scan each run of tool_calls, collect the subsequent tool_results,
+		// and match by tool_call_id.  Unmatched tool_calls get synthetic results.
 		const repaired: ChatMessage[] = [];
-		for (let i = 0; i < chatMessages.length; i++) {
-			repaired.push(chatMessages[i]!);
-			if (chatMessages[i]!.role === "tool_call" && chatMessages[i]!.tool_call) {
-				const next = chatMessages[i + 1];
-				if (!next || next.role !== "tool_result") {
-					const tc = chatMessages[i]!.tool_call!;
+		let i = 0;
+		while (i < chatMessages.length) {
+			const msg = chatMessages[i]!;
+
+			// Not a tool_call — pass through
+			if (msg.role !== "tool_call" || !msg.tool_call) {
+				repaired.push(msg);
+				i++;
+				continue;
+			}
+
+			// Collect the run of consecutive tool_call messages
+			const toolCallRun: ChatMessage[] = [];
+			while (i < chatMessages.length && chatMessages[i]!.role === "tool_call" && chatMessages[i]!.tool_call) {
+				toolCallRun.push(chatMessages[i]!);
+				i++;
+			}
+
+			// Collect the run of consecutive tool_result messages that follow
+			const toolResultRun: ChatMessage[] = [];
+			while (i < chatMessages.length && chatMessages[i]!.role === "tool_result" && chatMessages[i]!.tool_result) {
+				toolResultRun.push(chatMessages[i]!);
+				i++;
+			}
+
+			// Build a set of tool_call_ids that have matching results
+			const matchedIds = new Set(
+				toolResultRun.map((r) => r.tool_result!.tool_call_id)
+			);
+
+			// Emit all tool_calls
+			for (const tc of toolCallRun) {
+				repaired.push(tc);
+			}
+
+			// Emit all existing tool_results
+			for (const tr of toolResultRun) {
+				repaired.push(tr);
+			}
+
+			// Inject synthetic results for any unmatched tool_calls
+			for (const tc of toolCallRun) {
+				const tcData = tc.tool_call!;
+				if (!matchedIds.has(tcData.id)) {
 					repaired.push({
 						role: "tool_result",
 						content: "",
 						tool_result: {
-							tool_call_id: tc.id,
-							tool_name: tc.tool_name,
+							tool_call_id: tcData.id,
+							tool_name: tcData.tool_name,
 							result: "Tool call was cancelled by the user.",
 							is_error: true,
 						},
 					});
 					log.warn("Injected synthetic tool_result for orphaned tool_call", {
-						toolName: tc.tool_name,
-						toolCallId: tc.id,
+						toolName: tcData.tool_name,
+						toolCallId: tcData.id,
 					});
 				}
 			}
