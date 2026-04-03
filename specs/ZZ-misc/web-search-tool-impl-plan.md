@@ -103,7 +103,7 @@ Add behavioral guidance to the system prompt so the LLM knows when/how to use `w
 
 ### 3.1 Add system prompt section
 
-- [ ] In `src/chat/default-system-prompt.ts`, add a `## Web search` section (near the existing `## Web fetching` section). Content should cover:
+- [x] In `src/chat/default-system-prompt.ts`, add a `## Web search` section (near the existing `## Web fetching` section). Content should cover:
   - When to use `web_search` (finding information, exploring topics) vs `fetch_webpage` (reading a known URL)
   - The search-then-fetch workflow: use `web_search` to find URLs, then `fetch_webpage` on specific results for full content
   - Results are snippets only — not full page content
@@ -113,7 +113,7 @@ Add behavioral guidance to the system prompt so the LLM knows when/how to use `w
 
 ### 3.2 Update `## Web fetching` section
 
-- [ ] Add a cross-reference to `web_search` in the existing `## Web fetching` section
+- [x] Add a cross-reference to `web_search` in the existing `## Web fetching` section
   - Mention: "To find URLs, use `web_search` first rather than guessing URLs"
 
 ### Phase 3 verification
