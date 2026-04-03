@@ -80,6 +80,11 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Fetch a webpage by URL and return its content as Markdown.",
 		isWrite: false,
 	},
+	web_search: {
+		name: "Web search",
+		desc: "Search the web via DuckDuckGo and return result titles, URLs, and snippets.",
+		isWrite: false,
+	},
 	execute_command: {
 		name: "Execute command",
 		desc: "Execute a shell command on the user's system (desktop only).",
