@@ -524,6 +524,8 @@ The fork badge in the conversation list (§3.4.4) is only displayed when the par
 
 ### 6.2 E2E Test (Playwright script in [`e2e/scripts/`](../e2e/scripts/))
 
+> **Implementation note:** Use the `/write-e2e-test` command to guide the AI through writing these tests. The command encodes this repo's E2E conventions (helper utilities, fixture setup, assertion patterns, script naming) and ensures the resulting test scripts are consistent with the existing suite in `e2e/scripts/`.
+
 **Core fork functionality:**
 1. Create a conversation with several user/assistant exchanges
 2. Fork at message N
