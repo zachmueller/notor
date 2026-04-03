@@ -136,46 +136,46 @@ Add styles for the fork badge in the conversation list and the hover fork button
 Test `prepareFork()` thoroughly in isolation. These tests validate the core slicing, ID reassignment, metadata, and edge case logic without needing UI or persistence.
 
 ### 6.1 Create test file
-- [ ] Create `src/chat/conversation.test.ts` (or add to existing test file if one exists for `ConversationManager`)
+- [x] Create `src/chat/conversation.test.ts` (or add to existing test file if one exists for `ConversationManager`)
 
 ### 6.2 Basic slicing tests
-- [ ] Test: fork at first message — fork contains exactly 1 message
-- [ ] Test: fork at middle message — fork contains messages 0..N inclusive
-- [ ] Test: fork at last message — fork contains all messages
+- [x] Test: fork at first message — fork contains exactly 1 message
+- [x] Test: fork at middle message — fork contains messages 0..N inclusive
+- [x] Test: fork at last message — fork contains all messages
 
 ### 6.3 ID reassignment tests
-- [ ] Test: all message IDs in fork are fresh UUIDs, none match originals
-- [ ] Test: `conversation_id` on every message matches the new conversation's ID
-- [ ] Test: new conversation ID is a fresh UUID, different from parent
+- [x] Test: all message IDs in fork are fresh UUIDs, none match originals
+- [x] Test: `conversation_id` on every message matches the new conversation's ID
+- [x] Test: new conversation ID is a fresh UUID, different from parent
 
 ### 6.4 Metadata tests
-- [ ] Test: `forked_from_conversation_id` matches parent conversation ID
-- [ ] Test: `forked_from_message_id` matches the fork-point message's original ID
-- [ ] Test: `created_at` is set to "now" (not copied from parent)
-- [ ] Test: `total_input_tokens` / `total_output_tokens` / `estimated_cost` are re-summed from sliced messages only
-- [ ] Test: uses caller-provided `currentProviderId`, `currentModelId`, `currentMode` (not parent values)
+- [x] Test: `forked_from_conversation_id` matches parent conversation ID
+- [x] Test: `forked_from_message_id` matches the fork-point message's original ID
+- [x] Test: `created_at` is set to "now" (not copied from parent)
+- [x] Test: `total_input_tokens` / `total_output_tokens` / `estimated_cost` are re-summed from sliced messages only
+- [x] Test: uses caller-provided `currentProviderId`, `currentModelId`, `currentMode` (not parent values)
 
 ### 6.5 Title tests
-- [ ] Test: title is `"Fork of {original title}"` when parent has a title
-- [ ] Test: title falls back to `"Fork of {first 8 chars of ID}"` when parent has no title
-- [ ] Test: forking a fork strips existing `"Fork of "` prefix (prevents `"Fork of Fork of X"`)
+- [x] Test: title is `"Fork of {original title}"` when parent has a title
+- [x] Test: title falls back to `"Fork of {first 8 chars of ID}"` when parent has no title
+- [x] Test: forking a fork strips existing `"Fork of "` prefix (prevents `"Fork of Fork of X"`)
 
 ### 6.6 Tool call pairing tests
-- [ ] Test: fork at `tool_call` message auto-includes paired `tool_result` (next message)
-- [ ] Test: fork at `tool_result` does NOT include next `tool_call`
-- [ ] Test: fork at `tool_call` with no paired result — still returns valid data (no auto-extension)
-- [ ] Test: multi-tool sequence — fork mid-sequence includes only messages up to fork point + auto-extension
+- [x] Test: fork at `tool_call` message auto-includes paired `tool_result` (next message)
+- [x] Test: fork at `tool_result` does NOT include next `tool_call`
+- [x] Test: fork at `tool_call` with no paired result — still returns valid data (no auto-extension)
+- [x] Test: multi-tool sequence — fork mid-sequence includes only messages up to fork point + auto-extension
 
 ### 6.7 Preservation tests
-- [ ] Test: original message timestamps are preserved (not overwritten)
-- [ ] Test: provider `tool_call.id` and `tool_result.tool_call_id` are preserved (not reassigned)
-- [ ] Test: workflow metadata (`workflow_path`, `workflow_name`, `persona_name`) is preserved from parent
-- [ ] Test: `is_background` is cleared to `false`
-- [ ] Test: `use_extended_context` is preserved when truthy
+- [x] Test: original message timestamps are preserved (not overwritten)
+- [x] Test: provider `tool_call.id` and `tool_result.tool_call_id` are preserved (not reassigned)
+- [x] Test: workflow metadata (`workflow_path`, `workflow_name`, `persona_name`) is preserved from parent
+- [x] Test: `is_background` is cleared to `false`
+- [x] Test: `use_extended_context` is preserved when truthy
 
 ### 6.8 Edge case tests
-- [ ] Test: returns `null` for unknown/nonexistent message ID
-- [ ] Test: works with a conversation that has only system + 1 user message
+- [x] Test: returns `null` for unknown/nonexistent message ID
+- [x] Test: works with a conversation that has only system + 1 user message
 
 ---
 
