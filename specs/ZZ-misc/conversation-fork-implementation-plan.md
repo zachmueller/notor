@@ -11,17 +11,17 @@
 The foundation — add fork metadata to types and implement the core `prepareFork()` method that slices messages and builds the forked conversation object. No UI or wiring yet; this phase is fully unit-testable in isolation.
 
 ### 1.1 Add fork fields to `Conversation` type
-- [ ] Add `forked_from_conversation_id?: string | null` to `Conversation` interface in [types.ts:69](../src/types.ts) (after `use_extended_context`)
-- [ ] Add `forked_from_message_id?: string | null` to `Conversation` interface in [types.ts:69](../src/types.ts)
+- [x] Add `forked_from_conversation_id?: string | null` to `Conversation` interface in [types.ts:69](../src/types.ts) (after `use_extended_context`)
+- [x] Add `forked_from_message_id?: string | null` to `Conversation` interface in [types.ts:69](../src/types.ts)
 
 ### 1.2 Add fork field to `ConversationListEntry`
-- [ ] Add `forked_from_conversation_id?: string` to `ConversationListEntry` in [history.ts:59-68](../src/chat/history.ts)
+- [x] Add `forked_from_conversation_id?: string` to `ConversationListEntry` in [history.ts:59-68](../src/chat/history.ts)
 
 ### 1.3 Implement `ConversationManager.prepareFork()`
-- [ ] Add `prepareFork(forkAtMessageId, currentProviderId, currentModelId, currentMode)` method to `ConversationManager` class in [conversation.ts](../src/chat/conversation.ts) (after `loadConversation` at line ~147)
-- [ ] Implement message slice — linear scan for `forkAtMessageId`, return `null` if not found
-- [ ] Implement tool_call/tool_result auto-pairing — if fork-point message has `role === "tool_call"`, scan forward for the paired `tool_result` whose `tool_call_id` matches (`tool_call.id ?? message.id` fallback per [orchestrator.ts:1998](../src/chat/orchestrator.ts))
-- [ ] Build new `Conversation` object with:
+- [x] Add `prepareFork(forkAtMessageId, currentProviderId, currentModelId, currentMode)` method to `ConversationManager` class in [conversation.ts](../src/chat/conversation.ts) (after `loadConversation` at line ~147)
+- [x] Implement message slice — linear scan for `forkAtMessageId`, return `null` if not found
+- [x] Implement tool_call/tool_result auto-pairing — if fork-point message has `role === "tool_call"`, scan forward for the paired `tool_result` whose `tool_call_id` matches (`tool_call.id ?? message.id` fallback per [orchestrator.ts:1998](../src/chat/orchestrator.ts))
+- [x] Build new `Conversation` object with:
   - Fresh UUID via `crypto.randomUUID()`
   - `created_at` / `updated_at` set to "now" (not copied from parent)
   - Title: `"Fork of {baseTitle}"` with `"Fork of "` prefix stripping to prevent accumulation
@@ -31,12 +31,12 @@ The foundation — add fork metadata to types and implement the core `prepareFor
   - Spread workflow metadata (`workflow_path`, `workflow_name`, `persona_name`) from parent
   - `is_background: false` always
   - Conditionally spread `use_extended_context`
-- [ ] Assign fresh message IDs — `crypto.randomUUID()` for each message's `id`, set `conversation_id` to new conversation ID, preserve all other fields (timestamps, tool_call.id, tool_result.tool_call_id) via spread
-- [ ] Return `{ conversation, messages }` or `null`
+- [x] Assign fresh message IDs — `crypto.randomUUID()` for each message's `id`, set `conversation_id` to new conversation ID, preserve all other fields (timestamps, tool_call.id, tool_result.tool_call_id) via spread
+- [x] Return `{ conversation, messages }` or `null`
 
 ### 1.4 Extract fork metadata in `HistoryManager`
-- [ ] In `listConversations()` ([history.ts](../src/chat/history.ts) ~line 410-419), add `forked_from_conversation_id: headerObj.forked_from_conversation_id as string | undefined` to the `entries.push(...)` call
-- [ ] In `searchConversations()` ([history.ts](../src/chat/history.ts) ~line 502-511), add the same `forked_from_conversation_id` field to its `entries.push(...)` call
+- [x] In `listConversations()` ([history.ts](../src/chat/history.ts) ~line 410-419), add `forked_from_conversation_id: headerObj.forked_from_conversation_id as string | undefined` to the `entries.push(...)` call
+- [x] In `searchConversations()` ([history.ts](../src/chat/history.ts) ~line 502-511), add the same `forked_from_conversation_id` field to its `entries.push(...)` call
 
 ---
 

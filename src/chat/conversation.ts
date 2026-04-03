@@ -147,6 +147,106 @@ export class ConversationManager {
 	}
 
 	/**
+	 * Prepare a forked conversation by slicing messages up to (and including)
+	 * the given fork-point message. Does NOT persist or switch — the caller
+	 * is responsible for that.
+	 *
+	 * If the fork-point message is a `tool_call`, the immediately following
+	 * `tool_result` whose `tool_call_id` matches is auto-included so the
+	 * forked conversation is never left with an unpaired tool call.
+	 *
+	 * @returns Fork data, or `null` if the fork-point message was not found.
+	 */
+	prepareFork(
+		forkAtMessageId: string,
+		currentProviderId: string,
+		currentModelId: string,
+		currentMode: ConversationMode,
+	): { conversation: Conversation; messages: Message[] } | null {
+		if (!this.activeConversation) return null;
+
+		// --- Locate fork-point index ---
+		const forkIdx = this.messages.findIndex((m) => m.id === forkAtMessageId);
+		if (forkIdx === -1) return null;
+
+		// --- Slice messages up to fork point (inclusive) ---
+		let endIdx = forkIdx;
+
+		// Auto-pair: if fork-point is a tool_call, include the paired tool_result
+		const forkMsg = this.messages[forkIdx]!;
+		if (forkMsg.role === "tool_call" && forkMsg.tool_call) {
+			const expectedId = forkMsg.tool_call.id ?? forkMsg.id;
+			const next = this.messages[forkIdx + 1];
+			if (next?.role === "tool_result" && next.tool_result?.tool_call_id === expectedId) {
+				endIdx = forkIdx + 1;
+			}
+		}
+
+		const slicedMessages = this.messages.slice(0, endIdx + 1);
+
+		// --- Build new conversation object ---
+		const now = new Date().toISOString();
+		const newId = generateId();
+		const parent = this.activeConversation;
+
+		// Title: strip existing "Fork of " prefix to prevent accumulation
+		const baseTitle = parent.title
+			? parent.title.replace(/^Fork of /, "")
+			: parent.id.substring(0, 8);
+		const title = `Fork of ${baseTitle}`;
+
+		// Re-sum token/cost from sliced messages only
+		let totalInput = 0;
+		let totalOutput = 0;
+		let estimatedCost: number | null = null;
+		for (const m of slicedMessages) {
+			if (m.input_tokens) totalInput += m.input_tokens;
+			if (m.output_tokens) totalOutput += m.output_tokens;
+			if (m.cost_estimate != null) {
+				estimatedCost = (estimatedCost ?? 0) + m.cost_estimate;
+			}
+		}
+
+		const conversation: Conversation = {
+			id: newId,
+			created_at: now,
+			updated_at: now,
+			title,
+			provider_id: currentProviderId,
+			model_id: currentModelId,
+			total_input_tokens: totalInput,
+			total_output_tokens: totalOutput,
+			estimated_cost: estimatedCost,
+			mode: currentMode,
+			// Workflow metadata from parent
+			...(parent.workflow_path !== undefined && { workflow_path: parent.workflow_path }),
+			...(parent.workflow_name !== undefined && { workflow_name: parent.workflow_name }),
+			...(parent.persona_name !== undefined && { persona_name: parent.persona_name }),
+			is_background: false,
+			...(parent.use_extended_context && { use_extended_context: parent.use_extended_context }),
+			// Fork provenance
+			forked_from_conversation_id: parent.id,
+			forked_from_message_id: forkAtMessageId,
+		};
+
+		// --- Assign fresh IDs to messages ---
+		const newMessages: Message[] = slicedMessages.map((m) => ({
+			...m,
+			id: generateId(),
+			conversation_id: newId,
+		}));
+
+		log.info("Prepared fork", {
+			parentId: parent.id,
+			forkAtMessageId,
+			newId,
+			messageCount: newMessages.length,
+		});
+
+		return { conversation, messages: newMessages };
+	}
+
+	/**
 	 * Get the active conversation, or null if none.
 	 */
 	getActiveConversation(): Conversation | null {

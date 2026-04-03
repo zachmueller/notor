@@ -65,6 +65,8 @@ export interface ConversationListEntry {
 	provider_id: string;
 	model_id: string;
 	filename: string;
+	/** Parent conversation ID when this entry is a fork. */
+	forked_from_conversation_id?: string;
 }
 
 /**
@@ -416,6 +418,7 @@ export class HistoryManager {
 					provider_id: convProviderId,
 					model_id: convModelId,
 					filename,
+					forked_from_conversation_id: headerObj.forked_from_conversation_id as string | undefined,
 				});
 			} catch (e) {
 				log.warn("Failed to read conversation header", {
@@ -508,6 +511,7 @@ export class HistoryManager {
 					provider_id: convProviderId,
 					model_id: convModelId,
 					filename,
+					forked_from_conversation_id: headerObj.forked_from_conversation_id as string | undefined,
 				});
 			} catch (e) {
 				log.warn("Failed to search conversation", {

@@ -67,6 +67,22 @@ export interface Conversation {
 	 * @see private/bedrock-model-picker-overhaul.md — Phase 2e
 	 */
 	use_extended_context?: boolean;
+	/**
+	 * ID of the conversation this was forked from (null for non-forked
+	 * conversations). Together with `forked_from_message_id`, establishes
+	 * fork provenance for lineage navigation.
+	 *
+	 * @see specs/ZZ-misc/conversation-fork-design.md
+	 */
+	forked_from_conversation_id?: string | null;
+	/**
+	 * ID of the message in the parent conversation at which the fork was
+	 * created. Messages up to and including this one were copied into the
+	 * fork.
+	 *
+	 * @see specs/ZZ-misc/conversation-fork-design.md
+	 */
+	forked_from_message_id?: string | null;
 }
 
 /** Plan/Act mode. */
