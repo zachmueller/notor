@@ -18,6 +18,7 @@ import { ConversationManager } from "./conversation";
 import { ContextManager } from "./context";
 import type { SystemPromptBuilder } from "./system-prompt";
 import type { ToolDispatcher } from "./dispatcher";
+import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./tool-orchestration";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings, ModelPricing } from "../settings";
@@ -1496,54 +1497,38 @@ export class ChatOrchestrator {
 						});
 					}
 
-					// --- Step 2: Dispatch each tool serially, collecting results ---
-					const toolResults: ToolResult[] = [];
-
+					// --- Step 2: Dispatch tools via batch orchestration ---
+					// Partition into concurrent/serial batches and execute
+					// with parallel execution for concurrency-safe (read) tools.
+					const messageIdMap = new Map<string, string>();
 					for (const entry of toolCallEntries) {
-						if (abortController.signal.aborted) {
-							// Produce synthetic error results for remaining calls
-							toolResults.push({
-								tool_name: entry.call.toolName,
-								success: false,
-								result: "",
-								error: "Tool call was cancelled by the user.",
-								tool_call_id: entry.call.toolCallId,
-							});
-							continue;
-						}
+						messageIdMap.set(entry.call.toolCallId, entry.message.id);
+					}
 
-						let toolResult: ToolResult;
-						try {
-							toolResult = await this.dispatcher.dispatch(
-								entry.call.toolName,
-								entry.call.parameters,
-								mode,
-								entry.message.id,
-								abortController.signal
-							);
-						} catch (dispatchError) {
-							// Ensure the orphaned tool_call gets a matching tool_result
-							// so the conversation history stays valid for the provider.
-							toolResult = {
-								tool_name: entry.call.toolName,
-								success: false,
-								result: "",
-								error: `Tool call failed: ${dispatchError instanceof Error ? dispatchError.message : String(dispatchError)}`,
-							};
-							log.warn("Tool dispatch threw, injecting error tool_result", {
-								toolName: entry.call.toolName,
-								error: String(dispatchError),
-							});
-						}
+					const batches = partitionToolCalls(
+						result.calls,
+						this.dispatcher,
+					);
+					const batchResults = await executeToolBatches(
+						batches,
+						this.dispatcher,
+						mode,
+						messageIdMap,
+						abortController.signal,
+					);
 
-						// Propagate the provider tool call ID so the result can be correlated
-						toolResult.tool_call_id = entry.call.toolCallId;
+					// Map results back to entries for UI updates
+					const toolResults: ToolResult[] = [];
+					for (const batchResult of batchResults) {
+						const entry = toolCallEntries.find(
+							e => e.call.toolCallId === batchResult.call.toolCallId
+						);
 
 						// Update tool call status badge in the UI
-						if (entry.el) {
+						if (entry?.el) {
 							this.view?.updateToolCallStatus(
 								entry.el,
-								toolResult.success ? "success" : "error"
+								batchResult.result.success ? "success" : "error"
 							);
 							// Set message ID after dispatch completes so only
 							// finished tool calls are forkable (not pending ones)
@@ -1551,7 +1536,7 @@ export class ChatOrchestrator {
 							this.view?.appendForkButton(entry.el);
 						}
 
-						toolResults.push(toolResult);
+						toolResults.push(batchResult.result);
 					}
 
 					// --- Step 3: Add all tool_result messages ---
@@ -2378,12 +2363,6 @@ export class ChatOrchestrator {
 }
 
 /** Internal result type for stream processing. */
-type ToolCallInfo = {
-	toolCallId: string;
-	toolName: string;
-	parameters: Record<string, unknown>;
-};
-
 type StreamResult =
 	| { type: "text"; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }

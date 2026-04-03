@@ -470,11 +470,11 @@ Multiple tool calls rendered simultaneously need clear visual grouping:
 4. ✅ Updated all provider `sendMessage()` implementations (Anthropic, OpenAI, Bedrock, Local) to handle the new array fields
 5. ✅ Update the orphaned tool call safety net for consecutive tool_call runs (completed in Phase 2 — required co-change per Section 5 hard gate)
 
-### Phase 4: Parallel Execution (Higher Risk)
-1. Create `src/chat/tool-orchestration.ts` with partitioning and parallel execution
-2. Add concurrency-safety determination (based on `tool.mode` for built-in tools; always non-concurrent for MCP tools)
-3. Wire into `responseLoop()` — replace serial dispatch with batch orchestration
-4. Add concurrency cap (default: 5)
+### Phase 4: Parallel Execution (Higher Risk) — ✅ COMPLETE (2026-04-03)
+1. ✅ Created `src/chat/tool-orchestration.ts` with `partitionToolCalls()` and `executeToolBatches()` functions
+2. ✅ Concurrency-safety determination: built-in `mode === "read"` tools are concurrent; MCP tools always non-concurrent; unknown tools conservatively non-concurrent
+3. ✅ Wired into `responseLoop()` — serial dispatch loop replaced with `partitionToolCalls()` → `executeToolBatches()` pipeline
+4. ✅ Concurrency cap of 5 (default) enforced via semaphore in `runConcurrentBatch()`
 
 ### Phase 5: Polish
 1. Batch approval UX (if needed)
