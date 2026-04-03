@@ -130,25 +130,25 @@ Targeted tests for the parsing and URL-cleaning logic that don't require network
 
 ### 4.1 Create `src/tools/web-search.test.ts`
 
-- [ ] Test `cleanDDGUrl()`:
+- [x] Test `cleanDDGUrl()`:
   - Decodes DDG redirect URL (`//duckduckgo.com/l/?uddg=...`) → actual URL
   - Handles protocol-relative URLs → `https:` prefix
   - Passes through absolute URLs unchanged
   - Returns `null` for relative paths, empty strings, malformed URLs
   - Handles double-encoded URLs correctly
-- [ ] Test `parseDDGResults()`:
+- [x] Test `parseDDGResults()`:
   - Parses a saved DDG HTML snapshot → correct titles, URLs, snippets
   - Respects `maxResults` cap
   - Skips results with missing title or URL
   - Handles empty/malformed HTML gracefully (returns `[]`)
-- [ ] Test domain denylist filtering in `execute()`:
+- [x] Test domain denylist filtering in `execute()`:
   - Results from blocked domains are excluded
   - Results from allowed domains pass through
   - Wildcard patterns work correctly
 
 ### Phase 4 verification
 
-- [ ] All unit tests pass (`npm test`)
+- [x] All unit tests pass (`npm test`)
 
 ---
 

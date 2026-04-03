@@ -5,6 +5,7 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": resolve(__dirname, "src"),
+			obsidian: resolve(__dirname, "src/__mocks__/obsidian.ts"),
 		},
 	},
 	test: {
