@@ -123,6 +123,7 @@ Verified against the codebase: provider instances in `ProviderRegistry` (`src/pr
 - Each sub-agent creates its own `AbortController` for independent cancellation of in-flight LLM requests
 - If the sub-agent profile specifies a different provider/model via `notor-preferred-provider` / `notor-preferred-model`, the `use_subagent` tool resolves it via `ProviderRegistry.getProvider(type)` before constructing the `SubAgentRunner`
 - If the specified provider is not configured or the model is not available, fail with a clear error message in the tool result (no silent fallback — consistent with Section 4.1)
+- **Constraint for future provider work:** Provider `sendMessage()` implementations must keep all per-request state local (not instance-level) to support concurrent use by sub-agents. The OpenAI, Local, and (now fixed) Bedrock providers all follow this pattern.
 
 ---
 
@@ -215,7 +216,12 @@ Notor's `ChatOrchestrator` (~2370 lines) is deeply coupled to features sub-agent
 - `SubAgentResult`: `{ text: string; messages: Message[]; tokenUsage: { input: number; output: number }; iterationCount: number; wasCapReached: boolean }`
 - Internal loop: `provider.sendMessage()` → process stream → dispatch tools → repeat until text-only response or iteration cap
 - Does NOT use `ConversationManager` (plain `Message[]` array) or `ContextManager` (short-lived conversations)
-- Extract `processStream()` core logic (chunk accumulation, tool call JSON parsing — orchestrator lines 1886–1960) into shared utility `src/chat/stream-utils.ts`. **Note:** The current `processStream()` (lines 1874–2009) has direct view-layer coupling (`this.view?.createAssistantMessagePlaceholder()`, `this.view?.appendStreamChunk()`, `this.view?.finalizeAssistantMessage()`). The shared utility must accept optional rendering callbacks so the orchestrator can pass view methods while the `SubAgentRunner` passes either `onProgress` or nothing.
+- Extract `processStream()` core logic into a shared **event transform stream** in `src/chat/stream-utils.ts`. The current `processStream()` (orchestrator lines 1874–2009) interleaves pure stream parsing with view-layer calls (`this.view?.createAssistantMessagePlaceholder()`, `this.view?.appendStreamChunk()`, `this.view?.finalizeAssistantMessage()`). Rather than threading callbacks through the shared layer, the utility is an async generator that transforms the raw `AsyncIterable<StreamChunk>` from the provider into higher-level, fully-parsed events:
+  - `parseStreamEvents(stream: AsyncIterable<StreamChunk>, abortSignal: AbortSignal): AsyncIterable<ParsedStreamEvent>`
+  - Event types: `{ type: "text_delta", text: string; delta: string }` (accumulated text + new delta), `{ type: "tool_call", id: string; name: string; parameters: Record<string, unknown> }` (fully parsed), `{ type: "message_end", inputTokens: number; outputTokens: number }`, `{ type: "error", message: string }`, `{ type: "cancelled", text: string }`
+  - This cleanly separates parsing from rendering: the orchestrator consumes events and renders to the view; the `SubAgentRunner` consumes the same events and feeds `onProgress` or collects results silently
+  - The orchestrator's `processStream()` method becomes a thin consumer of `parseStreamEvents()` that adds view rendering on top
+  - `_backgroundResponseLoop`'s duplicate stream processing logic should also be migrated to consume `parseStreamEvents()`, eliminating the third copy of the loop
 
 ### 9.2 Token & Cost Tracking
 
