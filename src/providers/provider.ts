@@ -23,17 +23,17 @@ import type { ModelInfo } from "../types";
 export interface ChatMessage {
 	role: "system" | "user" | "assistant" | "tool_call" | "tool_result";
 	content: string;
-	tool_call?: {
+	tool_calls?: Array<{
 		id: string;
 		tool_name: string;
 		parameters: Record<string, unknown>;
-	};
-	tool_result?: {
+	}>;
+	tool_results?: Array<{
 		tool_call_id: string;
 		tool_name: string;
 		result: string;
 		is_error: boolean;
-	};
+	}>;
 }
 
 // ---------------------------------------------------------------------------

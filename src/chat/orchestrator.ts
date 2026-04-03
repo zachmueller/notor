@@ -2087,13 +2087,15 @@ export class ChatOrchestrator {
 						chatMessages.push({
 							role: "tool_call",
 							content: "",
-							tool_call: {
-								// Use the provider-assigned ID (e.g., Bedrock toolUseId) when
-								// available; fall back to the message UUID for other providers.
-								id: msg.tool_call.id ?? msg.id,
-								tool_name: msg.tool_call.tool_name,
-								parameters: msg.tool_call.parameters,
-							},
+							tool_calls: [
+								{
+									// Use the provider-assigned ID (e.g., Bedrock toolUseId) when
+									// available; fall back to the message UUID for other providers.
+									id: msg.tool_call.id ?? msg.id,
+									tool_name: msg.tool_call.tool_name,
+									parameters: msg.tool_call.parameters,
+								},
+							],
 						});
 					}
 					break;
@@ -2107,13 +2109,15 @@ export class ChatOrchestrator {
 						chatMessages.push({
 							role: "tool_result",
 							content: "",
-							tool_result: {
-								// Must match the tool_call.id used above for the same call.
-								tool_call_id: msg.tool_result.tool_call_id ?? msg.id,
-								tool_name: msg.tool_result.tool_name,
-								result: resultStr || msg.tool_result.error || "",
-								is_error: !msg.tool_result.success,
-							},
+							tool_results: [
+								{
+									// Must match the tool_calls[].id used above for the same call.
+									tool_call_id: msg.tool_result.tool_call_id ?? msg.id,
+									tool_name: msg.tool_result.tool_name,
+									result: resultStr || msg.tool_result.error || "",
+									is_error: !msg.tool_result.success,
+								},
+							],
 						});
 					}
 					break;
@@ -2135,7 +2139,7 @@ export class ChatOrchestrator {
 			const msg = chatMessages[i]!;
 
 			// Not a tool_call — pass through
-			if (msg.role !== "tool_call" || !msg.tool_call) {
+			if (msg.role !== "tool_call" || !msg.tool_calls?.length) {
 				repaired.push(msg);
 				i++;
 				continue;
@@ -2143,21 +2147,21 @@ export class ChatOrchestrator {
 
 			// Collect the run of consecutive tool_call messages
 			const toolCallRun: ChatMessage[] = [];
-			while (i < chatMessages.length && chatMessages[i]!.role === "tool_call" && chatMessages[i]!.tool_call) {
+			while (i < chatMessages.length && chatMessages[i]!.role === "tool_call" && chatMessages[i]!.tool_calls?.length) {
 				toolCallRun.push(chatMessages[i]!);
 				i++;
 			}
 
 			// Collect the run of consecutive tool_result messages that follow
 			const toolResultRun: ChatMessage[] = [];
-			while (i < chatMessages.length && chatMessages[i]!.role === "tool_result" && chatMessages[i]!.tool_result) {
+			while (i < chatMessages.length && chatMessages[i]!.role === "tool_result" && chatMessages[i]!.tool_results?.length) {
 				toolResultRun.push(chatMessages[i]!);
 				i++;
 			}
 
 			// Build a set of tool_call_ids that have matching results
 			const matchedIds = new Set(
-				toolResultRun.map((r) => r.tool_result!.tool_call_id)
+				toolResultRun.flatMap((r) => r.tool_results!.map((tr) => tr.tool_call_id))
 			);
 
 			// Emit all tool_calls
@@ -2172,35 +2176,93 @@ export class ChatOrchestrator {
 
 			// Inject synthetic results for any unmatched tool_calls
 			for (const tc of toolCallRun) {
-				const tcData = tc.tool_call!;
-				if (!matchedIds.has(tcData.id)) {
-					repaired.push({
-						role: "tool_result",
-						content: "",
-						tool_result: {
-							tool_call_id: tcData.id,
-							tool_name: tcData.tool_name,
-							result: "Tool call was cancelled by the user.",
-							is_error: true,
-						},
-					});
-					log.warn("Injected synthetic tool_result for orphaned tool_call", {
-						toolName: tcData.tool_name,
-						toolCallId: tcData.id,
-					});
+				for (const tcData of tc.tool_calls!) {
+					if (!matchedIds.has(tcData.id)) {
+						repaired.push({
+							role: "tool_result",
+							content: "",
+							tool_results: [
+								{
+									tool_call_id: tcData.id,
+									tool_name: tcData.tool_name,
+									result: "Tool call was cancelled by the user.",
+									is_error: true,
+								},
+							],
+						});
+						log.warn("Injected synthetic tool_result for orphaned tool_call", {
+							toolName: tcData.tool_name,
+							toolCallId: tcData.id,
+						});
+					}
 				}
 			}
 		}
 
+		// Phase 3: Coalesce consecutive tool_call/tool_result messages into
+		// single messages with arrays, matching the provider-expected format
+		// (one assistant message with N tool_use blocks, one user message with
+		// N tool_result blocks).
+		const coalesced: ChatMessage[] = [];
+		let j = 0;
+		while (j < repaired.length) {
+			const msg = repaired[j]!;
+
+			if (msg.role === "tool_call" && msg.tool_calls?.length) {
+				// Look back: if the preceding coalesced message is an assistant
+				// message (pre-tool-call text + token carrier), absorb its content
+				// into the coalesced tool_call message.
+				let preToolCallText = "";
+				const prev = coalesced[coalesced.length - 1];
+				if (prev && prev.role === "assistant" && !prev.tool_calls) {
+					preToolCallText = prev.content;
+					coalesced.pop(); // absorb into the coalesced message
+				}
+
+				// Collect all consecutive tool_call entries
+				const allToolCalls: ChatMessage["tool_calls"] = [];
+				while (j < repaired.length && repaired[j]!.role === "tool_call" && repaired[j]!.tool_calls?.length) {
+					allToolCalls.push(...repaired[j]!.tool_calls!);
+					j++;
+				}
+
+				coalesced.push({
+					role: "tool_call",
+					content: preToolCallText,
+					tool_calls: allToolCalls,
+				});
+				continue;
+			}
+
+			if (msg.role === "tool_result" && msg.tool_results?.length) {
+				// Collect all consecutive tool_result entries
+				const allToolResults: ChatMessage["tool_results"] = [];
+				while (j < repaired.length && repaired[j]!.role === "tool_result" && repaired[j]!.tool_results?.length) {
+					allToolResults.push(...repaired[j]!.tool_results!);
+					j++;
+				}
+
+				coalesced.push({
+					role: "tool_result",
+					content: "",
+					tool_results: allToolResults,
+				});
+				continue;
+			}
+
+			coalesced.push(msg);
+			j++;
+		}
+
 		log.info("ChatMessages built for provider", {
-			totalCount: repaired.length,
-			firstRole: repaired[0]?.role ?? "none",
-			secondRole: repaired[1]?.role ?? "none",
-			lastRole: repaired[repaired.length - 1]?.role ?? "none",
-			roles: repaired.map((m) => m.role),
+			totalCount: coalesced.length,
+			firstRole: coalesced[0]?.role ?? "none",
+			secondRole: coalesced[1]?.role ?? "none",
+			lastRole: coalesced[coalesced.length - 1]?.role ?? "none",
+			roles: coalesced.map((m) => m.role),
 		});
 
-		return repaired;
+		return coalesced;
 	}
 
 	// -----------------------------------------------------------------------

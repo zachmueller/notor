@@ -80,39 +80,44 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 function toOpenAIMessages(
 	messages: ChatMessage[]
 ): Record<string, unknown>[] {
-	return messages.map((msg) => {
-		if (msg.role === "tool_call" && msg.tool_call) {
-			return {
+	const result: Record<string, unknown>[] = [];
+	for (const msg of messages) {
+		if (msg.role === "tool_call" && msg.tool_calls?.length) {
+			result.push({
 				role: "assistant",
-				content: null,
-				tool_calls: [
-					{
-						id: msg.tool_call.id,
-						type: "function",
-						function: {
-							name: msg.tool_call.tool_name,
-							arguments: JSON.stringify(msg.tool_call.parameters),
-						},
+				content: msg.content || null,
+				tool_calls: msg.tool_calls.map((tc) => ({
+					id: tc.id,
+					type: "function",
+					function: {
+						name: tc.tool_name,
+						arguments: JSON.stringify(tc.parameters),
 					},
-				],
-			};
+				})),
+			});
+			continue;
 		}
 
-		if (msg.role === "tool_result" && msg.tool_result) {
-			return {
-				role: "tool",
-				tool_call_id: msg.tool_result.tool_call_id,
-				content: msg.tool_result.result,
-			};
+		if (msg.role === "tool_result" && msg.tool_results?.length) {
+			// OpenAI-compatible format: one message per tool result
+			for (const tr of msg.tool_results) {
+				result.push({
+					role: "tool",
+					tool_call_id: tr.tool_call_id,
+					content: tr.result,
+				});
+			}
+			continue;
 		}
 
-		return {
+		result.push({
 			role: msg.role === "tool_call" || msg.role === "tool_result"
 				? "user"
 				: msg.role,
 			content: msg.content,
-		};
-	});
+		});
+	}
+	return result;
 }
 
 /**

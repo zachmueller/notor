@@ -59,33 +59,34 @@ function toAnthropicMessages(
 			continue;
 		}
 
-		if (msg.role === "tool_call" && msg.tool_call) {
-			// Tool use is part of the assistant's response in Anthropic's format
-			anthropicMessages.push({
-				role: "assistant",
-				content: [
-					{
-						type: "tool_use",
-						id: msg.tool_call.id,
-						name: msg.tool_call.tool_name,
-						input: msg.tool_call.parameters,
-					},
-				],
-			});
+		if (msg.role === "tool_call" && msg.tool_calls?.length) {
+			// Tool use is part of the assistant's response in Anthropic's format.
+			// Pre-tool-call text (if any) is included as a leading text block.
+			const content: Record<string, unknown>[] = [];
+			if (msg.content) {
+				content.push({ type: "text", text: msg.content });
+			}
+			for (const tc of msg.tool_calls) {
+				content.push({
+					type: "tool_use",
+					id: tc.id,
+					name: tc.tool_name,
+					input: tc.parameters,
+				});
+			}
+			anthropicMessages.push({ role: "assistant", content });
 			continue;
 		}
 
-		if (msg.role === "tool_result" && msg.tool_result) {
+		if (msg.role === "tool_result" && msg.tool_results?.length) {
 			anthropicMessages.push({
 				role: "user",
-				content: [
-					{
-						type: "tool_result",
-						tool_use_id: msg.tool_result.tool_call_id,
-						content: msg.tool_result.result,
-						is_error: msg.tool_result.is_error,
-					},
-				],
+				content: msg.tool_results.map((tr) => ({
+					type: "tool_result",
+					tool_use_id: tr.tool_call_id,
+					content: tr.result,
+					is_error: tr.is_error,
+				})),
 			});
 			continue;
 		}

@@ -463,11 +463,11 @@ Multiple tool calls rendered simultaneously need clear visual grouping:
 3. ✅ Add all `tool_call` messages first, then all `tool_result` messages — validates stream collection and grouped ordering without introducing concurrency
 4. ✅ Update orphaned tool_call safety net to handle consecutive tool_call runs (scans runs and matches by tool_call_id instead of checking `chatMessages[i+1]`) — required co-change per Section 5 hard gate
 
-### Phase 3: Message Coalescing (Medium Risk)
-1. Replace `ChatMessage` singular `tool_call?`/`tool_result?` fields with `tool_calls?`/`tool_results?` arrays
-2. Update `toChatMessages()` to coalesce consecutive tool_call/tool_result messages
-3. Include pre-tool-call text as a text content block in the coalesced assistant message
-4. Update provider `sendMessage()` implementations to handle the new array fields
+### Phase 3: Message Coalescing (Medium Risk) — ✅ COMPLETE (2026-04-03)
+1. ✅ Replaced `ChatMessage` singular `tool_call?`/`tool_result?` fields with `tool_calls?`/`tool_results?` arrays
+2. ✅ Updated `toChatMessages()` to coalesce consecutive tool_call/tool_result messages into single messages with arrays
+3. ✅ Pre-tool-call assistant text is absorbed into the coalesced tool_call message's `content` field
+4. ✅ Updated all provider `sendMessage()` implementations (Anthropic, OpenAI, Bedrock, Local) to handle the new array fields
 5. ✅ Update the orphaned tool call safety net for consecutive tool_call runs (completed in Phase 2 — required co-change per Section 5 hard gate)
 
 ### Phase 4: Parallel Execution (Higher Risk)

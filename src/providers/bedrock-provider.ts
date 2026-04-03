@@ -41,6 +41,7 @@ import {
 	ConverseStreamCommand,
 } from "@aws-sdk/client-bedrock-runtime";
 import type {
+	ContentBlock,
 	ConversationRole,
 	ConverseStreamCommandInput,
 	ConverseStreamOutput,
@@ -83,34 +84,38 @@ function toBedrockMessages(
 			continue;
 		}
 
-		if (msg.role === "tool_call" && msg.tool_call) {
+		if (msg.role === "tool_call" && msg.tool_calls?.length) {
+			// Pre-tool-call text (if any) is included as a leading text block.
+			const content: ContentBlock[] = [];
+			if (msg.content) {
+				content.push({ text: msg.content });
+			}
+			for (const tc of msg.tool_calls) {
+				content.push({
+					toolUse: {
+						toolUseId: tc.id,
+						name: tc.tool_name,
+						input: tc.parameters as unknown as DocumentType,
+					},
+				});
+			}
 			bedrockMessages.push({
 				role: "assistant" as ConversationRole,
-				content: [
-					{
-						toolUse: {
-							toolUseId: msg.tool_call.id,
-							name: msg.tool_call.tool_name,
-							input: msg.tool_call.parameters as unknown as DocumentType,
-						},
-					},
-				],
+				content,
 			});
 			continue;
 		}
 
-		if (msg.role === "tool_result" && msg.tool_result) {
+		if (msg.role === "tool_result" && msg.tool_results?.length) {
 			bedrockMessages.push({
 				role: "user" as ConversationRole,
-				content: [
-					{
-						toolResult: {
-							toolUseId: msg.tool_result.tool_call_id,
-							content: [{ text: msg.tool_result.result }],
-							status: msg.tool_result.is_error ? "error" : "success",
-						},
+				content: msg.tool_results.map((tr) => ({
+					toolResult: {
+						toolUseId: tr.tool_call_id,
+						content: [{ text: tr.result }],
+						status: tr.is_error ? ("error" as const) : ("success" as const),
 					},
-				],
+				})),
 			});
 			continue;
 		}
