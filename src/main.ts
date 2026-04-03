@@ -1463,6 +1463,21 @@ export default class NotorPlugin extends Plugin {
 			});
 		});
 
+		// Fork conversation at a specific message
+		view.setOnForkConversation(async (messageId: string) => {
+			const result = await orchestrator.forkConversation(messageId);
+			if (!result) return;
+
+			await orchestrator.switchConversation(result.filename);
+
+			checkpointManager.setConversationId(result.conversation.id);
+			view.setActiveConversationId(result.conversation.id);
+			this.getStaleTracker().clear?.();
+			this.getVaultRuleManager().clearAccessedNotes();
+
+			new Notice(`Forked: ${result.conversation.title}`);
+		});
+
 		// Export conversation from history list
 		view.setOnExportConversation((filename: string) => {
 			historyManager.loadConversation(filename).then(({ conversation, messages }) => {

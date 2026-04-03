@@ -45,20 +45,20 @@ The foundation — add fork metadata to types and implement the core `prepareFor
 Connect the core logic to the orchestrator and wire the fork callback through main.ts. After this phase, forking works programmatically (callable from dev console) but has no UI trigger yet.
 
 ### 2.1 Implement `ChatOrchestrator.forkConversation()`
-- [ ] Add `forkConversation(forkAtMessageId: string)` method to `ChatOrchestrator` in [orchestrator.ts](../src/chat/orchestrator.ts) (alongside `newConversation` and `switchConversation`)
-- [ ] Get current provider type and config from `this.providerRegistry`
-- [ ] Get current mode from `this.conversationManager.getActiveConversation()?.mode`
-- [ ] Call `this.conversationManager.prepareFork(...)` — return `null` with `Notice` if fork data is null
-- [ ] Call `this.historyManager.importConversation(forkData.conversation, forkData.messages)` to persist
-- [ ] Return `{ filename, conversation }` (do NOT call `switchConversation` internally — main.ts handles post-switch wiring)
+- [x] Add `forkConversation(forkAtMessageId: string)` method to `ChatOrchestrator` in [orchestrator.ts](../src/chat/orchestrator.ts) (alongside `newConversation` and `switchConversation`)
+- [x] Get current provider type and config from `this.providerRegistry`
+- [x] Get current mode from `this.conversationManager.getActiveConversation()?.mode`
+- [x] Call `this.conversationManager.prepareFork(...)` — return `null` with `Notice` if fork data is null
+- [x] Call `this.historyManager.importConversation(forkData.conversation, forkData.messages)` to persist
+- [x] Return `{ filename, conversation }` (do NOT call `switchConversation` internally — main.ts handles post-switch wiring)
 
 ### 2.2 Add fork callback to `ChatView`
-- [ ] Add `private onForkConversation?: (messageId: string) => Promise<void>` property to `NotorChatView` in [chat-view.ts](../src/ui/chat-view.ts)
-- [ ] Add `setOnForkConversation(callback)` setter method in the callback setters section (~line 171-299)
+- [x] Add `private onForkConversation?: (messageId: string) => Promise<void>` property to `NotorChatView` in [chat-view.ts](../src/ui/chat-view.ts)
+- [x] Add `setOnForkConversation(callback)` setter method in the callback setters section (~line 171-299)
 
 ### 2.3 Wire fork callback in `main.ts`
-- [ ] In the view wiring section of [main.ts](../src/main.ts) (~line 1449), register `view.setOnForkConversation(...)` callback
-- [ ] Callback implementation:
+- [x] In the view wiring section of [main.ts](../src/main.ts) (~line 1449), register `view.setOnForkConversation(...)` callback
+- [x] Callback implementation:
   - Call `orchestrator.forkConversation(messageId)`
   - If result is null, return early
   - Call `orchestrator.switchConversation(result.filename)`

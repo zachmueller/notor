@@ -146,6 +146,9 @@ export class NotorChatView extends ItemView {
 	private getCurrentProvider?: () => LLMProviderType;
 	private getCurrentModel?: () => string;
 
+	// Fork callback
+	private onForkConversation?: (messageId: string) => Promise<void>;
+
 	// Checkpoint callbacks
 	private onListCheckpoints?: () => Promise<Checkpoint[]>;
 	private onRestoreCheckpoint?: (checkpointId: string) => Promise<boolean>;
@@ -275,6 +278,10 @@ export class NotorChatView extends ItemView {
 
 	setOnGetCurrentContent(callback: (notePath: string) => Promise<string | null>): void {
 		this.onGetCurrentContent = callback;
+	}
+
+	setOnForkConversation(callback: (messageId: string) => Promise<void>): void {
+		this.onForkConversation = callback;
 	}
 
 	// -----------------------------------------------------------------------

@@ -9,7 +9,7 @@
  */
 
 import { type App, Notice } from "obsidian";
-import type { ConversationMode, Message, ToolResult, WorkflowExecution, ExecutionChain } from "../types";
+import type { Conversation, ConversationMode, Message, ToolResult, WorkflowExecution, ExecutionChain } from "../types";
 import type { ChatMessage, ToolDefinition, StreamChunk, SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
@@ -275,6 +275,46 @@ export class ChatOrchestrator {
 		this.view?.updateModeDisplay(conversation.mode);
 
 		log.info("New conversation started", { id: conversation.id });
+	}
+
+	/**
+	 * Fork the current conversation at a specific message.
+	 *
+	 * Creates a new conversation containing all messages up to (and including)
+	 * the fork-point message, persists it, and returns the filename and
+	 * conversation object. Does NOT switch to the fork — the caller (main.ts)
+	 * handles post-switch wiring.
+	 *
+	 * Returns `null` (with a Notice) if the fork-point message is not found.
+	 */
+	async forkConversation(
+		forkAtMessageId: string,
+	): Promise<{ filename: string; conversation: Conversation } | null> {
+		const providerType = this.providerRegistry.getActiveType();
+		const providerConfig = this.providerRegistry.getConfig(providerType);
+		const modelId = providerConfig?.model_id ?? "";
+		const currentMode =
+			this.conversationManager.getActiveConversation()?.mode ??
+			this.settings.mode;
+
+		const forkData = this.conversationManager.prepareFork(
+			forkAtMessageId,
+			providerType,
+			modelId,
+			currentMode,
+		);
+
+		if (!forkData) {
+			new Notice("Could not fork: message not found in current conversation.");
+			return null;
+		}
+
+		const filename = await this.historyManager.importConversation(
+			forkData.conversation,
+			forkData.messages,
+		);
+
+		return { filename, conversation: forkData.conversation };
 	}
 
 	/**
