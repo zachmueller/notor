@@ -161,7 +161,7 @@ prepareFork(
        ),
        estimated_cost: slicedMessages.reduce(
            (sum, m) => sum + (m.cost_estimate ?? 0), 0
-       ) || null,
+       ) ?? null,
        // Fork provenance
        forked_from_conversation_id: original.id,
        forked_from_message_id: forkAtMessageId,
@@ -232,7 +232,7 @@ async forkConversation(forkAtMessageId: string): Promise<{
     const forkData = this.conversationManager.prepareFork(
         forkAtMessageId,
         providerType,
-        providerConfig.modelId,
+        providerConfig?.model_id ?? "",
         this.conversationManager.getActiveConversation()?.mode ?? "act"
     );
     if (!forkData) {
@@ -265,10 +265,10 @@ Add a `data-message-id` attribute to each rendered message element so the contex
 
 | Method | Line | Element | Change |
 |--------|------|---------|--------|
-| `renderUserMessage()` | 1094 | `msgEl` (`.notor-message-user`) | `msgEl.dataset.messageId = message.id;` |
-| `finalizeAssistantMessage()` | 1228 | `contentEl.parentElement` (the `.notor-message-assistant` wrapper created in `createAssistantMessagePlaceholder` at line 1204) | `contentEl.parentElement!.dataset.messageId = message.id;` |
-| Orchestrator (after `updateToolCallStatus`) | ~1459 | `toolEl` (`.notor-tool-call`) | `toolEl.dataset.messageId = toolCallMessage.id;` — set in the orchestrator after dispatch completes, **not** in `renderToolCall()` |
-| `renderToolResult()` | 1355 | `resultEl` (`.notor-tool-result`) | `resultEl.dataset.messageId = message.id;` |
+| `renderUserMessage()` | 1094 | `msgEl` (`.notor-message-user`) | `msgEl.dataset.messageId = message.id;` + append fork button (§3.4.3) |
+| `finalizeAssistantMessage()` | 1228 | `contentEl.parentElement` (the `.notor-message-assistant` wrapper created in `createAssistantMessagePlaceholder` at line 1204) | `contentEl.parentElement!.dataset.messageId = message.id;` + append fork button (§3.4.3) |
+| Orchestrator (after `updateToolCallStatus`) | ~1459 | `toolEl` (`.notor-tool-call`) | `toolEl.dataset.messageId = toolCallMessage.id;` + append fork button (§3.4.3) — set in the orchestrator after dispatch completes, **not** in `renderToolCall()` |
+| `renderToolResult()` | 1355 | `resultEl` (`.notor-tool-result`) | `resultEl.dataset.messageId = message.id;` + append fork button (§3.4.3) |
 
 #### 3.4.2 Context Menu
 
@@ -300,7 +300,32 @@ this.messageListEl.addEventListener("contextmenu", (evt: MouseEvent) => {
 
 This uses Obsidian's built-in `Menu` API (same API used by Obsidian's native context menus). The `"git-branch-plus"` icon is available in Obsidian's Lucide icon set.
 
-#### 3.4.3 Fork Callback
+#### 3.4.3 Hover Fork Button
+
+In addition to the context menu, add a hover-visible fork button to each message element. This is a new UI pattern — no hover-action buttons currently exist on messages (only on conversation list items).
+
+**Rendering:** When `data-message-id` is set on a message element (i.e., the message is finalized), append a fork button to the message wrapper:
+
+```typescript
+const forkBtn = msgEl.createDiv({ cls: "notor-fork-btn" });
+setIcon(forkBtn, "git-branch-plus");
+forkBtn.setAttribute("aria-label", "Fork conversation from here");
+forkBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    const messageId = msgEl.dataset.messageId;
+    if (messageId) {
+        void this.onForkConversation?.(messageId);
+    }
+});
+```
+
+**Placement:** The button is added inside each message's top-level wrapper element (`.notor-message-user`, `.notor-message-assistant`, `.notor-tool-call`, `.notor-tool-result`). It is positioned absolutely in the top-right corner via CSS and hidden by default, appearing only on hover.
+
+**In-progress message guard:** The same `data-message-id` mechanism applies — the button is only added when the ID is set (in `renderUserMessage`, `finalizeAssistantMessage`, after tool dispatch, and in `renderToolResult`). For assistant messages, the button is added in `finalizeAssistantMessage()` (not at placeholder creation time) since the message ID is not yet known at placeholder creation.
+
+**Note:** Both the hover button and the context menu are available on the same messages. The hover button provides discoverability; the context menu provides a familiar right-click path.
+
+#### 3.4.4 Fork Callback
 
 Add a new callback following the existing pattern ([`src/ui/chat-view.ts:171-299`](../src/ui/chat-view.ts)):
 
@@ -312,7 +337,7 @@ setOnForkConversation(callback: (messageId: string) => Promise<void>): void {
 }
 ```
 
-#### 3.4.4 Fork Lineage in Conversation List
+#### 3.4.5 Fork Lineage in Conversation List
 
 **File: [`src/ui/chat-view.ts`](../src/ui/chat-view.ts) — `renderConversationList()` method (lines 1545–1599)**
 
@@ -409,6 +434,31 @@ entries.push({
 
 .notor-fork-badge:hover {
     opacity: 0.8;
+}
+
+/* Hover fork button on messages */
+.notor-message {
+    position: relative;
+}
+
+.notor-fork-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    opacity: 0;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: var(--radius-s);
+    transition: opacity 150ms ease;
+}
+
+.notor-message:hover .notor-fork-btn {
+    opacity: 0.4;
+}
+
+.notor-fork-btn:hover {
+    opacity: 0.8;
+    background: var(--background-modifier-hover);
 }
 ```
 
