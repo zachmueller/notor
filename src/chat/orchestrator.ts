@@ -1431,128 +1431,10 @@ export class ChatOrchestrator {
 							conv.estimated_cost
 						);
 					}
-				} else if (result.type === "tool_call") {
-					// Tool call — dispatch and loop
-					const toolCallMessage = this.conversationManager.addMessage({
-						role: "tool_call",
-						content: "",
-						tool_call: {
-							id: result.toolCallId,
-							tool_name: result.toolName,
-							parameters: result.parameters,
-							status: "pending",
-						},
-					});
-
-					const toolCallEl = this.view?.renderToolCall(toolCallMessage);
-
-					// Phase 3 (HOOK-005): Fire on_tool_call hooks after approval, before execution
-					// G-004: Pass override manager so workflow-scoped hooks are used when active
-					const currentConv = this.conversationManager.getActiveConversation();
-					if (currentConv && vaultRootPath) {
-						const { dispatchOnToolCall } = await import("../hooks/hook-events");
-						dispatchOnToolCall(
-							{
-								conversationId: currentConv.id,
-								timestamp: new Date().toISOString(),
-								toolName: result.toolName,
-								toolParams: result.parameters,
-							},
-							this.settings,
-							vaultRootPath,
-							this.workflowHookOverrideManager
-						);
-					}
-
-					// Dispatch through the tool dispatcher (with abort signal so
-					// approval dialogs can be cancelled via the Stop button).
-					let toolResult: ToolResult;
-					try {
-						toolResult = await this.dispatcher.dispatch(
-							result.toolName,
-							result.parameters,
-							mode,
-							toolCallMessage.id,
-							abortController.signal
-						);
-					} catch (dispatchError) {
-						// Ensure the orphaned tool_call gets a matching tool_result
-						// so the conversation history stays valid for the provider.
-						toolResult = {
-							tool_name: result.toolName,
-							success: false,
-							result: "",
-							error: `Tool call failed: ${dispatchError instanceof Error ? dispatchError.message : String(dispatchError)}`,
-						};
-						log.warn("Tool dispatch threw, injecting error tool_result", {
-							toolName: result.toolName,
-							error: String(dispatchError),
-						});
-					}
-
-					// Update tool call status badge in the UI
-					if (toolCallEl) {
-						this.view?.updateToolCallStatus(
-							toolCallEl,
-							toolResult.success ? "success" : "error"
-						);
-						// Set message ID after dispatch completes so only
-						// finished tool calls are forkable (not pending ones)
-						toolCallEl.dataset.messageId = toolCallMessage.id;
-						this.view?.appendForkButton(toolCallEl);
-					}
-
-					// Propagate the provider tool call ID so the result can be correlated
-					toolResult.tool_call_id = result.toolCallId;
-
-					// Record note access for vault rule re-evaluation
-					const notePath = result.parameters["path"] as string | undefined;
-					if (notePath && this.vaultRuleManager) {
-						this.vaultRuleManager.recordNoteAccess(notePath);
-					}
-
-					// Add tool result message
-					const toolResultMessage = this.conversationManager.addMessage({
-						role: "tool_result",
-						content: "",
-						tool_result: toolResult,
-					});
-
-					this.view?.renderToolResult(toolResultMessage);
-
-					// If the user cancelled during tool dispatch, stop the loop
-					// without adding a "[Response cancelled]" message. The
-					// tool_result (rejected/error) is already in the conversation,
-					// so the history is valid. The user can send a follow-up
-					// message and the LLM will see: tool_call → tool_result → new user message.
-					if (abortController.signal.aborted) {
-						break;
-					}
-
-					// Phase 3 (HOOK-005): Fire on_tool_result hooks after execution
-					// G-004: Pass override manager so workflow-scoped hooks are used when active
-					const convForToolResult = this.conversationManager.getActiveConversation();
-					if (convForToolResult && vaultRootPath) {
-						const { dispatchOnToolResult } = await import("../hooks/hook-events");
-						const toolResultStr = typeof toolResult.result === "string"
-							? toolResult.result
-							: JSON.stringify(toolResult.result);
-						dispatchOnToolResult(
-							{
-								conversationId: convForToolResult.id,
-								timestamp: new Date().toISOString(),
-								toolName: result.toolName,
-								toolParams: result.parameters,
-								toolResult: toolResultStr,
-								toolStatus: toolResult.success ? "success" : "error",
-							},
-							this.settings,
-							vaultRootPath,
-							this.workflowHookOverrideManager
-						);
-					}
-
-					// Track tokens from message_end if available
+				} else if (result.type === "tool_calls") {
+					// Tool calls — dispatch each serially and loop
+					// Track tokens from message_end (now correctly captured
+					// because processStream consumes the full stream).
 					if (result.inputTokens || result.outputTokens) {
 						this.conversationManager.addMessage({
 							role: "assistant",
@@ -1563,7 +1445,129 @@ export class ChatOrchestrator {
 						});
 					}
 
-					// Continue the loop — send tool result back to LLM
+					for (const call of result.calls) {
+						const toolCallMessage = this.conversationManager.addMessage({
+							role: "tool_call",
+							content: "",
+							tool_call: {
+								id: call.toolCallId,
+								tool_name: call.toolName,
+								parameters: call.parameters,
+								status: "pending",
+							},
+						});
+
+						const toolCallEl = this.view?.renderToolCall(toolCallMessage);
+
+						// Phase 3 (HOOK-005): Fire on_tool_call hooks after approval, before execution
+						// G-004: Pass override manager so workflow-scoped hooks are used when active
+						const currentConv = this.conversationManager.getActiveConversation();
+						if (currentConv && vaultRootPath) {
+							const { dispatchOnToolCall } = await import("../hooks/hook-events");
+							dispatchOnToolCall(
+								{
+									conversationId: currentConv.id,
+									timestamp: new Date().toISOString(),
+									toolName: call.toolName,
+									toolParams: call.parameters,
+								},
+								this.settings,
+								vaultRootPath,
+								this.workflowHookOverrideManager
+							);
+						}
+
+						// Dispatch through the tool dispatcher (with abort signal so
+						// approval dialogs can be cancelled via the Stop button).
+						let toolResult: ToolResult;
+						try {
+							toolResult = await this.dispatcher.dispatch(
+								call.toolName,
+								call.parameters,
+								mode,
+								toolCallMessage.id,
+								abortController.signal
+							);
+						} catch (dispatchError) {
+							// Ensure the orphaned tool_call gets a matching tool_result
+							// so the conversation history stays valid for the provider.
+							toolResult = {
+								tool_name: call.toolName,
+								success: false,
+								result: "",
+								error: `Tool call failed: ${dispatchError instanceof Error ? dispatchError.message : String(dispatchError)}`,
+							};
+							log.warn("Tool dispatch threw, injecting error tool_result", {
+								toolName: call.toolName,
+								error: String(dispatchError),
+							});
+						}
+
+						// Update tool call status badge in the UI
+						if (toolCallEl) {
+							this.view?.updateToolCallStatus(
+								toolCallEl,
+								toolResult.success ? "success" : "error"
+							);
+							// Set message ID after dispatch completes so only
+							// finished tool calls are forkable (not pending ones)
+							toolCallEl.dataset.messageId = toolCallMessage.id;
+							this.view?.appendForkButton(toolCallEl);
+						}
+
+						// Propagate the provider tool call ID so the result can be correlated
+						toolResult.tool_call_id = call.toolCallId;
+
+						// Record note access for vault rule re-evaluation
+						const notePath = call.parameters["path"] as string | undefined;
+						if (notePath && this.vaultRuleManager) {
+							this.vaultRuleManager.recordNoteAccess(notePath);
+						}
+
+						// Add tool result message
+						const toolResultMessage = this.conversationManager.addMessage({
+							role: "tool_result",
+							content: "",
+							tool_result: toolResult,
+						});
+
+						this.view?.renderToolResult(toolResultMessage);
+
+						// If the user cancelled during tool dispatch, stop the loop
+						if (abortController.signal.aborted) {
+							break;
+						}
+
+						// Phase 3 (HOOK-005): Fire on_tool_result hooks after execution
+						// G-004: Pass override manager so workflow-scoped hooks are used when active
+						const convForToolResult = this.conversationManager.getActiveConversation();
+						if (convForToolResult && vaultRootPath) {
+							const { dispatchOnToolResult } = await import("../hooks/hook-events");
+							const toolResultStr = typeof toolResult.result === "string"
+								? toolResult.result
+								: JSON.stringify(toolResult.result);
+							dispatchOnToolResult(
+								{
+									conversationId: convForToolResult.id,
+									timestamp: new Date().toISOString(),
+									toolName: call.toolName,
+									toolParams: call.parameters,
+									toolResult: toolResultStr,
+									toolStatus: toolResult.success ? "success" : "error",
+								},
+								this.settings,
+								vaultRootPath,
+								this.workflowHookOverrideManager
+							);
+						}
+					}
+
+					// If abort was triggered during the tool dispatch loop, break out
+					if (abortController.signal.aborted) {
+						break;
+					}
+
+					// Continue the loop — send tool results back to LLM
 					continueLoop = true;
 				} else if (result.type === "cancelled") {
 					// User cancelled — always render an assistant message so the
@@ -1863,6 +1867,7 @@ export class ChatOrchestrator {
 		let currentToolCallId = "";
 		let currentToolName = "";
 		let toolCallJson = "";
+		const accumulatedToolCalls: ToolCallInfo[] = [];
 
 		try {
 			for await (const chunk of stream) {
@@ -1900,7 +1905,7 @@ export class ChatOrchestrator {
 						break;
 
 					case "tool_call_end": {
-						// Tool call complete — return for dispatch
+						// Tool call complete — accumulate and continue reading stream
 						let parameters: Record<string, unknown> = {};
 						try {
 							if (toolCallJson.trim()) {
@@ -1921,18 +1926,17 @@ export class ChatOrchestrator {
 							};
 						}
 
-						// Continue reading to get message_end tokens
-						// But return tool call for dispatch
-						return {
-							type: "tool_call",
+						accumulatedToolCalls.push({
 							toolCallId: currentToolCallId,
 							toolName: currentToolName,
 							parameters,
-							text: textContent,
-							inputTokens,
-							outputTokens,
-							contentEl,
-						};
+						});
+
+						// Reset per-call state for next tool call in the stream
+						currentToolCallId = "";
+						currentToolName = "";
+						toolCallJson = "";
+						break;
 					}
 
 					case "message_end":
@@ -1961,6 +1965,18 @@ export class ChatOrchestrator {
 				};
 			}
 			throw e;
+		}
+
+		// If we accumulated tool calls, return them all
+		if (accumulatedToolCalls.length > 0) {
+			return {
+				type: "tool_calls",
+				calls: accumulatedToolCalls,
+				text: textContent,
+				inputTokens,
+				outputTokens,
+				contentEl,
+			};
 		}
 
 		return {
@@ -2221,8 +2237,14 @@ export class ChatOrchestrator {
 }
 
 /** Internal result type for stream processing. */
+type ToolCallInfo = {
+	toolCallId: string;
+	toolName: string;
+	parameters: Record<string, unknown>;
+};
+
 type StreamResult =
 	| { type: "text"; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "tool_call"; toolCallId: string; toolName: string; parameters: Record<string, unknown>; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "cancelled"; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "error"; error: string; text: string; inputTokens: number; outputTokens: number };

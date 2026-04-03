@@ -450,10 +450,12 @@ Multiple tool calls rendered simultaneously need clear visual grouping:
 
 > **Hard gate on Phases 2 and 3:** These phases MUST be implemented, tested, and merged as a single unit (same PR). The orphaned tool_call safety net (lines 2076-2098) checks `chatMessages[i + 1]` — with Phase 2's grouped ordering (`tool_call, tool_call, tool_result, tool_result`), the first tool_call's next message is another tool_call, triggering **false positive** synthetic result injection that corrupts the conversation. Phase 3's updated safety net eliminates this failure mode. No intermediate state where grouped ordering exists without the updated safety net is acceptable.
 
-### Phase 1: Stream Collection (Low Risk)
-1. Modify `processStream()` to accumulate all tool calls and return `tool_calls` array
-2. Update the `StreamResult` type
-3. This change is backwards-compatible: if LLM returns 1 tool call, the array has 1 element
+### Phase 1: Stream Collection (Low Risk) — ✅ COMPLETE (2026-04-03)
+1. ✅ Modify `processStream()` to accumulate all tool calls and return `tool_calls` array
+2. ✅ Update the `StreamResult` type — replaced `tool_call` variant with `tool_calls` (carries `calls: ToolCallInfo[]`)
+3. ✅ This change is backwards-compatible: if LLM returns 1 tool call, the array has 1 element
+4. ✅ Updated `responseLoop()` to handle `result.type === "tool_calls"` with serial dispatch loop
+5. ✅ Token counts now correctly captured from `message_end` (previously lost due to early return)
 
 ### Phase 2: Serial Multi-Tool (Medium Risk)  
 1. Update `responseLoop()` to handle `result.type === "tool_calls"`
