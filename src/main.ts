@@ -8,7 +8,7 @@
  * tab, and initializes all managers with clean unload support.
  */
 
-import { Notice, Plugin, WorkspaceLeaf, TFile, TAbstractFile, normalizePath } from "obsidian";
+import { Notice, Plugin, WorkspaceLeaf, TFile, TAbstractFile, normalizePath, parseYaml } from "obsidian";
 import { MarkdownView } from "obsidian";
 import { createDefaultSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
@@ -99,6 +99,10 @@ import { VaultRuleManager } from "./rules/vault-rules";
 // Personas
 import { PersonaManager } from "./personas/persona-manager";
 
+// Sub-agents
+import { SubAgentManager } from "./sub-agents/manager";
+import { UseSubagentTool } from "./tools/use-subagent";
+
 // MCP
 import { McpHub } from "./mcp/mcp-hub";
 import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
@@ -125,6 +129,7 @@ export default class NotorPlugin extends Plugin {
 	private _noteOpener?: NoteOpener;
 	private _staleTracker?: StaleContentTracker;
 	private _personaManager?: PersonaManager;
+	private _subAgentManager?: SubAgentManager;
 
 	// -----------------------------------------------------------------------
 	// Phase 4.1: MCP (ARCH-005)
@@ -1048,6 +1053,24 @@ export default class NotorPlugin extends Plugin {
 			this._toolRegistry.register(new WriteDocxTool(this.app, this.settings));
 			this._toolRegistry.register(new ExtractDocxCommentsTool(this.app, this.settings));
 
+			// Sub-agent tool (Phase 5)
+			const useSubagentTool = new UseSubagentTool(
+				this.getSubAgentManager(),
+				this.getProviderRegistry(),
+				this._toolRegistry,
+				this.settings,
+				() => this.getOrchestrator()?.getEffectiveToolConfig() ?? null,
+			);
+			const adapter = this.app.vault.adapter as { basePath?: string };
+			if (adapter.basePath) {
+				useSubagentTool.setVaultRootPath(adapter.basePath);
+			}
+			this._toolRegistry.register(useSubagentTool);
+			// Fire-and-forget initial profile cache population
+			useSubagentTool.refreshVisibleProfiles().catch((e) =>
+				log.warn("Failed to load initial sub-agent profiles", { error: String(e) })
+			);
+
 			log.debug("Tool registry initialized", {
 				tools: this._toolRegistry.getNames(),
 			});
@@ -1135,6 +1158,20 @@ export default class NotorPlugin extends Plugin {
 			);
 		}
 		return this._personaManager;
+	}
+
+	/** Sub-agent profile manager (Phase 3). */
+	getSubAgentManager(): SubAgentManager {
+		if (!this._subAgentManager) {
+			this._subAgentManager = new SubAgentManager(
+				this.app.vault,
+				this.app.metadataCache,
+				this.settings,
+				async () => this.saveData(this.settings),
+				parseYaml,
+			);
+		}
+		return this._subAgentManager;
 	}
 
 	/** Chat orchestrator — the main send/receive loop coordinator. */

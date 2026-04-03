@@ -1,0 +1,377 @@
+/**
+ * use_subagent tool — spawns a focused sub-agent to perform a specific task.
+ *
+ * The LLM invokes this tool with a profile name and task description.
+ * The tool spins up an isolated `SubAgentRunner` conversation loop and
+ * returns the final text result.
+ *
+ * @see specs/ZZ-misc/sub-agents-design.md — Sections 2.1, 8, 9.5
+ * @see specs/ZZ-misc/sub-agents-implementation-plan.md — Phase 5.3
+ */
+
+import { Notice } from "obsidian";
+import type { Tool, JSONSchema, ToolExecuteOptions, ToolResult } from "./tool";
+import type { ToolDefinition as ProviderToolDefinition } from "../providers/provider";
+import type { SubAgentManager } from "../sub-agents/manager";
+import type { SubAgentProfile } from "../sub-agents/types";
+import type { ProviderRegistry } from "../providers/index";
+import type { ToolRegistry } from "./index";
+import type { NotorSettings } from "../settings/types";
+import type { EffectiveToolConfig } from "../tool-config/types";
+import type { ParsedToolConfig } from "../tool-config/types";
+import type { ApprovalCallback } from "../chat/dispatcher";
+import type { LLMProviderType } from "../types";
+import { ToolDispatcher } from "../chat/dispatcher";
+import { SubAgentRunner } from "../chat/sub-agent-runner";
+import { intersectToolConfig } from "../tool-config/merger";
+import { SUB_AGENT_PREAMBLE } from "../sub-agents/preamble";
+import {
+	USE_SUBAGENT_TOOL_NAME,
+	SUB_AGENT_ITERATION_CAP,
+} from "../sub-agents/constants";
+import { Semaphore } from "../sub-agents/semaphore";
+import { logger } from "../utils/logger";
+
+const log = logger("UseSubagentTool");
+
+/**
+ * Tool that spawns focused sub-agent conversations.
+ *
+ * Implements the `Tool` interface with dynamic `description` and
+ * `input_schema` getters that reflect the currently visible sub-agent
+ * profiles.
+ */
+export class UseSubagentTool implements Tool {
+	readonly name = USE_SUBAGENT_TOOL_NAME;
+	readonly mode = "read" as const;
+
+	private cachedVisibleProfiles: SubAgentProfile[] = [];
+	private readonly semaphore: Semaphore;
+
+	/**
+	 * Defense-in-depth flag (Section 3.3). Should never be `true` in normal
+	 * operation because `filterSubAgentTools()` removes this tool from
+	 * sub-agent tool lists.
+	 */
+	_isSubAgentContext = false;
+
+	/** Vault root path for sub-agent dispatcher path enforcement. */
+	private vaultRootPath?: string;
+
+	/** Parent's approval callback for the "bubble" pattern (Section 9.7). */
+	private parentApprovalCallback?: ApprovalCallback;
+
+	constructor(
+		private readonly subAgentManager: SubAgentManager,
+		private readonly providerRegistry: ProviderRegistry,
+		private readonly toolRegistry: ToolRegistry,
+		private readonly settings: NotorSettings,
+		private readonly getParentEffectiveConfig: () => EffectiveToolConfig | null,
+	) {
+		this.semaphore = new Semaphore(
+			settings.sub_agent_concurrency_cap ?? 3,
+		);
+	}
+
+	// -----------------------------------------------------------------------
+	// Public setters (called after construction from main.ts)
+	// -----------------------------------------------------------------------
+
+	setVaultRootPath(path: string): void {
+		this.vaultRootPath = path;
+	}
+
+	setApprovalCallback(callback: ApprovalCallback): void {
+		this.parentApprovalCallback = callback;
+	}
+
+	// -----------------------------------------------------------------------
+	// Dynamic description & schema (Section 8)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Dynamic description that includes the list of visible sub-agent profiles.
+	 * Rebuilt on each access from the cached profile list.
+	 */
+	get description(): string {
+		const base = "Spawn a focused sub-agent to perform a specific task. Available profiles:\n";
+		if (this.cachedVisibleProfiles.length === 0) {
+			return base + "(no profiles available)";
+		}
+		const profileLines = this.cachedVisibleProfiles
+			.filter((p) => p.description !== null)
+			.map((p) => `- ${p.name}: ${p.description}`);
+		return base + profileLines.join("\n");
+	}
+
+	/**
+	 * Dynamic input schema with an `enum` constraint on profile names.
+	 */
+	get input_schema(): JSONSchema {
+		return {
+			type: "object",
+			properties: {
+				profile: {
+					type: "string",
+					description: "Name of the sub-agent profile to use.",
+					enum: this.cachedVisibleProfiles.map((p) => p.name),
+				},
+				task: {
+					type: "string",
+					description: "The specific task or question for the sub-agent to complete.",
+				},
+			},
+			required: ["profile", "task"],
+		};
+	}
+
+	// -----------------------------------------------------------------------
+	// Profile cache management (5.3c)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Refresh the cached list of visible profiles from the manager.
+	 *
+	 * Called:
+	 * - Once at registration time (fire-and-forget from main.ts)
+	 * - At the start of each `execute()` invocation (hot-reload)
+	 * - When settings change (visibility toggle) — wired in Phase 7
+	 */
+	async refreshVisibleProfiles(): Promise<void> {
+		try {
+			this.cachedVisibleProfiles = await this.subAgentManager.getVisibleProfiles(
+				this.toolRegistry.getNames(),
+			);
+		} catch (e) {
+			log.warn("Failed to refresh visible profiles", { error: String(e) });
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Execute (5.3d — 10-step pipeline)
+	// -----------------------------------------------------------------------
+
+	async execute(
+		params: Record<string, unknown>,
+		options?: ToolExecuteOptions,
+	): Promise<ToolResult> {
+		// Step 1: Refresh profiles & validate
+		await this.refreshVisibleProfiles();
+
+		const profileName = params["profile"] as string;
+		const task = params["task"] as string;
+
+		const profile = this.cachedVisibleProfiles.find((p) => p.name === profileName);
+		if (!profile) {
+			return {
+				tool_name: USE_SUBAGENT_TOOL_NAME,
+				success: false,
+				result: "",
+				error: `Sub-agent profile '${profileName}' not found or is disabled.`,
+			};
+		}
+
+		// Defense-in-depth: isVisible check
+		if (!this.subAgentManager.isVisible(profile.name)) {
+			return {
+				tool_name: USE_SUBAGENT_TOOL_NAME,
+				success: false,
+				result: "",
+				error: `Sub-agent profile '${profileName}' is disabled.`,
+			};
+		}
+
+		// Step 2: Defense-in-depth — reject if in sub-agent context
+		if (this._isSubAgentContext) {
+			return {
+				tool_name: USE_SUBAGENT_TOOL_NAME,
+				success: false,
+				result: "",
+				error: "use_subagent cannot be called from within a sub-agent.",
+			};
+		}
+
+		// Step 3: Acquire semaphore slot
+		await this.semaphore.acquire();
+		try {
+			return await this.executeInner(profile, task, options);
+		} finally {
+			this.semaphore.release();
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Inner execution (Steps 4–10)
+	// -----------------------------------------------------------------------
+
+	private async executeInner(
+		profile: SubAgentProfile,
+		task: string,
+		options?: ToolExecuteOptions,
+	): Promise<ToolResult> {
+		// Step 4: Resolve provider and model
+		let provider;
+		let providerType: LLMProviderType;
+
+		if (profile.preferred_provider) {
+			providerType = profile.preferred_provider as LLMProviderType;
+			try {
+				provider = this.providerRegistry.getProvider(providerType);
+			} catch {
+				return {
+					tool_name: USE_SUBAGENT_TOOL_NAME,
+					success: false,
+					result: "",
+					error: `Provider '${providerType}' is not configured for sub-agent '${profile.name}'.`,
+				};
+			}
+		} else {
+			providerType = this.providerRegistry.getActiveType();
+			provider = this.providerRegistry.getActiveProvider();
+		}
+
+		const providerConfig = this.providerRegistry.getConfig(providerType);
+		const model = profile.preferred_model ?? providerConfig?.model_id ?? "";
+		if (!model) {
+			return {
+				tool_name: USE_SUBAGENT_TOOL_NAME,
+				success: false,
+				result: "",
+				error: `No model ID could be resolved for sub-agent '${profile.name}'. Configure a model in the provider settings or set notor-preferred-model in the profile.`,
+			};
+		}
+
+		// Step 5: Build sub-agent's effective tool config
+		const parentConfig = this.getParentEffectiveConfig();
+		const effectiveParent = parentConfig ?? this.buildPermissiveDefault();
+
+		// Merge the profile's tool_configs array into a single ParsedToolConfig
+		const mergedSubAgentConfig: ParsedToolConfig = {
+			source: "subagent",
+			sourceFile: profile.system_prompt_path,
+			documentPosition: 0,
+			tools: {},
+		};
+		for (const config of profile.tool_configs) {
+			Object.assign(mergedSubAgentConfig.tools, config.tools);
+		}
+
+		// Build toolModes map
+		const toolModes: Record<string, "read" | "write"> = {};
+		for (const tool of this.toolRegistry.getAll()) {
+			toolModes[tool.name] = tool.mode;
+		}
+
+		const intersectedConfig = intersectToolConfig(
+			effectiveParent,
+			mergedSubAgentConfig,
+			toolModes,
+		);
+
+		// Step 6: Configuration gap detection
+		const gaps: string[] = [];
+		for (const [toolName, subEntry] of Object.entries(mergedSubAgentConfig.tools)) {
+			if (subEntry.enabled !== false) {
+				const intersected = intersectedConfig.tools[toolName];
+				if (!intersected || !intersected.enabled) {
+					gaps.push(toolName);
+				}
+			}
+		}
+		if (gaps.length > 0) {
+			const gapList = gaps.join(", ");
+			new Notice(
+				`Sub-agent '${profile.name}': tools [${gapList}] are enabled in the profile but disabled in the current context.`,
+			);
+			log.warn("Sub-agent configuration gap", {
+				profile: profile.name,
+				disabledByParent: gaps,
+			});
+		}
+
+		// Step 7: Build sub-agent tool definitions and dispatcher
+		const enabledToolNames = Object.entries(intersectedConfig.tools)
+			.filter(([, entry]) => entry.enabled)
+			.map(([name]) => name);
+
+		const toolDefs: ProviderToolDefinition[] = enabledToolNames
+			.map((name) => this.toolRegistry.get(name))
+			.filter((t): t is Tool => t !== undefined)
+			.map((t) => ({
+				name: t.name,
+				description: t.description,
+				input_schema: t.input_schema as unknown as ProviderToolDefinition["input_schema"],
+			}));
+
+		const subDispatcher = new ToolDispatcher();
+		for (const name of enabledToolNames) {
+			const tool = this.toolRegistry.get(name);
+			if (tool) subDispatcher.registerTool(tool);
+		}
+		subDispatcher.setEffectiveToolConfig(intersectedConfig);
+		subDispatcher.setSettings(this.settings);
+		if (this.vaultRootPath) {
+			subDispatcher.setVaultRootPath(this.vaultRootPath);
+		}
+		if (this.parentApprovalCallback) {
+			subDispatcher.setApprovalCallback(this.parentApprovalCallback);
+		}
+
+		// Step 8: Assemble system prompt
+		const systemPrompt = SUB_AGENT_PREAMBLE + "\n" + profile.prompt_content;
+
+		// Step 9: Construct and run SubAgentRunner
+		const abortSignal = options?.abortSignal;
+		const mode = options?.mode ?? "act";
+		const parentSignal = abortSignal ?? new AbortController().signal;
+
+		const runner = new SubAgentRunner({
+			provider,
+			model,
+			systemPrompt,
+			toolDefinitions: toolDefs,
+			dispatcher: subDispatcher,
+			parentAbortSignal: parentSignal,
+			iterationCap: SUB_AGENT_ITERATION_CAP,
+			mode,
+			onProgress: options?.onProgress,
+		});
+
+		const result = await runner.run(task);
+
+		// Step 10: Format and return ToolResult
+		log.info("Sub-agent completed", {
+			profile: profile.name,
+			iterations: result.iterationCount,
+			wasCapReached: result.wasCapReached,
+			tokenUsage: result.tokenUsage,
+		});
+
+		return {
+			tool_name: USE_SUBAGENT_TOOL_NAME,
+			success: true,
+			result: result.text,
+		};
+	}
+
+	// -----------------------------------------------------------------------
+	// Helpers
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Build a permissive default config when the parent has no effective config.
+	 * All registered tools enabled with defaults.
+	 */
+	private buildPermissiveDefault(): EffectiveToolConfig {
+		const tools: EffectiveToolConfig["tools"] = {};
+		for (const name of this.toolRegistry.getNames()) {
+			tools[name] = {
+				enabled: true,
+				auto_approve: false,
+				allowed_paths: [],
+				blocked_paths: [],
+			};
+		}
+		return { tools };
+	}
+}

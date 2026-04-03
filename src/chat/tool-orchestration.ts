@@ -116,6 +116,7 @@ export async function executeToolBatches(
 	messageIdMap: Map<string, string>,
 	abortSignal?: AbortSignal,
 	concurrencyCap: number = DEFAULT_CONCURRENCY_CAP,
+	onProgressMap?: Map<string, (status: string) => void>,
 ): Promise<ToolCallResult[]> {
 	const allResults: ToolCallResult[] = [];
 
@@ -147,6 +148,7 @@ export async function executeToolBatches(
 				messageIdMap,
 				abortSignal,
 				concurrencyCap,
+				onProgressMap,
 			);
 			allResults.push(...results);
 		} else {
@@ -166,7 +168,7 @@ export async function executeToolBatches(
 					continue;
 				}
 
-				const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal);
+				const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId));
 				allResults.push({ call, result });
 			}
 		}
@@ -188,6 +190,7 @@ async function runConcurrentBatch(
 	messageIdMap: Map<string, string>,
 	abortSignal?: AbortSignal,
 	concurrencyCap: number = DEFAULT_CONCURRENCY_CAP,
+	onProgressMap?: Map<string, (status: string) => void>,
 ): Promise<ToolCallResult[]> {
 	log.info("Running concurrent batch", { count: calls.length, cap: concurrencyCap });
 
@@ -229,7 +232,7 @@ async function runConcurrentBatch(
 					},
 				};
 			}
-			const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal);
+			const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId));
 			return { call, result };
 		} finally {
 			release();
@@ -249,6 +252,7 @@ async function safeDispatch(
 	mode: ConversationMode,
 	messageId: string,
 	abortSignal?: AbortSignal,
+	onProgress?: (status: string) => void,
 ): Promise<ToolResult> {
 	try {
 		const result = await dispatcher.dispatch(
@@ -257,6 +261,7 @@ async function safeDispatch(
 			mode,
 			messageId,
 			abortSignal,
+			onProgress,
 		);
 		result.tool_call_id = call.toolCallId;
 		return result;

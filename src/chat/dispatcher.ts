@@ -12,6 +12,7 @@ import type { ConversationMode, ToolCall, ToolResult } from "../types";
 import type { StreamChunk } from "../providers/provider";
 import type { NotorSettings } from "../settings";
 import type { EffectiveToolConfig } from "../tool-config/types";
+import type { ToolExecuteOptions } from "../tools/tool";
 import { isDomainBlocked } from "../tools/fetch-webpage";
 import { resolveAndValidatePath } from "../utils/path-validation";
 import { enforcePathConstraints } from "../tool-config/path-enforcer";
@@ -58,7 +59,7 @@ function resolveMcpAutoApprove(
 export interface DispatchableTool {
 	name: string;
 	mode: "read" | "write";
-	execute(params: Record<string, unknown>): Promise<ToolResult>;
+	execute(params: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult>;
 }
 
 /** Callback for requesting user approval of a tool call. */
@@ -264,7 +265,8 @@ export class ToolDispatcher {
 		parameters: Record<string, unknown>,
 		mode: ConversationMode,
 		messageId: string,
-		abortSignal?: AbortSignal
+		abortSignal?: AbortSignal,
+		onProgress?: (status: string) => void,
 	): Promise<ToolResult> {
 		// 1. Look up tool in registry
 		const tool = this.tools.get(toolName);
@@ -469,7 +471,8 @@ export class ToolDispatcher {
 		//    the background but its result is discarded.
 		const startTime = Date.now();
 		try {
-			const executePromise = tool.execute(parameters);
+			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal };
+			const executePromise = tool.execute(parameters, executeOptions);
 
 			let result: ToolResult;
 			if (abortSignal) {

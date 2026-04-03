@@ -77,7 +77,7 @@ The design doc (Section 3.2) requires AND/intersection semantics — distinct fr
 Section 3.3 requires defense-in-depth against recursive sub-agents.
 
 - [x] When building the sub-agent's tool list, always exclude `use_subagent` by name
-- [ ] Add a guard in the `use_subagent` tool's `execute()`: if called from within a sub-agent context, return an error result immediately _(implemented in Phase 5.3d Step 2 via `_isSubAgentContext` flag)_
+- [x] Add a guard in the `use_subagent` tool's `execute()`: if called from within a sub-agent context, return an error result immediately _(implemented in Phase 5.3d Step 2 via `_isSubAgentContext` flag)_
 
 ---
 
@@ -230,7 +230,7 @@ Section 9.5: additive, non-breaking change. This is a prerequisite for 5.3 so th
 
 The `onProgress` callback flows: orchestrator → `executeToolBatches()` → `safeDispatch()` → `dispatcher.dispatch()` → `tool.execute()` → `SubAgentRunner`. For Phase 5, only the plumbing is wired; the orchestrator passes `undefined` until Phase 8 adds view-layer integration.
 
-- [ ] Define `ToolExecuteOptions` type in `src/tools/tool.ts`
+- [x] Define `ToolExecuteOptions` type in `src/tools/tool.ts`
   ```typescript
   export interface ToolExecuteOptions {
     /** Progress callback for long-running tools (Section 9.5). */
@@ -242,21 +242,21 @@ The `onProgress` callback flows: orchestrator → `executeToolBatches()` → `sa
   }
   ```
   - Adding `mode` and `abortSignal` eliminates the need for `getParentMode` and `getParentAbortSignal` callbacks on `UseSubagentTool`'s constructor (see 5.3a). Currently, the dispatcher handles abort via `Promise.race` externally (L475-491) and mode is checked before `execute()` (L312). By also passing them through options, tools that need these values (like `use_subagent`) can access them without constructor-injected callbacks. Existing tools ignore them.
-- [ ] Update `Tool` interface in `src/tools/tool.ts` (L53-72):
+- [x] Update `Tool` interface in `src/tools/tool.ts` (L53-72):
   - Change `execute` signature to: `execute(params: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult>`
   - Existing tools don't need changes — `options` is optional and they ignore it
-- [ ] Update `DispatchableTool` interface in `src/chat/dispatcher.ts` (L58-62):
+- [x] Update `DispatchableTool` interface in `src/chat/dispatcher.ts` (L58-62):
   - Change `execute` signature to match: `execute(params: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult>`
   - Import `ToolExecuteOptions` from `../tools/tool`
-- [ ] Update `ToolDispatcher.dispatch()` in `src/chat/dispatcher.ts` (L262-268):
+- [x] Update `ToolDispatcher.dispatch()` in `src/chat/dispatcher.ts` (L262-268):
   - Add `onProgress?: (status: string) => void` parameter to `dispatch()` signature
   - At the `tool.execute()` call site (L472), pass options: `tool.execute(parameters, { onProgress, mode, abortSignal })`
   - The dispatcher already has `mode` and `abortSignal` in scope at this point — just thread them through
-- [ ] Thread `onProgress` through tool orchestration in `src/chat/tool-orchestration.ts`:
+- [x] Thread `onProgress` through tool orchestration in `src/chat/tool-orchestration.ts`:
   - Add optional `onProgress?: Map<string, (status: string) => void>` parameter to `executeToolBatches()` (L112) — keyed by tool call ID, since multiple tools execute in a batch
   - Thread through `runConcurrentBatch()` (L184) and `safeDispatch()` (L246) to `dispatcher.dispatch()`
   - For Phase 5, all callers pass `undefined` — the orchestrator/SubAgentRunner don't provide progress callbacks yet (Phase 8 wires the view-layer)
-- [ ] Verify all existing tests pass — the new parameter is optional everywhere
+- [x] Verify all existing tests pass — the new parameter is optional everywhere
 
 ### 5.2 Implement the concurrency semaphore
 
@@ -264,7 +264,7 @@ Section 9.3: dedicated semaphore, cap of 3, separate from tool-orchestration's c
 
 `SUB_AGENT_CONCURRENCY_CAP` already exists in `src/sub-agents/constants.ts` (L42). The semaphore implementation is new.
 
-- [ ] Create `src/sub-agents/semaphore.ts` with a reusable `Semaphore` class
+- [x] Create `src/sub-agents/semaphore.ts` with a reusable `Semaphore` class
   - Follow the inline pattern from `tool-orchestration.ts` (L194-215) but as a standalone class:
     ```typescript
     export class Semaphore {
@@ -280,12 +280,12 @@ Section 9.3: dedicated semaphore, cap of 3, separate from tool-orchestration's c
   - `acquire()`: if `activeCount < cap`, increment and return; otherwise push a resolve callback to `waitQueue` and return a Promise
   - `release()`: decrement `activeCount`, shift next waiter from queue and call it
   - `pending` and `active` getters for diagnostics/testing
-- [ ] Write unit tests in `src/sub-agents/semaphore.test.ts`
-  - [ ] Test: acquire up to cap succeeds immediately
-  - [ ] Test: acquire beyond cap blocks until release
-  - [ ] Test: 4th concurrent acquire waits until one of the first 3 releases
-  - [ ] Test: release order matches FIFO queue order
-  - [ ] Test: `active` and `pending` getters report correct counts
+- [x] Write unit tests in `src/sub-agents/semaphore.test.ts`
+  - [x] Test: acquire up to cap succeeds immediately
+  - [x] Test: acquire beyond cap blocks until release
+  - [x] Test: 4th concurrent acquire waits until one of the first 3 releases
+  - [x] Test: release order matches FIFO queue order
+  - [x] Test: `active` and `pending` getters report correct counts
 
 ### 5.3 Implement the `use_subagent` tool
 
@@ -293,7 +293,7 @@ This is the main task. Create `src/tools/use-subagent.ts` implementing the `Tool
 
 #### 5.3a Constructor & dependencies
 
-- [ ] Create `src/tools/use-subagent.ts` with `UseSubagentTool implements Tool`
+- [x] Create `src/tools/use-subagent.ts` with `UseSubagentTool implements Tool`
   - `name`: `USE_SUBAGENT_TOOL_NAME` (from `src/sub-agents/constants.ts`)
   - `mode`: `"read"` — the tool itself is read-mode; sub-agent tools are independently gated
   - Constructor dependencies:
@@ -317,7 +317,7 @@ This is the main task. Create `src/tools/use-subagent.ts` implementing the `Tool
 
 Section 8: profile list is embedded in the tool description, not a separate system prompt section.
 
-- [ ] Implement `description` as a TypeScript getter that rebuilds dynamically:
+- [x] Implement `description` as a TypeScript getter that rebuilds dynamically:
   ```typescript
   get description(): string {
     // Returns base description + profile list with descriptions
@@ -327,7 +327,7 @@ Section 8: profile list is embedded in the tool description, not a separate syst
   - Base description: "Spawn a focused sub-agent to perform a specific task. Available profiles:\n"
   - For each visible profile from `this.cachedVisibleProfiles`: append `- {name}: {description}` (skip profiles with `null` description, per Phase 9 edge case 9.4)
   - Call `refreshVisibleProfiles()` to update `this.cachedVisibleProfiles` lazily (see 5.3c)
-- [ ] Implement `input_schema` as a getter:
+- [x] Implement `input_schema` as a getter:
   ```typescript
   get input_schema(): JSONSchema {
     return {
@@ -353,8 +353,8 @@ Section 8: profile list is embedded in the tool description, not a separate syst
 
 `SubAgentManager.getVisibleProfiles()` does async disk I/O. Tool property getters (`description`, `input_schema`) must be synchronous. Solution: cache the profile list and refresh it periodically.
 
-- [ ] Add `private cachedVisibleProfiles: SubAgentProfile[] = []` instance field
-- [ ] Add `async refreshVisibleProfiles(): Promise<void>` method:
+- [x] Add `private cachedVisibleProfiles: SubAgentProfile[] = []` instance field
+- [x] Add `async refreshVisibleProfiles(): Promise<void>` method:
   - Calls `this.subAgentManager.getVisibleProfiles(this.toolRegistry.getNames())`
   - Updates `this.cachedVisibleProfiles`
   - Called once at registration time (from `main.ts` after constructing the tool)
@@ -363,7 +363,7 @@ Section 8: profile list is embedded in the tool description, not a separate syst
 
 #### 5.3d `execute()` implementation — step by step
 
-- [ ] `execute(params, options?)` method:
+- [x] `execute(params, options?)` method:
 
   **Step 1: Refresh profiles & validate**
   - `await this.refreshVisibleProfiles()`
@@ -499,29 +499,29 @@ Section 8: profile list is embedded in the tool description, not a separate syst
 
 #### 5.3e Unit tests
 
-- [ ] Create `src/tools/use-subagent.test.ts`
-  - [ ] Test: valid profile + task → SubAgentRunner is constructed and run, result returned as ToolResult
-  - [ ] Test: unknown profile name → error ToolResult
-  - [ ] Test: disabled profile (visibility toggle off) → error ToolResult
-  - [ ] Test: `_isSubAgentContext` flag set → error ToolResult (defense-in-depth)
-  - [ ] Test: provider not configured for profile's preferred_provider → error ToolResult
-  - [ ] Test: semaphore limits concurrent executions to cap
-  - [ ] Test: configuration gap detection emits Notice for disabled-by-parent tools
-  - [ ] Test: `onProgress` callback is threaded through to SubAgentRunner
-  - [ ] Test: dynamic `description` getter includes visible profile names and descriptions
-  - [ ] Test: dynamic `input_schema` getter has `enum` matching visible profile names
-  - [ ] Test: profile with no description is excluded from description text
-  - [ ] Test: profile's multiple tool_config blocks are merged (last-writer-wins)
-  - [ ] Test: intersected config correctly restricts sub-agent tools to parent ∩ profile
+- [x] Create `src/tools/use-subagent.test.ts`
+  - [x] Test: valid profile + task → SubAgentRunner is constructed and run, result returned as ToolResult
+  - [x] Test: unknown profile name → error ToolResult
+  - [x] Test: disabled profile (visibility toggle off) → error ToolResult
+  - [x] Test: `_isSubAgentContext` flag set → error ToolResult (defense-in-depth)
+  - [x] Test: provider not configured for profile's preferred_provider → error ToolResult
+  - [x] Test: semaphore limits concurrent executions to cap
+  - [x] Test: configuration gap detection emits Notice for disabled-by-parent tools
+  - [x] Test: `onProgress` callback is threaded through to SubAgentRunner
+  - [x] Test: dynamic `description` getter includes visible profile names and descriptions
+  - [x] Test: dynamic `input_schema` getter has `enum` matching visible profile names
+  - [x] Test: profile with no description is excluded from description text
+  - [x] Test: profile's multiple tool_config blocks are merged (last-writer-wins)
+  - [x] Test: intersected config correctly restricts sub-agent tools to parent ∩ profile
 
 ### 5.4 Register the tool
 
 Wire `UseSubagentTool` into the plugin initialization and dispatch pipeline.
 
-- [ ] Add `SubAgentManager` instantiation to `main.ts` if not already present:
+- [x] Add `SubAgentManager` instantiation to `main.ts` if not already present:
   - Check if `getSubAgentManager()` getter exists; if not, add it following the existing lazy-init pattern (like `getToolRegistry()` at L1001)
   - Dependencies: `this.app.vault`, `this.app.metadataCache`, `this.settings`, `() => this.saveData()`, `parseYaml` from obsidian
-- [ ] Register `UseSubagentTool` in `getToolRegistry()` (main.ts ~L1001-1056):
+- [x] Register `UseSubagentTool` in `getToolRegistry()` (main.ts ~L1001-1056):
   ```typescript
   // Sub-agent tool
   const useSubagentTool = new UseSubagentTool(
@@ -541,15 +541,15 @@ Wire `UseSubagentTool` into the plugin initialization and dispatch pipeline.
   - **Circular dependency note**: The tool needs `ToolRegistry` to enumerate tools, and the registry holds the tool. This is fine because the tool only reads from the registry at `execute()` time (not at construction time). The `this._toolRegistry` reference is valid since it's being populated in the same method.
   - **Orchestrator access**: The `getParentEffectiveConfig` callback needs the orchestrator instance. Since the orchestrator is created lazily (after the registry), use a closure: `() => this.getOrchestrator()?.getEffectiveToolConfig()`. Verify that a `getOrchestrator()` getter exists or add one.
   - **Approval callback**: Set after the dispatcher is created in `getToolDispatcher()`, since the dispatcher holds the approval callback. Add a line after dispatcher setup: `useSubagentTool.setApprovalCallback(this._toolDispatcher.getApprovalCallback())` — or store a reference to the callback separately. Alternatively, `UseSubagentTool` could receive a `getApprovalCallback` closure.
-- [ ] Call `useSubagentTool.refreshVisibleProfiles()` after registration to populate the initial profile cache:
+- [x] Call `useSubagentTool.refreshVisibleProfiles()` after registration to populate the initial profile cache:
   ```typescript
   useSubagentTool.refreshVisibleProfiles().catch(e =>
     log.warn("Failed to load initial sub-agent profiles", { error: String(e) })
   );
   ```
   - This is fire-and-forget — if it fails, profiles will be loaded on first `execute()` call
-- [ ] Verify that the tool appears in `getToolDefinitions()` output and that its dynamic description/schema are correct
-- [ ] Write integration test: mock SubAgentManager with test profiles → call dispatcher.dispatch("use_subagent", ...) → verify SubAgentRunner is invoked with correct parameters and result flows back
+- [ ] Verify that the tool appears in `getToolDefinitions()` output and that its dynamic description/schema are correct _(deferred to manual testing / Phase 8)_
+- [ ] Write integration test: mock SubAgentManager with test profiles → call dispatcher.dispatch("use_subagent", ...) → verify SubAgentRunner is invoked with correct parameters and result flows back _(deferred to Phase 8 integration)_
 
 ---
 

@@ -8,10 +8,28 @@
  * @see design/tools.md — tool classification table
  */
 
-import type { ToolResult } from "../types";
+import type { ConversationMode, ToolResult } from "../types";
 
 // Re-export ToolResult for tool implementations
 export type { ToolResult };
+
+/**
+ * Options passed to `Tool.execute()` for long-running or context-aware tools.
+ *
+ * All fields are optional — existing tools ignore them. Tools like
+ * `use_subagent` use `onProgress`, `mode`, and `abortSignal` to drive
+ * sub-agent execution.
+ *
+ * @see specs/ZZ-misc/sub-agents-design.md — Section 9.5
+ */
+export interface ToolExecuteOptions {
+	/** Progress callback for long-running tools. */
+	onProgress?: (status: string) => void;
+	/** Current conversation mode — tools like use_subagent propagate this to child contexts. */
+	mode?: ConversationMode;
+	/** Abort signal — tools like use_subagent pass this to SubAgentRunner. */
+	abortSignal?: AbortSignal;
+}
 
 /**
  * JSON Schema definition as passed to LLMs for tool calling.
@@ -66,7 +84,8 @@ export interface Tool {
 	/**
 	 * Execute the tool with the given parameters.
 	 * @param params - Validated parameters from the LLM
+	 * @param options - Optional execution options (progress, mode, abort)
 	 * @returns Tool result (success or failure)
 	 */
-	execute(params: Record<string, unknown>): Promise<ToolResult>;
+	execute(params: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult>;
 }

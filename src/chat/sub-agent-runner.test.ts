@@ -207,6 +207,7 @@ describe("SubAgentRunner", () => {
 				"act",
 				"tc-1",
 				expect.anything(), // AbortSignal
+				undefined, // onProgress (not used by sub-agent runner)
 			);
 		});
 
@@ -533,7 +534,8 @@ describe("SubAgentRunner", () => {
 				expect.anything(),
 				"plan",
 				expect.anything(),
-				expect.anything(),
+				expect.anything(), // AbortSignal
+				undefined, // onProgress
 			);
 			expect(result.iterationCount).toBe(2);
 		});
