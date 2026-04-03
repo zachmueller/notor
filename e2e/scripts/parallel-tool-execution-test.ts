@@ -386,21 +386,17 @@ async function testTokenTracking(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 
-		// Access the conversation manager's messages
-		const view = plugin.getChatView?.() ?? plugin.view;
-		if (!view) return null;
-
-		const orchestrator = view.orchestrator;
+		const orchestrator = plugin.getOrchestrator?.();
 		if (!orchestrator) return null;
 
-		const convManager = orchestrator.conversationManager;
+		const convManager = orchestrator.getConversationManager?.();
 		if (!convManager) return null;
 
-		const messages = convManager.getMessages?.() ?? convManager.messages ?? [];
+		const messages = convManager.getMessages?.() ?? [];
 
-		// Find assistant messages with token data
+		// Find assistant messages with token data (snake_case fields)
 		const assistantMsgs = messages.filter(
-			(m: any) => m.role === "assistant" && (m.inputTokens > 0 || m.outputTokens > 0),
+			(m: any) => m.role === "assistant" && (m.input_tokens > 0 || m.output_tokens > 0),
 		);
 
 		// Find tool_call messages
@@ -417,8 +413,8 @@ async function testTokenTracking(ctx: TestContext): Promise<void> {
 			// Sample token values from the last assistant message with tokens
 			lastTokens: assistantMsgs.length > 0
 				? {
-						input: assistantMsgs[assistantMsgs.length - 1].inputTokens,
-						output: assistantMsgs[assistantMsgs.length - 1].outputTokens,
+						input: assistantMsgs[assistantMsgs.length - 1].input_tokens,
+						output: assistantMsgs[assistantMsgs.length - 1].output_tokens,
 					}
 				: null,
 		};
@@ -571,16 +567,13 @@ async function testMessageCoalescing(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 
-		const view = plugin.getChatView?.() ?? plugin.view;
-		if (!view) return null;
-
-		const orchestrator = view.orchestrator;
+		const orchestrator = plugin.getOrchestrator?.();
 		if (!orchestrator) return null;
 
-		const convManager = orchestrator.conversationManager;
+		const convManager = orchestrator.getConversationManager?.();
 		if (!convManager) return null;
 
-		const messages = convManager.getMessages?.() ?? convManager.messages ?? [];
+		const messages = convManager.getMessages?.() ?? [];
 
 		// Count message roles
 		const roleCounts: Record<string, number> = {};
