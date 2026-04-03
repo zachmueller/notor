@@ -153,16 +153,16 @@ The mini-orchestrator that runs isolated sub-agent conversations.
 
 Section 2.3: standard preamble prepended to every sub-agent's system prompt.
 
-- [ ] Create `src/sub-agents/preamble.ts` with `SUB_AGENT_PREAMBLE` constant
-  - [ ] Instructions: complete the specific request, return concise summary, don't ask clarifying questions, provide final answer directly
-  - [ ] Keep it short — this consumes tokens on every sub-agent invocation
+- [x] Create `src/sub-agents/preamble.ts` with `SUB_AGENT_PREAMBLE` constant
+  - [x] Instructions: complete the specific request, return concise summary, don't ask clarifying questions, provide final answer directly
+  - [x] Keep it short — this consumes tokens on every sub-agent invocation
 
 ### 4.2 Implement `SubAgentRunner`
 
 Section 9.1: separate class, not reuse of `ChatOrchestrator`.
 
-- [ ] Create `src/chat/sub-agent-runner.ts`
-  - [ ] Constructor parameters:
+- [x] Create `src/chat/sub-agent-runner.ts`
+  - [x] Constructor parameters:
     - `provider: LLMProvider` — resolved provider instance
     - `model: string` — model ID
     - `systemPrompt: string` — preamble + profile prompt body
@@ -172,7 +172,7 @@ Section 9.1: separate class, not reuse of `ChatOrchestrator`.
     - `iterationCap: number` — default 10
     - `mode: ConversationMode` — inherited from parent (Section 9.6)
     - `onProgress?: (status: string) => void` — optional progress callback
-  - [ ] Define `SubAgentResult` type:
+  - [x] Define `SubAgentResult` type:
     ```typescript
     {
       text: string;
@@ -182,39 +182,39 @@ Section 9.1: separate class, not reuse of `ChatOrchestrator`.
       wasCapReached: boolean;
     }
     ```
-  - [ ] Implement `run(taskPrompt: string): Promise<SubAgentResult>`
-    - [ ] Initialize messages array with system message (preamble + profile prompt) and user message (task prompt)
-    - [ ] Loop (up to iteration cap):
+  - [x] Implement `run(taskPrompt: string): Promise<SubAgentResult>`
+    - [x] Initialize messages array with system message (preamble + profile prompt) and user message (task prompt)
+    - [x] Loop (up to iteration cap):
       1. Call `provider.sendMessage()` with current messages, tool definitions, options (model, abort_signal)
       2. Consume stream via `parseStreamEvents()` from Phase 1
       3. On text-only response (no tool calls) → break loop, return result
       4. On tool calls → dispatch via `dispatcher.dispatch()`, add tool_call and tool_result messages, call `onProgress`, continue loop
       5. On error → fail with error in result
       6. On abort → return partial result with cancelled marker
-    - [ ] If iteration cap reached: return with `wasCapReached: true` and marker text per Section 9.8
-    - [ ] Track cumulative token usage across all iterations
-    - [ ] NO compaction, NO hooks, NO view rendering, NO ConversationManager/ContextManager
+    - [x] If iteration cap reached: return with `wasCapReached: true` and marker text per Section 9.8
+    - [x] Track cumulative token usage across all iterations
+    - [x] NO compaction, NO hooks, NO view rendering, NO ConversationManager/ContextManager
 
 ### 4.3 Implement abort propagation
 
 Section 6.2: parent's Stop button must cancel all active sub-agents.
 
-- [ ] Each `SubAgentRunner` gets its own `AbortController`
-- [ ] The `use_subagent` tool links the parent's `AbortSignal` to the sub-agent's controller:
+- [x] Each `SubAgentRunner` gets its own `AbortController`
+- [x] The `use_subagent` tool links the parent's `AbortSignal` to the sub-agent's controller:
   - Listen to parent signal's `abort` event → call sub-agent controller's `abort()`
   - Clean up listener when sub-agent completes
-- [ ] Sub-agent checks abort signal before each LLM call and tool execution
+- [x] Sub-agent checks abort signal before each LLM call and tool execution
 
 ### 4.4 Write unit tests for `SubAgentRunner`
 
-- [ ] Test: text-only response on first turn → returns immediately
-- [ ] Test: tool call → tool result → text response → returns after 2 iterations
-- [ ] Test: iteration cap reached → returns with `wasCapReached: true` and marker
-- [ ] Test: provider error → fails with error
-- [ ] Test: abort signal → returns partial result
-- [ ] Test: `onProgress` called after each iteration with status string
-- [ ] Test: token usage accumulated across iterations
-- [ ] Test: write tool blocked in Plan mode
+- [x] Test: text-only response on first turn → returns immediately
+- [x] Test: tool call → tool result → text response → returns after 2 iterations
+- [x] Test: iteration cap reached → returns with `wasCapReached: true` and marker
+- [x] Test: provider error → fails with error
+- [x] Test: abort signal → returns partial result
+- [x] Test: `onProgress` called after each iteration with status string
+- [x] Test: token usage accumulated across iterations
+- [x] Test: write tool blocked in Plan mode
 
 ---
 
