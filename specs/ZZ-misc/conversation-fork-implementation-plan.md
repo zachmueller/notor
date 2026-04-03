@@ -184,29 +184,29 @@ Test `prepareFork()` thoroughly in isolation. These tests validate the core slic
 End-to-end Playwright tests validating the full fork flow through the UI. Use the `/write-e2e-test` command to generate test scripts following the repo's E2E conventions in `e2e/scripts/`.
 
 ### 7.1 Core fork flow
-- [ ] Test: create conversation with several exchanges, fork at message N, verify fork JSONL exists with correct message count
-- [ ] Test: verify all IDs in fork JSONL are fresh (no overlap with original conversation)
-- [ ] Test: verify original conversation JSONL is byte-identical after fork (unchanged)
-- [ ] Test: verify forked conversation can be continued (send a new message, get a response)
-- [ ] Test: verify conversation list shows the fork with lineage badge
+- [x] Test: create conversation with several exchanges, fork at message N, verify fork JSONL exists with correct message count
+- [x] Test: verify all IDs in fork JSONL are fresh (no overlap with original conversation)
+- [x] Test: verify original conversation JSONL is byte-identical after fork (unchanged)
+- [x] Test: verify forked conversation can be continued (send a new message, get a response)
+- [x] Test: verify conversation list shows the fork with lineage badge
 
 ### 7.2 Tool call boundary tests
-- [ ] Test: fork at `tool_call` → paired `tool_result` is included in fork JSONL
-- [ ] Test: fork at `tool_result` → next `tool_call` is NOT included
-- [ ] Test: fork at `tool_call` with no paired result → fork is still continuable
-- [ ] Test: fork mid-multi-tool sequence → exact message count matches expectation
-- [ ] Test: continue forked conversation after tool_call boundary → LLM responds without API errors
+- [x] Test: fork at `tool_call` → paired `tool_result` is included in fork JSONL
+- [x] Test: fork at `tool_result` → next `tool_call` is NOT included
+- [x] Test: fork at `tool_call` with no paired result → fork is still continuable
+- [x] Test: fork mid-multi-tool sequence → exact message count matches expectation
+- [x] Test: continue forked conversation after tool_call boundary → LLM responds without API errors
 
 ### 7.3 Fork badge and navigation
-- [ ] Test: fork badge is clickable and navigates to parent conversation
-- [ ] Test: delete parent conversation → fork badge is no longer shown
-- [ ] Test: fork an imported conversation → `forked_from_conversation_id` references the import's local ID
+- [x] Test: fork badge is clickable and navigates to parent conversation
+- [x] Test: delete parent conversation → fork badge is no longer shown
+- [x] Test: fork an imported conversation → `forked_from_conversation_id` references the import's local ID
 
 ### 7.4 Streaming and in-progress guards
-- [ ] Test: while assistant is streaming, right-click an earlier completed message → context menu appears
-- [ ] Test: while assistant is streaming, right-click the in-progress message → no context menu
-- [ ] Test: while tool call is pending, right-click the pending tool call → no context menu
-- [ ] Test: while tool call is pending, right-click an earlier completed message → context menu appears
+- [x] Test: while assistant is streaming, right-click an earlier completed message → context menu appears
+- [x] Test: while assistant is streaming, right-click the in-progress message → no context menu
+- [x] Test: while tool call is pending, right-click the pending tool call → no context menu
+- [x] Test: while tool call is pending, right-click an earlier completed message → context menu appears
 
 ---
 
