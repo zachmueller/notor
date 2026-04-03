@@ -170,10 +170,10 @@ The Stop button must propagate through to sub-agent execution. The parent's `Abo
 ### 7.1 New "Sub-agents" Section
 
 A new collapsible section in Settings, following the Personas pattern:
-- "Create new sub-agent" button that prompts for a name and creates the skeleton directory/file
+- "Create new sub-agent" button that guides users through creating a new profile: prompts for a name, creates the skeleton directory and `system-prompt.md` file with frontmatter template (including placeholder `notor-description`), and opens the new file in a leaf so the user can immediately customize it
 - List of discovered sub-agent profiles, each with:
   - A visibility toggle (whether the profile is available to the LLM)
-  - An open button (using `square-arrow-out-up-right` icon) to navigate to the profile note
+  - An open button (using the [`square-arrow-out-up-right`](https://lucide.dev/icons/square-arrow-out-up-right) Lucide icon) to open the profile note in a new leaf
 
 ### 7.2 Visibility Toggle Enforcement
 
