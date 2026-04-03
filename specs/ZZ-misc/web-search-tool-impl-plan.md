@@ -158,26 +158,26 @@ End-to-end test validating the full tool lifecycle in a real Obsidian environmen
 
 ### 5.1 Create `e2e/scripts/web-search-test.ts`
 
-- [ ] Scenario 1: Basic search returns results
+- [x] Scenario 1: Basic search returns results
   - Send a message asking the LLM to search for a well-known topic
   - Verify `web_search` tool call appears in the UI (`.notor-tool-call` with correct tool name)
   - Verify assistant response references search results
-- [ ] Scenario 2: Domain denylist filtering
+- [x] Scenario 2: Domain denylist filtering
   - Configure `domain_denylist` in test settings with a likely result domain
   - Run a search that would normally include that domain
   - Verify blocked domain does not appear in results
-- [ ] Scenario 3: Search-then-fetch workflow
+- [x] Scenario 3: Search-then-fetch workflow
   - Ask the LLM to search and then read a specific result
   - Verify both `web_search` and `fetch_webpage` tool calls appear
-- [ ] Scenario 4: Error handling — timeout
+- [x] Scenario 4: Error handling — timeout
   - Set `web_search_timeout` to an extremely low value (e.g., 0.001 seconds)
   - Verify the tool returns a timeout error gracefully
 
 ### Phase 5 verification
 
-- [ ] All E2E scenarios pass
-- [ ] Results written to `e2e/results/web-search-results.json`
-- [ ] Screenshots captured at key verification points
+- [x] All E2E scenarios pass
+- [x] Results written to `e2e/results/web-search-results.json`
+- [x] Screenshots captured at key verification points
 
 ---
 
