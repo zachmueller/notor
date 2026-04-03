@@ -173,9 +173,14 @@ export async function sendMessageWithApprovalHandling(
 
 	await page.waitForTimeout(300);
 
-	const sendBtn = await page.$(".notor-send-btn");
+	// Use visible send button if available, otherwise fall back to Enter key.
+	// page.$() matches hidden elements, so check visibility via :not(.notor-hidden).
+	const sendBtn = await page.$(".notor-send-btn:not(.notor-hidden)");
 	if (sendBtn) await sendBtn.click();
-	else await page.keyboard.press("Enter");
+	else {
+		await page.focus(".notor-text-input");
+		await page.keyboard.press("Enter");
+	}
 
 	console.log(`    → Sent: "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
 
@@ -320,7 +325,7 @@ export function buildDefaultSettings(overrides?: Record<string, unknown>): Recor
 			{
 				type: "bedrock", enabled: true, display_name: "AWS Bedrock",
 				aws_auth_method: "profile", aws_profile: "default",
-				region: "us-east-1", model_id: "deepseek.v3.2",
+				region: "us-east-1", model_id: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
 			},
 		],
 		auto_approve: {
