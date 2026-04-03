@@ -54,6 +54,7 @@ export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	list_vault: true,
 	read_frontmatter: true,
 	fetch_webpage: true,
+	web_search: true,
 	write_note: false,
 	replace_in_note: false,
 	update_frontmatter: false,
@@ -123,6 +124,10 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	fetch_webpage_max_download_mb: 5,
 	fetch_webpage_max_output_chars: 50000,
 	domain_denylist: [],
+
+	// web_search
+	web_search_timeout: 10,
+	web_search_default_num_results: 5,
 
 	// Phase 3: execute_command
 	execute_command_timeout: 30,

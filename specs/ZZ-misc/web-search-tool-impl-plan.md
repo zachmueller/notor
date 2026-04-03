@@ -11,25 +11,25 @@ The foundational tool class, parsing logic, and registration — enough to make 
 
 ### 1.1 Create `src/tools/web-search.ts`
 
-- [ ] Define `WebSearchResult` type: `{ title: string; url: string; snippet: string }`
-- [ ] Implement `cleanDDGUrl(raw: string): string | null`
+- [x] Define `WebSearchResult` type: `{ title: string; url: string; snippet: string }`
+- [x] Implement `cleanDDGUrl(raw: string): string | null`
   - Handle `//duckduckgo.com/l/?uddg=...` redirect format
   - Handle protocol-relative URLs (`//...` → `https:...`)
   - Pass through absolute `http://` / `https://` URLs
   - Return `null` for anything else
-- [ ] Implement `parseDDGResults(html: string, maxResults: number): WebSearchResult[]`
+- [x] Implement `parseDDGResults(html: string, maxResults: number): WebSearchResult[]`
   - Use global `DOMParser` (NOT `@xmldom/xmldom` — that's XML-only)
   - Parse with `text/html` mime type
   - Select `.result` containers, extract `.result__title a` (href + text) and `.result__snippet` (text)
   - Call `cleanDDGUrl()` on each href
   - Cap at `maxResults`
-- [ ] Implement `WebSearchTool` class implementing `Tool` interface from `src/tools/tool.ts`
+- [x] Implement `WebSearchTool` class implementing `Tool` interface from `src/tools/tool.ts`
   - Constructor: `(app: App, settings: NotorSettings)` — same as `FetchWebpageTool`
   - `name = "web_search"`
   - `mode = "read"` (safe in Plan mode)
   - `description` — concise LLM-facing description: searches the web via DuckDuckGo, returns titles/URLs/snippets
   - `input_schema` — `query` (string, required), `num_results` (number, optional, default 5, max 10)
-- [ ] Implement `execute()` method
+- [x] Implement `execute()` method
   - Clamp `num_results` to 1–10, default to `settings.web_search_default_num_results`
   - Build timeout via `Promise.race()` pattern (from `fetch-webpage.ts:410-440`) using `settings.web_search_timeout * 1000`
   - POST to `https://html.duckduckgo.com/html/` with form-encoded body `q={query}&kl=us-en`
@@ -44,17 +44,17 @@ The foundational tool class, parsing logic, and registration — enough to make 
 
 ### 1.2 Register the tool
 
-- [ ] In `src/main.ts` `getToolRegistry()`, add `WebSearchTool` registration alongside `FetchWebpageTool`
+- [x] In `src/main.ts` `getToolRegistry()`, add `WebSearchTool` registration alongside `FetchWebpageTool`
   - Import `WebSearchTool` from `./tools/web-search`
   - `this._toolRegistry.register(new WebSearchTool(this.app, this.settings))`
 
 ### 1.3 Add auto-approve default
 
-- [ ] In `src/settings/defaults.ts`, add `web_search: true` to `DEFAULT_AUTO_APPROVE` (read-only tool, same as `fetch_webpage`)
+- [x] In `src/settings/defaults.ts`, add `web_search: true` to `DEFAULT_AUTO_APPROVE` (read-only tool, same as `fetch_webpage`)
 
 ### Phase 1 verification
 
-- [ ] Build succeeds (`npm run build`)
+- [x] Build succeeds (`npm run build`)
 - [ ] Tool appears in `getToolRegistry().getNames()`
 - [ ] Manual test: ask LLM to search for something → tool call appears in UI, results returned
 

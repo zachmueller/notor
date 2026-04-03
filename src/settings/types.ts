@@ -144,8 +144,18 @@ export interface NotorSettings {
 	/** Maximum output character count after conversion. */
 	fetch_webpage_max_output_chars: number;
 
-	/** Blocked domain patterns for fetch_webpage. */
+	/** Blocked domain patterns for fetch_webpage and web_search. */
 	domain_denylist: string[];
+
+	// -------------------------------------------------------------------
+	// web_search settings
+	// -------------------------------------------------------------------
+
+	/** HTTP request timeout in seconds for web_search. */
+	web_search_timeout: number;
+
+	/** Default number of results web_search returns. */
+	web_search_default_num_results: number;
 
 	// -------------------------------------------------------------------
 	// Phase 3: execute_command settings

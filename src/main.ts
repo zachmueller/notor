@@ -74,6 +74,7 @@ import { UpdateFrontmatterTool } from "./tools/update-frontmatter";
 import { ManageTagsTool } from "./tools/manage-tags";
 import { MoveNoteTool } from "./tools/move-note";
 import { FetchWebpageTool } from "./tools/fetch-webpage";
+import { WebSearchTool } from "./tools/web-search";
 import { ExecuteCommandTool } from "./tools/execute-command";
 import { ReadFileTool } from "./tools/read-file";
 import { ReadDocxTool } from "./tools/read-docx";
@@ -1035,6 +1036,9 @@ export default class NotorPlugin extends Plugin {
 			// Phase 3: New tools
 			this._toolRegistry.register(
 				new FetchWebpageTool(this.app, this.settings)
+			);
+			this._toolRegistry.register(
+				new WebSearchTool(this.app, this.settings)
 			);
 			this._toolRegistry.register(
 				new ExecuteCommandTool(this.app, this.settings)
