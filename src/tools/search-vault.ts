@@ -17,6 +17,9 @@ import { logger } from "../utils/logger";
 
 const log = logger("SearchVaultTool");
 
+/** Maximum matches returned per file. Files with more matches expose the real count via total_match_count. */
+const MAX_MATCHES_PER_FILE = 10;
+
 /** A single match within a file. */
 interface MatchResult {
 	line: number;
@@ -29,6 +32,7 @@ interface FileResult {
 	path: string;
 	matches: MatchResult[];
 	match_count: number;
+	total_match_count: number;
 	backlink_count: number;
 	modified: string;
 }
@@ -36,6 +40,7 @@ interface FileResult {
 /** Structured result returned from search_vault. */
 interface SearchResult {
 	total_matches: number;
+	total_files: number;
 	files: FileResult[];
 }
 
@@ -54,9 +59,11 @@ export class SearchVaultTool implements Tool {
 
 	readonly description =
 		"Search across notes in the vault using regex or text patterns, returning matches " +
-		"with surrounding context lines. Results are grouped by file with line numbers. " +
+		"with surrounding context lines. Results are grouped by file with line numbers and paginated " +
+		"(use limit/offset to page through files). Each file returns up to 10 matches; if more exist, " +
+		"total_match_count shows the real count — use read_note to see the full file. " +
 		"Results can be sorted by match count (default), backlink count (to find hub/authoritative notes), " +
-		"or last modified time. Each result includes match_count, backlink_count, and modified metadata.";
+		"or last modified time. Each result includes match_count, total_match_count, backlink_count, and modified metadata.";
 
 	readonly input_schema = {
 		type: "object",
@@ -91,6 +98,18 @@ export class SearchVaultTool implements Tool {
 				enum: ["match_count", "backlinks", "modified"],
 				default: "match_count",
 			},
+			limit: {
+				type: "number",
+				description:
+					"Maximum number of files to return. Defaults to 20.",
+				default: 20,
+			},
+			offset: {
+				type: "number",
+				description:
+					"Number of files to skip for pagination. Defaults to 0.",
+				default: 0,
+			},
 		},
 		required: ["query"],
 	};
@@ -109,6 +128,11 @@ export class SearchVaultTool implements Tool {
 			| "match_count"
 			| "backlinks"
 			| "modified";
+		const limit = Math.max(
+			1,
+			Math.min(200, Math.floor((params["limit"] as number | undefined) ?? 20))
+		);
+		const offset = Math.max(0, Math.floor((params["offset"] as number | undefined) ?? 0));
 
 		if (!query || typeof query !== "string") {
 			return {
@@ -149,14 +173,18 @@ export class SearchVaultTool implements Tool {
 				const matches = this.searchFile(content, regex, contextLines);
 
 				if (matches.length > 0) {
+					const totalMatchCount = matches.length;
+					const cappedMatches = matches.slice(0, MAX_MATCHES_PER_FILE);
+
 					fileResults.push({
 						path: file.path,
-						matches,
-						match_count: matches.length,
+						matches: cappedMatches,
+						match_count: cappedMatches.length,
+						total_match_count: totalMatchCount,
 						backlink_count: backlinkCounts.get(file.path) ?? 0,
 						modified: new Date(file.stat.mtime).toISOString(),
 					});
-					totalMatches += matches.length;
+					totalMatches += totalMatchCount;
 				}
 			} catch (e) {
 				// Skip files that can't be read (binary, permission issues, etc.)
@@ -173,16 +201,22 @@ export class SearchVaultTool implements Tool {
 		// Sort results by the selected field
 		const sortedResults = this.sortFileResults(fileResults, sortBy);
 
+		// Apply file-level pagination
+		const totalFiles = sortedResults.length;
+		const paginatedResults = sortedResults.slice(offset, offset + limit);
+
 		log.debug("Search complete", {
 			query,
 			totalMatches,
 			filesSearched: candidates.length,
-			filesWithMatches: sortedResults.length,
+			filesWithMatches: totalFiles,
+			returned: paginatedResults.length,
 		});
 
 		const result: SearchResult = {
 			total_matches: totalMatches,
-			files: sortedResults,
+			total_files: totalFiles,
+			files: paginatedResults,
 		};
 
 		return {
@@ -274,7 +308,7 @@ export class SearchVaultTool implements Tool {
 					return new Date(b.modified).getTime() - new Date(a.modified).getTime();
 				case "match_count":
 				default:
-					return b.match_count - a.match_count;
+					return b.total_match_count - a.total_match_count;
 			}
 		});
 	}
