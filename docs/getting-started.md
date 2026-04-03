@@ -39,6 +39,35 @@ npm run dev
 
 You can control which tools are available and configure auto-approve in **Settings → Notor → Tools**. See [vault-tools.md](vault-tools.md#enabling-and-disabling-tools) for details.
 
+### AWS Bedrock
+
+AWS Bedrock uses the Converse API with two authentication methods:
+
+1. **Named profile** (recommended) — uses your `~/.aws/config` and `~/.aws/credentials` files.
+   - Set the **Region** dropdown to your preferred AWS region (default: `us-east-1`).
+   - Enter your **AWS profile name** (default: `default`).
+   - Leave the access key fields empty — credentials are loaded from disk via `fromIni()`.
+
+2. **Direct keys** — enter an AWS access key ID and secret access key directly.
+   - Credentials are stored securely via Obsidian's secrets manager.
+   - Use this method when you don't have a local AWS config file (e.g., on a shared machine).
+
+Required IAM permissions: `bedrock:InvokeModelWithResponseStream` (for chat) and `bedrock:ListInferenceProfiles` (for model discovery).
+
+## Command palette reference
+
+All Notor commands are accessible via the Obsidian command palette (Ctrl/Cmd+P):
+
+| Command | Description |
+|---------|-------------|
+| **Notor: Open chat panel** | Opens the main Notor chat interface |
+| **Notor: New conversation** | Creates a fresh conversation |
+| **Notor: Compact context** | Manually compacts the current conversation's context window |
+| **Notor: Run workflow** | Opens a workflow picker to select and run a workflow |
+| **Notor: Export conversation** | Exports the active conversation to HTML or Markdown |
+| **Notor: Import conversation from HTML** | Imports a previously exported HTML conversation |
+| **Notor: Open tool config inspector** | Opens a debugging view showing the effective tool configuration |
+
 ## Create your first persona
 
 Personas let you define specialized AI personalities with their own system prompt, model preferences, and approval behavior. See [personas.md](personas.md) for the full reference.

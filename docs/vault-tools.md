@@ -9,16 +9,21 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `read_note` | Read a note's content (optionally including frontmatter) | Plan & Act |
 | `write_note` | Create a new note or overwrite an existing one | Act only |
 | `replace_in_note` | Surgical SEARCH/REPLACE edits within a note | Act only |
+| `move_note` | Move and/or rename a note within the vault (auto-updates all internal links) | Act only |
 | `search_vault` | Regex/text search across notes with context lines | Plan & Act |
 | `list_vault` | List vault folder structure and file metadata | Plan & Act |
 | `read_frontmatter` | Read a note's YAML frontmatter as structured data | Plan & Act |
 | `update_frontmatter` | Add, modify, or remove specific frontmatter keys | Act only |
 | `manage_tags` | Add or remove tags via the frontmatter `tags` property | Act only |
+| `get_backlinks` | List all notes that link TO a given note | Plan & Act |
+| `get_outlinks` | List all notes that a given note links TO (resolved and unresolved) | Plan & Act |
+| `web_search` | Search the web via DuckDuckGo and return titles, URLs, and snippets | Plan & Act |
 | `fetch_webpage` | Fetch a URL and return its content as Markdown | Plan & Act |
 | `execute_command` | Run a shell command and return its output | Act only |
 | `read_file` | Read a text file from the filesystem (desktop only) | Plan & Act |
 | `read_docx` | Read a `.docx` file and return its content as Markdown (desktop only) | Plan & Act |
 | `write_docx` | Convert Markdown to a `.docx` file on the filesystem (desktop only) | Act only |
+| `extract_docx_comments` | Extract review comments from a `.docx` file and write them as a structured note (desktop only) | Act only |
 | `use_subagent` | Spawn a focused [sub-agent](sub-agents.md) child conversation for a specific task | Plan & Act |
 
 Every tool call is displayed inline in the chat thread — name, parameters, result, and status — so you always see exactly what the AI is doing.
@@ -26,6 +31,8 @@ Every tool call is displayed inline in the chat thread — name, parameters, res
 Tools marked **Act only** are blocked in Plan mode. See [safety.md](safety.md) for details on Plan/Act mode and the approval workflow.
 
 Tools marked **desktop only** are unavailable on mobile and return an error if invoked there.
+
+By default, when the AI reads or modifies a note, the note is automatically opened in the editor so you can see what the AI is working with. You can disable this behavior in **Settings → Notor** via the **Open notes on access** toggle.
 
 ## Enabling and disabling tools
 
@@ -82,6 +89,52 @@ filesystem__read_file:
 
 Use the **Copy tool config YAML** button in **Settings → Notor → Tools** to generate a starting snippet with your current settings.
 
+### Debugging effective configuration
+
+Open the command palette and run **Notor: Open tool config inspector** to see the effective tool configuration for the current conversation. This view shows the merged result of all active config layers (global, rule, persona, workflow) and is useful for diagnosing unexpected tool availability or approval behavior.
+
+## Moving notes
+
+The `move_note` tool moves and/or renames a note within the vault. Obsidian automatically updates all internal wikilinks and markdown links that point to the moved file.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `path` | Yes | Current path of the note relative to vault root. The `.md` extension is optional; a bare note name is also accepted. |
+| `new_path` | Yes | New path for the note relative to vault root. The `.md` extension is optional and will be added automatically. Intermediate directories are created if needed. |
+| `add_alias` | No | If `true` and the note's filename is changing, the old filename is appended to the note's frontmatter `aliases` list to preserve discoverability. Default: `false`. |
+
+- A checkpoint is created before the operation for rollback.
+- Rejects the operation if a note already exists at the destination path.
+- Write tool — available in Act mode only; requires explicit approval unless auto-approved.
+
+## Backlinks and outlinks
+
+Two read-only tools query Obsidian's in-memory link index — no disk I/O is involved.
+
+### `get_backlinks`
+
+Returns all notes in the vault that link **to** the specified note (incoming links). Self-links are filtered out. Output is a newline-separated list of vault-relative paths, or `(none)` if no backlinks exist.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `path` | Yes | Path to the note relative to vault root. The `.md` extension is optional; a bare note name is also accepted. |
+
+### `get_outlinks`
+
+Returns all notes that the specified note links **to** (outgoing links). Self-links are filtered out. Output is divided into two sections: **Resolved** (links whose target notes exist in the vault) and **Unresolved** (links whose targets do not exist).
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `path` | Yes | Path to the note relative to vault root. The `.md` extension is optional; a bare note name is also accepted. |
+
+Both tools are read-only — available in Plan and Act modes.
+
 ## Vault search
 
 The `search_vault` tool supports an optional `sort_by` parameter to control result ordering:
@@ -104,6 +157,23 @@ The `fetch_webpage` tool lets the AI retrieve external content:
 - Configurable size limits: raw download cap (default: 5 MB) and output character cap (default: 50,000 characters). Pages exceeding the output cap are truncated with a notice to the AI.
 - Defaults to auto-approved (read-only tool, available in Plan and Act modes).
 - When a fetch fails, actionable error hints are shown for common Chromium `net::ERR_*` codes (DNS resolution failure, connection refused, timeout, SSL/TLS errors, and others). If the primary `requestUrl` method fails, an automatic diagnostic probe using native `fetch` runs to help distinguish Obsidian-specific issues from network-level problems.
+
+## Web search
+
+The `web_search` tool lets the AI search the web via DuckDuckGo and return structured results:
+
+- Returns a numbered markdown list with titles, clickable URLs, and text snippets.
+- Results are snippets only — use `fetch_webpage` on a result URL to retrieve full page content.
+- The domain denylist (configured in **Settings → Notor**) applies to search result URLs; blocked domains are filtered out before results are returned.
+- Configurable timeout (default: 10 seconds) and result count (default: 5, maximum: 10) in **Settings → Notor**.
+- Read-only tool — available in Plan and Act modes. Auto-approved by default.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `query` | Yes | Search query string. |
+| `num_results` | No | Number of results to return. Default: 5. Maximum: 10. |
 
 ## Shell command execution
 
@@ -184,6 +254,25 @@ If no template is configured, the tool produces a plain `.docx` using Word's sta
 
 - Write tool — available in Act mode only; requires explicit approval unless auto-approved.
 - Auto-approve default: off.
+
+### `extract_docx_comments`
+
+Extracts review comments from a `.docx` file and writes them as a structured Obsidian vault note. Supports threaded replies, @mention resolution, and resolved-comment filtering.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `docx_path` | Yes | Path to the `.docx` file. Vault-relative or absolute. Must be within the vault or an allowed path. |
+| `output_path` | Yes | Vault-relative path for the output note (e.g. `Reviews/feedback.md`). The `.md` extension is optional. |
+| `include_resolved` | No | Include resolved/done comments. Default: `false`. |
+
+- Resolved (done) comments are excluded by default. Pass `include_resolved: true` to include them.
+- **Idempotent append** — when the output note already exists, only new comments are appended; previously extracted comments are skipped based on their unique IDs.
+- Each comment includes: reviewer name, timestamp, quoted document text (the passage the comment was attached to), comment body, and any reply thread.
+- Write tool — available in Act mode only; requires explicit approval unless auto-approved.
+- Auto-approve default: off.
+- Desktop only.
 
 ### Settings
 

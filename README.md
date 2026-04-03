@@ -11,7 +11,7 @@ Notor brings AI-powered assistance directly into your Obsidian workflow. It give
 ## What Notor can do
 
 - **Chat with an AI inside Obsidian** — side panel chat with streaming responses, multiple LLM providers (local, Anthropic, OpenAI, AWS Bedrock), dynamic model selection, and conversation history
-- **[Read, write, and edit notes](docs/vault-tools.md)** — 14 built-in tools including vault note operations, web fetching, shell command execution, filesystem read/write with Word (`.docx`) support, and sub-agent dispatch
+- **[Read, write, and edit notes](docs/vault-tools.md)** — 19 built-in tools including vault note operations (read, write, search, move, backlinks/outlinks), web search and fetching, shell command execution, filesystem read/write with Word (`.docx`) support (including comment extraction), and sub-agent dispatch
 - **[Safety-first approval model](docs/safety.md)** — Plan/Act mode, diff previews with per-hunk accept/reject, approval gates for write operations, and automatic checkpoints for rollback
 - **[Note and file attachments](docs/context.md)** — attach vault notes (with section-level references) or external files directly to messages; ambient workspace context injected automatically
 - **[Vault-level instruction files](docs/rules.md)** — store Markdown rule files under `notor/rules/` that inject instructions automatically based on note directory or tag
@@ -22,6 +22,7 @@ Notor brings AI-powered assistance directly into your Obsidian workflow. It give
 - **[Vault event hooks](docs/hooks.md#vault-event-hooks)** — hooks triggered by vault events: note open/save/create, tag changes, and cron schedules
 - **[Custom MCP tool servers](docs/mcp-servers.md)** — connect stdio or HTTP MCP servers to extend the AI's tool set; uniform dispatch with Plan/Act enforcement and approval UI
 - **[Sub-agents](docs/sub-agents.md)** — spawn focused child conversations for vault search, web lookup, or custom tasks; isolated context, default-deny tool access, concurrent execution (up to 3), and three built-in profiles (`search-vault`, `search-web`, `notor-help`)
+- **[Conversation export & import](docs/export-import.md)** — export conversations to self-contained HTML or Markdown; import previously exported HTML conversations back into the plugin
 - **Auto-compaction** — automatic context summarization when conversations approach the model's context window limit
 
 ---

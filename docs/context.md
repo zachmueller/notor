@@ -24,6 +24,10 @@ Every message automatically includes a snapshot of your current workspace state 
 
 Each source can be individually enabled or disabled in **Settings → Notor**. All three are on by default.
 
+## Token usage and cost tracking
+
+Notor tracks cumulative input and output token counts for each conversation, displayed in the chat footer. If per-model pricing is configured in **Settings → Notor**, an estimated cost is calculated and shown alongside token counts. Pricing is set per 1K tokens for both input and output. Token counts and costs are also included in HTML and Markdown exports.
+
 ## Auto-compaction for long sessions
 
 When a conversation approaches the active model's context window limit, Notor automatically summarizes it and continues in a new context window:
