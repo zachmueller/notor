@@ -19,6 +19,7 @@ import { ContextManager } from "./context";
 import type { SystemPromptBuilder } from "./system-prompt";
 import type { ToolDispatcher } from "./dispatcher";
 import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./tool-orchestration";
+import { parseStreamEvents } from "./stream-utils";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings, ModelPricing } from "../settings";
@@ -886,56 +887,36 @@ export class ChatOrchestrator {
 			let outputTokens = 0;
 			let toolCallId = "";
 			let toolName = "";
-			let toolCallJson = "";
+			let parameters: Record<string, unknown> = {};
 			let hasToolCall = false;
-			let streamDone = false;
 
-			for await (const chunk of stream) {
-				if (abortController.signal.aborted) {
-					streamDone = true;
-					break;
-				}
-				switch (chunk.type) {
+			for await (const event of parseStreamEvents(stream, abortController.signal)) {
+				switch (event.type) {
 					case "text_delta":
-						textContent += chunk.text;
+						textContent = event.text;
 						break;
-					case "tool_call_start":
+					case "tool_call":
 						hasToolCall = true;
-						toolCallId = chunk.id;
-						toolName = chunk.tool_name;
-						toolCallJson = "";
-						break;
-					case "tool_call_delta":
-						toolCallJson += chunk.partial_json;
-						break;
-					case "tool_call_end":
-						streamDone = true;
+						toolCallId = event.id;
+						toolName = event.name;
+						parameters = event.parameters;
+						// Background loop handles one tool call at a time
 						break;
 					case "message_end":
-						inputTokens = chunk.input_tokens;
-						outputTokens = chunk.output_tokens;
+						inputTokens = event.inputTokens;
+						outputTokens = event.outputTokens;
 						break;
 					case "error":
-						throw new Error(chunk.error);
+						throw new Error(event.message);
+					case "cancelled":
+						// Abort — exit the loop
+						break;
 				}
-				if (streamDone && hasToolCall) break;
+				// Background loop breaks after the first tool call
+				if (hasToolCall) break;
 			}
 
 			if (hasToolCall) {
-				// Parse tool call parameters
-				let parameters: Record<string, unknown> = {};
-				try {
-					if (toolCallJson.trim()) {
-						parameters = JSON.parse(toolCallJson);
-					}
-				} catch (e) {
-					log.warn("Failed to parse tool call JSON in background workflow", {
-						toolName,
-						error: String(e),
-					});
-					throw new Error(`Failed to parse tool call parameters for ${toolName}`);
-				}
-
 				// Add tool call message
 				const toolCallMessage = bgConvManager.addMessage({
 					role: "tool_call",
@@ -1883,108 +1864,52 @@ export class ChatOrchestrator {
 		// will use it rather than creating a second element.
 		let contentEl: HTMLElement | undefined = eagerContentEl;
 
-		// Tool call accumulation
-		let currentToolCallId = "";
-		let currentToolName = "";
-		let toolCallJson = "";
 		const accumulatedToolCalls: ToolCallInfo[] = [];
 
-		try {
-			for await (const chunk of stream) {
-				if (abortController.signal.aborted) {
+		for await (const event of parseStreamEvents(stream, abortController.signal)) {
+			switch (event.type) {
+				case "text_delta":
+					// contentEl may already be set from the eager placeholder
+					if (!contentEl) {
+						contentEl = this.view?.createAssistantMessagePlaceholder();
+					}
+					textContent = event.text;
+					if (contentEl) {
+						this.view?.appendStreamChunk(contentEl, event.delta);
+					}
+					break;
+
+				case "tool_call":
+					accumulatedToolCalls.push({
+						toolCallId: event.id,
+						toolName: event.name,
+						parameters: event.parameters,
+					});
+					break;
+
+				case "message_end":
+					inputTokens = event.inputTokens;
+					outputTokens = event.outputTokens;
+					break;
+
+				case "error":
+					return {
+						type: "error",
+						error: event.message,
+						text: textContent,
+						inputTokens,
+						outputTokens,
+					};
+
+				case "cancelled":
 					return {
 						type: "cancelled",
-						text: textContent,
+						text: event.text,
 						inputTokens,
 						outputTokens,
 						contentEl,
 					};
-				}
-
-				switch (chunk.type) {
-					case "text_delta":
-						// contentEl may already be set from the eager placeholder
-						if (!contentEl) {
-							contentEl = this.view?.createAssistantMessagePlaceholder();
-						}
-						textContent += chunk.text;
-						if (contentEl) {
-							this.view?.appendStreamChunk(contentEl, chunk.text);
-						}
-						break;
-
-					case "tool_call_start":
-						currentToolCallId = chunk.id;
-						currentToolName = chunk.tool_name;
-						toolCallJson = "";
-						// Hide loading indicator during tool call parsing
-						break;
-
-					case "tool_call_delta":
-						toolCallJson += chunk.partial_json;
-						break;
-
-					case "tool_call_end": {
-						// Tool call complete — accumulate and continue reading stream
-						let parameters: Record<string, unknown> = {};
-						try {
-							if (toolCallJson.trim()) {
-								parameters = JSON.parse(toolCallJson);
-							}
-						} catch (e) {
-							log.warn("Failed to parse tool call JSON", {
-								toolName: currentToolName,
-								json: toolCallJson,
-								error: String(e),
-							});
-							return {
-								type: "error",
-								error: `Failed to parse tool call parameters for ${currentToolName}`,
-								text: textContent,
-								inputTokens,
-								outputTokens,
-							};
-						}
-
-						accumulatedToolCalls.push({
-							toolCallId: currentToolCallId,
-							toolName: currentToolName,
-							parameters,
-						});
-
-						// Reset per-call state for next tool call in the stream
-						currentToolCallId = "";
-						currentToolName = "";
-						toolCallJson = "";
-						break;
-					}
-
-					case "message_end":
-						inputTokens = chunk.input_tokens;
-						outputTokens = chunk.output_tokens;
-						break;
-
-					case "error":
-						return {
-							type: "error",
-							error: chunk.error,
-							text: textContent,
-							inputTokens,
-							outputTokens,
-						};
-				}
 			}
-		} catch (e) {
-			if (abortController.signal.aborted) {
-				return {
-					type: "cancelled",
-					text: textContent,
-					inputTokens,
-					outputTokens,
-					contentEl,
-				};
-			}
-			throw e;
 		}
 
 		// If we accumulated tool calls, return them all

@@ -12,36 +12,36 @@ Extract the shared stream parsing logic that both `ChatOrchestrator` and `SubAge
 
 The design doc (Section 9.1) calls for a shared event transform stream in `src/chat/stream-utils.ts`. Currently, `processStream()` (orchestrator.ts ~L1874-2009) interleaves stream parsing with view-layer calls (`this.view?.appendStreamChunk()`, `this.view?.createAssistantMessagePlaceholder()`, etc.). The background response loop (`_backgroundResponseLoop` ~L810-1048) duplicates much of this parsing logic without the view calls.
 
-- [ ] Create `src/chat/stream-utils.ts` with `parseStreamEvents()` async generator
-  - [ ] Define `ParsedStreamEvent` union type:
+- [x] Create `src/chat/stream-utils.ts` with `parseStreamEvents()` async generator
+  - [x] Define `ParsedStreamEvent` union type:
     - `{ type: "text_delta"; text: string; delta: string }` — accumulated text + new delta
     - `{ type: "tool_call"; id: string; name: string; parameters: Record<string, unknown> }` — fully parsed tool call
     - `{ type: "message_end"; inputTokens: number; outputTokens: number }`
     - `{ type: "error"; message: string }`
     - `{ type: "cancelled"; text: string }`
-  - [ ] Signature: `parseStreamEvents(stream: AsyncIterable<StreamChunk>, abortSignal: AbortSignal): AsyncIterable<ParsedStreamEvent>`
-  - [ ] Port chunk accumulation logic from `processStream()`:
+  - [x] Signature: `parseStreamEvents(stream: AsyncIterable<StreamChunk>, abortSignal: AbortSignal): AsyncIterable<ParsedStreamEvent>`
+  - [x] Port chunk accumulation logic from `processStream()`:
     - `text_delta` → accumulate text, yield `text_delta` event with both accumulated and delta
     - `tool_call_start` / `tool_call_delta` / `tool_call_end` → accumulate JSON fragments, yield fully-parsed `tool_call` on end
     - `message_end` → yield token counts
     - `error` → yield error event
-  - [ ] Handle abort signal: check before each chunk, yield `cancelled` event on abort
-  - [ ] Export types and function
+  - [x] Handle abort signal: check before each chunk, yield `cancelled` event on abort
+  - [x] Export types and function
 
 ### 1.2 Migrate `processStream()` to consume `parseStreamEvents()`
 
-- [ ] Refactor `ChatOrchestrator.processStream()` to be a thin consumer of `parseStreamEvents()`
-  - [ ] Replace inline chunk handling with event consumption loop
-  - [ ] Preserve all view-layer calls (`appendStreamChunk`, `createAssistantMessagePlaceholder`, `finalizeAssistantMessage`) as reactions to events
-  - [ ] Preserve the `StreamResult` return type and all existing behavior
-  - [ ] Preserve eager content element handling
-- [ ] Verify all existing orchestrator tests pass without modification
+- [x] Refactor `ChatOrchestrator.processStream()` to be a thin consumer of `parseStreamEvents()`
+  - [x] Replace inline chunk handling with event consumption loop
+  - [x] Preserve all view-layer calls (`appendStreamChunk`, `createAssistantMessagePlaceholder`, `finalizeAssistantMessage`) as reactions to events
+  - [x] Preserve the `StreamResult` return type and all existing behavior
+  - [x] Preserve eager content element handling
+- [x] Verify all existing orchestrator tests pass without modification
 - [ ] Verify manual testing: normal chat, tool calls, cancellation all work identically
 
 ### 1.3 Migrate `_backgroundResponseLoop` stream processing
 
-- [ ] Refactor the background loop's inline stream parsing to consume `parseStreamEvents()`
-  - [ ] The background loop (orchestrator.ts ~L810-1048) has its own stream consumption that skips view calls — replace with `parseStreamEvents()` + silent consumption
+- [x] Refactor the background loop's inline stream parsing to consume `parseStreamEvents()`
+  - [x] The background loop (orchestrator.ts ~L810-1048) has its own stream consumption that skips view calls — replace with `parseStreamEvents()` + silent consumption
 - [ ] Verify background workflow execution still works
 
 ---
