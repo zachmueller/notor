@@ -8,7 +8,7 @@
  * @see design/ux.md — chat panel layout, message display
  */
 
-import { ItemView, MarkdownRenderer, Modal, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownRenderer, Menu, Modal, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
 import type { ConversationMode, Message, LLMProviderType, ModelInfo, Checkpoint, Persona } from "../types";
 import type { Attachment } from "../context/attachment";
@@ -683,6 +683,25 @@ export class NotorChatView extends ItemView {
 			this.autoScroll = distanceFromBottom <= 50;
 		});
 
+		// Context menu for forking conversations (event delegation)
+		this.messageListEl.addEventListener("contextmenu", (evt: MouseEvent) => {
+			const target = (evt.target as HTMLElement).closest("[data-message-id]") as HTMLElement | null;
+			if (!target) return;
+			const messageId = target.dataset.messageId;
+			if (!messageId) return;
+
+			const menu = new Menu();
+			menu.addItem((item) => {
+				item.setTitle("Fork conversation from here")
+					.setIcon("git-branch-plus")
+					.onClick(() => {
+						this.onForkConversation?.(messageId);
+					});
+			});
+			menu.showAtMouseEvent(evt);
+			evt.preventDefault();
+		});
+
 		// Loading indicator
 		this.loadingIndicatorEl = container.createDiv({
 			cls: "notor-loading-indicator notor-hidden",
@@ -1085,6 +1104,24 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Append a hover fork button to a message element.
+	 * The button reads `data-message-id` from the element and invokes
+	 * the fork callback when clicked.
+	 */
+	appendForkButton(msgEl: HTMLElement): void {
+		const btn = msgEl.createDiv({ cls: "notor-fork-btn" });
+		setIcon(btn, "git-branch-plus");
+		btn.ariaLabel = "Fork conversation from here";
+		btn.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const messageId = msgEl.dataset.messageId;
+			if (messageId) {
+				this.onForkConversation?.(messageId);
+			}
+		});
+	}
+
+	/**
 	 * Render a user message in the message list.
 	 *
 	 * Hook injection messages (identified by `is_hook_injection`) are
@@ -1105,6 +1142,8 @@ export class NotorChatView extends ItemView {
 		}
 
 		const msgEl = this.messageListEl.createDiv({ cls: "notor-message notor-message-user" });
+		msgEl.dataset.messageId = message.id;
+		this.appendForkButton(msgEl);
 		const contentEl = msgEl.createDiv({ cls: "notor-message-content" });
 
 		// Extract <attachments> block (if any) and render as collapsed <details>
@@ -1233,6 +1272,8 @@ export class NotorChatView extends ItemView {
 	 * Finalize a streaming assistant message with full markdown rendering.
 	 */
 	async finalizeAssistantMessage(contentEl: HTMLElement, message: Message): Promise<void> {
+		contentEl.parentElement!.dataset.messageId = message.id;
+		this.appendForkButton(contentEl.parentElement!);
 		contentEl.empty();
 		await MarkdownRenderer.render(
 			this.app,
@@ -1364,6 +1405,8 @@ export class NotorChatView extends ItemView {
 		if (!toolResult) return;
 
 		const resultEl = this.messageListEl.createDiv({ cls: "notor-tool-result" });
+		resultEl.dataset.messageId = message.id;
+		this.appendForkButton(resultEl);
 
 		// Summary line
 		const summaryEl = resultEl.createDiv({ cls: "notor-tool-result-summary" });

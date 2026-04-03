@@ -72,31 +72,31 @@ Connect the core logic to the orchestrator and wire the fork callback through ma
 Add `data-message-id` attributes to rendered messages and implement both the context menu and hover fork button. This is the user-facing surface.
 
 ### 3.1 Set `data-message-id` on rendered messages
-- [ ] In `renderUserMessage()` ([chat-view.ts](../src/ui/chat-view.ts) ~line 1094): set `msgEl.dataset.messageId = message.id` on the `.notor-message-user` element
-- [ ] In `finalizeAssistantMessage()` ([chat-view.ts](../src/ui/chat-view.ts) ~line 1228): set `contentEl.parentElement!.dataset.messageId = message.id` on the `.notor-message-assistant` wrapper (ID not known at placeholder creation time)
-- [ ] In orchestrator after tool dispatch completes ([orchestrator.ts](../src/chat/orchestrator.ts) ~line 1454-1459): set `toolEl.dataset.messageId = toolCallMessage.id` on the `.notor-tool-call` element alongside `updateToolCallStatus()` — NOT in `renderToolCall()` (pending tool calls should not be forkable)
-- [ ] In `renderToolResult()` ([chat-view.ts](../src/ui/chat-view.ts) ~line 1355): set `resultEl.dataset.messageId = message.id` on the `.notor-tool-result` element
-- [ ] Verify: `renderHookInjection()` does NOT set `data-message-id` (hook injections are not forkable — this should already be the case since the method doesn't set it)
+- [x] In `renderUserMessage()` ([chat-view.ts](../src/ui/chat-view.ts) ~line 1094): set `msgEl.dataset.messageId = message.id` on the `.notor-message-user` element
+- [x] In `finalizeAssistantMessage()` ([chat-view.ts](../src/ui/chat-view.ts) ~line 1228): set `contentEl.parentElement!.dataset.messageId = message.id` on the `.notor-message-assistant` wrapper (ID not known at placeholder creation time)
+- [x] In orchestrator after tool dispatch completes ([orchestrator.ts](../src/chat/orchestrator.ts) ~line 1454-1459): set `toolEl.dataset.messageId = toolCallMessage.id` on the `.notor-tool-call` element alongside `updateToolCallStatus()` — NOT in `renderToolCall()` (pending tool calls should not be forkable)
+- [x] In `renderToolResult()` ([chat-view.ts](../src/ui/chat-view.ts) ~line 1355): set `resultEl.dataset.messageId = message.id` on the `.notor-tool-result` element
+- [x] Verify: `renderHookInjection()` does NOT set `data-message-id` (hook injections are not forkable — this should already be the case since the method doesn't set it)
 
 ### 3.2 Add hover fork button to messages
-- [ ] Create a helper method (e.g., `appendForkButton(msgEl)`) that:
+- [x] Create a helper method (e.g., `appendForkButton(msgEl)`) that:
   - Creates a `div` with class `notor-fork-btn`
   - Sets `git-branch-plus` icon via Obsidian's `setIcon()`
   - Sets `aria-label: "Fork conversation from here"`
   - Adds click handler that reads `msgEl.dataset.messageId` and calls `this.onForkConversation?.(messageId)`
   - Stops click propagation
-- [ ] Call `appendForkButton()` in `renderUserMessage()` after setting `data-message-id`
-- [ ] Call `appendForkButton()` in `finalizeAssistantMessage()` after setting `data-message-id` (on `contentEl.parentElement`)
-- [ ] Call `appendForkButton()` in orchestrator after setting `data-message-id` on tool call elements
-- [ ] Call `appendForkButton()` in `renderToolResult()` after setting `data-message-id`
+- [x] Call `appendForkButton()` in `renderUserMessage()` after setting `data-message-id`
+- [x] Call `appendForkButton()` in `finalizeAssistantMessage()` after setting `data-message-id` (on `contentEl.parentElement`)
+- [x] Call `appendForkButton()` in orchestrator after setting `data-message-id` on tool call elements
+- [x] Call `appendForkButton()` in `renderToolResult()` after setting `data-message-id`
 
 ### 3.3 Add context menu via event delegation
-- [ ] Register a single `contextmenu` event listener on `this.messageListEl` (the scrollable message container)
-- [ ] Use event delegation: find closest `[data-message-id]` ancestor of click target
-- [ ] If no match (unfinalized message or non-message element), return without preventing default
-- [ ] Create Obsidian `Menu` with "Fork conversation from here" item (`git-branch-plus` icon)
-- [ ] On click: call `this.onForkConversation?.(messageId)`
-- [ ] Call `menu.showAtMouseEvent(evt)` and `evt.preventDefault()`
+- [x] Register a single `contextmenu` event listener on `this.messageListEl` (the scrollable message container)
+- [x] Use event delegation: find closest `[data-message-id]` ancestor of click target
+- [x] If no match (unfinalized message or non-message element), return without preventing default
+- [x] Create Obsidian `Menu` with "Fork conversation from here" item (`git-branch-plus` icon)
+- [x] On click: call `this.onForkConversation?.(messageId)`
+- [x] Call `menu.showAtMouseEvent(evt)` and `evt.preventDefault()`
 
 ---
 

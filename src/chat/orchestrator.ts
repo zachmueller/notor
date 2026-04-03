@@ -1496,6 +1496,10 @@ export class ChatOrchestrator {
 							toolCallEl,
 							toolResult.success ? "success" : "error"
 						);
+						// Set message ID after dispatch completes so only
+						// finished tool calls are forkable (not pending ones)
+						toolCallEl.dataset.messageId = toolCallMessage.id;
+						this.view?.appendForkButton(toolCallEl);
 					}
 
 					// Propagate the provider tool call ID so the result can be correlated
