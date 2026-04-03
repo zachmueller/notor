@@ -35,6 +35,7 @@ import { renderCheckpointSection } from "./sections/checkpoints";
 import { renderModelPricingSection } from "./sections/model-pricing";
 import { renderMcpServersSection } from "./sections/mcp-servers";
 import { renderPersonasSection } from "./sections/personas";
+import { renderSubAgentsSection } from "./sections/sub-agents";
 import { renderRulesAndWorkflowsSection } from "./sections/rules-and-workflows";
 import { createSettingsGroup, snapshotDetailsState, restoreDetailsState } from "./helpers";
 
@@ -114,6 +115,10 @@ export class NotorSettingTab extends PluginSettingTab {
 		// --- Personas (collapsed by default) ---
 		const personasGroup = createSettingsGroup(containerEl, "Personas", false, persisted, onToggle);
 		renderPersonasSection(personasGroup, ctx);
+
+		// --- Sub-agents (collapsed by default) ---
+		const subAgentsGroup = createSettingsGroup(containerEl, "Sub-agents", false, persisted, onToggle);
+		renderSubAgentsSection(subAgentsGroup, ctx);
 
 		// --- Rules and workflows (collapsed by default) ---
 		const rulesWorkflowsGroup = createSettingsGroup(containerEl, "Rules and workflows", false, persisted, onToggle);

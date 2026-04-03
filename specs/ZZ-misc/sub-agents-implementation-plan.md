@@ -592,13 +592,13 @@ Section 5.3: markdown export gets summary only, HTML export gets expandable deta
 
 Section 7.1: follows the Personas settings pattern in `src/settings/sections/personas.ts`.
 
-- [ ] Create `src/settings/sections/sub-agents.ts`
-  - [ ] Section heading: "Sub-agents"
-  - [ ] Description text explaining sub-agent purpose
-  - [ ] "Create new sub-agent" button:
-    - [ ] Prompt for name via `promptForName()` helper (from `shared.ts`)
-    - [ ] Create directory `{notor_dir}/sub-agents/{name}/`
-    - [ ] Create skeleton `system-prompt.md` with frontmatter template:
+- [x] Create `src/settings/sections/sub-agents.ts`
+  - [x] Section heading: "Sub-agents"
+  - [x] Description text explaining sub-agent purpose
+  - [x] "Create new sub-agent" button:
+    - [x] Prompt for name via `promptForName()` helper (from `shared.ts`)
+    - [x] Create directory `{notor_dir}/sub-agents/{name}/`
+    - [x] Create skeleton `system-prompt.md` with frontmatter template:
       ```yaml
       ---
       notor-description: ""
@@ -606,18 +606,18 @@ Section 7.1: follows the Personas settings pattern in `src/settings/sections/per
       # notor-preferred-model: claude-sonnet-4-20250514
       ---
       ```
-    - [ ] Include placeholder `<notor_tool_config>` block
-    - [ ] Open the new file in a leaf for immediate editing
-  - [ ] List of discovered sub-agent profiles, each with:
-    - [ ] Name label (+ "Built-in" badge for built-in profiles)
-    - [ ] Visibility toggle (whether the profile is available to the LLM)
-    - [ ] Open button (using `square-arrow-out-up-right` Lucide icon) to open profile in a new leaf
-      - [ ] For built-in profiles: creates vault file from constant on first click, then opens it
-    - [ ] "Reset to default" action for built-in profiles (visible only if vault file exists and differs from constant)
+    - [x] Include placeholder `<notor_tool_config>` block
+    - [x] Open the new file in a leaf for immediate editing
+  - [x] List of discovered sub-agent profiles, each with:
+    - [x] Name label (+ "Built-in" badge for built-in profiles)
+    - [x] Visibility toggle (whether the profile is available to the LLM)
+    - [x] Open button (using `square-arrow-out-up-right` Lucide icon) to open profile in a new leaf
+      - [x] For built-in profiles: creates vault file from constant on first click, then opens it
+    - [x] "Reset to default" action for built-in profiles (visible only if vault file exists and differs from constant)
 
 ### 7.2 Wire settings section into settings tab
 
-- [ ] Import and call `renderSubAgentsSection()` from `settings-tab.ts`
+- [x] Import and call `renderSubAgentsSection()` from `settings-tab.ts`
 - [x] Add `sub_agent_visibility` to `NotorSettings` interface (default: all visible) — already exists in `settings/types.ts` L290 and `settings/defaults.ts` L160
 - [x] Add `sub_agent_auto_approve_reads` to `NotorSettings` (default: `true`, per Section 9.7) — already exists in `settings/types.ts` L298 and `settings/defaults.ts` L161
 - [x] Add `sub_agent_concurrency_cap` to `NotorSettings` for advanced users (default: 3, per Section 9.3) — already exists in `settings/types.ts` L306 and `settings/defaults.ts` L162
