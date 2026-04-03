@@ -239,6 +239,16 @@ export class WebSearchTool implements Tool {
 
 		const parsed = parseDDGResults(responseText, numResults);
 
+		// Warn on possible selector drift: DDG returned content but no
+		// results could be extracted — the HTML structure may have changed.
+		if (parsed.length === 0 && responseText.length > 0) {
+			log.warn(
+				"DuckDuckGo returned a non-empty response but 0 results were parsed. " +
+					"The HTML structure may have changed (selector drift).",
+				{ query, responseLength: responseText.length }
+			);
+		}
+
 		// Filter out blocked domains
 		const results = parsed.filter((r) => {
 			const check = isDomainBlocked(r.url, this.settings.domain_denylist);

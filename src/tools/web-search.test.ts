@@ -186,14 +186,16 @@ describe("parseDDGResults", () => {
 import { requestUrl } from "obsidian";
 const mockRequestUrl = vi.mocked(requestUrl);
 
-// Mock the logger
+// Mock the logger — use shared mock functions so tests can assert on log calls.
+// vi.hoisted ensures the variable is declared before the hoisted vi.mock factory runs.
+const mockLog = vi.hoisted(() => ({
+	info: vi.fn(),
+	warn: vi.fn(),
+	debug: vi.fn(),
+	error: vi.fn(),
+}));
 vi.mock("../utils/logger", () => ({
-	logger: () => ({
-		info: vi.fn(),
-		warn: vi.fn(),
-		debug: vi.fn(),
-		error: vi.fn(),
-	}),
+	logger: () => mockLog,
 }));
 
 function fakeSettings(overrides: Record<string, unknown> = {}) {
@@ -308,5 +310,86 @@ describe("WebSearchTool.execute — domain denylist filtering", () => {
 
 		expect(result.success).toBe(true);
 		expect(result.result).toContain("Ex");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Edge case handling (Phase 6)
+// ---------------------------------------------------------------------------
+
+describe("WebSearchTool.execute — edge cases", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("logs a warning when DDG returns non-empty body but 0 results are parsed (selector drift)", async () => {
+		// Non-empty HTML with no .result containers → 0 parsed results
+		mockRequestUrl.mockResolvedValue({
+			status: 200,
+			text: "<html><body><p>Some content but no results</p></body></html>",
+		} as any);
+
+		const tool = new WebSearchTool({} as any, fakeSettings());
+		const result = await tool.execute({ query: "test" });
+
+		expect(result.success).toBe(true);
+		expect(result.result).toContain("No results found");
+		expect(mockLog.warn).toHaveBeenCalledWith(
+			expect.stringContaining("0 results were parsed"),
+			expect.objectContaining({ query: "test" })
+		);
+	});
+
+	it("does not log selector drift warning when response is empty", async () => {
+		mockRequestUrl.mockResolvedValue({
+			status: 200,
+			text: "",
+		} as any);
+
+		const tool = new WebSearchTool({} as any, fakeSettings());
+		await tool.execute({ query: "test" });
+
+		// The warn call for selector drift should NOT fire for empty responses
+		expect(mockLog.warn).not.toHaveBeenCalledWith(
+			expect.stringContaining("0 results were parsed"),
+			expect.anything()
+		);
+	});
+
+	it("handles network errors gracefully (no stack trace)", async () => {
+		mockRequestUrl.mockRejectedValue(new Error("getaddrinfo ENOTFOUND html.duckduckgo.com"));
+
+		const tool = new WebSearchTool({} as any, fakeSettings());
+		const result = await tool.execute({ query: "test" });
+
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("getaddrinfo ENOTFOUND");
+		expect(result.error).not.toContain("at "); // No stack trace leaked
+	});
+
+	it("handles non-Error thrown values gracefully", async () => {
+		mockRequestUrl.mockRejectedValue("connection refused");
+
+		const tool = new WebSearchTool({} as any, fakeSettings());
+		const result = await tool.execute({ query: "test" });
+
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("Unknown network error");
+	});
+
+	it("handles timeout errors gracefully", async () => {
+		// Simulate a request that never resolves, so the timeout fires
+		mockRequestUrl.mockImplementation(
+			() => new Promise(() => {}) as any // never resolves
+		);
+
+		const tool = new WebSearchTool(
+			{} as any,
+			fakeSettings({ web_search_timeout: 0.01 }) // 10ms timeout
+		);
+		const result = await tool.execute({ query: "test" });
+
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("timed out");
 	});
 });

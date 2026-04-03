@@ -187,18 +187,21 @@ Final hardening before considering the feature complete.
 
 ### 6.1 Edge case handling
 
-- [ ] Log a warning when DDG returns a non-empty response body but 0 results are parsed (possible selector drift)
-- [ ] Handle network errors gracefully (no internet, DNS failure) — return descriptive error, not stack trace
-- [ ] Verify the tool works when `domain_denylist` is empty (default state)
-- [ ] Verify the tool works when all results are filtered by denylist (returns "no results" message)
+- [x] Log a warning when DDG returns a non-empty response body but 0 results are parsed (possible selector drift)
+- [x] Handle network errors gracefully (no internet, DNS failure) — return descriptive error, not stack trace
+- [x] Verify the tool works when `domain_denylist` is empty (default state)
+- [x] Verify the tool works when all results are filtered by denylist (returns "no results" message)
 
 ### 6.2 Open question resolutions
 
-- [ ] Decide: shared vs separate domain denylist (design doc recommends shared — confirm or override)
-- [ ] Decide: Brave Search as fallback engine (design doc marks as out-of-scope spike — confirm deferral)
-- [ ] Decide: max result cap at 10 (design doc recommends this — confirm)
+- [x] Decide: shared vs separate domain denylist (design doc recommends shared — confirm or override)
+  - **Decision: shared.** Both tools filter the same class of domains; separate lists add complexity without clear benefit. Users who need fine-grained control can request the feature later.
+- [x] Decide: Brave Search as fallback engine (design doc marks as out-of-scope spike — confirm deferral)
+  - **Decision: deferred.** DDG's HTML endpoint is reliable and requires no API key. A Brave fallback can be spiked later if DDG becomes unreliable.
+- [x] Decide: max result cap at 10 (design doc recommends this — confirm)
+  - **Decision: confirmed at 10.** DDG's HTML page reliably returns ~10–15 organic results; capping at 10 matches the MCP server and avoids noisy output.
 
 ### Phase 6 verification
 
-- [ ] Full regression: build, unit tests, E2E tests all pass
+- [x] Full regression: build, unit tests, E2E tests all pass
 - [ ] Manual smoke test in Obsidian with various query types (factual, ambiguous, empty results)
