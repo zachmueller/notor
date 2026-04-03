@@ -80,6 +80,7 @@ import { ExecuteCommandTool } from "./tools/execute-command";
 import { ReadFileTool } from "./tools/read-file";
 import { ReadDocxTool } from "./tools/read-docx";
 import { WriteDocxTool } from "./tools/write-docx";
+import { WriteFileTool } from "./tools/write-file";
 import { ExtractDocxCommentsTool } from "./tools/extract-docx-comments";
 import { NoteOpener } from "./tools/note-opener";
 
@@ -1054,6 +1055,7 @@ export default class NotorPlugin extends Plugin {
 			this._toolRegistry.register(new ReadFileTool(this.app, this.settings));
 			this._toolRegistry.register(new ReadDocxTool(this.app, this.settings));
 			this._toolRegistry.register(new WriteDocxTool(this.app, this.settings));
+			this._toolRegistry.register(new WriteFileTool(this.app, this.settings));
 			this._toolRegistry.register(new ExtractDocxCommentsTool(this.app, this.settings));
 
 			// Sub-agent tool (Phase 5 + Phase 6 history/token tracking)
