@@ -35,8 +35,9 @@ Key exports from `test-helpers.ts`:
 - **Settings:** `buildDefaultSettings(overrides?)` — returns a complete plugin settings object; only pass fields that differ from defaults
 - **Page finders:** `findVaultPage(browser, timeout?)` — finds the Obsidian page with `.notor-chat-container`
 - **Element helpers:** `waitForSelector(page, selector, timeoutMs?)`
-- **LLM helpers:** `sendMessage(page, message)`, `sendMessageWithApprovalHandling(page, message)`, `waitForResponse(page)`, `getLastAssistantMessage(page)`, `getLastToolCallNames(page)`
+- **LLM helpers:** `sendMessage(page, message)`, `sendMessageWithApprovalHandling(page, message)`, `waitForResponse(page, timeoutMs?)`, `getLastAssistantMessage(page)`, `getLastToolCallNames(page)`
 - **UI helpers:** `newConversation(page)`, `setMode(page, "Plan" | "Act")`, `selectPersona(page, name | null)`
+- **State helpers:** `ensureCleanState(page)` — aborts any in-progress LLM response and waits for the chat input to become editable; call at the start of tests that require a clean input state, especially after tests that may leave a streaming response in flight
 
 Key exports from `test-harness.ts`:
 - **`runTest(config, testFn)`** — the only entry point; handles everything from build to teardown
@@ -129,6 +130,7 @@ Follow these rules strictly:
 - **Filter expected errors in "no unexpected errors" tests** — e.g., exclude known connection-refused errors when testing against unreachable URLs
 - **Use separate `async function testXxx(ctx)` functions** for each logical test scenario
 - **Pre-configure state in initial settings** when the plugin needs it at render time (e.g., MCP servers must be in settings before load for the status indicator to render)
+- **Use `ensureCleanState(page)`** at the start of tests that require a ready chat input — especially when earlier tests may leave a streaming response or pending tool call in flight. This aborts any in-progress response and waits for the input to re-enable
 
 ### DO NOT:
 - **Never duplicate shared boilerplate** — no inline path constants, result tracking, screenshot helpers, pass/fail functions, findVaultPage, build/launch/connect/teardown, data.json backup/restore, or results printing

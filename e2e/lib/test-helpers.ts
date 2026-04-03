@@ -307,6 +307,60 @@ export async function selectPersona(page: Page, personaName: string | null): Pro
 	return selected;
 }
 
+/**
+ * Force-abort any in-progress LLM response and wait for the chat input to
+ * become editable again. Call this at the start of tests that require a clean
+ * input state, especially after tests that may leave a response in flight.
+ *
+ * Tries the visible stop button first, then falls back to aborting via the
+ * plugin's AbortController. Waits up to 20 seconds for the input to re-enable.
+ */
+export async function ensureCleanState(page: Page): Promise<void> {
+	const inputDisabled = await page.evaluate(() => {
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		return el?.getAttribute("contenteditable") !== "true";
+	});
+
+	if (!inputDisabled) return;
+
+	console.log("  ⚠ Input is disabled — aborting in-progress response...");
+
+	// Try clicking the stop button
+	const stopBtn = await page.$(".notor-stop-btn:not(.notor-hidden)");
+	if (stopBtn) {
+		await stopBtn.click();
+		console.log("  Clicked stop button");
+	} else {
+		// Fallback: abort via orchestrator's AbortController
+		await page.evaluate(() => {
+			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
+			if (!plugin) return;
+			try {
+				const view = plugin.getChatView?.() ?? plugin.view;
+				if (view) {
+					const controller = view.getAbortController?.();
+					if (controller) controller.abort();
+				}
+			} catch {}
+		});
+		console.log("  Aborted via orchestrator fallback");
+	}
+
+	// Wait for input to become editable
+	for (let i = 0; i < 20; i++) {
+		await page.waitForTimeout(1_000);
+		const ready = await page.evaluate(() => {
+			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+			return el?.getAttribute("contenteditable") === "true";
+		});
+		if (ready) {
+			console.log(`  Input re-enabled after ${i + 1}s`);
+			return;
+		}
+	}
+	console.log("  ⚠ Input still disabled after 20s wait");
+}
+
 // ---------------------------------------------------------------------------
 // Settings builder
 // ---------------------------------------------------------------------------

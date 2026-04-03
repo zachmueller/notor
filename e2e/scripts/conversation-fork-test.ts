@@ -37,6 +37,7 @@ import {
 	sendMessageWithApprovalHandling,
 	waitForResponse,
 	newConversation,
+	ensureCleanState,
 	VAULT_PATH,
 } from "../lib/test-helpers";
 
@@ -1168,56 +1169,6 @@ async function testContextMenuDuringStreaming(ctx: TestContext): Promise<void> {
 	}
 }
 
-/**
- * Force-abort any in-progress LLM response and wait for the input to become editable.
- * This ensures a clean state between tests that depend on the input being ready.
- */
-async function ensureCleanState(page: any): Promise<void> {
-	// Check if input is disabled (indicating an in-progress response)
-	const inputDisabled = await page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		return el?.getAttribute("contenteditable") !== "true";
-	});
-
-	if (inputDisabled) {
-		console.log("  ⚠ Input is disabled — aborting in-progress response...");
-
-		// Try clicking the stop button
-		const stopBtn = await page.$(".notor-stop-btn:not(.notor-hidden)");
-		if (stopBtn) {
-			await stopBtn.click();
-			console.log("  Clicked stop button");
-		} else {
-			// Fallback: abort via orchestrator
-			await page.evaluate(() => {
-				const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-				if (!plugin) return;
-				try {
-					const view = plugin.getChatView?.() ?? plugin.view;
-					if (view) {
-						const controller = view.getAbortController?.();
-						if (controller) controller.abort();
-					}
-				} catch {}
-			});
-			console.log("  Aborted via orchestrator fallback");
-		}
-
-		// Wait for input to become editable
-		for (let i = 0; i < 20; i++) {
-			await page.waitForTimeout(1_000);
-			const ready = await page.evaluate(() => {
-				const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-				return el?.getAttribute("contenteditable") === "true";
-			});
-			if (ready) {
-				console.log(`  Input re-enabled after ${i + 1}s`);
-				return;
-			}
-		}
-		console.log("  ⚠ Input still disabled after 20s wait");
-	}
-}
 
 async function testNoContextMenuOnInProgress(ctx: TestContext): Promise<void> {
 	console.log("\nTest 15: While streaming, right-click in-progress message → no context menu");
