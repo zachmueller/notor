@@ -72,7 +72,7 @@ When enabled via feature gate, tools begin executing **while the stream is still
 
 **Error cascading** (lines 209-230): If a Bash tool errors, a sibling abort controller is signaled so concurrent Bash siblings can short-circuit with synthetic errors rather than continuing pointlessly. Only Bash tools trigger this cascade — other tool failures are independent.
 
-**Context modifiers:** The streaming executor does NOT support context modifiers for concurrent tools (line 388-390 comment) — they are silently discarded. Serial tools apply modifiers immediately.
+**Context modifiers:** The streaming executor does NOT apply context modifiers for concurrent tools (lines 388-395). This is intentional and documented with an inline comment — modifiers are collected but only applied when the tool is non-concurrent. Serial tools apply modifiers immediately.
 
 ### 2.5 Result Collection and Next-Turn Message Assembly
 
@@ -277,10 +277,35 @@ async function executeToolBatches(
 
 **Algorithm:**
 1. Iterate batches in order.
-2. For a concurrent batch: `await Promise.all(batch.calls.map(call => dispatcher.dispatch(...)))`, capped at `concurrencyCap` using a simple semaphore. **`Promise.all` is chosen specifically because it preserves submission order** — results are returned in the same order as the input calls, regardless of completion order.
-3. For a serial batch (single call): `await dispatcher.dispatch(...)`.
+2. For a concurrent batch: `await Promise.all(batch.calls.map(call => safeDispatch(call)))`, capped at `concurrencyCap` using a simple semaphore. **`Promise.all` is chosen specifically because it preserves submission order** — results are returned in the same order as the input calls, regardless of completion order. Each `dispatcher.dispatch()` call is wrapped in a try/catch (`safeDispatch`) that converts unexpected throws into error `ToolResult`s. This matches the existing error-handling pattern at `responseLoop()` lines 1478-1491 and prevents a single unexpected throw from discarding all concurrent sibling results via `Promise.all`'s fail-fast behavior.
+3. For a serial batch (single call): `await safeDispatch(call)`.
 4. If `abortSignal` fires mid-batch, remaining calls in the batch produce synthetic error results (matching the existing orphan safety net pattern).
 5. Return all results in original call order.
+
+**`safeDispatch` wrapper:**
+
+```typescript
+async function safeDispatch(
+  call: ToolCallInfo,
+  dispatcher: ToolDispatcher,
+  mode: ConversationMode,
+  messageId: string,
+  abortSignal?: AbortSignal
+): Promise<ToolResult> {
+  try {
+    return await dispatcher.dispatch(
+      call.toolName, call.parameters, mode, messageId, abortSignal
+    );
+  } catch (e) {
+    return {
+      tool_name: call.toolName,
+      success: false,
+      result: "",
+      error: `Tool call failed: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+}
+```
 
 **Why not the StreamingToolExecutor approach?** The streaming executor starts tools before the stream finishes, which is an optimization for latency. For Notor's initial implementation, the simpler batch approach (collect all calls first, then execute) is sufficient and much less complex. The streaming approach can be added as a follow-up if profiling shows the benefit.
 
@@ -293,6 +318,9 @@ async function executeToolBatches(
 **New flow for `result.type === "tool_calls"`:**
 
 ```
+0. Add an assistant message carrying result.text and token counts
+   (see "Pre-tool-call text handling" below)
+
 1. For each call in result.calls:
    a. Add a tool_call message via conversationManager.addMessage()
    b. Render tool call UI via view.renderToolCall()
@@ -301,7 +329,7 @@ async function executeToolBatches(
 2. Partition calls into batches via partitionToolCalls()
 
 3. Execute batches via executeToolBatches()
-   - Concurrent batches run in parallel
+   - Concurrent batches run in parallel (via safeDispatch wrapper)
    - Serial batches run one-at-a-time
    - All pre-execution checks (approval, path enforcement, etc.) still
      happen inside dispatcher.dispatch() per-tool
@@ -316,14 +344,17 @@ async function executeToolBatches(
 
 5. If abortSignal fired during execution, break
 
-6. Track tokens from the (now correctly captured) message_end
-
-7. continueLoop = true
+6. continueLoop = true
 ```
 
 **Important sequencing detail:** All `tool_call` messages must be added to the conversation **before** any `tool_result` messages. This ensures that `toChatMessages()` can correctly group them when building the API request (see Change 4).
 
-**Pre-tool-call text handling:** When the LLM produces text before tool calls, `result.text` contains that text. The coalescing logic in `toChatMessages()` (Change 4) must include this text as a text content block alongside the tool_use blocks in the coalesced assistant message, matching the Anthropic API's native format where a single assistant message contains both text and tool_use content blocks.
+**Pre-tool-call text handling:** When the LLM produces text before tool calls, `result.text` contains that text. An **assistant `Message`** is added to the conversation **before** the tool_call messages (step 0), carrying both `result.text` as content and the token counts from `message_end` (`result.inputTokens`, `result.outputTokens`). This reuses the existing token-tracking pattern at lines 1556-1564 but moves it to the correct position — before tool_calls rather than after tool_results.
+
+This placement matters for three reasons:
+1. **Coalescing in `toChatMessages()`:** The coalescing logic detects the pattern `assistant(text + tokens) → tool_call × N` and merges them into a single API assistant message with a text content block followed by tool_use content blocks, matching the Anthropic API's native format.
+2. **Compaction safety:** `extractPendingMessages()` scans backward for the last assistant message. With the assistant message placed before tool_calls, tool_call and tool_result messages are correctly identified as "pending" (after the last assistant) and re-appended after compaction.
+3. **Token attribution:** Token counts are now correctly associated with the LLM turn that produced them, not orphaned after the tool results.
 
 ### 4.4 Change 4: Update `toChatMessages()` for Multi-Tool Turns
 
@@ -337,12 +368,19 @@ async function executeToolBatches(
 
 ```typescript
 // When iterating messages and encountering a tool_call:
-// 1. Look ahead to collect all consecutive tool_call messages
-// 2. Emit ONE assistant ChatMessage with all tool_use blocks
-//    (include any preceding text from the LLM as a text content block)
-// 3. Skip ahead past the tool_calls
-// 4. Collect matching consecutive tool_result messages  
-// 5. Emit ONE user ChatMessage with all tool_result blocks
+// 1. Check if the preceding message is an assistant message (the pre-tool-call
+//    text + token carrier from Change 3 step 0). If so, use its content as the
+//    text content block for the coalesced assistant message.
+// 2. Look ahead to collect all consecutive tool_call messages
+// 3. Emit ONE assistant ChatMessage with:
+//    - A text content block (from the preceding assistant message, if any)
+//    - All tool_use blocks from the consecutive tool_call messages
+// 4. Skip ahead past the tool_calls
+// 5. Collect matching consecutive tool_result messages  
+// 6. Emit ONE user ChatMessage with all tool_result blocks
+//
+// The preceding assistant message is "absorbed" into the coalesced message
+// and should NOT also be emitted as a separate ChatMessage.
 ```
 
 **The `ChatMessage` type** ([`/Volumes/workplace/notor/src/providers/provider.ts`](/Volumes/workplace/notor/src/providers/provider.ts), lines 23-37) currently supports only one `tool_call?` and one `tool_result?` per message. Replace singular fields with array fields:
@@ -365,7 +403,7 @@ interface ChatMessage {
 }
 ```
 
-Since all three providers need updating anyway, arrays-only is cleaner than maintaining dual singular/array fields. For a single tool call, the array has one element.
+This is an **atomic arrays-only** migration — no dual singular/array fields. All consumers of `ChatMessage.tool_call` and `ChatMessage.tool_result` must be updated in the same change. Before starting, run `grep -r '\.tool_call\b' --include='*.ts'` and `grep -r '\.tool_result\b' --include='*.ts'` across the codebase to enumerate all consumers (providers, compaction, history export, tests, etc.). For a single tool call, the array has one element.
 
 **Provider impact:** Each provider's message-building code needs updating:
 
@@ -410,7 +448,7 @@ Multiple tool calls rendered simultaneously need clear visual grouping:
 
 ## 5. Implementation Order
 
-> **Note on phase independence:** These phases are ordered for incremental development within a feature branch. Phases 2 and 3 have a dependency: the orphaned tool_call safety net (updated in Phase 3) will misfire if Phase 2's grouped message ordering is used without the Phase 3 safety net update. If phases are developed and tested incrementally, either: (a) keep interleaved ordering in Phase 2 as a temporary measure, or (b) always develop Phases 2 and 3 together. This is not a concern if all phases ship as a single release.
+> **Hard gate on Phases 2 and 3:** These phases MUST be implemented, tested, and merged as a single unit (same PR). The orphaned tool_call safety net (lines 2076-2098) checks `chatMessages[i + 1]` — with Phase 2's grouped ordering (`tool_call, tool_call, tool_result, tool_result`), the first tool_call's next message is another tool_call, triggering **false positive** synthetic result injection that corrupts the conversation. Phase 3's updated safety net eliminates this failure mode. No intermediate state where grouped ordering exists without the updated safety net is acceptable.
 
 ### Phase 1: Stream Collection (Low Risk)
 1. Modify `processStream()` to accumulate all tool calls and return `tool_calls` array
@@ -510,7 +548,8 @@ If the user clicks Stop while 3 tools are running in parallel:
 - `partitionToolCalls()`: Test grouping logic with various read/write tool sequences
 - `partitionToolCalls()`: Test that MCP tools are always treated as non-concurrent regardless of mode
 - `partitionToolCalls()`: Test that unknown tools are treated as non-concurrent
-- `toChatMessages()` coalescing: Verify consecutive tool_call/tool_result messages produce correct grouped ChatMessages
+- `safeDispatch()`: Verify that an unexpected throw from `dispatcher.dispatch()` is caught and converted to an error `ToolResult`
+- `toChatMessages()` coalescing: Verify `assistant(text) → tool_call × N → tool_result × N` produces one API assistant message (text + tool_use blocks) + one API user message (tool_result blocks)
 - `toChatMessages()` coalescing: Verify pre-tool-call text is included as text content block in coalesced assistant message
 - Orphan safety net: Verify synthetic results are injected for each unpaired tool_call in a multi-call scenario
 - Orphan safety net: Verify no false positives — consecutive tool_calls with matching tool_results don't trigger injection
@@ -519,9 +558,42 @@ If the user clicks Stop while 3 tools are running in parallel:
 - End-to-end: Send a prompt that triggers multiple tool calls (e.g., "read notes A, B, and C") and verify all three execute and their results appear in the conversation
 - Abort mid-batch: Start a multi-tool turn, abort during execution, verify all tool_calls have matching tool_results
 - Provider round-trip: Verify that the coalesced ChatMessage format is correctly consumed by each provider (Anthropic, OpenAI, Bedrock) on the next LLM turn
+- Compaction round-trip: Trigger compaction after a multi-tool turn, verify `extractPendingMessages()` correctly identifies tool_call/tool_result messages as pending and re-appends them after compaction
 
 ### Manual Testing
 - Verify UI shows all tool calls grouped in a single turn
 - Verify approval gates work correctly for non-auto-approved tools in a batch
 - Verify token counts are correctly captured from `message_end` (previously lost)
 - Verify conversation forking still works from individual tool calls within a multi-tool turn
+
+---
+
+## 9. Review Notes (2026-04-03)
+
+This section documents findings from a code-level review of both the Notor and Claude Code codebases against the claims in this design doc.
+
+### 9.1 All Architecture Claims Verified
+
+Every claim in Sections 2 and 3 was confirmed by code inspection:
+
+- `processStream()` returns on first `tool_call_end` (line 1926), discarding remaining stream + `message_end` tokens ✓
+- `responseLoop()` handles single `result.type === "tool_call"` per iteration ✓
+- `toChatMessages()` has 1:1 mapping + orphan safety net checking `chatMessages[i+1]` ✓
+- `Message` type carries singular `tool_call?` / `tool_result?` ✓
+- `ChatMessage` type carries singular `tool_call?` / `tool_result?` ✓
+- `addMessage()` is simple array push with fire-and-forget callbacks ✓
+- All 18 built-in tools have correct `mode` assignments (10 read, 8 write) ✓
+- Dispatcher handles single tool with try/catch that always returns `ToolResult` (lines 510-531) ✓
+- All 3 providers already emit multiple `tool_call_start/delta/end` sequences ✓
+- MCP tools distinguishable via `isMcpTool()` at `mcp-tool-adapter.ts:32-34` (checks for `__` separator) ✓
+- Approval UI is inline/promise-based, returns `Promise<"approved" | "rejected">` ✓
+- Hooks are fire-and-forget (`void` dispatch) ✓
+- Claude Code's `partitionToolCalls()`, `all()`, and `StreamingToolExecutor` all work as described ✓
+
+### 9.2 Remaining Low-Priority Notes
+
+**Concurrent HTTP tools:** `fetch_webpage` and `web_search` (both `mode: "read"`) make external HTTP requests. Running these concurrently is fine in general, but external services may rate-limit rapid concurrent requests. No code change needed — just worth a comment in the concurrency-safety determination if these tools are frequently batched.
+
+**Hook overlap:** The doc says hooks fire "sequentially" (Section 7.5). More precisely: hook *initiation* is sequential (the result-collection loop iterates in order), but hooks are fire-and-forget (`void` dispatch). If a hook takes 5 seconds, the next hook's initiation won't wait for it. This is the correct behavior for Notor (no blocking), but hook scripts that assume exclusive execution should be aware that overlap is possible across tools in the same batch.
+
+**Abort + background tools:** When abort fires during `Promise.all`, the dispatcher's `Promise.race` returns the abort error immediately, but `tool.execute()` continues in the background (lines 467-494). For concurrent read tools, this means N background operations may complete after the user clicks Stop. This is pre-existing behavior, not introduced by this design.
