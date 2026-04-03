@@ -122,7 +122,7 @@ prepareFork(
 
 2. **Slice messages.** Take `this.messages[0..forkIndex]` inclusive.
 
-3. **Handle tool_call / tool_result pairing.** If the fork-point message has `role === "tool_call"`, scan forward for the next message with `role === "tool_result"` whose `tool_result.tool_call_id` matches the tool_call's `tool_call.id`. If found (and it's the very next message), include it in the slice. This prevents orphaned tool calls that would break provider API calls when the user continues the forked conversation. The orchestrator's `toChatMessages` safety net (in [`src/chat/orchestrator.ts`](../src/chat/orchestrator.ts)) already injects synthetic "cancelled by user" tool_results for orphaned tool_calls, so even if the pairing is missed, the system degrades gracefully rather than erroring.
+3. **Handle tool_call / tool_result pairing.** If the fork-point message has `role === "tool_call"`, scan forward for the next message with `role === "tool_result"` whose `tool_result.tool_call_id` matches the tool_call's effective ID. The effective ID is `tool_call.id ?? message.id` — the same fallback used by `toChatMessages` ([`src/chat/orchestrator.ts:1998`](../src/chat/orchestrator.ts)) since `ToolCall.id` is optional (`id?: string` at [`src/types.ts:146`](../src/types.ts)). If found (and it's the very next message), include it in the slice. This prevents orphaned tool calls that would break provider API calls when the user continues the forked conversation. The orchestrator's `toChatMessages` safety net (in [`src/chat/orchestrator.ts`](../src/chat/orchestrator.ts)) already injects synthetic "cancelled by user" tool_results for orphaned tool_calls, so even if the pairing is missed, the system degrades gracefully rather than erroring.
 
 4. **Build the new Conversation.** Follows the same pattern as `createConversation()` ([`src/chat/conversation.ts:73-130`](../src/chat/conversation.ts)):
 
@@ -132,9 +132,11 @@ prepareFork(
 
    // Title: prefer "Fork of {title}", fall back to first 8 chars of
    // parent conversation ID so the fork is identifiable.
-   const forkTitle = original.title
-       ? `Fork of ${original.title}`
-       : `Fork of ${original.id.substring(0, 8)}`;
+   // Strip any existing "Fork of " prefix to prevent accumulation
+   // when forking a fork (e.g., "Fork of Fork of X" → "Fork of X").
+   const baseTitle = original.title?.replace(/^Fork of /, "")
+       ?? original.id.substring(0, 8);
+   const forkTitle = `Fork of ${baseTitle}`;
 
    const forkedConversation: Conversation = {
        id: newConversationId,
@@ -206,19 +208,32 @@ Add a new public method (alongside `newConversation` and `switchConversation`):
  * Fork the active conversation at the specified message.
  *
  * Creates a new independent conversation containing all messages up to
- * and including the fork point, persists it as a new JSONL file, and
- * switches to it.
+ * and including the fork point, persists it as a new JSONL file.
+ *
+ * Returns the filename and conversation object so the caller (main.ts)
+ * can handle switching and post-switch wiring (checkpoint manager,
+ * active conversation ID, stale tracker, vault rules). This mirrors
+ * how switchConversation is wired in main.ts — the orchestrator
+ * performs the data operation, and main.ts coordinates the side effects.
+ *
+ * Returns null if the fork-point message was not found.
  */
-async forkConversation(forkAtMessageId: string): Promise<void> {
+async forkConversation(forkAtMessageId: string): Promise<{
+    filename: string;
+    conversation: Conversation;
+} | null> {
+    const providerType = this.providerRegistry.getActiveType();
+    const providerConfig = this.providerRegistry.getConfig(providerType);
+
     const forkData = this.conversationManager.prepareFork(
         forkAtMessageId,
-        this.currentProviderId,
-        this.currentModelId,
+        providerType,
+        providerConfig.modelId,
         this.conversationManager.getActiveConversation()?.mode ?? "act"
     );
     if (!forkData) {
         new Notice("Cannot fork: message not found (it may have been compacted).");
-        return;
+        return null;
     }
 
     const filename = await this.historyManager.importConversation(
@@ -226,12 +241,11 @@ async forkConversation(forkAtMessageId: string): Promise<void> {
         forkData.messages
     );
 
-    await this.switchConversation(filename);
-    new Notice(`Forked conversation: ${forkData.conversation.title ?? "Untitled"}`);
+    return { filename, conversation: forkData.conversation };
 }
 ```
 
-This follows the exact same pattern used by the import flow in [`src/main.ts:353-359`](../src/main.ts) and [`src/main.ts:1476-1483`](../src/main.ts).
+**Why the orchestrator does not call `switchConversation` itself:** The switch callback in [`src/main.ts:1449-1464`](../src/main.ts) performs critical post-switch wiring (`checkpointManager.setConversationId`, `view.setActiveConversationId`, stale tracker and vault rule cleanup). Having `forkConversation` call `switchConversation` internally would bypass this wiring. Instead, the caller in `main.ts` handles both the switch and the wiring (see §3.5).
 
 ### 3.4 Chat View — Fork UI
 
@@ -241,14 +255,14 @@ This follows the exact same pattern used by the import flow in [`src/main.ts:353
 
 Add a `data-message-id` attribute to each rendered message element so the context menu can identify the message.
 
-**Note on assistant messages:** The `.notor-message-assistant` wrapper div is created in `createAssistantMessagePlaceholder()` ([`src/ui/chat-view.ts:1192`](../src/ui/chat-view.ts)), which returns only the inner `contentEl`. The message ID is not yet known at placeholder creation time (it's assigned after the LLM response completes). The ID must therefore be set in `finalizeAssistantMessage()` by navigating up to the parent element via `contentEl.parentElement`.
+**Note on assistant messages:** The `.notor-message-assistant` wrapper div is created in `createAssistantMessagePlaceholder()` ([`src/ui/chat-view.ts:1204`](../src/ui/chat-view.ts)), which returns only the inner `contentEl`. The message ID is not yet known at placeholder creation time (it's assigned after the LLM response completes). The ID must therefore be set in `finalizeAssistantMessage()` by navigating up to the parent element via `contentEl.parentElement`.
 
 | Method | Line | Element | Change |
 |--------|------|---------|--------|
-| `renderUserMessage()` | 1087 | `msgEl` (`.notor-message-user`) | `msgEl.dataset.messageId = message.id;` |
-| `finalizeAssistantMessage()` | 1215 | `contentEl.parentElement` (the `.notor-message-assistant` wrapper created in `createAssistantMessagePlaceholder` at line 1192) | `contentEl.parentElement!.dataset.messageId = message.id;` |
-| `renderToolCall()` | 1308 | `toolEl` (`.notor-tool-call`) | `toolEl.dataset.messageId = message.id;` |
-| `renderToolResult()` | 1346 | `resultEl` (`.notor-tool-result`) | `resultEl.dataset.messageId = message.id;` |
+| `renderUserMessage()` | 1094 | `msgEl` (`.notor-message-user`) | `msgEl.dataset.messageId = message.id;` |
+| `finalizeAssistantMessage()` | 1228 | `contentEl.parentElement` (the `.notor-message-assistant` wrapper created in `createAssistantMessagePlaceholder` at line 1204) | `contentEl.parentElement!.dataset.messageId = message.id;` |
+| `renderToolCall()` | 1317 | `toolEl` (`.notor-tool-call`) | `toolEl.dataset.messageId = message.id;` |
+| `renderToolResult()` | 1355 | `resultEl` (`.notor-tool-result`) | `resultEl.dataset.messageId = message.id;` |
 
 #### 3.4.2 Context Menu
 
@@ -294,9 +308,9 @@ setOnForkConversation(callback: (messageId: string) => Promise<void>): void {
 
 #### 3.4.4 Fork Lineage in Conversation List
 
-**File: [`src/ui/chat-view.ts`](../src/ui/chat-view.ts) — `renderConversationList()` method (lines 1532–1576)**
+**File: [`src/ui/chat-view.ts`](../src/ui/chat-view.ts) — `renderConversationList()` method (lines 1545–1599)**
 
-The conversation list is a sidebar panel toggled via the header "list" icon. Individual entries are rendered in `renderConversationList()`, where each `ConversationListEntry` becomes a `.notor-conversation-list-item` div. The title is set at line 1551 (`titleEl.textContent = entry.title ?? "Untitled"`).
+The conversation list is a sidebar panel toggled via the header "list" icon. Individual entries are rendered in `renderConversationList()`, where each `ConversationListEntry` becomes a `.notor-conversation-list-item` div. The title is set at line 1565 (`titleEl.textContent = entry.title ?? "Untitled"`).
 
 Immediately after the title is set, when `entry.forked_from_conversation_id` is present, append a **clickable** fork lineage indicator. Clicking the badge navigates to the parent conversation. Before rendering the badge, verify the parent conversation still exists (it may have been deleted by the retention policy):
 
@@ -331,13 +345,26 @@ if (entry.forked_from_conversation_id) {
 
 **File: [`src/main.ts`](../src/main.ts)**
 
-In the view wiring section (where all other `setOn*` callbacks are registered), add:
+In the view wiring section (where all other `setOn*` callbacks are registered, near [`src/main.ts:1449`](../src/main.ts)), add:
 
 ```typescript
 view.setOnForkConversation(async (messageId: string) => {
-    await orchestrator.forkConversation(messageId);
+    const result = await orchestrator.forkConversation(messageId);
+    if (!result) return;
+
+    // Switch to the forked conversation, then run the same post-switch
+    // wiring as the regular switchConversation callback (lines 1449-1464).
+    await orchestrator.switchConversation(result.filename);
+    checkpointManager.setConversationId(result.conversation.id);
+    view.setActiveConversationId(result.conversation.id);
+    this.getStaleTracker().clear?.();
+    this.getVaultRuleManager().clearAccessedNotes();
+
+    new Notice(`Forked conversation: ${result.conversation.title ?? "Untitled"}`);
 });
 ```
+
+**Note:** This intentionally mirrors the post-switch wiring in the existing `setOnSwitchConversation` callback. The duplication is acceptable because fork is the only other path that triggers a conversation switch programmatically (imports go through a separate modal flow).
 
 ### 3.6 HistoryManager — Extract Fork Metadata
 
@@ -432,11 +459,13 @@ Checkpoints ([`src/checkpoints/checkpoint.ts`](../src/checkpoints/checkpoint.ts)
 
 ### 4.5 Hook Injection Messages
 
-Messages with `is_hook_injection: true` are rendered differently in the UI ([`src/ui/chat-view.ts:1082-1084`](../src/ui/chat-view.ts)). The `is_hook_injection` flag is preserved during fork (it's part of the message spread), so these messages render correctly in the forked conversation. The context menu is not shown on hook injection messages since they are rendered as collapsed `<details>` elements without the standard message wrapper.
+Messages with `is_hook_injection: true` are rendered differently in the UI ([`src/ui/chat-view.ts:1095-1097`](../src/ui/chat-view.ts) dispatches to `renderHookInjection` at [`src/ui/chat-view.ts:1181-1188`](../src/ui/chat-view.ts)). The `is_hook_injection` flag is preserved during fork (it's part of the message spread), so these messages render correctly in the forked conversation. The context menu is not shown on hook injection messages because `data-message-id` is only added to the four main render methods (`renderUserMessage`, `finalizeAssistantMessage`, `renderToolCall`, `renderToolResult`) — `renderHookInjection` does not set it, so the `[data-message-id]` event delegation in the context menu handler (§3.4.2) naturally skips these elements.
 
 ### 4.6 System Messages
 
 System messages are not rendered in the chat view, so no context menu appears on them. They are naturally included in the fork if they fall within the sliced range.
+
+**Runtime behavior:** The forked JSONL will contain the parent conversation's system message (which may include stale vault rules, persona instructions, etc.). This is harmless because `toChatMessages()` ([`src/chat/orchestrator.ts:1957`](../src/chat/orchestrator.ts)) replaces the content of any `role === "system"` message with a freshly built system prompt on every LLM call. The persisted system message serves only as a historical record of what the LLM saw at the time.
 
 ### 4.7 Empty Fork (Fork at First Message)
 
