@@ -305,6 +305,14 @@ export interface NotorSettings {
 	 */
 	sub_agent_concurrency_cap: number;
 
+	/**
+	 * Maximum LLM turns per sub-agent invocation. Sub-agents that exceed
+	 * this limit return partial results.
+	 *
+	 * @see specs/ZZ-misc/sub-agents-design.md — Section 2.2
+	 */
+	sub_agent_iteration_cap: number;
+
 	// -------------------------------------------------------------------
 	// Settings UI state
 	// -------------------------------------------------------------------

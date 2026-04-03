@@ -42,4 +42,4 @@ export function filterSubAgentTools<T extends { name: string }>(tools: T[]): T[]
 export const SUB_AGENT_CONCURRENCY_CAP = 3;
 
 /** Maximum LLM turns per sub-agent invocation (Section 2.2). */
-export const SUB_AGENT_ITERATION_CAP = 10;
+export const SUB_AGENT_ITERATION_CAP = 20;

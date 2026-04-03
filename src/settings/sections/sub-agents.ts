@@ -50,6 +50,26 @@ export function renderSubAgentsSection(
 		cls: "setting-item-description",
 	});
 
+	// Iteration cap setting
+	new Setting(containerEl)
+		.setName("Iteration cap")
+		.setDesc(
+			"Maximum number of LLM turns per sub-agent invocation. " +
+			"Sub-agents that hit this limit return partial results. (1\u2013100)",
+		)
+		.addText((text) =>
+			text
+				.setPlaceholder("20")
+				.setValue(String(ctx.settings.sub_agent_iteration_cap))
+				.onChange(async (value) => {
+					const parsed = parseInt(value, 10);
+					if (!isNaN(parsed) && parsed >= 1 && parsed <= 100) {
+						ctx.settings.sub_agent_iteration_cap = parsed;
+						await ctx.saveSettings();
+					}
+				}),
+		);
+
 	// "Create new sub-agent" button
 	new Setting(containerEl)
 		.setName("Create new sub-agent")

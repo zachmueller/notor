@@ -339,7 +339,7 @@ export class UseSubagentTool implements Tool {
 			toolDefinitions: toolDefs,
 			dispatcher: subDispatcher,
 			parentAbortSignal: parentSignal,
-			iterationCap: SUB_AGENT_ITERATION_CAP,
+			iterationCap: this.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP,
 			mode,
 			onProgress: options?.onProgress,
 		});
