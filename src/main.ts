@@ -1605,12 +1605,14 @@ export default class NotorPlugin extends Plugin {
 			}).setting?.openTabById("notor");
 		});
 
-		// Settings deep-link: open settings tab and scroll to a specific group
+		// Settings deep-link: open settings panel, switch to Notor tab, scroll to group
 		view.setOnOpenSettingsGroup((groupTitle: string) => {
-			(this.app as import("obsidian").App & {
+			const appSetting = (this.app as import("obsidian").App & {
 				setting?: { open: () => void; openTabById: (id: string) => void };
-			}).setting?.openTabById("notor");
-			// Defer scrollToGroup to next tick so the settings DOM renders first
+			}).setting;
+			appSetting?.open();
+			appSetting?.openTabById("notor");
+			// Defer scrollToGroup so the settings DOM renders first
 			setTimeout(() => {
 				this._settingTab?.scrollToGroup(groupTitle);
 			}, 100);
