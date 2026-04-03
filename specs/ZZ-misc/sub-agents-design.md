@@ -79,9 +79,9 @@ Concretely:
 - `effective.enabled = parent.enabled AND subagent.enabled`
 - `effective.allowed_paths = intersection(parent.allowed_paths, subagent.allowed_paths)`
 - `effective.blocked_paths = union(parent.blocked_paths, subagent.blocked_paths)`
-- `effective.auto_approve`: sub-agent always inherits the parent's auto_approve settings (sub-agents cannot escalate approval)
+- `effective.auto_approve`: read tools (`mode === "read"`) are force-approved (per Section 9.7); write tools inherit the parent's auto_approve settings
 
-This requires a new merge function separate from the existing precedence-based `mergeToolConfigs()`. The existing merger (in `src/tool-config/merger.ts`, 115 lines) uses sparse override semantics with source precedence; sub-agents need AND/intersection semantics.
+This requires a new merge function separate from the existing precedence-based `mergeToolConfigs()`. The existing merger (in `src/tool-config/merger.ts`, ~114 lines) uses sparse override semantics with source precedence; sub-agents need AND/intersection semantics.
 
 **Implementation:** A new `intersectToolConfig(parentEffective: EffectiveToolConfig, subAgentConfig: ParsedToolConfig): EffectiveToolConfig` function in `merger.ts`:
 - For each tool: `enabled = parent.enabled AND subagent.enabled`
@@ -116,7 +116,7 @@ Multiple sub-agents may run concurrently, potentially with different providers. 
 
 ### 4.3 Provider Sharing Strategy
 
-Verified against the codebase: provider instances in `ProviderRegistry` (`src/providers/index.ts`) are stateless between `sendMessage()` calls — they hold configuration but no per-request state. Sub-agents can safely share the parent's provider instance.
+Verified against the codebase: provider instances in `ProviderRegistry` (`src/providers/index.ts`) are stateless between `sendMessage()` calls — they hold configuration but no per-request state. `BedrockProvider`'s `activeToolBlockIndices` was the one exception (mutable instance state used during streaming); this has been moved to local scope within `sendMessage()` to match the pattern used by OpenAI and Local providers. Sub-agents can safely share the parent's provider instance.
 
 **Implementation:**
 - Sub-agent receives the provider instance directly (not the `ProviderRegistry`)
@@ -206,7 +206,7 @@ _These were originally open questions. Resolutions informed by Claude Code and C
 
 **Decision: Separate `SubAgentRunner` class.**
 
-Notor's `ChatOrchestrator` (2371 lines) is deeply coupled to features sub-agents don't need: compaction, hooks, persona switching, workflow assembly, and view rendering (callbacks like `this.view?.renderToolCall`). Notor already has precedent for this pattern — `_backgroundResponseLoop` (lines 810–1048 of `orchestrator.ts`) is a stripped-down copy of `responseLoop` for background workflows. Cline's separate `SubagentRunner` class validates this approach.
+Notor's `ChatOrchestrator` (~2370 lines) is deeply coupled to features sub-agents don't need: compaction, hooks, persona switching, workflow assembly, and view rendering (callbacks like `this.view?.renderToolCall`). Notor already has precedent for this pattern — `_backgroundResponseLoop` (lines 810–1048 of `orchestrator.ts`) is a stripped-down copy of `responseLoop` for background workflows. Cline's separate `SubagentRunner` class validates this approach.
 
 **Implementation:**
 - New class `SubAgentRunner` in `src/chat/sub-agent-runner.ts`
@@ -215,7 +215,7 @@ Notor's `ChatOrchestrator` (2371 lines) is deeply coupled to features sub-agents
 - `SubAgentResult`: `{ text: string; messages: Message[]; tokenUsage: { input: number; output: number }; iterationCount: number; wasCapReached: boolean }`
 - Internal loop: `provider.sendMessage()` → process stream → dispatch tools → repeat until text-only response or iteration cap
 - Does NOT use `ConversationManager` (plain `Message[]` array) or `ContextManager` (short-lived conversations)
-- Extract `processStream()` core logic (chunk accumulation, tool call JSON parsing — orchestrator lines 1886–1960) into shared utility `src/chat/stream-utils.ts`
+- Extract `processStream()` core logic (chunk accumulation, tool call JSON parsing — orchestrator lines 1886–1960) into shared utility `src/chat/stream-utils.ts`. **Note:** The current `processStream()` (lines 1874–2009) has direct view-layer coupling (`this.view?.createAssistantMessagePlaceholder()`, `this.view?.appendStreamChunk()`, `this.view?.finalizeAssistantMessage()`). The shared utility must accept optional rendering callbacks so the orchestrator can pass view methods while the `SubAgentRunner` passes either `onProgress` or nothing.
 
 ### 9.2 Token & Cost Tracking
 
@@ -321,7 +321,7 @@ Research into Claude Code and Cline's sub-agent implementations informed the res
 
 1. **Both use default-deny tool access** — confirming our Section 3.1 design.
 2. **Both prevent recursive sub-agents** — confirming our Section 3.3 design.
-3. **Orchestrator isolation vs. reuse**: Claude Code reuses its query loop (simpler codebase, ~400 line query function). Cline uses a separate class (their main task loop is more complex). Notor's `ChatOrchestrator` (2371 lines) is closer to Cline's complexity, favoring the separate-class approach.
+3. **Orchestrator isolation vs. reuse**: Claude Code reuses its query loop (simpler codebase, ~400 line query function). Cline uses a separate class (their main task loop is more complex). Notor's `ChatOrchestrator` (~2370 lines) is closer to Cline's complexity, favoring the separate-class approach.
 4. **History**: Claude Code's sidechain JSONL approach avoids race conditions and keeps the parent conversation clean. Cline's ephemeral approach sacrifices debuggability. Our Section 5 design (separate JSONL files) aligns with Claude Code.
 5. **Permissions**: Claude Code's "bubble" pattern (surface prompts to parent) for fork agents is a good model for how Notor should handle write-tool approvals in sub-agents.
 6. **Completion signal**: Claude Code's "text with no tool calls" approach is simpler and avoids adding a dedicated tool. Adopted for Notor.

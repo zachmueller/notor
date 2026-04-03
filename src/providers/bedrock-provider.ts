@@ -233,20 +233,19 @@ export class BedrockProvider implements LLMProvider {
 		return this.bedrockClient;
 	}
 
-	/**
-	 * Map content block index → provider toolUseId for active tool-use blocks.
-	 * Used so that contentBlockStop can emit tool_call_end with the correct
-	 * provider-assigned ID (required by Bedrock for toolResult correlation).
-	 */
-	private activeToolBlockIndices = new Map<number, string>();
-
 	async *sendMessage(
 		messages: ChatMessage[],
 		tools: ToolDefinition[],
 		options: SendMessageOptions
 	): AsyncIterable<StreamChunk> {
-		// Clear tool block index tracker for each new request
-		this.activeToolBlockIndices = new Map<number, string>();
+		/**
+		 * Map content block index → provider toolUseId for active tool-use blocks.
+		 * Used so that contentBlockStop can emit tool_call_end with the correct
+		 * provider-assigned ID (required by Bedrock for toolResult correlation).
+		 * Local to each sendMessage() invocation to avoid shared mutable state
+		 * when multiple callers (e.g. concurrent sub-agents) use the same provider.
+		 */
+		const activeToolBlockIndices = new Map<number, string>();
 		const client = this.getRuntimeClient();
 		const { system, messages: bedrockMessages } =
 			toBedrockMessages(messages);
@@ -376,7 +375,7 @@ export class BedrockProvider implements LLMProvider {
 				if (options.abort_signal?.aborted) {
 					return;
 				}
-				yield* this.handleBedrockEvent(event);
+				yield* this.handleBedrockEvent(event, activeToolBlockIndices);
 			}
 		} catch (e: unknown) {
 			if (options.abort_signal?.aborted) {
@@ -394,7 +393,8 @@ export class BedrockProvider implements LLMProvider {
 	 * Handle a single Bedrock Converse stream event.
 	 */
 	private *handleBedrockEvent(
-		event: ConverseStreamOutput
+		event: ConverseStreamOutput,
+		activeToolBlockIndices: Map<number, string>
 	): Iterable<StreamChunk> {
 		if (event.contentBlockStart) {
 			const start = event.contentBlockStart.start;
@@ -402,7 +402,7 @@ export class BedrockProvider implements LLMProvider {
 				const blockIndex = event.contentBlockStart.contentBlockIndex ?? -1;
 				const toolUseId = start.toolUse.toolUseId ?? "";
 				// Map block index → provider toolUseId so tool_call_end can emit the right ID
-				this.activeToolBlockIndices.set(blockIndex, toolUseId);
+				activeToolBlockIndices.set(blockIndex, toolUseId);
 				yield {
 					type: "tool_call_start",
 					id: toolUseId,
@@ -428,9 +428,9 @@ export class BedrockProvider implements LLMProvider {
 		if (event.contentBlockStop) {
 			const blockIndex = event.contentBlockStop.contentBlockIndex ?? -1;
 			// Only emit tool_call_end for blocks that were actually tool-use blocks
-			const toolUseId = this.activeToolBlockIndices.get(blockIndex);
+			const toolUseId = activeToolBlockIndices.get(blockIndex);
 			if (toolUseId !== undefined) {
-				this.activeToolBlockIndices.delete(blockIndex);
+				activeToolBlockIndices.delete(blockIndex);
 				yield {
 					type: "tool_call_end",
 					id: toolUseId,
