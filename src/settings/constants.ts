@@ -120,6 +120,11 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Write text content to a file on the filesystem (desktop only).",
 		isWrite: true,
 	},
+	replace_in_file: {
+		name: "Replace in file",
+		desc: "Make targeted SEARCH/REPLACE edits in a text file (desktop only).",
+		isWrite: true,
+	},
 	extract_docx_comments: {
 		name: "Extract Word doc comments",
 		desc: "Extract review comments from a .docx file into a structured note (desktop only).",
