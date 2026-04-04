@@ -79,6 +79,17 @@ export class NotorSettingTab extends PluginSettingTab {
 		if (!details) return;
 		details.open = true;
 		details.scrollIntoView({ behavior: "smooth", block: "start" });
+
+		// Restart animation if re-navigating to same group
+		details.classList.remove("notor-settings-group-highlight");
+		void details.offsetWidth; // force reflow
+		details.classList.add("notor-settings-group-highlight");
+
+		// Remove class after animation. Timeout fallback for prefers-reduced-motion
+		// (animation: none → animationend never fires).
+		const cleanup = () => details.classList.remove("notor-settings-group-highlight");
+		details.addEventListener("animationend", cleanup, { once: true });
+		setTimeout(cleanup, 2000);
 	}
 
 	display(): void {

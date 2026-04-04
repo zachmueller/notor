@@ -187,6 +187,24 @@
 	padding: 0 18px 10px;
 }
 
+/* Deep-link highlight — temporary glow when scrolled to via notor-settings:// link */
+.notor-settings-group.notor-settings-group-highlight {
+	animation: notor-group-highlight 1.5s ease-out forwards;
+}
+
+@keyframes notor-group-highlight {
+	0%   { box-shadow: 0 0 0 3px hsla(var(--interactive-accent-hsl), 0.6); }
+	100% { box-shadow: 0 0 0 3px hsla(var(--interactive-accent-hsl), 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.notor-settings-group.notor-settings-group-highlight {
+		animation: none;
+		outline: 2px solid var(--interactive-accent);
+		outline-offset: -1px;
+	}
+}
+
 /* ==========================================================================
    Unified Tools section
    ========================================================================== */
