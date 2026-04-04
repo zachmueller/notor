@@ -22,7 +22,7 @@ import {
 	executeToolBatches,
 	type ToolCallInfo,
 } from "./tool-orchestration";
-import { SUB_AGENT_ITERATION_CAP } from "../sub-agents/constants";
+import { SUB_AGENT_ITERATION_CAP, SUB_AGENT_TOKEN_LIMIT } from "../sub-agents/constants";
 import { logger } from "../utils/logger";
 
 const log = logger("SubAgentRunner");
@@ -36,6 +36,13 @@ const log = logger("SubAgentRunner");
  *
  * @see specs/ZZ-misc/sub-agents-design.md — Section 9.1
  */
+/** Why the sub-agent stopped. */
+export type SubAgentStopReason =
+	| "completed"
+	| "iteration_cap"
+	| "token_limit"
+	| "context_window";
+
 export interface SubAgentResult {
 	/** Final text response from the sub-agent. */
 	text: string;
@@ -45,8 +52,8 @@ export interface SubAgentResult {
 	tokenUsage: { input: number; output: number };
 	/** Number of LLM turns executed. */
 	iterationCount: number;
-	/** Whether the iteration cap was reached before completion. */
-	wasCapReached: boolean;
+	/** Why the sub-agent stopped. */
+	stopReason: SubAgentStopReason;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +75,8 @@ export interface SubAgentRunnerOptions {
 	parentAbortSignal: AbortSignal;
 	/** Maximum LLM turns (default: SUB_AGENT_ITERATION_CAP). */
 	iterationCap?: number;
+	/** Maximum total tokens (input + output). 0 = no limit. */
+	tokenLimit?: number;
 	/** Inherited from parent conversation (Section 9.6). */
 	mode: ConversationMode;
 	/** Optional progress callback (Section 9.5). */
@@ -85,6 +94,7 @@ export class SubAgentRunner {
 	private readonly toolDefinitions: ToolDefinition[];
 	private readonly dispatcher: ToolDispatcher;
 	private readonly iterationCap: number;
+	private readonly tokenLimit: number;
 	private readonly mode: ConversationMode;
 	private readonly onProgress?: (status: string) => void;
 
@@ -104,6 +114,7 @@ export class SubAgentRunner {
 		this.toolDefinitions = options.toolDefinitions;
 		this.dispatcher = options.dispatcher;
 		this.iterationCap = options.iterationCap ?? SUB_AGENT_ITERATION_CAP;
+		this.tokenLimit = options.tokenLimit ?? SUB_AGENT_TOKEN_LIMIT;
 		this.mode = options.mode;
 		this.onProgress = options.onProgress;
 
@@ -140,6 +151,7 @@ export class SubAgentRunner {
 		const tokenUsage = { input: 0, output: 0 };
 		let iterationCount = 0;
 		let lastText = "";
+		let streamResult: ConsumedStreamResult | undefined;
 
 		try {
 			while (iterationCount < this.iterationCap) {
@@ -151,8 +163,29 @@ export class SubAgentRunner {
 						messages,
 						tokenUsage,
 						iterationCount,
-						wasCapReached: false,
+						stopReason: "completed",
 					};
+				}
+
+				// Pre-flight token limit check: reserve headroom for wind-down
+				if (this.tokenLimit > 0 && streamResult) {
+					const lastInputCost = streamResult.inputTokens;
+					const windDownReserve = lastInputCost + 4096;
+					if (tokenUsage.input + tokenUsage.output + windDownReserve >= this.tokenLimit) {
+						log.warn("Sub-agent approaching token limit (pre-flight)", {
+							tokenUsage,
+							limit: this.tokenLimit,
+							windDownReserve,
+						});
+						const limitMarker = `[Sub-agent stopped: token limit (${(tokenUsage.input + tokenUsage.output).toLocaleString()} tokens used, limit ${this.tokenLimit.toLocaleString()}). Results may be incomplete.]`;
+						return {
+							text: lastText ? `${lastText}\n\n${limitMarker}` : limitMarker,
+							messages,
+							tokenUsage,
+							iterationCount,
+							stopReason: "token_limit",
+						};
+					}
 				}
 
 				iterationCount++;
@@ -171,11 +204,27 @@ export class SubAgentRunner {
 				);
 
 				// --- Parse stream ---
-				const streamResult = await this.consumeStream(stream);
+				streamResult = await this.consumeStream(stream);
 
 				// Accumulate tokens
 				tokenUsage.input += streamResult.inputTokens;
 				tokenUsage.output += streamResult.outputTokens;
+
+				// Post-turn token limit check
+				if (this.tokenLimit > 0 && tokenUsage.input + tokenUsage.output >= this.tokenLimit) {
+					log.warn("Sub-agent reached token limit", {
+						tokenUsage,
+						limit: this.tokenLimit,
+					});
+					const limitMarker = `[Sub-agent stopped: token limit (${(tokenUsage.input + tokenUsage.output).toLocaleString()} tokens used, limit ${this.tokenLimit.toLocaleString()}). Results may be incomplete.]`;
+					return {
+						text: lastText ? `${lastText}\n\n${limitMarker}` : limitMarker,
+						messages,
+						tokenUsage,
+						iterationCount,
+						stopReason: "token_limit",
+					};
+				}
 
 				// --- Handle stream result ---
 				if (streamResult.type === "error") {
@@ -185,7 +234,7 @@ export class SubAgentRunner {
 						messages,
 						tokenUsage,
 						iterationCount,
-						wasCapReached: false,
+						stopReason: "completed",
 					};
 				}
 
@@ -196,7 +245,7 @@ export class SubAgentRunner {
 						messages,
 						tokenUsage,
 						iterationCount,
-						wasCapReached: false,
+						stopReason: "completed",
 					};
 				}
 
@@ -219,7 +268,7 @@ export class SubAgentRunner {
 						messages,
 						tokenUsage,
 						iterationCount,
-						wasCapReached: false,
+						stopReason: "completed",
 					};
 				}
 
@@ -289,7 +338,7 @@ export class SubAgentRunner {
 				messages,
 				tokenUsage,
 				iterationCount,
-				wasCapReached: true,
+				stopReason: "iteration_cap",
 			};
 		} finally {
 			// Clean up the parent abort listener

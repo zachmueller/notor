@@ -73,7 +73,7 @@ function makeSubAgentResult(overrides: Partial<SubAgentResult> = {}): SubAgentRe
 		messages: [],
 		tokenUsage: { input: 100, output: 50 },
 		iterationCount: 2,
-		wasCapReached: false,
+		stopReason: "completed",
 		...overrides,
 	};
 }

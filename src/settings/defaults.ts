@@ -168,6 +168,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	sub_agent_auto_approve_reads: true,
 	sub_agent_concurrency_cap: 3,
 	sub_agent_iteration_cap: 20,
+	sub_agent_token_limit: 0,
 
 	// Settings UI state
 	settings_collapsed_sections: {},

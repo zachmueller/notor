@@ -43,3 +43,6 @@ export const SUB_AGENT_CONCURRENCY_CAP = 3;
 
 /** Maximum LLM turns per sub-agent invocation (Section 2.2). */
 export const SUB_AGENT_ITERATION_CAP = 20;
+
+/** Maximum total tokens (input + output) per sub-agent. 0 = no limit. */
+export const SUB_AGENT_TOKEN_LIMIT = 0;

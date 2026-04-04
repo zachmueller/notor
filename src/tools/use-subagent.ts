@@ -29,6 +29,7 @@ import { SUB_AGENT_PREAMBLE } from "../sub-agents/preamble";
 import {
 	USE_SUBAGENT_TOOL_NAME,
 	SUB_AGENT_ITERATION_CAP,
+	SUB_AGENT_TOKEN_LIMIT,
 } from "../sub-agents/constants";
 import { Semaphore } from "../sub-agents/semaphore";
 import {
@@ -340,6 +341,7 @@ export class UseSubagentTool implements Tool {
 			dispatcher: subDispatcher,
 			parentAbortSignal: parentSignal,
 			iterationCap: this.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP,
+			tokenLimit: this.settings.sub_agent_token_limit ?? SUB_AGENT_TOKEN_LIMIT,
 			mode,
 			onProgress: options?.onProgress,
 		});
@@ -350,7 +352,7 @@ export class UseSubagentTool implements Tool {
 		log.info("Sub-agent completed", {
 			profile: profile.name,
 			iterations: result.iterationCount,
-			wasCapReached: result.wasCapReached,
+			stopReason: result.stopReason,
 			tokenUsage: result.tokenUsage,
 		});
 
@@ -383,7 +385,7 @@ export class UseSubagentTool implements Tool {
 						total_input_tokens: result.tokenUsage.input,
 						total_output_tokens: result.tokenUsage.output,
 						iteration_count: result.iterationCount,
-						was_cap_reached: result.wasCapReached,
+						stop_reason: result.stopReason,
 						created_at: new Date().toISOString(),
 					},
 					persistedMessages,
@@ -405,7 +407,7 @@ export class UseSubagentTool implements Tool {
 				jsonl_filename: jsonlFilename,
 				token_usage: result.tokenUsage,
 				iteration_count: result.iterationCount,
-				was_cap_reached: result.wasCapReached,
+				stop_reason: result.stopReason,
 				profile_name: profile.name,
 			} : null,
 		};

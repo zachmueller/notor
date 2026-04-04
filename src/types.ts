@@ -202,8 +202,8 @@ export interface ToolResult {
 		token_usage: { input: number; output: number };
 		/** Number of LLM turns the sub-agent executed. */
 		iteration_count: number;
-		/** Whether the sub-agent hit its iteration cap. */
-		was_cap_reached: boolean;
+		/** Why the sub-agent stopped (e.g. "completed", "iteration_cap", "token_limit"). */
+		stop_reason: string;
 		/** Name of the sub-agent profile used. */
 		profile_name: string;
 	} | null;

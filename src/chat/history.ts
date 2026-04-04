@@ -282,7 +282,7 @@ export class HistoryManager {
 			total_input_tokens: number;
 			total_output_tokens: number;
 			iteration_count: number;
-			was_cap_reached: boolean;
+			stop_reason: string;
 			created_at: string;
 		},
 		messages: Message[],

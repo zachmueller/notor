@@ -132,7 +132,7 @@ describe("SubAgentRunner", () => {
 
 			expect(result.text).toBe("The answer is 42.");
 			expect(result.iterationCount).toBe(1);
-			expect(result.wasCapReached).toBe(false);
+			expect(result.stopReason).toBe("completed");
 			expect(result.tokenUsage.input).toBe(10);
 			expect(result.tokenUsage.output).toBe(5);
 		});
@@ -196,7 +196,7 @@ describe("SubAgentRunner", () => {
 
 			expect(result.text).toBe("I found 3 notes about testing.");
 			expect(result.iterationCount).toBe(2);
-			expect(result.wasCapReached).toBe(false);
+			expect(result.stopReason).toBe("completed");
 			// Token usage accumulated across both turns
 			expect(result.tokenUsage.input).toBe(15 + 12);
 			expect(result.tokenUsage.output).toBe(8 + 6);
@@ -267,7 +267,7 @@ describe("SubAgentRunner", () => {
 	});
 
 	describe("iteration cap", () => {
-		it("returns with wasCapReached when iteration limit is hit", async () => {
+		it("returns with stopReason 'iteration_cap' when iteration limit is hit", async () => {
 			// Provider always returns tool calls, never text-only
 			const toolStream = toolCallStream("tc-loop", "search_vault", { q: "x" }, 5, 3);
 			const streams: StreamChunk[][] = Array.from({ length: 3 }, () => [...toolStream]);
@@ -293,7 +293,7 @@ describe("SubAgentRunner", () => {
 
 			const result = await runner.run("Keep searching");
 
-			expect(result.wasCapReached).toBe(true);
+			expect(result.stopReason).toBe("iteration_cap");
 			expect(result.iterationCount).toBe(3);
 			expect(result.text).toContain("[Sub-agent reached iteration limit (3 turns)");
 			expect(result.text).toContain("Results may be incomplete");
@@ -316,7 +316,7 @@ describe("SubAgentRunner", () => {
 			expect(result.text).toContain("Sub-agent error");
 			expect(result.text).toContain("Rate limit exceeded");
 			expect(result.iterationCount).toBe(1);
-			expect(result.wasCapReached).toBe(false);
+			expect(result.stopReason).toBe("completed");
 		});
 
 		it("feeds tool execution errors back to the LLM", async () => {
@@ -374,7 +374,7 @@ describe("SubAgentRunner", () => {
 
 			expect(result.text).toContain("[Sub-agent cancelled]");
 			expect(result.iterationCount).toBe(0);
-			expect(result.wasCapReached).toBe(false);
+			expect(result.stopReason).toBe("completed");
 			// Provider should not have been called
 			expect(provider.sendMessage).not.toHaveBeenCalled();
 		});
@@ -407,7 +407,7 @@ describe("SubAgentRunner", () => {
 			const result = await runner.run("Task");
 
 			expect(result.text).toContain("[Sub-agent cancelled]");
-			expect(result.wasCapReached).toBe(false);
+			expect(result.stopReason).toBe("completed");
 		});
 
 		it("cleans up parent abort listener on completion", async () => {

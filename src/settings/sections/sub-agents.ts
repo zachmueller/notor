@@ -70,6 +70,26 @@ export function renderSubAgentsSection(
 				}),
 		);
 
+	// Token limit setting
+	new Setting(containerEl)
+		.setName("Token limit")
+		.setDesc(
+			"Maximum total tokens (input + output) per sub-agent invocation. " +
+			"0 = no limit (only iteration cap applies). (0\u201310,000,000)",
+		)
+		.addText((text) =>
+			text
+				.setPlaceholder("0")
+				.setValue(String(ctx.settings.sub_agent_token_limit))
+				.onChange(async (value) => {
+					const parsed = parseInt(value, 10);
+					if (!isNaN(parsed) && parsed >= 0 && parsed <= 10_000_000) {
+						ctx.settings.sub_agent_token_limit = parsed;
+						await ctx.saveSettings();
+					}
+				}),
+		);
+
 	// "Create new sub-agent" button
 	new Setting(containerEl)
 		.setName("Create new sub-agent")

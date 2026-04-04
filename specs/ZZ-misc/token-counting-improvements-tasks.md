@@ -131,16 +131,16 @@ the footer. Sub-agent token rollup at lines 1553-1561 (foreground) and 997-1005
 
 ### 3A: Add the `sub_agent_token_limit` setting
 
-- [ ] **3A-1.** Add `sub_agent_token_limit: number` field to settings type
+- [x] **3A-1.** Add `sub_agent_token_limit: number` field to settings type
   (`src/settings/types.ts`, near lines 308-314 where `sub_agent_iteration_cap`
   lives)
   - JSDoc: "Maximum total tokens (input + output) per sub-agent invocation.
     0 means no token limit (only iteration cap applies)."
-- [ ] **3A-2.** Add default value in `src/settings/defaults.ts` (near line 170)
+- [x] **3A-2.** Add default value in `src/settings/defaults.ts` (near line 170)
   - `sub_agent_token_limit: 0`
-- [ ] **3A-3.** Add `SUB_AGENT_TOKEN_LIMIT = 0` constant to
+- [x] **3A-3.** Add `SUB_AGENT_TOKEN_LIMIT = 0` constant to
   `src/sub-agents/constants.ts` (near line 45)
-- [ ] **3A-4.** Add UI control in `src/settings/sections/sub-agents.ts` (after
+- [x] **3A-4.** Add UI control in `src/settings/sections/sub-agents.ts` (after
   the iteration cap setting at lines 53-71)
   - Text input, numeric validation, range 0–10,000,000
   - Placeholder "0" (unlimited)
@@ -148,29 +148,29 @@ the footer. Sub-agent token rollup at lines 1553-1561 (foreground) and 997-1005
 
 ### 3B: Wire setting into SubAgentRunner
 
-- [ ] **3B-1.** Add `tokenLimit` to `SubAgentRunner` constructor options
+- [x] **3B-1.** Add `tokenLimit` to `SubAgentRunner` constructor options
   (`src/chat/sub-agent-runner.ts`, around line 100)
   - Store as `private readonly tokenLimit: number`
   - Default to `SUB_AGENT_TOKEN_LIMIT` if not provided
-- [ ] **3B-2.** Pass `tokenLimit` from `UseSubagentTool`
+- [x] **3B-2.** Pass `tokenLimit` from `UseSubagentTool`
   (`src/tools/use-subagent.ts`, at lines 335-345 where the runner is created)
   - `tokenLimit: this.settings.sub_agent_token_limit ?? SUB_AGENT_TOKEN_LIMIT`
 
 ### 3C: Add token limit check in the sub-agent loop
 
-- [ ] **3C-1.** Hoist `streamResult` declaration above the `while` loop
+- [x] **3C-1.** Hoist `streamResult` declaration above the `while` loop
   (`src/chat/sub-agent-runner.ts`, before line 145)
   - Declare `let streamResult: ConsumedStreamResult | undefined;`
   - Change line 174 from `const streamResult = ...` to `streamResult = ...`
   - This is needed so the pre-flight check (3C-3) can reference the previous
     iteration's result
-- [ ] **3C-2.** Add post-turn token limit check after token accumulation (after
+- [x] **3C-2.** Add post-turn token limit check after token accumulation (after
   lines 177-178)
   - If `this.tokenLimit > 0` and `tokenUsage.input + tokenUsage.output >= this.tokenLimit`,
     trigger wind-down (Phase 4) or early return with token limit marker
   - For now (before Phase 4), return with a marker similar to the cap-reached
     block at lines 280-293
-- [ ] **3C-3.** Add pre-flight token limit check before the LLM call (after the
+- [x] **3C-3.** Add pre-flight token limit check before the LLM call (after the
   abort check at lines 147-156)
   - Reserve headroom for wind-down: use last turn's `inputTokens` as proxy for
     conversation re-send cost + 4096 for summary response
@@ -181,22 +181,26 @@ the footer. Sub-agent token rollup at lines 1553-1561 (foreground) and 997-1005
 
 ### 3D: Update SubAgentResult reporting
 
-- [ ] **3D-1.** Replace `wasCapReached: boolean` with
+- [x] **3D-1.** Replace `wasCapReached: boolean` with
   `stopReason: "completed" | "iteration_cap" | "token_limit" | "context_window"`
   on the `SubAgentResult` type (lines 39-50 in `sub-agent-runner.ts`)
-- [ ] **3D-2.** Update all return sites in `run()` to use `stopReason`:
+- [x] **3D-2.** Update all return sites in `run()` to use `stopReason`:
   - Line 149-155 (abort): `stopReason: "completed"` (or a new `"aborted"` value)
   - Line 183-189 (error): `stopReason: "completed"`
   - Line 194-200 (cancelled): `stopReason: "completed"`
   - Line 217-223 (text completion): `stopReason: "completed"`
   - Line 287-293 (iteration cap): `stopReason: "iteration_cap"`
   - New token limit return: `stopReason: "token_limit"`
-- [ ] **3D-3.** Update callers that check `wasCapReached`:
-  - `src/tools/use-subagent.ts` — find references to `wasCapReached` and replace
-    with `stopReason !== "completed"` (or more specific checks)
-  - `src/chat/orchestrator.ts` — same
+- [x] **3D-3.** Update callers that check `wasCapReached`:
+  - `src/tools/use-subagent.ts` — replaced all `wasCapReached` → `stopReason`
+  - `src/types.ts` — replaced `was_cap_reached: boolean` → `stop_reason: string`
+  - `src/chat/history.ts` — replaced `was_cap_reached` → `stop_reason`
+  - `src/export/html-exporter.ts` — updated to show `stop_reason` label
+  - `src/chat/orchestrator.ts` — no references found (confirmed)
+  - All tests updated to use new field names
 - [ ] **3D-4.** Verify: set `sub_agent_token_limit` to 5000, run a sub-agent
   task, confirm it stops with the token limit marker
+  - 🔜 Ready for manual testing
 
 ---
 

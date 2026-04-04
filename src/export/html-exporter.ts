@@ -533,7 +533,9 @@ function renderSubAgentDetail(
 	const profileLabel = escapeHtml(metadata.profile_name);
 	const tokenInfo = `${metadata.token_usage.input.toLocaleString()} in / ${metadata.token_usage.output.toLocaleString()} out`;
 	const iterInfo = `${metadata.iteration_count} turn${metadata.iteration_count !== 1 ? "s" : ""}`;
-	const capWarning = metadata.was_cap_reached ? " (iteration limit reached)" : "";
+	const capWarning = metadata.stop_reason !== "completed"
+		? ` (stopped: ${metadata.stop_reason.replace(/_/g, " ")})`
+		: "";
 	const summaryText = `Sub-agent: ${profileLabel} — ${iterInfo}, ${tokenInfo}${capWarning}`;
 
 	const renderedMessages = messages

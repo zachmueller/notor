@@ -313,6 +313,12 @@ export interface NotorSettings {
 	 */
 	sub_agent_iteration_cap: number;
 
+	/**
+	 * Maximum total tokens (input + output) per sub-agent invocation.
+	 * 0 means no token limit (only iteration cap applies).
+	 */
+	sub_agent_token_limit: number;
+
 	// -------------------------------------------------------------------
 	// Settings UI state
 	// -------------------------------------------------------------------
