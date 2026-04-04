@@ -80,16 +80,24 @@ export class NotorSettingTab extends PluginSettingTab {
 		details.open = true;
 		details.scrollIntoView({ behavior: "smooth", block: "start" });
 
-		// Restart animation if re-navigating to same group
+		// Wait until the element is visible in the viewport before highlighting,
+		// so the glow doesn't start (and partially fade) during the smooth scroll.
 		details.classList.remove("notor-settings-group-highlight");
-		void details.offsetWidth; // force reflow
-		details.classList.add("notor-settings-group-highlight");
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (!entries[0]?.isIntersecting) return;
+				observer.disconnect();
 
-		// Remove class after animation. Timeout fallback for prefers-reduced-motion
-		// (animation: none → animationend never fires).
-		const cleanup = () => details.classList.remove("notor-settings-group-highlight");
-		details.addEventListener("animationend", cleanup, { once: true });
-		setTimeout(cleanup, 2000);
+				void details.offsetWidth; // force reflow to restart animation
+				details.classList.add("notor-settings-group-highlight");
+
+				const cleanup = () => details.classList.remove("notor-settings-group-highlight");
+				details.addEventListener("animationend", cleanup, { once: true });
+				setTimeout(cleanup, 2000);
+			},
+			{ threshold: 0.1 },
+		);
+		observer.observe(details);
 	}
 
 	display(): void {
