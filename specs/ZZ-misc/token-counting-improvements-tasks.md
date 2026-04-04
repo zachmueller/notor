@@ -312,6 +312,43 @@ method's `cancelled` branch (around line 345) may return 0 tokens even if
 
 ---
 
+## Phase 5: Fix Sub-Agent Token Inflation of Compaction/Truncation
+
+> Independent of Phase 4. Small scope. Fixes a confirmed bug.
+
+**Bug:** Sub-agent cumulative token counts were stored on tool_result messages'
+`input_tokens`/`output_tokens` fields. Both `estimateConversationTokens()`
+(compaction) and `estimateMessageTokens()` (truncation) interpreted these as
+the message's actual context window footprint — e.g. a sub-agent using 10,000
+tokens across 5 iterations made a ~500-token tool_result look like 10,000
+tokens, triggering premature compaction.
+
+**Fix:** Stop storing sub-agent tokens on per-message fields. Accumulate them
+directly on the conversation totals via a new `addTokens()` method.
+
+- [x] **5-1.** Add `addTokens(input, output)` method to `ConversationManager`
+  (`src/chat/conversation.ts`, after `getEstimatedCost()`)
+  - Increments `conversation.total_input_tokens` / `total_output_tokens` directly
+  - Does NOT attach tokens to any message (so compaction/truncation estimation
+    correctly falls through to content-based sizing)
+- [x] **5-2.** Update foreground sub-agent token rollup in orchestrator
+  (`src/chat/orchestrator.ts`, line ~1573)
+  - Remove `input_tokens` / `output_tokens` from `addMessage()` call
+  - Call `addTokens()` separately for sub-agent metadata
+- [x] **5-3.** Update background sub-agent token rollup in orchestrator
+  (`src/chat/orchestrator.ts`, line ~997)
+  - Same pattern with `bgConvManager`
+- [x] **5-4.** Fix `prepareFork()` re-summation (`src/chat/conversation.ts`,
+  line ~202) to include sub-agent tokens from
+  `m.tool_result?.sub_agent_metadata?.token_usage`
+- [x] **5-5.** Add unit tests for `addTokens()` and sub-agent-aware
+  `prepareFork()` — 279/279 tests pass
+- [ ] **5-6.** Verify via E2E: sub-agent conversation does NOT trigger
+  premature compaction
+  - 🔜 Ready for manual testing or E2E extension
+
+---
+
 ## Implementation Order & Dependencies
 
 ```
@@ -327,6 +364,7 @@ Phase 4A (runWindDown)     ── depends on 3D ─────────  med
 Phase 4B (Context window)  ── depends on 4A ─────────  medium
 Phase 4B½ (Cancelled fix) ─── depends on 4A ─────────  small
 Phase 4C (Wire up)        ─── depends on 4A,4B,4B½ ── small
+Phase 5  (Compaction fix)  ── independent ──────────── small
 ```
 
 Recommended groupings for implementation sessions:

@@ -10,7 +10,7 @@ vi.mock("../utils/logger", () => ({
 }));
 
 import { ConversationManager } from "./conversation";
-import type { Message } from "../types";
+import type { Message, ToolResult } from "../types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -444,5 +444,95 @@ describe("ConversationManager.prepareFork()", () => {
 			expect(fork!.conversation.total_input_tokens).toBe(5);
 			expect(fork!.conversation.estimated_cost).toBeCloseTo(0.005);
 		});
+
+		it("includes sub-agent token usage from tool_result.sub_agent_metadata in re-summation", () => {
+			mgr.createConversation("openai", "gpt-4", "act");
+			mgr.addMessage({ role: "user", content: "Use a sub-agent" });
+			mgr.addMessage({
+				role: "tool_call",
+				content: "",
+				tool_call: { id: "call_sa", tool_name: "use_subagent", parameters: {}, status: "success" },
+			});
+			const tr = mgr.addMessage({
+				role: "tool_result",
+				content: "",
+				tool_result: {
+					tool_name: "use_subagent",
+					success: true,
+					result: "Sub-agent found 3 notes.",
+					tool_call_id: "call_sa",
+					sub_agent_metadata: {
+						jsonl_filename: "test.jsonl",
+						token_usage: { input: 5000, output: 1200 },
+						iteration_count: 3,
+						stop_reason: "completed",
+						profile_name: "search-vault",
+					},
+				} as ToolResult,
+			});
+			// Sub-agent tokens rolled up via addTokens (not on message fields)
+			mgr.addTokens(5000, 1200);
+
+			const fork = mgr.prepareFork(tr.id, "openai", "gpt-4", "act");
+			expect(fork).not.toBeNull();
+			expect(fork!.conversation.total_input_tokens).toBe(5000);
+			expect(fork!.conversation.total_output_tokens).toBe(1200);
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// addTokens()
+// ---------------------------------------------------------------------------
+
+describe("ConversationManager.addTokens()", () => {
+	let mgr: ConversationManager;
+
+	beforeEach(() => {
+		mgr = createManager();
+	});
+
+	it("accumulates tokens into conversation totals", () => {
+		mgr.createConversation("openai", "gpt-4", "act");
+
+		mgr.addTokens(500, 200);
+		expect(mgr.getActiveConversation()!.total_input_tokens).toBe(500);
+		expect(mgr.getActiveConversation()!.total_output_tokens).toBe(200);
+
+		mgr.addTokens(300, 100);
+		expect(mgr.getActiveConversation()!.total_input_tokens).toBe(800);
+		expect(mgr.getActiveConversation()!.total_output_tokens).toBe(300);
+	});
+
+	it("does not affect any message's input_tokens or output_tokens", () => {
+		mgr.createConversation("openai", "gpt-4", "act");
+		mgr.addMessage({ role: "user", content: "Hello" });
+
+		mgr.addTokens(5000, 1200);
+
+		const messages = mgr.getMessages();
+		for (const msg of messages) {
+			expect(msg.input_tokens).toBeNull();
+			expect(msg.output_tokens).toBeNull();
+		}
+
+		// But conversation totals are updated
+		expect(mgr.getActiveConversation()!.total_input_tokens).toBe(5000);
+		expect(mgr.getActiveConversation()!.total_output_tokens).toBe(1200);
+	});
+
+	it("throws when no active conversation", () => {
+		expect(() => mgr.addTokens(100, 50)).toThrow("No active conversation");
+	});
+
+	it("works alongside addMessage token accumulation", () => {
+		mgr.createConversation("openai", "gpt-4", "act");
+		mgr.addMessage({ role: "user", content: "Hello", input_tokens: 10 });
+		mgr.addTokens(5000, 1200); // sub-agent tokens
+		mgr.addMessage({ role: "assistant", content: "Hi", output_tokens: 20 });
+
+		const conv = mgr.getActiveConversation()!;
+		expect(conv.total_input_tokens).toBe(5010); // 10 from message + 5000 from addTokens
+		expect(conv.total_output_tokens).toBe(1220); // 1200 from addTokens + 20 from message
 	});
 });

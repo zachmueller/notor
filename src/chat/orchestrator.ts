@@ -994,15 +994,19 @@ export class ChatOrchestrator {
 				}
 
 				// Add tool result message
-				// Phase 6.2: Roll up sub-agent tokens into parent totals
-				const bgSubAgentTokens = toolResult.sub_agent_metadata?.token_usage;
 				bgConvManager.addMessage({
 					role: "tool_result",
 					content: "",
 					tool_result: toolResult,
-					input_tokens: bgSubAgentTokens?.input,
-					output_tokens: bgSubAgentTokens?.output,
 				});
+
+				// Roll up sub-agent tokens into conversation totals without
+				// inflating per-message estimates (which would cause premature
+				// compaction/truncation).
+				const bgSubAgentTokens = toolResult.sub_agent_metadata?.token_usage;
+				if (bgSubAgentTokens) {
+					bgConvManager.addTokens(bgSubAgentTokens.input, bgSubAgentTokens.output);
+				}
 
 				// Add token tracking message if available
 				if (inputTokens || outputTokens) {
@@ -1570,15 +1574,19 @@ export class ChatOrchestrator {
 							this.vaultRuleManager.recordNoteAccess(notePath);
 						}
 
-						// Phase 6.2: Roll up sub-agent tokens into parent totals
-						const subAgentTokens = toolResult.sub_agent_metadata?.token_usage;
 						const toolResultMessage = this.conversationManager.addMessage({
 							role: "tool_result",
 							content: "",
 							tool_result: toolResult,
-							input_tokens: subAgentTokens?.input,
-							output_tokens: subAgentTokens?.output,
 						});
+
+						// Roll up sub-agent tokens into conversation totals without
+						// inflating per-message estimates (which would cause premature
+						// compaction/truncation).
+						const subAgentTokens = toolResult.sub_agent_metadata?.token_usage;
+						if (subAgentTokens) {
+							this.conversationManager.addTokens(subAgentTokens.input, subAgentTokens.output);
+						}
 
 						this.view?.renderToolResult(toolResultMessage);
 

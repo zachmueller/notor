@@ -202,6 +202,12 @@ export class ConversationManager {
 		for (const m of slicedMessages) {
 			if (m.input_tokens) totalInput += m.input_tokens;
 			if (m.output_tokens) totalOutput += m.output_tokens;
+			// Include sub-agent token usage (not stored on input_tokens/output_tokens)
+			const subTokens = m.tool_result?.sub_agent_metadata?.token_usage;
+			if (subTokens) {
+				totalInput += subTokens.input;
+				totalOutput += subTokens.output;
+			}
 			if (m.cost_estimate != null) {
 				estimatedCost = (estimatedCost ?? 0) + m.cost_estimate;
 			}
@@ -438,6 +444,27 @@ export class ConversationManager {
 	 */
 	getEstimatedCost(): number | null {
 		return this.activeConversation?.estimated_cost ?? null;
+	}
+
+	/**
+	 * Accumulate token counts into the active conversation totals
+	 * without associating them with a specific message.
+	 *
+	 * Used for sub-agent token rollup, where the tokens should count
+	 * toward the conversation total (for billing display) but must NOT
+	 * inflate per-message estimates used by compaction/truncation.
+	 */
+	addTokens(input: number, output: number): void {
+		if (!this.activeConversation) {
+			throw new Error("No active conversation. Create or load one first.");
+		}
+		if (input) {
+			this.activeConversation.total_input_tokens += input;
+		}
+		if (output) {
+			this.activeConversation.total_output_tokens += output;
+		}
+		void this.onConversationChanged?.(this.activeConversation);
 	}
 
 	// -----------------------------------------------------------------------
