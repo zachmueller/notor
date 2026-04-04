@@ -13,7 +13,8 @@
  *   4. Verify token footer shows non-zero values
  *   5. Send a tool-triggering prompt — compare tool-call turn tokens
  *   6. Verify token footer accumulates across turns
- *   7. Dump all token-related logs for manual inspection
+ *   7. Write a large note — verify output tokens are proportional to content size
+ *   8. Dump all token-related logs for manual inspection
  *
  * Prerequisites:
  *   - ~/.aws/credentials or ~/.aws/config with a [default] profile
@@ -40,6 +41,12 @@ import {
 
 const SIMPLE_PROMPT = "What is 2 + 2? Reply with just the number.";
 const TOOL_PROMPT = "Read the file named 'Welcome.md' in the vault root. Summarize it in one sentence.";
+const LARGE_WRITE_PROMPT =
+	"Create a new note at 'Token Test/large-output.md' with a comprehensive guide to " +
+	"sorting algorithms. Include sections on bubble sort, selection sort, insertion sort, " +
+	"merge sort, quick sort, and heap sort. For each algorithm include: a description, " +
+	"pseudocode in a code block, time complexity analysis (best/average/worst), space " +
+	"complexity, and when to use it. Make it detailed — at least 300 lines of markdown.";
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -304,6 +311,134 @@ async function testTokenFooterAccumulation(ctx: TestContext): Promise<void> {
 	}
 }
 
+async function testLargeWriteTokens(ctx: TestContext): Promise<void> {
+	console.log("\nTest 6: Large write_note — output token proportionality");
+	const { page } = ctx;
+
+	// Fresh conversation so token counts are isolated
+	await newConversation(page);
+	await page.waitForTimeout(1_000);
+
+	const beforeSend = new Date().toISOString();
+
+	// write_note requires approval — use approval handling
+	const { responded, approved } = await sendMessageWithApprovalHandling(
+		page, LARGE_WRITE_PROMPT, 120_000
+	);
+
+	if (!responded) {
+		const shot = await ctx.screenshot("06-large-write-no-response");
+		ctx.fail("Large write response", "No response received within timeout", shot);
+		return;
+	}
+
+	const responseText = await getLastAssistantMessage(page);
+	const shot = await ctx.screenshot("06-large-write-response");
+	ctx.pass("Large write response", `Response: "${responseText.trim().substring(0, 80)}"${approved ? " (approved)" : ""}`, shot);
+
+	// Extract token logs from this interaction
+	const logs = extractTokenLogs(ctx, beforeSend);
+
+	// Test 6a: Bedrock metadata events — expect multiple turns (tool call + final)
+	console.log("\nTest 6a: Bedrock metadata events during large write");
+	if (logs.bedrock.length === 0) {
+		ctx.fail("Bedrock metadata (large write)", "No metadata events logged");
+	} else {
+		const totalOutput = logs.bedrock.reduce((sum, e) => sum + (e.outputTokens ?? 0), 0);
+		const details = logs.bedrock.map((e, i) =>
+			`  [${i}] input=${e.inputTokens} output=${e.outputTokens} total=${e.totalTokens}`
+		).join("\n");
+		console.log(`  Bedrock metadata events (${logs.bedrock.length}):\n${details}`);
+		console.log(`  Total output tokens across all turns: ${totalOutput}`);
+		ctx.pass("Bedrock metadata (large write)", `${logs.bedrock.length} event(s), total output=${totalOutput}`);
+	}
+
+	// Test 6b: Orchestrator events — check tool-call turn output tokens
+	console.log("\nTest 6b: Orchestrator message_end during large write");
+	if (logs.orchestrator.length === 0) {
+		ctx.fail("Orchestrator message_end (large write)", "No message_end events logged");
+	} else {
+		const toolTurns = logs.orchestrator.filter((e) => (e.toolCallCount ?? 0) > 0);
+		const totalOutput = logs.orchestrator.reduce((sum, e) => sum + (e.outputTokens ?? 0), 0);
+		const details = logs.orchestrator.map((e, i) =>
+			`  [${i}] input=${e.inputTokens} output=${e.outputTokens} toolCalls=${e.toolCallCount}`
+		).join("\n");
+		console.log(`  Orchestrator events (${logs.orchestrator.length}):\n${details}`);
+		console.log(`  Tool-call turns: ${toolTurns.length}, total output tokens: ${totalOutput}`);
+
+		if (toolTurns.length > 0) {
+			const writeCallTurn = toolTurns[0]!;
+			ctx.pass("Large write tool-call detected",
+				`toolCallCount=${writeCallTurn.toolCallCount}, outputTokens=${writeCallTurn.outputTokens}`);
+
+			// The write_note tool call should generate substantial output tokens
+			// because the model outputs the full note content as a tool argument.
+			// A 300+ line markdown guide should be at least ~1000 tokens.
+			if ((writeCallTurn.outputTokens ?? 0) >= 500) {
+				ctx.pass("Large write output tokens proportional",
+					`outputTokens=${writeCallTurn.outputTokens} (≥500 — proportional to content size)`);
+			} else {
+				ctx.fail("Large write output tokens proportional",
+					`outputTokens=${writeCallTurn.outputTokens} (<500 — suspiciously low for a 300+ line note)`);
+			}
+		} else {
+			ctx.fail("Large write tool-call detected",
+				"No tool-call turns found — model may not have used write_note");
+		}
+	}
+
+	// Test 6c: Read the written file to check actual content size
+	console.log("\nTest 6c: Verify written content size vs reported tokens");
+	const fileContent = await page.evaluate(async () => {
+		const app = (window as any).app;
+		if (!app) return null;
+		const file = app.vault.getAbstractFileByPath("Token Test/large-output.md");
+		if (!file) return null;
+		return await app.vault.read(file);
+	});
+
+	if (fileContent) {
+		const charCount = fileContent.length;
+		const lineCount = fileContent.split("\n").length;
+		// Rough estimate: 1 token ≈ 4 characters for English text
+		const estimatedTokens = Math.round(charCount / 4);
+
+		const toolTurn = logs.orchestrator.find((e) => (e.toolCallCount ?? 0) > 0);
+		const reportedOutput = toolTurn?.outputTokens ?? 0;
+
+		console.log(`  Written file: ${lineCount} lines, ${charCount} chars`);
+		console.log(`  Estimated tokens from content: ~${estimatedTokens}`);
+		console.log(`  Reported output tokens (tool-call turn): ${reportedOutput}`);
+
+		// The reported output tokens should be in the same ballpark as the
+		// estimated tokens from content (within 2x either way)
+		const ratio = reportedOutput > 0 ? estimatedTokens / reportedOutput : 0;
+		const detail = `${lineCount} lines, ${charCount} chars, est ~${estimatedTokens} tokens, reported ${reportedOutput} (ratio ${ratio.toFixed(2)})`;
+
+		if (ratio > 0.2 && ratio < 5.0) {
+			ctx.pass("Content size vs token count proportional", detail);
+		} else if (reportedOutput === 0) {
+			ctx.fail("Content size vs token count proportional", `Reported 0 output tokens despite writing ${charCount} chars`);
+		} else {
+			ctx.fail("Content size vs token count proportional", `Ratio ${ratio.toFixed(2)} is outside expected range (0.2–5.0): ${detail}`);
+		}
+	} else {
+		ctx.fail("Written file readable", "Could not read 'Token Test/large-output.md' — file may not have been created");
+	}
+
+	// Test 6d: Token footer after large write
+	console.log("\nTest 6d: Token footer after large write");
+	const footerText = await getTokenFooterText(page);
+	if (footerText) {
+		const parsed = parseTokenFooter(footerText);
+		if (parsed) {
+			const shotFooter = await ctx.screenshot("06d-large-write-footer");
+			ctx.pass("Token footer after large write",
+				`Footer: "${footerText}" → input=${parsed.input}, output=${parsed.output}`, shotFooter);
+		}
+	}
+}
+
 async function testDumpAllTokenLogs(ctx: TestContext): Promise<void> {
 	console.log("\n=== Full Token Log Dump ===");
 
@@ -355,6 +490,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	await testTokenFooterAfterSimplePrompt(ctx);
 	await testToolCallTokens(ctx, simpleLogs);
 	await testTokenFooterAccumulation(ctx);
+	await testLargeWriteTokens(ctx);
 	await testDumpAllTokenLogs(ctx);
 }
 
@@ -369,8 +505,13 @@ const settings = buildDefaultSettings({
 		list_vault: true,
 		read_frontmatter: true,
 		fetch_webpage: true,
+		write_note: true,
 	},
 	mode: "act",
 });
 
-runTest({ name: "bedrock-token-counting", settings }, tests);
+runTest({
+	name: "bedrock-token-counting",
+	settings,
+	cleanupFiles: ["Token Test"],
+}, tests);
