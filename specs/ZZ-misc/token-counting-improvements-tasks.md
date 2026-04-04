@@ -198,9 +198,12 @@ the footer. Sub-agent token rollup at lines 1553-1561 (foreground) and 997-1005
   - `src/export/html-exporter.ts` — updated to show `stop_reason` label
   - `src/chat/orchestrator.ts` — no references found (confirmed)
   - All tests updated to use new field names
-- [ ] **3D-4.** Verify: set `sub_agent_token_limit` to 5000, run a sub-agent
+- [x] **3D-4.** Verify: set `sub_agent_token_limit` to 5000, run a sub-agent
   task, confirm it stops with the token limit marker
-  - 🔜 Ready for manual testing
+  - ✅ Verified via `e2e/scripts/sub-agent-token-limit-test.ts` (7/7 pass)
+  - Pre-flight check fired at 2,268 tokens used (wind-down reserve 6,142 > limit 5,000)
+  - SubAgentRunner logged "approaching token limit (pre-flight)" with stopReason
+  - With limit=0, sub-agent completed normally (3 iterations, stopReason: "completed")
 
 ---
 
