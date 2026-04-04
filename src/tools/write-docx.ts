@@ -15,7 +15,7 @@
  * @see specs/04c-docx/spec.md — FR-72, FR-73, NFR-19
  */
 
-import { Platform } from "obsidian";
+import { Platform, getFrontMatterInfo } from "obsidian";
 import type { App } from "obsidian";
 import * as fs from "fs";
 import { join, dirname, extname } from "path";
@@ -40,6 +40,7 @@ import type { Tool, ToolResult } from "./tool";
 import type { NotorSettings } from "../settings";
 import { resolveAndValidatePath } from "../utils/path-validation";
 import { logger } from "../utils/logger";
+import { resolveNote } from "../utils/resolve-note";
 
 const log = logger("WriteDocxTool");
 
@@ -352,7 +353,11 @@ export class WriteDocxTool implements Tool {
 	readonly mode = "write" as const;
 
 	readonly description =
-		"Convert Markdown content to a .docx file on the filesystem. " +
+		"Convert Markdown to a .docx file on the filesystem. " +
+		"Provide either note_name (to convert an existing vault note directly) " +
+		"or content (to convert new Markdown the assistant has composed). " +
+		"When the source already exists as a vault note, prefer note_name to " +
+		"avoid regenerating content. " +
 		"Specify output_path for a full path, or filename + a configured default " +
 		"output directory. Optionally provide a template_path to inherit styles, " +
 		"margins, headers, and footers from an existing .docx file. " +
@@ -362,9 +367,20 @@ export class WriteDocxTool implements Tool {
 	readonly input_schema = {
 		type: "object",
 		properties: {
+			note_name: {
+				type: "string",
+				description:
+					"Path to an existing vault note whose Markdown content will be the docx source. " +
+					"Accepts vault-relative path, bare note name, or path without .md extension. " +
+					"Frontmatter is automatically stripped. " +
+					"Use this instead of content when converting a note that already exists in the vault.",
+			},
 			content: {
 				type: "string",
-				description: "Markdown content to convert to .docx.",
+				description:
+					"Markdown content to convert to .docx. " +
+					"Use this for new or custom content that does not exist as a vault note. " +
+					"Mutually exclusive with note_name.",
 			},
 			output_path: {
 				type: "string",
@@ -382,7 +398,7 @@ export class WriteDocxTool implements Tool {
 					"Path to a .docx template. Overrides the default template setting.",
 			},
 		},
-		required: ["content"],
+		required: [],
 	};
 
 	constructor(
@@ -391,17 +407,31 @@ export class WriteDocxTool implements Tool {
 	) {}
 
 	async execute(params: Record<string, unknown>): Promise<ToolResult> {
-		const content = params["content"] as string | undefined;
+		const rawContent = params["content"] as string | undefined;
+		const noteName = params["note_name"] as string | undefined;
 		const output_path = params["output_path"] as string | undefined;
 		const filename = params["filename"] as string | undefined;
 		const template_path = params["template_path"] as string | undefined;
 
-		if (!content || typeof content !== "string" || content.trim() === "") {
+		// --- Content source validation ---
+		const hasContent = rawContent !== undefined && typeof rawContent === "string" && rawContent.trim() !== "";
+		const hasNoteName = noteName !== undefined && typeof noteName === "string" && noteName.trim() !== "";
+
+		if (hasContent && hasNoteName) {
 			return {
 				tool_name: this.name,
 				success: false,
 				result: "",
-				error: "Missing required parameter: content",
+				error: "Provide either content or note_name, not both.",
+			};
+		}
+
+		if (!hasContent && !hasNoteName) {
+			return {
+				tool_name: this.name,
+				success: false,
+				result: "",
+				error: "Either content or note_name must be provided.",
 			};
 		}
 
@@ -422,6 +452,49 @@ export class WriteDocxTool implements Tool {
 				result: "",
 				error: "Could not determine vault root path.",
 			};
+		}
+
+		// ---------------------------------------------------------------------------
+		// Content source resolution
+		// ---------------------------------------------------------------------------
+
+		let content: string;
+
+		if (hasNoteName) {
+			const file = resolveNote(noteName!, this.app.vault, this.app.metadataCache);
+			if (!file) {
+				return {
+					tool_name: this.name,
+					success: false,
+					result: "",
+					error: `Note not found: ${noteName}`,
+				};
+			}
+			if (file.extension !== "md") {
+				return {
+					tool_name: this.name,
+					success: false,
+					result: "",
+					error: `Path is not a Markdown note: ${noteName}`,
+				};
+			}
+
+			const fullContent = await this.app.vault.read(file);
+			const fmInfo = getFrontMatterInfo(fullContent);
+			content = fmInfo.exists
+				? fullContent.slice(fmInfo.contentStart).replace(/^\n/, "")
+				: fullContent;
+
+			if (content.trim() === "") {
+				return {
+					tool_name: this.name,
+					success: false,
+					result: "",
+					error: `Note is empty (after stripping frontmatter): ${noteName}`,
+				};
+			}
+		} else {
+			content = rawContent!;
 		}
 
 		// Validate filename has no path separators
@@ -572,7 +645,8 @@ export class WriteDocxTool implements Tool {
 				bytes: buffer.length,
 			});
 
-			const successMessage = `Successfully wrote .docx file to ${resolvedOutputPath}`;
+			const sourceInfo = hasNoteName ? ` from note "${noteName}"` : "";
+			const successMessage = `Successfully wrote .docx file${sourceInfo} to ${resolvedOutputPath}`;
 			const result = filenameIgnored
 				? `Warning: filename was ignored because output_path was provided.\n\n${successMessage}`
 				: successMessage;

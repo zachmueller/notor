@@ -107,7 +107,8 @@ This specification covers:
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `content` | string | Yes | Markdown content to convert to `.docx`. |
+| `note_name` | string | Conditional | Path to an existing vault note whose Markdown content will be the docx source. Accepts vault-relative path, bare note name, or path without `.md` extension. Frontmatter is automatically stripped. Mutually exclusive with `content`. |
+| `content` | string | Conditional | Markdown content to convert to `.docx`. Use for new or custom content that does not exist as a vault note. Mutually exclusive with `note_name`. |
 | `output_path` | string | Conditional | Vault-relative or absolute output file path (including `.docx` extension). Required if `write_docx_default_output_dir` is not configured and `filename` is not provided. |
 | `filename` | string | No | Output filename without `.docx` extension. Combined with `write_docx_default_output_dir` to form the output path. |
 | `template_path` | string | No | Path to a `.docx` template. Vault-relative or absolute. Overrides `write_docx_default_template_path`. |

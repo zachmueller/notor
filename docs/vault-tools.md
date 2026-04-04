@@ -229,13 +229,14 @@ Reads a `.docx` file from the filesystem and returns its content converted to Ma
 
 ### `write_docx`
 
-Converts Markdown content to a `.docx` file and writes it to the filesystem. Supports headings (H1–H6), paragraphs, bold, italic, inline code, fenced code blocks, bullet lists, numbered lists, tables, blockquotes, horizontal rules, and links.
+Converts Markdown to a `.docx` file and writes it to the filesystem. Provide either `note_name` (to convert an existing vault note directly) or `content` (to convert new Markdown the assistant has composed). When the source already exists as a vault note, prefer `note_name` to avoid regenerating content. Supports headings (H1–H6), paragraphs, bold, italic, inline code, fenced code blocks, bullet lists, numbered lists, tables, blockquotes, horizontal rules, and links.
 
 **Parameters:**
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `content` | Yes | Markdown content to convert to `.docx`. |
+| `note_name` | Conditional | Path to an existing vault note whose Markdown content will be the docx source. Accepts vault-relative path, bare note name, or path without `.md` extension. Frontmatter is automatically stripped. Mutually exclusive with `content`. |
+| `content` | Conditional | Markdown content to convert to `.docx`. Use for new or custom content that does not exist as a vault note. Mutually exclusive with `note_name`. |
 | `output_path` | Conditional | Full output path including `.docx` extension. Required if `write_docx_default_output_dir` is not configured and `filename` is not provided. |
 | `filename` | No | Output filename without `.docx` extension. Combined with the default output directory setting to form the output path. |
 | `template_path` | No | Path to a `.docx` template. Vault-relative or absolute. Overrides the default template setting. |
