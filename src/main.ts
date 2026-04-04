@@ -476,11 +476,13 @@ export default class NotorPlugin extends Plugin {
 	// -----------------------------------------------------------------------
 
 	async loadSettings() {
-		const loaded = Object.assign(
-			{},
-			createDefaultSettings(this.app.vault.configDir),
-			await this.loadData()
-		);
+		const defaults = createDefaultSettings(this.app.vault.configDir);
+		const loaded = Object.assign({}, defaults, await this.loadData());
+
+		// Deep-merge keyed records so new default entries survive
+		// when the saved object replaces defaults via Object.assign.
+		loaded.auto_approve = { ...defaults.auto_approve, ...loaded.auto_approve };
+
 		if (this.settings) {
 			// Mutate the existing object so all components that captured a reference
 			// (e.g. ReadFileTool, ExecuteCommandTool) see the updated values.

@@ -424,7 +424,7 @@ export class UseSubagentTool implements Tool {
 		for (const name of this.toolRegistry.getNames()) {
 			tools[name] = {
 				enabled: true,
-				auto_approve: false,
+				auto_approve: this.settings.auto_approve[name] ?? false,
 				allowed_paths: [],
 				blocked_paths: [],
 			};

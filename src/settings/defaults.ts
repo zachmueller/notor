@@ -65,6 +65,10 @@ export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	read_file: false,
 	read_docx: false,
 	write_docx: false,
+	move_note: false,
+	write_file: false,
+	replace_in_file: false,
+	extract_docx_comments: false,
 	use_subagent: false,
 };
 
