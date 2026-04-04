@@ -15,6 +15,11 @@ vi.mock("../mcp/mcp-tool-adapter", () => ({
 	isMcpTool: () => false,
 }));
 
+// Mock model-metadata — return a large context window so it doesn't trigger
+vi.mock("../providers/model-metadata", () => ({
+	getContextWindow: () => 128_000,
+}));
+
 import { SubAgentRunner, type SubAgentResult, type SubAgentRunnerOptions } from "./sub-agent-runner";
 import type { LLMProvider, ChatMessage, StreamChunk, SendMessageOptions, ToolDefinition } from "../providers/provider";
 import type { ToolResult, ConversationMode } from "../types";
@@ -271,6 +276,9 @@ describe("SubAgentRunner", () => {
 			// Provider always returns tool calls, never text-only
 			const toolStream = toolCallStream("tc-loop", "search_vault", { q: "x" }, 5, 3);
 			const streams: StreamChunk[][] = Array.from({ length: 3 }, () => [...toolStream]);
+			// 4th stream: wind-down summary response
+			const summaryStream = textStream("Summary: searched 3 times.", 8, 4);
+			streams.push(summaryStream);
 
 			const tools = new Map([
 				["search_vault", {
@@ -295,11 +303,12 @@ describe("SubAgentRunner", () => {
 
 			expect(result.stopReason).toBe("iteration_cap");
 			expect(result.iterationCount).toBe(3);
-			expect(result.text).toContain("[Sub-agent reached iteration limit (3 turns)");
-			expect(result.text).toContain("Results may be incomplete");
-			// Token usage: 3 iterations × (5 input + 3 output)
-			expect(result.tokenUsage.input).toBe(15);
-			expect(result.tokenUsage.output).toBe(9);
+			// Wind-down produces a structured marker + summary
+			expect(result.text).toContain("[Sub-agent stopped: iteration limit (3 turns)]");
+			expect(result.text).toContain("Summary: searched 3 times.");
+			// Token usage: 3 iterations × (5 input + 3 output) + wind-down (8 + 4)
+			expect(result.tokenUsage.input).toBe(23);
+			expect(result.tokenUsage.output).toBe(13);
 		});
 	});
 

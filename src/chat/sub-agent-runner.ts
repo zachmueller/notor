@@ -23,6 +23,8 @@ import {
 	type ToolCallInfo,
 } from "./tool-orchestration";
 import { SUB_AGENT_ITERATION_CAP, SUB_AGENT_TOKEN_LIMIT } from "../sub-agents/constants";
+import { getContextWindow } from "../providers/model-metadata";
+import { estimateTokenCount } from "../utils/tokens";
 import { logger } from "../utils/logger";
 
 const log = logger("SubAgentRunner");
@@ -177,14 +179,34 @@ export class SubAgentRunner {
 							limit: this.tokenLimit,
 							windDownReserve,
 						});
-						const limitMarker = `[Sub-agent stopped: token limit (${(tokenUsage.input + tokenUsage.output).toLocaleString()} tokens used, limit ${this.tokenLimit.toLocaleString()}). Results may be incomplete.]`;
-						return {
-							text: lastText ? `${lastText}\n\n${limitMarker}` : limitMarker,
-							messages,
-							tokenUsage,
-							iterationCount,
-							stopReason: "token_limit",
-						};
+						return await this.runWindDown(messages, tokenUsage, iterationCount, "token_limit");
+					}
+				}
+
+				// Context window proximity check (Phase 4B)
+				if (streamResult) {
+					// Use last turn's actual API-reported input tokens as context size
+					const contextLimit = getContextWindow(this.model);
+					const lastInputTokens = streamResult.inputTokens;
+					const windDownReserve = lastInputTokens + 4096;
+					if (contextLimit > 0 && lastInputTokens + windDownReserve >= contextLimit) {
+						log.warn("Sub-agent approaching context window limit", {
+							lastInputTokens,
+							contextLimit,
+							windDownReserve,
+						});
+						return await this.runWindDown(messages, tokenUsage, iterationCount, "context_window");
+					}
+				} else {
+					// First iteration: use heuristic estimate (50% threshold)
+					const contextLimit = getContextWindow(this.model);
+					const estimatedTokens = this.estimateConversationTokens(messages);
+					if (contextLimit > 0 && estimatedTokens >= contextLimit * 0.5) {
+						log.warn("Sub-agent estimated context exceeds 50% of window (first iteration)", {
+							estimatedTokens,
+							contextLimit,
+						});
+						return await this.runWindDown(messages, tokenUsage, iterationCount, "context_window");
 					}
 				}
 
@@ -216,14 +238,7 @@ export class SubAgentRunner {
 						tokenUsage,
 						limit: this.tokenLimit,
 					});
-					const limitMarker = `[Sub-agent stopped: token limit (${(tokenUsage.input + tokenUsage.output).toLocaleString()} tokens used, limit ${this.tokenLimit.toLocaleString()}). Results may be incomplete.]`;
-					return {
-						text: lastText ? `${lastText}\n\n${limitMarker}` : limitMarker,
-						messages,
-						tokenUsage,
-						iterationCount,
-						stopReason: "token_limit",
-					};
+					return await this.runWindDown(messages, tokenUsage, iterationCount, "token_limit");
 				}
 
 				// --- Handle stream result ---
@@ -326,24 +341,129 @@ export class SubAgentRunner {
 				this.onProgress?.(`Executed ${toolNames} (turn ${iterationCount}/${this.iterationCap})`);
 			}
 
-			// --- Iteration cap reached ---
+			// --- Iteration cap reached → wind down ---
 			log.warn("Sub-agent reached iteration cap", {
 				cap: this.iterationCap,
 				lastTextLength: lastText.length,
 			});
-
-			const capMarker = `[Sub-agent reached iteration limit (${this.iterationCap} turns). Results may be incomplete.]`;
-			return {
-				text: lastText ? `${lastText}\n\n${capMarker}` : capMarker,
-				messages,
-				tokenUsage,
-				iterationCount,
-				stopReason: "iteration_cap",
-			};
+			return await this.runWindDown(messages, tokenUsage, iterationCount, "iteration_cap");
 		} finally {
 			// Clean up the parent abort listener
 			this.unlinkParentAbort();
 		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Wind-down: graceful summary before stopping
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Send one final LLM turn asking the model to summarize progress before
+	 * the sub-agent is terminated.
+	 */
+	private async runWindDown(
+		messages: ChatMessage[],
+		tokenUsage: { input: number; output: number },
+		iterationCount: number,
+		reason: "iteration_cap" | "token_limit" | "context_window",
+	): Promise<SubAgentResult> {
+		const reasonLabels: Record<typeof reason, string> = {
+			iteration_cap: `iteration limit (${iterationCount} turns)`,
+			token_limit: `token limit (${(tokenUsage.input + tokenUsage.output).toLocaleString()} tokens)`,
+			context_window: "context window proximity (~50%)",
+		};
+		const reasonLabel = reasonLabels[reason];
+
+		// Report progress
+		this.onProgress?.("Summarizing progress...");
+
+		// Append summarization instructions
+		messages.push({
+			role: "user",
+			content: [
+				`You are about to be stopped because you have reached the ${reasonLabel}.`,
+				"Before stopping, please provide a concise summary of:",
+				"1. What was accomplished",
+				"2. What remains to be done",
+				"3. Key findings or results so far",
+				"",
+				"Do NOT call any tools. Respond with text only.",
+			].join("\n"),
+		});
+
+		// Send the summary turn — pass toolDefinitions (NOT empty []) because
+		// Bedrock requires toolConfig when conversation history contains
+		// toolUse/toolResult blocks.
+		const sendOptions: SendMessageOptions = {
+			model: this.model,
+			abort_signal: this.abortController.signal,
+		};
+
+		try {
+			const stream = this.provider.sendMessage(
+				messages,
+				this.toolDefinitions,
+				sendOptions,
+			);
+
+			const streamResult = await this.consumeStream(stream);
+
+			// Accumulate tokens from the summary turn
+			tokenUsage.input += streamResult.inputTokens;
+			tokenUsage.output += streamResult.outputTokens;
+
+			// Use whatever text was generated (ignore tool calls if model made them)
+			const summaryText = streamResult.text || "[No summary generated]";
+			const marker = `[Sub-agent stopped: ${reasonLabel}]`;
+
+			return {
+				text: `${marker}\n\n${summaryText}`,
+				messages,
+				tokenUsage,
+				iterationCount,
+				stopReason: reason,
+			};
+		} catch (err) {
+			// If the summary turn fails, fall back to a static marker
+			log.warn("Wind-down summary turn failed", { error: err });
+			const marker = `[Sub-agent stopped: ${reasonLabel}]`;
+
+			return {
+				text: marker,
+				messages,
+				tokenUsage,
+				iterationCount,
+				stopReason: reason,
+			};
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Context window estimation
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Heuristic token estimate for the full conversation — used on the first
+	 * iteration when no API-reported input token count is available yet.
+	 * Accounts for tool_calls and tool_results arrays, not just msg.content.
+	 */
+	private estimateConversationTokens(messages: ChatMessage[]): number {
+		let total = 0;
+		for (const msg of messages) {
+			total += estimateTokenCount(msg.content);
+			if (msg.tool_calls) {
+				for (const tc of msg.tool_calls) {
+					total += estimateTokenCount(tc.tool_name);
+					total += estimateTokenCount(JSON.stringify(tc.parameters));
+				}
+			}
+			if (msg.tool_results) {
+				for (const tr of msg.tool_results) {
+					total += estimateTokenCount(tr.result);
+				}
+			}
+		}
+		return total;
 	}
 
 	// -----------------------------------------------------------------------

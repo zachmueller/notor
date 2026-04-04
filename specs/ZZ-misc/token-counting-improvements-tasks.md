@@ -215,7 +215,7 @@ the footer. Sub-agent token rollup at lines 1553-1561 (foreground) and 997-1005
 
 **File:** `src/chat/sub-agent-runner.ts`
 
-- [ ] **4A-1.** Add `runWindDown` private async method with signature:
+- [x] **4A-1.** Add `runWindDown` private async method with signature:
   ```
   private async runWindDown(
       messages: ChatMessage[],
@@ -224,35 +224,35 @@ the footer. Sub-agent token rollup at lines 1553-1561 (foreground) and 997-1005
       reason: "iteration_cap" | "token_limit" | "context_window",
   ): Promise<SubAgentResult>
   ```
-- [ ] **4A-2.** Implement reason labels mapping:
+- [x] **4A-2.** Implement reason labels mapping:
   - `iteration_cap` → "iteration limit (N turns)"
   - `token_limit` → "token limit (N tokens)"
   - `context_window` → "context window proximity (~50%)"
-- [ ] **4A-3.** Append a user message with summarization instructions
+- [x] **4A-3.** Append a user message with summarization instructions
   - Tell the model it's about to be stopped and why
   - Request: what was accomplished, what remains, key findings
   - Instruct: "Do NOT call any tools. Respond with text only."
-- [ ] **4A-4.** Send the summary turn via `this.provider.sendMessage()`
+- [x] **4A-4.** Send the summary turn via `this.provider.sendMessage()`
   - Pass `this.toolDefinitions` (NOT empty `[]`) — Bedrock requires `toolConfig`
     when conversation history contains `toolUse`/`toolResult` blocks
   - Pass the abort signal
-- [ ] **4A-5.** Consume the stream and accumulate tokens
+- [x] **4A-5.** Consume the stream and accumulate tokens
   - If the model makes tool calls anyway, ignore them and use whatever text was
     generated
-- [ ] **4A-6.** Build and return `SubAgentResult`:
+- [x] **4A-6.** Build and return `SubAgentResult`:
   - Prepend `[Sub-agent stopped: <reason label>]` marker
   - Include summary text (or fallback message if no text returned)
   - Set `stopReason` to the `reason` parameter
-- [ ] **4A-7.** Call `this.onProgress?.()` with a status message before the
+- [x] **4A-7.** Call `this.onProgress?.()` with a status message before the
   summary turn so the user sees "Summarizing progress..." in the UI
 
 ### Phase 4B: Context Window Proximity Trigger
 
 **File:** `src/chat/sub-agent-runner.ts`
 
-- [ ] **4B-1.** Import `getContextWindow` from `src/providers/model-metadata.ts`
+- [x] **4B-1.** Import `getContextWindow` from `src/providers/model-metadata.ts`
   (function at line 578)
-- [ ] **4B-2.** Add context window check inside the `while` loop, before the LLM
+- [x] **4B-2.** Add context window check inside the `while` loop, before the LLM
   call (after the abort check at lines 147-156)
   - Use `streamResult?.inputTokens` (last turn's actual API-reported input
     tokens) as the most accurate measure of current context size
@@ -261,14 +261,14 @@ the footer. Sub-agent token rollup at lines 1553-1561 (foreground) and 997-1005
     `runWindDown(..., "context_window")`
   - Guard: only check when `contextLimit > 0` and `streamResult` exists (skip
     first iteration)
-- [ ] **4B-3.** Add `estimateConversationTokens` fallback method for the first
+- [x] **4B-3.** Add `estimateConversationTokens` fallback method for the first
   iteration (when `streamResult` is undefined)
   - Must account for `tool_calls` and `tool_results` arrays on messages, not
     just `msg.content` (which is `""` for tool messages)
   - Use `estimateTokenCount()` from `src/utils/tokens.ts` (line 39)
   - Use 50% threshold (not 70%) to compensate for heuristic inaccuracy on
     code/JSON content
-- [ ] **4B-4.** Note: `getContextWindow()` falls back to
+- [x] **4B-4.** Note: `getContextWindow()` falls back to
   `DEFAULT_CONTEXT_WINDOW = 128_000` for unknown models (line 584 in
   `model-metadata.ts`). This is conservative enough — triggering at ~64K tokens.
   Acceptable edge case for now.
@@ -282,33 +282,44 @@ yields `{ type: "cancelled", text }` without token fields. The `consumeStream`
 method's `cancelled` branch (around line 345) may return 0 tokens even if
 `message_end` was received before cancellation.
 
-- [ ] **4B½-1.** In `consumeStream` (lines 308-363), verify that
+- [x] **4B½-1.** In `consumeStream` (lines 308-363), verify that
   `inputTokens`/`outputTokens` are accumulated as side-channel state that
   persists regardless of result type
   - Check the `ConsumedStreamResult` cancelled variant (lines 370-373) — it
     already includes `inputTokens`/`outputTokens` fields
   - Verify the `cancelled` case in the event loop populates these from the
     accumulated values (not from the event, which doesn't have token fields)
-- [ ] **4B½-2.** If the cancelled variant returns 0 tokens despite `message_end`
+  - ✅ Verified: `consumeStream` (lines 477-532) declares `inputTokens`/`outputTokens`
+    as local variables that persist across the event loop. `message_end` sets them
+    (line 500-501), and the `cancelled` return path (lines 514-521) returns these
+    accumulated values. Already correct — no fix needed.
+- [x] **4B½-2.** If the cancelled variant returns 0 tokens despite `message_end`
   having been received earlier in the stream, fix by ensuring the `cancelled`
   return path uses the accumulated `inputTokens`/`outputTokens` variables
+  - ✅ Already correct — no fix needed (see 4B½-1 verification)
 
 ### Phase 4C: Wire Wind-Down into Existing Paths
 
 **File:** `src/chat/sub-agent-runner.ts`
 
-- [ ] **4C-1.** Replace iteration-cap-reached block (lines 280-293) with:
+- [x] **4C-1.** Replace iteration-cap-reached block (lines 280-293) with:
   `return await this.runWindDown(messages, tokenUsage, iterationCount, "iteration_cap");`
-- [ ] **4C-2.** Replace the Phase 3 temporary token-limit return (task 3C-2)
+- [x] **4C-2.** Replace the Phase 3 temporary token-limit return (task 3C-2)
   with: `return await this.runWindDown(messages, tokenUsage, iterationCount, "token_limit");`
+  - Also replaced pre-flight token-limit return (task 3C-3) with wind-down call
 - [ ] **4C-3.** Verify iteration cap wind-down: set cap to 3, run a research
   sub-agent, confirm structured summary instead of raw "[Results may be
   incomplete]" marker
+  - ✅ Unit test passes: iteration cap → wind-down summary turn fires, marker
+    format is `[Sub-agent stopped: iteration limit (N turns)]` + summary text
+  - 🔜 Ready for manual E2E testing
 - [ ] **4C-4.** Verify token limit wind-down: set low token limit, confirm
   summary triggers on token exhaustion
+  - 🔜 Ready for manual E2E testing
 - [ ] **4C-5.** Verify context window wind-down: feed a sub-agent a task that
   generates huge tool results, confirm the context window check triggers and
   produces a summary
+  - 🔜 Ready for manual E2E testing
 
 ---
 
