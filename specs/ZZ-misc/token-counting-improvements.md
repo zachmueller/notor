@@ -10,6 +10,26 @@ diagnostic logging, and (4) sub-agent limits are iteration-based rather than
 token-based. These need to be fixed in order before we can build the more ambitious
 features (token-limited sub-agents, graceful wind-down with auto-summary).
 
+### Token categorization clarification
+
+The APIs already classify tool-call content as **output tokens**. When the LLM generates
+`write_file(content="500 lines...")`, that entire response counts as `output_tokens` in
+the API response. The large `input_tokens` number seen on tool-call turns is the
+**conversation history being re-sent** to the model, not tool content being miscategorized.
+
+The perception that "tokens aren't going up during tool calls" likely stems from one or
+more of:
+- **(a)** The Anthropic input-tokens-always-0 bug (Phase 1C) makes it look like input
+  tokens are 0 for text turns and suddenly large for tool turns — creating the illusion
+  of miscategorization.
+- **(b)** The footer not updating during tool-call rounds (Phase 2) means accumulated
+  tokens from tool turns are invisible until the final text response.
+- **(c)** A real Bedrock-specific bug where `outputTokens` doesn't include tool-use
+  content for certain models.
+
+**Phase 1A diagnostic logging is the prerequisite** for determining which interpretation
+is correct. Do not assume (c) — verify with data first.
+
 ---
 
 ## Phase 1: Audit & Fix Token Counting Across All Providers
@@ -85,6 +105,12 @@ if (event.metadata) {
    at line 375-377 causes `return` before the `metadata` event arrives), tokens are
    lost. The abort check fires BEFORE yielding the event, so a race condition is
    possible where the metadata event is in the buffer but the abort fires first.
+   **Note:** This race exists at two layers — the Bedrock provider level (lines
+   375-377) AND the `parseStreamEvents` consumer in `src/chat/stream-utils.ts`
+   (which has its own abort check that can discard `message_end` chunks). Both
+   layers must be addressed, e.g., by ensuring `message_end` events are always
+   processed before yielding a `cancelled` result, or by accumulating token counts
+   as a side-channel that survives cancellation.
 
 2. **`usage` might be undefined** — The `if (usage)` guard silently drops the case
    where `event.metadata` exists but `event.metadata.usage` is undefined. Add logging
@@ -103,20 +129,24 @@ if (event.metadata) {
 
 The Anthropic streaming API splits token reporting across two events:
 
-- `message_start` → `message.usage.input_tokens`
-- `message_delta` → `usage.output_tokens`
+- `message_start` → `data.message.usage.input_tokens` (nested under `message`)
+- `message_delta` → `data.usage.output_tokens` (at top-level `usage`)
 
 In `src/providers/anthropic-provider.ts:358-362`, `message_start` is ignored. The
 `message_delta` handler at line 348 falls back to `data.usage.input_tokens ?? 0`,
-which is always 0. **Result: every Anthropic turn reports 0 input tokens.**
+which is always 0 because `message_delta` does not include `input_tokens`.
+**Result: every Anthropic turn reports 0 input tokens.**
 
 **Fix:** `handleAnthropicEvent` is a stateless generator method, so state must be
 held in `parseAnthropicStream`. Pass a mutable state object:
 
 - Create `streamState = { pendingInputTokens: 0 }` in `parseAnthropicStream`
 - Pass it into `handleAnthropicEvent` as a parameter
-- `message_start` writes to `streamState.pendingInputTokens`
-- `message_delta` reads from `streamState.pendingInputTokens`
+- `message_start` writes `data.message?.usage?.input_tokens` to
+  `streamState.pendingInputTokens` (**IMPORTANT:** use the nested
+  `data.message.usage` path, NOT `data.usage`)
+- `message_delta` reads from `streamState.pendingInputTokens` for input_tokens
+  and from `data.usage.output_tokens` for output_tokens
 
 ### 1D: OpenAI Provider — Verify (likely fine)
 
@@ -257,13 +287,19 @@ sub_agent_token_limit: 0,  // No token limit by default (iteration cap is primar
    }
    ```
 
-3. Also add a **pre-flight check** before the LLM call (after the abort check at line 147):
+3. Also add a **pre-flight check** before the LLM call (after the abort check at line 147).
+   The threshold must reserve headroom for the wind-down summary turn (which re-sends
+   the full conversation). Use the last turn's `inputTokens` as a proxy for wind-down cost:
    ```typescript
-   // Pre-flight: if we're already past 90% of token limit, wind down now
-   // rather than risking a large turn that pushes us way over
+   // Pre-flight: ensure we have enough token budget left for at least one
+   // more turn PLUS a wind-down summary turn.
    if (this.tokenLimit > 0) {
        const totalTokens = tokenUsage.input + tokenUsage.output;
-       if (totalTokens >= this.tokenLimit * 0.9) {
+       // Reserve: last input cost (conversation will be at least this big)
+       // + estimated max output (~4096 tokens for summary)
+       const lastInputCost = streamResult?.inputTokens ?? 0;
+       const windDownReserve = lastInputCost + 4096;
+       if (totalTokens + windDownReserve >= this.tokenLimit) {
            return await this.runWindDown(messages, tokenUsage, iterationCount, "token_limit");
        }
    }
@@ -285,11 +321,13 @@ export const SUB_AGENT_TOKEN_LIMIT = 0;
 `SubAgentResult.wasCapReached` currently covers only iteration cap. Options:
 
 A. Keep single boolean, reinterpret as "was the sub-agent stopped early for any reason"
-B. Add `stopReason: "completed" | "iteration_cap" | "token_limit" | "context_window"`
+B. Replace `wasCapReached` with `stopReason: "completed" | "iteration_cap" | "token_limit" | "context_window"`
 
 **Recommendation:** Option B. The `stopReason` field gives the parent orchestrator
-(and the user via the UI) clear info about WHY the sub-agent stopped. The existing
-`wasCapReached` is kept for backward compat but computed from `stopReason !== "completed"`.
+(and the user via the UI) clear info about WHY the sub-agent stopped. **Remove
+`wasCapReached` entirely** — it overlaps with `stopReason`. Callers that checked
+`wasCapReached` should check `stopReason !== "completed"` instead. Update call sites
+in `src/tools/use-subagent.ts` and `src/chat/orchestrator.ts`.
 
 ### Verification
 
@@ -317,6 +355,13 @@ the sub-agent gets one final "summary turn":
 
 Using empty tool definitions instead of a system message is critical — it's the only
 way to guarantee the LLM won't try to make more tool calls in the summary turn.
+
+**Bedrock caveat:** Bedrock may reject requests where the conversation history contains
+`toolUse`/`toolResult` content blocks but no `toolConfig` is provided (since
+`toBedrockToolConfig([])` returns `undefined`, omitting the config entirely). This
+must be tested explicitly with Bedrock. Fallback approach: include tool definitions
+but rely on the prompt instruction "Do NOT call any tools" — less reliable but avoids
+API compatibility issues.
 
 ### Phase 4A: `runWindDown` method
 
@@ -383,41 +428,56 @@ private async runWindDown(
 ### Phase 4B: Context Window Proximity Trigger
 
 **`src/chat/sub-agent-runner.ts`** — Inside the `while` loop, before the LLM call
-(after the abort check):
+(after the abort check).
+
+**Preferred approach: Use actual API token counts** instead of character-based
+estimation. The sub-agent already tracks `tokenUsage.input` which reflects the actual
+input token count from the last turn. This IS the current conversation context size
+(the API re-reads the full conversation each turn). This is far more accurate than
+the `estimateTokenCount` heuristic (which uses `CHARS_PER_TOKEN = 4` and can be
+25-40% off for code/JSON content).
 
 ```typescript
 // Check context window proximity (Phase 4B)
+// Use actual API-reported input tokens from last turn as the most accurate
+// measure of current context size. Reserve headroom for wind-down turn.
 const contextLimit = getContextWindow(this.model);
-if (contextLimit > 0) {
-    const estimatedUsage = this.estimateConversationTokens(messages);
-    if (estimatedUsage >= contextLimit * 0.7) {
+if (contextLimit > 0 && tokenUsage.input > 0) {
+    // lastInputTokens = input tokens from the most recent API response
+    // This equals the full conversation context the model processed
+    const lastInputTokens = streamResult?.inputTokens ?? 0;
+    const windDownReserve = lastInputTokens + 4096; // room for summary turn
+    if (lastInputTokens + windDownReserve >= contextLimit) {
         return await this.runWindDown(messages, tokenUsage, iterationCount, "context_window");
     }
 }
 ```
 
-Helper method:
+**Fallback (if actual token counts aren't available on the first iteration):**
+Use `estimateConversationTokens` as a floor estimate, but it MUST account for
+tool content in `tool_calls` and `tool_results` arrays (not just `msg.content`,
+which is `""` for tool messages):
+
 ```typescript
 private estimateConversationTokens(messages: ChatMessage[]): number {
     let total = 0;
     for (const msg of messages) {
         total += estimateTokenCount(msg.content);
         if (msg.tool_calls) {
-            for (const tc of msg.tool_calls) {
-                total += estimateTokenCount(JSON.stringify(tc.parameters));
-            }
+            // tool_call messages have content="" — the real tokens are here
+            total += estimateTokenCount(JSON.stringify(msg.tool_calls));
         }
         if (msg.tool_results) {
-            for (const tr of msg.tool_results) {
-                total += estimateTokenCount(
-                    typeof tr.result === "string" ? tr.result : JSON.stringify(tr.result)
-                );
-            }
+            // tool_result messages have content="" — the real tokens are here
+            total += estimateTokenCount(JSON.stringify(msg.tool_results));
         }
     }
     return total;
 }
 ```
+
+Use 50% threshold (not 70%) with the estimation fallback to compensate for the
+heuristic's inaccuracy on code/JSON content.
 
 ### Phase 4C: Wire into existing cap-reached path
 
@@ -461,10 +521,14 @@ setting and check. Phase 4 builds the summary infrastructure on top.
 ## Open Questions
 
 1. **Default token limit value:** 0 (unlimited) vs. concrete default? See Phase 3 notes.
-2. **Summary turn token budget:** The summary turn itself costs tokens. Should we
-   reserve a token budget for it (e.g., always leave 10% headroom for the summary)?
-   Currently the 70% context window threshold provides implicit headroom, but the
-   token limit check at 90% is tighter.
-3. **`stopReason` on `SubAgentResult`:** Add a string enum field, or keep the boolean?
-   Leaning toward the enum for clarity.
+2. ~~**Summary turn token budget:**~~ **RESOLVED.** Pre-flight checks now reserve
+   headroom based on last turn's `inputTokens` + 4096 for the summary response.
+3. ~~**`stopReason` on `SubAgentResult`:**~~ **RESOLVED.** Replace `wasCapReached` with
+   `stopReason` enum. Update all call sites.
 4. **Footer "pending" indicator:** Worth the UX polish, or skip for now?
+5. **Bedrock empty-tools compatibility:** Does Bedrock accept requests with no
+   `toolConfig` when conversation history contains `toolUse`/`toolResult` blocks?
+   Must be tested before committing to the Phase 4A approach.
+6. **Root cause of user's token concern:** Is it (a) the Anthropic input-tokens-always-0
+   bug, (b) footer not updating during tool rounds, or (c) a real Bedrock model-specific
+   issue? Phase 1A logging should answer this before Phase 3+ work begins.
