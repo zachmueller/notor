@@ -115,9 +115,13 @@ the footer. Sub-agent token rollup at lines 1553-1561 (foreground) and 997-1005
   - Same pattern but using `bgConvManager` — check if there's a view reference
     available in the background path; if not, skip (background processing may
     not have a view)
-- [ ] **2-4.** Verify: start a conversation triggering multiple sequential tool
+- [x] **2-4.** Verify: start a conversation triggering multiple sequential tool
   calls (e.g., "read these 3 files and summarize them"). Observe that the token
   footer updates after each tool-call round, not just at the end.
+  - ✅ Verified via `e2e/scripts/token-footer-realtime-test.ts` (10/10 pass)
+  - Footer showed 3 distinct incremental values during single tool-call turn
+  - Multi-tool prompt showed monotonically non-decreasing accumulation
+  - Sequential prompts confirmed growth across turns
 
 ---
 
