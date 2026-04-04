@@ -100,17 +100,17 @@ switch) and line 1414 (final text response). The tool-calls branch (lines
 the footer. Sub-agent token rollup at lines 1553-1561 (foreground) and 997-1005
 (background) has the same gap.
 
-- [ ] **2-1.** Add `updateTokenFooter` call after tool-call turn tokens are
+- [x] **2-1.** Add `updateTokenFooter` call after tool-call turn tokens are
   recorded (after the `addMessage` block at lines 1429-1437)
   - Read conversation via `this.conversationManager.getActiveConversation()`
   - Call `this.view?.updateTokenFooter(conv.total_input_tokens, conv.total_output_tokens, conv.estimated_cost)`
   - Guard with `if (conv)` null check
-- [ ] **2-2.** Add `updateTokenFooter` call after each tool_result `addMessage`
+- [x] **2-2.** Add `updateTokenFooter` call after each tool_result `addMessage`
   in the foreground tool result loop (after line 1561)
   - Same pattern: get active conversation, call `updateTokenFooter`
   - This captures sub-agent token rollup incrementally so the footer updates as
     each sub-agent completes
-- [ ] **2-3.** Add `updateTokenFooter` call after each tool_result `addMessage`
+- [x] **2-3.** Add `updateTokenFooter` call after each tool_result `addMessage`
   in the background response loop (after line 1005)
   - Same pattern but using `bgConvManager` — check if there's a view reference
     available in the background path; if not, skip (background processing may

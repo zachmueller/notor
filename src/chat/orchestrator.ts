@@ -1014,6 +1014,16 @@ export class ChatOrchestrator {
 					});
 				}
 
+				// Update token footer after background tool result token rollup
+				const bgConvForFooter = bgConvManager.getActiveConversation();
+				if (bgConvForFooter) {
+					this.view?.updateTokenFooter(
+						bgConvForFooter.total_input_tokens,
+						bgConvForFooter.total_output_tokens,
+						bgConvForFooter.estimated_cost
+					);
+				}
+
 				// Continue the loop
 				continueLoop = true;
 			} else {
@@ -1434,6 +1444,16 @@ export class ChatOrchestrator {
 							output_tokens: result.outputTokens,
 							cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens),
 						});
+
+						// Update token footer after tool-call turn tokens are recorded
+						const convAfterToolTokens = this.conversationManager.getActiveConversation();
+						if (convAfterToolTokens) {
+							this.view?.updateTokenFooter(
+								convAfterToolTokens.total_input_tokens,
+								convAfterToolTokens.total_output_tokens,
+								convAfterToolTokens.estimated_cost
+							);
+						}
 					}
 
 					// --- Step 1: Add all tool_call messages and render UI ---
@@ -1582,6 +1602,16 @@ export class ChatOrchestrator {
 								this.settings,
 								vaultRootPath,
 								this.workflowHookOverrideManager
+							);
+						}
+
+						// Update token footer after sub-agent token rollup
+						const convAfterToolResult = this.conversationManager.getActiveConversation();
+						if (convAfterToolResult) {
+							this.view?.updateTokenFooter(
+								convAfterToolResult.total_input_tokens,
+								convAfterToolResult.total_output_tokens,
+								convAfterToolResult.estimated_cost
 							);
 						}
 					}
