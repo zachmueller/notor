@@ -476,10 +476,25 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 
 **Verification:** Attach a PDF → Anthropic receives native document block, OpenAI receives extracted text. Use `read_file` on a PDF with `pages` param → correct pages extracted. Test with corrupt/encrypted PDFs → graceful errors.
 
+### Phase 2.5: DOCX Image Handling
+
+**Goal:** Full image support in `read_docx` (extraction to vault) and `write_docx` (embedding from vault). Independent of the Content Block System — can begin immediately.
+
+**Files to create:**
+- `src/tools/docx-image-utils.ts` — `resolveImageForDocx()`, image dimension parsing, format mapping
+
+**Files to modify:**
+- `src/mammoth.d.ts` — expand type declarations (§10.3)
+- `src/tools/read-docx.ts` — mammoth `convertImage` handler, Turndown rule rewrite, vault image persistence via `app.vault.createBinary()`
+- `src/tools/write-docx.ts` — add `ImageRun` import, `image` case in `buildDocxChildren()`, make functions async, fix template grafting for media/relationship/content-type merging
+
+**Verification:** `read_docx` on a docx with images → images saved to attachment folder with MD5 filenames → markdown contains `![alt](path)` → images render in Obsidian preview. `write_docx` with image markdown → open output in Word → images render. Template grafting with images → styles preserved AND images present. Duplicate images across multiple calls → same MD5 filename, no overwrites. Mixed formats (PNG + EMF + JPEG) → supported work, unsupported get text placeholders.
+
+See §10 for full implementation details.
+
 ### Phase 4: Polish & Edge Cases
 
 - Handle MCP tool results with images (currently omitted)
-- Handle images within Word documents (currently `[image]` placeholders in `read_docx`)
 - Drag-and-drop support for images/PDFs on chat input
 - Image thumbnail preview in attachment chips
 - Context compaction awareness for binary content
@@ -511,3 +526,330 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 | `pdfjs-dist` | PDF rendering engine | **Maybe** | Peer dep of unpdf. Large (~2-3MB). May need lazy loading. |
 
 Goal: exactly **one** new production dependency (the PDF library). Image handling requires **zero** new dependencies thanks to Electron's DOM APIs.
+
+---
+
+## 10. DOCX Image Handling
+
+The three docx tools (`read_docx`, `write_docx`, `extract_docx_comments`) currently have no image support. `read_docx` replaces all images with `[image]` placeholders; `write_docx` silently drops image tokens; `extract_docx_comments` is text-only and out of scope for images.
+
+This section details how to add full image support to `read_docx` and `write_docx`. Both changes are **independent of the Content Block System** (Phases 1–3) — they are pure filesystem I/O and can be implemented immediately as Phase 2.5.
+
+### 10.1 `read_docx` — Image Extraction & Vault Persistence
+
+**Strategy:** Extract images from docx via mammoth's `convertImage` API, save each to the vault's configured attachment folder with MD5-based filenames, and reference them in the output markdown via standard `![alt](path)` embedding.
+
+This approach means:
+- Images become first-class vault files the user can browse, reuse, and reference
+- The markdown output is self-contained and renderable in Obsidian's preview
+- No dependency on the Content Block System (Phases 1–2)
+- MD5 filenames prevent overwrites: if the same image appears in multiple documents, it resolves to the same file without collision with user-named files
+
+**Obsidian attachment folder API:**
+
+```typescript
+// Respects user's Settings → Files & Links → Default location for new attachments
+const vaultPath = await app.fileManager.getAvailablePathForAttachment(
+  filename,    // e.g., "a1b2c3d4e5f6.png"
+  sourcePath   // optional: vault-relative note path for "same folder" mode
+);
+// Returns vault-relative path, e.g., "Attachments/a1b2c3d4e5f6.png"
+
+// Save binary to vault
+await app.vault.createBinary(vaultPath, arrayBuffer);
+```
+
+**Implementation:**
+
+**Step 1 — mammoth `convertImage` handler** ([`src/tools/read-docx.ts`](../src/tools/read-docx.ts)):
+
+```typescript
+import { createHash } from "crypto";
+
+interface ExtractedImage {
+  vaultPath: string;      // where the image was saved in the vault
+  contentType: string;
+  altText: string;
+}
+
+const extractedImages: ExtractedImage[] = [];
+
+const options = {
+  convertImage: mammoth.images.imgElement(async (image) => {
+    const contentType = image.contentType;
+
+    // Skip unsupported formats (EMF, WMF, TIFF, SVG)
+    const supported = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+    if (!supported.includes(contentType)) {
+      return {
+        src: `__notor_skip__`,
+        alt: `[Unsupported image format: ${contentType}]`,
+      };
+    }
+
+    try {
+      const buffer = await image.readAsBuffer();
+
+      // MD5-based filename prevents accidental overwrites
+      const hash = createHash("md5").update(buffer).digest("hex");
+      const ext = contentType.split("/")[1] === "jpeg" ? "jpg" : contentType.split("/")[1];
+      const filename = `${hash}.${ext}`;
+
+      // Resolve against user's attachment folder setting
+      const targetPath = await this.app.fileManager.getAvailablePathForAttachment(filename);
+      const existingFile = this.app.vault.getFileByPath(targetPath);
+
+      if (!existingFile) {
+        await this.app.vault.createBinary(targetPath, buffer.buffer);
+      }
+
+      const index = extractedImages.length;
+      extractedImages.push({ vaultPath: targetPath, contentType, altText: "" });
+
+      return { src: `__notor_img_${index}__`, alt: "" };
+    } catch (e) {
+      log.warn("Failed to extract image from docx", { error: e });
+      return { src: `__notor_skip__`, alt: "[Image: extraction failed]" };
+    }
+  }),
+};
+
+const { value: html } = await mammoth.convertToHtml({ buffer: buf }, options);
+```
+
+**Step 2 — Turndown rule rewrite** — replace the current blanket `[image]` rule with vault-path markdown embeds:
+
+```typescript
+td.addRule("replaceImages", {
+  filter: (node) => node.nodeName === "IMG",
+  replacement: (_content, node) => {
+    const src = (node as HTMLElement).getAttribute("src") || "";
+    const alt = (node as HTMLElement).getAttribute("alt") || "";
+
+    // Unsupported format — render alt text
+    if (src === "__notor_skip__") return alt;
+
+    // Extracted image — standard markdown embed
+    const match = src.match(/__notor_img_(\d+)__/);
+    if (match) {
+      const img = extractedImages[parseInt(match[1])];
+      if (img) return `![${img.altText || "image"}](${img.vaultPath})`;
+    }
+
+    return "[image]"; // fallback
+  },
+});
+```
+
+**Step 3 — Result** — the tool returns standard markdown with embedded image references:
+
+```markdown
+# Document Title
+
+Some text above the image.
+
+![image](Attachments/a1b2c3d4e5f6.png)
+
+More text below the image.
+```
+
+The LLM receives this markdown and can see the image paths. If the broader image handling system (Phase 2) is also active, the LLM could use `read_file` to actually view the images. Without Phase 2, the LLM at least knows the images exist and where they are.
+
+**MD5 deduplication behavior:**
+- Same image in the same document (e.g., repeated logo): saved once, referenced multiple times
+- Same image across different documents: reuses the existing vault file
+- Different images: guaranteed different filenames (MD5 collision probability is negligible)
+- User's existing files are never overwritten: MD5 hashes won't collide with human-named files
+
+**Edge cases:**
+
+| Scenario | Behavior |
+|----------|----------|
+| EMF/WMF (Windows metafiles) | Skip — `[Unsupported image format: image/x-emf]` in markdown |
+| SVG | Skip — not supported by vision APIs |
+| TIFF | Skip — not web-renderable |
+| Corrupt/unreadable image | Skip with `[Image: extraction failed]` + warning log |
+| Very large image (>20MB buffer) | Still save — vault handles large files fine |
+| Attachment folder doesn't exist | Obsidian's `getAvailablePathForAttachment` creates it |
+| No images in document | No files saved, markdown identical to current output |
+| `read_docx` called on mobile | Already blocked by platform guard |
+
+**Dependencies:** None on the Content Block System. Requires the `mammoth.d.ts` type update (§10.3) and access to `this.app` for vault operations. The `ReadDocxTool` constructor already receives `app: App`.
+
+### 10.2 `write_docx` — Image Embedding
+
+**Strategy:** Handle `image` tokens from marked's lexer using the `docx` library's `ImageRun` class. Independent of the Content Block System — purely filesystem I/O.
+
+**Image token format from marked:**
+
+```typescript
+{ type: "image", href: string, title: string | null, text: string /* alt text */ }
+```
+
+**Implementation changes to [`src/tools/write-docx.ts`](../src/tools/write-docx.ts):**
+
+**Step 1 — Add `ImageRun` to imports:**
+
+```typescript
+import { Document, Packer, Paragraph, TextRun, ImageRun, /* ... */ } from "docx";
+```
+
+**Step 2 — Make `buildDocxChildren()` and `generateDocx()` async.** Image reading requires async I/O. The sole caller already `await`s `generateDocx()`.
+
+**Step 3 — Add image case to `buildDocxChildren()`:**
+
+```typescript
+case "image": {
+  const img = token as Tokens.Image;
+  const imageData = await resolveImageForDocx(img.href, vaultRoot, allowedPaths);
+  if (imageData) {
+    result.push(
+      new Paragraph({
+        children: [
+          new ImageRun({
+            type: imageData.type,
+            data: imageData.buffer,
+            transformation: { width: imageData.width, height: imageData.height },
+            altText: {
+              title: img.title || "",
+              description: img.text || "",
+              name: img.text || "image",
+            },
+          }),
+        ],
+      })
+    );
+  } else {
+    // Fallback: render as text placeholder
+    result.push(new Paragraph({
+      children: [new TextRun({ text: `[Image: ${img.href}]` })],
+    }));
+  }
+  break;
+}
+```
+
+**Step 4 — New utility `resolveImageForDocx()`** (in new file `src/tools/docx-image-utils.ts`):
+
+```typescript
+export interface DocxImageData {
+  type: "jpg" | "png" | "gif" | "bmp";
+  buffer: Buffer;
+  width: number;   // pixels
+  height: number;  // pixels
+}
+
+export async function resolveImageForDocx(
+  href: string,
+  vaultRoot: string,
+  allowedPaths: string[]
+): Promise<DocxImageData | null>
+```
+
+**Image source resolution:**
+- **Vault-relative paths** (e.g., `Attachments/abc123.png`): resolve from vault root
+- **Absolute paths**: validate against `allowedPaths` via `resolveAndValidatePath()`
+- **Data URIs** (`data:image/png;base64,...`): decode directly to buffer
+- **HTTP URLs**: reject — no network I/O from tools (security)
+
+**Format mapping:** `image/png` → `"png"`, `image/jpeg` → `"jpg"`, `image/gif` → `"gif"`, `image/bmp` → `"bmp"`. WebP is not supported by the `docx` library's `ImageRun` — convert to PNG via Electron Canvas API if encountered.
+
+**Dimension detection** — parse image buffer headers (zero dependencies, ~50 lines):
+- **PNG**: bytes 16–23 of IHDR chunk (width: 16–19, height: 20–23, big-endian uint32)
+- **JPEG**: scan for SOF0/SOF2 marker (`0xFF 0xC0` / `0xFF 0xC2`), height at offset+5, width at offset+7
+- **GIF**: bytes 6–9 (width: 6–7, height: 8–9, little-endian uint16)
+- **BMP**: bytes 18–25 (width: 18–21, height: 22–25, little-endian int32)
+
+**Step 5 — Template grafting fix** — critical issue with current implementation:
+
+The current template grafting logic ([`write-docx.ts` lines 286–338](../src/tools/write-docx.ts)) only copies `word/document.xml` from the generated docx into the template ZIP. But `ImageRun` images are stored across three locations in the docx ZIP:
+
+1. `word/media/*` — the actual image binary files
+2. `word/_rels/document.xml.rels` — relationship entries mapping rId references to media paths
+3. `[Content_Types].xml` — content type declarations for image formats
+
+**Fix:** When grafting, also merge from the generated ZIP into the template ZIP:
+- All `word/media/*` files (copy each entry)
+- Image relationship entries from generated `word/_rels/document.xml.rels` into template's (parse XML, append `<Relationship>` elements with image type)
+- Image content type entries from generated `[Content_Types].xml` into template's (append `<Default>` or `<Override>` elements for image extensions)
+
+Use `@xmldom/xmldom` (already a transitive dependency via mammoth) to parse and merge the relationship and content type XML.
+
+**`ImageRun` API** (from `docx ^9.6.1`):
+
+```typescript
+new ImageRun({
+  type: "jpg" | "png" | "gif" | "bmp",         // RegularImageOptions
+  data: Buffer | string | Uint8Array,            // image binary data
+  transformation: { width: number, height: number },  // required, in pixels
+  altText?: { title: string, description: string, name: string },
+})
+```
+
+**Size limits:**
+- Max input image: 20MB (reject larger with error)
+- No resize/compression needed — docx stores the original binary
+- Max dimensions: no limit (Word handles display scaling)
+
+### 10.3 `mammoth.d.ts` Type Declaration Update
+
+The current 6-line declaration at [`src/mammoth.d.ts`](../src/mammoth.d.ts) must be expanded to enable type-safe usage of mammoth's image extraction API:
+
+```typescript
+declare module "mammoth" {
+  interface Options {
+    styleMap?: string | string[];
+    includeEmbeddedStyleMap?: boolean;
+    includeDefaultStyleMap?: boolean;
+    convertImage?: ImageConverter;
+    ignoreEmptyParagraphs?: boolean;
+    idPrefix?: string;
+    externalFileAccess?: boolean;
+    transformDocument?: (element: any) => any;
+  }
+
+  interface ImageConverter {
+    __mammothBrand: "ImageConverter";
+  }
+
+  interface Image {
+    contentType: string;
+    readAsArrayBuffer(): Promise<ArrayBuffer>;
+    readAsBase64String(): Promise<string>;
+    readAsBuffer(): Promise<Buffer>;
+  }
+
+  interface ImageAttributes {
+    src: string;
+    alt?: string;
+    [key: string]: string | undefined;
+  }
+
+  interface Images {
+    dataUri: ImageConverter;
+    imgElement(f: (image: Image) => Promise<ImageAttributes>): ImageConverter;
+  }
+
+  interface Result {
+    value: string;
+    messages: Array<{ type: string; message: string }>;
+  }
+
+  export function convertToHtml(input: { buffer: Buffer }, options?: Options): Promise<Result>;
+  export function extractRawText(input: { buffer: Buffer }): Promise<Result>;
+  export const images: Images;
+}
+```
+
+### 10.4 Error Handling
+
+All image errors are **non-fatal** — a document with 10 images where 2 fail still returns the text + the 8 successful images:
+
+| Error | `read_docx` behavior | `write_docx` behavior |
+|-------|---------------------|----------------------|
+| Unsupported format (EMF/WMF/SVG/TIFF) | `[Unsupported image format: ...]` in markdown | Text placeholder paragraph |
+| Corrupt/unreadable image | `[Image: extraction failed]` + warning log | `[Image: path]` text + warning log |
+| Image too large (>20MB) | Still save (vault handles it) | Reject with text placeholder |
+| Image file not found | N/A (embedded in docx) | `[Image: path]` text + warning |
+| Vault write fails | `[Image: save failed]` + warning log | N/A |
+| Attachment folder config missing | Obsidian defaults to vault root | N/A |
