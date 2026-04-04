@@ -115,7 +115,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Convert Markdown to a .docx file on the filesystem (desktop only).",
 		isWrite: true,
 	},
-	write_to_file: {
+	write_file: {
 		name: "Write file",
 		desc: "Write text content to a file on the filesystem (desktop only).",
 		isWrite: true,

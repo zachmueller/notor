@@ -33,8 +33,8 @@ The largest section (~60% of the prompt). For each tool, Cline's prompt includes
 - **Tool name and description**: what the tool does and when to use it
 - **Parameter definitions**: name, type, required/optional, description
 - **XML-formatted usage syntax**: exact invocation format the LLM must produce
-- **Usage guidance**: when to prefer this tool over alternatives (e.g., `replace_in_file` vs `write_to_file`)
-- **Behavioral rules per tool**: e.g., "always provide complete file content" for `write_to_file`, "SEARCH content must match exactly" for `replace_in_file`
+- **Usage guidance**: when to prefer this tool over alternatives (e.g., `replace_in_file` vs `write_file`)
+- **Behavioral rules per tool**: e.g., "always provide complete file content" for `write_file`, "SEARCH content must match exactly" for `replace_in_file`
 - **Examples**: concrete usage examples with realistic parameters
 
 **Sub-sections within tool instructions:**
@@ -45,7 +45,7 @@ The largest section (~60% of the prompt). For each tool, Cline's prompt includes
 
 ### 1.3 Editing Files (Strategy Guidance)
 
-A dedicated section explaining *when* to use `write_to_file` vs `replace_in_file` — covering:
+A dedicated section explaining *when* to use `write_file` vs `replace_in_file` — covering:
 
 - Purpose and role of each tool
 - Decision criteria for choosing between them
@@ -124,7 +124,7 @@ The following architectural patterns from Cline's prompt directly apply to Notor
 
 ### 2.2 Strategic Editing Guidance (HIGH transfer)
 
-**Cline pattern:** Dedicated section explaining when to use `write_to_file` vs `replace_in_file`, with decision criteria and workflow tips.
+**Cline pattern:** Dedicated section explaining when to use `write_file` vs `replace_in_file`, with decision criteria and workflow tips.
 
 **Notor application:** Direct parallel. Notor needs a "Note Editing Strategy" section explaining:
 - When to use `write_note` (new notes, complete rewrites) vs `replace_in_note` (targeted edits, section updates)

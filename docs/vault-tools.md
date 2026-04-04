@@ -23,7 +23,7 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `read_file` | Read a text file from the filesystem (desktop only) | Plan & Act |
 | `read_docx` | Read a `.docx` file and return its content as Markdown (desktop only) | Plan & Act |
 | `write_docx` | Convert Markdown to a `.docx` file on the filesystem (desktop only) | Act only |
-| `write_to_file` | Write text content to a file on the filesystem (desktop only) | Act only |
+| `write_file` | Write text content to a file on the filesystem (desktop only) | Act only |
 | `replace_in_file` | Make targeted SEARCH/REPLACE edits in a text file (desktop only) | Act only |
 | `extract_docx_comments` | Extract review comments from a `.docx` file and write them as a structured note (desktop only) | Act only |
 | `use_subagent` | Spawn a focused [sub-agent](sub-agents.md) child conversation for a specific task | Plan & Act |
@@ -257,7 +257,7 @@ If no template is configured, the tool produces a plain `.docx` using Word's sta
 - Write tool — available in Act mode only; requires explicit approval unless auto-approved.
 - Auto-approve default: off.
 
-### `write_to_file`
+### `write_file`
 
 Writes text content to a file on the filesystem. Creates the file if it does not exist, or overwrites it entirely if it does. Intermediate directories are created automatically.
 

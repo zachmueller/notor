@@ -1,5 +1,5 @@
 /**
- * `write_to_file` tool — writes text content to a file on the filesystem.
+ * `write_file` tool — writes text content to a file on the filesystem.
  *
  * Validates path against vault root and user-configured allowed paths.
  * Creates intermediate directories as needed. Overwrites existing files.
@@ -24,13 +24,13 @@ const log = logger("WriteFileTool");
 const MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
 /**
- * Implements the `write_to_file` tool.
+ * Implements the `write_file` tool.
  *
  * Writes text content to a file on the filesystem, enforcing path boundary
  * checks. Creates intermediate directories and overwrites existing files.
  */
 export class WriteFileTool implements Tool {
-	readonly name = "write_to_file";
+	readonly name = "write_file";
 	readonly mode = "write" as const;
 
 	readonly description =
@@ -94,7 +94,7 @@ export class WriteFileTool implements Tool {
 				tool_name: this.name,
 				success: false,
 				result: "",
-				error: "write_to_file is only available on desktop.",
+				error: "write_file is only available on desktop.",
 			};
 		}
 
