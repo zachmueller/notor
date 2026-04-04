@@ -440,6 +440,12 @@ export class BedrockProvider implements LLMProvider {
 
 		if (event.metadata) {
 			const usage = event.metadata.usage;
+			log.debug("Bedrock metadata event", {
+				hasUsage: !!usage,
+				inputTokens: usage?.inputTokens,
+				outputTokens: usage?.outputTokens,
+				totalTokens: usage?.totalTokens,
+			});
 			if (usage) {
 				yield {
 					type: "message_end",

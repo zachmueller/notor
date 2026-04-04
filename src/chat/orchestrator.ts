@@ -1913,6 +1913,11 @@ export class ChatOrchestrator {
 				case "message_end":
 					inputTokens = event.inputTokens;
 					outputTokens = event.outputTokens;
+					log.debug("processStream message_end", {
+						inputTokens,
+						outputTokens,
+						toolCallCount: accumulatedToolCalls.length,
+					});
 					break;
 
 				case "error":

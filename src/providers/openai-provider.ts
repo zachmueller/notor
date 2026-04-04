@@ -247,6 +247,11 @@ export class OpenAIProvider implements LLMProvider {
 
 				// Handle usage info (may come in the final chunk)
 				if (parsed.usage) {
+					log.debug("OpenAI usage chunk", {
+						promptTokens: parsed.usage.prompt_tokens,
+						completionTokens: parsed.usage.completion_tokens,
+						hasToolCalls: activeToolCalls.size > 0,
+					});
 					yield {
 						type: "message_end",
 						input_tokens: parsed.usage.prompt_tokens ?? 0,

@@ -17,25 +17,26 @@ The Anthropic streaming API sends `input_tokens` in `message_start` (nested at
 and `message_delta` reads `data.usage.input_tokens ?? 0` (line 351) which is
 always 0 because `message_delta` never includes `input_tokens`.
 
-- [ ] **1C-1.** Add a `streamState` object in `parseAnthropicStream` (line ~244)
+- [x] **1C-1.** Add a `streamState` object in `parseAnthropicStream` (line ~244)
   - Declare `const streamState = { pendingInputTokens: 0 };` before the SSE
     parsing loop
   - Pass `streamState` as a third parameter to `handleAnthropicEvent` (called at
     lines 281-284)
-- [ ] **1C-2.** Update `handleAnthropicEvent` signature (line 302) to accept
+- [x] **1C-2.** Update `handleAnthropicEvent` signature (line 302) to accept
   `streamState: { pendingInputTokens: number }` as a third parameter
-- [ ] **1C-3.** Capture input tokens from `message_start` (lines 358-362)
+- [x] **1C-3.** Capture input tokens from `message_start` (lines 358-362)
   - Replace the empty `break` with:
     `streamState.pendingInputTokens = data.message?.usage?.input_tokens ?? 0;`
   - Must use `data.message.usage` (nested), NOT `data.usage` (top-level)
   - Note: `AnthropicEventData` interface (lines 29-35) may need a `message`
     property added with `{ usage?: { input_tokens?: number } }`
-- [ ] **1C-4.** Use `streamState.pendingInputTokens` in `message_delta` handler
+- [x] **1C-4.** Use `streamState.pendingInputTokens` in `message_delta` handler
   (lines 346-356)
   - Change `input_tokens: data.usage.input_tokens ?? 0` (line 351) to
     `input_tokens: streamState.pendingInputTokens`
 - [ ] **1C-5.** Verify: enable debug logging, send a message via Anthropic
   provider, confirm `inputTokens` is now non-zero in the `message_end` event
+  - ⏳ Blocked: no Anthropic API key available for testing
 
 ---
 
@@ -50,13 +51,13 @@ The metadata handler (lines 441-450) looks correct on paper. Logging will reveal
 whether `outputTokens` actually includes tool-use content and whether `metadata`
 events fire reliably.
 
-- [ ] **1A-1.** Add debug log inside `handleBedrockEvent` metadata handler
+- [x] **1A-1.** Add debug log inside `handleBedrockEvent` metadata handler
   (after line 441, before the `if (usage)` guard)
   - Log `event.metadata.usage` fields: `inputTokens`, `outputTokens`,
     `totalTokens`, and `!!usage`
   - Also log when `event.metadata` exists but `usage` is undefined (the current
     `if (usage)` guard at line 442 silently drops this case)
-- [ ] **1A-2.** Add debug log in `orchestrator.ts` `processStream()` after the
+- [x] **1A-2.** Add debug log in `orchestrator.ts` `processStream()` after the
   `message_end` case (line 1913-1916)
   - Log `inputTokens`, `outputTokens`, `accumulatedToolCalls.length` (or
     equivalent indicator of whether this was a tool-call turn)
@@ -64,6 +65,7 @@ events fire reliably.
   Bedrock, check logs for `message_end` token values. Compare `outputTokens` to
   expected content size. Cross-reference `totalTokens` if `outputTokens` seems
   low.
+  - 🔜 Ready for manual testing with Bedrock
 
 ---
 
@@ -77,11 +79,12 @@ Token extraction at lines 248-254 reads `parsed.usage.prompt_tokens` and
 `parsed.usage.completion_tokens` from the final SSE chunk. The request already
 sets `stream_options: { include_usage: true }`.
 
-- [ ] **1D-1.** Add debug log after the `if (parsed.usage)` block (line 248)
+- [x] **1D-1.** Add debug log after the `if (parsed.usage)` block (line 248)
   - Log `prompt_tokens`, `completion_tokens`, and whether the chunk also
     contained tool call content
 - [ ] **1D-2.** Manual verification: send a tool-call-triggering prompt via
   OpenAI, confirm token values look proportional to content
+  - ⏳ Blocked: no OpenAI API key available for testing
 
 ---
 

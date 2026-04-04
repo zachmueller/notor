@@ -31,6 +31,7 @@ interface AnthropicEventData {
 	delta?: { type?: string; text?: string; partial_json?: string };
 	index?: number;
 	usage?: { input_tokens?: number; output_tokens?: number };
+	message?: { usage?: { input_tokens?: number } };
 	error?: { message?: string };
 }
 
@@ -249,6 +250,7 @@ export class AnthropicProvider implements LLMProvider {
 		const decoder = new TextDecoder();
 		let buffer = "";
 		let currentEventType = "";
+		const streamState = { pendingInputTokens: 0 };
 
 		try {
 			while (true) {
@@ -280,7 +282,8 @@ export class AnthropicProvider implements LLMProvider {
 							const parsed = JSON.parse(data);
 							yield* this.handleAnthropicEvent(
 								currentEventType,
-								parsed
+								parsed,
+								streamState
 							);
 						} catch {
 							log.warn("Failed to parse Anthropic SSE data", {
@@ -301,7 +304,8 @@ export class AnthropicProvider implements LLMProvider {
 	 */
 	private *handleAnthropicEvent(
 		eventType: string,
-		data: AnthropicEventData
+		data: AnthropicEventData,
+		streamState: { pendingInputTokens: number }
 	): Iterable<StreamChunk> {
 		switch (eventType) {
 			case "content_block_start": {
@@ -344,11 +348,12 @@ export class AnthropicProvider implements LLMProvider {
 			}
 
 			case "message_delta": {
-				// Contains stop_reason and usage
+				// Contains stop_reason and usage. output_tokens comes from
+				// message_delta; input_tokens was captured from message_start.
 				if (data.usage) {
 					yield {
 						type: "message_end",
-						input_tokens: data.usage.input_tokens ?? 0,
+						input_tokens: streamState.pendingInputTokens,
 						output_tokens: data.usage.output_tokens ?? 0,
 					};
 				}
@@ -356,8 +361,11 @@ export class AnthropicProvider implements LLMProvider {
 			}
 
 			case "message_start": {
-				// The message_start event contains initial usage (input tokens)
-				// We'll capture the complete usage in message_delta instead.
+				// Anthropic sends input_tokens in message_start (nested at
+				// data.message.usage.input_tokens). message_delta only has
+				// output_tokens, so we capture input here for later emission.
+				streamState.pendingInputTokens =
+					data.message?.usage?.input_tokens ?? 0;
 				break;
 			}
 
