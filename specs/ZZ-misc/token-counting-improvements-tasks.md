@@ -307,19 +307,26 @@ method's `cancelled` branch (around line 345) may return 0 tokens even if
 - [x] **4C-2.** Replace the Phase 3 temporary token-limit return (task 3C-2)
   with: `return await this.runWindDown(messages, tokenUsage, iterationCount, "token_limit");`
   - Also replaced pre-flight token-limit return (task 3C-3) with wind-down call
-- [ ] **4C-3.** Verify iteration cap wind-down: set cap to 3, run a research
+- [x] **4C-3.** Verify iteration cap wind-down: set cap to 2, run a research
   sub-agent, confirm structured summary instead of raw "[Results may be
   incomplete]" marker
   - ✅ Unit test passes: iteration cap → wind-down summary turn fires, marker
     format is `[Sub-agent stopped: iteration limit (N turns)]` + summary text
-  - 🔜 Ready for manual E2E testing
-- [ ] **4C-4.** Verify token limit wind-down: set low token limit, confirm
+  - ✅ E2E verified via `e2e/scripts/wind-down-summary-test.ts` (9/9 pass)
+  - SubAgentRunner logged "Sub-agent reached iteration cap" with cap=2
+  - stopReason: "iteration_cap" confirmed in UseSubagentTool completion log
+- [x] **4C-4.** Verify token limit wind-down: set low token limit, confirm
   summary triggers on token exhaustion
-  - 🔜 Ready for manual E2E testing
+  - ✅ E2E verified via `e2e/scripts/wind-down-summary-test.ts` (9/9 pass)
+  - Token limit=5000, sub-agent stopped after 1 iteration (2,021+149 tokens)
+  - stopReason: "token_limit" confirmed in UseSubagentTool completion log
+  - Wind-down summary turn produced non-zero output tokens
 - [ ] **4C-5.** Verify context window wind-down: feed a sub-agent a task that
   generates huge tool results, confirm the context window check triggers and
   produces a summary
-  - 🔜 Ready for manual E2E testing
+  - ⏳ Not E2E-testable: requires ~64K tokens in context (128K model × 50%
+    threshold). Same runWindDown() code path as 4C-3/4C-4, verified by unit
+    tests
 
 ---
 
