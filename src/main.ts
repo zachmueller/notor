@@ -1727,10 +1727,12 @@ export default class NotorPlugin extends Plugin {
 		});
 
 		// Wire approval callback for tool dispatcher
-		toolDispatcher.setApprovalCallback(async (toolCall, abortSignal?) => {
-			// Find the most recent tool call element in the view for the approval UI.
-			// The view tracks the last rendered tool call element via getLastToolCallEl().
-			const toolCallEl = view.getLastToolCallEl();
+		toolDispatcher.setApprovalCallback(async (toolCall, abortSignal?, messageId?) => {
+			// Look up the specific tool call element by message ID, falling back to
+			// the last rendered element for backward compatibility (e.g. sub-agent dispatchers).
+			const toolCallEl = messageId
+				? view.getToolCallEl(messageId) ?? view.getLastToolCallEl()
+				: view.getLastToolCallEl();
 			if (!toolCallEl) {
 				// Fallback: auto-approve if no UI element available
 				log.warn("No tool call element for approval prompt, auto-approving");

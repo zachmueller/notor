@@ -63,7 +63,7 @@ export interface DispatchableTool {
 }
 
 /** Callback for requesting user approval of a tool call. */
-export type ApprovalCallback = (toolCall: ToolCall, abortSignal?: AbortSignal) => Promise<"approved" | "rejected">;
+export type ApprovalCallback = (toolCall: ToolCall, abortSignal?: AbortSignal, messageId?: string) => Promise<"approved" | "rejected">;
 
 /** Events emitted by the dispatcher for UI updates. */
 export interface DispatcherEvents {
@@ -414,7 +414,7 @@ export class ToolDispatcher {
 			if (!this.approvalCallback) {
 				log.warn("No approval callback set, auto-approving", { toolName });
 			} else {
-				const decision = await this.approvalCallback(toolCall, abortSignal);
+				const decision = await this.approvalCallback(toolCall, abortSignal, messageId);
 
 				if (decision === "rejected") {
 					toolCall.status = "rejected";

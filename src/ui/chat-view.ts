@@ -88,6 +88,8 @@ export class NotorChatView extends ItemView {
 	private abortController: AbortController | null = null;
 	private showConversationList = false;
 	private lastToolCallEl: HTMLElement | null = null;
+	/** Map of message IDs to their rendered tool call elements, for targeted approval. */
+	private toolCallElMap = new Map<string, HTMLElement>();
 	/** Whether to auto-scroll to the bottom on new content. Set to false when the user scrolls up. */
 	private autoScroll = true;
 
@@ -1398,6 +1400,15 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Get the tool call element for a specific message ID.
+	 * Used by the approval callback to target the correct element
+	 * when multiple tool calls are rendered in one turn.
+	 */
+	getToolCallEl(messageId: string): HTMLElement | null {
+		return this.toolCallElMap.get(messageId) ?? null;
+	}
+
+	/**
 	 * Get the messages container element for compaction markers.
 	 * Phase 3 (COMP-004).
 	 */
@@ -1472,6 +1483,9 @@ export class NotorChatView extends ItemView {
 		});
 
 		this.lastToolCallEl = toolEl;
+		if (message.id) {
+			this.toolCallElMap.set(message.id, toolEl);
+		}
 		this.scrollToBottom();
 		return toolEl;
 	}
@@ -1750,6 +1764,8 @@ export class NotorChatView extends ItemView {
 	clearMessages(): void {
 		this.messageListEl.empty();
 		this.tokenFooterEl.addClass("notor-hidden");
+		this.toolCallElMap.clear();
+		this.lastToolCallEl = null;
 	}
 
 	/**
