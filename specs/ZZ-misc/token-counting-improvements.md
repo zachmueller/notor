@@ -27,8 +27,9 @@ more of:
 - **(c)** A real Bedrock-specific bug where `outputTokens` doesn't include tool-use
   content for certain models.
 
-**Phase 1A diagnostic logging is the prerequisite** for determining which interpretation
-is correct. Do not assume (c) — verify with data first.
+Phase 1A diagnostic logging will help determine which of these is the primary cause for
+Bedrock specifically. The Anthropic bug (a) is confirmed from code reading alone and
+should be fixed independently (Phase 1C). Do not assume (c) — verify with data first.
 
 ---
 
@@ -38,30 +39,12 @@ The user primarily uses **Bedrock** and reports that "in cases where the LLM is 
 large files, I don't see the LLM side tokens go up much at all." This could stem from
 multiple causes that need to be investigated together.
 
-### 1A: Add Per-Turn Diagnostic Logging
+### 1A: Add Per-Turn Diagnostic Logging (Bedrock-Focused)
 
-Before fixing anything, add temporary debug logging so we can verify actual token
-values flowing through the system. This is critical for Bedrock since the bug may
-not be in parsing but in what the API actually returns.
-
-**`src/chat/orchestrator.ts`** — In `processStream()`, after the `message_end` case
-(line 1913-1916), add:
-
-```typescript
-case "message_end":
-    inputTokens = event.inputTokens;
-    outputTokens = event.outputTokens;
-    log.debug("Stream message_end token counts", {
-        inputTokens,
-        outputTokens,
-        hasToolCalls: accumulatedToolCalls.length > 0,
-        toolCallCount: accumulatedToolCalls.length,
-    });
-    break;
-```
-
-**`src/chat/sub-agent-runner.ts`** — In `consumeStream()`, after capturing tokens
-from `message_end`, add similar logging.
+Add temporary debug logging to verify actual token values flowing through the system.
+This is primarily needed for Bedrock, where the bug may not be in parsing but in what
+the API actually returns. Anthropic and OpenAI providers are straightforward and don't
+need diagnostic logging — the Anthropic bug (Phase 1C) is confirmed from code reading.
 
 **`src/providers/bedrock-provider.ts`** — In `handleBedrockEvent()`, in the metadata
 handler (line 441-450), add:
@@ -77,6 +60,23 @@ if (event.metadata) {
     });
     // ... existing yield
 }
+```
+
+**`src/chat/orchestrator.ts`** — In `processStream()`, after the `message_end` case
+(line 1913-1916), add logging to correlate provider-reported tokens with what reaches
+the orchestrator:
+
+```typescript
+case "message_end":
+    inputTokens = event.inputTokens;
+    outputTokens = event.outputTokens;
+    log.debug("Stream message_end token counts", {
+        inputTokens,
+        outputTokens,
+        hasToolCalls: accumulatedToolCalls.length > 0,
+        toolCallCount: accumulatedToolCalls.length,
+    });
+    break;
 ```
 
 ### 1B: Bedrock Provider — Verify Tool Call Token Attribution
@@ -198,15 +198,18 @@ Add two `updateTokenFooter` calls:
    }
    ```
 
-2. **After all tool results are recorded** (after line 1587, closing the tool_result
-   loop). This captures sub-agent token rollup:
+2. **After each tool result is recorded** (inside the tool_result loop, after each
+   `addMessage` for a `tool_result`). This captures sub-agent token rollup incrementally,
+   so when multiple sub-agents run in a single round, the footer updates as each
+   sub-agent completes rather than waiting for all of them:
    ```typescript
-   const convAfterResults = this.conversationManager.getActiveConversation();
-   if (convAfterResults) {
+   // Inside the tool result loop, after addMessage for each tool_result:
+   const convAfterResult = this.conversationManager.getActiveConversation();
+   if (convAfterResult) {
        this.view?.updateTokenFooter(
-           convAfterResults.total_input_tokens,
-           convAfterResults.total_output_tokens,
-           convAfterResults.estimated_cost,
+           convAfterResult.total_input_tokens,
+           convAfterResult.total_output_tokens,
+           convAfterResult.estimated_cost,
        );
    }
    ```
@@ -276,7 +279,15 @@ sub_agent_token_limit: 0,  // No token limit by default (iteration cap is primar
 
 1. Add `tokenLimit` to constructor options and store as `private readonly tokenLimit: number`
 
-2. Add check inside the `while` loop, after token accumulation (line 178):
+2. **Hoist `streamResult` declaration** above the `while` loop so the pre-flight check
+   can reference the previous iteration's result:
+   ```typescript
+   let streamResult: ConsumedStreamResult | undefined;
+   // ... existing: const tokenUsage = { input: 0, output: 0 };
+   ```
+   Then change line 174 from `const streamResult = ...` to `streamResult = ...`.
+
+3. Add check inside the `while` loop, after token accumulation (line 178):
    ```typescript
    // Check token limit (Phase 3)
    if (this.tokenLimit > 0) {
@@ -287,7 +298,7 @@ sub_agent_token_limit: 0,  // No token limit by default (iteration cap is primar
    }
    ```
 
-3. Also add a **pre-flight check** before the LLM call (after the abort check at line 147).
+4. Also add a **pre-flight check** before the LLM call (after the abort check at line 147).
    The threshold must reserve headroom for the wind-down summary turn (which re-sends
    the full conversation). Use the last turn's `inputTokens` as a proxy for wind-down cost:
    ```typescript
@@ -320,14 +331,14 @@ export const SUB_AGENT_TOKEN_LIMIT = 0;
 
 `SubAgentResult.wasCapReached` currently covers only iteration cap. Options:
 
-A. Keep single boolean, reinterpret as "was the sub-agent stopped early for any reason"
-B. Replace `wasCapReached` with `stopReason: "completed" | "iteration_cap" | "token_limit" | "context_window"`
-
-**Recommendation:** Option B. The `stopReason` field gives the parent orchestrator
-(and the user via the UI) clear info about WHY the sub-agent stopped. **Remove
-`wasCapReached` entirely** — it overlaps with `stopReason`. Callers that checked
-`wasCapReached` should check `stopReason !== "completed"` instead. Update call sites
-in `src/tools/use-subagent.ts` and `src/chat/orchestrator.ts`.
+Replace `wasCapReached` with `stopReason: "completed" | "iteration_cap" | "token_limit" | "context_window"`.
+The `stopReason` field gives the parent orchestrator (and the user via the UI) clear
+info about WHY the sub-agent stopped. **Remove `wasCapReached` entirely** — it overlaps
+with `stopReason`. Callers that checked `wasCapReached` should check
+`stopReason !== "completed"` instead. Update call sites in `src/tools/use-subagent.ts`
+and `src/chat/orchestrator.ts`. Update `SubAgentResult` in `sub-agent-runner.ts` to
+replace the `wasCapReached: boolean` field with `stopReason` and update ALL return
+sites in the `run()` method (completed, error, cancelled, cap-reached).
 
 ### Verification
 
@@ -353,15 +364,10 @@ the sub-agent gets one final "summary turn":
 2. Send to LLM with **empty tool definitions** (forcing text-only response)
 3. Return the summary as the sub-agent result
 
-Using empty tool definitions instead of a system message is critical — it's the only
-way to guarantee the LLM won't try to make more tool calls in the summary turn.
-
-**Bedrock caveat:** Bedrock may reject requests where the conversation history contains
-`toolUse`/`toolResult` content blocks but no `toolConfig` is provided (since
-`toBedrockToolConfig([])` returns `undefined`, omitting the config entirely). This
-must be tested explicitly with Bedrock. Fallback approach: include tool definitions
-but rely on the prompt instruction "Do NOT call any tools" — less reliable but avoids
-API compatibility issues.
+The wind-down turn passes the full `this.toolDefinitions` (not empty `[]`) to satisfy
+Bedrock's requirement that `toolConfig` is present when conversation history contains
+`toolUse`/`toolResult` blocks. The prompt instructs the model not to call tools. If the
+model makes tool calls anyway, ignore them and use whatever text was generated.
 
 ### Phase 4A: `runWindDown` method
 
@@ -377,7 +383,9 @@ private async runWindDown(
     const reasonLabels: Record<string, string> = {
         iteration_cap: `iteration limit (${this.iterationCap} turns)`,
         token_limit: `token limit (${(tokenUsage.input + tokenUsage.output).toLocaleString()} tokens)`,
-        context_window: "context window proximity (70%)",
+        // ~50% because the wind-down turn re-sends the full conversation,
+        // so we need 2x current context size to fit both the history and the summary.
+        context_window: "context window proximity (~50%)",
     };
 
     this.onProgress?.(`Summarizing progress (reached ${reasonLabels[reason]})...`);
@@ -395,9 +403,13 @@ private async runWindDown(
         ].join("\n"),
     });
 
+    // Pass full tool definitions to satisfy Bedrock's requirement that toolConfig
+    // is present when conversation history contains toolUse/toolResult blocks.
+    // The prompt instructs the model not to call tools; if it does anyway, we
+    // ignore the tool calls and use whatever text was generated.
     const stream = this.provider.sendMessage(
         messages,
-        [],  // No tools — force text-only response
+        this.toolDefinitions,
         { model: this.model, abort_signal: this.abortController.signal },
     );
 
@@ -405,13 +417,15 @@ private async runWindDown(
     tokenUsage.input += result.inputTokens;
     tokenUsage.output += result.outputTokens;
 
-    if (result.text) {
-        messages.push({ role: "assistant", content: result.text });
+    // Use whatever text the model generated, even if it also made tool calls
+    const summaryText = result.text;
+    if (summaryText) {
+        messages.push({ role: "assistant", content: summaryText });
     }
 
     const marker = `[Sub-agent stopped: ${reasonLabels[reason]}]`;
-    const text = result.text
-        ? `${marker}\n\n${result.text}`
+    const text = summaryText
+        ? `${marker}\n\n${summaryText}`
         : `${marker}\n\n[Summary generation failed — no text returned]`;
 
     return {
@@ -419,8 +433,7 @@ private async runWindDown(
         messages,
         tokenUsage,
         iterationCount,
-        wasCapReached: true,
-        stopReason: reason,  // New field from Phase 3
+        stopReason: reason,
     };
 }
 ```
@@ -479,6 +492,23 @@ private estimateConversationTokens(messages: ChatMessage[]): number {
 Use 50% threshold (not 70%) with the estimation fallback to compensate for the
 heuristic's inaccuracy on code/JSON content.
 
+**Context window fallback note:** `getContextWindow()` falls back to
+`DEFAULT_CONTEXT_WINDOW = 128_000` for models not in the metadata table. This is
+conservative enough for a first pass (triggering at ~64K tokens). If a model has a
+smaller context window and isn't in the metadata table, the check triggers too late —
+an acceptable edge case for now.
+
+### Phase 4B½: Ensure Cancelled Streams Report Tokens
+
+When abort fires, `parseStreamEvents` yields `{ type: "cancelled", text }` without
+token fields. This means `consumeStream` in `sub-agent-runner.ts` may return 0 tokens
+for a cancelled turn even if `message_end` was received before cancellation.
+
+**Fix:** In `consumeStream`, accumulate `inputTokens`/`outputTokens` as side-channel
+state (separate from the result type determination). The `cancelled` result variant
+should still include whatever tokens were captured before the abort. This ensures
+Phase 3's token limit check has accurate cumulative counts even after aborted turns.
+
 ### Phase 4C: Wire into existing cap-reached path
 
 Replace the current cap-reached block (lines 280-293):
@@ -504,16 +534,19 @@ return await this.runWindDown(messages, tokenUsage, iterationCount, "iteration_c
 ## Implementation Order
 
 ```
-Phase 1  ──────────────────────────────────────  (independent, small)
+Phase 1C ──────────────────────────────────────  (independent, small — fix immediately)
+Phase 1A ──────────────────────────────────────  (Bedrock-only logging, small)
 Phase 2  ──────────────────────────────────────  (independent, small)
 Phase 3  ──── depends on Phase 1 ─────────────  (medium)
 Phase 4  ──── depends on Phase 3 ─────────────  (medium-large)
-         4A: runWindDown method
-         4B: context window check
-         4C: wire into existing paths
+         4A:  runWindDown method
+         4B:  context window check
+         4B½: cancelled stream token fix
+         4C:  wire into existing paths
 ```
 
-Phases 1 and 2 are independent bug fixes (~30 min each). Phase 3 adds the token limit
+Phase 1C is a clear bug fix — no logging prerequisite needed. Phase 1A adds Bedrock
+diagnostic logging. Phases 1C, 1A, and 2 are independent. Phase 3 adds the token limit
 setting and check. Phase 4 builds the summary infrastructure on top.
 
 ---
@@ -526,9 +559,11 @@ setting and check. Phase 4 builds the summary infrastructure on top.
 3. ~~**`stopReason` on `SubAgentResult`:**~~ **RESOLVED.** Replace `wasCapReached` with
    `stopReason` enum. Update all call sites.
 4. **Footer "pending" indicator:** Worth the UX polish, or skip for now?
-5. **Bedrock empty-tools compatibility:** Does Bedrock accept requests with no
-   `toolConfig` when conversation history contains `toolUse`/`toolResult` blocks?
-   Must be tested before committing to the Phase 4A approach.
-6. **Root cause of user's token concern:** Is it (a) the Anthropic input-tokens-always-0
-   bug, (b) footer not updating during tool rounds, or (c) a real Bedrock model-specific
-   issue? Phase 1A logging should answer this before Phase 3+ work begins.
+5. ~~**Bedrock empty-tools compatibility:**~~ **RESOLVED.** Pass full tool definitions
+   in the wind-down turn (not empty `[]`) to satisfy Bedrock's `toolConfig` requirement.
+   The prompt instructs the model not to call tools; if it does anyway, ignore tool calls
+   and use whatever text was generated.
+6. ~~**Root cause of user's token concern:**~~ **RESOLVED.** All three causes likely
+   contribute: (a) the Anthropic input-tokens-always-0 bug is confirmed from code — fix
+   in Phase 1C immediately; (b) footer not updating during tool rounds — fix in Phase 2;
+   (c) Bedrock-specific behavior — verify with Phase 1A logging.
