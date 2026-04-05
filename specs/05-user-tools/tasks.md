@@ -198,11 +198,11 @@ Parse and resolve extension settings. Reference:
 
 **File:** `src/extensions/compiler.ts`
 
-- [ ] Implement `stripTypes(code: string): string`
+- [x] Implement `stripTypes(code: string): string`
   - Import `{ transform }` from `"sucrase"`
   - Call `transform(code, { transforms: ["typescript"] })` — no JSX, no imports transform
   - Return `result.code`
-- [ ] Implement error handling for Sucrase failures:
+- [x] Implement error handling for Sucrase failures:
   - Catch Sucrase errors (syntax errors in user code)
   - Return descriptive error message including the original error message and file context
   - Handle common TS patterns: type annotations, interfaces, generics, `as` casts, type-only imports (stripped to empty)
@@ -211,17 +211,17 @@ Parse and resolve extension settings. Reference:
 
 **File:** `src/extensions/compiler.ts`
 
-- [ ] Obtain `AsyncFunction` constructor: `const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor`
-- [ ] Implement `compileToolFunction(strippedCode: string): CompiledExtensionFn`
+- [x] Obtain `AsyncFunction` constructor: `const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor`
+- [x] Implement `compileToolFunction(strippedCode: string): CompiledExtensionFn`
   - Arguments: `"app", "obsidian", "utils", "libs", "settings", "shared", "params"`
   - Return `new AsyncFunction(...argNames, strippedCode)`
-- [ ] Implement `compileAutomationFunction(strippedCode: string): CompiledExtensionFn`
+- [x] Implement `compileAutomationFunction(strippedCode: string): CompiledExtensionFn`
   - Arguments: `"app", "obsidian", "utils", "libs", "settings", "shared", "context"`
   - Return `new AsyncFunction(...argNames, strippedCode)`
-- [ ] Implement `compileExtension(rawCode: string, type: "tool" | "automation"): { fn: CompiledExtensionFn } | { error: string }`
+- [x] Implement `compileExtension(rawCode: string, type: "tool" | "automation"): { fn: CompiledExtensionFn } | { error: string }`
   - Pipeline: `stripTypes()` → `compile*Function()`
   - Catch compilation errors (syntax errors surviving type stripping) — return descriptive error with file path
-- [ ] Handle error cases:
+- [x] Handle error cases:
   - Sucrase transform failure → descriptive error
   - AsyncFunction constructor failure (runtime syntax error) → descriptive error
 
@@ -240,7 +240,7 @@ Assemble the `utils`, `libs`, and `obsidian` objects passed to extensions at run
 - `enforcePathConstraints` from `src/tool-config/path-enforcer.ts:64-93`
 - `isPathWithin` from `src/utils/path-validation.ts:27-41`
 
-- [ ] Implement `buildUtils(plugin: NotorPlugin)` returning:
+- [x] Implement `buildUtils(plugin: NotorPlugin)` returning:
   - `resolveNote`: `(path) => resolveNote(path, plugin.app.vault, plugin.app.metadataCache)`
   - `staleTracker`: `plugin.getStaleTracker()`
   - `checkpointManager`: `plugin.getCheckpointManager()`
@@ -250,7 +250,7 @@ Assemble the `utils`, `libs`, and `obsidian` objects passed to extensions at run
   - `executeShellCommand`: `(cmd, opts?) => executeShellCommand(cmd, plugin.settings, opts)`
   - `pathEnforcer`: `{ enforcePathConstraints, isPathWithin }` — wrappers around the dispatch-time functions
   - Note: `abortSignal` is NOT included here — it's per-call only, merged by `UserToolAdapter.execute()`
-- [ ] Implement `buildLibs()` returning:
+- [x] Implement `buildLibs()` returning:
   - `mammoth` — static import from `"mammoth"`
   - `Turndown` — static import of `TurndownService` from `"turndown"`
   - `turndownGfm` — `{ gfm }` from `"turndown-plugin-gfm"`
@@ -260,7 +260,7 @@ Assemble the `utils`, `libs`, and `obsidian` objects passed to extensions at run
   - `marked` — `{ marked }` from `"marked"`
   - `xmldom` — `* as xmldom` from `"@xmldom/xmldom"`
   - `croner` — `{ Cron }` from `"croner"`
-- [ ] Implement `buildObsidianExports()` returning commonly needed `obsidian` module exports:
+- [x] Implement `buildObsidianExports()` returning commonly needed `obsidian` module exports:
   - `requestUrl`, `Notice`, `TFile`, `TFolder`, `getFrontMatterInfo`, `normalizePath`, `MarkdownView`
   - Import from `"obsidian"` module
 

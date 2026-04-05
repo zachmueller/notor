@@ -380,9 +380,9 @@ function stripTypes(code: string): string {
 }
 ```
 
-- [ ] Implement `stripTypes()` function
-- [ ] Handle Sucrase errors (syntax errors in user code) — return descriptive error messages
-- [ ] Verify that common TS patterns work: type annotations, interfaces, generics, `as` casts, type-only imports (which should be stripped)
+- [x] Implement `stripTypes()` function
+- [x] Handle Sucrase errors (syntax errors in user code) — return descriptive error messages
+- [x] Verify that common TS patterns work: type annotations, interfaces, generics, `as` casts, type-only imports (which should be stripped)
 
 ### EXT-009 — Implement AsyncFunction compilation
 
@@ -411,9 +411,9 @@ function compileAutomationFunction(strippedCode: string): CompiledExtensionFn {
 }
 ```
 
-- [ ] Implement `compileToolFunction()` and `compileAutomationFunction()`
-- [ ] Handle compilation errors (syntax errors that survive type stripping) — return descriptive messages with file path
-- [ ] Implement full `compileExtension()` pipeline: `stripTypes()` → `compile*Function()`
+- [x] Implement `compileToolFunction()` and `compileAutomationFunction()`
+- [x] Handle compilation errors (syntax errors that survive type stripping) — return descriptive messages with file path
+- [x] Implement full `compileExtension()` pipeline: `stripTypes()` → `compile*Function()`
 
 ### EXT-010 — Build injected context objects
 
@@ -475,9 +475,9 @@ function buildLibs(): Record<string, unknown> {
 
 **Note on `unpdf`:** Currently dynamically imported in `src/media/pdf-processor.ts` to defer loading of the heavy PDF.js wrapper. We preserve this pattern — `libs.unpdf` is exposed as a lazy async wrapper (`() => import("unpdf")`). Extension code uses `const { getDocumentProxy } = await libs.unpdf();`. This avoids regressing plugin startup time for all users.
 
-- [ ] Implement `buildUtils()` — verify each utility reference resolves correctly from `main.ts` accessors. Note: `abortSignal` from `ToolExecuteOptions` is NOT included here (it's only available per-call); instead `UserToolAdapter.execute()` merges `abortSignal` into the utils object per-invocation (see EXT-012 adapter)
-- [ ] Implement `buildLibs()` — verify all 9 libraries import correctly (mammoth, Turndown, turndownGfm, unpdf, docx, PizZip, marked, xmldom, croner). Note: `unpdf` is a lazy wrapper (`() => import("unpdf")`), not a static import
-- [ ] Implement `buildObsidianExports()` — expose commonly needed `obsidian` module exports (`requestUrl`, `Notice`, `TFile`, `getFrontMatterInfo`, `normalizePath`, etc.)
+- [x] Implement `buildUtils()` — verify each utility reference resolves correctly from `main.ts` accessors. Note: `abortSignal` from `ToolExecuteOptions` is NOT included here (it's only available per-call); instead `UserToolAdapter.execute()` merges `abortSignal` into the utils object per-invocation (see EXT-012 adapter)
+- [x] Implement `buildLibs()` — verify all 9 libraries import correctly (mammoth, Turndown, turndownGfm, unpdf, docx, PizZip, marked, xmldom, croner). Note: `unpdf` is a lazy wrapper (`() => import("unpdf")`), not a static import
+- [x] Implement `buildObsidianExports()` — expose commonly needed `obsidian` module exports (`requestUrl`, `Notice`, `TFile`, `getFrontMatterInfo`, `normalizePath`, etc.)
 
 ---
 
