@@ -127,9 +127,11 @@ export type ImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/w
 
 export type ContentBlock =
   | { type: "text"; text: string }
-  | { type: "image"; media_type: ImageMediaType; data: string }   // base64
-  | { type: "document"; media_type: "application/pdf"; data: string }; // base64
+  | { type: "image"; media_type: ImageMediaType; data: string; width?: number; height?: number }
+  | { type: "document"; media_type: "application/pdf"; data: string; page_count?: number };
 ```
+
+The optional `width`, `height`, and `page_count` fields carry processing metadata for token estimation (see §7 Phase 1). The image pipeline (§4.3) always knows post-processing dimensions from the Electron Canvas API; the PDF processor knows page count from the PDF library. These fields are optional for backward compatibility with blocks created before the metadata was captured, and for edge cases where dimensions cannot be determined. The metadata overhead is negligible (~30 bytes per block in serialized JSONL).
 
 **Two types must change in concert:**
 
@@ -501,9 +503,91 @@ When compaction triggers on a conversation containing `ContentBlock[]` messages,
 
 This prevents: (a) sending large base64 blobs to the summarization call, (b) type errors in compaction logic that assumes string content, (c) wasted tokens on image blocks during summarization.
 
-**Media token estimation (open research question):**
+**Media token estimation:**
 
-Images and PDF documents consume significant tokens (e.g., ~1600 tokens for a 1000×1000 image on Anthropic, ~1500–3000 tokens per PDF page). The current character-based estimator (`text.length / 4` in `src/utils/tokens.ts:39`) cannot account for this. The exact estimation approach (fixed cost per block, provider-aware formulas, or base64 size heuristic) requires further research before implementation. For Phase 1, a conservative fixed estimate (e.g., 3000 tokens per image block, 2000 per PDF page) is acceptable as a placeholder.
+Images and PDF documents consume significant tokens (e.g., ~1333 tokens for a 1000×1000 image on Anthropic, ~1500–3000 tokens per PDF page). The current character-based estimator (`text.length / 4` in `src/utils/tokens.ts:39`) cannot account for this — and critically, must NOT be applied to base64 `data` strings in media blocks. A 1MB PDF encoded as base64 produces ~1.33M characters, which the text formula would estimate at ~333K tokens, when the actual API cost is ~2000 tokens per page.
+
+**Reference implementation research:**
+
+- **Cline** does not estimate media tokens locally at all — it relies entirely on API-reported `usage.prompt_tokens` after the request completes. PDFs are text-extracted via `pdf-parse`, then estimated with the standard `text.length / 4` formula. Images are sent as base64 blocks with no local token cost estimate.
+- **Claude Code** uses a flat **2000 tokens** per image or document block (`tokenEstimation.ts:400-411`, `microCompact.ts:38`). Anthropic's documented formula `(width * height) / 750` is referenced in a code comment but intentionally not used — the flat constant is simpler and avoids needing dimensions at estimation time. The same 2000 constant is used for both rough estimation and micro-compaction. A critical design insight: the base64 string of a PDF document block must NOT reach the text estimator — a 1MB PDF is ~1.33M base64 chars → ~333K estimated tokens via the text formula, vs the ~2000 tokens the API actually charges.
+
+**Notor's advantage:** Unlike Claude Code, Notor processes all images through an Electron Canvas pipeline (§4.3) BEFORE they reach the estimation layer. This means the exact post-processing dimensions are known at `ContentBlock` creation time and can be stored on the block (§4.1). Similarly, the PDF processor will have page count available from the PDF library. This enables a dimension-aware formula instead of a flat constant.
+
+**New function** — add `estimateContentTokens` to `src/utils/tokens.ts`:
+
+```typescript
+/**
+ * Estimate tokens for message content that may be a plain string or
+ * a ContentBlock array (text + image + document blocks).
+ *
+ * Uses Anthropic's documented image formula (width * height / 750) when
+ * dimensions are available, with a flat 2000-token fallback per media
+ * block when metadata is absent. This matches Claude Code's proven
+ * conservative estimate while being more accurate when Notor's image
+ * pipeline provides dimensions.
+ *
+ * For native PDF document blocks, estimates 2000 tokens per page (a
+ * conservative midpoint between text-heavy ~1500 and complex ~3000
+ * pages). Text-extracted PDFs appear as text blocks and are handled
+ * by the standard text estimator — this function only estimates native
+ * document blocks.
+ */
+export function estimateContentTokens(content: string | ContentBlock[]): number {
+    if (typeof content === "string") return estimateTokenCount(content);
+    let total = 0;
+    for (const block of content) {
+        switch (block.type) {
+            case "text":
+                total += estimateTokenCount(block.text);
+                break;
+            case "image":
+                total += estimateImageTokens(block.width, block.height);
+                break;
+            case "document":
+                total += estimateDocumentTokens(block.page_count);
+                break;
+        }
+    }
+    return total;
+}
+
+function estimateImageTokens(width?: number, height?: number): number {
+    if (width && height) return Math.ceil((width * height) / 750);
+    return 2000; // fallback: Claude Code's proven flat estimate
+}
+
+function estimateDocumentTokens(pageCount?: number): number {
+    if (pageCount) return pageCount * 2000;
+    return 2000; // fallback: single-block estimate for unknown page count
+}
+```
+
+**Formula rationale:**
+
+| Approach | Pros | Cons | Decision |
+|----------|------|------|----------|
+| Flat 2000 per block (Claude Code) | Simple, proven | Underestimates large images (2000×2000 = 5333 actual), overestimates small (200×200 = 53 actual) | **Fallback only** |
+| Anthropic formula `(w×h)/750` | Accurate for Anthropic/Bedrock; Notor has dimensions available | Overestimates for OpenAI by ~1.7× typical, up to ~7× for max-size images | **Primary for images** |
+| Provider-specific formulas | Most accurate per provider | Requires plumbing provider identity into utility layer; three formulas to maintain | **Deferred to Phase 4** |
+| Base64 size heuristic | No metadata needed | Wildly inaccurate — base64 size bears no relation to API token cost | **Rejected** |
+| No estimation / API-only (Cline) | Zero estimation error | Cannot track context usage until after API call; compaction cannot trigger preemptively | **Rejected** |
+
+Using Anthropic's formula as the universal default is acceptable. The worst-case overestimation occurs for OpenAI with a max-size 2000×2000 image: 5333 estimated vs ~765 actual (~7×). For typical images (1000×1000): 1333 estimated vs ~765 actual (~1.7×). Overestimation causes compaction to trigger marginally earlier — a benign outcome that wastes a small amount of context space but never risks context overflow. The alternative (underestimation) risks context overflow before compaction activates, which is a user-visible failure.
+
+**Callsite updates** — replace `estimateTokenCount(msg.content)` / `estimateTokens(msg.content)` with `estimateContentTokens(msg.content)` at all three estimation callsites:
+
+| File | Line(s) | Current | Updated |
+|------|---------|---------|---------|
+| `src/chat/context.ts` | 89–100 | `let text = message.content; text += ...; return estimateTokenCount(text)` | Restructure: `let total = estimateContentTokens(message.content);` then `total += estimateTokenCount(JSON.stringify(...))` for tool call/result portions (see note below) |
+| `src/context/compaction.ts` | 80 | `estimateTokens(msg.content)` | `estimateContentTokens(msg.content)` |
+| `src/chat/sub-agent-runner.ts` | 453 | `estimateTokenCount(msg.content)` | `estimateContentTokens(msg.content)` |
+
+**`context.ts` restructuring note:** The current code at line 89 assigns `message.content` to `let text`, then concatenates tool call JSON via `+=` at lines 93–97, then calls `estimateTokenCount(text)`. When `content` is `ContentBlock[]`, the `+=` concatenation would produce nonsense (`"[object Object],[object Object]{...}"`). The fix splits estimation into a content portion (via `estimateContentTokens`) and a tool metadata portion (via `estimateTokenCount` on the JSON-stringified parameters), then sums them.
+
+**ToolResult media estimation (Phase 2):** When `ToolResult.content_blocks` is added (§5.4), the tool result estimation paths in `context.ts:92–98` and `compaction.ts:88–93` must also account for media blocks in tool results. The `estimateContentTokens` function can be reused: `estimateContentTokens(msg.tool_result.content_blocks)` when the field is present.
+
+**Future Phase 4 refinement:** When provider-specific accuracy matters (e.g., a user on OpenAI hits compaction too early due to image overestimation), add a `provider?: string` parameter to `estimateImageTokens` and implement OpenAI's tile-based formula: `170 × ceil(w/512) × ceil(h/512) + 85` (high detail). This is deferred because: (a) overestimation is benign, (b) the provider identity is not currently available in the token estimation utility layer, and (c) it only matters for image-heavy conversations on non-Anthropic providers.
 
 **Sub-agent media propagation:**
 
@@ -576,7 +660,7 @@ See §10 for full implementation details.
 - Handle MCP tool results with images (currently omitted with `[N image(s) omitted]`)
 - Drag-and-drop support for images/PDFs on chat input
 - Image thumbnail preview in attachment chips
-- Refined media token estimation (replace Phase 1 placeholder with provider-aware formulas)
+- Provider-specific image token formulas (OpenAI tile-based, Gemini per-token) to reduce overestimation for non-Anthropic providers in image-heavy conversations
 - E2E test coverage
 
 ---
@@ -593,7 +677,7 @@ See §10 for full implementation details.
 | Canvas not available in all Obsidian contexts | Image processing fails | All processing runs in renderer process where Canvas is available. Verify in Phase 2. |
 | Binary content increases history file sizes | Larger JSONL files on disk | Media IS persisted. Existing `history_max_size_mb` (500MB) and `history_max_age_days` (90 days) provide guardrails. A conversation with 10 images adds ~2–5MB. |
 | Context compaction encounters media blocks | Wasted tokens, type errors, API failures | Phase 1 adds compaction safety: strip media blocks before summarization, append `[omitted]` marker. |
-| Media token estimation inaccuracy | Context overflow or premature truncation | Open research question (§7 Phase 1). Conservative fixed estimates as placeholder until provider-aware formulas are researched. |
+| Media token estimation inaccuracy | Context overflow or premature compaction | Dimension-aware formula `(w×h)/750` for images with known dimensions; flat 2000-token fallback otherwise. Per-page estimate for PDFs. Overestimates for OpenAI (benign: compaction triggers earlier, not later). Provider-specific formulas deferred to Phase 4. |
 
 ---
 
