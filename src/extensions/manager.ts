@@ -311,6 +311,16 @@ export class ExtensionManager {
 		return Array.from(this.tools.values());
 	}
 
+	/** Get all compiled user automation definitions. */
+	getAutomations(): UserAutomationDefinition[] {
+		return Array.from(this.automations.values());
+	}
+
+	/** Get the shared settings definition (from `notor/settings.md`), or null. */
+	getSharedSettingsDefinition(): SharedSettingsDefinition | null {
+		return this.sharedSettings;
+	}
+
 	// -----------------------------------------------------------------------
 	// Automation accessors
 	// -----------------------------------------------------------------------

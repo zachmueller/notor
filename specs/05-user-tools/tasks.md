@@ -422,28 +422,28 @@ Follow existing section patterns from `src/settings/sections/` (30 files). Refer
 - `SecretComponent` from `obsidian` (see usage in `src/settings/sections/provider-anthropic.ts:7-29`)
 - Dynamic list pattern from `src/settings/sections/fetch-webpage.ts:82-139` (domain_denylist)
 
-- [ ] Implement `renderExtensionsSection(containerEl: HTMLElement, ctx: SettingsContext): void`
+- [x] Implement `renderExtensionsSection(containerEl: HTMLElement, ctx: SettingsContext): void`
   - Get extension manager from `ctx.plugin.getExtensionManager()`
   - Collect all extensions with settings schemas (tools, automations, shared)
   - If nothing to show (no settings and no shared settings), hide section entirely
-- [ ] Implement shared settings sub-section (if `notor/settings.md` exists with settings):
+- [x] Implement shared settings sub-section (if `notor/settings.md` exists with settings):
   - Heading: "Shared settings"
   - Render each `SettingsFieldSchema` using the appropriate UI component
-- [ ] Implement per-extension settings sub-sections:
+- [x] Implement per-extension settings sub-sections:
   - One sub-section per tool/automation that has a `settings` block
   - Heading: "Tool: {name}" or "Automation: {displayName || filename}"
   - Render each field using the appropriate UI component
   - "Reset to defaults" button: clears `user_extension_settings[name]`, calls `saveSettings()` + `redisplay()`
-- [ ] Implement field rendering for all 6 type variants:
+- [x] Implement field rendering for all 6 type variants:
   - `type: string` + no `options` → `Setting.addText()` with onChange saving to `user_extension_settings[extName][key]`
   - `type: string` + `secret: true` → `SecretComponent` with ID from `slugifySecretId()`
   - `type: string` + `options` → `Setting.addDropdown()` with options from schema
   - `type: number` → `Setting.addText()` with numeric validation, respect `min`/`max`
   - `type: boolean` → `Setting.addToggle()`
   - `type: string[]` → dynamic list with add/remove pattern (from fetch-webpage domain_denylist)
-- [ ] Implement "Reload extensions" button at bottom of section:
+- [x] Implement "Reload extensions" button at bottom of section:
   - Calls `extensionManager.reload(false)`, shows Notice with summary, calls `redisplay()`
-- [ ] Wire into `src/settings/settings-tab.ts` render pipeline:
+- [x] Wire into `src/settings/settings-tab.ts` render pipeline:
   - Add new settings group in `display()` method (after "Automation" group, before "Storage")
   - Use `createSettingsGroup(containerEl, "Extensions", false, persisted, onToggle)`
   - Call `renderExtensionsSection(groupBody, settingsContext)`
@@ -452,7 +452,7 @@ Follow existing section patterns from `src/settings/sections/` (30 files). Refer
 
 **File:** `src/main.ts`
 
-- [ ] Register command `notor:reload-extensions` in `onload()` (near other command registrations, lines ~248-314):
+- [x] Register command `notor:reload-extensions` in `onload()` (near other command registrations, lines ~248-314):
   ```typescript
   this.addCommand({
     id: "reload-extensions",

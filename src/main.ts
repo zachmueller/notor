@@ -106,6 +106,9 @@ import { PersonaManager } from "./personas/persona-manager";
 import { SubAgentManager } from "./sub-agents/manager";
 import { UseSubagentTool } from "./tools/use-subagent";
 
+// Extensions
+import { ExtensionManager } from "./extensions/manager";
+
 // MCP
 import { McpHub } from "./mcp/mcp-hub";
 import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
@@ -133,6 +136,7 @@ export default class NotorPlugin extends Plugin {
 	private _staleTracker?: StaleContentTracker;
 	private _personaManager?: PersonaManager;
 	private _subAgentManager?: SubAgentManager;
+	private _extensionManager?: ExtensionManager;
 	private _settingTab?: NotorSettingTab;
 
 	// -----------------------------------------------------------------------
@@ -385,6 +389,24 @@ export default class NotorPlugin extends Plugin {
 				});
 
 				input.click();
+			},
+		});
+
+		// EXT-016: Reload user extensions from vault files.
+		this.addCommand({
+			id: "reload-extensions",
+			name: "Reload user extensions",
+			callback: () => {
+				this.getExtensionManager().reload(false).then((result) => {
+					const summary =
+						`Extensions reloaded: ${result.toolCount} tool${result.toolCount !== 1 ? "s" : ""}, ` +
+						`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}` +
+						(result.errors.length > 0 ? ` (${result.errors.length} error${result.errors.length !== 1 ? "s" : ""})` : "");
+					new Notice(summary);
+				}).catch((e) => {
+					log.error("Extension reload failed", { error: String(e) });
+					new Notice(`Extension reload failed: ${e instanceof Error ? e.message : String(e)}`);
+				});
 			},
 		});
 
@@ -1183,6 +1205,14 @@ export default class NotorPlugin extends Plugin {
 			);
 		}
 		return this._subAgentManager;
+	}
+
+	/** Extension manager — user-defined tools and automations (EXT-016). */
+	getExtensionManager(): ExtensionManager {
+		if (!this._extensionManager) {
+			this._extensionManager = new ExtensionManager(this, parseYaml);
+		}
+		return this._extensionManager;
 	}
 
 	/** Chat orchestrator — the main send/receive loop coordinator. */

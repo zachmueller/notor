@@ -802,14 +802,14 @@ Add a new settings group for user-defined extensions.
 - `type: boolean` → toggle (`Setting.addToggle()`)
 - `type: string[]` → dynamic list with add/remove (same pattern as `domain_denylist` in `renderFetchWebpageSection()`)
 
-- [ ] Implement `renderExtensionsSection()` function
-- [ ] Implement shared settings sub-section (from `notor/settings.md`)
-- [ ] Implement per-extension settings sub-sections (one per tool/automation that has `settings`)
-- [ ] Implement field rendering for all 6 type variants
-- [ ] Implement "Reset to defaults" button per extension (clears `user_extension_settings[name]`)
-- [ ] Implement "Reload extensions" button (calls `extensionManager.reload()`)
-- [ ] Hide group entirely if no extensions have settings and no shared settings exist
-- [ ] Wire into `settings-tab.ts` render pipeline
+- [x] Implement `renderExtensionsSection()` function
+- [x] Implement shared settings sub-section (from `notor/settings.md`)
+- [x] Implement per-extension settings sub-sections (one per tool/automation that has `settings`)
+- [x] Implement field rendering for all 6 type variants
+- [x] Implement "Reset to defaults" button per extension (clears `user_extension_settings[name]`)
+- [x] Implement "Reload extensions" button (calls `extensionManager.reload()`)
+- [x] Hide group entirely if no extensions have settings and no shared settings exist
+- [x] Wire into `settings-tab.ts` render pipeline
 
 ### EXT-016 — Register reload command
 
@@ -817,8 +817,8 @@ Add the `notor:reload-extensions` Obsidian command.
 
 **File:** `src/main.ts` (modify existing)
 
-- [ ] Register command `notor:reload-extensions` with label "Reload user extensions"
-- [ ] Command callback: call `extensionManager.reload(false)` (not initial load), show Notice with summary
+- [x] Register command `notor:reload-extensions` with label "Reload user extensions"
+- [x] Command callback: call `extensionManager.reload(false)` (not initial load), show Notice with summary
 
 ---
 

@@ -38,6 +38,7 @@ import { renderMcpServersSection } from "./sections/mcp-servers";
 import { renderPersonasSection } from "./sections/personas";
 import { renderSubAgentsSection } from "./sections/sub-agents";
 import { renderRulesAndWorkflowsSection } from "./sections/rules-and-workflows";
+import { renderExtensionsSection } from "./sections/extensions";
 import { createSettingsGroup, snapshotDetailsState, restoreDetailsState } from "./helpers";
 
 /**
@@ -178,6 +179,10 @@ export class NotorSettingTab extends PluginSettingTab {
 		const automationGroup = createSettingsGroup(containerEl, "Automation", false, persisted, onToggle);
 		renderHooksSection(automationGroup, ctx);
 		renderVaultEventHooksSection(automationGroup, ctx);
+
+		// --- Extensions (collapsed by default) ---
+		const extensionsGroup = createSettingsGroup(containerEl, "Extensions", false, persisted, onToggle);
+		renderExtensionsSection(extensionsGroup, ctx);
 
 		// --- Storage (collapsed by default) ---
 		const storageGroup = createSettingsGroup(containerEl, "Storage", false, persisted, onToggle);
