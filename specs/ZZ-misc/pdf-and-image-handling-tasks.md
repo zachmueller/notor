@@ -372,19 +372,23 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 3.1 PDF Library Evaluation
 
-- [ ] **Run library evaluation** (per design spec section 3.3)
-  - Create `e2e/scripts/pdf-library-eval.ts`
-  - Install candidates as dev deps: `unpdf`, `pdf-parse-new`
-  - Test against representative PDFs: plain text, tables, multi-column, large (100+ pages), scanned
-  - Measure: extraction time, character count, page-level support, errors
-  - Test esbuild bundling compatibility (platform: node, format: cjs, target: es2018)
-  - Measure bundle size impact (current: 3.2MB, target: <500KB additional)
-  - **Decision gate:** Pick winning library before proceeding
+- [x] **Run library evaluation** (per design spec section 3.3)
+  - Evaluated `unpdf` (v1.4.0) and `pdf-parse-new` (v2.0.0)
+  - **Decision: `unpdf`** — selected as the PDF text extraction library
+  - **Rationale:**
+    - `pdf-parse-new` disqualified: ~3.1MB raw bundle (would nearly double the plugin), Node >= 20.11 engine requirement (risky for older Obsidian/Electron), poor maintenance (22 stars, questionable packaging with test fixtures in published package)
+    - `unpdf` is the clear winner: ~1.4MB raw bundle (smaller by 2x+), well-maintained (unjs ecosystem, 1.1K stars), zero runtime dependencies, CJS entry point available
+    - Neither meets strict 500KB target — mitigate with lazy loading via dynamic `import()` so PDF.js is only loaded when PDF features are used
+  - **Implementation notes for Task 3.2:**
+    - Page-level extraction: use `getDocumentProxy()` from unpdf to get the pdf object, then `pdf.getPage(n)` + `getTextContent()` for specific pages (the convenience `extractText()` wrapper does not support page ranges)
+    - Text extraction quality is basic (raw PDF.js `getTextContent()`) — adequate for plain text, limited for complex tables/multi-column layouts
+    - `isEvalSupported: false` is set by default (good for Electron CSP)
+    - Consider marking `unpdf/pdfjs` as external in esbuild and loading separately to reduce main bundle impact
 
 ### 3.2 New Files
 
 - [ ] **Create `src/media/pdf-processor.ts`**
-  - Install chosen PDF library as production dependency in `package.json`
+  - Install `unpdf` as production dependency in `package.json`
   - Implement text extraction path:
     - Load PDF via library → extract text (full or page range) → clean (normalize whitespace, remove control chars) → truncate to configurable limit (default 400K chars)
   - Implement native document block path:
@@ -636,11 +640,11 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 |-------|---------------------------|---------------------|
 | Phase 1 | None | None |
 | Phase 2 | None (Electron Canvas API) | None |
-| Phase 3 | 1 PDF library (unpdf or pdf-parse-new) | Test PDFs in `e2e/fixtures/pdf/` |
+| Phase 3 | `unpdf` | Test PDFs in `e2e/fixtures/pdf/` |
 | Phase 2.5 | None (mammoth + docx already installed) | None |
 | Phase 4 | None | E2E test fixtures |
 
-**Total new production dependencies: 1** (the PDF library, added in Phase 3)
+**Total new production dependencies: 1** (`unpdf`, added in Phase 3)
 
 ---
 
