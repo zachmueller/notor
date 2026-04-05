@@ -162,7 +162,7 @@ function renderBuiltinToolsSection(
 					.setIcon("square-arrow-out-up-right")
 					.setTooltip("Open extension file")
 					.onClick(async () => {
-						await ctx.app.workspace.openLinkText(vaultFilePath, "");
+						await ctx.app.workspace.openLinkText(vaultFilePath, "", true);
 					}),
 			);
 
@@ -193,7 +193,7 @@ function renderBuiltinToolsSection(
 					.onClick(async () => {
 						try {
 							const path = await manager.ensureBuiltinToolVaultFile(toolName);
-							await ctx.app.workspace.openLinkText(path, "");
+							await ctx.app.workspace.openLinkText(path, "", true);
 							new Notice(
 								`Created ${path} — reload extensions to activate.`,
 							);
