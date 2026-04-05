@@ -31,12 +31,15 @@ import {
 	createVaultNoteSectionAttachment,
 	createExternalFileAttachment,
 	createVaultImageAttachment,
+	createVaultPdfAttachment,
 	createExternalBinaryAttachment,
+	createExternalPdfAttachment,
 	readExternalFile,
 	isDuplicate,
 } from "../context/attachment";
 import { detectMediaFormat } from "../media/format-detector";
 import { processImage } from "../media/image-processor";
+import { processPdf } from "../media/pdf-processor";
 import type { ImageMediaType } from "../media/types";
 import type { NotorSettings } from "../settings/types";
 
@@ -276,7 +279,7 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 		const allFiles = this.app.vault.getFiles();
 		const files = allFiles.filter((f) => {
 			const ext = "." + f.extension.toLowerCase();
-			return ext === ".md" || IMAGE_EXTENSIONS.has(ext);
+			return ext === ".md" || IMAGE_EXTENSIONS.has(ext) || PDF_EXTENSIONS.has(ext);
 		});
 
 		if (!query) {
@@ -348,10 +351,12 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	renderSuggestion(suggestion: VaultNoteSuggestion, el: HTMLElement): void {
 		const container = el.createDiv({ cls: "notor-suggest-item" });
 
-		// Show image icon for image files
+		// Show type-specific icon for media files
 		const ext = "." + suggestion.file.extension.toLowerCase();
 		if (IMAGE_EXTENSIONS.has(ext)) {
 			container.createSpan({ cls: "notor-suggest-icon", text: "\uD83D\uDDBC\uFE0F " });
+		} else if (PDF_EXTENSIONS.has(ext)) {
+			container.createSpan({ cls: "notor-suggest-icon", text: "\uD83D\uDCC4 " });
 		}
 
 		if (suggestion.matchSource === "path" && suggestion.match?.match.matches) {
@@ -398,11 +403,16 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 			return;
 		}
 
-		// Create the attachment — route image files to image attachment
+		// Create the attachment — route image/PDF files to appropriate attachment type
 		const ext = "." + suggestion.file.extension.toLowerCase();
-		const attachment = IMAGE_EXTENSIONS.has(ext)
-			? createVaultImageAttachment(suggestion.file.path)
-			: createVaultNoteAttachment(suggestion.file.path);
+		let attachment: Attachment;
+		if (IMAGE_EXTENSIONS.has(ext)) {
+			attachment = createVaultImageAttachment(suggestion.file.path);
+		} else if (PDF_EXTENSIONS.has(ext)) {
+			attachment = createVaultPdfAttachment(suggestion.file.path);
+		} else {
+			attachment = createVaultNoteAttachment(suggestion.file.path);
+		}
 
 		// Insert inline token (replaces `[[query` text with a styled span)
 		insertWikilinkToken(this.chatInputEl, attachment);
@@ -589,6 +599,9 @@ function getAbsoluteFilePath(file: File): string | undefined {
 /** Image file extensions for routing detection. */
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
+/** PDF file extension for routing detection. */
+const PDF_EXTENSIONS = new Set([".pdf"]);
+
 /**
  * Read an external binary (image) file, process it, and return base64 + metadata.
  *
@@ -630,6 +643,49 @@ async function readExternalBinaryFile(
 	};
 }
 
+/**
+ * Read an external PDF file, process it, and return base64 + metadata.
+ *
+ * Returns null if the file exceeds the size limit or cannot be read.
+ */
+async function readExternalPdfFile(
+	absolutePath: string,
+	settings: NotorSettings,
+	maxSizeMb = 50,
+): Promise<{ base64: string; pageCount?: number } | null> {
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const fs = require("fs") as typeof import("fs");
+
+	const stats = fs.statSync(absolutePath);
+	if (stats.size > maxSizeMb * 1024 * 1024) {
+		return null;
+	}
+
+	const buffer = Buffer.from(fs.readFileSync(absolutePath));
+	const format = detectMediaFormat(buffer);
+	if (format !== "pdf") {
+		return null;
+	}
+
+	const result = await processPdf(buffer, {
+		providerType: "anthropic", // Use native path for pre-processing; provider routing happens at send time
+	});
+
+	// Extract the document block for native path
+	const docBlock = result.contentBlocks.find((b) => b.type === "document");
+	if (docBlock && docBlock.type === "document") {
+		return {
+			base64: docBlock.data,
+			pageCount: docBlock.page_count,
+		};
+	}
+
+	// Fallback: base64 encode raw buffer
+	return {
+		base64: buffer.toString("base64"),
+	};
+}
+
 export function openExternalFileDialog(
 	app: App,
 	onAttachmentAdded: OnAttachmentAdded,
@@ -647,7 +703,7 @@ export function openExternalFileDialog(
 	input.multiple = true;
 	// Common text + image extensions as a convenience hint (not a security boundary)
 	input.accept =
-		".md,.txt,.json,.csv,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.sh,.bash,.zsh,.r,.sql,.env,.cfg,.ini,.conf,.log,.diff,.patch,.rst,.tex,.bib,.properties,.gradle,.pom,.sbt,.png,.jpg,.jpeg,.gif,.webp";
+		".md,.txt,.json,.csv,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.sh,.bash,.zsh,.r,.sql,.env,.cfg,.ini,.conf,.log,.diff,.patch,.rst,.tex,.bib,.properties,.gradle,.pom,.sbt,.png,.jpg,.jpeg,.gif,.webp,.pdf";
 
 	input.addEventListener("change", () => {
 		const files = Array.from(input.files ?? []);
@@ -656,8 +712,9 @@ export function openExternalFileDialog(
 		type PendingFile = { absolutePath: string; name: string; content: string; fileSizeBytes: number };
 		const pendingConfirmation: PendingFile[] = [];
 
-		// Collect image files for async processing
+		// Collect image and PDF files for async processing
 		const imageFiles: Array<{ absolutePath: string; name: string }> = [];
+		const pdfFiles: Array<{ absolutePath: string; name: string }> = [];
 
 		for (const file of files) {
 			const absolutePath = getAbsoluteFilePath(file);
@@ -676,6 +733,12 @@ export function openExternalFileDialog(
 			const ext = "." + file.name.split(".").pop()?.toLowerCase();
 			if (IMAGE_EXTENSIONS.has(ext)) {
 				imageFiles.push({ absolutePath, name: file.name });
+				continue;
+			}
+
+			// Route PDF files to binary processing path
+			if (PDF_EXTENSIONS.has(ext)) {
+				pdfFiles.push({ absolutePath, name: file.name });
 				continue;
 			}
 
@@ -730,6 +793,32 @@ export function openExternalFileDialog(
 					} catch (e) {
 						const msg = e instanceof Error ? e.message : String(e);
 						new Notice(`Failed to process image ${imgFile.name}: ${msg}`);
+					}
+				}
+			})();
+		}
+
+		// Process PDF files asynchronously
+		if (pdfFiles.length > 0 && settings) {
+			void (async () => {
+				for (const pdfFile of pdfFiles) {
+					try {
+						const result = await readExternalPdfFile(pdfFile.absolutePath, settings);
+						if (!result) {
+							new Notice(`Failed to process PDF: ${pdfFile.name}`);
+							continue;
+						}
+						const attachment = createExternalPdfAttachment(
+							pdfFile.absolutePath,
+							pdfFile.name,
+							result.base64,
+							result.pageCount,
+						);
+						onAttachmentAdded(attachment);
+						log.debug("External PDF attached", { name: pdfFile.name });
+					} catch (e) {
+						const msg = e instanceof Error ? e.message : String(e);
+						new Notice(`Failed to process PDF ${pdfFile.name}: ${msg}`);
 					}
 				}
 			})();

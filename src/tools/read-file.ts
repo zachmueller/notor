@@ -20,6 +20,7 @@ import type { NotorSettings } from "../settings";
 import { resolveAndValidatePath } from "../utils/path-validation";
 import { detectMediaFormat } from "../media/format-detector";
 import { processImage } from "../media/image-processor";
+import { processPdf } from "../media/pdf-processor";
 import type { ImageMediaType } from "../media/types";
 import { logger } from "../utils/logger";
 
@@ -40,9 +41,11 @@ export class ReadFileTool implements Tool {
 	readonly mode = "read" as const;
 
 	readonly description =
-		"Read a text file or image from the filesystem and return its contents. " +
+		"Read a text file, image, or PDF from the filesystem and return its contents. " +
 		"Supported image formats: PNG, JPEG, GIF, WebP — images are resized and " +
 		"compressed automatically. " +
+		"Supported document formats: PDF — sent as native document block or extracted text " +
+		"depending on provider. Use the pages parameter for specific page ranges. " +
 		"The path must be within the vault or a user-configured allow-list of paths. " +
 		"Other binary files are rejected — use read_docx for Word documents. " +
 		"Supports an optional encoding parameter for text files (default: utf-8). " +
@@ -60,6 +63,12 @@ export class ReadFileTool implements Tool {
 				description: "File encoding. Default: utf-8.",
 				default: "utf-8",
 			},
+			pages: {
+				type: "string",
+				description:
+					"Page range for PDF files (e.g. '1-5', '3', '10-20'). " +
+					"Ignored for non-PDF files.",
+			},
 		},
 		required: ["path"],
 	};
@@ -72,6 +81,7 @@ export class ReadFileTool implements Tool {
 	async execute(params: Record<string, unknown>): Promise<ToolResult> {
 		const path = params["path"] as string | undefined;
 		const encoding = params["encoding"] as string | undefined;
+		const pages = params["pages"] as string | undefined;
 
 		if (!path || typeof path !== "string" || path.trim() === "") {
 			return {
@@ -184,13 +194,42 @@ export class ReadFileTool implements Tool {
 				}
 
 				if (format === "pdf") {
-					// Phase 3: PDF support
-					return {
-						tool_name: this.name,
-						success: false,
-						result: "",
-						error: "PDF support is not yet implemented. Use read_docx for Word documents.",
-					};
+					// Raw size limit: 50 MB
+					if (buf.length > 50 * 1024 * 1024) {
+						return {
+							tool_name: this.name,
+							success: false,
+							result: "",
+							error: `PDF file is too large (${(buf.length / (1024 * 1024)).toFixed(1)} MB). Maximum raw input size is 50 MB.`,
+						};
+					}
+
+					try {
+						const result = await processPdf(buf, {
+							pages,
+							providerType: this.settings.active_provider,
+							maxTextChars: this.settings.pdf_text_max_chars,
+							preferNative: this.settings.pdf_prefer_native,
+						});
+						const filename = resolvedPath.split("/").pop() ?? resolvedPath;
+
+						log.info("Read PDF file", { path: resolvedPath, summary: result.textSummary });
+
+						return {
+							tool_name: this.name,
+							success: true,
+							result: `Read PDF: ${filename} — ${result.textSummary}`,
+							content_blocks: result.contentBlocks,
+						};
+					} catch (e) {
+						const message = e instanceof Error ? e.message : String(e);
+						return {
+							tool_name: this.name,
+							success: false,
+							result: "",
+							error: `Failed to process PDF: ${message}`,
+						};
+					}
 				}
 
 				return {
@@ -198,7 +237,7 @@ export class ReadFileTool implements Tool {
 					success: false,
 					result: "",
 					error:
-						"read_file only supports text-based files and images (PNG, JPEG, GIF, WebP). For Word documents, use read_docx instead.",
+						"read_file only supports text-based files, images (PNG, JPEG, GIF, WebP), and PDFs. For Word documents, use read_docx instead.",
 				};
 			}
 

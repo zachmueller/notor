@@ -102,6 +102,12 @@ export class AttachmentChipManager {
 				cls: "notor-attachment-chip-icon",
 				text: "\uD83D\uDDBC\uFE0F",
 			});
+		} else if (attachment.type === "vault_pdf" || attachment.type === "external_pdf") {
+			chipEl.addClass("notor-attachment-chip--pdf");
+			chipEl.createSpan({
+				cls: "notor-attachment-chip-icon",
+				text: "\uD83D\uDCC4",
+			});
 		} else if (attachment.type === "external_file") {
 			chipEl.addClass("notor-attachment-chip--external");
 			chipEl.createSpan({

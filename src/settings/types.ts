@@ -271,6 +271,15 @@ export interface NotorSettings {
 	/** JPEG compression quality (0–100) for the compression cascade. */
 	image_compression_quality: number;
 
+	/** Maximum PDF size in MB for native document blocks (default: 10). */
+	pdf_native_max_size_mb: number;
+
+	/** Maximum characters for PDF text extraction (default: 400000). */
+	pdf_text_max_chars: number;
+
+	/** Whether to prefer native PDF blocks when the provider supports them (default: true). */
+	pdf_prefer_native: boolean;
+
 	// Phase 4c: docx & file tools
 
 	/**

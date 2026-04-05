@@ -1212,7 +1212,7 @@ export class ChatOrchestrator {
 				const resolved = await resolveAttachment(this.app, att, {
 					maxDimension: this.settings.image_max_dimension,
 					compressionQuality: this.settings.image_compression_quality,
-				});
+				}, this.settings.active_provider);
 				resolvedAttachments.push(resolved);
 
 				// Surface inline warnings for failed resolutions

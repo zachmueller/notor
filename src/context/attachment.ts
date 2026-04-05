@@ -19,6 +19,7 @@ import type { App, TFile } from "obsidian";
 import type { ContentBlock } from "../media/types";
 import { detectMediaFormat } from "../media/format-detector";
 import { processImage } from "../media/image-processor";
+import { processPdf } from "../media/pdf-processor";
 import type { ImageMediaType } from "../media/types";
 
 // ---------------------------------------------------------------------------
@@ -26,7 +27,7 @@ import type { ImageMediaType } from "../media/types";
 // ---------------------------------------------------------------------------
 
 /** Attachment content source type. */
-export type AttachmentType = "vault_note" | "vault_note_section" | "external_file" | "vault_image" | "external_image";
+export type AttachmentType = "vault_note" | "vault_note_section" | "external_file" | "vault_image" | "external_image" | "vault_pdf" | "external_pdf";
 
 /** Attachment resolution lifecycle status. */
 export type AttachmentStatus = "pending" | "resolved" | "error";
@@ -240,6 +241,65 @@ export function createExternalBinaryAttachment(
 	};
 }
 
+/**
+ * Create an attachment for a vault PDF file.
+ *
+ * Binary content is populated during `resolveAttachment()`.
+ *
+ * @param path - Vault-relative path to the PDF file.
+ * @returns A pending Attachment ready for resolution at send time.
+ */
+export function createVaultPdfAttachment(path: string): Attachment {
+	const filename = path.split("/").pop() ?? path;
+	return {
+		id: generateUUID(),
+		type: "vault_pdf",
+		path,
+		section: null,
+		display_name: filename,
+		content: null,
+		content_length: null,
+		binary_content: null,
+		media_type: null,
+		width: null,
+		height: null,
+		status: "pending",
+		error_message: null,
+	};
+}
+
+/**
+ * Create an attachment for an external PDF file (already processed).
+ *
+ * @param absolutePath - Absolute filesystem path to the file.
+ * @param filename - Original filename for display.
+ * @param base64 - Base64-encoded binary data.
+ * @param pageCount - Number of pages in the PDF (optional).
+ * @returns A resolved Attachment with binary content populated.
+ */
+export function createExternalPdfAttachment(
+	absolutePath: string,
+	filename: string,
+	base64: string,
+	pageCount?: number,
+): Attachment {
+	return {
+		id: generateUUID(),
+		type: "external_pdf",
+		path: absolutePath,
+		section: null,
+		display_name: filename,
+		content: pageCount != null ? String(pageCount) : null,
+		content_length: pageCount ?? null,
+		binary_content: base64,
+		media_type: "application/pdf",
+		width: null,
+		height: null,
+		status: "resolved",
+		error_message: null,
+	};
+}
+
 // ---------------------------------------------------------------------------
 // Duplicate detection
 // ---------------------------------------------------------------------------
@@ -283,9 +343,10 @@ export async function resolveAttachment(
 	app: App,
 	attachment: Attachment,
 	imageSettings?: { maxDimension: number; compressionQuality: number },
+	providerType?: string,
 ): Promise<Attachment> {
-	// External files and external images are already resolved at attach time
-	if (attachment.type === "external_file" || attachment.type === "external_image") {
+	// External files, external images, and external PDFs are already resolved at attach time
+	if (attachment.type === "external_file" || attachment.type === "external_image" || attachment.type === "external_pdf") {
 		return { ...attachment };
 	}
 
@@ -341,6 +402,75 @@ export async function resolveAttachment(
 				...attachment,
 				status: "error",
 				error_message: `Failed to process image: ${e instanceof Error ? e.message : String(e)}`,
+			};
+		}
+	}
+
+	// Vault PDF: read binary, process through PDF pipeline
+	if (attachment.type === "vault_pdf") {
+		const file = app.vault.getFileByPath(attachment.path);
+		if (!file) {
+			return {
+				...attachment,
+				status: "error",
+				error_message: `PDF not found: ${attachment.path}`,
+			};
+		}
+
+		try {
+			const arrayBuffer = await app.vault.readBinary(file);
+			const buffer = Buffer.from(arrayBuffer);
+			const format = detectMediaFormat(buffer);
+
+			if (format !== "pdf") {
+				return {
+					...attachment,
+					status: "error",
+					error_message: "File is not a valid PDF",
+				};
+			}
+
+			const result = await processPdf(buffer, {
+				providerType: providerType ?? "local",
+			});
+
+			// For native document blocks, store the base64 data
+			const docBlock = result.contentBlocks.find((b) => b.type === "document");
+			if (docBlock && docBlock.type === "document") {
+				return {
+					...attachment,
+					binary_content: docBlock.data,
+					media_type: "application/pdf",
+					content: result.textSummary,
+					content_length: result.textSummary.length,
+					status: "resolved",
+					error_message: null,
+				};
+			}
+
+			// For text extraction, store the text content
+			const textBlock = result.contentBlocks.find((b) => b.type === "text");
+			if (textBlock && textBlock.type === "text") {
+				return {
+					...attachment,
+					content: textBlock.text,
+					content_length: textBlock.text.length,
+					media_type: "application/pdf",
+					status: "resolved",
+					error_message: null,
+				};
+			}
+
+			return {
+				...attachment,
+				status: "error",
+				error_message: "PDF processing returned no content",
+			};
+		} catch (e) {
+			return {
+				...attachment,
+				status: "error",
+				error_message: `Failed to process PDF: ${e instanceof Error ? e.message : String(e)}`,
 			};
 		}
 	}
@@ -616,6 +746,24 @@ export function buildAttachmentsBlock(attachments: Attachment[]): { text: string
 						width: att.width ?? undefined,
 						height: att.height ?? undefined,
 					});
+				}
+				break;
+
+			case "vault_pdf":
+			case "external_pdf":
+				if (att.binary_content && att.media_type === "application/pdf") {
+					// Native document block path
+					contentBlocks.push({
+						type: "document",
+						media_type: "application/pdf",
+						data: att.binary_content,
+						page_count: att.content_length ?? undefined,
+					});
+				} else if (att.content) {
+					// Text extraction path — include extracted text as XML tag
+					tags.push(
+						`  <pdf-document name="${escapeXmlAttr(att.display_name)}">\n${att.content}\n  </pdf-document>`
+					);
 				}
 				break;
 		}

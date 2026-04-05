@@ -179,6 +179,9 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	// Image & PDF
 	image_max_dimension: 2000,
 	image_compression_quality: 80,
+	pdf_native_max_size_mb: 10,
+	pdf_text_max_chars: 400000,
+	pdf_prefer_native: true,
 
 	// Phase 4c: docx & file tools
 	read_file_allowed_paths: [],

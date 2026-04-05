@@ -58,4 +58,61 @@ export function renderMediaSection(
 					}
 				}),
 		);
+
+	// PDF settings
+	new Setting(containerEl)
+		.setName("Max native PDF size (MB)")
+		.setDesc(
+			"Maximum PDF file size (in MB) for native document blocks sent to " +
+			"providers that support them (Anthropic, Bedrock). Larger PDFs fall " +
+			"back to text extraction.",
+		)
+		.addText((text) =>
+			text
+				.setPlaceholder("10")
+				.setValue(String(ctx.settings.pdf_native_max_size_mb))
+				.onChange(async (value) => {
+					const parsed = parseFloat(value);
+					if (!isNaN(parsed) && parsed > 0) {
+						ctx.settings.pdf_native_max_size_mb = parsed;
+						await ctx.saveSettings();
+					}
+				}),
+		);
+
+	new Setting(containerEl)
+		.setName("PDF text extraction limit (chars)")
+		.setDesc(
+			"Maximum number of characters to extract from PDFs when using text " +
+			"extraction (for providers without native PDF support, or when reading " +
+			"specific page ranges).",
+		)
+		.addText((text) =>
+			text
+				.setPlaceholder("400000")
+				.setValue(String(ctx.settings.pdf_text_max_chars))
+				.onChange(async (value) => {
+					const parsed = parseInt(value, 10);
+					if (!isNaN(parsed) && parsed > 0) {
+						ctx.settings.pdf_text_max_chars = parsed;
+						await ctx.saveSettings();
+					}
+				}),
+		);
+
+	new Setting(containerEl)
+		.setName("Prefer native PDF blocks")
+		.setDesc(
+			"When enabled, PDFs are sent as native document blocks to providers " +
+			"that support them (Anthropic, Bedrock). When disabled, text is always " +
+			"extracted from PDFs regardless of provider.",
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(ctx.settings.pdf_prefer_native)
+				.onChange(async (value) => {
+					ctx.settings.pdf_prefer_native = value;
+					await ctx.saveSettings();
+				}),
+		);
 }

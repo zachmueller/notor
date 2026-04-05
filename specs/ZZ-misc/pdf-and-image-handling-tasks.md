@@ -387,7 +387,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 3.2 New Files
 
-- [ ] **Create `src/media/pdf-processor.ts`**
+- [x] **Create `src/media/pdf-processor.ts`**
   - Install `unpdf` as production dependency in `package.json`
   - Implement text extraction path:
     - Load PDF via library → extract text (full or page range) → clean (normalize whitespace, remove control chars) → truncate to configurable limit (default 400K chars)
@@ -400,7 +400,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 3.3 Tool Changes — Extend `read_file` for PDFs
 
-- [ ] **Update `src/tools/read-file.ts`**
+- [x] **Update `src/tools/read-file.ts`**
   - Add `pages` parameter to `input_schema`: `{ type: "string", description: "Page range for PDF files (e.g. '1-5', '3', '10-20'). Ignored for non-PDF files." }`
   - **Out-of-range pages:** When the requested range extends beyond the document's page count (e.g., `pages: "1-100"` on a 5-page PDF), return all available pages within the range without error. When the entire range is out of bounds (e.g., `pages: "50-60"` on a 5-page PDF), return an error: `"Requested pages 50-60 but document has only 5 pages"`
   - Update `description` to mention PDF support
@@ -411,7 +411,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 3.4 Attachment System — PDF Support
 
-- [ ] **Update `src/context/attachment.ts`**
+- [x] **Update `src/context/attachment.ts`**
   - Add attachment types: `"vault_pdf"`, `"external_pdf"` to `AttachmentType`
   - Add factory: `createVaultPdfAttachment(path: string): Attachment`
   - Update `resolveAttachment()` for PDF types:
@@ -423,25 +423,25 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 3.5 UI Changes
 
-- [ ] **Update `src/ui/attachment-picker.ts`**
+- [x] **Update `src/ui/attachment-picker.ts`**
   - Add `.pdf` to accepted extensions in `openExternalFileDialog()`
   - Route PDF files to binary read path
   - Update `VaultNoteSuggest.getSuggestions()` (from Task 2.7's `getFiles()` filter) to add `.pdf` to the allowed extensions list
   - Update `selectSuggestion()` to route `.pdf` files to `createVaultPdfAttachment(file.path)` (from Task 3.4)
 
-- [ ] **Update `src/ui/attachment-chips.ts`**
+- [x] **Update `src/ui/attachment-chips.ts`**
   - Add PDF-specific chip rendering (PDF icon)
 
 ### 3.6 Settings
 
-- [ ] **Update `src/settings/types.ts`** — Add to `NotorSettings`:
+- [x] **Update `src/settings/types.ts`** — Add to `NotorSettings`:
   - `pdf_native_max_size_mb: number` (default: 10)
   - `pdf_text_max_chars: number` (default: 400000)
   - `pdf_prefer_native: boolean` (default: true)
 
-- [ ] **Update `src/settings/defaults.ts`** — Add defaults for PDF settings
+- [x] **Update `src/settings/defaults.ts`** — Add defaults for PDF settings
 
-- [ ] **Update `src/settings/sections/media.ts`** — Add PDF settings to the "Images & PDFs" subsection (under "Tool configuration" group)
+- [x] **Update `src/settings/sections/media.ts`** — Add PDF settings to the "Images & PDFs" subsection (under "Tool configuration" group)
 
 ### 3.7 Verification
 
@@ -450,7 +450,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 - [ ] **Manual test: read_file with pages** — `read_file` on PDF with `pages: "1-5"` → correct pages extracted
 - [ ] **Manual test: Edge cases** — Encrypted PDF (graceful error), image-only PDF (no text layer → empty text warning), corrupt PDF (graceful error)
 - [ ] **Unit tests** — PDF processor, page range parsing, provider capability routing
-- [ ] **Build check** — Bundle size acceptable with new PDF dependency
+- [x] **Build check** — Bundle size acceptable with new PDF dependency
 
 ---
 
