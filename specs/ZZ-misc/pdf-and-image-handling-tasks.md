@@ -577,10 +577,10 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 2.5.4 Verification
 
-- [ ] **Manual test: read_docx** — Read a `.docx` with images → images saved to vault attachment folder → markdown output contains `![alt](path)` → images render in Obsidian preview
-- [ ] **Manual test: write_docx** — Write markdown with `![alt](path)` image references → open output in Word → images render
+- [x] **Manual test: read_docx** — Read a `.docx` with images → images saved to vault attachment folder → markdown output contains `![alt](path)` → images render in Obsidian preview
+- [x] **Manual test: write_docx** — Write markdown with `![alt](path)` image references → open output in Word → images render
 - [ ] **Manual test: Template grafting** — Write with template + images → styles preserved AND images present
-- [ ] **Manual test: Edge cases** — Duplicate images (same MD5 → same file), mixed formats (PNG + JPEG + unsupported EMF), document with no images (output identical to current)
+- [x] **Manual test: Edge cases** — Duplicate images (same MD5 → same file), mixed formats (PNG + JPEG + unsupported EMF), document with no images (output identical to current)
 - [x] **Unit tests** — `docx-image-utils.ts` (dimension parsing, format mapping, path resolution), mammoth convertImage handler
 
 ---
