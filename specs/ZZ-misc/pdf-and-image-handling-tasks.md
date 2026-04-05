@@ -49,7 +49,7 @@ Each provider's message conversion function must handle the case where `msg.cont
       - image → `{ type: "image", source: { type: "base64", media_type, data } }`
       - document → `{ type: "document", source: { type: "base64", media_type: "application/pdf", data } }` (Anthropic document blocks do not require a `name` field, unlike Bedrock)
     - When `msg.role === "user"` and `msg.content` is `string`, wrap as `[{ type: "text", text: msg.content }]` (wire format changes from string to array — Anthropic accepts both forms and treats them identically for billing, token counting, and generation. This normalizes to array for consistency with the `ContentBlock[]` branch). **Edge case:** When `msg.content` is an empty string `""`, do NOT wrap — pass as string `""` directly. Anthropic rejects empty text content blocks in arrays (`[{ type: "text", text: "" }]` → 400 error) but accepts empty string content
-    - When assistant (always string), pass through unchanged: `content: msg.content`
+    - When assistant, assert string (see Phase 1 "assert string" convention) and pass through unchanged: `content: msg.content`
 
 - [ ] **`src/providers/openai-provider.ts` — `toOpenAIMessages()`**
   - Lines 57-69: Tool call branch `content: msg.content || null` — pre-tool-call assistant text, always a string. No change needed
@@ -58,7 +58,8 @@ Each provider's message conversion function must handle the case where `msg.cont
       - text → `{ type: "text", text }`
       - image → `{ type: "image_url", image_url: { url: "data:{media_type};base64,{data}" } }`
       - document → **skip** with text placeholder `"[PDF document — not supported by this provider]"`. This placeholder remains permanently as a safety net — in normal operation, OpenAI/Local providers never receive document blocks because `processPdf()` (Phase 3) converts PDFs to text blocks before they reach the provider. The placeholder only triggers if a code path incorrectly sends a raw document block to a non-native provider
-    - When assistant (always string), pass through unchanged
+    - When `msg.role === "user"` and `msg.content` is `string`, keep existing behavior: `content: msg.content` (OpenAI accepts both string and array content for user messages; no normalization to array needed here unlike Anthropic)
+    - When assistant, assert string (see Phase 1 "assert string" convention) and pass through unchanged: `content: msg.content`
 
 - [ ] **`src/providers/bedrock-provider.ts` — `toBedrockMessages()`**
   - **Import note:** `ContentBlock` is already imported from `@aws-sdk/client-bedrock-runtime` at line 44. Use an import alias: `import { ContentBlock as MediaContentBlock } from "../media/types"` to avoid the name collision. Within this file, use `MediaContentBlock` for all references to the Notor content block type (in type annotations, mapping functions, etc.)
@@ -69,18 +70,20 @@ Each provider's message conversion function must handle the case where `msg.cont
       - text → `{ text }`
       - image → `{ image: { format, source: { bytes: Buffer.from(data, "base64") } } }` — map `block.media_type` to Bedrock format by stripping the `image/` prefix: `block.media_type.split("/")[1]` (e.g., `"image/png"` → `"png"`)
       - document → `{ document: { format: "pdf", name: "document.pdf", source: { bytes: Buffer.from(data, "base64") } } }` (the `name` field is required by Bedrock's API schema but not used for processing — a static default is sufficient; threading the original filename is a future enhancement)
-    - When assistant (always string), keep existing: `content: [{ text: msg.content }]`
+    - When `msg.role === "user"` and `msg.content` is `string`, keep existing behavior: `content: [{ text: msg.content }]` (Bedrock already wraps strings in content block arrays)
+    - When assistant, assert string (see Phase 1 "assert string" convention) and keep existing: `content: [{ text: msg.content }]`
 
 - [ ] **`src/providers/local-provider.ts` — `toOpenAIMessages()`**
   - Lines 85-97: Tool call branch `content: msg.content || null` — pre-tool-call assistant text, always a string. No change needed
-  - Lines 113-118: Catch-all handles **both** user and assistant messages. Same fix as OpenAI provider (including permanent document block safety-net placeholder). When assistant (always string), pass through unchanged
+  - Lines 113-118: Catch-all handles **both** user and assistant messages. Same fix as OpenAI provider (including permanent document block safety-net placeholder, user-string pass-through, and assistant assertion). Apply the same three branches: user+`ContentBlock[]` (map to content parts), user+string (keep existing `content: msg.content`), assistant (assert string and pass through)
   - **Note:** The local provider's `toOpenAIMessages()` is structurally identical to the OpenAI provider's. Apply the same changes at the corresponding lines. The only semantic difference is in `capabilities.ts` (Phase 2): local sets `supportsImages: true` optimistically
   - **Note:** Document block mapping in all providers is dead code until Phase 3 adds PDF processing. It cannot be meaningfully tested until then. Consider marking with `// Phase 3: PDF support` comments
 
 ### 1.4 Token Estimation — Media-Aware
 
 - [ ] **Add `estimateContentTokens()` to `src/utils/tokens.ts`**
-  - Import `ContentBlock` from `../media/types`
+  - Import `ContentBlock` from `../media/types` at the top of the file
+  - Place `estimateContentTokens` and its private helpers after the existing `estimateTokenCount` function (line ~52) and before the `estimateTokens` alias (line 54)
   - Implement `estimateContentTokens(content: string | ContentBlock[]): number`
     - String input: delegate to existing `estimateTokenCount()`
     - `ContentBlock[]`: sum per-block estimates:
@@ -114,23 +117,22 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 ### 1.5 Context Compaction — Strip Media Before Summarization
 
-- [ ] **Update `src/context/compaction.ts:241`** — Empty content check
-  - Replace `if (!msg.content?.trim()) continue;` with `getTextContent()` usage:
-    - `const text = getTextContent(msg.content); if (!text.trim()) continue;`
-
-- [ ] **Update `src/context/compaction.ts:244`** — Compaction message building
-  - Implementation pseudocode:
+- [ ] **Update `src/context/compaction.ts:241-244`** — Empty content check and compaction message building
+  - Replace lines 241-244 (the `if (!msg.content?.trim()) continue;` guard and the `content: msg.content` assignment in the object literal below it). Full replacement:
     ```ts
-    let text = getTextContent(msg.content); // handles both string and ContentBlock[]
+    const text = getTextContent(msg.content);
+    if (!text.trim()) continue;
+    let compactionContent = text;
     if (Array.isArray(msg.content)) {
         const mediaCount = msg.content.filter(b => b.type !== "text").length;
         if (mediaCount > 0) {
-            text += `\n[${mediaCount} media block${mediaCount === 1 ? "" : "s"} omitted during compaction]`;
+            compactionContent += `\n[${mediaCount} media block${mediaCount === 1 ? "" : "s"} omitted during compaction]`;
         }
     }
-    // Assign `text` (plain string) to the ChatMessage.content field
+    // Then in the object literal that follows (the chatMessages.push call):
+    content: compactionContent,  // was: content: msg.content
     ```
-  - **Assign the result as a plain `string`** to the `ChatMessage.content` field — this ensures the summarization call receives only text, not base64 blobs. The type union allows this (string is a valid `string | ContentBlock[]` value)
+  - **Assign `compactionContent` (plain `string`)** to the `ChatMessage.content` field — this ensures the summarization call receives only text, not base64 blobs. The type union allows this (string is a valid `string | ContentBlock[]` value)
   - **Note:** `getTextContent()` handles both cases transparently — for string content (assistant messages), it returns the string unchanged. The `Array.isArray()` check and media marker logic only triggers for `ContentBlock[]` content, which only occurs for user messages. No separate role-based branching is needed here.
 
 ### 1.6 Orchestrator & History — Handle Union Type
@@ -142,7 +144,7 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Assert string using the Phase 1 convention (prev is assistant message, always string): `preToolCallText = typeof prev.content === "string" ? prev.content : (() => { throw new Error("Expected string content for assistant message"); })();`
 
 - [ ] **`src/chat/orchestrator.ts:2043, 2057`** — `content: msg.content` pass-through
-  - No change needed (both types accept the union), but add comments noting user content may be `ContentBlock[]`
+  - No change needed (both types accept the union). No comments required — the type annotation on `ChatMessage.content` already documents that it can be `ContentBlock[]`
 
 - [ ] **`src/chat/orchestrator.ts:2103-2176, 2178-2231`** — `toChatMessages()` repair & coalescing phases
   - **Repair phase** (lines 2103-2176): Injects synthetic `tool_result` messages for orphaned tool calls. All `content` fields are string literals (`""`) — no code changes required
@@ -219,7 +221,7 @@ Each provider's message conversion function must handle the case where `msg.cont
     - JPEG: try quality 80 → 60 → 40 → 20
     - GIF/WebP: convert to PNG first, then PNG cascade. GIF conversion extracts the first frame only (animation is lost) — this happens implicitly: `new Image()` loads the GIF and Canvas `drawImage()` captures whatever frame is currently displayed (always the first frame for a just-loaded GIF), so no explicit frame extraction code is needed. WebP conversion may increase size; apply PNG cascade compression after conversion
   - If the final compression step still exceeds `MAX_IMAGE_BASE64_BYTES`, throw an error: `"Image exceeds 5MB after maximum compression (final size: ${size} bytes)"`. This is an unrecoverable error — the caller converts it to a `ToolResult` with `success: false` or an `Attachment` with `status: "error"`
-  - **Already-within-limits optimization:** If the input image is (a) already ≤ max dimension on both axes AND (b) the raw base64 of the original buffer is ≤ `MAX_IMAGE_BASE64_BYTES`, skip the Canvas pipeline entirely and return the original buffer as base64. This avoids unnecessary quality loss from re-encoding. The Canvas pipeline only runs when resize or compression is actually needed
+  - **Already-within-limits optimization:** The `Image()` load (for dimension reading) always runs. After loading, if the input image is (a) already ≤ max dimension on both axes AND (b) the raw base64 of the original buffer is ≤ `MAX_IMAGE_BASE64_BYTES`, skip the Canvas resize/compress steps (Canvas `createElement`, `drawImage`, `toDataURL`, compression cascade) and return the original buffer as base64 with dimensions from `img.naturalWidth`/`img.naturalHeight`. This avoids unnecessary quality loss from re-encoding. The Canvas steps only run when resize or compression is actually needed
   - Export `processImage(buffer: Buffer, mediaType: ImageMediaType, options?: { maxDimension?: number; compressionQuality?: number }): Promise<ContentBlock>` — defaults to `maxDimension: 2000` and `compressionQuality: 80`. Callers (`read_file`, `resolveAttachment`, `readExternalBinaryFile`) pass `this.settings.image_max_dimension` and `this.settings.image_compression_quality` from the plugin settings
   - `processImage()` throws on unrecoverable errors (corrupt image, Canvas/Image load failure, exceeding size limit after maximum compression, zero-dimension images, Canvas `toDataURL` returning empty string). Callers (`read_file`, `resolveAttachment`) are responsible for catching and converting to appropriate error responses (e.g., `ToolResult` with `success: false`, or `Attachment` with `status: "error"`)
   - **Image load pattern:** Use both `onload` (resolve) and `onerror` (reject) handlers when loading the Image element. Example: `await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = () => reject(new Error("Failed to decode image")); img.src = dataUrl; })`. Also guard against zero-dimension results after load (`img.naturalWidth === 0 || img.naturalHeight === 0` indicates a decode failure on some platforms)
@@ -270,7 +272,7 @@ Each provider's message conversion function must handle the case where `msg.cont
     - `height: number | null` — image height in pixels after processing (null for non-image attachments). Used by `buildAttachmentsBlock()` to set `ContentBlock` dimensions for accurate token estimation
   - **Update existing factory functions** (`createVaultNoteAttachment`, `createVaultNoteSectionAttachment`, `createExternalFileAttachment`) to include `binary_content: null`, `media_type: null`, `width: null`, and `height: null` in their return objects — required for TypeScript compilation after the interface change
   - Add factory: `createVaultImageAttachment(path: string): Attachment` — returns Attachment with `type: "vault_image"`, `binary_content: null`, `media_type: null`, `width: null`, `height: null`, `status: "pending"`. Binary content and dimensions are populated during `resolveAttachment()`
-  - Add factory: `createExternalBinaryAttachment(absolutePath: string, filename: string, base64: string, mediaType: string, width?: number, height?: number): Attachment` — sets `binary_content: base64`, `media_type: mediaType`, `width: width ?? null`, `height: height ?? null`, `status: "resolved"` (already processed by caller). Note: unlike `createVaultImageAttachment` (which starts as "pending"), external binary attachments arrive fully processed
+  - Add factory: `createExternalBinaryAttachment(absolutePath: string, filename: string, base64: string, mediaType: string, width?: number, height?: number): Attachment` (extended from design doc §5.1 to include dimension metadata for token estimation) — sets `binary_content: base64`, `media_type: mediaType`, `width: width ?? null`, `height: height ?? null`, `status: "resolved"` (already processed by caller). Note: unlike `createVaultImageAttachment` (which starts as "pending"), external binary attachments arrive fully processed
   - Update `resolveAttachment()`:
     - For `vault_image`: read binary via `app.vault.readBinary(file)`, convert to `Buffer` via `Buffer.from(arrayBuffer)`, detect format via `detectMediaFormat()`. If `detectMediaFormat()` returns `null` (unknown binary format) or returns a non-image format (e.g., `"pdf"`), set `status: "error"` and `error_message: "Unsupported image format"` — do not attempt to process through `processImage()`. Otherwise, process through `processImage(buffer, mediaType)`. The returned `ContentBlock` contains `data` (base64), `media_type`, `width`, and `height` — extract these fields and store on the Attachment: `binary_content = block.data`, `media_type = block.media_type`, `width = block.width`, `height = block.height`
     - If image processing fails (corrupt file, canvas error, exceeds size after compression), set `status: "error"` and `error_message` with a descriptive message. Do not throw — follow the existing error handling pattern at lines 261-266
@@ -315,7 +317,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
   - Add `content_blocks: msg.tool_result.content_blocks` to this object literal when `msg.tool_result.content_blocks` is present — this matches the type extension from the `provider.ts` update above
 
 - [ ] **Update provider `toXxxMessages()` functions** — Format `content_blocks` in tool results
-  - Extract a helper function within each provider file (e.g., `function mapContentBlock(block: MediaContentBlock)` in bedrock-provider.ts) to share the mapping logic between user messages (Task 1.3) and tool results. Do not create a cross-provider shared module
+  - Extract a helper function within each provider file to share the mapping logic between user messages (Task 1.3) and tool results. Do not create a cross-provider shared module. The helper's shape is provider-specific — reuse the exact mapping logic defined in Task 1.3 for each provider (e.g., Bedrock: `function mapContentBlock(block: MediaContentBlock): BedrockContentBlock` returning `{ image: { format, source: { bytes } } }` etc.; Anthropic: returns `{ type: "image", source: { type: "base64", ... } }` etc.). The return type is the provider's native content block type
   - **Anthropic** (line 88): `content: tr.result` (currently a string) → when `tr.content_blocks` present, switch to array format: `content: [{ type: "text", text: tr.result }, ...blocks.map(b => mapBlock(b))]`. Anthropic's `tool_result` content field accepts either a string or an array — when `content_blocks` is absent, keep the existing string format for backward compatibility. When `tr.result` is empty and `content_blocks` is present, omit the text block from the array
   - **OpenAI** (line 79): `content: tr.result` → when `tr.content_blocks` present: as of early 2026, OpenAI does not support multipart content arrays in tool result messages (`role: "tool"`) — only string content is accepted. Use only the text summary from `tr.result` and log a `log.warn()` when image blocks are dropped. Verify this is still the case at implementation time, as the API may have changed. If OpenAI has added multipart tool result support by implementation time, follow the Anthropic pattern: `content: [{ type: "text", text: tr.result }, ...mappedBlocks]`
   - **Bedrock** (lines 112-118): `content: [{ text: tr.result }]` is inside a `{ toolResult: { toolUseId, content: [...], status } }` structure (the `content` field is specifically at line 115). Append mapped image/document blocks **inside the `toolResult.content` array**, using the same Bedrock-native format as user messages: `{ image: { format, source: { bytes: Buffer.from(data, "base64") } } }`. **Note:** Verify via the AWS SDK types that `toolResult.content[]` accepts the same `{ image: { format, source: { bytes } } }` structure as `converseMessage.content[]`
@@ -327,7 +329,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 - [ ] **Update `src/ui/attachment-picker.ts`**
   - Expand `openExternalFileDialog()` accepted extensions (line 584-586):
     - Add: `.png,.jpg,.jpeg,.gif,.webp`
-  - Add `readExternalBinaryFile(absolutePath: string, maxSizeMb?: number): Promise<{ base64: string; mediaType: string; width?: number; height?: number } | null>` for binary file reading. Returns `null` if file exceeds size limit or cannot be read. Default `maxSizeMb`: 50 (matching the `read_file` raw size limit from Task 2.3). Detect media type via `detectMediaFormat()` on the first bytes of the buffer. **For image files:** process through `processImage()` (resize/compress) before returning — extract `data`, `media_type`, `width`, `height` from the returned `ContentBlock`. This ensures external images go through the same compression cascade as vault images
+  - Add `readExternalBinaryFile(absolutePath: string, maxSizeMb?: number): Promise<{ base64: string; mediaType: string; width?: number; height?: number } | null>` for binary file reading. Returns `null` if file exceeds size limit or cannot be read. Default `maxSizeMb`: 50 (matching the `read_file` raw size limit from Task 2.3). Detect media type via `detectMediaFormat()` on the first bytes of the buffer. **For image files:** process through `processImage()` (resize/compress) before returning — extract `data`, `media_type`, `width`, `height` from the returned `ContentBlock`. Image processing settings (`maxDimension`, `compressionQuality`) are read from `this.settings.image_max_dimension` and `this.settings.image_compression_quality` within the method body — they are not function parameters (the attachment picker class has access to `this.settings`). This ensures external images go through the same compression cascade as vault images
   - Route image files to binary read path instead of UTF-8 text read. **ContentBlock extraction:** Extract fields from the returned `ContentBlock` for the return object: `block.data` → `base64`, `block.media_type` → `mediaType`, `block.width` → `width`, `block.height` → `height`
   - Update `VaultNoteSuggest` (lines 173-389) to show image files from vault (not just `.md`):
     - **API change required:** Replace `this.app.vault.getMarkdownFiles()` (line 270) with `this.app.vault.getFiles()` and filter manually by extension (`.md`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`). `getMarkdownFiles()` is an Obsidian API that only returns `.md` files and cannot be configured to include other types. (PDF files are added separately in Phase 3, Task 3.5)
@@ -498,12 +500,12 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 - [ ] **Update `src/tools/write-docx.ts`**
   - Add `ImageRun` to imports from `docx` (line 24-37)
-  - **Signature change:** Update `generateDocx` from `(content: string, templatePath: string | null)` (current at write-docx.ts:251) to `(content: string, templatePath: string | null, vaultRoot: string, allowedPaths: string[])`. Note: `outputPath` is NOT a parameter of `generateDocx()` — file writing is handled in the tool's `execute()` method. In `execute()`, thread `vaultRoot` from `this.app.vault.adapter.basePath` and `allowedPaths` from `this.settings.read_file_allowed_paths` into the `generateDocx()` call.
+  - **Signature change:** Update `generateDocx` from `(content: string, templatePath: string | null)` (current at write-docx.ts:251) to `(content: string, templatePath: string | null, vaultRoot: string, allowedPaths: string[])`. Note: `outputPath` is NOT a parameter of `generateDocx()` — file writing is handled in the tool's `execute()` method. In `execute()`, thread `vaultRoot` from `this.app.vault.adapter.basePath` and `allowedPaths` from `this.settings.read_file_allowed_paths` into the `generateDocx()` call. `generateDocx()` is a standalone function (not a class method), so it cannot access `this.settings` directly — these parameters are the only way to pass the values in.
   - **Image pre-resolution pass** — Both `buildDocxChildren()` (line 108) and `renderInline()` (line 53) are synchronous. The `docx` library's `Document`, `Paragraph`, `Table`, and `ImageRun` constructors all expect synchronous children arrays. Making either function async would require restructuring all constructor call sites.
     - **Strategy:** Add an async pre-pass in `generateDocx()` before calling `buildDocxChildren()`:
       1. **Recursively** walk all tokens from `marked.lexer()` output — image tokens are inline tokens nested inside `paragraph`, `blockquote`, `list` item, and `table` cell tokens (in marked v17, `![alt](url)` is parsed as `{ type: "paragraph", tokens: [{ type: "image", href: "url" }] }`). The walk must descend into each block token's `.tokens` and `.items[].tokens` arrays to find all `image` entries.
       2. Collect all `image` token `href` values from the recursive walk
-      3. Resolve all images in parallel: `await Promise.all(hrefs.map(h => resolveImageForDocx(h, vaultRoot, allowedPaths)))` — `allowedPaths` is sourced from `this.settings.read_file_allowed_paths` in the tool's `execute()` method, threaded into `generateDocx()` as a new parameter (full signature: `generateDocx(content, templatePath, vaultRoot, allowedPaths)`) — note that `generateDocx()` is a standalone function, not a class method, so it cannot access `this.settings` directly
+      3. Resolve all images in parallel: `await Promise.all(hrefs.map(h => resolveImageForDocx(h, vaultRoot, allowedPaths)))` (both parameters are already available from the signature change above)
       4. Build a `Map<string, DocxImageData>` lookup from href → resolved image data
       5. Pass the map into `buildDocxChildren()` as a parameter
     - `buildDocxChildren()` stays synchronous — image lookup is a synchronous `map.get(href)` call
@@ -514,7 +516,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - When a `paragraph` token contains an image mixed with other inline tokens (e.g., `text ![alt](url) more text`), render via `renderInline()` as today — the image token falls through to the default `raw` text rendering, which renders the image token's `.raw` property (the original markdown syntax, e.g., `![alt](url)`) as literal text in the Word document. This is acceptable: mixed image+text paragraphs are rare in practice, and the raw syntax preserves the reference. The `InlineChild` type union returned by `renderInline()` remains unchanged (`TextRun | ExternalHyperlink`) — `ImageRun` is used only in standalone image paragraphs constructed directly in `buildDocxChildren()`, not through `renderInline()`
     - **Known limitation:** Standalone images inside blockquotes, list items, and table cells are rendered as text placeholders (`![alt](url)` literal text), not as `ImageRun` elements. This is because `buildDocxChildren()` delegates these block types directly to `renderInline()` (blockquote line 167, list line 179, table cells line 201), which has no image handling. Fixing this would require refactoring these cases to detect nested image paragraphs, which is deferred — top-level standalone images cover the vast majority of real-world usage
     - Paragraphs with no image tokens continue through the existing `renderInline()` path unchanged
-- [ ] **Refactor template grafting — Step 1: Migrate body grafting to DOM parsing (lines 286-338)**
+- [ ] **Refactor template grafting — Step 1: Parse body DOMs (lines 286-338) — append deferred to Step 3**
   - The current grafting uses regex-based XML string manipulation (regex to extract `<w:body>`, regex to strip `<w:sectPr>`). Introducing DOM-based merging for relationships alongside regex-based body grafting creates an inconsistent, fragile mix. Migrate the entire grafting routine to `@xmldom/xmldom` (`^0.8.11`, already a direct dependency in package.json).
   - **Namespace handling:** Use `getElementsByTagName("w:body")` — xmldom 0.8.x resolves prefixed tag names when the `w:` prefix is declared in the document (always true for OOXML). Use this as the primary approach. If at implementation time it returns an empty NodeList, fall back to `getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "body")`. Add an assertion after the call: `if (!bodyElements.length) throw new Error("Could not locate <w:body> in document.xml")`
   - Implementation:
