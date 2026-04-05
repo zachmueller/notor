@@ -462,7 +462,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 2.5.1 Type Declarations
 
-- [ ] **Expand `src/mammoth.d.ts`** (currently 6 lines)
+- [x] **Expand `src/mammoth.d.ts`** (currently 6 lines)
   - Add `Options` interface with `convertImage?: ImageConverter`
   - Add `ImageConverter` branded type
   - Add `Image` interface: `contentType: string`, `readAsBuffer(): Promise<Buffer>`, `readAsArrayBuffer(): Promise<ArrayBuffer>`, `readAsBase64String(): Promise<string>`
@@ -474,7 +474,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 2.5.2 `read_docx` — Image Extraction
 
-- [ ] **Update `src/tools/read-docx.ts`**
+- [x] **Update `src/tools/read-docx.ts`**
   - Add `import { createHash } from "crypto"`
   - Implement mammoth `convertImage` handler (before `convertToHtml` call at line 142). **`this` binding:** use an arrow function for the callback passed to `mammoth.images.imgElement()` to preserve lexical `this` access to `this.app` for vault operations.
     - Check format against supported list (`image/png`, `image/jpeg`, `image/gif`, `image/webp`)
@@ -493,7 +493,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 2.5.3 `write_docx` — Image Embedding
 
-- [ ] **Create `src/tools/docx-image-utils.ts`**
+- [x] **Create `src/tools/docx-image-utils.ts`**
   - Define `DocxImageData` interface: `type: "jpg" | "png" | "gif" | "bmp"`, `buffer: Buffer`, `width: number`, `height: number`
   - Implement `resolveImageForDocx(href, vaultRoot, allowedPaths): Promise<DocxImageData | null>`
     - Vault-relative paths: resolve from vault root
@@ -510,7 +510,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - BMP: bytes 18-25
   - Max input image size: 20MB (reject larger with error)
 
-- [ ] **Update `src/tools/write-docx.ts`**
+- [x] **Update `src/tools/write-docx.ts`**
   - Add `ImageRun` to imports from `docx` (line 24-37)
   - **Signature change:** Update `generateDocx` from `(content: string, templatePath: string | null)` (current at write-docx.ts:251) to `(content: string, templatePath: string | null, vaultRoot: string, allowedPaths: string[])`. Note: `outputPath` is NOT a parameter of `generateDocx()` — file writing is handled in the tool's `execute()` method. In `execute()`, thread `vaultRoot` from `this.app.vault.adapter.basePath` and `allowedPaths` from `this.settings.read_file_allowed_paths` into the `generateDocx()` call. `generateDocx()` is a standalone function (not a class method), so it cannot access `this.settings` directly — these parameters are the only way to pass the values in.
   - **Image pre-resolution pass** — Both `buildDocxChildren()` (line 108) and `renderInline()` (line 53) are synchronous. The `docx` library's `Document`, `Paragraph`, `Table`, and `ImageRun` constructors all expect synchronous children arrays. Making either function async would require restructuring all constructor call sites.
@@ -528,7 +528,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - When a `paragraph` token contains an image mixed with other inline tokens (e.g., `text ![alt](url) more text`), render via `renderInline()` as today — the image token falls through to the default `raw` text rendering, which renders the image token's `.raw` property (the original markdown syntax, e.g., `![alt](url)`) as literal text in the Word document. This is acceptable: mixed image+text paragraphs are rare in practice, and the raw syntax preserves the reference. The `InlineChild` type union returned by `renderInline()` remains unchanged (`TextRun | ExternalHyperlink`) — `ImageRun` is used only in standalone image paragraphs constructed directly in `buildDocxChildren()`, not through `renderInline()`
     - **Known limitation:** Standalone images inside blockquotes, list items, and table cells are rendered as text placeholders (`![alt](url)` literal text), not as `ImageRun` elements. This is because `buildDocxChildren()` delegates these block types directly to `renderInline()` (blockquote line 167, list line 179, table cells line 201), which has no image handling. Fixing this would require refactoring these cases to detect nested image paragraphs, which is deferred — top-level standalone images cover the vast majority of real-world usage
     - Paragraphs with no image tokens continue through the existing `renderInline()` path unchanged
-- [ ] **Refactor template grafting — Step 1: Parse body DOMs (lines 286-338) — append deferred to Step 3**
+- [x] **Refactor template grafting — Step 1: Parse body DOMs (lines 286-338) — append deferred to Step 3**
   - The current grafting uses regex-based XML string manipulation (regex to extract `<w:body>`, regex to strip `<w:sectPr>`). Introducing DOM-based merging for relationships alongside regex-based body grafting creates an inconsistent, fragile mix. Migrate the entire grafting routine to `@xmldom/xmldom` (`^0.8.11`, already a direct dependency in package.json).
   - **Namespace handling for element lookup:** Use `getElementsByTagName("w:body")` — xmldom 0.8.x resolves prefixed tag names when the `w:` prefix is declared in the document (always true for OOXML). Use this as the primary approach. If at implementation time it returns an empty NodeList, fall back to `getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "body")`. Add an assertion after the call: `if (!bodyElements.length) throw new Error("Could not locate <w:body> in document.xml")`. **Note:** This `getElementsByTagNameNS()` fallback applies only to element lookup here in Step 1. Attribute access in Step 3 uses the prefixed form (`getAttribute("r:embed")`) exclusively — see Step 3 for rationale
   - Implementation:
@@ -541,12 +541,12 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
   - This replaces the current regex approach with equivalent DOM operations, reducing fragility
   - **Verify:** Generate a DOCX with template using both the old regex and new DOM approaches. Compare the output `word/document.xml` for semantic XML equivalence (attribute order and whitespace may differ — `DOMParser`/`XMLSerializer` may normalize these). Add a unit test that round-trips a known template and asserts the generated body content matches
 
-- [ ] **Refactor template grafting — Step 2: Copy `word/media/*` image files**
+- [x] **Refactor template grafting — Step 2: Copy `word/media/*` image files**
   - When the generated doc contains images (from `ImageRun`), copy all `word/media/*` binary files from the generated zip into the template zip
   - When the generated doc has no images, skip (no media to copy)
   - Handle duplicate media filenames: the `docx` library generates unique names (`image1.png`, `image2.png`), but if a filename already exists in the template, rename with a numeric suffix
 
-- [ ] **Refactor template grafting — Step 3: Merge `word/_rels/document.xml.rels` with rId conflict resolution**
+- [x] **Refactor template grafting — Step 3: Merge `word/_rels/document.xml.rels` with rId conflict resolution**
   - Both the template and generated doc independently assign relationship IDs (`rId1`, `rId2`, etc.). Naively merging relationships causes collisions.
   - rId conflict resolution algorithm:
     1. Parse template's `word/_rels/document.xml.rels` with `DOMParser`
@@ -558,7 +558,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     7. Append remapped `<Relationship>` elements to template `.rels` DOM
     8. Serialize updated `.rels` back to template zip
 
-- [ ] **Refactor template grafting — Step 4: Merge `[Content_Types].xml`**
+- [x] **Refactor template grafting — Step 4: Merge `[Content_Types].xml`**
   - Parse both `[Content_Types].xml` with `DOMParser`
   - **Extension source (primary approach):** Scan `word/media/*` filenames in the generated zip and extract their file extensions (e.g., `image1.jpeg` → `"jpeg"`, `image2.png` → `"png"`). This is more reliable than using the pre-resolved `DocxImageData` map, since the `docx` library may normalize extensions (e.g., `.jpg` → `.jpeg`). **Important:** the `docx` library writes JPEG media files as `imageN.jpeg`, so the Content_Types entry must use `Extension="jpeg"` — using `"jpg"` produces a corrupt DOCX that Word cannot open. The zip filename scan naturally captures this normalization
   - For each image extension found, add a `<Default Extension="..." ContentType="..."/>` entry to the template's `[Content_Types].xml` if not already present. Content type mapping: `"png"` → `"image/png"`, `"jpeg"` → `"image/jpeg"`, `"gif"` → `"image/gif"`, `"bmp"` → `"image/bmp"`. Check for duplicates by iterating existing `<Default>` child elements of the `<Types>` root and comparing `getAttribute("Extension")` against the target extension string.
@@ -581,7 +581,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 - [ ] **Manual test: write_docx** — Write markdown with `![alt](path)` image references → open output in Word → images render
 - [ ] **Manual test: Template grafting** — Write with template + images → styles preserved AND images present
 - [ ] **Manual test: Edge cases** — Duplicate images (same MD5 → same file), mixed formats (PNG + JPEG + unsupported EMF), document with no images (output identical to current)
-- [ ] **Unit tests** — `docx-image-utils.ts` (dimension parsing, format mapping, path resolution), mammoth convertImage handler
+- [x] **Unit tests** — `docx-image-utils.ts` (dimension parsing, format mapping, path resolution), mammoth convertImage handler
 
 ---
 

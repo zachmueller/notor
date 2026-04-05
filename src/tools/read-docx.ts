@@ -13,10 +13,13 @@
  */
 
 import { Platform } from "obsidian";
-import type { App } from "obsidian";
+import type { App, TFile } from "obsidian";
 import * as fs from "fs";
 import { extname } from "path";
+import { createHash } from "crypto";
 import mammoth from "mammoth";
+import { images as mammothImages } from "mammoth";
+import type { Image as MammothImage } from "mammoth";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
 import type { Tool, ToolResult } from "./tool";
@@ -43,8 +46,9 @@ export class ReadDocxTool implements Tool {
 	readonly description =
 		"Read a .docx file and return its content as Markdown. " +
 		"The path must be within the vault or a user-configured allow-list of paths. " +
-		"Images are replaced with [image] placeholders. " +
-		"Desktop-only tool.";
+		"Embedded images (PNG, JPEG, GIF, WebP) are extracted to the vault attachment folder " +
+		"and referenced as ![alt](path) in the output. Unsupported formats (EMF, WMF, SVG, TIFF) " +
+		"are replaced with descriptive text. Desktop-only tool.";
 
 	readonly input_schema = {
 		type: "object",
@@ -138,8 +142,77 @@ export class ReadDocxTool implements Tool {
 
 			const buf = await fs.promises.readFile(resolvedPath);
 
-			// Convert DOCX → HTML via mammoth
-			const { value: html } = await mammoth.convertToHtml({ buffer: buf });
+			// Build image extraction handler
+			const extractedImages: Array<{ index: number; vaultPath: string | null; alt: string }> = [];
+			let imageIndex = 0;
+
+			// Determine if the input path is vault-relative (for attachment folder resolution)
+			const vaultFile: TFile | null = this.app.vault.getFileByPath(path);
+			const sourcePath: string | undefined = vaultFile ? vaultFile.path : undefined;
+
+			const supportedImageTypes = new Set([
+				"image/png", "image/jpeg", "image/gif", "image/webp",
+			]);
+
+			const convertImage = mammothImages.imgElement(
+				async (image: MammothImage) => {
+					const idx = imageIndex++;
+					const contentType = image.contentType;
+
+					// Skip unsupported formats
+					if (!supportedImageTypes.has(contentType)) {
+						const formatName = contentType.replace("image/", "").toUpperCase();
+						const alt = `[Unsupported image format: ${formatName}]`;
+						extractedImages.push({ index: idx, vaultPath: null, alt });
+						return { src: `__notor_skip_${idx}__`, alt };
+					}
+
+					try {
+						const imgBuffer = await image.readAsBuffer();
+						const ext = (contentType.split("/")[1] ?? "bin").replace("jpeg", "jpg");
+						const hash = createHash("md5").update(imgBuffer).digest("hex");
+						const filename = `${hash}.${ext}`;
+
+						// Resolve target path via Obsidian's attachment folder logic
+						const targetPath = await this.app.fileManager.getAvailablePathForAttachment(
+							filename,
+							sourcePath,
+						);
+
+						// Check if the file already exists at the resolved path
+						const existing = this.app.vault.getFileByPath(targetPath);
+						if (!existing) {
+							// Save the image binary — use .slice() to extract the relevant portion
+							const arrayBuf = imgBuffer.buffer.slice(
+								imgBuffer.byteOffset,
+								imgBuffer.byteOffset + imgBuffer.byteLength,
+							);
+							await this.app.vault.createBinary(targetPath, arrayBuf);
+						}
+
+						extractedImages.push({ index: idx, vaultPath: targetPath, alt: filename });
+						return { src: `__notor_img_${idx}__`, alt: filename };
+					} catch (err) {
+						const errMsg = err instanceof Error ? err.message : String(err);
+						log.warn("Image extraction failed", { index: idx, error: errMsg });
+						extractedImages.push({ index: idx, vaultPath: null, alt: `[Image extraction failed]` });
+						return { src: `__notor_skip_${idx}__`, alt: `[Image extraction failed]` };
+					}
+				},
+			);
+
+			// Convert DOCX → HTML via mammoth (with image handler)
+			const { value: html } = await mammoth.convertToHtml(
+				{ buffer: buf },
+				{ convertImage },
+			);
+
+			// Build a lookup from src marker → extracted image info
+			const imageMap = new Map<string, { vaultPath: string | null; alt: string }>();
+			for (const img of extractedImages) {
+				imageMap.set(`__notor_img_${img.index}__`, img);
+				imageMap.set(`__notor_skip_${img.index}__`, img);
+			}
 
 			// Convert HTML → Markdown via Turndown (local instance, not shared singleton)
 			const td = new TurndownService({
@@ -153,12 +226,38 @@ export class ReadDocxTool implements Tool {
 			td.use(gfm);
 			td.addRule("replaceImages", {
 				filter: ["img"],
-				replacement: () => "[image]",
+				replacement: (_content: string, node: HTMLElement) => {
+					const src = node.getAttribute("src") ?? "";
+					const alt = node.getAttribute("alt") ?? "";
+
+					// Vault-path-aware image replacement
+					if (src.startsWith("__notor_img_")) {
+						const info = imageMap.get(src);
+						if (info?.vaultPath) {
+							return `![${alt}](${info.vaultPath})`;
+						}
+					}
+
+					// Skipped / failed images
+					if (src.startsWith("__notor_skip_")) {
+						return alt || "[image]";
+					}
+
+					// Fallback
+					return "[image]";
+				},
 			});
 
 			const markdown = td.turndown(html);
 
-			log.info("Read docx", { path: resolvedPath, bytes: buf.length });
+			const extractedCount = extractedImages.filter(i => i.vaultPath !== null).length;
+			const skippedCount = extractedImages.filter(i => i.vaultPath === null).length;
+			log.info("Read docx", {
+				path: resolvedPath,
+				bytes: buf.length,
+				imagesExtracted: extractedCount,
+				imagesSkipped: skippedCount,
+			});
 
 			return {
 				tool_name: this.name,
