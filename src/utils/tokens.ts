@@ -49,8 +49,12 @@ export function estimateTokenCount(text: string): number {
 
 import type { ContentBlock } from "../media/types";
 
-function estimateImageTokens(width?: number, height?: number): number {
+function estimateImageTokens(width?: number, height?: number, provider?: string): number {
 	if (width != null && height != null) {
+		if (provider === "openai") {
+			// OpenAI GPT-4 Vision tile-based formula (high detail mode)
+			return 170 * Math.ceil(width / 512) * Math.ceil(height / 512) + 85;
+		}
 		return Math.ceil((width * height) / 750);
 	}
 	return 2000;
@@ -68,8 +72,10 @@ function estimateDocumentTokens(pageCount?: number): number {
  *
  * For strings, delegates to estimateTokenCount().
  * For ContentBlock[], sums per-block estimates using type-specific heuristics.
+ *
+ * @param provider - Optional provider type for provider-specific token formulas (e.g., "openai" uses tile-based image estimation).
  */
-export function estimateContentTokens(content: string | ContentBlock[]): number {
+export function estimateContentTokens(content: string | ContentBlock[], provider?: string): number {
 	if (typeof content === "string") {
 		return estimateTokenCount(content);
 	}
@@ -80,7 +86,7 @@ export function estimateContentTokens(content: string | ContentBlock[]): number 
 				total += estimateTokenCount(block.text);
 				break;
 			case "image":
-				total += estimateImageTokens(block.width, block.height);
+				total += estimateImageTokens(block.width, block.height, provider);
 				break;
 			case "document":
 				total += estimateDocumentTokens(block.page_count);

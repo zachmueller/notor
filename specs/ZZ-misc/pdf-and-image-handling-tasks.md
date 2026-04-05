@@ -591,13 +591,13 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 4.1 MCP Tool Results with Images
 
-- [ ] **Handle MCP image results** — Currently omitted with `[N image(s) omitted]`
+- [x] **Handle MCP image results** — Currently omitted with `[N image(s) omitted]`
   - When MCP tools return image content, convert to `ContentBlock` and include in tool result
   - Respect provider media capabilities
 
 ### 4.2 Drag-and-Drop Support
 
-- [ ] **Add drag-and-drop for images/PDFs on chat input area**
+- [x] **Add drag-and-drop for images/PDFs on chat input area**
   - Listen for `drop` events on the chat input container
   - Detect file type via extension/magic bytes
   - Route to appropriate attachment creation flow
@@ -605,32 +605,32 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 4.3 Image Thumbnail Preview
 
-- [ ] **Render small thumbnail preview in attachment chips** for image attachments
+- [x] **Render small thumbnail preview in attachment chips** for image attachments
   - Use `<img src="data:...">` with small dimensions (e.g., 32x32) in the chip element
   - Only for images, not PDFs
 
 ### 4.4 Provider-Specific Token Formulas
 
-- [ ] **Implement OpenAI tile-based image token formula**
+- [x] **Implement OpenAI tile-based image token formula**
   - `170 * ceil(w/512) * ceil(h/512) + 85` (high detail mode)
   - Add `provider?: string` parameter to `estimateImageTokens`
   - Reduces overestimation for image-heavy conversations on OpenAI
 
 ### 4.5 HTML Export — Inline Images
 
-- [ ] **Optionally embed images in HTML export**
+- [x] **Optionally embed images in HTML export**
   - When exporting to HTML, image blocks render as `<img src="data:{mediaType};base64,{data}">` inline
   - PDF blocks render as `[PDF document attached]` text
 
 ### 4.6 E2E Test Coverage
 
-- [ ] **E2E test: Image attachment flow** — Attach image → send → model responds with image description
-- [ ] **E2E test: PDF attachment flow** — Attach PDF → send → model summarizes content
-- [ ] **E2E test: read_file on image** — Tool call returns image block
-- [ ] **E2E test: read_file on PDF** — Tool call returns document block or text
+- [x] **E2E test: Image attachment flow** — Attach image → send → model responds with image description
+- [x] **E2E test: PDF attachment flow** — Attach PDF → send → model summarizes content
+- [x] **E2E test: read_file on image** — Tool call returns image block
+- [x] **E2E test: read_file on PDF** — Tool call returns document block or text
 - [ ] **E2E test: read_docx with images** — Images saved to vault, markdown contains paths
 - [ ] **E2E test: write_docx with images** — Output contains embedded images
-- [ ] **E2E test: History persistence** — Send image → close/reopen conversation → image still present in history
+- [x] **E2E test: History persistence** — Send image → close/reopen conversation → image still present in history
 
 ---
 

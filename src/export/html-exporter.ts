@@ -10,7 +10,7 @@ import type { Conversation, Message, ToolCall, ToolResult } from "../types";
 import { formatToolDisplayName } from "../ui/tool-call-ui";
 import { USE_SUBAGENT_TOOL_NAME } from "../sub-agents/constants";
 import { marked } from "marked";
-import { getTextContent } from "../media/types";
+import { getTextContent, type ContentBlock } from "../media/types";
 
 const WORKFLOW_RE = /<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/;
 const ATTACHMENTS_RE = /<attachments>([\s\S]*?)<\/attachments>/;
@@ -224,6 +224,13 @@ body {
   font-weight: 600;
 }
 
+.inline-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 4px 0;
+}
+
 .token-annotation {
   font-size: 0.75em;
   color: var(--text-muted);
@@ -429,6 +436,19 @@ function renderUserMessage(msg: Message): string {
 
 	if (content.trim()) {
 		parts.push(`<div class="message-content">${escapeHtml(content.trim()).replace(/\n/g, "<br>")}</div>`);
+	}
+
+	// Render inline media blocks (images and PDF placeholders)
+	if (Array.isArray(msg.content)) {
+		for (const block of msg.content as ContentBlock[]) {
+			if (block.type === "image") {
+				const widthAttr = block.width ? ` width="${block.width}"` : "";
+				const heightAttr = block.height ? ` height="${block.height}"` : "";
+				parts.push(`<div class="message-content"><img class="inline-image" src="data:${escapeHtml(block.media_type)};base64,${block.data}"${widthAttr}${heightAttr} alt="Attached image"></div>`);
+			} else if (block.type === "document") {
+				parts.push(`<div class="message-content"><em>[PDF document attached]</em></div>`);
+			}
+		}
 	}
 
 	return messageBlock("user", "User", ts, parts.join("\n"));

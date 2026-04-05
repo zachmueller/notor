@@ -98,10 +98,23 @@ export class AttachmentChipManager {
 		// Type-specific visual indicator
 		if (attachment.type === "vault_image" || attachment.type === "external_image") {
 			chipEl.addClass("notor-attachment-chip--image");
-			chipEl.createSpan({
-				cls: "notor-attachment-chip-icon",
-				text: "\uD83D\uDDBC\uFE0F",
-			});
+			// Render thumbnail if binary data is available
+			if (attachment.binary_content && attachment.media_type) {
+				const thumb = chipEl.createEl("img", {
+					cls: "notor-attachment-chip-thumbnail",
+					attr: {
+						src: `data:${attachment.media_type};base64,${attachment.binary_content}`,
+						alt: attachment.display_name,
+					},
+				});
+				thumb.width = 24;
+				thumb.height = 24;
+			} else {
+				chipEl.createSpan({
+					cls: "notor-attachment-chip-icon",
+					text: "\uD83D\uDDBC\uFE0F",
+				});
+			}
 		} else if (attachment.type === "vault_pdf" || attachment.type === "external_pdf") {
 			chipEl.addClass("notor-attachment-chip--pdf");
 			chipEl.createSpan({

@@ -25,7 +25,22 @@ import {
 	renderWriteNoteDiffPreview,
 	renderReplaceInNoteDiffPreview,
 } from "./diff-view";
-import { VaultNoteSuggest, createAttachmentButton } from "./attachment-picker";
+import {
+	VaultNoteSuggest,
+	createAttachmentButton,
+	getAbsoluteFilePath,
+	readExternalBinaryFile,
+	readExternalPdfFile,
+	IMAGE_EXTENSIONS,
+	PDF_EXTENSIONS,
+} from "./attachment-picker";
+import {
+	createExternalFileAttachment,
+	createExternalBinaryAttachment,
+	createExternalPdfAttachment,
+	readExternalFile,
+	isDuplicate,
+} from "../context/attachment";
 import { AttachmentChipManager, createAttachmentChipContainer } from "./attachment-chips";
 import { WorkflowSlashSuggest, detectSlashTrigger } from "./workflow-suggest";
 import { resolveNote } from "../utils/resolve-note";
@@ -983,6 +998,121 @@ export class NotorChatView extends ItemView {
 		});
 		setIcon(this.stopButtonEl, "octagon-pause");
 		this.stopButtonEl.addEventListener("click", () => this.handleStop());
+
+		// Drag-and-drop support for images and PDFs
+		this.setupDragAndDrop();
+	}
+
+	/**
+	 * Set up drag-and-drop handlers on the input area for images, PDFs, and text files.
+	 */
+	private setupDragAndDrop(): void {
+		let dragCounter = 0;
+
+		this.inputAreaEl.addEventListener("dragover", (e) => {
+			e.preventDefault();
+			if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+		});
+
+		this.inputAreaEl.addEventListener("dragenter", (e) => {
+			e.preventDefault();
+			dragCounter++;
+			if (dragCounter === 1) {
+				this.inputAreaEl.addClass("notor-drop-active");
+			}
+		});
+
+		this.inputAreaEl.addEventListener("dragleave", (e) => {
+			e.preventDefault();
+			dragCounter--;
+			if (dragCounter === 0) {
+				this.inputAreaEl.removeClass("notor-drop-active");
+			}
+		});
+
+		this.inputAreaEl.addEventListener("drop", (e) => {
+			e.preventDefault();
+			dragCounter = 0;
+			this.inputAreaEl.removeClass("notor-drop-active");
+
+			const files = Array.from(e.dataTransfer?.files ?? []);
+			if (files.length === 0) return;
+
+			const settings = this.plugin.settings;
+			const existing = this.pendingAttachments;
+
+			for (const file of files) {
+				const absolutePath = getAbsoluteFilePath(file);
+				if (!absolutePath) {
+					new Notice(`Cannot read file path for: ${file.name}`);
+					continue;
+				}
+
+				if (isDuplicate(existing, { path: absolutePath })) {
+					new Notice(`Already attached: ${file.name}`);
+					continue;
+				}
+
+				const ext = "." + (file.name.split(".").pop()?.toLowerCase() ?? "");
+
+				if (IMAGE_EXTENSIONS.has(ext)) {
+					void (async () => {
+						try {
+							const result = await readExternalBinaryFile(absolutePath, settings);
+							if (!result) {
+								new Notice(`Failed to process image: ${file.name}`);
+								return;
+							}
+							const att = createExternalBinaryAttachment(
+								absolutePath,
+								file.name,
+								result.base64,
+								result.mediaType,
+								result.width,
+								result.height,
+							);
+							this.addAttachment(att);
+						} catch (err) {
+							const msg = err instanceof Error ? err.message : String(err);
+							new Notice(`Failed to process image ${file.name}: ${msg}`);
+						}
+					})();
+				} else if (PDF_EXTENSIONS.has(ext)) {
+					void (async () => {
+						try {
+							const result = await readExternalPdfFile(absolutePath, settings);
+							if (!result) {
+								new Notice(`Failed to process PDF: ${file.name}`);
+								return;
+							}
+							const att = createExternalPdfAttachment(
+								absolutePath,
+								file.name,
+								result.base64,
+								result.pageCount,
+							);
+							this.addAttachment(att);
+						} catch (err) {
+							const msg = err instanceof Error ? err.message : String(err);
+							new Notice(`Failed to process PDF ${file.name}: ${msg}`);
+						}
+					})();
+				} else {
+					// Text file
+					const result = readExternalFile(
+						absolutePath,
+						file.name,
+						settings.external_file_size_threshold_mb,
+					);
+					if (!result.success) {
+						new Notice(result.error ?? `Failed to read file: ${file.name}`);
+						continue;
+					}
+					const att = createExternalFileAttachment(absolutePath, file.name, result.content!);
+					this.addAttachment(att);
+				}
+			}
+		});
 	}
 
 	// -----------------------------------------------------------------------

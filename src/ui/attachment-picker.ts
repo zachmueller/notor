@@ -568,7 +568,7 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
  * Tries `webUtils.getPathForFile()` (Electron 28+, the current recommended API)
  * and falls back to the legacy `File.path` property for older Electron versions.
  */
-function getAbsoluteFilePath(file: File): string | undefined {
+export function getAbsoluteFilePath(file: File): string | undefined {
 	try {
 		// eslint-disable-next-line @typescript-eslint/no-require-imports -- runtime require needed to access Electron's webUtils which has no static import path in Obsidian's plugin environment
 		const { webUtils } = require("electron") as {
@@ -597,10 +597,10 @@ function getAbsoluteFilePath(file: File): string | undefined {
  * @param thresholdMb - File size threshold for confirmation dialog.
  */
 /** Image file extensions for routing detection. */
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+export const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
 /** PDF file extension for routing detection. */
-const PDF_EXTENSIONS = new Set([".pdf"]);
+export const PDF_EXTENSIONS = new Set([".pdf"]);
 
 /**
  * Read an external binary (image) file, process it, and return base64 + metadata.
@@ -608,7 +608,7 @@ const PDF_EXTENSIONS = new Set([".pdf"]);
  * Returns null if the file exceeds the size limit, cannot be read, or is not
  * a supported image format.
  */
-async function readExternalBinaryFile(
+export async function readExternalBinaryFile(
 	absolutePath: string,
 	settings: NotorSettings,
 	maxSizeMb = 50,
@@ -648,7 +648,7 @@ async function readExternalBinaryFile(
  *
  * Returns null if the file exceeds the size limit or cannot be read.
  */
-async function readExternalPdfFile(
+export async function readExternalPdfFile(
 	absolutePath: string,
 	settings: NotorSettings,
 	maxSizeMb = 50,

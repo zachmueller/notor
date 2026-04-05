@@ -799,6 +799,13 @@
 	flex-shrink: 0;
 }
 
+.notor-input-area.notor-drop-active {
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+	border-style: dashed;
+	border-width: 2px;
+}
+
 .notor-input-wrapper {
 	width: 100%;
 }
@@ -1557,6 +1564,14 @@
 .notor-attachment-chip-icon {
 	font-size: 11px;
 	line-height: 1;
+	flex-shrink: 0;
+}
+
+.notor-attachment-chip-thumbnail {
+	width: 24px;
+	height: 24px;
+	object-fit: cover;
+	border-radius: 3px;
 	flex-shrink: 0;
 }
 

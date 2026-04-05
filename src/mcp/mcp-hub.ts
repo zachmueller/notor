@@ -25,6 +25,8 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import type { NotorSettings } from "../settings";
 import type { ToolResult } from "../types";
+import type { ContentBlock, ImageMediaType } from "../media/types";
+import { getMediaCapabilities } from "../media/capabilities";
 import type {
 	McpServerConfig,
 	McpConnection,
@@ -47,6 +49,9 @@ const RECONNECT_INITIAL_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 const RECONNECT_BACKOFF_FACTOR = 2;
 const RECONNECT_MAX_CONSECUTIVE_FAILURES = 5;
+
+/** Image MIME types that can be converted to ContentBlock. */
+const SUPPORTED_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 /** Obsidian SecretStorage interface (minimal — just what we need). */
 interface SecretStorage {
@@ -523,27 +528,43 @@ export class McpHub {
 	}
 
 	/**
-	 * Extract text-only content from an MCP tool call result.
+	 * Extract content from an MCP tool call result.
 	 *
-	 * Phase 4.1: only TextContent items extracted. Images and resources
-	 * counted and a notice appended.
+	 * Converts MCP ImageContent items to ContentBlock objects when the
+	 * active provider supports images. Resources are still omitted with
+	 * a notice.
 	 *
 	 * @see specs/04-mcp/contracts/mcp-tool-dispatch.md — Response Processing
 	 */
 	private extractToolResult(
 		namespacedName: string,
-		result: { [key: string]: unknown; content?: Array<{ type: string; text?: string }>; isError?: boolean }
+		result: {
+			[key: string]: unknown;
+			content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+			isError?: boolean;
+		}
 	): ToolResult {
 		const textParts: string[] = [];
-		let omittedImages = 0;
+		const contentBlocks: ContentBlock[] = [];
 		let omittedResources = 0;
+
+		const capabilities = getMediaCapabilities(this.settings?.active_provider ?? "local");
 
 		const content = result.content ?? [];
 		for (const item of content) {
 			if (item.type === "text") {
 				textParts.push(item.text ?? "");
 			} else if (item.type === "image") {
-				omittedImages++;
+				if (capabilities.supportsImages && item.data && item.mimeType && SUPPORTED_IMAGE_MIME_TYPES.has(item.mimeType)) {
+					contentBlocks.push({
+						type: "image",
+						media_type: item.mimeType as ImageMediaType,
+						data: item.data,
+					});
+				} else {
+					// Unsupported mime type or provider — append text notice
+					textParts.push(`[image: ${item.mimeType ?? "unknown type"} — not supported by current provider]`);
+				}
 			} else if (item.type === "resource") {
 				omittedResources++;
 			}
@@ -551,16 +572,15 @@ export class McpHub {
 
 		let output = textParts.join("\n");
 
+		if (contentBlocks.length > 0) {
+			output += output ? "\n" : "";
+			output += `[${contentBlocks.length} image${contentBlocks.length > 1 ? "s" : ""} included]`;
+		}
+
 		// Append omission notices
-		const omissions: string[] = [];
-		if (omittedImages > 0) {
-			omissions.push(`${omittedImages} image${omittedImages > 1 ? "s" : ""} omitted`);
-		}
 		if (omittedResources > 0) {
-			omissions.push(`${omittedResources} resource${omittedResources > 1 ? "s" : ""} omitted`);
-		}
-		if (omissions.length > 0) {
-			output += `\n[${omissions.join(", ")}]`;
+			output += output ? "\n" : "";
+			output += `[${omittedResources} resource${omittedResources > 1 ? "s" : ""} omitted]`;
 		}
 
 		if (!output) {
@@ -571,6 +591,7 @@ export class McpHub {
 			tool_name: namespacedName,
 			success: !result.isError,
 			result: output,
+			...(contentBlocks.length > 0 ? { content_blocks: contentBlocks } : {}),
 		};
 	}
 
