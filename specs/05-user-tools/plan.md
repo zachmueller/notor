@@ -2,7 +2,7 @@
 
 **Created:** 2026-04-05
 **Design Doc:** [design/user-defined-tools.md](../../design/user-defined-tools.md)
-**Status:** In Progress
+**Status:** Complete
 
 ## Technical Context
 
@@ -1078,58 +1078,58 @@ Ensure extension errors are surfaced correctly without crashing the plugin.
 
 **File:** `src/extensions/__tests__/parser.test.ts`
 
-- [ ] Test: valid tool file parses correctly (frontmatter + YAML fence + code fence)
-- [ ] Test: valid automation file parses correctly
-- [ ] Test: valid settings file parses correctly
-- [ ] Test: missing required frontmatter fields produce errors
-- [ ] Test: missing code fence produces error
-- [ ] Test: YAML fence parsing with `params` and `settings` blocks
-- [ ] Test: code fence extraction with different language tags (ts, typescript, js, javascript)
-- [ ] Test: prose outside fences is ignored
+- [x] Test: valid tool file parses correctly (frontmatter + YAML fence + code fence)
+- [x] Test: valid automation file parses correctly
+- [x] Test: valid settings file parses correctly
+- [x] Test: missing required frontmatter fields produce errors
+- [x] Test: missing code fence produces error
+- [x] Test: YAML fence parsing with `params` and `settings` blocks
+- [x] Test: code fence extraction with different language tags (ts, typescript, js, javascript)
+- [x] Test: prose outside fences is ignored
 
 ### EXT-020 — Unit tests for param schema conversion
 
 **File:** `src/extensions/__tests__/param-schema.test.ts`
 
-- [ ] Test: basic types (string, number, boolean) convert correctly
-- [ ] Test: `string[]` converts to array schema
-- [ ] Test: params with defaults are not in `required`
-- [ ] Test: params without defaults are in `required`
-- [ ] Test: `enum` field maps correctly
+- [x] Test: basic types (string, number, boolean) convert correctly
+- [x] Test: `string[]` converts to array schema
+- [x] Test: params with defaults are not in `required`
+- [x] Test: params without defaults are in `required`
+- [x] Test: `enum` field maps correctly
 
 ### EXT-021 — Unit tests for compilation pipeline
 
 **File:** `src/extensions/__tests__/compiler.test.ts`
 
-- [ ] Test: TypeScript type annotations are stripped
-- [ ] Test: interface declarations are stripped
-- [ ] Test: `as` casts are stripped
-- [ ] Test: JavaScript code passes through unchanged
-- [ ] Test: compiled function is callable with correct arguments
-- [ ] Test: syntax errors produce descriptive error messages
-- [ ] Test: async/await works in compiled code
+- [x] Test: TypeScript type annotations are stripped
+- [x] Test: interface declarations are stripped
+- [x] Test: `as` casts are stripped
+- [x] Test: JavaScript code passes through unchanged
+- [x] Test: compiled function is callable with correct arguments
+- [x] Test: syntax errors produce descriptive error messages
+- [x] Test: async/await works in compiled code
 
 ### EXT-022 — Unit tests for settings resolution
 
 **File:** `src/extensions/__tests__/settings-schema.test.ts`
 
-- [ ] Test: schema defaults are used when no persisted values exist
-- [ ] Test: persisted values override defaults
-- [ ] Test: missing required settings (no default, no persisted) are reported
-- [ ] Test: type validation for each field type
+- [x] Test: schema defaults are used when no persisted values exist
+- [x] Test: persisted values override defaults
+- [x] Test: missing required settings (no default, no persisted) are reported
+- [x] Test: type validation for each field type
 
 ### EXT-023 — Integration tests
 
 **File:** `src/extensions/__tests__/manager.test.ts`
 
-- [ ] Test: full reload cycle discovers and compiles tools
-- [ ] Test: user tool registers in ToolRegistry and overwrites built-in
-- [ ] Test: user tool execute() returns ToolResult
-- [ ] Test: automation fires for matching trigger
-- [ ] Test: automation `notor-tools` filter works
-- [ ] Test: automations execute sequentially in `order` order
-- [ ] Test: reload clears previous registrations before re-registering
-- [ ] Test: reload reports built-in name collisions in summary
+- [x] Test: full reload cycle discovers and compiles tools
+- [x] Test: user tool registers in ToolRegistry and overwrites built-in
+- [x] Test: user tool execute() returns ToolResult
+- [x] Test: automation fires for matching trigger
+- [x] Test: automation `notor-tools` filter works
+- [x] Test: automations execute sequentially in `order` order
+- [x] Test: reload clears previous registrations before re-registering
+- [x] Test: reload reports built-in name collisions in summary
 
 ---
 

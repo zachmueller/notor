@@ -3,7 +3,7 @@
 **Created:** 2026-04-06
 **Plan:** [plan.md](./plan.md)
 **Design:** [design/user-defined-tools.md](../../design/user-defined-tools.md)
-**Status:** In Progress
+**Status:** Complete
 
 ---
 
@@ -602,86 +602,86 @@ Augment `src/extensions/manager.ts` with comprehensive error handling.
 
 **File:** `src/extensions/__tests__/parser.test.ts`
 
-- [ ] Test: valid tool file parses correctly (frontmatter + YAML fence + code fence)
-- [ ] Test: valid automation file parses correctly with all optional fields
-- [ ] Test: valid settings file parses correctly
-- [ ] Test: missing `notor-type` field returns error
-- [ ] Test: invalid `notor-type` value returns error
-- [ ] Test: missing required tool frontmatter fields (`notor-tool-name`, `notor-description`, `notor-mode`) returns errors
-- [ ] Test: missing required automation frontmatter (`notor-trigger`) returns error
-- [ ] Test: missing code fence returns error for tools and automations
-- [ ] Test: missing YAML fence settings block returns error for settings type
-- [ ] Test: YAML fence parsing with `params` and `settings` blocks
-- [ ] Test: code fence extraction with all language tags (ts, typescript, js, javascript)
-- [ ] Test: multiple fences — only first of each type is extracted
-- [ ] Test: prose outside fences is ignored
-- [ ] Test: `notor-automation-order` defaults to 0 when not specified
-- [ ] Test: `on_schedule` trigger requires `notor-schedule` field
+- [x] Test: valid tool file parses correctly (frontmatter + YAML fence + code fence)
+- [x] Test: valid automation file parses correctly with all optional fields
+- [x] Test: valid settings file parses correctly
+- [x] Test: missing `notor-type` field returns error
+- [x] Test: invalid `notor-type` value returns error
+- [x] Test: missing required tool frontmatter fields (`notor-tool-name`, `notor-description`, `notor-mode`) returns errors
+- [x] Test: missing required automation frontmatter (`notor-trigger`) returns error
+- [x] Test: missing code fence returns error for tools and automations
+- [x] Test: missing YAML fence settings block returns error for settings type
+- [x] Test: YAML fence parsing with `params` and `settings` blocks
+- [x] Test: code fence extraction with all language tags (ts, typescript, js, javascript)
+- [x] Test: multiple fences — only first of each type is extracted
+- [x] Test: prose outside fences is ignored
+- [x] Test: `notor-automation-order` defaults to 0 when not specified
+- [x] Test: `on_schedule` trigger requires `notor-schedule` field
 
 ### EXT-020 — Unit tests for param schema conversion
 
 **File:** `src/extensions/__tests__/param-schema.test.ts`
 
-- [ ] Test: basic types (string, number, boolean) convert to correct JSON Schema
-- [ ] Test: `string[]` converts to `{ type: "array", items: { type: "string" } }`
-- [ ] Test: params with `default` are NOT in `required[]`
-- [ ] Test: params without `default` ARE in `required[]`
-- [ ] Test: `enum` field maps to JSON Schema `enum`
-- [ ] Test: `description` passes through correctly
-- [ ] Test: `path_namespace` is stripped from JSON Schema output
-- [ ] Test: `extractPathParams()` extracts entries with `path_namespace` correctly
-- [ ] Test: `extractPathParams()` returns empty array when no path params
-- [ ] Test: empty params object produces valid empty schema
+- [x] Test: basic types (string, number, boolean) convert to correct JSON Schema
+- [x] Test: `string[]` converts to `{ type: "array", items: { type: "string" } }`
+- [x] Test: params with `default` are NOT in `required[]`
+- [x] Test: params without `default` ARE in `required[]`
+- [x] Test: `enum` field maps to JSON Schema `enum`
+- [x] Test: `description` passes through correctly
+- [x] Test: `path_namespace` is stripped from JSON Schema output
+- [x] Test: `extractPathParams()` extracts entries with `path_namespace` correctly
+- [x] Test: `extractPathParams()` returns empty array when no path params
+- [x] Test: empty params object produces valid empty schema
 
 ### EXT-021 — Unit tests for compilation pipeline
 
 **File:** `src/extensions/__tests__/compiler.test.ts`
 
-- [ ] Test: TypeScript type annotations are stripped (e.g., `const x: string = "hello"`)
-- [ ] Test: interface declarations are stripped
-- [ ] Test: `as` casts are stripped (e.g., `const x = foo as string`)
-- [ ] Test: generic type parameters are stripped
-- [ ] Test: plain JavaScript code passes through unchanged
-- [ ] Test: compiled tool function is callable with 7 arguments (app, obsidian, utils, libs, settings, shared, params)
-- [ ] Test: compiled automation function is callable with 7 arguments (app, obsidian, utils, libs, settings, shared, context)
-- [ ] Test: async/await works in compiled code
-- [ ] Test: return value is accessible from compiled function
-- [ ] Test: Sucrase syntax error produces descriptive error message
-- [ ] Test: AsyncFunction constructor syntax error produces descriptive error message
+- [x] Test: TypeScript type annotations are stripped (e.g., `const x: string = "hello"`)
+- [x] Test: interface declarations are stripped
+- [x] Test: `as` casts are stripped (e.g., `const x = foo as string`)
+- [x] Test: generic type parameters are stripped
+- [x] Test: plain JavaScript code passes through unchanged
+- [x] Test: compiled tool function is callable with 7 arguments (app, obsidian, utils, libs, settings, shared, params)
+- [x] Test: compiled automation function is callable with 7 arguments (app, obsidian, utils, libs, settings, shared, context)
+- [x] Test: async/await works in compiled code
+- [x] Test: return value is accessible from compiled function
+- [x] Test: Sucrase syntax error produces descriptive error message
+- [x] Test: AsyncFunction constructor syntax error produces descriptive error message
 
 ### EXT-022 — Unit tests for settings resolution
 
 **File:** `src/extensions/__tests__/settings-schema.test.ts`
 
-- [ ] Test: schema defaults are used when no persisted values exist
-- [ ] Test: persisted values override defaults
-- [ ] Test: missing required settings (no default, no persisted) are reported in `missing[]`
-- [ ] Test: type validation for string fields
-- [ ] Test: type validation for number fields
-- [ ] Test: type validation for boolean fields
-- [ ] Test: type validation for string[] fields
-- [ ] Test: `slugifySecretId()` normalizes to lowercase-alphanumeric-with-dashes
-- [ ] Test: `slugifySecretId()` handles special characters and spaces
-- [ ] Test: shared settings resolution works independently from per-extension
+- [x] Test: schema defaults are used when no persisted values exist
+- [x] Test: persisted values override defaults
+- [x] Test: missing required settings (no default, no persisted) are reported in `missing[]`
+- [x] Test: type validation for string fields
+- [x] Test: type validation for number fields
+- [x] Test: type validation for boolean fields
+- [x] Test: type validation for string[] fields
+- [x] Test: `slugifySecretId()` normalizes to lowercase-alphanumeric-with-dashes
+- [x] Test: `slugifySecretId()` handles special characters and spaces
+- [x] Test: shared settings resolution works independently from per-extension
 
 ### EXT-023 — Integration tests
 
 **File:** `src/extensions/__tests__/manager.test.ts`
 
-- [ ] Test: full reload cycle discovers and compiles tools from mock vault files
-- [ ] Test: user tool registers in ToolRegistry and is retrievable via `registry.get(name)`
-- [ ] Test: user tool with same name as built-in overwrites it (last-write-wins)
-- [ ] Test: `UserToolAdapter.execute()` returns valid ToolResult with correct fields
-- [ ] Test: `UserToolAdapter.execute()` handles thrown errors gracefully (returns error ToolResult)
-- [ ] Test: `getAutomationsForTrigger()` returns automations matching the trigger
-- [ ] Test: `getAutomationsForToolEvent()` respects `notor-tools` filter
-- [ ] Test: `getAutomationsForToolEvent()` with null filter matches all tools
-- [ ] Test: automations execute sequentially in `order` order
-- [ ] Test: reload clears previous registrations before re-registering
-- [ ] Test: reload reports built-in name collisions in `builtinOverrides`
-- [ ] Test: compilation error skips extension but continues loading others
-- [ ] Test: missing required settings returns appropriate error ToolResult
-- [ ] Test: `destroy()` cleans up registry entries and `TOOL_PATH_PARAMS`
+- [x] Test: full reload cycle discovers and compiles tools from mock vault files
+- [x] Test: user tool registers in ToolRegistry and is retrievable via `registry.get(name)`
+- [x] Test: user tool with same name as built-in overwrites it (last-write-wins)
+- [x] Test: `UserToolAdapter.execute()` returns valid ToolResult with correct fields
+- [x] Test: `UserToolAdapter.execute()` handles thrown errors gracefully (returns error ToolResult)
+- [x] Test: `getAutomationsForTrigger()` returns automations matching the trigger
+- [x] Test: `getAutomationsForToolEvent()` respects `notor-tools` filter
+- [x] Test: `getAutomationsForToolEvent()` with null filter matches all tools
+- [x] Test: automations execute sequentially in `order` order
+- [x] Test: reload clears previous registrations before re-registering
+- [x] Test: reload reports built-in name collisions in `builtinOverrides`
+- [x] Test: compilation error skips extension but continues loading others
+- [x] Test: missing required settings returns appropriate error ToolResult
+- [x] Test: `destroy()` cleans up registry entries and `TOOL_PATH_PARAMS`
 
 ---
 
