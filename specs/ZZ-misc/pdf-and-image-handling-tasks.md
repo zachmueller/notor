@@ -28,7 +28,7 @@
 ### 1.2 Core Type Changes
 
 - [ ] **Update `src/types.ts:107`** — Change `Message.content` from `string` to `string | ContentBlock[]`
-  - Import `ContentBlock` from `../media/types`
+  - Import `ContentBlock` from `./media/types` (same level — `src/types.ts` and `src/media/` are siblings)
 
 - [ ] **Update `src/providers/provider.ts:25`** — Change `ChatMessage.content` from `string` to `string | ContentBlock[]`
   - Import `ContentBlock` from `../media/types`
@@ -80,10 +80,18 @@ Each provider's message conversion function must handle the case where `msg.cont
 - [ ] **Update `src/chat/context.ts:77-101`** — `estimateMessageTokens()`
   - Full function spans lines 77-101; lines 79-86 contain early returns for `output_tokens`/`input_tokens` that must be preserved
   - Replace the core logic at lines 89-100 (`let text = message.content; text += ...; return estimateTokenCount(text)`) with:
-    - `let total = estimateContentTokens(message.content);`
-    - `total += estimateTokenCount(JSON.stringify(message.tool_call?.parameters))` (when present)
-    - `total += estimateTokenCount(typeof result === "string" ? result : JSON.stringify(result))` (when present)
-    - `return total;`
+    ```ts
+    let total = estimateContentTokens(message.content);
+    if (message.tool_call) {
+        total += estimateTokenCount(JSON.stringify(message.tool_call.parameters));
+    }
+    if (message.tool_result) {
+        const result = message.tool_result.result;
+        total += estimateTokenCount(typeof result === "string" ? result : JSON.stringify(result));
+    }
+    return total;
+    ```
+  - The conditionals match the existing guards at lines 93-97; the key change is splitting content estimation (via `estimateContentTokens`) from tool metadata estimation (via `estimateTokenCount`)
 
 - [ ] **Update `src/context/compaction.ts:80`** — `estimateConversationTokens()`
   - Replace `estimateTokens(msg.content)` with `estimateContentTokens(msg.content)`
@@ -99,10 +107,10 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 - [ ] **Update `src/context/compaction.ts:244`** — Compaction message building
   - When `msg.content` is `ContentBlock[]`:
-    - Extract only text blocks via `getTextContent()`
-    - Count omitted media blocks
-    - Append `[N image(s)/document(s) omitted during compaction]` text marker
-    - Assign the text-only content to the `ChatMessage` to prevent base64 blobs reaching the summarization call
+    - Extract text via `getTextContent()`
+    - Count omitted media blocks (image + document)
+    - Append `\n[N image(s)/document(s) omitted during compaction]` to the extracted text
+    - **Assign the result as a plain `string`** to the `ChatMessage.content` field — this ensures the summarization call receives only text, not base64 blobs. The type union allows this (string is a valid `string | ContentBlock[]` value)
 
 ### 1.6 Orchestrator & History — Handle Union Type
 
@@ -135,7 +143,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 - [ ] **`src/chat/conversation.ts:348`** — `generateTitle(params.content)` **(compile error)**
   - `generateTitle()` is declared as `private generateTitle(content: string)` at line 478 and immediately calls `.replace()` on its argument — passing `ContentBlock[]` produces `"[object Object]..."` as the title
   - This is a **TypeScript compile error site** after the type change, not just a pass-through
-  - Wrap: `this.generateTitle(typeof params.content === "string" ? params.content : getTextContent(params.content))`
+  - Wrap: `this.generateTitle(getTextContent(params.content))` — `getTextContent()` already handles string input (returns it as-is), so no separate `typeof` check is needed
 
 - [ ] **`src/chat/sub-agent-history.ts:58, 78, 96`** — `content: cm.content` pass-through
   - No change needed (both `ChatMessage` and `Message` accept the union)
@@ -187,6 +195,7 @@ Each provider's message conversion function must handle the case where `msg.cont
     - JPEG: try quality 80 → 60 → 40 → 20
     - GIF/WebP: convert to PNG first, then PNG cascade
   - Export `processImage(buffer: Buffer, mediaType: ImageMediaType): Promise<ContentBlock>`
+  - Callers must detect the media type before calling `processImage()` (via `detectMediaFormat()`). The function does not re-detect, since callers need the format for routing decisions (image vs PDF vs unknown binary) before processing.
   - Return `ContentBlock` with `width`/`height` metadata populated from Canvas
   - Unit tests for: dimension validation, resize logic, compression cascade, format detection
 
@@ -343,6 +352,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
   - In the format detection branch (added in Phase 2):
     - If PDF detected → process via `processPdf()` → return `ToolResult` with `content_blocks` (native doc block or text) + text summary in `result`
     - When `pages` param provided, force text extraction path
+    - **Provider type threading:** Read the active provider from `this.settings.provider` and pass it as `providerType` to `processPdf()`. This determines whether the PDF is sent as a native document block (Anthropic/Bedrock) or extracted to text (OpenAI/Local).
 
 ### 3.4 Attachment System — PDF Support
 
@@ -350,8 +360,9 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
   - Add attachment types: `"vault_pdf"`, `"external_pdf"` to `AttachmentType`
   - Add factory: `createVaultPdfAttachment(path: string): Attachment`
   - Update `resolveAttachment()` for PDF types:
+    - Add `providerType: string` parameter to `resolveAttachment()`, threaded from the orchestrator which has access to `this.settings.provider`
     - Read binary via `app.vault.readBinary(file)` or `fs.promises.readFile()`
-    - Process through PDF pipeline (native or text extraction based on active provider)
+    - Process through PDF pipeline (native or text extraction based on `providerType`)
     - Store base64 in `binary_content`
   - Update `buildAttachmentsBlock()` to produce PDF `ContentBlock` entries
 
@@ -413,7 +424,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - Generate MD5 hash filename: `${hash}.${ext}`
     - Resolve vault path via `this.app.fileManager.getAvailablePathForAttachment(filename)`
     - Check if file already exists (`this.app.vault.getFileByPath()`)
-    - If not exists: save via `this.app.vault.createBinary(targetPath, buffer.buffer)` — note: `buffer.buffer` converts `Buffer` → `ArrayBuffer` as required by Obsidian's vault API
+    - If not exists: save via `this.app.vault.createBinary(targetPath, buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength))` — note: bare `buffer.buffer` is unsafe because a `Buffer` may be a view of a larger `ArrayBuffer`; the `.slice()` extracts only the relevant portion as required by Obsidian's vault API
     - Track extracted images with index for Turndown rule replacement
   - Replace existing Turndown image rule (lines 154-157: `filter: ["img"], replacement: () => "[image]"`) with vault-path-aware rule:
     - Match `__notor_img_N__` src pattern → emit `![alt](vaultPath)` markdown
@@ -431,7 +442,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - Data URIs: decode base64 directly to buffer
     - HTTP URLs: reject (no network I/O from tools)
   - Format mapping: `image/png` → `"png"`, `image/jpeg` → `"jpg"`, `image/gif` → `"gif"`, `image/bmp` → `"bmp"`
-  - WebP handling: if encountered, convert to PNG via Electron Canvas API
+  - WebP handling: if encountered, convert to PNG via Electron Canvas API. This requires DOM `Canvas` access — available because Obsidian tools execute in Electron's renderer process. If this assumption changes, conversion must be moved to a caller with DOM access.
   - Dimension detection via buffer header parsing (zero deps):
     - PNG: bytes 16-23 of IHDR chunk
     - JPEG: scan for SOF0/SOF2 marker
@@ -445,13 +456,13 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - **Strategy:** Add an async pre-pass in `generateDocx()` before calling `buildDocxChildren()`:
       1. **Recursively** walk all tokens from `marked.lexer()` output — image tokens are inline tokens nested inside `paragraph`, `blockquote`, `list` item, and `table` cell tokens (in marked v17, `![alt](url)` is parsed as `{ type: "paragraph", tokens: [{ type: "image", href: "url" }] }`). The walk must descend into each block token's `.tokens` and `.items[].tokens` arrays to find all `image` entries.
       2. Collect all `image` token `href` values from the recursive walk
-      3. Resolve all images in parallel: `await Promise.all(hrefs.map(h => resolveImageForDocx(h, vaultRoot, allowedPaths)))`
+      3. Resolve all images in parallel: `await Promise.all(hrefs.map(h => resolveImageForDocx(h, vaultRoot, allowedPaths)))` — `allowedPaths` is sourced from `this.settings.read_file_allowed_paths`, threaded into `generateDocx()` as a parameter
       4. Build a `Map<string, DocxImageData>` lookup from href → resolved image data
       5. Pass the map into `buildDocxChildren()` as a parameter
     - `buildDocxChildren()` stays synchronous — image lookup is a synchronous `map.get(href)` call
     - **Signature change cascade:** `buildDocxChildren(tokens, resolvedImages)` — the function calls itself recursively (e.g., for blockquote/list children), so all recursive call sites inside `buildDocxChildren` must forward the `resolvedImages` map parameter
   - **Handle images in the `paragraph` case** of `buildDocxChildren()` (line 125-130) — in marked v17, standalone images are parsed as inline `image` tokens wrapped in a `paragraph` token, NOT as top-level `image` block tokens. Handle this by detecting single-image paragraphs:
-    - When a `paragraph` token contains exactly one child token of `type: "image"`, render it as a dedicated `new Paragraph({ children: [new ImageRun({ type, data, transformation: { width, height }, altText })] })` using the pre-resolved map
+    - When a `paragraph` token contains exactly one child token of `type: "image"`, render it as a dedicated `new Paragraph({ children: [new ImageRun({ type, data, transformation: { width, height }, altText })] })` using the pre-resolved map. **Scaling:** the `width`/`height` from buffer header parsing are raw pixel dimensions; scale proportionally to fit within page content width (~600px at 96 DPI for standard A4/Letter with 1-inch margins): `if (width > 600) { const scale = 600 / width; width = Math.round(width * scale); height = Math.round(height * scale); }`. If dimensions cannot be determined from the buffer, use a fallback of 400×300.
     - If the image href is not in the resolved map, render fallback: `new Paragraph({ children: [new TextRun({ text: "[Image: href]" })] })`
     - When a `paragraph` token contains an image mixed with other inline tokens (e.g., `text ![alt](url) more text`), render via `renderInline()` as today — the image token falls through to the default `raw` text rendering (acceptable: mixed image+text paragraphs are rare in practice)
     - Paragraphs with no image tokens continue through the existing `renderInline()` path unchanged
@@ -478,13 +489,13 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     2. Find highest rId number in template
     3. Parse generated doc's `word/_rels/document.xml.rels` with `DOMParser`
     4. Remap all generated rIds to `rId(maxId + offset)`
-    5. Update generated `word/document.xml` body: replace `r:embed="rIdN"` and `r:id="rIdN"` references (can use DOM `getAttribute`/`setAttribute` on the already-parsed body nodes)
+    5. Update generated `word/document.xml` body: walk all elements in the parsed body DOM and, for each element with an `r:embed` or `r:id` attribute, remap the value using the remap table via `getAttribute()`/`setAttribute()` — consistent with Step 1's DOM-based approach (no regex)
     6. Append remapped `<Relationship>` elements to template `.rels` DOM
     7. Serialize updated `.rels` back to template zip
 
 - [ ] **Refactor template grafting — Step 4: Merge `[Content_Types].xml`**
   - Parse both `[Content_Types].xml` with `DOMParser`
-  - For each image extension in the generated doc (png, jpg, gif, bmp), add a `<Default Extension="png" ContentType="image/png"/>` entry to the template's `[Content_Types].xml` if not already present
+  - For each image format in the generated doc, add a `<Default Extension="..." ContentType="..."/>` entry to the template's `[Content_Types].xml` if not already present. **Extension mapping:** use OOXML extensions — `png`, `jpeg` (not `jpg`), `gif`, `bmp`. Note that the `docx` library writes JPEG media files as `imageN.jpeg`, so the Content_Types entry must use `Extension="jpeg"` even though `DocxImageData.type` is `"jpg"`.
   - Serialize back to template zip
 
 ### 2.5.4 Verification
