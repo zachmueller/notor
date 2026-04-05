@@ -23,7 +23,7 @@
   - Export media limit constants (e.g., `MAX_IMAGE_BASE64_BYTES = 5 * 1024 * 1024`). **Note:** `MAX_IMAGE_BASE64_BYTES` is the image processor pipeline's maximum output size (used as the target in the compression cascade). Per-provider limits in `capabilities.ts` (Phase 2) are checked separately at message assembly time
 
 - [ ] **Create `src/media/format-detector.ts`**
-  - Implement magic byte detection for: PNG (`89 50 4E 47`), JPEG (`FF D8 FF`), GIF (`47 49 46`), WebP (`52 49 46 46...57 45 42 50`), PDF (`25 50 44 46`)
+  - Implement magic byte detection for: PNG (`89 50 4E 47`), JPEG (`FF D8 FF`), GIF (`47 49 46`), WebP (bytes 0-3: `52 49 46 46` (RIFF) AND bytes 8-11: `57 45 42 50` (WEBP); bytes 4-7 are file size and ignored during detection), PDF (`25 50 44 46`)
   - Export `detectMediaFormat(buffer: Buffer): "png" | "jpeg" | "gif" | "webp" | "pdf" | null`
   - Unit tests for each format + unknown binary
 
@@ -42,7 +42,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 - [ ] **`src/providers/anthropic-provider.ts` — `toAnthropicMessages()`**
   - Line 59: System message concatenation — add assertion/guard that system content is string
-  - Lines 66-68: Tool call branch `content.push({ type: "text", text: msg.content })` — this is pre-tool-call assistant text, always a string. No change needed, but add assertion for safety
+  - Lines 66-68: Tool call branch `content.push({ type: "text", text: msg.content })` — this is pre-tool-call assistant text, always a string. No change needed, but add assertion for safety (see Phase 1 "assert string" convention above)
   - Lines 95-98: Catch-all handles **both** user and assistant messages (`role: msg.role === "user" ? "user" : "assistant"`, `content: msg.content`). Split into two branches:
     - When `msg.role === "user"` and `msg.content` is `ContentBlock[]`, map to Anthropic native blocks:
       - text → `{ type: "text", text }`
@@ -62,7 +62,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 - [ ] **`src/providers/bedrock-provider.ts` — `toBedrockMessages()`**
   - **Import note:** `ContentBlock` is already imported from `@aws-sdk/client-bedrock-runtime` at line 44. Use an import alias: `import { ContentBlock as MediaContentBlock } from "../media/types"` to avoid the name collision. Within this file, use `MediaContentBlock` for all references to the Notor content block type (in type annotations, mapping functions, etc.)
-  - Line 83: System `{ text: msg.content }` — assert string
+  - Line 83: System `{ text: msg.content }` — assert string (see Phase 1 "assert string" convention above)
   - Lines 88-92: Tool call branch `content.push({ text: msg.content })` — pre-tool-call assistant text, always a string. No change needed
   - Lines 122-129: Catch-all handles **both** user and assistant messages (`role: msg.role === "user" ? "user" : "assistant"`, `content: [{ text: msg.content }]`). Split:
     - When user and `ContentBlock[]`, map to Bedrock blocks:
@@ -118,12 +118,19 @@ Each provider's message conversion function must handle the case where `msg.cont
     - `const text = getTextContent(msg.content); if (!text.trim()) continue;`
 
 - [ ] **Update `src/context/compaction.ts:244`** — Compaction message building
-  - When `msg.content` is `ContentBlock[]`:
-    - Extract text via `getTextContent()`
-    - Count omitted media blocks (image + document)
-    - Append a marker to the extracted text: `` `\n[${N} media block${N === 1 ? "" : "s"} omitted during compaction]` `` where N is the total count of non-text blocks
-    - **Assign the result as a plain `string`** to the `ChatMessage.content` field — this ensures the summarization call receives only text, not base64 blobs. The type union allows this (string is a valid `string | ContentBlock[]` value)
-  - **Note:** `getTextContent()` handles both cases transparently — for string content (assistant messages), it returns the string unchanged. The media stripping logic (counting omitted blocks, appending marker) only triggers when `msg.content` is `ContentBlock[]`, which only occurs for user messages. No separate role-based branching is needed here.
+  - Implementation pseudocode:
+    ```ts
+    let text = getTextContent(msg.content); // handles both string and ContentBlock[]
+    if (Array.isArray(msg.content)) {
+        const mediaCount = msg.content.filter(b => b.type !== "text").length;
+        if (mediaCount > 0) {
+            text += `\n[${mediaCount} media block${mediaCount === 1 ? "" : "s"} omitted during compaction]`;
+        }
+    }
+    // Assign `text` (plain string) to the ChatMessage.content field
+    ```
+  - **Assign the result as a plain `string`** to the `ChatMessage.content` field — this ensures the summarization call receives only text, not base64 blobs. The type union allows this (string is a valid `string | ContentBlock[]` value)
+  - **Note:** `getTextContent()` handles both cases transparently — for string content (assistant messages), it returns the string unchanged. The `Array.isArray()` check and media marker logic only triggers for `ContentBlock[]` content, which only occurs for user messages. No separate role-based branching is needed here.
 
 ### 1.6 Orchestrator & History — Handle Union Type
 
@@ -131,7 +138,7 @@ Each provider's message conversion function must handle the case where `msg.cont
   - `msg.content?.trim()` — assert string before the trim check (`.trim()` does not exist on arrays): `const text = typeof msg.content === "string" ? msg.content : (() => { throw new Error("Expected string content for assistant message"); })(); if (!text.trim()) { ... }`
 
 - [ ] **`src/chat/orchestrator.ts:2194`** — `preToolCallText = prev.content`
-  - Assert string (prev is assistant message, always string)
+  - Assert string using the Phase 1 convention (prev is assistant message, always string): `preToolCallText = typeof prev.content === "string" ? prev.content : (() => { throw new Error("Expected string content for assistant message"); })();`
 
 - [ ] **`src/chat/orchestrator.ts:2043, 2057`** — `content: msg.content` pass-through
   - No change needed (both types accept the union), but add comments noting user content may be `ContentBlock[]`
@@ -210,7 +217,7 @@ Each provider's message conversion function must handle the case where `msg.cont
     - JPEG: try quality 80 → 60 → 40 → 20
     - GIF/WebP: convert to PNG first, then PNG cascade. GIF conversion extracts the first frame only (animation is lost). WebP conversion may increase size; apply PNG cascade compression after conversion
   - Export `processImage(buffer: Buffer, mediaType: ImageMediaType): Promise<ContentBlock>`
-  - `processImage()` throws on unrecoverable errors (corrupt image, Canvas load failure, image exceeding internal size limits). Callers (`read_file`, `resolveAttachment`) are responsible for catching and converting to appropriate error responses (e.g., `ToolResult` with `success: false`, or `Attachment` with `status: "error"`)
+  - `processImage()` throws on unrecoverable errors (corrupt image, Canvas/Image load failure, image exceeding internal size limits, zero-dimension images, Canvas `toDataURL` returning empty string). Callers (`read_file`, `resolveAttachment`) are responsible for catching and converting to appropriate error responses (e.g., `ToolResult` with `success: false`, or `Attachment` with `status: "error"`)
   - Callers must detect the media type before calling `processImage()` (via `detectMediaFormat()`). The function does not re-detect, since callers need the format for routing decisions (image vs PDF vs unknown binary) before processing.
   - Return `ContentBlock` with `width`/`height` metadata populated from Canvas
   - Unit tests for: dimension validation, resize logic, compression cascade, format detection
@@ -252,18 +259,21 @@ Each provider's message conversion function must handle the case where `msg.cont
 - [ ] **Update `src/context/attachment.ts`**
   - Add attachment types: `"vault_image"`, `"external_image"` to `AttachmentType` union
   - Add fields to `Attachment` interface:
-    - `binary_content: string | null` — base64-encoded binary for images/PDFs
+    - `binary_content: string | null` — base64-encoded binary for images/PDFs (post-processing: resized/compressed for images)
     - `media_type: string | null` — detected MIME type (e.g., `"image/png"`)
-  - **Update existing factory functions** (`createVaultNoteAttachment`, `createVaultNoteSectionAttachment`, `createExternalFileAttachment`) to include `binary_content: null` and `media_type: null` in their return objects — required for TypeScript compilation after the interface change
-  - Add factory: `createVaultImageAttachment(path: string): Attachment` — returns Attachment with `type: "vault_image"`, `binary_content: null`, `media_type: null`, `status: "pending"`. Binary content is populated during `resolveAttachment()`
+    - `width: number | null` — image width in pixels after processing (null for non-image attachments). Populated by `processImage()` result during `resolveAttachment()`
+    - `height: number | null` — image height in pixels after processing (null for non-image attachments). Used by `buildAttachmentsBlock()` to set `ContentBlock` dimensions for accurate token estimation
+  - **Update existing factory functions** (`createVaultNoteAttachment`, `createVaultNoteSectionAttachment`, `createExternalFileAttachment`) to include `binary_content: null`, `media_type: null`, `width: null`, and `height: null` in their return objects — required for TypeScript compilation after the interface change
+  - Add factory: `createVaultImageAttachment(path: string): Attachment` — returns Attachment with `type: "vault_image"`, `binary_content: null`, `media_type: null`, `width: null`, `height: null`, `status: "pending"`. Binary content and dimensions are populated during `resolveAttachment()`
   - Add factory: `createExternalBinaryAttachment(absolutePath: string, filename: string, base64: string, mediaType: string): Attachment`
   - Update `resolveAttachment()`:
-    - For `vault_image`: read binary via `app.vault.readBinary(file)`, process through image pipeline, store base64 in `binary_content`
+    - For `vault_image`: read binary via `app.vault.readBinary(file)`, detect format via `detectMediaFormat()`, process through `processImage(buffer, mediaType)`. The returned `ContentBlock` contains `data` (base64), `media_type`, `width`, and `height` — extract these fields and store on the Attachment: `binary_content = block.data`, `media_type = block.media_type`, `width = block.width`, `height = block.height`
     - If image processing fails (corrupt file, unsupported format after magic byte detection, canvas error), set `status: "error"` and `error_message` with a descriptive message. Do not throw — follow the existing error handling pattern at lines 261-266
   - Update `buildAttachmentsBlock()` return type:
     - From: `string | null`
     - To: `{ text: string | null; contentBlocks: ContentBlock[] }`
     - Text attachments continue as XML string; image attachments produce `ContentBlock` entries
+    - **Image ContentBlock construction:** For each resolved image attachment, create `{ type: "image", media_type: attachment.media_type!, data: attachment.binary_content!, width: attachment.width ?? undefined, height: attachment.height ?? undefined }`. The `!` assertions are safe because `resolveAttachment()` populates these fields before status becomes `"resolved"`
     - **Edge cases:** When no text attachments are resolved, `text` is `null`. When no binary attachments are resolved, `contentBlocks` is `[]` (empty array). When no attachments at all are resolved, return `{ text: null, contentBlocks: [] }`
   - **Atomicity note:** Task 2.4 and 2.5 must be applied together. If implementing incrementally, add the new return type in Task 2.4 but also add a temporary adapter at the caller site (`orchestrator.ts:1224`) to destructure the new return type. Task 2.5 finalizes the caller
 
@@ -311,7 +321,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 - [ ] **Update `src/ui/attachment-picker.ts`**
   - Expand `openExternalFileDialog()` accepted extensions (line 584-586):
     - Add: `.png,.jpg,.jpeg,.gif,.webp`
-  - Add `readExternalBinaryFile(absolutePath: string, maxSizeMb?: number): Promise<{ base64: string; mediaType: string } | null>` for binary file reading. Returns `null` if file exceeds size limit or cannot be read. Detect media type via `detectMediaFormat()` on the first bytes of the buffer
+  - Add `readExternalBinaryFile(absolutePath: string, maxSizeMb?: number): Promise<{ base64: string; mediaType: string; width?: number; height?: number } | null>` for binary file reading. Returns `null` if file exceeds size limit or cannot be read. Detect media type via `detectMediaFormat()` on the first bytes of the buffer. **For image files:** process through `processImage()` (resize/compress) before returning — extract `data`, `media_type`, `width`, `height` from the returned `ContentBlock`. This ensures external images go through the same compression cascade as vault images
   - Route image files to binary read path instead of UTF-8 text read
   - Update `VaultNoteSuggest` (lines 173-335) to show image files from vault (not just `.md`):
     - **API change required:** Replace `this.app.vault.getMarkdownFiles()` (line 270) with `this.app.vault.getFiles()` and filter manually by extension (`.md`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`). `getMarkdownFiles()` is an Obsidian API that only returns `.md` files and cannot be configured to include other types
@@ -447,7 +457,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - Skip unsupported formats (EMF, WMF, SVG, TIFF) with descriptive alt text
     - Read image as buffer via `image.readAsBuffer()` — returns a Node.js `Buffer` (Electron's polyfill in the renderer process)
     - Generate MD5 hash filename: `${hash}.${ext}`
-    - Resolve vault path via `this.app.fileManager.getAvailablePathForAttachment(filename, sourcePath)` where `sourcePath` is the vault-relative path of the source DOCX file (for "same folder as current file" attachment settings). If unavailable, omit the second argument — Obsidian falls back to the default attachment folder
+    - Resolve vault path via `this.app.fileManager.getAvailablePathForAttachment(filename, sourcePath)` where `sourcePath` is the vault-relative path of the source DOCX file (for "same folder as current file" attachment settings). When the DOCX path is vault-relative, pass it directly as `sourcePath`. When the DOCX path is absolute (outside the vault), omit `sourcePath` — Obsidian falls back to the default attachment folder
     - Check if file already exists (`this.app.vault.getFileByPath()`)
     - If not exists: save via `this.app.vault.createBinary(targetPath, buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength))` — note: bare `buffer.buffer` is unsafe because a `Buffer` may be a view of a larger `ArrayBuffer`; the `.slice()` extracts only the relevant portion as required by Obsidian's vault API
     - Track extracted images with index for Turndown rule replacement
@@ -525,8 +535,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 - [ ] **Refactor template grafting — Step 4: Merge `[Content_Types].xml`**
   - Parse both `[Content_Types].xml` with `DOMParser`
-  - **Extension mapping (critical):** Map `DocxImageData.type` to OOXML extension before generating Content_Types entries: `"jpg"` → `"jpeg"`, all others (`"png"`, `"gif"`, `"bmp"`) unchanged. The `docx` library writes JPEG media files as `imageN.jpeg`, so the Content_Types entry must use `Extension="jpeg"` — using `"jpg"` produces a corrupt DOCX that Word cannot open.
-  - **Extension source:** Scan `word/media/*` filenames in the generated zip for their file extensions. This is more reliable than using the pre-resolved `DocxImageData` map, since the `docx` library may normalize extensions (e.g., `.jpg` → `.jpeg`)
+  - **Extension source (primary approach):** Scan `word/media/*` filenames in the generated zip and extract their file extensions (e.g., `image1.jpeg` → `"jpeg"`, `image2.png` → `"png"`). This is more reliable than using the pre-resolved `DocxImageData` map, since the `docx` library may normalize extensions (e.g., `.jpg` → `.jpeg`). **Important:** the `docx` library writes JPEG media files as `imageN.jpeg`, so the Content_Types entry must use `Extension="jpeg"` — using `"jpg"` produces a corrupt DOCX that Word cannot open. The zip filename scan naturally captures this normalization
   - For each image extension found, add a `<Default Extension="..." ContentType="..."/>` entry to the template's `[Content_Types].xml` if not already present. Check for duplicates by iterating existing `<Default>` child elements of the `<Types>` root and comparing `getAttribute("Extension")` against the target extension string.
   - Serialize back to template zip
 
