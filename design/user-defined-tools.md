@@ -86,14 +86,36 @@ All of these are already bundled into the plugin by esbuild. Exposing them is ze
 
 ### Compilation Pipeline
 
-1. **Discover** — scan `notor/tools/`, `notor/automations/`, and `notor/settings.md` recursively on plugin load and on vault file-change events (hot reload). Files must be `.md` with `notor-type` frontmatter set to `tool`, `automation`, or `settings`.
+1. **Discover** — scan `notor/tools/`, `notor/automations/`, and `notor/settings.md` recursively on plugin load and on manual reload. Files must be `.md` with `notor-type` frontmatter set to `tool`, `automation`, or `settings`.
 2. **Parse** — extract YAML frontmatter (flat fields), locate the first YAML fenced code block (nested config: `params`, `settings`), and locate the first TypeScript/JavaScript fenced code block (logic).
 3. **Strip types** — run the code block through sucrase (or regex for simple cases) to remove TypeScript type annotations.
 4. **Resolve settings** — merge schema defaults with persisted user values and SecretStorage secrets to produce the `settings` and `shared` objects.
-5. **Compile** — create a function via `new Function(argNames..., strippedCode)` with the injected context variables (including `settings`, `shared`) as named arguments.
-6. **Cache** — store the compiled function keyed by file path. Recompile only when the file changes.
+5. **Compile** — create an `async` function via `new AsyncFunction(argNames..., strippedCode)` with the injected context variables (including `settings`, `shared`) as named arguments. The function body is wrapped as `async` so user code can use `await` directly (most vault operations are async). `AsyncFunction` is obtained via `Object.getPrototypeOf(async function(){}).constructor`.
+6. **Cache** — store the compiled function keyed by file path. Recompile on manual reload.
 
-**Hot reload:** Extensions are recompiled automatically when their source files change, detected via Obsidian's vault file-change events. This enables a live development loop — edit the extension note, save, and the updated version is immediately active. In-flight tool calls use the version compiled at dispatch time; the new version applies to subsequent calls.
+**Manual reload:** Extensions are recompiled on demand — there is no automatic hot reload on vault file changes. This avoids uncertain compilation timing if users edit extension files while the LLM is mid-operation. Two reload mechanisms are provided:
+
+- **Settings UI** — A "Reload extensions" button in the Extensions settings group re-discovers and recompiles all extensions.
+- **Command** — The `notor:reload-extensions` Obsidian command does the same, accessible from the command palette or a hotkey.
+
+In-flight tool calls continue using the version compiled at dispatch time; reloaded versions apply to subsequent calls.
+
+### Error Handling
+
+When a user extension throws at runtime, errors are surfaced through three channels:
+
+**Tools:**
+1. **Notice** — An Obsidian Notice is shown with the error message for immediate visibility.
+2. **ToolResult** — The error is returned to the LLM as `{ success: false, error: "<message>" }` so the LLM can react appropriately.
+3. **Logger** — The full stack trace is written via the extension's scoped logger (`utils.logger(name)`) for debugging.
+
+Tool code can also return a custom error result directly (e.g., `return { success: false, error: "Note not found — try a different path" }`) to control the message the LLM sees and direct its reaction to the specific failure, without throwing an exception.
+
+**Automations:**
+1. **Notice** — An Obsidian Notice is shown with the error message.
+2. **Logger** — The full stack trace is written via the extension's scoped logger.
+
+Automations have no ToolResult channel since they are side effects, not tool invocations.
 
 ### Type Stripping Strategy
 
@@ -113,6 +135,10 @@ Mitigations:
 - Keep `utils` as a stable facade with documented methods, not raw internal objects
 - Version the injected API shape (e.g., `notor-api: 1` in frontmatter) so the plugin can warn on breaking changes
 - Obsidian's own API (`app`, `vault`, `metadataCache`) is already stable — that's the majority of what extensions use
+
+### Security Model
+
+User extensions run with full `app` access — the same trust level as the plugin itself. This is consistent with Obsidian's security model: community plugins already have unrestricted access, and Notor workflows can execute arbitrary shell commands via hooks. Users should treat extension code with the same caution as any plugin code. Documentation should note this explicitly so users understand the trust boundary.
 
 ---
 
@@ -253,12 +279,15 @@ notor-type: automation
 notor-trigger: on_tool_result
 notor-tools: [write_note, replace_in_note]
 notor-display-name: "Tag AI-modified notes"
+notor-automation-order: 10
+notor-blocking: true
 ---
 
 # Tag AI-Modified Notes
 
 Automatically adds a configurable tag to any note written or modified by the AI.
-Only fires on successful write operations. The tag name can be changed in Settings.
+Only fires on successful write operations. Uses blocking mode so the tag is applied
+before the LLM sees the tool result. The tag name can be changed in Settings.
 
 ```yaml
 settings:
@@ -292,6 +321,8 @@ await app.fileManager.processFrontMatter(file, (fm: any) => {
 | `notor-schedule` | conditional | Cron expression (required when `notor-trigger: on_schedule`). Same property used by workflows. |
 | `notor-tools` | no | Array of tool names to filter on (only for `on_tool_call`/`on_tool_result`; ignored for other events). If omitted, fires for all tools. |
 | `notor-display-name` | no | Human-readable label for settings UI and logging. Reuses the same property used by workflows. |
+| `notor-automation-order` | no | Numeric execution priority. Lower values fire first. Default: `0`. Ties broken alphabetically by filename. |
+| `notor-blocking` | no | Boolean. When `true`, the automation is awaited before the pipeline continues. Default: `false` (fire-and-forget). Ignored for `pre_send` (which is inherently blocking). See [Blocking Automations](#blocking-automations). |
 
 ### YAML Fence Schema (Automations)
 
@@ -333,18 +364,34 @@ Note: tools get `params` (from the LLM). Automations get `context` (from the hoo
 
 ### Return Semantics
 
-| Event | Return Type | Behavior |
-|-------|------------|----------|
-| `pre_send` | `string \| void` | Returned string is injected into the conversation (same as shell hook stdout) |
-| `on_tool_call` | `void` | Fire-and-forget side effect |
-| `on_tool_result` | `void` | Fire-and-forget side effect |
-| `after_completion` | `void` | Fire-and-forget side effect |
-| `on_note_open` | `void` | Fire-and-forget side effect |
-| `on_note_create` | `void` | Fire-and-forget side effect |
-| `on_save` | `void` | Fire-and-forget side effect |
-| `on_manual_save` | `void` | Fire-and-forget side effect |
-| `on_tag_change` | `void` | Fire-and-forget side effect |
-| `on_schedule` | `void` | Fire-and-forget side effect |
+| Event | Return Type | Default Behavior | When `notor-blocking: true` |
+|-------|------------|------------------|----------------------------|
+| `pre_send` | `string \| void` | Returned string injected into conversation (inherently blocking) | N/A — always blocking |
+| `on_tool_call` | `void` | Fire-and-forget side effect | Awaited before tool executes. Cannot modify tool parameters — side effects only. |
+| `on_tool_result` | `void` | Fire-and-forget side effect | Awaited before result returned to LLM. Cannot modify the result — side effects only. |
+| `after_completion` | `void` | Fire-and-forget side effect | Awaited before message flow completes. |
+| `on_note_open` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
+| `on_note_create` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
+| `on_save` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
+| `on_manual_save` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
+| `on_tag_change` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
+| `on_schedule` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
+
+### Blocking Automations
+
+By default, automations are fire-and-forget — they execute asynchronously without blocking the pipeline. This matches existing shell hook behavior.
+
+Setting `notor-blocking: true` in frontmatter makes the automation blocking: the dispatch pipeline `await`s the automation's completion before proceeding. This is useful when the automation's side effect must be visible before the next pipeline step (e.g., tagging a note before the LLM sees the tool result).
+
+**Semantics per event:**
+
+- **`pre_send`**: Inherently blocking — the return value is injected into the conversation. `notor-blocking` is ignored.
+- **`on_tool_call` + blocking**: Awaited before the tool executes. The automation cannot modify tool parameters — it is a side effect only.
+- **`on_tool_result` + blocking**: Awaited before the result is returned to the LLM. The automation cannot modify the result — it is a side effect only.
+- **`after_completion` + blocking**: Awaited before the message flow completes.
+- **Vault events + blocking** (`on_note_open`, `on_note_create`, `on_save`, `on_manual_save`, `on_tag_change`, `on_schedule`): Awaited before the event handler returns.
+
+**Ordering interaction:** When multiple automations fire for the same event, they execute in `notor-automation-order` order (ascending, ties broken alphabetically). Blocking automations are awaited in sequence; non-blocking automations are fired in parallel after all blocking ones complete.
 
 ### The `notor-tools` Filter
 
@@ -357,11 +404,13 @@ notor-tools: [write_note, replace_in_note]
 
 The plugin evaluates this filter *before* invoking the function — automations that don't match the current tool are skipped entirely (no overhead). This filter only applies to `on_tool_call` and `on_tool_result` events; it is ignored for vault events.
 
+**MCP tools:** The `notor-tools` filter supports MCP tool names using the same `{serverName}__{toolName}` double-underscore naming convention used elsewhere in Notor. For example, `notor-tools: [write_note, my-server__query]` fires the automation for both the built-in `write_note` tool and the MCP tool `query` from `my-server`. MCP tools pass through the same dispatch pipeline as built-in and vault-defined tools, so no special handling is needed beyond using the correct name.
+
 ### Discovery & Registration
 
 - Discovered from `notor/automations/` (`.md` files with `notor-type: automation` in frontmatter).
 - Registered alongside existing shell hooks in the hook dispatch pipeline.
-- Execution order: global shell hooks first, then vault-defined automations.
+- Execution order: global shell hooks first, then vault-defined automations sorted by `notor-automation-order` (ascending, default `0`). Ties broken alphabetically by filename.
 - Vault-defined automations do NOT replace shell hooks — they coexist. Shell hooks remain for users who prefer simple shell commands.
 
 ### Interaction with Existing Hook Systems
@@ -533,20 +582,22 @@ At execution time, `settings` and `shared` are resolved by merging:
 
 ---
 
-## Open Questions
+## Resolved Decisions
 
-1. **Editor support**: Should the plugin provide a TypeScript declaration file (`notor-extensions-api.d.ts`) that users can reference for autocomplete? This would describe the shapes of `app`, `params`, `context`, `utils`, `libs`, etc.
+The following design questions were resolved during the exploration phase:
 
-2. **Hot reload implementation details**: The design specifies hot reload via vault file-change events (see Compilation Pipeline). Remaining open items: debounce strategy for rapid saves, how to surface compilation errors during hot reload (Notice? inline?), and whether to show a success Notice on recompile.
+1. **Editor support (TS declaration file)** — Deferred. Not included in the first iteration. A `notor-extensions-api.d.ts` for autocomplete is future work.
 
-3. **Error UX**: When a user extension throws at runtime, how is the error surfaced? Options: Notice, chat message, log only. Probably all three — Notice for visibility, error returned to LLM as ToolResult (for tools), and detailed stack trace in the log.
+2. **Hot reload** — Manual reload only. Extensions are recompiled via a Settings UI button ("Reload extensions") or the `notor:reload-extensions` command. No automatic hot reload on vault file changes, to avoid uncertain compilation timing during LLM operations. See [Compilation Pipeline](#compilation-pipeline).
 
-4. **Async support**: Extension bodies should support `await` (most vault operations are async). The compiled function needs to be wrapped as `async`.
+3. **Error UX** — All three channels. Tools: Notice + ToolResult (`success: false`) + logger with stack trace. Automations: Notice + logger. Tool code can return custom `{ success: false, error: "..." }` to direct the LLM's reaction. See [Error Handling](#error-handling).
 
-5. **Security model**: User extensions run with full `app` access — same trust level as the plugin itself. This is consistent with how workflows can already execute arbitrary shell commands via hooks. Worth a clear note in documentation.
+4. **Async support** — Yes. The compiled function is wrapped as `async` so user code can use `await` directly. See [Compilation Pipeline](#compilation-pipeline) step 5.
 
-6. **Automation ordering**: Should users control execution order between automations? Options: alphabetical by filename, explicit `order` field in frontmatter, or undefined (no guaranteed order).
+5. **Security model** — Documentation note. User extensions run with full `app` access, same trust level as the plugin. See [Security Model](#security-model).
 
-7. **MCP tool filter**: Should the `notor-tools` filter in automations support MCP tool names (e.g., `my-server__query`)? Likely yes, since MCP tools go through the same dispatch pipeline.
+6. **Automation ordering** — `notor-automation-order` numeric frontmatter field. Default `0`, ascending sort, alphabetical tie-break. See [Automations Frontmatter Schema](#frontmatter-schema-1) and [Discovery & Registration](#discovery--registration).
 
-8. **Blocking automations**: Current shell hooks are fire-and-forget for `on_tool_call`/`on_tool_result`. Should TypeScript automations have the option to block? For example, the tag-after-write case benefits from the tag being applied before the LLM sees the tool result — but this changes the dispatch pipeline's timing guarantees.
+7. **MCP tool filter** — Yes. `notor-tools` supports MCP tool names using `{serverName}__{toolName}` double-underscore convention. See [The `notor-tools` Filter](#the-notor-tools-filter).
+
+8. **Blocking automations** — Opt-in via `notor-blocking: true` frontmatter field. Default `false` (fire-and-forget). Blocking automations are awaited before the pipeline continues. Side effects only — cannot modify parameters or results. See [Blocking Automations](#blocking-automations).
