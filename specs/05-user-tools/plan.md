@@ -352,7 +352,7 @@ async function resolveSharedSettings(
 ```
 
 - [ ] Implement `parseSettingsSchema()`
-- [ ] Implement `resolveSettings()` with SecretStorage integration for `secret: true` fields. Always reads from live `plugin.settings` reference (no caching/snapshots)
+- [ ] Implement `resolveSettings()` with SecretStorage integration for `secret: true` fields. Note: `getSecret()` from `src/utils/secrets.ts` is synchronous; the `async` signature is for future-proofing, not because SecretStorage requires it. Always reads from live `plugin.settings` reference (no caching/snapshots)
 - [ ] Implement `resolveSharedSettings()` for the global `notor/settings.md` settings
 - [ ] Implement `slugifySecretId()` — normalize extension names and setting keys to lowercase-alphanumeric-with-dashes for `SecretStorage` ID construction (per `SecretStorage` constraint: "ID must be lowercase alphanumeric with dashes")
 - [ ] Validate required settings (no `default`, not yet configured) — produce clear error messages
@@ -461,7 +461,7 @@ function buildLibs(): Record<string, unknown> {
   return {
     mammoth,
     Turndown: TurndownService,
-    turndownGfm: { gfm },
+    turndownGfm: { gfm },  // Wrapped in object because the package exports a function, not a class/module — usage: `new libs.Turndown().use(libs.turndownGfm.gfm)`
     unpdf: () => import("unpdf"),
     docx,
     PizZip,
@@ -474,7 +474,7 @@ function buildLibs(): Record<string, unknown> {
 
 **Note on `unpdf`:** Currently dynamically imported in `src/media/pdf-processor.ts` to defer loading of the heavy PDF.js wrapper. We preserve this pattern — `libs.unpdf` is exposed as a lazy async wrapper (`() => import("unpdf")`). Extension code uses `const { getDocumentProxy } = await libs.unpdf();`. This avoids regressing plugin startup time for all users.
 
-- [ ] Implement `buildUtils()` — verify each utility reference resolves correctly from `main.ts` accessors. Include `abortSignal` from `ToolExecuteOptions` in the utils context for user tools (see EXT-012 adapter)
+- [ ] Implement `buildUtils()` — verify each utility reference resolves correctly from `main.ts` accessors. Note: `abortSignal` from `ToolExecuteOptions` is NOT included here (it's only available per-call); instead `UserToolAdapter.execute()` merges `abortSignal` into the utils object per-invocation (see EXT-012 adapter)
 - [ ] Implement `buildLibs()` — verify all 9 libraries import correctly (mammoth, Turndown, turndownGfm, unpdf, docx, PizZip, marked, xmldom, croner). Note: `unpdf` is a lazy wrapper (`() => import("unpdf")`), not a static import
 - [ ] Implement `buildObsidianExports()` — expose commonly needed `obsidian` module exports (`requestUrl`, `Notice`, `TFile`, `getFrontMatterInfo`, `normalizePath`, etc.)
 
@@ -567,8 +567,8 @@ class ExtensionManager {
 2. For each tool: strip types → compile → validate. Store in `this.tools`
 3. For each automation: strip types → compile → validate. Store in `this.automations`
 4. Parse shared settings from `notor/settings.md` (if present)
-5. Unregister previously-registered user tools from `ToolRegistry`, `ToolDispatcher`, and `TOOL_PATH_PARAMS`
-6. Register tools in `ToolRegistry` and `ToolDispatcher` (overwrites built-in if same name)
+5. Unregister previously-registered user tools from `ToolRegistry` and `TOOL_PATH_PARAMS`. Also unregister from `ToolDispatcher` **if it exists** (see step 6)
+6. Register tools in `ToolRegistry` (always). Register in `ToolDispatcher` **only if the dispatcher has already been created** — check via `plugin.hasDispatcher()`. On initial load the dispatcher does not yet exist; it will pick up user tools automatically from `registry.getAll()` when it is lazily created on first chat. On manual reload the dispatcher IS already created and requires explicit `registerTool()` / `unregisterTool()` calls
 7. Register user tool path params in `TOOL_PATH_PARAMS` (for `enforcePathConstraints()` at dispatch time)
 8. Detect and warn about built-in tool name collisions via Notice (e.g., `'Tool "read_note" overrides built-in'`)
 9. Report errors via Obsidian Notice + logger
@@ -599,7 +599,8 @@ class UserToolAdapter implements Tool {
   async execute(params: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult> {
     // 1. Resolve settings + shared settings (always reads from live plugin.settings reference)
     // 2. Build injected context (app, obsidian, utils, libs, settings, shared, params)
-    //    - Include options?.abortSignal in utils context for cancellation support
+    //    - Merge options?.abortSignal into the utils object per-invocation (abortSignal is
+    //      only available at call time, not when buildUtils() constructs the base object)
     // 3. Call compiled function
     // 4. Wrap return value as ToolResult (always include tool_name: this.definition.name)
     // 5. On error: Notice + logger + return { tool_name: this.definition.name, success: false, error }
@@ -610,9 +611,9 @@ class UserToolAdapter implements Tool {
 - [ ] Implement `ExtensionManager` class with all methods
 - [ ] Implement `UserToolAdapter` class implementing `Tool` interface
 - [ ] Implement the `reload()` flow with error aggregation
-- [ ] Implement tool registration (register in both `ToolRegistry` and `ToolDispatcher`)
+- [ ] Implement tool registration: always register in `ToolRegistry`; conditionally register in `ToolDispatcher` only when `plugin.hasDispatcher()` is true (avoids forcing premature creation of the dispatcher on initial load). Note: `ToolDispatcher.registerTool()` accepts `DispatchableTool` (subset: `name`, `mode`, `execute`); `UserToolAdapter` satisfies this via structural typing since `Tool` is a superset of `DispatchableTool`
 - [ ] Implement path param registration: for each user tool with `pathParams`, add entries to `TOOL_PATH_PARAMS` so `enforcePathConstraints()` applies at dispatch time
-- [ ] Track which tool names were registered by extensions so they can be unregistered on reload (before re-registering — includes clearing their `TOOL_PATH_PARAMS` entries)
+- [ ] Track which tool names were registered by extensions so they can be unregistered on reload (before re-registering — includes clearing their `TOOL_PATH_PARAMS` entries and `ToolDispatcher` entries if dispatcher exists)
 - [ ] Clean up `TOOL_PATH_PARAMS` entries in `destroy()` (plugin unload), not just on reload
 
 ---
@@ -690,7 +691,7 @@ const automationCtx = {
 };
 ```
 
-- [ ] Add accessor parameter to all four dispatch functions (not `ExtensionManager` directly)
+- [ ] Add accessor parameter to all four dispatch functions in `hook-events.ts` (not `ExtensionManager` directly)
 - [ ] Implement automation execution within each dispatch function (fire-and-forget for all except `pre_send`)
 - [ ] Execute automations sequentially in `notor-automation-order` order
 - [ ] Translate field names from `ToolHookContext` to design-doc names inline in each dispatch function (no separate `buildAutomationContext()` helper)
@@ -705,7 +706,7 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 - `src/hooks/vault-event-dispatcher.ts` — add automation dispatch step
 - `src/hooks/vault-event-handlers.ts` — pass automations accessor through deps
 - `src/hooks/vault-event-listener-manager.ts` — add `getExtensionAutomations` accessor
-- `src/hooks/vault-event-scheduler.ts` — add automation schedule support
+- `src/hooks/vault-event-scheduler.ts` — add `setExtensionAutomations()` setter (new setter, following existing `setDispatch()` pattern) + automation schedule support in `syncJobs()`
 
 **Execution order per design doc:**
 1. Shell hooks (existing)
@@ -737,8 +738,8 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 - [ ] Add `getExtensionAutomations?` accessor to `DispatcherDeps` interface
 - [ ] Dispatch automations as a separate step after hooks+workflows in `dispatchVaultEventHooks()`
 - [ ] Build vault event context objects (using design-doc field names)
-- [ ] Add `getExtensionAutomations` accessor to `VaultEventListenerManager` constructor; update `hasActiveHooks()` to check automations
-- [ ] Add `getExtensionAutomations` accessor to `VaultEventScheduler`; add parallel loop in `syncJobs()` for automation `on_schedule` entries
+- [ ] Add `getExtensionAutomations` accessor to `VaultEventListenerManager` constructor; update `hasActiveHooks()` to check automations. **Init ordering:** the accessor must be wired before `onLayoutReady()` calls `evaluateListeners()`. The accessor returns empty until extensions are loaded; after `ExtensionManager.reload()` completes, call `evaluateListeners()` again to register listeners for any new automation vault event triggers
+- [ ] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (new setter, following the existing `setDispatch()` pattern — each data source has its own injection point); add parallel loop in `syncJobs()` for automation `on_schedule` entries
 - [ ] Ensure loop prevention (`ExecutionChainTracker`) works with automations
 - [ ] Wire `getExtensionAutomations` accessor through from `main.ts` when constructing deps
 
@@ -921,7 +922,10 @@ onload()
     → NEW: extensionManager.reload()
       → discovers tools, automations, shared settings
       → compiles all extensions
-      → registers user tools in ToolRegistry + ToolDispatcher
+      → registers user tools in ToolRegistry (dispatcher does not exist yet
+        at this point — tools will be picked up automatically when the
+        dispatcher is lazily created on first chat via registry.getAll())
+    → NEW: evaluateListeners() again (picks up automation vault event triggers)
 ```
 
 **Lazy accessor pattern (matches existing):**
@@ -939,15 +943,30 @@ getExtensionManager(): ExtensionManager {
 
 **Integration points in main.ts:**
 
-1. `getToolRegistry()` — call `extensionManager.reload()` after registering built-in tools (ensures user tools overwrite built-ins)
-2. `getToolDispatcher()` — user tools already registered via reload, no extra wiring needed
+1. `getToolRegistry()` — no changes needed; user tools are registered in the registry during `extensionManager.reload()` which runs in `onLayoutReady()`
+2. `getToolDispatcher()` — on lazy creation, it iterates `registry.getAll()` which already includes user tools (if reload ran first). On manual reload, `ExtensionManager` checks `plugin.hasDispatcher()` and explicitly registers/unregisters
 3. `_initMcpHub()` — no changes needed (MCP tools register independently)
 4. Orchestrator — call `orchestrator.setExtensionAccessors()` (same pattern as `setPersonaManager()` and `setWorkflowHookOverrideManager()`) so it can pass accessors at each dispatch call site
 5. `onunload()` — call `extensionManager.destroy()` (includes `TOOL_PATH_PARAMS` cleanup)
 
 **Passing to hook dispatch (orchestrator setter pattern):**
 
-Add a `setExtensionAccessors()` method on `ChatOrchestrator` (matches existing `setPersonaManager()` and `setWorkflowHookOverrideManager()` patterns). The orchestrator stores the accessors and passes them at each lazy-imported dispatch call site:
+Add a `setExtensionAccessors()` method on `ChatOrchestrator` (matches existing `setPersonaManager()` and `setWorkflowHookOverrideManager()` patterns). The orchestrator stores the accessors and passes them at dispatch call sites.
+
+**Important: mixed import pattern.** The four dispatch functions use two different import strategies in the orchestrator:
+- `dispatchPreSend` and `dispatchAfterCompletion` are **statically imported** at the top of `orchestrator.ts` (line 32)
+- `dispatchOnToolCall` and `dispatchOnToolResult` are **dynamically imported** at their call sites
+
+There are **six call sites** across two execution paths, plus one private wrapper:
+
+| Function | Foreground (`responseLoop`) | Background (`_backgroundResponseLoop`) | Import |
+|---|---|---|---|
+| `dispatchPreSend` | `orchestrator.ts:1240` | — | Static |
+| `dispatchOnToolCall` | `orchestrator.ts:1495` | `orchestrator.ts:966` | Dynamic |
+| `dispatchOnToolResult` | `orchestrator.ts:1604` | `orchestrator.ts:981` | Dynamic |
+| `dispatchAfterCompletion` | `orchestrator.ts:1693` (via `dispatchAfterCompletionHooks()`) | — | Static |
+
+Automations must fire in both the foreground and background loops for consistent behavior.
 
 ```typescript
 // In ChatOrchestrator:
@@ -958,9 +977,18 @@ setExtensionAccessors(accessors: {
   this.extensionAccessors = accessors;
 }
 
-// At each dispatch call site (e.g., dispatchOnToolCall):
+// Static import call sites — pass accessor directly from instance field:
+dispatchPreSend(context, this.settings, vaultRootPath, this.workflowHookOverrideManager, this.extensionAccessors?.getForTrigger);
+
+// Dynamic import call sites — accessor must be in closure scope:
 const { dispatchOnToolCall } = await import("../hooks/hook-events");
 dispatchOnToolCall(context, this.settings, vaultRootPath, this.workflowHookOverrideManager, this.extensionAccessors?.getForToolEvent);
+
+// Private wrapper — must accept and forward the parameter:
+private dispatchAfterCompletionHooks(): void {
+  // ...
+  dispatchAfterCompletion(context, this.settings, vaultRootPath, this.workflowHookOverrideManager, this.extensionAccessors?.getForTrigger);
+}
 ```
 
 ```typescript
@@ -975,14 +1003,16 @@ orchestrator.setExtensionAccessors({
 For vault event dispatch, inject `getAutomationsForTrigger` into `DispatcherDeps`.
 
 - [ ] Create `getExtensionManager()` lazy accessor
+- [ ] Add `hasDispatcher(): boolean` to `NotorPlugin` (returns `this._toolDispatcher != null`) for conditional registration in `ExtensionManager.reload()`
 - [ ] Add `get vaultRootPath(): string` getter to `NotorPlugin` (`(this.app.vault.adapter as { basePath?: string }).basePath ?? ""`)
 - [ ] Wire initial `reload()` into `onLayoutReady()` (after tool registry initialization)
 - [ ] Add `setExtensionAccessors()` method to `ChatOrchestrator` (stores accessors for dispatch call sites)
 - [ ] Call `orchestrator.setExtensionAccessors()` in `main.ts` after creating extension manager
-- [ ] Pass stored accessors through to all four LLM lifecycle dispatch calls at their lazy-import call sites
+- [ ] Pass stored accessors through to all **six** LLM lifecycle dispatch call sites (4 in foreground `responseLoop` + 2 in background `_backgroundResponseLoop`)
+- [ ] Update private `dispatchAfterCompletionHooks()` wrapper to accept and forward the extension accessor
 - [ ] Add `getExtensionAutomations` accessor to vault event `DispatcherDeps` construction
-- [ ] Add `getExtensionAutomations` accessor to `VaultEventListenerManager` construction
-- [ ] Add `getExtensionAutomations` accessor to `VaultEventScheduler` setup
+- [ ] Add `getExtensionAutomations` accessor to `VaultEventListenerManager` construction — wire before `onLayoutReady` calls `evaluateListeners()`. Accessor returns empty until extensions are loaded; call `evaluateListeners()` again after `reload()` completes
+- [ ] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (new setter, following the existing `setDispatch()` pattern)
 - [ ] Wire `extensionManager.destroy()` into `onunload()` (includes `TOOL_PATH_PARAMS` cleanup)
 - [ ] Wire `registerExtensionVaultWatcher()` into `onLayoutReady()` (after initial extension reload)
 - [ ] Ensure reload ordering: built-in tools → user tools → MCP tools (MCP is async, so user tools may register before MCP connects — that's fine, MCP tools don't conflict with user tools)
@@ -1179,7 +1209,7 @@ params:
 
 ### Q-2: Tool concurrency classification — RESOLVED: Use `mode` directly
 
-`partitionToolCalls()` in `tool-orchestration.ts` already classifies by `tool.mode`. Since `UserToolAdapter` exposes `mode` from the frontmatter `notor-mode` field, user tools with `mode: "read"` are concurrency-safe and user tools with `mode: "write"` are non-concurrent. No changes to `partitionToolCalls()` needed.
+`partitionToolCalls()` in `tool-orchestration.ts` has two classification branches: MCP tools use `hasExplicitUserReadClassification()` (non-concurrent by default, opt-in to concurrency via server config), while non-MCP tools use `!dispatcher.isWriteTool(toolName)` (which reads `tool.mode`). Since user tools are not MCP tools, they fall through to the non-MCP branch. `UserToolAdapter` exposes `mode` from the frontmatter `notor-mode` field, so user tools with `mode: "read"` are concurrency-safe and user tools with `mode: "write"` are non-concurrent. No changes to `partitionToolCalls()` needed.
 
 ### Q-3: User tool names in `<notor_tool_config>` blocks — RESOLVED: Works automatically (with caveat)
 
