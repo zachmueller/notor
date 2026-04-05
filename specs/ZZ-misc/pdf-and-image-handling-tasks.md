@@ -205,7 +205,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 - [x] **TypeScript compilation** — `npm run build` succeeds with zero type errors across all modified files
 - [x] **Unit tests pass** — `npm test` for existing tests (no regressions)
 - [x] **Unit tests for new code** — `src/media/types.test.ts` (getTextContent), `src/media/format-detector.test.ts`, token estimation tests
-- [ ] **Manual smoke test** — Open existing conversation, send a message, verify content flows through correctly as plain string
+- [x] **Manual smoke test** — Open existing conversation, send a message, verify content flows through correctly as plain string (covered by `e2e/scripts/image-handling-test.ts` test 1)
 
 ---
 
@@ -358,8 +358,8 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 2.9 Verification
 
-- [ ] **Manual test: Attachment picker** — Attach image via file dialog → chip appears with image icon → send message → model describes image content
-- [ ] **Manual test: read_file tool** — LLM calls `read_file` on a `.png` → receives image block → describes image
+- [x] **Manual test: Attachment picker** — Attach image via file dialog → chip appears with image icon → send message → model describes image content (covered by `e2e/scripts/image-handling-test.ts` test 7)
+- [x] **Manual test: read_file tool** — LLM calls `read_file` on a `.png` → receives image block → describes image (covered by `e2e/scripts/image-handling-test.ts` tests 4-5)
 - [ ] **Manual test: Provider compatibility** — Test with Anthropic and OpenAI providers
 - [ ] **Unit tests** — image-processor pipeline, capabilities lookup, attachment factory functions
 - [x] **Build check** — `npm run build` succeeds, bundle size increase is acceptable (<100KB for new code, no new deps)
