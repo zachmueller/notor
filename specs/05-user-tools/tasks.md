@@ -573,22 +573,26 @@ Follow the workflow vault watcher pattern from `main.ts:1335-1358` with `schedul
 
 Augment `src/extensions/manager.ts` with comprehensive error handling.
 
-- [ ] Implement try/catch in `UserToolAdapter.execute()`:
+- [x] Implement try/catch in `UserToolAdapter.execute()`:
   - **On error:** 3 channels:
     1. Notice: `new Notice(\`Extension error in ${this.name}: ${error.message}\`)`
     2. ToolResult: `{ tool_name: this.name, success: false, error: error.message, duration_ms }`
     3. Logger: `log.error("User tool execution failed", { tool: this.name, error: String(error), stack: error.stack })`
-- [ ] Implement try/catch in automation execution paths (EXT-013/014):
+  - Implemented in `src/extensions/manager.ts:136-153` (EXT-012)
+- [x] Implement try/catch in automation execution paths (EXT-013/014):
   - **On error:** 2 channels:
     1. Notice: `new Notice(\`Automation error in ${displayName}: ${error.message}\`)`
     2. Logger: `log.error("User automation execution failed", { automation: displayName, trigger, error: String(error), stack: error.stack })`
-- [ ] Implement compilation error reporting in `reload()`:
+  - Implemented in `src/hooks/hook-events.ts` (all four dispatch functions) and `src/hooks/vault-event-dispatcher.ts:168-180` (EXT-013, EXT-014)
+- [x] Implement compilation error reporting in `reload()`:
   - Display Notice: `"Extension '{name}' failed to compile: {error}"`
   - Log with full details
   - Skip extension (don't register), continue loading others
-- [ ] Implement required settings validation before execution:
+  - Implemented in `src/extensions/manager.ts:219-224` (tools) and `235-240` (automations) (EXT-012)
+- [x] Implement required settings validation before execution:
   - Tool: check `resolveSettings()` for `missing` array — return `{ success: false, error: "Tool 'X' requires setting 'Y' to be configured in Settings." }`
   - Automation: check `resolveSettings()` — show Notice with same message, skip execution
+  - Implemented in `src/extensions/manager.ts:68-76` (tool) and `391-398` (automation) (EXT-012)
 
 ---
 

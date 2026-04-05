@@ -1065,10 +1065,10 @@ Ensure extension errors are surfaced correctly without crashing the plugin.
 - Tool returns `{ success: false, error: "Tool 'X' requires setting 'Y' to be configured in Settings." }`
 - Automation fires Notice with same message and skips execution
 
-- [ ] Implement try/catch in `UserToolAdapter.execute()`
-- [ ] Implement try/catch in automation execution paths
-- [ ] Implement compilation error reporting in `reload()`
-- [ ] Implement required settings validation before execution
+- [x] Implement try/catch in `UserToolAdapter.execute()` — already implemented in `manager.ts:136-153` (EXT-012)
+- [x] Implement try/catch in automation execution paths — already implemented in `hook-events.ts` (EXT-013) and `vault-event-dispatcher.ts:168-180` (EXT-014)
+- [x] Implement compilation error reporting in `reload()` — already implemented in `manager.ts:219-224, 235-240` (EXT-012)
+- [x] Implement required settings validation before execution — already implemented in `manager.ts:68-76` (tool) and `391-398` (automation) (EXT-012)
 
 ---
 
