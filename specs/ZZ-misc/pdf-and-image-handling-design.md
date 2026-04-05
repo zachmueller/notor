@@ -133,6 +133,21 @@ export type ContentBlock =
 
 The optional `width`, `height`, and `page_count` fields carry processing metadata for token estimation (see §7 Phase 1). The image pipeline (§4.3) always knows post-processing dimensions from the Electron Canvas API; the PDF processor knows page count from the PDF library. These fields are optional for backward compatibility with blocks created before the metadata was captured, and for edge cases where dimensions cannot be determined. The metadata overhead is negligible (~30 bytes per block in serialized JSONL).
 
+**Helper function** — to reduce type-narrowing boilerplate at 30+ read sites, `src/media/types.ts` also exports a `getTextContent()` utility:
+
+```typescript
+/** Extract the text portion from content that may be a string or ContentBlock[]. */
+export function getTextContent(content: string | ContentBlock[]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+}
+```
+
+This is used by exporters, compaction, history search, and any other consumer that needs the text representation without media. It does NOT replace provider-specific formatting — providers map `ContentBlock[]` to their native content block formats directly.
+
 **Two types must change in concert:**
 
 Notor has two separate message types. `Message` (`src/types.ts:99`) is the internal type used by the conversation manager, JSONL history, token estimation, UI, and sub-agents. `ChatMessage` (`src/providers/provider.ts:23`) is the provider-facing type constructed from `Message` via `toChatMessages()`. Both have `content: string` today, and both must change.
@@ -376,6 +391,8 @@ export interface ToolResult {
 
 The dispatcher and providers format tool results with content blocks per the provider's wire format (e.g., Anthropic tool_result content arrays can include image blocks alongside text).
 
+**Contract:** `content_blocks` is present ONLY when a tool produces media output (e.g., `read_file` on an image or PDF with native provider support). When `content_blocks` is present, `result` MUST still contain a text summary (e.g., `"Read image: photo.png (1200×800, image/png)"`). This ensures consumers that cannot handle media (sub-agents on text-only providers, export modules, search indexing) always have a meaningful fallback via the existing `result` field. When both are populated, providers that support media use `content_blocks`; all others fall back to `result`.
+
 ### 5.5 Enhanced `read_file` Tool (`src/tools/read-file.ts`)
 
 Rather than creating separate `read_pdf` and `read_image` tools, extend the existing `read_file` tool to handle all three content types. This avoids tool proliferation and keeps the LLM's tool list lean.
@@ -463,7 +480,7 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 **Goal:** Introduce `ContentBlock` type, update both `Message` and `ChatMessage` content types, make all four providers handle the union, and ensure all existing consumers compile and work correctly. No user-facing changes.
 
 **Files to create:**
-- `src/media/types.ts` — `ContentBlock`, `ImageMediaType`, constants
+- `src/media/types.ts` — `ContentBlock`, `ImageMediaType`, `getTextContent()`, constants
 - `src/media/format-detector.ts` — magic byte detection
 
 **Files to modify:**
@@ -473,16 +490,18 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 - `src/providers/openai-provider.ts` — `toOpenAIMessages()` handles `ContentBlock[]`
 - `src/providers/bedrock-provider.ts` — `toBedrockMessages()` handles `ContentBlock[]`
 - `src/providers/local-provider.ts` — `toOpenAIMessages()` handles `ContentBlock[]`
-- All callsites that consume `content` as string (see table below)
+- `src/export/markdown-exporter.ts` — use `getTextContent()` at all `msg.content` read sites
+- `src/export/html-exporter.ts` — use `getTextContent()` at all `msg.content` read sites
+- All other callsites that consume `content` as string (see table below)
 
 **Callsite enumeration — all locations that read `content` as a plain string:**
 
+*Provider layer:*
+
 | File | Line(s) | Current code | Required change |
 |------|---------|-------------|-----------------|
-| `src/chat/context.ts` | 89 | `let text = message.content` then string concat | Extract text: if `ContentBlock[]`, join text blocks; estimate media token cost separately |
-| `src/chat/sub-agent-runner.ts` | 453 | `estimateTokenCount(msg.content)` | Handle union — extract text for estimation, add media token cost |
 | `src/providers/anthropic-provider.ts` | 59 | `` `${system}\n\n${msg.content}` `` (system prompt concatenation) | Type-narrow: system messages are always string, add assertion or guard |
-| `src/providers/anthropic-provider.ts` | 67 | `{ type: "text", text: msg.content }` | If `ContentBlock[]`, map to Anthropic content blocks directly |
+| `src/providers/anthropic-provider.ts` | 68 | `{ type: "text", text: msg.content }` | If `ContentBlock[]`, map to Anthropic content blocks directly |
 | `src/providers/anthropic-provider.ts` | 97 | `content: msg.content` (assistant messages) | Pass through — assistant messages are always string (LLM output is text) |
 | `src/providers/openai-provider.ts` | 60 | `content: msg.content \|\| null` | If `ContentBlock[]`, map to OpenAI content parts |
 | `src/providers/openai-provider.ts` | 89 | `content: msg.content` | Same — map to OpenAI content parts when array |
@@ -490,9 +509,43 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 | `src/providers/bedrock-provider.ts` | 91 | `content.push({ text: msg.content })` | If `ContentBlock[]`, map to Bedrock content blocks |
 | `src/providers/bedrock-provider.ts` | 128 | `content: [{ text: msg.content }]` | If `ContentBlock[]`, map to Bedrock content blocks |
 | `src/providers/local-provider.ts` | 88, 117 | Same as OpenAI patterns | Same fixes as OpenAI |
-| `src/chat/history.ts` | 496 | `typeof msg.content === "string"` then `.substring(0, 120)` | Already guards! Add `ContentBlock[]` branch: extract first text block for preview |
+
+*Context & token estimation:*
+
+| File | Line(s) | Current code | Required change |
+|------|---------|-------------|-----------------|
+| `src/chat/context.ts` | 89 | `let text = message.content` then string concat | Extract text: if `ContentBlock[]`, join text blocks; estimate media token cost separately |
+| `src/chat/sub-agent-runner.ts` | 453 | `estimateTokenCount(msg.content)` | Handle union — extract text for estimation, add media token cost |
+| `src/context/compaction.ts` | 80 | `estimateTokens(msg.content)` | `estimateContentTokens(msg.content)` |
+| `src/context/compaction.ts` | 241 | `if (!msg.content?.trim()) continue;` | Use `getTextContent()` helper — `.trim()` doesn't exist on arrays |
+| `src/context/compaction.ts` | 244 | `content: msg.content` (builds ChatMessage for summarization) | Pass through — both types accept the union. But note: media blocks in this message reach the summarization provider and should be stripped (see compaction safety below) |
+
+*Orchestrator & history:*
+
+| File | Line(s) | Current code | Required change |
+|------|---------|-------------|-----------------|
 | `src/chat/orchestrator.ts` | 2043, 2057 | `content: msg.content` (Message → ChatMessage) | Pass-through works — both types now accept the union |
 | `src/chat/orchestrator.ts` | 2051 | `msg.content?.trim()` (empty assistant check) | Type-narrow: assistant content is always string |
+| `src/chat/history.ts` | 442 | `JSON.parse(message.content)` (compaction record detection) | Add type guard: only parse when `typeof message.content === "string"`. Only runs on system messages (always string), but guard prevents future regressions |
+| `src/chat/history.ts` | 496 | `typeof msg.content === "string"` then `.substring(0, 120)` | Already guards! Add `ContentBlock[]` branch: extract first text block for preview |
+| `src/chat/history.ts` | 587 | `typeof msg.content === "string"` then `.substring(0, 120)` | Same pattern as line 496 — duplicate preview logic in `searchConversations()`. Same fix: add `ContentBlock[]` branch |
+| `src/chat/history.ts` | 590 | `typeof msg.content === "string"` then `.toLowerCase().includes(needle)` | Already type-guarded! For `ContentBlock[]`, search text blocks for the needle |
+
+*Export modules:*
+
+| File | Line(s) | Current code | Required change |
+|------|---------|-------------|-----------------|
+| `src/export/markdown-exporter.ts` | 95 | `msg.content` passed to `wrapCallout()` (hook injection) | Use `getTextContent()` — hook injections are always string, but add guard |
+| `src/export/markdown-exporter.ts` | 99 | `let content = msg.content` then regex/slice | Use `getTextContent()` — user messages with media: extract text, append `[N image(s) attached]` marker |
+| `src/export/markdown-exporter.ts` | 139 | `parts.push(msg.content)` (assistant messages) | Pass through — assistant messages are always string |
+| `src/export/html-exporter.ts` | 394 | `escapeHtml(msg.content)` (hook injection) | Use `getTextContent()` |
+| `src/export/html-exporter.ts` | 398 | `let content = msg.content` then regex/slice | Use `getTextContent()`. For HTML export, image blocks could optionally render as `<img src="data:...">` tags (Phase 4 enhancement) |
+| `src/export/html-exporter.ts` | 438 | `marked.parse(msg.content)` (assistant messages) | Pass through — assistant messages are always string |
+| `src/export/html-exporter.ts` | 556 | `msg.content.substring(0, 200)` (sub-agent system) | Use `getTextContent()` — system messages are always string, but add guard |
+| `src/export/html-exporter.ts` | 558 | `escapeHtml(msg.content)` (sub-agent user) | Use `getTextContent()` |
+| `src/export/html-exporter.ts` | 560 | `marked.parse(msg.content)` (sub-agent assistant) | Pass through — assistant messages are always string |
+
+**Export module strategy:** For Phase 1, all export callsites use `getTextContent()` to extract the text portion. Media blocks are silently omitted — the exported text still makes sense because the LLM's responses reference the images by description. In Phase 4, HTML export can optionally embed images as `<img src="data:...">` inline tags for rich exports.
 
 **Context compaction safety:**
 
@@ -672,11 +725,11 @@ See §10 for full implementation details.
 | PDF library too large for plugin bundle | Build size doubles, slow Obsidian startup | Evaluate bundle impact early (§3.3). Fall back to lighter library. Consider lazy loading via dynamic `import()`. |
 | Canvas API resize quality poor | Blurry images sent to API | Test at various scales during Phase 2. JPEG at quality 80 on canvas is generally good. Keep PNG path for screenshots/diagrams. |
 | Provider rejects image/document format | Errors during conversation | Capability detection (§4.6) prevents sending unsupported formats. Graceful fallback to text extraction. |
-| `Message.content` / `ChatMessage.content` type change regressions | Broken conversations, compile errors | Phase 1 enumerates all 14 callsites that consume content as string (§7). TypeScript compiler catches any missed sites. |
+| `Message.content` / `ChatMessage.content` type change regressions | Broken conversations, compile errors | Phase 1 enumerates all ~31 callsites that consume content as string (§7), including export modules. TypeScript compiler catches any missed sites. |
 | Large images/PDFs cause memory pressure | Plugin crashes or OOM | Enforce size limits (20MB max file, 5MB max base64). Process one attachment at a time. |
 | Canvas not available in all Obsidian contexts | Image processing fails | All processing runs in renderer process where Canvas is available. Verify in Phase 2. |
-| Binary content increases history file sizes | Larger JSONL files on disk | Media IS persisted. Existing `history_max_size_mb` (500MB) and `history_max_age_days` (90 days) provide guardrails. A conversation with 10 images adds ~2–5MB. |
-| Context compaction encounters media blocks | Wasted tokens, type errors, API failures | Phase 1 adds compaction safety: strip media blocks before summarization, append `[omitted]` marker. |
+| Binary content increases history file sizes | Larger JSONL files on disk, expensive line parsing | Media IS persisted inline as base64. Existing `history_max_size_mb` (500MB) and `history_max_age_days` (90 days) provide guardrails. A conversation with 10 images adds ~2–5MB. **Known scaling concern:** image-heavy users could hit the 500MB limit much faster than text-only users, and individual JSONL lines of 500KB+ are expensive to parse for sidebar previews. If this becomes a problem in practice, a Phase 4+ optimization could store media as separate files (`history/media/{hash}.{ext}`) referenced by hash in ContentBlocks, keeping JSONL lean and enabling cross-conversation deduplication. |
+| Context compaction encounters media blocks | Wasted tokens, type errors, API failures | Phase 1 adds compaction safety: strip media blocks before summarization, append `[omitted]` marker. **Known limitation:** after compaction, images/documents are permanently lost from the conversation context. If the user discussed an image ("describe this diagram") and compaction triggers, the summary retains the LLM's text description but the original image is gone. This matches Claude Code's behavior and is acceptable — the LLM's summary of "the user asked about a diagram showing X and I described Y" preserves the semantic content even without the raw image. |
 | Media token estimation inaccuracy | Context overflow or premature compaction | Dimension-aware formula `(w×h)/750` for images with known dimensions; flat 2000-token fallback otherwise. Per-page estimate for PDFs. Overestimates for OpenAI (benign: compaction triggers earlier, not later). Provider-specific formulas deferred to Phase 4. |
 
 ---
@@ -945,13 +998,14 @@ Use `@xmldom/xmldom` (`^0.8.11`, already a direct dependency) to parse and merge
 1. Parse template's word/_rels/document.xml.rels
 2. Find the highest rId number in the template (e.g., rId5 → maxId = 5)
 3. Parse generated doc's word/_rels/document.xml.rels
-4. Collect all image/media relationships from the generated doc
-5. Build a remap table: for each generated image relationship rIdN,
+4. Collect ALL relationships from the generated doc (not just image/media —
+   also hyperlinks, headers, footers, etc. that may have been generated)
+5. Build a remap table: for each generated relationship rIdN,
    assign a new ID rId(maxId + offset) where offset increments from 1
    Example: generated rId2 → rId6, generated rId3 → rId7
 6. Update the generated word/document.xml body content:
    replace all rId references using the remap table
-   (regex: r:embed="rIdN" → r:embed="rId(remapped)")
+   (regex on both r:embed="rIdN" AND r:id="rIdN" attributes)
 7. Append remapped <Relationship> elements to the template's .rels XML
 8. Copy all word/media/* files from generated ZIP into template ZIP
 9. Parse both [Content_Types].xml files:
