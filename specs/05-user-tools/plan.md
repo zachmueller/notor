@@ -16,9 +16,9 @@
 | Compilation | `new AsyncFunction(argNames..., strippedCode)` | Extensions use `await` directly. Constructed via `Object.getPrototypeOf(async function(){}).constructor`. Same trust level as plugin code |
 | YAML fence parsing | `parseYaml` from `obsidian` module | Already used by sub-agent discovery, tool config parser, workflow hook parser. No new dependency |
 | Param schema format | Simplified YAML → JSON Schema conversion | User writes `params.path.type: string`; runtime converts to `{ type: "object", properties: { path: { type: "string" } }, required: [...] }`. Lowers the authoring bar vs. raw JSON Schema |
-| Hot reload | Manual only (Settings button + command palette), with file watcher Notices | Avoids compilation during active LLM operations. File watchers on `notor/tools/` and `notor/automations/` show a debounced Notice prompting the user to reload — no auto-recompilation |
-| Extension settings storage | Two new `NotorSettings` fields: `user_extension_settings` and `user_shared_settings` | Follows existing patterns. Secrets use `SecretStorage` with ID convention `notor-ext-{name}-{key}` / `notor-shared-{key}` |
-| Registration approach | User tools register in `ToolRegistry` via same `register()` method; user automations register in a new `AutomationRegistry` alongside existing hook dispatch | Tools integrate fully with existing dispatch pipeline. Automations coexist with shell hooks (not replace) |
+| Hot reload | Manual only (Settings button + command palette), with file watcher Notices | Avoids compilation during active LLM operations. File watchers on `notor/tools/` and `notor/automations/` show a 1000ms-debounced Notice prompting the user to reload — no auto-recompilation |
+| Extension settings storage | Two new `NotorSettings` fields: `user_extension_settings` and `user_shared_settings` | Follows existing patterns. Secrets use `SecretStorage` with ID convention `notor-ext-{name}-{key}` / `notor-shared-{key}`. Extension names and keys are auto-slugified to lowercase-alphanumeric-with-dashes to satisfy `SecretStorage` ID constraints |
+| Registration approach | User tools register in `ToolRegistry` via same `register()` method; user automations dispatched via lightweight accessor callbacks injected into existing dispatch functions | Tools integrate fully with existing dispatch pipeline. Automations coexist with shell hooks (not replace). Accessor pattern avoids coupling hook module to extension module |
 | Discovery directories | `notor/tools/` and `notor/automations/` and `notor/settings.md` | Follows established `notor/{entity}/` convention. Discovered on plugin load and manual reload |
 
 ### Technology Stack
@@ -35,7 +35,7 @@
 |---|---|
 | `ToolRegistry` | User tools call `register()` — if name matches built-in, it overwrites (last-write-wins). User tools loaded after built-ins so they always take precedence |
 | `ToolDispatcher` | User tools registered via `registerTool()` — participate in full dispatch pipeline (Plan/Act, auto-approve, path enforcement, checkpoints, approval UI) |
-| `ChatOrchestrator` | User automations fire at the same lifecycle points as shell hooks. `dispatchPreSend`, `dispatchOnToolCall`, `dispatchOnToolResult`, `dispatchAfterCompletion` extended to also invoke matching automations |
+| `ChatOrchestrator` | User automations fire at the same lifecycle points as shell hooks. `dispatchPreSend`, `dispatchOnToolCall`, `dispatchOnToolResult`, `dispatchAfterCompletion` extended with lightweight accessor callbacks (not full `ExtensionManager` reference) to invoke matching automations |
 | `VaultEventListenerManager` | User automations with vault event triggers (`on_note_open`, `on_save`, etc.) register alongside workflow triggers. `evaluateListeners()` extended to include automation triggers |
 | `VaultEventDispatcher` | `dispatchVaultEventHooks()` extended to collect and execute matching automations after shell hooks and workflow hooks |
 | `SystemPromptBuilder` | Tool definitions include user tools (they're in the registry). No special handling needed — `getToolDefinitions()` / `getFilteredToolDefinitions()` already return all registered tools |
@@ -144,8 +144,8 @@ interface UserAutomationDefinition {
   toolFilter: string[] | null;
   /** Execution order from frontmatter `notor-automation-order`. Default 0. */
   order: number;
-  /** Blocking mode from frontmatter `notor-blocking`. Default false. */
-  blocking: boolean;
+  // NOTE: `notor-blocking` was removed from the design. All automations are
+  // fire-and-forget (except pre_send which is inherently blocking).
   /** Parsed settings schema from YAML fence `settings` block (optional). */
   settingsSchema: SettingsFieldSchema[] | null;
   /** Raw TypeScript/JavaScript code from code fence. */
@@ -268,7 +268,6 @@ const CODE_FENCE_REGEX = /^```(yaml|ts|typescript|js|javascript)\s*\n([\s\S]*?)^
 | `notor-tools` | — | `toolFilter` |
 | `notor-display-name` | — | `displayName` |
 | `notor-automation-order` | — | `order` |
-| `notor-blocking` | — | `blocking` |
 
 - [ ] Implement `parseExtensionFile()` function
 - [ ] Implement `extractYamlFence()` helper (returns first YAML fence content or null)
@@ -353,8 +352,9 @@ async function resolveSharedSettings(
 ```
 
 - [ ] Implement `parseSettingsSchema()`
-- [ ] Implement `resolveSettings()` with SecretStorage integration for `secret: true` fields
+- [ ] Implement `resolveSettings()` with SecretStorage integration for `secret: true` fields. Always reads from live `plugin.settings` reference (no caching/snapshots)
 - [ ] Implement `resolveSharedSettings()` for the global `notor/settings.md` settings
+- [ ] Implement `slugifySecretId()` — normalize extension names and setting keys to lowercase-alphanumeric-with-dashes for `SecretStorage` ID construction (per `SecretStorage` constraint: "ID must be lowercase alphanumeric with dashes")
 - [ ] Validate required settings (no `default`, not yet configured) — produce clear error messages
 
 ---
@@ -448,6 +448,7 @@ The `pathEnforcer` sub-object exposes the dispatch-time path enforcement and `is
 ```typescript
 import mammoth from "mammoth";
 import TurndownService from "turndown";
+import { gfm } from "turndown-plugin-gfm";
 import * as unpdf from "unpdf";
 import * as docx from "docx";
 import PizZip from "pizzip";
@@ -459,6 +460,7 @@ function buildLibs(): Record<string, unknown> {
   return {
     mammoth,
     Turndown: TurndownService,
+    turndownGfm: { gfm },
     unpdf,
     docx,
     PizZip,
@@ -469,11 +471,11 @@ function buildLibs(): Record<string, unknown> {
 }
 ```
 
-**Note on `unpdf`:** Currently dynamically imported in `src/media/pdf-processor.ts`. The `libs` object should use the same lazy import pattern or accept that it's bundled.
+**Note on `unpdf`:** Currently dynamically imported in `src/media/pdf-processor.ts`. Decision: use eager static import for simplicity — the bundle size impact is acceptable since users installing extensions likely want the full library surface.
 
-- [ ] Implement `buildUtils()` — verify each utility reference resolves correctly from `main.ts` accessors
-- [ ] Implement `buildLibs()` — verify all 9 libraries import correctly
-- [ ] Handle the `unpdf` dynamic import edge case (either eager import or lazy proxy)
+- [ ] Implement `buildUtils()` — verify each utility reference resolves correctly from `main.ts` accessors. Include `abortSignal` from `ToolExecuteOptions` in the utils context for user tools (see EXT-012 adapter)
+- [ ] Implement `buildLibs()` — verify all 9 libraries import correctly (mammoth, Turndown, turndownGfm, unpdf, docx, PizZip, marked, xmldom, croner)
+- [ ] Use eager static import for `unpdf` (accepts bundle size tradeoff)
 - [ ] Implement `buildObsidianExports()` — expose commonly needed `obsidian` module exports (`requestUrl`, `Notice`, `TFile`, `getFrontMatterInfo`, `normalizePath`, etc.)
 
 ---
@@ -529,14 +531,10 @@ class ExtensionManager {
   private compiledLibs: Record<string, unknown> | null = null;
 
   constructor(
-    private readonly app: App,
     private readonly plugin: NotorPlugin,
-    private readonly vault: Vault,
-    private readonly metadataCache: MetadataCache,
-    private readonly settings: NotorSettings,
-    private readonly saveSettings: () => Promise<void>,
     private readonly parseYAML: (yaml: string) => unknown,
   ) {}
+  // Derives app, vault, metadataCache, settings from plugin (avoids redundant params)
 
   /** Full discovery + compilation + registration cycle. */
   async reload(): Promise<ExtensionReloadResult>
@@ -572,8 +570,9 @@ class ExtensionManager {
 5. Unregister previously-registered user tools from `ToolRegistry`, `ToolDispatcher`, and `TOOL_PATH_PARAMS`
 6. Register tools in `ToolRegistry` and `ToolDispatcher` (overwrites built-in if same name)
 7. Register user tool path params in `TOOL_PATH_PARAMS` (for `enforcePathConstraints()` at dispatch time)
-8. Report errors via Obsidian Notice + logger
-9. Return summary: `{ toolCount, automationCount, errors }`
+8. Detect and warn about built-in tool name collisions via Notice (e.g., `'Tool "read_note" overrides built-in'`)
+9. Report errors via Obsidian Notice + logger
+10. Return summary: `{ toolCount, automationCount, builtinOverrides, errors }`
 
 **Integration with ToolRegistry:**
 
@@ -597,9 +596,10 @@ class UserToolAdapter implements Tool {
     this.mode = definition.mode;
   }
 
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
-    // 1. Resolve settings + shared settings
+  async execute(params: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult> {
+    // 1. Resolve settings + shared settings (always reads from live plugin.settings reference)
     // 2. Build injected context (app, obsidian, utils, libs, settings, shared, params)
+    //    - Include options?.abortSignal in utils context for cancellation support
     // 3. Call compiled function
     // 4. Wrap return value as ToolResult
     // 5. On error: Notice + logger + return { success: false, error }
@@ -613,6 +613,7 @@ class UserToolAdapter implements Tool {
 - [ ] Implement tool registration (register in both `ToolRegistry` and `ToolDispatcher`)
 - [ ] Implement path param registration: for each user tool with `pathParams`, add entries to `TOOL_PATH_PARAMS` so `enforcePathConstraints()` applies at dispatch time
 - [ ] Track which tool names were registered by extensions so they can be unregistered on reload (before re-registering — includes clearing their `TOOL_PATH_PARAMS` entries)
+- [ ] Clean up `TOOL_PATH_PARAMS` entries in `destroy()` (plugin unload), not just on reload
 
 ---
 
@@ -629,31 +630,43 @@ Extend the four LLM lifecycle dispatch functions to fire matching user automatio
 2. Workflow-scoped hooks (existing, if override active)
 3. Vault-defined automations (new — sorted by `notor-automation-order`)
 
+**Integration approach:** Use an accessor/callback pattern (not direct `ExtensionManager` dependency). Each dispatch function receives a lightweight accessor function rather than the full manager:
+
+```typescript
+type GetAutomationsForTrigger = (trigger: AutomationTrigger) => UserAutomationDefinition[];
+type GetAutomationsForToolEvent = (
+  trigger: "on_tool_call" | "on_tool_result",
+  toolName: string
+) => UserAutomationDefinition[];
+```
+
+This avoids coupling the hook module to the extension module. The orchestrator injects these accessors (bound to the `ExtensionManager` instance) when calling dispatch functions.
+
+**All automations are fire-and-forget** (executed inside the existing `void (async () => { ... })()` IIFE). The exception is `pre_send` which is inherently blocking (its existing function is already `async` and awaited by the orchestrator).
+
 **Changes to each dispatch function:**
 
 - `dispatchPreSend()`:
-  - After shell hooks, get automations with `trigger: "pre_send"` from `ExtensionManager`
-  - Execute blocking automations sequentially (inherently blocking)
+  - Signature: add `getAutomations?: GetAutomationsForTrigger` parameter
+  - After shell hooks, get automations with `trigger: "pre_send"`
+  - Execute sequentially (inherently blocking since `dispatchPreSend` is awaited)
   - Collect returned strings and append to stdout array
-  - Signature: add `extensionManager?: ExtensionManager` parameter
 
 - `dispatchOnToolCall()`:
-  - After shell hooks, get automations with `trigger: "on_tool_call"` filtered by `toolName`
-  - Execute blocking automations first (sequential, awaited)
-  - Fire non-blocking automations in parallel
-  - Build `context` object with `toolName`, `params`, `conversationId`, `timestamp`, `hookEvent`
+  - Signature: add `getAutomations?: GetAutomationsForToolEvent` parameter
+  - Inside the existing fire-and-forget IIFE, after shell hooks complete, execute automations sequentially in `order` order
 
 - `dispatchOnToolResult()`:
-  - After shell hooks, get automations with `trigger: "on_tool_result"` filtered by `toolName`
-  - Execute blocking automations first (sequential, awaited)
-  - Fire non-blocking automations in parallel
-  - Build `context` object with `toolName`, `params`, `result`, `status`, `conversationId`, `timestamp`, `hookEvent`
+  - Signature: add `getAutomations?: GetAutomationsForToolEvent` parameter
+  - Same pattern as `dispatchOnToolCall`
 
 - `dispatchAfterCompletion()`:
-  - After shell hooks, get automations with `trigger: "after_completion"`
-  - Execute blocking then non-blocking
+  - Signature: add `getAutomations?: GetAutomationsForTrigger` parameter
+  - Same fire-and-forget pattern
 
 **Context object construction:**
+
+The adapter translates from internal hook field names (`toolParams`, `toolResult`, `toolStatus`) to the design doc's extension-facing names (`params`, `result`, `status`):
 
 ```typescript
 function buildAutomationContext(
@@ -661,9 +674,9 @@ function buildAutomationContext(
   hookData: {
     conversationId?: string;
     toolName?: string;
-    params?: Record<string, unknown>;
-    result?: string;
-    status?: "success" | "error";
+    params?: Record<string, unknown>;   // translated from toolParams
+    result?: string;                     // translated from toolResult
+    status?: "success" | "error";        // translated from toolStatus
     notePath?: string;
     oldTags?: string[];
     newTags?: string[];
@@ -678,30 +691,36 @@ function buildAutomationContext(
 }
 ```
 
-- [ ] Add `extensionManager` parameter to all four dispatch functions
-- [ ] Implement automation execution within each dispatch function
-- [ ] Implement blocking vs. non-blocking ordering per design doc
-- [ ] Build context objects for each event type
+- [ ] Add accessor parameter to all four dispatch functions (not `ExtensionManager` directly)
+- [ ] Implement automation execution within each dispatch function (fire-and-forget for all except `pre_send`)
+- [ ] Execute automations sequentially in `notor-automation-order` order
+- [ ] Build context objects with design-doc field names (translate from internal names)
 - [ ] Handle automation errors: Notice + logger (no ToolResult for automations)
-- [ ] Respect `notor-tools` filter for `on_tool_call` and `on_tool_result`
+- [ ] Respect `notor-tools` filter for `on_tool_call` and `on_tool_result` (via `GetAutomationsForToolEvent`)
 
 ### EXT-014 — Integrate automations with vault event hooks
 
 Extend vault event dispatch to include user automations alongside shell hooks and workflows.
 
-**File:** `src/hooks/vault-event-handlers.ts` (modify existing)
-**File:** `src/hooks/vault-event-dispatcher.ts` (modify existing)
+**Files modified:**
+- `src/hooks/vault-event-dispatcher.ts` — add automation dispatch step
+- `src/hooks/vault-event-handlers.ts` — pass automations accessor through deps
+- `src/hooks/vault-event-listener-manager.ts` — add `getExtensionAutomations` accessor
+- `src/hooks/vault-event-scheduler.ts` — add automation schedule support
 
 **Execution order per design doc:**
 1. Shell hooks (existing)
 2. Workflow hooks (existing)
-3. Vault-defined automations (new)
+3. Vault-defined automations (new — **separate dispatch step**, not mixed into existing collection)
+
+**Design decision:** Automations are dispatched in a separate step after the existing hooks+workflows, rather than being added to the `collectHooksAndWorkflows()` return type. This avoids modifying the `Array<VaultEventHook | Workflow>` union type and the `_executeOneHook()` discrimination logic. The existing `collectHooksAndWorkflows()` function remains unchanged.
 
 **Changes:**
 
-- `collectHooksAndWorkflows()` → rename to `collectHooksWorkflowsAndAutomations()` or add automations to return value
-- `handleNoteOpen()`, `handleNoteCreate()`, `handleModify()`, etc. — pass automations to dispatch
-- `dispatchVaultEventHooks()` — execute automations after hooks and workflows
+- `dispatchVaultEventHooks()` — after the existing hook/workflow loop, execute matching automations via a `getAutomationsForTrigger` accessor injected through `DispatcherDeps`
+- `DispatcherDeps` interface — add `getExtensionAutomations?: GetAutomationsForTrigger` field
+- `VaultEventListenerManager` constructor — add `getExtensionAutomations?: () => UserAutomationDefinition[]` accessor so `hasActiveHooks()` considers automation triggers when deciding whether to register Obsidian listeners
+- `VaultEventScheduler` — add `getExtensionAutomations` accessor (via new setter, following the existing `setDispatch()` pattern). `syncJobs()` adds a parallel loop for automation `on_schedule` entries alongside existing hook and workflow schedule handling
 
 **Vault event context for automations:**
 
@@ -716,14 +735,13 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 { hookEvent, timestamp, schedule }
 ```
 
-**`on_schedule` integration:** Automations with `notor-trigger: on_schedule` need cron timers. Extend `VaultEventScheduler` to include automation schedules alongside workflow schedules and shell hook schedules.
-
-- [ ] Extend `collectHooksAndWorkflows()` to include matching automations
-- [ ] Extend `dispatchVaultEventHooks()` to execute automations
-- [ ] Build vault event context objects
-- [ ] Extend `VaultEventListenerManager.evaluateListeners()` to consider automation triggers
-- [ ] Extend `VaultEventScheduler` for `on_schedule` automations
+- [ ] Add `getExtensionAutomations?` accessor to `DispatcherDeps` interface
+- [ ] Dispatch automations as a separate step after hooks+workflows in `dispatchVaultEventHooks()`
+- [ ] Build vault event context objects (using design-doc field names)
+- [ ] Add `getExtensionAutomations` accessor to `VaultEventListenerManager` constructor; update `hasActiveHooks()` to check automations
+- [ ] Add `getExtensionAutomations` accessor to `VaultEventScheduler`; add parallel loop in `syncJobs()` for automation `on_schedule` entries
 - [ ] Ensure loop prevention (`ExecutionChainTracker`) works with automations
+- [ ] Wire `getExtensionAutomations` accessor through from `main.ts` when constructing deps
 
 ---
 
@@ -812,7 +830,7 @@ The existing workflow watcher uses a simple `setTimeout` debounce (see `schedule
 private _extensionChangeTimer: ReturnType<typeof setTimeout> | null = null;
 private _extensionStaleNotice: Notice | null = null;
 
-private static readonly EXTENSION_DEBOUNCE_MS = 2000;
+private static readonly EXTENSION_DEBOUNCE_MS = 1000;
 
 private scheduleExtensionChangeNotice(): void {
   // Clear any pending debounce timer
@@ -844,12 +862,12 @@ private scheduleExtensionChangeNotice(): void {
 }
 ```
 
-**Debounce rationale:** 2000ms debounce coalesces rapid bursts from:
+**Debounce rationale:** 1000ms debounce coalesces rapid bursts from:
 - Obsidian sync writing multiple files
 - Git operations updating several extension files at once
-- User saving a file multiple times in quick succession (Obsidian auto-saves)
+- Obsidian auto-saves during active editing (prevents Notice flicker)
 
-The debounce window is intentionally longer than the workflow watcher's because extension compilation is heavier than workflow discovery, and we only show a Notice (not auto-reload).
+Longer than the workflow watcher's 300ms because the watcher only shows a Notice (not auto-reload), and extension file edits are typically less frequent than workflow edits. The extra delay prevents distracting Notice flashes during normal editing.
 
 **Path matching helpers:**
 
@@ -914,11 +932,7 @@ private _extensionManager: ExtensionManager | null = null;
 
 getExtensionManager(): ExtensionManager {
   if (!this._extensionManager) {
-    this._extensionManager = new ExtensionManager(
-      this.app, this, this.app.vault, this.app.metadataCache,
-      this.settings, () => this.saveSettings(),
-      parseYaml,
-    );
+    this._extensionManager = new ExtensionManager(this, parseYaml);
   }
   return this._extensionManager;
 }
@@ -929,19 +943,33 @@ getExtensionManager(): ExtensionManager {
 1. `getToolRegistry()` — call `extensionManager.reload()` after registering built-in tools (ensures user tools overwrite built-ins)
 2. `getToolDispatcher()` — user tools already registered via reload, no extra wiring needed
 3. `_initMcpHub()` — no changes needed (MCP tools register independently)
-4. Orchestrator — pass `extensionManager` to dispatch functions for automation firing
-5. `onunload()` — call `extensionManager.destroy()`
+4. Orchestrator — bind `extensionManager.getAutomationsForTrigger` and `extensionManager.getAutomationsForToolEvent` as accessor callbacks, pass to dispatch functions
+5. `onunload()` — call `extensionManager.destroy()` (includes `TOOL_PATH_PARAMS` cleanup)
 
-**Passing to hook dispatch:**
+**Passing to hook dispatch (accessor pattern):**
 
-The orchestrator needs to pass `extensionManager` when calling `dispatchPreSend()`, `dispatchOnToolCall()`, `dispatchOnToolResult()`, `dispatchAfterCompletion()`. This follows the same pattern as `WorkflowHookOverrideManager`.
+Instead of passing the full `ExtensionManager` to dispatch functions, bind lightweight accessors:
+
+```typescript
+// In orchestrator setup or at call sites:
+const getAutomations = (trigger) => extensionManager.getAutomationsForTrigger(trigger);
+const getToolAutomations = (trigger, toolName) => extensionManager.getAutomationsForToolEvent(trigger, toolName);
+
+// Pass to dispatch functions as optional last parameter
+dispatchPreSend(context, settings, vaultRootPath, overrideManager, getAutomations);
+dispatchOnToolCall(context, settings, vaultRootPath, overrideManager, getToolAutomations);
+```
+
+For vault event dispatch, inject `getAutomationsForTrigger` into `DispatcherDeps`.
 
 - [ ] Create `getExtensionManager()` lazy accessor
 - [ ] Wire initial `reload()` into `onLayoutReady()` (after tool registry initialization)
-- [ ] Pass `extensionManager` to orchestrator
-- [ ] Pass `extensionManager` through to all four LLM lifecycle dispatch calls
-- [ ] Pass `extensionManager` through to vault event handler deps
-- [ ] Wire `extensionManager.destroy()` into `onunload()`
+- [ ] Bind accessor callbacks from `extensionManager` and pass to orchestrator
+- [ ] Pass accessor callbacks through to all four LLM lifecycle dispatch calls
+- [ ] Add `getExtensionAutomations` accessor to vault event `DispatcherDeps` construction
+- [ ] Add `getExtensionAutomations` accessor to `VaultEventListenerManager` construction
+- [ ] Add `getExtensionAutomations` accessor to `VaultEventScheduler` setup
+- [ ] Wire `extensionManager.destroy()` into `onunload()` (includes `TOOL_PATH_PARAMS` cleanup)
 - [ ] Wire `registerExtensionVaultWatcher()` into `onLayoutReady()` (after initial extension reload)
 - [ ] Ensure reload ordering: built-in tools → user tools → MCP tools (MCP is async, so user tools may register before MCP connects — that's fine, MCP tools don't conflict with user tools)
 
@@ -1035,8 +1063,9 @@ Ensure extension errors are surfaced correctly without crashing the plugin.
 - [ ] Test: user tool execute() returns ToolResult
 - [ ] Test: automation fires for matching trigger
 - [ ] Test: automation `notor-tools` filter works
-- [ ] Test: blocking vs non-blocking automation ordering
+- [ ] Test: automations execute sequentially in `order` order
 - [ ] Test: reload clears previous registrations before re-registering
+- [ ] Test: reload reports built-in name collisions in summary
 
 ---
 
@@ -1093,7 +1122,7 @@ Phase 9 (EXT-019 — EXT-023)
 
 ### R-4: Automation infinite loops
 
-**Risk:** A blocking `on_tool_result` automation that calls `app.vault.process()` could trigger `on_save` hooks, which trigger workflows, which call tools, which trigger the automation again.
+**Risk:** An `on_tool_result` automation that calls `app.vault.process()` could trigger `on_save` hooks, which trigger workflows, which call tools, which trigger the automation again.
 **Mitigation:** The existing `ExecutionChainTracker` detects loops via `shouldSkipHook()`. Automations must participate in this same chain tracking. Additionally, automations that fire from vault events already go through the existing loop prevention in `vault-event-handlers.ts`.
 
 ### R-5: Secret settings migration
@@ -1138,9 +1167,11 @@ params:
 
 `partitionToolCalls()` in `tool-orchestration.ts` already classifies by `tool.mode`. Since `UserToolAdapter` exposes `mode` from the frontmatter `notor-mode` field, user tools with `mode: "read"` are concurrency-safe and user tools with `mode: "write"` are non-concurrent. No changes to `partitionToolCalls()` needed.
 
-### Q-3: User tool names in `<notor_tool_config>` blocks — RESOLVED: Works automatically
+### Q-3: User tool names in `<notor_tool_config>` blocks — RESOLVED: Works automatically (with caveat)
 
 User tools register in `ToolRegistry` with their declared `notor-tool-name`. The `<notor_tool_config>` system operates on tool names from the registry, so user tools can be enabled/disabled and have `auto_approve` / path constraints set by personas, workflows, and rules — no special handling required. The tool config parser's `knownToolNames` validation will include user tool names since they're in the registry at parse time.
+
+**Caveat:** If a user tool fails to compile (or hasn't been discovered yet on first load), a persona/workflow referencing that tool name in a `<notor_tool_config>` block may get an unknown-tool-name warning. This is acceptable for Phase 1 — the warning is non-blocking and the tool config will work once the extension loads successfully.
 
 ### Q-4: Extension file watching — RESOLVED: Watch + Notice (no auto-reload)
 

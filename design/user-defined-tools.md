@@ -280,14 +280,12 @@ notor-trigger: on_tool_result
 notor-tools: [write_note, replace_in_note]
 notor-display-name: "Tag AI-modified notes"
 notor-automation-order: 10
-notor-blocking: true
 ---
 
 # Tag AI-Modified Notes
 
 Automatically adds a configurable tag to any note written or modified by the AI.
-Only fires on successful write operations. Uses blocking mode so the tag is applied
-before the LLM sees the tool result. The tag name can be changed in Settings.
+Only fires on successful write operations. The tag name can be changed in Settings.
 
 ```yaml
 settings:
@@ -322,7 +320,7 @@ await app.fileManager.processFrontMatter(file, (fm: any) => {
 | `notor-tools` | no | Array of tool names to filter on (only for `on_tool_call`/`on_tool_result`; ignored for other events). If omitted, fires for all tools. |
 | `notor-display-name` | no | Human-readable label for settings UI and logging. Reuses the same property used by workflows. |
 | `notor-automation-order` | no | Numeric execution priority. Lower values fire first. Default: `0`. Ties broken alphabetically by filename. |
-| `notor-blocking` | no | Boolean. When `true`, the automation is awaited before the pipeline continues. Default: `false` (fire-and-forget). Ignored for `pre_send` (which is inherently blocking). See [Blocking Automations](#blocking-automations). |
+| ~~`notor-blocking`~~ | — | **Removed.** All automations are fire-and-forget (except `pre_send` which is inherently blocking). The existing LLM lifecycle dispatch functions (`dispatchOnToolCall`, `dispatchOnToolResult`, `dispatchAfterCompletion`) use a fire-and-forget `void (async () => { ... })()` pattern — the orchestrator does not await them. Supporting true pipeline-blocking would require changing these signatures to `async` and updating all call sites, which is out of scope for the first iteration. |
 
 ### YAML Fence Schema (Automations)
 
@@ -364,34 +362,22 @@ Note: tools get `params` (from the LLM). Automations get `context` (from the hoo
 
 ### Return Semantics
 
-| Event | Return Type | Default Behavior | When `notor-blocking: true` |
-|-------|------------|------------------|----------------------------|
-| `pre_send` | `string \| void` | Returned string injected into conversation (inherently blocking) | N/A — always blocking |
-| `on_tool_call` | `void` | Fire-and-forget side effect | Awaited before tool executes. Cannot modify tool parameters — side effects only. |
-| `on_tool_result` | `void` | Fire-and-forget side effect | Awaited before result returned to LLM. Cannot modify the result — side effects only. |
-| `after_completion` | `void` | Fire-and-forget side effect | Awaited before message flow completes. |
-| `on_note_open` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
-| `on_note_create` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
-| `on_save` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
-| `on_manual_save` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
-| `on_tag_change` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
-| `on_schedule` | `void` | Fire-and-forget side effect | Awaited before event handler returns. |
+| Event | Return Type | Behavior |
+|-------|------------|----------|
+| `pre_send` | `string \| void` | Inherently blocking — returned string injected into conversation |
+| `on_tool_call` | `void` | Fire-and-forget side effect |
+| `on_tool_result` | `void` | Fire-and-forget side effect |
+| `after_completion` | `void` | Fire-and-forget side effect |
+| `on_note_open` | `void` | Fire-and-forget side effect |
+| `on_note_create` | `void` | Fire-and-forget side effect |
+| `on_save` | `void` | Fire-and-forget side effect |
+| `on_manual_save` | `void` | Fire-and-forget side effect |
+| `on_tag_change` | `void` | Fire-and-forget side effect |
+| `on_schedule` | `void` | Fire-and-forget side effect |
 
-### Blocking Automations
+All automations are fire-and-forget — they execute asynchronously without blocking the pipeline. This matches existing shell hook behavior. The only exception is `pre_send`, which is inherently blocking because its return value is injected into the conversation.
 
-By default, automations are fire-and-forget — they execute asynchronously without blocking the pipeline. This matches existing shell hook behavior.
-
-Setting `notor-blocking: true` in frontmatter makes the automation blocking: the dispatch pipeline `await`s the automation's completion before proceeding. This is useful when the automation's side effect must be visible before the next pipeline step (e.g., tagging a note before the LLM sees the tool result).
-
-**Semantics per event:**
-
-- **`pre_send`**: Inherently blocking — the return value is injected into the conversation. `notor-blocking` is ignored.
-- **`on_tool_call` + blocking**: Awaited before the tool executes. The automation cannot modify tool parameters — it is a side effect only.
-- **`on_tool_result` + blocking**: Awaited before the result is returned to the LLM. The automation cannot modify the result — it is a side effect only.
-- **`after_completion` + blocking**: Awaited before the message flow completes.
-- **Vault events + blocking** (`on_note_open`, `on_note_create`, `on_save`, `on_manual_save`, `on_tag_change`, `on_schedule`): Awaited before the event handler returns.
-
-**Ordering interaction:** When multiple automations fire for the same event, they execute in `notor-automation-order` order (ascending, ties broken alphabetically). Blocking automations are awaited in sequence; non-blocking automations are fired in parallel after all blocking ones complete.
+**Ordering:** When multiple automations fire for the same event, they execute sequentially in `notor-automation-order` order (ascending, ties broken alphabetically).
 
 ### The `notor-tools` Filter
 
@@ -600,4 +586,4 @@ The following design questions were resolved during the exploration phase:
 
 7. **MCP tool filter** — Yes. `notor-tools` supports MCP tool names using `{serverName}__{toolName}` double-underscore convention. See [The `notor-tools` Filter](#the-notor-tools-filter).
 
-8. **Blocking automations** — Opt-in via `notor-blocking: true` frontmatter field. Default `false` (fire-and-forget). Blocking automations are awaited before the pipeline continues. Side effects only — cannot modify parameters or results. See [Blocking Automations](#blocking-automations).
+8. **Blocking automations** — **Removed.** All automations are fire-and-forget (except `pre_send` which is inherently blocking). The existing LLM lifecycle dispatch functions use a fire-and-forget pattern — the orchestrator does not await them. True pipeline-blocking would require changing dispatch signatures and all call sites, which is deferred. See [Return Semantics](#return-semantics).
