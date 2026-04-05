@@ -514,10 +514,10 @@ async function discoverExtensions(
 6. Check for `{notorDir}/settings.md` — if exists and has `notor-type: settings`, parse shared settings
 7. Collect all errors with file paths for user-visible reporting
 
-- [ ] Implement `discoverExtensions()` function — strip trailing slash from `notorDir` before building paths (e.g., `const baseDir = notorDir.replace(/\/$/, "")`)
-- [ ] Handle missing directories gracefully (no error, just empty results)
-- [ ] Handle malformed files gracefully (log error, skip file, continue)
-- [ ] Sort automations by `order` (ascending), then alphabetically by filename for ties
+- [x] Implement `discoverExtensions()` function — strip trailing slash from `notorDir` before building paths (e.g., `const baseDir = notorDir.replace(/\/$/, "")`)
+- [x] Handle missing directories gracefully (no error, just empty results)
+- [x] Handle malformed files gracefully (log error, skip file, continue)
+- [x] Sort automations by `order` (ascending), then alphabetically by filename for ties
 
 ### EXT-012 — Implement ExtensionManager
 
@@ -615,13 +615,13 @@ class UserToolAdapter implements Tool {
 }
 ```
 
-- [ ] Implement `ExtensionManager` class with all methods
-- [ ] Implement `UserToolAdapter` class implementing `Tool` interface
-- [ ] Implement the `reload()` flow with error aggregation
-- [ ] Implement tool registration: always register in `ToolRegistry`; conditionally register in `ToolDispatcher` only when `isInitialLoad` is false (avoids forcing premature creation of the dispatcher on initial load). Note: `ToolDispatcher.registerTool()` accepts `DispatchableTool` (subset: `name`, `mode`, `execute`); `UserToolAdapter` satisfies this via structural typing since `Tool` is a superset of `DispatchableTool`
-- [ ] Implement path param registration: for each user tool with `pathParams`, add entries to `TOOL_PATH_PARAMS` so `enforcePathConstraints()` applies at dispatch time
-- [ ] Track which tool names were registered by extensions so they can be unregistered on reload (before re-registering — includes clearing their `TOOL_PATH_PARAMS` entries and `ToolDispatcher` entries if dispatcher exists)
-- [ ] Clean up `TOOL_PATH_PARAMS` entries in `destroy()` (plugin unload), not just on reload
+- [x] Implement `ExtensionManager` class with all methods
+- [x] Implement `UserToolAdapter` class implementing `Tool` interface
+- [x] Implement the `reload()` flow with error aggregation
+- [x] Implement tool registration: always register in `ToolRegistry`; conditionally register in `ToolDispatcher` only when `isInitialLoad` is false (avoids forcing premature creation of the dispatcher on initial load). Note: `ToolDispatcher.registerTool()` accepts `DispatchableTool` (subset: `name`, `mode`, `execute`); `UserToolAdapter` satisfies this via structural typing since `Tool` is a superset of `DispatchableTool`
+- [x] Implement path param registration: for each user tool with `pathParams`, add entries to `TOOL_PATH_PARAMS` so `enforcePathConstraints()` applies at dispatch time
+- [x] Track which tool names were registered by extensions so they can be unregistered on reload (before re-registering — includes clearing their `TOOL_PATH_PARAMS` entries and `ToolDispatcher` entries if dispatcher exists)
+- [x] Clean up `TOOL_PATH_PARAMS` entries in `destroy()` (plugin unload), not just on reload
 
 ---
 

@@ -274,7 +274,7 @@ Assemble the `utils`, `libs`, and `obsidian` objects passed to extensions at run
 
 Follow patterns from `src/sub-agents/discovery.ts` (async, uses vault API) and `src/workflows/workflow-discovery.ts` (normalizes `notorDir`, collects `.md` files).
 
-- [ ] Implement `discoverExtensions(vault: Vault, metadataCache: MetadataCache, notorDir: string, parseYAML: (yaml: string) => unknown): Promise<{ tools: UserToolDefinition[]; automations: UserAutomationDefinition[]; sharedSettings: SharedSettingsDefinition | null; errors: ExtensionError[] }>`
+- [x] Implement `discoverExtensions(vault: Vault, metadataCache: MetadataCache, notorDir: string, parseYAML: (yaml: string) => unknown): Promise<{ tools: UserToolDefinition[]; automations: UserAutomationDefinition[]; sharedSettings: SharedSettingsDefinition | null; errors: ExtensionError[] }>`
   - Normalize `notorDir`: `const baseDir = notorDir.replace(/\/$/, "")`
   - Scan `{baseDir}/tools/` for `.md` files — use `vault.getAbstractFileByPath()` then iterate children
   - For each file: read content via `vault.read(file)`, get frontmatter from `metadataCache.getFileCache(file)?.frontmatter` (fall back to manual YAML parsing), call `parseExtensionFile()`
@@ -282,8 +282,8 @@ Follow patterns from `src/sub-agents/discovery.ts` (async, uses vault API) and `
   - Check for `{baseDir}/settings.md` — if exists and has `notor-type: settings`, parse shared settings
   - Handle missing directories gracefully (not an error — just empty results)
   - Handle malformed files: log error via `logger("ExtensionDiscovery")`, add to errors array, skip file, continue
-- [ ] Sort automations by `order` (ascending), then alphabetically by filename for ties
-- [ ] Return aggregated results with all errors
+- [x] Sort automations by `order` (ascending), then alphabetically by filename for ties
+- [x] Return aggregated results with all errors
 
 ### EXT-012 — Implement ExtensionManager
 
@@ -298,10 +298,10 @@ Central manager class orchestrating discovery, compilation, registration, and re
 - `ToolResult` from `src/types.ts:174-214`
 - `ToolExecuteOptions` from `src/tools/tool.ts:25-32` — has `abortSignal?: AbortSignal`
 
-- [ ] Implement `ExtensionManager` class:
+- [x] Implement `ExtensionManager` class:
   - Fields: `tools: Map<string, UserToolDefinition>`, `automations: Map<string, UserAutomationDefinition>`, `sharedSettings: SharedSettingsDefinition | null`, `compiledLibs` (lazily built), `registeredToolNames: Set<string>` (tracks names for cleanup on reload)
   - Constructor: `(plugin: NotorPlugin, parseYAML: (yaml: string) => unknown)` — derives `app`, `vault`, `metadataCache`, `settings` from plugin
-- [ ] Implement `async reload(isInitialLoad: boolean): Promise<ExtensionReloadResult>`:
+- [x] Implement `async reload(isInitialLoad: boolean): Promise<ExtensionReloadResult>`:
   1. Call `discoverExtensions()` with `plugin.app.vault`, `plugin.app.metadataCache`, `plugin.settings.notor_dir`, `parseYAML`
   2. Compile each tool: `stripTypes()` → `compileToolFunction()`. Store in `this.tools`. Skip on error (add to errors)
   3. Compile each automation: `stripTypes()` → `compileAutomationFunction()`. Store in `this.automations`. Skip on error
@@ -313,7 +313,7 @@ Central manager class orchestrating discovery, compilation, registration, and re
   9. Detect built-in overrides: if a user tool name was already in the registry before unregister step → add to `builtinOverrides` and show Notice
   10. Log results and show Notice with summary
   11. Return `ExtensionReloadResult`
-- [ ] Implement `UserToolAdapter` class implementing `Tool` interface:
+- [x] Implement `UserToolAdapter` class implementing `Tool` interface:
   - Constructor: `(definition: UserToolDefinition, manager: ExtensionManager, plugin: NotorPlugin)`
   - Properties: `name`, `description`, `input_schema` (via `paramSchemaToJsonSchema()`), `mode`
   - `async execute(params, options?): Promise<ToolResult>`:
@@ -327,14 +327,14 @@ Central manager class orchestrating discovery, compilation, registration, and re
     8. Map return value to `ToolResult` — populate `tool_name`, `success`, `result`, `duration_ms`. Pass through `content_blocks` if returned. `tool_call_id` set by dispatcher, NOT adapter
     9. On error: show Notice, log via logger, return `{ tool_name, success: false, error: error.message, duration_ms }`
   - `UserToolAdapter` satisfies `DispatchableTool` via structural typing (Tool is a superset)
-- [ ] Implement `getTools(): UserToolDefinition[]`
-- [ ] Implement `getAutomationsForTrigger(trigger: AutomationTrigger): UserAutomationDefinition[]`
+- [x] Implement `getTools(): UserToolDefinition[]`
+- [x] Implement `getAutomationsForTrigger(trigger: AutomationTrigger): UserAutomationDefinition[]`
   - Filter automations by trigger, return sorted by order
-- [ ] Implement `getAutomationsForToolEvent(trigger: "on_tool_call" | "on_tool_result", toolName: string): UserAutomationDefinition[]`
+- [x] Implement `getAutomationsForToolEvent(trigger: "on_tool_call" | "on_tool_result", toolName: string): UserAutomationDefinition[]`
   - Filter by trigger AND `toolFilter` (if `toolFilter` is null → matches all tools; if non-null → must include `toolName`)
-- [ ] Implement `getResolvedSharedSettings(): Record<string, unknown>` (sync)
-- [ ] Implement `getResolvedSettings(extensionName: string): Record<string, unknown>` (sync)
-- [ ] Implement `destroy(): void`
+- [x] Implement `getResolvedSharedSettings(): Record<string, unknown>` (sync)
+- [x] Implement `getResolvedSettings(extensionName: string): Record<string, unknown>` (sync)
+- [x] Implement `destroy(): void`
   - Unregister all user tools from registry and `TOOL_PATH_PARAMS`
   - Clear internal maps
 
