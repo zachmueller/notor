@@ -2044,19 +2044,23 @@ export class ChatOrchestrator {
 					});
 					break;
 
-				case "assistant":
+				case "assistant": {
 					// Defensive: skip assistant messages with blank content.
 					// Providers like Bedrock reject empty text fields. This can
 					// happen if a response is cancelled before any text arrives.
-					if (!msg.content?.trim()) {
+					const assistantText = typeof msg.content === "string"
+						? msg.content
+						: (() => { throw new Error("Expected string content for assistant message"); })();
+					if (!assistantText.trim()) {
 						log.warn("Skipping assistant message with empty content", { id: msg.id });
 						break;
 					}
 					chatMessages.push({
 						role: "assistant",
-						content: msg.content,
+						content: assistantText,
 					});
 					break;
+				}
 
 				case "tool_call":
 					if (msg.tool_call) {
@@ -2191,7 +2195,9 @@ export class ChatOrchestrator {
 				let preToolCallText = "";
 				const prev = coalesced[coalesced.length - 1];
 				if (prev && prev.role === "assistant" && !prev.tool_calls) {
-					preToolCallText = prev.content;
+					preToolCallText = typeof prev.content === "string"
+						? prev.content
+						: (() => { throw new Error("Expected string content for assistant message"); })();
 					coalesced.pop(); // absorb into the coalesced message
 				}
 

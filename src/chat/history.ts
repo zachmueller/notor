@@ -53,6 +53,8 @@ import type { Conversation, Message } from "../types";
 import type { CompactionRecord } from "../context/compaction";
 import { isSubAgentFilename } from "./sub-agent-history";
 import { logger } from "../utils/logger";
+import type { ContentBlock } from "../media/types";
+import { getTextContent } from "../media/types";
 
 const log = logger("HistoryManager");
 
@@ -438,6 +440,7 @@ export class HistoryManager {
 	 */
 	static parseCompactionRecord(message: Message): CompactionRecord | null {
 		if (message.role !== "system") return null;
+		if (typeof message.content !== "string") return null;
 		try {
 			const parsed = JSON.parse(message.content);
 			if (parsed && parsed.type === "compaction") {
@@ -493,9 +496,14 @@ export class HistoryManager {
 					if (!msgLine || !msgLine.trim()) continue;
 					try {
 						const msg = JSON.parse(msgLine) as Record<string, unknown>;
-						if (msg.role === "user" && typeof msg.content === "string") {
-							preview = msg.content.substring(0, 120);
-							break;
+						if (msg.role === "user") {
+							if (typeof msg.content === "string") {
+								preview = msg.content.substring(0, 120);
+								break;
+							} else if (Array.isArray(msg.content)) {
+								preview = getTextContent(msg.content as ContentBlock[]).substring(0, 120);
+								break;
+							}
 						}
 					} catch {
 						// skip malformed lines
@@ -584,11 +592,19 @@ export class HistoryManager {
 					if (!msgLine || !msgLine.trim()) continue;
 					try {
 						const msg = JSON.parse(msgLine) as Record<string, unknown>;
-						if (msg.role === "user" && typeof msg.content === "string" && !preview) {
-							preview = msg.content.substring(0, 120);
+						if (msg.role === "user" && !preview) {
+							if (typeof msg.content === "string") {
+								preview = msg.content.substring(0, 120);
+							} else if (Array.isArray(msg.content)) {
+								preview = getTextContent(msg.content as ContentBlock[]).substring(0, 120);
+							}
 						}
-						if (!matched && typeof msg.content === "string" && msg.content.toLowerCase().includes(needle)) {
-							matched = true;
+						if (!matched) {
+							if (typeof msg.content === "string" && msg.content.toLowerCase().includes(needle)) {
+								matched = true;
+							} else if (Array.isArray(msg.content) && getTextContent(msg.content as ContentBlock[]).toLowerCase().includes(needle)) {
+								matched = true;
+							}
 						}
 					} catch {
 						// skip malformed lines

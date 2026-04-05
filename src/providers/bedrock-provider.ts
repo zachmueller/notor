@@ -32,6 +32,7 @@ import type {
 import { ProviderError } from "./provider";
 import { getSecret, SECRET_IDS } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
+import type { ContentBlock as MediaContentBlock } from "../media/types";
 import { getModelExtendedContext } from "./model-metadata";
 import { logger } from "../utils/logger";
 
@@ -80,7 +81,10 @@ function toBedrockMessages(
 
 	for (const msg of messages) {
 		if (msg.role === "system") {
-			system.push({ text: msg.content });
+			const text = typeof msg.content === "string"
+				? msg.content
+				: (() => { throw new Error("Expected string content for system message"); })();
+			system.push({ text });
 			continue;
 		}
 
@@ -88,7 +92,7 @@ function toBedrockMessages(
 			// Pre-tool-call text (if any) is included as a leading text block.
 			const content: ContentBlock[] = [];
 			if (msg.content) {
-				content.push({ text: msg.content });
+				content.push({ text: msg.content as string });
 			}
 			for (const tc of msg.tool_calls) {
 				content.push({
@@ -120,13 +124,48 @@ function toBedrockMessages(
 			continue;
 		}
 
-		const role: ConversationRole =
-			msg.role === "user" ? "user" : "assistant";
-
-		bedrockMessages.push({
-			role,
-			content: [{ text: msg.content }],
-		});
+		if (msg.role === "user") {
+			if (Array.isArray(msg.content)) {
+				bedrockMessages.push({
+					role: "user" as ConversationRole,
+					content: (msg.content as MediaContentBlock[]).map((block) => {
+						switch (block.type) {
+							case "text":
+								return { text: block.text } as ContentBlock;
+							case "image":
+								return {
+									image: {
+										format: block.media_type.split("/")[1] as "png" | "jpeg" | "gif" | "webp",
+										source: { bytes: Buffer.from(block.data, "base64") },
+									},
+								} as ContentBlock;
+							case "document":
+								return {
+									document: {
+										format: "pdf" as const,
+										name: "document.pdf",
+										source: { bytes: Buffer.from(block.data, "base64") },
+									},
+								} as ContentBlock;
+						}
+					}),
+				});
+			} else {
+				bedrockMessages.push({
+					role: "user" as ConversationRole,
+					content: [{ text: msg.content }],
+				});
+			}
+		} else {
+			// Assistant message — always string
+			const text = typeof msg.content === "string"
+				? msg.content
+				: (() => { throw new Error("Expected string content for assistant message"); })();
+			bedrockMessages.push({
+				role: "assistant" as ConversationRole,
+				content: [{ text }],
+			});
+		}
 	}
 
 	log.info("Bedrock messages prepared", {

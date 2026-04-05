@@ -34,6 +34,7 @@ import { WorkflowActivityIndicator } from "./workflow-activity-indicator";
 import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tracker";
 import type { Workflow } from "../types";
 import { McpStatusIndicator } from "./mcp-status-indicator";
+import { getTextContent } from "../media/types";
 
 const log = logger("ChatView");
 
@@ -1156,11 +1157,12 @@ export class NotorChatView extends ItemView {
 		const contentEl = msgEl.createDiv({ cls: "notor-message-content" });
 
 		// Extract <attachments> block (if any) and render as collapsed <details>
-		const { attachmentsXml, remainder } = extractAttachmentsBlock(message.content);
+		const textContent = getTextContent(message.content);
+		const { attachmentsXml, remainder } = extractAttachmentsBlock(textContent);
 		if (attachmentsXml !== null) {
 			this.renderAttachmentsBlock(contentEl, attachmentsXml);
 		}
-		const textToRender = attachmentsXml !== null ? remainder : message.content;
+		const textToRender = attachmentsXml !== null ? remainder : textContent;
 
 		// E-014: Detect <workflow_instructions> block and render as collapsible <details>
 		if (message.is_workflow_message) {
@@ -1238,7 +1240,7 @@ export class NotorChatView extends ItemView {
 		const details = wrapper.createEl("details");
 		details.createEl("summary", { text: "Hook output" });
 		const pre = details.createEl("pre", { cls: "notor-hook-injection-content" });
-		pre.createEl("code", { text: message.content });
+		pre.createEl("code", { text: getTextContent(message.content) });
 		this.scrollToBottom();
 	}
 
@@ -1284,9 +1286,12 @@ export class NotorChatView extends ItemView {
 		contentEl.parentElement!.dataset.messageId = message.id;
 		this.appendForkButton(contentEl.parentElement!);
 		contentEl.empty();
+		const assistantText = typeof message.content === "string"
+			? message.content
+			: (() => { throw new Error("Expected string content for assistant message"); })();
 		await MarkdownRenderer.render(
 			this.app,
-			message.content,
+			assistantText,
 			contentEl,
 			"",
 			this

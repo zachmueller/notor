@@ -11,7 +11,7 @@
  */
 
 import type { Message } from "../types";
-import { estimateTokenCount } from "../utils/tokens";
+import { estimateTokenCount, estimateContentTokens } from "../utils/tokens";
 import { getContextWindow } from "../providers/model-metadata";
 import { logger } from "../utils/logger";
 
@@ -86,18 +86,18 @@ export class ContextManager {
 		}
 
 		// Fall back to estimation
-		let text = message.content;
+		let total = estimateContentTokens(message.content);
 
 		// Include tool call/result content in estimation
 		if (message.tool_call) {
-			text += JSON.stringify(message.tool_call.parameters);
+			total += estimateTokenCount(JSON.stringify(message.tool_call.parameters));
 		}
 		if (message.tool_result) {
 			const result = message.tool_result.result;
-			text += typeof result === "string" ? result : JSON.stringify(result);
+			total += estimateTokenCount(typeof result === "string" ? result : JSON.stringify(result));
 		}
 
-		return estimateTokenCount(text);
+		return total;
 	}
 
 	/**

@@ -10,6 +10,7 @@ import type { Conversation, Message, ToolCall, ToolResult } from "../types";
 import { formatToolDisplayName } from "../ui/tool-call-ui";
 import { USE_SUBAGENT_TOOL_NAME } from "../sub-agents/constants";
 import { marked } from "marked";
+import { getTextContent } from "../media/types";
 
 const WORKFLOW_RE = /<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/;
 const ATTACHMENTS_RE = /<attachments>([\s\S]*?)<\/attachments>/;
@@ -391,11 +392,11 @@ function renderUserMessage(msg: Message): string {
 	const parts: string[] = [];
 
 	if (msg.is_hook_injection) {
-		parts.push(detailsBlock("Hook output", `<pre>${escapeHtml(msg.content)}</pre>`));
+		parts.push(detailsBlock("Hook output", `<pre>${escapeHtml(getTextContent(msg.content))}</pre>`));
 		return messageBlock("user", "User", ts, parts.join("\n"));
 	}
 
-	let content = msg.content;
+	let content = getTextContent(msg.content);
 
 	// Attachments XML block
 	const attachMatch = ATTACHMENTS_RE.exec(content);
@@ -435,7 +436,10 @@ function renderUserMessage(msg: Message): string {
 
 function renderAssistantMessage(msg: Message): string {
 	const ts = formatTimestamp(msg.timestamp);
-	const htmlContent = marked.parse(msg.content, { async: false }) as string;
+	const assistantText = typeof msg.content === "string"
+		? msg.content
+		: (() => { throw new Error("Expected string content for assistant message"); })();
+	const htmlContent = marked.parse(assistantText, { async: false }) as string;
 	let body = `<div class="message-content">${htmlContent}</div>`;
 
 	if (msg.input_tokens || msg.output_tokens) {
@@ -552,12 +556,18 @@ function renderSubAgentDetail(
  */
 function renderSubAgentMessage(msg: Message): string | null {
 	switch (msg.role) {
-		case "system":
-			return `<div class="sub-agent-msg sub-agent-system"><em>System:</em> <pre>${escapeHtml(msg.content.substring(0, 200))}${msg.content.length > 200 ? "…" : ""}</pre></div>`;
+		case "system": {
+			const sysText = getTextContent(msg.content);
+			return `<div class="sub-agent-msg sub-agent-system"><em>System:</em> <pre>${escapeHtml(sysText.substring(0, 200))}${sysText.length > 200 ? "…" : ""}</pre></div>`;
+		}
 		case "user":
-			return `<div class="sub-agent-msg sub-agent-user"><strong>Task:</strong> ${escapeHtml(msg.content)}</div>`;
-		case "assistant":
-			return `<div class="sub-agent-msg sub-agent-assistant"><strong>Assistant:</strong> <div class="message-content">${marked.parse(msg.content, { async: false }) as string}</div></div>`;
+			return `<div class="sub-agent-msg sub-agent-user"><strong>Task:</strong> ${escapeHtml(getTextContent(msg.content))}</div>`;
+		case "assistant": {
+			const asstText = typeof msg.content === "string"
+				? msg.content
+				: (() => { throw new Error("Expected string content for assistant message"); })();
+			return `<div class="sub-agent-msg sub-agent-assistant"><strong>Assistant:</strong> <div class="message-content">${marked.parse(asstText, { async: false }) as string}</div></div>`;
+		}
 		case "tool_call": {
 			const tc = msg.tool_call;
 			if (!tc) return null;

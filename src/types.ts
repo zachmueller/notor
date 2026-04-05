@@ -4,6 +4,8 @@
  * All entity definitions sourced from specs/01-mvp/data-model.md.
  */
 
+import type { ContentBlock } from "./media/types";
+
 // ---------------------------------------------------------------------------
 // Conversation
 // ---------------------------------------------------------------------------
@@ -103,8 +105,8 @@ export interface Message {
 	conversation_id: string;
 	/** Message role. */
 	role: MessageRole;
-	/** Message text content. */
-	content: string;
+	/** Message content — plain text or an array of content blocks (text, image, document). */
+	content: string | ContentBlock[];
 	/** When the message was created (ISO 8601). */
 	timestamp: string;
 	/** Input token count for this message (null for non-LLM messages). */

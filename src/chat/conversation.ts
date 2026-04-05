@@ -11,6 +11,8 @@
 
 import type { Conversation, ConversationMode, Message, MessageRole, ToolCall, ToolResult } from "../types";
 import { logger } from "../utils/logger";
+import type { ContentBlock } from "../media/types";
+import { getTextContent } from "../media/types";
 
 const log = logger("ConversationManager");
 
@@ -281,7 +283,7 @@ export class ConversationManager {
 	 */
 	addMessage(params: {
 		role: MessageRole;
-		content: string;
+		content: string | ContentBlock[];
 		input_tokens?: number | null;
 		output_tokens?: number | null;
 		cost_estimate?: number | null;
@@ -345,7 +347,7 @@ export class ConversationManager {
 			!params.is_hook_injection &&
 			!this.activeConversation.title
 		) {
-			this.activeConversation.title = this.generateTitle(params.content);
+			this.activeConversation.title = this.generateTitle(getTextContent(params.content));
 		}
 
 		log.debug("Added message", {

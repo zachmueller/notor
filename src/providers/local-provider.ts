@@ -110,12 +110,37 @@ function toOpenAIMessages(
 			continue;
 		}
 
-		result.push({
-			role: msg.role === "tool_call" || msg.role === "tool_result"
-				? "user"
-				: msg.role,
-			content: msg.content,
-		});
+		if (msg.role === "user") {
+			if (Array.isArray(msg.content)) {
+				result.push({
+					role: "user",
+					content: msg.content.map((block) => {
+						switch (block.type) {
+							case "text":
+								return { type: "text", text: block.text };
+							case "image":
+								return { type: "image_url", image_url: { url: `data:${block.media_type};base64,${block.data}` } };
+							case "document":
+								// Phase 3: PDF support — safety-net placeholder for non-native providers
+								return { type: "text", text: "[PDF document — not supported by this provider]" };
+						}
+					}),
+				});
+			} else {
+				result.push({ role: "user", content: msg.content });
+			}
+		} else {
+			// Assistant (or unmapped role fallback) — always string
+			const text = typeof msg.content === "string"
+				? msg.content
+				: (() => { throw new Error("Expected string content for assistant message"); })();
+			result.push({
+				role: msg.role === "tool_call" || msg.role === "tool_result"
+					? "user"
+					: msg.role,
+				content: text,
+			});
+		}
 	}
 	return result;
 }

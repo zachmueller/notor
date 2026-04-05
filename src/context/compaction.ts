@@ -13,7 +13,8 @@
 import type { Message } from "../types";
 import type { NotorSettings } from "../settings";
 import type { LLMProvider, ChatMessage, SendMessageOptions } from "../providers/provider";
-import { estimateTokens } from "../utils/tokens";
+import { estimateTokens, estimateContentTokens } from "../utils/tokens";
+import { getTextContent } from "../media/types";
 import { getContextWindow } from "../providers/model-metadata";
 import { logger } from "../utils/logger";
 
@@ -77,7 +78,7 @@ export function estimateConversationTokens(messages: Message[]): number {
 		} else if (msg.input_tokens) {
 			total += msg.input_tokens;
 		} else {
-			total += estimateTokens(msg.content);
+			total += estimateContentTokens(msg.content);
 
 			// Include tool call parameters in estimation
 			if (msg.tool_call) {
@@ -238,10 +239,18 @@ export async function performCompaction(
 			// Skip messages with blank content — providers like Bedrock reject
 			// empty text fields. This can happen if a response was cancelled
 			// before any text arrived.
-			if (!msg.content?.trim()) continue;
+			const text = getTextContent(msg.content);
+			if (!text.trim()) continue;
+			let compactionContent = text;
+			if (Array.isArray(msg.content)) {
+				const mediaCount = msg.content.filter(b => b.type !== "text").length;
+				if (mediaCount > 0) {
+					compactionContent += `\n[${mediaCount} media block${mediaCount === 1 ? "" : "s"} omitted during compaction]`;
+				}
+			}
 			chatMessages.push({
 				role: msg.role,
-				content: msg.content,
+				content: compactionContent,
 			});
 		} else if (msg.role === "tool_call" && msg.tool_call) {
 			// Represent tool calls as assistant messages for summarization

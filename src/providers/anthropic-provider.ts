@@ -56,7 +56,10 @@ function toAnthropicMessages(
 	for (const msg of messages) {
 		if (msg.role === "system") {
 			// Anthropic takes system as a separate parameter
-			system = system ? `${system}\n\n${msg.content}` : msg.content;
+			const text = typeof msg.content === "string"
+				? msg.content
+				: (() => { throw new Error("Expected string content for system message"); })();
+			system = system ? `${system}\n\n${text}` : text;
 			continue;
 		}
 
@@ -65,7 +68,10 @@ function toAnthropicMessages(
 			// Pre-tool-call text (if any) is included as a leading text block.
 			const content: Record<string, unknown>[] = [];
 			if (msg.content) {
-				content.push({ type: "text", text: msg.content });
+				const text = typeof msg.content === "string"
+					? msg.content
+					: (() => { throw new Error("Expected string content for assistant message"); })();
+				content.push({ type: "text", text });
 			}
 			for (const tc of msg.tool_calls) {
 				content.push({
@@ -92,10 +98,37 @@ function toAnthropicMessages(
 			continue;
 		}
 
-		anthropicMessages.push({
-			role: msg.role === "user" ? "user" : "assistant",
-			content: msg.content,
-		});
+		if (msg.role === "user") {
+			if (Array.isArray(msg.content)) {
+				anthropicMessages.push({
+					role: "user",
+					content: msg.content.map((block) => {
+						switch (block.type) {
+							case "text":
+								return { type: "text", text: block.text };
+							case "image":
+								return { type: "image", source: { type: "base64", media_type: block.media_type, data: block.data } };
+							case "document":
+								return { type: "document", source: { type: "base64", media_type: "application/pdf", data: block.data } };
+						}
+					}),
+				});
+			} else if (msg.content === "") {
+				// Anthropic rejects empty text content blocks in arrays — pass empty string directly
+				anthropicMessages.push({ role: "user", content: msg.content });
+			} else {
+				anthropicMessages.push({
+					role: "user",
+					content: [{ type: "text", text: msg.content }],
+				});
+			}
+		} else {
+			// Assistant message — always string
+			const text = typeof msg.content === "string"
+				? msg.content
+				: (() => { throw new Error("Expected string content for assistant message"); })();
+			anthropicMessages.push({ role: "assistant", content: text });
+		}
 	}
 
 	return { system, messages: anthropicMessages };

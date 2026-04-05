@@ -9,6 +9,7 @@
  */
 
 import type { ModelInfo } from "../types";
+import type { ContentBlock } from "../media/types";
 
 // ---------------------------------------------------------------------------
 // ChatMessage — message format for LLM API calls
@@ -22,7 +23,7 @@ import type { ModelInfo } from "../types";
  */
 export interface ChatMessage {
 	role: "system" | "user" | "assistant" | "tool_call" | "tool_result";
-	content: string;
+	content: string | ContentBlock[];
 	tool_calls?: Array<{
 		id: string;
 		tool_name: string;

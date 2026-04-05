@@ -24,7 +24,7 @@ import {
 } from "./tool-orchestration";
 import { SUB_AGENT_ITERATION_CAP, SUB_AGENT_TOKEN_LIMIT } from "../sub-agents/constants";
 import { getContextWindow } from "../providers/model-metadata";
-import { estimateTokenCount } from "../utils/tokens";
+import { estimateTokenCount, estimateContentTokens } from "../utils/tokens";
 import { logger } from "../utils/logger";
 
 const log = logger("SubAgentRunner");
@@ -450,7 +450,7 @@ export class SubAgentRunner {
 	private estimateConversationTokens(messages: ChatMessage[]): number {
 		let total = 0;
 		for (const msg of messages) {
-			total += estimateTokenCount(msg.content);
+			total += estimateContentTokens(msg.content);
 			if (msg.tool_calls) {
 				for (const tc of msg.tool_calls) {
 					total += estimateTokenCount(tc.tool_name);

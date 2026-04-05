@@ -8,6 +8,7 @@
 
 import type { Conversation, Message, ToolCall, ToolResult } from "../types";
 import { formatToolDisplayName } from "../ui/tool-call-ui";
+import { getTextContent } from "../media/types";
 
 const WORKFLOW_RE = /<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/;
 const ATTACHMENTS_RE = /<attachments>([\s\S]*?)<\/attachments>/;
@@ -92,11 +93,11 @@ function renderUserMessage(msg: Message): string {
 	parts.push(`## User\n*${timestamp}*`);
 
 	if (msg.is_hook_injection) {
-		parts.push(wrapCallout("info", "Hook output", msg.content, true));
+		parts.push(wrapCallout("info", "Hook output", getTextContent(msg.content), true));
 		return parts.join("\n\n");
 	}
 
-	let content = msg.content;
+	let content = getTextContent(msg.content);
 
 	// Extract and render attachments block
 	const attachMatch = ATTACHMENTS_RE.exec(content);
@@ -136,7 +137,10 @@ function renderAssistantMessage(msg: Message): string {
 	const parts: string[] = [];
 	const timestamp = formatTimestamp(msg.timestamp);
 	parts.push(`## Assistant\n*${timestamp}*`);
-	parts.push(msg.content);
+	const assistantContent = typeof msg.content === "string"
+		? msg.content
+		: (() => { throw new Error("Expected string content for assistant message"); })();
+	parts.push(assistantContent);
 
 	if (msg.input_tokens || msg.output_tokens) {
 		parts.push(`*↑${msg.input_tokens ?? 0} · ↓${msg.output_tokens ?? 0}*`);

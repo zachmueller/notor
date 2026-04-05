@@ -43,6 +43,53 @@ export function estimateTokenCount(text: string): number {
 	return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
+// ---------------------------------------------------------------------------
+// Media-aware token estimation
+// ---------------------------------------------------------------------------
+
+import type { ContentBlock } from "../media/types";
+
+function estimateImageTokens(width?: number, height?: number): number {
+	if (width != null && height != null) {
+		return Math.ceil((width * height) / 750);
+	}
+	return 2000;
+}
+
+function estimateDocumentTokens(pageCount?: number): number {
+	if (pageCount != null) {
+		return pageCount * 2000;
+	}
+	return 2000;
+}
+
+/**
+ * Estimate tokens for content that may be a string or ContentBlock[].
+ *
+ * For strings, delegates to estimateTokenCount().
+ * For ContentBlock[], sums per-block estimates using type-specific heuristics.
+ */
+export function estimateContentTokens(content: string | ContentBlock[]): number {
+	if (typeof content === "string") {
+		return estimateTokenCount(content);
+	}
+	let total = 0;
+	for (const block of content) {
+		switch (block.type) {
+			case "text":
+				total += estimateTokenCount(block.text);
+				break;
+			case "image":
+				total += estimateImageTokens(block.width, block.height);
+				break;
+			case "document":
+				total += estimateDocumentTokens(block.page_count);
+				break;
+		}
+	}
+	return total;
+}
+
 /**
  * Alias for {@link estimateTokenCount} matching the Phase 3 task spec name.
  *

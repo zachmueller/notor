@@ -13,7 +13,7 @@
 
 ### 1.1 New Files
 
-- [ ] **Create `src/media/types.ts`**
+- [x] **Create `src/media/types.ts`**
   - Define `ImageMediaType` union (`"image/png" | "image/jpeg" | "image/gif" | "image/webp"`)
   - Define `ContentBlock` discriminated union (text, image, document)
     - `text`: `{ type: "text"; text: string }`
@@ -22,25 +22,25 @@
   - Export `getTextContent(content: string | ContentBlock[]): string` helper — when input is `ContentBlock[]`, filters to text blocks and joins with `"\n"`; when input is `string`, returns it as-is. When input is an empty `ContentBlock[]` or contains no text blocks, returns `""` (empty string)
   - Export media limit constant: `MAX_IMAGE_BASE64_BYTES = 5 * 1024 * 1024` (the image processor pipeline's maximum output size, used as the target in the compression cascade). This is the only constant needed in Phase 1. Additional constants (`MAX_RAW_INPUT_BYTES` for the 50MB raw file limit) are defined inline at their usage sites in Phase 2 since they are single-use values. **Note:** Per-provider limits in `capabilities.ts` (Phase 2) are checked separately at message assembly time
 
-- [ ] **Create `src/media/format-detector.ts`**
+- [x] **Create `src/media/format-detector.ts`**
   - Implement magic byte detection for: PNG (`89 50 4E 47`), JPEG (`FF D8 FF`), GIF (`47 49 46`), WebP (bytes 0-3: `52 49 46 46` (RIFF) AND bytes 8-11: `57 45 42 50` (WEBP); bytes 4-7 are file size and ignored during detection), PDF (`25 50 44 46`)
   - Export `detectMediaFormat(buffer: Buffer): "png" | "jpeg" | "gif" | "webp" | "pdf" | null`
   - Unit tests for each format + unknown binary
 
 ### 1.2 Core Type Changes
 
-- [ ] **Update `src/types.ts:107`** — Change `Message.content` from `string` to `string | ContentBlock[]`
+- [x] **Update `src/types.ts:107`** — Change `Message.content` from `string` to `string | ContentBlock[]`
   - Import `ContentBlock` from `./media/types` (same level — `src/types.ts` and `src/media/` are siblings)
   - **JSONL compatibility:** No migration needed. `JSON.parse` of existing JSONL lines produces `string` for the `content` field, which is a valid member of `string | ContentBlock[]`. New messages with `ContentBlock[]` serialize as JSON arrays and parse back correctly
 
-- [ ] **Update `src/providers/provider.ts:25`** — Change `ChatMessage.content` from `string` to `string | ContentBlock[]`
+- [x] **Update `src/providers/provider.ts:25`** — Change `ChatMessage.content` from `string` to `string | ContentBlock[]`
   - Import `ContentBlock` from `../media/types`
 
 ### 1.3 Provider Layer — Handle `ContentBlock[]` in `toXxxMessages()`
 
 Each provider's message conversion function must handle the case where `msg.content` is `ContentBlock[]` instead of `string`. System and assistant messages are always strings (system prompts are text, LLM output is text). User messages may be `ContentBlock[]` when media is attached.
 
-- [ ] **`src/providers/anthropic-provider.ts` — `toAnthropicMessages()`**
+- [x] **`src/providers/anthropic-provider.ts` — `toAnthropicMessages()`**
   - Line 59: System message concatenation — add assertion/guard that system content is string
   - Lines 66-68: Tool call branch `content.push({ type: "text", text: msg.content })` — this is pre-tool-call assistant text, always a string. No change needed, but add assertion for safety (see Phase 1 "assert string" convention above)
   - Lines 95-98: Catch-all handles **both** user and assistant messages (`role: msg.role === "user" ? "user" : "assistant"`, `content: msg.content`). Replace the single `anthropicMessages.push()` call with an `if (msg.role === "user") { ... } else { ... }` block, each branch pushing with its own content format:
@@ -51,7 +51,7 @@ Each provider's message conversion function must handle the case where `msg.cont
     - When `msg.role === "user"` and `msg.content` is `string`, wrap as `[{ type: "text", text: msg.content }]` (wire format changes from string to array — Anthropic accepts both forms and treats them identically for billing, token counting, and generation. This normalizes to array for consistency with the `ContentBlock[]` branch). **Edge case:** When `msg.content` is an empty string `""`, do NOT wrap — pass as string `""` directly. Anthropic rejects empty text content blocks in arrays (`[{ type: "text", text: "" }]` → 400 error) but accepts empty string content
     - When assistant, assert string (see Phase 1 "assert string" convention) and pass through unchanged: `content: msg.content`
 
-- [ ] **`src/providers/openai-provider.ts` — `toOpenAIMessages()`**
+- [x] **`src/providers/openai-provider.ts` — `toOpenAIMessages()`**
   - Lines 57-69: Tool call branch `content: msg.content || null` — pre-tool-call assistant text, always a string. No change needed
   - Lines 85-90: Catch-all handles **both** user and assistant messages (`role: msg.role === "tool_call" || ... ? "user" : msg.role`, `content: msg.content`). Split:
     - When user and `ContentBlock[]`, map to OpenAI content parts:
@@ -61,7 +61,7 @@ Each provider's message conversion function must handle the case where `msg.cont
     - When `msg.role === "user"` and `msg.content` is `string`, keep existing behavior: `content: msg.content` (the `Array.isArray` check in the preceding branch implicitly narrows the type to `string`; if TypeScript still infers the union, add an explicit `as string` cast). OpenAI accepts both string and array content for user messages; no normalization to array needed here unlike Anthropic
     - When assistant, assert string (see Phase 1 "assert string" convention) and pass through unchanged: `content: msg.content`
 
-- [ ] **`src/providers/bedrock-provider.ts` — `toBedrockMessages()`**
+- [x] **`src/providers/bedrock-provider.ts` — `toBedrockMessages()`**
   - **Import note:** `ContentBlock` is already imported from `@aws-sdk/client-bedrock-runtime` at line 44. Use an import alias: `import { ContentBlock as MediaContentBlock } from "../media/types"` to avoid the name collision. Within this file, use `MediaContentBlock` for all references to the Notor content block type (in type annotations, mapping functions, etc.)
   - Line 83: System `{ text: msg.content }` — assert string (see Phase 1 "assert string" convention above)
   - Lines 88-92: Tool call branch `content.push({ text: msg.content })` — pre-tool-call assistant text, always a string. No change needed
@@ -73,7 +73,7 @@ Each provider's message conversion function must handle the case where `msg.cont
     - When `msg.role === "user"` and `msg.content` is `string`, keep existing behavior: `content: [{ text: msg.content }]` (Bedrock already wraps strings in content block arrays)
     - When assistant, assert string (see Phase 1 "assert string" convention) and keep existing: `content: [{ text: msg.content }]`
 
-- [ ] **`src/providers/local-provider.ts` — `toOpenAIMessages()`**
+- [x] **`src/providers/local-provider.ts` — `toOpenAIMessages()`**
   - Lines 85-97: Tool call branch `content: msg.content || null` — pre-tool-call assistant text, always a string. No change needed
   - Lines 113-118: Catch-all handles **both** user and assistant messages. Same fix as OpenAI provider (including permanent document block safety-net placeholder, user-string pass-through, and assistant assertion). Apply the same three branches: user+`ContentBlock[]` (map to content parts), user+string (keep existing `content: msg.content`), assistant (assert string and pass through)
   - **Note:** The local provider's `toOpenAIMessages()` is structurally identical to the OpenAI provider's. Apply the same changes at the corresponding lines. The only semantic difference is in `capabilities.ts` (Phase 2): local sets `supportsImages: true` optimistically
@@ -81,7 +81,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 ### 1.4 Token Estimation — Media-Aware
 
-- [ ] **Add `estimateContentTokens()` to `src/utils/tokens.ts`**
+- [x] **Add `estimateContentTokens()` to `src/utils/tokens.ts`**
   - Import `ContentBlock` from `../media/types` at the top of the file
   - Place `estimateContentTokens` and its private helpers after the existing `estimateTokenCount` function (line ~52) and before the `estimateTokens` alias (line 54)
   - Implement `estimateContentTokens(content: string | ContentBlock[]): number`
@@ -93,7 +93,7 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Private helpers: `estimateImageTokens(w?, h?)`, `estimateDocumentTokens(pageCount?)`
   - Unit tests in `src/utils/tokens.test.ts` covering: string input, text-only blocks, image with/without dimensions, document with/without page count, mixed content, empty `ContentBlock[]` returns 0
 
-- [ ] **Update `src/chat/context.ts:77-101`** — `estimateMessageTokens()`
+- [x] **Update `src/chat/context.ts:77-101`** — `estimateMessageTokens()`
   - Full function spans lines 77-101; lines 79-86 contain early returns for `output_tokens`/`input_tokens` that must be preserved
   - Replace the core logic at lines 89-100 (`let text = message.content; text += ...; return estimateTokenCount(text)`) with:
     ```ts
@@ -109,15 +109,15 @@ Each provider's message conversion function must handle the case where `msg.cont
     ```
   - The conditionals match the existing guards at lines 93-97; the key change is splitting content estimation (via `estimateContentTokens`) from tool metadata estimation (via `estimateTokenCount`)
 
-- [ ] **Update `src/context/compaction.ts:80`** — `estimateConversationTokens()`
+- [x] **Update `src/context/compaction.ts:80`** — `estimateConversationTokens()`
   - Replace `estimateTokens(msg.content)` with `estimateContentTokens(msg.content)` (note: `estimateTokens` is an alias of `estimateTokenCount` defined at `tokens.ts:54`). Only this call changes — the `estimateTokens(JSON.stringify(...))` calls for tool_call/tool_result at lines 84 and 90 remain unchanged since their arguments are always strings
 
-- [ ] **Update `src/chat/sub-agent-runner.ts:453`** — `estimateConversationTokens()`
+- [x] **Update `src/chat/sub-agent-runner.ts:453`** — `estimateConversationTokens()`
   - Replace `estimateTokenCount(msg.content)` with `estimateContentTokens(msg.content)`
 
 ### 1.5 Context Compaction — Strip Media Before Summarization
 
-- [ ] **Update `src/context/compaction.ts:241-245`** — Empty content check and compaction message building
+- [x] **Update `src/context/compaction.ts:241-245`** — Empty content check and compaction message building
   - Replace lines 241-245 (the `if (!msg.content?.trim()) continue;` guard through the entire `chatMessages.push()` call including its closing `});`). Full replacement:
     ```ts
     const text = getTextContent(msg.content);
@@ -139,51 +139,51 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 ### 1.6 Orchestrator & History — Handle Union Type
 
-- [ ] **`src/chat/orchestrator.ts:2051`** — Empty assistant content check
+- [x] **`src/chat/orchestrator.ts:2051`** — Empty assistant content check
   - `msg.content?.trim()` — assert string before the trim check (`.trim()` does not exist on arrays): `const text = typeof msg.content === "string" ? msg.content : (() => { throw new Error("Expected string content for assistant message"); })(); if (!text.trim()) { ... }`
 
-- [ ] **`src/chat/orchestrator.ts:2194`** — `preToolCallText = prev.content`
+- [x] **`src/chat/orchestrator.ts:2194`** — `preToolCallText = prev.content`
   - Assert string using the Phase 1 convention (prev is assistant message, always string): `preToolCallText = typeof prev.content === "string" ? prev.content : (() => { throw new Error("Expected string content for assistant message"); })();`
 
-- [ ] **`src/chat/orchestrator.ts:2043, 2057`** — `content: msg.content` pass-through
+- [x] **`src/chat/orchestrator.ts:2043, 2057`** — `content: msg.content` pass-through
   - No change needed (both types accept the union). No comments required — the type annotation on `ChatMessage.content` already documents that it can be `ContentBlock[]`
 
-- [ ] **`src/chat/orchestrator.ts:2103-2176, 2178-2231`** — `toChatMessages()` repair & coalescing phases
+- [x] **`src/chat/orchestrator.ts:2103-2176, 2178-2231`** — `toChatMessages()` repair & coalescing phases
   - **Repair phase** (lines 2103-2176): Injects synthetic `tool_result` messages for orphaned tool calls. All `content` fields are string literals (`""`) — no code changes required
   - **Coalescing phase** (lines 2178-2231): Merges consecutive tool_call/tool_result messages. Line 2194 is covered above. Coalesced messages use `content: preToolCallText` (string, from assistant) and `content: ""` (string literal) — no code changes required
   - Both phases are safe because they only construct messages with string content, never propagate user `ContentBlock[]`. After all Phase 1 changes, confirm these phases compile without errors. TypeScript may report errors on string operations because `ChatMessage.content` is now a union type — if so, add `as string` casts at the specific sites (all content values in these phases are string literals or assistant text, so the casts are safe). Likely cast sites: any line where `content` is assigned from a string literal (`""`) or from `preToolCallText` (known string) but TypeScript infers the broader union type. Expected: 0-3 sites
 
-- [ ] **`src/chat/history.ts:442`** — `JSON.parse(message.content)`
+- [x] **`src/chat/history.ts:442`** — `JSON.parse(message.content)`
   - Add type guard: `if (typeof message.content !== "string") return null;` before JSON parse
   - System messages are always string, but guard prevents future regressions
 
-- [ ] **`src/chat/history.ts:496-497`** — Preview generation
+- [x] **`src/chat/history.ts:496-497`** — Preview generation
   - Current: `typeof msg.content === "string"` guard exists, then `.substring(0, 120)`
   - Add `ContentBlock[]` branch: `else if (Array.isArray(msg.content)) preview = getTextContent(msg.content as ContentBlock[]).substring(0, 120);`
   - **Type note:** Messages are parsed as `Record<string, unknown>` from JSONL. The parsed `msg.content` is `unknown[]` at runtime, not a typed `ContentBlock[]`. Cast to `ContentBlock[]` after verifying `Array.isArray(msg.content)` — `getTextContent()` only reads `.type` and `.text` fields, so the cast is safe for well-formed history data
 
-- [ ] **`src/chat/history.ts:587-590`** — Search conversations
+- [x] **`src/chat/history.ts:587-590`** — Search conversations
   - Line 587: Same preview fix as line 496 (with same `Array.isArray` + cast pattern)
   - Line 590: For `ContentBlock[]`, search text blocks: `getTextContent(msg.content as ContentBlock[]).toLowerCase().includes(needle)`
 
-- [ ] **`src/chat/conversation.ts:348`** — `generateTitle(params.content)` **(compile error)**
+- [x] **`src/chat/conversation.ts:348`** — `generateTitle(params.content)` **(compile error)**
   - `generateTitle()` is declared as `private generateTitle(content: string)` at line 478 and immediately calls `.replace()` on its argument — passing `ContentBlock[]` produces `"[object Object]..."` as the title
   - This is a **TypeScript compile error site** after the type change, not just a pass-through
   - Wrap: `this.generateTitle(getTextContent(params.content))` — `getTextContent()` already handles string input (returns it as-is), so no separate `typeof` check is needed. **Note:** If `getTextContent()` returns `""` (e.g., image-only message), `generateTitle()` produces an empty string after cleaning. This is acceptable for Phase 1 (no media is created yet). Phase 2 adds an image-only fallback — see Task 2.10
 
-- [ ] **`src/chat/sub-agent-history.ts:58, 78, 96`** — `content: cm.content` pass-through
+- [x] **`src/chat/sub-agent-history.ts:58, 78, 96`** — `content: cm.content` pass-through
   - No change needed (both `ChatMessage` and `Message` accept the union)
   - **Note:** These lines flow `ChatMessage → Message` (the reverse of the typical `toChatMessages()` direction). The union type is valid in both directions
   - Verify TypeScript compilation passes
 
 ### 1.7 Export Modules — Use `getTextContent()`
 
-- [ ] **`src/export/markdown-exporter.ts`**
+- [x] **`src/export/markdown-exporter.ts`**
   - Line 95: `wrapCallout("info", "Hook output", msg.content, true)` — wrap with `getTextContent()` (hook injections are always string, but guard for type safety)
   - Line 99: `let content = msg.content` then regex/slice operations — use `getTextContent(msg.content)` for the text portion. The `<attachments>` XML block is embedded in text content, so `getTextContent()` preserves it and the existing regex extraction continues to work unchanged
   - Line 139: `parts.push(msg.content)` — assert string (assistant messages always string)
 
-- [ ] **`src/export/html-exporter.ts`**
+- [x] **`src/export/html-exporter.ts`**
   - Line 394: `escapeHtml(msg.content)` — wrap with `getTextContent()`
   - Line 398: `let content = msg.content` then regex/slice — use `getTextContent(msg.content)`
   - Line 438: `marked.parse(msg.content)` — assert string (assistant always string)
@@ -193,7 +193,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 ### 1.8 UI — Handle Union in Chat View
 
-- [ ] **`src/ui/chat-view.ts`**
+- [x] **`src/ui/chat-view.ts`**
   - Line 1159: `extractAttachmentsBlock(message.content)` — pass `getTextContent(message.content)` (attachment XML is in the text portion)
   - Line 1163: `textToRender = ... : message.content` — use `getTextContent(message.content)` as fallback
   - Line 1241: `pre.createEl("code", { text: message.content })` — use `getTextContent()` (hook injections are string, but guard)
@@ -202,9 +202,9 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 ### 1.9 Verification
 
-- [ ] **TypeScript compilation** — `npm run build` succeeds with zero type errors across all modified files
-- [ ] **Unit tests pass** — `npm test` for existing tests (no regressions)
-- [ ] **Unit tests for new code** — `src/media/types.test.ts` (getTextContent), `src/media/format-detector.test.ts`, token estimation tests
+- [x] **TypeScript compilation** — `npm run build` succeeds with zero type errors across all modified files
+- [x] **Unit tests pass** — `npm test` for existing tests (no regressions)
+- [x] **Unit tests for new code** — `src/media/types.test.ts` (getTextContent), `src/media/format-detector.test.ts`, token estimation tests
 - [ ] **Manual smoke test** — Open existing conversation, send a message, verify content flows through correctly as plain string
 
 ---
