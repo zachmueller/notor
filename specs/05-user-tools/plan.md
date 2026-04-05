@@ -16,7 +16,7 @@
 | Compilation | `new AsyncFunction(argNames..., strippedCode)` | Extensions use `await` directly. Constructed via `Object.getPrototypeOf(async function(){}).constructor`. Same trust level as plugin code |
 | YAML fence parsing | `parseYaml` from `obsidian` module | Already used by sub-agent discovery, tool config parser, workflow hook parser. No new dependency |
 | Param schema format | Simplified YAML → JSON Schema conversion | User writes `params.path.type: string`; runtime converts to `{ type: "object", properties: { path: { type: "string" } }, required: [...] }`. Lowers the authoring bar vs. raw JSON Schema |
-| Hot reload | Manual only (Settings button + command palette) | Avoids compilation during active LLM operations. Design doc resolved decision |
+| Hot reload | Manual only (Settings button + command palette), with file watcher Notices | Avoids compilation during active LLM operations. File watchers on `notor/tools/` and `notor/automations/` show a debounced Notice prompting the user to reload — no auto-recompilation |
 | Extension settings storage | Two new `NotorSettings` fields: `user_extension_settings` and `user_shared_settings` | Follows existing patterns. Secrets use `SecretStorage` with ID convention `notor-ext-{name}-{key}` / `notor-shared-{key}` |
 | Registration approach | User tools register in `ToolRegistry` via same `register()` method; user automations register in a new `AutomationRegistry` alongside existing hook dispatch | Tools integrate fully with existing dispatch pipeline. Automations coexist with shell hooks (not replace) |
 | Discovery directories | `notor/tools/` and `notor/automations/` and `notor/settings.md` | Follows established `notor/{entity}/` convention. Discovered on plugin load and manual reload |
@@ -42,7 +42,7 @@
 | `NotorSettings` | New fields: `user_extension_settings`, `user_shared_settings`. Settings defaults/merge in `loadSettings()` |
 | `SettingsTab` | New "Extensions" settings group with per-extension settings and shared settings sub-sections |
 | `main.ts` | New lazy accessor `getExtensionManager()`. Wired into reload command + settings button. Discovery runs on plugin load (`onLayoutReady`) |
-| `tool-config/path-enforcer.ts` | `TOOL_PATH_PARAMS` table — user tools that declare path params need a registration mechanism so path enforcement works. Initially, user tools are exempt from path enforcement (they control their own path handling) |
+| `tool-config/path-enforcer.ts` | `TOOL_PATH_PARAMS` table extended to support dynamic registration of user-tool path params. User tools declare path params in their YAML fence; the runtime registers them in `TOOL_PATH_PARAMS` so `enforcePathConstraints()` applies. The path enforcer functions are also exposed via `utils.pathEnforcer` for extensions to use directly |
 | `tool-orchestration.ts` | `partitionToolCalls()` needs to classify user tools. User tools with `mode: "read"` are concurrency-safe; `mode: "write"` are non-concurrent. Same logic as built-in tools |
 | `esbuild.config.mjs` | Sucrase added as a bundled dependency (not external) |
 
@@ -107,6 +107,8 @@ interface UserToolDefinition {
   mode: "read" | "write";
   /** Parsed param schema from YAML fence `params` block. */
   params: ParamSchema;
+  /** Path parameter descriptors for path enforcement (from `params[x].path_namespace`). */
+  pathParams: ToolPathParam[];
   /** Parsed settings schema from YAML fence `settings` block (optional). */
   settingsSchema: SettingsFieldSchema[] | null;
   /** Raw TypeScript/JavaScript code from code fence. */
@@ -190,6 +192,8 @@ interface ParamSchema {
     default?: unknown;
     enum?: string[];
     items?: { type: string };
+    /** If set, this param is a path and participates in path enforcement. */
+    path_namespace?: "vault" | "filesystem";
   };
 }
 
@@ -308,8 +312,10 @@ params:
 - `type: "string[]"` maps to `{ type: "array", items: { type: "string" } }`
 - `enum` field maps to JSON Schema `enum`
 - Pass through `description`, `default`
+- `path_namespace` is consumed by the runtime (not passed to JSON Schema) — it populates `UserToolDefinition.pathParams`
 
 - [ ] Implement `paramSchemaToJsonSchema(params: ParamSchema): JSONSchema`
+- [ ] Implement `extractPathParams(toolName: string, params: ParamSchema): ToolPathParam[]` — extracts entries with `path_namespace` into `ToolPathParam[]` for registration in `TOOL_PATH_PARAMS`
 - [ ] Handle all type mappings: `string`, `number`, `boolean`, `string[]`
 - [ ] Compute `required` array correctly (params without defaults)
 
@@ -426,9 +432,16 @@ function buildUtils(plugin: NotorPlugin): Record<string, unknown> {
     logger: (name: string) => logger(`ext:${name}`),
     resolveAndValidatePath: (path: string) => resolveAndValidatePath(path, plugin.vaultRootPath, plugin.settings.read_file_allowed_paths),
     executeShellCommand: (cmd: string, opts?: unknown) => executeShellCommand(cmd, plugin.settings, opts),
+    pathEnforcer: {
+      enforcePathConstraints: (toolName: string, params: Record<string, unknown>, entry: ResolvedToolConfigEntry) =>
+        enforcePathConstraints(toolName, params, entry, plugin.vaultRootPath),
+      isPathWithin: (target: string, base: string) => isPathWithin(target, base),
+    },
   };
 }
 ```
+
+The `pathEnforcer` sub-object exposes the dispatch-time path enforcement and `isPathWithin` utility from `src/tool-config/path-enforcer.ts` and `src/utils/path-validation.ts`. This allows user tools to leverage the same path constraint logic used by built-in tools.
 
 **`libs` object:** References to bundled libraries.
 
@@ -556,9 +569,11 @@ class ExtensionManager {
 2. For each tool: strip types → compile → validate. Store in `this.tools`
 3. For each automation: strip types → compile → validate. Store in `this.automations`
 4. Parse shared settings from `notor/settings.md` (if present)
-5. Register tools in `ToolRegistry` and `ToolDispatcher` (overwrites built-in if same name)
-6. Report errors via Obsidian Notice + logger
-7. Return summary: `{ toolCount, automationCount, errors }`
+5. Unregister previously-registered user tools from `ToolRegistry`, `ToolDispatcher`, and `TOOL_PATH_PARAMS`
+6. Register tools in `ToolRegistry` and `ToolDispatcher` (overwrites built-in if same name)
+7. Register user tool path params in `TOOL_PATH_PARAMS` (for `enforcePathConstraints()` at dispatch time)
+8. Report errors via Obsidian Notice + logger
+9. Return summary: `{ toolCount, automationCount, errors }`
 
 **Integration with ToolRegistry:**
 
@@ -596,7 +611,8 @@ class UserToolAdapter implements Tool {
 - [ ] Implement `UserToolAdapter` class implementing `Tool` interface
 - [ ] Implement the `reload()` flow with error aggregation
 - [ ] Implement tool registration (register in both `ToolRegistry` and `ToolDispatcher`)
-- [ ] Track which tool names were registered by extensions so they can be unregistered on reload (before re-registering)
+- [ ] Implement path param registration: for each user tool with `pathParams`, add entries to `TOOL_PATH_PARAMS` so `enforcePathConstraints()` applies at dispatch time
+- [ ] Track which tool names were registered by extensions so they can be unregistered on reload (before re-registering — includes clearing their `TOOL_PATH_PARAMS` entries)
 
 ---
 
@@ -765,11 +781,113 @@ Add the `notor:reload-extensions` Obsidian command.
 
 - [ ] Register command `notor:reload-extensions` with label "Reload user extensions"
 - [ ] Command callback: call `extensionManager.reload()`, show Notice with summary
-- [ ] Command only available on desktop (same as shell hooks)
 
 ---
 
 ## Phase 7: main.ts Wiring & Lifecycle
+
+### EXT-024 — Extension file watcher with reload Notice
+
+Watch `notor/tools/`, `notor/automations/`, and `notor/settings.md` for file changes and show a debounced Notice prompting the user to reload extensions.
+
+**File:** `src/extensions/watcher.ts` (new)
+**File:** `src/main.ts` (modify — register vault event listeners)
+
+**Design:** Follows the existing `registerWorkflowVaultWatcher()` pattern in `main.ts` (lines 1335-1358) which uses `vault.on("create")`, `vault.on("delete")`, `vault.on("rename")`, and `metadataCache.on("changed")` with a debounced rescan timer.
+
+**Watched events:**
+
+| Vault Event | Trigger Condition |
+|---|---|
+| `vault.on("create")` | New `.md` file created in `notor/tools/` or `notor/automations/`, or `notor/settings.md` created |
+| `vault.on("delete")` | `.md` file deleted from `notor/tools/` or `notor/automations/`, or `notor/settings.md` deleted |
+| `vault.on("rename")` | File renamed into or out of `notor/tools/` or `notor/automations/` |
+| `metadataCache.on("changed")` | Metadata (frontmatter) changed on a file in `notor/tools/` or `notor/automations/`, or on `notor/settings.md` |
+
+**Debouncing:**
+
+The existing workflow watcher uses a simple `setTimeout` debounce (see `scheduleWorkflowRescan()` in `main.ts`). Extensions use the same pattern:
+
+```typescript
+private _extensionChangeTimer: ReturnType<typeof setTimeout> | null = null;
+private _extensionStaleNotice: Notice | null = null;
+
+private static readonly EXTENSION_DEBOUNCE_MS = 2000;
+
+private scheduleExtensionChangeNotice(): void {
+  // Clear any pending debounce timer
+  if (this._extensionChangeTimer !== null) {
+    clearTimeout(this._extensionChangeTimer);
+  }
+
+  this._extensionChangeTimer = setTimeout(() => {
+    this._extensionChangeTimer = null;
+
+    // Don't show duplicate notices — if one is already visible, skip
+    if (this._extensionStaleNotice) return;
+
+    this._extensionStaleNotice = new Notice(
+      "Extension files changed. Reload extensions to apply updates.",
+      0  // persistent until clicked or dismissed
+    );
+
+    // Add click handler to trigger reload directly from the Notice
+    this._extensionStaleNotice.noticeEl.addEventListener("click", () => {
+      this._extensionStaleNotice?.hide();
+      this._extensionStaleNotice = null;
+      this.getExtensionManager().reload();
+    });
+
+    // Clear reference when Notice is dismissed (timeout or user action)
+    // Notice auto-hides after ~8s by default; use 0 for persistent
+  }, EXTENSION_DEBOUNCE_MS);
+}
+```
+
+**Debounce rationale:** 2000ms debounce coalesces rapid bursts from:
+- Obsidian sync writing multiple files
+- Git operations updating several extension files at once
+- User saving a file multiple times in quick succession (Obsidian auto-saves)
+
+The debounce window is intentionally longer than the workflow watcher's because extension compilation is heavier than workflow discovery, and we only show a Notice (not auto-reload).
+
+**Path matching helpers:**
+
+```typescript
+private isExtensionToolFile(file: TAbstractFile): boolean {
+  return file.path.startsWith(`${this.settings.notor_dir}tools/`) && file.path.endsWith(".md");
+}
+
+private isExtensionAutomationFile(file: TAbstractFile): boolean {
+  return file.path.startsWith(`${this.settings.notor_dir}automations/`) && file.path.endsWith(".md");
+}
+
+private isExtensionSettingsFile(file: TAbstractFile): boolean {
+  return file.path === `${this.settings.notor_dir}settings.md`;
+}
+
+private isExtensionFile(file: TAbstractFile): boolean {
+  return this.isExtensionToolFile(file) || this.isExtensionAutomationFile(file) || this.isExtensionSettingsFile(file);
+}
+```
+
+**Notice behavior:**
+- Persistent Notice (duration `0`) — stays visible until clicked or manually dismissed
+- Clicking the Notice triggers `extensionManager.reload()` directly (one-click reload UX)
+- Only one "stale extensions" Notice is shown at a time (duplicate suppression via `_extensionStaleNotice` reference)
+- Notice is cleared after successful reload
+
+**Cleanup:** Timer and Notice reference cleared in `onunload()`.
+
+- [ ] Implement `registerExtensionVaultWatcher()` in `main.ts` using `registerEvent()` for all four vault events
+- [ ] Implement path matching helpers (`isExtensionToolFile()`, etc.)
+- [ ] Implement debounced Notice with 2000ms window
+- [ ] Implement click-to-reload on the Notice
+- [ ] Implement duplicate Notice suppression
+- [ ] Clear timer and Notice in `onunload()`
+- [ ] Register watchers in `onLayoutReady()` (after initial extension discovery)
+
+---
 
 ### EXT-017 — Wire ExtensionManager into plugin lifecycle
 
@@ -824,6 +942,7 @@ The orchestrator needs to pass `extensionManager` when calling `dispatchPreSend(
 - [ ] Pass `extensionManager` through to all four LLM lifecycle dispatch calls
 - [ ] Pass `extensionManager` through to vault event handler deps
 - [ ] Wire `extensionManager.destroy()` into `onunload()`
+- [ ] Wire `registerExtensionVaultWatcher()` into `onLayoutReady()` (after initial extension reload)
 - [ ] Ensure reload ordering: built-in tools → user tools → MCP tools (MCP is async, so user tools may register before MCP connects — that's fine, MCP tools don't conflict with user tools)
 
 ---
@@ -944,7 +1063,7 @@ Phase 5 (EXT-013, 014)  Phase 6 (EXT-015, 016)  ← parallel
   │                      │
   └──────────┬───────────┘
              ▼
-Phase 7 (EXT-017)
+Phase 7 (EXT-017, EXT-024)
   │
   ▼
 Phase 8 (EXT-018)
@@ -965,7 +1084,7 @@ Phase 9 (EXT-019 — EXT-023)
 ### R-2: `AsyncFunction` CSP restrictions
 
 **Risk:** Content Security Policy may block `new Function()` / `new AsyncFunction()` in some environments.
-**Mitigation:** Obsidian desktop (Electron) has no restrictive CSP for plugin code. Community plugins already use dynamic code evaluation. Mobile Obsidian may have restrictions — verify during testing. If blocked on mobile, extensions are desktop-only (consistent with shell hooks).
+**Mitigation:** Obsidian desktop (Electron) has no restrictive CSP for plugin code. Community plugins already use dynamic code evaluation. The entire Notor plugin is desktop-only, so no mobile CSP concerns apply.
 
 ### R-3: User tool overwrites built-in with broken implementation
 
@@ -994,20 +1113,37 @@ Phase 9 (EXT-019 — EXT-023)
 
 ---
 
-## Open Questions
+## Resolved Questions
 
-### Q-1: Path enforcement for user tools
+### Q-1: Path enforcement for user tools — RESOLVED: Yes, first iteration
 
-User tools manage their own path handling (they call `app.vault.read()` directly). Should `TOOL_PATH_PARAMS` in `path-enforcer.ts` be extended to support user-declared path params? **Proposed:** Defer to Phase 2. User tools are trusted code — they run with full `app` access.
+User tools participate in path enforcement via `TOOL_PATH_PARAMS`. The YAML fence param schema supports an optional `path_namespace: "vault" | "filesystem"` field. Params with this field are registered in `TOOL_PATH_PARAMS` during `reload()`, so `enforcePathConstraints()` in the dispatch pipeline applies to user tools the same way it does to built-ins.
 
-### Q-2: Tool concurrency classification
+Additionally, the path enforcer utilities are exposed via `utils.pathEnforcer` so user tool code can call `enforcePathConstraints()` and `isPathWithin()` directly for custom path validation logic.
 
-`partitionToolCalls()` in `tool-orchestration.ts` classifies tools as concurrent-safe (read) or not (write). User tools with `mode: "read"` should be concurrent-safe. **Proposed:** Use the `mode` field directly — same logic as built-in tools.
+**Example YAML fence with path enforcement:**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to note"
+    path_namespace: vault
+  output_dir:
+    type: string
+    description: "Output directory"
+    path_namespace: filesystem
+```
 
-### Q-3: User tool names in `<notor_tool_config>` blocks
+### Q-2: Tool concurrency classification — RESOLVED: Use `mode` directly
 
-User tools participate in the tool config system. They can be enabled/disabled and have auto_approve set by personas/workflows/rules. **Proposed:** This works automatically — tool config operates on tool names, and user tools are in the registry with their declared names.
+`partitionToolCalls()` in `tool-orchestration.ts` already classifies by `tool.mode`. Since `UserToolAdapter` exposes `mode` from the frontmatter `notor-mode` field, user tools with `mode: "read"` are concurrency-safe and user tools with `mode: "write"` are non-concurrent. No changes to `partitionToolCalls()` needed.
 
-### Q-4: Extension file watching
+### Q-3: User tool names in `<notor_tool_config>` blocks — RESOLVED: Works automatically
 
-The design doc specifies manual reload only. Should we also watch `notor/tools/` and `notor/automations/` for file changes and prompt the user to reload? **Proposed:** Defer. Manual reload is simpler and avoids the compilation timing issues noted in the design doc.
+User tools register in `ToolRegistry` with their declared `notor-tool-name`. The `<notor_tool_config>` system operates on tool names from the registry, so user tools can be enabled/disabled and have `auto_approve` / path constraints set by personas, workflows, and rules — no special handling required. The tool config parser's `knownToolNames` validation will include user tool names since they're in the registry at parse time.
+
+### Q-4: Extension file watching — RESOLVED: Watch + Notice (no auto-reload)
+
+File watchers on `notor/tools/`, `notor/automations/`, and `notor/settings.md` detect changes and show a debounced Notice prompting the user to reload. No auto-recompilation occurs — the user must explicitly trigger reload via the Settings button or the `notor:reload-extensions` command.
+
+See [EXT-024](#ext-024--extension-file-watcher-with-reload-notice) for full implementation details.
