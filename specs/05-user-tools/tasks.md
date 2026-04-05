@@ -11,23 +11,23 @@
 
 ### EXT-001 — Install Sucrase
 
-- [ ] Add `"sucrase": "^3.35.0"` to `dependencies` in `package.json`
-- [ ] Run `npm install` and verify `package-lock.json` updates
-- [ ] Run `npm run build` — confirm esbuild bundles sucrase without errors (it's not in the `external` array in `esbuild.config.mjs:31-45`, so it will be bundled)
-- [ ] Check bundle size delta is reasonable (~50KB)
+- [x] Add `"sucrase": "^3.35.0"` to `dependencies` in `package.json`
+- [x] Run `npm install` and verify `package-lock.json` updates
+- [x] Run `npm run build` — confirm esbuild bundles sucrase without errors (it's not in the `external` array in `esbuild.config.mjs:31-45`, so it will be bundled)
+- [x] Check bundle size delta is reasonable (~50KB)
 
 ### EXT-002 — Create `src/extensions/` module scaffolding
 
-- [ ] Create directory `src/extensions/`
-- [ ] Create `src/extensions/types.ts` with placeholder exports
-- [ ] Create `src/extensions/parser.ts` with module doc comment and placeholder export
-- [ ] Create `src/extensions/compiler.ts` with placeholder export
-- [ ] Create `src/extensions/discovery.ts` with placeholder export
-- [ ] Create `src/extensions/manager.ts` with placeholder export
-- [ ] Create `src/extensions/settings-schema.ts` with placeholder export
-- [ ] Create `src/extensions/param-schema.ts` with placeholder export
-- [ ] Create `src/extensions/runtime-context.ts` with placeholder export
-- [ ] Create `src/extensions/watcher.ts` with placeholder export
+- [x] Create directory `src/extensions/`
+- [x] Create `src/extensions/types.ts` with placeholder exports
+- [x] Create `src/extensions/parser.ts` with module doc comment and placeholder export
+- [x] Create `src/extensions/compiler.ts` with placeholder export
+- [x] Create `src/extensions/discovery.ts` with placeholder export
+- [x] Create `src/extensions/manager.ts` with placeholder export
+- [x] Create `src/extensions/settings-schema.ts` with placeholder export
+- [x] Create `src/extensions/param-schema.ts` with placeholder export
+- [x] Create `src/extensions/runtime-context.ts` with placeholder export
+- [x] Create `src/extensions/watcher.ts` with placeholder export
 
 ---
 

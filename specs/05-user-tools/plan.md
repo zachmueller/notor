@@ -2,7 +2,7 @@
 
 **Created:** 2026-04-05
 **Design Doc:** [design/user-defined-tools.md](../../design/user-defined-tools.md)
-**Status:** Planning
+**Status:** In Progress
 
 ## Technical Context
 
@@ -56,10 +56,10 @@ Add sucrase as a production dependency (bundled by esbuild into the plugin).
 
 **Files modified:** `package.json`, `package-lock.json`
 
-- [ ] Add `"sucrase": "^3.35.0"` to `dependencies` in `package.json`
-- [ ] Run `npm install`
-- [ ] Run `npm run build` and confirm the bundle compiles without errors
-- [ ] Verify sucrase's bundle impact is reasonable (~50KB as noted in design doc)
+- [x] Add `"sucrase": "^3.35.0"` to `dependencies` in `package.json`
+- [x] Run `npm install`
+- [x] Run `npm run build` and confirm the bundle compiles without errors
+- [x] Verify sucrase's bundle impact is reasonable (~50KB as noted in design doc)
 
 ### EXT-002 — Create `src/extensions/` module scaffolding
 
@@ -78,8 +78,8 @@ src/extensions/
   param-schema.ts   — YAML param schema → JSON Schema conversion
 ```
 
-- [ ] Create `src/extensions/types.ts` with type stubs
-- [ ] Create remaining files with module doc comments and placeholder exports
+- [x] Create `src/extensions/types.ts` with type stubs
+- [x] Create remaining files with module doc comments and placeholder exports
 
 ---
 
