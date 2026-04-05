@@ -354,8 +354,8 @@ In addition to the shared runtime (`app`, `obsidian`, `utils`, `libs`), automati
 | Field | Available On | Type | Description |
 |-------|-------------|------|-------------|
 | `context.notePath` | `on_note_open`, `on_note_create`, `on_save`, `on_manual_save`, `on_tag_change` | `string` | Vault-relative path of the affected note |
-| `context.oldTags` | `on_tag_change` | `string[]` | Tags before the change |
-| `context.newTags` | `on_tag_change` | `string[]` | Tags after the change |
+| `context.tagsAdded` | `on_tag_change` | `string[]` | Tags added in this change |
+| `context.tagsRemoved` | `on_tag_change` | `string[]` | Tags removed in this change |
 | `context.schedule` | `on_schedule` | `string` | The cron expression that fired |
 
 Note: tools get `params` (from the LLM). Automations get `context` (from the hook lifecycle). This makes it unambiguous which type of extension you're writing.

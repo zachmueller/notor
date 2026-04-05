@@ -352,7 +352,7 @@ async function resolveSharedSettings(
 ```
 
 - [ ] Implement `parseSettingsSchema()`
-- [ ] Implement `resolveSettings()` with SecretStorage integration for `secret: true` fields. Note: `getSecret()` from `src/utils/secrets.ts` is synchronous; the `async` signature is for future-proofing, not because SecretStorage requires it. Always reads from live `plugin.settings` reference (no caching/snapshots)
+- [ ] Implement `resolveSettings()` with SecretStorage integration for `secret: true` fields. Note: `getSecret()` from `src/utils/secrets.ts` is synchronous; `resolveSettings()` is declared `async` because it participates in the async `UserToolAdapter.execute()` pipeline, not because of SecretStorage. Always reads from live `plugin.settings` reference (no caching/snapshots)
 - [ ] Implement `resolveSharedSettings()` for the global `notor/settings.md` settings
 - [ ] Implement `slugifySecretId()` — normalize extension names and setting keys to lowercase-alphanumeric-with-dashes for `SecretStorage` ID construction (per `SecretStorage` constraint: "ID must be lowercase alphanumeric with dashes")
 - [ ] Validate required settings (no `default`, not yet configured) — produce clear error messages
@@ -430,7 +430,7 @@ function buildUtils(plugin: NotorPlugin): Record<string, unknown> {
     checkpointManager: plugin.getCheckpointManager(),
     noteOpener: plugin.getNoteOpener(),
     logger: (name: string) => logger(`ext:${name}`),
-    resolveAndValidatePath: (path: string) => resolveAndValidatePath(path, plugin.vaultRootPath, plugin.settings.read_file_allowed_paths),
+    resolveAndValidatePath: (path: string, allowedPaths?: string[]) => resolveAndValidatePath(path, plugin.vaultRootPath, allowedPaths ?? plugin.settings.read_file_allowed_paths),
     executeShellCommand: (cmd: string, opts?: ShellExecuteOptions) => executeShellCommand(cmd, plugin.settings, opts),
     pathEnforcer: {
       enforcePathConstraints: (toolName: string, params: Record<string, unknown>, entry: ResolvedToolConfigEntry) =>
@@ -505,14 +505,15 @@ async function discoverExtensions(
 ```
 
 **Discovery steps:**
-1. Resolve `{notorDir}/tools/` directory — list `.md` files
-2. For each file: read content, check `notor-type: tool` in frontmatter, parse via `parseExtensionFile()`
-3. Resolve `{notorDir}/automations/` directory — list `.md` files
-4. For each file: read content, check `notor-type: automation` in frontmatter, parse via `parseExtensionFile()`
-5. Check for `{notorDir}/settings.md` — if exists and has `notor-type: settings`, parse shared settings
-6. Collect all errors with file paths for user-visible reporting
+1. Normalize `notorDir` — strip trailing slash to avoid double-slash in paths (matches `src/workflows/workflow-discovery.ts:421` pattern: `notorDir.replace(/\/$/, "")`)
+2. Resolve `{notorDir}/tools/` directory — list `.md` files
+3. For each file: read content, check `notor-type: tool` in frontmatter, parse via `parseExtensionFile()`
+4. Resolve `{notorDir}/automations/` directory — list `.md` files
+5. For each file: read content, check `notor-type: automation` in frontmatter, parse via `parseExtensionFile()`
+6. Check for `{notorDir}/settings.md` — if exists and has `notor-type: settings`, parse shared settings
+7. Collect all errors with file paths for user-visible reporting
 
-- [ ] Implement `discoverExtensions()` function
+- [ ] Implement `discoverExtensions()` function — strip trailing slash from `notorDir` before building paths (e.g., `const baseDir = notorDir.replace(/\/$/, "")`)
 - [ ] Handle missing directories gracefully (no error, just empty results)
 - [ ] Handle malformed files gracefully (log error, skip file, continue)
 - [ ] Sort automations by `order` (ascending), then alphabetically by filename for ties
@@ -601,9 +602,14 @@ class UserToolAdapter implements Tool {
     // 2. Build injected context (app, obsidian, utils, libs, settings, shared, params)
     //    - Merge options?.abortSignal into the utils object per-invocation (abortSignal is
     //      only available at call time, not when buildUtils() constructs the base object)
-    // 3. Call compiled function
-    // 4. Wrap return value as ToolResult (always include tool_name: this.definition.name)
-    // 5. On error: Notice + logger + return { tool_name: this.definition.name, success: false, error }
+    // 3. Record start time via Date.now()
+    // 4. Call compiled function
+    // 5. Wrap return value as ToolResult:
+    //    - Always populate: tool_name, success, result, duration_ms (measured by adapter)
+    //    - User code may also return content_blocks (passed through if present)
+    //    - tool_call_id is set by the dispatcher, NOT by the adapter
+    //    - error populated only on failure
+    // 6. On error: Notice + logger + return { tool_name: this.definition.name, success: false, error, duration_ms }
   }
 }
 ```
@@ -733,7 +739,7 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 
 - `dispatchVaultEventHooks()` — after the existing hook/workflow loop, execute matching automations via a `getExtensionAutomations` accessor injected through `DispatcherDeps`. The accessor flows automatically from `main.ts` through the lazy `getDispatcherDeps()` closure → `VaultEventHandlerDeps.dispatch` callback → `dispatchVaultEventHooks()`. No changes to `VaultEventHandlerDeps` or `collectHooksAndWorkflows()` needed
 - `DispatcherDeps` interface — add `getExtensionAutomations?: GetAutomationsForTrigger` field
-- `VaultEventListenerManager` — add `setExtensionAutomations()` setter (NOT a constructor param, since the manager is constructed in `_initVaultEventHooks()` before `onLayoutReady()` and before extensions are discovered). The setter stores a `() => UserAutomationDefinition[]` accessor. `hasActiveHooks()` checks this accessor alongside settings hooks and workflow triggers when deciding whether to register Obsidian listeners
+- `VaultEventListenerManager` — add `setExtensionAutomations()` setter (NOT a constructor param, since the manager is constructed in `_initVaultEventHooks()` before `onLayoutReady()` and before extensions are discovered). The setter stores a `(trigger: AutomationTrigger) => UserAutomationDefinition[]` function (i.e., `getAutomationsForTrigger` from `ExtensionManager`). `hasActiveHooks()` calls this function with the specific vault event type and checks if the result is non-empty, alongside existing settings hooks and workflow trigger checks. This ensures filtering of LLM lifecycle triggers (which are not `VaultEventHookType` values) happens in `ExtensionManager`, not in the listener manager
 - `VaultEventScheduler` — add `setExtensionAutomations()` setter (separate from the existing `setDispatch()`, since each data source has its own injection point). `syncJobs()` adds a parallel loop for automation `on_schedule` entries alongside existing hook and workflow schedule handling
 
 **Vault event context for automations:**
@@ -743,7 +749,7 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 { hookEvent, timestamp, notePath }
 
 // on_tag_change:
-{ hookEvent, timestamp, notePath, oldTags, newTags }
+{ hookEvent, timestamp, notePath, tagsAdded, tagsRemoved }
 
 // on_schedule:
 { hookEvent, timestamp, schedule }
@@ -752,8 +758,8 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 - [ ] Add `getExtensionAutomations?` accessor to `DispatcherDeps` interface. This flows automatically through the dispatch chain: `main.ts` builds `getDispatcherDeps()` closure (which includes the accessor) → `VaultEventHandlerDeps.dispatch` callback wraps `dispatchVaultEventHooks(hooks, context, chain, getDispatcherDeps())` → automations accessor is available inside `dispatchVaultEventHooks()`. No changes to `VaultEventHandlerDeps` or `collectHooksAndWorkflows()` needed
 - [ ] Dispatch automations as a separate step after hooks+workflows in `dispatchVaultEventHooks()`. Automations must execute within the **same `chain` context** as the preceding hooks so `ExecutionChainTracker.shouldSkipHook()` applies — pass the `chain` parameter through to automation execution to prevent re-entrant loops (e.g., an automation calling `app.vault.process()` triggering `on_save` which re-enters the dispatch pipeline)
 - [ ] Build vault event context objects (using design-doc field names)
-- [ ] Add `setExtensionAutomations()` setter on `VaultEventListenerManager` (NOT a constructor param — the manager is constructed in `_initVaultEventHooks()` before extensions are discovered). Update `hasActiveHooks()` to check the stored accessor. **Init ordering:** call the setter before `onLayoutReady()` calls `evaluateListeners()`. The accessor returns empty until extensions are loaded; after `ExtensionManager.reload()` completes, call `evaluateListeners()` again to register listeners for any new automation vault event triggers
-- [ ] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (separate from `setDispatch()` — each data source has its own injection point); add parallel loop in `syncJobs()` for automation `on_schedule` entries
+- [ ] Add `setExtensionAutomations()` setter on `VaultEventListenerManager` (NOT a constructor param — the manager is constructed in `_initVaultEventHooks()` before extensions are discovered). The setter accepts `(trigger: AutomationTrigger) => UserAutomationDefinition[]` (the `getAutomationsForTrigger` function). Update `hasActiveHooks()` to call the stored function with the specific vault event type and check if the result is non-empty. **Init ordering:** call the setter before `onLayoutReady()` calls `evaluateListeners()`. The accessor returns empty until extensions are loaded; after `ExtensionManager.reload()` completes, call `evaluateListeners()` again to register listeners for any new automation vault event triggers
+- [ ] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (separate from `setDispatch()` — each data source has its own injection point); add parallel loop in `syncJobs()` for automation `on_schedule` entries. **Job ID convention:** use `ext-auto:{filePath}` (e.g., `ext-auto:notor/automations/daily-cleanup.md`) to avoid collisions with settings hook UUIDs and workflow IDs in the `desiredJobs` map
 - [ ] Wire `getExtensionAutomations` accessor through from `main.ts` when constructing `getDispatcherDeps()` closure and when calling setters on `VaultEventListenerManager` and `VaultEventScheduler`
 
 ---
