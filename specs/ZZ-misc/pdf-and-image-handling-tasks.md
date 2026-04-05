@@ -114,6 +114,11 @@ Each provider's message conversion function must handle the case where `msg.cont
 - [ ] **`src/chat/orchestrator.ts:2043, 2057`** — `content: msg.content` pass-through
   - No change needed (both types accept the union), but add comments noting user content may be `ContentBlock[]`
 
+- [ ] **`src/chat/orchestrator.ts:2103-2176, 2178-2231`** — `toChatMessages()` repair & coalescing phases
+  - **Repair phase** (lines 2103-2176): Injects synthetic `tool_result` messages for orphaned tool calls. All `content` fields are string literals (`""`) — no change needed, but verify compilation
+  - **Coalescing phase** (lines 2178-2231): Merges consecutive tool_call/tool_result messages. Line 2194 is covered above. Coalesced messages use `content: preToolCallText` (string, from assistant) and `content: ""` (string literal) — no change needed, but verify compilation
+  - Both phases are safe because they only construct messages with string content, never propagate user `ContentBlock[]`
+
 - [ ] **`src/chat/history.ts:442`** — `JSON.parse(message.content)`
   - Add type guard: `if (typeof message.content !== "string") return null;` before JSON parse
   - System messages are always string, but guard prevents future regressions
@@ -196,7 +201,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 - [ ] **Create `src/settings/sections/media.ts`** — "Images & PDFs" settings section
   - Setting: `image_max_dimension` (number, default 2000)
   - Setting: `image_compression_quality` (number, default 80)
-  - Register in `src/settings/settings-tab.ts`
+  - Register in `src/settings/settings-tab.ts` under the existing "Tool configuration" group (line 168: `const toolConfigGroup = createSettingsGroup(...)`) — add `renderMediaSection(toolConfigGroup, ctx);` alongside the existing `renderDocxToolsSection` call
 
 ### 2.2 Type Extensions
 
@@ -240,8 +245,8 @@ Each provider's message conversion function must handle the case where `msg.cont
     - If media blocks → return `[{ type: "text", text }, ...mediaBlocks]`
   - **Note:** The existing `MessageParts` interface keeps `attachments?: string` unchanged — it receives only the text portion from the destructured `buildAttachmentsBlock()` return value. The `contentBlocks` are handled separately via `assembleUserContent()`.
 
-- [ ] **Update `src/chat/orchestrator.ts` (~lines 1220-1260)**
-  - `buildAttachmentsBlock()` now returns `{ text, contentBlocks }`
+- [ ] **Update `src/chat/orchestrator.ts` (~lines 1206-1225)**
+  - `buildAttachmentsBlock()` (called at line 1224) now returns `{ text, contentBlocks }`
   - Destructure: `const { text: attachmentsText, contentBlocks } = buildAttachmentsBlock(resolvedAttachments);`
   - Pass `attachmentsText` (not the full return value) to `assembleUserMessage({ attachments: attachmentsText ?? undefined, ... })` — the `MessageParts.attachments` field remains `string`
   - Call `assembleUserContent(assembledText, contentBlocks)` to merge
@@ -364,7 +369,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 - [ ] **Update `src/settings/defaults.ts`** — Add defaults for PDF settings
 
-- [ ] **Update `src/settings/sections/media.ts`** — Add PDF settings to the "Images & PDFs" section
+- [ ] **Update `src/settings/sections/media.ts`** — Add PDF settings to the "Images & PDFs" subsection (under "Tool configuration" group)
 
 ### 3.7 Verification
 
@@ -432,17 +437,19 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 - [ ] **Update `src/tools/write-docx.ts`**
   - Add `ImageRun` to imports from `docx` (line 24-37)
-  - **Image pre-resolution pass** — `buildDocxChildren()` is synchronous and called recursively (nested lists, blockquotes, table cells). The `docx` library's `Document`, `Paragraph`, and `Table` constructors all expect synchronous children arrays. Making `buildDocxChildren()` async would require awaiting every recursive call and restructuring all constructor call sites.
+  - **Image pre-resolution pass** — Both `buildDocxChildren()` (line 108) and `renderInline()` (line 53) are synchronous. The `docx` library's `Document`, `Paragraph`, `Table`, and `ImageRun` constructors all expect synchronous children arrays. Making either function async would require restructuring all constructor call sites.
     - **Strategy:** Add an async pre-pass in `generateDocx()` before calling `buildDocxChildren()`:
-      1. Walk all tokens from `marked.lexer()` output, collect all `image` token `href` values
-      2. Resolve all images in parallel: `await Promise.all(hrefs.map(h => resolveImageForDocx(h, vaultRoot, allowedPaths)))`
-      3. Build a `Map<string, DocxImageData>` lookup from href → resolved image data
-      4. Pass the map into `buildDocxChildren()` as a parameter
-    - `buildDocxChildren()` stays synchronous — the `image` case does a synchronous `map.get(href)` lookup
-  - Add `image` case to the token type switch in `buildDocxChildren()` (after existing cases around line 108-245):
-    - Look up `resolvedImages.get(img.href)` from the pre-resolved map
-    - If resolved: create `new Paragraph({ children: [new ImageRun({ type, data, transformation: { width, height }, altText })] })`
-    - If not resolved: fallback text paragraph `[Image: href]`
+      1. **Recursively** walk all tokens from `marked.lexer()` output — image tokens are inline tokens nested inside `paragraph`, `blockquote`, `list` item, and `table` cell tokens (in marked v17, `![alt](url)` is parsed as `{ type: "paragraph", tokens: [{ type: "image", href: "url" }] }`). The walk must descend into each block token's `.tokens` and `.items[].tokens` arrays to find all `image` entries.
+      2. Collect all `image` token `href` values from the recursive walk
+      3. Resolve all images in parallel: `await Promise.all(hrefs.map(h => resolveImageForDocx(h, vaultRoot, allowedPaths)))`
+      4. Build a `Map<string, DocxImageData>` lookup from href → resolved image data
+      5. Pass the map into `buildDocxChildren()` as a parameter
+    - `buildDocxChildren()` stays synchronous — image lookup is a synchronous `map.get(href)` call
+  - **Handle images in the `paragraph` case** of `buildDocxChildren()` (line 125-130) — in marked v17, standalone images are parsed as inline `image` tokens wrapped in a `paragraph` token, NOT as top-level `image` block tokens. Handle this by detecting single-image paragraphs:
+    - When a `paragraph` token contains exactly one child token of `type: "image"`, render it as a dedicated `new Paragraph({ children: [new ImageRun({ type, data, transformation: { width, height }, altText })] })` using the pre-resolved map
+    - If the image href is not in the resolved map, render fallback: `new Paragraph({ children: [new TextRun({ text: "[Image: href]" })] })`
+    - When a `paragraph` token contains an image mixed with other inline tokens (e.g., `text ![alt](url) more text`), render via `renderInline()` as today — the image token falls through to the default `raw` text rendering (acceptable: mixed image+text paragraphs are rare in practice)
+    - Paragraphs with no image tokens continue through the existing `renderInline()` path unchanged
   - **Refactor template grafting (lines 286-338) to use DOM parsing + handle images:**
     - The current grafting uses regex-based XML string manipulation (regex to extract `<w:body>`, regex to strip `<w:sectPr>`). Introducing DOM-based merging for relationships alongside regex-based body grafting creates an inconsistent, fragile mix. Migrate the entire grafting routine to `@xmldom/xmldom` (`^0.8.11`, already a direct dependency in package.json).
     - **Step 1 — Migrate existing body grafting to DOM parsing:**

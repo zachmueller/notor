@@ -364,7 +364,7 @@ This keeps `assembleUserMessage()` simple (text-only assembly) and introduces a 
 
 ### 5.3 Orchestrator (`src/chat/orchestrator.ts`)
 
-In the `sendMessage` flow (~line 1220-1260):
+In `handleUserMessage()` (~lines 1206-1225):
 
 1. `buildAttachmentsBlock()` now returns `{ text, contentBlocks }`
 2. Text parts assembled via `assembleUserMessage()` as before (returns `string`)
@@ -469,7 +469,7 @@ New settings in `NotorSettings` (`src/settings/types.ts`):
 | `pdf_text_max_chars` | `number` | `400000` | Max chars for PDF text extraction |
 | `pdf_prefer_native` | `boolean` | `true` | Use native PDF blocks when provider supports them |
 
-New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
+New settings subsection: "Images & PDFs" (`src/settings/sections/media.ts`), registered under the existing "Tool configuration" group in `src/settings/settings-tab.ts` (line 168) alongside the existing `renderDocxToolsSection` call.
 
 ---
 
@@ -529,6 +529,8 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 | `src/chat/orchestrator.ts` | 2043, 2057 | `content: msg.content` (Message → ChatMessage) | Pass-through works — both types now accept the union |
 | `src/chat/orchestrator.ts` | 2051 | `msg.content?.trim()` (empty assistant check) | Type-narrow: assistant content is always string |
 | `src/chat/orchestrator.ts` | 2194 | `preToolCallText = prev.content` (absorbs pre-tool-call assistant text) | Type-narrow: `prev` is an assistant ChatMessage, content is always string. Add assertion or guard |
+| `src/chat/orchestrator.ts` | 2103-2176 | Repair phase: injects synthetic `tool_result` with `content: ""` for orphaned tool calls | No change needed — all `content` fields are string literals (`""`). Verify compilation passes |
+| `src/chat/orchestrator.ts` | 2178-2231 | Coalescing phase: merges consecutive tool_call/result messages. `content: preToolCallText` (string from assistant) and `content: ""` | No change needed — only constructs messages with string content, never propagates user `ContentBlock[]`. Verify compilation passes |
 | `src/chat/sub-agent-history.ts` | 58, 78, 96 | `content: cm.content` (ChatMessage → Message conversion) | Pass-through works — both types now accept the union. No type-narrowing needed since the content is propagated as-is |
 | `src/chat/history.ts` | 442 | `JSON.parse(message.content)` (compaction record detection) | Add type guard: only parse when `typeof message.content === "string"`. Only runs on system messages (always string), but guard prevents future regressions |
 | `src/chat/history.ts` | 496 | `typeof msg.content === "string"` then `.substring(0, 120)` | Already guards! Add `ContentBlock[]` branch: extract first text block for preview |
@@ -925,36 +927,82 @@ The LLM receives this markdown and can see the image paths. If the broader image
 import { Document, Packer, Paragraph, TextRun, ImageRun, /* ... */ } from "docx";
 ```
 
-**Step 2 — Make `buildDocxChildren()` and `generateDocx()` async.** Image reading requires async I/O. The sole caller already `await`s `generateDocx()`.
-
-**Step 3 — Add image case to `buildDocxChildren()`:**
+**Step 2 — Add async image pre-resolution pass in `generateDocx()`.** Both `buildDocxChildren()` (line 108) and `renderInline()` (line 53) are synchronous. The `docx` library's constructors (`Paragraph`, `Table`, `ImageRun`) expect synchronous children arrays. Making either function async would require restructuring all constructor call sites. Instead, resolve all images before the synchronous rendering pass:
 
 ```typescript
-case "image": {
-  const img = token as Tokens.Image;
-  const imageData = await resolveImageForDocx(img.href, vaultRoot, allowedPaths);
-  if (imageData) {
-    result.push(
-      new Paragraph({
-        children: [
-          new ImageRun({
-            type: imageData.type,
-            data: imageData.buffer,
-            transformation: { width: imageData.width, height: imageData.height },
-            altText: {
-              title: img.title || "",
-              description: img.text || "",
-              name: img.text || "image",
-            },
-          }),
-        ],
-      })
-    );
+// In generateDocx(), after marked.lexer() but before buildDocxChildren():
+
+function collectImageHrefs(tokens: Token[]): string[] {
+  const hrefs: string[] = [];
+  for (const token of tokens) {
+    // Image tokens are inline, nested inside paragraphs, blockquotes, list items, etc.
+    if (token.type === "image") {
+      hrefs.push((token as Tokens.Image).href);
+    }
+    // Recurse into child tokens (paragraphs, blockquotes, table cells)
+    if ("tokens" in token && Array.isArray(token.tokens)) {
+      hrefs.push(...collectImageHrefs(token.tokens));
+    }
+    // Recurse into list items
+    if ("items" in token && Array.isArray(token.items)) {
+      for (const item of token.items) {
+        if (item.tokens) hrefs.push(...collectImageHrefs(item.tokens));
+      }
+    }
+  }
+  return hrefs;
+}
+
+const imageHrefs = collectImageHrefs(tokens);
+const resolvedEntries = await Promise.all(
+  imageHrefs.map(async (h) => [h, await resolveImageForDocx(h, vaultRoot, allowedPaths)] as const)
+);
+const resolvedImages = new Map(resolvedEntries);
+// Pass resolvedImages into buildDocxChildren() as a parameter
+```
+
+**Step 3 — Handle images in the `paragraph` case of `buildDocxChildren()`.**
+
+In marked v17 (`^17.0.4`), standalone images are parsed as inline `image` tokens wrapped in a `paragraph` token — NOT as top-level `image` block tokens. For example, `![alt](url)` is lexed as:
+
+```json
+{ "type": "paragraph", "tokens": [{ "type": "image", "href": "url", "text": "alt" }] }
+```
+
+Detect single-image paragraphs in the existing `paragraph` case (line 125-130) and render them as dedicated image paragraphs:
+
+```typescript
+case "paragraph": {
+  const p = token as Tokens.Paragraph;
+  // Standalone image: paragraph with exactly one image child token
+  if (p.tokens?.length === 1 && p.tokens[0].type === "image") {
+    const img = p.tokens[0] as Tokens.Image;
+    const imageData = resolvedImages.get(img.href); // synchronous lookup
+    if (imageData) {
+      result.push(
+        new Paragraph({
+          children: [
+            new ImageRun({
+              type: imageData.type,
+              data: imageData.buffer,
+              transformation: { width: imageData.width, height: imageData.height },
+              altText: {
+                title: img.title || "",
+                description: img.text || "",
+                name: img.text || "image",
+              },
+            }),
+          ],
+        })
+      );
+    } else {
+      result.push(new Paragraph({
+        children: [new TextRun({ text: `[Image: ${img.href}]` })],
+      }));
+    }
   } else {
-    // Fallback: render as text placeholder
-    result.push(new Paragraph({
-      children: [new TextRun({ text: `[Image: ${img.href}]` })],
-    }));
+    // Normal paragraph (no image, or mixed image+text) — existing path
+    result.push(new Paragraph({ children: renderInline(p.tokens ?? []) }));
   }
   break;
 }
