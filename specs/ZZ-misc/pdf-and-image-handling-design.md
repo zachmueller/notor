@@ -51,9 +51,9 @@ Adding PDF and image support enables:
 |--------|-------|-------------|---------------------|
 | PDF library | pdf-parse | None (native API + poppler) | Evaluate candidates (§3) |
 | Image resize | None (raw base64) | sharp (native binary) | Electron Canvas API (zero deps) |
-| Content model | `ContentBlock[]` | `ContentBlock[]` | Same — extend `ChatMessage.content` |
+| Content model | `ContentBlock[]` | `ContentBlock[]` | Same — extend `Message.content` + `ChatMessage.content` |
 | Native PDF blocks | No | Yes (Anthropic) | Yes (Anthropic + Bedrock) |
-| Provider abstraction | Anthropic-centric | Anthropic-only | Multi-provider formatter |
+| Provider abstraction | Anthropic-centric | Anthropic-only | Extend each provider's `toXxxMessages()` |
 
 ---
 
@@ -118,7 +118,7 @@ Create a test script (`e2e/scripts/pdf-library-eval.ts`) that:
 
 ### 4.1 Content Block System
 
-The core change: extend `ChatMessage.content` from `string` to `string | ContentBlock[]`.
+The core change: extend both `Message.content` and `ChatMessage.content` from `string` to `string | ContentBlock[]`.
 
 ```typescript
 // src/media/types.ts (new file)
@@ -131,9 +131,20 @@ export type ContentBlock =
   | { type: "document"; media_type: "application/pdf"; data: string }; // base64
 ```
 
-```typescript
-// src/providers/provider.ts — ChatMessage change (backward-compatible)
+**Two types must change in concert:**
 
+Notor has two separate message types. `Message` (`src/types.ts:99`) is the internal type used by the conversation manager, JSONL history, token estimation, UI, and sub-agents. `ChatMessage` (`src/providers/provider.ts:23`) is the provider-facing type constructed from `Message` via `toChatMessages()`. Both have `content: string` today, and both must change.
+
+```typescript
+// src/types.ts — Message change
+export interface Message {
+  // ... existing fields ...
+  content: string | ContentBlock[];  // ← was: string
+}
+```
+
+```typescript
+// src/providers/provider.ts — ChatMessage change
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool_call" | "tool_result";
   content: string | ContentBlock[];  // ← was: string
@@ -141,7 +152,9 @@ export interface ChatMessage {
 }
 ```
 
-This is backward-compatible: all existing code passes strings, which remain valid. Only new image/PDF code paths produce `ContentBlock[]`.
+Media content (base64 image/document blocks) persists everywhere `Message` is used, including JSONL chat history. This means history files will grow for image-heavy conversations (a single 2000×2000 JPEG at quality 80 is ~200–500KB in base64). The existing `history_max_size_mb` (500MB) and `history_max_age_days` (90 days) settings provide sufficient guardrails.
+
+The **write side** is backward-compatible: all existing code that creates messages with `content: "some string"` remains valid. The **read side** is not — 10+ callsites consume `content` as a plain string and will surface as TypeScript compile errors. These are enumerated exhaustively in Phase 1 (§7).
 
 ### 4.2 New Module: `src/media/`
 
@@ -151,7 +164,6 @@ This is backward-compatible: all existing code passes strings, which remain vali
 | `src/media/format-detector.ts` | Magic byte detection (PDF, PNG, JPEG, GIF, WebP) |
 | `src/media/image-processor.ts` | Image validation, resize, compression, base64 encoding |
 | `src/media/pdf-processor.ts` | PDF text extraction, native doc block creation, page ranges |
-| `src/media/provider-formatter.ts` | Provider-specific content block formatting |
 | `src/media/capabilities.ts` | Provider media capability detection |
 
 ### 4.3 Image Processing Pipeline (`src/media/image-processor.ts`)
@@ -185,9 +197,17 @@ const dataUrl = canvas.toDataURL("image/jpeg", quality);
 **Processing rules:**
 - Max dimensions: 2000×2000px (scale down proportionally if exceeded)
 - Max base64 output: 5MB (Anthropic API limit)
-- Compression cascade: JPEG quality 80 → 60 → 40 → 20 if still over 5MB
 - Supported formats: PNG, JPEG, GIF, WebP (detected via magic bytes)
-- PNGs with transparency: keep as PNG (canvas `toDataURL("image/png")`) unless too large
+
+**Format-aware compression cascade:**
+
+JPEG compression introduces artifacts around high-contrast edges, making text in screenshots and diagrams unreadable at lower quality levels. To preserve quality, the compression strategy depends on the source format:
+
+- **PNG images:** Resize if needed → try PNG first (`canvas.toDataURL("image/png")`) → if over 5MB, cascade to JPEG quality 80 → 60 → 40
+- **JPEG images:** Resize if needed → try JPEG at original quality (or 80) → cascade to 60 → 40 → 20
+- **GIF/WebP:** Convert to PNG first (to preserve quality), then follow the PNG cascade
+
+This ensures screenshots and diagrams with text stay as PNG when possible (typically <5MB after resize), while photographs that need aggressive compression use JPEG.
 
 ### 4.4 PDF Processing Pipeline (`src/media/pdf-processor.ts`)
 
@@ -207,7 +227,7 @@ PDF file → Read buffer → Magic byte check (%PDF-) → Size check
 
 **Native document block path:**
 1. Base64-encode the raw PDF buffer
-2. Check size (max 10MB for Anthropic, 5MB for Bedrock)
+2. Check size against provider's API-documented limit (see §4.6 capabilities table)
 3. Return as `{ type: "document", media_type: "application/pdf", data: "..." }`
 
 **Page range support:**
@@ -215,26 +235,28 @@ PDF file → Read buffer → Magic byte check (%PDF-) → Size check
 - When specified, forces text extraction path (can't send partial PDF as native doc)
 - Library must support per-page access (criterion in §3.2)
 
-### 4.5 Provider-Specific Formatting (`src/media/provider-formatter.ts`)
+### 4.5 Provider-Specific Formatting (in each provider's `toXxxMessages()`)
+
+Rather than introducing a separate `provider-formatter.ts` module, each provider's existing `toXxxMessages()` function is extended to handle `ContentBlock[]` in `msg.content`. This keeps all provider-specific logic co-located in the provider file, matching the existing architecture. The media module (`src/media/`) handles content block *creation* (image processing, PDF processing, format detection) but not provider-specific *formatting*.
 
 Each provider maps `ContentBlock[]` to its native API format:
 
-**Anthropic:**
+**Anthropic** (`toAnthropicMessages()` in `src/providers/anthropic-provider.ts`):
 - Text → `{ type: "text", text }` (unchanged)
 - Image → `{ type: "image", source: { type: "base64", media_type, data } }`
 - Document → `{ type: "document", source: { type: "base64", media_type: "application/pdf", data } }`
 
-**OpenAI:**
+**OpenAI** (`toOpenAIMessages()` in `src/providers/openai-provider.ts`):
 - Text → `{ type: "text", text }`
 - Image → `{ type: "image_url", image_url: { url: "data:{media_type};base64,{data}" } }`
 - Document → pre-converted to text (PDF processor handles this before it reaches OpenAI)
 
-**Bedrock (Converse API):**
+**Bedrock** (`toBedrockMessages()` in `src/providers/bedrock-provider.ts`):
 - Text → `{ text: "..." }` (existing Bedrock ContentBlock format)
 - Image → `{ image: { format: "png"|"jpeg"|..., source: { bytes: Buffer.from(data, "base64") } } }`
 - Document → `{ document: { format: "pdf", name: "document.pdf", source: { bytes: Buffer.from(data, "base64") } } }`
 
-**Local (OpenAI-compatible):**
+**Local** (`toOpenAIMessages()` in `src/providers/local-provider.ts`):
 - Same as OpenAI format; vision support varies by model
 
 ### 4.6 Provider Media Capabilities (`src/media/capabilities.ts`)
@@ -304,21 +326,39 @@ Text attachments continue as XML `<attachments>` block. Binary attachments produ
 
 ### 5.2 Message Assembly (`src/context/message-assembler.ts`)
 
-`assembleUserMessage()` currently returns `string`. It evolves to return `string | ContentBlock[]`:
+`assembleUserMessage()` remains unchanged — it continues to return `string` (the text portion of the user message).
 
-- If there are no media content blocks, behavior is unchanged (returns string)
-- If there are content blocks, returns `ContentBlock[]` with the text message as the first `{ type: "text" }` block, followed by image/document blocks
+A **new function** `assembleUserContent()` is added to merge the text message with media content blocks:
+
+```typescript
+export function assembleUserContent(
+  text: string,
+  mediaBlocks: ContentBlock[]
+): string | ContentBlock[] {
+  if (mediaBlocks.length === 0) return text;
+  return [{ type: "text", text }, ...mediaBlocks];
+}
+```
+
+- When there are no media blocks, returns the plain string (existing behavior preserved)
+- When there are media blocks, returns `ContentBlock[]` with the text message as the first `{ type: "text" }` block, followed by image/document blocks
+
+This keeps `assembleUserMessage()` simple (text-only assembly) and introduces a clear composition point that the orchestrator calls after both text and media are ready.
 
 ### 5.3 Orchestrator (`src/chat/orchestrator.ts`)
 
 In the `sendMessage` flow (~line 1220-1260):
 
 1. `buildAttachmentsBlock()` now returns `{ text, contentBlocks }`
-2. Text parts assembled via `assembleUserMessage()` as before
-3. If `contentBlocks.length > 0`, the user `ChatMessage.content` becomes a `ContentBlock[]` array instead of a plain string
-4. Providers handle both formats in their `toXxxMessages()` functions
+2. Text parts assembled via `assembleUserMessage()` as before (returns `string`)
+3. `assembleUserContent(text, contentBlocks)` merges text and media → returns `string | ContentBlock[]`
+4. Result stored as `Message.content` (persisted to JSONL history including any base64 media)
+5. `toChatMessages()` passes `Message.content` through to `ChatMessage.content`
+6. Providers handle both formats in their `toXxxMessages()` functions
 
-**History persistence:** Binary content is NOT persisted in the JSONL history file (would balloon file sizes). When replaying from history, images/PDFs are omitted — the text description remains. This matches current behavior for MCP image results (`"[1 image omitted]"`). Future enhancement could add optional persistence.
+**History persistence:** Media content (base64 image/document blocks) IS persisted in the JSONL history file as part of `Message.content`. This means image-heavy conversations will produce larger history files (a single image adds ~200–500KB). The existing `history_max_size_mb` (500MB) and `history_max_age_days` (90 days) settings provide sufficient guardrails. On replay, the full `ContentBlock[]` is restored from JSON, so images/PDFs are available when resuming a conversation.
+
+**Preview extraction** (`history.ts:496`): already checks `typeof msg.content === "string"` before calling `.substring(0, 120)`. When `content` is `ContentBlock[]`, extract text from the first text block for the preview.
 
 ### 5.4 Tool Results (`src/types.ts`)
 
@@ -418,20 +458,58 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 
 ### Phase 1: Foundation — Content Block System
 
-**Goal:** Introduce `ContentBlock` type and make all four providers handle it. No user-facing changes.
+**Goal:** Introduce `ContentBlock` type, update both `Message` and `ChatMessage` content types, make all four providers handle the union, and ensure all existing consumers compile and work correctly. No user-facing changes.
 
 **Files to create:**
 - `src/media/types.ts` — `ContentBlock`, `ImageMediaType`, constants
 - `src/media/format-detector.ts` — magic byte detection
 
 **Files to modify:**
+- `src/types.ts` — `Message.content: string | ContentBlock[]`
 - `src/providers/provider.ts` — `ChatMessage.content: string | ContentBlock[]`
 - `src/providers/anthropic-provider.ts` — `toAnthropicMessages()` handles `ContentBlock[]`
 - `src/providers/openai-provider.ts` — `toOpenAIMessages()` handles `ContentBlock[]`
 - `src/providers/bedrock-provider.ts` — `toBedrockMessages()` handles `ContentBlock[]`
 - `src/providers/local-provider.ts` — `toOpenAIMessages()` handles `ContentBlock[]`
+- All callsites that consume `content` as string (see table below)
 
-**Verification:** Existing conversations work identically (all content remains strings). Unit tests for format detection.
+**Callsite enumeration — all locations that read `content` as a plain string:**
+
+| File | Line(s) | Current code | Required change |
+|------|---------|-------------|-----------------|
+| `src/chat/context.ts` | 89 | `let text = message.content` then string concat | Extract text: if `ContentBlock[]`, join text blocks; estimate media token cost separately |
+| `src/chat/sub-agent-runner.ts` | 453 | `estimateTokenCount(msg.content)` | Handle union — extract text for estimation, add media token cost |
+| `src/providers/anthropic-provider.ts` | 59 | `` `${system}\n\n${msg.content}` `` (system prompt concatenation) | Type-narrow: system messages are always string, add assertion or guard |
+| `src/providers/anthropic-provider.ts` | 67 | `{ type: "text", text: msg.content }` | If `ContentBlock[]`, map to Anthropic content blocks directly |
+| `src/providers/anthropic-provider.ts` | 97 | `content: msg.content` (assistant messages) | Pass through — assistant messages are always string (LLM output is text) |
+| `src/providers/openai-provider.ts` | 60 | `content: msg.content \|\| null` | If `ContentBlock[]`, map to OpenAI content parts |
+| `src/providers/openai-provider.ts` | 89 | `content: msg.content` | Same — map to OpenAI content parts when array |
+| `src/providers/bedrock-provider.ts` | 83 | `system.push({ text: msg.content })` | Type-narrow: system messages always string |
+| `src/providers/bedrock-provider.ts` | 91 | `content.push({ text: msg.content })` | If `ContentBlock[]`, map to Bedrock content blocks |
+| `src/providers/bedrock-provider.ts` | 128 | `content: [{ text: msg.content }]` | If `ContentBlock[]`, map to Bedrock content blocks |
+| `src/providers/local-provider.ts` | 88, 117 | Same as OpenAI patterns | Same fixes as OpenAI |
+| `src/chat/history.ts` | 496 | `typeof msg.content === "string"` then `.substring(0, 120)` | Already guards! Add `ContentBlock[]` branch: extract first text block for preview |
+| `src/chat/orchestrator.ts` | 2043, 2057 | `content: msg.content` (Message → ChatMessage) | Pass-through works — both types now accept the union |
+| `src/chat/orchestrator.ts` | 2051 | `msg.content?.trim()` (empty assistant check) | Type-narrow: assistant content is always string |
+
+**Context compaction safety:**
+
+When compaction triggers on a conversation containing `ContentBlock[]` messages, media blocks must be stripped before summarization. The compaction logic in `src/chat/context.ts` should:
+1. Extract only text blocks from `ContentBlock[]` content
+2. Drop image/document blocks (they cannot be meaningfully summarized)
+3. Append a `[N image(s)/document(s) omitted during compaction]` text marker
+
+This prevents: (a) sending large base64 blobs to the summarization call, (b) type errors in compaction logic that assumes string content, (c) wasted tokens on image blocks during summarization.
+
+**Media token estimation (open research question):**
+
+Images and PDF documents consume significant tokens (e.g., ~1600 tokens for a 1000×1000 image on Anthropic, ~1500–3000 tokens per PDF page). The current character-based estimator (`text.length / 4` in `src/utils/tokens.ts:39`) cannot account for this. The exact estimation approach (fixed cost per block, provider-aware formulas, or base64 size heuristic) requires further research before implementation. For Phase 1, a conservative fixed estimate (e.g., 3000 tokens per image block, 2000 per PDF page) is acceptable as a placeholder.
+
+**Sub-agent media propagation:**
+
+With the union type on `Message.content`, media naturally flows to sub-agents via the existing message passing in `src/chat/sub-agent-runner.ts`. The token estimator fix (callsite table above) ensures sub-agent token budgets account for media. Provider capability checks at send time handle format compatibility — if a sub-agent's provider doesn't support images, the provider's `toXxxMessages()` should strip unsupported media blocks and include a text placeholder.
+
+**Verification:** Existing conversations work identically (all content remains strings). Unit tests for format detection. TypeScript compilation succeeds with zero type errors at all callsites listed above.
 
 ### Phase 2: Image Handling
 
@@ -446,13 +524,14 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 - `src/types.ts` — `ToolResult.content_blocks`
 - `src/tools/read-file.ts` — add format detection before binary rejection; route images to image processor
 - `src/context/attachment.ts` — new types, `binary_content`, new factories, updated `buildAttachmentsBlock()`
-- `src/context/message-assembler.ts` — return `string | ContentBlock[]`
-- `src/chat/orchestrator.ts` — multi-part message assembly
+- `src/context/message-assembler.ts` — add `assembleUserContent()` function (§5.2)
+- `src/chat/orchestrator.ts` — call `assembleUserContent()` to merge text + media blocks
 - `src/chat/dispatcher.ts` — propagate `content_blocks` from tool results
 - `src/ui/attachment-picker.ts` — accept image files, binary read
 - `src/ui/attachment-chips.ts` — image chip display
 - `src/settings/types.ts` — image settings
 - `src/settings/defaults.ts` — default values
+- `src/settings/settings-tab.ts` — register new "Images & PDFs" section
 
 **Verification:** Attach an image via picker → confirm it appears in the LLM's context (model describes the image). Use `read_file` on an image → LLM describes the image content. Test with Anthropic and OpenAI providers.
 
@@ -494,10 +573,10 @@ See §10 for full implementation details.
 
 ### Phase 4: Polish & Edge Cases
 
-- Handle MCP tool results with images (currently omitted)
+- Handle MCP tool results with images (currently omitted with `[N image(s) omitted]`)
 - Drag-and-drop support for images/PDFs on chat input
 - Image thumbnail preview in attachment chips
-- Context compaction awareness for binary content
+- Refined media token estimation (replace Phase 1 placeholder with provider-aware formulas)
 - E2E test coverage
 
 ---
@@ -509,10 +588,12 @@ See §10 for full implementation details.
 | PDF library too large for plugin bundle | Build size doubles, slow Obsidian startup | Evaluate bundle impact early (§3.3). Fall back to lighter library. Consider lazy loading via dynamic `import()`. |
 | Canvas API resize quality poor | Blurry images sent to API | Test at various scales during Phase 2. JPEG at quality 80 on canvas is generally good. Keep PNG path for screenshots/diagrams. |
 | Provider rejects image/document format | Errors during conversation | Capability detection (§4.6) prevents sending unsupported formats. Graceful fallback to text extraction. |
-| `ChatMessage.content` type change regressions | Broken conversations | Phase 1 is exclusively this change with full backward compatibility. All existing paths produce strings unchanged. |
+| `Message.content` / `ChatMessage.content` type change regressions | Broken conversations, compile errors | Phase 1 enumerates all 14 callsites that consume content as string (§7). TypeScript compiler catches any missed sites. |
 | Large images/PDFs cause memory pressure | Plugin crashes or OOM | Enforce size limits (20MB max file, 5MB max base64). Process one attachment at a time. |
 | Canvas not available in all Obsidian contexts | Image processing fails | All processing runs in renderer process where Canvas is available. Verify in Phase 2. |
-| Binary content bloats conversation history | Large JSONL files | Binary content not persisted. Omitted on replay with `[image/PDF omitted]` marker. |
+| Binary content increases history file sizes | Larger JSONL files on disk | Media IS persisted. Existing `history_max_size_mb` (500MB) and `history_max_age_days` (90 days) provide guardrails. A conversation with 10 images adds ~2–5MB. |
+| Context compaction encounters media blocks | Wasted tokens, type errors, API failures | Phase 1 adds compaction safety: strip media blocks before summarization, append `[omitted]` marker. |
+| Media token estimation inaccuracy | Context overflow or premature truncation | Open research question (§7 Phase 1). Conservative fixed estimates as placeholder until provider-aware formulas are researched. |
 
 ---
 
@@ -768,12 +849,38 @@ The current template grafting logic ([`write-docx.ts` lines 286–338](../src/to
 2. `word/_rels/document.xml.rels` — relationship entries mapping rId references to media paths
 3. `[Content_Types].xml` — content type declarations for image formats
 
-**Fix:** When grafting, also merge from the generated ZIP into the template ZIP:
-- All `word/media/*` files (copy each entry)
-- Image relationship entries from generated `word/_rels/document.xml.rels` into template's (parse XML, append `<Relationship>` elements with image type)
-- Image content type entries from generated `[Content_Types].xml` into template's (append `<Default>` or `<Override>` elements for image extensions)
+**Fix — including rId conflict resolution:**
 
-Use `@xmldom/xmldom` (already a transitive dependency via mammoth) to parse and merge the relationship and content type XML.
+Both the template and generated document independently assign relationship IDs (`rId1`, `rId2`, etc.). Naively merging relationships would cause collisions — e.g., the template's `rId2 → settings.xml` could be overwritten by the generated doc's `rId2 → media/image1.png`. The fix requires remapping generated rIds to avoid conflicts.
+
+Use `@xmldom/xmldom` (`^0.8.11`, already a direct dependency) to parse and merge the XML.
+
+**Algorithm:**
+
+```
+1. Parse template's word/_rels/document.xml.rels
+2. Find the highest rId number in the template (e.g., rId5 → maxId = 5)
+3. Parse generated doc's word/_rels/document.xml.rels
+4. Collect all image/media relationships from the generated doc
+5. Build a remap table: for each generated image relationship rIdN,
+   assign a new ID rId(maxId + offset) where offset increments from 1
+   Example: generated rId2 → rId6, generated rId3 → rId7
+6. Update the generated word/document.xml body content:
+   replace all rId references using the remap table
+   (regex: r:embed="rIdN" → r:embed="rId(remapped)")
+7. Append remapped <Relationship> elements to the template's .rels XML
+8. Copy all word/media/* files from generated ZIP into template ZIP
+9. Parse both [Content_Types].xml files:
+   - For each image extension in the generated doc (png, jpg, gif, bmp),
+     add a <Default Extension="png" ContentType="image/png"/> entry
+     to the template's [Content_Types].xml if not already present
+10. Write updated .rels and [Content_Types].xml back to template ZIP
+```
+
+**Edge cases:**
+- Template has no existing images: maxId is determined from non-image relationships (styles, settings, etc.)
+- Generated doc has no images: skip the entire merge (no media to copy)
+- Duplicate media filenames: the `docx` library generates unique filenames (`image1.png`, `image2.png`), so collisions with template media are unlikely but should be checked — if a filename exists, rename with a numeric suffix
 
 **`ImageRun` API** (from `docx ^9.6.1`):
 
