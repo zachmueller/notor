@@ -16,7 +16,11 @@ Introduce two vault-defined extension types that share a common TypeScript runti
 - **Vault-defined tools** (`notor/tools/*.md`) — called by the LLM via tool_use, return a `ToolResult`
 - **Vault-defined automations** (`notor/automations/*.md`) — fire at LLM lifecycle hook events, run as side effects
 
-Both are Markdown notes with YAML frontmatter + a single fenced TypeScript/JavaScript code block. Prose outside the code fence serves as user-facing documentation visible in Obsidian. At plugin load, Notor discovers these files, extracts the code fence, strips types, compiles via `new Function()`, injects Obsidian APIs and bundled libraries as arguments, and registers them appropriately.
+Both are Markdown notes with YAML frontmatter + fenced code blocks (YAML for configuration, TypeScript/JavaScript for logic). Prose outside the code fences serves as user-facing documentation visible in Obsidian. At plugin load, Notor discovers these files, extracts the code fences, strips types, compiles via `new Function()`, injects Obsidian APIs and bundled libraries as arguments, and registers them appropriately.
+
+A third extension type shares the same file format:
+
+- **Global extension settings** (`notor/settings.md`) — declares shared settings accessible to all tools and automations via a `shared` object
 
 ---
 
@@ -28,7 +32,12 @@ Both tools and automations share the same underlying execution infrastructure.
 
 All user-defined extensions are **Markdown notes** (`.md`). The code lives inside a single fenced code block. This mirrors how workflows are already Markdown notes with frontmatter — extensions add a code fence.
 
-**Parsing rule:** The plugin extracts the first `` ```ts ```, `` ```typescript ```, `` ```js ```, or `` ```javascript `` fenced code block from the note body. Everything outside the fence (prose, headings, etc.) is documentation — ignored by the runtime but visible when the user opens the note in Obsidian. This lets users document what the extension does, why it exists, and how to customize it, all in the same file.
+**Parsing rules:**
+- **YAML fence** — The plugin extracts the first `` ```yaml `` fenced code block. This contains nested configuration (parameter schemas, settings schemas) that would exceed Obsidian frontmatter's depth limitations. Optional — extensions without params or settings can omit it.
+- **Code fence** — The plugin extracts the first `` ```ts ```, `` ```typescript ```, `` ```js ```, or `` ```javascript `` fenced code block. This contains the extension's executable logic.
+- Everything outside the fences (prose, headings, etc.) is documentation — ignored by the runtime but visible when the user opens the note in Obsidian. This lets users document what the extension does, why it exists, and how to customize it, all in the same file.
+
+**Split between frontmatter and YAML fence:** Flat scalar fields (`name`, `description`, `mode`, `event`, `label`, etc.) live in frontmatter. Nested structures (`params`, `settings`) live in the YAML code fence to avoid Obsidian's frontmatter depth limitations.
 
 ### Injected Context (Shared)
 
@@ -72,13 +81,21 @@ All user-defined extension code executes with these variables in scope:
 
 All of these are already bundled into the plugin by esbuild. Exposing them is zero-cost — just passing references to loaded modules.
 
+#### Extension Settings
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `settings` | `Record<string, unknown>` | Per-extension settings declared in the YAML fence's `settings` block, resolved from schema defaults + user-configured values. See [Extension Settings](#extension-settings). |
+| `shared` | `Record<string, unknown>` | Global shared settings from `notor/settings.md`, available to all extensions. Empty `{}` if no shared settings exist. |
+
 ### Compilation Pipeline
 
-1. **Discover** — scan `notor/tools/` and `notor/automations/` recursively on plugin load and on file changes. Files must be `.md` with the appropriate frontmatter marker (`notor-tool: true` or `notor-automation: true`).
-2. **Parse** — extract YAML frontmatter and locate the first TypeScript/JavaScript fenced code block in the body.
+1. **Discover** — scan `notor/tools/`, `notor/automations/`, and `notor/settings.md` recursively on plugin load and on file changes. Files must be `.md` with the appropriate frontmatter marker (`notor-tool: true`, `notor-automation: true`, or `notor-settings: true`).
+2. **Parse** — extract YAML frontmatter (flat fields), locate the first YAML fenced code block (nested config: `params`, `settings`), and locate the first TypeScript/JavaScript fenced code block (logic).
 3. **Strip types** — run the code block through sucrase (or regex for simple cases) to remove TypeScript type annotations.
-4. **Compile** — create a function via `new Function(argNames..., strippedCode)` with the injected context variables as named arguments.
-5. **Cache** — store the compiled function keyed by file path. Recompile only when the file changes.
+4. **Resolve settings** — merge schema defaults with persisted user values and SecretStorage secrets to produce the `settings` and `shared` objects.
+5. **Compile** — create a function via `new Function(argNames..., strippedCode)` with the injected context variables (including `settings`, `shared`) as named arguments.
+6. **Cache** — store the compiled function keyed by file path. Recompile only when the file changes.
 
 ### Type Stripping Strategy
 
@@ -112,6 +129,14 @@ notor-tool: true
 name: read_note
 description: "Read a vault note, stripping HTML comments"
 mode: read
+---
+
+# Read Note (Custom)
+
+Customized version of the built-in `read_note` tool that strips HTML comments
+from note content before returning it.
+
+```yaml
 params:
   path:
     type: string
@@ -120,12 +145,7 @@ params:
     type: boolean
     description: "Include YAML frontmatter"
     default: false
----
-
-# Read Note (Custom)
-
-Customized version of the built-in `read_note` tool that strips HTML comments
-from note content before returning it.
+```
 
 ```typescript
 const file = utils.resolveNote(params.path);
@@ -155,7 +175,13 @@ return { success: true, result: content };
 | `name` | yes | Tool name (unique identifier). If it matches a built-in tool name, overrides it. |
 | `description` | yes | Human-readable description sent to the LLM. |
 | `mode` | yes | `"read"` or `"write"`. Determines Plan/Act mode behavior. |
+
+### YAML Fence Schema
+
+| Field | Required | Description |
+|-------|----------|-------------|
 | `params` | yes | Parameter schema (simplified YAML that maps to JSON Schema). |
+| `settings` | no | Settings schema — declares user-configurable fields rendered in the settings UI. See [Extension Settings](#extension-settings). |
 
 ### Tool-Specific Injected Context
 
@@ -163,7 +189,7 @@ In addition to the shared runtime, tools receive:
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `params` | `Record<string, unknown>` | Parameters passed by the LLM, validated against the frontmatter schema |
+| `params` | `Record<string, unknown>` | Parameters passed by the LLM, validated against the YAML fence schema |
 
 The function body is expected to return a `ToolResult` object (`{ success, result, error? }`).
 
@@ -228,8 +254,16 @@ label: "Tag AI-modified notes"
 
 # Tag AI-Modified Notes
 
-Automatically adds `#ai-modified` tag to any note written or modified by the AI.
-Only fires on successful write operations.
+Automatically adds a configurable tag to any note written or modified by the AI.
+Only fires on successful write operations. The tag name can be changed in Settings.
+
+```yaml
+settings:
+  tag_name:
+    type: string
+    description: "Tag to add to AI-modified notes"
+    default: "ai-modified"
+```
 
 ```typescript
 if (context.status !== "success") return;
@@ -240,7 +274,7 @@ if (!file) return;
 
 await fileManager.processFrontMatter(file, (fm: any) => {
   fm.tags = fm.tags || [];
-  if (!fm.tags.includes("ai-modified")) fm.tags.push("ai-modified");
+  if (!fm.tags.includes(settings.tag_name)) fm.tags.push(settings.tag_name);
 });
 ```
 ````
@@ -253,6 +287,12 @@ await fileManager.processFrontMatter(file, (fm: any) => {
 | `event` | yes | Hook lifecycle event: `pre_send`, `on_tool_call`, `on_tool_result`, `after_completion` |
 | `tools` | no | Array of tool names to filter on (only for `on_tool_call`/`on_tool_result`). If omitted, fires for all tools. |
 | `label` | no | Human-readable label for settings UI and logging. |
+
+### YAML Fence Schema (Automations)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `settings` | no | Settings schema — declares user-configurable fields rendered in the settings UI. See [Extension Settings](#extension-settings). |
 
 ### Automation-Specific Injected Context
 
@@ -304,6 +344,158 @@ The plugin evaluates this filter *before* invoking the function — automations 
 | **Global shell hooks** (settings UI) | Coexist. Shell hooks fire first, automations fire after. |
 | **Workflow-scoped hooks** (G-004) | Automations are global by default. Workflow-scoped override could suppress them (future). |
 | **Vault event hooks** (on_note_open, on_save, etc.) | Separate system — not affected. Could extend automations to vault events in the future. |
+
+---
+
+## Extension Settings
+
+Both tools and automations can declare a `settings` block in their YAML code fence. This provides user-configurable values that appear in the plugin's settings UI and are injected at runtime.
+
+### Settings Schema
+
+Each entry under `settings:` declares one setting field:
+
+| Property | Required | Type | Description |
+|----------|----------|------|-------------|
+| `type` | yes | `"string" \| "number" \| "boolean" \| "string[]"` | Value type |
+| `description` | yes | `string` | Human-readable label for settings UI |
+| `default` | no | matches `type` | Default value (used if user hasn't configured) |
+| `secret` | no | `boolean` | If `true`, stored in Obsidian SecretStorage, rendered as password input |
+| `min` | no | `number` | Minimum value (number type only) |
+| `max` | no | `number` | Maximum value (number type only) |
+| `options` | no | `string[]` | Enum constraint — renders as dropdown (string type only) |
+
+### Example: Tool with Settings
+
+````markdown
+---
+notor-tool: true
+name: custom_search
+description: "Search via custom API"
+mode: read
+---
+
+# Custom Search
+
+Searches a custom API. Configure the API key and timeout in Settings.
+
+```yaml
+params:
+  query:
+    type: string
+    description: "Search query"
+  num_results:
+    type: number
+    description: "Number of results"
+    default: 5
+settings:
+  api_key:
+    type: string
+    description: "API key for the search service"
+    secret: true
+  timeout:
+    type: number
+    description: "Request timeout in seconds"
+    default: 30
+  base_url:
+    type: string
+    description: "API base URL"
+    default: "https://api.example.com"
+```
+
+```typescript
+const resp = await obsidian.requestUrl({
+  url: `${settings.base_url}/search?q=${params.query}&n=${params.num_results}`,
+  headers: { Authorization: `Bearer ${settings.api_key}` },
+  timeout: settings.timeout * 1000,
+});
+return { success: true, result: resp.text };
+```
+````
+
+### Global Shared Settings
+
+Built-in tools already share settings across tools — `domain_denylist` is used by both `fetch_webpage` and `web_search`, and `read_file_allowed_paths` is shared by 6 file tools. User-defined extensions need the same capability.
+
+A dedicated `notor/settings.md` file defines shared settings using the same schema:
+
+````markdown
+<!-- notor/settings.md -->
+---
+notor-settings: true
+---
+
+# Shared Extension Settings
+
+Settings shared across multiple user-defined tools and automations.
+
+```yaml
+settings:
+  custom_domain_denylist:
+    type: string[]
+    description: "Domains blocked from custom tools"
+    default: []
+  shared_api_key:
+    type: string
+    description: "API key used by multiple tools"
+    secret: true
+```
+````
+
+Global settings are injected as a `shared` object alongside `settings`:
+
+```typescript
+// In any tool or automation body:
+const blocked = shared.custom_domain_denylist; // from notor/settings.md
+const timeout = settings.timeout;              // from this extension's own settings
+```
+
+The `shared` object is always available (empty `{}` if `notor/settings.md` doesn't exist or has no settings).
+
+### Storage
+
+Two generic buckets in `NotorSettings`:
+
+```typescript
+/** Per-extension settings, keyed by extension name then setting key. */
+user_extension_settings: Record<string, Record<string, string | number | boolean | string[]>>;
+
+/** Global shared extension settings, keyed by setting key. */
+user_shared_settings: Record<string, string | number | boolean | string[]>;
+```
+
+Both default to `{}`. Populated lazily as users configure extensions.
+
+Settings with `secret: true` use Obsidian's `SecretStorage` API (via existing `getSecret()`/`setSecret()` helpers). Secret ID conventions:
+- Per-extension: `notor-ext-{extension-name}-{setting-key}`
+- Shared: `notor-shared-{setting-key}`
+
+Secret values are never persisted in `data.json`.
+
+### Settings UI
+
+The plugin auto-generates a settings UI section from each extension's `settings` schema. This appears under a new **"Extension settings"** collapsible group in the settings tab.
+
+Rendering per field type:
+- `type: string` + no `options` → text input (or password input if `secret: true`)
+- `type: string` + `options` → dropdown
+- `type: number` → text input with numeric validation (respects `min`/`max`)
+- `type: boolean` → toggle
+- `type: string[]` → dynamic list with add/remove buttons (same pattern as the domain denylist)
+
+Global shared settings render in their own sub-section labeled "Shared settings" at the top of the group. Each per-extension section includes a **"Reset to defaults"** button.
+
+Extensions with no `settings` block don't appear in the settings UI. If no extensions have settings, the group is hidden entirely.
+
+### Runtime Resolution
+
+At execution time, `settings` and `shared` are resolved by merging:
+
+1. Schema defaults from the YAML fence
+2. Persisted values from `user_extension_settings[name]` / `user_shared_settings`
+3. Secret values from SecretStorage (for `secret: true` fields)
+
+**Validation:** Before executing, the runtime checks that all required settings (no `default`, not yet configured by the user) have values. Missing required settings produce an error returned to the LLM: `"Tool 'custom_search' requires setting 'api_key' to be configured in Settings."` This prevents cryptic runtime failures and applies to both per-extension and shared settings.
 
 ---
 
