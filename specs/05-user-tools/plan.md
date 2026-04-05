@@ -42,7 +42,7 @@
 | `NotorSettings` | New fields: `user_extension_settings`, `user_shared_settings`. Settings defaults/merge in `loadSettings()` |
 | `SettingsTab` | New "Extensions" settings group with per-extension settings and shared settings sub-sections |
 | `main.ts` | New lazy accessor `getExtensionManager()`. Wired into reload command + settings button. Discovery runs on plugin load (`onLayoutReady`) |
-| `tool-config/path-enforcer.ts` | `TOOL_PATH_PARAMS` table extended to support dynamic registration of user-tool path params. User tools declare path params in their YAML fence; the runtime registers them in `TOOL_PATH_PARAMS` so `enforcePathConstraints()` applies. The path enforcer functions are also exposed via `utils.pathEnforcer` for extensions to use directly |
+| `tool-config/path-enforcer.ts` | `TOOL_PATH_PARAMS` is a `const` plain object (`Record<string, ToolPathParam[]>`) that already supports runtime property mutation — no structural change needed. User tools declare path params in their YAML fence; the runtime adds/removes entries via `TOOL_PATH_PARAMS[toolName] = [...]` / `delete TOOL_PATH_PARAMS[toolName]` so `enforcePathConstraints()` applies. The path enforcer functions are also exposed via `utils.pathEnforcer` for extensions to use directly |
 | `tool-orchestration.ts` | `partitionToolCalls()` needs to classify user tools. User tools with `mode: "read"` are concurrency-safe; `mode: "write"` are non-concurrent. Same logic as built-in tools |
 | `esbuild.config.mjs` | Sucrase added as a bundled dependency (not external) |
 
@@ -425,8 +425,8 @@ Assemble the `utils` and `libs` objects passed to extensions at runtime.
 ```typescript
 function buildUtils(plugin: NotorPlugin): Record<string, unknown> {
   return {
-    resolveNote: (path: string) => resolveNote(plugin.app.vault, plugin.app.metadataCache, path),
-    staleTracker: plugin.getStaleContentTracker(),
+    resolveNote: (path: string) => resolveNote(path, plugin.app.vault, plugin.app.metadataCache),
+    staleTracker: plugin.getStaleTracker(),
     checkpointManager: plugin.getCheckpointManager(),
     noteOpener: plugin.getNoteOpener(),
     logger: (name: string) => logger(`ext:${name}`),
@@ -441,6 +441,8 @@ function buildUtils(plugin: NotorPlugin): Record<string, unknown> {
 }
 ```
 
+**Note:** `plugin.vaultRootPath` requires a new getter on `NotorPlugin` (see EXT-017). Implementation: `get vaultRootPath(): string { return (this.app.vault.adapter as { basePath?: string }).basePath ?? ""; }`
+
 The `pathEnforcer` sub-object exposes the dispatch-time path enforcement and `isPathWithin` utility from `src/tool-config/path-enforcer.ts` and `src/utils/path-validation.ts`. This allows user tools to leverage the same path constraint logic used by built-in tools.
 
 **`libs` object:** References to bundled libraries.
@@ -449,7 +451,6 @@ The `pathEnforcer` sub-object exposes the dispatch-time path enforcement and `is
 import mammoth from "mammoth";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
-import * as unpdf from "unpdf";
 import * as docx from "docx";
 import PizZip from "pizzip";
 import { marked } from "marked";
@@ -461,7 +462,7 @@ function buildLibs(): Record<string, unknown> {
     mammoth,
     Turndown: TurndownService,
     turndownGfm: { gfm },
-    unpdf,
+    unpdf: () => import("unpdf"),
     docx,
     PizZip,
     marked,
@@ -471,11 +472,10 @@ function buildLibs(): Record<string, unknown> {
 }
 ```
 
-**Note on `unpdf`:** Currently dynamically imported in `src/media/pdf-processor.ts`. Decision: use eager static import for simplicity — the bundle size impact is acceptable since users installing extensions likely want the full library surface.
+**Note on `unpdf`:** Currently dynamically imported in `src/media/pdf-processor.ts` to defer loading of the heavy PDF.js wrapper. We preserve this pattern — `libs.unpdf` is exposed as a lazy async wrapper (`() => import("unpdf")`). Extension code uses `const { getDocumentProxy } = await libs.unpdf();`. This avoids regressing plugin startup time for all users.
 
 - [ ] Implement `buildUtils()` — verify each utility reference resolves correctly from `main.ts` accessors. Include `abortSignal` from `ToolExecuteOptions` in the utils context for user tools (see EXT-012 adapter)
-- [ ] Implement `buildLibs()` — verify all 9 libraries import correctly (mammoth, Turndown, turndownGfm, unpdf, docx, PizZip, marked, xmldom, croner)
-- [ ] Use eager static import for `unpdf` (accepts bundle size tradeoff)
+- [ ] Implement `buildLibs()` — verify all 9 libraries import correctly (mammoth, Turndown, turndownGfm, unpdf, docx, PizZip, marked, xmldom, croner). Note: `unpdf` is a lazy wrapper (`() => import("unpdf")`), not a static import
 - [ ] Implement `buildObsidianExports()` — expose commonly needed `obsidian` module exports (`requestUrl`, `Notice`, `TFile`, `getFrontMatterInfo`, `normalizePath`, etc.)
 
 ---
@@ -601,8 +601,8 @@ class UserToolAdapter implements Tool {
     // 2. Build injected context (app, obsidian, utils, libs, settings, shared, params)
     //    - Include options?.abortSignal in utils context for cancellation support
     // 3. Call compiled function
-    // 4. Wrap return value as ToolResult
-    // 5. On error: Notice + logger + return { success: false, error }
+    // 4. Wrap return value as ToolResult (always include tool_name: this.definition.name)
+    // 5. On error: Notice + logger + return { tool_name: this.definition.name, success: false, error }
   }
 }
 ```
@@ -666,35 +666,34 @@ This avoids coupling the hook module to the extension module. The orchestrator i
 
 **Context object construction:**
 
-The adapter translates from internal hook field names (`toolParams`, `toolResult`, `toolStatus`) to the design doc's extension-facing names (`params`, `result`, `status`):
+Each dispatch function translates from internal `ToolHookContext` field names to the design doc's extension-facing names inline — no separate helper needed. The translation happens at the call site inside each dispatch function:
 
 ```typescript
-function buildAutomationContext(
-  trigger: AutomationTrigger,
-  hookData: {
-    conversationId?: string;
-    toolName?: string;
-    params?: Record<string, unknown>;   // translated from toolParams
-    result?: string;                     // translated from toolResult
-    status?: "success" | "error";        // translated from toolStatus
-    notePath?: string;
-    oldTags?: string[];
-    newTags?: string[];
-    schedule?: string;
-  }
-): Record<string, unknown> {
-  return {
-    hookEvent: trigger,
-    timestamp: new Date().toISOString(),
-    ...hookData,
-  };
-}
+// Example: inside dispatchOnToolCall(), after shell hooks:
+const automationCtx = {
+  hookEvent: "on_tool_call",
+  timestamp: context.timestamp,
+  conversationId: context.conversationId,
+  toolName: context.toolName,
+  params: context.toolParams,           // translated from internal toolParams
+};
+
+// Example: inside dispatchOnToolResult(), after shell hooks:
+const automationCtx = {
+  hookEvent: "on_tool_result",
+  timestamp: context.timestamp,
+  conversationId: context.conversationId,
+  toolName: context.toolName,
+  params: context.toolParams,           // translated from internal toolParams
+  result: context.toolResult,           // translated from internal toolResult
+  status: context.toolStatus,           // translated from internal toolStatus
+};
 ```
 
 - [ ] Add accessor parameter to all four dispatch functions (not `ExtensionManager` directly)
 - [ ] Implement automation execution within each dispatch function (fire-and-forget for all except `pre_send`)
 - [ ] Execute automations sequentially in `notor-automation-order` order
-- [ ] Build context objects with design-doc field names (translate from internal names)
+- [ ] Translate field names from `ToolHookContext` to design-doc names inline in each dispatch function (no separate `buildAutomationContext()` helper)
 - [ ] Handle automation errors: Notice + logger (no ToolResult for automations)
 - [ ] Respect `notor-tools` filter for `on_tool_call` and `on_tool_result` (via `GetAutomationsForToolEvent`)
 
@@ -899,7 +898,7 @@ private isExtensionFile(file: TAbstractFile): boolean {
 
 - [ ] Implement `registerExtensionVaultWatcher()` in `main.ts` using `registerEvent()` for all four vault events
 - [ ] Implement path matching helpers (`isExtensionToolFile()`, etc.)
-- [ ] Implement debounced Notice with 2000ms window
+- [ ] Implement debounced Notice with 1000ms window
 - [ ] Implement click-to-reload on the Notice
 - [ ] Implement duplicate Notice suppression
 - [ ] Clear timer and Notice in `onunload()`
@@ -943,29 +942,44 @@ getExtensionManager(): ExtensionManager {
 1. `getToolRegistry()` — call `extensionManager.reload()` after registering built-in tools (ensures user tools overwrite built-ins)
 2. `getToolDispatcher()` — user tools already registered via reload, no extra wiring needed
 3. `_initMcpHub()` — no changes needed (MCP tools register independently)
-4. Orchestrator — bind `extensionManager.getAutomationsForTrigger` and `extensionManager.getAutomationsForToolEvent` as accessor callbacks, pass to dispatch functions
+4. Orchestrator — call `orchestrator.setExtensionAccessors()` (same pattern as `setPersonaManager()` and `setWorkflowHookOverrideManager()`) so it can pass accessors at each dispatch call site
 5. `onunload()` — call `extensionManager.destroy()` (includes `TOOL_PATH_PARAMS` cleanup)
 
-**Passing to hook dispatch (accessor pattern):**
+**Passing to hook dispatch (orchestrator setter pattern):**
 
-Instead of passing the full `ExtensionManager` to dispatch functions, bind lightweight accessors:
+Add a `setExtensionAccessors()` method on `ChatOrchestrator` (matches existing `setPersonaManager()` and `setWorkflowHookOverrideManager()` patterns). The orchestrator stores the accessors and passes them at each lazy-imported dispatch call site:
 
 ```typescript
-// In orchestrator setup or at call sites:
-const getAutomations = (trigger) => extensionManager.getAutomationsForTrigger(trigger);
-const getToolAutomations = (trigger, toolName) => extensionManager.getAutomationsForToolEvent(trigger, toolName);
+// In ChatOrchestrator:
+setExtensionAccessors(accessors: {
+  getForTrigger: (trigger: AutomationTrigger) => UserAutomationDefinition[];
+  getForToolEvent: (trigger: "on_tool_call" | "on_tool_result", toolName: string) => UserAutomationDefinition[];
+}): void {
+  this.extensionAccessors = accessors;
+}
 
-// Pass to dispatch functions as optional last parameter
-dispatchPreSend(context, settings, vaultRootPath, overrideManager, getAutomations);
-dispatchOnToolCall(context, settings, vaultRootPath, overrideManager, getToolAutomations);
+// At each dispatch call site (e.g., dispatchOnToolCall):
+const { dispatchOnToolCall } = await import("../hooks/hook-events");
+dispatchOnToolCall(context, this.settings, vaultRootPath, this.workflowHookOverrideManager, this.extensionAccessors?.getForToolEvent);
+```
+
+```typescript
+// In main.ts orchestrator setup:
+const mgr = this.getExtensionManager();
+orchestrator.setExtensionAccessors({
+  getForTrigger: (t) => mgr.getAutomationsForTrigger(t),
+  getForToolEvent: (t, n) => mgr.getAutomationsForToolEvent(t, n),
+});
 ```
 
 For vault event dispatch, inject `getAutomationsForTrigger` into `DispatcherDeps`.
 
 - [ ] Create `getExtensionManager()` lazy accessor
+- [ ] Add `get vaultRootPath(): string` getter to `NotorPlugin` (`(this.app.vault.adapter as { basePath?: string }).basePath ?? ""`)
 - [ ] Wire initial `reload()` into `onLayoutReady()` (after tool registry initialization)
-- [ ] Bind accessor callbacks from `extensionManager` and pass to orchestrator
-- [ ] Pass accessor callbacks through to all four LLM lifecycle dispatch calls
+- [ ] Add `setExtensionAccessors()` method to `ChatOrchestrator` (stores accessors for dispatch call sites)
+- [ ] Call `orchestrator.setExtensionAccessors()` in `main.ts` after creating extension manager
+- [ ] Pass stored accessors through to all four LLM lifecycle dispatch calls at their lazy-import call sites
 - [ ] Add `getExtensionAutomations` accessor to vault event `DispatcherDeps` construction
 - [ ] Add `getExtensionAutomations` accessor to `VaultEventListenerManager` construction
 - [ ] Add `getExtensionAutomations` accessor to `VaultEventScheduler` setup

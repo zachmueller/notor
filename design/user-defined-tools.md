@@ -318,7 +318,7 @@ await app.fileManager.processFrontMatter(file, (fm: any) => {
 | `notor-trigger` | yes | Hook event to fire on. LLM lifecycle: `pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`. Vault events: `on_note_open`, `on_note_create`, `on_save`, `on_manual_save`, `on_tag_change`, `on_schedule`. Reuses the same property used by workflows. |
 | `notor-schedule` | conditional | Cron expression (required when `notor-trigger: on_schedule`). Same property used by workflows. |
 | `notor-tools` | no | Array of tool names to filter on (only for `on_tool_call`/`on_tool_result`; ignored for other events). If omitted, fires for all tools. |
-| `notor-display-name` | no | Human-readable label for settings UI and logging. Reuses the same property used by workflows. |
+| `notor-display-name` | no | Human-readable label for settings UI and logging. |
 | `notor-automation-order` | no | Numeric execution priority. Lower values fire first. Default: `0`. Ties broken alphabetically by filename. |
 | ~~`notor-blocking`~~ | — | **Removed.** All automations are fire-and-forget (except `pre_send` which is inherently blocking). The existing LLM lifecycle dispatch functions (`dispatchOnToolCall`, `dispatchOnToolResult`, `dispatchAfterCompletion`) use a fire-and-forget `void (async () => { ... })()` pattern — the orchestrator does not await them. Supporting true pipeline-blocking would require changing these signatures to `async` and updating all call sites, which is out of scope for the first iteration. |
 
