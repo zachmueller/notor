@@ -170,6 +170,10 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	sub_agent_iteration_cap: 20,
 	sub_agent_token_limit: 0,
 
+	// Phase 5: User-defined extensions
+	user_extension_settings: {},
+	user_shared_settings: {},
+
 	// Settings UI state
 	settings_collapsed_sections: {},
 

@@ -339,6 +339,27 @@ export interface NotorSettings {
 	sub_agent_token_limit: number;
 
 	// -------------------------------------------------------------------
+	// Phase 5: User-defined extension settings
+	// -------------------------------------------------------------------
+
+	/**
+	 * Per-extension settings, keyed by extension name then setting key.
+	 * Values are persisted via loadData/saveData. Secret fields use
+	 * SecretStorage instead and are not stored here.
+	 *
+	 * @see specs/05-user-tools/plan.md — EXT-004
+	 */
+	user_extension_settings: Record<string, Record<string, string | number | boolean | string[]>>;
+
+	/**
+	 * Global shared extension settings from `notor/settings.md`, keyed
+	 * by setting key. Shared across all extensions.
+	 *
+	 * @see specs/05-user-tools/plan.md — EXT-004
+	 */
+	user_shared_settings: Record<string, string | number | boolean | string[]>;
+
+	// -------------------------------------------------------------------
 	// Settings UI state
 	// -------------------------------------------------------------------
 

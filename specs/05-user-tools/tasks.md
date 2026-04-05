@@ -42,8 +42,8 @@ Define all shared types for the extension system. Reference existing types:
 - `ToolResult` from `src/types.ts:174-214`
 - `Tool` interface from `src/tools/tool.ts:71-91`
 
-- [ ] Define `ExtensionType = "tool" | "automation" | "settings"` discriminator
-- [ ] Define `UserToolDefinition` interface:
+- [x] Define `ExtensionType = "tool" | "automation" | "settings"` discriminator
+- [x] Define `UserToolDefinition` interface:
   - `filePath: string` — vault-relative source path
   - `name: string` — from frontmatter `notor-tool-name`
   - `description: string` — from frontmatter `notor-description`
@@ -53,8 +53,8 @@ Define all shared types for the extension system. Reference existing types:
   - `settingsSchema: SettingsFieldSchema[] | null` — from YAML fence `settings` block
   - `rawCode: string` — TypeScript/JavaScript code from code fence
   - `compiledFn: CompiledExtensionFn | null` — null until compilation succeeds
-- [ ] Define `AutomationTrigger` union type — LLM lifecycle (`pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`) + vault events (`on_note_open`, `on_note_create`, `on_save`, `on_manual_save`, `on_tag_change`, `on_schedule`)
-- [ ] Define `UserAutomationDefinition` interface:
+- [x] Define `AutomationTrigger` union type — LLM lifecycle (`pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`) + vault events (`on_note_open`, `on_note_create`, `on_save`, `on_manual_save`, `on_tag_change`, `on_schedule`)
+- [x] Define `UserAutomationDefinition` interface:
   - `filePath: string`
   - `displayName: string | null` — from `notor-display-name`
   - `trigger: AutomationTrigger` — from `notor-trigger`
@@ -64,10 +64,10 @@ Define all shared types for the extension system. Reference existing types:
   - `settingsSchema: SettingsFieldSchema[] | null`
   - `rawCode: string`
   - `compiledFn: CompiledExtensionFn | null`
-- [ ] Define `SharedSettingsDefinition` interface:
+- [x] Define `SharedSettingsDefinition` interface:
   - `filePath: string` — always `notor/settings.md`
   - `settingsSchema: SettingsFieldSchema[]`
-- [ ] Define `SettingsFieldSchema` interface:
+- [x] Define `SettingsFieldSchema` interface:
   - `key: string` — YAML key name
   - `name: string` — human-readable label for UI
   - `type: "string" | "number" | "boolean" | "string[]"` — value type
@@ -77,11 +77,11 @@ Define all shared types for the extension system. Reference existing types:
   - `min?: number` — number type only
   - `max?: number` — number type only
   - `options?: string[]` — string type only, renders as dropdown
-- [ ] Define `ParamSchema` interface — `Record<string, { type: string; description?: string; default?: unknown; enum?: string[]; items?: { type: string }; path_namespace?: "vault" | "filesystem" }>`
-- [ ] Define `CompiledExtensionFn = (...args: unknown[]) => Promise<unknown>`
-- [ ] Define `ExtensionError` interface — `{ filePath: string; message: string }`
-- [ ] Define `ExtensionReloadResult` interface — `{ toolCount: number; automationCount: number; builtinOverrides: string[]; errors: ExtensionError[] }`
-- [ ] Export all types
+- [x] Define `ParamSchema` interface — `Record<string, { type: string; description?: string; default?: unknown; enum?: string[]; items?: { type: string }; path_namespace?: "vault" | "filesystem" }>`
+- [x] Define `CompiledExtensionFn = (...args: unknown[]) => Promise<unknown>`
+- [x] Define `ExtensionError` interface — `{ filePath: string; message: string }`
+- [x] Define `ExtensionReloadResult` interface — `{ toolCount: number; automationCount: number; builtinOverrides: string[]; errors: ExtensionError[] }`
+- [x] Export all types
 
 ### EXT-004 — Add NotorSettings fields
 
@@ -89,10 +89,10 @@ Define all shared types for the extension system. Reference existing types:
 
 Add the two new settings fields for extension data persistence. Follow the existing pattern — settings are organized by phase/feature group with doc comments.
 
-- [ ] Add to `NotorSettings` interface in `src/settings/types.ts` (after sub-agent settings block ~line 339, before settings UI state):
+- [x] Add to `NotorSettings` interface in `src/settings/types.ts` (after sub-agent settings block ~line 339, before settings UI state):
   - `user_extension_settings: Record<string, Record<string, string | number | boolean | string[]>>` — per-extension settings keyed by extension name then setting key
   - `user_shared_settings: Record<string, string | number | boolean | string[]>` — global shared settings keyed by setting key
-- [ ] Add defaults in `src/settings/defaults.ts` `createDefaultSettings()`:
+- [x] Add defaults in `src/settings/defaults.ts` `createDefaultSettings()`:
   - `user_extension_settings: {}`
   - `user_shared_settings: {}`
 

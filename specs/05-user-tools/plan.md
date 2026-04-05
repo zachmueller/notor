@@ -201,8 +201,8 @@ interface ParamSchema {
 type CompiledExtensionFn = (...args: unknown[]) => Promise<unknown>;
 ```
 
-- [ ] Implement all types above
-- [ ] Export all types from `src/extensions/types.ts`
+- [x] Implement all types above
+- [x] Export all types from `src/extensions/types.ts`
 
 ### EXT-004 — Add NotorSettings fields
 
@@ -222,8 +222,8 @@ user_shared_settings: Record<string, string | number | boolean | string[]>;
 
 **File:** `src/settings/defaults.ts` (modify existing)
 
-- [ ] Add `user_extension_settings: {}` to default settings
-- [ ] Add `user_shared_settings: {}` to default settings
+- [x] Add `user_extension_settings: {}` to default settings
+- [x] Add `user_shared_settings: {}` to default settings
 
 ---
 
