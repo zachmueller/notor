@@ -14,9 +14,11 @@
  */
 
 import { Cron } from "croner";
+import { Notice } from "obsidian";
 import type { VaultEventHook, Workflow } from "../types";
 import type { VaultEventHookContext } from "./vault-event-hook-engine";
 import type { ExecutionChain } from "../types";
+import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
 import { logger } from "../utils/logger";
 
 const log = logger("VaultEventScheduler");
@@ -68,6 +70,18 @@ export class VaultEventScheduler {
 	 */
 	private getDiscoveredWorkflows: (() => Workflow[]) | null = null;
 
+	/**
+	 * EXT-014: Accessor for user-defined automations with `on_schedule` trigger.
+	 * Set via `setExtensionAutomations()` during plugin initialization.
+	 */
+	private extensionAutomationsAccessor: ((trigger: AutomationTrigger) => UserAutomationDefinition[]) | null = null;
+
+	/**
+	 * EXT-014: Executor for user-defined automations.
+	 * Encapsulates runtime context building and compiled function invocation.
+	 */
+	private extensionAutomationExecutor: ((automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>) | null = null;
+
 	// ---------------------------------------------------------------------------
 	// Initialization
 	// ---------------------------------------------------------------------------
@@ -88,6 +102,24 @@ export class VaultEventScheduler {
 		this.getDiscoveredWorkflows = getDiscoveredWorkflows;
 	}
 
+	/**
+	 * EXT-014: Inject the extension automation accessor and executor.
+	 *
+	 * Separate from `setDispatch()` — each data source has its own injection
+	 * point. Must be called before `syncJobs()` for automation schedules to
+	 * be picked up.
+	 *
+	 * @param getAutomations    - Returns automations matching the given trigger.
+	 * @param executeAutomation - Executes an automation with runtime context.
+	 */
+	setExtensionAutomations(
+		getAutomations: (trigger: AutomationTrigger) => UserAutomationDefinition[],
+		executeAutomation: (automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>,
+	): void {
+		this.extensionAutomationsAccessor = getAutomations;
+		this.extensionAutomationExecutor = executeAutomation;
+	}
+
 	// ---------------------------------------------------------------------------
 	// Job synchronization
 	// ---------------------------------------------------------------------------
@@ -106,8 +138,8 @@ export class VaultEventScheduler {
 	 * @param hooks - Current list of enabled `on_schedule` hooks from settings.
 	 */
 	syncJobs(hooks: VaultEventHook[]): void {
-		// Build the desired job set: settings hooks + scheduled workflow triggers
-		const desiredJobs = new Map<string, { schedule: string; label: string; isWorkflow: boolean; hook?: VaultEventHook; workflow?: Workflow }>();
+		// Build the desired job set: settings hooks + scheduled workflow triggers + extension automations
+		const desiredJobs = new Map<string, { schedule: string; label: string; isWorkflow: boolean; hook?: VaultEventHook; workflow?: Workflow; automation?: UserAutomationDefinition }>();
 
 		// Settings-configured hooks
 		for (const hook of hooks) {
@@ -144,6 +176,26 @@ export class VaultEventScheduler {
 			}
 		}
 
+		// EXT-014: Extension automations with on_schedule trigger
+		if (this.extensionAutomationsAccessor) {
+			const scheduledAutomations = this.extensionAutomationsAccessor("on_schedule");
+			for (const automation of scheduledAutomations) {
+				if (!automation.schedule?.trim()) {
+					log.warn("on_schedule automation has no schedule expression, skipping", {
+						filePath: automation.filePath,
+					});
+					continue;
+				}
+				const key = `ext-auto:${automation.filePath}`;
+				desiredJobs.set(key, {
+					schedule: automation.schedule.trim(),
+					label: automation.displayName ?? automation.filePath,
+					isWorkflow: false,
+					automation,
+				});
+			}
+		}
+
 		// Stop jobs that are no longer desired
 		for (const [id, job] of this.jobs) {
 			if (!desiredJobs.has(id)) {
@@ -154,7 +206,7 @@ export class VaultEventScheduler {
 		// Start jobs that are new
 		for (const [id, desired] of desiredJobs) {
 			if (!this.jobs.has(id)) {
-				this.startJob(id, desired.schedule, desired.label, desired.hook, desired.workflow);
+				this.startJob(id, desired.schedule, desired.label, desired.hook, desired.workflow, desired.automation);
 			}
 		}
 
@@ -233,6 +285,8 @@ export class VaultEventScheduler {
 		this.jobs.clear();
 		this.dispatchFn = null;
 		this.getDiscoveredWorkflows = null;
+		this.extensionAutomationsAccessor = null;
+		this.extensionAutomationExecutor = null;
 		log.debug("VaultEventScheduler destroyed");
 	}
 
@@ -258,11 +312,12 @@ export class VaultEventScheduler {
 		schedule: string,
 		label: string,
 		hook?: VaultEventHook,
-		workflow?: Workflow
+		workflow?: Workflow,
+		automation?: UserAutomationDefinition,
 	): void {
 		try {
 			const job = new Cron(schedule, () => {
-				this.onJobFire(id, label, hook, workflow);
+				this.onJobFire(id, label, hook, workflow, automation);
 			});
 
 			this.jobs.set(id, job);
@@ -310,9 +365,35 @@ export class VaultEventScheduler {
 		id: string,
 		label: string,
 		hook?: VaultEventHook,
-		workflow?: Workflow
+		workflow?: Workflow,
+		automation?: UserAutomationDefinition,
 	): void {
 		log.debug("on_schedule job fired", { id, label });
+
+		// EXT-014: Extension automation — execute directly via the executor callback
+		if (automation) {
+			if (!this.extensionAutomationExecutor) {
+				log.warn("on_schedule automation job fired but no executor set — skipping", { id });
+				return;
+			}
+
+			const context: Record<string, unknown> = {
+				hookEvent: "on_schedule",
+				timestamp: new Date().toISOString(),
+				schedule: automation.schedule,
+			};
+
+			void (async () => {
+				try {
+					await this.extensionAutomationExecutor!(automation, context);
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : String(e);
+					log.error("Extension automation on_schedule execution failed", { id, error: msg });
+					new Notice(`Automation error in ${label}: ${msg}`);
+				}
+			})();
+			return;
+		}
 
 		if (!this.dispatchFn) {
 			log.warn("on_schedule job fired but no dispatch function set — skipping", { id });

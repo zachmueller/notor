@@ -22,6 +22,7 @@
 import { Notice, Platform, TFile } from "obsidian";
 import type { App, Vault, MetadataCache } from "obsidian";
 import type { VaultEventHook, Workflow, ExecutionChain, TriggerContext, WorkflowExecution } from "../types";
+import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
 import type { NotorSettings } from "../settings";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import type { ChatOrchestrator } from "../chat/orchestrator";
@@ -62,6 +63,10 @@ export interface DispatcherDeps {
 	personaManager?: PersonaManager;
 	/** Execution chain tracker instance. */
 	chainTracker: ExecutionChainTracker;
+	/** EXT-014: Accessor for user-defined automations matching a vault event trigger. */
+	getExtensionAutomations?: (trigger: AutomationTrigger) => UserAutomationDefinition[];
+	/** EXT-014: Executor for user-defined automations (encapsulates runtime context building). */
+	executeExtensionAutomation?: (automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +105,9 @@ export function dispatchVaultEventHooks(
 	chain: ExecutionChain | null,
 	deps: DispatcherDeps
 ): void {
-	if (hooks.length === 0) return;
+	// EXT-014: Also check for extension automations before early return
+	const hasAutomations = deps.getExtensionAutomations && deps.executeExtensionAutomation;
+	if (hooks.length === 0 && !hasAutomations) return;
 
 	log.info("Dispatching vault event hooks", {
 		count: hooks.length,
@@ -121,6 +128,64 @@ export function dispatchVaultEventHooks(
 					hookEvent: context.hookEvent,
 				});
 				new Notice(`Vault event hook error: ${msg}`);
+			}
+		}
+
+		// EXT-014: Execute matching extension automations after hooks/workflows
+		if (deps.getExtensionAutomations && deps.executeExtensionAutomation) {
+			try {
+				const automations = deps.getExtensionAutomations(context.hookEvent as AutomationTrigger);
+				if (automations.length > 0) {
+					log.info("Dispatching extension automations for vault event", {
+						count: automations.length,
+						event: context.hookEvent,
+					});
+
+					// Build vault event context for automations
+					const automationCtx: Record<string, unknown> = {
+						hookEvent: context.hookEvent,
+						timestamp: context.timestamp,
+					};
+
+					// Add event-specific context fields
+					if (context.notePath !== null) {
+						automationCtx.notePath = context.notePath;
+					}
+					if (context.tagsAdded !== null) {
+						automationCtx.tagsAdded = context.tagsAdded;
+					}
+					if (context.tagsRemoved !== null) {
+						automationCtx.tagsRemoved = context.tagsRemoved;
+					}
+
+					// Execute within the same chain context for loop prevention
+					for (const automation of automations) {
+						// Check execution chain for loop prevention
+						if (chain !== null && deps.chainTracker.shouldSkipHook(chain, context.hookEvent)) {
+							break;
+						}
+
+						try {
+							await deps.executeExtensionAutomation(automation, automationCtx);
+						} catch (e) {
+							const displayName = automation.displayName ?? automation.filePath;
+							const message = e instanceof Error ? e.message : String(e);
+							new Notice(`Automation error in ${displayName}: ${message}`);
+							log.error("User automation execution failed", {
+								automation: displayName,
+								trigger: context.hookEvent,
+								error: String(e),
+								stack: e instanceof Error ? e.stack : undefined,
+							});
+						}
+					}
+				}
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e);
+				log.error("Unexpected error dispatching extension automations", {
+					error: msg,
+					hookEvent: context.hookEvent,
+				});
 			}
 		}
 

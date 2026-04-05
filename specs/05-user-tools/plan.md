@@ -712,12 +712,12 @@ const automationCtx = {
 };
 ```
 
-- [ ] Add accessor parameter to all four dispatch functions in `hook-events.ts` (not `ExtensionManager` directly)
-- [ ] Implement automation execution within each dispatch function (fire-and-forget for all except `pre_send`)
-- [ ] Execute automations sequentially in `notor-automation-order` order
-- [ ] Translate field names from each function's context type (`PreSendContext`, `ToolHookContext`, or `CompletionContext`) to design-doc names inline in each dispatch function (no separate `buildAutomationContext()` helper)
-- [ ] Handle automation errors: Notice + logger (no ToolResult for automations)
-- [ ] Respect `notor-tools` filter for `on_tool_call` and `on_tool_result` (via `GetAutomationsForToolEvent`)
+- [x] Add accessor parameter to all four dispatch functions in `hook-events.ts` (not `ExtensionManager` directly)
+- [x] Implement automation execution within each dispatch function (fire-and-forget for all except `pre_send`)
+- [x] Execute automations sequentially in `notor-automation-order` order
+- [x] Translate field names from each function's context type (`PreSendContext`, `ToolHookContext`, or `CompletionContext`) to design-doc names inline in each dispatch function (no separate `buildAutomationContext()` helper)
+- [x] Handle automation errors: Notice + logger (no ToolResult for automations)
+- [x] Respect `notor-tools` filter for `on_tool_call` and `on_tool_result` (via `GetAutomationsForToolEvent`)
 
 ### EXT-014 — Integrate automations with vault event hooks
 
@@ -756,12 +756,12 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 { hookEvent, timestamp, schedule }
 ```
 
-- [ ] Add `getExtensionAutomations?` accessor to `DispatcherDeps` interface. This flows automatically through the dispatch chain: `main.ts` builds `getDispatcherDeps()` closure (which includes the accessor) → `VaultEventHandlerDeps.dispatch` callback wraps `dispatchVaultEventHooks(hooks, context, chain, getDispatcherDeps())` → automations accessor is available inside `dispatchVaultEventHooks()`. No changes to `VaultEventHandlerDeps` or `collectHooksAndWorkflows()` needed
-- [ ] Dispatch automations as a separate step after hooks+workflows in `dispatchVaultEventHooks()`. Automations must execute within the **same `chain` context** as the preceding hooks so `ExecutionChainTracker.shouldSkipHook()` applies — pass the `chain` parameter through to automation execution to prevent re-entrant loops (e.g., an automation calling `app.vault.process()` triggering `on_save` which re-enters the dispatch pipeline). **Error resilience:** Wrap the automation dispatch step in its own try/catch block (independent of the hook/workflow loop's error handling) so that if the hook loop throws unexpectedly, automations still have a chance to run, and automation errors don't propagate to the caller. Each individual automation should also have its own try/catch (same pattern as individual hooks)
-- [ ] Build vault event context objects (using design-doc field names)
-- [ ] Add `setExtensionAutomations()` setter on `VaultEventListenerManager` (NOT a constructor param — the manager is constructed in `_initVaultEventHooks()` before extensions are discovered). The setter accepts `(trigger: AutomationTrigger) => UserAutomationDefinition[]` (the `getAutomationsForTrigger` function). Update `hasActiveHooks()` to call the stored function with the specific vault event type and check if the result is non-empty. **Init ordering:** call the setter before `onLayoutReady()` calls `evaluateListeners()`. The accessor returns empty until extensions are loaded; after `ExtensionManager.reload()` completes, call `evaluateListeners()` again to register listeners for any new automation vault event triggers
-- [ ] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (separate from `setDispatch()` — each data source has its own injection point); add parallel loop in `syncJobs()` for automation `on_schedule` entries. **Job ID convention:** use `ext-auto:{filePath}` (e.g., `ext-auto:notor/automations/daily-cleanup.md`) to avoid collisions with settings hook UUIDs and workflow IDs in the `desiredJobs` map
-- [ ] Wire `getExtensionAutomations` accessor through from `main.ts` when constructing `getDispatcherDeps()` closure and when calling setters on `VaultEventListenerManager` and `VaultEventScheduler`
+- [x] Add `getExtensionAutomations?` and `executeExtensionAutomation?` accessors to `DispatcherDeps` interface. Flows through the dispatch chain automatically — no changes to `VaultEventHandlerDeps` or `collectHooksAndWorkflows()` needed
+- [x] Dispatch automations as a separate step after hooks+workflows in `dispatchVaultEventHooks()`. Uses same `chain` context for `shouldSkipHook()`. Wrapped in independent try/catch; each automation also has its own try/catch. Early return updated to check for automations
+- [x] Build vault event context objects (using design-doc field names): `hookEvent`, `timestamp`, conditionally `notePath`, `tagsAdded`, `tagsRemoved`
+- [x] Add `setExtensionAutomations()` setter on `VaultEventListenerManager` (NOT a constructor param). Updated `hasActiveHooks()` to also check extension automations. Wiring deferred to EXT-017
+- [x] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (separate from `setDispatch()`); added parallel loop in `syncJobs()` for automation `on_schedule` entries. Job ID convention: `ext-auto:{filePath}`. Updated `startJob()`, `onJobFire()`, and `destroy()`
+- [ ] Wire `getExtensionAutomations` accessor through from `main.ts` when constructing `getDispatcherDeps()` closure and when calling setters on `VaultEventListenerManager` and `VaultEventScheduler` — **deferred to EXT-017 (Phase 7 wiring)**
 
 ---
 

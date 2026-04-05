@@ -31,9 +31,35 @@ import { getEnabledHooks } from "./hook-config";
 import { executeHook, type HookContext } from "./hook-engine";
 import type { WorkflowHookOverrideManager } from "./workflow-hook-override";
 import type { WorkflowScopedHook } from "../types";
+import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
 import { logger } from "../utils/logger";
 
 const log = logger("HookEvents");
+
+// ---------------------------------------------------------------------------
+// EXT-013: Extension automation accessor types
+// ---------------------------------------------------------------------------
+
+/**
+ * Accessor for user-defined automations matching a lifecycle trigger
+ * (`pre_send` or `after_completion`).
+ *
+ * Injected via callbacks to avoid coupling the hook module to the
+ * extension module at runtime.
+ */
+export interface LifecycleAutomationAccessors {
+	getForTrigger: (trigger: AutomationTrigger) => UserAutomationDefinition[];
+	execute: (automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>;
+}
+
+/**
+ * Accessor for user-defined automations matching a tool event trigger
+ * (`on_tool_call` or `on_tool_result`).
+ */
+export interface ToolEventAutomationAccessors {
+	getForToolEvent: (trigger: "on_tool_call" | "on_tool_result", toolName: string) => UserAutomationDefinition[];
+	execute: (automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>;
+}
 
 // ---------------------------------------------------------------------------
 // F-022: run_workflow action dispatcher for Phase 3 lifecycle hooks
@@ -291,13 +317,15 @@ export interface CompletionContext {
  * @param settings - Plugin settings.
  * @param vaultRootPath - Vault root path for hook cwd.
  * @param overrideManager - Optional workflow hook override manager (G-004).
+ * @param extensionAutomations - Optional extension automation accessors (EXT-013).
  * @returns Array of non-empty stdout strings from hooks.
  */
 export async function dispatchPreSend(
 	context: PreSendContext,
 	settings: NotorSettings,
 	vaultRootPath: string,
-	overrideManager?: WorkflowHookOverrideManager
+	overrideManager?: WorkflowHookOverrideManager,
+	extensionAutomations?: LifecycleAutomationAccessors,
 ): Promise<string[]> {
 	// G-004: Resolve effective hooks (scoped or global)
 	const globalHooks = getEnabledHooks(settings.hooks, "pre_send");
@@ -305,7 +333,10 @@ export async function dispatchPreSend(
 		? overrideManager.getEffectiveHooks(context.conversationId, "pre_send", globalHooks)
 		: globalHooks;
 
-	if (effectiveHooks.length === 0) return [];
+	// EXT-013: Collect matching user automations
+	const automations = extensionAutomations?.getForTrigger("pre_send") ?? [];
+
+	if (effectiveHooks.length === 0 && automations.length === 0) return [];
 
 	// Discriminate scoped vs global: override is active AND returned a different array
 	const areScopedHooks = overrideManager?.isOverrideActive(context.conversationId) &&
@@ -375,8 +406,36 @@ export async function dispatchPreSend(
 		}
 	}
 
+	// EXT-013: Execute user automations after shell hooks (sequentially, blocking)
+	if (automations.length > 0 && extensionAutomations) {
+		const automationCtx = {
+			hookEvent: "pre_send",
+			timestamp: context.timestamp,
+			conversationId: context.conversationId,
+		};
+		for (const automation of automations) {
+			try {
+				const result = await extensionAutomations.execute(automation, automationCtx);
+				if (typeof result === "string" && result.length > 0) {
+					stdoutResults.push(result);
+				}
+			} catch (e) {
+				const displayName = automation.displayName ?? automation.filePath;
+				const message = e instanceof Error ? e.message : String(e);
+				new Notice(`Automation error in ${displayName}: ${message}`);
+				log.error("User automation execution failed", {
+					automation: displayName,
+					trigger: "pre_send",
+					error: String(e),
+					stack: e instanceof Error ? e.stack : undefined,
+				});
+			}
+		}
+	}
+
 	log.info("Pre-send hooks complete", {
 		total: effectiveHooks.length,
+		automations: automations.length,
 		withOutput: stdoutResults.length,
 		scoped: areScopedHooks,
 	});
@@ -402,12 +461,14 @@ export async function dispatchPreSend(
  * @param settings - Plugin settings.
  * @param vaultRootPath - Vault root path for hook cwd.
  * @param overrideManager - Optional workflow hook override manager (G-004).
+ * @param extensionAutomations - Optional extension automation accessors (EXT-013).
  */
 export function dispatchOnToolCall(
 	context: ToolHookContext,
 	settings: NotorSettings,
 	vaultRootPath: string,
-	overrideManager?: WorkflowHookOverrideManager
+	overrideManager?: WorkflowHookOverrideManager,
+	extensionAutomations?: ToolEventAutomationAccessors,
 ): void {
 	// G-004: Resolve effective hooks (scoped or global)
 	const globalHooks = getEnabledHooks(settings.hooks, "on_tool_call");
@@ -415,7 +476,10 @@ export function dispatchOnToolCall(
 		? overrideManager.getEffectiveHooks(context.conversationId, "on_tool_call", globalHooks)
 		: globalHooks;
 
-	if (effectiveHooks.length === 0) return;
+	// EXT-013: Collect matching user automations
+	const automations = extensionAutomations?.getForToolEvent("on_tool_call", context.toolName) ?? [];
+
+	if (effectiveHooks.length === 0 && automations.length === 0) return;
 
 	const areScopedHooks = overrideManager?.isOverrideActive(context.conversationId) &&
 		effectiveHooks !== globalHooks;
@@ -463,8 +527,35 @@ export function dispatchOnToolCall(
 				await executeHook(hook, hookContext, settings, vaultRootPath);
 			}
 		}
+		// EXT-013: Execute user automations after shell hooks
+		if (automations.length > 0 && extensionAutomations) {
+			const automationCtx = {
+				hookEvent: "on_tool_call",
+				timestamp: context.timestamp,
+				conversationId: context.conversationId,
+				toolName: context.toolName,
+				params: context.toolParams,
+			};
+			for (const automation of automations) {
+				try {
+					await extensionAutomations.execute(automation, automationCtx);
+				} catch (e) {
+					const displayName = automation.displayName ?? automation.filePath;
+					const message = e instanceof Error ? e.message : String(e);
+					new Notice(`Automation error in ${displayName}: ${message}`);
+					log.error("User automation execution failed", {
+						automation: displayName,
+						trigger: "on_tool_call",
+						error: String(e),
+						stack: e instanceof Error ? e.stack : undefined,
+					});
+				}
+			}
+		}
+
 		log.info("on_tool_call hooks complete", {
 			count: effectiveHooks.length,
+			automations: automations.length,
 			scoped: areScopedHooks,
 		});
 	})();
@@ -485,12 +576,14 @@ export function dispatchOnToolCall(
  * @param settings - Plugin settings.
  * @param vaultRootPath - Vault root path for hook cwd.
  * @param overrideManager - Optional workflow hook override manager (G-004).
+ * @param extensionAutomations - Optional extension automation accessors (EXT-013).
  */
 export function dispatchOnToolResult(
 	context: ToolHookContext,
 	settings: NotorSettings,
 	vaultRootPath: string,
-	overrideManager?: WorkflowHookOverrideManager
+	overrideManager?: WorkflowHookOverrideManager,
+	extensionAutomations?: ToolEventAutomationAccessors,
 ): void {
 	// G-004: Resolve effective hooks (scoped or global)
 	const globalHooks = getEnabledHooks(settings.hooks, "on_tool_result");
@@ -498,7 +591,10 @@ export function dispatchOnToolResult(
 		? overrideManager.getEffectiveHooks(context.conversationId, "on_tool_result", globalHooks)
 		: globalHooks;
 
-	if (effectiveHooks.length === 0) return;
+	// EXT-013: Collect matching user automations
+	const automations = extensionAutomations?.getForToolEvent("on_tool_result", context.toolName) ?? [];
+
+	if (effectiveHooks.length === 0 && automations.length === 0) return;
 
 	const areScopedHooks = overrideManager?.isOverrideActive(context.conversationId) &&
 		effectiveHooks !== globalHooks;
@@ -552,8 +648,37 @@ export function dispatchOnToolResult(
 				await executeHook(hook, hookContext, settings, vaultRootPath);
 			}
 		}
+		// EXT-013: Execute user automations after shell hooks
+		if (automations.length > 0 && extensionAutomations) {
+			const automationCtx = {
+				hookEvent: "on_tool_result",
+				timestamp: context.timestamp,
+				conversationId: context.conversationId,
+				toolName: context.toolName,
+				params: context.toolParams,
+				result: context.toolResult,
+				status: context.toolStatus,
+			};
+			for (const automation of automations) {
+				try {
+					await extensionAutomations.execute(automation, automationCtx);
+				} catch (e) {
+					const displayName = automation.displayName ?? automation.filePath;
+					const message = e instanceof Error ? e.message : String(e);
+					new Notice(`Automation error in ${displayName}: ${message}`);
+					log.error("User automation execution failed", {
+						automation: displayName,
+						trigger: "on_tool_result",
+						error: String(e),
+						stack: e instanceof Error ? e.stack : undefined,
+					});
+				}
+			}
+		}
+
 		log.info("on_tool_result hooks complete", {
 			count: effectiveHooks.length,
+			automations: automations.length,
 			scoped: areScopedHooks,
 		});
 	})();
@@ -574,12 +699,14 @@ export function dispatchOnToolResult(
  * @param settings - Plugin settings.
  * @param vaultRootPath - Vault root path for hook cwd.
  * @param overrideManager - Optional workflow hook override manager (G-004).
+ * @param extensionAutomations - Optional extension automation accessors (EXT-013).
  */
 export function dispatchAfterCompletion(
 	context: CompletionContext,
 	settings: NotorSettings,
 	vaultRootPath: string,
-	overrideManager?: WorkflowHookOverrideManager
+	overrideManager?: WorkflowHookOverrideManager,
+	extensionAutomations?: LifecycleAutomationAccessors,
 ): void {
 	// G-004: Resolve effective hooks (scoped or global)
 	const globalHooks = getEnabledHooks(settings.hooks, "after_completion");
@@ -587,7 +714,10 @@ export function dispatchAfterCompletion(
 		? overrideManager.getEffectiveHooks(context.conversationId, "after_completion", globalHooks)
 		: globalHooks;
 
-	if (effectiveHooks.length === 0) return;
+	// EXT-013: Collect matching user automations
+	const automations = extensionAutomations?.getForTrigger("after_completion") ?? [];
+
+	if (effectiveHooks.length === 0 && automations.length === 0) return;
 
 	const areScopedHooks = overrideManager?.isOverrideActive(context.conversationId) &&
 		effectiveHooks !== globalHooks;
@@ -636,8 +766,33 @@ export function dispatchAfterCompletion(
 				await executeHook(hook, hookContext, settings, vaultRootPath);
 			}
 		}
+		// EXT-013: Execute user automations after shell hooks
+		if (automations.length > 0 && extensionAutomations) {
+			const automationCtx = {
+				hookEvent: "after_completion",
+				timestamp: context.timestamp,
+				conversationId: context.conversationId,
+			};
+			for (const automation of automations) {
+				try {
+					await extensionAutomations.execute(automation, automationCtx);
+				} catch (e) {
+					const displayName = automation.displayName ?? automation.filePath;
+					const message = e instanceof Error ? e.message : String(e);
+					new Notice(`Automation error in ${displayName}: ${message}`);
+					log.error("User automation execution failed", {
+						automation: displayName,
+						trigger: "after_completion",
+						error: String(e),
+						stack: e instanceof Error ? e.stack : undefined,
+					});
+				}
+			}
+		}
+
 		log.info("after_completion hooks complete", {
 			count: effectiveHooks.length,
+			automations: automations.length,
 			scoped: areScopedHooks,
 		});
 	})();

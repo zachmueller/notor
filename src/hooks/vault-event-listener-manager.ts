@@ -91,6 +91,19 @@ export class VaultEventListenerManager {
 	 */
 	private readonly handlers = new Map<VaultEventHookType, VaultEventHandler>();
 
+	/**
+	 * EXT-014: Accessor for user-defined automations.
+	 *
+	 * Set via `setExtensionAutomations()` after the manager is constructed
+	 * (NOT a constructor param — the manager is constructed before extensions
+	 * are discovered). Returns empty array until extensions are loaded.
+	 *
+	 * Accepts `string` trigger to avoid coupling to `AutomationTrigger` type —
+	 * `VaultEventHookType` values are a subset of `AutomationTrigger` values
+	 * and work at runtime (strings are strings).
+	 */
+	private extensionAutomationsAccessor: ((trigger: string) => unknown[]) | null = null;
+
 	constructor(
 		plugin: Plugin,
 		getSettings: () => NotorSettings,
@@ -117,6 +130,25 @@ export class VaultEventListenerManager {
 	setEventHandler(eventType: VaultEventHookType, handler: VaultEventHandler): void {
 		this.handlers.set(eventType, handler);
 		log.debug("Handler registered", { eventType });
+	}
+
+	// ---------------------------------------------------------------------------
+	// EXT-014: Extension automations accessor
+	// ---------------------------------------------------------------------------
+
+	/**
+	 * Set the accessor for user-defined extension automations.
+	 *
+	 * Called after extensions are discovered. The accessor returns automations
+	 * matching the given trigger string. `hasActiveHooks()` uses this to
+	 * determine whether Obsidian listeners should be active for event types
+	 * that have automation triggers but no settings hooks or workflow triggers.
+	 *
+	 * @param accessor - Function that returns automations for a trigger string.
+	 */
+	setExtensionAutomations(accessor: (trigger: string) => unknown[]): void {
+		this.extensionAutomationsAccessor = accessor;
+		log.debug("Extension automations accessor set");
 	}
 
 	// ---------------------------------------------------------------------------
@@ -343,6 +375,14 @@ export class VaultEventListenerManager {
 		const triggerValue = vaultEventTypeToWorkflowTrigger(event);
 		if (triggerValue && workflows.some((w) => w.trigger === triggerValue)) {
 			return true;
+		}
+
+		// EXT-014: Check extension automations with a matching trigger
+		if (this.extensionAutomationsAccessor) {
+			const automations = this.extensionAutomationsAccessor(event);
+			if (automations.length > 0) {
+				return true;
+			}
 		}
 
 		return false;

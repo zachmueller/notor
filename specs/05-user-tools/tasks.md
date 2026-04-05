@@ -359,28 +359,25 @@ type GetAutomationsForTrigger = (trigger: AutomationTrigger) => UserAutomationDe
 type GetAutomationsForToolEvent = (trigger: "on_tool_call" | "on_tool_result", toolName: string) => UserAutomationDefinition[];
 ```
 
-- [ ] Add `getAutomations?: GetAutomationsForTrigger` parameter to `dispatchPreSend()` signature (after `overrideManager`)
-  - After existing shell hook execution, get automations: `const automations = getAutomations?.("pre_send") ?? []`
+- [x] Add `extensionAutomations?: LifecycleAutomationAccessors` parameter to `dispatchPreSend()` signature (after `overrideManager`)
+  - After existing shell hook execution, get automations: `const automations = extensionAutomations?.getForTrigger("pre_send") ?? []`
   - Execute sequentially (pre_send is inherently blocking/awaited)
   - Build context: `{ hookEvent: "pre_send", timestamp: context.timestamp, conversationId: context.conversationId }`
-  - Invoke compiled function with `(app, obsidian, utils, libs, settings, shared, automationCtx)` — but automations don't have per-call app/utils. Instead, the automation's `compiledFn` is called with context built by the dispatch function. The `app`, `obsidian`, `utils`, `libs`, `settings`, `shared` must be provided by the caller or built inline. **Design note:** The accessor pattern returns `UserAutomationDefinition[]` which contain `compiledFn` but NOT the runtime context objects. The dispatch functions need access to `app`, `obsidian`, `utils`, `libs` to invoke automations. **Solution:** Add a second accessor `executeAutomation?: (automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>` that encapsulates the runtime context building. OR: pass the execution through the manager. **Simplest approach:** Add `executeAutomation` callback alongside `getAutomations`
+  - Used **Option A (accessor pair):** `getForTrigger` returns definitions, `execute(automation, context)` invokes with runtime objects via `ExtensionManager.executeAutomation()`. Used `import type` from extensions module (type-only, no runtime coupling)
   - Collect returned strings from pre_send automations and append to stdout array
   - Wrap each automation in try/catch — Notice + logger on error, continue with next
-- [ ] Add `getAutomations?: GetAutomationsForToolEvent` parameter to `dispatchOnToolCall()` signature
-  - Inside the existing fire-and-forget IIFE, after shell hooks, get automations: `getAutomations?.("on_tool_call", context.toolName) ?? []`
+- [x] Add `extensionAutomations?: ToolEventAutomationAccessors` parameter to `dispatchOnToolCall()` signature
+  - Inside the existing fire-and-forget IIFE, after shell hooks, get automations: `extensionAutomations?.getForToolEvent("on_tool_call", context.toolName) ?? []`
   - Execute sequentially in order
   - Build context: `{ hookEvent: "on_tool_call", timestamp: context.timestamp, conversationId: context.conversationId, toolName: context.toolName, params: context.toolParams }`
   - Wrap in try/catch per automation
-- [ ] Add `getAutomations?: GetAutomationsForToolEvent` parameter to `dispatchOnToolResult()` signature
+- [x] Add `extensionAutomations?: ToolEventAutomationAccessors` parameter to `dispatchOnToolResult()` signature
   - Same pattern as `dispatchOnToolCall`
   - Build context: `{ hookEvent: "on_tool_result", timestamp: context.timestamp, conversationId: context.conversationId, toolName: context.toolName, params: context.toolParams, result: context.toolResult, status: context.toolStatus }`
-- [ ] Add `getAutomations?: GetAutomationsForTrigger` parameter to `dispatchAfterCompletion()` signature
+- [x] Add `extensionAutomations?: LifecycleAutomationAccessors` parameter to `dispatchAfterCompletion()` signature
   - Same fire-and-forget pattern
   - Build context: `{ hookEvent: "after_completion", timestamp: context.timestamp, conversationId: context.conversationId }`
-- [ ] Define the automation execution callback type and integrate with dispatch functions. Two options (pick one during implementation):
-  - **Option A (accessor pair):** `getAutomations` returns definitions, `executeAutomation(automation, context)` invokes with runtime objects
-  - **Option B (single executor):** `dispatchAutomations(trigger, context)` does both lookup and execution
-  - Either way, the hook module must NOT import from extensions module — keep the boundary clean via callbacks
+- [x] Define the automation execution callback type and integrate with dispatch functions. Chose **Option A (accessor pair):** `getForTrigger`/`getForToolEvent` returns definitions, `execute(automation, context)` invokes with runtime objects. Added `LifecycleAutomationAccessors` and `ToolEventAutomationAccessors` interfaces. Uses `import type` from extensions module (type-only, no runtime coupling). Added `ExtensionManager.executeAutomation()` method as the callback implementation
 
 ### EXT-014 — Integrate automations with vault event hooks
 
@@ -390,26 +387,26 @@ type GetAutomationsForToolEvent = (trigger: "on_tool_call" | "on_tool_result", t
 - `src/hooks/vault-event-scheduler.ts` — add setter + automation schedule support
 - `src/hooks/vault-event-handlers.ts` — no changes needed (accessor flows through `DispatcherDeps`)
 
-- [ ] Add `getExtensionAutomations?: (trigger: AutomationTrigger) => UserAutomationDefinition[]` to `DispatcherDeps` interface in `vault-event-dispatcher.ts:46-65`
-- [ ] Add automation dispatch step in `dispatchVaultEventHooks()` (after line ~132):
+- [x] Add `getExtensionAutomations?: (trigger: AutomationTrigger) => UserAutomationDefinition[]` and `executeExtensionAutomation?` to `DispatcherDeps` interface in `vault-event-dispatcher.ts`
+- [x] Add automation dispatch step in `dispatchVaultEventHooks()`:
   - After the existing hook/workflow loop, get automations via `deps.getExtensionAutomations`
-  - Map vault event type to `AutomationTrigger` (they use the same string values)
-  - Build vault event context objects per event type:
-    - `on_note_open`, `on_note_create`, `on_save`, `on_manual_save`: `{ hookEvent, timestamp, notePath }`
-    - `on_tag_change`: `{ hookEvent, timestamp, notePath, tagsAdded, tagsRemoved }`
-    - `on_schedule`: `{ hookEvent, timestamp, schedule }`
+  - Cast `context.hookEvent` to `AutomationTrigger` (vault event types are a subset)
+  - Build vault event context objects dynamically — includes `hookEvent`, `timestamp`, and conditionally `notePath`, `tagsAdded`, `tagsRemoved` based on null checks
   - Execute within the same `chain` context (for `ExecutionChainTracker.shouldSkipHook()`)
-  - Wrap in independent try/catch block (separate from hook/workflow loop error handling)
-  - Each individual automation also gets its own try/catch
-- [ ] Add `setExtensionAutomations(accessor: (trigger: AutomationTrigger) => UserAutomationDefinition[])` setter on `VaultEventListenerManager` (NOT a constructor param — manager is constructed before extensions are discovered)
-  - Store the accessor function
-  - Update `hasActiveHooks()` (line ~331): alongside existing checks, call the stored accessor with the specific vault event type and check if result is non-empty
-  - **Type note:** `hasActiveHooks()` accepts `VaultEventHookType` but accessor accepts `AutomationTrigger` — works at runtime (strings are strings), `getAutomationsForTrigger()` returns `[]` for non-matching triggers
-- [ ] Add `setExtensionAutomations(accessor)` setter on `VaultEventScheduler`
+  - Wrapped in independent try/catch block (separate from hook/workflow loop error handling)
+  - Each individual automation also has its own try/catch
+  - Updated early return to also check for extension automations
+- [x] Add `setExtensionAutomations(accessor: (trigger: string) => unknown[])` setter on `VaultEventListenerManager` (NOT a constructor param — manager is constructed before extensions are discovered)
+  - Stores the accessor function with generic `string` trigger type (avoids importing `AutomationTrigger`)
+  - Updated `hasActiveHooks()`: alongside existing checks, calls the stored accessor with the specific vault event type and checks if result is non-empty
+  - **Type note:** Accessor typed as `(trigger: string) => unknown[]` — `VaultEventHookType` values pass through as strings, `getAutomationsForTrigger()` returns `[]` for non-matching triggers
+- [x] Add `setExtensionAutomations(getAutomations, executeAutomation)` setter on `VaultEventScheduler`
   - Separate from existing `setDispatch()` setter (each data source has its own injection point)
-  - Update `syncJobs()` (line ~108): add parallel loop for automation `on_schedule` entries
+  - Updated `syncJobs()`: added parallel loop for automation `on_schedule` entries
   - Job ID convention: `ext-auto:{filePath}` (e.g., `ext-auto:notor/automations/daily-cleanup.md`) to avoid collisions with hook UUIDs and workflow IDs in the `desiredJobs` map
-- [ ] Also need an automation executor callback for vault event automations (same pattern as EXT-013 — the dispatch function needs to invoke the compiled function with runtime context objects)
+  - Updated `onJobFire()`: automation jobs execute directly via the executor callback (not through `dispatchFn`)
+  - Updated `destroy()`: clears accessor and executor fields
+- [x] Added automation executor callback for vault event automations: `DispatcherDeps.executeExtensionAutomation` and `VaultEventScheduler.extensionAutomationExecutor` — both bound to `ExtensionManager.executeAutomation()` at wiring time
 
 ---
 

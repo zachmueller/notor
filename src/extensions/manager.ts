@@ -354,6 +354,59 @@ export class ExtensionManager {
 	}
 
 	// -----------------------------------------------------------------------
+	// Automation execution
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Execute a single automation with the given context.
+	 *
+	 * Resolves settings, builds runtime context, and invokes the compiled function.
+	 * Used as a callback by hook dispatch functions (EXT-013, EXT-014).
+	 *
+	 * @param automation - The automation definition to execute.
+	 * @param context    - Event context passed as the `context` parameter to the automation.
+	 * @returns The return value from the automation's compiled function.
+	 */
+	async executeAutomation(
+		automation: UserAutomationDefinition,
+		context: Record<string, unknown>,
+	): Promise<unknown> {
+		if (!automation.compiledFn) {
+			throw new Error(`Automation '${automation.displayName ?? automation.filePath}' has no compiled function`);
+		}
+
+		const extensionName = automation.displayName ?? automation.filePath;
+
+		// Resolve per-extension settings (sync)
+		const { values: settings, missing: missingSettings } = this.getResolvedSettings(extensionName);
+
+		if (missingSettings.length > 0) {
+			const msg = `Automation '${extensionName}' requires setting${missingSettings.length > 1 ? "s" : ""} '${missingSettings.join("', '")}' to be configured in Settings.`;
+			new Notice(msg);
+			log.warn(msg);
+			return;
+		}
+
+		// Resolve shared settings (sync)
+		const { values: shared } = this.getResolvedSharedSettings();
+
+		// Build runtime context
+		const utils = buildUtils(this.plugin);
+		const libs = this.getCachedLibs();
+		const obsidian = this.getCachedObsidianExports();
+
+		return automation.compiledFn(
+			this.plugin.app,
+			obsidian,
+			utils,
+			libs,
+			settings,
+			shared,
+			context,
+		);
+	}
+
+	// -----------------------------------------------------------------------
 	// Settings resolution
 	// -----------------------------------------------------------------------
 
