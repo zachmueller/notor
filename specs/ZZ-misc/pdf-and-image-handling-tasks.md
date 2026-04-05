@@ -9,6 +9,8 @@
 
 **Goal:** Introduce `ContentBlock` type, update `Message` and `ChatMessage` content types from `string` to `string | ContentBlock[]`, make all providers handle the union, fix all read-side callsites, and add media-aware token estimation. No user-facing changes — existing conversations remain string-only.
 
+**Convention — "assert string":** When a task in this phase says "assert string" or "add assertion/guard", use a runtime type guard that throws on violation: `const text = typeof msg.content === "string" ? msg.content : (() => { throw new Error("Expected string content for {role} message"); })();`. This catches future regressions while being explicit about the invariant. Apply this pattern consistently across all files in this phase.
+
 ### 1.1 New Files
 
 - [ ] **Create `src/media/types.ts`**
@@ -17,7 +19,7 @@
     - `text`: `{ type: "text"; text: string }`
     - `image`: `{ type: "image"; media_type: ImageMediaType; data: string; width?: number; height?: number }`
     - `document`: `{ type: "document"; media_type: "application/pdf"; data: string; page_count?: number }`
-  - Export `getTextContent(content: string | ContentBlock[]): string` helper
+  - Export `getTextContent(content: string | ContentBlock[]): string` helper — when input is `ContentBlock[]`, filters to text blocks and joins with `"\n"`; when input is `string`, returns it as-is
   - Export media limit constants (e.g., `MAX_IMAGE_BASE64_BYTES = 5 * 1024 * 1024`)
 
 - [ ] **Create `src/media/format-detector.ts`**
@@ -58,7 +60,7 @@ Each provider's message conversion function must handle the case where `msg.cont
     - When assistant (always string), pass through unchanged
 
 - [ ] **`src/providers/bedrock-provider.ts` — `toBedrockMessages()`**
-  - **Import note:** `ContentBlock` is already imported from `@aws-sdk/client-bedrock-runtime` at line 44. Use an import alias: `import { ContentBlock as MediaContentBlock } from "../media/types"` to avoid the name collision
+  - **Import note:** `ContentBlock` is already imported from `@aws-sdk/client-bedrock-runtime` at line 44. Use an import alias: `import { ContentBlock as MediaContentBlock } from "../media/types"` to avoid the name collision. Within this file, use `MediaContentBlock` for all references to the Notor content block type (in type annotations, mapping functions, etc.)
   - Line 83: System `{ text: msg.content }` — assert string
   - Lines 88-92: Tool call branch `content.push({ text: msg.content })` — pre-tool-call assistant text, always a string. No change needed
   - Lines 122-129: Catch-all handles **both** user and assistant messages (`role: msg.role === "user" ? "user" : "assistant"`, `content: [{ text: msg.content }]`). Split:
@@ -83,7 +85,7 @@ Each provider's message conversion function must handle the case where `msg.cont
       - image: `(width * height) / 750` when dimensions known, else flat `2000`
       - document: `pageCount * 2000` when known, else flat `2000`
   - Private helpers: `estimateImageTokens(w?, h?)`, `estimateDocumentTokens(pageCount?)`
-  - Unit tests covering: string input, text-only blocks, image with/without dimensions, document with/without page count, mixed content
+  - Unit tests covering: string input, text-only blocks, image with/without dimensions, document with/without page count, mixed content, empty `ContentBlock[]` returns 0
 
 - [ ] **Update `src/chat/context.ts:77-101`** — `estimateMessageTokens()`
   - Full function spans lines 77-101; lines 79-86 contain early returns for `output_tokens`/`input_tokens` that must be preserved
@@ -117,7 +119,7 @@ Each provider's message conversion function must handle the case where `msg.cont
   - When `msg.content` is `ContentBlock[]`:
     - Extract text via `getTextContent()`
     - Count omitted media blocks (image + document)
-    - Append `\n[N image(s)/document(s) omitted during compaction]` to the extracted text
+    - Append `\n[N media block(s) omitted during compaction]` to the extracted text, where N is the total count of non-text blocks
     - **Assign the result as a plain `string`** to the `ChatMessage.content` field — this ensures the summarization call receives only text, not base64 blobs. The type union allows this (string is a valid `string | ContentBlock[]` value)
   - **Note:** `getTextContent()` handles both cases transparently — for string content (assistant messages), it returns the string unchanged. The media stripping logic (counting omitted blocks, appending marker) only triggers when `msg.content` is `ContentBlock[]`, which only occurs for user messages. No separate role-based branching is needed here.
 
@@ -308,7 +310,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
   - Update `VaultNoteSuggest` (lines 173-335) to show image files from vault (not just `.md`):
     - Modify file filtering to include `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` extensions
     - Update suggestion rendering to show a distinct icon for image files (vs. the existing note icon)
-    - Update the selection handler to route image files to the binary read path (via `readExternalBinaryFile()`) and create `vault_image` attachments instead of text `vault_note` attachments
+    - Update the selection handler to route vault image files to `createVaultImageAttachment(file.path)` (from Task 2.4) instead of creating text `vault_note` attachments. The binary reading happens inside `resolveAttachment()`, not at selection time — do not use `readExternalBinaryFile()` for vault files.
 
 - [ ] **Update `src/ui/attachment-chips.ts`**
   - Add image-specific chip rendering (image icon instead of paper clip)
@@ -357,7 +359,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - Magic byte check (`%PDF-`) → base64 encode raw buffer → size check against provider limits → return `ContentBlock { type: "document" }`
   - Page range support: parse `"1-5"`, `"3"`, `"10-20"` syntax (1-indexed)
   - Consult `getMediaCapabilities()` to decide native vs text path
-  - Export `processPdf(buffer: Buffer, options: { pages?: string; providerType: string }): Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>`
+  - Export `processPdf(buffer: Buffer, options: { pages?: string; providerType: string }): Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>` — returns a single-element array in practice (one document or one text block). Array type aligns with `ToolResult.content_blocks` and allows future page-splitting if needed.
 
 ### 3.3 Tool Changes — Extend `read_file` for PDFs
 
@@ -434,7 +436,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 - [ ] **Update `src/tools/read-docx.ts`**
   - Add `import { createHash } from "crypto"`
-  - Implement mammoth `convertImage` handler (before `convertToHtml` call at line 142):
+  - Implement mammoth `convertImage` handler (before `convertToHtml` call at line 142). **`this` binding:** mammoth invokes the callback in its own context — use an arrow function for the handler, or capture `const app = this.app` before the options object, to preserve access to the tool's `this.app` for vault operations.
     - Check format against supported list (`image/png`, `image/jpeg`, `image/gif`, `image/webp`)
     - Skip unsupported formats (EMF, WMF, SVG, TIFF) with descriptive alt text
     - Read image as buffer via `image.readAsBuffer()` — returns a Node.js `Buffer` (Electron's polyfill in the renderer process)
@@ -469,6 +471,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 - [ ] **Update `src/tools/write-docx.ts`**
   - Add `ImageRun` to imports from `docx` (line 24-37)
+  - **Signature change:** Update `generateDocx` from `(content: string, templatePath: string | null)` to `(content: string, templatePath: string | null, vaultRoot: string, allowedPaths: string[])`. In the tool's `execute()` method, thread `vaultRoot` from `this.app.vault.adapter.basePath` and `allowedPaths` from `this.settings.read_file_allowed_paths` into the `generateDocx()` call.
   - **Image pre-resolution pass** — Both `buildDocxChildren()` (line 108) and `renderInline()` (line 53) are synchronous. The `docx` library's `Document`, `Paragraph`, `Table`, and `ImageRun` constructors all expect synchronous children arrays. Making either function async would require restructuring all constructor call sites.
     - **Strategy:** Add an async pre-pass in `generateDocx()` before calling `buildDocxChildren()`:
       1. **Recursively** walk all tokens from `marked.lexer()` output — image tokens are inline tokens nested inside `paragraph`, `blockquote`, `list` item, and `table` cell tokens (in marked v17, `![alt](url)` is parsed as `{ type: "paragraph", tokens: [{ type: "image", href: "url" }] }`). The walk must descend into each block token's `.tokens` and `.items[].tokens` arrays to find all `image` entries.
@@ -477,7 +480,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
       4. Build a `Map<string, DocxImageData>` lookup from href → resolved image data
       5. Pass the map into `buildDocxChildren()` as a parameter
     - `buildDocxChildren()` stays synchronous — image lookup is a synchronous `map.get(href)` call
-    - **Signature change cascade:** `buildDocxChildren(tokens, resolvedImages)` — the function calls itself recursively (e.g., for blockquote/list children), so all recursive call sites inside `buildDocxChildren` must forward the `resolvedImages` map parameter
+    - **Signature change cascade:** `buildDocxChildren(tokens, resolvedImages)` — note that `buildDocxChildren` does not currently call itself recursively (blockquote at line 167 and list at line 179 both delegate to `renderInline()`). However, if future changes add recursive calls, they must forward the `resolvedImages` map. The only call site to update is `generateDocx()` at line 256: `buildDocxChildren(tokens, resolvedImages)`
   - **Handle images in the `paragraph` case** of `buildDocxChildren()` (line 125-130) — in marked v17, standalone images are parsed as inline `image` tokens wrapped in a `paragraph` token, NOT as top-level `image` block tokens. Handle this by detecting single-image paragraphs:
     - When a `paragraph` token contains exactly one child token of `type: "image"`, render it as a dedicated `new Paragraph({ children: [new ImageRun({ type, data, transformation: { width, height }, altText })] })` using the pre-resolved map. **Scaling:** the `width`/`height` from buffer header parsing are raw pixel dimensions; scale proportionally to fit within page content area (~600px wide, ~800px tall at 96 DPI for standard A4/Letter with 1-inch margins). Apply the more restrictive of width and height constraints: `const wScale = width > 600 ? 600 / width : 1; const hScale = height > 800 ? 800 / height : 1; const scale = Math.min(wScale, hScale); if (scale < 1) { width = Math.round(width * scale); height = Math.round(height * scale); }`. If dimensions cannot be determined from the buffer, use a fallback of 400×300.
     - If the image href is not in the resolved map, render fallback: `new Paragraph({ children: [new TextRun({ text: "[Image: href]" })] })`
@@ -506,13 +509,14 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     2. Find highest rId number in template
     3. Parse generated doc's `word/_rels/document.xml.rels` with `DOMParser`
     4. Remap all generated rIds to `rId(maxId + offset)`
-    5. Update generated `word/document.xml` body: walk all elements in the parsed body DOM and, for each element with an `r:embed` or `r:id` attribute, remap the value using the remap table via `getAttribute()`/`setAttribute()` — consistent with Step 1's DOM-based approach (no regex)
+    5. Update generated `word/document.xml` body: walk all elements in the parsed body DOM and, for each element with an `r:embed`, `r:id`, or `r:link` attribute, remap the value using the remap table via `getAttribute()`/`setAttribute()` — consistent with Step 1's DOM-based approach (no regex)
     6. Append remapped `<Relationship>` elements to template `.rels` DOM
     7. Serialize updated `.rels` back to template zip
 
 - [ ] **Refactor template grafting — Step 4: Merge `[Content_Types].xml`**
   - Parse both `[Content_Types].xml` with `DOMParser`
-  - For each image format in the generated doc, add a `<Default Extension="..." ContentType="..."/>` entry to the template's `[Content_Types].xml` if not already present. Check for duplicates by iterating existing `<Default>` child elements of the `<Types>` root and comparing `getAttribute("Extension")` against the target extension string. **Extension mapping:** use OOXML extensions — `png`, `jpeg` (not `jpg`), `gif`, `bmp`. Note that the `docx` library writes JPEG media files as `imageN.jpeg`, so the Content_Types entry must use `Extension="jpeg"` even though `DocxImageData.type` is `"jpg"`.
+  - **Extension mapping (critical):** Map `DocxImageData.type` to OOXML extension before generating Content_Types entries: `"jpg"` → `"jpeg"`, all others (`"png"`, `"gif"`, `"bmp"`) unchanged. The `docx` library writes JPEG media files as `imageN.jpeg`, so the Content_Types entry must use `Extension="jpeg"` — using `"jpg"` produces a corrupt DOCX that Word cannot open.
+  - For each image format in the generated doc, add a `<Default Extension="..." ContentType="..."/>` entry to the template's `[Content_Types].xml` if not already present. Check for duplicates by iterating existing `<Default>` child elements of the `<Types>` root and comparing `getAttribute("Extension")` against the target extension string.
   - Serialize back to template zip
 
 ### 2.5.4 Verification
