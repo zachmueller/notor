@@ -832,7 +832,7 @@ const options = {
       const existingFile = this.app.vault.getFileByPath(targetPath);
 
       if (!existingFile) {
-        await this.app.vault.createBinary(targetPath, buffer.buffer);
+        await this.app.vault.createBinary(targetPath, buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
       }
 
       const index = extractedImages.length;
