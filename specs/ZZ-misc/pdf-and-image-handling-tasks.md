@@ -126,8 +126,9 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Line 587: Same preview fix as line 496
   - Line 590: For `ContentBlock[]`, search text blocks: `getTextContent(msg.content).toLowerCase().includes(needle)`
 
-- [ ] **`src/chat/conversation.ts:348`** — `generateTitle(params.content)`
-  - `params.content` may be `ContentBlock[]` (user message with media)
+- [ ] **`src/chat/conversation.ts:348`** — `generateTitle(params.content)` **(compile error)**
+  - `generateTitle()` is declared as `private generateTitle(content: string)` at line 478 and immediately calls `.replace()` on its argument — passing `ContentBlock[]` produces `"[object Object]..."` as the title
+  - This is a **TypeScript compile error site** after the type change, not just a pass-through
   - Wrap: `this.generateTitle(typeof params.content === "string" ? params.content : getTextContent(params.content))`
 
 - [ ] **`src/chat/sub-agent-history.ts:58, 78, 96`** — `content: cm.content` pass-through
@@ -237,24 +238,35 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Add `assembleUserContent(text: string, mediaBlocks: ContentBlock[]): string | ContentBlock[]`
     - If no media blocks → return plain string (existing behavior preserved)
     - If media blocks → return `[{ type: "text", text }, ...mediaBlocks]`
+  - **Note:** The existing `MessageParts` interface keeps `attachments?: string` unchanged — it receives only the text portion from the destructured `buildAttachmentsBlock()` return value. The `contentBlocks` are handled separately via `assembleUserContent()`.
 
 - [ ] **Update `src/chat/orchestrator.ts` (~lines 1220-1260)**
   - `buildAttachmentsBlock()` now returns `{ text, contentBlocks }`
-  - Pass `text` to `assembleUserMessage()` as before
+  - Destructure: `const { text: attachmentsText, contentBlocks } = buildAttachmentsBlock(resolvedAttachments);`
+  - Pass `attachmentsText` (not the full return value) to `assembleUserMessage({ attachments: attachmentsText ?? undefined, ... })` — the `MessageParts.attachments` field remains `string`
   - Call `assembleUserContent(assembledText, contentBlocks)` to merge
   - Store result as `Message.content` (persisted to JSONL including base64)
 
-### 2.6 Dispatcher — Propagate `content_blocks`
+### 2.6 Tool Result Media Propagation
 
-- [ ] **Update `src/chat/dispatcher.ts`**
-  - When a tool returns `ToolResult` with `content_blocks`, propagate them through the event chain
-  - Ensure `content_blocks` reaches the provider formatting layer
+The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it already passes `ToolResult` objects through intact via `onToolCallResult`. The real gap is the `ChatMessage.tool_results` type and the `toChatMessages()` mapping in the orchestrator.
 
-- [ ] **Update provider `toXxxMessages()` functions** — Handle `content_blocks` in tool results
-  - Anthropic: tool_result content arrays support image blocks alongside text
-  - OpenAI: tool results as multipart content
-  - Bedrock: tool result content blocks
-  - Local: same as OpenAI
+**Current flow:** `ToolResult` (with new `content_blocks`) → stored on `Message.tool_result` → `toChatMessages()` at orchestrator.ts:2081 maps it to `ChatMessage.tool_results[]` entry → providers read `tr.result` (string only). The `content_blocks` field is lost in the `toChatMessages()` mapping because `ChatMessage.tool_results[]` has no `content_blocks` field.
+
+- [ ] **Update `src/providers/provider.ts:30-35`** — Extend `ChatMessage.tool_results[]` entry type
+  - Add `content_blocks?: ContentBlock[]` to the tool result entry interface
+  - Current interface: `{ tool_call_id: string; tool_name: string; result: string; is_error: boolean }`
+  - Add: `content_blocks?: ContentBlock[]`
+
+- [ ] **Update `src/chat/orchestrator.ts:2081-2093`** — `toChatMessages()` tool result mapping
+  - Current: maps `msg.tool_result` → `{ tool_call_id, tool_name, result: resultStr, is_error }`
+  - Add: copy `content_blocks` from `msg.tool_result.content_blocks` when present
+
+- [ ] **Update provider `toXxxMessages()` functions** — Format `content_blocks` in tool results
+  - Anthropic (line 88): `content: tr.result` → when `tr.content_blocks` present, map to array: `[{ type: "text", text: tr.result }, ...mappedMediaBlocks]`; Anthropic `tool_result` content arrays natively support image blocks alongside text
+  - OpenAI (line 79): `content: tr.result` → when `tr.content_blocks` present, map to multipart content array with `image_url` entries
+  - Bedrock (line 115): `content: [{ text: tr.result }]` → when `tr.content_blocks` present, append image/document blocks to the content array
+  - Local (line 107): same as OpenAI
 
 ### 2.7 UI Changes
 
@@ -388,11 +400,11 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Implement mammoth `convertImage` handler (before `convertToHtml` call at line 142):
     - Check format against supported list (`image/png`, `image/jpeg`, `image/gif`, `image/webp`)
     - Skip unsupported formats (EMF, WMF, SVG, TIFF) with descriptive alt text
-    - Read image as buffer via `image.readAsBuffer()`
+    - Read image as buffer via `image.readAsBuffer()` — returns a Node.js `Buffer` (Electron's polyfill in the renderer process)
     - Generate MD5 hash filename: `${hash}.${ext}`
     - Resolve vault path via `this.app.fileManager.getAvailablePathForAttachment(filename)`
     - Check if file already exists (`this.app.vault.getFileByPath()`)
-    - If not exists: save via `this.app.vault.createBinary(targetPath, buffer.buffer)`
+    - If not exists: save via `this.app.vault.createBinary(targetPath, buffer.buffer)` — note: `buffer.buffer` converts `Buffer` → `ArrayBuffer` as required by Obsidian's vault API
     - Track extracted images with index for Turndown rule replacement
   - Replace existing Turndown image rule (lines 154-157: `filter: ["img"], replacement: () => "[image]"`) with vault-path-aware rule:
     - Match `__notor_img_N__` src pattern → emit `![alt](vaultPath)` markdown
@@ -420,25 +432,40 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 - [ ] **Update `src/tools/write-docx.ts`**
   - Add `ImageRun` to imports from `docx` (line 24-37)
-  - Make `buildDocxChildren()` async (currently sync — callers already await `generateDocx()`)
+  - **Image pre-resolution pass** — `buildDocxChildren()` is synchronous and called recursively (nested lists, blockquotes, table cells). The `docx` library's `Document`, `Paragraph`, and `Table` constructors all expect synchronous children arrays. Making `buildDocxChildren()` async would require awaiting every recursive call and restructuring all constructor call sites.
+    - **Strategy:** Add an async pre-pass in `generateDocx()` before calling `buildDocxChildren()`:
+      1. Walk all tokens from `marked.lexer()` output, collect all `image` token `href` values
+      2. Resolve all images in parallel: `await Promise.all(hrefs.map(h => resolveImageForDocx(h, vaultRoot, allowedPaths)))`
+      3. Build a `Map<string, DocxImageData>` lookup from href → resolved image data
+      4. Pass the map into `buildDocxChildren()` as a parameter
+    - `buildDocxChildren()` stays synchronous — the `image` case does a synchronous `map.get(href)` lookup
   - Add `image` case to the token type switch in `buildDocxChildren()` (after existing cases around line 108-245):
-    - Call `resolveImageForDocx()` to get buffer + dimensions
+    - Look up `resolvedImages.get(img.href)` from the pre-resolved map
     - If resolved: create `new Paragraph({ children: [new ImageRun({ type, data, transformation: { width, height }, altText })] })`
     - If not resolved: fallback text paragraph `[Image: href]`
-  - Fix template grafting (lines 286-338) to handle images:
-    - Current: only copies `word/document.xml` from generated zip into template
-    - Must also merge:
-      1. `word/media/*` — copy image binary files from generated zip
-      2. `word/_rels/document.xml.rels` — merge relationship entries with rId conflict resolution
-      3. `[Content_Types].xml` — add image format content type declarations
-    - rId conflict resolution algorithm:
-      1. Parse template's `.rels` with `@xmldom/xmldom` (already a dependency)
+  - **Refactor template grafting (lines 286-338) to use DOM parsing + handle images:**
+    - The current grafting uses regex-based XML string manipulation (regex to extract `<w:body>`, regex to strip `<w:sectPr>`). Introducing DOM-based merging for relationships alongside regex-based body grafting creates an inconsistent, fragile mix. Migrate the entire grafting routine to `@xmldom/xmldom` (`^0.8.11`, already a direct dependency in package.json).
+    - **Step 1 — Migrate existing body grafting to DOM parsing:**
+      1. Parse generated `word/document.xml` with `DOMParser` → extract `<w:body>` child nodes
+      2. Parse template `word/document.xml` with `DOMParser` → locate `<w:body>` element
+      3. Remove all non-`<w:sectPr>` children from template body
+      4. Import and append generated body children (excluding `<w:sectPr>`) into template body
+      5. Serialize back with `XMLSerializer` → write to template zip
+      - This replaces the current regex approach with equivalent DOM operations, reducing fragility
+    - **Step 2 — Add image support to grafting:**
+      - Must also merge:
+        1. `word/media/*` — copy image binary files from generated zip
+        2. `word/_rels/document.xml.rels` — merge relationship entries with rId conflict resolution
+        3. `[Content_Types].xml` — add image format content type declarations
+    - **rId conflict resolution algorithm:**
+      1. Parse template's `word/_rels/document.xml.rels` with `DOMParser`
       2. Find highest rId number in template
-      3. Remap all generated rIds to `rId(maxId + offset)`
-      4. Update generated `document.xml` body: replace `r:embed="rIdN"` and `r:id="rIdN"` references
-      5. Append remapped `<Relationship>` elements to template `.rels`
-      6. Copy `word/media/*` files from generated zip
-      7. Merge `[Content_Types].xml` (add `<Default Extension="png" .../>` etc.)
+      3. Parse generated doc's `word/_rels/document.xml.rels` with `DOMParser`
+      4. Remap all generated rIds to `rId(maxId + offset)`
+      5. Update generated `word/document.xml` body: replace `r:embed="rIdN"` and `r:id="rIdN"` references (can use DOM `getAttribute`/`setAttribute` on the already-parsed body nodes)
+      6. Append remapped `<Relationship>` elements to template `.rels` DOM
+      7. Copy `word/media/*` files from generated zip into template zip
+      8. Parse both `[Content_Types].xml` with `DOMParser` → add `<Default Extension="png" .../>` etc. if not already present → serialize back
 
 ### 2.5.4 Verification
 
