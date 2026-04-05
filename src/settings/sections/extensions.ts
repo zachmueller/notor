@@ -1,13 +1,14 @@
 /**
  * Extensions settings section renderer.
  *
- * Renders shared settings, per-tool settings, and per-automation settings
- * defined in user extension files, plus a "Reload extensions" button.
+ * Renders built-in tools with customize/open/reset actions, shared settings,
+ * per-tool settings, and per-automation settings defined in user extension
+ * files, plus a "Reload extensions" button.
  *
  * @see specs/05-user-tools/tasks.md — EXT-015
  */
 
-import { Notice, SecretComponent, Setting } from "obsidian";
+import { Notice, SecretComponent, Setting, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
 import type { SettingsFieldSchema, UserToolDefinition, UserAutomationDefinition } from "../../extensions/types";
 import { slugifySecretId } from "../../extensions/settings-schema";
@@ -19,39 +20,21 @@ export function renderExtensionsSection(
 ): void {
 	const manager = ctx.plugin.getExtensionManager();
 
+	// --- Built-in tools ---
+	renderBuiltinToolsSection(containerEl, ctx);
+
+	// --- User extension settings ---
 	const sharedDef = manager.getSharedSettingsDefinition();
 	const toolsWithSettings = manager.getTools().filter((t) => t.settingsSchema && t.settingsSchema.length > 0);
 	const automationsWithSettings = manager.getAutomations().filter((a) => a.settingsSchema && a.settingsSchema.length > 0);
 
-	const hasContent = sharedDef !== null || toolsWithSettings.length > 0 || automationsWithSettings.length > 0;
-
-	if (!hasContent) {
-		// Still show the reload button even when there's no settings content
-		new Setting(containerEl)
-			.setName("Reload extensions")
-			.setDesc("Re-discover and re-compile all user tools and automations.")
-			.addButton((btn) =>
-				btn.setButtonText("Reload").onClick(async () => {
-					const result = await manager.reload(false);
-					const summary =
-						`Extensions reloaded: ${result.toolCount} tool${result.toolCount !== 1 ? "s" : ""}, ` +
-						`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}` +
-						(result.errors.length > 0 ? ` (${result.errors.length} error${result.errors.length !== 1 ? "s" : ""})` : "");
-					new Notice(summary);
-					ctx.redisplay();
-				}),
-			);
-		return;
-	}
-
-	// --- Shared settings ---
+	// Shared settings
 	if (sharedDef) {
 		new Setting(containerEl).setHeading().setName("Shared settings");
 		renderFieldList(containerEl, ctx, sharedDef.settingsSchema, {
 			kind: "shared",
 		});
 
-		// Reset to defaults
 		new Setting(containerEl).addButton((btn) =>
 			btn
 				.setButtonText("Reset to defaults")
@@ -64,7 +47,7 @@ export function renderExtensionsSection(
 		);
 	}
 
-	// --- Per-tool settings ---
+	// Per-tool settings
 	for (const tool of toolsWithSettings) {
 		new Setting(containerEl).setHeading().setName(`Tool: ${tool.name}`);
 		renderFieldList(containerEl, ctx, tool.settingsSchema!, {
@@ -84,7 +67,7 @@ export function renderExtensionsSection(
 		);
 	}
 
-	// --- Per-automation settings ---
+	// Per-automation settings
 	for (const automation of automationsWithSettings) {
 		const label = automation.displayName ?? automation.filePath.split("/").pop()?.replace(/\.md$/, "") ?? automation.filePath;
 		const extKey = automation.displayName ?? automation.filePath;
@@ -122,6 +105,107 @@ export function renderExtensionsSection(
 				ctx.redisplay();
 			}),
 		);
+}
+
+// ---------------------------------------------------------------------------
+// Built-in tools section
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a listing of all built-in tools with customize/open/reset actions.
+ */
+function renderBuiltinToolsSection(
+	containerEl: HTMLElement,
+	ctx: SettingsContext,
+): void {
+	const manager = ctx.plugin.getExtensionManager();
+	const registry = ctx.plugin.getToolRegistry();
+	const builtinNames = manager.getBuiltinToolNames();
+
+	new Setting(containerEl).setHeading().setName("Built-in tools");
+	containerEl.createEl("p", {
+		text:
+			"Create customizable copies of built-in tools. " +
+			"Customized tools override the built-in implementation after reload.",
+		cls: "setting-item-description",
+	});
+
+	for (const toolName of builtinNames) {
+		const tool = registry.get(toolName);
+
+		const setting = new Setting(containerEl).setName(toolName);
+
+		if (tool) {
+			setting.setDesc(tool.description);
+		}
+
+		// "Built-in" badge
+		const badge = setting.nameEl.createSpan({
+			text: "Built-in",
+			cls: "notor-extension-badge-builtin",
+		});
+		badge.style.marginLeft = "8px";
+		badge.style.fontSize = "0.75em";
+		badge.style.opacity = "0.7";
+		badge.style.fontStyle = "italic";
+
+		const vaultFilePath = normalizePath(
+			`${ctx.settings.notor_dir}/tools/${toolName}.md`,
+		);
+		const vaultFileExists =
+			ctx.app.vault.getAbstractFileByPath(vaultFilePath) !== null;
+
+		if (vaultFileExists) {
+			// Open button
+			setting.addButton((btn) =>
+				btn
+					.setIcon("square-arrow-out-up-right")
+					.setTooltip("Open extension file")
+					.onClick(async () => {
+						await ctx.app.workspace.openLinkText(vaultFilePath, "");
+					}),
+			);
+
+			// Reset to default button
+			setting.addButton((btn) =>
+				btn
+					.setButtonText("Reset to default")
+					.setTooltip(
+						"Restore built-in scaffold (overwrites customizations)",
+					)
+					.onClick(async () => {
+						try {
+							await manager.resetBuiltinToolToDefault(toolName);
+							new Notice(`Tool "${toolName}" reset to default.`);
+							ctx.redisplay();
+						} catch (e) {
+							const msg = e instanceof Error ? e.message : String(e);
+							new Notice(`Failed to reset tool: ${msg}`);
+						}
+					}),
+			);
+		} else {
+			// Customize button
+			setting.addButton((btn) =>
+				btn
+					.setButtonText("Customize")
+					.setTooltip("Create a vault file to customize this tool")
+					.onClick(async () => {
+						try {
+							const path = await manager.ensureBuiltinToolVaultFile(toolName);
+							await ctx.app.workspace.openLinkText(path, "");
+							new Notice(
+								`Created ${path} — reload extensions to activate.`,
+							);
+							ctx.redisplay();
+						} catch (e) {
+							const msg = e instanceof Error ? e.message : String(e);
+							new Notice(`Failed to create tool file: ${msg}`);
+						}
+					}),
+			);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +265,7 @@ function renderField(
 	field: SettingsFieldSchema,
 	target: FieldTarget,
 ): void {
-	// Secret string field → SecretComponent
+	// Secret string field -> SecretComponent
 	if (field.type === "string" && field.secret) {
 		const secretId = target.kind === "shared"
 			? slugifySecretId("notor-shared", field.key)
@@ -200,7 +284,7 @@ function renderField(
 		return;
 	}
 
-	// String with options → dropdown
+	// String with options -> dropdown
 	if (field.type === "string" && field.options && field.options.length > 0) {
 		const persisted = getPersistedValue(ctx, field, target);
 		const currentValue = persisted !== undefined ? String(persisted) : (field.default !== undefined ? String(field.default) : "");
@@ -218,7 +302,7 @@ function renderField(
 		return;
 	}
 
-	// Plain string → text input
+	// Plain string -> text input
 	if (field.type === "string") {
 		const persisted = getPersistedValue(ctx, field, target);
 		const currentValue = persisted !== undefined ? String(persisted) : (field.default !== undefined ? String(field.default) : "");
@@ -235,7 +319,7 @@ function renderField(
 		return;
 	}
 
-	// Number → text input with validation
+	// Number -> text input with validation
 	if (field.type === "number") {
 		const persisted = getPersistedValue(ctx, field, target);
 		const currentValue = persisted !== undefined ? String(persisted) : (field.default !== undefined ? String(field.default) : "");
@@ -256,7 +340,7 @@ function renderField(
 		return;
 	}
 
-	// Boolean → toggle
+	// Boolean -> toggle
 	if (field.type === "boolean") {
 		const persisted = getPersistedValue(ctx, field, target);
 		const currentValue = persisted !== undefined ? Boolean(persisted) : (field.default !== undefined ? Boolean(field.default) : false);
@@ -271,7 +355,7 @@ function renderField(
 		return;
 	}
 
-	// string[] → dynamic list with add/remove
+	// string[] -> dynamic list with add/remove
 	if (field.type === "string[]") {
 		const persisted = getPersistedValue(ctx, field, target);
 		const currentList: string[] = Array.isArray(persisted)

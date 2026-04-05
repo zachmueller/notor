@@ -8,7 +8,7 @@
  * tab, and initializes all managers with clean unload support.
  */
 
-import { Notice, Plugin, WorkspaceLeaf, TFile, TAbstractFile, normalizePath, parseYaml } from "obsidian";
+import { Notice, Platform, Plugin, WorkspaceLeaf, TFile, TAbstractFile, normalizePath, parseYaml } from "obsidian";
 import { MarkdownView } from "obsidian";
 import { createDefaultSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
@@ -1495,36 +1495,44 @@ export default class NotorPlugin extends Plugin {
 			if (this._extensionStaleNotice) return;
 
 			const notice = new Notice(
-				"Extension files changed. Click to reload extensions.",
+				"Extension files changed." + (Platform.isDesktop ? "\n(right-click to reload)" : ""),
 				0, // persistent — no auto-dismiss
 			);
 
-			// Add click handler to trigger reload directly
+			// Left-click: clear reference (Obsidian's default dismisses the Notice)
 			notice.noticeEl.addEventListener("click", () => {
-				notice.hide();
 				this._extensionStaleNotice = null;
-				this.getExtensionManager().reload(false).then((result) => {
-					const summary =
-						`Extensions reloaded: ${result.toolCount} tool${result.toolCount !== 1 ? "s" : ""}, ` +
-						`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}` +
-						(result.errors.length > 0 ? ` (${result.errors.length} error${result.errors.length !== 1 ? "s" : ""})` : "");
-					new Notice(summary);
-
-					// Re-evaluate listeners to pick up any new automation triggers
-					if (this._vaultEventListenerManager) {
-						this._vaultEventListenerManager.evaluateListeners();
-					}
-					if (this._vaultEventScheduler) {
-						const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
-							(h) => h.enabled
-						);
-						this._vaultEventScheduler.syncJobs(enabledScheduleHooks);
-					}
-				}).catch((e) => {
-					log.error("Extension reload from Notice failed", { error: String(e) });
-					new Notice(`Extension reload failed: ${e instanceof Error ? e.message : String(e)}`);
-				});
 			});
+
+			// Right-click: trigger reload (desktop only)
+			if (Platform.isDesktop) {
+				notice.noticeEl.oncontextmenu = (e) => {
+					e.preventDefault();
+					notice.hide();
+					this._extensionStaleNotice = null;
+					this.getExtensionManager().reload(false).then((result) => {
+						const summary =
+							`Extensions reloaded: ${result.toolCount} tool${result.toolCount !== 1 ? "s" : ""}, ` +
+							`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}` +
+							(result.errors.length > 0 ? ` (${result.errors.length} error${result.errors.length !== 1 ? "s" : ""})` : "");
+						new Notice(summary);
+
+						// Re-evaluate listeners to pick up any new automation triggers
+						if (this._vaultEventListenerManager) {
+							this._vaultEventListenerManager.evaluateListeners();
+						}
+						if (this._vaultEventScheduler) {
+							const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
+								(h) => h.enabled
+							);
+							this._vaultEventScheduler.syncJobs(enabledScheduleHooks);
+						}
+					}).catch((err) => {
+						log.error("Extension reload from Notice failed", { error: String(err) });
+						new Notice(`Extension reload failed: ${err instanceof Error ? err.message : String(err)}`);
+					});
+				};
+			}
 
 			this._extensionStaleNotice = notice;
 		}, 1000);

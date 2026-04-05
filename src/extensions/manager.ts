@@ -5,7 +5,7 @@
  * and reload lifecycle for user tools and automations.
  */
 
-import { Notice } from "obsidian";
+import { Notice, normalizePath } from "obsidian";
 import type NotorPlugin from "../main";
 import type { Tool, ToolExecuteOptions, JSONSchema } from "../tools/tool";
 import type { ToolResult } from "../types";
@@ -25,6 +25,7 @@ import { resolveSettings, resolveSharedSettings } from "./settings-schema";
 import { buildUtils, buildLibs, buildObsidianExports } from "./runtime-context";
 import type { ExtensionUtils, ExtensionLibs, ExtensionObsidianExports } from "./runtime-context";
 import { TOOL_PATH_PARAMS } from "../tool-config/path-enforcer";
+import { BUILTIN_TOOL_SCAFFOLDS } from "./builtin-tool-scaffolds";
 import { logger } from "../utils/logger";
 
 const log = logger("ExtensionManager");
@@ -295,10 +296,6 @@ export class ExtensionManager {
 			(errors.length > 0 ? ` (${errors.length} error${errors.length !== 1 ? "s" : ""})` : "");
 		log.info(summary);
 
-		if (!isInitialLoad) {
-			new Notice(summary);
-		}
-
 		return { toolCount, automationCount, builtinOverrides, errors };
 	}
 
@@ -481,6 +478,73 @@ export class ExtensionManager {
 			this.cachedObsidianInstance = buildObsidianExports();
 		}
 		return this.cachedObsidianInstance;
+	}
+
+	// -----------------------------------------------------------------------
+	// Built-in tool scaffolds
+	// -----------------------------------------------------------------------
+
+	/** Get all built-in tool names (for the settings UI). */
+	getBuiltinToolNames(): string[] {
+		return Array.from(BUILTIN_TOOL_SCAFFOLDS.keys());
+	}
+
+	/**
+	 * Ensure a vault file exists for a built-in tool scaffold.
+	 *
+	 * Creates `{notor_dir}/tools/{toolName}.md` with the scaffold content
+	 * if it doesn't already exist. Returns the vault-relative file path.
+	 */
+	async ensureBuiltinToolVaultFile(toolName: string): Promise<string> {
+		const scaffold = BUILTIN_TOOL_SCAFFOLDS.get(toolName);
+		if (!scaffold) {
+			throw new Error(`No built-in scaffold for tool "${toolName}"`);
+		}
+
+		const dir = normalizePath(`${this.plugin.settings.notor_dir}/tools`);
+		const filePath = normalizePath(`${dir}/${toolName}.md`);
+
+		// If file already exists, return its path
+		if (this.plugin.app.vault.getAbstractFileByPath(filePath)) {
+			return filePath;
+		}
+
+		// Ensure directory exists
+		const dirFile = this.plugin.app.vault.getAbstractFileByPath(dir);
+		if (!dirFile) {
+			await this.plugin.app.vault.createFolder(dir);
+		}
+
+		await this.plugin.app.vault.create(filePath, scaffold.scaffoldContent);
+		log.info("Created built-in tool scaffold", { tool: toolName, path: filePath });
+		return filePath;
+	}
+
+	/**
+	 * Reset a built-in tool's vault file to the default scaffold content.
+	 *
+	 * Overwrites if the file exists, creates if it doesn't.
+	 */
+	async resetBuiltinToolToDefault(toolName: string): Promise<void> {
+		const scaffold = BUILTIN_TOOL_SCAFFOLDS.get(toolName);
+		if (!scaffold) {
+			throw new Error(`No built-in scaffold for tool "${toolName}"`);
+		}
+
+		const dir = normalizePath(`${this.plugin.settings.notor_dir}/tools`);
+		const filePath = normalizePath(`${dir}/${toolName}.md`);
+
+		const existing = this.plugin.app.vault.getAbstractFileByPath(filePath);
+		if (existing) {
+			await this.plugin.app.vault.modify(existing as import("obsidian").TFile, scaffold.scaffoldContent);
+		} else {
+			const dirFile = this.plugin.app.vault.getAbstractFileByPath(dir);
+			if (!dirFile) {
+				await this.plugin.app.vault.createFolder(dir);
+			}
+			await this.plugin.app.vault.create(filePath, scaffold.scaffoldContent);
+		}
+		log.info("Reset built-in tool scaffold to default", { tool: toolName, path: filePath });
 	}
 
 	// -----------------------------------------------------------------------
