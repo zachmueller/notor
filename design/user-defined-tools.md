@@ -33,8 +33,8 @@ Both tools and automations share the same underlying execution infrastructure.
 All user-defined extensions are **Markdown notes** (`.md`). The code lives inside a single fenced code block. This mirrors how workflows are already Markdown notes with frontmatter — extensions add a code fence.
 
 **Parsing rules:**
-- **YAML fence** — The plugin extracts the first `` ```yaml `` fenced code block. This contains nested configuration (parameter schemas, settings schemas) that would exceed Obsidian frontmatter's depth limitations. Optional — extensions without params or settings can omit it.
-- **Code fence** — The plugin extracts the first `` ```ts ```, `` ```typescript ```, `` ```js ```, or `` ```javascript `` fenced code block. This contains the extension's executable logic.
+- **YAML fence** — The plugin extracts the first ` ```yaml``` ` fenced code block. This contains nested configuration (parameter schemas, settings schemas) that would exceed Obsidian frontmatter's depth limitations. Optional — extensions without params or settings can omit it.
+- **Code fence** — The plugin extracts the first ` ```ts``` `, ` ```typescript``` `, ` ```js``` `, or ` ```javascript``` ` fenced code block. This contains the extension's executable logic.
 - Everything outside the fences (prose, headings, etc.) is documentation — ignored by the runtime but visible when the user opens the note in Obsidian. This lets users document what the extension does, why it exists, and how to customize it, all in the same file.
 
 **Split between frontmatter and YAML fence:** Flat scalar fields (`name`, `description`, `mode`, `event`, `label`, etc.) live in frontmatter. Nested structures (`params`, `settings`) live in the YAML code fence to avoid Obsidian's frontmatter depth limitations.
@@ -56,15 +56,15 @@ All user-defined extension code executes with these variables in scope:
 
 #### Notor Utilities
 
-| Variable | Type | Description |
-|----------|------|-------------|
-| `utils.resolveNote(path)` | function | Resolve a note path (handles bare names, missing `.md`, wikilinks) |
-| `utils.staleTracker` | `StaleContentTracker` | Record reads and check for concurrent edits before writes |
-| `utils.checkpointManager` | `CheckpointManager` | Create snapshots before destructive operations |
-| `utils.noteOpener` | `NoteOpener` | Open notes in the editor |
-| `utils.logger(name)` | function | Create a scoped logger |
-| `utils.resolveAndValidatePath(path)` | function | Validate and resolve filesystem paths |
-| `utils.executeShellCommand(cmd, opts)` | function | Run a shell command |
+| Variable                               | Type                  | Description                                                        |
+| -------------------------------------- | --------------------- | ------------------------------------------------------------------ |
+| `utils.resolveNote(path)`              | function              | Resolve a note path (handles bare names, missing `.md`, wikilinks) |
+| `utils.staleTracker`                   | `StaleContentTracker` | Record reads and check for concurrent edits before writes          |
+| `utils.checkpointManager`              | `CheckpointManager`   | Create snapshots before destructive operations                     |
+| `utils.noteOpener`                     | `NoteOpener`          | Open notes in the editor                                           |
+| `utils.logger(name)`                   | function              | Create a scoped logger                                             |
+| `utils.resolveAndValidatePath(path)`   | function              | Validate and resolve filesystem paths                              |
+| `utils.executeShellCommand(cmd, opts)` | function              | Run a shell command                                                |
 
 #### Bundled Libraries
 
