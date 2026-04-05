@@ -37,7 +37,7 @@ All user-defined extensions are **Markdown notes** (`.md`). The code lives insid
 - **Code fence** — The plugin extracts the first ` ```ts``` `, ` ```typescript``` `, ` ```js``` `, or ` ```javascript``` ` fenced code block. This contains the extension's executable logic.
 - Everything outside the fences (prose, headings, etc.) is documentation — ignored by the runtime but visible when the user opens the note in Obsidian. This lets users document what the extension does, why it exists, and how to customize it, all in the same file.
 
-**Split between frontmatter and YAML fence:** Flat scalar fields (`name`, `description`, `mode`, `event`, `label`, etc.) live in frontmatter. Nested structures (`params`, `settings`) live in the YAML code fence to avoid Obsidian's frontmatter depth limitations.
+**Split between frontmatter and YAML fence:** Flat scalar fields (`notor-tool-name`, `notor-description`, `notor-mode`, `notor-trigger`, `notor-display-name`, etc.) live in frontmatter. Nested structures (`params`, `settings`) live in the YAML code fence to avoid Obsidian's frontmatter depth limitations.
 
 ### Injected Context (Shared)
 
@@ -47,11 +47,7 @@ All user-defined extension code executes with these variables in scope:
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `app` | `App` | Full Obsidian App instance |
-| `vault` | `Vault` | Shorthand for `app.vault` |
-| `metadataCache` | `MetadataCache` | Shorthand for `app.metadataCache` |
-| `fileManager` | `FileManager` | Shorthand for `app.fileManager` |
-| `workspace` | `Workspace` | Shorthand for `app.workspace` |
+| `app` | `App` | Full Obsidian App instance (access `app.vault`, `app.metadataCache`, `app.fileManager`, `app.workspace`, etc.) |
 | `obsidian` | module | Obsidian module exports (`requestUrl`, `Notice`, `TFile`, `getFrontMatterInfo`, etc.) |
 
 #### Notor Utilities
@@ -90,12 +86,14 @@ All of these are already bundled into the plugin by esbuild. Exposing them is ze
 
 ### Compilation Pipeline
 
-1. **Discover** — scan `notor/tools/`, `notor/automations/`, and `notor/settings.md` recursively on plugin load and on file changes. Files must be `.md` with the appropriate frontmatter marker (`notor-tool: true`, `notor-automation: true`, or `notor-settings: true`).
+1. **Discover** — scan `notor/tools/`, `notor/automations/`, and `notor/settings.md` recursively on plugin load and on vault file-change events (hot reload). Files must be `.md` with `notor-type` frontmatter set to `tool`, `automation`, or `settings`.
 2. **Parse** — extract YAML frontmatter (flat fields), locate the first YAML fenced code block (nested config: `params`, `settings`), and locate the first TypeScript/JavaScript fenced code block (logic).
 3. **Strip types** — run the code block through sucrase (or regex for simple cases) to remove TypeScript type annotations.
 4. **Resolve settings** — merge schema defaults with persisted user values and SecretStorage secrets to produce the `settings` and `shared` objects.
 5. **Compile** — create a function via `new Function(argNames..., strippedCode)` with the injected context variables (including `settings`, `shared`) as named arguments.
 6. **Cache** — store the compiled function keyed by file path. Recompile only when the file changes.
+
+**Hot reload:** Extensions are recompiled automatically when their source files change, detected via Obsidian's vault file-change events. This enables a live development loop — edit the extension note, save, and the updated version is immediately active. In-flight tool calls use the version compiled at dispatch time; the new version applies to subsequent calls.
 
 ### Type Stripping Strategy
 
@@ -105,11 +103,11 @@ All of these are already bundled into the plugin by esbuild. Exposing them is ze
 | **Regex-based** | ~0KB | Simple type annotations only | Fragile on complex types, but extensions are short |
 | **Accept JS only** | 0KB | N/A | Worse DX; users expect TS in a TS project |
 
-Recommendation: **Sucrase**. It's small, fast, and handles everything users would realistically write in an extension body. The TS code fence signals to Obsidian's editor to provide syntax highlighting.
+**Decision: Sucrase.** It is small (~50KB), fast, and handles the full TypeScript syntax surface users need in extension bodies. The TS code fence signals to Obsidian's editor to provide syntax highlighting.
 
 ### API Stability Considerations
 
-The injected context (`app`, `vault`, `utils`, `libs`) becomes a public API contract. Changes to the `utils` surface (e.g., renaming `staleTracker` methods, changing `CheckpointManager` interface) become breaking changes for user extensions.
+The injected context (`app`, `obsidian`, `utils`, `libs`) becomes a public API contract. Changes to the `utils` surface (e.g., renaming `staleTracker` methods, changing `CheckpointManager` interface) become breaking changes for user extensions.
 
 Mitigations:
 - Keep `utils` as a stable facade with documented methods, not raw internal objects
@@ -125,10 +123,10 @@ Mitigations:
 ````markdown
 <!-- notor/tools/read_note.md -->
 ---
-notor-tool: true
-name: read_note
-description: "Read a vault note, stripping HTML comments"
-mode: read
+notor-type: tool
+notor-tool-name: read_note
+notor-description: "Read a vault note, stripping HTML comments"
+notor-mode: read
 ---
 
 # Read Note (Custom)
@@ -151,7 +149,7 @@ params:
 const file = utils.resolveNote(params.path);
 if (!file) return { success: false, error: `Note not found: ${params.path}` };
 
-let content = await vault.read(file);
+let content = await app.vault.read(file);
 
 if (!params.include_frontmatter) {
   const fmInfo = obsidian.getFrontMatterInfo(content);
@@ -171,10 +169,10 @@ return { success: true, result: content };
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `notor-tool` | yes | Must be `true`. Identifies this note as a vault-defined tool. |
-| `name` | yes | Tool name (unique identifier). If it matches a built-in tool name, overrides it. |
-| `description` | yes | Human-readable description sent to the LLM. |
-| `mode` | yes | `"read"` or `"write"`. Determines Plan/Act mode behavior. |
+| `notor-type` | yes | Must be `tool`. Identifies this note as a vault-defined tool. |
+| `notor-tool-name` | yes | Tool name (unique identifier). If it matches a built-in tool name, overrides it. |
+| `notor-description` | yes | Human-readable description sent to the LLM. Reuses the same property used by sub-agent profiles. |
+| `notor-mode` | yes | `"read"` or `"write"`. Determines Plan/Act mode behavior. |
 
 ### YAML Fence Schema
 
@@ -196,31 +194,31 @@ The function body is expected to return a `ToolResult` object (`{ success, resul
 ### Registration
 
 1. User-defined tools register in `ToolRegistry` via the same `register()` method as built-in tools.
-2. If a user tool's `name` matches a built-in tool, it replaces the built-in (last-write-wins; user tools load after built-ins).
+2. If a user tool's `notor-tool-name` matches a built-in tool, it replaces the built-in (last-write-wins; user tools load after built-ins).
 3. User tools participate fully in the existing dispatch pipeline: Plan/Act enforcement, auto-approve resolution, `<notor_tool_config>` overrides, checkpoint creation, approval UI.
 
 ### Integration with Existing Systems
 
 | System | Integration |
 |--------|-------------|
-| **Plan/Act mode** | Enforced via `mode` field in frontmatter — identical to built-in tools |
+| **Plan/Act mode** | Enforced via `notor-mode` field in frontmatter — identical to built-in tools |
 | **Auto-approve** | Participates in the same resolution chain (global, persona, workflow, rule overrides) |
 | **`<notor_tool_config>`** | User tools can be toggled/configured in persona/workflow/rule YAML blocks by name |
 | **Effective Config Inspector** | User tools appear alongside built-in and MCP tools |
 | **Tool call UI** | Rendered identically — name, parameters, result |
-| **Diff view** | If a user tool calls `vault.process()`, diffs work the same way |
+| **Diff view** | If a user tool calls `app.vault.process()`, diffs work the same way |
 | **Checkpoints** | User tools can call `utils.checkpointManager.createCheckpoint()` directly |
 
 ### Built-in Tool Migration Path
 
 Every existing built-in tool (except `use_subagent`) could be reimplemented as a vault-defined tool. The implementations are straightforward Obsidian API usage:
 
-- `read_note` — ~80 lines: `vault.read()` + frontmatter stripping + stale tracking
-- `write_note` — ~100 lines: `vault.create()`/`vault.process()` + frontmatter preservation + checkpoints
+- `read_note` — ~80 lines: `app.vault.read()` + frontmatter stripping + stale tracking
+- `write_note` — ~100 lines: `app.vault.create()`/`app.vault.process()` + frontmatter preservation + checkpoints
 - `search_vault` — ~120 lines: file iteration + content matching
-- `get_backlinks` / `get_outlinks` — ~40 lines: `metadataCache.resolvedLinks` queries
-- `move_note` — ~50 lines: `fileManager.renameFile()` (auto-rewrites wikilinks)
-- `manage_tags` — ~60 lines: `fileManager.processFrontMatter()`
+- `get_backlinks` / `get_outlinks` — ~40 lines: `app.metadataCache.resolvedLinks` queries
+- `move_note` — ~50 lines: `app.fileManager.renameFile()` (auto-rewrites wikilinks)
+- `manage_tags` — ~60 lines: `app.fileManager.processFrontMatter()`
 - `fetch_webpage` — ~80 lines: `requestUrl()` + Turndown HTML-to-Markdown
 - `web_search` — ~70 lines: `requestUrl()` to DuckDuckGo + HTML parsing
 - `read_docx` / `write_docx` — ~150 lines: mammoth/docx library usage
@@ -229,9 +227,14 @@ Every existing built-in tool (except `use_subagent`) could be reimplemented as a
 
 Phase 1 (initial release): User-defined tools work alongside built-ins. Built-ins remain as TypeScript classes in `src/tools/`.
 
-Phase 2 (optional future): Ship built-in tool reference implementations as default `.md` files that the plugin writes to `notor/tools/` on first load (or via a "Reset to defaults" action). The `src/tools/` classes become fallbacks — used only if no vault-defined tool with the same name exists.
+Phase 2 (future): Expose built-in tools through a Settings UI that mirrors the existing sub-agent profile pattern:
 
-This is a non-breaking, incremental path. Users who never touch `notor/tools/` get the same experience as today.
+- Built-in tools are listed in a "Built-in tools" section within the Extension settings group. Each entry shows the tool name, description, and a "Built-in" badge.
+- A **"Customize"** button writes the tool's reference implementation to `notor/tools/{name}.md` and opens it for editing. This mirrors `SubAgentManager.ensureBuiltinVaultFile()`.
+- A **"Reset to default"** button overwrites the vault file with the built-in implementation, discarding user customizations. This mirrors `SubAgentManager.resetToDefault()`.
+- If no vault file exists for a tool, the built-in TypeScript class in `src/tools/` is used. If a vault file exists, it takes precedence (same override semantics as Phase 1).
+
+This is a non-breaking, incremental path identical to the sub-agent profile pattern already shipped. Users who never customize tools get the same experience as today.
 
 ### Scope Exclusion
 
@@ -246,10 +249,10 @@ This is a non-breaking, incremental path. Users who never touch `notor/tools/` g
 ````markdown
 <!-- notor/automations/tag-ai-writes.md -->
 ---
-notor-automation: true
-event: on_tool_result
-tools: [write_note, replace_in_note]
-label: "Tag AI-modified notes"
+notor-type: automation
+notor-trigger: on_tool_result
+notor-tools: [write_note, replace_in_note]
+notor-display-name: "Tag AI-modified notes"
 ---
 
 # Tag AI-Modified Notes
@@ -260,6 +263,7 @@ Only fires on successful write operations. The tag name can be changed in Settin
 ```yaml
 settings:
   tag_name:
+    name: "Tag Name"
     type: string
     description: "Tag to add to AI-modified notes"
     default: "ai-modified"
@@ -272,7 +276,7 @@ const notePath = context.params.path as string;
 const file = utils.resolveNote(notePath);
 if (!file) return;
 
-await fileManager.processFrontMatter(file, (fm: any) => {
+await app.fileManager.processFrontMatter(file, (fm: any) => {
   fm.tags = fm.tags || [];
   if (!fm.tags.includes(settings.tag_name)) fm.tags.push(settings.tag_name);
 });
@@ -283,10 +287,11 @@ await fileManager.processFrontMatter(file, (fm: any) => {
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `notor-automation` | yes | Must be `true`. Identifies this note as a vault-defined automation. |
-| `event` | yes | Hook lifecycle event: `pre_send`, `on_tool_call`, `on_tool_result`, `after_completion` |
-| `tools` | no | Array of tool names to filter on (only for `on_tool_call`/`on_tool_result`). If omitted, fires for all tools. |
-| `label` | no | Human-readable label for settings UI and logging. |
+| `notor-type` | yes | Must be `automation`. Identifies this note as a vault-defined automation. |
+| `notor-trigger` | yes | Hook event to fire on. LLM lifecycle: `pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`. Vault events: `on_note_open`, `on_note_create`, `on_save`, `on_manual_save`, `on_tag_change`, `on_schedule`. Reuses the same property used by workflows. |
+| `notor-schedule` | conditional | Cron expression (required when `notor-trigger: on_schedule`). Same property used by workflows. |
+| `notor-tools` | no | Array of tool names to filter on (only for `on_tool_call`/`on_tool_result`; ignored for other events). If omitted, fires for all tools. |
+| `notor-display-name` | no | Human-readable label for settings UI and logging. Reuses the same property used by workflows. |
 
 ### YAML Fence Schema (Automations)
 
@@ -296,17 +301,33 @@ await fileManager.processFrontMatter(file, (fm: any) => {
 
 ### Automation-Specific Injected Context
 
-In addition to the shared runtime (`app`, `vault`, `libs`, `utils`, `obsidian`), automations receive a `context` object with event-specific data:
+In addition to the shared runtime (`app`, `obsidian`, `utils`, `libs`), automations receive a `context` object with event-specific data:
+
+**Common fields (all events):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `context.timestamp` | `string` | ISO 8601 event timestamp |
+| `context.hookEvent` | `string` | The event name |
+
+**LLM lifecycle fields:**
 
 | Field | Available On | Type | Description |
 |-------|-------------|------|-------------|
-| `context.conversationId` | all events | `string` | Current conversation UUID |
-| `context.timestamp` | all events | `string` | ISO 8601 event timestamp |
-| `context.hookEvent` | all events | `string` | The event name |
+| `context.conversationId` | all LLM events | `string` | Current conversation UUID |
 | `context.toolName` | `on_tool_call`, `on_tool_result` | `string` | Tool that was called |
 | `context.params` | `on_tool_call`, `on_tool_result` | `Record<string, unknown>` | Tool parameters (parsed, not serialized) |
 | `context.result` | `on_tool_result` | `string` | Tool result output |
 | `context.status` | `on_tool_result` | `"success" \| "error"` | Whether the tool succeeded |
+
+**Vault event fields:**
+
+| Field | Available On | Type | Description |
+|-------|-------------|------|-------------|
+| `context.notePath` | `on_note_open`, `on_note_create`, `on_save`, `on_manual_save`, `on_tag_change` | `string` | Vault-relative path of the affected note |
+| `context.oldTags` | `on_tag_change` | `string[]` | Tags before the change |
+| `context.newTags` | `on_tag_change` | `string[]` | Tags after the change |
+| `context.schedule` | `on_schedule` | `string` | The cron expression that fired |
 
 Note: tools get `params` (from the LLM). Automations get `context` (from the hook lifecycle). This makes it unambiguous which type of extension you're writing.
 
@@ -318,21 +339,27 @@ Note: tools get `params` (from the LLM). Automations get `context` (from the hoo
 | `on_tool_call` | `void` | Fire-and-forget side effect |
 | `on_tool_result` | `void` | Fire-and-forget side effect |
 | `after_completion` | `void` | Fire-and-forget side effect |
+| `on_note_open` | `void` | Fire-and-forget side effect |
+| `on_note_create` | `void` | Fire-and-forget side effect |
+| `on_save` | `void` | Fire-and-forget side effect |
+| `on_manual_save` | `void` | Fire-and-forget side effect |
+| `on_tag_change` | `void` | Fire-and-forget side effect |
+| `on_schedule` | `void` | Fire-and-forget side effect |
 
-### The `tools` Filter
+### The `notor-tools` Filter
 
-The `tools` field in frontmatter is the key ergonomic improvement over shell hooks. Instead of writing `if (context.toolName === "write_note")` in the body, users declare the filter declaratively:
+The `notor-tools` field in frontmatter is the key ergonomic improvement over shell hooks. Instead of writing `if (context.toolName === "write_note")` in the body, users declare the filter declaratively:
 
 ```yaml
-event: on_tool_result
-tools: [write_note, replace_in_note]
+notor-trigger: on_tool_result
+notor-tools: [write_note, replace_in_note]
 ```
 
-The plugin evaluates this filter *before* invoking the function — automations that don't match the current tool are skipped entirely (no overhead).
+The plugin evaluates this filter *before* invoking the function — automations that don't match the current tool are skipped entirely (no overhead). This filter only applies to `on_tool_call` and `on_tool_result` events; it is ignored for vault events.
 
 ### Discovery & Registration
 
-- Discovered from `notor/automations/` (`.md` files with `notor-automation: true` in frontmatter).
+- Discovered from `notor/automations/` (`.md` files with `notor-type: automation` in frontmatter).
 - Registered alongside existing shell hooks in the hook dispatch pipeline.
 - Execution order: global shell hooks first, then vault-defined automations.
 - Vault-defined automations do NOT replace shell hooks — they coexist. Shell hooks remain for users who prefer simple shell commands.
@@ -343,7 +370,7 @@ The plugin evaluates this filter *before* invoking the function — automations 
 |--------|-------------|
 | **Global shell hooks** (settings UI) | Coexist. Shell hooks fire first, automations fire after. |
 | **Workflow-scoped hooks** (G-004) | Automations are global by default. Workflow-scoped override could suppress them (future). |
-| **Vault event hooks** (on_note_open, on_save, etc.) | Separate system — not affected. Could extend automations to vault events in the future. |
+| **Vault event hooks** (on_note_open, on_save, etc.) | Coexist. Vault-defined automations with vault event triggers register alongside existing shell/workflow hooks in the vault event dispatch pipeline. Execution order: shell hooks first, then workflow hooks, then vault-defined automations. |
 
 ---
 
@@ -357,10 +384,11 @@ Each entry under `settings:` declares one setting field:
 
 | Property | Required | Type | Description |
 |----------|----------|------|-------------|
+| `name` | yes | `string` | Human-readable label displayed as the setting name in the UI (maps to Obsidian `Setting.setName()`) |
 | `type` | yes | `"string" \| "number" \| "boolean" \| "string[]"` | Value type |
-| `description` | yes | `string` | Human-readable label for settings UI |
+| `description` | no | `string` | Sub-text displayed below the setting name (maps to Obsidian `Setting.setDesc()`) |
 | `default` | no | matches `type` | Default value (used if user hasn't configured) |
-| `secret` | no | `boolean` | If `true`, stored in Obsidian SecretStorage, rendered as password input |
+| `secret` | no | `boolean` | If `true`, stored in Obsidian's `SecretStorage` API (OS-level encrypted storage) and rendered via `SecretComponent`. Same mechanism used for API keys elsewhere in the plugin. |
 | `min` | no | `number` | Minimum value (number type only) |
 | `max` | no | `number` | Maximum value (number type only) |
 | `options` | no | `string[]` | Enum constraint — renders as dropdown (string type only) |
@@ -369,10 +397,10 @@ Each entry under `settings:` declares one setting field:
 
 ````markdown
 ---
-notor-tool: true
-name: custom_search
-description: "Search via custom API"
-mode: read
+notor-type: tool
+notor-tool-name: custom_search
+notor-description: "Search via custom API"
+notor-mode: read
 ---
 
 # Custom Search
@@ -390,16 +418,19 @@ params:
     default: 5
 settings:
   api_key:
+    name: "API Key"
     type: string
     description: "API key for the search service"
     secret: true
   timeout:
+    name: "Request Timeout"
     type: number
     description: "Request timeout in seconds"
     default: 30
   base_url:
+    name: "API Base URL"
     type: string
-    description: "API base URL"
+    description: "Base URL for the search API"
     default: "https://api.example.com"
 ```
 
@@ -422,7 +453,7 @@ A dedicated `notor/settings.md` file defines shared settings using the same sche
 ````markdown
 <!-- notor/settings.md -->
 ---
-notor-settings: true
+notor-type: settings
 ---
 
 # Shared Extension Settings
@@ -432,10 +463,12 @@ Settings shared across multiple user-defined tools and automations.
 ```yaml
 settings:
   custom_domain_denylist:
+    name: "Custom Domain Denylist"
     type: string[]
     description: "Domains blocked from custom tools"
     default: []
   shared_api_key:
+    name: "Shared API Key"
     type: string
     description: "API key used by multiple tools"
     secret: true
@@ -470,14 +503,15 @@ Settings with `secret: true` use Obsidian's `SecretStorage` API (via existing `g
 - Per-extension: `notor-ext-{extension-name}-{setting-key}`
 - Shared: `notor-shared-{setting-key}`
 
-Secret values are never persisted in `data.json`.
+Secret values are stored in OS-level encrypted storage (Keychain on macOS, DPAPI on Windows, libsecret on Linux) via Obsidian's `SecretStorage` API — never persisted in `data.json`.
 
 ### Settings UI
 
 The plugin auto-generates a settings UI section from each extension's `settings` schema. This appears under a new **"Extension settings"** collapsible group in the settings tab.
 
 Rendering per field type:
-- `type: string` + no `options` → text input (or password input if `secret: true`)
+- `type: string` + no `options` → text input
+- `type: string` + `secret: true` → `SecretComponent` (password-masked input backed by Obsidian's `SecretStorage` API for OS-level encrypted storage — the same mechanism used for Anthropic/OpenAI API keys in the plugin)
 - `type: string` + `options` → dropdown
 - `type: number` → text input with numeric validation (respects `min`/`max`)
 - `type: boolean` → toggle
@@ -503,7 +537,7 @@ At execution time, `settings` and `shared` are resolved by merging:
 
 1. **Editor support**: Should the plugin provide a TypeScript declaration file (`notor-extensions-api.d.ts`) that users can reference for autocomplete? This would describe the shapes of `app`, `params`, `context`, `utils`, `libs`, etc.
 
-2. **Hot reload**: Should editing an extension file immediately update the registered tool/automation, or require a plugin reload? Hot reload is better UX but adds complexity (need to handle in-flight tool calls).
+2. **Hot reload implementation details**: The design specifies hot reload via vault file-change events (see Compilation Pipeline). Remaining open items: debounce strategy for rapid saves, how to surface compilation errors during hot reload (Notice? inline?), and whether to show a success Notice on recompile.
 
 3. **Error UX**: When a user extension throws at runtime, how is the error surfaced? Options: Notice, chat message, log only. Probably all three — Notice for visibility, error returned to LLM as ToolResult (for tools), and detailed stack trace in the log.
 
@@ -513,6 +547,6 @@ At execution time, `settings` and `shared` are resolved by merging:
 
 6. **Automation ordering**: Should users control execution order between automations? Options: alphabetical by filename, explicit `order` field in frontmatter, or undefined (no guaranteed order).
 
-7. **MCP tool filter**: Should the `tools` filter in automations support MCP tool names (e.g., `my-server__query`)? Likely yes, since MCP tools go through the same dispatch pipeline.
+7. **MCP tool filter**: Should the `notor-tools` filter in automations support MCP tool names (e.g., `my-server__query`)? Likely yes, since MCP tools go through the same dispatch pipeline.
 
 8. **Blocking automations**: Current shell hooks are fire-and-forget for `on_tool_call`/`on_tool_result`. Should TypeScript automations have the option to block? For example, the tag-after-write case benefits from the tag being applied before the LLM sees the tool result — but this changes the dispatch pipeline's timing guarantees.
