@@ -48,7 +48,7 @@ Each provider's message conversion function must handle the case where `msg.cont
       - text → `{ type: "text", text }`
       - image → `{ type: "image", source: { type: "base64", media_type, data } }`
       - document → `{ type: "document", source: { type: "base64", media_type: "application/pdf", data } }` (Anthropic document blocks do not require a `name` field, unlike Bedrock)
-    - When `msg.role === "user"` and `msg.content` is `string`, wrap as `[{ type: "text", text: msg.content }]` (wire format changes from string to array — Anthropic accepts both forms, but this normalizes to array for consistency with the `ContentBlock[]` branch)
+    - When `msg.role === "user"` and `msg.content` is `string`, wrap as `[{ type: "text", text: msg.content }]` (wire format changes from string to array — Anthropic accepts both forms and treats them identically for billing, token counting, and generation. This normalizes to array for consistency with the `ContentBlock[]` branch)
     - When assistant (always string), pass through unchanged: `content: msg.content`
 
 - [ ] **`src/providers/openai-provider.ts` — `toOpenAIMessages()`**
@@ -146,7 +146,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 - [ ] **`src/chat/orchestrator.ts:2103-2176, 2178-2231`** — `toChatMessages()` repair & coalescing phases
   - **Repair phase** (lines 2103-2176): Injects synthetic `tool_result` messages for orphaned tool calls. All `content` fields are string literals (`""`) — no code changes required
   - **Coalescing phase** (lines 2178-2231): Merges consecutive tool_call/tool_result messages. Line 2194 is covered above. Coalesced messages use `content: preToolCallText` (string, from assistant) and `content: ""` (string literal) — no code changes required
-  - Both phases are safe because they only construct messages with string content, never propagate user `ContentBlock[]`. After all Phase 1 changes, confirm these phases compile without errors. TypeScript may report errors on string operations because `ChatMessage.content` is now a union type — if so, add `as string` casts at the specific sites (all content values in these phases are string literals or assistant text, so the casts are safe)
+  - Both phases are safe because they only construct messages with string content, never propagate user `ContentBlock[]`. After all Phase 1 changes, confirm these phases compile without errors. TypeScript may report errors on string operations because `ChatMessage.content` is now a union type — if so, add `as string` casts at the specific sites (all content values in these phases are string literals or assistant text, so the casts are safe). Likely cast sites: any line where `content` is assigned from a string literal (`""`) or from `preToolCallText` (known string) but TypeScript infers the broader union type. Expected: 0-3 sites
 
 - [ ] **`src/chat/history.ts:442`** — `JSON.parse(message.content)`
   - Add type guard: `if (typeof message.content !== "string") return null;` before JSON parse
@@ -168,6 +168,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 - [ ] **`src/chat/sub-agent-history.ts:58, 78, 96`** — `content: cm.content` pass-through
   - No change needed (both `ChatMessage` and `Message` accept the union)
+  - **Note:** These lines flow `ChatMessage → Message` (the reverse of the typical `toChatMessages()` direction). The union type is valid in both directions
   - Verify TypeScript compilation passes
 
 ### 1.7 Export Modules — Use `getTextContent()`
@@ -215,7 +216,7 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Format-aware compression cascade:
     - PNG: try PNG first → if >5MB, cascade JPEG 80 → 60 → 40
     - JPEG: try quality 80 → 60 → 40 → 20
-    - GIF/WebP: convert to PNG first, then PNG cascade. GIF conversion extracts the first frame only (animation is lost). WebP conversion may increase size; apply PNG cascade compression after conversion
+    - GIF/WebP: convert to PNG first, then PNG cascade. GIF conversion extracts the first frame only (animation is lost) — this happens implicitly: `new Image()` loads the GIF and Canvas `drawImage()` captures whatever frame is currently displayed (always the first frame for a just-loaded GIF), so no explicit frame extraction code is needed. WebP conversion may increase size; apply PNG cascade compression after conversion
   - Export `processImage(buffer: Buffer, mediaType: ImageMediaType): Promise<ContentBlock>`
   - `processImage()` throws on unrecoverable errors (corrupt image, Canvas/Image load failure, image exceeding internal size limits, zero-dimension images, Canvas `toDataURL` returning empty string). Callers (`read_file`, `resolveAttachment`) are responsible for catching and converting to appropriate error responses (e.g., `ToolResult` with `success: false`, or `Attachment` with `status: "error"`)
   - Callers must detect the media type before calling `processImage()` (via `detectMediaFormat()`). The function does not re-detect, since callers need the format for routing decisions (image vs PDF vs unknown binary) before processing.
@@ -274,6 +275,7 @@ Each provider's message conversion function must handle the case where `msg.cont
     - To: `{ text: string | null; contentBlocks: ContentBlock[] }`
     - Text attachments continue as XML string; image attachments produce `ContentBlock` entries
     - **Image ContentBlock construction:** For each resolved image attachment, create `{ type: "image", media_type: attachment.media_type!, data: attachment.binary_content!, width: attachment.width ?? undefined, height: attachment.height ?? undefined }`. The `!` assertions are safe because `resolveAttachment()` populates these fields before status becomes `"resolved"`
+    - **Implementation structure:** The existing loop over resolved attachments (lines 435-466) should be split: text attachments (`vault_note`, `vault_note_section`, `external_file`) continue through the existing XML `<attachments>` block construction unchanged (producing the `text` field). Binary attachments (`vault_image`, `external_image`, and later PDF types) are collected into the `contentBlocks` array using the ContentBlock construction described above. A single pass with type-based branching is sufficient
     - **Edge cases:** When no text attachments are resolved, `text` is `null`. When no binary attachments are resolved, `contentBlocks` is `[]` (empty array). When no attachments at all are resolved, return `{ text: null, contentBlocks: [] }`
   - **Atomicity note:** Task 2.4 and 2.5 must be applied together — `orchestrator.ts:1224` is the **only** caller of `buildAttachmentsBlock()`. If implementing incrementally, update the return type and the caller destructuring in the same commit. The minimal adapter at the caller: `const { text: attachmentsText, contentBlocks } = buildAttachmentsBlock(resolvedAttachments);` followed by `attachmentsBlock = attachmentsText;` (replacing the current direct assignment). Task 2.5 finalizes the caller with the full `assembleUserContent()` integration
 
@@ -283,7 +285,7 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Add `assembleUserContent(text: string, mediaBlocks: ContentBlock[]): string | ContentBlock[]` — this requires importing `ContentBlock` from `../media/types` into the existing string-only module. This is acceptable; `message-assembler.ts` is the composition point for user message content
     - If no media blocks → return plain string (existing behavior preserved)
     - If media blocks and `text` is non-empty → return `[{ type: "text", text }, ...mediaBlocks]`
-    - If media blocks and `text` is empty → return `[...mediaBlocks]` directly (no empty text block — providers like Anthropic reject empty text content blocks)
+    - If media blocks and `text.trim()` is empty → return `[...mediaBlocks]` directly (no empty or whitespace-only text block — providers like Anthropic reject empty text content blocks, and whitespace-only blocks are equally problematic)
   - **Note:** The existing `MessageParts` interface keeps `attachments?: string` unchanged — it receives only the text portion from the destructured `buildAttachmentsBlock()` return value. The `contentBlocks` are handled separately via `assembleUserContent()`.
 
 - [ ] **Update `src/chat/orchestrator.ts` (~lines 1206-1225)**
@@ -324,7 +326,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
   - Add `readExternalBinaryFile(absolutePath: string, maxSizeMb?: number): Promise<{ base64: string; mediaType: string; width?: number; height?: number } | null>` for binary file reading. Returns `null` if file exceeds size limit or cannot be read. Default `maxSizeMb`: 50 (matching the `read_file` raw size limit from Task 2.3). Detect media type via `detectMediaFormat()` on the first bytes of the buffer. **For image files:** process through `processImage()` (resize/compress) before returning — extract `data`, `media_type`, `width`, `height` from the returned `ContentBlock`. This ensures external images go through the same compression cascade as vault images
   - Route image files to binary read path instead of UTF-8 text read
   - Update `VaultNoteSuggest` (lines 173-335) to show image files from vault (not just `.md`):
-    - **API change required:** Replace `this.app.vault.getMarkdownFiles()` (line 270) with `this.app.vault.getFiles()` and filter manually by extension (`.md`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`). `getMarkdownFiles()` is an Obsidian API that only returns `.md` files and cannot be configured to include other types
+    - **API change required:** Replace `this.app.vault.getMarkdownFiles()` (line 270) with `this.app.vault.getFiles()` and filter manually by extension (`.md`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`). `getMarkdownFiles()` is an Obsidian API that only returns `.md` files and cannot be configured to include other types. (PDF files are added separately in Phase 3, Task 3.5)
     - Update suggestion rendering to show a distinct icon for image files (vs. the existing note icon)
     - Update the selection handler to route vault image files to `createVaultImageAttachment(file.path)` (from Task 2.4) instead of creating text `vault_note` attachments. The binary reading happens inside `resolveAttachment()`, not at selection time — do not use `readExternalBinaryFile()` for vault files.
 
@@ -375,7 +377,8 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - Magic byte check (`%PDF-`) → base64 encode raw buffer → size check against provider limits → return `ContentBlock { type: "document" }`
   - Page range support: parse `"1-5"`, `"3"`, `"10-20"` syntax (1-indexed)
   - Consult `getMediaCapabilities()` to decide native vs text path
-  - Export `processPdf(buffer: Buffer, options: { pages?: string; providerType: string }): Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>` — returns a single-element array in current implementation (one document or one text block), but callers must handle arrays of any length. Array type aligns with `ToolResult.content_blocks` and allows future page-splitting if needed.
+  - Export `processPdf(buffer: Buffer, options: { pages?: string; providerType: string }): Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>` — returns a single-element array in current implementation (one document or one text block), but callers must handle arrays of any length. Array type aligns with `ToolResult.content_blocks` and allows future page-splitting if needed
+  - **`textSummary` content:** For the text extraction path, `textSummary` is the extracted text (truncated to the configured limit). For the native document block path, `textSummary` is a short descriptor: `"PDF document (N pages, M.M MB)"` — full text extraction is skipped since the native block carries the raw PDF. This summary is used as the `ToolResult.result` fallback for providers that don't support native PDF
 
 ### 3.3 Tool Changes — Extend `read_file` for PDFs
 
@@ -393,7 +396,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
   - Add attachment types: `"vault_pdf"`, `"external_pdf"` to `AttachmentType`
   - Add factory: `createVaultPdfAttachment(path: string): Attachment`
   - Update `resolveAttachment()` for PDF types:
-    - Add `providerType?: string` optional parameter to `resolveAttachment()`, threaded from the orchestrator which passes `this.settings.active_provider`. Only used when `attachment.type` is `"vault_pdf"` or `"external_pdf"` — image attachments (Phase 2) do not need it. Making it optional avoids breaking existing Phase 2 callers
+    - Add `providerType?: string` optional parameter to `resolveAttachment()`, threaded from the orchestrator which passes `this.settings.active_provider`. Only used when `attachment.type` is `"vault_pdf"` or `"external_pdf"` — image attachments (Phase 2) do not need it. Making it optional avoids breaking existing Phase 2 callers. When `providerType` is omitted for a PDF attachment, default to the text extraction path (the universal fallback — all providers support text)
     - Read binary via `app.vault.readBinary(file)` or `fs.promises.readFile()`
     - Process through PDF pipeline (native or text extraction based on `providerType`)
     - Store base64 in `binary_content`
@@ -501,11 +504,11 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
   - **Handle images in the `paragraph` case** of `buildDocxChildren()` (line 125-130) — in marked v17, standalone images are parsed as inline `image` tokens wrapped in a `paragraph` token, NOT as top-level `image` block tokens. Handle this by detecting single-image paragraphs:
     - When a `paragraph` token contains exactly one child token of `type: "image"`, render it as a dedicated `new Paragraph({ children: [new ImageRun({ type, data, transformation: { width, height }, altText })] })` using the pre-resolved map. **Scaling:** the `width`/`height` from buffer header parsing are raw pixel dimensions; scale proportionally to fit within page content area (~600px wide, ~800px tall at 96 DPI for standard A4/Letter with 1-inch margins). Apply the more restrictive of width and height constraints: `const wScale = width > 600 ? 600 / width : 1; const hScale = height > 800 ? 800 / height : 1; const scale = Math.min(wScale, hScale); if (scale < 1) { width = Math.round(width * scale); height = Math.round(height * scale); }`. If dimensions cannot be determined from the buffer, use a fallback of 400×300.
     - If the image href is not in the resolved map, render fallback: `new Paragraph({ children: [new TextRun({ text: "[Image: href]" })] })`
-    - When a `paragraph` token contains an image mixed with other inline tokens (e.g., `text ![alt](url) more text`), render via `renderInline()` as today — the image token falls through to the default `raw` text rendering (acceptable: mixed image+text paragraphs are rare in practice). The `InlineChild` type union returned by `renderInline()` remains unchanged (`TextRun | ExternalHyperlink`) — `ImageRun` is used only in standalone image paragraphs constructed directly in `buildDocxChildren()`, not through `renderInline()`
+    - When a `paragraph` token contains an image mixed with other inline tokens (e.g., `text ![alt](url) more text`), render via `renderInline()` as today — the image token falls through to the default `raw` text rendering, which renders the image token's `.raw` property (the original markdown syntax, e.g., `![alt](url)`) as literal text in the Word document. This is acceptable: mixed image+text paragraphs are rare in practice, and the raw syntax preserves the reference. The `InlineChild` type union returned by `renderInline()` remains unchanged (`TextRun | ExternalHyperlink`) — `ImageRun` is used only in standalone image paragraphs constructed directly in `buildDocxChildren()`, not through `renderInline()`
     - Paragraphs with no image tokens continue through the existing `renderInline()` path unchanged
 - [ ] **Refactor template grafting — Step 1: Migrate body grafting to DOM parsing (lines 286-338)**
   - The current grafting uses regex-based XML string manipulation (regex to extract `<w:body>`, regex to strip `<w:sectPr>`). Introducing DOM-based merging for relationships alongside regex-based body grafting creates an inconsistent, fragile mix. Migrate the entire grafting routine to `@xmldom/xmldom` (`^0.8.11`, already a direct dependency in package.json).
-  - **Namespace handling:** Use `getElementsByTagName("w:body")` — xmldom 0.8.x handles prefixed tag names without requiring explicit namespace URI resolution
+  - **Namespace handling:** Use `getElementsByTagName("w:body")` — xmldom 0.8.x handles prefixed tag names without requiring explicit namespace URI resolution. Verify at implementation time that this returns results; if not, use `getElementsByTagNameNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'body')` as fallback
   - Implementation:
     1. Parse generated `word/document.xml` with `DOMParser` → extract `<w:body>` child nodes
     2. Parse template `word/document.xml` with `DOMParser` → locate `<w:body>` element
@@ -528,7 +531,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     2. Find highest rId number in template
     3. Parse generated doc's `word/_rels/document.xml.rels` with `DOMParser`
     4. Remap all generated rIds to `rId(maxId + offset)`
-    5. Update the **generated body DOM nodes only** (from Step 1, not yet appended to template): walk all elements and, for each element with an `r:embed`, `r:id`, or `r:link` attribute, remap the value using the remap table via `getAttribute()`/`setAttribute()` — consistent with Step 1's DOM-based approach (no regex). Do NOT walk template-originated nodes
+    5. Update the **generated body DOM nodes only** (from Step 1, not yet appended to template): walk all elements and, for each element with an `r:embed`, `r:id`, or `r:link` attribute, remap the value using the remap table via `getAttribute()`/`setAttribute()` — consistent with Step 1's DOM-based approach (no regex). These three attributes cover all relationship references used by `ImageRun`-generated content; other rId attributes (e.g., in headers/footers) are not present in generated body content. Do NOT walk template-originated nodes
     6. **Now** append the remapped generated body children into the template body (completing Step 1, sub-step 5)
     7. Append remapped `<Relationship>` elements to template `.rels` DOM
     8. Serialize updated `.rels` back to template zip
