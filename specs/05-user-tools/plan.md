@@ -431,7 +431,7 @@ function buildUtils(plugin: NotorPlugin): Record<string, unknown> {
     noteOpener: plugin.getNoteOpener(),
     logger: (name: string) => logger(`ext:${name}`),
     resolveAndValidatePath: (path: string) => resolveAndValidatePath(path, plugin.vaultRootPath, plugin.settings.read_file_allowed_paths),
-    executeShellCommand: (cmd: string, opts?: unknown) => executeShellCommand(cmd, plugin.settings, opts),
+    executeShellCommand: (cmd: string, opts?: ShellExecuteOptions) => executeShellCommand(cmd, plugin.settings, opts),
     pathEnforcer: {
       enforcePathConstraints: (toolName: string, params: Record<string, unknown>, entry: ResolvedToolConfigEntry) =>
         enforcePathConstraints(toolName, params, entry, plugin.vaultRootPath),
@@ -667,10 +667,17 @@ This avoids coupling the hook module to the extension module. The orchestrator i
 
 **Context object construction:**
 
-Each dispatch function translates from internal `ToolHookContext` field names to the design doc's extension-facing names inline — no separate helper needed. The translation happens at the call site inside each dispatch function:
+Each dispatch function translates from its internal context type to the design doc's extension-facing `context` object inline. Note that each dispatch function uses a **different context type** — `PreSendContext`, `ToolHookContext`, or `CompletionContext` — so the translation is specific to each function:
 
 ```typescript
-// Example: inside dispatchOnToolCall(), after shell hooks:
+// Example: inside dispatchPreSend() (context: PreSendContext), after shell hooks:
+const automationCtx = {
+  hookEvent: "pre_send",
+  timestamp: context.timestamp,
+  conversationId: context.conversationId,
+};
+
+// Example: inside dispatchOnToolCall() (context: ToolHookContext), after shell hooks:
 const automationCtx = {
   hookEvent: "on_tool_call",
   timestamp: context.timestamp,
@@ -679,7 +686,7 @@ const automationCtx = {
   params: context.toolParams,           // translated from internal toolParams
 };
 
-// Example: inside dispatchOnToolResult(), after shell hooks:
+// Example: inside dispatchOnToolResult() (context: ToolHookContext), after shell hooks:
 const automationCtx = {
   hookEvent: "on_tool_result",
   timestamp: context.timestamp,
@@ -689,12 +696,19 @@ const automationCtx = {
   result: context.toolResult,           // translated from internal toolResult
   status: context.toolStatus,           // translated from internal toolStatus
 };
+
+// Example: inside dispatchAfterCompletion() (context: CompletionContext), after shell hooks:
+const automationCtx = {
+  hookEvent: "after_completion",
+  timestamp: context.timestamp,
+  conversationId: context.conversationId,
+};
 ```
 
 - [ ] Add accessor parameter to all four dispatch functions in `hook-events.ts` (not `ExtensionManager` directly)
 - [ ] Implement automation execution within each dispatch function (fire-and-forget for all except `pre_send`)
 - [ ] Execute automations sequentially in `notor-automation-order` order
-- [ ] Translate field names from `ToolHookContext` to design-doc names inline in each dispatch function (no separate `buildAutomationContext()` helper)
+- [ ] Translate field names from each function's context type (`PreSendContext`, `ToolHookContext`, or `CompletionContext`) to design-doc names inline in each dispatch function (no separate `buildAutomationContext()` helper)
 - [ ] Handle automation errors: Notice + logger (no ToolResult for automations)
 - [ ] Respect `notor-tools` filter for `on_tool_call` and `on_tool_result` (via `GetAutomationsForToolEvent`)
 
@@ -705,8 +719,8 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 **Files modified:**
 - `src/hooks/vault-event-dispatcher.ts` — add automation dispatch step
 - `src/hooks/vault-event-handlers.ts` — pass automations accessor through deps
-- `src/hooks/vault-event-listener-manager.ts` — add `getExtensionAutomations` accessor
-- `src/hooks/vault-event-scheduler.ts` — add `setExtensionAutomations()` setter (new setter, following existing `setDispatch()` pattern) + automation schedule support in `syncJobs()`
+- `src/hooks/vault-event-listener-manager.ts` — add `setExtensionAutomations()` setter + update `hasActiveHooks()`
+- `src/hooks/vault-event-scheduler.ts` — add `setExtensionAutomations()` setter + automation schedule support in `syncJobs()`
 
 **Execution order per design doc:**
 1. Shell hooks (existing)
@@ -717,10 +731,10 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 
 **Changes:**
 
-- `dispatchVaultEventHooks()` — after the existing hook/workflow loop, execute matching automations via a `getAutomationsForTrigger` accessor injected through `DispatcherDeps`
+- `dispatchVaultEventHooks()` — after the existing hook/workflow loop, execute matching automations via a `getExtensionAutomations` accessor injected through `DispatcherDeps`. The accessor flows automatically from `main.ts` through the lazy `getDispatcherDeps()` closure → `VaultEventHandlerDeps.dispatch` callback → `dispatchVaultEventHooks()`. No changes to `VaultEventHandlerDeps` or `collectHooksAndWorkflows()` needed
 - `DispatcherDeps` interface — add `getExtensionAutomations?: GetAutomationsForTrigger` field
-- `VaultEventListenerManager` constructor — add `getExtensionAutomations?: () => UserAutomationDefinition[]` accessor so `hasActiveHooks()` considers automation triggers when deciding whether to register Obsidian listeners
-- `VaultEventScheduler` — add `getExtensionAutomations` accessor (via new setter, following the existing `setDispatch()` pattern). `syncJobs()` adds a parallel loop for automation `on_schedule` entries alongside existing hook and workflow schedule handling
+- `VaultEventListenerManager` — add `setExtensionAutomations()` setter (NOT a constructor param, since the manager is constructed in `_initVaultEventHooks()` before `onLayoutReady()` and before extensions are discovered). The setter stores a `() => UserAutomationDefinition[]` accessor. `hasActiveHooks()` checks this accessor alongside settings hooks and workflow triggers when deciding whether to register Obsidian listeners
+- `VaultEventScheduler` — add `setExtensionAutomations()` setter (separate from the existing `setDispatch()`, since each data source has its own injection point). `syncJobs()` adds a parallel loop for automation `on_schedule` entries alongside existing hook and workflow schedule handling
 
 **Vault event context for automations:**
 
@@ -735,13 +749,12 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 { hookEvent, timestamp, schedule }
 ```
 
-- [ ] Add `getExtensionAutomations?` accessor to `DispatcherDeps` interface
-- [ ] Dispatch automations as a separate step after hooks+workflows in `dispatchVaultEventHooks()`
+- [ ] Add `getExtensionAutomations?` accessor to `DispatcherDeps` interface. This flows automatically through the dispatch chain: `main.ts` builds `getDispatcherDeps()` closure (which includes the accessor) → `VaultEventHandlerDeps.dispatch` callback wraps `dispatchVaultEventHooks(hooks, context, chain, getDispatcherDeps())` → automations accessor is available inside `dispatchVaultEventHooks()`. No changes to `VaultEventHandlerDeps` or `collectHooksAndWorkflows()` needed
+- [ ] Dispatch automations as a separate step after hooks+workflows in `dispatchVaultEventHooks()`. Automations must execute within the **same `chain` context** as the preceding hooks so `ExecutionChainTracker.shouldSkipHook()` applies — pass the `chain` parameter through to automation execution to prevent re-entrant loops (e.g., an automation calling `app.vault.process()` triggering `on_save` which re-enters the dispatch pipeline)
 - [ ] Build vault event context objects (using design-doc field names)
-- [ ] Add `getExtensionAutomations` accessor to `VaultEventListenerManager` constructor; update `hasActiveHooks()` to check automations. **Init ordering:** the accessor must be wired before `onLayoutReady()` calls `evaluateListeners()`. The accessor returns empty until extensions are loaded; after `ExtensionManager.reload()` completes, call `evaluateListeners()` again to register listeners for any new automation vault event triggers
-- [ ] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (new setter, following the existing `setDispatch()` pattern — each data source has its own injection point); add parallel loop in `syncJobs()` for automation `on_schedule` entries
-- [ ] Ensure loop prevention (`ExecutionChainTracker`) works with automations
-- [ ] Wire `getExtensionAutomations` accessor through from `main.ts` when constructing deps
+- [ ] Add `setExtensionAutomations()` setter on `VaultEventListenerManager` (NOT a constructor param — the manager is constructed in `_initVaultEventHooks()` before extensions are discovered). Update `hasActiveHooks()` to check the stored accessor. **Init ordering:** call the setter before `onLayoutReady()` calls `evaluateListeners()`. The accessor returns empty until extensions are loaded; after `ExtensionManager.reload()` completes, call `evaluateListeners()` again to register listeners for any new automation vault event triggers
+- [ ] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (separate from `setDispatch()` — each data source has its own injection point); add parallel loop in `syncJobs()` for automation `on_schedule` entries
+- [ ] Wire `getExtensionAutomations` accessor through from `main.ts` when constructing `getDispatcherDeps()` closure and when calling setters on `VaultEventListenerManager` and `VaultEventScheduler`
 
 ---
 
@@ -966,7 +979,7 @@ There are **six call sites** across two execution paths, plus one private wrappe
 | `dispatchOnToolResult` | `orchestrator.ts:1604` | `orchestrator.ts:981` | Dynamic |
 | `dispatchAfterCompletion` | `orchestrator.ts:1693` (via `dispatchAfterCompletionHooks()`) | — | Static |
 
-Automations must fire in both the foreground and background loops for consistent behavior.
+Automations must fire in both the foreground and background loops for consistent behavior. There are **5 direct call sites + 1 private wrapper** that forwards to `dispatchAfterCompletion`:
 
 ```typescript
 // In ChatOrchestrator:
@@ -1003,15 +1016,15 @@ orchestrator.setExtensionAccessors({
 For vault event dispatch, inject `getAutomationsForTrigger` into `DispatcherDeps`.
 
 - [ ] Create `getExtensionManager()` lazy accessor
-- [ ] Add `hasDispatcher(): boolean` to `NotorPlugin` (returns `this._toolDispatcher != null`) for conditional registration in `ExtensionManager.reload()`
+- [ ] Add `hasDispatcher(): boolean` to `NotorPlugin` (returns `this._toolDispatcher != null`) for conditional registration in `ExtensionManager.reload()`. Note: this is a new public method — no precedent exists in the codebase (existing code uses inline `if (this._toolDispatcher)` checks). An alternative is to pass an `isInitialLoad` flag to `reload()` instead, skipping dispatcher registration on initial load (the dispatcher doesn't exist yet and will pick up user tools from `registry.getAll()` when lazily created on first chat)
 - [ ] Add `get vaultRootPath(): string` getter to `NotorPlugin` (`(this.app.vault.adapter as { basePath?: string }).basePath ?? ""`)
 - [ ] Wire initial `reload()` into `onLayoutReady()` (after tool registry initialization)
 - [ ] Add `setExtensionAccessors()` method to `ChatOrchestrator` (stores accessors for dispatch call sites)
 - [ ] Call `orchestrator.setExtensionAccessors()` in `main.ts` after creating extension manager
-- [ ] Pass stored accessors through to all **six** LLM lifecycle dispatch call sites (4 in foreground `responseLoop` + 2 in background `_backgroundResponseLoop`)
+- [ ] Pass stored accessors through to all **5 direct call sites + 1 private wrapper** (3 in foreground `responseLoop` + 2 in background `_backgroundResponseLoop` + `dispatchAfterCompletionHooks()` wrapper)
 - [ ] Update private `dispatchAfterCompletionHooks()` wrapper to accept and forward the extension accessor
 - [ ] Add `getExtensionAutomations` accessor to vault event `DispatcherDeps` construction
-- [ ] Add `getExtensionAutomations` accessor to `VaultEventListenerManager` construction — wire before `onLayoutReady` calls `evaluateListeners()`. Accessor returns empty until extensions are loaded; call `evaluateListeners()` again after `reload()` completes
+- [ ] Call `setExtensionAutomations()` setter on `VaultEventListenerManager` — wire before `onLayoutReady` calls `evaluateListeners()`. Accessor returns empty until extensions are loaded; call `evaluateListeners()` again after `reload()` completes
 - [ ] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (new setter, following the existing `setDispatch()` pattern)
 - [ ] Wire `extensionManager.destroy()` into `onunload()` (includes `TOOL_PATH_PARAMS` cleanup)
 - [ ] Wire `registerExtensionVaultWatcher()` into `onLayoutReady()` (after initial extension reload)
