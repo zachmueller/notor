@@ -492,6 +492,8 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 - `src/providers/local-provider.ts` — `toOpenAIMessages()` handles `ContentBlock[]`
 - `src/export/markdown-exporter.ts` — use `getTextContent()` at all `msg.content` read sites
 - `src/export/html-exporter.ts` — use `getTextContent()` at all `msg.content` read sites
+- `src/ui/chat-view.ts` — use `getTextContent()` at user message rendering sites
+- `src/chat/sub-agent-history.ts` — pass-through (no changes needed, but verify union propagates)
 - All other callsites that consume `content` as string (see table below)
 
 **Callsite enumeration — all locations that read `content` as a plain string:**
@@ -526,6 +528,8 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 |------|---------|-------------|-----------------|
 | `src/chat/orchestrator.ts` | 2043, 2057 | `content: msg.content` (Message → ChatMessage) | Pass-through works — both types now accept the union |
 | `src/chat/orchestrator.ts` | 2051 | `msg.content?.trim()` (empty assistant check) | Type-narrow: assistant content is always string |
+| `src/chat/orchestrator.ts` | 2194 | `preToolCallText = prev.content` (absorbs pre-tool-call assistant text) | Type-narrow: `prev` is an assistant ChatMessage, content is always string. Add assertion or guard |
+| `src/chat/sub-agent-history.ts` | 58, 78, 96 | `content: cm.content` (ChatMessage → Message conversion) | Pass-through works — both types now accept the union. No type-narrowing needed since the content is propagated as-is |
 | `src/chat/history.ts` | 442 | `JSON.parse(message.content)` (compaction record detection) | Add type guard: only parse when `typeof message.content === "string"`. Only runs on system messages (always string), but guard prevents future regressions |
 | `src/chat/history.ts` | 496 | `typeof msg.content === "string"` then `.substring(0, 120)` | Already guards! Add `ContentBlock[]` branch: extract first text block for preview |
 | `src/chat/history.ts` | 587 | `typeof msg.content === "string"` then `.substring(0, 120)` | Same pattern as line 496 — duplicate preview logic in `searchConversations()`. Same fix: add `ContentBlock[]` branch |
@@ -544,6 +548,15 @@ New settings section: "Images & PDFs" (`src/settings/sections/media.ts`).
 | `src/export/html-exporter.ts` | 556 | `msg.content.substring(0, 200)` (sub-agent system) | Use `getTextContent()` — system messages are always string, but add guard |
 | `src/export/html-exporter.ts` | 558 | `escapeHtml(msg.content)` (sub-agent user) | Use `getTextContent()` |
 | `src/export/html-exporter.ts` | 560 | `marked.parse(msg.content)` (sub-agent assistant) | Pass through — assistant messages are always string |
+
+*UI (chat view):*
+
+| File | Line(s) | Current code | Required change |
+|------|---------|-------------|-----------------|
+| `src/ui/chat-view.ts` | 1159 | `extractAttachmentsBlock(message.content)` (user message rendering) | Use `getTextContent()` — user messages with media are `ContentBlock[]`, but attachment XML extraction operates on the text portion only |
+| `src/ui/chat-view.ts` | 1163 | `textToRender = ... remainder : message.content` (fallback text) | Use `getTextContent()` as fallback when no attachments XML found |
+| `src/ui/chat-view.ts` | 1241 | `pre.createEl("code", { text: message.content })` (hook injection display) | Use `getTextContent()` — hook injections are always string, but add guard |
+| `src/ui/chat-view.ts` | 1289 | `message.content` passed to `MarkdownRenderer.render()` (assistant finalization) | Pass through — assistant messages are always string (LLM output is text). Add assertion for safety |
 
 **Export module strategy:** For Phase 1, all export callsites use `getTextContent()` to extract the text portion. Media blocks are silently omitted — the exported text still makes sense because the LLM's responses reference the images by description. In Phase 4, HTML export can optionally embed images as `<img src="data:...">` inline tags for rich exports.
 
@@ -725,7 +738,7 @@ See §10 for full implementation details.
 | PDF library too large for plugin bundle | Build size doubles, slow Obsidian startup | Evaluate bundle impact early (§3.3). Fall back to lighter library. Consider lazy loading via dynamic `import()`. |
 | Canvas API resize quality poor | Blurry images sent to API | Test at various scales during Phase 2. JPEG at quality 80 on canvas is generally good. Keep PNG path for screenshots/diagrams. |
 | Provider rejects image/document format | Errors during conversation | Capability detection (§4.6) prevents sending unsupported formats. Graceful fallback to text extraction. |
-| `Message.content` / `ChatMessage.content` type change regressions | Broken conversations, compile errors | Phase 1 enumerates all ~31 callsites that consume content as string (§7), including export modules. TypeScript compiler catches any missed sites. |
+| `Message.content` / `ChatMessage.content` type change regressions | Broken conversations, compile errors | Phase 1 enumerates all ~39 callsites that consume content as string (§7), including providers, context/estimation, orchestrator/history, UI, and export modules. TypeScript compiler catches any missed sites. |
 | Large images/PDFs cause memory pressure | Plugin crashes or OOM | Enforce size limits (20MB max file, 5MB max base64). Process one attachment at a time. |
 | Canvas not available in all Obsidian contexts | Image processing fails | All processing runs in renderer process where Canvas is available. Verify in Phase 2. |
 | Binary content increases history file sizes | Larger JSONL files on disk, expensive line parsing | Media IS persisted inline as base64. Existing `history_max_size_mb` (500MB) and `history_max_age_days` (90 days) provide guardrails. A conversation with 10 images adds ~2–5MB. **Known scaling concern:** image-heavy users could hit the 500MB limit much faster than text-only users, and individual JSONL lines of 500KB+ are expensive to parse for sidebar previews. If this becomes a problem in practice, a Phase 4+ optimization could store media as separate files (`history/media/{hash}.{ext}`) referenced by hash in ContentBlocks, keeping JSONL lean and enabling cross-conversation deduplication. |
