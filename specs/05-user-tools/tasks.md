@@ -475,29 +475,35 @@ Follow existing section patterns from `src/settings/sections/` (30 files). Refer
 
 Follow existing lazy accessor patterns (lines 907-1228). Reference init sequence in `onLayoutReady()` (line ~423) and cleanup in `onunload()` (line ~435).
 
-- [ ] Add `vaultRootPath` getter to `NotorPlugin`:
+- [x] Add `vaultRootPath` getter to `NotorPlugin`:
   - `get vaultRootPath(): string { return (this.app.vault.adapter as { basePath?: string }).basePath ?? ""; }`
   - Consolidates the `basePath` cast that appears at lines 578, 701, 1075, 1111
-- [ ] Add lazy accessor `getExtensionManager()`:
+- [x] Add lazy accessor `getExtensionManager()`:
   - Field: `private _extensionManager: ExtensionManager | null = null`
   - Pattern: check null → create `new ExtensionManager(this, parseYaml)` → return
   - Import `parseYaml` from `"obsidian"` (already imported at line 11)
-- [ ] Wire initial `reload(true)` into `onLayoutReady()`:
+- [x] Wire initial `reload(true)` into `onLayoutReady()`:
   - After existing workflow discovery + vault watcher registration
   - Call `await this.getExtensionManager().reload(true)` — `isInitialLoad: true` skips dispatcher registration
   - After reload, call `evaluateListeners()` again on vault event listener manager to pick up automation vault event triggers
-- [ ] Add `setExtensionAccessors()` method to `ChatOrchestrator`:
-  - Store accessors: `{ getForTrigger, getForToolEvent, executeAutomation }` (exact shape depends on EXT-013 design choice)
+- [x] Add `setExtensionAccessors()` method to `ChatOrchestrator`:
+  - Store accessors: `{ lifecycle: LifecycleAutomationAccessors, toolEvent: ToolEventAutomationAccessors }`
   - Follow existing `setPersonaManager()` (line 171) and `setWorkflowHookOverrideManager()` (line 183) patterns
-- [ ] Call `orchestrator.setExtensionAccessors()` in `main.ts` after creating extension manager:
+- [x] Call `orchestrator.setExtensionAccessors()` in `main.ts` after creating extension manager:
   ```typescript
   const mgr = this.getExtensionManager();
   orchestrator.setExtensionAccessors({
-    getForTrigger: (t) => mgr.getAutomationsForTrigger(t),
-    getForToolEvent: (t, n) => mgr.getAutomationsForToolEvent(t, n),
+    lifecycle: {
+      getForTrigger: (t) => mgr.getAutomationsForTrigger(t),
+      execute: (a, c) => mgr.executeAutomation(a, c),
+    },
+    toolEvent: {
+      getForToolEvent: (t, n) => mgr.getAutomationsForToolEvent(t, n),
+      execute: (a, c) => mgr.executeAutomation(a, c),
+    },
   });
   ```
-- [ ] Pass stored accessors through to ALL dispatch call sites in orchestrator:
+- [x] Pass stored accessors through to ALL dispatch call sites in orchestrator:
   - **Static import sites (foreground `responseLoop`):**
     - `dispatchPreSend()` at orchestrator line ~1240 — add accessor param
     - `dispatchAfterCompletion()` at orchestrator line ~1693 (via `dispatchAfterCompletionHooks()`) — add accessor param
@@ -509,20 +515,21 @@ Follow existing lazy accessor patterns (lines 907-1228). Reference init sequence
     - `dispatchOnToolResult()` at orchestrator line ~981 — add accessor param
   - **Private wrapper:**
     - `dispatchAfterCompletionHooks()` at orchestrator line ~1688 — accept and forward accessor
-- [ ] Wire `getExtensionAutomations` accessor into vault event `DispatcherDeps`:
+- [x] Wire `getExtensionAutomations` accessor into vault event `DispatcherDeps`:
   - In `main.ts` where `getDispatcherDeps()` closure is built (within `_initVaultEventHooks()`, line ~578)
   - Add `getExtensionAutomations: (trigger) => this.getExtensionManager().getAutomationsForTrigger(trigger)` to deps object
-- [ ] Call `setExtensionAutomations()` on `VaultEventListenerManager`:
+  - Add `executeExtensionAutomation: (automation, context) => this.getExtensionManager().executeAutomation(automation, context)` to deps object
+- [x] Call `setExtensionAutomations()` on `VaultEventListenerManager`:
   - Wire before `onLayoutReady` calls `evaluateListeners()`
   - Accessor returns empty array until extensions are loaded
   - After `reload()` completes, call `evaluateListeners()` again to register listeners for new automation vault event triggers
-- [ ] Call `setExtensionAutomations()` on `VaultEventScheduler`:
+- [x] Call `setExtensionAutomations()` on `VaultEventScheduler`:
   - Wire similarly to how `setDispatch()` is called
   - Scheduler will pick up `on_schedule` automations in `syncJobs()`
-- [ ] Wire `extensionManager.destroy()` into `onunload()` (line ~435):
+- [x] Wire `extensionManager.destroy()` into `onunload()` (line ~435):
   - Add `this._extensionManager?.destroy()` in cleanup sequence
   - Includes `TOOL_PATH_PARAMS` cleanup
-- [ ] Ensure reload ordering: built-in tools → user tools → MCP tools (MCP is async and independent)
+- [x] Ensure reload ordering: built-in tools → user tools → MCP tools (MCP is async and independent)
 
 ### EXT-024 — Extension file watcher with reload Notice
 
@@ -530,31 +537,33 @@ Follow existing lazy accessor patterns (lines 907-1228). Reference init sequence
 
 Follow the workflow vault watcher pattern from `main.ts:1335-1358` with `scheduleWorkflowRescan()` debounce at `main.ts:1314-1326`.
 
-- [ ] Add class fields to `NotorPlugin`:
+- [x] Add class fields to `NotorPlugin`:
   - `private _extensionChangeTimer: ReturnType<typeof setTimeout> | null = null`
   - `private _extensionStaleNotice: Notice | null = null`
-- [ ] Implement path matching helpers on `NotorPlugin` (or in `src/extensions/watcher.ts`):
-  - `isExtensionToolFile(file)`: `file.path.startsWith(\`${this.settings.notor_dir}tools/\`) && file.path.endsWith(".md")`
-  - `isExtensionAutomationFile(file)`: `file.path.startsWith(\`${this.settings.notor_dir}automations/\`) && file.path.endsWith(".md")`
-  - `isExtensionSettingsFile(file)`: `file.path === \`${this.settings.notor_dir}settings.md\``
-  - `isExtensionFile(file)`: any of the above
-- [ ] Implement `scheduleExtensionChangeNotice()`:
+- [x] Implement path matching helpers in `src/extensions/watcher.ts`:
+  - `isExtensionToolFile(file, notorDir)`: uses `normalizePath()` for proper path handling
+  - `isExtensionAutomationFile(file, notorDir)`: same pattern
+  - `isExtensionSettingsFile(file, notorDir)`: checks for `notor/settings.md`
+  - `isExtensionFile(file, notorDir)`: any of the above
+  - `isExtensionPath(filePath, notorDir)`: string-based check for rename old paths
+- [x] Implement `scheduleExtensionChangeNotice()`:
   - Clear any pending debounce timer
   - Set new timer with 1000ms delay (longer than workflow watcher's 300ms — Notice-only, no auto-reload)
   - On fire: check duplicate Notice suppression via `_extensionStaleNotice` reference
-  - Show persistent Notice (duration `0`): "Extension files changed. Reload extensions to apply updates."
+  - Show persistent Notice (duration `0`): "Extension files changed. Click to reload extensions."
   - Add click handler on Notice to trigger `this.getExtensionManager().reload(false)` directly
   - Clear Notice reference on successful reload
-- [ ] Implement `registerExtensionVaultWatcher()` in `main.ts`:
+  - Re-evaluates listeners and syncs scheduler after reload
+- [x] Implement `registerExtensionVaultWatcher()` in `main.ts`:
   - Register four event listeners (same as workflow watcher pattern):
-    - `this.registerEvent(this.app.vault.on("create", (file) => { if (this.isExtensionFile(file)) this.scheduleExtensionChangeNotice(); }))`
-    - `this.registerEvent(this.app.vault.on("delete", (file) => { ... }))`
-    - `this.registerEvent(this.app.vault.on("rename", (file, oldPath) => { ... }))` — check both new and old paths
-    - `this.registerEvent(this.app.metadataCache.on("changed", (file) => { ... }))` — frontmatter changes
-- [ ] Clear timer and Notice in `onunload()`:
+    - `this.registerEvent(this.app.vault.on("create", ...))` — uses imported `isExtensionFile()`
+    - `this.registerEvent(this.app.vault.on("delete", ...))` — same pattern
+    - `this.registerEvent(this.app.vault.on("rename", ...))` — checks both new path and old path via `isExtensionPath()`
+    - `this.registerEvent(this.app.metadataCache.on("changed", ...))` — frontmatter changes
+- [x] Clear timer and Notice in `onunload()`:
   - `if (this._extensionChangeTimer !== null) clearTimeout(this._extensionChangeTimer)`
   - `this._extensionStaleNotice?.hide()`
-- [ ] Register watchers in `onLayoutReady()` after initial extension discovery
+- [x] Register watchers in `onLayoutReady()` after initial extension discovery (inside `reload().then()` callback)
 
 ---
 

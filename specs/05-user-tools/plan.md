@@ -761,7 +761,7 @@ Extend vault event dispatch to include user automations alongside shell hooks an
 - [x] Build vault event context objects (using design-doc field names): `hookEvent`, `timestamp`, conditionally `notePath`, `tagsAdded`, `tagsRemoved`
 - [x] Add `setExtensionAutomations()` setter on `VaultEventListenerManager` (NOT a constructor param). Updated `hasActiveHooks()` to also check extension automations. Wiring deferred to EXT-017
 - [x] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (separate from `setDispatch()`); added parallel loop in `syncJobs()` for automation `on_schedule` entries. Job ID convention: `ext-auto:{filePath}`. Updated `startJob()`, `onJobFire()`, and `destroy()`
-- [ ] Wire `getExtensionAutomations` accessor through from `main.ts` when constructing `getDispatcherDeps()` closure and when calling setters on `VaultEventListenerManager` and `VaultEventScheduler` — **deferred to EXT-017 (Phase 7 wiring)**
+- [x] Wire `getExtensionAutomations` accessor through from `main.ts` when constructing `getDispatcherDeps()` closure and when calling setters on `VaultEventListenerManager` and `VaultEventScheduler` — **completed in EXT-017 (Phase 7 wiring)**
 
 ---
 
@@ -917,13 +917,13 @@ private isExtensionFile(file: TAbstractFile): boolean {
 
 **Cleanup:** Timer and Notice reference cleared in `onunload()`.
 
-- [ ] Implement `registerExtensionVaultWatcher()` in `main.ts` using `registerEvent()` for all four vault events
-- [ ] Implement path matching helpers (`isExtensionToolFile()`, etc.)
-- [ ] Implement debounced Notice with 1000ms window
-- [ ] Implement click-to-reload on the Notice
-- [ ] Implement duplicate Notice suppression
-- [ ] Clear timer and Notice in `onunload()`
-- [ ] Register watchers in `onLayoutReady()` (after initial extension discovery)
+- [x] Implement `registerExtensionVaultWatcher()` in `main.ts` using `registerEvent()` for all four vault events
+- [x] Implement path matching helpers (`isExtensionFile()`, `isExtensionPath()`, etc.) in `src/extensions/watcher.ts`
+- [x] Implement debounced Notice with 1000ms window
+- [x] Implement click-to-reload on the Notice
+- [x] Implement duplicate Notice suppression
+- [x] Clear timer and Notice in `onunload()`
+- [x] Register watchers in `onLayoutReady()` (after initial extension discovery)
 
 ---
 
@@ -1022,20 +1022,20 @@ orchestrator.setExtensionAccessors({
 
 For vault event dispatch, inject `getAutomationsForTrigger` into `DispatcherDeps`.
 
-- [ ] Create `getExtensionManager()` lazy accessor
-- [ ] Add `isInitialLoad` parameter to `ExtensionManager.reload(isInitialLoad: boolean)`. When `true` (called from `onLayoutReady()`), skip `ToolDispatcher` registration — the dispatcher doesn't exist yet and will pick up user tools from `registry.getAll()` when lazily created on first chat. When `false` (manual reload from command/settings), register/unregister in the dispatcher. This avoids adding a new `hasDispatcher()` public method to `NotorPlugin`
-- [ ] Add `get vaultRootPath(): string` getter to `NotorPlugin` (`(this.app.vault.adapter as { basePath?: string }).basePath ?? ""`)
-- [ ] Wire initial `reload(true)` into `onLayoutReady()` (after tool registry initialization — `isInitialLoad: true` skips dispatcher registration)
-- [ ] Add `setExtensionAccessors()` method to `ChatOrchestrator` (stores accessors for dispatch call sites)
-- [ ] Call `orchestrator.setExtensionAccessors()` in `main.ts` after creating extension manager
-- [ ] Pass stored accessors through to all **5 direct call sites + 1 private wrapper** (3 in foreground `responseLoop` + 2 in background `_backgroundResponseLoop` + `dispatchAfterCompletionHooks()` wrapper)
-- [ ] Update private `dispatchAfterCompletionHooks()` wrapper to accept and forward the extension accessor
-- [ ] Add `getExtensionAutomations` accessor to vault event `DispatcherDeps` construction
-- [ ] Call `setExtensionAutomations()` setter on `VaultEventListenerManager` — wire before `onLayoutReady` calls `evaluateListeners()`. Accessor returns empty until extensions are loaded; call `evaluateListeners()` again after `reload()` completes
-- [ ] Add `setExtensionAutomations()` setter on `VaultEventScheduler` (new setter, following the existing `setDispatch()` pattern)
-- [ ] Wire `extensionManager.destroy()` into `onunload()` (includes `TOOL_PATH_PARAMS` cleanup)
-- [ ] Wire `registerExtensionVaultWatcher()` into `onLayoutReady()` (after initial extension reload)
-- [ ] Ensure reload ordering: built-in tools → user tools → MCP tools (MCP is async, so user tools may register before MCP connects — that's fine, MCP tools don't conflict with user tools)
+- [x] Create `getExtensionManager()` lazy accessor (already existed from EXT-016)
+- [x] Add `isInitialLoad` parameter to `ExtensionManager.reload(isInitialLoad: boolean)`. When `true` (called from `onLayoutReady()`), skip `ToolDispatcher` registration — the dispatcher doesn't exist yet and will pick up user tools from `registry.getAll()` when lazily created on first chat. When `false` (manual reload from command/settings), register/unregister in the dispatcher (already existed from EXT-012)
+- [x] Add `get vaultRootPath(): string` getter to `NotorPlugin` (`(this.app.vault.adapter as { basePath?: string }).basePath ?? ""`). Consolidated 4 existing `basePath` casts in main.ts
+- [x] Wire initial `reload(true)` into `onLayoutReady()` (after workflow discovery — `isInitialLoad: true` skips dispatcher registration)
+- [x] Add `setExtensionAccessors()` method to `ChatOrchestrator` (stores `LifecycleAutomationAccessors` and `ToolEventAutomationAccessors`)
+- [x] Call `orchestrator.setExtensionAccessors()` in `main.ts` after creating extension manager (in `getOrchestrator()` lazy accessor)
+- [x] Pass stored accessors through to all **5 direct call sites + 1 private wrapper** (3 in foreground `responseLoop` + 2 in background `_backgroundResponseLoop` + `dispatchAfterCompletionHooks()` wrapper)
+- [x] Update private `dispatchAfterCompletionHooks()` wrapper to forward the extension lifecycle accessor
+- [x] Add `getExtensionAutomations` + `executeExtensionAutomation` accessors to vault event `DispatcherDeps` construction
+- [x] Call `setExtensionAutomations()` setter on `VaultEventListenerManager` — wired before `onLayoutReady` calls `evaluateListeners()`. Accessor returns empty until extensions are loaded; `evaluateListeners()` called again after `reload()` completes
+- [x] Call `setExtensionAutomations()` setter on `VaultEventScheduler` (wired alongside `setDispatch()`)
+- [x] Wire `extensionManager.destroy()` into `onunload()` (includes `TOOL_PATH_PARAMS` cleanup)
+- [x] Wire `registerExtensionVaultWatcher()` into `onLayoutReady()` (after initial extension reload, inside the `reload().then()` callback)
+- [x] Ensure reload ordering: built-in tools → user tools → MCP tools (MCP is async, so user tools may register before MCP connects — that's fine, MCP tools don't conflict with user tools)
 
 ---
 

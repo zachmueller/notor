@@ -30,6 +30,7 @@ import { assembleUserMessage, assembleUserContent } from "../context/message-ass
 import type { Attachment } from "../context/attachment";
 import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment";
 import { dispatchPreSend, dispatchAfterCompletion } from "../hooks/hook-events";
+import type { LifecycleAutomationAccessors, ToolEventAutomationAccessors } from "../hooks/hook-events";
 import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-override";
 import { shouldCompact, performCompaction } from "../context/compaction";
 import { showCompactingIndicator, showCompactionMarker } from "../ui/compaction-marker";
@@ -182,6 +183,33 @@ export class ChatOrchestrator {
 	 */
 	setWorkflowHookOverrideManager(manager: WorkflowHookOverrideManager): void {
 		this.workflowHookOverrideManager = manager;
+	}
+
+	/**
+	 * Extension automation accessor pair for lifecycle hooks.
+	 *
+	 * Stored as pre-built accessor objects so the orchestrator can pass them
+	 * directly to dispatch functions without knowing about ExtensionManager.
+	 *
+	 * @see specs/05-user-tools/tasks.md — EXT-017
+	 */
+	private extensionLifecycleAccessors?: LifecycleAutomationAccessors;
+	private extensionToolEventAccessors?: ToolEventAutomationAccessors;
+
+	/**
+	 * Set the extension automation accessors for lifecycle and tool event hooks.
+	 *
+	 * Called by `main.ts` after the ExtensionManager is created so the
+	 * orchestrator can forward user automations to all dispatch call sites.
+	 *
+	 * @see specs/05-user-tools/tasks.md — EXT-017
+	 */
+	setExtensionAccessors(accessors: {
+		lifecycle: LifecycleAutomationAccessors;
+		toolEvent: ToolEventAutomationAccessors;
+	}): void {
+		this.extensionLifecycleAccessors = accessors.lifecycle;
+		this.extensionToolEventAccessors = accessors.toolEvent;
 	}
 
 	/**
@@ -959,6 +987,7 @@ export class ChatOrchestrator {
 
 				// Dispatch hook events if applicable
 			// G-004: Pass override manager so workflow-scoped hooks are used when active
+			// EXT-017: Pass extension tool event automations
 				const bgConv = bgConvManager.getActiveConversation();
 				if (bgConv && vaultRootPath) {
 					const { dispatchOnToolCall, dispatchOnToolResult } =
@@ -972,7 +1001,8 @@ export class ChatOrchestrator {
 						},
 						this.settings,
 						vaultRootPath,
-						this.workflowHookOverrideManager
+						this.workflowHookOverrideManager,
+						this.extensionToolEventAccessors,
 					);
 
 					const toolResultStr = typeof toolResult.result === "string"
@@ -989,7 +1019,8 @@ export class ChatOrchestrator {
 						},
 						this.settings,
 						vaultRootPath,
-						this.workflowHookOverrideManager
+						this.workflowHookOverrideManager,
+						this.extensionToolEventAccessors,
 					);
 				}
 
@@ -1232,6 +1263,7 @@ export class ChatOrchestrator {
 
 		// Phase 3 (HOOK-004): Dispatch pre-send hooks and capture stdout
 		// G-004: Pass override manager so workflow-scoped hooks are used when active
+		// EXT-017: Pass extension lifecycle automations
 		let hookInjections: string[] | undefined;
 		const conv = this.conversationManager.getActiveConversation();
 		if (conv) {
@@ -1244,7 +1276,8 @@ export class ChatOrchestrator {
 					},
 					this.settings,
 					vaultRootPath,
-					this.workflowHookOverrideManager
+					this.workflowHookOverrideManager,
+					this.extensionLifecycleAccessors,
 				);
 				// Filter empty results
 				if (hookInjections && hookInjections.length === 0) {
@@ -1490,6 +1523,7 @@ export class ChatOrchestrator {
 
 						// HOOK-005: Fire on_tool_call hooks sequentially
 						// G-004: Pass override manager so workflow-scoped hooks are used when active
+						// EXT-017: Pass extension tool event automations
 						const currentConv = this.conversationManager.getActiveConversation();
 						if (currentConv && vaultRootPath) {
 							const { dispatchOnToolCall } = await import("../hooks/hook-events");
@@ -1502,7 +1536,8 @@ export class ChatOrchestrator {
 								},
 								this.settings,
 								vaultRootPath,
-								this.workflowHookOverrideManager
+								this.workflowHookOverrideManager,
+								this.extensionToolEventAccessors,
 							);
 						}
 
@@ -1599,6 +1634,7 @@ export class ChatOrchestrator {
 
 						// HOOK-005: Fire on_tool_result hooks sequentially
 						// G-004: Pass override manager so workflow-scoped hooks are used when active
+						// EXT-017: Pass extension tool event automations
 						const convForToolResult = this.conversationManager.getActiveConversation();
 						if (convForToolResult && vaultRootPath) {
 							const { dispatchOnToolResult } = await import("../hooks/hook-events");
@@ -1616,7 +1652,8 @@ export class ChatOrchestrator {
 								},
 								this.settings,
 								vaultRootPath,
-								this.workflowHookOverrideManager
+								this.workflowHookOverrideManager,
+								this.extensionToolEventAccessors,
 							);
 						}
 
@@ -1685,6 +1722,7 @@ export class ChatOrchestrator {
 	 *
 	 * G-004: Passes the override manager so workflow-scoped hooks are used
 	 * when a workflow-scoped override is active for this conversation.
+	 * EXT-017: Passes extension lifecycle automations.
 	 */
 	private dispatchAfterCompletionHooks(): void {
 		const convForCompletion = this.conversationManager.getActiveConversation();
@@ -1697,7 +1735,8 @@ export class ChatOrchestrator {
 				},
 				this.settings,
 				vaultRootPath,
-				this.workflowHookOverrideManager
+				this.workflowHookOverrideManager,
+				this.extensionLifecycleAccessors,
 			);
 		}
 	}

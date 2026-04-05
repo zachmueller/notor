@@ -108,6 +108,8 @@ import { UseSubagentTool } from "./tools/use-subagent";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
+import type { AutomationTrigger } from "./extensions/types";
+import { isExtensionFile, isExtensionPath } from "./extensions/watcher";
 
 // MCP
 import { McpHub } from "./mcp/mcp-hub";
@@ -121,6 +123,19 @@ const log = logger("Main");
 
 export default class NotorPlugin extends Plugin {
 	settings: NotorSettings;
+
+	/**
+	 * Vault root absolute path (Electron-specific).
+	 *
+	 * Consolidates the `basePath` adapter cast that previously appeared
+	 * at multiple call sites. Returns empty string when unavailable
+	 * (e.g. mobile/web where `basePath` doesn't exist).
+	 *
+	 * @see specs/05-user-tools/tasks.md — EXT-017
+	 */
+	get vaultRootPath(): string {
+		return (this.app.vault.adapter as { basePath?: string }).basePath ?? "";
+	}
 
 	// Lazily initialized components (heavy init deferred until first use)
 	private _providerRegistry?: ProviderRegistry;
@@ -158,6 +173,12 @@ export default class NotorPlugin extends Plugin {
 
 	/** Debounce timer for vault-triggered workflow rescans. */
 	private _workflowRescanTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Debounce timer for extension file change Notice (EXT-024). */
+	private _extensionChangeTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Reference to the "stale extensions" Notice for duplicate suppression (EXT-024). */
+	private _extensionStaleNotice: Notice | null = null;
 
 	// -----------------------------------------------------------------------
 	// Group F: Vault event hook components (F-023)
@@ -449,6 +470,30 @@ export default class NotorPlugin extends Plugin {
 			} catch (e) {
 				log.warn("Initial workflow discovery failed", { error: String(e) });
 			}
+
+			// EXT-017: Discover and compile user extensions (tools + automations).
+			// Must run after workflow discovery so the tool registry is populated
+			// with built-in tools first (user tools override by last-write-wins).
+			// isInitialLoad=true skips dispatcher registration — the dispatcher
+			// doesn't exist yet and will pick up user tools via registry.getAll().
+			this.getExtensionManager().reload(true).then(() => {
+				// Re-evaluate vault event listeners to pick up automation triggers
+				if (this._vaultEventListenerManager) {
+					this._vaultEventListenerManager.evaluateListeners();
+				}
+				// Sync scheduler to pick up on_schedule automations
+				if (this._vaultEventScheduler) {
+					const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
+						(h) => h.enabled
+					);
+					this._vaultEventScheduler.syncJobs(enabledScheduleHooks);
+				}
+
+				// EXT-024: Register file watchers after initial discovery
+				this.registerExtensionVaultWatcher();
+			}).catch((e) => {
+				log.warn("Initial extension discovery failed", { error: String(e) });
+			});
 		});
 
 		log.info("Plugin loaded");
@@ -485,6 +530,18 @@ export default class NotorPlugin extends Plugin {
 		// Group G: Clear all workflow hook override state (G-005)
 		this._workflowHookOverrideManager?.destroy();
 		log.info("WorkflowHookOverrideManager destroyed");
+
+		// EXT-017: Destroy extension manager (unregisters tools + path params)
+		this._extensionManager?.destroy();
+		log.info("ExtensionManager destroyed");
+
+		// EXT-024: Clear extension watcher timer and stale Notice
+		if (this._extensionChangeTimer !== null) {
+			clearTimeout(this._extensionChangeTimer);
+			this._extensionChangeTimer = null;
+		}
+		this._extensionStaleNotice?.hide();
+		this._extensionStaleNotice = null;
 
 		// All DOM elements, intervals, and event listeners registered via
 		// this.register* / this.registerEvent / this.registerDomEvent are
@@ -597,17 +654,20 @@ export default class NotorPlugin extends Plugin {
 		// by handler closures). Orchestrator is accessed lazily via getter so
 		// it isn't initialized until first use (lazy init pattern).
 		const getDispatcherDeps = (): DispatcherDeps => {
-			const adapter = this.app.vault.adapter as { basePath?: string };
 			return {
 				app: this.app,
 				vault: this.app.vault,
 				metadataCache: this.app.metadataCache,
 				getSettings: () => this.settings,
-				vaultRootPath: adapter.basePath ?? "",
+				vaultRootPath: this.vaultRootPath,
 				concurrencyManager: workflowConcurrencyManager,
 				orchestrator: this.getOrchestrator(),
 				personaManager: this._personaManager,
 				chainTracker: executionChainTracker,
+				// EXT-017: Wire extension automation accessor + executor for vault event hooks.
+				// Uses lazy accessor so it returns [] until extensions are discovered.
+				getExtensionAutomations: (trigger) => this.getExtensionManager().getAutomationsForTrigger(trigger),
+				executeExtensionAutomation: (automation, context) => this.getExtensionManager().executeAutomation(automation, context),
 			};
 		};
 
@@ -670,6 +730,18 @@ export default class NotorPlugin extends Plugin {
 			() => this._discoveredWorkflows
 		);
 
+		// EXT-017: Wire extension automation accessors into listener manager and scheduler.
+		// Uses lazy accessors so they return [] until extensions are discovered.
+		// After initial reload() completes, evaluateListeners() is called again to
+		// register listeners for new automation vault event triggers.
+		listenerManager.setExtensionAutomations(
+			(trigger: string) => this.getExtensionManager().getAutomationsForTrigger(trigger as AutomationTrigger)
+		);
+		vaultEventScheduler.setExtensionAutomations(
+			(trigger) => this.getExtensionManager().getAutomationsForTrigger(trigger),
+			(automation, context) => this.getExtensionManager().executeAutomation(automation, context),
+		);
+
 		// Register vault.on('delete') and vault.on('rename') for tag shadow cache maintenance (F-014)
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
@@ -720,8 +792,7 @@ export default class NotorPlugin extends Plugin {
 	 * @see specs/04-mcp/contracts/mcp-connection-lifecycle.md
 	 */
 	private _initMcpHub(): void {
-		const adapter = this.app.vault.adapter as { basePath?: string };
-		const vaultRootPath = adapter.basePath ?? "";
+		const vaultRootPath = this.vaultRootPath;
 
 		const mcpHub = new McpHub(this.manifest.version, vaultRootPath);
 		this._mcpHub = mcpHub;
@@ -1094,9 +1165,8 @@ export default class NotorPlugin extends Plugin {
 				this.getHistoryManager(),
 				() => this.getOrchestrator()?.getConversationManager()?.getActiveConversation() ?? null,
 			);
-			const adapter = this.app.vault.adapter as { basePath?: string };
-			if (adapter.basePath) {
-				useSubagentTool.setVaultRootPath(adapter.basePath);
+			if (this.vaultRootPath) {
+				useSubagentTool.setVaultRootPath(this.vaultRootPath);
 			}
 			this._toolRegistry.register(useSubagentTool);
 			// Fire-and-forget initial profile cache population
@@ -1130,9 +1200,8 @@ export default class NotorPlugin extends Plugin {
 			);
 
 			// Set vault root path for working directory validation
-			const adapter = this.app.vault.adapter as { basePath?: string };
-			if (adapter.basePath) {
-				this._toolDispatcher.setVaultRootPath(adapter.basePath);
+			if (this.vaultRootPath) {
+				this._toolDispatcher.setVaultRootPath(this.vaultRootPath);
 			}
 		}
 		return this._toolDispatcher;
@@ -1242,6 +1311,21 @@ export default class NotorPlugin extends Plugin {
 			this._orchestrator.setWorkflowHookOverrideManager(
 				this.getWorkflowHookOverrideManager()
 			);
+
+			// EXT-017: Wire extension automation accessors to orchestrator.
+			// Uses lazy accessor closures so the extension manager is only
+			// created when the orchestrator is first used (not at import time).
+			const mgr = this.getExtensionManager();
+			this._orchestrator.setExtensionAccessors({
+				lifecycle: {
+					getForTrigger: (t) => mgr.getAutomationsForTrigger(t),
+					execute: (a, c) => mgr.executeAutomation(a, c),
+				},
+				toolEvent: {
+					getForToolEvent: (t, n) => mgr.getAutomationsForToolEvent(t, n),
+					execute: (a, c) => mgr.executeAutomation(a, c),
+				},
+			});
 		}
 		return this._orchestrator;
 	}
@@ -1383,6 +1467,109 @@ export default class NotorPlugin extends Plugin {
 		this.registerEvent(
 			this.app.metadataCache.on("changed", (f) => {
 				if (this.isWorkflowFile(f)) this.scheduleWorkflowRescan();
+			})
+		);
+	}
+
+	// -----------------------------------------------------------------------
+	// Extension file watcher (EXT-024)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Debounced handler for extension file changes.
+	 *
+	 * Shows a persistent Notice prompting the user to reload extensions.
+	 * Uses 1000ms debounce (longer than the 300ms workflow watcher) since
+	 * this only shows a Notice rather than auto-reloading.
+	 *
+	 * @see specs/05-user-tools/tasks.md — EXT-024
+	 */
+	private scheduleExtensionChangeNotice(): void {
+		if (this._extensionChangeTimer !== null) {
+			clearTimeout(this._extensionChangeTimer);
+		}
+		this._extensionChangeTimer = setTimeout(() => {
+			this._extensionChangeTimer = null;
+
+			// Suppress duplicate Notice — if one is already showing, skip
+			if (this._extensionStaleNotice) return;
+
+			const notice = new Notice(
+				"Extension files changed. Click to reload extensions.",
+				0, // persistent — no auto-dismiss
+			);
+
+			// Add click handler to trigger reload directly
+			notice.noticeEl.addEventListener("click", () => {
+				notice.hide();
+				this._extensionStaleNotice = null;
+				this.getExtensionManager().reload(false).then((result) => {
+					const summary =
+						`Extensions reloaded: ${result.toolCount} tool${result.toolCount !== 1 ? "s" : ""}, ` +
+						`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}` +
+						(result.errors.length > 0 ? ` (${result.errors.length} error${result.errors.length !== 1 ? "s" : ""})` : "");
+					new Notice(summary);
+
+					// Re-evaluate listeners to pick up any new automation triggers
+					if (this._vaultEventListenerManager) {
+						this._vaultEventListenerManager.evaluateListeners();
+					}
+					if (this._vaultEventScheduler) {
+						const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
+							(h) => h.enabled
+						);
+						this._vaultEventScheduler.syncJobs(enabledScheduleHooks);
+					}
+				}).catch((e) => {
+					log.error("Extension reload from Notice failed", { error: String(e) });
+					new Notice(`Extension reload failed: ${e instanceof Error ? e.message : String(e)}`);
+				});
+			});
+
+			this._extensionStaleNotice = notice;
+		}, 1000);
+	}
+
+	/**
+	 * Register vault and metadata-cache event listeners that show a
+	 * "reload extensions" Notice when extension files change.
+	 *
+	 * Follows the same pattern as `registerWorkflowVaultWatcher()`.
+	 * All listeners are automatically torn down on plugin unload via
+	 * `registerEvent()`.
+	 *
+	 * @see specs/05-user-tools/tasks.md — EXT-024
+	 */
+	private registerExtensionVaultWatcher(): void {
+		this.registerEvent(
+			this.app.vault.on("create", (f) => {
+				if (isExtensionFile(f, this.settings.notor_dir)) {
+					this.scheduleExtensionChangeNotice();
+				}
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("delete", (f) => {
+				if (isExtensionFile(f, this.settings.notor_dir)) {
+					this.scheduleExtensionChangeNotice();
+				}
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("rename", (f, oldPath) => {
+				if (
+					isExtensionFile(f, this.settings.notor_dir) ||
+					isExtensionPath(oldPath, this.settings.notor_dir)
+				) {
+					this.scheduleExtensionChangeNotice();
+				}
+			})
+		);
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (f) => {
+				if (isExtensionFile(f, this.settings.notor_dir)) {
+					this.scheduleExtensionChangeNotice();
+				}
 			})
 		);
 	}
