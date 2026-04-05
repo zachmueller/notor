@@ -106,38 +106,38 @@ Add the two new settings fields for extension data persistence. Follow the exist
 
 Parse extension Markdown files: extract frontmatter, YAML code fence, and TS/JS code fence. Follow the pattern from `src/sub-agents/discovery.ts` (reads file content, extracts frontmatter from metadata cache or manual YAML, parses structured data).
 
-- [ ] Implement `extractYamlFence(content: string): string | null`
+- [x] Implement `extractYamlFence(content: string): string | null`
   - Match the first `` ```yaml `` fenced code block
   - Use regex: `` /^```yaml\s*\n([\s\S]*?)^```\s*$/gm ``
   - Return inner content or null if not found
   - Handle edge cases: empty fences, multiple fences (take first only)
-- [ ] Implement `extractCodeFence(content: string): { code: string; lang: string } | null`
+- [x] Implement `extractCodeFence(content: string): { code: string; lang: string } | null`
   - Match the first `` ```ts ``, `` ```typescript ``, `` ```js ``, or `` ```javascript `` fence
   - Use regex: `` /^```(ts|typescript|js|javascript)\s*\n([\s\S]*?)^```\s*$/gm ``
   - Return `{ code, lang }` or null
-- [ ] Implement `parseExtensionFile(content: string, frontmatter: Record<string, unknown>, filePath: string, parseYAML: (yaml: string) => unknown): UserToolDefinition | UserAutomationDefinition | SharedSettingsDefinition | ExtensionError`
+- [x] Implement `parseExtensionFile(content: string, frontmatter: Record<string, unknown>, filePath: string, parseYAML: (yaml: string) => unknown): UserToolDefinition | UserAutomationDefinition | SharedSettingsDefinition | ExtensionError`
   - Read `notor-type` from frontmatter — must be `"tool"`, `"automation"`, or `"settings"`
   - Extract YAML fence → parse with `parseYAML()` for `params` and `settings` blocks
   - Extract code fence → raw code string
   - Dispatch to type-specific parsing based on `notor-type`
-- [ ] Implement tool parsing branch:
+- [x] Implement tool parsing branch:
   - Validate required frontmatter: `notor-tool-name` (string), `notor-description` (string), `notor-mode` (`"read" | "write"`)
   - Code fence is required — return error if missing
   - Parse `params` from YAML fence (required) via `ParamSchema` type
   - Parse `settings` from YAML fence (optional) via settings schema parser
   - Extract `pathParams` from params with `path_namespace` field
   - Return `UserToolDefinition`
-- [ ] Implement automation parsing branch:
+- [x] Implement automation parsing branch:
   - Validate required frontmatter: `notor-trigger` (must be valid `AutomationTrigger` value)
   - Code fence is required — return error if missing
   - Parse optional fields: `notor-schedule` (required when trigger is `on_schedule`), `notor-tools` (string array), `notor-display-name` (string), `notor-automation-order` (number, default 0)
   - Parse `settings` from YAML fence (optional)
   - Return `UserAutomationDefinition`
-- [ ] Implement settings parsing branch:
+- [x] Implement settings parsing branch:
   - YAML fence with `settings` block is required
   - No code fence needed
   - Return `SharedSettingsDefinition`
-- [ ] Return `ExtensionError` with file path and descriptive message for any validation failure
+- [x] Return `ExtensionError` with file path and descriptive message for any validation failure
 
 ### EXT-006 — Implement param schema converter
 
@@ -145,7 +145,7 @@ Parse extension Markdown files: extract frontmatter, YAML code fence, and TS/JS 
 
 Convert simplified YAML param schema to JSON Schema for LLM tool definitions. Reference `JSONSchema` type from `src/tools/tool.ts:37-55`.
 
-- [ ] Implement `paramSchemaToJsonSchema(params: ParamSchema): JSONSchema`
+- [x] Implement `paramSchemaToJsonSchema(params: ParamSchema): JSONSchema`
   - Create `{ type: "object", properties: {}, required: [] }` wrapper
   - For each param entry, map to JSON Schema property:
     - `type: "string"` → `{ type: "string" }`
@@ -156,7 +156,7 @@ Convert simplified YAML param schema to JSON Schema for LLM tool definitions. Re
   - Map `enum` field to JSON Schema `enum`
   - Strip `path_namespace` (consumed by runtime, not sent to LLM)
   - Params without `default` are added to `required[]`
-- [ ] Implement `extractPathParams(toolName: string, params: ParamSchema): ToolPathParam[]`
+- [x] Implement `extractPathParams(toolName: string, params: ParamSchema): ToolPathParam[]`
   - For each param with `path_namespace` field:
     - Create `{ paramName: key, namespace: param.path_namespace }` (note: `path_namespace` in YAML maps to `namespace` in `ToolPathParam` — drop the `path_` prefix)
   - Import `ToolPathParam` from `src/tool-config/types.ts`
@@ -170,12 +170,12 @@ Parse and resolve extension settings. Reference:
 - `setSecret()` from `src/utils/secrets.ts:72-82` (synchronous)
 - SecretStorage ID constraint: lowercase alphanumeric with dashes
 
-- [ ] Implement `parseSettingsSchema(yamlSettings: Record<string, unknown>): { schemas: SettingsFieldSchema[]; errors: string[] }`
+- [x] Implement `parseSettingsSchema(yamlSettings: Record<string, unknown>): { schemas: SettingsFieldSchema[]; errors: string[] }`
   - Each key in the YAML object becomes a `SettingsFieldSchema` entry with `key` set to the YAML key name
   - Validate required properties: `name` (string) and `type` (one of `"string" | "number" | "boolean" | "string[]"`)
   - Validate optional properties match expected types
   - Collect validation errors with descriptive messages
-- [ ] Implement `resolveSettings(schemas: SettingsFieldSchema[], extensionName: string, persistedValues: Record<string, string | number | boolean | string[]>, app: App): { values: Record<string, unknown>; missing: string[] }`
+- [x] Implement `resolveSettings(schemas: SettingsFieldSchema[], extensionName: string, persistedValues: Record<string, string | number | boolean | string[]>, app: App): { values: Record<string, unknown>; missing: string[] }`
   - **Synchronous function** — `getSecret()` and settings access are both sync
   - For each schema field:
     - If `secret: true`: read from SecretStorage via `getSecret(app, slugifySecretId("notor-ext", extensionName, field.key))`
@@ -183,9 +183,9 @@ Parse and resolve extension settings. Reference:
     - Fall back to `field.default` if no persisted value
     - If no default and no persisted value → add to `missing[]`
   - Always reads from live `plugin.settings` reference (no caching)
-- [ ] Implement `resolveSharedSettings(schemas: SettingsFieldSchema[], persistedValues: Record<string, string | number | boolean | string[]>, app: App): { values: Record<string, unknown>; missing: string[] }`
+- [x] Implement `resolveSharedSettings(schemas: SettingsFieldSchema[], persistedValues: Record<string, string | number | boolean | string[]>, app: App): { values: Record<string, unknown>; missing: string[] }`
   - Same logic as `resolveSettings` but uses shared secret ID convention: `notor-shared-{key}`
-- [ ] Implement `slugifySecretId(...parts: string[]): string`
+- [x] Implement `slugifySecretId(...parts: string[]): string`
   - Join parts with `-`, convert to lowercase, replace non-alphanumeric-dash chars with `-`, collapse consecutive dashes
   - Example: `slugifySecretId("notor-ext", "Custom Search", "api_key")` → `"notor-ext-custom-search-api-key"`
   - Satisfies SecretStorage constraint: "ID must be lowercase alphanumeric with dashes"

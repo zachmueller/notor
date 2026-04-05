@@ -269,12 +269,12 @@ const CODE_FENCE_REGEX = /^```(yaml|ts|typescript|js|javascript)\s*\n([\s\S]*?)^
 | `notor-display-name` | — | `displayName` |
 | `notor-automation-order` | — | `order` |
 
-- [ ] Implement `parseExtensionFile()` function
-- [ ] Implement `extractYamlFence()` helper (returns first YAML fence content or null)
-- [ ] Implement `extractCodeFence()` helper (returns first TS/JS fence content or null)
-- [ ] Validate frontmatter fields with type checking and error reporting
-- [ ] Default missing `notor-automation-order` to `0` in automation parsing (so discovery sort is deterministic)
-- [ ] Handle edge cases: missing fences, empty fences, multiple fences (take first only)
+- [x] Implement `parseExtensionFile()` function
+- [x] Implement `extractYamlFence()` helper (returns first YAML fence content or null)
+- [x] Implement `extractCodeFence()` helper (returns first TS/JS fence content or null)
+- [x] Validate frontmatter fields with type checking and error reporting
+- [x] Default missing `notor-automation-order` to `0` in automation parsing (so discovery sort is deterministic)
+- [x] Handle edge cases: missing fences, empty fences, multiple fences (take first only)
 
 ### EXT-006 — Implement param schema converter
 
@@ -314,10 +314,10 @@ params:
 - Pass through `description`, `default`
 - `path_namespace` is consumed by the runtime (not passed to JSON Schema) — it populates `UserToolDefinition.pathParams`. The YAML field `path_namespace` maps to `ToolPathParam.namespace` (drop the `path_` prefix)
 
-- [ ] Implement `paramSchemaToJsonSchema(params: ParamSchema): JSONSchema`
-- [ ] Implement `extractPathParams(toolName: string, params: ParamSchema): ToolPathParam[]` — extracts entries with `path_namespace` into `ToolPathParam[]` for registration in `TOOL_PATH_PARAMS`
-- [ ] Handle all type mappings: `string`, `number`, `boolean`, `string[]`
-- [ ] Compute `required` array correctly (params without defaults)
+- [x] Implement `paramSchemaToJsonSchema(params: ParamSchema): JSONSchema`
+- [x] Implement `extractPathParams(toolName: string, params: ParamSchema): ToolPathParam[]` — extracts entries with `path_namespace` into `ToolPathParam[]` for registration in `TOOL_PATH_PARAMS`
+- [x] Handle all type mappings: `string`, `number`, `boolean`, `string[]`
+- [x] Compute `required` array correctly (params without defaults)
 
 ### EXT-007 — Implement settings schema parser
 
@@ -352,11 +352,11 @@ function resolveSharedSettings(
 ): { values: Record<string, unknown>; missing: string[] }
 ```
 
-- [ ] Implement `parseSettingsSchema()`
-- [ ] Implement `resolveSettings()` with SecretStorage integration for `secret: true` fields. Note: `getSecret()` from `src/utils/secrets.ts` is synchronous and `plugin.settings` access is also synchronous, so `resolveSettings()` should be a **synchronous** function (not `async`). It works fine when called from the `async` `UserToolAdapter.execute()` pipeline. Always reads from live `plugin.settings` reference (no caching/snapshots)
-- [ ] Implement `resolveSharedSettings()` for the global `notor/settings.md` settings
-- [ ] Implement `slugifySecretId()` — normalize extension names and setting keys to lowercase-alphanumeric-with-dashes for `SecretStorage` ID construction (per `SecretStorage` constraint: "ID must be lowercase alphanumeric with dashes")
-- [ ] Validate required settings (no `default`, not yet configured) — produce clear error messages
+- [x] Implement `parseSettingsSchema()`
+- [x] Implement `resolveSettings()` with SecretStorage integration for `secret: true` fields. Note: `getSecret()` from `src/utils/secrets.ts` is synchronous and `plugin.settings` access is also synchronous, so `resolveSettings()` should be a **synchronous** function (not `async`). It works fine when called from the `async` `UserToolAdapter.execute()` pipeline. Always reads from live `plugin.settings` reference (no caching/snapshots)
+- [x] Implement `resolveSharedSettings()` for the global `notor/settings.md` settings
+- [x] Implement `slugifySecretId()` — normalize extension names and setting keys to lowercase-alphanumeric-with-dashes for `SecretStorage` ID construction (per `SecretStorage` constraint: "ID must be lowercase alphanumeric with dashes")
+- [x] Validate required settings (no `default`, not yet configured) — produce clear error messages
 
 ---
 
