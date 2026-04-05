@@ -43,7 +43,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 - [ ] **`src/providers/anthropic-provider.ts` — `toAnthropicMessages()`**
   - Line 59: System message concatenation — add assertion/guard that system content is string
   - Lines 66-68: Tool call branch `content.push({ type: "text", text: msg.content })` — this is pre-tool-call assistant text, always a string. No change needed, but add assertion for safety (see Phase 1 "assert string" convention above)
-  - Lines 95-98: Catch-all handles **both** user and assistant messages (`role: msg.role === "user" ? "user" : "assistant"`, `content: msg.content`). Split into two branches:
+  - Lines 95-98: Catch-all handles **both** user and assistant messages (`role: msg.role === "user" ? "user" : "assistant"`, `content: msg.content`). Replace the single `anthropicMessages.push()` call with an `if (msg.role === "user") { ... } else { ... }` block, each branch pushing with its own content format:
     - When `msg.role === "user"` and `msg.content` is `ContentBlock[]`, map to Anthropic native blocks:
       - text → `{ type: "text", text }`
       - image → `{ type: "image", source: { type: "base64", media_type, data } }`
@@ -58,7 +58,7 @@ Each provider's message conversion function must handle the case where `msg.cont
       - text → `{ type: "text", text }`
       - image → `{ type: "image_url", image_url: { url: "data:{media_type};base64,{data}" } }`
       - document → **skip** with text placeholder `"[PDF document — not supported by this provider]"`. This placeholder remains permanently as a safety net — in normal operation, OpenAI/Local providers never receive document blocks because `processPdf()` (Phase 3) converts PDFs to text blocks before they reach the provider. The placeholder only triggers if a code path incorrectly sends a raw document block to a non-native provider
-    - When `msg.role === "user"` and `msg.content` is `string`, keep existing behavior: `content: msg.content` (OpenAI accepts both string and array content for user messages; no normalization to array needed here unlike Anthropic)
+    - When `msg.role === "user"` and `msg.content` is `string`, keep existing behavior: `content: msg.content` (the `Array.isArray` check in the preceding branch implicitly narrows the type to `string`; if TypeScript still infers the union, add an explicit `as string` cast). OpenAI accepts both string and array content for user messages; no normalization to array needed here unlike Anthropic
     - When assistant, assert string (see Phase 1 "assert string" convention) and pass through unchanged: `content: msg.content`
 
 - [ ] **`src/providers/bedrock-provider.ts` — `toBedrockMessages()`**
@@ -117,8 +117,8 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 ### 1.5 Context Compaction — Strip Media Before Summarization
 
-- [ ] **Update `src/context/compaction.ts:241-244`** — Empty content check and compaction message building
-  - Replace lines 241-244 (the `if (!msg.content?.trim()) continue;` guard and the `content: msg.content` assignment in the object literal below it). Full replacement:
+- [ ] **Update `src/context/compaction.ts:241-245`** — Empty content check and compaction message building
+  - Replace lines 241-245 (the `if (!msg.content?.trim()) continue;` guard through the entire `chatMessages.push()` call including its closing `});`). Full replacement:
     ```ts
     const text = getTextContent(msg.content);
     if (!text.trim()) continue;
@@ -129,8 +129,10 @@ Each provider's message conversion function must handle the case where `msg.cont
             compactionContent += `\n[${mediaCount} media block${mediaCount === 1 ? "" : "s"} omitted during compaction]`;
         }
     }
-    // Then in the object literal that follows (the chatMessages.push call):
-    content: compactionContent,  // was: content: msg.content
+    chatMessages.push({
+        role: msg.role,
+        content: compactionContent,
+    });
     ```
   - **Assign `compactionContent` (plain `string`)** to the `ChatMessage.content` field — this ensures the summarization call receives only text, not base64 blobs. The type union allows this (string is a valid `string | ContentBlock[]` value)
   - **Note:** `getTextContent()` handles both cases transparently — for string content (assistant messages), it returns the string unchanged. The `Array.isArray()` check and media marker logic only triggers for `ContentBlock[]` content, which only occurs for user messages. No separate role-based branching is needed here.
@@ -167,7 +169,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 - [ ] **`src/chat/conversation.ts:348`** — `generateTitle(params.content)` **(compile error)**
   - `generateTitle()` is declared as `private generateTitle(content: string)` at line 478 and immediately calls `.replace()` on its argument — passing `ContentBlock[]` produces `"[object Object]..."` as the title
   - This is a **TypeScript compile error site** after the type change, not just a pass-through
-  - Wrap: `this.generateTitle(getTextContent(params.content))` — `getTextContent()` already handles string input (returns it as-is), so no separate `typeof` check is needed. **Note:** If `getTextContent()` returns `""` (e.g., image-only message), `generateTitle()` produces an empty string after cleaning. This is acceptable for Phase 1 (no media is created yet). In Phase 2, when image-only user messages become possible, add a fallback: `const text = getTextContent(params.content); this.activeConversation.title = this.generateTitle(text || "Image conversation");`
+  - Wrap: `this.generateTitle(getTextContent(params.content))` — `getTextContent()` already handles string input (returns it as-is), so no separate `typeof` check is needed. **Note:** If `getTextContent()` returns `""` (e.g., image-only message), `generateTitle()` produces an empty string after cleaning. This is acceptable for Phase 1 (no media is created yet). Phase 2 adds an image-only fallback — see Task 2.10
 
 - [ ] **`src/chat/sub-agent-history.ts:58, 78, 96`** — `content: cm.content` pass-through
   - No change needed (both `ChatMessage` and `Message` accept the union)
@@ -221,8 +223,8 @@ Each provider's message conversion function must handle the case where `msg.cont
     - JPEG: try quality 80 → 60 → 40 → 20
     - GIF/WebP: convert to PNG first, then PNG cascade. GIF conversion extracts the first frame only (animation is lost) — this happens implicitly: `new Image()` loads the GIF and Canvas `drawImage()` captures whatever frame is currently displayed (always the first frame for a just-loaded GIF), so no explicit frame extraction code is needed. WebP conversion may increase size; apply PNG cascade compression after conversion
   - If the final compression step still exceeds `MAX_IMAGE_BASE64_BYTES`, throw an error: `"Image exceeds 5MB after maximum compression (final size: ${size} bytes)"`. This is an unrecoverable error — the caller converts it to a `ToolResult` with `success: false` or an `Attachment` with `status: "error"`
-  - **Already-within-limits optimization:** The `Image()` load (for dimension reading) always runs. After loading, if the input image is (a) already ≤ max dimension on both axes AND (b) the raw base64 of the original buffer is ≤ `MAX_IMAGE_BASE64_BYTES`, skip the Canvas resize/compress steps (Canvas `createElement`, `drawImage`, `toDataURL`, compression cascade) and return the original buffer as base64 with dimensions from `img.naturalWidth`/`img.naturalHeight`. This avoids unnecessary quality loss from re-encoding. The Canvas steps only run when resize or compression is actually needed
-  - Export `processImage(buffer: Buffer, mediaType: ImageMediaType, options?: { maxDimension?: number; compressionQuality?: number }): Promise<ContentBlock>` — defaults to `maxDimension: 2000` and `compressionQuality: 80`. Callers (`read_file`, `resolveAttachment`, `readExternalBinaryFile`) pass `this.settings.image_max_dimension` and `this.settings.image_compression_quality` from the plugin settings
+  - **Already-within-limits optimization:** The `Image()` load (for dimension reading) always runs. After loading, if the input image is (a) already ≤ max dimension on both axes AND (b) the base64-encoded size of the original buffer is ≤ `MAX_IMAGE_BASE64_BYTES` (check via `Math.ceil(buffer.length * 4 / 3)` to avoid encoding the full buffer just for a size check), skip the Canvas resize/compress steps (Canvas `createElement`, `drawImage`, `toDataURL`, compression cascade) and return the original buffer as base64 with dimensions from `img.naturalWidth`/`img.naturalHeight`. This avoids unnecessary quality loss from re-encoding. The Canvas steps only run when resize or compression is actually needed
+  - Export `processImage(buffer: Buffer, mediaType: ImageMediaType, options?: { maxDimension?: number; compressionQuality?: number }): Promise<ContentBlock>` — always returns a `ContentBlock` of type `"image"` with `media_type`, `data`, `width`, and `height` populated. Defaults to `maxDimension: 2000` and `compressionQuality: 80`. Callers (`read_file`, `resolveAttachment`, `readExternalBinaryFile`) pass `this.settings.image_max_dimension` and `this.settings.image_compression_quality` from the plugin settings
   - `processImage()` throws on unrecoverable errors (corrupt image, Canvas/Image load failure, exceeding size limit after maximum compression, zero-dimension images, Canvas `toDataURL` returning empty string). Callers (`read_file`, `resolveAttachment`) are responsible for catching and converting to appropriate error responses (e.g., `ToolResult` with `success: false`, or `Attachment` with `status: "error"`)
   - **Image load pattern:** Use both `onload` (resolve) and `onerror` (reject) handlers when loading the Image element. Example: `await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = () => reject(new Error("Failed to decode image")); img.src = dataUrl; })`. Also guard against zero-dimension results after load (`img.naturalWidth === 0 || img.naturalHeight === 0` indicates a decode failure on some platforms)
   - Callers must detect the media type before calling `processImage()` (via `detectMediaFormat()`). The function does not re-detect, since callers need the format for routing decisions (image vs PDF vs unknown binary) before processing.
@@ -274,7 +276,7 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Add factory: `createVaultImageAttachment(path: string): Attachment` — returns Attachment with `type: "vault_image"`, `binary_content: null`, `media_type: null`, `width: null`, `height: null`, `status: "pending"`. Binary content and dimensions are populated during `resolveAttachment()`
   - Add factory: `createExternalBinaryAttachment(absolutePath: string, filename: string, base64: string, mediaType: string, width?: number, height?: number): Attachment` (extended from design doc §5.1 to include dimension metadata for token estimation) — sets `binary_content: base64`, `media_type: mediaType`, `width: width ?? null`, `height: height ?? null`, `status: "resolved"` (already processed by caller). Note: unlike `createVaultImageAttachment` (which starts as "pending"), external binary attachments arrive fully processed
   - Update `resolveAttachment()`:
-    - For `vault_image`: read binary via `app.vault.readBinary(file)`, convert to `Buffer` via `Buffer.from(arrayBuffer)`, detect format via `detectMediaFormat()`. If `detectMediaFormat()` returns `null` (unknown binary format) or returns a non-image format (e.g., `"pdf"`), set `status: "error"` and `error_message: "Unsupported image format"` — do not attempt to process through `processImage()`. Otherwise, process through `processImage(buffer, mediaType)`. The returned `ContentBlock` contains `data` (base64), `media_type`, `width`, and `height` — extract these fields and store on the Attachment: `binary_content = block.data`, `media_type = block.media_type`, `width = block.width`, `height = block.height`
+    - For `vault_image`: look up the file via `app.vault.getFileByPath(attachment.path)` (matching the existing pattern at line 205); return error status if not found. Read binary via `app.vault.readBinary(file)`, convert to `Buffer` via `Buffer.from(arrayBuffer)`, detect format via `detectMediaFormat()`. If `detectMediaFormat()` returns `null` (unknown binary format) or returns a non-image format (e.g., `"pdf"`), set `status: "error"` and `error_message: "Unsupported image format"` — do not attempt to process through `processImage()`. Otherwise, process through `processImage(buffer, mediaType)`. The returned `ContentBlock` contains `data` (base64), `media_type`, `width`, and `height` — extract these fields and store on the Attachment: `binary_content = block.data`, `media_type = block.media_type`, `width = block.width`, `height = block.height`
     - If image processing fails (corrupt file, canvas error, exceeds size after compression), set `status: "error"` and `error_message` with a descriptive message. Do not throw — follow the existing error handling pattern at lines 261-266
   - Update `buildAttachmentsBlock()` return type:
     - From: `string | null`
@@ -317,8 +319,8 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
   - Add `content_blocks: msg.tool_result.content_blocks` to this object literal when `msg.tool_result.content_blocks` is present — this matches the type extension from the `provider.ts` update above
 
 - [ ] **Update provider `toXxxMessages()` functions** — Format `content_blocks` in tool results
-  - Extract a helper function within each provider file to share the mapping logic between user messages (Task 1.3) and tool results. Do not create a cross-provider shared module. The helper's shape is provider-specific — reuse the exact mapping logic defined in Task 1.3 for each provider (e.g., Bedrock: `function mapContentBlock(block: MediaContentBlock): BedrockContentBlock` returning `{ image: { format, source: { bytes } } }` etc.; Anthropic: returns `{ type: "image", source: { type: "base64", ... } }` etc.). The return type is the provider's native content block type
-  - **Anthropic** (line 88): `content: tr.result` (currently a string) → when `tr.content_blocks` present, switch to array format: `content: [{ type: "text", text: tr.result }, ...blocks.map(b => mapBlock(b))]`. Anthropic's `tool_result` content field accepts either a string or an array — when `content_blocks` is absent, keep the existing string format for backward compatibility. When `tr.result` is empty and `content_blocks` is present, omit the text block from the array
+  - Refactor the inline `ContentBlock` mapping logic added in Task 1.3 into a named helper function within each provider file, then reuse that helper for both user messages (updating the Task 1.3 call sites) and tool results. Do not create a cross-provider shared module. The helper's shape is provider-specific — reuse the exact mapping logic defined in Task 1.3 for each provider (e.g., Bedrock: `function mapContentBlock(block: MediaContentBlock): BedrockContentBlock` returning `{ image: { format, source: { bytes } } }` etc.; Anthropic: returns `{ type: "image", source: { type: "base64", ... } }` etc.). The return type is the provider's native content block type
+  - **Anthropic** (line 88): `content: tr.result` (currently a string) → when `tr.content_blocks` present, switch to array format: `content: [{ type: "text", text: tr.result }, ...blocks.map(b => mapBlock(b))]`. Anthropic's `tool_result` content field accepts either a string or an array — when `content_blocks` is absent, keep the existing string format for backward compatibility. When `tr.result` is an empty string (`""`) and `content_blocks` is present, omit the text block from the array
   - **OpenAI** (line 79): `content: tr.result` → when `tr.content_blocks` present: as of early 2026, OpenAI does not support multipart content arrays in tool result messages (`role: "tool"`) — only string content is accepted. Use only the text summary from `tr.result` and log a `log.warn()` when image blocks are dropped. Verify this is still the case at implementation time, as the API may have changed. If OpenAI has added multipart tool result support by implementation time, follow the Anthropic pattern: `content: [{ type: "text", text: tr.result }, ...mappedBlocks]`
   - **Bedrock** (lines 112-118): `content: [{ text: tr.result }]` is inside a `{ toolResult: { toolUseId, content: [...], status } }` structure (the `content` field is specifically at line 115). Append mapped image/document blocks **inside the `toolResult.content` array**, using the same Bedrock-native format as user messages: `{ image: { format, source: { bytes: Buffer.from(data, "base64") } } }`. **Note:** Verify via the AWS SDK types that `toolResult.content[]` accepts the same `{ image: { format, source: { bytes } } }` structure as `converseMessage.content[]`
   - **Local** (line 107): same as OpenAI (text summary only for tool results, drop image blocks with `log.warn()`)
@@ -329,7 +331,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 - [ ] **Update `src/ui/attachment-picker.ts`**
   - Expand `openExternalFileDialog()` accepted extensions (line 584-586):
     - Add: `.png,.jpg,.jpeg,.gif,.webp`
-  - Add `readExternalBinaryFile(absolutePath: string, maxSizeMb?: number): Promise<{ base64: string; mediaType: string; width?: number; height?: number } | null>` for binary file reading. Returns `null` if file exceeds size limit or cannot be read. Default `maxSizeMb`: 50 (matching the `read_file` raw size limit from Task 2.3). Detect media type via `detectMediaFormat()` on the first bytes of the buffer. **For image files:** process through `processImage()` (resize/compress) before returning — extract `data`, `media_type`, `width`, `height` from the returned `ContentBlock`. Image processing settings (`maxDimension`, `compressionQuality`) are read from `this.settings.image_max_dimension` and `this.settings.image_compression_quality` within the method body — they are not function parameters (the attachment picker class has access to `this.settings`). This ensures external images go through the same compression cascade as vault images
+  - Add `readExternalBinaryFile(absolutePath: string, maxSizeMb?: number): Promise<{ base64: string; mediaType: string; width?: number; height?: number } | null>` for binary file reading. Returns `null` if the file exceeds size limit, cannot be read, or `detectMediaFormat()` returns a non-image format (including `null` for unknown binaries and `"pdf"` — PDFs are handled separately in Phase 3, Task 3.5). Default `maxSizeMb`: 50 (matching the `read_file` raw size limit from Task 2.3). Detect media type via `detectMediaFormat()` on the first bytes of the buffer. **For image files:** process through `processImage()` (resize/compress) before returning — extract `data`, `media_type`, `width`, `height` from the returned `ContentBlock`. Image processing settings (`maxDimension`, `compressionQuality`) are read from `this.settings.image_max_dimension` and `this.settings.image_compression_quality` within the method body — they are not function parameters (the attachment picker class has access to `this.settings`). This ensures external images go through the same compression cascade as vault images
   - Route image files to binary read path instead of UTF-8 text read. **ContentBlock extraction:** Extract fields from the returned `ContentBlock` for the return object: `block.data` → `base64`, `block.media_type` → `mediaType`, `block.width` → `width`, `block.height` → `height`
   - Update `VaultNoteSuggest` (lines 173-389) to show image files from vault (not just `.md`):
     - **API change required:** Replace `this.app.vault.getMarkdownFiles()` (line 270) with `this.app.vault.getFiles()` and filter manually by extension (`.md`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`). `getMarkdownFiles()` is an Obsidian API that only returns `.md` files and cannot be configured to include other types. (PDF files are added separately in Phase 3, Task 3.5)
@@ -347,6 +349,12 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
   - `image_compression_quality: number` (default: 80)
 
 - [ ] **Update `src/settings/defaults.ts`** — Add defaults for new settings
+
+### 2.10 Image-Only Title Fallback
+
+- [ ] **Update `src/chat/conversation.ts:348`** — Image-only title fallback
+  - In Phase 1 (Task 1.6), `generateTitle` was wrapped with `getTextContent()`. Now that image-only user messages are possible, add an empty-content fallback:
+    `const text = getTextContent(params.content); this.activeConversation.title = this.generateTitle(text || "Image conversation");`
 
 ### 2.9 Verification
 
@@ -381,7 +389,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - Load PDF via library → extract text (full or page range) → clean (normalize whitespace, remove control chars) → truncate to configurable limit (default 400K chars)
   - Implement native document block path:
     - Magic byte check (`%PDF-`) → base64 encode raw buffer → size check against provider limits → return `ContentBlock { type: "document" }`
-  - Page range support: parse `"1-5"`, `"3"`, `"10-20"` syntax (1-indexed)
+  - Page range support: parse `"1-5"`, `"3"`, `"10-20"` syntax (1-indexed). Supports a single contiguous range only. Comma-separated or multiple ranges (e.g., `"1-3,7-9"`, `"1,3,5"`) are not supported — return an error with a descriptive message if commas are detected
   - Consult `getMediaCapabilities()` to decide native vs text path
   - Export `processPdf(buffer: Buffer, options: { pages?: string; providerType: string }): Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>` — returns a single-element array in current implementation (one document or one text block), but callers must handle arrays of any length. Array type aligns with `ToolResult.content_blocks` and allows future page-splitting if needed
   - **`textSummary` content:** For the text extraction path, `textSummary` is the extracted text (truncated to the configured limit). For the native document block path, `textSummary` is a short descriptor: `"PDF document (N pages, M.M MB)"` — full text extraction is skipped since the native block carries the raw PDF. This summary is used as the `ToolResult.result` fallback for providers that don't support native PDF
@@ -464,7 +472,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 - [ ] **Update `src/tools/read-docx.ts`**
   - Add `import { createHash } from "crypto"`
-  - Implement mammoth `convertImage` handler (before `convertToHtml` call at line 142). **`this` binding:** use an arrow function for the `convertImage` handler to preserve lexical `this` access to `this.app` for vault operations.
+  - Implement mammoth `convertImage` handler (before `convertToHtml` call at line 142). **`this` binding:** use an arrow function for the callback passed to `mammoth.images.imgElement()` to preserve lexical `this` access to `this.app` for vault operations.
     - Check format against supported list (`image/png`, `image/jpeg`, `image/gif`, `image/webp`)
     - Skip unsupported formats (EMF, WMF, SVG, TIFF) with descriptive alt text
     - Read image as buffer via `image.readAsBuffer()` — returns a Node.js `Buffer` (Electron's polyfill in the renderer process)
@@ -518,7 +526,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - Paragraphs with no image tokens continue through the existing `renderInline()` path unchanged
 - [ ] **Refactor template grafting — Step 1: Parse body DOMs (lines 286-338) — append deferred to Step 3**
   - The current grafting uses regex-based XML string manipulation (regex to extract `<w:body>`, regex to strip `<w:sectPr>`). Introducing DOM-based merging for relationships alongside regex-based body grafting creates an inconsistent, fragile mix. Migrate the entire grafting routine to `@xmldom/xmldom` (`^0.8.11`, already a direct dependency in package.json).
-  - **Namespace handling:** Use `getElementsByTagName("w:body")` — xmldom 0.8.x resolves prefixed tag names when the `w:` prefix is declared in the document (always true for OOXML). Use this as the primary approach. If at implementation time it returns an empty NodeList, fall back to `getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "body")`. Add an assertion after the call: `if (!bodyElements.length) throw new Error("Could not locate <w:body> in document.xml")`
+  - **Namespace handling for element lookup:** Use `getElementsByTagName("w:body")` — xmldom 0.8.x resolves prefixed tag names when the `w:` prefix is declared in the document (always true for OOXML). Use this as the primary approach. If at implementation time it returns an empty NodeList, fall back to `getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "body")`. Add an assertion after the call: `if (!bodyElements.length) throw new Error("Could not locate <w:body> in document.xml")`. **Note:** This `getElementsByTagNameNS()` fallback applies only to element lookup here in Step 1. Attribute access in Step 3 uses the prefixed form (`getAttribute("r:embed")`) exclusively — see Step 3 for rationale
   - Implementation:
     1. Parse generated `word/document.xml` with `DOMParser` → extract `<w:body>` child nodes
     2. Parse template `word/document.xml` with `DOMParser` → locate `<w:body>` element
@@ -549,7 +557,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 - [ ] **Refactor template grafting — Step 4: Merge `[Content_Types].xml`**
   - Parse both `[Content_Types].xml` with `DOMParser`
   - **Extension source (primary approach):** Scan `word/media/*` filenames in the generated zip and extract their file extensions (e.g., `image1.jpeg` → `"jpeg"`, `image2.png` → `"png"`). This is more reliable than using the pre-resolved `DocxImageData` map, since the `docx` library may normalize extensions (e.g., `.jpg` → `.jpeg`). **Important:** the `docx` library writes JPEG media files as `imageN.jpeg`, so the Content_Types entry must use `Extension="jpeg"` — using `"jpg"` produces a corrupt DOCX that Word cannot open. The zip filename scan naturally captures this normalization
-  - For each image extension found, add a `<Default Extension="..." ContentType="..."/>` entry to the template's `[Content_Types].xml` if not already present. Check for duplicates by iterating existing `<Default>` child elements of the `<Types>` root and comparing `getAttribute("Extension")` against the target extension string.
+  - For each image extension found, add a `<Default Extension="..." ContentType="..."/>` entry to the template's `[Content_Types].xml` if not already present. Content type mapping: `"png"` → `"image/png"`, `"jpeg"` → `"image/jpeg"`, `"gif"` → `"image/gif"`, `"bmp"` → `"image/bmp"`. Check for duplicates by iterating existing `<Default>` child elements of the `<Types>` root and comparing `getAttribute("Extension")` against the target extension string.
   - Serialize back to template zip
 
   **Execution order summary for Steps 1-4 (critical — getting this wrong produces corrupt DOCX files):**
