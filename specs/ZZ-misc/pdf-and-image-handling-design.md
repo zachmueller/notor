@@ -678,7 +678,6 @@ With the union type on `Message.content`, media naturally flows to sub-agents vi
 - `src/context/attachment.ts` — new types, `binary_content`, new factories, updated `buildAttachmentsBlock()`
 - `src/context/message-assembler.ts` — add `assembleUserContent()` function (§5.2)
 - `src/chat/orchestrator.ts` — call `assembleUserContent()` to merge text + media blocks
-- `src/chat/dispatcher.ts` — propagate `content_blocks` from tool results
 - `src/ui/attachment-picker.ts` — accept image files, binary read
 - `src/ui/attachment-chips.ts` — image chip display
 - `src/settings/types.ts` — image settings

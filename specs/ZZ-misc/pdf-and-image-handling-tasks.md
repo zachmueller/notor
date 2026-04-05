@@ -49,7 +49,7 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Line 60: `content: msg.content || null` — when `ContentBlock[]`, map to OpenAI content parts:
     - text → `{ type: "text", text }`
     - image → `{ type: "image_url", image_url: { url: "data:{media_type};base64,{data}" } }`
-    - document → extract text block only (PDFs pre-converted to text for OpenAI)
+    - document → **skip** with text placeholder `"[PDF document — not supported by this provider]"` (in Phase 1, no document blocks exist yet; the actual document-to-text routing via the PDF processor + capabilities check is added in Phase 3)
   - Line 89: Assistant `content: msg.content` — assert string
 
 - [ ] **`src/providers/bedrock-provider.ts` — `toBedrockMessages()`**
@@ -61,7 +61,7 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Line 128: `content: [{ text: msg.content }]` — same mapping
 
 - [ ] **`src/providers/local-provider.ts` — `toOpenAIMessages()`**
-  - Line 88: `content: msg.content || null` — same fix as OpenAI provider
+  - Line 88: `content: msg.content || null` — same fix as OpenAI provider (including document block skip with placeholder)
   - Line 117: `content: msg.content` — assert string for assistant
 
 ### 1.4 Token Estimation — Media-Aware
@@ -77,8 +77,9 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Private helpers: `estimateImageTokens(w?, h?)`, `estimateDocumentTokens(pageCount?)`
   - Unit tests covering: string input, text-only blocks, image with/without dimensions, document with/without page count, mixed content
 
-- [ ] **Update `src/chat/context.ts:89-100`** — `estimateMessageTokens()`
-  - Replace `let text = message.content; text += ...; return estimateTokenCount(text)` with:
+- [ ] **Update `src/chat/context.ts:77-101`** — `estimateMessageTokens()`
+  - Full function spans lines 77-101; lines 79-86 contain early returns for `output_tokens`/`input_tokens` that must be preserved
+  - Replace the core logic at lines 89-100 (`let text = message.content; text += ...; return estimateTokenCount(text)`) with:
     - `let total = estimateContentTokens(message.content);`
     - `total += estimateTokenCount(JSON.stringify(message.tool_call?.parameters))` (when present)
     - `total += estimateTokenCount(typeof result === "string" ? result : JSON.stringify(result))` (when present)
@@ -258,7 +259,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 **Current flow:** `ToolResult` (with new `content_blocks`) → stored on `Message.tool_result` → `toChatMessages()` at orchestrator.ts:2081 maps it to `ChatMessage.tool_results[]` entry → providers read `tr.result` (string only). The `content_blocks` field is lost in the `toChatMessages()` mapping because `ChatMessage.tool_results[]` has no `content_blocks` field.
 
-- [ ] **Update `src/providers/provider.ts:30-35`** — Extend `ChatMessage.tool_results[]` entry type
+- [ ] **Update `src/providers/provider.ts:31-36`** — Extend `ChatMessage.tool_results[]` entry type
   - Add `content_blocks?: ContentBlock[]` to the tool result entry interface
   - Current interface: `{ tool_call_id: string; tool_name: string; result: string; is_error: boolean }`
   - Add: `content_blocks?: ContentBlock[]`
@@ -280,7 +281,10 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - Add: `.png,.jpg,.jpeg,.gif,.webp`
   - Add `readExternalBinaryFile()` function for binary file reading (base64 encode)
   - Route image files to binary read path instead of UTF-8 text read
-  - Update `VaultNoteSuggest` to show image files from vault (not just `.md`)
+  - Update `VaultNoteSuggest` (lines 173-335) to show image files from vault (not just `.md`):
+    - Modify file filtering to include `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` extensions
+    - Update suggestion rendering to show a distinct icon for image files (vs. the existing note icon)
+    - Update the selection handler to route image files to the binary read path (via `readExternalBinaryFile()`) and create `vault_image` attachments instead of text `vault_note` attachments
 
 - [ ] **Update `src/ui/attachment-chips.ts`**
   - Add image-specific chip rendering (image icon instead of paper clip)
@@ -445,34 +449,43 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
       4. Build a `Map<string, DocxImageData>` lookup from href → resolved image data
       5. Pass the map into `buildDocxChildren()` as a parameter
     - `buildDocxChildren()` stays synchronous — image lookup is a synchronous `map.get(href)` call
+    - **Signature change cascade:** `buildDocxChildren(tokens, resolvedImages)` — the function calls itself recursively (e.g., for blockquote/list children), so all recursive call sites inside `buildDocxChildren` must forward the `resolvedImages` map parameter
   - **Handle images in the `paragraph` case** of `buildDocxChildren()` (line 125-130) — in marked v17, standalone images are parsed as inline `image` tokens wrapped in a `paragraph` token, NOT as top-level `image` block tokens. Handle this by detecting single-image paragraphs:
     - When a `paragraph` token contains exactly one child token of `type: "image"`, render it as a dedicated `new Paragraph({ children: [new ImageRun({ type, data, transformation: { width, height }, altText })] })` using the pre-resolved map
     - If the image href is not in the resolved map, render fallback: `new Paragraph({ children: [new TextRun({ text: "[Image: href]" })] })`
     - When a `paragraph` token contains an image mixed with other inline tokens (e.g., `text ![alt](url) more text`), render via `renderInline()` as today — the image token falls through to the default `raw` text rendering (acceptable: mixed image+text paragraphs are rare in practice)
     - Paragraphs with no image tokens continue through the existing `renderInline()` path unchanged
-  - **Refactor template grafting (lines 286-338) to use DOM parsing + handle images:**
-    - The current grafting uses regex-based XML string manipulation (regex to extract `<w:body>`, regex to strip `<w:sectPr>`). Introducing DOM-based merging for relationships alongside regex-based body grafting creates an inconsistent, fragile mix. Migrate the entire grafting routine to `@xmldom/xmldom` (`^0.8.11`, already a direct dependency in package.json).
-    - **Step 1 — Migrate existing body grafting to DOM parsing:**
-      1. Parse generated `word/document.xml` with `DOMParser` → extract `<w:body>` child nodes
-      2. Parse template `word/document.xml` with `DOMParser` → locate `<w:body>` element
-      3. Remove all non-`<w:sectPr>` children from template body
-      4. Import and append generated body children (excluding `<w:sectPr>`) into template body
-      5. Serialize back with `XMLSerializer` → write to template zip
-      - This replaces the current regex approach with equivalent DOM operations, reducing fragility
-    - **Step 2 — Add image support to grafting:**
-      - Must also merge:
-        1. `word/media/*` — copy image binary files from generated zip
-        2. `word/_rels/document.xml.rels` — merge relationship entries with rId conflict resolution
-        3. `[Content_Types].xml` — add image format content type declarations
-    - **rId conflict resolution algorithm:**
-      1. Parse template's `word/_rels/document.xml.rels` with `DOMParser`
-      2. Find highest rId number in template
-      3. Parse generated doc's `word/_rels/document.xml.rels` with `DOMParser`
-      4. Remap all generated rIds to `rId(maxId + offset)`
-      5. Update generated `word/document.xml` body: replace `r:embed="rIdN"` and `r:id="rIdN"` references (can use DOM `getAttribute`/`setAttribute` on the already-parsed body nodes)
-      6. Append remapped `<Relationship>` elements to template `.rels` DOM
-      7. Copy `word/media/*` files from generated zip into template zip
-      8. Parse both `[Content_Types].xml` with `DOMParser` → add `<Default Extension="png" .../>` etc. if not already present → serialize back
+- [ ] **Refactor template grafting — Step 1: Migrate body grafting to DOM parsing (lines 286-338)**
+  - The current grafting uses regex-based XML string manipulation (regex to extract `<w:body>`, regex to strip `<w:sectPr>`). Introducing DOM-based merging for relationships alongside regex-based body grafting creates an inconsistent, fragile mix. Migrate the entire grafting routine to `@xmldom/xmldom` (`^0.8.11`, already a direct dependency in package.json).
+  - Implementation:
+    1. Parse generated `word/document.xml` with `DOMParser` → extract `<w:body>` child nodes
+    2. Parse template `word/document.xml` with `DOMParser` → locate `<w:body>` element
+    3. Remove all non-`<w:sectPr>` children from template body
+    4. Import and append generated body children (excluding `<w:sectPr>`) into template body
+    5. Serialize back with `XMLSerializer` → write to template zip
+  - This replaces the current regex approach with equivalent DOM operations, reducing fragility
+  - **Verify:** Template grafting produces identical output to the regex approach (no regressions)
+
+- [ ] **Refactor template grafting — Step 2: Copy `word/media/*` image files**
+  - When the generated doc contains images (from `ImageRun`), copy all `word/media/*` binary files from the generated zip into the template zip
+  - When the generated doc has no images, skip (no media to copy)
+  - Handle duplicate media filenames: the `docx` library generates unique names (`image1.png`, `image2.png`), but if a filename already exists in the template, rename with a numeric suffix
+
+- [ ] **Refactor template grafting — Step 3: Merge `word/_rels/document.xml.rels` with rId conflict resolution**
+  - Both the template and generated doc independently assign relationship IDs (`rId1`, `rId2`, etc.). Naively merging relationships causes collisions.
+  - rId conflict resolution algorithm:
+    1. Parse template's `word/_rels/document.xml.rels` with `DOMParser`
+    2. Find highest rId number in template
+    3. Parse generated doc's `word/_rels/document.xml.rels` with `DOMParser`
+    4. Remap all generated rIds to `rId(maxId + offset)`
+    5. Update generated `word/document.xml` body: replace `r:embed="rIdN"` and `r:id="rIdN"` references (can use DOM `getAttribute`/`setAttribute` on the already-parsed body nodes)
+    6. Append remapped `<Relationship>` elements to template `.rels` DOM
+    7. Serialize updated `.rels` back to template zip
+
+- [ ] **Refactor template grafting — Step 4: Merge `[Content_Types].xml`**
+  - Parse both `[Content_Types].xml` with `DOMParser`
+  - For each image extension in the generated doc (png, jpg, gif, bmp), add a `<Default Extension="png" ContentType="image/png"/>` entry to the template's `[Content_Types].xml` if not already present
+  - Serialize back to template zip
 
 ### 2.5.4 Verification
 
