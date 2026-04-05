@@ -4,7 +4,7 @@
 
 Notor brings AI-powered assistance directly into your Obsidian workflow. It gives you a full AI chat panel with the ability to read, search, create, and surgically edit notes in your vault — with full transparency into every AI action, a safety-first approval model, diff previews for proposed changes, and rollback via checkpoints.
 
-> **Status:** Phases 0–5 of the roadmap implemented.
+> **Status:** Phases 0–5.1 of the roadmap implemented.
 
 ---
 
@@ -22,6 +22,7 @@ Notor brings AI-powered assistance directly into your Obsidian workflow. It give
 - **[Vault event hooks](docs/hooks.md#vault-event-hooks)** — hooks triggered by vault events: note open/save/create, tag changes, and cron schedules
 - **[Custom MCP tool servers](docs/mcp-servers.md)** — connect stdio or HTTP MCP servers to extend the AI's tool set; uniform dispatch with Plan/Act enforcement and approval UI
 - **[Sub-agents](docs/sub-agents.md)** — spawn focused child conversations for vault search, web lookup, or custom tasks; isolated context, default-deny tool access, concurrent execution (up to 3), and three built-in profiles (`search-vault`, `search-web`, `notor-help`)
+- **[User-defined extensions](docs/extensions.md)** — create custom tools and automations as Markdown files in your vault with TypeScript/JavaScript code fences; tools are called by the AI alongside built-in tools, automations fire at lifecycle and vault events; per-extension settings with auto-generated UI; shared settings across extensions
 - **[Conversation export & import](docs/export-import.md)** — export conversations to self-contained HTML or Markdown; import previously exported HTML conversations back into the plugin
 - **Auto-compaction** — automatic context summarization when conversations approach the model's context window limit
 
@@ -87,6 +88,7 @@ For full setup walkthroughs — including creating your first persona, workflow,
 | **Phase 4.1** | Custom MCP servers: stdio/SSE/Streamable HTTP transports, tool discovery, uniform dispatch, read/write classification, Plan/Act signaling, auto-approve, chat panel status indicator | ✅ Complete |
 | **Phase 4c** | Word & file tools: `read_file`, `read_docx`, `write_docx` with optional template grafting; shared path-validation utility; settings UI | ✅ Complete |
 | **Phase 5** | Sub-agents: `use_subagent` tool, isolated child conversations, built-in profiles (`search-vault`, `search-web`, `notor-help`), default-deny tool access, concurrency control, progress UI | ✅ Complete |
+| **Phase 5.1** | User-defined extensions: vault-authored tools and automations as Markdown files, TypeScript runtime with Obsidian API access, per-extension settings with auto-generated UI, shared settings, file watcher with reload | ✅ Complete |
 | **Phase 6** | Advanced & multi-agent: agent monitor panel, background agents, browser capabilities | 🔜 Planned |
 
 ---
@@ -110,6 +112,7 @@ src/
   shell/               # Shell executor, shell resolver, output buffer (shared by execute_command and hooks)
   mcp/                 # MCP server hub, tool adapter, and type definitions
   sub-agents/          # Sub-agent profile discovery, manager, built-in profiles, preamble, semaphore
+  extensions/          # User-defined tool and automation runtime: discovery, parsing, compilation, settings
   settings/            # Settings interface, defaults, tab UI, per-section UI components
   ui/                  # Chat panel, diff view, approval UI, tool call display, attachment chips,
                        #   compaction markers, persona picker, workflow activity indicator,
@@ -133,6 +136,7 @@ The `design/` directory contains the full medium-term vision for Notor, written 
 | [`design/architecture.md`](design/architecture.md) | LLM provider layer, context management, personas, workflows, agents, hooks, checkpoints |
 | [`design/ux.md`](design/ux.md) | Chat panel, editor behavior, diff preview, transparency, and UI patterns |
 | [`design/tools.md`](design/tools.md) | Built-in tool definitions, web fetching, shell access, and custom MCP tool extensibility |
+| [`design/user-defined-tools.md`](design/user-defined-tools.md) | User-defined extension system: vault-authored tools, automations, shared settings, runtime context, compilation pipeline |
 | [`design/research/`](design/research/) | Pre-implementation research findings (secrets manager, vault API, system prompt design, LLM model APIs) |
 
 ---

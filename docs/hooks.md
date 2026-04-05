@@ -55,6 +55,16 @@ Configure hooks that fire automatically in response to vault lifecycle events:
 
 ---
 
+## User-defined automations
+
+In addition to shell command hooks and workflow triggers, you can define vault-authored automations that fire at the same LLM lifecycle and vault events listed above. Automations are TypeScript/JavaScript code in Markdown files under `notor/automations/`, with direct access to Obsidian APIs and Notor utilities.
+
+Automations coexist with shell hooks — shell hooks fire first, then workflow hooks, then vault-defined automations (sorted by `notor-automation-order`).
+
+See [extensions.md](extensions.md) for the full reference on defining automations, available triggers, and the runtime context.
+
+---
+
 ## Per-workflow hook overrides
 
 Define a `notor-hooks` YAML mapping in a workflow's frontmatter to override global LLM lifecycle hooks for that workflow's duration. Overridden events use the workflow-scoped hooks; non-overridden events continue using global hooks. Reverts to global hooks when the workflow ends. See [workflows.md](workflows.md) for details.

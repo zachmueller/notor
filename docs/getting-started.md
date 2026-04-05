@@ -67,6 +67,7 @@ All Notor commands are accessible via the Obsidian command palette (Ctrl/Cmd+P):
 | **Notor: Export conversation** | Exports the active conversation to HTML or Markdown |
 | **Notor: Import conversation from HTML** | Imports a previously exported HTML conversation |
 | **Notor: Open tool config inspector** | Opens a debugging view showing the effective tool configuration |
+| **Notor: Reload user extensions** | Re-discovers and recompiles all user-defined tools and automations |
 
 ## Create your first persona
 
@@ -147,6 +148,55 @@ The built-in profiles (`search-vault`, `search-web`, `notor-help`) are enabled b
 4. The profile is immediately available — ask the AI something that would benefit from focused investigation
 
 > Sub-agents use default-deny tool access. A sub-agent can only use tools that are both enabled in its profile AND enabled in the parent conversation. See [sub-agents.md](sub-agents.md#tool-access) for details.
+
+## Create your first extension
+
+Extensions let you add custom tools and automations as Markdown files in your vault — no external processes or MCP servers required. See [extensions.md](extensions.md) for the full reference.
+
+### Quick tool example
+
+1. Create `notor/tools/hello-world.md` in your vault
+2. Add frontmatter and code fences:
+   ````markdown
+   ---
+   notor-type: tool
+   notor-tool-name: hello_world
+   notor-description: "Return a greeting for the given name"
+   notor-mode: read
+   ---
+
+   ```yaml
+   params:
+     name:
+       type: string
+       description: "Name to greet"
+   ```
+
+   ```typescript
+   return { success: true, result: `Hello, ${params.name}!` };
+   ```
+   ````
+3. Open the command palette -> **Notor: Reload user extensions**
+4. Ask the AI to greet someone — it will invoke your custom `hello_world` tool
+
+### Quick automation example
+
+1. Create `notor/automations/log-completions.md` in your vault:
+   ````markdown
+   ---
+   notor-type: automation
+   notor-trigger: after_completion
+   notor-display-name: "Log completions"
+   ---
+
+   ```typescript
+   const log = utils.logger("completions");
+   log.info("AI response completed", { conversationId: context.conversationId });
+   ```
+   ````
+2. Reload extensions and send a message — check the developer console to see the log entry
+
+> Extensions support TypeScript out of the box — types are stripped at compile time. See [extensions.md](extensions.md) for the full file format, runtime context reference, and worked examples.
 
 ## Configure Word & file tools
 

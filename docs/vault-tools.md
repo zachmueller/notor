@@ -28,6 +28,10 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `extract_docx_comments` | Extract review comments from a `.docx` file and write them as a structured note (desktop only) | Act only |
 | `use_subagent` | Spawn a focused [sub-agent](sub-agents.md) child conversation for a specific task | Plan & Act |
 
+### User-defined tools
+
+In addition to the built-in tools above, you can create custom tools as Markdown files in `notor/tools/`. User-defined tools appear alongside built-in tools in the AI's tool set, the **Settings -> Tools** section, and the tool config inspector. If a user tool's name matches a built-in tool, the user tool replaces it. See [extensions.md](extensions.md) for the full reference.
+
 Every tool call is displayed inline in the chat thread — name, parameters, result, and status — so you always see exactly what the AI is doing.
 
 Tools marked **Act only** are blocked in Plan mode. See [safety.md](safety.md) for details on Plan/Act mode and the approval workflow.
