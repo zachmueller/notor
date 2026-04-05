@@ -1165,9 +1165,11 @@ runTest(
 		name: "user-extensions",
 		settings,
 		setupVault: (vaultPath) => {
-			// Create extension directories
+			// Clean and recreate extension directories to remove stale files from prior runs
 			const toolsDir = path.join(vaultPath, "notor", "tools");
 			const automationsDir = path.join(vaultPath, "notor", "automations");
+			if (fs.existsSync(toolsDir)) fs.rmSync(toolsDir, { recursive: true, force: true });
+			if (fs.existsSync(automationsDir)) fs.rmSync(automationsDir, { recursive: true, force: true });
 			fs.mkdirSync(toolsDir, { recursive: true });
 			fs.mkdirSync(automationsDir, { recursive: true });
 
