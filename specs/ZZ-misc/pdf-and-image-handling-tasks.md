@@ -449,7 +449,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 - [ ] **Manual test: OpenAI** — Attach PDF → provider receives extracted text → model summarizes PDF
 - [ ] **Manual test: read_file with pages** — `read_file` on PDF with `pages: "1-5"` → correct pages extracted
 - [ ] **Manual test: Edge cases** — Encrypted PDF (graceful error), image-only PDF (no text layer → empty text warning), corrupt PDF (graceful error)
-- [ ] **Unit tests** — PDF processor, page range parsing, provider capability routing
+- [x] **Unit tests** — PDF processor, page range parsing, provider capability routing
 - [x] **Build check** — Bundle size acceptable with new PDF dependency
 
 ---

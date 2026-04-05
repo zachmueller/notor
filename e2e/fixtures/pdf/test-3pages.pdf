@@ -1,0 +1,51 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R 9 0 R] /Count 3 >>
+endobj
+4 0 obj
+<< /Length 150 >>
+stream
+BT /F1 12 Tf 72 720 Td (This is page one of the test PDF document. It contains sample text for testing PDF text extraction in the Notor plugin.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+6 0 obj
+<< /Length 122 >>
+stream
+BT /F1 12 Tf 72 720 Td (This is page two. It has different content to verify page range extraction works correctly.) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+8 0 obj
+<< /Length 121 >>
+stream
+BT /F1 12 Tf 72 720 Td (This is page three, the final page. It confirms that multi-page PDFs are handled properly.) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000000 00000 n 
+0000000127 00000 n 
+0000000328 00000 n 
+0000000454 00000 n 
+0000000627 00000 n 
+0000000753 00000 n 
+0000000925 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+1051
+%%EOF
