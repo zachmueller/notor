@@ -26,6 +26,7 @@ import { renderDocxToolsSection } from "./sections/docx-tools";
 import { renderHooksSection } from "./sections/hooks";
 import { renderVaultEventHooksSection } from "./sections/vault-event-hooks";
 import { renderFileAttachmentsSection } from "./sections/file-attachments";
+import { renderMediaSection } from "./sections/media";
 import { renderCompactionSection } from "./sections/compaction";
 import { renderProviderModelReferenceSection } from "./sections/provider-reference";
 import { renderGeneralSection } from "./sections/general";
@@ -170,6 +171,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		renderWebSearchSection(toolConfigGroup, ctx);
 		renderExecuteCommandSection(toolConfigGroup, ctx);
 		renderDocxToolsSection(toolConfigGroup, ctx);
+		renderMediaSection(toolConfigGroup, ctx);
 		renderFileAttachmentsSection(toolConfigGroup, ctx);
 
 		// --- Automation (collapsed by default) ---

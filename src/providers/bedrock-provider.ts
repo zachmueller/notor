@@ -73,6 +73,29 @@ const DEFAULT_REGION = "us-east-1";
  * - Messages alternate between user and assistant roles
  * - Tool use/results are content blocks within messages
  */
+/** Map a Notor ContentBlock to Bedrock's native content block format. */
+function mapToBedrockBlock(block: MediaContentBlock): ContentBlock {
+	switch (block.type) {
+		case "text":
+			return { text: block.text } as ContentBlock;
+		case "image":
+			return {
+				image: {
+					format: block.media_type.split("/")[1] as "png" | "jpeg" | "gif" | "webp",
+					source: { bytes: Buffer.from(block.data, "base64") },
+				},
+			} as ContentBlock;
+		case "document":
+			return {
+				document: {
+					format: "pdf" as const,
+					name: "document.pdf",
+					source: { bytes: Buffer.from(block.data, "base64") },
+				},
+			} as ContentBlock;
+	}
+}
+
 function toBedrockMessages(
 	messages: ChatMessage[]
 ): { system: SystemContentBlock[]; messages: BedrockMessage[] } {
@@ -113,13 +136,21 @@ function toBedrockMessages(
 		if (msg.role === "tool_result" && msg.tool_results?.length) {
 			bedrockMessages.push({
 				role: "user" as ConversationRole,
-				content: msg.tool_results.map((tr) => ({
-					toolResult: {
-						toolUseId: tr.tool_call_id,
-						content: [{ text: tr.result }],
-						status: tr.is_error ? ("error" as const) : ("success" as const),
-					},
-				})),
+				content: msg.tool_results.map((tr) => {
+					const trContent: ContentBlock[] = [{ text: tr.result } as ContentBlock];
+					if (tr.content_blocks?.length) {
+						for (const block of tr.content_blocks) {
+							trContent.push(mapToBedrockBlock(block));
+						}
+					}
+					return {
+						toolResult: {
+							toolUseId: tr.tool_call_id,
+							content: trContent,
+							status: tr.is_error ? ("error" as const) : ("success" as const),
+						},
+					} as ContentBlock;
+				}),
 			});
 			continue;
 		}
@@ -128,27 +159,7 @@ function toBedrockMessages(
 			if (Array.isArray(msg.content)) {
 				bedrockMessages.push({
 					role: "user" as ConversationRole,
-					content: (msg.content as MediaContentBlock[]).map((block) => {
-						switch (block.type) {
-							case "text":
-								return { text: block.text } as ContentBlock;
-							case "image":
-								return {
-									image: {
-										format: block.media_type.split("/")[1] as "png" | "jpeg" | "gif" | "webp",
-										source: { bytes: Buffer.from(block.data, "base64") },
-									},
-								} as ContentBlock;
-							case "document":
-								return {
-									document: {
-										format: "pdf" as const,
-										name: "document.pdf",
-										source: { bytes: Buffer.from(block.data, "base64") },
-									},
-								} as ContentBlock;
-						}
-					}),
+					content: (msg.content as MediaContentBlock[]).map(mapToBedrockBlock),
 				});
 			} else {
 				bedrockMessages.push({

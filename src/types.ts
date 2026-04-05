@@ -178,6 +178,8 @@ export interface ToolResult {
 	success: boolean;
 	/** Tool output. */
 	result: string | Record<string, unknown>;
+	/** Optional media output from tool execution (images, documents). When present, `result` still contains a text summary for fallback. */
+	content_blocks?: ContentBlock[];
 	/** Error message if execution failed. */
 	error?: string | null;
 	/** Execution time in milliseconds. */

@@ -24,6 +24,8 @@
  * @see specs/03-workflows-personas/contracts/workflow-assembly.md — Step 6
  */
 
+import type { ContentBlock } from "../media/types";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -101,4 +103,28 @@ export function assembleUserMessage(parts: MessageParts): string {
 	}
 
 	return sections.join("\n\n");
+}
+
+/**
+ * Merge assembled text content with media content blocks.
+ *
+ * If no media blocks, returns plain string (preserving existing behavior).
+ * If media blocks present, returns a `ContentBlock[]` array with a leading
+ * text block (if text is non-empty) followed by the media blocks.
+ *
+ * @param text - The assembled text content (from `assembleUserMessage()`).
+ * @param mediaBlocks - Media content blocks from attachments or tools.
+ * @returns Plain string or ContentBlock[] for the message content.
+ */
+export function assembleUserContent(
+	text: string,
+	mediaBlocks: ContentBlock[],
+): string | ContentBlock[] {
+	if (mediaBlocks.length === 0) {
+		return text;
+	}
+	if (text.trim()) {
+		return [{ type: "text", text }, ...mediaBlocks];
+	}
+	return [...mediaBlocks];
 }

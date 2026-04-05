@@ -215,7 +215,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 ### 2.1 New Files
 
-- [ ] **Create `src/media/image-processor.ts`**
+- [x] **Create `src/media/image-processor.ts`**
   - Use Electron Canvas API (zero new dependencies) for resize + compress. Use `document.createElement("canvas")` and `new Image()` from the DOM (available in Electron's renderer process). For unit tests, mock `document.createElement("canvas")` and `new Image()` using Vitest's mocking APIs (`vi.fn()`, `vi.stubGlobal()`). See `src/__mocks__/obsidian.ts` for the project's existing mock pattern
   - Implement pipeline: buffer → magic byte detect → Image() load → validate dimensions → resize if >2000px → compress → base64
   - Format-aware compression cascade:
@@ -231,7 +231,7 @@ Each provider's message conversion function must handle the case where `msg.cont
   - Return `ContentBlock` with `width`/`height` metadata populated from Canvas
   - Unit tests for: dimension validation, resize logic, compression cascade, format detection
 
-- [ ] **Create `src/media/capabilities.ts`**
+- [x] **Create `src/media/capabilities.ts`**
   - Define `MediaCapabilities` interface: `supportsImages`, `supportsNativePdf`, `maxImageSizeBytes`, `maxDocumentSizeBytes`, `maxMediaItems`
   - Export `getMediaCapabilities(providerType: string): MediaCapabilities`
   - Provider capability table:
@@ -240,20 +240,20 @@ Each provider's message conversion function must handle the case where `msg.cont
     - Bedrock: images yes, native PDF yes, 3.75MB image, 4.5MB doc, 20 items
     - Local: `supportsImages: true`, native PDF no, 5MB image, N/A doc, 10 items. Add a comment noting that actual image support depends on the backend model — `true` means "send images, but do not error if the model ignores them"
 
-- [ ] **Create `src/settings/sections/media.ts`** — "Images & PDFs" settings section
+- [x] **Create `src/settings/sections/media.ts`** — "Images & PDFs" settings section
   - Setting: `image_max_dimension` (number, default 2000)
   - Setting: `image_compression_quality` (number, default 80)
   - Register in `src/settings/settings-tab.ts` under the existing "Tool configuration" group (line 168: `const toolConfigGroup = createSettingsGroup(...)`) — add `renderMediaSection(toolConfigGroup, ctx);` alongside the existing `renderDocxToolsSection` call
 
 ### 2.2 Type Extensions
 
-- [ ] **Update `src/types.ts`** — Add `content_blocks` to `ToolResult`
+- [x] **Update `src/types.ts`** — Add `content_blocks` to `ToolResult`
   - `content_blocks?: ContentBlock[]` — optional media output from tool execution
   - Contract: when present, `result` field still contains a text summary for fallback
 
 ### 2.3 Tool Changes — Extend `read_file`
 
-- [ ] **Update `src/tools/read-file.ts`**
+- [x] **Update `src/tools/read-file.ts`**
   - Update `description` to mention image support (PNG, JPEG, GIF, WebP)
   - At line 137 (binary detection via null bytes), insert format detection before rejection:
     1. Read buffer (existing)
@@ -265,7 +265,7 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 ### 2.4 Attachment System — Image Support
 
-- [ ] **Update `src/context/attachment.ts`**
+- [x] **Update `src/context/attachment.ts`**
   - Add attachment types: `"vault_image"`, `"external_image"` to `AttachmentType` union
   - Add fields to `Attachment` interface:
     - `binary_content: string | null` — base64-encoded binary for images/PDFs (post-processing: resized/compressed for images)
@@ -289,14 +289,14 @@ Each provider's message conversion function must handle the case where `msg.cont
 
 ### 2.5 Message Assembly — Merge Text + Media
 
-- [ ] **Update `src/context/message-assembler.ts`**
+- [x] **Update `src/context/message-assembler.ts`**
   - Add `assembleUserContent(text: string, mediaBlocks: ContentBlock[]): string | ContentBlock[]` — this requires importing `ContentBlock` from `../media/types` into the existing string-only module. This is acceptable; `message-assembler.ts` is the composition point for user message content
     - If no media blocks → return plain string (existing behavior preserved)
     - If media blocks and `text` is non-empty → return `[{ type: "text", text }, ...mediaBlocks]`
     - If media blocks and `text.trim()` is empty → return `[...mediaBlocks]` directly (no empty or whitespace-only text block — providers like Anthropic reject empty text content blocks, and whitespace-only blocks are equally problematic)
   - **Note:** The existing `MessageParts` interface keeps `attachments?: string` unchanged — it receives only the text portion from the destructured `buildAttachmentsBlock()` return value. The `contentBlocks` are handled separately via `assembleUserContent()`.
 
-- [ ] **Update `src/chat/orchestrator.ts` (~lines 1206-1225)**
+- [x] **Update `src/chat/orchestrator.ts` (~lines 1206-1225)**
   - `buildAttachmentsBlock()` (called at line 1224) now returns `{ text, contentBlocks }`
   - Destructure: `const { text: attachmentsText, contentBlocks } = buildAttachmentsBlock(resolvedAttachments);`
   - Pass `attachmentsText` (not the full return value) to `assembleUserMessage({ attachments: attachmentsText ?? undefined, ... })` — the `MessageParts.attachments` field remains `string`
@@ -309,16 +309,16 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 **Current flow:** `ToolResult` (with new `content_blocks`) → stored on `Message.tool_result` → `toChatMessages()` at orchestrator.ts:2081 maps it to `ChatMessage.tool_results[]` entry → providers read `tr.result` (string only). The `content_blocks` field is lost in the `toChatMessages()` mapping because `ChatMessage.tool_results[]` has no `content_blocks` field.
 
-- [ ] **Update `src/providers/provider.ts:31-36`** — Extend `ChatMessage.tool_results[]` entry type
+- [x] **Update `src/providers/provider.ts:31-36`** — Extend `ChatMessage.tool_results[]` entry type
   - Add `content_blocks?: ContentBlock[]` to the tool result entry interface
   - Current interface: `{ tool_call_id: string; tool_name: string; result: string; is_error: boolean }`
   - Add: `content_blocks?: ContentBlock[]`
 
-- [ ] **Update `src/chat/orchestrator.ts:2081-2093`** — `toChatMessages()` tool result mapping
+- [x] **Update `src/chat/orchestrator.ts:2081-2093`** — `toChatMessages()` tool result mapping
   - Current: maps `msg.tool_result` → `{ tool_call_id, tool_name, result: resultStr, is_error }`
   - Add `content_blocks: msg.tool_result.content_blocks` to this object literal when `msg.tool_result.content_blocks` is present — this matches the type extension from the `provider.ts` update above
 
-- [ ] **Update provider `toXxxMessages()` functions** — Format `content_blocks` in tool results
+- [x] **Update provider `toXxxMessages()` functions** — Format `content_blocks` in tool results
   - Refactor the inline `ContentBlock` mapping logic added in Task 1.3 into a named helper function within each provider file, then reuse that helper for both user messages (updating the Task 1.3 call sites) and tool results. Do not create a cross-provider shared module. The helper's shape is provider-specific — reuse the exact mapping logic defined in Task 1.3 for each provider (e.g., Bedrock: `function mapContentBlock(block: MediaContentBlock): BedrockContentBlock` returning `{ image: { format, source: { bytes } } }` etc.; Anthropic: returns `{ type: "image", source: { type: "base64", ... } }` etc.). The return type is the provider's native content block type
   - **Anthropic** (line 88): `content: tr.result` (currently a string) → when `tr.content_blocks` present, switch to array format: `content: [{ type: "text", text: tr.result }, ...blocks.map(b => mapBlock(b))]`. Anthropic's `tool_result` content field accepts either a string or an array — when `content_blocks` is absent, keep the existing string format for backward compatibility. When `tr.result` is an empty string (`""`) and `content_blocks` is present, omit the text block from the array
   - **OpenAI** (line 79): `content: tr.result` → when `tr.content_blocks` present: as of early 2026, OpenAI does not support multipart content arrays in tool result messages (`role: "tool"`) — only string content is accepted. Use only the text summary from `tr.result` and log a `log.warn()` when image blocks are dropped. Verify this is still the case at implementation time, as the API may have changed. If OpenAI has added multipart tool result support by implementation time, follow the Anthropic pattern: `content: [{ type: "text", text: tr.result }, ...mappedBlocks]`
@@ -328,7 +328,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 
 ### 2.7 UI Changes
 
-- [ ] **Update `src/ui/attachment-picker.ts`**
+- [x] **Update `src/ui/attachment-picker.ts`**
   - Expand `openExternalFileDialog()` accepted extensions (line 584-586):
     - Add: `.png,.jpg,.jpeg,.gif,.webp`
   - Add `readExternalBinaryFile(absolutePath: string, maxSizeMb?: number): Promise<{ base64: string; mediaType: string; width?: number; height?: number } | null>` for binary file reading. Returns `null` if the file exceeds size limit, cannot be read, or `detectMediaFormat()` returns a non-image format (including `null` for unknown binaries and `"pdf"` — PDFs are handled separately in Phase 3, Task 3.5). Default `maxSizeMb`: 50 (matching the `read_file` raw size limit from Task 2.3). Detect media type via `detectMediaFormat()` on the first bytes of the buffer. **For image files:** process through `processImage()` (resize/compress) before returning — extract `data`, `media_type`, `width`, `height` from the returned `ContentBlock`. Image processing settings (`maxDimension`, `compressionQuality`) are read from `this.settings.image_max_dimension` and `this.settings.image_compression_quality` within the method body — they are not function parameters (the attachment picker class has access to `this.settings`). This ensures external images go through the same compression cascade as vault images
@@ -338,21 +338,21 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
     - Update suggestion rendering to show a distinct icon for image files (vs. the existing note icon)
     - Update `selectSuggestion()` (line 373) to check the file extension: for `.md` files, continue calling `createVaultNoteAttachment()` (line 386); for image files (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`), call `createVaultImageAttachment(file.path)` (from Task 2.4) instead. The binary reading happens inside `resolveAttachment()`, not at selection time — do not use `readExternalBinaryFile()` for vault files.
 
-- [ ] **Update `src/ui/attachment-chips.ts`**
+- [x] **Update `src/ui/attachment-chips.ts`**
   - Add image-specific chip rendering (image icon instead of paper clip)
   - Consider small thumbnail preview for image chips (or defer to Phase 4)
 
 ### 2.8 Settings
 
-- [ ] **Update `src/settings/types.ts`** — Add to `NotorSettings`:
+- [x] **Update `src/settings/types.ts`** — Add to `NotorSettings`:
   - `image_max_dimension: number` (default: 2000)
   - `image_compression_quality: number` (default: 80)
 
-- [ ] **Update `src/settings/defaults.ts`** — Add defaults for new settings
+- [x] **Update `src/settings/defaults.ts`** — Add defaults for new settings
 
 ### 2.10 Image-Only Title Fallback
 
-- [ ] **Update `src/chat/conversation.ts:348`** — Image-only title fallback
+- [x] **Update `src/chat/conversation.ts:348`** — Image-only title fallback
   - In Phase 1 (Task 1.6), `generateTitle` was wrapped with `getTextContent()`. Now that image-only user messages are possible, add an empty-content fallback:
     `const text = getTextContent(params.content); this.activeConversation.title = this.generateTitle(text || "Image conversation");`
 
@@ -362,7 +362,7 @@ The dispatcher (`src/chat/dispatcher.ts`) does **not** need changes — it alrea
 - [ ] **Manual test: read_file tool** — LLM calls `read_file` on a `.png` → receives image block → describes image
 - [ ] **Manual test: Provider compatibility** — Test with Anthropic and OpenAI providers
 - [ ] **Unit tests** — image-processor pipeline, capabilities lookup, attachment factory functions
-- [ ] **Build check** — `npm run build` succeeds, bundle size increase is acceptable (<100KB for new code, no new deps)
+- [x] **Build check** — `npm run build` succeeds, bundle size increase is acceptable (<100KB for new code, no new deps)
 
 ---
 

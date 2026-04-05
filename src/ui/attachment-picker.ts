@@ -30,9 +30,15 @@ import {
 	createVaultNoteAttachment,
 	createVaultNoteSectionAttachment,
 	createExternalFileAttachment,
+	createVaultImageAttachment,
+	createExternalBinaryAttachment,
 	readExternalFile,
 	isDuplicate,
 } from "../context/attachment";
+import { detectMediaFormat } from "../media/format-detector";
+import { processImage } from "../media/image-processor";
+import type { ImageMediaType } from "../media/types";
+import type { NotorSettings } from "../settings/types";
 
 // ---------------------------------------------------------------------------
 // Inline wikilink token insertion
@@ -267,7 +273,11 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 			return [];
 		}
 
-		const files = this.app.vault.getMarkdownFiles();
+		const allFiles = this.app.vault.getFiles();
+		const files = allFiles.filter((f) => {
+			const ext = "." + f.extension.toLowerCase();
+			return ext === ".md" || IMAGE_EXTENSIONS.has(ext);
+		});
 
 		if (!query) {
 			// No query yet — show all files (up to limit)
@@ -338,6 +348,12 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	renderSuggestion(suggestion: VaultNoteSuggestion, el: HTMLElement): void {
 		const container = el.createDiv({ cls: "notor-suggest-item" });
 
+		// Show image icon for image files
+		const ext = "." + suggestion.file.extension.toLowerCase();
+		if (IMAGE_EXTENSIONS.has(ext)) {
+			container.createSpan({ cls: "notor-suggest-icon", text: "\uD83D\uDDBC\uFE0F " });
+		}
+
 		if (suggestion.matchSource === "path" && suggestion.match?.match.matches) {
 			// Path match: render the full path with highlights
 			const pathEl = container.createSpan({ cls: "notor-suggest-name" });
@@ -382,8 +398,11 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 			return;
 		}
 
-		// Create the attachment
-		const attachment = createVaultNoteAttachment(suggestion.file.path);
+		// Create the attachment — route image files to image attachment
+		const ext = "." + suggestion.file.extension.toLowerCase();
+		const attachment = IMAGE_EXTENSIONS.has(ext)
+			? createVaultImageAttachment(suggestion.file.path)
+			: createVaultNoteAttachment(suggestion.file.path);
 
 		// Insert inline token (replaces `[[query` text with a styled span)
 		insertWikilinkToken(this.chatInputEl, attachment);
@@ -567,11 +586,56 @@ function getAbsoluteFilePath(file: File): string | undefined {
  * @param existingAttachments - Current attachments for duplicate detection.
  * @param thresholdMb - File size threshold for confirmation dialog.
  */
+/** Image file extensions for routing detection. */
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+
+/**
+ * Read an external binary (image) file, process it, and return base64 + metadata.
+ *
+ * Returns null if the file exceeds the size limit, cannot be read, or is not
+ * a supported image format.
+ */
+async function readExternalBinaryFile(
+	absolutePath: string,
+	settings: NotorSettings,
+	maxSizeMb = 50,
+): Promise<{ base64: string; mediaType: string; width?: number; height?: number } | null> {
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const fs = require("fs") as typeof import("fs");
+
+	const stats = fs.statSync(absolutePath);
+	if (stats.size > maxSizeMb * 1024 * 1024) {
+		return null;
+	}
+
+	const buffer = Buffer.from(fs.readFileSync(absolutePath));
+	const format = detectMediaFormat(buffer);
+	if (!format || format === "pdf" || !["png", "jpeg", "gif", "webp"].includes(format)) {
+		return null;
+	}
+
+	const mediaType = `image/${format}` as ImageMediaType;
+	const block = await processImage(buffer, mediaType, {
+		maxDimension: settings.image_max_dimension,
+		compressionQuality: settings.image_compression_quality,
+	});
+
+	if (block.type !== "image") return null;
+
+	return {
+		base64: block.data,
+		mediaType: block.media_type,
+		width: block.width,
+		height: block.height,
+	};
+}
+
 export function openExternalFileDialog(
 	app: App,
 	onAttachmentAdded: OnAttachmentAdded,
 	existingAttachments: () => Attachment[],
-	thresholdMb: number
+	thresholdMb: number,
+	settings?: NotorSettings,
 ): void {
 	if (!Platform.isDesktopApp) {
 		new Notice("External file attachment is only available on desktop");
@@ -581,9 +645,9 @@ export function openExternalFileDialog(
 	const input = document.createElement("input");
 	input.type = "file";
 	input.multiple = true;
-	// Common text-like extensions as a convenience hint (not a security boundary)
+	// Common text + image extensions as a convenience hint (not a security boundary)
 	input.accept =
-		".md,.txt,.json,.csv,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.sh,.bash,.zsh,.r,.sql,.env,.cfg,.ini,.conf,.log,.diff,.patch,.rst,.tex,.bib,.properties,.gradle,.pom,.sbt";
+		".md,.txt,.json,.csv,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.sh,.bash,.zsh,.r,.sql,.env,.cfg,.ini,.conf,.log,.diff,.patch,.rst,.tex,.bib,.properties,.gradle,.pom,.sbt,.png,.jpg,.jpeg,.gif,.webp";
 
 	input.addEventListener("change", () => {
 		const files = Array.from(input.files ?? []);
@@ -591,6 +655,9 @@ export function openExternalFileDialog(
 
 		type PendingFile = { absolutePath: string; name: string; content: string; fileSizeBytes: number };
 		const pendingConfirmation: PendingFile[] = [];
+
+		// Collect image files for async processing
+		const imageFiles: Array<{ absolutePath: string; name: string }> = [];
 
 		for (const file of files) {
 			const absolutePath = getAbsoluteFilePath(file);
@@ -605,7 +672,14 @@ export function openExternalFileDialog(
 				continue;
 			}
 
-			// Read and validate the file
+			// Route image files to binary processing path
+			const ext = "." + file.name.split(".").pop()?.toLowerCase();
+			if (IMAGE_EXTENSIONS.has(ext)) {
+				imageFiles.push({ absolutePath, name: file.name });
+				continue;
+			}
+
+			// Read and validate text file
 			const result = readExternalFile(absolutePath, file.name, thresholdMb);
 
 			if (!result.success) {
@@ -614,8 +688,6 @@ export function openExternalFileDialog(
 			}
 
 			if (result.needsConfirmation) {
-				// Queue for modal confirmation — modals are non-blocking so handle
-				// these after the synchronous loop
 				pendingConfirmation.push({
 					absolutePath,
 					name: file.name,
@@ -625,7 +697,6 @@ export function openExternalFileDialog(
 				continue;
 			}
 
-			// Create the attachment
 			const attachment = createExternalFileAttachment(
 				absolutePath,
 				file.name,
@@ -634,6 +705,34 @@ export function openExternalFileDialog(
 			onAttachmentAdded(attachment);
 
 			log.debug("External file attached", { name: file.name });
+		}
+
+		// Process image files asynchronously
+		if (imageFiles.length > 0 && settings) {
+			void (async () => {
+				for (const imgFile of imageFiles) {
+					try {
+						const result = await readExternalBinaryFile(imgFile.absolutePath, settings);
+						if (!result) {
+							new Notice(`Failed to process image: ${imgFile.name}`);
+							continue;
+						}
+						const attachment = createExternalBinaryAttachment(
+							imgFile.absolutePath,
+							imgFile.name,
+							result.base64,
+							result.mediaType,
+							result.width,
+							result.height,
+						);
+						onAttachmentAdded(attachment);
+						log.debug("External image attached", { name: imgFile.name });
+					} catch (e) {
+						const msg = e instanceof Error ? e.message : String(e);
+						new Notice(`Failed to process image ${imgFile.name}: ${msg}`);
+					}
+				}
+			})();
 		}
 
 		// Chain modals for oversized files one at a time.
@@ -703,7 +802,8 @@ export function createAttachmentButton(
 	inputEl: HTMLDivElement,
 	onAttachmentAdded: OnAttachmentAdded,
 	existingAttachments: () => Attachment[],
-	thresholdMb: number
+	thresholdMb: number,
+	settings?: NotorSettings,
 ): HTMLButtonElement {
 	const btn = containerEl.createEl("button", {
 		cls: "notor-attach-btn clickable-icon",
@@ -757,7 +857,8 @@ export function createAttachmentButton(
 					app,
 					onAttachmentAdded,
 					existingAttachments,
-					thresholdMb
+					thresholdMb,
+					settings,
 				);
 			});
 		}

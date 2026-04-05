@@ -19,6 +19,7 @@ import type {
 	ToolDefinition,
 } from "./provider";
 import { ProviderError } from "./provider";
+import type { ContentBlock as MediaContentBlock } from "../media/types";
 import { getSecret, SECRET_IDS } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import { logger } from "../utils/logger";
@@ -40,6 +41,18 @@ const DEFAULT_ENDPOINT = "https://api.anthropic.com";
 
 /** Required Anthropic API version header. */
 const ANTHROPIC_VERSION = "2023-06-01";
+
+/** Map a Notor ContentBlock to Anthropic's native content block format. */
+function mapToAnthropicBlock(block: MediaContentBlock): Record<string, unknown> {
+	switch (block.type) {
+		case "text":
+			return { type: "text", text: block.text };
+		case "image":
+			return { type: "image", source: { type: "base64", media_type: block.media_type, data: block.data } };
+		case "document":
+			return { type: "document", source: { type: "base64", media_type: "application/pdf", data: block.data } };
+	}
+}
 
 /**
  * Convert Notor ChatMessages to Anthropic Messages API format.
@@ -88,12 +101,30 @@ function toAnthropicMessages(
 		if (msg.role === "tool_result" && msg.tool_results?.length) {
 			anthropicMessages.push({
 				role: "user",
-				content: msg.tool_results.map((tr) => ({
-					type: "tool_result",
-					tool_use_id: tr.tool_call_id,
-					content: tr.result,
-					is_error: tr.is_error,
-				})),
+				content: msg.tool_results.map((tr) => {
+					if (tr.content_blocks?.length) {
+						// Multipart tool result: text summary + media blocks
+						const parts: Record<string, unknown>[] = [];
+						if (tr.result) {
+							parts.push({ type: "text", text: tr.result });
+						}
+						for (const block of tr.content_blocks) {
+							parts.push(mapToAnthropicBlock(block));
+						}
+						return {
+							type: "tool_result",
+							tool_use_id: tr.tool_call_id,
+							content: parts,
+							is_error: tr.is_error,
+						};
+					}
+					return {
+						type: "tool_result",
+						tool_use_id: tr.tool_call_id,
+						content: tr.result,
+						is_error: tr.is_error,
+					};
+				}),
 			});
 			continue;
 		}
@@ -102,16 +133,7 @@ function toAnthropicMessages(
 			if (Array.isArray(msg.content)) {
 				anthropicMessages.push({
 					role: "user",
-					content: msg.content.map((block) => {
-						switch (block.type) {
-							case "text":
-								return { type: "text", text: block.text };
-							case "image":
-								return { type: "image", source: { type: "base64", media_type: block.media_type, data: block.data } };
-							case "document":
-								return { type: "document", source: { type: "base64", media_type: "application/pdf", data: block.data } };
-						}
-					}),
+					content: msg.content.map(mapToAnthropicBlock),
 				});
 			} else if (msg.content === "") {
 				// Anthropic rejects empty text content blocks in arrays — pass empty string directly

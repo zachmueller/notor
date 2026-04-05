@@ -26,7 +26,7 @@ import type { NotorSettings, ModelPricing } from "../settings";
 import type { VaultRuleManager } from "../rules/vault-rules";
 import type { PersonaManager } from "../personas/persona-manager";
 import { buildAutoContextBlock } from "../context/auto-context";
-import { assembleUserMessage } from "../context/message-assembler";
+import { assembleUserMessage, assembleUserContent } from "../context/message-assembler";
 import type { Attachment } from "../context/attachment";
 import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment";
 import { dispatchPreSend, dispatchAfterCompletion } from "../hooks/hook-events";
@@ -1202,13 +1202,17 @@ export class ChatOrchestrator {
 
 		const mode = this.conversationManager.getMode();
 
-		// Phase 3 (ATT-008): Resolve attachments and build XML block
-		let attachmentsBlock: string | null = null;
+		// Phase 3 (ATT-008): Resolve attachments and build XML/media blocks
+		let attachmentsText: string | null = null;
+		let attachmentContentBlocks: import("../media/types").ContentBlock[] = [];
 		const resolvedAttachments: Attachment[] = [];
 
 		if (attachments && attachments.length > 0) {
 			for (const att of attachments) {
-				const resolved = await resolveAttachment(this.app, att);
+				const resolved = await resolveAttachment(this.app, att, {
+					maxDimension: this.settings.image_max_dimension,
+					compressionQuality: this.settings.image_compression_quality,
+				});
 				resolvedAttachments.push(resolved);
 
 				// Surface inline warnings for failed resolutions
@@ -1221,7 +1225,9 @@ export class ChatOrchestrator {
 				}
 			}
 
-			attachmentsBlock = buildAttachmentsBlock(resolvedAttachments);
+			const built = buildAttachmentsBlock(resolvedAttachments);
+			attachmentsText = built.text;
+			attachmentContentBlocks = built.contentBlocks;
 		}
 
 		// Phase 3 (HOOK-004): Dispatch pre-send hooks and capture stdout
@@ -1250,10 +1256,11 @@ export class ChatOrchestrator {
 		// Assemble the user message content: attachments → user text
 		// (Auto-context is now injected into the system prompt per ACI-001;
 		//  hook output is sent as a separate message per ACI-002.)
-		const assembledContent = assembleUserMessage({
-			attachments: attachmentsBlock ?? undefined,
+		const assembledText = assembleUserMessage({
+			attachments: attachmentsText ?? undefined,
 			userText: content,
 		});
+		const assembledContent = assembleUserContent(assembledText, attachmentContentBlocks);
 
 		// Build attachment metadata for JSONL logging (no content, just metadata)
 		const attachmentMetadata = resolvedAttachments.length > 0
@@ -2096,6 +2103,7 @@ export class ChatOrchestrator {
 									tool_name: msg.tool_result.tool_name,
 									result: resultStr || msg.tool_result.error || "",
 									is_error: !msg.tool_result.success,
+									...(msg.tool_result.content_blocks?.length ? { content_blocks: msg.tool_result.content_blocks } : {}),
 								},
 							],
 						});

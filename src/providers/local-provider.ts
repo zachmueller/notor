@@ -100,7 +100,14 @@ function toOpenAIMessages(
 
 		if (msg.role === "tool_result" && msg.tool_results?.length) {
 			// OpenAI-compatible format: one message per tool result
+			// Local providers do not support multipart content in tool results — text summary only
 			for (const tr of msg.tool_results) {
+				if (tr.content_blocks?.length) {
+					log.warn("Dropping image blocks from local provider tool result (not supported)", {
+						tool: tr.tool_name,
+						blockCount: tr.content_blocks.length,
+					});
+				}
 				result.push({
 					role: "tool",
 					tool_call_id: tr.tool_call_id,

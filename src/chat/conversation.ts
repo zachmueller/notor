@@ -347,7 +347,8 @@ export class ConversationManager {
 			!params.is_hook_injection &&
 			!this.activeConversation.title
 		) {
-			this.activeConversation.title = this.generateTitle(getTextContent(params.content));
+			const titleText = getTextContent(params.content);
+			this.activeConversation.title = this.generateTitle(titleText || "Image conversation");
 		}
 
 		log.debug("Added message", {

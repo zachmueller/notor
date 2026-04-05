@@ -964,7 +964,8 @@ export class NotorChatView extends ItemView {
 			this.textInputEl,
 			(attachment: Attachment) => this.addAttachment(attachment),
 			() => this.pendingAttachments,
-			this.plugin.settings.external_file_size_threshold_mb
+			this.plugin.settings.external_file_size_threshold_mb,
+			this.plugin.settings,
 		);
 
 		// Send button

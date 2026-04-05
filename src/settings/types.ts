@@ -261,6 +261,16 @@ export interface NotorSettings {
 	 */
 	log_level: LogLevel;
 
+	// -------------------------------------------------------------------
+	// Image & PDF settings
+	// -------------------------------------------------------------------
+
+	/** Maximum image dimension (width or height) in pixels before resizing. */
+	image_max_dimension: number;
+
+	/** JPEG compression quality (0–100) for the compression cascade. */
+	image_compression_quality: number;
+
 	// Phase 4c: docx & file tools
 
 	/**

@@ -18,6 +18,9 @@ import * as fs from "fs";
 import type { Tool, ToolResult } from "./tool";
 import type { NotorSettings } from "../settings";
 import { resolveAndValidatePath } from "../utils/path-validation";
+import { detectMediaFormat } from "../media/format-detector";
+import { processImage } from "../media/image-processor";
+import type { ImageMediaType } from "../media/types";
 import { logger } from "../utils/logger";
 
 const log = logger("ReadFileTool");
@@ -37,10 +40,12 @@ export class ReadFileTool implements Tool {
 	readonly mode = "read" as const;
 
 	readonly description =
-		"Read a text file from the filesystem and return its contents as a string. " +
+		"Read a text file or image from the filesystem and return its contents. " +
+		"Supported image formats: PNG, JPEG, GIF, WebP — images are resized and " +
+		"compressed automatically. " +
 		"The path must be within the vault or a user-configured allow-list of paths. " +
-		"Binary files are rejected — use read_docx for Word documents. " +
-		"Supports an optional encoding parameter (default: utf-8). " +
+		"Other binary files are rejected — use read_docx for Word documents. " +
+		"Supports an optional encoding parameter for text files (default: utf-8). " +
 		"Desktop-only tool.";
 
 	readonly input_schema = {
@@ -135,12 +140,65 @@ export class ReadFileTool implements Tool {
 
 			// Detect binary via null bytes in first 8 KB
 			if (buf.subarray(0, 8192).includes(0)) {
+				// Check if this is a known media format before rejecting
+				const format = detectMediaFormat(buf);
+
+				if (format === "png" || format === "jpeg" || format === "gif" || format === "webp") {
+					// Raw size limit: 50 MB
+					if (buf.length > 50 * 1024 * 1024) {
+						return {
+							tool_name: this.name,
+							success: false,
+							result: "",
+							error: `Image file is too large (${(buf.length / (1024 * 1024)).toFixed(1)} MB). Maximum raw input size is 50 MB.`,
+						};
+					}
+
+					try {
+						const mediaType = `image/${format}` as ImageMediaType;
+						const block = await processImage(buf, mediaType, {
+							maxDimension: this.settings.image_max_dimension,
+							compressionQuality: this.settings.image_compression_quality,
+						});
+						const filename = resolvedPath.split("/").pop() ?? resolvedPath;
+						const w = block.type === "image" ? block.width : undefined;
+						const h = block.type === "image" ? block.height : undefined;
+
+						log.info("Read image file", { path: resolvedPath, format, width: w, height: h });
+
+						return {
+							tool_name: this.name,
+							success: true,
+							result: `Read image: ${filename} (${w}x${h}, image/${format})`,
+							content_blocks: [block],
+						};
+					} catch (e) {
+						const message = e instanceof Error ? e.message : String(e);
+						return {
+							tool_name: this.name,
+							success: false,
+							result: "",
+							error: `Failed to process image: ${message}`,
+						};
+					}
+				}
+
+				if (format === "pdf") {
+					// Phase 3: PDF support
+					return {
+						tool_name: this.name,
+						success: false,
+						result: "",
+						error: "PDF support is not yet implemented. Use read_docx for Word documents.",
+					};
+				}
+
 				return {
 					tool_name: this.name,
 					success: false,
 					result: "",
 					error:
-						"read_file only supports text-based files. For Word documents, use read_docx instead.",
+						"read_file only supports text-based files and images (PNG, JPEG, GIF, WebP). For Word documents, use read_docx instead.",
 				};
 			}
 

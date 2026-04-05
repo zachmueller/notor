@@ -16,13 +16,17 @@
  */
 
 import type { App, TFile } from "obsidian";
+import type { ContentBlock } from "../media/types";
+import { detectMediaFormat } from "../media/format-detector";
+import { processImage } from "../media/image-processor";
+import type { ImageMediaType } from "../media/types";
 
 // ---------------------------------------------------------------------------
 // ATT-001: Attachment data model
 // ---------------------------------------------------------------------------
 
 /** Attachment content source type. */
-export type AttachmentType = "vault_note" | "vault_note_section" | "external_file";
+export type AttachmentType = "vault_note" | "vault_note_section" | "external_file" | "vault_image" | "external_image";
 
 /** Attachment resolution lifecycle status. */
 export type AttachmentStatus = "pending" | "resolved" | "error";
@@ -49,6 +53,14 @@ export interface Attachment {
 	content: string | null;
 	/** Length of the resolved content in characters (populated at send time). */
 	content_length: number | null;
+	/** Base64-encoded binary for images/PDFs (post-processing: resized/compressed for images). */
+	binary_content: string | null;
+	/** Detected MIME type (e.g., "image/png"). */
+	media_type: string | null;
+	/** Image width in pixels after processing (null for non-image attachments). */
+	width: number | null;
+	/** Image height in pixels after processing (null for non-image attachments). */
+	height: number | null;
 	/** Resolution lifecycle status. */
 	status: AttachmentStatus;
 	/** Error description if resolution failed. */
@@ -94,6 +106,10 @@ export function createVaultNoteAttachment(path: string): Attachment {
 		display_name: filename,
 		content: null,
 		content_length: null,
+		binary_content: null,
+		media_type: null,
+		width: null,
+		height: null,
 		status: "pending",
 		error_message: null,
 	};
@@ -119,6 +135,10 @@ export function createVaultNoteSectionAttachment(
 		display_name: `${filename} § ${section}`,
 		content: null,
 		content_length: null,
+		binary_content: null,
+		media_type: null,
+		width: null,
+		height: null,
 		status: "pending",
 		error_message: null,
 	};
@@ -148,6 +168,73 @@ export function createExternalFileAttachment(
 		display_name: filename,
 		content,
 		content_length: content.length,
+		binary_content: null,
+		media_type: null,
+		width: null,
+		height: null,
+		status: "resolved",
+		error_message: null,
+	};
+}
+
+/**
+ * Create an attachment for a vault image file.
+ *
+ * Binary content and dimensions are populated during `resolveAttachment()`.
+ *
+ * @param path - Vault-relative path to the image file.
+ * @returns A pending Attachment ready for resolution at send time.
+ */
+export function createVaultImageAttachment(path: string): Attachment {
+	const filename = path.split("/").pop() ?? path;
+	return {
+		id: generateUUID(),
+		type: "vault_image",
+		path,
+		section: null,
+		display_name: filename,
+		content: null,
+		content_length: null,
+		binary_content: null,
+		media_type: null,
+		width: null,
+		height: null,
+		status: "pending",
+		error_message: null,
+	};
+}
+
+/**
+ * Create an attachment for an external binary file (already processed).
+ *
+ * @param absolutePath - Absolute filesystem path to the file.
+ * @param filename - Original filename for display.
+ * @param base64 - Base64-encoded binary data (post-processing).
+ * @param mediaType - MIME type (e.g., "image/png").
+ * @param width - Image width in pixels (optional).
+ * @param height - Image height in pixels (optional).
+ * @returns A resolved Attachment with binary content populated.
+ */
+export function createExternalBinaryAttachment(
+	absolutePath: string,
+	filename: string,
+	base64: string,
+	mediaType: string,
+	width?: number,
+	height?: number,
+): Attachment {
+	return {
+		id: generateUUID(),
+		type: "external_image",
+		path: absolutePath,
+		section: null,
+		display_name: filename,
+		content: null,
+		content_length: null,
+		binary_content: base64,
+		media_type: mediaType,
+		width: width ?? null,
+		height: height ?? null,
 		status: "resolved",
 		error_message: null,
 	};
@@ -194,11 +281,68 @@ export function isDuplicate(
  */
 export async function resolveAttachment(
 	app: App,
-	attachment: Attachment
+	attachment: Attachment,
+	imageSettings?: { maxDimension: number; compressionQuality: number },
 ): Promise<Attachment> {
-	// External files are already resolved at attach time
-	if (attachment.type === "external_file") {
+	// External files and external images are already resolved at attach time
+	if (attachment.type === "external_file" || attachment.type === "external_image") {
 		return { ...attachment };
+	}
+
+	// Vault image: read binary, detect format, process through image pipeline
+	if (attachment.type === "vault_image") {
+		const file = app.vault.getFileByPath(attachment.path);
+		if (!file) {
+			return {
+				...attachment,
+				status: "error",
+				error_message: `Image not found: ${attachment.path}`,
+			};
+		}
+
+		try {
+			const arrayBuffer = await app.vault.readBinary(file);
+			const buffer = Buffer.from(arrayBuffer);
+			const format = detectMediaFormat(buffer);
+
+			if (!format || format === "pdf" || !["png", "jpeg", "gif", "webp"].includes(format)) {
+				return {
+					...attachment,
+					status: "error",
+					error_message: "Unsupported image format",
+				};
+			}
+
+			const mediaType = `image/${format}` as ImageMediaType;
+			const block = await processImage(buffer, mediaType, {
+				maxDimension: imageSettings?.maxDimension,
+				compressionQuality: imageSettings?.compressionQuality,
+			});
+
+			if (block.type !== "image") {
+				return {
+					...attachment,
+					status: "error",
+					error_message: "Unexpected processing result",
+				};
+			}
+
+			return {
+				...attachment,
+				binary_content: block.data,
+				media_type: block.media_type,
+				width: block.width ?? null,
+				height: block.height ?? null,
+				status: "resolved",
+				error_message: null,
+			};
+		} catch (e) {
+			return {
+				...attachment,
+				status: "error",
+				error_message: `Failed to process image: ${e instanceof Error ? e.message : String(e)}`,
+			};
+		}
 	}
 
 	// Look up the file in the vault
@@ -424,21 +568,23 @@ export function readExternalFile(
 // ---------------------------------------------------------------------------
 
 /**
- * Serialize resolved attachments into the `<attachments>` XML block.
+ * Serialize resolved attachments into the `<attachments>` XML block for text
+ * attachments and ContentBlock entries for binary (image) attachments.
  *
  * Only includes attachments with status "resolved". Error-status
  * attachments are omitted.
  *
  * @param attachments - Array of attachments to serialize.
- * @returns The `<attachments>` XML string, or `null` if no resolved attachments.
+ * @returns Object with `text` (XML string or null) and `contentBlocks` (image/document blocks).
  */
-export function buildAttachmentsBlock(attachments: Attachment[]): string | null {
+export function buildAttachmentsBlock(attachments: Attachment[]): { text: string | null; contentBlocks: ContentBlock[] } {
 	const resolved = attachments.filter((a) => a.status === "resolved");
 	if (resolved.length === 0) {
-		return null;
+		return { text: null, contentBlocks: [] };
 	}
 
 	const tags: string[] = [];
+	const contentBlocks: ContentBlock[] = [];
 
 	for (const att of resolved) {
 		switch (att.type) {
@@ -459,10 +605,24 @@ export function buildAttachmentsBlock(attachments: Attachment[]): string | null 
 					`  <external-file name="${escapeXmlAttr(att.display_name)}">\n${att.content ?? ""}\n  </external-file>`
 				);
 				break;
+
+			case "vault_image":
+			case "external_image":
+				if (att.binary_content && att.media_type) {
+					contentBlocks.push({
+						type: "image",
+						media_type: att.media_type as ImageMediaType,
+						data: att.binary_content,
+						width: att.width ?? undefined,
+						height: att.height ?? undefined,
+					});
+				}
+				break;
 		}
 	}
 
-	return `<attachments>\n${tags.join("\n")}\n</attachments>`;
+	const text = tags.length > 0 ? `<attachments>\n${tags.join("\n")}\n</attachments>` : null;
+	return { text, contentBlocks };
 }
 
 /**

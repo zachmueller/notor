@@ -96,21 +96,27 @@ export class AttachmentChipManager {
 		});
 
 		// Type-specific visual indicator
-		if (attachment.type === "external_file") {
+		if (attachment.type === "vault_image" || attachment.type === "external_image") {
+			chipEl.addClass("notor-attachment-chip--image");
+			chipEl.createSpan({
+				cls: "notor-attachment-chip-icon",
+				text: "\uD83D\uDDBC\uFE0F",
+			});
+		} else if (attachment.type === "external_file") {
 			chipEl.addClass("notor-attachment-chip--external");
 			chipEl.createSpan({
 				cls: "notor-attachment-chip-icon",
-				text: "📎",
+				text: "\uD83D\uDCCE",
 			});
 		} else if (attachment.type === "vault_note_section") {
 			chipEl.createSpan({
 				cls: "notor-attachment-chip-icon",
-				text: "§",
+				text: "\u00A7",
 			});
 		} else {
 			chipEl.createSpan({
 				cls: "notor-attachment-chip-icon",
-				text: "📄",
+				text: "\uD83D\uDCC4",
 			});
 		}
 

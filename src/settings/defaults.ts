@@ -176,6 +176,10 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	// Developer escape hatch
 	log_level: "error",
 
+	// Image & PDF
+	image_max_dimension: 2000,
+	image_compression_quality: 80,
+
 	// Phase 4c: docx & file tools
 	read_file_allowed_paths: [],
 	write_docx_default_output_dir: "",

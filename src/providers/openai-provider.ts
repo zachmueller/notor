@@ -72,7 +72,14 @@ function toOpenAIMessages(
 
 		if (msg.role === "tool_result" && msg.tool_results?.length) {
 			// OpenAI requires one message per tool result with role "tool"
+			// OpenAI does not support multipart content in tool results — use text summary only
 			for (const tr of msg.tool_results) {
+				if (tr.content_blocks?.length) {
+					log.warn("Dropping image blocks from OpenAI tool result (not supported)", {
+						tool: tr.tool_name,
+						blockCount: tr.content_blocks.length,
+					});
+				}
 				result.push({
 					role: "tool",
 					tool_call_id: tr.tool_call_id,

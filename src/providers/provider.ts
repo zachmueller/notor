@@ -34,6 +34,7 @@ export interface ChatMessage {
 		tool_name: string;
 		result: string;
 		is_error: boolean;
+		content_blocks?: ContentBlock[];
 	}>;
 }
 
