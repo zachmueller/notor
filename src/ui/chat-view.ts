@@ -1789,7 +1789,17 @@ export class NotorChatView extends ItemView {
 			);
 			this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
 			const decision = await decisionPromise;
-			return decision.accepted ? "approved" : "rejected";
+			if (!decision.accepted) return "rejected";
+
+			// Filter changes to only include user-accepted blocks so the
+			// tool executes with the partial selection (parameters is the
+			// same object reference the dispatcher passes to tool.execute()).
+			if (decision.acceptedBlockIndexes) {
+				parameters["changes"] = changeBlocks.filter((_, i) =>
+					decision.acceptedBlockIndexes!.has(i)
+				);
+			}
+			return "approved";
 		}
 
 		// Other tools: use the plain approval prompt
