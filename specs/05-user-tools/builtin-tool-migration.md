@@ -8,11 +8,11 @@
 
 ## Goal
 
-Migrate all 19 built-in tools (everything except `use_subagent`) from TypeScript classes in `src/tools/` into the user-defined extension runtime. After this migration:
+Migrate all 20 built-in tools (everything except `use_subagent`) from TypeScript classes in `src/tools/` into the user-defined extension runtime. After this migration:
 
 1. **Single tool runtime** — every non-subagent tool runs through `UserToolAdapter`, eliminating the dual code paths (class-based built-in vs. extension-based user tool)
 2. **True customizability** — clicking "Customize" produces a note with the full working implementation, ready to edit; no placeholder stub
-3. **Simpler boot** — `getToolRegistry()` registers only `use_subagent`; all other tools are discovered/compiled by `ExtensionManager`
+3. **Simpler boot** — `getToolRegistry()` registers only `use_subagent`; all other tools are loaded by `ExtensionManager` from pre-compiled scaffold defaults
 4. **Consistency** — tool behavior, error handling, and settings resolution follow one model
 
 ## Current Architecture
@@ -22,7 +22,7 @@ onload()
   → getToolRegistry()
       → new ReadNoteTool(app, staleTracker, noteOpener)   ← class instance
       → new SearchVaultTool(app)                           ← class instance
-      → ... (19 built-in class registrations)
+      → ... (20 built-in class registrations)
       → new UseSubagentTool(subAgentMgr, providerReg, ...) ← stays as class
   → onLayoutReady()
       → ExtensionManager.reload(isInitialLoad=true)
@@ -32,7 +32,7 @@ onload()
 ```
 
 Tools live in two places:
-- **19 TypeScript classes** in `src/tools/*.ts` — registered directly, instantiated with constructor dependencies
+- **20 TypeScript classes** in `src/tools/*.ts` — registered directly, instantiated with constructor dependencies
 - **User extension vault files** in `notor/tools/*.md` — discovered, parsed, compiled, wrapped in `UserToolAdapter`
 
 The "Customize" button creates a vault file from `builtin-tool-scaffolds.ts`, but the scaffold contains only placeholder code (`return "Not yet customized..."`). The user must rewrite the implementation from scratch.
@@ -46,40 +46,47 @@ onload()
   → onLayoutReady()
       → ExtensionManager.reload(isInitialLoad=true)
           → discoverExtensions() scans notor/tools/ and notor/automations/
-          → for each of 19 built-in tools NOT found in vault:
-              → parse scaffold content from BUILTIN_TOOL_SCAFFOLDS
-              → compile into UserToolAdapter
+          → for each of 20 built-in tools NOT found in vault:
+              → load pre-compiled scaffold from BUILTIN_TOOL_SCAFFOLDS
+              → wrap in UserToolAdapter
           → for user vault files: parse and compile (existing behavior)
           → user vault files override scaffold defaults (same-name last-write-wins)
           → register all in ToolRegistry
 ```
 
-All 19 tools run through the same `UserToolAdapter.execute()` pipeline: settings resolution → context injection → compiled function call → ToolResult mapping.
+All 20 tools run through the same `UserToolAdapter.execute()` pipeline: settings resolution → context injection → compiled function call → ToolResult mapping.
+
+**Boot-timing note:** Between `getToolRegistry()` (registers only `use_subagent`) and `ExtensionManager.reload()` (registers remaining 20 tools), the registry is incomplete. This is safe because `reload()` runs inside `onLayoutReady()` and no chat session can start before layout is ready. The ToolDispatcher is also lazily created after this point.
 
 ## Design Decisions
 
 ### D-1: Scaffold fallback (no auto-created vault files)
 
-When `ExtensionManager.reload()` discovers that a built-in tool has no corresponding vault file in `notor/tools/`, it parses and compiles the scaffold content directly from the in-memory `BUILTIN_TOOL_SCAFFOLDS` map. No vault file is created automatically.
+When `ExtensionManager.reload()` discovers that a built-in tool has no corresponding vault file in `notor/tools/`, it loads the pre-compiled scaffold from the in-memory `BUILTIN_TOOL_SCAFFOLDS` map. No vault file is created automatically.
 
-**Why:** Auto-creating 19 `.md` files in the vault on first boot would be surprising and clutter the user's notor directory. The scaffold-as-fallback approach is invisible — tools work out of the box. Vault files only appear when the user explicitly clicks "Customize".
+**Why:** Auto-creating 20 `.md` files in the vault on first boot would be surprising and clutter the user's notor directory. The scaffold-as-fallback approach is invisible — tools work out of the box. Vault files only appear when the user explicitly clicks "Customize".
 
 **How it works:**
 1. `discoverExtensions()` returns vault-discovered tools (existing behavior, unchanged)
 2. After discovery, `reload()` iterates `BUILTIN_TOOL_SCAFFOLDS` and checks which names are missing from the discovered set
-3. For each missing scaffold, it calls `parseExtensionFile()` on the scaffold content (synthetic frontmatter + YAML fence + code fence) and `compileExtension()` on the result
-4. Scaffold-compiled tools are registered alongside vault-discovered tools
+3. For each missing scaffold, it constructs a frontmatter object directly from the scaffold metadata (name, description, mode) and passes it to `parseExtensionFile()` along with the scaffold content — no re-parsing of YAML frontmatter needed since the metadata is already structured
+4. Scaffold tools are marked with `isScaffold: true` on the `UserToolDefinition` and wrapped in `UserToolAdapter` using the pre-compiled function (no runtime Sucrase transform — see D-7)
 5. If a vault file exists with the same name as a scaffold, the vault file wins (discovered tools take precedence over scaffold fallbacks)
 
-### D-2: Expose `pluginSettings` in extension utils
+### D-2: Migrate tool-relevant plugin settings to shared settings
 
-Several built-in tools directly reference `NotorSettings` fields: fetch timeouts, domain denylist, image processing options, docx output directory, PDF settings, allowed paths, etc. These settings are not available through the current `ExtensionUtils` interface.
+Several built-in tools directly reference `NotorSettings` fields: fetch timeouts, domain denylist, image processing options, docx output directory, PDF settings, allowed paths, etc. Rather than exposing the internal `NotorSettings` object through the extension API, these settings are migrated into the shared settings system (`notor/settings.md`) so scaffolds access them via the standard `shared` channel defined in `design/user-defined-tools.md`.
 
-Add a `pluginSettings` field to `ExtensionUtils` — a read-only reference to `plugin.settings`.
+**Settings to migrate (~10 fields):**
+- `fetch_timeout`, `fetch_max_size`, `domain_denylist` (fetch_webpage, web_search)
+- `image_max_dimension`, `image_compression_quality` (read_file)
+- `pdf_processing_mode` (read_file)
+- `allowed_paths` (read_file, write_file, replace_in_file)
+- `docx_output_dir` (write_docx)
 
-**Why this is safe:** Extensions already have access to the full `app` object, which can reach plugin settings via `app.plugins.plugins['notor'].settings`. Exposing it via `utils.pluginSettings` is a convenience, not a new security surface.
+**Why shared settings:** The design doc defines two settings channels — per-extension `settings` and global `shared` settings. An alternative approach of exposing `utils.pluginSettings` was considered but rejected because it would introduce a third settings channel exposing an opaque internal object. Migrating to the existing `shared` channel stays within the design's model, makes the settings visible and editable by users, and avoids type erasure (shared settings have schemas).
 
-**Type:** `Record<string, unknown>` in the public interface (avoids importing `NotorSettings` into the extension API surface). TypeScript-level documentation via JSDoc comments for commonly used fields.
+**Impact on plugin code:** The plugin's own code that reads these settings (e.g., `this.settings.fetch_timeout`) should be updated to read from the shared settings store, or the shared settings store should be initialized from the plugin settings on boot. The migration can be done incrementally — scaffold code reads from `shared`, and a compatibility layer populates `shared` from existing `NotorSettings` fields during startup.
 
 ### D-3: Node.js modules via `require()` in extension code
 
@@ -112,9 +119,23 @@ This is cleaner than constructing `ToolResult` objects manually and matches how 
 
 `UseSubagentTool` has 7 constructor dependencies (`SubAgentManager`, `ProviderRegistry`, `ToolRegistry`, `NotorSettings`, `getParentEffectiveConfig`, `HistoryManager`, `getParentConversation`) and dynamic properties (`description` and `input_schema` built on-the-fly from cached profiles). Migrating it would require exposing the sub-agent manager, provider registry, and conversation internals through the extension API — too much internal surface for a tool that users should not customize.
 
-### D-6: Open customized files in new leaf
+### D-6: ~~Open customized files in new leaf~~ (already applied)
 
-The "Customize" and "Open" buttons in the Extensions settings section currently open files in the active leaf via `openLinkText(path, "")`. Changed to `openLinkText(path, "", true)` to open in a new leaf, matching the `NoteOpener` pattern used by tool execution.
+This fix was applied in commit `a968826`. Both `openLinkText` calls in `src/settings/sections/extensions.ts` (lines 124 and 155) already pass the third `true` argument. No changes needed.
+
+### D-7: Pre-compile scaffold code at build time
+
+Scaffold code blocks contain TypeScript that must be stripped before execution. Rather than running Sucrase at runtime on every `reload()`, an esbuild plugin pre-compiles the scaffold code during the build. The bundle embeds pre-stripped JavaScript strings.
+
+**How it works:**
+1. An esbuild plugin scans `builtin-tool-scaffolds.ts` during the build
+2. For each scaffold code block, it runs Sucrase `transform()` to strip TypeScript annotations
+3. The resulting JavaScript is embedded in the scaffold's `preCompiledCode` field
+4. At runtime, `reload()` creates `AsyncFunction` directly from the pre-compiled JS — no Sucrase needed
+
+**Why:** 20 scaffold tools (some 600+ lines like `write_docx`) add unnecessary latency if compiled via Sucrase on every plugin boot. Since scaffold content is static within a plugin version, the compilation result is deterministic and can be computed once at build time. This aligns with the design doc's pipeline step 6 ("Cache — store compiled function").
+
+**Fallback:** If `preCompiledCode` is absent (e.g., development mode), fall back to runtime Sucrase compilation.
 
 ---
 
@@ -122,7 +143,7 @@ The "Customize" and "Open" buttons in the Extensions settings section currently 
 
 ### `src/extensions/builtin-tool-scaffolds.ts` — Full tool implementations
 
-**Scope:** Rewrite all 19 scaffold code blocks with working implementations adapted to the extension runtime.
+**Scope:** Rewrite all 20 scaffold code blocks with working implementations adapted to the extension runtime.
 
 **`scaffold()` helper signature change:**
 ```ts
@@ -142,7 +163,19 @@ ${code}
 \`\`\`
 ```
 
-**Conversion patterns applied to all 19 tools:**
+**`BuiltinToolScaffold` type addition:**
+```ts
+export interface BuiltinToolScaffold {
+  name: string;
+  description: string;
+  mode: "read" | "write";
+  scaffoldContent: string;
+  /** Pre-compiled JS (Sucrase-stripped at build time via D-7). */
+  preCompiledCode?: string;
+}
+```
+
+**Conversion patterns applied to all 20 tools:**
 
 | Built-in class pattern | Extension code equivalent |
 |---|---|
@@ -152,7 +185,7 @@ ${code}
 | `this.staleTracker` | `utils.staleTracker` |
 | `this.noteOpener` | `utils.noteOpener` |
 | `this.checkpointManager` | `utils.checkpointManager` |
-| `this.settings` | `utils.pluginSettings` |
+| `this.settings` | `shared` (shared settings channel — see D-2) |
 | `resolveNote(p, vault, mc)` | `utils.resolveNote(p)` |
 | `resolveAndValidatePath(p, root, allowed)` | `utils.resolveAndValidatePath(p)` |
 | `executeShellCommand(cmd, settings, opts)` | `utils.executeShellCommand(cmd, opts)` |
@@ -178,18 +211,30 @@ ${code}
 | Medium | `read_note`, `write_note`, `replace_in_note`, `manage_tags`, `move_note`, `list_vault`, `execute_command`, `replace_in_file` | 80-200 |
 | Complex | `search_vault`, `fetch_webpage`, `web_search`, `read_file`, `read_docx`, `write_docx`, `extract_docx_comments` | 200-600 |
 
-### `src/extensions/runtime-context.ts` — Add `pluginSettings`
+### `src/extensions/runtime-context.ts` — Add media utilities and `Platform`
 
 ```ts
 // In ExtensionUtils interface:
-/** Read-only reference to plugin settings for built-in tool scaffolds. */
-pluginSettings: Record<string, unknown>;
+/** Detect media format from buffer magic bytes. */
+detectMediaFormat: (buffer: Buffer) => "png" | "jpeg" | "gif" | "webp" | "pdf" | null;
+/** Process an image buffer for LLM consumption (resize, compress). */
+processImage: (buffer: Buffer, mediaType: ImageMediaType, options?: { maxDimension?: number; compressionQuality?: number }) => Promise<ContentBlock>;
+/** Process a PDF buffer for LLM consumption. */
+processPdf: (buffer: Buffer, options: PdfProcessorOptions) => Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>;
 
 // In buildUtils():
-pluginSettings: plugin.settings as unknown as Record<string, unknown>,
+detectMediaFormat,
+processImage,
+processPdf,
 ```
 
-~5 lines changed.
+Also add `Platform` to `buildObsidianExports()` (needed by `execute_command` scaffold for desktop-only guard):
+```ts
+// In buildObsidianExports():
+Platform,
+```
+
+~15 lines changed. No `pluginSettings` field needed — scaffolds use the `shared` settings channel (D-2).
 
 ### `src/extensions/manager.ts` — Scaffold fallback in reload pipeline
 
@@ -201,34 +246,46 @@ for (const [name, scaffold] of BUILTIN_TOOL_SCAFFOLDS) {
     // Skip if vault file was discovered with this name
     if (discovered.tools.some(t => t.name === name)) continue;
 
-    // Parse scaffold content as if it were a vault file
+    // Construct frontmatter directly from scaffold metadata (no re-parsing)
+    const frontmatter: Record<string, unknown> = {
+        "notor-type": "tool",
+        "notor-tool-name": scaffold.name,
+        "notor-description": scaffold.description,
+        "notor-mode": scaffold.mode,
+    };
     const parsed = parseExtensionFile(
         scaffold.scaffoldContent,
-        extractFrontmatter(scaffold.scaffoldContent, this.parseYAML),
-        `builtin:${name}`,
+        frontmatter,
+        `(built-in scaffold: ${name})`,
         this.parseYAML,
     );
     if ("message" in parsed) {
-        errors.push({ filePath: `builtin:${name}`, message: parsed.message });
+        errors.push({ filePath: `(built-in scaffold: ${name})`, message: parsed.message });
         continue;
     }
     if ("name" in parsed && "mode" in parsed) {
-        discovered.tools.push(parsed as UserToolDefinition);
+        const toolDef = parsed as UserToolDefinition;
+        toolDef.isScaffold = true;
+        // Use pre-compiled function from build step (D-7); fall back to runtime Sucrase
+        if (scaffold.preCompiledCode) {
+            toolDef.compiledFn = new AsyncFunction(...argNames, scaffold.preCompiledCode);
+        }
+        discovered.tools.push(toolDef);
     }
 }
 ```
 
-This uses a synthetic `filePath` of `builtin:{name}` so scaffold-origin tools are distinguishable from vault-origin tools in logs and error messages.
+Scaffold-origin tools are marked with `isScaffold: true` on `UserToolDefinition` for programmatic detection. The `filePath` is descriptive for logging only.
 
-**Helper needed:** `extractFrontmatter(content, parseYAML)` — a small function that parses frontmatter from raw Markdown content. This already exists as internal logic in `discovery.ts:parseOneExtensionFile()` lines 190-206. Extract it as a shared helper.
+**Refactor:** Extract the manual YAML parsing logic from `discovery.ts:parseOneExtensionFile()` (lines 190-206) into a standalone `extractFrontmatter(content, parseYAML)` helper. This cleans up `parseOneExtensionFile()` and provides a reusable utility for future code that needs to parse frontmatter from raw markdown content (e.g., template imports, clipboard paste). Note: the scaffold injection above does NOT use this helper — it constructs frontmatter directly from structured metadata.
 
 ### `src/main.ts` — Remove built-in class registrations
 
 In `getToolRegistry()` (lines 1105-1182):
-- **Remove** all 19 tool class registrations (lines 1115-1156)
-- **Remove** associated imports for tool classes
+- **Remove** all 20 tool class registrations (lines 1115-1156)
+- **Remove** associated imports for tool classes (lines 66-86)
 - **Keep** `UseSubagentTool` registration (lines 1159-1175)
-- **Keep** dependency acquisition for `staleTracker`, `noteOpener`, `checkpointManager` only if still needed by `UseSubagentTool` (it doesn't use them — so remove those lines too)
+- **Remove** dependency acquisition for `staleTracker`, `noteOpener`, `checkpointManager` — `UseSubagentTool` doesn't use them
 
 After change:
 ```ts
@@ -262,39 +319,39 @@ getToolRegistry(): ToolRegistry {
 
 **Boot sequence change:** The comment at `main.ts:474-476` ("Must run after workflow discovery so the tool registry is populated with built-in tools first") is no longer accurate — remove or update it. The extension manager now provides ALL tools (both scaffold defaults and vault overrides). The ordering is:
 1. `getToolRegistry()` — registers `use_subagent` only
-2. `ExtensionManager.reload(true)` — discovers vault files, injects scaffold fallbacks, compiles, registers all 19 tools
+2. `ExtensionManager.reload(true)` — discovers vault files, injects scaffold fallbacks, loads pre-compiled functions, registers all 20 tools
 
-### `src/settings/sections/extensions.ts` — Fix leaf opening
+### `src/settings/sections/extensions.ts` — ~~Fix leaf opening~~ (already applied)
 
-Two lines:
-- Line 165: `openLinkText(vaultFilePath, "")` → `openLinkText(vaultFilePath, "", true)`
-- Line 196: `openLinkText(path, "")` → `openLinkText(path, "", true)`
+Both `openLinkText` calls (lines 124 and 155) already pass `true` as the third argument (commit `a968826`). No changes needed.
 
 ### `src/extensions/manager.ts` — Override detection update
 
-The current override detection (lines 250-256) checks if a compiled user tool name exists in the registry AND is not in `registeredToolNames`. After migration, scaffold-provided tools ARE in `registeredToolNames` (they're registered by the extension manager). So "override" detection should change to: a vault-discovered tool that replaces a scaffold-provided tool.
+The current override detection (lines 250-256) checks if a compiled user tool name exists in the registry AND is not in `registeredToolNames`. After migration, scaffold-provided tools ARE in `registeredToolNames` (they're registered by the extension manager). So "override" detection should change to: a compiled vault-discovered tool that replaces a scaffold-provided tool.
 
 ```ts
-// Detect user vault overrides of scaffold defaults
-for (const tool of discovered.tools) {
-    if (BUILTIN_TOOL_SCAFFOLDS.has(tool.name) && !tool.filePath.startsWith("builtin:")) {
-        builtinOverrides.push(tool.name);
+// Detect user vault overrides of scaffold defaults (iterate compiledTools, not discovered)
+for (const [name, tool] of compiledTools) {
+    if (BUILTIN_TOOL_SCAFFOLDS.has(name) && !tool.isScaffold) {
+        builtinOverrides.push(name);
     }
 }
 ```
 
+**Important:** This iterates `compiledTools` (successfully compiled only), not `discovered.tools` (which includes tools that failed compilation). This preserves the current behavior where only tools that actually compiled successfully are counted as overrides.
+
 ### Test file updates
 
 **Unit tests** (`src/extensions/__tests__/manager.test.ts`):
-- Update "user tool with same name as built-in overwrites it" test — built-ins are now scaffolds, not class instances
+- Update "detects built-in tool overrides" test — built-ins are now scaffolds with `isScaffold: true`, not class instances
 - Add test: scaffold fallback registers tools when no vault files exist
-- Add test: vault file overrides scaffold default
-- Add test: `reload()` with empty vault produces 19 scaffold tools
+- Add test: vault file overrides scaffold default (vault `isScaffold: false` wins)
+- Add test: `reload()` with empty vault produces 20 scaffold tools
 
 **E2E test** (`e2e/scripts/user-extensions-test.ts`):
-- Scenario 3 ("User tool is registered in ToolRegistry") needs updating — all 19 scaffold tools + `use_subagent` should be registered
-- Scenario 12 ("Built-in tool scaffolds API returns all 20 built-in tools") — the scaffold map still has 19 entries (was 20 including read_note which is now 19 excluding use_subagent... actually `BUILTIN_TOOL_SCAFFOLDS` currently has all 20. After migration it has 19 — remove the `use_subagent` scaffold since it's not migrated)
-- Scenario 13 ("ensureBuiltinToolVaultFile creates scaffold") — should still work but now the scaffold contains real code
+- Scenario 3 ("User tool is registered in ToolRegistry") needs updating — all 20 scaffold tools + `use_subagent` should be registered (21 total)
+- Scenario 12 ("Built-in tool scaffolds API returns all 20 built-in tools") — `BUILTIN_TOOL_SCAFFOLDS` has 20 entries (all non-subagent tools); `use_subagent` was never in the map. No change needed.
+- Scenario 13 ("ensureBuiltinToolVaultFile creates scaffold") — should still work but now the scaffold contains real implementation code
 
 ---
 
@@ -328,30 +385,28 @@ for (const tool of discovered.tools) {
 | Tool | Key adaptation notes |
 |---|---|
 | `search_vault` | Three helpers: `getCandidateFiles()`, `searchFile()`, `sortFileResults()` + `matchesGlob()`, `getBacklinkCounts()`. Regex with `/gm` flag, `lastIndex` reset between files. ~250 lines. |
-| `fetch_webpage` | `obsidian.requestUrl()`. Turndown instance with GFM plugin + custom rules (strip nav/footer). `utils.pluginSettings` for timeout, size caps, denylist. Helpers: `isDomainBlocked()`, `getNetErrorHint()`. ~300 lines. |
+| `fetch_webpage` | `obsidian.requestUrl()`. Turndown instance with GFM plugin + custom rules (strip nav/footer). `shared` for timeout, size caps, denylist. Helpers: `isDomainBlocked()`, `getNetErrorHint()`. ~300 lines. |
 | `web_search` | DuckDuckGo HTML scraping via `DOMParser`. `obsidian.requestUrl()` POST. Helpers: `cleanDDGUrl()`, `parseDDGResults()`. Domain denylist filtering. ~200 lines. |
-| `read_file` | Binary detection, media format detection (magic bytes), image processing pipeline, PDF processing. `require("fs")`. `utils.pluginSettings` for image/PDF settings. ~200 lines. |
+| `read_file` | Binary detection, media format detection (magic bytes), image processing pipeline, PDF processing. `require("fs")`. `shared` for image/PDF settings. ~200 lines. |
 | `read_docx` | `libs.mammoth` conversion with image extraction callback. `require("crypto")` for MD5 dedup. Custom Turndown rule for images. ~200 lines. |
 | `write_docx` | `libs.marked.lexer()` tokenization → `libs.docx` block generation. Template grafting via `libs.PizZip` + `libs.xmldom`. Helpers: `renderInline()`, `buildDocxChildren()`, `graftIntoTemplate()`, image resolution. ~600 lines. |
 | `extract_docx_comments` | `libs.PizZip` for XML extraction. Comment threading, resolved filtering, `@mention` resolution. Idempotent append. ~300 lines. |
 
 ### Missing from `obsidian` exports
 
-The `execute_command` tool checks `Platform.isDesktopApp`. This is not currently in `buildObsidianExports()`. Options:
-- Add `Platform` to `buildObsidianExports()` (preferred — small addition, useful for any extension)
-- OR hardcode the check as `true` in the scaffold (since the plugin is desktop-only). Less robust.
+The `execute_command` tool checks `Platform.isDesktopApp`. Add `Platform` to `buildObsidianExports()` (small addition, useful for any extension that needs platform detection).
 
-The `read_file` tool references image/PDF processing utilities from `src/media/`. These would need to either:
-- Be inlined in the scaffold code (increases scaffold size significantly)
-- Be exposed via a new `utils.media` namespace
-- Be simplified (e.g., skip image resizing in the extension version, just return raw content)
+### Media utilities for `read_file` scaffold
 
-**Recommendation:** Expose key media utilities via `utils`:
+The `read_file` tool references image/PDF processing utilities from `src/media/`. Expose these via `utils` (see runtime-context.ts changes above):
+
 ```ts
-utils.detectMediaFormat: (buffer: Buffer) => MediaFormat | null
-utils.processImage: (buffer: Buffer, mediaType: string, options: ImageOptions) => Promise<ContentBlock>
-utils.processPdf: (buffer: Buffer, options: PdfOptions) => Promise<ContentBlock>
+utils.detectMediaFormat: (buffer: Buffer) => "png" | "jpeg" | "gif" | "webp" | "pdf" | null
+utils.processImage: (buffer: Buffer, mediaType: ImageMediaType, options?: { maxDimension?: number; compressionQuality?: number }) => Promise<ContentBlock>
+utils.processPdf: (buffer: Buffer, options: PdfProcessorOptions) => Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>
 ```
+
+Note: `processPdf` returns `{ contentBlocks, textSummary }`, not a single `ContentBlock`. The `read_file` scaffold must handle the real return shape.
 
 This avoids duplicating ~200 lines of media processing code in the scaffold and keeps it maintainable. The `read_file` scaffold would then be ~100 lines instead of ~300.
 
@@ -359,15 +414,14 @@ This avoids duplicating ~200 lines of media processing code in the scaffold and 
 
 ## Risk Assessment
 
-### R-1: Compilation performance on boot
+### R-1: ~~Compilation performance on boot~~ (mitigated by D-7)
 
-**Risk:** Compiling 19 tools via Sucrase + AsyncFunction on every plugin load adds latency.
-**Estimate:** Sucrase `transform()` is fast (~1ms per tool). AsyncFunction construction is also fast. 19 tools should add < 50ms total.
-**Mitigation:** Measure in e2e test. If problematic, consider caching compiled functions keyed by scaffold content hash.
+**Risk:** Compiling 20 tools via Sucrase + AsyncFunction on every plugin load adds latency.
+**Mitigation:** D-7 pre-compiles scaffold code at build time. Only `AsyncFunction` construction runs at boot (fast). User vault files still use runtime Sucrase, but those are 0-few files, not 20.
 
 ### R-2: Scaffold code correctness
 
-**Risk:** Converting 19 tool implementations to extension code may introduce subtle bugs (different `this` context, missing error paths, etc.).
+**Risk:** Converting 20 tool implementations to extension code may introduce subtle bugs (different `this` context, missing error paths, etc.).
 **Mitigation:** Each tool's scaffold should be tested by:
 1. Creating the vault file via `ensureBuiltinToolVaultFile()`
 2. Reloading extensions
@@ -401,22 +455,22 @@ This avoids duplicating ~200 lines of media processing code in the scaffold and 
 ### Unit tests
 
 - `src/extensions/__tests__/manager.test.ts`:
-  - New: `reload()` with empty vault produces 19 scaffold tools + correct names
-  - New: vault file overrides scaffold default (vault file wins)
-  - Updated: override detection uses `filePath.startsWith("builtin:")` check
+  - New: `reload()` with empty vault produces 20 scaffold tools + correct names
+  - New: vault file overrides scaffold default (vault file wins, `isScaffold: false`)
+  - Updated: override detection uses `tool.isScaffold` check (not string prefix)
   - New: scaffold-compiled tool executes correctly (invoke `read_note` scaffold, verify return value)
 
 ### E2E tests
 
 - Update `user-extensions-test.ts`:
-  - Scenario 3: verify all 19 scaffold tools + `use_subagent` registered (20 total)
+  - Scenario 3: verify all 20 scaffold tools + `use_subagent` registered (21 total)
   - New scenario: invoke a scaffold-provided tool (e.g., `read_note` via LLM) without any vault files
   - Scenario 13: after `ensureBuiltinToolVaultFile("read_note")` + reload, tool still works (now runs vault code, not scaffold)
 
 ### Manual verification
 
-1. Fresh vault (no `notor/tools/` directory) → all tools available and functional
-2. Click "Customize" on `read_note` → note opens in new tab with full implementation
+1. Fresh vault (no `notor/tools/` directory) → all 20 tools available and functional
+2. Click "Customize" on `read_note` → note opens in new leaf with full implementation
 3. Edit the customized note (e.g., add logging) → reload → verify modified behavior
 4. Click "Reset to default" → reload → back to scaffold behavior
 5. Complex tool test: `write_docx` scaffold generates a valid `.docx` file
