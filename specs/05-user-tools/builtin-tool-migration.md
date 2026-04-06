@@ -2190,3 +2190,204 @@ settings:
 **Settings UI migration:** The existing `src/settings/sections/web-search.ts` (61 lines) renders timeout and default num_results fields. After migration, these are auto-generated from the extension settings schema. The manual settings section file can be removed. The domain denylist note ("shared with fetch_webpage") is handled by the shared settings UI from D-8.
 
 **Comparison with spec's complexity estimate:** The spec classifies `web_search` as "Complex" at 200-400 lines and estimates ~200 lines. The scaffold is ~130 lines — below the estimate. This is because `isDomainBlocked` moves to `utils` (saving ~36 lines of inline code), and the tool has no Turndown conversion, no diagnostic fetch probe, and no error hint map (unlike `fetch_webpage`). The two inlined helpers (`cleanDDGUrl` + `parseDDGResults`) are compact pure functions. This is the simpler of the two web-facing tools — comparable to a mid-range "Straightforward" tool in actual scaffold complexity, elevated to "Moderate" only because of the `DOMParser` browser-global dependency and the shared `isDomainBlocked` migration coordination with `fetch_webpage`.
+
+### `read_file` — Feasibility: Moderate ✅
+
+**Source:** `src/tools/read-file.ts` (272 lines total, ~182 lines of execute logic)
+
+**What the built-in class does:**
+1. Validates `path` param (exists, is string, not empty)
+2. Desktop-only guard via `Platform.isDesktopApp`
+3. Resolves vault root via `app.vault.adapter.basePath`
+4. Validates path against vault root and `settings.read_file_allowed_paths` via `resolveAndValidatePath()`
+5. Checks file existence via `fs.promises.stat()` (ENOENT → specific error)
+6. Reads raw buffer via `fs.promises.readFile()`
+7. Binary detection: scans first 8 KB for null bytes (`buf.subarray(0, 8192).includes(0)`)
+8. **Image branch** (PNG/JPEG/GIF/WebP): 50 MB size limit, `processImage(buf, mediaType, { maxDimension, compressionQuality })`, returns `content_blocks` with image block + metadata summary string
+9. **PDF branch**: 50 MB size limit, `processPdf(buf, { pages, providerType, maxTextChars, preferNative })`, returns `content_blocks` with PDF content blocks + text summary string
+10. **Other binary**: rejects with error directing user to `read_docx` for Word documents
+11. **Text files**: decodes buffer via specified encoding (default `utf-8`), returns content string
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `Platform` from `"obsidian"` | `obsidian.Platform` | ⚠️ Planned (spec runtime-context.ts changes) |
+| `import * as fs from "fs"` | `libs.fs` | ⚠️ Planned (spec D-3) |
+| `resolveAndValidatePath(path, vaultRoot, allowedPaths)` | `utils.resolveAndValidatePath(path)` | ✅ — runtime-context.ts already injects `vaultRootPath` and defaults `allowedPaths` to `plugin.settings.read_file_allowed_paths` |
+| `detectMediaFormat(buf)` | `utils.detectMediaFormat(buf)` | ⚠️ Planned (spec runtime-context.ts changes — media utilities section) |
+| `processImage(buf, mediaType, opts)` | `utils.processImage(buf, mediaType, opts)` | ⚠️ Planned (spec runtime-context.ts changes — media utilities section) |
+| `processPdf(buf, opts)` | `utils.processPdf(buf, opts)` | ⚠️ Planned (spec runtime-context.ts changes — media utilities section). Note: `utils.processPdf` injects `active_provider` and `pdf_native_max_size_mb` (as `maxNativeSizeBytes`) from plugin settings internally. Scaffold does NOT pass `providerType` or `maxNativeSizeBytes`. |
+| `ImageMediaType` type | N/A (stripped by Sucrase) | ✅ (runtime irrelevant) |
+| `logger("ReadFileTool")` | `utils.logger("read_file")` | ✅ |
+| `this.settings.read_file_allowed_paths` | `shared.read_file_allowed_paths` | ✅ (shared setting — see D-2/D-8). Not needed explicitly — `utils.resolveAndValidatePath(path)` reads it internally as default. |
+| `this.settings.image_max_dimension` | `settings.image_max_dimension` | ✅ (per-extension setting — see D-2) |
+| `this.settings.image_compression_quality` | `settings.image_compression_quality` | ✅ (per-extension setting — see D-2) |
+| `this.settings.pdf_text_max_chars` | `settings.pdf_text_max_chars` | ✅ (per-extension setting — see D-2) |
+| `this.settings.pdf_prefer_native` | `settings.pdf_prefer_native` | ✅ (per-extension setting — see D-2) |
+| `this.settings.active_provider` | N/A — injected internally by `utils.processPdf` | ✅ (scaffold never sees this) |
+| `this.settings.pdf_native_max_size_mb` | N/A — injected internally by `utils.processPdf` as `maxNativeSizeBytes` | ✅ (scaffold never sees this; also fixes the bug where this setting was previously ignored) |
+
+**Settings:** Per-extension `settings` for `image_max_dimension`, `image_compression_quality`, `pdf_prefer_native`, `pdf_text_max_chars`, `pdf_native_max_size_mb`. Shared `shared` for `read_file_allowed_paths` (consumed implicitly by `utils.resolveAndValidatePath()`). The `active_provider` and `pdf_native_max_size_mb` fields are NOT extension settings — they are injected internally by the `utils.processPdf` wrapper (see D-2 notes and runtime-context.ts changes).
+
+**Helper functions (1 trivial, not needed):**
+
+1. **`getVaultRootPath()`** (4 lines) — Extracts `basePath` from `app.vault.adapter`. Not needed in the scaffold because `utils.resolveAndValidatePath()` already knows the vault root (injected at build time in runtime-context.ts). The scaffold simply calls `utils.resolveAndValidatePath(path)`.
+
+**Return value mapping:**
+- Text success → return string content (adapter wraps in `{ success: true, result: string }`)
+- Image success → **special case**: must return an object with `result` (summary string) and `content_blocks` (image block array). The `UserToolAdapter.execute()` return-value mapper handles objects — returning `{ result: "Read image: ...", content_blocks: [block] }` produces the correct `ToolResult`. This matches how the built-in class returns `{ success: true, result: "Read image: ...", content_blocks: [block] }`.
+- PDF success → same pattern as images: return `{ result: "Read PDF: ...", content_blocks: result.contentBlocks }`
+- Validation/read failures → throw (adapter wraps in `{ success: false, error }`)
+
+**Key pattern: `content_blocks` return shape.** This tool is one of the few that returns `content_blocks` (multi-modal content blocks for images and PDFs) alongside a `result` string. The built-in class constructs a full `ToolResult` with `{ success: true, result: summaryString, content_blocks: [...] }`. In the scaffold, the code must return an object with both `result` and `content_blocks` keys so the adapter mapper preserves both. Verify that `UserToolAdapter.execute()` correctly forwards `content_blocks` from the returned object to the final `ToolResult` — if the mapper only looks at `typeof returnValue === "string"` vs `"object"`, returning `{ result, content_blocks }` should pass through as-is. This is the critical pattern to validate during implementation.
+
+**Scaffold code (estimated ~100 lines):**
+```ts
+const log = utils.logger("read_file");
+
+if (!params.path || typeof params.path !== "string" || params.path.trim() === "") {
+  throw new Error("Missing required parameter: path");
+}
+
+if (!obsidian.Platform.isDesktopApp) {
+  throw new Error("read_file is only available on desktop.");
+}
+
+const pathResult = utils.resolveAndValidatePath(params.path);
+if (!pathResult.valid) throw new Error(pathResult.error);
+const resolvedPath = pathResult.resolvedPath;
+
+// Check file existence
+try {
+  await libs.fs.promises.stat(resolvedPath);
+} catch (e) {
+  if (e.code === "ENOENT") throw new Error(`File not found: ${resolvedPath}`);
+  throw e;
+}
+
+// Read raw buffer for binary detection
+const buf = await libs.fs.promises.readFile(resolvedPath);
+
+// Detect binary via null bytes in first 8 KB
+if (buf.subarray(0, 8192).includes(0)) {
+  const format = utils.detectMediaFormat(buf);
+
+  if (format === "png" || format === "jpeg" || format === "gif" || format === "webp") {
+    if (buf.length > 50 * 1024 * 1024) {
+      throw new Error(
+        `Image file is too large (${(buf.length / (1024 * 1024)).toFixed(1)} MB). Maximum raw input size is 50 MB.`
+      );
+    }
+    const mediaType = `image/${format}`;
+    const block = await utils.processImage(buf, mediaType, {
+      maxDimension: settings.image_max_dimension,
+      compressionQuality: settings.image_compression_quality,
+    });
+    const filename = resolvedPath.split("/").pop() ?? resolvedPath;
+    const w = block.type === "image" ? block.width : undefined;
+    const h = block.type === "image" ? block.height : undefined;
+    log.info("Read image file", { path: resolvedPath, format, width: w, height: h });
+    return { result: `Read image: ${filename} (${w}x${h}, image/${format})`, content_blocks: [block] };
+  }
+
+  if (format === "pdf") {
+    if (buf.length > 50 * 1024 * 1024) {
+      throw new Error(
+        `PDF file is too large (${(buf.length / (1024 * 1024)).toFixed(1)} MB). Maximum raw input size is 50 MB.`
+      );
+    }
+    const result = await utils.processPdf(buf, {
+      pages: params.pages,
+      maxTextChars: settings.pdf_text_max_chars,
+      preferNative: settings.pdf_prefer_native,
+    });
+    const filename = resolvedPath.split("/").pop() ?? resolvedPath;
+    log.info("Read PDF file", { path: resolvedPath, summary: result.textSummary });
+    return { result: `Read PDF: ${filename} — ${result.textSummary}`, content_blocks: result.contentBlocks };
+  }
+
+  throw new Error(
+    "read_file only supports text-based files, images (PNG, JPEG, GIF, WebP), and PDFs. For Word documents, use read_docx instead."
+  );
+}
+
+const encoding = params.encoding ?? "utf-8";
+const content = buf.toString(encoding);
+log.info("Read file", { path: resolvedPath, bytes: buf.length });
+return content;
+```
+
+**No new `utils` expansions needed beyond what's already planned.** The three media utilities (`detectMediaFormat`, `processImage`, `processPdf`) are already specified in the runtime-context.ts changes section. `resolveAndValidatePath` is already exposed. No local helper functions to inline — the media processing complexity is entirely delegated to `utils`.
+
+**Required runtime expansions (all already planned in spec):**
+- `obsidian.Platform` — add to `buildObsidianExports()` (spec runtime-context.ts changes)
+- `libs.fs` — add to `buildLibs()` (spec D-3)
+- `utils.detectMediaFormat` — add to `ExtensionUtils` and `buildUtils()` (spec runtime-context.ts changes)
+- `utils.processImage` — add to `ExtensionUtils` and `buildUtils()` (spec runtime-context.ts changes)
+- `utils.processPdf` — add to `ExtensionUtils` and `buildUtils()` (spec runtime-context.ts changes, with `active_provider` and `pdf_native_max_size_mb` injected internally)
+
+**YAML fence:**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the file. Vault-relative or absolute."
+    path_namespace: filesystem
+  encoding:
+    type: string
+    description: "File encoding. Default: utf-8."
+    default: "utf-8"
+  pages:
+    type: string
+    description: "Page range for PDF files (e.g. '1-5', '3', '10-20'). Ignored for non-PDF files."
+settings:
+  image_max_dimension:
+    name: "Image Max Dimension"
+    type: number
+    description: "Maximum width or height in pixels. Images larger than this are resized proportionally."
+    default: 2000
+    min: 100
+    max: 8000
+  image_compression_quality:
+    name: "Image Compression Quality"
+    type: number
+    description: "JPEG compression quality (1-100). Lower values reduce size but decrease quality."
+    default: 80
+    min: 1
+    max: 100
+  pdf_prefer_native:
+    name: "Prefer Native PDF"
+    type: boolean
+    description: "Send PDFs as native document blocks when supported by the provider. If false, always extract text."
+    default: true
+  pdf_text_max_chars:
+    name: "PDF Max Text Characters"
+    type: number
+    description: "Maximum characters to extract from PDF text content."
+    default: 100000
+    min: 1000
+    max: 1000000
+  pdf_native_max_size_mb:
+    name: "PDF Native Max Size (MB)"
+    type: number
+    description: "Maximum PDF file size in MB for native document block processing. Larger PDFs fall back to text extraction."
+    default: 10
+    min: 1
+    max: 100
+```
+
+**Scaffold `scaffold()` call change:** Needs the new 5th `code` parameter. The YAML fence includes both `params:` and `settings:` sections. The `settings` entries for image/PDF options replace the current direct `NotorSettings` field references.
+
+**Settings UI migration:** The existing image and PDF settings are scattered across `src/settings/sections/` (specifically in the read-file or media sections). After migration, these are auto-generated from the extension settings schema. The manual settings section files for these fields can be removed.
+
+**Comparison with spec's complexity estimate:** The spec classifies `read_file` as "Complex" at 200-400 lines and estimates ~200 lines. The scaffold is ~100 lines — well below the estimate. This is because all three media processing functions (`detectMediaFormat`, `processImage`, `processPdf`) are delegated to `utils`, saving ~200+ lines of image processing pipelines, PDF extraction, format detection magic bytes, and compression cascades. Without `utils`, the scaffold would need to inline the full `src/media/` stack (~400 lines across 3 files) — clearly impractical and the right call to expose via `utils`. The scaffold itself is structurally straightforward: param validation → path validation → binary detection → branch on format → delegate to `utils` → return. The main sophistication is the `content_blocks` return pattern for multi-modal responses.
+
+**Risk: `content_blocks` passthrough in `UserToolAdapter` (medium).** The adapter's return-value mapper must forward `content_blocks` from the returned object to the final `ToolResult`. If the mapper only handles `string` returns (wrapped in `{ success: true, result: string }`) and `object` returns (passed through as-is), returning `{ result, content_blocks }` should work. However, this is a pattern unique to `read_file` among the scaffold tools — no other scaffold returns `content_blocks`. Must verify the adapter handles this correctly during implementation. If it doesn't, the mapper needs a small adjustment to check for `content_blocks` on the returned object.
+
+**Risk: `pdf_native_max_size_mb` behavior change (medium, already documented as R-2).** This migration wires `pdf_native_max_size_mb` through to `processPdf()` for the first time via the `utils.processPdf` wrapper, fixing the existing bug where the setting was ignored. See R-2 in the Risk Assessment section for mitigation.
+
+**Risk: `encoding` parameter edge cases (low).** The built-in class casts `encoding` to `BufferEncoding` for `buf.toString()`. Node.js `Buffer.toString()` accepts common encodings (`utf-8`, `ascii`, `latin1`, `base64`, `hex`, etc.) and throws on invalid ones. The scaffold passes `params.encoding ?? "utf-8"` directly — same behavior. No special handling needed.
+
+**Risk: 50 MB size limit as magic number (low).** The 50 MB binary file size limit is hardcoded in the scaffold (matching the built-in class). Not exposed as a setting — this is a safety guard against OOM, not a user-tunable preference. Acceptable to hardcode.
