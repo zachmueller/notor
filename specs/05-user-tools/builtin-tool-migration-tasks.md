@@ -106,26 +106,26 @@ Write actual tool implementations in the scaffold code blocks. Grouped by comple
 
 ### 3.1 Trivial tools — zero settings, minimal dependencies
 
-These tools have no per-extension settings, no external library deps, and are pure Obsidian API usage. ~20-65 lines each.
+These tools have no per-extension settings, no external library deps, and are pure Obsidian API usage. ~20-65 lines each. See [feasibility/trivial-tools.md](feasibility/trivial-tools.md) for detailed dependency tables, gotchas, and scaffold outlines.
 
-- [ ] `read_frontmatter` — cache read via `app.metadataCache.getFileCache()`, strip `position` key. ~20 lines.
-- [ ] `get_backlinks` — reverse-lookup of `app.metadataCache.resolvedLinks`. ~20 lines.
-- [ ] `get_outlinks` — read `resolvedLinks[path]` + `unresolvedLinks[path]`. ~35 lines.
-- [ ] `update_frontmatter` — `app.fileManager.processFrontMatter()`, checkpoint creation. ~60 lines. Note: correct YAML schema `set` param from `type: string` to `type: object`.
-- [ ] `read_note` — `utils.resolveNote()`, `obsidian.getFrontMatterInfo()`, stale tracker read, note opener. ~60 lines.
-- [ ] `manage_tags` — `app.fileManager.processFrontMatter()`, tag normalization helpers. ~65 lines. Handle diverse input shapes (string vs array), delete empty tags key.
+- [ ] `read_frontmatter` — cache read via `app.metadataCache.getFileCache()`, strip `position` key. ~20 lines. ([feasibility](feasibility/trivial-tools.md#read_frontmatter--feasibility-trivial-))
+- [ ] `get_backlinks` — reverse-lookup of `app.metadataCache.resolvedLinks`. ~20 lines. ([feasibility](feasibility/trivial-tools.md#get_backlinks--feasibility-trivial-))
+- [ ] `get_outlinks` — read `resolvedLinks[path]` + `unresolvedLinks[path]`. ~35 lines. ([feasibility](feasibility/trivial-tools.md#get_outlinks--feasibility-trivial-))
+- [ ] `update_frontmatter` — `app.fileManager.processFrontMatter()`, checkpoint creation. ~60 lines. Note: correct YAML schema `set` param from `type: string` to `type: object`. ([feasibility](feasibility/trivial-tools.md#update_frontmatter--feasibility-trivial-))
+- [ ] `read_note` — `utils.resolveNote()`, `obsidian.getFrontMatterInfo()`, stale tracker read, note opener. ~60 lines. ([feasibility](feasibility/trivial-tools.md#read_note--feasibility-trivial-))
+- [ ] `manage_tags` — `app.fileManager.processFrontMatter()`, tag normalization helpers. ~65 lines. Handle diverse input shapes (string vs array), delete empty tags key. ([feasibility](feasibility/trivial-tools.md#manage_tags--feasibility-trivial-))
 
 ### 3.2 Straightforward tools — small inlined helpers, standard deps
 
-~75-120 lines each. Require `libs.fs`/`libs.path`/`obsidian.Platform` (from Phase 1.2-1.3) and `utils.ensureDirectoryExists` (from Phase 1.4).
+~75-120 lines each. Require `libs.fs`/`libs.path`/`obsidian.Platform` (from Phase 1.2-1.3) and `utils.ensureDirectoryExists` (from Phase 1.4). See [feasibility/straightforward-tools.md](feasibility/straightforward-tools.md) for detailed dependency tables, gotchas, and scaffold outlines. `write_file` is assessed in [feasibility/trivial-tools.md](feasibility/trivial-tools.md#write_file--feasibility-trivial-).
 
-- [ ] `write_file` — `libs.fs.promises.writeFile()`, path validation via `utils.resolveAndValidatePath()`, `Platform.isDesktopApp` guard. ~50 lines.
-- [ ] `replace_in_file` — `libs.fs` read/write, binary detection (null-byte scan on first 8KB), atomic in-memory search/replace. ~120 lines.
-- [ ] `execute_command` — `utils.executeShellCommand()`, path validation for working dir, `Platform.isDesktopApp` guard, partial output on timeout/non-zero exit. ~80 lines.
-- [ ] `write_note` — stale check, checkpoint, `app.vault.process()`, frontmatter preservation (prepend old frontmatter when new content lacks it), `utils.ensureDirectoryExists()`. ~120 lines.
-- [ ] `replace_in_note` — JSON-parsed change blocks, atomic `vault.process()`, stale check + checkpoint, regex `lastIndex` reset. ~130 lines.
-- [ ] `move_note` — `app.fileManager.renameFile()`, optional alias insertion, `utils.ensureDirectoryExists()`. ~120 lines.
-- [ ] `list_vault` — `app.vault.getFiles()` / `getAbstractFileByPath()`, helpers (`collectItems`, `classifyFile`, `sortItems`), pagination. ~160 lines.
+- [ ] `write_file` — `libs.fs.promises.writeFile()`, path validation via `utils.resolveAndValidatePath()`, `Platform.isDesktopApp` guard. ~50 lines. ([feasibility](feasibility/trivial-tools.md#write_file--feasibility-trivial-))
+- [ ] `replace_in_file` — `libs.fs` read/write, binary detection (null-byte scan on first 8KB), atomic in-memory search/replace. ~120 lines. ([feasibility](feasibility/straightforward-tools.md#replace_in_file--feasibility-straightforward-))
+- [ ] `execute_command` — `utils.executeShellCommand()`, path validation for working dir, `Platform.isDesktopApp` guard, partial output on timeout/non-zero exit. ~80 lines. ([feasibility](feasibility/straightforward-tools.md#execute_command--feasibility-straightforward-))
+- [ ] `write_note` — stale check, checkpoint, `app.vault.process()`, frontmatter preservation (prepend old frontmatter when new content lacks it), `utils.ensureDirectoryExists()`. ~120 lines. ([feasibility](feasibility/straightforward-tools.md#write_note--feasibility-straightforward-))
+- [ ] `replace_in_note` — JSON-parsed change blocks, atomic `vault.process()`, stale check + checkpoint, regex `lastIndex` reset. ~130 lines. ([feasibility](feasibility/straightforward-tools.md#replace_in_note--feasibility-straightforward-))
+- [ ] `move_note` — `app.fileManager.renameFile()`, optional alias insertion, `utils.ensureDirectoryExists()`. ~120 lines. ([feasibility](feasibility/straightforward-tools.md#move_note--feasibility-straightforward-))
+- [ ] `list_vault` — `app.vault.getFiles()` / `getAbstractFileByPath()`, helpers (`collectItems`, `classifyFile`, `sortItems`), pagination. ~160 lines. ([feasibility](feasibility/straightforward-tools.md#list_vault--feasibility-straightforward-))
 
 ---
 
@@ -133,20 +133,20 @@ These tools have no per-extension settings, no external library deps, and are pu
 
 ### 4.1 Moderate tools — external library deps and/or settings
 
-~100-250 lines each. Require library access (`Turndown`, `mammoth`, etc.) and some require per-extension or shared settings.
+~100-250 lines each. Require library access (`Turndown`, `mammoth`, etc.) and some require per-extension or shared settings. See [feasibility/moderate-tools.md](feasibility/moderate-tools.md) for detailed dependency tables, gotchas, and scaffold outlines.
 
-- [ ] `search_vault` — helpers (`getCandidateFiles`, `searchFile`, `sortFileResults`, `matchesGlob`, `getBacklinkCounts`), regex `/gm` with `lastIndex` reset. No settings. ~250 lines.
-- [ ] `fetch_webpage` — `obsidian.requestUrl()`, `libs.Turndown` with GFM plugin + custom rules (strip nav/footer), `utils.isDomainBlocked()`, error diagnostic probing, `getNetErrorHint()` helper. Per-extension settings: `fetch_webpage_timeout`, `fetch_webpage_max_download_mb`, `fetch_webpage_max_output_chars`. Shared settings: `domain_denylist`. ~300 lines.
-- [ ] `web_search` — DuckDuckGo HTML scraping via native `DOMParser`, `obsidian.requestUrl()` POST, `utils.isDomainBlocked()`, helpers (`cleanDDGUrl`, `parseDDGResults`). Per-extension settings: `web_search_timeout`, `web_search_default_num_results`. Shared settings: `domain_denylist`. ~200 lines.
-- [ ] `read_file` — binary detection, `utils.detectMediaFormat()`, `utils.processImage()`, `utils.processPdf()`, `libs.fs`. Per-extension settings: `image_max_dimension`, `image_compression_quality`, `pdf_prefer_native`, `pdf_text_max_chars`, `pdf_native_max_size_mb`. Verify `UserToolAdapter` correctly forwards `content_blocks` in return value. ~200 lines.
-- [ ] `read_docx` — `libs.mammoth` with image extraction callback (~45 lines callback), `libs.crypto` for MD5 dedup, `libs.Turndown` with custom image rule. ~200 lines.
+- [ ] `search_vault` — helpers (`getCandidateFiles`, `searchFile`, `sortFileResults`, `matchesGlob`, `getBacklinkCounts`), regex `/gm` with `lastIndex` reset. No settings. ~250 lines. ([feasibility](feasibility/moderate-tools.md#search_vault--feasibility-moderate-))
+- [ ] `fetch_webpage` — `obsidian.requestUrl()`, `libs.Turndown` with GFM plugin + custom rules (strip nav/footer), `utils.isDomainBlocked()`, error diagnostic probing, `getNetErrorHint()` helper. Per-extension settings: `fetch_webpage_timeout`, `fetch_webpage_max_download_mb`, `fetch_webpage_max_output_chars`. Shared settings: `domain_denylist`. ~300 lines. ([feasibility](feasibility/moderate-tools.md#fetch_webpage--feasibility-moderate-))
+- [ ] `web_search` — DuckDuckGo HTML scraping via native `DOMParser`, `obsidian.requestUrl()` POST, `utils.isDomainBlocked()`, helpers (`cleanDDGUrl`, `parseDDGResults`). Per-extension settings: `web_search_timeout`, `web_search_default_num_results`. Shared settings: `domain_denylist`. ~200 lines. ([feasibility](feasibility/moderate-tools.md#web_search--feasibility-moderate-))
+- [ ] `read_file` — binary detection, `utils.detectMediaFormat()`, `utils.processImage()`, `utils.processPdf()`, `libs.fs`. Per-extension settings: `image_max_dimension`, `image_compression_quality`, `pdf_prefer_native`, `pdf_text_max_chars`, `pdf_native_max_size_mb`. Verify `UserToolAdapter` correctly forwards `content_blocks` in return value. ~200 lines. ([feasibility](feasibility/moderate-tools.md#read_file--feasibility-moderate-))
+- [ ] `read_docx` — `libs.mammoth` with image extraction callback (~45 lines callback), `libs.crypto` for MD5 dedup, `libs.Turndown` with custom image rule. ~200 lines. ([feasibility](feasibility/moderate-tools.md#read_docx--feasibility-moderate-))
 
 ### 4.2 Complex tools — large scaffolds with utility delegation
 
-These are the largest scaffolds. Feasible only because infrastructure logic was extracted to `utils` in Phase 1.6.
+These are the largest scaffolds. Feasible only because infrastructure logic was extracted to `utils` in Phase 1.6. See [feasibility/complex-tools.md](feasibility/complex-tools.md) for detailed dependency tables, pipeline breakdowns, and scaffold outlines.
 
-- [ ] `extract_docx_comments` — `libs.PizZip` for ZIP extraction, `utils.docxComments` for all parsing/threading/formatting, `utils.ensureDirectoryExists()`. Scaffold handles I/O orchestration only. ~200 lines.
-- [ ] `write_docx` — `libs.marked.lexer()` tokenization, `libs.docx` block generation, `utils.resolveImageForDocx()` and `utils.graftDocxIntoTemplate()` for infrastructure. Inlines `renderInline()`, `buildDocxChildren()`, `collectImageHrefs()`, `scaleImageDimensions()` as local functions (customization points). Per-extension settings: `write_docx_default_output_dir`, `write_docx_default_template_path`. ~500-550 lines — largest scaffold.
+- [ ] `extract_docx_comments` — `libs.PizZip` for ZIP extraction, `utils.docxComments` for all parsing/threading/formatting, `utils.ensureDirectoryExists()`. Scaffold handles I/O orchestration only. ~200 lines. ([feasibility](feasibility/complex-tools.md#extract_docx_comments--feasibility-high-complexity-viable-with-utils-expansion-))
+- [ ] `write_docx` — `libs.marked.lexer()` tokenization, `libs.docx` block generation, `utils.resolveImageForDocx()` and `utils.graftDocxIntoTemplate()` for infrastructure. Inlines `renderInline()`, `buildDocxChildren()`, `collectImageHrefs()`, `scaleImageDimensions()` as local functions (customization points). Per-extension settings: `write_docx_default_output_dir`, `write_docx_default_template_path`. ~500-550 lines — largest scaffold. ([feasibility](feasibility/complex-tools.md#write_docx--feasibility-high-complexity-viable-with-utils-expansion-))
 
 ---
 
