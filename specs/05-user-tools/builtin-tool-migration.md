@@ -73,32 +73,46 @@ When `ExtensionManager.reload()` discovers that a built-in tool has no correspon
 4. Scaffold tools are marked with `isScaffold: true` on the `UserToolDefinition` and wrapped in `UserToolAdapter` using the pre-compiled function (no runtime Sucrase transform — see D-7)
 5. If a vault file exists with the same name as a scaffold, the vault file wins (discovered tools take precedence over scaffold fallbacks)
 
-### D-2: Migrate tool-relevant plugin settings to shared settings
+### D-2: Migrate tool settings into the extension settings system (hybrid)
 
-Several built-in tools directly reference `NotorSettings` fields: fetch timeouts, domain denylist, image processing options, docx output directory, PDF settings, allowed paths, etc. Rather than exposing the internal `NotorSettings` object through the extension API, these settings are migrated into the shared settings system (`notor/settings.md`) so scaffolds access them via the standard `shared` channel defined in `design/user-defined-tools.md`.
+Several built-in tools directly reference `NotorSettings` fields. These settings are migrated into the extension settings system using both channels defined in `design/user-defined-tools.md`: per-extension `settings` for single-tool fields, and global `shared` for cross-tool fields.
 
-**Settings to migrate (~10 fields):**
-- `fetch_timeout`, `fetch_max_size`, `domain_denylist` (fetch_webpage, web_search)
-- `image_max_dimension`, `image_compression_quality` (read_file)
-- `pdf_processing_mode` (read_file)
-- `allowed_paths` (read_file, write_file, replace_in_file)
-- `docx_output_dir` (write_docx)
+**Per-extension `settings`** (declared in each scaffold's YAML fence):
 
-**Why shared settings:** The design doc defines two settings channels — per-extension `settings` and global `shared` settings. An alternative approach of exposing `utils.pluginSettings` was considered but rejected because it would introduce a third settings channel exposing an opaque internal object. Migrating to the existing `shared` channel stays within the design's model, makes the settings visible and editable by users, and avoids type erasure (shared settings have schemas).
+| Tool | Settings fields |
+|---|---|
+| `fetch_webpage` | `fetch_webpage_timeout`, `fetch_webpage_max_download_mb`, `fetch_webpage_max_output_chars` |
+| `web_search` | `web_search_timeout`, `web_search_default_num_results` |
+| `execute_command` | `execute_command_allowed_paths`, `execute_command_timeout`, `execute_command_max_output_chars` |
+| `read_file` | `image_max_dimension`, `image_compression_quality`, `pdf_prefer_native`, `pdf_text_max_chars`, `pdf_native_max_size_mb` |
+| `write_docx` | `write_docx_default_output_dir`, `write_docx_default_template_path` |
 
-**Impact on plugin code:** The plugin's own code that reads these settings (e.g., `this.settings.fetch_timeout`) should be updated to read from the shared settings store, or the shared settings store should be initialized from the plugin settings on boot. The migration can be done incrementally — scaffold code reads from `shared`, and a compatibility layer populates `shared` from existing `NotorSettings` fields during startup.
+**`shared` settings** (cross-tool, declared via built-in shared settings scaffold — see D-8):
 
-### D-3: Node.js modules via `require()` in extension code
+| Setting | Used by |
+|---|---|
+| `domain_denylist` | fetch_webpage, web_search |
+| `read_file_allowed_paths` | read_file, write_file, replace_in_file, read_docx, write_docx, extract_docx_comments |
 
-Tools that access the filesystem (`read_file`, `write_file`, `replace_in_file`, `read_docx`, `write_docx`, `extract_docx_comments`) import `fs` and `crypto` from Node.js. In the extension runtime (compiled via `AsyncFunction`), these are accessed via `require()`:
+**Settings-free tools:** read_note, write_note, replace_in_note, search_vault, list_vault, read_frontmatter, update_frontmatter, manage_tags, move_note, get_backlinks, get_outlinks — these reference zero `NotorSettings` fields and migrate without any settings plumbing.
+
+**Why hybrid:** The design doc defines two settings channels — per-extension `settings` and global `shared` settings. Using per-extension for single-tool fields keeps settings co-located with the tool that owns them. Using `shared` for cross-tool fields (`domain_denylist` shared by 2 tools, `read_file_allowed_paths` shared by 6 tools) avoids duplication. An alternative of exposing `utils.pluginSettings` was considered but rejected — it would introduce a read-only third channel outside the extension settings model.
+
+**Data migration:** On first boot after update, detect old `NotorSettings` fields, copy values to new extension settings storage (`user_extension_settings` / `user_shared_settings`), clear old fields, and show an Obsidian Notice: "Tool settings have moved to the Extensions section in Settings." The old plugin settings UI sections for these fields are removed — they now render in the extension settings UI via each scaffold's `settingsSchema`.
+
+**Note on `active_provider`:** The `read_file` tool passes `this.settings.active_provider` to `processPdf()` for provider-dependent PDF handling. Rather than exposing this as a setting, `utils.processPdf` reads `active_provider` internally from the plugin instance (see runtime-context.ts changes). Scaffold code calls `utils.processPdf(buffer, { pages, maxTextChars, preferNative })` without needing to know the active provider.
+
+### D-3: Node.js modules via `libs` object
+
+Tools that access the filesystem (`read_file`, `write_file`, `replace_in_file`, `read_docx`, `write_docx`, `extract_docx_comments`) import `fs` and `crypto` from Node.js. These are exposed through the `libs` object alongside other bundled libraries:
 
 ```ts
-const fs = require("fs");
-const crypto = require("crypto");
-const path = require("path");
+libs.fs      // Node.js fs module
+libs.crypto  // Node.js crypto module
+libs.path    // Node.js path module
 ```
 
-**Why not add to `libs`:** Adding `fs`/`crypto`/`path` to `buildLibs()` would change the public API surface and require updating `ExtensionLibs` type. Using `require()` is standard in Electron and matches how any user-authored extension would access Node.js APIs. No runtime-context changes needed.
+**Why `libs` over `require()`:** Using `require()` would work in Electron today but is fragile — if Obsidian moves toward ESM-only or renderer sandboxing, `require()` calls break. Exposing via `libs` makes the dependency explicit and controllable. The `ExtensionLibs` type grows by 3 entries, which is a small API surface change for better forward-compatibility.
 
 ### D-4: Error handling pattern in extension code
 
@@ -123,19 +137,21 @@ This is cleaner than constructing `ToolResult` objects manually and matches how 
 
 This fix was applied in commit `a968826`. Both `openLinkText` calls in `src/settings/sections/extensions.ts` (lines 124 and 155) already pass the third `true` argument. No changes needed.
 
-### D-7: Pre-compile scaffold code at build time
+### ~~D-7: Pre-compile scaffold code at build time~~ (removed)
 
-Scaffold code blocks contain TypeScript that must be stripped before execution. Rather than running Sucrase at runtime on every `reload()`, an esbuild plugin pre-compiles the scaffold code during the build. The bundle embeds pre-stripped JavaScript strings.
+Scaffold code blocks use runtime Sucrase compilation, the same path as user vault files. Sucrase transforms ~1M lines/sec; all 20 scaffolds together add <5ms to boot. A custom esbuild plugin for pre-compilation was considered but rejected — the complexity (build plugin, `preCompiledCode` field, fallback logic) is not justified by the negligible performance gain. If profiling later shows boot time is a problem, pre-compilation can be added as a follow-up.
+
+### D-8: Built-in shared settings scaffold
+
+For the two `shared` settings (`domain_denylist`, `read_file_allowed_paths`), the extension manager provides a default shared settings schema when no `notor/settings.md` exists in the vault. This parallels how scaffold tools are provided when no vault tool files exist.
 
 **How it works:**
-1. An esbuild plugin scans `builtin-tool-scaffolds.ts` during the build
-2. For each scaffold code block, it runs Sucrase `transform()` to strip TypeScript annotations
-3. The resulting JavaScript is embedded in the scaffold's `preCompiledCode` field
-4. At runtime, `reload()` creates `AsyncFunction` directly from the pre-compiled JS — no Sucrase needed
+1. `ExtensionManager.reload()` checks if `discoverExtensions()` found a shared settings file
+2. If not, it loads a built-in shared settings schema from a constant (analogous to `BUILTIN_TOOL_SCAFFOLDS`)
+3. The built-in schema declares `domain_denylist` (type: `string[]`) and `read_file_allowed_paths` (type: `string[]`) with appropriate defaults
+4. If a user-authored `notor/settings.md` exists, it takes precedence (same "vault file wins" semantics as tool scaffolds)
 
-**Why:** 20 scaffold tools (some 600+ lines like `write_docx`) add unnecessary latency if compiled via Sucrase on every plugin boot. Since scaffold content is static within a plugin version, the compilation result is deterministic and can be computed once at build time. This aligns with the design doc's pipeline step 6 ("Cache — store compiled function").
-
-**Fallback:** If `preCompiledCode` is absent (e.g., development mode), fall back to runtime Sucrase compilation.
+This ensures the two cross-tool settings are always available in the `shared` object, even without a user-created settings file.
 
 ---
 
@@ -163,15 +179,13 @@ ${code}
 \`\`\`
 ```
 
-**`BuiltinToolScaffold` type addition:**
+**`BuiltinToolScaffold` type** (unchanged from current, no `preCompiledCode` — runtime Sucrase handles compilation):
 ```ts
 export interface BuiltinToolScaffold {
   name: string;
   description: string;
   mode: "read" | "write";
   scaffoldContent: string;
-  /** Pre-compiled JS (Sucrase-stripped at build time via D-7). */
-  preCompiledCode?: string;
 }
 ```
 
@@ -185,9 +199,10 @@ export interface BuiltinToolScaffold {
 | `this.staleTracker` | `utils.staleTracker` |
 | `this.noteOpener` | `utils.noteOpener` |
 | `this.checkpointManager` | `utils.checkpointManager` |
-| `this.settings` | `shared` (shared settings channel — see D-2) |
+| `this.settings.{field}` (single-tool) | `settings.{field}` (per-extension settings — see D-2) |
+| `this.settings.{field}` (cross-tool) | `shared.{field}` (shared settings — see D-2) |
 | `resolveNote(p, vault, mc)` | `utils.resolveNote(p)` |
-| `resolveAndValidatePath(p, root, allowed)` | `utils.resolveAndValidatePath(p)` |
+| `resolveAndValidatePath(p, root, allowed)` | `utils.resolveAndValidatePath(p)` (default allowed paths) or `utils.resolveAndValidatePath(p, settings.allowed_paths)` (per-extension paths, e.g. execute_command) |
 | `executeShellCommand(cmd, settings, opts)` | `utils.executeShellCommand(cmd, opts)` |
 | `logger("ToolName")` | `utils.logger("tool_name")` |
 | `getFrontMatterInfo` | `obsidian.getFrontMatterInfo` |
@@ -197,8 +212,9 @@ export interface BuiltinToolScaffold {
 | `mammoth` / `PizZip` / `docx` / etc. | `libs.mammoth` / `libs.PizZip` / `libs.docx` / etc. |
 | `TurndownService` / `gfm` | `libs.Turndown` / `libs.turndownGfm.gfm` |
 | `marked` / `xmldom` | `libs.marked` / `libs.xmldom` |
-| `import * as fs from "fs"` | `const fs = require("fs")` |
-| `import * as crypto from "crypto"` | `const crypto = require("crypto")` |
+| `import * as fs from "fs"` | `libs.fs` |
+| `import * as crypto from "crypto"` | `libs.crypto` |
+| `import * as path from "path"` | `libs.path` |
 | `return { success: false, error }` | `throw new Error(message)` |
 | `return { success: true, result: val }` | `return val` |
 | Private helper methods | Local `function` declarations in code block |
@@ -211,7 +227,7 @@ export interface BuiltinToolScaffold {
 | Medium | `read_note`, `write_note`, `replace_in_note`, `manage_tags`, `move_note`, `list_vault`, `execute_command`, `replace_in_file` | 80-200 |
 | Complex | `search_vault`, `fetch_webpage`, `web_search`, `read_file`, `read_docx`, `write_docx`, `extract_docx_comments` | 200-600 |
 
-### `src/extensions/runtime-context.ts` — Add media utilities and `Platform`
+### `src/extensions/runtime-context.ts` — Add media utilities, Node.js modules, and `Platform`
 
 ```ts
 // In ExtensionUtils interface:
@@ -219,22 +235,32 @@ export interface BuiltinToolScaffold {
 detectMediaFormat: (buffer: Buffer) => "png" | "jpeg" | "gif" | "webp" | "pdf" | null;
 /** Process an image buffer for LLM consumption (resize, compress). */
 processImage: (buffer: Buffer, mediaType: ImageMediaType, options?: { maxDimension?: number; compressionQuality?: number }) => Promise<ContentBlock>;
-/** Process a PDF buffer for LLM consumption. */
-processPdf: (buffer: Buffer, options: PdfProcessorOptions) => Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>;
+/** Process a PDF buffer for LLM consumption. Reads active_provider internally. */
+processPdf: (buffer: Buffer, options: { pages?: string; maxTextChars?: number; preferNative?: boolean }) => Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>;
 
 // In buildUtils():
 detectMediaFormat,
 processImage,
-processPdf,
+processPdf: (buffer, options) => processPdf(buffer, { ...options, providerType: plugin.settings.active_provider }),
 ```
 
-Also add `Platform` to `buildObsidianExports()` (needed by `execute_command` scaffold for desktop-only guard):
+Note: `utils.processPdf` wraps the underlying `processPdf` function, injecting `active_provider` from the plugin instance. Scaffold code does not need to know about the active provider — it calls `utils.processPdf(buffer, { pages, maxTextChars, preferNative })`.
+
+Add `Platform` to `buildObsidianExports()` (needed by `execute_command` scaffold for desktop-only guard):
 ```ts
 // In buildObsidianExports():
 Platform,
 ```
 
-~15 lines changed. No `pluginSettings` field needed — scaffolds use the `shared` settings channel (D-2).
+Add Node.js modules to `buildLibs()` (see D-3):
+```ts
+// In ExtensionLibs interface and buildLibs():
+fs: typeof import("fs");
+crypto: typeof import("crypto");
+path: typeof import("path");
+```
+
+~25 lines changed.
 
 ### `src/extensions/manager.ts` — Scaffold fallback in reload pipeline
 
@@ -266,10 +292,7 @@ for (const [name, scaffold] of BUILTIN_TOOL_SCAFFOLDS) {
     if ("name" in parsed && "mode" in parsed) {
         const toolDef = parsed as UserToolDefinition;
         toolDef.isScaffold = true;
-        // Use pre-compiled function from build step (D-7); fall back to runtime Sucrase
-        if (scaffold.preCompiledCode) {
-            toolDef.compiledFn = new AsyncFunction(...argNames, scaffold.preCompiledCode);
-        }
+        // Compiled via runtime Sucrase in the same pipeline as user vault files
         discovered.tools.push(toolDef);
     }
 }
@@ -365,7 +388,7 @@ for (const [name, tool] of compiledTools) {
 | `get_backlinks` | Iterate `app.metadataCache.resolvedLinks` reverse-lookup. ~35 lines. |
 | `get_outlinks` | Read `resolvedLinks[path]` + `unresolvedLinks[path]`. Two-section markdown output. ~40 lines. |
 | `update_frontmatter` | Uses `app.fileManager.processFrontMatter()`. Checkpoint creation. ~60 lines. |
-| `write_file` | Uses `require("fs").promises.writeFile()`. Path validation via `utils.resolveAndValidatePath()`. ~50 lines. |
+| `write_file` | Uses `libs.fs.promises.writeFile()`. Path validation via `utils.resolveAndValidatePath()`. ~50 lines. |
 
 ### Medium tools
 
@@ -378,17 +401,17 @@ for (const [name, tool] of compiledTools) {
 | `move_note` | `app.fileManager.renameFile()` for auto link-updating. Optional alias insertion. Helper: `ensureDirectoryExists()`, `normaliseAliases()`. ~120 lines. |
 | `list_vault` | Enumerate via `app.vault.getFiles()` / `getAbstractFileByPath()`. Helpers: `collectItems`, `classifyFile`, `sortItems`. Pagination. ~160 lines. |
 | `execute_command` | `utils.executeShellCommand()` already wraps settings. Path validation for working dir. Platform guard via `Platform.isDesktopApp`. ~80 lines. Need to import `Platform` from obsidian — add to `buildObsidianExports()`. |
-| `replace_in_file` | `require("fs")` for read/write. Binary detection (null-byte scan). Atomic in-memory search/replace. ~120 lines. |
+| `replace_in_file` | `libs.fs` for read/write. Binary detection (null-byte scan). Atomic in-memory search/replace. ~120 lines. |
 
 ### Complex tools
 
 | Tool | Key adaptation notes |
 |---|---|
 | `search_vault` | Three helpers: `getCandidateFiles()`, `searchFile()`, `sortFileResults()` + `matchesGlob()`, `getBacklinkCounts()`. Regex with `/gm` flag, `lastIndex` reset between files. ~250 lines. |
-| `fetch_webpage` | `obsidian.requestUrl()`. Turndown instance with GFM plugin + custom rules (strip nav/footer). `shared` for timeout, size caps, denylist. Helpers: `isDomainBlocked()`, `getNetErrorHint()`. ~300 lines. |
-| `web_search` | DuckDuckGo HTML scraping via `DOMParser`. `obsidian.requestUrl()` POST. Helpers: `cleanDDGUrl()`, `parseDDGResults()`. Domain denylist filtering. ~200 lines. |
-| `read_file` | Binary detection, media format detection (magic bytes), image processing pipeline, PDF processing. `require("fs")`. `shared` for image/PDF settings. ~200 lines. |
-| `read_docx` | `libs.mammoth` conversion with image extraction callback. `require("crypto")` for MD5 dedup. Custom Turndown rule for images. ~200 lines. |
+| `fetch_webpage` | `obsidian.requestUrl()`. Turndown instance with GFM plugin + custom rules (strip nav/footer). `settings` for timeout/size caps, `shared` for denylist. Helpers: `isDomainBlocked()`, `getNetErrorHint()`. ~300 lines. |
+| `web_search` | DuckDuckGo HTML scraping via `DOMParser`. `obsidian.requestUrl()` POST. Helpers: `cleanDDGUrl()`, `parseDDGResults()`. `settings` for timeout/num_results, `shared` for denylist. ~200 lines. |
+| `read_file` | Binary detection, media format detection (magic bytes), image processing pipeline, PDF processing. `libs.fs`. `settings` for image/PDF options. ~200 lines. |
+| `read_docx` | `libs.mammoth` conversion with image extraction callback. `libs.crypto` for MD5 dedup. Custom Turndown rule for images. ~200 lines. |
 | `write_docx` | `libs.marked.lexer()` tokenization → `libs.docx` block generation. Template grafting via `libs.PizZip` + `libs.xmldom`. Helpers: `renderInline()`, `buildDocxChildren()`, `graftIntoTemplate()`, image resolution. ~600 lines. |
 | `extract_docx_comments` | `libs.PizZip` for XML extraction. Comment threading, resolved filtering, `@mention` resolution. Idempotent append. ~300 lines. |
 
@@ -403,10 +426,10 @@ The `read_file` tool references image/PDF processing utilities from `src/media/`
 ```ts
 utils.detectMediaFormat: (buffer: Buffer) => "png" | "jpeg" | "gif" | "webp" | "pdf" | null
 utils.processImage: (buffer: Buffer, mediaType: ImageMediaType, options?: { maxDimension?: number; compressionQuality?: number }) => Promise<ContentBlock>
-utils.processPdf: (buffer: Buffer, options: PdfProcessorOptions) => Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>
+utils.processPdf: (buffer: Buffer, options: { pages?: string; maxTextChars?: number; preferNative?: boolean }) => Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>
 ```
 
-Note: `processPdf` returns `{ contentBlocks, textSummary }`, not a single `ContentBlock`. The `read_file` scaffold must handle the real return shape.
+Note: `utils.processPdf` wraps the underlying `processPdf` function and injects `active_provider` from the plugin instance internally. Scaffold code does not need to pass the provider type. `processPdf` returns `{ contentBlocks, textSummary }`, not a single `ContentBlock` — the `read_file` scaffold must handle the real return shape.
 
 This avoids duplicating ~200 lines of media processing code in the scaffold and keeps it maintainable. The `read_file` scaffold would then be ~100 lines instead of ~300.
 
@@ -414,10 +437,10 @@ This avoids duplicating ~200 lines of media processing code in the scaffold and 
 
 ## Risk Assessment
 
-### R-1: ~~Compilation performance on boot~~ (mitigated by D-7)
+### R-1: Compilation performance on boot
 
 **Risk:** Compiling 20 tools via Sucrase + AsyncFunction on every plugin load adds latency.
-**Mitigation:** D-7 pre-compiles scaffold code at build time. Only `AsyncFunction` construction runs at boot (fast). User vault files still use runtime Sucrase, but those are 0-few files, not 20.
+**Mitigation:** Sucrase transforms ~1M lines/sec. All 20 scaffolds together are <5ms. Log the timing during implementation to verify. If profiling later shows this is a bottleneck, build-time pre-compilation can be added as a follow-up.
 
 ### R-2: Scaffold code correctness
 
