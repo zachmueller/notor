@@ -413,10 +413,10 @@ async function testExtensionManagerState(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	// We expect 2 valid tools (echo + error), 2 automations, and shared settings.
+	// We expect 2 user vault tools (echo + error) + 20 scaffold built-in tools = 22 total.
 	// The broken tool should be excluded from tools but we get 3 files discovered;
-	// only 2 compile successfully.
-	const toolsOk = state.toolCount === 2;
+	// only 2 user tools compile successfully, plus all 20 scaffolds.
+	const toolsOk = state.toolCount === 22;
 	const automationsOk = state.automationCount === 2;
 	const sharedOk = state.hasSharedSettings;
 
@@ -430,7 +430,7 @@ async function testExtensionManagerState(ctx: TestContext): Promise<void> {
 	} else {
 		ctx.fail(
 			"Extension manager state",
-			`Expected 2 tools, 2 automations, sharedSettings=true. ` +
+			`Expected 22 tools (2 user + 20 scaffolds), 2 automations, sharedSettings=true. ` +
 				`Got tools=${state.toolCount} (${state.toolNames.join(", ")}), ` +
 				`automations=${state.automationCount}, sharedSettings=${state.hasSharedSettings}`,
 			shot,
@@ -541,7 +541,7 @@ async function testBrokenExtensionSkipped(ctx: TestContext): Promise<void> {
 	}
 
 	const hasBroken = state.toolNames.includes("e2e_broken_tool");
-	if (!hasBroken && state.toolCount === 2) {
+	if (!hasBroken && state.toolCount === 22) {
 		ctx.pass(
 			"Broken extension skipped",
 			`e2e_broken_tool not in compiled tools. ` +
@@ -551,7 +551,7 @@ async function testBrokenExtensionSkipped(ctx: TestContext): Promise<void> {
 	} else {
 		ctx.fail(
 			"Broken extension skipped",
-			`Expected e2e_broken_tool absent and 2 compiled tools. ` +
+			`Expected e2e_broken_tool absent and 22 compiled tools (2 user + 20 scaffolds). ` +
 				`Got broken=${hasBroken}, count=${state.toolCount}, names=[${state.toolNames.join(", ")}]`,
 			shot,
 		);
@@ -679,8 +679,8 @@ async function testExtensionReload(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	// Verify reload returned same counts as initial discovery
-	if (reloadResult.toolCount === 2 && reloadResult.automationCount === 2) {
+	// Verify reload returned same counts as initial discovery (2 user + 20 scaffolds = 22)
+	if (reloadResult.toolCount === 22 && reloadResult.automationCount === 2) {
 		ctx.pass(
 			"Extension reload",
 			`Reload: ${reloadResult.toolCount} tools, ${reloadResult.automationCount} automations, ` +
@@ -1043,7 +1043,7 @@ async function testScaffoldToolInvocation(ctx: TestContext): Promise<void> {
 		if (!tool) return { error: "read_frontmatter not found in registry" };
 
 		try {
-			const toolResult = await tool.execute({ note_path: "notor/tools/echo-test.md" });
+			const toolResult = await tool.execute({ path: "notor/tools/echo-test.md" });
 			return {
 				success: toolResult.success,
 				result: typeof toolResult.result === "string"
