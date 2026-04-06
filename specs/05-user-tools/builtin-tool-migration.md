@@ -3443,3 +3443,115 @@ params:
 **Notable: no stale tracker / no noteOpener.** Unlike `write_note` and `replace_in_note`, `move_note` does not use the stale content tracker or open the note in the editor after the operation. This is correct — `move_note` doesn't modify note content (it relocates the file and optionally touches frontmatter), so stale tracking is irrelevant. The note isn't opened because a move operation doesn't constitute an "access" that the user needs to see.
 
 **Comparison with spec's complexity estimate:** The spec classifies `move_note` as "Medium" at 80-280 lines and estimates ~120 lines. The scaffold is ~75 lines — below estimate. This is because the tool's logic is procedurally straightforward: validate → resolve → guard → checkpoint → mkdir → rename → optional alias. No loops over content, no external API calls, no settings. The two inlined helpers add ~25 lines but both are simple. Structurally simpler than `write_note` (no create-vs-update branching, no frontmatter preservation, no stale tracking) and comparable to `manage_tags` in overall complexity.
+
+### `read_note` — Feasibility: Trivial ✅
+
+**Source:** `src/tools/read-note.ts` (147 lines total, ~85 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param exists and is a string
+2. Resolves note via `resolveNote(path, this.app.vault, this.app.metadataCache)`
+3. Guards against non-markdown files (`file.extension !== "md"`)
+4. Reads full content via `this.app.vault.read(file)` (not `cachedRead`, since the result feeds the stale tracker)
+5. Strips YAML frontmatter by default using `getFrontMatterInfo(fullContent)` — trims the leading `\n` after the closing `---`
+6. Records the **full** content (not stripped) to `this.staleTracker.recordRead(file.path, fullContent)` using the canonical `file.path` so write tools can detect concurrent edits regardless of input path spelling
+7. Opens the note in the editor via `this.noteOpener?.openNote(file.path)` if configured (`open_notes_on_access` setting)
+8. Returns the (possibly stripped) content string
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.vault.read(file)` | `app.vault.read(file)` | ✅ |
+| `resolveNote(path, vault, metadataCache)` | `utils.resolveNote(path)` | ✅ |
+| `getFrontMatterInfo(content)` | `obsidian.getFrontMatterInfo(content)` | ✅ |
+| `this.staleTracker.recordRead(path, content)` | `utils.staleTracker.recordRead(path, content)` | ✅ |
+| `this.noteOpener?.openNote(path)` | `utils.noteOpener.openNote(path)` | ✅ |
+| `logger("ReadNoteTool")` | `utils.logger("read_note")` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed. The `open_notes_on_access` setting controls the `NoteOpener` instance's `enabled` flag, which is already resolved when `utils.noteOpener` is constructed in `runtime-context.ts` — scaffold code does not need to read it.
+
+**Return value mapping:**
+- The built-in returns a plain-text string as `result`. In the scaffold, returning a string directly is handled by `UserToolAdapter.execute()` — `typeof returnValue === "string"` passes through as-is into `{ success: true, result: string }`.
+- For errors, the scaffold throws (adapter catches and wraps in `{ success: false, error }`).
+
+**Scaffold code (estimated ~35 lines):**
+```ts
+const log = utils.logger("read_note");
+
+if (!params.path || typeof params.path !== "string") {
+  throw new Error("Missing required parameter: path");
+}
+
+log.debug("Reading note", { path: params.path, includeFrontmatter: params.include_frontmatter });
+
+const file = utils.resolveNote(params.path);
+if (!file) throw new Error(`Note not found: ${params.path}`);
+
+// Only allow markdown files
+if (file.extension !== "md") {
+  throw new Error(`Path is not a Markdown note: ${params.path}`);
+}
+
+// Use vault.read (not cachedRead) since we'll track for write operations
+const fullContent = await app.vault.read(file);
+
+let returnContent: string;
+
+if (params.include_frontmatter) {
+  returnContent = fullContent;
+} else {
+  const fmInfo = obsidian.getFrontMatterInfo(fullContent);
+  if (fmInfo.exists) {
+    // Strip frontmatter — trim the leading newline after the closing ---
+    returnContent = fullContent.slice(fmInfo.contentStart).replace(/^\n/, "");
+  } else {
+    returnContent = fullContent;
+  }
+}
+
+// Record full content (not stripped) so write tools can compare against actual file state.
+// Use file.path (canonical) so stale checks work regardless of input spelling.
+utils.staleTracker.recordRead(file.path, fullContent);
+
+// Open the note in the editor if configured
+await utils.noteOpener.openNote(file.path);
+
+log.debug("Read note successfully", { path: params.path, contentLength: returnContent.length });
+
+return returnContent;
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed in the extension runtime: `resolveNote`, `staleTracker`, `noteOpener`, `logger`.
+
+**`obsidian` imports needed:** `getFrontMatterInfo` — already exposed via `buildObsidianExports()` in `runtime-context.ts`.
+
+**No `libs` needed.** No external libraries, no Node.js modules.
+
+**No settings migration needed.** This tool references zero `NotorSettings` fields. No per-extension `settings:` section in the YAML fence, no shared settings.
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the note relative to vault root. The '.md' extension is optional."
+    path_namespace: vault
+  include_frontmatter:
+    type: boolean
+    description: "Whether to include YAML frontmatter in the returned content."
+    default: false
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence. The existing YAML fence content is already correct.
+
+**Risk:** Effectively zero. This is a direct 1:1 port of the class logic with no edge cases or ambiguity. Every dependency is already exposed.
+
+**Notable: stale tracker records full content, not stripped.** The scaffold must record `fullContent` (before frontmatter stripping) to `utils.staleTracker.recordRead()`, not `returnContent`. This matches the built-in's behavior — write tools compare against the actual on-disk file state, which includes frontmatter. This is called out explicitly in the scaffold code comments to prevent users who customize the tool from accidentally recording the stripped content instead.
+
+**Notable: `noteOpener` is not optional-chained.** The built-in class uses `this.noteOpener?.openNote()` because the constructor accepts `noteOpener?: NoteOpener` (optional — undefined in unit tests). In the extension runtime, `utils.noteOpener` is always defined (constructed in `runtime-context.ts:81`). The `openNote()` method internally checks its `enabled` flag and no-ops when `open_notes_on_access` is false. No optional chaining needed in the scaffold.
+
+**Notable: `vault.read()` not `cachedRead()`.** The built-in explicitly uses `vault.read()` rather than `vault.cachedRead()`. The scaffold preserves this choice. The stale tracker needs the true on-disk content, not a potentially stale cache. The code comment in the scaffold calls this out to prevent users from "optimizing" to `cachedRead()`.
+
+**Comparison with spec's complexity estimate:** The spec classifies `read_note` as "Medium" at 80-280 lines and estimates ~60 lines. The scaffold is ~40 lines of logic — below estimate and at the lower bound of the "Medium" tier. This is because `read_note` is procedurally linear with no helper functions, no loops, no create-vs-update branching, and no settings. Structurally simpler than other "Medium" tools (`write_note`, `replace_in_note`, `manage_tags`, `move_note`) and closer in complexity to the "Simple" tier (`read_frontmatter`, `get_outlinks`). The "Medium" classification likely reflects its importance to the system (most-used tool, stale tracker integration) rather than raw code complexity.
