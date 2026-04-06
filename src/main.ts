@@ -1593,10 +1593,18 @@ export default class NotorPlugin extends Plugin {
 			// Suppress duplicate Notice — if one is already showing, skip
 			if (this._extensionStaleNotice) return;
 
+			const NOTICE_DURATION_MS = 10_000;
 			const notice = new Notice(
 				"Extension files changed." + (Platform.isDesktop ? "\n(right-click to reload)" : ""),
-				0, // persistent — no auto-dismiss
+				NOTICE_DURATION_MS,
 			);
+
+			// Clear stale reference when the notice auto-dismisses
+			setTimeout(() => {
+				if (this._extensionStaleNotice === notice) {
+					this._extensionStaleNotice = null;
+				}
+			}, NOTICE_DURATION_MS);
 
 			// Left-click: clear reference (Obsidian's default dismisses the Notice)
 			notice.noticeEl.addEventListener("click", () => {

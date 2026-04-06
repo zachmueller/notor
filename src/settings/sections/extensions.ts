@@ -90,6 +90,10 @@ function renderBuiltinToolsSection(
 		cls: "setting-item-description",
 	});
 
+	const toolDefsByName = new Map(
+		manager.getTools().map((t) => [t.name, t]),
+	);
+
 	for (const toolName of builtinNames) {
 		const tool = registry.get(toolName);
 
@@ -172,6 +176,26 @@ function renderBuiltinToolsSection(
 							const msg = e instanceof Error ? e.message : String(e);
 							new Notice(`Failed to create tool file: ${msg}`);
 						}
+					}),
+			);
+		}
+
+		// Inline settings if present
+		const toolDef = toolDefsByName.get(toolName);
+		if (toolDef?.settingsSchema && toolDef.settingsSchema.length > 0) {
+			renderFieldList(containerEl, ctx, toolDef.settingsSchema, {
+				kind: "extension",
+				extensionName: toolName,
+			});
+
+			new Setting(containerEl).addButton((btn) =>
+				btn
+					.setButtonText("Reset to defaults")
+					.setWarning()
+					.onClick(async () => {
+						delete ctx.settings.user_extension_settings[toolName];
+						await ctx.saveSettings();
+						ctx.redisplay();
 					}),
 			);
 		}
