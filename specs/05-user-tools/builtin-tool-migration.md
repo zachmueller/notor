@@ -56,7 +56,7 @@ onload()
 
 All 20 tools run through the same `UserToolAdapter.execute()` pipeline: settings resolution → context injection → compiled function call → ToolResult mapping.
 
-**Boot-timing note:** Between `getToolRegistry()` (registers only `use_subagent`) and `ExtensionManager.reload()` (registers remaining 20 tools), the registry is incomplete. This is safe because `reload()` runs inside `onLayoutReady()` and no chat session can start before layout is ready. The ToolDispatcher is also lazily created after this point.
+**Boot-timing note:** Between `getToolRegistry()` (registers only `use_subagent`) and `ExtensionManager.reload()` (registers remaining 20 tools), the registry is incomplete. This is safe because `reload()` runs inside `onLayoutReady()` and no chat session can start before layout is ready. The ToolDispatcher is created on-demand when the chat orchestrator is first accessed, which in practice always happens after `reload()` completes (reload takes <5ms, and user interaction is required to trigger the orchestrator). This ordering is not architecturally guaranteed, but the race is negligible — no guard is needed.
 
 ## Design Decisions
 
@@ -70,7 +70,7 @@ When `ExtensionManager.reload()` discovers that a built-in tool has no correspon
 1. `discoverExtensions()` returns vault-discovered tools (existing behavior, unchanged)
 2. After discovery, `reload()` iterates `BUILTIN_TOOL_SCAFFOLDS` and checks which names are missing from the discovered set
 3. For each missing scaffold, it constructs a frontmatter object directly from the scaffold metadata (name, description, mode) and passes it to `parseExtensionFile()` along with the scaffold content — no re-parsing of YAML frontmatter needed since the metadata is already structured
-4. Scaffold tools are marked with `isScaffold: true` on the `UserToolDefinition` and wrapped in `UserToolAdapter` using the pre-compiled function (no runtime Sucrase transform — see D-7)
+4. Scaffold tools are marked with `isScaffold: true` on the `UserToolDefinition` and compiled via runtime Sucrase in the same pipeline as user vault files (D-7 pre-compilation was considered but rejected — see ~~D-7~~)
 5. If a vault file exists with the same name as a scaffold, the vault file wins (discovered tools take precedence over scaffold fallbacks)
 
 ### D-2: Migrate tool settings into the extension settings system (hybrid)
@@ -84,7 +84,7 @@ Several built-in tools directly reference `NotorSettings` fields. These settings
 | `fetch_webpage` | `fetch_webpage_timeout`, `fetch_webpage_max_download_mb`, `fetch_webpage_max_output_chars` |
 | `web_search` | `web_search_timeout`, `web_search_default_num_results` |
 | `execute_command` | `execute_command_allowed_paths`, `execute_command_timeout`, `execute_command_max_output_chars` |
-| `read_file` | `image_max_dimension`, `image_compression_quality`, `pdf_prefer_native`, `pdf_text_max_chars`, `pdf_native_max_size_mb` |
+| `read_file` | `image_max_dimension`, `image_compression_quality`, `pdf_prefer_native`, `pdf_text_max_chars`, `pdf_native_max_size_mb` (**bug fix:** this setting exists in `NotorSettings` and has a UI but is currently never passed to `processPdf()` — this migration wires it through) |
 | `write_docx` | `write_docx_default_output_dir`, `write_docx_default_template_path` |
 
 **`shared` settings** (cross-tool, declared via built-in shared settings scaffold — see D-8):
@@ -98,9 +98,46 @@ Several built-in tools directly reference `NotorSettings` fields. These settings
 
 **Why hybrid:** The design doc defines two settings channels — per-extension `settings` and global `shared` settings. Using per-extension for single-tool fields keeps settings co-located with the tool that owns them. Using `shared` for cross-tool fields (`domain_denylist` shared by 2 tools, `read_file_allowed_paths` shared by 6 tools) avoids duplication. An alternative of exposing `utils.pluginSettings` was considered but rejected — it would introduce a read-only third channel outside the extension settings model.
 
-**Data migration:** On first boot after update, detect old `NotorSettings` fields, copy values to new extension settings storage (`user_extension_settings` / `user_shared_settings`), clear old fields, and show an Obsidian Notice: "Tool settings have moved to the Extensions section in Settings." The old plugin settings UI sections for these fields are removed — they now render in the extension settings UI via each scaffold's `settingsSchema`.
+**Data migration:** A one-time migration moves old `NotorSettings` tool fields into the extension settings system. The old plugin settings UI sections for these fields are removed — they now render in the extension settings UI via each scaffold's `settingsSchema`.
 
-**Note on `active_provider`:** The `read_file` tool passes `this.settings.active_provider` to `processPdf()` for provider-dependent PDF handling. Rather than exposing this as a setting, `utils.processPdf` reads `active_provider` internally from the plugin instance (see runtime-context.ts changes). Scaffold code calls `utils.processPdf(buffer, { pages, maxTextChars, preferNative })` without needing to know the active provider.
+**Detection:** Check whether any old tool-specific field exists in `NotorSettings` (e.g., `fetch_webpage_timeout` is present in the loaded data) AND `user_extension_settings` is empty (`{}`). If both conditions hold, run migration. No settings version field is needed.
+
+**Scope:** Unconditional — copy all old field values (including those that match defaults) so every setting appears in the new extension settings UI from the start.
+
+**Atomicity:** Two-phase write to prevent data loss:
+1. Copy all old field values into `user_extension_settings` (per-tool) and `user_shared_settings` (cross-tool). Call `saveSettings()`.
+2. Delete the old fields from `NotorSettings`. Call `saveSettings()` again.
+If the plugin crashes between phase 1 and phase 2, the next boot sees old fields still present but `user_extension_settings` already populated — the detection condition (`user_extension_settings` is empty) is false, so migration does not re-run. The old fields become harmless dead data.
+
+**Downgrade note:** Users who revert to a pre-migration plugin version will lose customized values (old fields are cleared in phase 2). The older version will apply its defaults. This is acceptable.
+
+**Location:** Migration runs inside `loadSettings()` (main.ts) after the `Object.assign()` merge, before returning. Implemented as a private `migrateToolSettingsToExtensions()` method on the plugin class.
+
+**Field mapping:**
+
+| Old `NotorSettings` field | New location | New key |
+|---|---|---|
+| `fetch_webpage_timeout` | `user_extension_settings["fetch_webpage"]` | `fetch_webpage_timeout` |
+| `fetch_webpage_max_download_mb` | `user_extension_settings["fetch_webpage"]` | `fetch_webpage_max_download_mb` |
+| `fetch_webpage_max_output_chars` | `user_extension_settings["fetch_webpage"]` | `fetch_webpage_max_output_chars` |
+| `web_search_timeout` | `user_extension_settings["web_search"]` | `web_search_timeout` |
+| `web_search_default_num_results` | `user_extension_settings["web_search"]` | `web_search_default_num_results` |
+| `execute_command_allowed_paths` | `user_extension_settings["execute_command"]` | `execute_command_allowed_paths` |
+| `execute_command_timeout` | `user_extension_settings["execute_command"]` | `execute_command_timeout` |
+| `execute_command_max_output_chars` | `user_extension_settings["execute_command"]` | `execute_command_max_output_chars` |
+| `image_max_dimension` | `user_extension_settings["read_file"]` | `image_max_dimension` |
+| `image_compression_quality` | `user_extension_settings["read_file"]` | `image_compression_quality` |
+| `pdf_prefer_native` | `user_extension_settings["read_file"]` | `pdf_prefer_native` |
+| `pdf_text_max_chars` | `user_extension_settings["read_file"]` | `pdf_text_max_chars` |
+| `pdf_native_max_size_mb` | `user_extension_settings["read_file"]` | `pdf_native_max_size_mb` |
+| `write_docx_default_output_dir` | `user_extension_settings["write_docx"]` | `write_docx_default_output_dir` |
+| `write_docx_default_template_path` | `user_extension_settings["write_docx"]` | `write_docx_default_template_path` |
+| `domain_denylist` | `user_shared_settings` | `domain_denylist` |
+| `read_file_allowed_paths` | `user_shared_settings` | `read_file_allowed_paths` |
+
+**Notice:** Show `new Notice("Tool settings have been migrated to Extensions in Settings.")` after successful migration.
+
+**Note on `active_provider` and `pdf_native_max_size_mb`:** The `read_file` tool passes `this.settings.active_provider` to `processPdf()` for provider-dependent PDF handling. Rather than exposing these as settings, `utils.processPdf` reads `active_provider` and `pdf_native_max_size_mb` internally from the plugin instance (see runtime-context.ts changes), converting the latter to bytes as `maxNativeSizeBytes`. Scaffold code calls `utils.processPdf(buffer, { pages, maxTextChars, preferNative })` without needing to know the active provider or native size limit. Note: `pdf_native_max_size_mb` exists in `NotorSettings` today but is never actually passed to `processPdf()` — this migration fixes that bug.
 
 ### D-3: Node.js modules via `libs` object
 
@@ -241,10 +278,10 @@ processPdf: (buffer: Buffer, options: { pages?: string; maxTextChars?: number; p
 // In buildUtils():
 detectMediaFormat,
 processImage,
-processPdf: (buffer, options) => processPdf(buffer, { ...options, providerType: plugin.settings.active_provider }),
+processPdf: (buffer, options) => processPdf(buffer, { ...options, providerType: plugin.settings.active_provider, maxNativeSizeBytes: plugin.settings.pdf_native_max_size_mb * 1024 * 1024 }),
 ```
 
-Note: `utils.processPdf` wraps the underlying `processPdf` function, injecting `active_provider` from the plugin instance. Scaffold code does not need to know about the active provider — it calls `utils.processPdf(buffer, { pages, maxTextChars, preferNative })`.
+Note: `utils.processPdf` wraps the underlying `processPdf` function, injecting `active_provider` and `pdf_native_max_size_mb` (converted to bytes as `maxNativeSizeBytes`) from plugin settings. Scaffold code does not need to know about the active provider or the native size limit — it calls `utils.processPdf(buffer, { pages, maxTextChars, preferNative })`.
 
 Add `Platform` to `buildObsidianExports()` (needed by `execute_command` scaffold for desktop-only guard):
 ```ts
@@ -302,13 +339,27 @@ Scaffold-origin tools are marked with `isScaffold: true` on `UserToolDefinition`
 
 **Refactor:** Extract the manual YAML parsing logic from `discovery.ts:parseOneExtensionFile()` (lines 190-206) into a standalone `extractFrontmatter(content, parseYAML)` helper. This cleans up `parseOneExtensionFile()` and provides a reusable utility for future code that needs to parse frontmatter from raw markdown content (e.g., template imports, clipboard paste). Note: the scaffold injection above does NOT use this helper — it constructs frontmatter directly from structured metadata.
 
+### `src/extensions/types.ts` — Add `isScaffold` flag
+
+Add an optional `isScaffold` property to `UserToolDefinition`:
+
+```ts
+export interface UserToolDefinition {
+    // ... existing fields ...
+    /** True when this tool was loaded from a built-in scaffold (no vault file). */
+    isScaffold?: boolean;
+}
+```
+
+This is required for the `toolDef.isScaffold = true` assignment in manager.ts scaffold injection and the `!tool.isScaffold` check in override detection.
+
 ### `src/main.ts` — Remove built-in class registrations
 
 In `getToolRegistry()` (lines 1105-1182):
 - **Remove** all 20 tool class registrations (lines 1115-1156)
-- **Remove** associated imports for tool classes (lines 66-86)
+- **Remove** tool class imports (lines 66-85). Keep line 65 (`ToolRegistry`) and line 86 (`NoteOpener` — still needed by `runtime-context.ts:81` for `utils.noteOpener` and by `getNoteOpener()` in main.ts)
 - **Keep** `UseSubagentTool` registration (lines 1159-1175)
-- **Remove** dependency acquisition for `staleTracker`, `noteOpener`, `checkpointManager` — `UseSubagentTool` doesn't use them
+- **Remove** the lines in `getToolRegistry()` that pass `staleTracker`, `noteOpener`, and `checkpointManager` into tool constructors. The getter methods themselves (`getStaleTracker()`, `getNoteOpener()`, `getCheckpointManager()`) remain — they are used elsewhere in main.ts (conversation lifecycle management, settings save, etc.)
 
 After change:
 ```ts
@@ -372,7 +423,7 @@ for (const [name, tool] of compiledTools) {
 - Add test: `reload()` with empty vault produces 20 scaffold tools
 
 **E2E test** (`e2e/scripts/user-extensions-test.ts`):
-- Scenario 3 ("User tool is registered in ToolRegistry") needs updating — all 20 scaffold tools + `use_subagent` should be registered (21 total)
+- Scenario 3 ("User tool is registered in ToolRegistry") needs updating — verify that scaffold-provided tools (e.g., `read_note`, `search_vault`) coexist with user-created test tools in the registry. Assert presence of representative scaffold tools rather than a hard total count (a hard count would break whenever a tool is added or removed)
 - Scenario 12 ("Built-in tool scaffolds API returns all 20 built-in tools") — `BUILTIN_TOOL_SCAFFOLDS` has 20 entries (all non-subagent tools); `use_subagent` was never in the map. No change needed.
 - Scenario 13 ("ensureBuiltinToolVaultFile creates scaffold") — should still work but now the scaffold contains real implementation code
 
@@ -429,7 +480,7 @@ utils.processImage: (buffer: Buffer, mediaType: ImageMediaType, options?: { maxD
 utils.processPdf: (buffer: Buffer, options: { pages?: string; maxTextChars?: number; preferNative?: boolean }) => Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>
 ```
 
-Note: `utils.processPdf` wraps the underlying `processPdf` function and injects `active_provider` from the plugin instance internally. Scaffold code does not need to pass the provider type. `processPdf` returns `{ contentBlocks, textSummary }`, not a single `ContentBlock` — the `read_file` scaffold must handle the real return shape.
+Note: `utils.processPdf` wraps the underlying `processPdf` function and injects `active_provider` and `pdf_native_max_size_mb` (as `maxNativeSizeBytes`, converted to bytes) from plugin settings internally. Scaffold code does not need to pass the provider type or native size limit. `processPdf` returns `{ contentBlocks, textSummary }`, not a single `ContentBlock` — the `read_file` scaffold must handle the real return shape.
 
 This avoids duplicating ~200 lines of media processing code in the scaffold and keeps it maintainable. The `read_file` scaffold would then be ~100 lines instead of ~300.
 
@@ -486,7 +537,7 @@ This avoids duplicating ~200 lines of media processing code in the scaffold and 
 ### E2E tests
 
 - Update `user-extensions-test.ts`:
-  - Scenario 3: verify all 20 scaffold tools + `use_subagent` registered (21 total)
+  - Scenario 3: verify that scaffold-provided tools (e.g., `read_note`, `search_vault`) coexist with user-created test tools in the registry (assert presence of representative scaffolds, not a hard total count)
   - New scenario: invoke a scaffold-provided tool (e.g., `read_note` via LLM) without any vault files
   - Scenario 13: after `ensureBuiltinToolVaultFile("read_note")` + reload, tool still works (now runs vault code, not scaffold)
 
