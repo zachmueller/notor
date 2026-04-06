@@ -990,3 +990,221 @@ return `Applied ${params.changes.length} replacement${params.changes.length > 1 
 ```
 
 **Risk:** Low. This is a direct 1:1 port with no complex helpers, no external library dependencies beyond `fs`, no settings beyond what `utils.resolveAndValidatePath` already handles, and no tricky patterns. The atomic all-or-nothing semantics are purely in-memory sequential logic that translates directly. The only prerequisites are the `Platform` and `libs.fs` runtime expansions that are already planned for other tools (`execute_command` needs `Platform`, `read_file`/`write_file` need `libs.fs`).
+
+### `write_docx` — Feasibility: High complexity, viable with `utils` expansion ✅
+
+**Source:** `src/tools/write-docx.ts` (1,041 lines) + `src/tools/docx-image-utils.ts` (285 lines) = **1,326 lines total**
+
+**What the built-in class does:**
+
+The tool has a multi-stage pipeline:
+
+1. **Input validation** (~80 lines) — Mutually exclusive `content`/`note_name`, desktop-only guard, vault root check
+2. **Content source resolution** (~35 lines) — Resolve note via `resolveNote()`, read via `app.vault.read()`, strip frontmatter via `getFrontMatterInfo()`
+3. **Output path resolution** (~55 lines) — Three-step precedence: `output_path` > (`filename` + `write_docx_default_output_dir`) > error. Path boundary validation. Parent directory existence check.
+4. **Template path resolution** (~45 lines) — Optional `template_path` or settings default. File existence and `.docx` extension validation.
+5. **DOCX generation** (`generateDocx()`, ~65 lines) — `marked.lexer()` tokenization → image pre-resolution in parallel → `buildDocxChildren()` → `new Document()` → `Packer.toBuffer()` → optional template grafting
+6. **Template grafting** (`graftIntoTemplate()`, ~255 lines) — DOM-based XML manipulation via `@xmldom/xmldom`: body content replacement, media file copying with collision-avoidance renaming, `.rels` merging with rId conflict resolution, `[Content_Types].xml` merging
+7. **Image resolution** (`resolveImageForDocx()` in `docx-image-utils.ts`, ~90 lines of core logic) — Vault-relative/absolute path resolution, data URI decoding, magic-byte format detection, dimension parsing from buffer headers, WebP→PNG conversion via Canvas
+8. **Image dimension parsing** (~60 lines) — Format-specific parsers for PNG (IHDR), JPEG (SOF0/SOF2 marker scan), GIF, BMP buffer headers
+9. **Markdown→DOCX rendering** (`renderInline()` + `buildDocxChildren()`, ~230 lines) — Block tokens (heading, paragraph, code, hr, blockquote, list, table) → `docx.Paragraph`/`Table`; inline tokens (text, strong, em, codespan, link) → `TextRun`/`ExternalHyperlink`; standalone image paragraphs → `ImageRun` with scaling
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `Platform` from `"obsidian"` | `obsidian.Platform` | ⚠️ Planned (spec runtime-context.ts changes) |
+| `getFrontMatterInfo` from `"obsidian"` | `obsidian.getFrontMatterInfo` | ✅ |
+| `import * as fs from "fs"` | `libs.fs` | ⚠️ Planned (spec D-3) |
+| `import { join, dirname, extname } from "path"` | `libs.path` | ⚠️ Planned (spec D-3) |
+| `import { marked } from "marked"` | `libs.marked` | ✅ |
+| `import { Document, Packer, Paragraph, ... } from "docx"` | `libs.docx` | ✅ |
+| `import PizZip from "pizzip"` | `libs.PizZip` | ✅ |
+| `import { DOMParser, XMLSerializer } from "@xmldom/xmldom"` | `libs.xmldom` | ✅ |
+| `resolveAndValidatePath(path, vaultRoot, allowedPaths)` | `utils.resolveAndValidatePath(path)` | ✅ |
+| `resolveNote(path, vault, metadataCache)` | `utils.resolveNote(path)` | ✅ |
+| `logger("WriteDocxTool")` | `utils.logger("write_docx")` | ✅ |
+| `resolveImageForDocx(href, vaultRoot, allowedPaths)` | **Not exposed** | ❌ See analysis below |
+
+**Settings:** Per-extension `settings` for `write_docx_default_output_dir` and `write_docx_default_template_path`. Shared `shared` for `read_file_allowed_paths` (consumed implicitly by `utils.resolveAndValidatePath()` as default). Defaults from `src/settings/defaults.ts:191-193`: both empty strings.
+
+**The core question: inline vs. `utils` expansion**
+
+A fully-inlined scaffold would be ~900-1,050 lines. This is significantly larger than any other scaffold (next largest is `extract_docx_comments` at ~300 lines). The spec already flags this as "Complex+" and explicitly calls for evaluating whether additional logic should be exposed via `utils`.
+
+**Analysis of inlining candidates:**
+
+| Component | Lines | Inline? | Rationale |
+|---|---|---|---|
+| `renderInline()` | ~47 | Yes | Core customization point — users may want to adjust inline rendering (e.g., add underline support, custom link handling). Uses `libs.docx` types directly. |
+| `buildDocxChildren()` | ~183 | Yes | Core customization point — users may want to add block types, change code block styling, adjust image handling. This is the heart of what "customizing write_docx" means. |
+| `collectImageHrefs()` | ~35 | Yes | Small, tightly coupled to `buildDocxChildren`. |
+| `scaleImageDimensions()` | ~17 | Yes | Trivial helper. |
+| `generateDocx()` | ~65 | Yes | Orchestrator that ties the pieces together. |
+| `graftIntoTemplate()` | ~255 | **No → `utils`** | Complex DOM-based XML manipulation with rId conflict resolution. Not a customization target — users want to change *what content is generated*, not *how it's grafted into a template*. Exposing as `utils.graftDocxIntoTemplate()` saves ~255 lines and keeps the scaffold focused on the customizable parts. |
+| `resolveImageForDocx()` + helpers | ~285 | **No → `utils`** | Image resolution, format detection, dimension parsing, WebP conversion. This is infrastructure, not a customization target. Only consumed by `write-docx.ts` (confirmed via grep — no other importers). Exposing as `utils.resolveImageForDocx()` saves ~285 lines and avoids duplicating battle-tested image handling code. |
+
+**Recommended `utils` expansions (2 new entries):**
+
+```ts
+// In ExtensionUtils interface:
+
+/** Resolve an image href to data suitable for embedding in a DOCX via ImageRun.
+ *  Handles vault-relative paths, absolute paths, data URIs, format detection,
+ *  dimension parsing, and WebP→PNG conversion. Returns null for unresolvable images. */
+resolveImageForDocx: (href: string, allowedPaths?: string[]) => Promise<DocxImageData | null>;
+
+/** Graft generated DOCX body content into a template, preserving template styles,
+ *  margins, headers, footers, and section properties. Handles media file copying
+ *  with collision avoidance, rId conflict resolution, and Content_Types merging. */
+graftDocxIntoTemplate: (generatedZip: PizZip, templateZip: PizZip) => Promise<void>;
+```
+
+```ts
+// In buildUtils():
+
+resolveImageForDocx: (href: string, allowedPaths?: string[]) =>
+    resolveImageForDocx(href, vaultRootPath, allowedPaths ?? plugin.settings.read_file_allowed_paths),
+
+graftDocxIntoTemplate: graftIntoTemplate,  // direct passthrough — no settings injection needed
+```
+
+The `resolveImageForDocx` wrapper injects `vaultRootPath` and defaults `allowedPaths` to the plugin's `read_file_allowed_paths` — same pattern as `utils.resolveAndValidatePath()`. Scaffold code calls `utils.resolveImageForDocx(href)` without needing the vault root.
+
+The `graftDocxIntoTemplate` is a direct passthrough — the function takes two `PizZip` instances and has no settings dependencies.
+
+**With these expansions, scaffold size drops to ~450-550 lines** — still the largest scaffold but within a manageable range. The scaffold retains all the customizable logic (markdown→docx rendering, image embedding, validation) while delegating the infrastructure (image resolution, template grafting) to `utils`.
+
+**DocxImageData type exposure:** The `DocxImageData` interface (`{ type: "jpg"|"png"|"gif"|"bmp", buffer: Buffer, width: number, height: number }`) is returned by `utils.resolveImageForDocx()` and consumed by scaffold code to construct `ImageRun` objects. Since extension code is untyped at runtime (Sucrase strips types), the scaffold works with the shape directly — no type import needed. However, the interface should be documented in the `ExtensionUtils` JSDoc so users customizing the scaffold know the return shape.
+
+**Helper functions (5 local functions to inline in scaffold):**
+
+1. **`renderInline(tokens)`** (~47 lines) — Converts marked inline tokens to `libs.docx.TextRun`/`ExternalHyperlink`. Straightforward port: `TextRun` → `libs.docx.TextRun`, etc.
+
+2. **`collectImageHrefs(tokens)`** (~35 lines) — Recursive walk of marked token tree collecting image hrefs. Pure logic, no dependencies.
+
+3. **`scaleImageDimensions(w, h)`** (~17 lines) — Scales to fit ~600×800px. Pure math.
+
+4. **`buildDocxChildren(tokens, resolvedImages)`** (~183 lines) — Block token → docx element conversion. The largest inline function. All `docx` library types accessed via `libs.docx.*`.
+
+5. **`generateDocx(content, templatePath)`** (~50 lines, simplified) — Orchestrates: tokenize → collect image hrefs → resolve images via `utils.resolveImageForDocx()` → `buildDocxChildren()` → `new libs.docx.Document()` → `libs.docx.Packer.toBuffer()` → optional `utils.graftDocxIntoTemplate()`. Shorter than the original because template grafting is delegated.
+
+**Tricky patterns:**
+
+1. **Destructured `docx` imports** — The class file imports 12 named exports from `docx` (`Document`, `Packer`, `Paragraph`, `TextRun`, `ImageRun`, `HeadingLevel`, `Table`, `TableRow`, `TableCell`, `ExternalHyperlink`, `AlignmentType`, `WidthType`, `BorderStyle`). In scaffold code, these become `libs.docx.Document`, `libs.docx.Paragraph`, etc. This is verbose but unambiguous. A destructuring shortcut at the top of the scaffold code block keeps it readable:
+   ```ts
+   const { Document, Packer, Paragraph, TextRun, ImageRun, HeadingLevel,
+           Table, TableRow, TableCell, ExternalHyperlink,
+           AlignmentType, WidthType, BorderStyle } = libs.docx;
+   ```
+
+2. **`marked` types** — The class uses `Token`, `Tokens.Heading`, `Tokens.Paragraph`, etc. from `marked` for type-safe token access. After Sucrase strips types, these become plain property accesses (`token.depth`, `token.tokens`, etc.) — no runtime impact. The scaffold code uses the same property access patterns without type annotations.
+
+3. **`PizZip` + `xmldom` in template grafting** — Delegated to `utils.graftDocxIntoTemplate()`, so the scaffold doesn't need to use these directly for grafting. However, the scaffold *does* need `libs.PizZip` to create the `PizZip` instances passed to `utils.graftDocxIntoTemplate()`:
+   ```ts
+   const generatedZip = new libs.PizZip(tempBuffer);
+   const templateBuf = await libs.fs.promises.readFile(resolvedTemplatePath);
+   const templateZip = new libs.PizZip(templateBuf);
+   await utils.graftDocxIntoTemplate(generatedZip, templateZip);
+   return templateZip.generate({ type: "nodebuffer" });
+   ```
+
+4. **`getVaultRootPath()` private helper** — Not needed. `utils.resolveAndValidatePath()` and `utils.resolveImageForDocx()` both handle vault root internally.
+
+**Return value mapping:**
+- Success → return string message (adapter wraps in `{ success: true, result: string }`)
+- Validation failures → throw (adapter wraps in `{ success: false, error }`)
+- The `filenameIgnored` warning is prepended to the success message — same pattern works with `return`.
+
+**Scaffold code (estimated ~500 lines):**
+```ts
+const log = utils.logger("write_docx");
+const { Document, Packer, Paragraph, TextRun, ImageRun, HeadingLevel,
+        Table, TableRow, TableCell, ExternalHyperlink,
+        AlignmentType, WidthType, BorderStyle } = libs.docx;
+
+// --- Param extraction ---
+// ~20 lines: content/note_name/output_path/filename/template_path extraction and validation
+
+// --- Local helpers (inlined) ---
+// renderInline(tokens) — ~47 lines
+// collectImageHrefs(tokens) — ~35 lines
+// scaleImageDimensions(w, h) — ~17 lines
+// buildDocxChildren(tokens, resolvedImages) — ~183 lines
+
+// --- Content source resolution ---
+// ~35 lines: note resolution, frontmatter stripping, empty check
+
+// --- Output path resolution (three-step) ---
+// ~55 lines: output_path > (filename + settings.write_docx_default_output_dir) > error
+
+// --- Template path resolution ---
+// ~30 lines: template_path or settings.write_docx_default_template_path
+
+// --- Generate and write ---
+// ~50 lines: tokenize → resolve images via utils.resolveImageForDocx() →
+//            buildDocxChildren() → Document → Packer.toBuffer() →
+//            optional utils.graftDocxIntoTemplate() → fs.promises.writeFile()
+
+return successMessage;
+```
+
+**YAML fence:**
+```yaml
+params:
+  note_name:
+    type: string
+    description: "Path to an existing vault note to convert. Mutually exclusive with content."
+    path_namespace: vault
+  content:
+    type: string
+    description: "Markdown content to convert. Mutually exclusive with note_name."
+  output_path:
+    type: string
+    description: "Full output path including .docx extension."
+    path_namespace: filesystem
+  filename:
+    type: string
+    description: "Output filename without .docx extension."
+  template_path:
+    type: string
+    description: "Path to a .docx template."
+    path_namespace: filesystem
+settings:
+  write_docx_default_output_dir:
+    name: "Default Output Directory"
+    type: string
+    description: "Default output directory when only filename is provided. Vault-relative or absolute."
+    default: ""
+  write_docx_default_template_path:
+    name: "Default Template Path"
+    type: string
+    description: "Default .docx template path. Vault-relative or absolute."
+    default: ""
+```
+
+**New `utils` expansions required (2):**
+- `utils.resolveImageForDocx(href, allowedPaths?)` — wraps `resolveImageForDocx()` from `src/tools/docx-image-utils.ts`, injecting `vaultRootPath` and defaulting `allowedPaths` to `plugin.settings.read_file_allowed_paths`. Saves ~285 lines of image resolution, format detection, dimension parsing, and WebP conversion from the scaffold.
+- `utils.graftDocxIntoTemplate(generatedZip, templateZip)` — direct passthrough to `graftIntoTemplate()` from `src/tools/write-docx.ts`. Saves ~255 lines of DOM-based XML manipulation, rId conflict resolution, and media file merging.
+
+**Source file refactoring required:** Before the class file can be deleted:
+1. Extract `graftIntoTemplate()` (lines 448-702 of `write-docx.ts`) to a standalone utility file (e.g., `src/docx/template-grafting.ts` or keep in `src/tools/docx-image-utils.ts` renamed to `src/tools/docx-utils.ts`). This function has no class dependencies — it takes two `PizZip` instances and uses only `@xmldom/xmldom`.
+2. `resolveImageForDocx()` already lives in `src/tools/docx-image-utils.ts` — it can stay there, imported by `runtime-context.ts` for the `utils` wrapper.
+
+**Required runtime expansions (already planned in spec + 2 new):**
+- `obsidian.Platform` — add to `buildObsidianExports()` (spec runtime-context.ts changes)
+- `libs.fs` — add to `buildLibs()` (spec D-3)
+- `libs.path` — add to `buildLibs()` (spec D-3)
+- **NEW:** `utils.resolveImageForDocx` — add to `ExtensionUtils` and `buildUtils()`
+- **NEW:** `utils.graftDocxIntoTemplate` — add to `ExtensionUtils` and `buildUtils()`
+
+**Risk: Scaffold size (medium).** At ~500 lines, this is still the largest scaffold by a significant margin. However, the logic is straightforward token-walking and docx library calls — there's no clever branching or state management. The main risk is that a user customizing this scaffold faces a large code surface. Mitigated by clear section comments and the fact that most users will only modify `buildDocxChildren()` or `renderInline()`.
+
+**Risk: `libs.docx` API surface (low).** The scaffold uses 12 named exports from the `docx` library. These are all part of `docx`'s stable public API. Since `libs.docx` exposes the entire module (`typeof import("docx")`), all named exports are accessible. The destructuring pattern at the top of the scaffold makes this clean.
+
+**Risk: `marked` token shape changes (low).** The scaffold relies on `marked.lexer()` producing tokens with specific shapes (`Tokens.Heading.depth`, `Tokens.List.items`, etc.). The `marked` library's token shapes are stable across major versions. Since `libs.marked` is pinned to the bundled version, this is controlled.
+
+**Risk: Template grafting correctness after extraction (low).** `graftIntoTemplate()` is a pure function (takes two `PizZip` instances, mutates the template zip in-place). Moving it to `utils` is a mechanical extract — no logic change. The existing E2E tests for template grafting validate correctness.
+
+**Risk: `resolveImageForDocx` vault root injection (low).** Same pattern as `utils.resolveAndValidatePath()` — the wrapper injects `vaultRootPath` at build time. Well-established pattern.
