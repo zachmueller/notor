@@ -101,6 +101,8 @@ export interface UserToolDefinition {
 	rawCode: string;
 	/** Compiled async function (null until compilation succeeds). */
 	compiledFn: CompiledExtensionFn | null;
+	/** True when this tool was loaded from a built-in scaffold (no vault file). */
+	isScaffold?: boolean;
 }
 
 // ---------------------------------------------------------------------------

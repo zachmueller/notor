@@ -11,55 +11,55 @@ Foundation changes that all subsequent phases depend on. No behavioral changes y
 
 ### 1.1 Add `isScaffold` flag to `UserToolDefinition`
 
-- [ ] Add `isScaffold?: boolean` to `UserToolDefinition` in `src/extensions/types.ts:85-104`
+- [x] Add `isScaffold?: boolean` to `UserToolDefinition` in `src/extensions/types.ts:85-104`
 
 ### 1.2 Expand runtime context — Node.js modules
 
 Adds `fs`, `crypto`, `path` to the extension runtime (D-3). Required by `read_file`, `write_file`, `replace_in_file`, `read_docx`, `write_docx`, `extract_docx_comments`, `execute_command`.
 
-- [ ] Add `fs`, `crypto`, `path` to `ExtensionLibs` interface in `src/extensions/runtime-context.ts:113-123`
-- [ ] Add `fs`, `crypto`, `path` to `buildLibs()` in `src/extensions/runtime-context.ts:131-143`
+- [x] Add `fs`, `crypto`, `path` to `ExtensionLibs` interface in `src/extensions/runtime-context.ts:113-123`
+- [x] Add `fs`, `crypto`, `path` to `buildLibs()` in `src/extensions/runtime-context.ts:131-143`
 
 ### 1.3 Expand runtime context — `Platform` export
 
 Required by `execute_command` and `write_file` scaffolds for the `Platform.isDesktopApp` guard.
 
-- [ ] Add `Platform` to `ExtensionObsidianExports` interface in `src/extensions/runtime-context.ts:150-158`
-- [ ] Add `Platform` to `buildObsidianExports()` in `src/extensions/runtime-context.ts:163-173`
+- [x] Add `Platform` to `ExtensionObsidianExports` interface in `src/extensions/runtime-context.ts:150-158`
+- [x] Add `Platform` to `buildObsidianExports()` in `src/extensions/runtime-context.ts:163-173`
 
 ### 1.4 Expand runtime context — shared helpers
 
 Utilities consumed by multiple scaffold tools. Must be added to `ExtensionUtils` interface and `buildUtils()`.
 
-- [ ] Add `ensureDirectoryExists(filePath: string)` to `ExtensionUtils` and `buildUtils()` — used by `write_note`, `move_note`, `extract_docx_comments` (~15 lines, inlined in `buildUtils`)
-- [ ] Add `isDomainBlocked(url, denylist)` to `ExtensionUtils` and `buildUtils()` — used by `fetch_webpage`, `web_search`
-  - [ ] Extract `isDomainBlocked()` from `src/tools/fetch-webpage.ts:86-122` into a standalone utility file (e.g., `src/utils/domain-denylist.ts`)
-  - [ ] Update import in `src/chat/dispatcher.ts:16` to use the extracted utility
+- [x] Add `ensureDirectoryExists(filePath: string)` to `ExtensionUtils` and `buildUtils()` — used by `write_note`, `move_note`, `extract_docx_comments` (~15 lines, inlined in `buildUtils`)
+- [x] Add `isDomainBlocked(url, denylist)` to `ExtensionUtils` and `buildUtils()` — used by `fetch_webpage`, `web_search`
+  - [x] Extract `isDomainBlocked()` from `src/tools/fetch-webpage.ts:86-122` into a standalone utility file (e.g., `src/utils/domain-denylist.ts`)
+  - [x] Update import in `src/chat/dispatcher.ts:16` to use the extracted utility
 
 ### 1.5 Expand runtime context — media utilities
 
 Required by the `read_file` scaffold for image/PDF processing.
 
-- [ ] Add `detectMediaFormat`, `processImage`, `processPdf` to `ExtensionUtils` interface
-- [ ] Implement in `buildUtils()` — `processPdf` wraps the underlying function, injecting `active_provider` and `pdf_native_max_size_mb` from plugin settings
+- [x] Add `detectMediaFormat`, `processImage`, `processPdf` to `ExtensionUtils` interface
+- [x] Implement in `buildUtils()` — `processPdf` wraps the underlying function, injecting `active_provider` and `pdf_native_max_size_mb` from plugin settings
 
 ### 1.6 Expand runtime context — DOCX utilities
 
 Required by `write_docx` and `extract_docx_comments` scaffolds. Without these, scaffold code would exceed 900 lines.
 
-- [ ] Add `resolveImageForDocx(href, allowedPaths?)` to `ExtensionUtils` and `buildUtils()` — wraps `src/tools/docx-image-utils.ts:resolveImageForDocx`, injecting `vaultRootPath` and default `allowedPaths`
-- [ ] Add `graftDocxIntoTemplate(generatedZip, templateZip)` to `ExtensionUtils` and `buildUtils()`
-  - [ ] Extract `graftIntoTemplate()` from `src/tools/write-docx.ts:448-702` into a standalone utility file
-- [ ] Add `docxComments` namespace to `ExtensionUtils` and `buildUtils()` — passthrough of 7 functions from `src/tools/docx-comment-parser.ts` (`parseCommentsXml`, `parseCommentsExtendedXml`, `extractQuotedText`, `parsePeopleXml`, `buildCommentThreads`, `formatCommentsAsMarkdown`, `extractExistingCommentIds`)
+- [x] Add `resolveImageForDocx(href, allowedPaths?)` to `ExtensionUtils` and `buildUtils()` — wraps `src/tools/docx-image-utils.ts:resolveImageForDocx`, injecting `vaultRootPath` and default `allowedPaths`
+- [x] Add `graftDocxIntoTemplate(generatedZip, templateZip)` to `ExtensionUtils` and `buildUtils()`
+  - [x] Extract `graftIntoTemplate()` from `src/tools/write-docx.ts:448-702` into a standalone utility file
+- [x] Add `docxComments` namespace to `ExtensionUtils` and `buildUtils()` — passthrough of 7 functions from `src/tools/docx-comment-parser.ts` (`parseCommentsXml`, `parseCommentsExtendedXml`, `extractQuotedText`, `parsePeopleXml`, `buildCommentThreads`, `formatCommentsAsMarkdown`, `extractExistingCommentIds`)
 
 ### 1.7 Update `scaffold()` helper signature
 
 Changes the scaffold helper in `src/extensions/builtin-tool-scaffolds.ts:34-66` to accept actual implementation code.
 
-- [ ] Rename `paramsYaml` to `yamlFenceContent` (now holds `params:` + `settings:` sections)
-- [ ] Add 5th parameter `code: string` for the implementation body
-- [ ] Update template to emit the `code` parameter instead of the placeholder `return "Not yet customized..."`
-- [ ] Update `${trimmedParams}` references to `${trimmedYaml}`
+- [x] Rename `paramsYaml` to `yamlFenceContent` (now holds `params:` + `settings:` sections)
+- [x] Add 5th parameter `code: string` for the implementation body
+- [x] Update template to emit the `code` parameter instead of the placeholder `return "Not yet customized..."`
+- [x] Update `${trimmedParams}` references to `${trimmedYaml}`
 
 ---
 

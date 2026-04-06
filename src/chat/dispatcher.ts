@@ -13,7 +13,7 @@ import type { StreamChunk } from "../providers/provider";
 import type { NotorSettings } from "../settings";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { ToolExecuteOptions } from "../tools/tool";
-import { isDomainBlocked } from "../tools/fetch-webpage";
+import { isDomainBlocked } from "../utils/domain-denylist";
 import { resolveAndValidatePath } from "../utils/path-validation";
 import { enforcePathConstraints } from "../tool-config/path-enforcer";
 import { resolveAutoApprove } from "../personas/auto-approve-resolver";

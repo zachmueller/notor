@@ -20,6 +20,7 @@ import type { App } from "obsidian";
 import type { Tool, ToolResult } from "./tool";
 import type { NotorSettings } from "../settings";
 import { logger } from "../utils/logger";
+import { isDomainBlocked } from "../utils/domain-denylist";
 
 const log = logger("FetchWebpageTool");
 
@@ -70,56 +71,9 @@ function getTurndown(): TurndownService {
 // Domain denylist matching (TOOL-011)
 // ---------------------------------------------------------------------------
 
-/**
- * Check whether a URL's domain is blocked by the denylist.
- *
- * Supports:
- * - Exact domain match: `example.com` blocks only `example.com`
- * - Wildcard match: `*.example.com` blocks all sub-domains but NOT
- *   `example.com` itself
- *
- * @param url      - The URL to check.
- * @param denylist - Array of domain patterns from settings.
- * @returns `{ blocked: true, pattern: string }` if blocked, or
- *          `{ blocked: false }` if allowed.
- */
-export function isDomainBlocked(
-	url: string,
-	denylist: string[]
-): { blocked: true; pattern: string } | { blocked: false } {
-	if (!denylist || denylist.length === 0) {
-		return { blocked: false };
-	}
-
-	let hostname: string;
-	try {
-		const parsed = new URL(url);
-		hostname = parsed.hostname.toLowerCase();
-	} catch {
-		// If URL can't be parsed, let the fetch itself fail later
-		return { blocked: false };
-	}
-
-	for (const pattern of denylist) {
-		const p = pattern.trim().toLowerCase();
-		if (!p) continue;
-
-		if (p.startsWith("*.")) {
-			// Wildcard: *.example.com blocks sub.example.com but not example.com
-			const baseDomain = p.slice(2);
-			if (hostname.endsWith("." + baseDomain)) {
-				return { blocked: true, pattern };
-			}
-		} else {
-			// Exact match
-			if (hostname === p) {
-				return { blocked: true, pattern };
-			}
-		}
-	}
-
-	return { blocked: false };
-}
+// Re-export from standalone utility for backward compatibility.
+// Canonical location: src/utils/domain-denylist.ts
+export { isDomainBlocked } from "../utils/domain-denylist";
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -35,9 +35,10 @@ function scaffold(
 	name: string,
 	description: string,
 	mode: "read" | "write",
-	paramsYaml: string,
+	yamlFenceContent: string,
+	code = '// Built-in tool override. Customize the code below.\n// The built-in implementation runs when this file doesn\'t exist.\nreturn "Not yet customized — remove this line and add your implementation.";',
 ): BuiltinToolScaffold {
-	const trimmedParams = paramsYaml.trimEnd();
+	const trimmedYaml = yamlFenceContent.trimEnd();
 	return {
 		name,
 		description,
@@ -53,13 +54,11 @@ notor-mode: ${mode}
 Customizable override for the built-in \`${name}\` tool. Edit the code below and reload extensions to apply changes.
 
 \`\`\`yaml
-${trimmedParams}
+${trimmedYaml}
 \`\`\`
 
 \`\`\`ts
-// Built-in tool override. Customize the code below.
-// The built-in implementation runs when this file doesn't exist.
-return "Not yet customized — remove this line and add your implementation.";
+${code}
 \`\`\`
 `,
 	};

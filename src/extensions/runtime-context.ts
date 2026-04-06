@@ -19,9 +19,27 @@ import { logger } from "../utils/logger";
 import { resolveAndValidatePath, isPathWithin } from "../utils/path-validation";
 import { executeShellCommand } from "../shell/shell-executor";
 import { enforcePathConstraints } from "../tool-config/path-enforcer";
+import { isDomainBlocked } from "../utils/domain-denylist";
+import { detectMediaFormat } from "../media/format-detector";
+import { processImage } from "../media/image-processor";
+import { processPdf } from "../media/pdf-processor";
+import type { ContentBlock, ImageMediaType } from "../media/types";
+import { resolveImageForDocx } from "../tools/docx-image-utils";
+import type { DocxImageData } from "../tools/docx-image-utils";
+import { graftIntoTemplate } from "../tools/docx-template-graft";
+import {
+	parseCommentsXml,
+	parseCommentsExtendedXml,
+	extractQuotedText,
+	parsePeopleXml,
+	buildCommentThreads,
+	formatCommentsAsMarkdown,
+	extractExistingCommentIds,
+} from "../tools/docx-comment-parser";
+import type { RawComment, Comment } from "../tools/docx-comment-parser";
 
 // Obsidian exports
-import { requestUrl, Notice, TFile as TFileClass, TFolder, getFrontMatterInfo, normalizePath, MarkdownView } from "obsidian";
+import { requestUrl, Notice, TFile as TFileClass, TFolder, getFrontMatterInfo, normalizePath, MarkdownView, Platform } from "obsidian";
 
 // Bundled libraries (static imports)
 import mammoth from "mammoth";
@@ -56,6 +74,30 @@ export interface ExtensionUtils {
 			entry: ResolvedToolConfigEntry,
 		) => string | null;
 		isPathWithin: (target: string, base: string) => boolean;
+	};
+	/** Check if a URL's domain matches any pattern in the denylist. */
+	isDomainBlocked: (url: string, denylist: string[]) => { blocked: true; pattern: string } | { blocked: false };
+	/** Create intermediate vault directories for a file path. */
+	ensureDirectoryExists: (filePath: string) => Promise<void>;
+	/** Detect media format from buffer magic bytes. */
+	detectMediaFormat: (buffer: Buffer) => "png" | "jpeg" | "gif" | "webp" | "pdf" | null;
+	/** Process an image buffer for LLM consumption (resize, compress). */
+	processImage: (buffer: Buffer, mediaType: ImageMediaType, options?: { maxDimension?: number; compressionQuality?: number }) => Promise<ContentBlock>;
+	/** Process a PDF buffer for LLM consumption. Reads active_provider and pdf_native_max_size_mb internally. */
+	processPdf: (buffer: Buffer, options: { pages?: string; maxTextChars?: number; preferNative?: boolean }) => Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>;
+	/** Resolve an image href to data suitable for embedding in a DOCX via ImageRun. */
+	resolveImageForDocx: (href: string, allowedPaths?: string[]) => Promise<DocxImageData | null>;
+	/** Graft generated DOCX body content into a template, preserving template styles/margins/headers/footers. */
+	graftDocxIntoTemplate: (generatedZip: import("pizzip"), templateZip: import("pizzip")) => Promise<void>;
+	/** DOCX comment parsing utilities. */
+	docxComments: {
+		parseCommentsXml: (xml: string) => RawComment[];
+		parseCommentsExtendedXml: (xml: string) => { resolvedIds: Set<string>; threadingMap: Map<string, string> };
+		extractQuotedText: (documentXml: string, commentId: string) => string;
+		parsePeopleXml: (xml: string) => Map<string, string>;
+		buildCommentThreads: (raw: RawComment[], threadingMap: Map<string, string>, resolvedIds: Set<string>, includeResolved: boolean, peopleMap: Map<string, string>) => Comment[];
+		formatCommentsAsMarkdown: (comments: Comment[], filename: string, startNumber: number) => string;
+		extractExistingCommentIds: (existingContent: string) => { ids: Set<string>; maxNumber: number };
 	};
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
@@ -102,6 +144,50 @@ export function buildUtils(plugin: NotorPlugin): ExtensionUtils {
 			isPathWithin: (target: string, base: string) =>
 				isPathWithin(target, base),
 		},
+
+		isDomainBlocked,
+
+		detectMediaFormat,
+
+		processImage,
+
+		processPdf: (buffer: Buffer, options: { pages?: string; maxTextChars?: number; preferNative?: boolean }) =>
+			processPdf(buffer, {
+				...options,
+				providerType: plugin.settings.active_provider,
+				maxNativeSizeBytes: plugin.settings.pdf_native_max_size_mb * 1024 * 1024,
+			}),
+
+		ensureDirectoryExists: async (filePath: string) => {
+			const parts = filePath.split("/");
+			parts.pop(); // remove filename
+			if (parts.length === 0) return;
+			let current = "";
+			for (const part of parts) {
+				current = current ? `${current}/${part}` : part;
+				const existing = plugin.app.vault.getAbstractFileByPath(current);
+				if (!existing) {
+					await plugin.app.vault.createFolder(current);
+				} else if (!(existing instanceof TFolder)) {
+					throw new Error(`Cannot create directory: "${current}" already exists as a file`);
+				}
+			}
+		},
+
+		resolveImageForDocx: (href: string, allowedPaths?: string[]) =>
+			resolveImageForDocx(href, vaultRootPath, allowedPaths ?? plugin.settings.read_file_allowed_paths),
+
+		graftDocxIntoTemplate: graftIntoTemplate,
+
+		docxComments: {
+			parseCommentsXml,
+			parseCommentsExtendedXml,
+			extractQuotedText,
+			parsePeopleXml,
+			buildCommentThreads,
+			formatCommentsAsMarkdown,
+			extractExistingCommentIds,
+		},
 	};
 }
 
@@ -120,6 +206,9 @@ export interface ExtensionLibs {
 	marked: typeof marked;
 	xmldom: typeof xmldom;
 	croner: { Cron: typeof Cron };
+	fs: typeof import("fs");
+	crypto: typeof import("crypto");
+	path: typeof import("path");
 }
 
 /**
@@ -139,6 +228,9 @@ export function buildLibs(): ExtensionLibs {
 		marked,
 		xmldom,
 		croner: { Cron },
+		fs: require("fs") as typeof import("fs"),
+		crypto: require("crypto") as typeof import("crypto"),
+		path: require("path") as typeof import("path"),
 	};
 }
 
@@ -155,6 +247,7 @@ export interface ExtensionObsidianExports {
 	getFrontMatterInfo: typeof getFrontMatterInfo;
 	normalizePath: typeof normalizePath;
 	MarkdownView: typeof MarkdownView;
+	Platform: typeof Platform;
 }
 
 /**
@@ -169,5 +262,6 @@ export function buildObsidianExports(): ExtensionObsidianExports {
 		getFrontMatterInfo,
 		normalizePath,
 		MarkdownView,
+		Platform,
 	};
 }
