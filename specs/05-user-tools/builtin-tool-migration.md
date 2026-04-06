@@ -56,7 +56,7 @@ onload()
 
 All 20 tools run through the same `UserToolAdapter.execute()` pipeline: settings resolution → context injection → compiled function call → ToolResult mapping.
 
-**Boot-timing note:** Between `getToolRegistry()` (registers only `use_subagent`) and `ExtensionManager.reload()` (registers remaining 20 tools), the registry is incomplete. This is safe because `reload()` runs inside `onLayoutReady()` and no chat session can start before layout is ready. The ToolDispatcher is created on-demand when the chat orchestrator is first accessed, which in practice always happens after `reload()` completes (reload takes <5ms, and user interaction is required to trigger the orchestrator). This ordering is not architecturally guaranteed, but the race is negligible — no guard is needed.
+**Boot-timing note:** Between `getToolRegistry()` (registers only `use_subagent`) and `ExtensionManager.reload()` (registers remaining 20 tools), the registry is incomplete. This is safe because `reload()` runs inside `onLayoutReady()` and no chat session can start before layout is ready. The ToolDispatcher is created on-demand when the chat orchestrator is first accessed, which in practice always happens after `reload()` completes (reload takes <5ms, and user interaction is required to trigger the orchestrator). This ordering is not architecturally guaranteed, but the race is negligible — we accept the risk of UX problems in rare edge cases rather than adding a guard. Explicitly out of scope to resolve.
 
 ## Design Decisions
 
@@ -70,7 +70,7 @@ When `ExtensionManager.reload()` discovers that a built-in tool has no correspon
 1. `discoverExtensions()` returns vault-discovered tools (existing behavior, unchanged)
 2. After discovery, `reload()` iterates `BUILTIN_TOOL_SCAFFOLDS` and checks which names are missing from the discovered set
 3. For each missing scaffold, it constructs a frontmatter object directly from the scaffold metadata (name, description, mode) and passes it to `parseExtensionFile()` along with the scaffold content — no re-parsing of YAML frontmatter needed since the metadata is already structured
-4. Scaffold tools are marked with `isScaffold: true` on the `UserToolDefinition` and compiled via runtime Sucrase in the same pipeline as user vault files (D-7 pre-compilation was considered but rejected — see ~~D-7~~)
+4. Scaffold tools are marked with `isScaffold: true` on the `UserToolDefinition` (this field must be added to the interface — see `src/extensions/types.ts` changes below) and compiled via runtime Sucrase in the same pipeline as user vault files (D-7 pre-compilation was considered but rejected — see ~~D-7~~)
 5. If a vault file exists with the same name as a scaffold, the vault file wins (discovered tools take precedence over scaffold fallbacks)
 
 ### D-2: Migrate tool settings into the extension settings system (hybrid)
@@ -101,6 +101,8 @@ Several built-in tools directly reference `NotorSettings` fields. These settings
 **Data migration:** A one-time migration moves old `NotorSettings` tool fields into the extension settings system. The old plugin settings UI sections for these fields are removed — they now render in the extension settings UI via each scaffold's `settingsSchema`.
 
 **Detection:** Per-tool key check. For each built-in tool that has settings (fetch_webpage, web_search, execute_command, read_file, write_docx), check whether its key is absent from `user_extension_settings` (e.g., `user_extension_settings["fetch_webpage"]` is `undefined`) AND the corresponding old field exists in `NotorSettings` (e.g., `fetch_webpage_timeout` is present in the loaded data). For shared settings, check whether the key is absent from `user_shared_settings` (e.g., `user_shared_settings["domain_denylist"]` is `undefined`) AND the old field exists. Migration runs per-tool-group: each group migrates independently if its detection condition holds. No settings version field is needed.
+
+**Edge case:** If a user has manually set `user_extension_settings["fetch_webpage"]` to `{}` (empty object), the `undefined` check would see it as defined and skip migration, silently losing old settings. This is an accepted risk — the scenario requires direct JSON editing of `data.json` and is unlikely in practice.
 
 **Why per-key:** A whole-object emptiness check (`user_extension_settings === {}`) would fail for users who already have extension settings configured for user-defined tools — the migration would never trigger, silently losing their old built-in tool customizations when phase 2 deletes the old fields.
 
@@ -200,18 +202,19 @@ This ensures the two cross-tool settings are always available in the `shared` ob
 
 **Scope:** Rewrite all 20 scaffold code blocks with working implementations adapted to the extension runtime.
 
-**`scaffold()` helper signature change:**
+**`scaffold()` helper signature change:** The current signature is `scaffold(name, description, mode, paramsYaml)` with 4 parameters. It generates placeholder code (`return "Not yet customized..."`). The new signature adds a 5th parameter `code` for the actual implementation, and renames `paramsYaml` to `yamlFenceContent` since the YAML fence now holds both `params:` and `settings:` sections:
+
 ```ts
 function scaffold(
   name: string,
   description: string,
   mode: "read" | "write",
   yamlFenceContent: string,  // renamed from paramsYaml — now holds params + settings YAML
-  code: string,              // NEW: actual implementation code
+  code: string,              // NEW: actual implementation code (replaces placeholder)
 ): BuiltinToolScaffold
 ```
 
-Note: `yamlFenceContent` (renamed from `paramsYaml`) now contains the full YAML fence content, including both `params:` and `settings:` sections for tools that declare per-extension settings (fetch_webpage, web_search, execute_command, read_file, write_docx). Tools without settings pass only the `params:` section as before.
+`yamlFenceContent` contains both `params:` and `settings:` sections for tools that declare per-extension settings (fetch_webpage, web_search, execute_command, read_file, write_docx). Tools without settings pass only the `params:` section as before.
 
 The template changes from generic placeholder to per-tool code (and `${trimmedParams}` becomes `${trimmedYaml}` to match the renamed parameter):
 ```
@@ -260,17 +263,20 @@ export interface BuiltinToolScaffold {
 | `import * as fs from "fs"` | `libs.fs` |
 | `import * as crypto from "crypto"` | `libs.crypto` |
 | `import * as path from "path"` | `libs.path` |
-| `return { success: false, error }` | `throw new Error(message)` |
-| `return { success: true, result: val }` | `return val` |
+| `return { success: false, error }` | `throw new Error(message)` (adapter sets `tool_name`, `result: ""` automatically) |
+| `return { success: true, result: val }` | `return val` (adapter wraps with `tool_name`, `success: true`) |
 | Private helper methods | Local `function` declarations in code block |
 
 **Complexity tiers:**
 
 | Tier | Tools | Est. lines per scaffold |
 |---|---|---|
-| Simple | `read_frontmatter`, `get_backlinks`, `get_outlinks`, `update_frontmatter`, `write_file` | 30-80 |
-| Medium | `read_note`, `write_note`, `replace_in_note`, `manage_tags`, `move_note`, `list_vault`, `execute_command`, `replace_in_file` | 80-200 |
-| Complex | `search_vault`, `fetch_webpage`, `web_search`, `read_file`, `read_docx`, `write_docx`, `extract_docx_comments` | 200-600 |
+| Simple | `read_frontmatter`, `get_backlinks`, `get_outlinks`, `update_frontmatter`, `write_file` | 40-100 |
+| Medium | `read_note`, `write_note`, `replace_in_note`, `manage_tags`, `move_note`, `list_vault`, `execute_command`, `replace_in_file` | 80-280 |
+| Complex | `search_vault`, `fetch_webpage`, `web_search`, `read_file`, `read_docx`, `extract_docx_comments` | 200-400 |
+| Complex+ | `write_docx` | 600-1100 |
+
+**Pre-plan research task:** Before writing scaffold implementations, deep-dive ALL 20 built-in tool source files and assess each tool's feasibility of migrating with the current plan. For tools with large or complex helper logic (especially `write_docx` at ~1,041 lines with template grafting, rId conflict resolution, and media merging), evaluate whether additional logic should be exposed via `utils` (or another mechanism) rather than inlined in the scaffold code block. Document findings and any recommended `utils` expansions before proceeding with implementation.
 
 ### `src/extensions/runtime-context.ts` — Add media utilities, Node.js modules, and `Platform`
 
@@ -349,9 +355,19 @@ Scaffold-origin tools are marked with `isScaffold: true` on `UserToolDefinition`
 
 **Refactor:** Extract the manual YAML parsing logic from `discovery.ts:parseOneExtensionFile()` (lines 190-206) into a standalone `extractFrontmatter(content, parseYAML)` helper. This cleans up `parseOneExtensionFile()` and provides a reusable utility for future code that needs to parse frontmatter from raw markdown content (e.g., template imports, clipboard paste). Note: the scaffold injection above does NOT use this helper — it constructs frontmatter directly from structured metadata.
 
+### `src/tool-config/path-enforcer.ts` — Remove static `TOOL_PATH_PARAMS` entries
+
+The static `TOOL_PATH_PARAMS` object (lines 27-48) hardcodes path param entries for 14 built-in tools. After migration, these are populated dynamically by `ExtensionManager.reload()` from each scaffold's YAML fence `path_namespace` declarations. Remove the static entries and replace with an empty initializer:
+
+```ts
+export const TOOL_PATH_PARAMS: Record<string, ToolPathParam[]> = {};
+```
+
+The dynamic registration in `manager.ts:278-280` becomes the single source of truth. See R-7 for rationale.
+
 ### `src/extensions/types.ts` — Add `isScaffold` flag
 
-Add an optional `isScaffold` property to `UserToolDefinition`:
+Add an optional `isScaffold` property to `UserToolDefinition`. This field does not exist today and must be created:
 
 ```ts
 export interface UserToolDefinition {
@@ -473,7 +489,7 @@ for (const [name, tool] of compiledTools) {
 | `web_search` | DuckDuckGo HTML scraping via `DOMParser`. `obsidian.requestUrl()` POST. Helpers: `cleanDDGUrl()`, `parseDDGResults()`. `settings` for timeout/num_results, `shared` for denylist. ~200 lines. |
 | `read_file` | Binary detection, media format detection (magic bytes), image processing pipeline, PDF processing. `libs.fs`. `settings` for image/PDF options. ~200 lines. |
 | `read_docx` | `libs.mammoth` conversion with image extraction callback. `libs.crypto` for MD5 dedup. Custom Turndown rule for images. ~200 lines. |
-| `write_docx` | `libs.marked.lexer()` tokenization → `libs.docx` block generation. Template grafting via `libs.PizZip` + `libs.xmldom`. Helpers: `renderInline()`, `buildDocxChildren()`, `graftIntoTemplate()`, image resolution. ~600 lines. |
+| `write_docx` | `libs.marked.lexer()` tokenization → `libs.docx` block generation. Template grafting via `libs.PizZip` + `libs.xmldom`. Helpers: `renderInline()`, `buildDocxChildren()`, `graftIntoTemplate()` (~250 lines alone, with rId conflict resolution and media file merging), image resolution. ~600-1100 lines — the largest scaffold by far. Feasibility of inlining vs. expanding `utils` should be assessed in the pre-plan research task. |
 | `extract_docx_comments` | `libs.PizZip` for XML extraction. Comment threading, resolved filtering, `@mention` resolution. Idempotent append. ~300 lines. |
 
 ### Missing from `obsidian` exports
@@ -536,6 +552,8 @@ This avoids duplicating ~200 lines of media processing code in the scaffold and 
 
 **Risk:** Path enforcement relies on `TOOL_PATH_PARAMS` being populated before dispatch. With scaffolds loaded during `ExtensionManager.reload()`, this happens in `onLayoutReady()` — same timing as before but via a different code path.
 **Mitigation:** `reload()` already registers `TOOL_PATH_PARAMS` entries (line 278-280 in manager.ts). Scaffold-compiled tools include `pathParams` from the YAML fence. No timing change.
+
+**Cleanup:** The static `TOOL_PATH_PARAMS` initializer in `src/tool-config/path-enforcer.ts` (lines 27-48) hardcodes path params for all 14 built-in tools that have them. After migration, these entries are populated dynamically by `ExtensionManager.reload()` from each scaffold's YAML fence `path_namespace` declarations. **Remove the static entries** from `path-enforcer.ts` — keep only the type export and an empty object initializer (`export const TOOL_PATH_PARAMS: Record<string, ToolPathParam[]> = {};`). The dynamic registration in `manager.ts` becomes the single source of truth.
 
 ---
 
