@@ -57,6 +57,58 @@ describe("paramSchemaToJsonSchema", () => {
 		});
 	});
 
+	it("converts object[] to array of objects schema", () => {
+		const params: ParamSchema = {
+			changes: {
+				type: "object[]",
+				description: "Array of search/replace blocks",
+				properties: {
+					search: { type: "string", description: "Text to find" },
+					replace: { type: "string", description: "Text to replace with" },
+				},
+				required_items: ["search", "replace"],
+			},
+		};
+		const schema = paramSchemaToJsonSchema(params);
+
+		expect(schema.properties?.changes).toEqual({
+			type: "array",
+			description: "Array of search/replace blocks",
+			items: {
+				type: "object",
+				properties: {
+					search: { type: "string", description: "Text to find" },
+					replace: { type: "string", description: "Text to replace with" },
+				},
+				required: ["search", "replace"],
+			},
+		});
+		expect(schema.required).toEqual(["changes"]);
+	});
+
+	it("converts object[] without required_items", () => {
+		const params: ParamSchema = {
+			entries: {
+				type: "object[]",
+				properties: {
+					key: { type: "string" },
+					value: { type: "string" },
+				},
+			},
+		};
+		const schema = paramSchemaToJsonSchema(params);
+
+		expect(schema.properties?.entries?.items).toEqual({
+			type: "object",
+			properties: {
+				key: { type: "string" },
+				value: { type: "string" },
+			},
+		});
+		// No required on items when required_items is omitted
+		expect(schema.properties?.entries?.items?.required).toBeUndefined();
+	});
+
 	it("params without default are in required[]", () => {
 		const params: ParamSchema = {
 			required_param: { type: "string" },

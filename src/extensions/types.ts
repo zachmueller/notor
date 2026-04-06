@@ -28,6 +28,17 @@ export interface ParamSchema {
 		default?: unknown;
 		enum?: string[];
 		items?: { type: string };
+		/**
+		 * For `object[]` type: property definitions for each object in the array.
+		 * Each key maps to `{ type, description? }`. Converted to JSON Schema
+		 * `items.properties` by `paramSchemaToJsonSchema()`.
+		 */
+		properties?: Record<string, { type: string; description?: string }>;
+		/**
+		 * For `object[]` type: which properties inside each object are required.
+		 * Converted to JSON Schema `items.required` by `paramSchemaToJsonSchema()`.
+		 */
+		required_items?: string[];
 		/** If set, this param is a path and participates in path enforcement. */
 		path_namespace?: "vault" | "filesystem";
 	};

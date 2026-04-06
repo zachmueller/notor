@@ -211,8 +211,18 @@ const REPLACE_IN_NOTE = scaffold(
     description: "Path to the note relative to vault root."
     path_namespace: vault
   changes:
-    type: string
-    description: "JSON-encoded array of {search, replace} objects."`,
+    type: "object[]"
+    description: "Array of search/replace blocks to apply in sequence. Each block replaces only the first occurrence of the search text."
+    properties:
+      search:
+        type: string
+        description: "Exact text to find in the note (character-for-character match including whitespace)."
+      replace:
+        type: string
+        description: "Text to replace the matched search text with. Use empty string to delete the matched text."
+    required_items:
+      - search
+      - replace`,
 );
 
 const UPDATE_FRONTMATTER = scaffold(
@@ -226,10 +236,10 @@ const UPDATE_FRONTMATTER = scaffold(
     path_namespace: vault
   set:
     type: string
-    description: "JSON-encoded object of key-value pairs to add or update."
+    description: "JSON-encoded object of key-value pairs to add or update in the frontmatter."
   remove:
-    type: string
-    description: "JSON-encoded array of frontmatter keys to remove."`,
+    type: "string[]"
+    description: "List of frontmatter keys to remove."`,
 );
 
 const MANAGE_TAGS = scaffold(
@@ -242,11 +252,11 @@ const MANAGE_TAGS = scaffold(
     description: "Path to the note relative to vault root."
     path_namespace: vault
   add:
-    type: string
-    description: "JSON-encoded array of tags to add."
+    type: "string[]"
+    description: "Tags to add to the note."
   remove:
-    type: string
-    description: "JSON-encoded array of tags to remove."`,
+    type: "string[]"
+    description: "Tags to remove from the note."`,
 );
 
 const MOVE_NOTE = scaffold(
@@ -388,8 +398,18 @@ const REPLACE_IN_FILE = scaffold(
     description: "Path to the file. Vault-relative or absolute."
     path_namespace: filesystem
   changes:
-    type: string
-    description: "JSON-encoded array of {search, replace} objects."`,
+    type: "object[]"
+    description: "Array of search/replace blocks to apply in sequence. Each block replaces only the first occurrence of the search text."
+    properties:
+      search:
+        type: string
+        description: "Exact text to find in the file (character-for-character match including whitespace)."
+      replace:
+        type: string
+        description: "Text to replace the matched search text with. Use empty string to delete the matched text."
+    required_items:
+      - search
+      - replace`,
 );
 
 const EXTRACT_DOCX_COMMENTS = scaffold(

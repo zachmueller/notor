@@ -16,9 +16,11 @@ import type { ParamSchema } from "./types";
  * - Each param key becomes a `properties` entry
  * - Params without `default` are added to `required[]`
  * - `type: "string[]"` maps to `{ type: "array", items: { type: "string" } }`
+ * - `type: "object[]"` maps to `{ type: "array", items: { type: "object", properties, required } }`
+ *   using `properties` and `required_items` from the param definition
  * - `enum` field maps to JSON Schema `enum`
  * - `description` and `default` are passed through
- * - `path_namespace` is stripped (consumed by runtime, not sent to LLM)
+ * - `path_namespace`, `properties`, `required_items` are stripped (consumed by runtime/converter, not sent raw to LLM)
  */
 export function paramSchemaToJsonSchema(params: ParamSchema): JSONSchema {
 	const properties: Record<string, JSONSchemaProperty> = {};
@@ -28,7 +30,23 @@ export function paramSchemaToJsonSchema(params: ParamSchema): JSONSchema {
 		const prop: JSONSchemaProperty = {};
 
 		// Map type
-		if (param.type === "string[]") {
+		if (param.type === "object[]") {
+			prop.type = "array";
+			const itemSchema: JSONSchemaProperty = { type: "object" };
+			if (param.properties) {
+				const itemProps: Record<string, JSONSchemaProperty> = {};
+				for (const [propKey, propDef] of Object.entries(param.properties)) {
+					const p: JSONSchemaProperty = { type: propDef.type };
+					if (propDef.description !== undefined) p.description = propDef.description;
+					itemProps[propKey] = p;
+				}
+				itemSchema.properties = itemProps;
+			}
+			if (param.required_items && param.required_items.length > 0) {
+				itemSchema.required = param.required_items;
+			}
+			prop.items = itemSchema;
+		} else if (param.type === "string[]") {
 			prop.type = "array";
 			prop.items = { type: "string" };
 		} else {

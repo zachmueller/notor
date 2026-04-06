@@ -971,6 +971,22 @@ return `Applied ${params.changes.length} replacement${params.changes.length > 1 
 - `obsidian.Platform` — add to `buildObsidianExports()` (spec runtime-context.ts changes)
 - `libs.fs` — add to `buildLibs()` (spec D-3)
 
-**YAML fence update needed:** The current scaffold (builtin-tool-scaffolds.ts:381-393) declares `changes` as `type: string` with description "JSON-encoded array of {search, replace} objects." This is a workaround for the simplified YAML param schema not supporting array-of-object types. The actual `input_schema` in the class defines `changes` as `type: array` with `items: { type: object, properties: { search, replace } }`. The scaffold YAML fence approach works because `UserToolAdapter` passes the LLM-provided params through — the LLM sends an array regardless of the YAML schema declaration. However, the description should clearly convey the expected structure. No change strictly required, but the mismatch between declared schema (`string`) and actual runtime type (`array`) is a documentation concern.
+**YAML fence schema — resolved:** The `ParamSchema` type system was extended with `object[]` support (see `types.ts` and `param-schema.ts` changes below) so the scaffold can express the `changes` param as a proper array of `{search, replace}` objects. This matches the class-based `input_schema` exactly — the LLM sees `type: "array"` with `items: { type: "object", properties: { search, replace }, required: [...] }` rather than an opaque `type: "string"`. The scaffold YAML fence now uses:
+
+```yaml
+  changes:
+    type: "object[]"
+    description: "Array of search/replace blocks to apply in sequence."
+    properties:
+      search:
+        type: string
+        description: "Exact text to find in the file."
+      replace:
+        type: string
+        description: "Text to replace the matched search text with."
+    required_items:
+      - search
+      - replace
+```
 
 **Risk:** Low. This is a direct 1:1 port with no complex helpers, no external library dependencies beyond `fs`, no settings beyond what `utils.resolveAndValidatePath` already handles, and no tricky patterns. The atomic all-or-nothing semantics are purely in-memory sequential logic that translates directly. The only prerequisites are the `Platform` and `libs.fs` runtime expansions that are already planned for other tools (`execute_command` needs `Platform`, `read_file`/`write_file` need `libs.fs`).
