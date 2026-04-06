@@ -2796,3 +2796,212 @@ params:
 **Risk: `ensureDirectoryExists` duplication (low).** The helper is duplicated across `write_note`, `move_note`, and `extract_docx_comments` scaffolds. At ~15 lines each, this is manageable. If a fourth tool needs it, extracting to `utils.ensureDirectoryExists()` becomes worthwhile. For now, inline duplication is preferred per the `extract_docx_comments` assessment precedent.
 
 **Comparison with spec's complexity estimate:** The spec classifies `write_note` as "Medium" at 80-280 lines and estimates ~120 lines. The scaffold is ~80 lines — at the low end. This is because the tool's logic, while branching (new vs. existing), is procedurally straightforward: no loops, no complex data transformations, no external library calls. The frontmatter preservation is the only non-trivial pattern, and it's a self-contained 10-line block using `obsidian.getFrontMatterInfo`. Structurally similar to `replace_in_note` (stale check → checkpoint → vault write → stale update → open) but with the additional create-new-file path and frontmatter preservation logic.
+
+### `list_vault` — Feasibility: Straightforward ✅
+
+**Source:** `src/tools/list-vault.ts` (273 lines total, ~180 lines of logic)
+
+**What the built-in class does:**
+1. Parses params: `path` (string, default `""`), `recursive` (boolean, default `false`), `limit` (number, clamped 1–500, default 50), `offset` (number, min 0, default 0), `sort_by` (enum `"last_modified"` | `"alphabetical"`, default `"last_modified"`)
+2. Collects items from the target directory via `collectItems(path, recursive)`:
+   - **Non-recursive:** Resolves the target folder via `app.vault.getAbstractFileByPath(path)` (or `app.vault.getRoot()` for empty path), iterates `folder.children`, maps each `TFile`/`TFolder` to a `ListItem`
+   - **Recursive:** Walks all folders via a recursive `getAllFolders()` helper starting from vault root, then iterates `app.vault.getFiles()`, filtering by path prefix match
+3. Classifies each file as `"note"` (`.md`), `"image"` (known image extensions), or `"attachment"` (everything else) via `classifyFile()`
+4. Maps files to `ListItem` objects with `name`, `path`, `type`, and optionally `size` and `modified` (ISO 8601 string from `file.stat.mtime`). Folders get only `name`, `path`, `type: "folder"`.
+5. Sorts items via `sortItems()`:
+   - `"alphabetical"`: folders before files, then `path.localeCompare()`
+   - `"last_modified"`: newest first by `modified` timestamp; folders (no mtime) sort last
+6. Applies pagination via `slice(offset, offset + limit)`
+7. Returns structured `ListResult`: `{ path, total_count, items }`
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.vault.getAbstractFileByPath()` | `app.vault.getAbstractFileByPath()` | ✅ |
+| `this.app.vault.getRoot()` | `app.vault.getRoot()` | ✅ |
+| `this.app.vault.getFiles()` | `app.vault.getFiles()` | ✅ |
+| `TFile` (instanceof check) | `obsidian.TFile` | ✅ |
+| `TFolder` (instanceof check) | `obsidian.TFolder` | ✅ |
+| `logger("ListVaultTool")` | `utils.logger("list_vault")` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed. Listed in the spec's "settings-free tools" group (D-2).
+
+**Helper functions:** Four private methods that all translate as local functions in the scaffold:
+1. `collectItems(targetPath, recursive)` — branching logic for recursive vs. non-recursive listing (~50 lines)
+2. `getAllFolders()` — recursive walk from vault root collecting `TFolder` instances (~12 lines)
+3. `toListItem(abstractFile)` — maps `TFile`/`TFolder` to `ListItem` shape (~15 lines)
+4. `classifyFile(file)` — extension-based type classification (~5 lines)
+5. `sortItems(items, sortBy)` — comparison function with folder-priority logic (~12 lines)
+
+All helpers are pure Obsidian API usage with no external dependencies. The `IMAGE_EXTENSIONS` set is a module-level constant that becomes a local constant in the scaffold.
+
+**Return value mapping:**
+- Success → return `{ path, total_count, items }` object. The `UserToolAdapter.execute()` return-value mapper handles objects correctly — `typeof returnValue === "object"` passes through as-is, producing `{ success: true, result: { path, total_count, items: [...] } }`.
+- Empty directory → returns `{ path, total_count: 0, items: [] }` — not an error, same as built-in.
+- Invalid path (non-recursive) → folder lookup returns null, `collectItems` returns `[]`, resulting in a valid empty listing. This matches built-in behavior — no error thrown for non-existent paths.
+
+**Key patterns and their scaffold translations:**
+
+1. **`instanceof` checks for `TFile`/`TFolder`** — The class imports these from `obsidian` and uses them for type narrowing throughout `collectItems` and `toListItem`. In the scaffold, `obsidian.TFile` and `obsidian.TFolder` are available via `buildObsidianExports()`. The `instanceof` checks work identically since the extension code runs in the same JS context as the plugin — these are the exact same constructor references.
+
+2. **Vault root access** — `app.vault.getRoot()` returns the root `TFolder`. The class uses this as the entry point for non-recursive listing of `""` and for `getAllFolders()`. Direct translation — no wrapper needed.
+
+3. **`file.stat.mtime` to ISO string** — The class creates `new Date(file.stat.mtime).toISOString()` for each file's `modified` field. Direct translation — `Date` is a global, `stat` is a standard Obsidian `TFile` property.
+
+4. **Limit clamping** — `Math.max(1, Math.min(500, Math.floor(limit)))` prevents unreasonable page sizes. Direct translation.
+
+5. **`Promise.resolve()` wrapper** — The class method is non-async, returning `Promise.resolve({ ... })`. In the scaffold, the compiled function is already async (wrapped by `AsyncFunction`), so the code simply returns the result object directly — no `Promise.resolve()` needed.
+
+**Scaffold code (estimated ~100 lines):**
+```ts
+const log = utils.logger("list_vault");
+
+const listPath = ((params.path as string) ?? "").trim();
+const recursive = (params.recursive as boolean) ?? false;
+const limit = Math.max(1, Math.min(500, Math.floor((params.limit as number) ?? 50)));
+const offset = Math.max(0, Math.floor((params.offset as number) ?? 0));
+const sortBy = ((params.sort_by as string) ?? "last_modified") as "last_modified" | "alphabetical";
+
+log.debug("Listing vault", { listPath, recursive, limit, offset, sortBy });
+
+const IMAGE_EXTENSIONS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff", "tif", "ico", "avif",
+]);
+
+function classifyFile(file: any): "note" | "image" | "attachment" {
+  const ext = file.extension.toLowerCase();
+  if (ext === "md") return "note";
+  if (IMAGE_EXTENSIONS.has(ext)) return "image";
+  return "attachment";
+}
+
+function toListItem(abstractFile: any): any {
+  if (abstractFile instanceof obsidian.TFolder) {
+    return { name: abstractFile.name, path: abstractFile.path, type: "folder" };
+  }
+  return {
+    name: abstractFile.name,
+    path: abstractFile.path,
+    type: classifyFile(abstractFile),
+    size: abstractFile.stat.size,
+    modified: new Date(abstractFile.stat.mtime).toISOString(),
+  };
+}
+
+function getAllFolders(): any[] {
+  const folders: any[] = [];
+  const walk = (folder: any) => {
+    for (const child of folder.children) {
+      if (child instanceof obsidian.TFolder) {
+        folders.push(child);
+        walk(child);
+      }
+    }
+  };
+  walk(app.vault.getRoot());
+  return folders;
+}
+
+function collectItems(targetPath: string, isRecursive: boolean): any[] {
+  const items: any[] = [];
+
+  if (!isRecursive) {
+    const folder = targetPath
+      ? app.vault.getAbstractFileByPath(targetPath)
+      : app.vault.getRoot();
+    if (!folder || !(folder instanceof obsidian.TFolder)) return [];
+    for (const child of folder.children) {
+      if (child instanceof obsidian.TFile || child instanceof obsidian.TFolder) {
+        items.push(toListItem(child));
+      }
+    }
+  } else {
+    const normalizedTarget = targetPath
+      ? (targetPath.endsWith("/") ? targetPath : targetPath + "/")
+      : "";
+    for (const folder of getAllFolders()) {
+      if (folder.path === "/" || folder.path === "") continue;
+      if (normalizedTarget === "" || folder.path.startsWith(normalizedTarget) || folder.path === targetPath) {
+        items.push(toListItem(folder));
+      }
+    }
+    for (const file of app.vault.getFiles()) {
+      if (normalizedTarget === "" || file.path.startsWith(normalizedTarget) || file.path === targetPath) {
+        items.push(toListItem(file));
+      }
+    }
+  }
+
+  return items;
+}
+
+// Collect, sort, paginate
+const allItems = collectItems(listPath, recursive);
+
+const sorted = [...allItems].sort((a: any, b: any) => {
+  if (sortBy === "alphabetical") {
+    if (a.type === "folder" && b.type !== "folder") return -1;
+    if (a.type !== "folder" && b.type === "folder") return 1;
+    return a.path.localeCompare(b.path);
+  }
+  const aTime = a.modified ? new Date(a.modified).getTime() : 0;
+  const bTime = b.modified ? new Date(b.modified).getTime() : 0;
+  return bTime - aTime;
+});
+
+const totalCount = sorted.length;
+const paginated = sorted.slice(offset, offset + limit);
+
+log.debug("List complete", { path: listPath, totalCount, returned: paginated.length });
+
+return { path: listPath || "/", total_count: totalCount, items: paginated };
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed in the extension runtime: `logger`. The tool uses only core Obsidian vault APIs (`getRoot`, `getFiles`, `getAbstractFileByPath`) and constructor types (`TFile`, `TFolder`), all available via injected `app` and `obsidian`.
+
+**`obsidian` imports needed:** `TFile` and `TFolder` (for `instanceof` checks). Both are already exposed via `buildObsidianExports()`.
+
+**No `libs` needed.** No external libraries, no Node.js modules.
+
+**No settings migration needed.** This tool references zero `NotorSettings` fields. No per-extension `settings:` section in the YAML fence, no shared settings.
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Directory to list, relative to vault root."
+    default: ""
+    path_namespace: vault
+  recursive:
+    type: boolean
+    description: "Whether to list contents recursively."
+    default: false
+  limit:
+    type: number
+    description: "Maximum number of items to return."
+    default: 50
+  offset:
+    type: number
+    description: "Number of items to skip for pagination."
+    default: 0
+  sort_by:
+    type: string
+    description: "Sort order: 'last_modified' or 'alphabetical'."
+    enum:
+      - last_modified
+      - alphabetical
+    default: "last_modified"
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence. The existing YAML fence content is already correct.
+
+**Risk: Helper function scoping (none).** The class uses four private methods. In the scaffold, these become local functions defined before use. All closures capture only `app`, `obsidian`, and `log` from the outer scope — all of which are stable injected values. No state mutation, no timing concerns.
+
+**Risk: `instanceof` across execution contexts (none).** The scaffold code runs in the same JavaScript realm as the plugin (compiled via `new AsyncFunction()`, not in a separate iframe or worker). The `obsidian.TFile` and `obsidian.TFolder` references injected via `buildObsidianExports()` are the exact same constructor objects used by the vault API, so `instanceof` checks work correctly.
+
+**Risk: Empty path handling (none).** The class treats empty string `""` as vault root for both non-recursive (via `app.vault.getRoot()`) and recursive (via empty `normalizedTarget` matching all paths) modes. The scaffold replicates this exactly. The return value uses `listPath || "/"` for display — same as built-in.
+
+**Comparison with spec's complexity estimate:** The spec classifies `list_vault` as "Medium" at 80-280 lines and estimates ~160 lines. The scaffold is ~100 lines — below estimate. The tool is structurally simple: no file I/O (reads only metadata from vault cache), no writes, no stale tracking, no checkpoints, no external libraries. The bulk of the code is the `collectItems` branching logic and sort comparators, all of which are straightforward translations from the class. This is the simplest of the "Medium" tier tools — it could arguably be "Simple" if not for the four helper functions and recursive traversal logic.
