@@ -3115,3 +3115,139 @@ params:
 **Risk: Encoding parameter (low).** The `encoding` parameter is cast to `BufferEncoding` and passed directly to `fs.promises.writeFile()`. Invalid encodings will throw at the Node.js level, which the adapter catches and wraps as `{ success: false, error }`. Same behavior as the built-in class.
 
 **Comparison with spec's complexity estimate:** The spec classifies `write_file` as "Simple" at 40-100 lines and estimates ~50 lines. The scaffold is ~40 lines — within estimate. This is one of the simplest filesystem tools: no binary detection, no media processing, no stale tracking, no checkpoints. Linear flow: validate → resolve path → mkdir → write → return. Good candidate for early implementation alongside `read_frontmatter` to validate the filesystem tool pipeline (`libs.fs`, `libs.path`, `obsidian.Platform`).
+
+### `update_frontmatter` — Feasibility: Trivial ✅
+
+**Source:** `src/tools/update-frontmatter.ts` (150 lines total, ~85 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param exists and is a string
+2. Validates at least one of `set` or `remove` is provided
+3. Resolves note via `resolveNote(path, this.app.vault, this.app.metadataCache)`
+4. Creates a checkpoint before modifying via `this.checkpointManager?.createCheckpoint(file.path, this.name, "")`
+5. Calls `this.app.fileManager.processFrontMatter(file, callback)` — atomic, body-safe update:
+   - If `set` is provided: iterates entries and assigns `frontmatter[key] = value`
+   - If `remove` is provided: iterates keys and `delete frontmatter[key]`
+6. Builds a human-readable summary string ("set N properties, removed M properties")
+7. Returns the summary as a success result
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.vault` | `app.vault` | ✅ |
+| `this.app.metadataCache` | `app.metadataCache` | ✅ |
+| `this.app.fileManager` | `app.fileManager` | ✅ |
+| `resolveNote(path, vault, metadataCache)` | `utils.resolveNote(path)` | ✅ |
+| `this.checkpointManager?.createCheckpoint()` | `utils.checkpointManager.createCheckpoint()` | ✅ |
+| `logger("UpdateFrontmatterTool")` | `utils.logger("update_frontmatter")` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed. Listed in the spec's "settings-free tools" group.
+
+**Return value mapping:**
+- Success → return string (e.g., `"Updated frontmatter on Research/Climate: set 2 properties, removed 1 property"`). The `UserToolAdapter.execute()` return-value mapper handles `typeof returnValue === "string"` by passing it through directly. Produces `{ success: true, result: "..." }`.
+- Validation failures (missing path, no set/remove) → throw (adapter wraps in `{ success: false, error }`).
+- `processFrontMatter` failure → throw (adapter wraps in `{ success: false, error }`). The built-in class has an explicit try/catch with `e instanceof Error ? e.message : String(e)` — the adapter's catch produces the same outcome.
+
+**Scaffold code (estimated ~35 lines):**
+```ts
+const log = utils.logger("update_frontmatter");
+
+if (!params.path || typeof params.path !== "string") {
+  throw new Error("Missing required parameter: path");
+}
+
+const set = params.set as Record<string, unknown> | undefined;
+const remove = params.remove as string[] | undefined;
+
+if (!set && !remove) {
+  throw new Error("At least one of 'set' or 'remove' must be provided");
+}
+
+log.debug("Updating frontmatter", {
+  path: params.path,
+  setKeys: set ? Object.keys(set) : [],
+  removeKeys: remove ?? [],
+});
+
+const file = utils.resolveNote(params.path);
+if (!file) throw new Error(`Note not found: ${params.path}`);
+
+// Checkpoint before modifying
+await utils.checkpointManager.createCheckpoint(file.path, "update_frontmatter", "");
+
+await app.fileManager.processFrontMatter(file, (frontmatter: any) => {
+  if (set) {
+    for (const [key, value] of Object.entries(set)) {
+      frontmatter[key] = value;
+    }
+  }
+  if (remove) {
+    for (const key of remove) {
+      delete frontmatter[key];
+    }
+  }
+});
+
+const setCount = set ? Object.keys(set).length : 0;
+const removeCount = remove ? remove.length : 0;
+const parts: string[] = [];
+if (setCount > 0) parts.push(`set ${setCount} propert${setCount === 1 ? "y" : "ies"}`);
+if (removeCount > 0) parts.push(`removed ${removeCount} propert${removeCount === 1 ? "y" : "ies"}`);
+
+log.info("Updated frontmatter", { path: params.path, setCount, removeCount });
+return `Updated frontmatter on ${params.path}: ${parts.join(", ")}`;
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed in the extension runtime.
+
+**No `libs` or `obsidian` imports needed.** Pure `app` + `utils` usage.
+
+**YAML fence:**
+
+The current scaffold declares `set` as `type: string` with description "JSON-encoded object of key-value pairs". However, the built-in tool's `input_schema` uses `type: "object"` with `additionalProperties: true`. This is a behavioral difference — the scaffold forces the LLM to JSON-encode the object as a string, while the built-in allows Claude to pass a native object.
+
+The param schema mapper (`paramSchemaToJsonSchema()` in `param-schema.ts:52-53`) passes through arbitrary `type` values to JSON Schema, so `type: object` in YAML produces `{ type: "object" }` in the JSON Schema sent to the LLM. JSON Schema defaults `additionalProperties` to `true` when unspecified, so the LLM will be able to pass arbitrary key-value pairs. The `additionalProperties: true` in the built-in is technically redundant.
+
+**Recommended YAML fence (updated from current scaffold to match built-in behavior):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the note relative to vault root."
+    path_namespace: vault
+  set:
+    type: object
+    description: "Key-value pairs to add or update in the frontmatter."
+  remove:
+    type: "string[]"
+    description: "List of frontmatter keys to remove."
+```
+
+Note: `set` changes from `type: string` → `type: object` to match the built-in's schema. Both `set` and `remove` lack defaults, so both appear in `required[]` in the JSON Schema. The built-in's `input_schema` only has `path` in `required` — `set` and `remove` are optional (the at-least-one validation is done in the tool body, not the schema). To preserve this, both `set` and `remove` should declare a default to keep them out of `required[]`:
+```yaml
+  set:
+    type: object
+    description: "Key-value pairs to add or update in the frontmatter."
+    default: null
+  remove:
+    type: "string[]"
+    description: "List of frontmatter keys to remove."
+    default: null
+```
+
+However, the `paramSchemaToJsonSchema` mapper sets `default` on the JSON Schema property when a default is provided (`param-schema.ts:62-64`), which would produce `"default": null` in the schema. This is semantically correct (both params are optional) but differs from the built-in's schema which omits `default` entirely. The practical impact is negligible — Claude handles both representations correctly. Alternatively, both could simply be omitted from `required` via a future `optional: true` flag, but that doesn't exist today. **Accepted: use `default: null` for both optional params.** The at-least-one-of-set-or-remove validation stays in the tool body.
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. The `set` param type changes from `string` to `object` and both optional params get `default: null`. No `settings:` section in the YAML fence.
+
+**Checkpoint handling:** The built-in class calls `this.checkpointManager?.createCheckpoint()` with optional chaining because the constructor accepts `CheckpointManager | undefined`. In the extension runtime, `utils.checkpointManager` is always defined (set in `buildUtils()` from `plugin.getCheckpointManager()` in `runtime-context.ts:79`), so no optional chaining is needed. The checkpoint call is non-fatal — if `createCheckpoint` itself throws, it should not block the frontmatter update. The built-in achieves this via optional chaining (if undefined, silently skips). The scaffold should wrap the checkpoint call in a try/catch to preserve the non-fatal semantics:
+```ts
+try {
+  await utils.checkpointManager.createCheckpoint(file.path, "update_frontmatter", "");
+} catch { /* non-fatal */ }
+```
+
+**Risk:** Effectively zero. This is one of the simplest write tools — a single `processFrontMatter` call with straightforward set/delete logic. No settings, no external libraries, no filesystem I/O, no complex helpers. The only notable detail is the `set` param type correction and the optional-param-as-default-null pattern. Good candidate for early implementation alongside `read_frontmatter` and `manage_tags` (all three use `processFrontMatter` / `metadataCache.getFileCache`).
+
+**Comparison with spec's complexity estimate:** The spec classifies `update_frontmatter` as "Simple" at 40-100 lines and estimates ~60 lines. The scaffold is ~35 lines — below estimate. The built-in class's 150 lines include the class boilerplate, `input_schema` declaration, explicit `ToolResult` construction, and verbose error handling — all absorbed by the adapter in the extension runtime.
