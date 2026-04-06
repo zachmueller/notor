@@ -163,6 +163,160 @@ const SEARCH_VAULT = scaffold(
     type: number
     description: "Number of files to skip for pagination."
     default: 0`,
+	`const log = utils.logger("search_vault");
+const MAX_MATCHES_PER_FILE = 10;
+
+const query = params.query as string;
+const searchPath = ((params.path as string) ?? "").trim();
+const contextLines = Math.max(0, Math.min(10, Math.floor((params.context_lines as number) ?? 3)));
+const filePattern = ((params.file_pattern as string) ?? "*.md").trim();
+const sortBy = ((params.sort_by as string) ?? "match_count") as "match_count" | "backlinks" | "modified";
+const limit = Math.max(1, Math.min(200, Math.floor((params.limit as number) ?? 20)));
+const offset = Math.max(0, Math.floor((params.offset as number) ?? 0));
+
+if (!query || typeof query !== "string") {
+  throw new Error("Missing required parameter: query");
+}
+
+// Compile regex — treat as literal string if not valid regex
+let regex: RegExp;
+try {
+  regex = new RegExp(query, "gm");
+} catch (e: any) {
+  throw new Error(\`Invalid search pattern: \${e instanceof Error ? e.message : String(e)}\`);
+}
+
+log.debug("Searching vault", { query, searchPath, contextLines, filePattern });
+
+// --- Helpers ---
+
+function matchesGlob(filename: string, pattern: string): boolean {
+  const regexStr = pattern
+    .replace(/[.+^\${}()|[\\]\\\\]/g, "\\\\$&")
+    .replace(/\\*/g, ".*");
+  try {
+    return new RegExp(\`^\${regexStr}$\`, "i").test(filename);
+  } catch {
+    return filename === pattern;
+  }
+}
+
+function getCandidateFiles(sp: string, fp: string): any[] {
+  const allFiles = app.vault.getFiles();
+  return allFiles.filter((file: any) => {
+    if (sp) {
+      const normalizedPath = sp.endsWith("/") ? sp : sp + "/";
+      if (!file.path.startsWith(normalizedPath) && file.path !== sp) return false;
+    }
+    if (fp && fp !== "*") {
+      if (!matchesGlob(file.name, fp)) return false;
+    }
+    return true;
+  });
+}
+
+function getBacklinkCounts(): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const [sourcePath, links] of Object.entries(app.metadataCache.resolvedLinks)) {
+    for (const targetPath of Object.keys(links as Record<string, number>)) {
+      if (targetPath !== sourcePath) {
+        counts.set(targetPath, (counts.get(targetPath) ?? 0) + 1);
+      }
+    }
+  }
+  return counts;
+}
+
+function searchFile(content: string, re: RegExp, ctxLines: number): any[] {
+  const lines = content.split("\\n");
+  const matches: any[] = [];
+  const matchedLineNumbers = new Set<number>();
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex] ?? "";
+    re.lastIndex = 0;
+    if (re.test(line)) {
+      if (matchedLineNumbers.has(lineIndex)) continue;
+      matchedLineNumbers.add(lineIndex);
+
+      const contextStart = Math.max(0, lineIndex - ctxLines);
+      const contextEnd = Math.min(lines.length - 1, lineIndex + ctxLines);
+      const contextParts: string[] = [];
+      for (let ci = contextStart; ci <= contextEnd; ci++) {
+        const prefix = ci === lineIndex ? ">" : " ";
+        contextParts.push(\`\${prefix} \${lines[ci] ?? ""}\`);
+      }
+
+      matches.push({
+        line: lineIndex + 1,
+        match: line.trim(),
+        context: contextParts.join("\\n"),
+      });
+    }
+  }
+  return matches;
+}
+
+function sortFileResults(results: any[], sb: string): any[] {
+  return [...results].sort((a: any, b: any) => {
+    switch (sb) {
+      case "backlinks": return b.backlink_count - a.backlink_count;
+      case "modified": return new Date(b.modified).getTime() - new Date(a.modified).getTime();
+      case "match_count":
+      default: return b.total_match_count - a.total_match_count;
+    }
+  });
+}
+
+// --- Main search ---
+
+const candidates = getCandidateFiles(searchPath, filePattern);
+const fileResults: any[] = [];
+let totalMatches = 0;
+const backlinkCounts = getBacklinkCounts();
+
+for (const file of candidates) {
+  try {
+    const content = await app.vault.cachedRead(file);
+    const matches = searchFile(content, regex, contextLines);
+
+    if (matches.length > 0) {
+      const totalMatchCount = matches.length;
+      const cappedMatches = matches.slice(0, MAX_MATCHES_PER_FILE);
+      fileResults.push({
+        path: file.path,
+        matches: cappedMatches,
+        match_count: cappedMatches.length,
+        total_match_count: totalMatchCount,
+        backlink_count: backlinkCounts.get(file.path) ?? 0,
+        modified: new Date(file.stat.mtime).toISOString(),
+      });
+      totalMatches += totalMatchCount;
+    }
+  } catch {
+    // Skip unreadable files
+  }
+
+  regex.lastIndex = 0;
+}
+
+const sortedResults = sortFileResults(fileResults, sortBy);
+const totalFiles = sortedResults.length;
+const paginatedResults = sortedResults.slice(offset, offset + limit);
+
+log.debug("Search complete", {
+  query,
+  totalMatches,
+  filesSearched: candidates.length,
+  filesWithMatches: totalFiles,
+  returned: paginatedResults.length,
+});
+
+return {
+  total_matches: totalMatches,
+  total_files: totalFiles,
+  files: paginatedResults,
+};`,
 );
 
 const LIST_VAULT = scaffold(
@@ -869,7 +1023,193 @@ const FETCH_WEBPAGE = scaffold(
 	`params:
   url:
     type: string
-    description: "URL of the webpage to fetch."`,
+    description: "URL of the webpage to fetch."
+settings:
+  fetch_webpage_timeout:
+    name: "Request Timeout"
+    type: number
+    description: "Timeout in seconds for HTTP requests."
+    default: 15
+    min: 1
+    max: 120
+  fetch_webpage_max_download_mb:
+    name: "Max Download Size (MB)"
+    type: number
+    description: "Maximum response body size in megabytes."
+    default: 5
+    min: 1
+    max: 50
+  fetch_webpage_max_output_chars:
+    name: "Max Output Characters"
+    type: number
+    description: "Maximum characters returned to the LLM. Longer content is truncated."
+    default: 50000
+    min: 1000
+    max: 500000`,
+	`const log = utils.logger("fetch_webpage");
+
+const USER_AGENT = "Notor/1.0";
+
+// --- Chromium net error hints ---
+const CHROMIUM_NET_ERROR_HINTS: Record<string, string> = {
+  ERR_NAME_NOT_RESOLVED: "DNS lookup failed — check the hostname or your network connection",
+  ERR_CONNECTION_REFUSED: "Connection refused — the server may be down or blocking requests",
+  ERR_CONNECTION_TIMED_OUT: "Connection timed out — the server took too long to respond",
+  ERR_CONNECTION_RESET: "Connection reset by the server — it may have dropped the connection",
+  ERR_INTERNET_DISCONNECTED: "No internet connection detected",
+  ERR_SSL_PROTOCOL_ERROR: "SSL/TLS handshake failed — the site may have a certificate issue",
+  ERR_CERT_AUTHORITY_INVALID: "SSL certificate not trusted — the certificate may be self-signed or expired",
+  ERR_CERT_DATE_INVALID: "SSL certificate has expired or is not yet valid",
+  ERR_BLOCKED_BY_CLIENT: "Request blocked by a browser extension or content policy",
+  ERR_TOO_MANY_REDIRECTS: "Too many redirects — the URL may be in a redirect loop",
+  ERR_INVALID_URL: "The URL is malformed or not supported by the network stack",
+  ERR_NETWORK_CHANGED: "Network changed during the request — try again",
+  ERR_ADDRESS_UNREACHABLE: "The server address is unreachable — it may be on a private or unavailable network",
+  ERR_EMPTY_RESPONSE: "The server returned an empty response",
+  ERR_FAILED: "Generic network failure — check your internet connection, proxy settings, or try again",
+};
+
+function getNetErrorHint(errorMessage: string): string | null {
+  for (const [code, hint] of Object.entries(CHROMIUM_NET_ERROR_HINTS)) {
+    if (errorMessage.includes(code)) return hint;
+  }
+  return null;
+}
+
+function initTurndown(): any {
+  const td = new libs.Turndown({
+    headingStyle: "atx",
+    codeBlockStyle: "fenced",
+    bulletListMarker: "-",
+    emDelimiter: "*",
+    strongDelimiter: "**",
+    linkStyle: "inlined",
+  });
+  td.use(libs.turndownGfm.gfm);
+  td.addRule("stripNav", {
+    filter: ["nav", "footer", "aside"],
+    replacement: () => "",
+  });
+  td.addRule("stripForms", {
+    filter: ["form", "input", "select", "button"],
+    replacement: () => "",
+  });
+  return td;
+}
+
+// --- Main logic ---
+
+const url = params.url as string;
+
+if (!url || typeof url !== "string") {
+  throw new Error("Missing required parameter: url");
+}
+
+let parsedUrl: URL;
+try {
+  parsedUrl = new URL(url);
+} catch {
+  throw new Error(\`Invalid URL: \${url}\`);
+}
+
+if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+  throw new Error(\`Unsupported protocol: \${parsedUrl.protocol}. Only http:// and https:// URLs are accepted.\`);
+}
+
+// Domain denylist check
+const denyCheck = utils.isDomainBlocked(url, shared.domain_denylist ?? []);
+if (denyCheck.blocked) {
+  log.info("Domain blocked by denylist", { url, pattern: denyCheck.pattern });
+  throw new Error(\`Domain \${parsedUrl.hostname} is blocked by your denylist.\`);
+}
+
+const timeoutMs = (settings.fetch_webpage_timeout as number) * 1000;
+const maxDownloadBytes = (settings.fetch_webpage_max_download_mb as number) * 1024 * 1024;
+const maxOutputChars = settings.fetch_webpage_max_output_chars as number;
+
+log.info("Fetching webpage", {
+  url,
+  timeout: \`\${settings.fetch_webpage_timeout}s\`,
+  maxDownloadMb: settings.fetch_webpage_max_download_mb,
+});
+
+let body: string;
+let mimeType: string;
+try {
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error(\`Request timed out after \${Math.round(timeoutMs / 1000)} seconds.\`)),
+      timeoutMs,
+    ),
+  );
+
+  const response = await Promise.race([
+    obsidian.requestUrl({
+      url,
+      method: "GET",
+      headers: { "User-Agent": USER_AGENT },
+      throw: false,
+    }),
+    timeoutPromise,
+  ]);
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(\`HTTP request failed with status \${response.status}.\`);
+  }
+
+  const bodyBytes = new TextEncoder().encode(response.text).length;
+  if (bodyBytes > maxDownloadBytes) {
+    throw new Error(\`Response body too large: download aborted at \${settings.fetch_webpage_max_download_mb} MB.\`);
+  }
+
+  const contentType = response.headers["content-type"] ?? "";
+  mimeType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  body = response.text;
+} catch (e: any) {
+  const message = e instanceof Error ? e.message : String(e);
+
+  // Diagnostic probe with native fetch
+  let nativeFetchResult: string;
+  try {
+    const probe = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
+    nativeFetchResult = \`native fetch OK (status \${probe.status})\`;
+  } catch (probeErr: any) {
+    nativeFetchResult = \`native fetch also failed: \${probeErr instanceof Error ? probeErr.message : String(probeErr)}\`;
+  }
+
+  const hint = getNetErrorHint(message);
+  const enhanced = hint
+    ? \`Failed to fetch URL: \${message} — \${hint}\`
+    : message;
+
+  log.warn("Fetch failed", { url, error: message, nativeFetchResult });
+  throw new Error(\`\${enhanced} [diagnostic: \${nativeFetchResult}]\`);
+}
+
+let content: string;
+if (mimeType === "text/html" || mimeType === "application/xhtml+xml") {
+  try {
+    content = initTurndown().turndown(body);
+  } catch {
+    content = body;
+  }
+} else if (mimeType.startsWith("text/") || mimeType === "application/json") {
+  content = body;
+} else {
+  throw new Error(\`Content type '\${mimeType}' is not supported. Only text/html, text/*, and application/json are supported.\`);
+}
+
+// Output character cap
+const totalLength = content.length;
+if (totalLength > maxOutputChars) {
+  const truncated = content.substring(0, maxOutputChars);
+  log.info("Output truncated", { url, totalLength, maxOutputChars });
+  return truncated +
+    \`\\n\\nNote: page was truncated at \${maxOutputChars.toLocaleString()} characters; total fetched length was \${totalLength.toLocaleString()} characters.\`;
+}
+
+log.info("Fetch complete", { url, contentType: mimeType, contentLength: content.length });
+return content;`,
 );
 
 const WEB_SEARCH = scaffold(
@@ -883,7 +1223,162 @@ const WEB_SEARCH = scaffold(
   num_results:
     type: number
     description: "Number of results to return. Maximum 10."
-    default: 5`,
+    default: 5
+settings:
+  web_search_timeout:
+    name: "Request Timeout"
+    type: number
+    description: "Maximum time in seconds to wait for search results before aborting."
+    default: 10
+    min: 1
+    max: 120
+  web_search_default_num_results:
+    name: "Default Number of Results"
+    type: number
+    description: "Number of search results returned when the LLM does not specify a count (1–10)."
+    default: 5
+    min: 1
+    max: 10`,
+	`const log = utils.logger("web_search");
+
+// --- Helpers ---
+
+function cleanDDGUrl(raw: string): string | null {
+  if (raw.startsWith("//duckduckgo.com/l/")) {
+    const qIndex = raw.indexOf("?");
+    if (qIndex === -1) return null;
+    const urlParams = new URLSearchParams(raw.substring(qIndex + 1));
+    const actual = urlParams.get("uddg");
+    if (!actual) return null;
+    return decodeURIComponent(actual);
+  }
+  if (raw.startsWith("//")) return "https:" + raw;
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  return null;
+}
+
+function parseDDGResults(html: string, maxResults: number): Array<{ title: string; url: string; snippet: string }> {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const results: Array<{ title: string; url: string; snippet: string }> = [];
+
+  const containers = Array.from(doc.querySelectorAll(".result"));
+  for (const el of containers) {
+    if (results.length >= maxResults) break;
+
+    const titleEl = el.querySelector(".result__title a");
+    const snippetEl = el.querySelector(".result__snippet");
+
+    const title = titleEl?.textContent?.trim() ?? "";
+    const rawUrl = titleEl?.getAttribute("href") ?? "";
+    const snippet = snippetEl?.textContent?.trim() ?? "";
+
+    if (!title || !rawUrl) continue;
+
+    const url = cleanDDGUrl(rawUrl);
+    if (!url) continue;
+
+    results.push({ title, url, snippet });
+  }
+
+  return results;
+}
+
+// --- Main logic ---
+
+const query = params.query as string;
+
+if (!query || typeof query !== "string") {
+  throw new Error("Missing required parameter: query");
+}
+
+const rawNum = typeof params.num_results === "number"
+  ? params.num_results
+  : (settings.web_search_default_num_results as number);
+const numResults = Math.max(1, Math.min(10, Math.round(rawNum)));
+const timeoutMs = (settings.web_search_timeout as number) * 1000;
+
+log.info("Web search initiated", { query, numResults, timeoutMs });
+
+let responseText: string;
+try {
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error(\`Request timed out after \${Math.round(timeoutMs / 1000)} seconds.\`)),
+      timeoutMs,
+    ),
+  );
+
+  const response = await Promise.race([
+    obsidian.requestUrl({
+      url: "https://html.duckduckgo.com/html/",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        DNT: "1",
+      },
+      body: \`q=\${encodeURIComponent(query)}&kl=us-en\`,
+      throw: false,
+    }),
+    timeoutPromise,
+  ]);
+
+  if (response.status !== 200) {
+    log.warn("DuckDuckGo returned non-200 status", { status: response.status });
+    throw new Error(\`Search request failed with HTTP status \${response.status}.\`);
+  }
+
+  responseText = response.text;
+} catch (e: any) {
+  const message = e instanceof Error ? e.message : "Unknown network error";
+  log.warn("Web search request failed", { error: message });
+  throw new Error(\`Web search failed: \${message}\`);
+}
+
+const parsed = parseDDGResults(responseText, numResults);
+
+// Warn on possible selector drift
+if (parsed.length === 0 && responseText.length > 0) {
+  log.warn(
+    "DuckDuckGo returned a non-empty response but 0 results were parsed. " +
+    "The HTML structure may have changed (selector drift).",
+    { query, responseLength: responseText.length },
+  );
+}
+
+// Filter out blocked domains
+const denylist = shared.domain_denylist ?? [];
+const results = parsed.filter((r: any) => {
+  const check = utils.isDomainBlocked(r.url, denylist);
+  if (check.blocked) {
+    log.debug("Filtered blocked domain from search results", { url: r.url, pattern: check.pattern });
+  }
+  return !check.blocked;
+});
+
+if (results.length === 0) {
+  return \`No results found for query: \${query}\`;
+}
+
+// Format output as numbered markdown list
+const lines: string[] = [
+  \`Web search results for "\${query}" (\${results.length} result\${results.length === 1 ? "" : "s"}):\`,
+  "",
+];
+
+for (let i = 0; i < results.length; i++) {
+  const r = results[i];
+  lines.push(\`\${i + 1}. **[\${r.title}](\${r.url})**\`);
+  if (r.snippet) lines.push(\`   \${r.snippet}\`);
+  lines.push("");
+}
+
+const output = lines.join("\\n").trimEnd();
+log.info("Web search completed", { query, resultCount: results.length });
+return output;`,
 );
 
 const EXECUTE_COMMAND = scaffold(
@@ -1018,7 +1513,133 @@ const READ_FILE = scaffold(
     default: "utf-8"
   pages:
     type: string
-    description: "Page range for PDF files (e.g. '1-5')."`,
+    description: "Page range for PDF files (e.g. '1-5')."
+settings:
+  image_max_dimension:
+    name: "Image Max Dimension"
+    type: number
+    description: "Maximum width or height in pixels. Images larger than this are resized proportionally."
+    default: 2000
+    min: 100
+    max: 8000
+  image_compression_quality:
+    name: "Image Compression Quality"
+    type: number
+    description: "JPEG compression quality (1-100)."
+    default: 80
+    min: 1
+    max: 100
+  pdf_prefer_native:
+    name: "Prefer Native PDF"
+    type: boolean
+    description: "Send PDFs as native document blocks when supported by the provider."
+    default: true
+  pdf_text_max_chars:
+    name: "PDF Max Text Characters"
+    type: number
+    description: "Maximum characters to extract from PDF text content."
+    default: 100000
+    min: 1000
+    max: 1000000
+  pdf_native_max_size_mb:
+    name: "PDF Native Max Size (MB)"
+    type: number
+    description: "Maximum PDF file size in MB for native document block processing."
+    default: 10
+    min: 1
+    max: 100`,
+	`const log = utils.logger("read_file");
+
+const filePath = params.path as string;
+const encoding = params.encoding as string | undefined;
+const pages = params.pages as string | undefined;
+
+if (!filePath || typeof filePath !== "string" || filePath.trim() === "") {
+  throw new Error("Missing required parameter: path");
+}
+
+if (!obsidian.Platform.isDesktopApp) {
+  throw new Error("read_file is only available on desktop.");
+}
+
+const pathResult = utils.resolveAndValidatePath(filePath);
+if (!pathResult.valid) throw new Error(pathResult.error);
+
+const resolvedPath = pathResult.resolvedPath;
+
+// Check file existence
+try {
+  await libs.fs.promises.stat(resolvedPath);
+} catch (e: any) {
+  if (e.code === "ENOENT") throw new Error(\`File not found: \${resolvedPath}\`);
+  throw e;
+}
+
+// Read raw buffer
+const buf = await libs.fs.promises.readFile(resolvedPath);
+
+// Detect binary via null bytes in first 8 KB
+if (buf.subarray(0, 8192).includes(0)) {
+  const format = utils.detectMediaFormat(buf);
+
+  if (format === "png" || format === "jpeg" || format === "gif" || format === "webp") {
+    if (buf.length > 50 * 1024 * 1024) {
+      throw new Error(\`Image file is too large (\${(buf.length / (1024 * 1024)).toFixed(1)} MB). Maximum raw input size is 50 MB.\`);
+    }
+
+    try {
+      const mediaType = \`image/\${format}\` as any;
+      const block = await utils.processImage(buf, mediaType, {
+        maxDimension: settings.image_max_dimension as number,
+        compressionQuality: settings.image_compression_quality as number,
+      });
+      const filename = resolvedPath.split("/").pop() ?? resolvedPath;
+      const w = block.type === "image" ? block.width : undefined;
+      const h = block.type === "image" ? block.height : undefined;
+
+      log.info("Read image file", { path: resolvedPath, format, width: w, height: h });
+
+      return {
+        result: \`Read image: \${filename} (\${w}x\${h}, image/\${format})\`,
+        content_blocks: [block],
+      };
+    } catch (e: any) {
+      throw new Error(\`Failed to process image: \${e instanceof Error ? e.message : String(e)}\`);
+    }
+  }
+
+  if (format === "pdf") {
+    if (buf.length > 50 * 1024 * 1024) {
+      throw new Error(\`PDF file is too large (\${(buf.length / (1024 * 1024)).toFixed(1)} MB). Maximum raw input size is 50 MB.\`);
+    }
+
+    try {
+      const result = await utils.processPdf(buf, {
+        pages,
+        maxTextChars: settings.pdf_text_max_chars as number,
+        preferNative: settings.pdf_prefer_native as boolean,
+      });
+      const filename = resolvedPath.split("/").pop() ?? resolvedPath;
+
+      log.info("Read PDF file", { path: resolvedPath, summary: result.textSummary });
+
+      return {
+        result: \`Read PDF: \${filename} — \${result.textSummary}\`,
+        content_blocks: result.contentBlocks,
+      };
+    } catch (e: any) {
+      throw new Error(\`Failed to process PDF: \${e instanceof Error ? e.message : String(e)}\`);
+    }
+  }
+
+  throw new Error(
+    "read_file only supports text-based files, images (PNG, JPEG, GIF, WebP), and PDFs. For Word documents, use read_docx instead."
+  );
+}
+
+const content = buf.toString((encoding as BufferEncoding) ?? "utf-8");
+log.info("Read file", { path: resolvedPath, bytes: buf.length });
+return content;`,
 );
 
 const READ_DOCX = scaffold(
@@ -1030,6 +1651,151 @@ const READ_DOCX = scaffold(
     type: string
     description: "Path to the .docx file. Vault-relative or absolute."
     path_namespace: filesystem`,
+	`const log = utils.logger("read_docx");
+
+const filePath = params.path as string;
+
+if (!filePath || typeof filePath !== "string" || filePath.trim() === "") {
+  throw new Error("Missing required parameter: path");
+}
+
+if (!obsidian.Platform.isDesktopApp) {
+  throw new Error("read_docx is only available on desktop.");
+}
+
+const pathResult = utils.resolveAndValidatePath(filePath);
+if (!pathResult.valid) throw new Error(pathResult.error);
+
+const resolvedPath = pathResult.resolvedPath;
+
+if (libs.path.extname(resolvedPath).toLowerCase() !== ".docx") {
+  throw new Error("read_docx only supports .docx files.");
+}
+
+// Check file existence
+try {
+  await libs.fs.promises.stat(resolvedPath);
+} catch (e: any) {
+  if (e.code === "ENOENT") throw new Error(\`File not found: \${resolvedPath}\`);
+  throw e;
+}
+
+const buf = await libs.fs.promises.readFile(resolvedPath);
+
+// Build image extraction handler
+const extractedImages: Array<{ index: number; vaultPath: string | null; alt: string }> = [];
+let imageIndex = 0;
+
+// Determine if the input path is vault-relative (for attachment folder resolution)
+const vaultFile = app.vault.getFileByPath(filePath);
+const sourcePath: string | undefined = vaultFile ? vaultFile.path : undefined;
+
+const supportedImageTypes = new Set([
+  "image/png", "image/jpeg", "image/gif", "image/webp",
+]);
+
+const convertImage = libs.mammoth.images.imgElement(
+  async (image: any) => {
+    const idx = imageIndex++;
+    const contentType = image.contentType;
+
+    // Skip unsupported formats
+    if (!supportedImageTypes.has(contentType)) {
+      const formatName = contentType.replace("image/", "").toUpperCase();
+      const alt = \`[Unsupported image format: \${formatName}]\`;
+      extractedImages.push({ index: idx, vaultPath: null, alt });
+      return { src: \`__notor_skip_\${idx}__\`, alt };
+    }
+
+    try {
+      const imgBuffer = await image.readAsBuffer();
+      const ext = (contentType.split("/")[1] ?? "bin").replace("jpeg", "jpg");
+      const hash = libs.crypto.createHash("md5").update(imgBuffer).digest("hex");
+      const filename = \`\${hash}.\${ext}\`;
+
+      // Resolve target path via Obsidian's attachment folder logic
+      const targetPath = await app.fileManager.getAvailablePathForAttachment(
+        filename,
+        sourcePath,
+      );
+
+      // Check if the file already exists at the resolved path
+      const existing = app.vault.getFileByPath(targetPath);
+      if (!existing) {
+        const arrayBuf = imgBuffer.buffer.slice(
+          imgBuffer.byteOffset,
+          imgBuffer.byteOffset + imgBuffer.byteLength,
+        );
+        await app.vault.createBinary(targetPath, arrayBuf);
+      }
+
+      extractedImages.push({ index: idx, vaultPath: targetPath, alt: filename });
+      return { src: \`__notor_img_\${idx}__\`, alt: filename };
+    } catch (err: any) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      log.warn("Image extraction failed", { index: idx, error: errMsg });
+      extractedImages.push({ index: idx, vaultPath: null, alt: "[Image extraction failed]" });
+      return { src: \`__notor_skip_\${idx}__\`, alt: "[Image extraction failed]" };
+    }
+  },
+);
+
+// Convert DOCX → HTML via mammoth (with image handler)
+const { value: html } = await libs.mammoth.convertToHtml(
+  { buffer: buf },
+  { convertImage },
+);
+
+// Build a lookup from src marker → extracted image info
+const imageMap = new Map<string, { vaultPath: string | null; alt: string }>();
+for (const img of extractedImages) {
+  imageMap.set(\`__notor_img_\${img.index}__\`, img);
+  imageMap.set(\`__notor_skip_\${img.index}__\`, img);
+}
+
+// Convert HTML → Markdown via Turndown (local instance)
+const td = new libs.Turndown({
+  headingStyle: "atx",
+  codeBlockStyle: "fenced",
+  bulletListMarker: "-",
+  emDelimiter: "*",
+  strongDelimiter: "**",
+  linkStyle: "inlined",
+});
+td.use(libs.turndownGfm.gfm);
+td.addRule("replaceImages", {
+  filter: ["img"],
+  replacement: (_content: string, node: any) => {
+    const src = node.getAttribute("src") ?? "";
+    const alt = node.getAttribute("alt") ?? "";
+
+    if (src.startsWith("__notor_img_")) {
+      const info = imageMap.get(src);
+      if (info?.vaultPath) {
+        return \`![\${alt}](\${info.vaultPath})\`;
+      }
+    }
+
+    if (src.startsWith("__notor_skip_")) {
+      return alt || "[image]";
+    }
+
+    return "[image]";
+  },
+});
+
+const markdown = td.turndown(html);
+
+const extractedCount = extractedImages.filter((i: any) => i.vaultPath !== null).length;
+const skippedCount = extractedImages.filter((i: any) => i.vaultPath === null).length;
+log.info("Read docx", {
+  path: resolvedPath,
+  bytes: buf.length,
+  imagesExtracted: extractedCount,
+  imagesSkipped: skippedCount,
+});
+
+return markdown;`,
 );
 
 const WRITE_DOCX = scaffold(
@@ -1053,7 +1819,352 @@ const WRITE_DOCX = scaffold(
   template_path:
     type: string
     description: "Path to a .docx template."
-    path_namespace: filesystem`,
+    path_namespace: filesystem
+settings:
+  write_docx_default_output_dir:
+    name: "Default Output Directory"
+    type: string
+    description: "Default output directory when only filename is provided."
+    default: ""
+  write_docx_default_template_path:
+    name: "Default Template Path"
+    type: string
+    description: "Default .docx template path."
+    default: ""`,
+	`const log = utils.logger("write_docx");
+
+const { Document, Packer, Paragraph, TextRun, ImageRun, HeadingLevel,
+        Table, TableRow, TableCell, ExternalHyperlink,
+        AlignmentType, WidthType, BorderStyle } = libs.docx;
+
+// --- Inline token renderer ---
+
+type InlineChild = any;
+
+function renderInline(tokens: any[]): InlineChild[] {
+  const result: InlineChild[] = [];
+  for (const token of tokens) {
+    switch (token.type) {
+      case "text":
+        result.push(new TextRun({ text: token.text }));
+        break;
+      case "strong":
+        result.push(new TextRun({ text: token.text, bold: true }));
+        break;
+      case "em":
+        result.push(new TextRun({ text: token.text, italics: true }));
+        break;
+      case "codespan":
+        result.push(new TextRun({ text: token.text, style: "Verbatim Char", font: { name: "Courier New" } }));
+        break;
+      case "link":
+        result.push(new ExternalHyperlink({ link: token.href, children: [new TextRun({ text: token.text })] }));
+        break;
+      default:
+        result.push(new TextRun({ text: token.raw ?? "" }));
+    }
+  }
+  return result;
+}
+
+// --- Image token collection ---
+
+function collectImageHrefs(tokens: any[]): string[] {
+  const hrefs: string[] = [];
+
+  function walk(tokenList: any[]): void {
+    for (const token of tokenList) {
+      if (token.type === "image") hrefs.push(token.href);
+      if (token.tokens && Array.isArray(token.tokens)) walk(token.tokens);
+      if (token.items && Array.isArray(token.items)) {
+        for (const item of token.items) {
+          if (item.tokens) walk(item.tokens);
+        }
+      }
+      if (token.type === "table") {
+        for (const cell of token.header) {
+          if (cell.tokens) walk(cell.tokens);
+        }
+        for (const row of token.rows) {
+          for (const cell of row) {
+            if (cell.tokens) walk(cell.tokens);
+          }
+        }
+      }
+    }
+  }
+
+  walk(tokens);
+  return hrefs;
+}
+
+function scaleImageDimensions(width: number, height: number): { width: number; height: number } {
+  const maxW = 600;
+  const maxH = 800;
+  const wScale = width > maxW ? maxW / width : 1;
+  const hScale = height > maxH ? maxH / height : 1;
+  const scale = Math.min(wScale, hScale);
+  if (scale < 1) {
+    return { width: Math.round(width * scale), height: Math.round(height * scale) };
+  }
+  return { width, height };
+}
+
+// --- Block token renderer ---
+
+function buildDocxChildren(tokens: any[], resolvedImages: Map<string, any>): any[] {
+  const result: any[] = [];
+
+  for (const token of tokens) {
+    switch (token.type) {
+      case "heading": {
+        const level = HeadingLevel[\`HEADING_\${token.depth}\` as keyof typeof HeadingLevel];
+        result.push(new Paragraph({ heading: level, children: renderInline(token.tokens ?? []) }));
+        break;
+      }
+      case "paragraph": {
+        const pTokens = token.tokens ?? [];
+        const firstToken = pTokens[0];
+
+        // Detect standalone image paragraph
+        if (pTokens.length === 1 && firstToken && firstToken.type === "image") {
+          const imageData = resolvedImages.get(firstToken.href);
+          if (imageData) {
+            const scaled = scaleImageDimensions(imageData.width, imageData.height);
+            result.push(new Paragraph({
+              children: [new ImageRun({
+                type: imageData.type,
+                data: imageData.buffer,
+                transformation: { width: scaled.width, height: scaled.height },
+                altText: { title: firstToken.text || "Image", description: firstToken.text || "", name: firstToken.href },
+              })],
+            }));
+          } else {
+            result.push(new Paragraph({ children: [new TextRun({ text: \`[Image: \${firstToken.href}]\` })] }));
+          }
+          break;
+        }
+
+        result.push(new Paragraph({ children: renderInline(pTokens) }));
+        break;
+      }
+      case "code": {
+        result.push(new Paragraph({
+          style: "Source Code",
+          children: [new TextRun({ text: token.text, font: { name: "Courier New" } })],
+        }));
+        break;
+      }
+      case "hr": {
+        result.push(new Paragraph({
+          border: { bottom: { style: BorderStyle.SINGLE, size: 6, space: 1, color: "auto" } },
+        }));
+        break;
+      }
+      case "blockquote": {
+        result.push(new Paragraph({ indent: { left: 720 }, children: renderInline(token.tokens ?? []) }));
+        break;
+      }
+      case "list": {
+        for (const item of token.items) {
+          if (token.ordered) {
+            result.push(new Paragraph({
+              numbering: { reference: "default-numbering", level: 0 },
+              children: renderInline(item.tokens ?? []),
+            }));
+          } else {
+            result.push(new Paragraph({ bullet: { level: 0 }, children: renderInline(item.tokens ?? []) }));
+          }
+        }
+        break;
+      }
+      case "table": {
+        const headerRow = new TableRow({
+          children: token.header.map((cell: any) =>
+            new TableCell({ children: [new Paragraph({ children: renderInline(cell.tokens ?? []) })] })
+          ),
+        });
+        const bodyRows = token.rows.map((row: any[]) =>
+          new TableRow({
+            children: row.map((cell: any) =>
+              new TableCell({ children: [new Paragraph({ children: renderInline(cell.tokens ?? []) })] })
+            ),
+          })
+        );
+        result.push(new Table({ rows: [headerRow, ...bodyRows], width: { size: 100, type: WidthType.PERCENTAGE } }));
+        break;
+      }
+      case "space":
+        break;
+      default:
+        result.push(new Paragraph({ children: [new TextRun({ text: token.raw ?? "" })] }));
+    }
+  }
+
+  return result;
+}
+
+// --- generateDocx ---
+
+async function generateDocx(mdContent: string, templatePath: string | null): Promise<Buffer> {
+  const tokens = libs.marked.lexer(mdContent);
+
+  // Image pre-resolution pass
+  const imageHrefs = collectImageHrefs(tokens);
+  const resolvedImages = new Map<string, any>();
+  if (imageHrefs.length > 0) {
+    const uniqueHrefs = [...new Set(imageHrefs)];
+    const results = await Promise.all(uniqueHrefs.map((href: string) => utils.resolveImageForDocx(href)));
+    for (let i = 0; i < uniqueHrefs.length; i++) {
+      const r = results[i];
+      const href = uniqueHrefs[i];
+      if (r !== null && r !== undefined && href !== undefined) {
+        resolvedImages.set(href, r);
+      }
+    }
+  }
+
+  const children = buildDocxChildren(tokens, resolvedImages);
+
+  const doc = new Document({
+    numbering: {
+      config: [{
+        reference: "default-numbering",
+        levels: [{
+          level: 0,
+          format: "decimal",
+          text: "%1.",
+          alignment: AlignmentType.LEFT,
+          style: { paragraph: { indent: { left: 720, hanging: 360 } } },
+        }],
+      }],
+    },
+    sections: [{ children }],
+  });
+
+  const tempBuffer = await Packer.toBuffer(doc);
+
+  if (templatePath === null) return tempBuffer;
+
+  // Graft generated body into template
+  const generatedZip = new libs.PizZip(tempBuffer);
+  const templateBuf = await libs.fs.promises.readFile(templatePath);
+  const templateZip = new libs.PizZip(templateBuf);
+
+  await utils.graftDocxIntoTemplate(generatedZip, templateZip);
+
+  return templateZip.generate({ type: "nodebuffer" });
+}
+
+// --- Main logic ---
+
+const rawContent = params.content as string | undefined;
+const noteName = params.note_name as string | undefined;
+const output_path = params.output_path as string | undefined;
+const filename = params.filename as string | undefined;
+const template_path = params.template_path as string | undefined;
+
+// Content source validation
+const hasContent = rawContent !== undefined && typeof rawContent === "string" && rawContent.trim() !== "";
+const hasNoteName = noteName !== undefined && typeof noteName === "string" && noteName.trim() !== "";
+
+if (hasContent && hasNoteName) throw new Error("Provide either content or note_name, not both.");
+if (!hasContent && !hasNoteName) throw new Error("Either content or note_name must be provided.");
+
+if (!obsidian.Platform.isDesktopApp) throw new Error("write_docx is only available on desktop.");
+
+// Content source resolution
+let mdContent: string;
+
+if (hasNoteName) {
+  const file = utils.resolveNote(noteName!);
+  if (!file) throw new Error(\`Note not found: \${noteName}\`);
+  if (file.extension !== "md") throw new Error(\`Path is not a Markdown note: \${noteName}\`);
+
+  const fullContent = await app.vault.read(file);
+  const fmInfo = obsidian.getFrontMatterInfo(fullContent);
+  mdContent = fmInfo.exists
+    ? fullContent.slice(fmInfo.contentStart).replace(/^\\n/, "")
+    : fullContent;
+
+  if (mdContent.trim() === "") throw new Error(\`Note is empty (after stripping frontmatter): \${noteName}\`);
+} else {
+  mdContent = rawContent!;
+}
+
+// Validate filename has no path separators
+if (filename && (filename.includes("/") || filename.includes("\\\\"))) {
+  throw new Error("filename must not contain path separators.");
+}
+
+// Output path resolution (three-step)
+let rawOutputPath: string;
+let filenameIgnored = false;
+
+if (output_path) {
+  if (filename) filenameIgnored = true;
+  rawOutputPath = output_path;
+} else if (filename && settings.write_docx_default_output_dir) {
+  const defaultDirResult = utils.resolveAndValidatePath(settings.write_docx_default_output_dir as string);
+  if (!defaultDirResult.valid) throw new Error(defaultDirResult.error);
+  rawOutputPath = libs.path.join(defaultDirResult.resolvedPath, filename + ".docx");
+} else {
+  throw new Error("No output path provided. Pass output_path, or provide a filename and configure write_docx_default_output_dir in Settings.");
+}
+
+// Validate final output path boundary
+const outputResult = utils.resolveAndValidatePath(rawOutputPath);
+if (!outputResult.valid) throw new Error(outputResult.error);
+const resolvedOutputPath = outputResult.resolvedPath;
+
+// Validate parent directory exists
+try {
+  await libs.fs.promises.stat(libs.path.dirname(resolvedOutputPath));
+} catch (e: any) {
+  if (e.code === "ENOENT") {
+    throw new Error(\`Output directory '\${libs.path.dirname(resolvedOutputPath)}' does not exist.\`);
+  }
+  throw e;
+}
+
+// Template path resolution
+const rawTemplatePath = template_path || (settings.write_docx_default_template_path as string) || null;
+let resolvedTemplatePath: string | null = null;
+
+if (rawTemplatePath) {
+  const templateResult = utils.resolveAndValidatePath(rawTemplatePath);
+  if (!templateResult.valid) throw new Error(templateResult.error);
+  resolvedTemplatePath = templateResult.resolvedPath;
+
+  try {
+    await libs.fs.promises.stat(resolvedTemplatePath);
+  } catch (e: any) {
+    if (e.code === "ENOENT") throw new Error(\`Template file not found: \${resolvedTemplatePath}\`);
+    throw e;
+  }
+
+  if (libs.path.extname(resolvedTemplatePath).toLowerCase() !== ".docx") {
+    throw new Error("Template must be a .docx file.");
+  }
+}
+
+// Generate and write
+const buffer = await generateDocx(mdContent, resolvedTemplatePath);
+await libs.fs.promises.writeFile(resolvedOutputPath, buffer);
+
+log.info("Wrote docx", {
+  path: resolvedOutputPath,
+  template: resolvedTemplatePath ?? "(none)",
+  bytes: buffer.length,
+});
+
+const sourceInfo = hasNoteName ? \` from note "\${noteName}"\` : "";
+const successMessage = \`Successfully wrote .docx file\${sourceInfo} to \${resolvedOutputPath}\`;
+const result = filenameIgnored
+  ? \`Warning: filename was ignored because output_path was provided.\\n\\n\${successMessage}\`
+  : successMessage;
+
+return result;`,
 );
 
 const WRITE_FILE = scaffold(
@@ -1220,6 +2331,139 @@ const EXTRACT_DOCX_COMMENTS = scaffold(
     type: boolean
     description: "Include resolved/done comments."
     default: false`,
+	`const log = utils.logger("extract_docx_comments");
+
+const docxPath = params.docx_path as string;
+const outputPath = params.output_path as string;
+const includeResolved = (params.include_resolved as boolean) ?? false;
+
+if (!docxPath || typeof docxPath !== "string" || docxPath.trim() === "") {
+  throw new Error("Missing required parameter: docx_path");
+}
+
+if (!outputPath || typeof outputPath !== "string" || outputPath.trim() === "") {
+  throw new Error("Missing required parameter: output_path");
+}
+
+if (!obsidian.Platform.isDesktopApp) {
+  throw new Error("extract_docx_comments is only available on desktop.");
+}
+
+const pathResult = utils.resolveAndValidatePath(docxPath);
+if (!pathResult.valid) throw new Error(pathResult.error);
+
+const resolvedPath = pathResult.resolvedPath;
+
+if (libs.path.extname(resolvedPath).toLowerCase() !== ".docx") {
+  throw new Error("extract_docx_comments only supports .docx files.");
+}
+
+// Check file exists
+try {
+  await libs.fs.promises.stat(resolvedPath);
+} catch (e: any) {
+  if (e.code === "ENOENT") throw new Error(\`File not found: \${resolvedPath}\`);
+  throw e;
+}
+
+// Extract XML blobs via PizZip
+const buf = await libs.fs.promises.readFile(resolvedPath);
+const zip = new libs.PizZip(buf);
+const commentsXml = zip.files["word/comments.xml"]?.asText() ?? null;
+const commentsExtXml = zip.files["word/commentsExtended.xml"]?.asText() ?? null;
+const documentXml = zip.files["word/document.xml"]?.asText() ?? null;
+const peopleXmlStr = zip.files["word/people.xml"]?.asText() ?? null;
+
+// Early exit: no comments
+if (!commentsXml) {
+  return "No comments found in the document.";
+}
+
+// Parse all XML
+const rawComments = utils.docxComments.parseCommentsXml(commentsXml);
+if (rawComments.length === 0) {
+  return "No comments found in the document.";
+}
+
+const { resolvedIds, threadingMap } = commentsExtXml
+  ? utils.docxComments.parseCommentsExtendedXml(commentsExtXml)
+  : { resolvedIds: new Set<string>(), threadingMap: new Map<string, string>() };
+
+// Extract quoted text for each comment
+if (documentXml) {
+  for (const raw of rawComments) {
+    raw.quotedText = utils.docxComments.extractQuotedText(documentXml, raw.commentId);
+  }
+}
+
+// Parse people for @mention resolution
+const peopleMap = peopleXmlStr
+  ? utils.docxComments.parsePeopleXml(peopleXmlStr)
+  : new Map<string, string>();
+
+// Build threaded comments
+const comments = utils.docxComments.buildCommentThreads(
+  rawComments,
+  threadingMap,
+  resolvedIds,
+  includeResolved,
+  peopleMap,
+);
+
+if (comments.length === 0) {
+  return "All comments are resolved. Use include_resolved=true to include them.";
+}
+
+// Check for existing note (for dedup/append)
+const normalizedOutput = outputPath.endsWith(".md") ? outputPath : outputPath + ".md";
+const existingFile = app.vault.getAbstractFileByPath(normalizedOutput);
+
+let startNumber = 1;
+let existingIds = new Set<string>();
+
+if (existingFile && existingFile instanceof obsidian.TFile) {
+  const existingContent = await app.vault.read(existingFile);
+  const existing = utils.docxComments.extractExistingCommentIds(existingContent);
+  existingIds = existing.ids;
+  startNumber = existing.maxNumber + 1;
+}
+
+// Filter out already-written comments
+const newComments = comments.filter((c: any) => !existingIds.has(c.uniqueId));
+if (newComments.length === 0) {
+  return \`All \${comments.length} comments already exist in \${normalizedOutput}.\`;
+}
+
+// Format as Markdown
+const filename = resolvedPath.split("/").pop() ?? "document.docx";
+const formatted = utils.docxComments.formatCommentsAsMarkdown(newComments, filename, startNumber);
+
+// Write to vault
+if (existingFile && existingFile instanceof obsidian.TFile) {
+  await app.vault.process(existingFile, (data: string) => {
+    return data.trimEnd() + "\\n\\n" + formatted;
+  });
+} else {
+  await utils.ensureDirectoryExists(normalizedOutput);
+  await app.vault.create(normalizedOutput, formatted);
+}
+
+// Return summary
+const skipped = comments.length - newComments.length;
+const summary =
+  \`Extracted \${newComments.length} comment(s) to \${normalizedOutput}\` +
+  (skipped > 0 ? \` (\${skipped} duplicate(s) skipped)\` : "") +
+  (resolvedIds.size > 0 && !includeResolved ? \` (\${resolvedIds.size} resolved comment(s) excluded)\` : "");
+
+log.info("Extracted docx comments", {
+  path: resolvedPath,
+  output: normalizedOutput,
+  total: rawComments.length,
+  written: newComments.length,
+  skipped,
+});
+
+return summary;`,
 );
 
 // ---------------------------------------------------------------------------
