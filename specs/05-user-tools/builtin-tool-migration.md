@@ -652,3 +652,80 @@ params:
 ```
 
 **Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
+
+### `get_outlinks` — Feasibility: Trivial ✅
+
+**Source:** `src/tools/get-outlinks.ts` (84 lines total, ~45 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param exists and is a string
+2. Resolves note via `resolveNote(path, this.app.vault, this.app.metadataCache)`
+3. Reads `this.app.metadataCache.resolvedLinks[file.path]` — object mapping target paths to link counts for links whose targets exist in the vault
+4. Reads `this.app.metadataCache.unresolvedLinks[file.path]` — object mapping link text to counts for links whose targets do NOT exist
+5. Filters out self-links from resolved links
+6. Formats two sections: `Resolved:` (newline-separated paths or `(none)`) and `Unresolved:` (newline-separated link names or `(none)`)
+7. Returns the combined plain-text string
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.metadataCache.resolvedLinks` | `app.metadataCache.resolvedLinks` | ✅ |
+| `this.app.metadataCache.unresolvedLinks` | `app.metadataCache.unresolvedLinks` | ✅ |
+| `resolveNote(path, vault, metadataCache)` | `utils.resolveNote(path)` | ✅ |
+| `logger("GetOutlinksTool")` | `utils.logger("get_outlinks")` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed.
+
+**Return value mapping:**
+- The built-in returns a plain-text string as `result`. In the scaffold, returning a string directly is handled by `UserToolAdapter.execute()` — `typeof returnValue === "string"` passes through as-is into `{ success: true, result: string }`.
+- For errors, the scaffold throws (adapter catches and wraps in `{ success: false, error }`).
+
+**Scaffold code (estimated ~25 lines):**
+```ts
+const log = utils.logger("get_outlinks");
+
+if (!params.path || typeof params.path !== "string") {
+  throw new Error("Missing required parameter: path");
+}
+
+log.debug("Getting outlinks", { path: params.path });
+
+const file = utils.resolveNote(params.path);
+if (!file) throw new Error(`Note not found: ${params.path}`);
+
+const resolvedMap = app.metadataCache.resolvedLinks[file.path] ?? {};
+const unresolvedMap = app.metadataCache.unresolvedLinks[file.path] ?? {};
+
+// Filter out self-links
+const resolvedPaths = Object.keys(resolvedMap).filter((p) => p !== file.path);
+const unresolvedLinkNames = Object.keys(unresolvedMap);
+
+log.debug("Got outlinks", {
+  path: file.path,
+  resolved: resolvedPaths.length,
+  unresolved: unresolvedLinkNames.length,
+});
+
+const resolvedSection = resolvedPaths.length > 0 ? resolvedPaths.join("\n") : "(none)";
+const unresolvedSection = unresolvedLinkNames.length > 0 ? unresolvedLinkNames.join("\n") : "(none)";
+return `Resolved:\n${resolvedSection}\n\nUnresolved:\n${unresolvedSection}`;
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed.
+
+**No `libs` or `obsidian` imports needed.** Pure `app` + `utils` usage.
+
+**Risk:** Effectively zero. Nearly identical structure to `read_frontmatter` — synchronous in-memory cache read, no settings, no file I/O, no external libraries. The only difference is two cache lookups (`resolvedLinks` + `unresolvedLinks`) instead of one, and a self-link filter. Direct 1:1 port of the class logic.
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the note relative to vault root."
+    path_namespace: vault
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
