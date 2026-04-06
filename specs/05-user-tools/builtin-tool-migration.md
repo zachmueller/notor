@@ -852,3 +852,125 @@ params:
 ```
 
 **Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
+
+### `replace_in_file` — Feasibility: Straightforward ✅
+
+**Source:** `src/tools/replace-in-file.ts` (271 lines total, ~170 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param (exists, is string, not empty)
+2. Validates `changes` param (array, non-empty, each block has non-empty `search` string and a `replace` string)
+3. Desktop-only guard via `Platform.isDesktopApp`
+4. Resolves vault root via `app.vault.adapter.basePath`
+5. Validates path against vault root and `settings.read_file_allowed_paths` via `resolveAndValidatePath()`
+6. Checks file existence via `fs.promises.stat()` (ENOENT → specific error)
+7. Reads raw buffer via `fs.promises.readFile()`
+8. Binary detection: scans first 8 KB for null bytes (`buf.subarray(0, 8192).includes(0)`)
+9. Applies SEARCH/REPLACE blocks sequentially in memory — each block replaces only the first occurrence via `indexOf()` + slice-concat
+10. Atomic semantics: if any search block fails to match, no changes are written; returns error with preview of the failing search text
+11. Writes modified content back via `fs.promises.writeFile()`
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `Platform` from `"obsidian"` | `obsidian.Platform` | ⚠️ Not yet — must be added to `buildObsidianExports()` (spec already calls for this in runtime-context.ts changes) |
+| `import * as fs from "fs"` | `libs.fs` | ⚠️ Not yet — must be added to `buildLibs()` (spec already calls for this in D-3) |
+| `resolveAndValidatePath(path, vaultRoot, allowedPaths)` | `utils.resolveAndValidatePath(path)` | ✅ — runtime-context.ts:85-90 already injects `vaultRootPath` and defaults `allowedPaths` to `plugin.settings.read_file_allowed_paths` |
+| `logger("ReplaceInFileTool")` | `utils.logger("replace_in_file")` | ✅ |
+| `this.settings.read_file_allowed_paths` | `shared.read_file_allowed_paths` | ✅ (shared setting — see D-2/D-8). However, the scaffold does NOT need to pass this explicitly — `utils.resolveAndValidatePath(path)` reads it internally as the default. Only tools with custom allowed paths (like `execute_command`) pass a second argument. |
+
+**Settings:** None per-extension. The only setting referenced (`read_file_allowed_paths`) is a cross-tool shared setting consumed internally by `utils.resolveAndValidatePath()`. No `settings:` section needed in the YAML fence.
+
+**Helper functions (1 trivial inline):**
+
+1. **`getVaultRootPath()`** (4 lines) — Extracts `basePath` from `app.vault.adapter`. Not needed in the scaffold because `utils.resolveAndValidatePath()` already knows the vault root (injected at build time in runtime-context.ts:86-88). The scaffold simply calls `utils.resolveAndValidatePath(path)` without needing the vault root at all.
+
+**Return value mapping:**
+- Success → return string message like `"Applied 3 replacements to /path/to/file"` (adapter wraps in `{ success: true, result: string }`)
+- Validation/match failures → throw (adapter wraps in `{ success: false, error }`)
+- The class has many early-return error paths (param validation, desktop guard, path validation, file not found, binary detection, search block mismatch). All convert to `throw new Error(message)` in the scaffold.
+
+**Scaffold code (estimated ~100 lines):**
+```ts
+const log = utils.logger("replace_in_file");
+
+if (!params.path || typeof params.path !== "string" || params.path.trim() === "") {
+  throw new Error("Missing required parameter: path");
+}
+if (!Array.isArray(params.changes) || params.changes.length === 0) {
+  throw new Error("Missing or empty required parameter: changes");
+}
+
+// Validate change blocks
+for (let i = 0; i < params.changes.length; i++) {
+  const block = params.changes[i];
+  if (typeof block?.search !== "string" || typeof block?.replace !== "string") {
+    throw new Error(`Change block ${i + 1} is missing required 'search' or 'replace' property`);
+  }
+  if (block.search === "") {
+    throw new Error(`Change block ${i + 1} has an empty search string. Search text must be non-empty.`);
+  }
+}
+
+if (!obsidian.Platform.isDesktopApp) {
+  throw new Error("replace_in_file is only available on desktop.");
+}
+
+const pathResult = utils.resolveAndValidatePath(params.path);
+if (!pathResult.valid) throw new Error(pathResult.error);
+const resolvedPath = pathResult.resolvedPath;
+
+// Check file existence
+try {
+  await libs.fs.promises.stat(resolvedPath);
+} catch (e) {
+  if (e.code === "ENOENT") throw new Error(`File not found: ${resolvedPath}`);
+  throw e;
+}
+
+// Read raw buffer for binary detection
+const buf = await libs.fs.promises.readFile(resolvedPath);
+
+if (buf.subarray(0, 8192).includes(0)) {
+  throw new Error(
+    "replace_in_file only supports text-based files. Binary files cannot be edited with SEARCH/REPLACE blocks."
+  );
+}
+
+let content = buf.toString("utf-8");
+
+// Apply SEARCH/REPLACE blocks sequentially in memory (atomic: all must match)
+for (let i = 0; i < params.changes.length; i++) {
+  const block = params.changes[i];
+  if (!block) continue;
+  const idx = content.indexOf(block.search);
+  if (idx === -1) {
+    const preview = block.search.length > 80
+      ? block.search.slice(0, 80) + "..."
+      : block.search;
+    throw new Error(
+      `Search block ${i + 1} did not match any text in ${params.path}. ` +
+      `No changes were applied. The search text was: "${preview}"`
+    );
+  }
+  content = content.slice(0, idx) + block.replace + content.slice(idx + block.search.length);
+}
+
+// All blocks matched — write
+await libs.fs.promises.writeFile(resolvedPath, content, "utf-8");
+
+log.info("Applied replacements", { path: resolvedPath, count: params.changes.length });
+return `Applied ${params.changes.length} replacement${params.changes.length > 1 ? "s" : ""} to ${resolvedPath}`;
+```
+
+**No new `utils` expansions needed.** `resolveAndValidatePath` already handles vault root and allowed paths internally.
+
+**Required runtime expansions (already planned in spec):**
+- `obsidian.Platform` — add to `buildObsidianExports()` (spec runtime-context.ts changes)
+- `libs.fs` — add to `buildLibs()` (spec D-3)
+
+**YAML fence update needed:** The current scaffold (builtin-tool-scaffolds.ts:381-393) declares `changes` as `type: string` with description "JSON-encoded array of {search, replace} objects." This is a workaround for the simplified YAML param schema not supporting array-of-object types. The actual `input_schema` in the class defines `changes` as `type: array` with `items: { type: object, properties: { search, replace } }`. The scaffold YAML fence approach works because `UserToolAdapter` passes the LLM-provided params through — the LLM sends an array regardless of the YAML schema declaration. However, the description should clearly convey the expected structure. No change strictly required, but the mismatch between declared schema (`string`) and actual runtime type (`array`) is a documentation concern.
+
+**Risk:** Low. This is a direct 1:1 port with no complex helpers, no external library dependencies beyond `fs`, no settings beyond what `utils.resolveAndValidatePath` already handles, and no tricky patterns. The atomic all-or-nothing semantics are purely in-memory sequential logic that translates directly. The only prerequisites are the `Platform` and `libs.fs` runtime expansions that are already planned for other tools (`execute_command` needs `Platform`, `read_file`/`write_file` need `libs.fs`).
