@@ -3555,3 +3555,179 @@ params:
 **Notable: `vault.read()` not `cachedRead()`.** The built-in explicitly uses `vault.read()` rather than `vault.cachedRead()`. The scaffold preserves this choice. The stale tracker needs the true on-disk content, not a potentially stale cache. The code comment in the scaffold calls this out to prevent users from "optimizing" to `cachedRead()`.
 
 **Comparison with spec's complexity estimate:** The spec classifies `read_note` as "Medium" at 80-280 lines and estimates ~60 lines. The scaffold is ~40 lines of logic — below estimate and at the lower bound of the "Medium" tier. This is because `read_note` is procedurally linear with no helper functions, no loops, no create-vs-update branching, and no settings. Structurally simpler than other "Medium" tools (`write_note`, `replace_in_note`, `manage_tags`, `move_note`) and closer in complexity to the "Simple" tier (`read_frontmatter`, `get_outlinks`). The "Medium" classification likely reflects its importance to the system (most-used tool, stale tracker integration) rather than raw code complexity.
+
+### `manage_tags` — Feasibility: Trivial ✅
+
+**Source:** `src/tools/manage-tags.ts` (210 lines total, ~100 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param exists and is a string
+2. Validates at least one of `add` or `remove` is provided with at least one tag
+3. Resolves note via `resolveNote(path, this.app.vault, this.app.metadataCache)`
+4. Creates checkpoint via `this.checkpointManager?.createCheckpoint(file.path, this.name, "")`
+5. Calls `this.app.fileManager.processFrontMatter(file, callback)` to atomically update frontmatter
+6. Inside the callback: normalises existing `tags` value (handles undefined, null, string, array), adds new tags (deduplicating), removes requested tags (gracefully skipping non-existent)
+7. If resulting tags array is empty, deletes the `tags` key from frontmatter entirely
+8. Builds a human-readable summary string (`"Tags updated on {path}: added [...], removed [...]"` or `"Tags unchanged..."`)
+9. Returns the summary string as the tool result
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.fileManager.processFrontMatter(file, cb)` | `app.fileManager.processFrontMatter(file, cb)` | ✅ |
+| `resolveNote(path, vault, metadataCache)` | `utils.resolveNote(path)` | ✅ |
+| `this.checkpointManager?.createCheckpoint()` | `utils.checkpointManager.createCheckpoint()` | ✅ |
+| `logger("ManageTagsTool")` | `utils.logger("manage_tags")` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed.
+
+**Return value mapping:**
+- The built-in returns a `ToolResult` object with `tool_name`, `success`, `result`, `error`. In the scaffold, returning a plain string is handled by `UserToolAdapter.execute()` — `typeof returnValue === "string"` passes through as-is into `{ success: true, result: string }`.
+- For errors, the scaffold returns `{ success: false, error: "..." }` directly (the adapter recognizes object return values).
+
+**Scaffold code (estimated ~60 lines):**
+```ts
+const log = utils.logger("manage_tags");
+
+if (!params.path || typeof params.path !== "string") {
+  return { success: false, error: "Missing required parameter: path" };
+}
+
+const add = params.add as string[] | undefined;
+const remove = params.remove as string[] | undefined;
+
+if ((!add || add.length === 0) && (!remove || remove.length === 0)) {
+  return { success: false, error: "At least one of 'add' or 'remove' must be provided with at least one tag" };
+}
+
+log.debug("Managing tags", { path: params.path, add: add ?? [], remove: remove ?? [] });
+
+const file = utils.resolveNote(params.path);
+if (!file) return { success: false, error: `Note not found: ${params.path}` };
+
+// Create checkpoint before modifying (non-fatal)
+try {
+  await utils.checkpointManager.createCheckpoint(file.path, "manage_tags", "");
+} catch { /* non-fatal */ }
+
+let actualAdded: string[] = [];
+let actualRemoved: string[] = [];
+
+// -- Helpers (inlined) --
+
+function normaliseTag(tag: string): string {
+  return tag.trim().replace(/^#/, "");
+}
+
+function normaliseTags(raw: unknown): string[] {
+  if (!raw) return [];
+  if (typeof raw === "string") return [normaliseTag(raw)];
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((t: any) => t != null && t !== "")
+      .map((t: any) => normaliseTag(String(t)));
+  }
+  return [];
+}
+
+await app.fileManager.processFrontMatter(file, (frontmatter: any) => {
+  let tags: string[] = normaliseTags(frontmatter["tags"]);
+
+  if (add && add.length > 0) {
+    for (const tag of add) {
+      const normalised = normaliseTag(tag);
+      if (!tags.includes(normalised)) {
+        tags.push(normalised);
+        actualAdded.push(normalised);
+      }
+    }
+  }
+
+  if (remove && remove.length > 0) {
+    for (const tag of remove) {
+      const normalised = normaliseTag(tag);
+      const idx = tags.indexOf(normalised);
+      if (idx !== -1) {
+        tags.splice(idx, 1);
+        actualRemoved.push(normalised);
+      }
+    }
+  }
+
+  if (tags.length > 0) {
+    frontmatter["tags"] = tags;
+  } else {
+    delete frontmatter["tags"];
+  }
+});
+
+const parts: string[] = [];
+if (actualAdded.length > 0) {
+  parts.push(`added [${actualAdded.map((t: string) => `"${t}"`).join(", ")}]`);
+}
+if (actualRemoved.length > 0) {
+  parts.push(`removed [${actualRemoved.map((t: string) => `"${t}"`).join(", ")}]`);
+}
+
+const summary = parts.length > 0
+  ? `Tags updated on ${params.path}: ${parts.join(", ")}`
+  : `Tags unchanged on ${params.path} (requested tags already in desired state)`;
+
+log.info("Tags managed", { path: params.path, added: actualAdded, removed: actualRemoved });
+
+return summary;
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed in the extension runtime: `resolveNote`, `checkpointManager`, `logger`.
+
+**No `libs` or `obsidian` imports needed.** Pure `app` + `utils` usage.
+
+**No settings migration needed.** This tool references zero `NotorSettings` fields. No per-extension `settings:` section in the YAML fence, no shared settings.
+
+**YAML fence (current scaffold is correct):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the note relative to vault root."
+    path_namespace: vault
+  add:
+    type: "string[]"
+    description: "Tags to add to the note."
+  remove:
+    type: "string[]"
+    description: "Tags to remove from the note."
+```
+
+The built-in's `input_schema` declares `add` and `remove` as `{ type: "array", items: { type: "string" } }` with neither in `required`. The scaffold's `type: "string[]"` maps correctly to this via `paramSchemaToJsonSchema()`. Both `add` and `remove` are optional (the at-least-one validation is done in the tool body, not the schema). Unlike `update_frontmatter`'s `set`/`remove` params which needed `default: null` to keep them out of `required[]`, the `string[]` type in the param schema mapper already produces an array type without requiring a default — **however**, the same `required[]` issue applies. Params without a `default` are added to `required[]` by `paramSchemaToJsonSchema()`. The built-in only has `path` in `required`. To match, both `add` and `remove` should declare `default: null`:
+
+```yaml
+  add:
+    type: "string[]"
+    description: "Tags to add to the note."
+    default: null
+  remove:
+    type: "string[]"
+    description: "Tags to remove from the note."
+    default: null
+```
+
+This mirrors the `update_frontmatter` pattern where optional params use `default: null` to stay out of `required[]`, with the at-least-one-of validation in the tool body.
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. The `add` and `remove` params get `default: null`. No `settings:` section in the YAML fence.
+
+**Checkpoint handling:** The built-in class calls `this.checkpointManager?.createCheckpoint()` with optional chaining (undefined in unit tests). In the extension runtime, `utils.checkpointManager` is always defined. The scaffold wraps the checkpoint call in a try/catch to preserve non-fatal semantics — identical to the `update_frontmatter` scaffold pattern.
+
+**Notable: helpers are inlined.** The built-in class has two private methods — `normaliseTags(raw)` and `normaliseTag(tag)`. These are simple, short functions (5 lines and 1 line respectively) used only within this tool. They are inlined as local functions in the scaffold. No `utils` expansion warranted for single-tool helpers this small.
+
+**Notable: `normaliseTags` handles diverse input shapes.** The `tags` frontmatter value can be `undefined`, `null`, a plain string (single tag), a mixed array, or a proper `string[]`. The `normaliseTags` helper handles all cases. This defensive normalization is important to preserve — Obsidian frontmatter parsing produces diverse shapes depending on how users write their YAML. The scaffold comments should note this to prevent users from "simplifying" the helper to only handle `string[]`.
+
+**Notable: empty tags array deletes the key.** When all tags are removed, the built-in deletes `frontmatter["tags"]` rather than leaving an empty array. This is the correct Obsidian convention — `processFrontMatter` will omit the key entirely from the YAML output, keeping frontmatter clean. The scaffold preserves this behavior.
+
+**Notable: `normaliseTag` strips leading `#`.** Users may pass tags with or without the `#` prefix (e.g., `"#project"` vs `"project"`). The normaliser strips the leading `#` so tags are stored consistently without the hash in frontmatter. This matches Obsidian's convention where frontmatter tags are stored without `#`.
+
+**Risk:** Effectively zero. This is one of the simplest write tools — a single `processFrontMatter` call with straightforward add/remove logic. No settings, no external libraries, no filesystem I/O beyond the frontmatter update. The two inlined helpers are trivial. The only notable detail is the `default: null` pattern for optional array params (same as `update_frontmatter`). Good candidate for early implementation alongside `read_frontmatter` and `update_frontmatter` (all three use `processFrontMatter` / frontmatter operations).
+
+**Comparison with spec's complexity estimate:** The spec classifies `manage_tags` as "Medium" at 80-280 lines and estimates ~100 lines. The scaffold is ~65 lines — below estimate. The built-in class's 210 lines include the class boilerplate, `input_schema` declaration, explicit `ToolResult` construction with `tool_name` fields, and verbose error handling with `result: ""` padding — all absorbed by the adapter in the extension runtime. The two helper methods add ~20 lines to the scaffold but are structurally trivial. Comparable in complexity to `update_frontmatter` (both are single-`processFrontMatter`-call tools) and simpler than `move_note` or `write_note`.
