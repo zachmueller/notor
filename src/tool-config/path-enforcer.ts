@@ -24,28 +24,8 @@ import { normalize, resolve, isAbsolute } from "path";
  * - Empty array: tool has no path params (exempt from enforcement).
  * - Tools not in this table (e.g., MCP tools): exempt from enforcement.
  */
-export const TOOL_PATH_PARAMS: Record<string, ToolPathParam[]> = {
-	read_note:          [{ paramName: "path", namespace: "vault" }],
-	write_note:         [{ paramName: "path", namespace: "vault" }],
-	replace_in_note:    [{ paramName: "path", namespace: "vault" }],
-	read_frontmatter:   [{ paramName: "path", namespace: "vault" }],
-	update_frontmatter: [{ paramName: "path", namespace: "vault" }],
-	manage_tags:        [{ paramName: "path", namespace: "vault" }],
-	move_note:          [
-		{ paramName: "path", namespace: "vault" },
-		{ paramName: "new_path", namespace: "vault" },
-	],
-	search_vault:       [{ paramName: "path", namespace: "vault" }],
-	list_vault:         [{ paramName: "path", namespace: "vault" }],
-	read_file:          [{ paramName: "path", namespace: "filesystem" }],
-	read_docx:          [{ paramName: "path", namespace: "filesystem" }],
-	write_docx:         [
-		{ paramName: "output_path",   namespace: "filesystem" },
-		{ paramName: "template_path", namespace: "filesystem" },
-	],
-	execute_command:    [{ paramName: "working_directory", namespace: "filesystem" }],
-	fetch_webpage:      [],
-};
+// Populated dynamically by ExtensionManager.reload() from scaffold/user tool metadata.
+export const TOOL_PATH_PARAMS: Record<string, ToolPathParam[]> = {};
 
 // ---------------------------------------------------------------------------
 // Public API

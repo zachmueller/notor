@@ -63,26 +63,6 @@ import type { LLMProviderType } from "./types";
 
 // Tools
 import { ToolRegistry } from "./tools/index";
-import { ReadNoteTool } from "./tools/read-note";
-import { WriteNoteTool } from "./tools/write-note";
-import { ReplaceInNoteTool } from "./tools/replace-in-note";
-import { SearchVaultTool } from "./tools/search-vault";
-import { ListVaultTool } from "./tools/list-vault";
-import { ReadFrontmatterTool } from "./tools/read-frontmatter";
-import { GetBacklinksTool } from "./tools/get-backlinks";
-import { GetOutlinksTool } from "./tools/get-outlinks";
-import { UpdateFrontmatterTool } from "./tools/update-frontmatter";
-import { ManageTagsTool } from "./tools/manage-tags";
-import { MoveNoteTool } from "./tools/move-note";
-import { FetchWebpageTool } from "./tools/fetch-webpage";
-import { WebSearchTool } from "./tools/web-search";
-import { ExecuteCommandTool } from "./tools/execute-command";
-import { ReadFileTool } from "./tools/read-file";
-import { ReadDocxTool } from "./tools/read-docx";
-import { WriteDocxTool } from "./tools/write-docx";
-import { WriteFileTool } from "./tools/write-file";
-import { ReplaceInFileTool } from "./tools/replace-in-file";
-import { ExtractDocxCommentsTool } from "./tools/extract-docx-comments";
 import { NoteOpener } from "./tools/note-opener";
 
 // Chat
@@ -472,8 +452,8 @@ export default class NotorPlugin extends Plugin {
 			}
 
 			// EXT-017: Discover and compile user extensions (tools + automations).
-			// Must run after workflow discovery so the tool registry is populated
-			// with built-in tools first (user tools override by last-write-wins).
+			// Scaffold defaults for all 20 built-in tools are injected here;
+			// vault-authored overrides win by last-write-wins.
 			// isInitialLoad=true skips dispatcher registration — the dispatcher
 			// doesn't exist yet and will pick up user tools via registry.getAll().
 			this.getExtensionManager().reload(true).then(() => {
@@ -1251,60 +1231,15 @@ export default class NotorPlugin extends Plugin {
 		return this._checkpointManager;
 	}
 
-	/** Tool registry with all built-in tools registered. */
+	/**
+	 * Tool registry. Built-in tools (except use_subagent) are loaded via
+	 * scaffold defaults in ExtensionManager.reload().
+	 */
 	getToolRegistry(): ToolRegistry {
 		if (!this._toolRegistry) {
 			this._toolRegistry = new ToolRegistry();
 
-			const staleTracker = this.getStaleTracker();
-			const noteOpener = this.getNoteOpener();
-			const checkpointManager = this.getCheckpointManager();
-
-			// Read-only tools
-			this._toolRegistry.register(
-				new ReadNoteTool(this.app, staleTracker, noteOpener)
-			);
-			this._toolRegistry.register(new SearchVaultTool(this.app));
-			this._toolRegistry.register(new ListVaultTool(this.app));
-			this._toolRegistry.register(new ReadFrontmatterTool(this.app));
-			this._toolRegistry.register(new GetBacklinksTool(this.app));
-			this._toolRegistry.register(new GetOutlinksTool(this.app));
-
-			// Write tools
-			this._toolRegistry.register(
-				new WriteNoteTool(this.app, staleTracker, noteOpener, checkpointManager)
-			);
-			this._toolRegistry.register(
-				new ReplaceInNoteTool(this.app, staleTracker, noteOpener, checkpointManager)
-			);
-			this._toolRegistry.register(
-				new UpdateFrontmatterTool(this.app, checkpointManager)
-			);
-			this._toolRegistry.register(
-				new ManageTagsTool(this.app, checkpointManager)
-			);
-			this._toolRegistry.register(
-				new MoveNoteTool(this.app, checkpointManager)
-			);
-
-			// Phase 3: New tools
-			this._toolRegistry.register(
-				new FetchWebpageTool(this.app, this.settings)
-			);
-			this._toolRegistry.register(
-				new WebSearchTool(this.app, this.settings)
-			);
-			this._toolRegistry.register(
-				new ExecuteCommandTool(this.app, this.settings)
-			);
-			this._toolRegistry.register(new ReadFileTool(this.app, this.settings));
-			this._toolRegistry.register(new ReadDocxTool(this.app, this.settings));
-			this._toolRegistry.register(new WriteDocxTool(this.app, this.settings));
-			this._toolRegistry.register(new WriteFileTool(this.app, this.settings));
-			this._toolRegistry.register(new ReplaceInFileTool(this.app, this.settings));
-			this._toolRegistry.register(new ExtractDocxCommentsTool(this.app, this.settings));
-
-			// Sub-agent tool (Phase 5 + Phase 6 history/token tracking)
+			// Sub-agent tool — the only remaining class-based built-in
 			const useSubagentTool = new UseSubagentTool(
 				this.getSubAgentManager(),
 				this.getProviderRegistry(),

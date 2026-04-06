@@ -196,28 +196,28 @@ Flip the switch: built-in tools now load exclusively through the scaffold pipeli
 
 ### 7.1 Strip `getToolRegistry()` in `src/main.ts`
 
-- [ ] Remove all 20 tool class registrations from `getToolRegistry()` (lines 1115-1156) — keep only `UseSubagentTool` (lines 1159-1175)
-- [ ] Remove tool class imports (lines 66-85). Keep `ToolRegistry` (line 65) and `NoteOpener` (line 86, still used by `runtime-context.ts` and `getNoteOpener()`)
-- [ ] Remove lines passing `staleTracker`, `noteOpener`, `checkpointManager` into tool constructors (the getter methods remain — used elsewhere)
-- [ ] Update or remove the comment at `main.ts:474-476` about boot ordering
+- [x] Remove all 20 tool class registrations from `getToolRegistry()` (lines 1115-1156) — keep only `UseSubagentTool` (lines 1159-1175)
+- [x] Remove tool class imports (lines 66-85). Keep `ToolRegistry` (line 65) and `NoteOpener` (line 86, still used by `runtime-context.ts` and `getNoteOpener()`)
+- [x] Remove lines passing `staleTracker`, `noteOpener`, `checkpointManager` into tool constructors (the getter methods remain — used elsewhere)
+- [x] Update or remove the comment at `main.ts:474-476` about boot ordering
 
 ### 7.2 Remove `execute_command` pre-validation from dispatcher
 
-- [ ] Remove the working directory pre-check block at `src/chat/dispatcher.ts:366-392` — after migration, the scaffold's own `resolveAndValidatePath()` produces the same error
+- [x] Remove the working directory pre-check block at `src/chat/dispatcher.ts:366-392` — after migration, the scaffold's own `resolveAndValidatePath()` produces the same error
 
 ### 7.3 Clear static `TOOL_PATH_PARAMS`
 
-- [ ] Replace the static entries in `src/tool-config/path-enforcer.ts:27-48` with an empty object: `export const TOOL_PATH_PARAMS: Record<string, ToolPathParam[]> = {};`
-- [ ] Dynamic registration in `manager.ts:278-280` becomes the single source of truth
+- [x] Replace the static entries in `src/tool-config/path-enforcer.ts:27-48` with an empty object: `export const TOOL_PATH_PARAMS: Record<string, ToolPathParam[]> = {};`
+- [x] Dynamic registration in `manager.ts:278-280` becomes the single source of truth
 
 ### 7.4 Delete tool class files (optional cleanup)
 
 After confirming all scaffolds work correctly, the class files in `src/tools/` can be removed. Keep files that are still imported as utilities.
 
-- [ ] Identify which `src/tools/*.ts` files are still imported by extracted utilities or other non-tool code (e.g., `docx-comment-parser.ts` is imported by `runtime-context.ts`, `docx-image-utils.ts` is imported by `runtime-context.ts`)
-- [ ] Delete class files that are no longer imported anywhere: `read-note.ts`, `search-vault.ts`, `list-vault.ts`, `read-frontmatter.ts`, `get-backlinks.ts`, `get-outlinks.ts`, `write-note.ts`, `replace-in-note.ts`, `update-frontmatter.ts`, `manage-tags.ts`, `move-note.ts`, `fetch-webpage.ts` (after `isDomainBlocked` extraction), `web-search.ts`, `execute-command.ts`, `read-file.ts`, `read-docx.ts`, `write-docx.ts` (after `graftIntoTemplate` extraction), `write-file.ts`, `replace-in-file.ts`, `extract-docx-comments.ts`
-- [ ] Keep: `tool.ts` (Tool interface), `index.ts` (ToolRegistry class), `use-subagent.ts`, `note-opener.ts`, `docx-comment-parser.ts`, `docx-image-utils.ts`, and any newly extracted utility files
-- [ ] Update `src/tools/index.ts` to remove re-exports of deleted classes
+- [x] Identify which `src/tools/*.ts` files are still imported by extracted utilities or other non-tool code (e.g., `docx-comment-parser.ts` is imported by `runtime-context.ts`, `docx-image-utils.ts` is imported by `runtime-context.ts`)
+- [x] Delete class files that are no longer imported anywhere: `read-note.ts`, `search-vault.ts`, `list-vault.ts`, `read-frontmatter.ts`, `get-backlinks.ts`, `get-outlinks.ts`, `write-note.ts`, `replace-in-note.ts`, `update-frontmatter.ts`, `manage-tags.ts`, `move-note.ts`, `fetch-webpage.ts` (after `isDomainBlocked` extraction), `web-search.ts`, `execute-command.ts`, `read-file.ts`, `read-docx.ts`, `write-docx.ts` (after `graftIntoTemplate` extraction), `write-file.ts`, `replace-in-file.ts`, `extract-docx-comments.ts`
+- [x] Keep: `tool.ts` (Tool interface), `index.ts` (ToolRegistry class), `use-subagent.ts`, `note-opener.ts`, `docx-comment-parser.ts`, `docx-image-utils.ts`, and any newly extracted utility files
+- [x] Update `src/tools/index.ts` to remove re-exports of deleted classes — N/A, no re-exports existed
 
 ---
 
