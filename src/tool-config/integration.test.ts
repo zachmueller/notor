@@ -5,7 +5,7 @@
  * through parsing, merging, and enforcement.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../mcp/mcp-tool-adapter", () => ({
 	isMcpTool: (name: string) => name.includes("__"),
@@ -13,7 +13,7 @@ vi.mock("../mcp/mcp-tool-adapter", () => ({
 
 import { extractToolConfigs } from "./parser";
 import { mergeToolConfigs } from "./merger";
-import { enforcePathConstraints } from "./path-enforcer";
+import { enforcePathConstraints, TOOL_PATH_PARAMS } from "./path-enforcer";
 import type { ParsedToolConfig } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,13 @@ function mockParseYAML(yamlObj: unknown): (text: string) => unknown {
 // ---------------------------------------------------------------------------
 
 describe("end-to-end tool config flow", () => {
+	beforeEach(() => {
+		// TOOL_PATH_PARAMS is dynamically populated post-migration (Phase 7.3).
+		// Seed entries needed by path enforcement tests.
+		for (const key of Object.keys(TOOL_PATH_PARAMS)) delete TOOL_PATH_PARAMS[key];
+		TOOL_PATH_PARAMS["read_note"] = [{ paramName: "path", namespace: "vault" }];
+	});
+
 	describe("persona disabling tools -> LLM tool list excludes disabled tools", () => {
 		it("disabled tools are filtered from effective config", () => {
 			const personaText = `You are a research assistant.

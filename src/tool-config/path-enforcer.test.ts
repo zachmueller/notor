@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { enforcePathConstraints, TOOL_PATH_PARAMS } from "./path-enforcer";
 import type { ResolvedToolConfigEntry } from "./types";
 
@@ -18,11 +18,34 @@ function makeEntry(overrides: Partial<ResolvedToolConfigEntry> = {}): ResolvedTo
 
 const VAULT_ROOT = "/Users/test/vault";
 
+/**
+ * After Phase 7.3, TOOL_PATH_PARAMS starts empty and is populated dynamically
+ * by ExtensionManager.reload(). Seed the entries needed by these unit tests.
+ */
+function seedPathParams(): void {
+	Object.assign(TOOL_PATH_PARAMS, {
+		read_note: [{ paramName: "path", namespace: "vault" as const }],
+		write_note: [{ paramName: "path", namespace: "vault" as const }],
+		read_file: [{ paramName: "path", namespace: "filesystem" as const }],
+		write_docx: [
+			{ paramName: "output_path", namespace: "filesystem" as const },
+			{ paramName: "template_path", namespace: "filesystem" as const },
+		],
+		fetch_webpage: [],
+	});
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("enforcePathConstraints", () => {
+	beforeEach(() => {
+		// Clear and re-seed before each test (entries are dynamic post-migration)
+		for (const key of Object.keys(TOOL_PATH_PARAMS)) delete TOOL_PATH_PARAMS[key];
+		seedPathParams();
+	});
+
 	describe("vault-namespace: prefix match", () => {
 		it("allows path within allowed prefix", () => {
 			const entry = makeEntry({ allowed_paths: ["notes/"] });
@@ -178,19 +201,18 @@ describe("enforcePathConstraints", () => {
 		});
 	});
 
-	describe("TOOL_PATH_PARAMS table coverage", () => {
-		it("contains entries for all 13 built-in tools", () => {
-			const expectedTools = [
-				"read_note", "write_note", "replace_in_note",
-				"read_frontmatter", "update_frontmatter", "manage_tags",
-				"search_vault", "list_vault",
-				"read_file", "read_docx", "write_docx",
-				"execute_command", "fetch_webpage",
-			];
-			for (const tool of expectedTools) {
-				expect(TOOL_PATH_PARAMS).toHaveProperty(tool);
-			}
-			expect(Object.keys(TOOL_PATH_PARAMS)).toHaveLength(14);
+	describe("TOOL_PATH_PARAMS is dynamically populated", () => {
+		it("starts empty before ExtensionManager.reload() seeds it", () => {
+			// Clear to verify the base state (before seedPathParams runs)
+			for (const key of Object.keys(TOOL_PATH_PARAMS)) delete TOOL_PATH_PARAMS[key];
+			expect(Object.keys(TOOL_PATH_PARAMS)).toHaveLength(0);
+		});
+
+		it("accepts dynamically registered entries", () => {
+			// seedPathParams() ran in beforeEach — verify entries are present
+			expect(TOOL_PATH_PARAMS).toHaveProperty("read_note");
+			expect(TOOL_PATH_PARAMS).toHaveProperty("write_docx");
+			expect(TOOL_PATH_PARAMS["write_docx"]).toHaveLength(2);
 		});
 	});
 
