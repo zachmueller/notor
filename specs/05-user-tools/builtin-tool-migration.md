@@ -1432,3 +1432,268 @@ params:
 **Risk: `Buffer` global availability (low).** The scaffold uses `Buffer.from()` for base64 decoding and `imgBuffer.buffer.slice()` for ArrayBuffer extraction. `Buffer` is available as a global in Electron's renderer process (Node.js integration enabled). Same pattern used by `replace_in_file` and `read_file` scaffolds.
 
 **Comparison with spec's complexity estimate:** The spec classifies `read_docx` as "Complex" at 200-400 lines. The actual scaffold is ~160 lines — lower than estimated because the image extraction logic, while conceptually complex, is mostly mammoth's callback API handling. The Turndown conversion is identical to the `fetch_webpage` pattern. This tool is more accurately "Medium-Complex" — simpler than `search_vault` or `fetch_webpage` in total helper count, with the complexity concentrated in the single mammoth image callback.
+
+### `extract_docx_comments` — Feasibility: High complexity, viable with `utils` expansion ✅
+
+**Source:** `src/tools/extract-docx-comments.ts` (370 lines total, ~300 lines of logic) + `src/tools/docx-comment-parser.ts` (467 lines total, ~400 lines of pure parsing logic)
+
+**What the built-in class does:**
+1. Validates `docx_path`, `output_path` params (existence, string type, non-empty)
+2. Desktop-only guard via `Platform.isDesktopApp`
+3. Resolves vault root via `app.vault.adapter.basePath`
+4. Validates docx path against vault root and `settings.read_file_allowed_paths` via `resolveAndValidatePath()`
+5. Checks `.docx` extension via `extname()`
+6. Checks file existence via `fs.promises.stat()` (ENOENT → specific error)
+7. Reads file buffer via `fs.promises.readFile()`, opens ZIP via `PizZip`
+8. Extracts 4 XML blobs: `word/comments.xml`, `word/commentsExtended.xml`, `word/document.xml`, `word/people.xml`
+9. Parses comments XML → raw comment objects (author, date, text, paraId)
+10. Parses commentsExtended XML → resolved IDs set + threading map (paraId → parent paraId)
+11. Extracts quoted text per comment from document XML (walks DOM for `commentRangeStart`/`commentRangeEnd` markers, collects `<w:t>` text between them)
+12. Parses people XML → author → userId map for @mention resolution
+13. Builds threaded comments (separates top-level from replies, filters resolved, resolves @mentions, computes deterministic unique IDs via MD5)
+14. Checks for existing output note and extracts already-written comment IDs (idempotent append)
+15. Filters new comments, formats as Markdown, writes to vault (create or append)
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `Platform` from `"obsidian"` | `obsidian.Platform` | ⚠️ Planned (spec runtime-context.ts changes) |
+| `TFile`, `TFolder` from `"obsidian"` | `obsidian.TFile`, `obsidian.TFolder` | ✅ |
+| `import * as fs from "fs"` | `libs.fs` | ⚠️ Planned (spec D-3) |
+| `import { extname } from "path"` | `libs.path.extname` | ⚠️ Planned (spec D-3) |
+| `PizZip` | `libs.PizZip` | ✅ |
+| `DOMParser` from `@xmldom/xmldom` | `libs.xmldom.DOMParser` | ✅ |
+| `createHash` from `"crypto"` | `libs.crypto.createHash` | ⚠️ Planned (spec D-3) |
+| `resolveAndValidatePath(path, vaultRoot, allowedPaths)` | `utils.resolveAndValidatePath(path)` | ✅ — runtime-context.ts injects `vaultRootPath` and defaults `allowedPaths` to `plugin.settings.read_file_allowed_paths` |
+| `logger("ExtractDocxCommentsTool")` | `utils.logger("extract_docx_comments")` | ✅ |
+| `this.settings.read_file_allowed_paths` | `shared.read_file_allowed_paths` | ✅ (shared setting — see D-2/D-8). Not needed explicitly — `utils.resolveAndValidatePath(path)` reads it internally as default. |
+| `parseCommentsXml()` | Inline in scaffold or expose via `utils` | ⚠️ See analysis below |
+| `parseCommentsExtendedXml()` | Inline in scaffold or expose via `utils` | ⚠️ See analysis below |
+| `extractQuotedText()` | Inline in scaffold or expose via `utils` | ⚠️ See analysis below |
+| `parsePeopleXml()` | Inline in scaffold or expose via `utils` | ⚠️ See analysis below |
+| `buildCommentThreads()` | Inline in scaffold or expose via `utils` | ⚠️ See analysis below |
+| `formatCommentsAsMarkdown()` | Inline in scaffold or expose via `utils` | ⚠️ See analysis below |
+| `extractExistingCommentIds()` | Inline in scaffold or expose via `utils` | ⚠️ See analysis below |
+| `resolveAtMentions()` | Inline in scaffold or expose via `utils` | ⚠️ See analysis below |
+| `computeUniqueId()` | Inline in scaffold or expose via `utils` | ⚠️ See analysis below |
+
+**Settings:** None per-extension. The only setting referenced (`read_file_allowed_paths`) is a cross-tool shared setting consumed internally by `utils.resolveAndValidatePath()`. No `settings:` section needed in the YAML fence.
+
+**The central question: inline ~400 lines of parsing logic or expose via `utils`?**
+
+The `docx-comment-parser.ts` module contains 9 exported functions + 4 internal helpers + 3 namespace constants + 2 interface types — totaling ~400 lines of pure parsing logic. This is the dominant complexity. The tool class itself is ~300 lines, of which ~120 are parameter validation and vault I/O (straightforward 1:1 porting), and the rest is orchestration calls into the parser module.
+
+**Option A — Inline everything (~500-550 lines scaffold):**
+Inline all 9 parser functions + 4 helpers + 3 constants as local `function` declarations in the scaffold code block. Produces the second-largest scaffold after `write_docx`. The code is self-contained (only depends on `libs.xmldom.DOMParser` and `libs.crypto.createHash`), so inlining is technically viable. However, this significantly exceeds the spec's ~300-line estimate and creates a massive, hard-to-read scaffold that users would struggle to customize.
+
+**Option B — Expose parser functions via `utils` (~200 lines scaffold): ✅ Recommended**
+Add `utils.docxComments` as a namespace object exposing the 9 parser functions from `docx-comment-parser.ts`. The scaffold code handles only I/O orchestration (ZIP extraction, vault reads/writes, directory creation) and delegates all XML parsing, threading, formatting, and dedup to `utils.docxComments.*`. This mirrors the `write_docx` precedent where complex helper logic (`graftIntoTemplate`) is recommended for `utils` expansion rather than inlining.
+
+**Recommended `utils` expansion:**
+```ts
+// In ExtensionUtils interface:
+docxComments: {
+  parseCommentsXml: (xml: string) => RawComment[];
+  parseCommentsExtendedXml: (xml: string) => { resolvedIds: Set<string>; threadingMap: Map<string, string> };
+  extractQuotedText: (documentXml: string, commentId: string) => string;
+  parsePeopleXml: (xml: string) => Map<string, string>;
+  buildCommentThreads: (raw: RawComment[], threadingMap: Map<string, string>, resolvedIds: Set<string>, includeResolved: boolean, peopleMap: Map<string, string>) => Comment[];
+  formatCommentsAsMarkdown: (comments: Comment[], filename: string, startNumber: number) => string;
+  extractExistingCommentIds: (existingContent: string) => { ids: Set<string>; maxNumber: number };
+};
+```
+
+Note: `resolveAtMentions` and `computeUniqueId` don't need direct exposure — they're called internally by `buildCommentThreads`. The `RawComment` and `Comment` types would be exported from `docx-comment-parser.ts` (they already are).
+
+**Why this is the right approach:** The parser module is a well-separated, pure-function layer with comprehensive unit tests (558 lines in `docx-comment-parser.test.ts` covering 34 test cases). Exposing it via `utils.docxComments` preserves this clean boundary. Users who customize the tool can swap the I/O orchestration (e.g., change output format, add custom filtering) without reimplementing XML parsing. The module has zero external consumers beyond this tool (verified via grep) — no import breakage concern.
+
+**Implementation cost of `utils.docxComments` expansion:** Minimal. Add ~10 lines to `runtime-context.ts` to import and wire the 7 functions. The module already exports everything needed. No new library dependencies. The existing unit tests continue to cover the parser logic independently.
+
+**Helper functions (1 to inline):**
+
+1. **`ensureDirectoryExists()`** (~15 lines) — Creates intermediate directories for the output note path. Uses `app.vault.getAbstractFileByPath()`, `app.vault.createFolder()`, `TFolder` check. This is a common pattern also used by `write_note` — potentially worth extracting to `utils.ensureDirectoryExists()` for reuse across both scaffolds. However, since only 2 scaffolds need it and it's only ~15 lines, inlining in each is acceptable. Uses `obsidian.TFolder` which is already available.
+
+2. **`getVaultRootPath()`** (4 lines) — Not needed because `utils.resolveAndValidatePath()` already knows the vault root.
+
+**Return value mapping:**
+- Success → return string summary like `"Extracted 5 comment(s) to Reviews/feedback.md (2 duplicate(s) skipped)"` (adapter wraps in `{ success: true, result: string }`)
+- Validation/parsing/write failures → throw (adapter wraps in `{ success: false, error }`)
+- Special success cases (no comments found, all resolved, all already exist) → return descriptive string
+
+**Scaffold code (estimated ~200 lines with `utils.docxComments`):**
+```ts
+const log = utils.logger("extract_docx_comments");
+
+if (!params.docx_path || typeof params.docx_path !== "string" || params.docx_path.trim() === "") {
+  throw new Error("Missing required parameter: docx_path");
+}
+if (!params.output_path || typeof params.output_path !== "string" || params.output_path.trim() === "") {
+  throw new Error("Missing required parameter: output_path");
+}
+const includeResolved = (params.include_resolved as boolean) ?? false;
+
+if (!obsidian.Platform.isDesktopApp) {
+  throw new Error("extract_docx_comments is only available on desktop.");
+}
+
+const pathResult = utils.resolveAndValidatePath(params.docx_path);
+if (!pathResult.valid) throw new Error(pathResult.error);
+const resolvedPath = pathResult.resolvedPath;
+
+if (libs.path.extname(resolvedPath).toLowerCase() !== ".docx") {
+  throw new Error("extract_docx_comments only supports .docx files.");
+}
+
+// Check file existence
+try {
+  await libs.fs.promises.stat(resolvedPath);
+} catch (e) {
+  if (e.code === "ENOENT") throw new Error(`File not found: ${resolvedPath}`);
+  throw e;
+}
+
+// Extract XML blobs via PizZip
+const buf = await libs.fs.promises.readFile(resolvedPath);
+const zip = new libs.PizZip(buf);
+const commentsXml = zip.files["word/comments.xml"]?.asText() ?? null;
+const commentsExtXml = zip.files["word/commentsExtended.xml"]?.asText() ?? null;
+const documentXml = zip.files["word/document.xml"]?.asText() ?? null;
+const peopleXmlStr = zip.files["word/people.xml"]?.asText() ?? null;
+
+// Early exit: no comments
+if (!commentsXml) return "No comments found in the document.";
+
+// Parse all XML via utils.docxComments
+const rawComments = utils.docxComments.parseCommentsXml(commentsXml);
+if (rawComments.length === 0) return "No comments found in the document.";
+
+const { resolvedIds, threadingMap } = commentsExtXml
+  ? utils.docxComments.parseCommentsExtendedXml(commentsExtXml)
+  : { resolvedIds: new Set(), threadingMap: new Map() };
+
+// Extract quoted text for each comment
+if (documentXml) {
+  for (const raw of rawComments) {
+    raw.quotedText = utils.docxComments.extractQuotedText(documentXml, raw.commentId);
+  }
+}
+
+// Parse people for @mention resolution
+const peopleMap = peopleXmlStr
+  ? utils.docxComments.parsePeopleXml(peopleXmlStr)
+  : new Map();
+
+// Build threaded comments
+const comments = utils.docxComments.buildCommentThreads(
+  rawComments, threadingMap, resolvedIds, includeResolved, peopleMap,
+);
+
+if (comments.length === 0) {
+  return "All comments are resolved. Use include_resolved=true to include them.";
+}
+
+// Check for existing note (for dedup/append)
+const normalizedOutput = params.output_path.endsWith(".md")
+  ? params.output_path
+  : params.output_path + ".md";
+const existingFile = app.vault.getAbstractFileByPath(normalizedOutput);
+
+let startNumber = 1;
+let existingIds = new Set();
+
+if (existingFile && existingFile instanceof obsidian.TFile) {
+  const existingContent = await app.vault.read(existingFile);
+  const existing = utils.docxComments.extractExistingCommentIds(existingContent);
+  existingIds = existing.ids;
+  startNumber = existing.maxNumber + 1;
+}
+
+// Filter out already-written comments
+const newComments = comments.filter((c) => !existingIds.has(c.uniqueId));
+if (newComments.length === 0) {
+  return `All ${comments.length} comments already exist in ${normalizedOutput}.`;
+}
+
+// Format as Markdown
+const filename = resolvedPath.split("/").pop() ?? "document.docx";
+const formatted = utils.docxComments.formatCommentsAsMarkdown(newComments, filename, startNumber);
+
+// Write to vault
+if (existingFile && existingFile instanceof obsidian.TFile) {
+  await app.vault.process(existingFile, (data) => data.trimEnd() + "\n\n" + formatted);
+} else {
+  // Ensure intermediate directories exist
+  const parts = normalizedOutput.split("/");
+  parts.pop();
+  let current = "";
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    const existing = app.vault.getAbstractFileByPath(current);
+    if (!existing) {
+      await app.vault.createFolder(current);
+    } else if (!(existing instanceof obsidian.TFolder)) {
+      throw new Error(`Cannot create directory: "${current}" already exists as a file`);
+    }
+  }
+  await app.vault.create(normalizedOutput, formatted);
+}
+
+// Return summary
+const skipped = comments.length - newComments.length;
+const summary =
+  `Extracted ${newComments.length} comment(s) to ${normalizedOutput}` +
+  (skipped > 0 ? ` (${skipped} duplicate(s) skipped)` : "") +
+  (resolvedIds.size > 0 && !includeResolved
+    ? ` (${resolvedIds.size} resolved comment(s) excluded)`
+    : "");
+
+log.info("Extracted docx comments", {
+  path: resolvedPath,
+  output: normalizedOutput,
+  total: rawComments.length,
+  written: newComments.length,
+  skipped,
+});
+
+return summary;
+```
+
+**Required runtime expansions (already planned in spec):**
+- `obsidian.Platform` — add to `buildObsidianExports()` (spec runtime-context.ts changes)
+- `libs.fs` — add to `buildLibs()` (spec D-3)
+- `libs.path` — add to `buildLibs()` (spec D-3)
+- `libs.crypto` — add to `buildLibs()` (spec D-3)
+
+**New `utils` expansion required:**
+- `utils.docxComments` — namespace exposing 7 functions from `docx-comment-parser.ts` (~10 lines to wire in `runtime-context.ts`). This is the **only new expansion** beyond what other tools already require. The module itself already exists and exports everything needed — zero new code to write.
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  docx_path:
+    type: string
+    description: "Path to the .docx file. Vault-relative or absolute. Must be within the vault or an allowed path."
+    path_namespace: filesystem
+  output_path:
+    type: string
+    description: "Vault-relative path for the output note (e.g. 'Reviews/feedback.md'). The .md extension is optional."
+    path_namespace: vault
+  include_resolved:
+    type: boolean
+    description: "Include resolved/done comments. Defaults to false."
+    default: false
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
+
+**Risk: `utils.docxComments` API surface growth (low).** Adding 7 functions to `utils` increases the API surface. However, these are pure functions with stable interfaces (only dependency is `@xmldom/xmldom` which is already bundled). The `docx-comment-parser.ts` module has been stable since implementation (no changes in recent git history). The functions are narrowly scoped to DOCX comment parsing — unlikely to need breaking changes.
+
+**Risk: `RawComment.quotedText` mutation pattern (low).** The orchestration code mutates `raw.quotedText` in-place after `parseCommentsXml()` returns. This is the same pattern used by the built-in class (line 217-222 of `extract-docx-comments.ts`). The `RawComment` interface already initializes `quotedText: ""` as a mutable field. Works identically in the scaffold since `utils.docxComments.parseCommentsXml()` returns the same mutable objects.
+
+**Risk: `Set`/`Map` type stripping (low).** The parser functions return `Set<string>` and `Map<string, string>` typed returns. Sucrase strips the type annotations; the runtime `Set` and `Map` constructors work identically. The scaffold code uses these as untyped collections which is fine.
+
+**Risk: No external consumers of `docx-comment-parser.ts` (verified).** Grep confirms the module is imported only by `extract-docx-comments.ts` (the tool class) and `docx-comment-parser.test.ts` (its unit tests). No dispatcher, no other tool, no settings code imports it. The class file can be removed cleanly after migration.
+
+**Comparison with spec's complexity estimate:** The spec classifies `extract_docx_comments` as "Complex" at 200-400 lines. With the recommended `utils.docxComments` expansion, the scaffold is ~200 lines — at the low end of the estimate. Without the expansion (Option A, full inline), it would be ~550 lines — significantly exceeding the estimate and producing the second-largest scaffold after `write_docx`. The `utils` expansion is clearly the right call: it keeps the scaffold manageable, preserves the existing test coverage boundary, and follows the same pattern recommended for `write_docx`'s `graftIntoTemplate`.
