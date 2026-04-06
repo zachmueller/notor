@@ -2626,3 +2626,173 @@ params:
 **Risk: `matchesGlob` regex injection (low).** The glob-to-regex conversion escapes all special regex characters except `*`. This matches the built-in behavior. Malicious glob patterns from the LLM could theoretically produce pathological regexes (ReDoS), but the pattern is tested only against short filenames, making catastrophic backtracking effectively impossible.
 
 **Comparison with spec's complexity estimate:** The spec classifies `search_vault` as "Complex" at 200-400 lines. The actual scaffold is ~150 lines — lower than the floor estimate. This is because `search_vault` has no external dependencies, no settings, no filesystem I/O beyond `cachedRead()`, and no library usage. All helpers are pure procedural code (filtering, sorting, line matching) that inline cleanly. The "Complex" classification was driven by the helper count (5 private methods), not by dependency complexity. In practice, this tool is closer to "Medium" — more code than `read_frontmatter` or `get_outlinks`, but structurally simpler than `fetch_webpage` or `read_file` because it has zero settings, zero library deps, and zero `utils` expansions.
+
+### `write_note` — Feasibility: Straightforward ✅
+
+**Source:** `src/tools/write-note.ts` (213 lines total, ~150 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param (exists, is string)
+2. Validates `content` param (exists, is string, not null/undefined)
+3. Resolves note via `resolveNote(path, this.app.vault, this.app.metadataCache)` — returns `null` for new files, `TFile` for existing
+4. **New file path:** auto-appends `.md` if missing, creates intermediate directories via `ensureDirectoryExists()`, creates file via `app.vault.create(createPath, content)`, opens in editor, returns success with character count
+5. **Existing file path:** reads current content via `app.vault.read(existingFile)`, performs stale content check via `staleTracker.check(file.path, currentContent)` using canonical path, creates checkpoint via `checkpointManager.createCheckpoint()`, applies frontmatter preservation (if existing note has frontmatter but new content doesn't, prepends the existing frontmatter block), writes via `app.vault.process(existingFile, () => finalContent)`, updates stale tracker with `updateAfterWrite()`, opens in editor
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.vault` | `app.vault` | ✅ |
+| `this.app.metadataCache` | `app.metadataCache` | ✅ |
+| `resolveNote(path, vault, metadataCache)` | `utils.resolveNote(path)` | ✅ |
+| `this.staleTracker` | `utils.staleTracker` | ✅ |
+| `this.checkpointManager` | `utils.checkpointManager` | ✅ |
+| `this.noteOpener` | `utils.noteOpener` | ✅ |
+| `logger("WriteNoteTool")` | `utils.logger("write_note")` | ✅ |
+| `getFrontMatterInfo` | `obsidian.getFrontMatterInfo` | ✅ |
+| `TFolder` | `obsidian.TFolder` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed. Listed in the spec's "settings-free tools" group (D-2).
+
+**Helper functions (1 to inline):**
+
+1. **`ensureDirectoryExists()`** (~20 lines) — Creates intermediate vault directories for a file path. Splits path on `/`, iterates segments, checks each via `app.vault.getAbstractFileByPath()`, creates missing folders via `app.vault.createFolder()`, throws if a segment exists as a file (not a folder, checked via `instanceof TFolder`). This exact helper is duplicated in `write-note.ts`, `move-note.ts`, and `extract-docx-comments.ts` (3 copies). The `extract_docx_comments` assessment (already in this doc) notes this pattern and concludes that inlining in each scaffold is acceptable since it's only ~15 lines and only 2-3 scaffolds need it. No `utils` expansion needed — inline as a local function.
+
+**Return value mapping:**
+- New file → return string like `"Note created: path/to/note.md (123 characters)"` (adapter wraps in `{ success: true, result: string }`)
+- Existing file → return string like `"Note updated: path/to/note.md (456 characters)"` (adapter wraps in `{ success: true, result: string }`)
+- Validation failures → throw (adapter wraps in `{ success: false, error }`)
+- Stale content → throw with stale error message
+- File system failures → throw (adapter catches)
+
+**Key patterns and their scaffold translations:**
+
+1. **Create-vs-update branching** — The class has two distinct code paths based on whether `resolveNote()` returns a `TFile` or `null`. New files go through `vault.create()`, existing files through `vault.process()`. This translates directly — `utils.resolveNote()` returns the same `TFile | null`. The scaffold uses a simple `if (!existingFile)` branch.
+
+2. **Frontmatter preservation** — When overwriting an existing note, the class compares `getFrontMatterInfo()` on both old and new content. If the existing note has frontmatter but the new content doesn't, the existing frontmatter block is prepended to the new content. This is a 10-line pattern using `obsidian.getFrontMatterInfo` which is already exposed. The `contentStart` offset from `getFrontMatterInfo` correctly handles the frontmatter delimiter and trailing newline.
+
+3. **Stale tracker canonical path** — Same pattern as `replace_in_note`: uses `existingFile.path` (Obsidian's canonical resolved path) for all stale tracker calls, ensuring `"My Note"`, `"My Note.md"`, and `"folder/My Note"` all resolve to the same tracker entry.
+
+4. **Stale tracker update after write** — After `vault.process()`, calls `staleTracker.updateAfterWrite(existingFile.path, finalContent)` with the content that was written (not re-reading from disk). This is simpler than `replace_in_note`'s approach (which re-reads after write) because `write_note` already has the final content in a local variable.
+
+5. **Directory creation for new files** — `ensureDirectoryExists()` is called only on the new-file path (before `vault.create()`). It's not needed for existing files since their directory already exists. Uses `TFolder` from `obsidian` for the type check.
+
+6. **Checkpoint before write (existing files only)** — `createCheckpoint()` is called only for existing files, before `vault.process()`. For new files, there's nothing to checkpoint. The class uses optional chaining (`this.checkpointManager?.createCheckpoint()`); the scaffold doesn't need it since `utils.checkpointManager` is always defined.
+
+**Scaffold code (estimated ~80 lines):**
+```ts
+const log = utils.logger("write_note");
+
+if (!params.path || typeof params.path !== "string") {
+  throw new Error("Missing required parameter: path");
+}
+if (params.content === undefined || params.content === null || typeof params.content !== "string") {
+  throw new Error("Missing required parameter: content");
+}
+
+log.debug("Writing note", { path: params.path, contentLength: params.content.length });
+
+// Helper: create intermediate directories
+async function ensureDirectoryExists(filePath: string) {
+  const parts = filePath.split("/");
+  parts.pop(); // remove filename
+  if (parts.length === 0) return;
+
+  let current = "";
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    const existing = app.vault.getAbstractFileByPath(current);
+    if (!existing) {
+      await app.vault.createFolder(current);
+      log.debug("Created directory", { path: current });
+    } else if (!(existing instanceof obsidian.TFolder)) {
+      throw new Error(`Cannot create directory: "${current}" already exists as a file`);
+    }
+  }
+}
+
+const existingFile = utils.resolveNote(params.path);
+
+if (!existingFile) {
+  // ---- New file: create with intermediate directories ----
+  const createPath = params.path.endsWith(".md") ? params.path : params.path + ".md";
+  await ensureDirectoryExists(createPath);
+  await app.vault.create(createPath, params.content);
+
+  log.info("Created new note", { path: createPath, chars: params.content.length });
+  await utils.noteOpener.openNote(createPath);
+
+  return `Note created: ${createPath} (${params.content.length} characters)`;
+}
+
+// ---- Existing file: stale check → checkpoint → frontmatter-safe write ----
+const currentContent = await app.vault.read(existingFile);
+
+// Stale content check (before checkpoint — no point snapshotting if stale)
+const staleResult = utils.staleTracker.check(existingFile.path, currentContent);
+if (staleResult.isStale) {
+  throw new Error(
+    "Note content has changed since last read. " +
+    "Re-read the note with read_note before retrying."
+  );
+}
+
+// Checkpoint before overwriting
+await utils.checkpointManager.createCheckpoint(existingFile.path, "write_note", "");
+
+// Frontmatter preservation: if existing note has frontmatter but new content doesn't,
+// prepend the existing frontmatter block
+const existingFm = obsidian.getFrontMatterInfo(currentContent);
+const newFm = obsidian.getFrontMatterInfo(params.content);
+
+let finalContent: string;
+
+if (existingFm.exists && !newFm.exists) {
+  const frontmatterBlock = currentContent.slice(0, existingFm.contentStart);
+  finalContent = frontmatterBlock + params.content;
+  log.debug("Preserved existing frontmatter", { path: params.path });
+} else {
+  finalContent = params.content;
+}
+
+await app.vault.process(existingFile, () => finalContent);
+
+// Update stale tracker so subsequent writes don't falsely detect staleness
+utils.staleTracker.updateAfterWrite(existingFile.path, finalContent);
+
+log.info("Modified existing note", { path: existingFile.path, chars: finalContent.length });
+await utils.noteOpener.openNote(existingFile.path);
+
+return `Note updated: ${existingFile.path} (${finalContent.length} characters)`;
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed in the extension runtime: `resolveNote`, `staleTracker`, `checkpointManager`, `noteOpener`, `logger`. The `ensureDirectoryExists` helper is inlined as a local function (~15 lines) rather than added to `utils` — same decision as documented in the `extract_docx_comments` assessment.
+
+**`obsidian` imports needed:** `getFrontMatterInfo` (frontmatter detection) and `TFolder` (directory type check in `ensureDirectoryExists`). Both are already exposed via `buildObsidianExports()`.
+
+**No `libs` needed.** No external libraries, no Node.js modules.
+
+**No settings migration needed.** This tool references zero `NotorSettings` fields. No per-extension `settings:` section in the YAML fence, no shared settings.
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the note relative to vault root."
+    path_namespace: vault
+  content:
+    type: string
+    description: "Complete content to write to the note."
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence. The existing YAML fence content is already correct.
+
+**Risk: `vault.process()` callback with closure variable (none).** The scaffold captures `finalContent` in a closure and passes `() => finalContent` to `vault.process()`. This is the exact same pattern as the built-in class — `vault.process` invokes the callback synchronously, so there's no timing issue. The `finalContent` variable is computed before the call and never mutated after.
+
+**Risk: `noteOpener` optional chaining removal (none).** Same as `replace_in_note` — the class uses `this.noteOpener?.openNote()` because `noteOpener` is an optional constructor param (undefined in unit tests). In the scaffold, `utils.noteOpener` is always defined. The `openNote()` method itself is a no-op when `open_notes_on_access` is disabled. Removing the `?.` is safe.
+
+**Risk: `ensureDirectoryExists` duplication (low).** The helper is duplicated across `write_note`, `move_note`, and `extract_docx_comments` scaffolds. At ~15 lines each, this is manageable. If a fourth tool needs it, extracting to `utils.ensureDirectoryExists()` becomes worthwhile. For now, inline duplication is preferred per the `extract_docx_comments` assessment precedent.
+
+**Comparison with spec's complexity estimate:** The spec classifies `write_note` as "Medium" at 80-280 lines and estimates ~120 lines. The scaffold is ~80 lines — at the low end. This is because the tool's logic, while branching (new vs. existing), is procedurally straightforward: no loops, no complex data transformations, no external library calls. The frontmatter preservation is the only non-trivial pattern, and it's a self-contained 10-line block using `obsidian.getFrontMatterInfo`. Structurally similar to `replace_in_note` (stale check → checkpoint → vault write → stale update → open) but with the additional create-new-file path and frontmatter preservation logic.
