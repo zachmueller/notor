@@ -3005,3 +3005,113 @@ params:
 **Risk: Empty path handling (none).** The class treats empty string `""` as vault root for both non-recursive (via `app.vault.getRoot()`) and recursive (via empty `normalizedTarget` matching all paths) modes. The scaffold replicates this exactly. The return value uses `listPath || "/"` for display — same as built-in.
 
 **Comparison with spec's complexity estimate:** The spec classifies `list_vault` as "Medium" at 80-280 lines and estimates ~160 lines. The scaffold is ~100 lines — below estimate. The tool is structurally simple: no file I/O (reads only metadata from vault cache), no writes, no stale tracking, no checkpoints, no external libraries. The bulk of the code is the `collectItems` branching logic and sort comparators, all of which are straightforward translations from the class. This is the simplest of the "Medium" tier tools — it could arguably be "Simple" if not for the four helper functions and recursive traversal logic.
+
+### `write_file` — Feasibility: Trivial ✅
+
+**Source:** `src/tools/write-file.ts` (173 lines total, ~95 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` and `content` params exist and are strings
+2. Desktop-only guard via `Platform.isDesktopApp`
+3. Gets vault root path from `app.vault.adapter.basePath`
+4. Validates path via `resolveAndValidatePath(path, vaultRoot, settings.read_file_allowed_paths)`
+5. Checks content size against 5 MB cap
+6. Creates intermediate directories via `fs.promises.mkdir(dirname(resolvedPath), { recursive: true })`
+7. Writes file via `fs.promises.writeFile(resolvedPath, content, { encoding })`
+8. Returns success message with path and character count
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `Platform.isDesktopApp` | `obsidian.Platform.isDesktopApp` | ⚠️ Planned (spec runtime-context.ts changes) |
+| `import * as fs from "fs"` | `libs.fs` | ⚠️ Planned (spec D-3) |
+| `import { dirname } from "path"` | `libs.path.dirname` | ⚠️ Planned (spec D-3) |
+| `resolveAndValidatePath(path, vaultRoot, allowedPaths)` | `utils.resolveAndValidatePath(path)` | ✅ |
+| `this.settings.read_file_allowed_paths` | `shared.read_file_allowed_paths` | ✅ (shared setting — see D-2/D-8) |
+| `logger("WriteFileTool")` | `utils.logger("write_file")` | ✅ |
+
+**Settings:** No per-extension settings. Uses `shared.read_file_allowed_paths` (cross-tool, declared via built-in shared settings scaffold — see D-8). The shared setting is passed implicitly through `utils.resolveAndValidatePath()` which defaults to `plugin.settings.read_file_allowed_paths` when no explicit `allowedPaths` argument is provided (see runtime-context.ts:85-89). The scaffold can simply call `utils.resolveAndValidatePath(path)` with no second argument.
+
+**Return value mapping:**
+- Success → return string (`"Successfully wrote file: {path} ({n} characters)"`) — adapter wraps in `{ success: true, result: string }`
+- Validation/write failures → throw — adapter wraps in `{ success: false, error }`
+
+**Helper functions:** One private method:
+1. **`getVaultRootPath()`** (~4 lines) — Extracts `basePath` from `app.vault.adapter`. In the scaffold, this is a one-liner: `const vaultRoot = (app.vault.adapter as any).basePath`. No need for a function.
+
+**Scaffold code (estimated ~40 lines):**
+```ts
+const log = utils.logger("write_file");
+
+if (!params.path || typeof params.path !== "string" || params.path.trim() === "") {
+  throw new Error("Missing required parameter: path");
+}
+if (params.content === undefined || params.content === null || typeof params.content !== "string") {
+  throw new Error("Missing required parameter: content");
+}
+
+if (!obsidian.Platform.isDesktopApp) {
+  throw new Error("write_file is only available on desktop.");
+}
+
+const vaultRoot = (app.vault.adapter as any).basePath;
+if (!vaultRoot) throw new Error("Could not determine vault root path.");
+
+const pathResult = utils.resolveAndValidatePath(params.path as string);
+if (!pathResult.valid) throw new Error(pathResult.error);
+
+const resolvedPath = pathResult.resolvedPath;
+const content = params.content as string;
+const encoding = (params.encoding as string) || "utf-8";
+
+const MAX_CONTENT_BYTES = 5 * 1024 * 1024;
+if (content.length > MAX_CONTENT_BYTES) {
+  throw new Error("Content exceeds maximum size of 5 MB.");
+}
+
+// Create intermediate directories if they don't exist
+await libs.fs.promises.mkdir(libs.path.dirname(resolvedPath), { recursive: true });
+
+// Write the file
+await libs.fs.promises.writeFile(resolvedPath, content, {
+  encoding: encoding as BufferEncoding,
+});
+
+log.info("Wrote file", { path: resolvedPath, chars: content.length });
+return `Successfully wrote file: ${resolvedPath} (${content.length} characters)`;
+```
+
+**No new `utils` expansions needed.** All dependencies are either already exposed (`utils.resolveAndValidatePath`, `utils.logger`) or are planned additions in the spec (`obsidian.Platform`, `libs.fs`, `libs.path`).
+
+**Blocked on planned spec additions:**
+- `obsidian.Platform` — add to `buildObsidianExports()` (spec runtime-context.ts changes, shared with `execute_command`, `replace_in_file`, and other desktop-only tools)
+- `libs.fs` — add to `buildLibs()` (spec D-3)
+- `libs.path` — add to `buildLibs()` (spec D-3)
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the file. Vault-relative or absolute."
+    path_namespace: filesystem
+  content:
+    type: string
+    description: "Complete text content to write to the file."
+  encoding:
+    type: string
+    description: "File encoding."
+    default: "utf-8"
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
+
+**Risk: `vaultRoot` extraction (none).** The `(app.vault.adapter as any).basePath` pattern is used by multiple other filesystem tools (`read_file`, `replace_in_file`, `read_docx`, etc.). In the scaffold, `utils.resolveAndValidatePath(path)` already reads `vaultRoot` internally from the closure in `buildUtils()` (runtime-context.ts:71), so the scaffold only needs the explicit `vaultRoot` extraction for the null guard. This is a belt-and-suspenders check — if `basePath` is null, `resolveAndValidatePath` would also fail. However, keeping the explicit guard preserves the specific error message ("Could not determine vault root path") which is clearer than the generic path validation error.
+
+**Risk: Content size check uses `string.length` not byte length (none — matches built-in).** The built-in class checks `content.length > MAX_CONTENT_BYTES` which compares character count against a byte limit. This is an approximation (multi-byte UTF-8 characters would exceed the byte limit at fewer characters), but the scaffold replicates the exact same behavior as the built-in. Not a regression.
+
+**Risk: Encoding parameter (low).** The `encoding` parameter is cast to `BufferEncoding` and passed directly to `fs.promises.writeFile()`. Invalid encodings will throw at the Node.js level, which the adapter catches and wraps as `{ success: false, error }`. Same behavior as the built-in class.
+
+**Comparison with spec's complexity estimate:** The spec classifies `write_file` as "Simple" at 40-100 lines and estimates ~50 lines. The scaffold is ~40 lines — within estimate. This is one of the simplest filesystem tools: no binary detection, no media processing, no stale tracking, no checkpoints. Linear flow: validate → resolve path → mkdir → write → return. Good candidate for early implementation alongside `read_frontmatter` to validate the filesystem tool pipeline (`libs.fs`, `libs.path`, `obsidian.Platform`).
