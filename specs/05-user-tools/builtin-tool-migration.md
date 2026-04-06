@@ -100,14 +100,16 @@ Several built-in tools directly reference `NotorSettings` fields. These settings
 
 **Data migration:** A one-time migration moves old `NotorSettings` tool fields into the extension settings system. The old plugin settings UI sections for these fields are removed — they now render in the extension settings UI via each scaffold's `settingsSchema`.
 
-**Detection:** Check whether any old tool-specific field exists in `NotorSettings` (e.g., `fetch_webpage_timeout` is present in the loaded data) AND `user_extension_settings` is empty (`{}`). If both conditions hold, run migration. No settings version field is needed.
+**Detection:** Per-tool key check. For each built-in tool that has settings (fetch_webpage, web_search, execute_command, read_file, write_docx), check whether its key is absent from `user_extension_settings` (e.g., `user_extension_settings["fetch_webpage"]` is `undefined`) AND the corresponding old field exists in `NotorSettings` (e.g., `fetch_webpage_timeout` is present in the loaded data). For shared settings, check whether the key is absent from `user_shared_settings` (e.g., `user_shared_settings["domain_denylist"]` is `undefined`) AND the old field exists. Migration runs per-tool-group: each group migrates independently if its detection condition holds. No settings version field is needed.
 
-**Scope:** Unconditional — copy all old field values (including those that match defaults) so every setting appears in the new extension settings UI from the start.
+**Why per-key:** A whole-object emptiness check (`user_extension_settings === {}`) would fail for users who already have extension settings configured for user-defined tools — the migration would never trigger, silently losing their old built-in tool customizations when phase 2 deletes the old fields.
+
+**Scope:** Unconditional within each group — copy all old field values (including those that match defaults) so every setting appears in the new extension settings UI from the start.
 
 **Atomicity:** Two-phase write to prevent data loss:
 1. Copy all old field values into `user_extension_settings` (per-tool) and `user_shared_settings` (cross-tool). Call `saveSettings()`.
 2. Delete the old fields from `NotorSettings`. Call `saveSettings()` again.
-If the plugin crashes between phase 1 and phase 2, the next boot sees old fields still present but `user_extension_settings` already populated — the detection condition (`user_extension_settings` is empty) is false, so migration does not re-run. The old fields become harmless dead data.
+If the plugin crashes between phase 1 and phase 2, the next boot sees old fields still present but `user_extension_settings` already populated — the per-key detection condition is false for already-migrated groups, so migration does not re-run those groups. The old fields become harmless dead data.
 
 **Downgrade note:** Users who revert to a pre-migration plugin version will lose customized values (old fields are cleared in phase 2). The older version will apply its defaults. This is acceptable.
 
@@ -204,13 +206,19 @@ function scaffold(
   name: string,
   description: string,
   mode: "read" | "write",
-  paramsYaml: string,
-  code: string,       // NEW: actual implementation code
+  yamlFenceContent: string,  // renamed from paramsYaml — now holds params + settings YAML
+  code: string,              // NEW: actual implementation code
 ): BuiltinToolScaffold
 ```
 
-The template changes from generic placeholder to per-tool code:
+Note: `yamlFenceContent` (renamed from `paramsYaml`) now contains the full YAML fence content, including both `params:` and `settings:` sections for tools that declare per-extension settings (fetch_webpage, web_search, execute_command, read_file, write_docx). Tools without settings pass only the `params:` section as before.
+
+The template changes from generic placeholder to per-tool code (and `${trimmedParams}` becomes `${trimmedYaml}` to match the renamed parameter):
 ```
+\`\`\`yaml
+${trimmedYaml}
+\`\`\`
+
 \`\`\`ts
 ${code}
 \`\`\`
@@ -336,6 +344,8 @@ for (const [name, scaffold] of BUILTIN_TOOL_SCAFFOLDS) {
 ```
 
 Scaffold-origin tools are marked with `isScaffold: true` on `UserToolDefinition` for programmatic detection. The `filePath` is descriptive for logging only.
+
+**Scaffold compilation failure handling:** In step 2 (compilation), if a scaffold-marked tool fails to compile, show a prominent critical-level Notice distinct from user extension errors: `"CRITICAL: Built-in tool '${name}' failed to load. The plugin may not function correctly."` This is important because scaffold compilation failure means a core tool is unavailable with no class-based fallback — unlike user extension failures (which are expected and recoverable), a scaffold failure indicates a plugin bug.
 
 **Refactor:** Extract the manual YAML parsing logic from `discovery.ts:parseOneExtensionFile()` (lines 190-206) into a standalone `extractFrontmatter(content, parseYAML)` helper. This cleans up `parseOneExtensionFile()` and provides a reusable utility for future code that needs to parse frontmatter from raw markdown content (e.g., template imports, clipboard paste). Note: the scaffold injection above does NOT use this helper — it constructs frontmatter directly from structured metadata.
 
@@ -491,9 +501,14 @@ This avoids duplicating ~200 lines of media processing code in the scaffold and 
 ### R-1: Compilation performance on boot
 
 **Risk:** Compiling 20 tools via Sucrase + AsyncFunction on every plugin load adds latency.
-**Mitigation:** Sucrase transforms ~1M lines/sec. All 20 scaffolds together are <5ms. Log the timing during implementation to verify. If profiling later shows this is a bottleneck, build-time pre-compilation can be added as a follow-up.
+**Mitigation:** Sucrase transforms ~1M lines/sec. All 20 scaffolds together are <5ms. Additionally, `parseExtensionFile()` runs `extractCodeFence()` and `extractYamlFence()` regex scans over each scaffold's content (~3000 total lines across all 20 scaffolds) — this is also negligible. Log the timing during implementation to verify. If profiling later shows this is a bottleneck, build-time pre-compilation can be added as a follow-up.
 
-### R-2: Scaffold code correctness
+### R-2: `pdf_native_max_size_mb` behavior change
+
+**Risk:** The `read_file` scaffold wires `pdf_native_max_size_mb` through to `processPdf()` for the first time (fixing a bug where the setting was ignored). This changes observable behavior: users with PDFs larger than the configured limit (default 10 MB) will now get text extraction instead of native PDF document blocks. Previously the limit was never enforced.
+**Mitigation:** Call out in release notes. Verify in manual testing with a >10 MB PDF that the limit is respected. Ensure the default (10 MB) is reasonable for common use.
+
+### R-3: Scaffold code correctness
 
 **Risk:** Converting 20 tool implementations to extension code may introduce subtle bugs (different `this` context, missing error paths, etc.).
 **Mitigation:** Each tool's scaffold should be tested by:
@@ -502,22 +517,22 @@ This avoids duplicating ~200 lines of media processing code in the scaffold and 
 3. Invoking the tool via LLM and comparing output to the class-based version
 4. Automated e2e test for at least 3-4 representative tools (simple, medium, complex)
 
-### R-3: Stale tracker and checkpoint dependencies
+### R-4: Stale tracker and checkpoint dependencies
 
 **Risk:** `utils.staleTracker` and `utils.checkpointManager` are lazy singletons on the plugin. Extension code accessing them during boot (before first chat) should work since they're created on first access.
 **Mitigation:** Verify lazy accessor pattern. Both `getStaleTracker()` and `getCheckpointManager()` create on first call — same as `getExtensionManager()`.
 
-### R-4: `DOMParser` availability in extension code
+### R-5: `DOMParser` availability in extension code
 
 **Risk:** `web_search` tool uses `new DOMParser()` for HTML parsing. This is a browser/Electron global, not a Node.js API.
 **Mitigation:** Electron's renderer process provides `DOMParser` globally. `libs.xmldom` is also available as a fallback. The scaffold code can use the native `DOMParser` directly — it's available in the same execution context.
 
-### R-5: Backward compatibility — tool config references
+### R-6: Backward compatibility — tool config references
 
 **Risk:** Personas, workflows, and rules may reference built-in tool names in `<notor_tool_config>` blocks. These references must continue to work.
 **Mitigation:** No change — tool names remain the same (e.g., `read_note`, `search_vault`). The tools register under the same names; only the implementation mechanism changes.
 
-### R-6: `TOOL_PATH_PARAMS` population timing
+### R-7: `TOOL_PATH_PARAMS` population timing
 
 **Risk:** Path enforcement relies on `TOOL_PATH_PARAMS` being populated before dispatch. With scaffolds loaded during `ExtensionManager.reload()`, this happens in `onLayoutReady()` — same timing as before but via a different code path.
 **Mitigation:** `reload()` already registers `TOOL_PATH_PARAMS` entries (line 278-280 in manager.ts). Scaffold-compiled tools include `pathParams` from the YAML fence. No timing change.
