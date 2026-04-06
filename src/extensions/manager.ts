@@ -19,6 +19,7 @@ import type {
 	UserToolDefinition,
 } from "./types";
 import { discoverExtensions } from "./discovery";
+import { parseExtensionFile } from "./parser";
 import { compileExtension } from "./compiler";
 import { paramSchemaToJsonSchema } from "./param-schema";
 import { resolveSettings, resolveSharedSettings } from "./settings-schema";
@@ -213,14 +214,49 @@ export class ExtensionManager {
 		);
 		errors.push(...discovered.errors);
 
+		// 1b. Inject scaffold fallbacks for missing built-in tools
+		for (const [name, scaffold] of BUILTIN_TOOL_SCAFFOLDS) {
+			// Skip if vault file was discovered with this name
+			if (discovered.tools.some(t => t.name === name)) continue;
+
+			// Construct frontmatter directly from scaffold metadata (no re-parsing)
+			const frontmatter: Record<string, unknown> = {
+				"notor-type": "tool",
+				"notor-tool-name": scaffold.name,
+				"notor-description": scaffold.description,
+				"notor-mode": scaffold.mode,
+			};
+			const parsed = parseExtensionFile(
+				scaffold.scaffoldContent,
+				frontmatter,
+				`(built-in scaffold: ${name})`,
+				this.parseYAML,
+			);
+			if ("message" in parsed) {
+				errors.push({ filePath: `(built-in scaffold: ${name})`, message: parsed.message });
+				continue;
+			}
+			if ("name" in parsed && "mode" in parsed) {
+				const toolDef = parsed as UserToolDefinition;
+				toolDef.isScaffold = true;
+				discovered.tools.push(toolDef);
+			}
+		}
+
 		// 2. Compile tools
 		const compiledTools = new Map<string, UserToolDefinition>();
 		for (const tool of discovered.tools) {
 			const result = compileExtension(tool.rawCode, "tool");
 			if ("error" in result) {
-				const msg = `Extension '${tool.name}' failed to compile: ${result.error}`;
-				new Notice(msg);
-				log.error(msg, { file: tool.filePath });
+				if (tool.isScaffold) {
+					const msg = `CRITICAL: Built-in tool '${tool.name}' failed to load. The plugin may not function correctly.`;
+					new Notice(msg);
+					log.error(msg, { file: tool.filePath, error: result.error });
+				} else {
+					const msg = `Extension '${tool.name}' failed to compile: ${result.error}`;
+					new Notice(msg);
+					log.error(msg, { file: tool.filePath });
+				}
 				errors.push({ filePath: tool.filePath, message: result.error });
 				continue;
 			}
@@ -247,10 +283,10 @@ export class ExtensionManager {
 		// 4. Shared settings
 		this.sharedSettings = discovered.sharedSettings;
 
-		// 5. Detect built-in overrides before unregistering
+		// 5. Detect built-in overrides (vault files that replace scaffold defaults)
 		const registry = this.plugin.getToolRegistry();
-		for (const toolName of compiledTools.keys()) {
-			if (registry.has(toolName) && !this.registeredToolNames.has(toolName)) {
+		for (const [toolName, tool] of compiledTools) {
+			if (BUILTIN_TOOL_SCAFFOLDS.has(toolName) && !tool.isScaffold) {
 				builtinOverrides.push(toolName);
 			}
 		}

@@ -71,32 +71,32 @@ Wire `ExtensionManager.reload()` to inject scaffold defaults for missing built-i
 
 Add scaffold fallback step between discovery (step 1) and compilation (step 2) in `src/extensions/manager.ts:203-300`.
 
-- [ ] After `discoverExtensions()`, iterate `BUILTIN_TOOL_SCAFFOLDS` and check which names are missing from `discovered.tools`
-- [ ] For each missing scaffold, construct frontmatter from scaffold metadata and call `parseExtensionFile()` with scaffold content
-- [ ] Mark injected tools with `isScaffold = true`
-- [ ] Push scaffold tools into `discovered.tools` so they flow through the existing compilation pipeline
+- [x] After `discoverExtensions()`, iterate `BUILTIN_TOOL_SCAFFOLDS` and check which names are missing from `discovered.tools`
+- [x] For each missing scaffold, construct frontmatter from scaffold metadata and call `parseExtensionFile()` with scaffold content
+- [x] Mark injected tools with `isScaffold = true`
+- [x] Push scaffold tools into `discovered.tools` so they flow through the existing compilation pipeline
 
 ### 2.2 Update override detection
 
 Current logic in `src/extensions/manager.ts:250-256` checks `registry.has(name) && !registeredToolNames.has(name)`. After migration, scaffold tools ARE in `registeredToolNames`, so override detection must change.
 
-- [ ] Change override detection to: iterate `compiledTools`, check `BUILTIN_TOOL_SCAFFOLDS.has(name) && !tool.isScaffold`
-- [ ] This correctly identifies vault-discovered tools that replace scaffold defaults
+- [x] Change override detection to: iterate `compiledTools`, check `BUILTIN_TOOL_SCAFFOLDS.has(name) && !tool.isScaffold`
+- [x] This correctly identifies vault-discovered tools that replace scaffold defaults
 
 ### 2.3 Scaffold compilation failure handling
 
 Scaffold failure is more critical than user extension failure (no class-based fallback).
 
-- [ ] In the compilation step (step 2), detect `tool.isScaffold === true` on failure
-- [ ] Show a distinct critical-level Notice: `"CRITICAL: Built-in tool '${name}' failed to load. The plugin may not function correctly."`
+- [x] In the compilation step (step 2), detect `tool.isScaffold === true` on failure
+- [x] Show a distinct critical-level Notice: `"CRITICAL: Built-in tool '${name}' failed to load. The plugin may not function correctly."`
 
 ### 2.4 Refactor: extract `extractFrontmatter()` helper
 
 Extract manual YAML parsing logic from `src/extensions/discovery.ts:parseOneExtensionFile()` (lines 190-206) into a standalone helper.
 
-- [ ] Create `extractFrontmatter(content, parseYAML)` helper function
-- [ ] Update `parseOneExtensionFile()` to use the extracted helper
-- [ ] Note: scaffold injection does NOT use this helper — it constructs frontmatter directly
+- [x] Create `extractFrontmatter(content, parseYAML)` helper function
+- [x] Update `parseOneExtensionFile()` to use the extracted helper
+- [x] Note: scaffold injection does NOT use this helper — it constructs frontmatter directly
 
 ---
 

@@ -38,6 +38,12 @@ vi.mock("../discovery", () => ({
 	discoverExtensions: (...args: unknown[]) => mockDiscoverExtensions(...args),
 }));
 
+// Mock parser (used by scaffold injection in reload)
+const mockParseExtensionFile = vi.fn();
+vi.mock("../parser", () => ({
+	parseExtensionFile: (...args: unknown[]) => mockParseExtensionFile(...args),
+}));
+
 // Mock compiler
 const mockCompileExtension = vi.fn();
 vi.mock("../compiler", () => ({
@@ -78,6 +84,13 @@ vi.mock("../runtime-context", () => ({
 // Mock secrets
 vi.mock("../../utils/secrets", () => ({
 	getSecret: vi.fn().mockReturnValue(null),
+}));
+
+// Mock BUILTIN_TOOL_SCAFFOLDS — empty by default so existing tests are unaffected.
+// Scaffold injection tests set this to a non-empty map.
+const mockBuiltinToolScaffolds = new Map<string, { name: string; description: string; mode: string; scaffoldContent: string }>();
+vi.mock("../builtin-tool-scaffolds", () => ({
+	BUILTIN_TOOL_SCAFFOLDS: mockBuiltinToolScaffolds,
 }));
 
 // ---------------------------------------------------------------------------
@@ -159,6 +172,23 @@ beforeEach(() => {
 	for (const key of Object.keys(mockToolPathParams)) {
 		delete mockToolPathParams[key];
 	}
+	// Reset scaffold map
+	mockBuiltinToolScaffolds.clear();
+	// Default: scaffold parsing returns a valid tool definition.
+	// Uses the frontmatter args passed in to construct the tool def.
+	mockParseExtensionFile.mockImplementation(
+		(_content: string, frontmatter: Record<string, unknown>, filePath: string) => ({
+			filePath,
+			name: frontmatter["notor-tool-name"] as string,
+			description: frontmatter["notor-description"] as string,
+			mode: frontmatter["notor-mode"] as string,
+			params: {},
+			pathParams: [],
+			settingsSchema: null,
+			rawCode: "return '';",
+			compiledFn: null,
+		}),
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -233,6 +263,15 @@ describe("ExtensionManager.reload", () => {
 	});
 
 	it("detects built-in tool overrides", async () => {
+		// Register read_note as a built-in scaffold
+		mockBuiltinToolScaffolds.set("read_note", {
+			name: "read_note",
+			description: "Read a note",
+			mode: "read",
+			scaffoldContent: "---\nnotor-type: tool\n---\n```ts\nreturn '';\n```",
+		});
+
+		// Discover a vault file for read_note (not a scaffold — overrides the default)
 		const tool = makeToolDef({ name: "read_note" });
 		const compiledFn = vi.fn();
 
@@ -244,10 +283,7 @@ describe("ExtensionManager.reload", () => {
 		});
 		mockCompileExtension.mockReturnValue({ fn: compiledFn });
 
-		// Pre-register "read_note" as a built-in tool
 		const plugin = createMockPlugin();
-		plugin._registeredTools.set("read_note", { name: "read_note" });
-
 		const manager = new ExtensionManager(plugin as never, vi.fn());
 		const result = await manager.reload(true);
 

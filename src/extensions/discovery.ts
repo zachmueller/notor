@@ -169,6 +169,35 @@ function collectMarkdownFiles(vault: Vault, dirPath: string): TFile[] {
 }
 
 /**
+ * Extract frontmatter from raw markdown content via manual YAML parsing.
+ *
+ * Looks for a `---` opener at the start of the content and a matching `\n---`
+ * closer. Returns the parsed object, or `null` if the content has no valid
+ * YAML frontmatter block.
+ *
+ * @throws If the YAML body exists but fails to parse.
+ */
+export function extractFrontmatter(
+	content: string,
+	parseYAML: (yaml: string) => unknown,
+): Record<string, unknown> | null {
+	if (!content.trimStart().startsWith("---")) return null;
+
+	const afterOpener = content.indexOf("\n", content.indexOf("---"));
+	if (afterOpener === -1) return null;
+
+	const closerIdx = content.indexOf("\n---", afterOpener);
+	if (closerIdx === -1) return null;
+
+	const yamlBody = content.substring(afterOpener + 1, closerIdx);
+	const parsed = parseYAML(yamlBody);
+	if (parsed && typeof parsed === "object") {
+		return parsed as Record<string, unknown>;
+	}
+	return null;
+}
+
+/**
  * Read and parse a single extension file.
  *
  * Gets frontmatter from metadata cache (falls back to manual YAML parsing
@@ -187,21 +216,11 @@ async function parseOneExtensionFile(
 	let frontmatter = fileCache?.frontmatter as Record<string, unknown> | undefined;
 
 	// If the metadata cache hasn't indexed the file yet, attempt manual YAML parsing
-	if (!frontmatter && content.trimStart().startsWith("---")) {
-		const afterOpener = content.indexOf("\n", content.indexOf("---"));
-		if (afterOpener !== -1) {
-			const closerIdx = content.indexOf("\n---", afterOpener);
-			if (closerIdx !== -1) {
-				const yamlBody = content.substring(afterOpener + 1, closerIdx);
-				try {
-					const parsed = parseYAML(yamlBody);
-					if (parsed && typeof parsed === "object") {
-						frontmatter = parsed as Record<string, unknown>;
-					}
-				} catch {
-					return { filePath: file.path, message: "Failed to parse YAML frontmatter" };
-				}
-			}
+	if (!frontmatter) {
+		try {
+			frontmatter = extractFrontmatter(content, parseYAML) ?? undefined;
+		} catch {
+			return { filePath: file.path, message: "Failed to parse YAML frontmatter" };
 		}
 	}
 
