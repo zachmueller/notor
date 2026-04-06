@@ -653,6 +653,129 @@ params:
 
 **Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
 
+### `fetch_webpage` — Feasibility: Moderate ✅
+
+**Source:** `src/tools/fetch-webpage.ts` (469 lines total, ~445 lines of logic)
+
+**What the built-in class does:**
+1. Validates `url` param (existence, string type, parseable URL, http/https protocol only)
+2. Checks URL against domain denylist via `isDomainBlocked(url, settings.domain_denylist)`
+3. Reads settings: `fetch_webpage_timeout` (seconds → ms), `fetch_webpage_max_download_mb` (MB → bytes), `fetch_webpage_max_output_chars`
+4. Fetches URL via `requestUrl()` with manual timeout race (`Promise.race` against `setTimeout`)
+5. On fetch failure: probes with native `fetch()` HEAD to isolate Obsidian vs. Electron network issues; maps Chromium `net::ERR_*` codes to human-readable hints via `getNetErrorHint()`
+6. Checks response status (non-2xx → error)
+7. Checks response body byte length against download cap (via `TextEncoder`)
+8. Extracts MIME type from `content-type` header
+9. HTML/XHTML → Turndown conversion (GFM plugin, custom rules stripping nav/footer/forms); text/JSON → pass-through; other → error
+10. Truncates output at `max_output_chars` with a note about truncation
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `requestUrl` | `obsidian.requestUrl` | ✅ |
+| `TurndownService` | `libs.Turndown` | ✅ |
+| `gfm` plugin | `libs.turndownGfm.gfm` | ✅ |
+| `logger("FetchWebpageTool")` | `utils.logger("fetch_webpage")` | ✅ |
+| `this.settings.domain_denylist` | `shared.domain_denylist` | ✅ (shared setting — see D-2/D-8) |
+| `this.settings.fetch_webpage_timeout` | `settings.fetch_webpage_timeout` | ✅ (per-extension setting — see D-2) |
+| `this.settings.fetch_webpage_max_download_mb` | `settings.fetch_webpage_max_download_mb` | ✅ (per-extension setting) |
+| `this.settings.fetch_webpage_max_output_chars` | `settings.fetch_webpage_max_output_chars` | ✅ (per-extension setting) |
+| `isDomainBlocked()` (exported) | Inline local function in scaffold | ⚠️ See note below |
+| `getNetErrorHint()` (private) | Inline local function in scaffold | ✅ (no external deps) |
+| `getTurndown()` (private singleton) | Inline local function in scaffold | ✅ (no external deps) |
+
+**Settings:** Per-extension `settings` for `fetch_webpage_timeout`, `fetch_webpage_max_download_mb`, `fetch_webpage_max_output_chars`. Shared `shared` for `domain_denylist`. All four fields have existing defaults in `src/settings/defaults.ts:129-133`.
+
+**Return value mapping:**
+- Success → return string (adapter wraps in `{ success: true, result: string }`)
+- Validation/fetch failures → throw (adapter wraps in `{ success: false, error }`)
+- Truncation → return the truncated string with appended note
+
+**Helper functions (3 local functions to inline):**
+
+1. **`getTurndown()`** (~27 lines) — Lazy-initialized Turndown singleton with ATX headings, fenced code, GFM plugin, and custom rules stripping `nav`/`footer`/`aside`/`form`/`input`/`select`/`button`. Private to file, no external consumers. Straightforward to inline as a local `function` in the scaffold code block. The singleton pattern (module-level `let turndownInstance`) translates to a closure variable in the scaffold.
+
+2. **`isDomainBlocked()`** (~36 lines) — Parses URL hostname, checks against denylist patterns (exact match and `*.domain.com` wildcard). **Exported** and consumed by three callers:
+   - `src/tools/web-search.ts:17` — will also be migrated to a scaffold; both scaffolds can inline the same function
+   - `src/chat/dispatcher.ts:16,341` — pre-execution denylist check in the tool dispatcher; this import **will break** when the class file is removed
+   
+   **Resolution:** The `dispatcher.ts` import is a migration-order concern. Either (a) extract `isDomainBlocked` to a standalone utility file (e.g., `src/utils/domain-denylist.ts`) before removing the class, or (b) move it to the shared runtime as `utils.isDomainBlocked(url, denylist)` so both scaffolds and the dispatcher can use it. Option (b) is preferred since it avoids duplication in both scaffold code blocks (~36 lines × 2) and keeps the dispatcher import clean. **Recommended: add `utils.isDomainBlocked` to `ExtensionUtils` in `runtime-context.ts`** and update the dispatcher import. If that feels like scope creep, option (a) is a minimal extract-to-utility refactor.
+
+3. **`getNetErrorHint()`** (~60 lines including the `CHROMIUM_NET_ERROR_HINTS` map) — Maps Chromium `net::ERR_*` error codes to human-readable strings. Private, no external consumers. Can be inlined as a local function + const map. This is the largest helper block but is pure data + a simple loop.
+
+**Tricky patterns:**
+
+1. **Timeout via `Promise.race`** — `requestUrl()` has no native timeout. The class races it against a `setTimeout` reject. Straightforward to replicate in scaffold code; no special runtime support needed.
+
+2. **Diagnostic fetch probe** — On `requestUrl` failure, the class probes with native `fetch()` HEAD to isolate whether the issue is Obsidian-specific or network-wide. This uses the global `fetch` (available in Electron renderer) and `AbortSignal.timeout(5000)`. Both are browser globals available in the scaffold execution context.
+
+3. **Body byte-length check** — Uses `new TextEncoder().encode(response.text).length` to measure UTF-8 byte size (not string `.length`). `TextEncoder` is a browser global, available in scaffold context.
+
+4. **Turndown singleton** — Module-level `let turndownInstance` becomes a closure variable. Since each scaffold is compiled as a new `AsyncFunction`, the singleton would be recreated per invocation unless hoisted. Two options: (a) accept re-creation (Turndown init is fast, <1ms), or (b) use a module-scoped pattern via a global stash. **Recommended: accept re-creation.** The performance cost is negligible and avoids complexity.
+
+**Scaffold code (estimated ~200 lines):**
+```ts
+const log = utils.logger("fetch_webpage");
+
+if (!params.url || typeof params.url !== "string") {
+  throw new Error("Missing required parameter: url");
+}
+
+// --- helpers (inlined) ---
+
+function initTurndown(): InstanceType<typeof libs.Turndown> { /* ~20 lines */ }
+// CHROMIUM_NET_ERROR_HINTS map + getNetErrorHint() — ~50 lines
+// isDomainBlocked() — ~35 lines (or use utils.isDomainBlocked if added)
+
+// --- main logic ---
+// URL validation, denylist check, fetch with timeout race,
+// error diagnostics, MIME handling, Turndown conversion,
+// output truncation — ~95 lines
+```
+
+**YAML fence:**
+```yaml
+params:
+  url:
+    type: string
+    description: "URL of the webpage to fetch."
+settings:
+  fetch_webpage_timeout:
+    name: "Request Timeout"
+    type: number
+    description: "Timeout in seconds for HTTP requests."
+    default: 15
+    min: 1
+    max: 120
+  fetch_webpage_max_download_mb:
+    name: "Max Download Size (MB)"
+    type: number
+    description: "Maximum response body size in megabytes."
+    default: 5
+    min: 1
+    max: 50
+  fetch_webpage_max_output_chars:
+    name: "Max Output Characters"
+    type: number
+    description: "Maximum characters returned to the LLM. Longer content is truncated."
+    default: 50000
+    min: 1000
+    max: 500000
+```
+
+**New `utils` expansions recommended:**
+- `utils.isDomainBlocked(url: string, denylist: string[]): { blocked: true; pattern: string } | { blocked: false }` — avoids duplicating ~36 lines in both `fetch_webpage` and `web_search` scaffolds, and keeps the `dispatcher.ts` import clean. Without this, the dispatcher import from `src/tools/fetch-webpage.ts` breaks when the class file is removed. **This is the only migration blocker** — the dispatcher dependency must be resolved before the class file can be deleted.
+
+**No other `utils`, `libs`, or `obsidian` expansions needed.** All other dependencies are already available.
+
+**Risk: `isDomainBlocked` dispatcher dependency (medium).** The `src/chat/dispatcher.ts:16` import of `isDomainBlocked` from `src/tools/fetch-webpage.ts` will break when the class file is removed. This affects `web_search` migration too (same import at `src/tools/web-search.ts:17`). Must be resolved as part of the migration — see recommended `utils.isDomainBlocked` expansion above.
+
+**Risk: Turndown singleton recreation (low).** Each invocation reinitializes Turndown. Turndown constructor + `use(gfm)` + 2 `addRule` calls is <1ms. Acceptable.
+
+**Risk: `getNetErrorHint` map size (low).** The 14-entry `CHROMIUM_NET_ERROR_HINTS` map is ~40 lines of string constants. Inlining in the scaffold is verbose but straightforward. If future tools also need it, could be promoted to `utils`, but currently only `fetch_webpage` uses it — not worth the API surface expansion for a single consumer.
+
 ### `get_outlinks` — Feasibility: Trivial ✅
 
 **Source:** `src/tools/get-outlinks.ts` (84 lines total, ~45 lines of logic)
