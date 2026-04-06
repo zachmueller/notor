@@ -43,11 +43,11 @@ The tool has a multi-stage pipeline:
 
 **Settings:** Per-extension `settings` for `write_docx_default_output_dir` and `write_docx_default_template_path`. Shared `shared` for `read_file_allowed_paths` (consumed implicitly by `utils.resolveAndValidatePath()`).
 
-**The core question: inline vs. `utils` expansion**
+**Decision: Extract infrastructure to `utils`, inline customizable logic.**
 
-A fully-inlined scaffold would be ~900-1,050 lines. The spec flags this as "Complex+" and calls for evaluating `utils` expansion.
+A fully-inlined scaffold would be ~900-1,050 lines. With the two recommended `utils` expansions below, scaffold size drops to ~450-550 lines — still the largest scaffold but manageable.
 
-**Analysis of inlining candidates:**
+**Inlining analysis:**
 
 | Component | Lines | Inline? | Rationale |
 |---|---|---|---|
@@ -59,7 +59,7 @@ A fully-inlined scaffold would be ~900-1,050 lines. The spec flags this as "Comp
 | `graftIntoTemplate()` | ~255 | **No → `utils`** | Complex XML manipulation. Not a customization target. |
 | `resolveImageForDocx()` + helpers | ~285 | **No → `utils`** | Infrastructure, not customizable. Only consumed by `write-docx.ts`. |
 
-**Recommended `utils` expansions (2 new entries):**
+**`utils` expansions (2 new entries, decided):**
 
 ```ts
 // In ExtensionUtils interface:
@@ -84,7 +84,7 @@ resolveImageForDocx: (href: string, allowedPaths?: string[]) =>
 graftDocxIntoTemplate: graftIntoTemplate,  // direct passthrough
 ```
 
-**With these expansions, scaffold size drops to ~450-550 lines** — still the largest scaffold but manageable. The scaffold retains all customizable logic while delegating infrastructure to `utils`.
+The scaffold retains all customizable logic (rendering, token walking) while delegating infrastructure to `utils`.
 
 **Helper functions (5 local functions to inline in scaffold):**
 
@@ -200,13 +200,9 @@ settings:
 
 **Settings:** None per-extension.
 
-**The central question: inline ~400 lines of parsing logic or expose via `utils`?**
+**Decision: Expose parser via `utils.docxComments` (Option B).** Inlining ~400 lines of parsing logic (Option A) would produce an unmanageable ~500-550 line scaffold. Exposing the parser via `utils` yields a ~200 line scaffold.
 
-**Option A — Inline everything (~500-550 lines scaffold):** Technically viable but produces an unmanageable scaffold.
-
-**Option B — Expose parser functions via `utils` (~200 lines scaffold): ✅ Recommended**
-
-**Recommended `utils` expansion:**
+**`utils` expansion (decided):**
 ```ts
 // In ExtensionUtils interface:
 docxComments: {

@@ -183,7 +183,7 @@ return `Applied ${params.changes.length} replacement${params.changes.length > 1 
 - Non-zero exit → throw with output in message
 - Spawn failures → throw (adapter wraps in `{ success: false, error }`)
 
-**Note on timeout/exit-code result handling:** The built-in class returns `{ success: false, result: partialOutput, error: message }` for timeout and non-zero exit, setting both `result` and `error`. In the scaffold, throwing an error only populates the `error` field (adapter sets `result: ""`). To preserve the partial output behavior, the scaffold should embed the output in the error message string (e.g., `throw new Error(\`Command timed out after ${timeout}s. Partial output:\n${output}\`)`) rather than trying to set both fields. This is a minor behavioral change — the LLM sees the output in the error message rather than in a separate result field. This is acceptable because the LLM reads both fields as text context anyway.
+**Decision: Combine partial output into error message.** The built-in class returns `{ success: false, result: partialOutput, error: message }` for timeout and non-zero exit, setting both `result` and `error`. In the scaffold, throwing an error only populates the `error` field (adapter sets `result: ""`). The scaffold embeds partial output in the error message string (e.g., `throw new Error(\`Command timed out after ${timeout}s. Partial output:\n${output}\`)`). The LLM reads both fields as text context, so the information is equivalent.
 
 **Scaffold code (estimated ~75 lines):**
 ```ts
@@ -313,15 +313,11 @@ settings:
 
 The dispatcher has a pre-execution validation for `execute_command` at lines 366-390 that reads `this.settings.execute_command_allowed_paths` directly from `NotorSettings`. After migration, this setting moves to `user_extension_settings["execute_command"]`.
 
-**Analysis:** This pre-check is *redundant* with the tool's own path validation — the tool itself calls `resolveAndValidatePath()` and returns an error if the path is rejected. Two resolution options:
+**Analysis:** This pre-check is *redundant* with the tool's own path validation — the tool itself calls `resolveAndValidatePath()` and returns an error if the path is rejected.
 
-1. **Remove the dispatcher pre-check (recommended).** The scaffold's own validation produces the same error. This is the simplest approach and eliminates the coupling between the dispatcher and tool-specific settings.
+**Decision: Remove the dispatcher pre-check.** Remove `dispatcher.ts:366-390` as part of the migration. The scaffold's own validation produces the same error. This eliminates the coupling between the dispatcher and tool-specific settings.
 
-2. **Update the dispatcher to read from extension settings.** This adds coupling and complexity for a pre-check that provides marginal UX value.
-
-Recommendation: option 1. Remove `dispatcher.ts:366-390` as part of the migration.
-
-**Risk: Dispatcher pre-validation removal (low).** Removing the pre-check means the path rejection happens inside the tool execution instead of before it. The user sees the approval prompt before the error, which is a minor UX regression.
+**Accepted tradeoff:** Removing the pre-check means the path rejection happens inside the tool execution instead of before it. The user sees the approval prompt before the error, which is a minor UX regression.
 
 **Risk: Partial output in error messages (low).** The behavioral change from separate `result`+`error` fields to combined error message string is acceptable. The LLM reads both fields as text.
 
@@ -636,7 +632,7 @@ params:
     description: "Complete content to write to the note."
 ```
 
-**Risk: `ensureDirectoryExists` duplication (low).** Duplicated across 3 scaffolds at ~15 lines each. Acceptable for now.
+**`ensureDirectoryExists` extraction:** This helper is needed by 3 scaffolds (`write_note`, `move_note`, `extract_docx_comments`). **Decision: Extract to `utils.ensureDirectoryExists`.** This avoids triplicating ~15 lines and provides a single implementation. The scaffold calls `await utils.ensureDirectoryExists(filePath)` instead of inlining the helper.
 
 **Comparison with spec's complexity estimate:** The spec classifies `write_note` as "Medium" at 80-280 lines and estimates ~120 lines. The scaffold is ~80 lines — at the low end.
 
@@ -948,7 +944,7 @@ params:
 
 **Risk: TFile mutation after `renameFile()` (none).** Obsidian's `renameFile` mutates the TFile in place — the `file` object remains valid for the subsequent `processFrontMatter()` call.
 
-**Risk: `ensureDirectoryExists` duplication (low).** Same ~15-line helper duplicated across 3 scaffolds. Acceptable for now.
+**`ensureDirectoryExists`:** Uses `utils.ensureDirectoryExists(normalizedNewPath)` — shared helper extracted to `utils` (see `write_note` notes).
 
 **Notable: no stale tracker / no noteOpener.** Unlike `write_note` and `replace_in_note`, `move_note` does not use the stale content tracker or open the note after the operation. This is correct — `move_note` doesn't modify note content.
 

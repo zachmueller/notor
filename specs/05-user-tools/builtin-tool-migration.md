@@ -278,7 +278,9 @@ export interface BuiltinToolScaffold {
 
 **Pre-plan research task:** Before writing scaffold implementations, deep-dive ALL 20 built-in tool source files and assess each tool's feasibility of migrating with the current plan. For tools with large or complex helper logic (especially `write_docx` at ~1,041 lines with template grafting, rId conflict resolution, and media merging), evaluate whether additional logic should be exposed via `utils` (or another mechanism) rather than inlined in the scaffold code block. Document findings and any recommended `utils` expansions before proceeding with implementation.
 
-### `src/extensions/runtime-context.ts` — Add media utilities, Node.js modules, and `Platform`
+### `src/extensions/runtime-context.ts` — Add media utilities, shared helpers, Node.js modules, and `Platform`
+
+**Media utilities (for `read_file` scaffold):**
 
 ```ts
 // In ExtensionUtils interface:
@@ -297,6 +299,82 @@ processPdf: (buffer, options) => processPdf(buffer, { ...options, providerType: 
 
 Note: `utils.processPdf` wraps the underlying `processPdf` function, injecting `active_provider` and `pdf_native_max_size_mb` (converted to bytes as `maxNativeSizeBytes`) from plugin settings. Scaffold code does not need to know about the active provider or the native size limit — it calls `utils.processPdf(buffer, { pages, maxTextChars, preferNative })`.
 
+**Shared helpers:**
+
+```ts
+// In ExtensionUtils interface:
+
+/** Check if a URL's domain matches any pattern in the denylist. */
+isDomainBlocked: (url: string, denylist: string[]) => { blocked: true; pattern: string } | { blocked: false };
+
+/** Create intermediate vault directories for a file path. */
+ensureDirectoryExists: (filePath: string) => Promise<void>;
+
+/** Resolve an image href to data suitable for embedding in a DOCX via ImageRun.
+ *  Handles vault-relative paths, absolute paths, data URIs, format detection,
+ *  dimension parsing, and WebP→PNG conversion. Returns null for unresolvable images. */
+resolveImageForDocx: (href: string, allowedPaths?: string[]) => Promise<DocxImageData | null>;
+
+/** Graft generated DOCX body content into a template, preserving template styles,
+ *  margins, headers, footers, and section properties. Handles media file copying
+ *  with collision avoidance, rId conflict resolution, and Content_Types merging. */
+graftDocxIntoTemplate: (generatedZip: PizZip, templateZip: PizZip) => Promise<void>;
+
+/** DOCX comment parsing utilities. */
+docxComments: {
+  parseCommentsXml: (xml: string) => RawComment[];
+  parseCommentsExtendedXml: (xml: string) => { resolvedIds: Set<string>; threadingMap: Map<string, string> };
+  extractQuotedText: (documentXml: string, commentId: string) => string;
+  parsePeopleXml: (xml: string) => Map<string, string>;
+  buildCommentThreads: (raw: RawComment[], threadingMap: Map<string, string>, resolvedIds: Set<string>, includeResolved: boolean, peopleMap: Map<string, string>) => Comment[];
+  formatCommentsAsMarkdown: (comments: Comment[], filename: string, startNumber: number) => string;
+  extractExistingCommentIds: (existingContent: string) => { ids: Set<string>; maxNumber: number };
+};
+```
+
+```ts
+// In buildUtils():
+
+isDomainBlocked,  // extracted from src/tools/fetch-webpage.ts
+
+ensureDirectoryExists: async (filePath: string) => {
+  const parts = filePath.split("/");
+  parts.pop();
+  if (parts.length === 0) return;
+  let current = "";
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    const existing = app.vault.getAbstractFileByPath(current);
+    if (!existing) {
+      await app.vault.createFolder(current);
+    } else if (!(existing instanceof TFolder)) {
+      throw new Error(`Cannot create directory: "${current}" already exists as a file`);
+    }
+  }
+},
+
+resolveImageForDocx: (href, allowedPaths?) =>
+  resolveImageForDocx(href, vaultRootPath, allowedPaths ?? plugin.settings.read_file_allowed_paths),
+
+graftDocxIntoTemplate: graftIntoTemplate,  // extracted from src/tools/write-docx.ts
+
+docxComments: {
+  parseCommentsXml,
+  parseCommentsExtendedXml,
+  extractQuotedText,
+  parsePeopleXml,
+  buildCommentThreads,
+  formatCommentsAsMarkdown,
+  extractExistingCommentIds,
+},  // all imported from src/tools/docx-comment-parser.ts
+```
+
+**Source file extraction required before class file deletion:**
+- `isDomainBlocked()` — extract from `src/tools/fetch-webpage.ts` to a standalone utility. Update `dispatcher.ts:16` import to use the extracted utility.
+- `graftIntoTemplate()` — extract from `src/tools/write-docx.ts` (lines 448-702) to a standalone utility.
+- `resolveImageForDocx()` — already in `src/tools/docx-image-utils.ts`, import from there.
+- `docx-comment-parser.ts` — already a standalone module, import directly.
+
 Add `Platform` to `buildObsidianExports()` (needed by `execute_command` scaffold for desktop-only guard):
 ```ts
 // In buildObsidianExports():
@@ -311,7 +389,7 @@ crypto: typeof import("crypto");
 path: typeof import("path");
 ```
 
-~25 lines changed.
+~80 lines changed.
 
 ### `src/extensions/manager.ts` — Scaffold fallback in reload pipeline
 
@@ -354,6 +432,12 @@ Scaffold-origin tools are marked with `isScaffold: true` on `UserToolDefinition`
 **Scaffold compilation failure handling:** In step 2 (compilation), if a scaffold-marked tool fails to compile, show a prominent critical-level Notice distinct from user extension errors: `"CRITICAL: Built-in tool '${name}' failed to load. The plugin may not function correctly."` This is important because scaffold compilation failure means a core tool is unavailable with no class-based fallback — unlike user extension failures (which are expected and recoverable), a scaffold failure indicates a plugin bug.
 
 **Refactor:** Extract the manual YAML parsing logic from `discovery.ts:parseOneExtensionFile()` (lines 190-206) into a standalone `extractFrontmatter(content, parseYAML)` helper. This cleans up `parseOneExtensionFile()` and provides a reusable utility for future code that needs to parse frontmatter from raw markdown content (e.g., template imports, clipboard paste). Note: the scaffold injection above does NOT use this helper — it constructs frontmatter directly from structured metadata.
+
+### `src/chat/dispatcher.ts` — Remove `execute_command` pre-validation, update `isDomainBlocked` import
+
+**Remove pre-dispatch path validation (lines 366-390).** This check validated `execute_command`'s working directory against `settings.execute_command_allowed_paths` before tool execution. After migration, the setting moves to per-extension settings and the scaffold's own `resolveAndValidatePath()` call produces the same error. Removing the pre-check eliminates coupling between the dispatcher and tool-specific settings. Accepted tradeoff: path rejection now happens inside tool execution instead of before the approval prompt.
+
+**Update `isDomainBlocked` import (line 16).** Currently imports from `src/tools/fetch-webpage.ts`. Update to import from the extracted standalone utility (see runtime-context.ts changes above).
 
 ### `src/tool-config/path-enforcer.ts` — Remove static `TOOL_PATH_PARAMS` entries
 
@@ -472,12 +556,12 @@ for (const [name, tool] of compiledTools) {
 | Tool | Key adaptation notes |
 |---|---|
 | `read_note` | `utils.resolveNote()`, `obsidian.getFrontMatterInfo()`, `utils.staleTracker.recordRead()`, `utils.noteOpener.openNote()`. ~60 lines. |
-| `write_note` | `utils.staleTracker.check()`, `utils.checkpointManager.createCheckpoint()`, `app.vault.process()`, frontmatter preservation. Helper: `ensureDirectoryExists()`. ~120 lines. |
+| `write_note` | `utils.staleTracker.check()`, `utils.checkpointManager.createCheckpoint()`, `app.vault.process()`, frontmatter preservation. Uses `utils.ensureDirectoryExists()`. ~120 lines. |
 | `replace_in_note` | JSON-parsed change blocks, atomic all-or-nothing via `app.vault.process()`. Stale check + checkpoint. ~130 lines. |
 | `manage_tags` | `app.fileManager.processFrontMatter()` with tag normalization helpers (`normaliseTags`, `normaliseTag`). ~100 lines. |
-| `move_note` | `app.fileManager.renameFile()` for auto link-updating. Optional alias insertion. Helper: `ensureDirectoryExists()`, `normaliseAliases()`. ~120 lines. |
+| `move_note` | `app.fileManager.renameFile()` for auto link-updating. Optional alias insertion. Uses `utils.ensureDirectoryExists()`. Helper: `normaliseAliases()`. ~120 lines. |
 | `list_vault` | Enumerate via `app.vault.getFiles()` / `getAbstractFileByPath()`. Helpers: `collectItems`, `classifyFile`, `sortItems`. Pagination. ~160 lines. |
-| `execute_command` | `utils.executeShellCommand()` already wraps settings. Path validation for working dir. Platform guard via `Platform.isDesktopApp`. ~80 lines. Need to import `Platform` from obsidian — add to `buildObsidianExports()`. |
+| `execute_command` | `utils.executeShellCommand()` already wraps settings. Path validation for working dir. Platform guard via `Platform.isDesktopApp`. Partial output on timeout/non-zero exit combined into error message string. ~80 lines. |
 | `replace_in_file` | `libs.fs` for read/write. Binary detection (null-byte scan). Atomic in-memory search/replace. ~120 lines. |
 
 ### Complex tools
@@ -485,30 +569,31 @@ for (const [name, tool] of compiledTools) {
 | Tool | Key adaptation notes |
 |---|---|
 | `search_vault` | Three helpers: `getCandidateFiles()`, `searchFile()`, `sortFileResults()` + `matchesGlob()`, `getBacklinkCounts()`. Regex with `/gm` flag, `lastIndex` reset between files. ~250 lines. |
-| `fetch_webpage` | `obsidian.requestUrl()`. Turndown instance with GFM plugin + custom rules (strip nav/footer). `settings` for timeout/size caps, `shared` for denylist. Helpers: `isDomainBlocked()`, `getNetErrorHint()`. ~300 lines. |
-| `web_search` | DuckDuckGo HTML scraping via `DOMParser`. `obsidian.requestUrl()` POST. Helpers: `cleanDDGUrl()`, `parseDDGResults()`. `settings` for timeout/num_results, `shared` for denylist. ~200 lines. |
+| `fetch_webpage` | `obsidian.requestUrl()`. Turndown instance with GFM plugin + custom rules (strip nav/footer). `settings` for timeout/size caps, `shared` for denylist. Uses `utils.isDomainBlocked()`. Helper: `getNetErrorHint()`. ~300 lines. |
+| `web_search` | DuckDuckGo HTML scraping via `DOMParser`. `obsidian.requestUrl()` POST. Uses `utils.isDomainBlocked()`. Helpers: `cleanDDGUrl()`, `parseDDGResults()`. `settings` for timeout/num_results, `shared` for denylist. ~200 lines. |
 | `read_file` | Binary detection, media format detection (magic bytes), image processing pipeline, PDF processing. `libs.fs`. `settings` for image/PDF options. ~200 lines. |
 | `read_docx` | `libs.mammoth` conversion with image extraction callback. `libs.crypto` for MD5 dedup. Custom Turndown rule for images. ~200 lines. |
-| `write_docx` | `libs.marked.lexer()` tokenization → `libs.docx` block generation. Template grafting via `libs.PizZip` + `libs.xmldom`. Helpers: `renderInline()`, `buildDocxChildren()`, `graftIntoTemplate()` (~250 lines alone, with rId conflict resolution and media file merging), image resolution. ~600-1100 lines — the largest scaffold by far. Feasibility of inlining vs. expanding `utils` should be assessed in the pre-plan research task. |
-| `extract_docx_comments` | `libs.PizZip` for XML extraction. Comment threading, resolved filtering, `@mention` resolution. Idempotent append. ~300 lines. |
+| `write_docx` | `libs.marked.lexer()` tokenization → `libs.docx` block generation. Uses `utils.resolveImageForDocx()` and `utils.graftDocxIntoTemplate()` for infrastructure. Inlines customizable rendering (`renderInline()`, `buildDocxChildren()`). ~450-550 lines — the largest scaffold. |
+| `extract_docx_comments` | `libs.PizZip` for XML extraction. Uses `utils.docxComments` for all parsing/threading/formatting. Uses `utils.ensureDirectoryExists()`. Scaffold handles I/O orchestration only. ~200 lines. |
 
 ### Missing from `obsidian` exports
 
 The `execute_command` tool checks `Platform.isDesktopApp`. Add `Platform` to `buildObsidianExports()` (small addition, useful for any extension that needs platform detection).
 
-### Media utilities for `read_file` scaffold
+### Utility expansions summary
 
-The `read_file` tool references image/PDF processing utilities from `src/media/`. Expose these via `utils` (see runtime-context.ts changes above):
+The following utilities are added to `ExtensionUtils` (see runtime-context.ts changes above for full signatures):
 
-```ts
-utils.detectMediaFormat: (buffer: Buffer) => "png" | "jpeg" | "gif" | "webp" | "pdf" | null
-utils.processImage: (buffer: Buffer, mediaType: ImageMediaType, options?: { maxDimension?: number; compressionQuality?: number }) => Promise<ContentBlock>
-utils.processPdf: (buffer: Buffer, options: { pages?: string; maxTextChars?: number; preferNative?: boolean }) => Promise<{ contentBlocks: ContentBlock[]; textSummary: string }>
-```
-
-Note: `utils.processPdf` wraps the underlying `processPdf` function and injects `active_provider` and `pdf_native_max_size_mb` (as `maxNativeSizeBytes`, converted to bytes) from plugin settings internally. Scaffold code does not need to pass the provider type or native size limit. `processPdf` returns `{ contentBlocks, textSummary }`, not a single `ContentBlock` — the `read_file` scaffold must handle the real return shape.
-
-This avoids duplicating ~200 lines of media processing code in the scaffold and keeps it maintainable. The `read_file` scaffold would then be ~100 lines instead of ~300.
+| Utility | Used by | Source |
+|---|---|---|
+| `utils.detectMediaFormat` | `read_file` | `src/media/` |
+| `utils.processImage` | `read_file` | `src/media/` |
+| `utils.processPdf` | `read_file` | `src/media/` (wraps `active_provider` + `pdf_native_max_size_mb` internally) |
+| `utils.isDomainBlocked` | `fetch_webpage`, `web_search`, `dispatcher.ts` | Extracted from `src/tools/fetch-webpage.ts` |
+| `utils.ensureDirectoryExists` | `write_note`, `move_note`, `extract_docx_comments` | Inlined in `buildUtils()` (~15 lines) |
+| `utils.resolveImageForDocx` | `write_docx` | `src/tools/docx-image-utils.ts` (wraps `vaultRootPath` + `allowedPaths` internally) |
+| `utils.graftDocxIntoTemplate` | `write_docx` | Extracted from `src/tools/write-docx.ts` |
+| `utils.docxComments` (7 functions) | `extract_docx_comments` | `src/tools/docx-comment-parser.ts` (direct passthrough) |
 
 ---
 

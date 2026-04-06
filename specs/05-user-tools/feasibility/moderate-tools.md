@@ -99,10 +99,8 @@ settings:
     max: 500000
 ```
 
-**New `utils` expansions recommended:**
-- `utils.isDomainBlocked(url: string, denylist: string[]): { blocked: true; pattern: string } | { blocked: false }` — avoids duplicating ~36 lines in both `fetch_webpage` and `web_search` scaffolds, and keeps the `dispatcher.ts` import clean.
-
-**Risk: `isDomainBlocked` dispatcher dependency (medium).** The `src/chat/dispatcher.ts:16` import will break when the class file is removed. Must be resolved as part of the migration.
+**Decision: Add `utils.isDomainBlocked`.**
+- `utils.isDomainBlocked(url: string, denylist: string[]): { blocked: true; pattern: string } | { blocked: false }` — avoids duplicating ~36 lines in both `fetch_webpage` and `web_search` scaffolds, and keeps the `dispatcher.ts` import clean. The function is extracted from `src/tools/fetch-webpage.ts` into a standalone utility and wired through `buildUtils()` in `runtime-context.ts`. The `dispatcher.ts:16` import is updated to use the extracted utility.
 
 **Risk: Turndown singleton recreation (low).** <1ms per invocation. Acceptable.
 
