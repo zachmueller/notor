@@ -12,6 +12,7 @@ import { Notice, SecretComponent, Setting, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
 import type { SettingsFieldSchema } from "../../extensions/types";
 import { slugifySecretId } from "../../extensions/settings-schema";
+import { ConfirmModal } from "../../ui/confirm-modal";
 
 /** Render the "Extensions" settings section. */
 export function renderExtensionsSection(
@@ -130,17 +131,27 @@ function renderBuiltinToolsSection(
 				btn
 					.setButtonText("Reset to default")
 					.setTooltip(
-						"Restore built-in scaffold (overwrites customizations)",
+						"Delete customized file and restore built-in default",
 					)
-					.onClick(async () => {
-						try {
-							await manager.resetBuiltinToolToDefault(toolName);
-							new Notice(`Tool "${toolName}" reset to default.`);
-							ctx.redisplay();
-						} catch (e) {
-							const msg = e instanceof Error ? e.message : String(e);
-							new Notice(`Failed to reset tool: ${msg}`);
-						}
+					.onClick(() => {
+						new ConfirmModal(
+							ctx.app,
+							"Reset to default?",
+							`This will delete your customized "${toolName}" file and restore the built-in default. Any custom logic will be lost.`,
+							async () => {
+								try {
+									await manager.resetBuiltinToolToDefault(toolName);
+									await manager.reload(false);
+									new Notice(`Tool "${toolName}" reset to default.`);
+									ctx.redisplay();
+								} catch (e) {
+									const msg = e instanceof Error ? e.message : String(e);
+									new Notice(`Failed to reset tool: ${msg}`);
+								}
+							},
+							"Reset to default",
+							true,
+						).open();
 					}),
 			);
 		} else {

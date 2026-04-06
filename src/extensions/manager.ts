@@ -564,9 +564,9 @@ export class ExtensionManager {
 	}
 
 	/**
-	 * Reset a built-in tool's vault file to the default scaffold content.
+	 * Reset a built-in tool to its default scaffold by deleting the vault file.
 	 *
-	 * Overwrites if the file exists, creates if it doesn't.
+	 * After deletion, the next `reload()` will inject the scaffold fallback.
 	 */
 	async resetBuiltinToolToDefault(toolName: string): Promise<void> {
 		const scaffold = BUILTIN_TOOL_SCAFFOLDS.get(toolName);
@@ -579,15 +579,9 @@ export class ExtensionManager {
 
 		const existing = this.plugin.app.vault.getAbstractFileByPath(filePath);
 		if (existing) {
-			await this.plugin.app.vault.modify(existing as import("obsidian").TFile, scaffold.scaffoldContent);
-		} else {
-			const dirFile = this.plugin.app.vault.getAbstractFileByPath(dir);
-			if (!dirFile) {
-				await this.plugin.app.vault.createFolder(dir);
-			}
-			await this.plugin.app.vault.create(filePath, scaffold.scaffoldContent);
+			await this.plugin.app.vault.delete(existing);
 		}
-		log.info("Reset built-in tool scaffold to default", { tool: toolName, path: filePath });
+		log.info("Reset built-in tool to default scaffold", { tool: toolName, path: filePath });
 	}
 
 	// -----------------------------------------------------------------------
