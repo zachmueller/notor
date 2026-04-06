@@ -3251,3 +3251,195 @@ try {
 **Risk:** Effectively zero. This is one of the simplest write tools — a single `processFrontMatter` call with straightforward set/delete logic. No settings, no external libraries, no filesystem I/O, no complex helpers. The only notable detail is the `set` param type correction and the optional-param-as-default-null pattern. Good candidate for early implementation alongside `read_frontmatter` and `manage_tags` (all three use `processFrontMatter` / `metadataCache.getFileCache`).
 
 **Comparison with spec's complexity estimate:** The spec classifies `update_frontmatter` as "Simple" at 40-100 lines and estimates ~60 lines. The scaffold is ~35 lines — below estimate. The built-in class's 150 lines include the class boilerplate, `input_schema` declaration, explicit `ToolResult` construction, and verbose error handling — all absorbed by the adapter in the extension runtime.
+
+### `move_note` — Feasibility: Straightforward ✅
+
+**Source:** `src/tools/move-note.ts` (208 lines total, ~120 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param (exists, is string)
+2. Validates `new_path` param (exists, is string)
+3. Resolves source note via `resolveNote(path, this.app.vault, this.app.metadataCache)` — returns `TFile` or `null`
+4. Validates source is a `.md` file (rejects non-markdown files)
+5. Normalizes destination path: auto-appends `.md` if missing
+6. No-op guard: rejects if source and destination are the same path
+7. Checks destination doesn't already exist via `app.vault.getAbstractFileByPath(normalizedNewPath)`
+8. Creates checkpoint via `this.checkpointManager?.createCheckpoint(file.path, this.name, "")`
+9. Ensures destination directory exists via `ensureDirectoryExists(normalizedNewPath)` — creates intermediate vault folders
+10. Stores old basename before rename for alias comparison
+11. Performs move/rename via `app.fileManager.renameFile(file, normalizedNewPath)` — Obsidian auto-updates all internal wikilinks/markdown links
+12. If `add_alias` is `true` and filename actually changed, appends old basename to frontmatter `aliases` array via `app.fileManager.processFrontMatter(file, callback)` — uses `normaliseAliases()` helper to handle existing aliases in string, array, or null form
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.vault` | `app.vault` | ✅ |
+| `this.app.metadataCache` | `app.metadataCache` | ✅ |
+| `this.app.fileManager` | `app.fileManager` | ✅ |
+| `resolveNote(path, vault, metadataCache)` | `utils.resolveNote(path)` | ✅ |
+| `this.checkpointManager` | `utils.checkpointManager` | ✅ |
+| `logger("MoveNoteTool")` | `utils.logger("move_note")` | ✅ |
+| `TFolder` | `obsidian.TFolder` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed. Listed in the spec's "settings-free tools" group (D-2).
+
+**Helper functions (2 to inline):**
+
+1. **`ensureDirectoryExists()`** (~20 lines) — Creates intermediate vault directories for a file path. Splits on `/`, iterates segments, checks each via `app.vault.getAbstractFileByPath()`, creates missing folders via `app.vault.createFolder()`, throws if a segment exists as a file (not a folder, checked via `instanceof TFolder`). This exact helper is duplicated in `write-note.ts`, `move-note.ts`, and `extract-docx-comments.ts` (3 copies). Per the `extract_docx_comments` and `write_note` assessment precedents, inlining in each scaffold is acceptable (~15 lines each). No `utils` expansion needed.
+
+2. **`normaliseAliases()`** (~10 lines) — Normalizes a raw frontmatter `aliases` value (which may be `null`, a `string`, or `string[]`) into a clean `string[]`. Filters out null/empty entries and trims whitespace. This helper is specific to `move_note` — no other tool needs it. Inline as a local function.
+
+**Return value mapping:**
+- Success → return string like `"Note moved: old/path.md → new/path.md"` (adapter wraps in `{ success: true, result: string }`)
+- Validation failures → throw (adapter wraps in `{ success: false, error }`)
+- Source not found → throw with "Note not found" message
+- Destination exists → throw with "A note already exists at" message
+- Same path → throw with "Source and destination are the same path" message
+- File system failures → throw (adapter catches)
+
+**Key patterns and their scaffold translations:**
+
+1. **`fileManager.renameFile()` for auto link-updating** — This is the tool's core operation. `app.fileManager.renameFile(file, newPath)` moves the file and automatically updates all internal wikilinks and markdown links that reference it. The TFile reference (`file`) remains valid after rename — Obsidian mutates the TFile in place (updates `.path`, `.name`, `.basename`, `.parent`). This is critical for the alias insertion step that follows, which uses the same `file` reference. The scaffold calls `app.fileManager.renameFile(file, normalizedNewPath)` identically.
+
+2. **Post-rename `processFrontMatter`** — After `renameFile()`, the class calls `app.fileManager.processFrontMatter(file, callback)` using the same `file` reference. This works because Obsidian's `renameFile` mutates the TFile object in place (its `.path` property is updated to the new location). The scaffold does the same — no need to re-resolve the file after rename.
+
+3. **Alias normalization** — The `normaliseAliases()` helper handles the three possible shapes of the `aliases` frontmatter field: `null`/`undefined` → `[]`, a single `string` → `[string]`, or an existing `string[]` → filtered and trimmed. This defensive parsing is necessary because users can manually write aliases in any of these forms. The scaffold inlines this as a local function.
+
+4. **Basename comparison for alias guard** — The class stores `oldBasename = file.basename` before rename, then computes `newBasename` from the normalized new path. Aliases are only added when the filename actually changes (not just a directory move). This prevents adding a redundant alias when a note is only relocated. The scaffold replicates this comparison.
+
+5. **Checkpoint before destructive operation** — `createCheckpoint()` is called before `renameFile()`. In the class, optional chaining (`this.checkpointManager?.`) is used because the constructor accepts `CheckpointManager | undefined`. In the scaffold, `utils.checkpointManager` is always defined (set in `buildUtils()` from `runtime-context.ts`), so no optional chaining is needed.
+
+**Scaffold code (estimated ~75 lines):**
+```ts
+const log = utils.logger("move_note");
+
+if (!params.path || typeof params.path !== "string") {
+  throw new Error("Missing required parameter: path");
+}
+if (!params.new_path || typeof params.new_path !== "string") {
+  throw new Error("Missing required parameter: new_path");
+}
+
+log.debug("Moving note", { path: params.path, newPath: params.new_path, addAlias: params.add_alias });
+
+// Helper: create intermediate directories
+async function ensureDirectoryExists(filePath: string) {
+  const parts = filePath.split("/");
+  parts.pop(); // remove filename
+  if (parts.length === 0) return;
+
+  let current = "";
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    const existing = app.vault.getAbstractFileByPath(current);
+    if (!existing) {
+      await app.vault.createFolder(current);
+      log.debug("Created directory", { path: current });
+    } else if (!(existing instanceof obsidian.TFolder)) {
+      throw new Error(`Cannot create directory: "${current}" already exists as a file`);
+    }
+  }
+}
+
+// Helper: normalize aliases frontmatter value to string[]
+function normaliseAliases(raw: unknown): string[] {
+  if (!raw) return [];
+  if (typeof raw === "string") return [raw.trim()];
+  if (Array.isArray(raw)) {
+    return raw.filter((a: unknown) => a != null && a !== "").map((a: unknown) => String(a).trim());
+  }
+  return [];
+}
+
+// Resolve source file
+const file = utils.resolveNote(params.path);
+if (!file) throw new Error(`Note not found: ${params.path}`);
+
+// Validate source is markdown
+if (file.extension !== "md") {
+  throw new Error(`Path is not a Markdown note: ${file.path}`);
+}
+
+// Normalize destination: auto-append .md if missing
+const normalizedNewPath = params.new_path.endsWith(".md") ? params.new_path : params.new_path + ".md";
+
+// No-op guard: same path
+if (file.path === normalizedNewPath) {
+  throw new Error("Source and destination are the same path");
+}
+
+// Check destination doesn't already exist
+const existing = app.vault.getAbstractFileByPath(normalizedNewPath);
+if (existing) {
+  throw new Error(`A note already exists at: ${normalizedNewPath}`);
+}
+
+// Checkpoint before destructive operation
+await utils.checkpointManager.createCheckpoint(file.path, "move_note", "");
+
+// Ensure destination directory exists
+await ensureDirectoryExists(normalizedNewPath);
+
+// Store old basename before rename (TFile.basename is name without extension)
+const oldBasename = file.basename;
+
+// Perform the move/rename — updates all internal links
+await app.fileManager.renameFile(file, normalizedNewPath);
+
+// Add alias if requested and filename actually changed
+const newBasename = normalizedNewPath.split("/").pop()!.replace(/\.md$/, "");
+if (params.add_alias && oldBasename !== newBasename) {
+  await app.fileManager.processFrontMatter(file, (fm: any) => {
+    const aliases = normaliseAliases(fm["aliases"]);
+    if (!aliases.includes(oldBasename)) {
+      aliases.push(oldBasename);
+    }
+    fm["aliases"] = aliases;
+  });
+}
+
+log.info("Note moved", { from: params.path, to: normalizedNewPath, aliasAdded: params.add_alias && oldBasename !== newBasename });
+
+return `Note moved: ${params.path} → ${normalizedNewPath}`;
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed in the extension runtime: `resolveNote`, `checkpointManager`, `logger`. The two helpers (`ensureDirectoryExists`, `normaliseAliases`) are inlined as local functions.
+
+**`obsidian` imports needed:** `TFolder` (directory type check in `ensureDirectoryExists`). Already exposed via `buildObsidianExports()`.
+
+**No `libs` needed.** No external libraries, no Node.js modules.
+
+**No settings migration needed.** This tool references zero `NotorSettings` fields. No per-extension `settings:` section in the YAML fence, no shared settings.
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Current path of the note relative to vault root."
+    path_namespace: vault
+  new_path:
+    type: string
+    description: "New path for the note relative to vault root."
+    path_namespace: vault
+  add_alias:
+    type: boolean
+    description: "If true, append the old name to the note's frontmatter aliases."
+    default: false
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence. The existing YAML fence content is already correct.
+
+**Risk: TFile mutation after `renameFile()` (none).** The scaffold uses the same `file` reference after `app.fileManager.renameFile()` for the `processFrontMatter()` call. This is safe because Obsidian's `renameFile` mutates the TFile in place — its `.path`, `.name`, `.basename`, and `.parent` properties are all updated to reflect the new location. The `file` object remains valid and usable. This is the same pattern used by the built-in class.
+
+**Risk: `ensureDirectoryExists` duplication (low).** Same assessment as `write_note`: the helper is duplicated across `write_note`, `move_note`, and `extract_docx_comments` scaffolds. At ~15 lines each, this is manageable. If a fourth tool needs it, extracting to `utils.ensureDirectoryExists()` becomes worthwhile. For now, inline duplication is preferred per the `extract_docx_comments` assessment precedent.
+
+**Risk: `normaliseAliases` type handling (none).** The helper handles three frontmatter shapes: `null`/`undefined`, `string`, and `string[]`. This is the complete set of possible forms for YAML list-like frontmatter values in Obsidian. The built-in class's implementation is identical — the scaffold is a direct transliteration.
+
+**Risk: checkpoint non-fatality (low).** The built-in class uses `this.checkpointManager?.createCheckpoint()` with optional chaining (undefined in unit tests). The scaffold calls `utils.checkpointManager.createCheckpoint()` directly. If `createCheckpoint` throws, the error propagates and blocks the move. The built-in's behavior is effectively the same — if the checkpoint manager is defined and throws, the class also propagates the error. The optional chaining in the class only skips the call when the manager is undefined (test scenario), not when it throws. No behavioral difference in production.
+
+**Notable: no stale tracker / no noteOpener.** Unlike `write_note` and `replace_in_note`, `move_note` does not use the stale content tracker or open the note in the editor after the operation. This is correct — `move_note` doesn't modify note content (it relocates the file and optionally touches frontmatter), so stale tracking is irrelevant. The note isn't opened because a move operation doesn't constitute an "access" that the user needs to see.
+
+**Comparison with spec's complexity estimate:** The spec classifies `move_note` as "Medium" at 80-280 lines and estimates ~120 lines. The scaffold is ~75 lines — below estimate. This is because the tool's logic is procedurally straightforward: validate → resolve → guard → checkpoint → mkdir → rename → optional alias. No loops over content, no external API calls, no settings. The two inlined helpers add ~25 lines but both are simple. Structurally simpler than `write_note` (no create-vs-update branching, no frontmatter preservation, no stale tracking) and comparable to `manage_tags` in overall complexity.
