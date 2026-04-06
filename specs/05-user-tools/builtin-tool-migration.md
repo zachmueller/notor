@@ -1208,3 +1208,227 @@ settings:
 **Risk: Template grafting correctness after extraction (low).** `graftIntoTemplate()` is a pure function (takes two `PizZip` instances, mutates the template zip in-place). Moving it to `utils` is a mechanical extract — no logic change. The existing E2E tests for template grafting validate correctness.
 
 **Risk: `resolveImageForDocx` vault root injection (low).** Same pattern as `utils.resolveAndValidatePath()` — the wrapper injects `vaultRootPath` at build time. Well-established pattern.
+
+### `read_docx` — Feasibility: Moderate ✅
+
+**Source:** `src/tools/read-docx.ts` (286 lines total, ~210 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param (existence, string type, non-empty)
+2. Desktop-only guard via `Platform.isDesktopApp`
+3. Resolves vault root via `app.vault.adapter.basePath`
+4. Validates path against vault root and `settings.read_file_allowed_paths` via `resolveAndValidatePath()`
+5. Checks `.docx` extension via `extname()`
+6. Checks file existence via `fs.promises.stat()` (ENOENT → specific error)
+7. Reads file buffer via `fs.promises.readFile()`
+8. Builds a mammoth image extraction handler (`mammothImages.imgElement()`) that:
+   - Skips unsupported image formats (EMF, WMF, SVG, TIFF) with descriptive alt text
+   - For supported formats (PNG, JPEG, GIF, WebP): reads image buffer, computes MD5 hash for dedup filename, resolves attachment path via `app.fileManager.getAvailablePathForAttachment()`, saves to vault via `app.vault.createBinary()` if not already present
+   - Tags each image with a marker src (`__notor_img_N__` or `__notor_skip_N__`) for post-processing
+9. Converts DOCX → HTML via `mammoth.convertToHtml({ buffer }, { convertImage })`
+10. Builds a Turndown instance with GFM plugin and a custom `replaceImages` rule that maps marker srcs back to vault paths (`![alt](vaultPath)`) or fallback text
+11. Converts HTML → Markdown via `td.turndown(html)`
+12. Returns the Markdown string
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `Platform` from `"obsidian"` | `obsidian.Platform` | ⚠️ Planned (spec runtime-context.ts changes) |
+| `import * as fs from "fs"` | `libs.fs` | ⚠️ Planned (spec D-3) |
+| `import { extname } from "path"` | `libs.path.extname` | ⚠️ Planned (spec D-3) |
+| `import { createHash } from "crypto"` | `libs.crypto.createHash` | ⚠️ Planned (spec D-3) |
+| `mammoth` (default + `images` named export) | `libs.mammoth` | ✅ — default export carries `images` property; `libs.mammoth.images.imgElement()` works |
+| `TurndownService` | `libs.Turndown` | ✅ |
+| `gfm` plugin | `libs.turndownGfm.gfm` | ✅ |
+| `resolveAndValidatePath(path, vaultRoot, allowedPaths)` | `utils.resolveAndValidatePath(path)` | ✅ — runtime-context.ts:85-90 injects `vaultRootPath` and defaults `allowedPaths` to `plugin.settings.read_file_allowed_paths` |
+| `logger("ReadDocxTool")` | `utils.logger("read_docx")` | ✅ |
+| `this.settings.read_file_allowed_paths` | `shared.read_file_allowed_paths` | ✅ (shared setting — see D-2/D-8). Not needed explicitly — `utils.resolveAndValidatePath(path)` reads it internally as default. |
+
+**Settings:** None per-extension. The only setting referenced (`read_file_allowed_paths`) is a cross-tool shared setting consumed internally by `utils.resolveAndValidatePath()`. No `settings:` section needed in the YAML fence.
+
+**Helper functions (0 to extract, all inline):**
+
+The class has one private helper `getVaultRootPath()` (4 lines) — not needed because `utils.resolveAndValidatePath()` already knows the vault root. All other logic is inline in the `execute()` method.
+
+**Return value mapping:**
+- Success → return Markdown string (adapter wraps in `{ success: true, result: string }`)
+- Validation/read failures → throw (adapter wraps in `{ success: false, error }`)
+
+**Key patterns and their scaffold translations:**
+
+1. **`mammoth.images.imgElement()` callback** — The image extraction handler is an async callback passed to mammoth. It uses `app.fileManager.getAvailablePathForAttachment()` and `app.vault.createBinary()`. Both are standard Obsidian APIs available via the injected `app`. The callback also uses `libs.crypto.createHash("md5")` for dedup filenames. This is the most complex part of the scaffold — ~45 lines of callback logic — but it's a direct 1:1 port with no class dependencies.
+
+2. **`mammoth` named export access** — The class imports `{ images as mammothImages }` as a named export. In the scaffold, access it as `libs.mammoth.images.imgElement()`. The mammoth default export object carries `images` as a property (confirmed via `src/mammoth.d.ts:26`). No runtime expansion needed.
+
+3. **Turndown instance with custom rule** — The class creates a local Turndown instance (not a shared singleton) per invocation. This is correct for the scaffold since each invocation should get a fresh instance with the image map. The custom `replaceImages` rule uses an `HTMLElement` param — `HTMLElement` is a browser/Electron global available in the scaffold execution context.
+
+4. **Vault-relative source path resolution** — The class resolves `app.vault.getFileByPath(path)` to determine if the input path is vault-relative (for attachment folder resolution). This is a standard vault API call, directly available as `app.vault.getFileByPath(path)`.
+
+5. **`Buffer.from()` / `.slice()` / `.buffer`** — Buffer operations for image extraction (`imgBuffer.buffer.slice(byteOffset, byteOffset + byteLength)` → `ArrayBuffer` for `app.vault.createBinary()`). `Buffer` is a Node.js global available in Electron renderer. No special exposure needed.
+
+**Scaffold code (estimated ~160 lines):**
+```ts
+const log = utils.logger("read_docx");
+
+if (!params.path || typeof params.path !== "string" || params.path.trim() === "") {
+  throw new Error("Missing required parameter: path");
+}
+
+if (!obsidian.Platform.isDesktopApp) {
+  throw new Error("read_docx is only available on desktop.");
+}
+
+const pathResult = utils.resolveAndValidatePath(params.path);
+if (!pathResult.valid) throw new Error(pathResult.error);
+const resolvedPath = pathResult.resolvedPath;
+
+if (libs.path.extname(resolvedPath).toLowerCase() !== ".docx") {
+  throw new Error("read_docx only supports .docx files.");
+}
+
+// Check file existence
+try {
+  await libs.fs.promises.stat(resolvedPath);
+} catch (e) {
+  if (e.code === "ENOENT") throw new Error(`File not found: ${resolvedPath}`);
+  throw e;
+}
+
+const buf = await libs.fs.promises.readFile(resolvedPath);
+
+// --- Image extraction handler ---
+const extractedImages = [];
+let imageIndex = 0;
+
+const vaultFile = app.vault.getFileByPath(params.path);
+const sourcePath = vaultFile ? vaultFile.path : undefined;
+
+const supportedImageTypes = new Set([
+  "image/png", "image/jpeg", "image/gif", "image/webp",
+]);
+
+const convertImage = libs.mammoth.images.imgElement(async (image) => {
+  const idx = imageIndex++;
+  const contentType = image.contentType;
+
+  if (!supportedImageTypes.has(contentType)) {
+    const formatName = contentType.replace("image/", "").toUpperCase();
+    const alt = `[Unsupported image format: ${formatName}]`;
+    extractedImages.push({ index: idx, vaultPath: null, alt });
+    return { src: `__notor_skip_${idx}__`, alt };
+  }
+
+  try {
+    const imgBuffer = await image.readAsBuffer();
+    const ext = (contentType.split("/")[1] ?? "bin").replace("jpeg", "jpg");
+    const hash = libs.crypto.createHash("md5").update(imgBuffer).digest("hex");
+    const filename = `${hash}.${ext}`;
+
+    const targetPath = await app.fileManager.getAvailablePathForAttachment(
+      filename, sourcePath,
+    );
+
+    const existing = app.vault.getFileByPath(targetPath);
+    if (!existing) {
+      const arrayBuf = imgBuffer.buffer.slice(
+        imgBuffer.byteOffset,
+        imgBuffer.byteOffset + imgBuffer.byteLength,
+      );
+      await app.vault.createBinary(targetPath, arrayBuf);
+    }
+
+    extractedImages.push({ index: idx, vaultPath: targetPath, alt: filename });
+    return { src: `__notor_img_${idx}__`, alt: filename };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    log.warn("Image extraction failed", { index: idx, error: errMsg });
+    extractedImages.push({ index: idx, vaultPath: null, alt: "[Image extraction failed]" });
+    return { src: `__notor_skip_${idx}__`, alt: "[Image extraction failed]" };
+  }
+});
+
+// DOCX → HTML
+const { value: html } = await libs.mammoth.convertToHtml(
+  { buffer: buf }, { convertImage },
+);
+
+// Build marker → image info lookup
+const imageMap = new Map();
+for (const img of extractedImages) {
+  imageMap.set(`__notor_img_${img.index}__`, img);
+  imageMap.set(`__notor_skip_${img.index}__`, img);
+}
+
+// HTML → Markdown via Turndown (fresh instance per call)
+const td = new libs.Turndown({
+  headingStyle: "atx",
+  codeBlockStyle: "fenced",
+  bulletListMarker: "-",
+  emDelimiter: "*",
+  strongDelimiter: "**",
+  linkStyle: "inlined",
+});
+td.use(libs.turndownGfm.gfm);
+td.addRule("replaceImages", {
+  filter: ["img"],
+  replacement: (_content, node) => {
+    const src = node.getAttribute("src") ?? "";
+    const alt = node.getAttribute("alt") ?? "";
+
+    if (src.startsWith("__notor_img_")) {
+      const info = imageMap.get(src);
+      if (info?.vaultPath) return `![${alt}](${info.vaultPath})`;
+    }
+
+    if (src.startsWith("__notor_skip_")) return alt || "[image]";
+
+    return "[image]";
+  },
+});
+
+const markdown = td.turndown(html);
+
+const extractedCount = extractedImages.filter(i => i.vaultPath !== null).length;
+const skippedCount = extractedImages.filter(i => i.vaultPath === null).length;
+log.info("Read docx", {
+  path: resolvedPath,
+  bytes: buf.length,
+  imagesExtracted: extractedCount,
+  imagesSkipped: skippedCount,
+});
+
+return markdown;
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed or planned. Unlike `write_docx`, this tool does NOT use `docx-image-utils.ts` — image extraction is handled by mammoth's callback API, not by manual buffer parsing. The `docx-image-utils.ts` file is used exclusively by `write_docx` for *embedding* images in generated DOCX files. `read_docx` *extracts* images from existing DOCX files, which is a fundamentally different operation handled by mammoth internally.
+
+**Required runtime expansions (already planned in spec):**
+- `obsidian.Platform` — add to `buildObsidianExports()` (spec runtime-context.ts changes)
+- `libs.fs` — add to `buildLibs()` (spec D-3)
+- `libs.path` — add to `buildLibs()` (spec D-3)
+- `libs.crypto` — add to `buildLibs()` (spec D-3)
+
+**No `libs` or `obsidian` expansions beyond what's already planned.**
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the .docx file. Vault-relative or absolute."
+    path_namespace: filesystem
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
+
+**Risk: `mammoth.images` access via default export (low).** The scaffold accesses `libs.mammoth.images.imgElement()`. The `mammoth` module's default export carries `images` as a property (confirmed in `src/mammoth.d.ts:26-33`). The runtime-context imports mammoth as `import mammoth from "mammoth"` (default import) which includes `images`. Verified: the built-in class uses the named export `import { images as mammothImages }` but the default export object is the same module — they are interchangeable.
+
+**Risk: `HTMLElement` type in Turndown rule (low).** The custom `replaceImages` rule's `replacement` callback receives a `node` parameter typed as `HTMLElement`. In the scaffold (Sucrase strips types), this is just a runtime object from the Turndown DOM. The `getAttribute()` method is standard DOM API available in Electron's renderer process. No special handling needed.
+
+**Risk: Image extraction to vault (low).** The `app.fileManager.getAvailablePathForAttachment()` and `app.vault.createBinary()` calls are standard Obsidian APIs. The dedup logic (MD5 hash → check `getFileByPath()` → skip if exists) is simple and self-contained. No race conditions — mammoth processes images sequentially within a single conversion call.
+
+**Risk: `Buffer` global availability (low).** The scaffold uses `Buffer.from()` for base64 decoding and `imgBuffer.buffer.slice()` for ArrayBuffer extraction. `Buffer` is available as a global in Electron's renderer process (Node.js integration enabled). Same pattern used by `replace_in_file` and `read_file` scaffolds.
+
+**Comparison with spec's complexity estimate:** The spec classifies `read_docx` as "Complex" at 200-400 lines. The actual scaffold is ~160 lines — lower than estimated because the image extraction logic, while conceptually complex, is mostly mammoth's callback API handling. The Turndown conversion is identical to the `fetch_webpage` pattern. This tool is more accurately "Medium-Complex" — simpler than `search_vault` or `fetch_webpage` in total helper count, with the complexity concentrated in the single mammoth image callback.
