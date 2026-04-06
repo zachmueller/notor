@@ -89,8 +89,13 @@ vi.mock("../../utils/secrets", () => ({
 // Mock BUILTIN_TOOL_SCAFFOLDS — empty by default so existing tests are unaffected.
 // Scaffold injection tests set this to a non-empty map.
 const mockBuiltinToolScaffolds = new Map<string, { name: string; description: string; mode: string; scaffoldContent: string }>();
+const mockBuiltinSharedSettingsSchema: Array<{ key: string; name: string; type: string; description: string; default: unknown }> = [
+	{ key: "domain_denylist", name: "Domain denylist", type: "string[]", description: "Blocked domains", default: [] },
+	{ key: "read_file_allowed_paths", name: "Allowed paths", type: "string[]", description: "Allowed FS paths", default: [] },
+];
 vi.mock("../builtin-tool-scaffolds", () => ({
 	BUILTIN_TOOL_SCAFFOLDS: mockBuiltinToolScaffolds,
+	BUILTIN_SHARED_SETTINGS_SCHEMA: mockBuiltinSharedSettingsSchema,
 }));
 
 // ---------------------------------------------------------------------------
@@ -382,6 +387,169 @@ describe("ExtensionManager.reload", () => {
 		await manager.reload(false);
 
 		expect(plugin._dispatcherTools.size).toBe(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Scaffold injection (Phase 8.1)
+// ---------------------------------------------------------------------------
+
+describe("Scaffold injection", () => {
+	/** Helper to populate mockBuiltinToolScaffolds with N fake scaffolds. */
+	function populateScaffolds(count: number): string[] {
+		const names: string[] = [];
+		for (let i = 0; i < count; i++) {
+			const name = `builtin_tool_${i}`;
+			names.push(name);
+			mockBuiltinToolScaffolds.set(name, {
+				name,
+				description: `Built-in tool ${i}`,
+				mode: i % 2 === 0 ? "read" : "write",
+				scaffoldContent: `---\nnotor-type: tool\n---\n\`\`\`ts\nreturn 'scaffold ${i}';\n\`\`\``,
+			});
+		}
+		return names;
+	}
+
+	it("reload() with empty vault produces scaffold tools with correct names", async () => {
+		const scaffoldNames = populateScaffolds(20);
+
+		// Discovery returns nothing (empty vault)
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [],
+			automations: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: vi.fn() });
+
+		const plugin = createMockPlugin();
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(result.toolCount).toBe(20);
+		const toolNames = manager.getTools().map(t => t.name);
+		for (const name of scaffoldNames) {
+			expect(toolNames).toContain(name);
+		}
+	});
+
+	it("scaffold tools have isScaffold: true", async () => {
+		populateScaffolds(3);
+
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [],
+			automations: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: vi.fn() });
+
+		const plugin = createMockPlugin();
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		await manager.reload(true);
+
+		for (const tool of manager.getTools()) {
+			expect(tool.isScaffold).toBe(true);
+		}
+	});
+
+	it("vault file overrides scaffold default (vault file wins, isScaffold: false)", async () => {
+		mockBuiltinToolScaffolds.set("my_builtin", {
+			name: "my_builtin",
+			description: "A builtin",
+			mode: "read",
+			scaffoldContent: "---\nnotor-type: tool\n---\n```ts\nreturn 'default';\n```",
+		});
+
+		// Discovery returns a vault file for my_builtin (not a scaffold)
+		const vaultTool = makeToolDef({ name: "my_builtin", filePath: "notor/tools/my_builtin.md" });
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [vaultTool],
+			automations: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: vi.fn() });
+
+		const plugin = createMockPlugin();
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(result.toolCount).toBe(1);
+		const tool = manager.getTools()[0];
+		expect(tool.name).toBe("my_builtin");
+		expect(tool.isScaffold).toBeFalsy();
+		expect(result.builtinOverrides).toContain("my_builtin");
+	});
+
+	it("scaffold compilation failure shows critical Notice", async () => {
+		mockBuiltinToolScaffolds.set("bad_builtin", {
+			name: "bad_builtin",
+			description: "A builtin that fails",
+			mode: "read",
+			scaffoldContent: "---\nnotor-type: tool\n---\n```ts\nreturn 'broken';\n```",
+		});
+
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [],
+			automations: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		// Scaffold compilation fails
+		mockCompileExtension.mockReturnValue({ error: "Unexpected token" });
+
+		const plugin = createMockPlugin();
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(result.toolCount).toBe(0);
+		expect(result.errors).toHaveLength(1);
+
+		// Verify CRITICAL Notice was shown
+		const criticalNotice = mockNoticeInstances.find(n =>
+			n.message.includes("CRITICAL") && n.message.includes("bad_builtin"),
+		);
+		expect(criticalNotice).toBeDefined();
+
+		// Verify error was logged at error level
+		expect(mockLog.error).toHaveBeenCalledWith(
+			expect.stringContaining("CRITICAL"),
+			expect.objectContaining({ error: "Unexpected token" }),
+		);
+	});
+
+	it("scaffold-compiled tool executes correctly via UserToolAdapter", async () => {
+		mockBuiltinToolScaffolds.set("exec_builtin", {
+			name: "exec_builtin",
+			description: "Executable builtin",
+			mode: "read",
+			scaffoldContent: "---\nnotor-type: tool\n---\n```ts\nreturn 'hello';\n```",
+		});
+
+		const executeFn = vi.fn().mockResolvedValue("scaffold result");
+
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [],
+			automations: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: executeFn });
+
+		const plugin = createMockPlugin();
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		await manager.reload(true);
+
+		const tool = manager.getTools()[0];
+		expect(tool.name).toBe("exec_builtin");
+
+		const adapter = new UserToolAdapter(tool, manager, plugin as never);
+		const result = await adapter.execute({ query: "test" });
+
+		expect(result.success).toBe(true);
+		expect(result.result).toBe("scaffold result");
 	});
 });
 

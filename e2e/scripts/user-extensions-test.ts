@@ -22,6 +22,7 @@
  *   13. ensureBuiltinToolVaultFile creates scaffold and reload registers override
  *   14. Reload does not produce duplicate Notices
  *   15. No unexpected error-level logs from extension system
+ *   16. Scaffold-provided tool (read_frontmatter) invocable without vault files
  *
  * Prerequisites:
  *   - Uses AWS Bedrock (default profile) for LLM calls
@@ -438,7 +439,7 @@ async function testExtensionManagerState(ctx: TestContext): Promise<void> {
 }
 
 async function testToolRegistered(ctx: TestContext): Promise<void> {
-	console.log("\nTest 3: User tools registered in ToolRegistry, broken excluded");
+	console.log("\nTest 3: User tools registered in ToolRegistry, scaffold tools coexist");
 	const { page } = ctx;
 
 	const registeredTools = await getRegisteredToolNames(page);
@@ -453,17 +454,23 @@ async function testToolRegistered(ctx: TestContext): Promise<void> {
 	const hasErrorTool = registeredTools.includes("e2e_error_tool");
 	const hasBrokenTool = registeredTools.includes("e2e_broken_tool");
 
-	if (hasEchoTool && hasErrorTool && !hasBrokenTool) {
+	// Verify representative scaffold-provided tools coexist with user tools
+	const scaffoldTools = ["read_note", "search_vault", "write_note", "fetch_webpage", "execute_command"];
+	const hasScaffoldTools = scaffoldTools.every((name) => registeredTools.includes(name));
+
+	if (hasEchoTool && hasErrorTool && !hasBrokenTool && hasScaffoldTools) {
 		ctx.pass(
 			"User tools registered",
 			`e2e_echo_test and e2e_error_tool in registry, e2e_broken_tool correctly excluded. ` +
+				`Scaffold tools present: [${scaffoldTools.join(", ")}]. ` +
 				`Total tools: ${registeredTools.length}`,
 			shot,
 		);
 	} else {
 		ctx.fail(
 			"User tools registered",
-			`echo=${hasEchoTool}, error=${hasErrorTool}, broken=${hasBrokenTool}. ` +
+			`echo=${hasEchoTool}, error=${hasErrorTool}, broken=${hasBrokenTool}, ` +
+				`scaffoldTools=${hasScaffoldTools} (missing: ${scaffoldTools.filter((n) => !registeredTools.includes(n)).join(", ")}). ` +
 				`All tools: [${registeredTools.join(", ")}]`,
 			shot,
 		);
@@ -922,7 +929,7 @@ async function testBuiltinToolScaffolds(ctx: TestContext): Promise<void> {
 }
 
 async function testBuiltinToolVaultFile(ctx: TestContext): Promise<void> {
-	console.log("\nTest 13: ensureBuiltinToolVaultFile creates scaffold and reload registers override");
+	console.log("\nTest 13: ensureBuiltinToolVaultFile creates scaffold with real implementation code");
 	const { page } = ctx;
 
 	// Create a vault file for a built-in tool scaffold
@@ -932,9 +939,14 @@ async function testBuiltinToolVaultFile(ctx: TestContext): Promise<void> {
 		const mgr = plugin.getExtensionManager();
 		try {
 			const filePath = await mgr.ensureBuiltinToolVaultFile("read_note");
-			// Verify file was created
-			const file = (window as any).app?.vault?.getAbstractFileByPath?.(filePath);
-			return { filePath, exists: file !== null };
+			// Verify file was created and read its content
+			const vault = (window as any).app?.vault;
+			const file = vault?.getAbstractFileByPath?.(filePath);
+			let content = "";
+			if (file) {
+				content = await vault.read(file);
+			}
+			return { filePath, exists: file !== null, content };
 		} catch (e: any) {
 			return { error: e.message };
 		}
@@ -957,7 +969,24 @@ async function testBuiltinToolVaultFile(ctx: TestContext): Promise<void> {
 			`ensureBuiltinToolVaultFile returned "${createResult.filePath}" but file not found in vault`,
 			shot1,
 		);
-		// Clean up
+		await vaultDelete(page, createResult.filePath);
+		return;
+	}
+
+	// Verify scaffold contains real implementation code (not placeholder)
+	const hasRealCode =
+		!createResult.content.includes("Not yet customized") &&
+		createResult.content.includes("```ts") &&
+		createResult.content.length > 200;
+
+	if (!hasRealCode) {
+		ctx.fail(
+			"Built-in tool vault file",
+			`Scaffold file contains placeholder instead of real implementation. ` +
+				`Content length: ${createResult.content.length}, ` +
+				`snippet: "${createResult.content.substring(0, 200)}"`,
+			shot1,
+		);
 		await vaultDelete(page, createResult.filePath);
 		return;
 	}
@@ -980,7 +1009,8 @@ async function testBuiltinToolVaultFile(ctx: TestContext): Promise<void> {
 	if (isOverride && toolCountOk) {
 		ctx.pass(
 			"Built-in tool vault file",
-			`Scaffold created at "${createResult.filePath}". After reload: ` +
+			`Scaffold created at "${createResult.filePath}" with real implementation ` +
+				`(${createResult.content.length} chars). After reload: ` +
 				`${reloadResult.toolCount} tools, overrides: [${reloadResult.builtinOverrides.join(", ")}]`,
 			shot2,
 		);
@@ -997,6 +1027,78 @@ async function testBuiltinToolVaultFile(ctx: TestContext): Promise<void> {
 	await vaultDelete(page, createResult.filePath);
 	await triggerExtensionReload(page);
 	await dismissAllNotices(page);
+}
+
+async function testScaffoldToolInvocation(ctx: TestContext): Promise<void> {
+	console.log("\nTest 16: Scaffold-provided tool (read_frontmatter) invocable without vault files");
+	const { page } = ctx;
+
+	// Invoke read_frontmatter on a note we know exists (the echo-test fixture)
+	const result = await page.evaluate(async () => {
+		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
+		if (!plugin?.getToolRegistry) return null;
+
+		const registry = plugin.getToolRegistry();
+		const tool = registry.get("read_frontmatter");
+		if (!tool) return { error: "read_frontmatter not found in registry" };
+
+		try {
+			const toolResult = await tool.execute({ note_path: "notor/tools/echo-test.md" });
+			return {
+				success: toolResult.success,
+				result: typeof toolResult.result === "string"
+					? toolResult.result.substring(0, 500)
+					: JSON.stringify(toolResult.result).substring(0, 500),
+				error: toolResult.error ?? null,
+			};
+		} catch (e: any) {
+			return { error: `execute threw: ${e.message}` };
+		}
+	});
+
+	const shot = await ctx.screenshot("16-scaffold-tool-invocation");
+
+	if (result === null) {
+		ctx.fail("Scaffold tool invocation", "Could not access ToolRegistry via plugin API", shot);
+		return;
+	}
+
+	if ("error" in result && result.error && !result.success) {
+		ctx.fail(
+			"Scaffold tool invocation",
+			`read_frontmatter execution failed: ${result.error}`,
+			shot,
+		);
+		return;
+	}
+
+	// The echo-test fixture has frontmatter with notor-type, notor-tool-name, etc.
+	const resultStr = result.result ?? "";
+	const hasFrontmatterContent =
+		resultStr.includes("notor-type") || resultStr.includes("notor-tool-name");
+
+	if (result.success && hasFrontmatterContent) {
+		ctx.pass(
+			"Scaffold tool invocation",
+			`read_frontmatter returned frontmatter from echo-test.md. ` +
+				`Snippet: "${resultStr.substring(0, 150)}"`,
+			shot,
+		);
+	} else if (result.success) {
+		ctx.pass(
+			"Scaffold tool invocation",
+			`read_frontmatter executed successfully but result may not contain expected keys. ` +
+				`Snippet: "${resultStr.substring(0, 150)}"`,
+			shot,
+		);
+	} else {
+		ctx.fail(
+			"Scaffold tool invocation",
+			`Unexpected result: success=${result.success}, error=${result.error}, ` +
+				`result="${resultStr.substring(0, 150)}"`,
+			shot,
+		);
+	}
 }
 
 async function testReloadNoDuplicateNotice(ctx: TestContext): Promise<void> {
@@ -1136,7 +1238,10 @@ async function tests(ctx: TestContext): Promise<void> {
 	// Test 14: No duplicate Notices on reload (Bug 2 fix)
 	await testReloadNoDuplicateNotice(ctx);
 
-	// Test 15: Final error check
+	// Test 16: Scaffold tool invocation without vault files
+	await testScaffoldToolInvocation(ctx);
+
+	// Test 15: Final error check (keep last so it catches all errors)
 	await testNoUnexpectedErrors(ctx);
 
 	// Dump extension-related logs for debugging

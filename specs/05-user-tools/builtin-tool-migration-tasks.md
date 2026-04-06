@@ -225,26 +225,26 @@ After confirming all scaffolds work correctly, the class files in `src/tools/` c
 
 ### 8.1 Unit tests — `src/extensions/__tests__/manager.test.ts`
 
-- [ ] Add test: `reload()` with empty vault produces 20 scaffold tools with correct names
-- [ ] Add test: scaffold tools have `isScaffold: true`
-- [ ] Add test: vault file overrides scaffold default (vault file wins, `isScaffold: false`)
-- [ ] Update "detects built-in tool overrides" test — built-ins are now scaffolds, not class instances
-- [ ] Add test: scaffold compilation failure shows critical Notice (distinct from user extension error)
-- [ ] Add test: scaffold-compiled tool executes correctly (invoke a simple scaffold like `read_frontmatter`, verify return)
+- [x] Add test: `reload()` with empty vault produces 20 scaffold tools with correct names
+- [x] Add test: scaffold tools have `isScaffold: true`
+- [x] Add test: vault file overrides scaffold default (vault file wins, `isScaffold: false`)
+- [x] Update "detects built-in tool overrides" test — built-ins are now scaffolds, not class instances
+- [x] Add test: scaffold compilation failure shows critical Notice (distinct from user extension error)
+- [x] Add test: scaffold-compiled tool executes correctly (invoke a simple scaffold like `read_frontmatter`, verify return)
 
 ### 8.2 E2E tests — `e2e/scripts/user-extensions-test.ts`
 
-- [ ] Update Scenario 3 ("User tool is registered in ToolRegistry") — verify scaffold-provided tools (e.g., `read_note`, `search_vault`) coexist with user-created test tools. Assert presence of representative scaffolds, not a hard total count.
-- [ ] Add scenario: invoke a scaffold-provided tool (e.g., `read_note`) without any vault files — verify it works end-to-end
-- [ ] Update Scenario 13 ("ensureBuiltinToolVaultFile creates scaffold") — scaffold now contains real implementation code, not placeholder
-- [ ] Verify Scenario 12 ("Built-in tool scaffolds API returns all 20 built-in tools") still passes — no changes expected
+- [x] Update Scenario 3 ("User tool is registered in ToolRegistry") — verify scaffold-provided tools (e.g., `read_note`, `search_vault`) coexist with user-created test tools. Assert presence of representative scaffolds, not a hard total count.
+- [x] Add scenario: invoke a scaffold-provided tool (e.g., `read_note`) without any vault files — verify it works end-to-end
+- [x] Update Scenario 13 ("ensureBuiltinToolVaultFile creates scaffold") — scaffold now contains real implementation code, not placeholder
+- [x] Verify Scenario 12 ("Built-in tool scaffolds API returns all 20 built-in tools") still passes — no changes expected
 
 ### 8.3 Settings migration tests
 
-- [ ] Add unit test: migration copies old `NotorSettings` fields into `user_extension_settings` and `user_shared_settings`
-- [ ] Add unit test: migration deletes old fields after successful copy
-- [ ] Add unit test: migration skips groups where `user_extension_settings[toolName]` already exists
-- [ ] Add unit test: crash between phase 1 and phase 2 does not cause re-migration on next boot
+- [x] Add unit test: migration copies old `NotorSettings` fields into `user_extension_settings` and `user_shared_settings`
+- [x] Add unit test: migration deletes old fields after successful copy
+- [x] Add unit test: migration skips groups where `user_extension_settings[toolName]` already exists
+- [x] Add unit test: crash between phase 1 and phase 2 does not cause re-migration on next boot
 
 ### 8.4 Manual verification checklist
 
