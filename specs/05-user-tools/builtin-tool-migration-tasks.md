@@ -108,24 +108,24 @@ Write actual tool implementations in the scaffold code blocks. Grouped by comple
 
 These tools have no per-extension settings, no external library deps, and are pure Obsidian API usage. ~20-65 lines each. See [feasibility/trivial-tools.md](feasibility/trivial-tools.md) for detailed dependency tables, gotchas, and scaffold outlines.
 
-- [ ] `read_frontmatter` — cache read via `app.metadataCache.getFileCache()`, strip `position` key. ~20 lines. ([feasibility](feasibility/trivial-tools.md#read_frontmatter--feasibility-trivial-))
-- [ ] `get_backlinks` — reverse-lookup of `app.metadataCache.resolvedLinks`. ~20 lines. ([feasibility](feasibility/trivial-tools.md#get_backlinks--feasibility-trivial-))
-- [ ] `get_outlinks` — read `resolvedLinks[path]` + `unresolvedLinks[path]`. ~35 lines. ([feasibility](feasibility/trivial-tools.md#get_outlinks--feasibility-trivial-))
-- [ ] `update_frontmatter` — `app.fileManager.processFrontMatter()`, checkpoint creation. ~60 lines. Note: correct YAML schema `set` param from `type: string` to `type: object`. ([feasibility](feasibility/trivial-tools.md#update_frontmatter--feasibility-trivial-))
-- [ ] `read_note` — `utils.resolveNote()`, `obsidian.getFrontMatterInfo()`, stale tracker read, note opener. ~60 lines. ([feasibility](feasibility/trivial-tools.md#read_note--feasibility-trivial-))
-- [ ] `manage_tags` — `app.fileManager.processFrontMatter()`, tag normalization helpers. ~65 lines. Handle diverse input shapes (string vs array), delete empty tags key. ([feasibility](feasibility/trivial-tools.md#manage_tags--feasibility-trivial-))
+- [x] `read_frontmatter` — cache read via `app.metadataCache.getFileCache()`, strip `position` key. ~20 lines. ([feasibility](feasibility/trivial-tools.md#read_frontmatter--feasibility-trivial-))
+- [x] `get_backlinks` — reverse-lookup of `app.metadataCache.resolvedLinks`. ~20 lines. ([feasibility](feasibility/trivial-tools.md#get_backlinks--feasibility-trivial-))
+- [x] `get_outlinks` — read `resolvedLinks[path]` + `unresolvedLinks[path]`. ~35 lines. ([feasibility](feasibility/trivial-tools.md#get_outlinks--feasibility-trivial-))
+- [x] `update_frontmatter` — `app.fileManager.processFrontMatter()`, checkpoint creation. ~60 lines. Note: correct YAML schema `set` param from `type: string` to `type: object`. ([feasibility](feasibility/trivial-tools.md#update_frontmatter--feasibility-trivial-))
+- [x] `read_note` — `utils.resolveNote()`, `obsidian.getFrontMatterInfo()`, stale tracker read, note opener. ~60 lines. ([feasibility](feasibility/trivial-tools.md#read_note--feasibility-trivial-))
+- [x] `manage_tags` — `app.fileManager.processFrontMatter()`, tag normalization helpers. ~65 lines. Handle diverse input shapes (string vs array), delete empty tags key. ([feasibility](feasibility/trivial-tools.md#manage_tags--feasibility-trivial-))
 
 ### 3.2 Straightforward tools — small inlined helpers, standard deps
 
 ~75-120 lines each. Require `libs.fs`/`libs.path`/`obsidian.Platform` (from Phase 1.2-1.3) and `utils.ensureDirectoryExists` (from Phase 1.4). See [feasibility/straightforward-tools.md](feasibility/straightforward-tools.md) for detailed dependency tables, gotchas, and scaffold outlines. `write_file` is assessed in [feasibility/trivial-tools.md](feasibility/trivial-tools.md#write_file--feasibility-trivial-).
 
-- [ ] `write_file` — `libs.fs.promises.writeFile()`, path validation via `utils.resolveAndValidatePath()`, `Platform.isDesktopApp` guard. ~50 lines. ([feasibility](feasibility/trivial-tools.md#write_file--feasibility-trivial-))
-- [ ] `replace_in_file` — `libs.fs` read/write, binary detection (null-byte scan on first 8KB), atomic in-memory search/replace. ~120 lines. ([feasibility](feasibility/straightforward-tools.md#replace_in_file--feasibility-straightforward-))
-- [ ] `execute_command` — `utils.executeShellCommand()`, path validation for working dir, `Platform.isDesktopApp` guard, partial output on timeout/non-zero exit. ~80 lines. ([feasibility](feasibility/straightforward-tools.md#execute_command--feasibility-straightforward-))
-- [ ] `write_note` — stale check, checkpoint, `app.vault.process()`, frontmatter preservation (prepend old frontmatter when new content lacks it), `utils.ensureDirectoryExists()`. ~120 lines. ([feasibility](feasibility/straightforward-tools.md#write_note--feasibility-straightforward-))
-- [ ] `replace_in_note` — JSON-parsed change blocks, atomic `vault.process()`, stale check + checkpoint, regex `lastIndex` reset. ~130 lines. ([feasibility](feasibility/straightforward-tools.md#replace_in_note--feasibility-straightforward-))
-- [ ] `move_note` — `app.fileManager.renameFile()`, optional alias insertion, `utils.ensureDirectoryExists()`. ~120 lines. ([feasibility](feasibility/straightforward-tools.md#move_note--feasibility-straightforward-))
-- [ ] `list_vault` — `app.vault.getFiles()` / `getAbstractFileByPath()`, helpers (`collectItems`, `classifyFile`, `sortItems`), pagination. ~160 lines. ([feasibility](feasibility/straightforward-tools.md#list_vault--feasibility-straightforward-))
+- [x] `write_file` — `libs.fs.promises.writeFile()`, path validation via `utils.resolveAndValidatePath()`, `Platform.isDesktopApp` guard. ~50 lines. ([feasibility](feasibility/trivial-tools.md#write_file--feasibility-trivial-))
+- [x] `replace_in_file` — `libs.fs` read/write, binary detection (null-byte scan on first 8KB), atomic in-memory search/replace. ~120 lines. ([feasibility](feasibility/straightforward-tools.md#replace_in_file--feasibility-straightforward-))
+- [x] `execute_command` — `utils.executeShellCommand()`, path validation for working dir, `Platform.isDesktopApp` guard, partial output on timeout/non-zero exit. ~80 lines. ([feasibility](feasibility/straightforward-tools.md#execute_command--feasibility-straightforward-))
+- [x] `write_note` — stale check, checkpoint, `app.vault.process()`, frontmatter preservation (prepend old frontmatter when new content lacks it), `utils.ensureDirectoryExists()`. ~120 lines. ([feasibility](feasibility/straightforward-tools.md#write_note--feasibility-straightforward-))
+- [x] `replace_in_note` — JSON-parsed change blocks, atomic `vault.process()`, stale check + checkpoint, regex `lastIndex` reset. ~130 lines. ([feasibility](feasibility/straightforward-tools.md#replace_in_note--feasibility-straightforward-))
+- [x] `move_note` — `app.fileManager.renameFile()`, optional alias insertion, `utils.ensureDirectoryExists()`. ~120 lines. ([feasibility](feasibility/straightforward-tools.md#move_note--feasibility-straightforward-))
+- [x] `list_vault` — `app.vault.getFiles()` / `getAbstractFileByPath()`, helpers (`collectItems`, `classifyFile`, `sortItems`), pagination. ~160 lines. ([feasibility](feasibility/straightforward-tools.md#list_vault--feasibility-straightforward-))
 
 ---
 
