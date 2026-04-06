@@ -222,9 +222,9 @@ Note: `resolveAtMentions` and `computeUniqueId` are called internally by `buildC
 
 **Implementation cost:** ~10 lines to wire in `runtime-context.ts`. Module already exports everything needed. Existing unit tests continue to cover parser logic independently.
 
-**Helper functions (1 to inline):**
+**Helper functions (1 shared):**
 
-1. **`ensureDirectoryExists()`** (~15 lines) — Same pattern as `write_note` and `move_note`. Inlined.
+1. **`ensureDirectoryExists()`** (~15 lines) — Same pattern as `write_note` and `move_note`. Uses `utils.ensureDirectoryExists()` (extracted to shared utility — see `write_note` notes in straightforward-tools.md).
 
 **Scaffold code (estimated ~200 lines with `utils.docxComments`):**
 The full scaffold handles I/O orchestration (ZIP extraction, vault reads/writes, directory creation) and delegates all XML parsing, threading, formatting, and dedup to `utils.docxComments.*`.

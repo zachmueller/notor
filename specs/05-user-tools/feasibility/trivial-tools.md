@@ -2,7 +2,7 @@
 
 Tools with minimal dependencies, no settings, and direct 1:1 ports from built-in classes. Good candidates for early implementation to validate the pipeline end-to-end.
 
-**Tools covered:** `read_frontmatter`, `get_outlinks`, `write_file`, `update_frontmatter`, `read_note`, `manage_tags`
+**Tools covered:** `read_frontmatter`, `get_backlinks`, `get_outlinks`, `write_file`, `update_frontmatter`, `read_note`, `manage_tags`
 
 ---
 
@@ -72,6 +72,81 @@ params:
 ```
 
 **Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
+
+---
+
+## `get_backlinks` — Feasibility: Trivial ✅
+
+**Source:** `src/tools/get-backlinks.ts` (82 lines total, ~40 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param exists and is a string
+2. Resolves note via `resolveNote(path, this.app.vault, this.app.metadataCache)`
+3. Iterates `this.app.metadataCache.resolvedLinks` (reverse-lookup) to find all source files whose resolved links include the target path
+4. Filters out self-links (source === target)
+5. Returns a newline-separated list of backlink paths, or `"(none)"` if empty
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.metadataCache.resolvedLinks` | `app.metadataCache.resolvedLinks` | ✅ |
+| `resolveNote(path, vault, metadataCache)` | `utils.resolveNote(path)` | ✅ |
+| `logger("GetBacklinksTool")` | `utils.logger("get_backlinks")` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed.
+
+**Return value mapping:**
+- The built-in returns a plain-text string as `result`. In the scaffold, returning a string directly is handled by `UserToolAdapter.execute()` — `typeof returnValue === "string"` passes through as-is into `{ success: true, result: string }`.
+- For errors, the scaffold throws (adapter catches and wraps in `{ success: false, error }`).
+
+**Scaffold code (estimated ~20 lines):**
+```ts
+const log = utils.logger("get_backlinks");
+
+if (!params.path || typeof params.path !== "string") {
+  throw new Error("Missing required parameter: path");
+}
+
+log.debug("Getting backlinks", { path: params.path });
+
+const file = utils.resolveNote(params.path);
+if (!file) throw new Error(`Note not found: ${params.path}`);
+
+// Reverse-lookup: find all source files whose resolvedLinks include the target.
+// Self-links are filtered out.
+const targetPath = file.path;
+const backlinks: string[] = [];
+for (const [sourcePath, links] of Object.entries(app.metadataCache.resolvedLinks)) {
+  if (sourcePath !== targetPath && targetPath in links) {
+    backlinks.push(sourcePath);
+  }
+}
+
+log.debug("Got backlinks", { path: file.path, count: backlinks.length });
+
+return backlinks.length > 0 ? backlinks.join("\n") : "(none)";
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed.
+
+**No `libs` or `obsidian` imports needed.** Pure `app` + `utils` usage.
+
+**Risk:** Effectively zero. Nearly identical structure to `get_outlinks` — synchronous in-memory cache iteration, no settings, no file I/O, no external libraries. The only difference is that `get_backlinks` does a reverse-lookup (iterates all entries in `resolvedLinks` looking for targets) while `get_outlinks` does a forward-lookup (reads `resolvedLinks[path]` directly). Both are O(n) over vault files but purely in-memory.
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the note relative to vault root."
+    path_namespace: vault
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
+
+**Comparison with spec's complexity estimate:** The spec classifies `get_backlinks` as "Simple" at 40-100 lines and estimates ~35 lines. The scaffold is ~20 lines — below estimate. The simplest of the trivial tools alongside `read_frontmatter`.
 
 ---
 
