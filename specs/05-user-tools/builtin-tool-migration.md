@@ -1890,3 +1890,192 @@ settings:
 **Risk: Partial output in error messages (low).** The behavioral change from separate `result`+`error` fields to combined error message string is acceptable. The LLM reads both fields as text. The format `"Command exited with code 1\n<output>"` is clear and preserves the diagnostic value. This matches the error handling pattern specified in D-4.
 
 **Comparison with spec's complexity estimate:** The spec classifies `execute_command` as "Medium" at 80-280 lines and estimates ~80 lines. The scaffold is ~75 lines — at the low end. This tool is one of the cleanest migrations because `utils.executeShellCommand()` already encapsulates the complex shell infrastructure (process spawning, shell resolution, timeout enforcement, output buffering). The scaffold is essentially param validation + a single `utils.executeShellCommand()` call + result formatting.
+
+### `replace_in_note` — Feasibility: Straightforward ✅
+
+**Source:** `src/tools/replace-in-note.ts` (261 lines total, ~170 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param (exists, is string)
+2. Validates `changes` param (array, non-empty, each block has non-empty `search` string and a `replace` string)
+3. Resolves note via `resolveNote(path, this.app.vault, this.app.metadataCache)`
+4. Reads current content via `app.vault.read(file)` for stale check
+5. Checks stale content via `this.staleTracker.check(file.path, currentContent)` — uses canonical `file.path` for consistency with `recordRead()`
+6. Creates checkpoint via `this.checkpointManager?.createCheckpoint(file.path, this.name, "")`
+7. Applies all SEARCH/REPLACE blocks atomically via `app.vault.process(file, callback)`:
+   - Iterates blocks sequentially; each replaces only the first occurrence via `indexOf()` + slice-concat
+   - If any block's search text is not found, throws inside the callback — `vault.process` guarantees no changes are written
+   - Records which block failed (1-indexed) and a preview of the search text (truncated at 80 chars) for the error message
+8. Updates stale tracker with new content via `this.staleTracker.updateAfterWrite(file.path, newContent)` — re-reads file after `vault.process` to get the written content. Falls back to `invalidate()` on read failure.
+9. Opens note in editor via `this.noteOpener?.openNote(file.path)`
+10. Returns success message with replacement count
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.vault` | `app.vault` | ✅ |
+| `this.app.metadataCache` | `app.metadataCache` | ✅ |
+| `resolveNote(path, vault, metadataCache)` | `utils.resolveNote(path)` | ✅ |
+| `this.staleTracker` | `utils.staleTracker` | ✅ |
+| `this.checkpointManager` | `utils.checkpointManager` | ✅ |
+| `this.noteOpener` | `utils.noteOpener` | ✅ |
+| `logger("ReplaceInNoteTool")` | `utils.logger("replace_in_note")` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed. Listed in the spec's "settings-free tools" group (D-2).
+
+**Helper functions:** None. The class has no private helpers — all logic is inline in `execute()`. The `ChangeBlock` interface (`{ search: string; replace: string }`) is a TypeScript-only type that disappears after Sucrase stripping; the scaffold works with the object shape directly via `params.changes[i].search` / `.replace`.
+
+**Return value mapping:**
+- Success → return string like `"Applied 3 replacements to path/to/note.md"` (adapter wraps in `{ success: true, result: string }`)
+- Validation failures → throw (adapter wraps in `{ success: false, error }`)
+- Stale content → throw (adapter wraps in `{ success: false, error }`)
+- Search block mismatch → throw with descriptive message including block number and search text preview
+
+**Key patterns and their scaffold translations:**
+
+1. **Atomic `vault.process()` with throw-on-mismatch** — The class applies all search/replace blocks inside a single `vault.process()` callback. If any block's search text isn't found, the callback throws, and `vault.process` guarantees no changes are written. This is the tool's defining behavior. In the scaffold, the same pattern works identically — `app.vault.process(file, (data) => { ... throw ... })` behaves the same regardless of calling context. The only difference is that the class catches the thrown error and returns a structured `ToolResult` with the failed block number, while the scaffold re-throws a new `Error` with the same message (adapter catches and wraps).
+
+2. **Stale tracker canonical path** — The class uses `file.path` (Obsidian's canonical resolved path) rather than the user-supplied `path` param for all stale tracker calls. This ensures that `"My Note"`, `"My Note.md"`, and `"folder/My Note.md"` all resolve to the same tracker entry. The scaffold does the same: `utils.resolveNote()` returns a `TFile` whose `.path` is canonical.
+
+3. **Two-phase stale tracker update** — After `vault.process()`, the class re-reads the file (`app.vault.read(file)`) and calls `staleTracker.updateAfterWrite(file.path, newContent)`. If the re-read fails, it falls back to `staleTracker.invalidate(file.path)` (non-fatal). This try/catch pattern translates directly.
+
+4. **Checkpoint before write** — `this.checkpointManager?.createCheckpoint(file.path, this.name, "")` uses optional chaining (checkpoint manager may be null in tests). In the scaffold, `utils.checkpointManager` is always defined (runtime-context.ts guarantees it), but `createCheckpoint()` is already non-fatal (logs warnings on failure, never throws). The scaffold calls `await utils.checkpointManager.createCheckpoint(file.path, "replace_in_note", "")` without optional chaining.
+
+5. **Error message with search text preview** — On mismatch, the class truncates the failed search text at 80 chars with `"..."` suffix. This is a 3-line pattern that translates directly.
+
+**Scaffold code (estimated ~90 lines):**
+```ts
+const log = utils.logger("replace_in_note");
+
+if (!params.path || typeof params.path !== "string") {
+  throw new Error("Missing required parameter: path");
+}
+if (!Array.isArray(params.changes) || params.changes.length === 0) {
+  throw new Error("Missing or empty required parameter: changes");
+}
+
+// Validate change blocks
+for (let i = 0; i < params.changes.length; i++) {
+  const block = params.changes[i];
+  if (typeof block?.search !== "string" || typeof block?.replace !== "string") {
+    throw new Error(`Change block ${i + 1} is missing required 'search' or 'replace' property`);
+  }
+  if (block.search === "") {
+    throw new Error(`Change block ${i + 1} has an empty search string. Search text must be non-empty.`);
+  }
+}
+
+log.debug("Replacing in note", { path: params.path, changeCount: params.changes.length });
+
+const file = utils.resolveNote(params.path);
+if (!file) throw new Error(`Note not found: ${params.path}`);
+
+// Stale content check
+let currentContent;
+try {
+  currentContent = await app.vault.read(file);
+} catch (e) {
+  const message = e instanceof Error ? e.message : String(e);
+  throw new Error(`Failed to read note for stale check: ${message}`);
+}
+
+const staleResult = utils.staleTracker.check(file.path, currentContent);
+if (staleResult.isStale) {
+  throw new Error(
+    "Note content has changed since last read. " +
+    "Re-read the note with read_note before retrying."
+  );
+}
+
+// Checkpoint before write
+await utils.checkpointManager.createCheckpoint(file.path, "replace_in_note", "");
+
+// Apply changes atomically via vault.process
+let failedBlockIndex = -1;
+let failedSearchText = "";
+
+try {
+  await app.vault.process(file, (data) => {
+    let modified = data;
+    for (let i = 0; i < params.changes.length; i++) {
+      const block = params.changes[i];
+      if (!block) continue;
+      const idx = modified.indexOf(block.search);
+      if (idx === -1) {
+        failedBlockIndex = i + 1;
+        failedSearchText = block.search;
+        throw new Error(`Search block ${i + 1} did not match`);
+      }
+      modified =
+        modified.slice(0, idx) +
+        block.replace +
+        modified.slice(idx + block.search.length);
+    }
+    return modified;
+  });
+} catch (e) {
+  if (failedBlockIndex !== -1) {
+    const preview = failedSearchText.length > 80
+      ? failedSearchText.slice(0, 80) + "..."
+      : failedSearchText;
+    throw new Error(
+      `Search block ${failedBlockIndex} did not match any text in ${params.path}. ` +
+      `No changes were applied. The search text was: "${preview}"`
+    );
+  }
+  throw e;
+}
+
+// Update stale tracker with new content
+try {
+  const newContent = await app.vault.read(file);
+  utils.staleTracker.updateAfterWrite(file.path, newContent);
+} catch {
+  utils.staleTracker.invalidate(file.path);
+}
+
+log.info("Applied replacements", { path: params.path, count: params.changes.length });
+
+// Open in editor
+await utils.noteOpener.openNote(file.path);
+
+return `Applied ${params.changes.length} replacement${params.changes.length > 1 ? "s" : ""} to ${params.path}`;
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed in the extension runtime: `resolveNote`, `staleTracker`, `checkpointManager`, `noteOpener`, `logger`.
+
+**No `libs` or `obsidian` imports needed.** Pure `app` + `utils` usage. No external libraries, no Node.js modules, no Obsidian API exports beyond the base `app` object.
+
+**No settings migration needed.** This tool references zero `NotorSettings` fields. No per-extension `settings:` section in the YAML fence, no shared settings.
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the note relative to vault root."
+    path_namespace: vault
+  changes:
+    type: "object[]"
+    description: "Array of search/replace blocks to apply in sequence. Each block replaces only the first occurrence of the search text."
+    properties:
+      search:
+        type: string
+        description: "Exact text to find in the note (character-for-character match including whitespace)."
+      replace:
+        type: string
+        description: "Text to replace the matched search text with. Use empty string to delete the matched text."
+    required_items:
+      - search
+      - replace
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence. The existing YAML fence content is already correct (uses `object[]` type for the `changes` param — this was added in commit `ccc9809`).
+
+**Risk: `vault.process()` throw-and-catch pattern (low).** The scaffold re-throws a new `Error` from the outer catch block rather than returning a structured `ToolResult`. The `UserToolAdapter` catch handler wraps this identically to a direct return of `{ success: false, error }`. The only behavioral difference: the class's error response includes `tool_name` explicitly, while the adapter sets `tool_name` from `this.name` — same value. No observable change.
+
+**Risk: `noteOpener` optional chaining removal (none).** The class uses `this.noteOpener?.openNote()` because `noteOpener` is an optional constructor param (undefined in unit tests). In the scaffold, `utils.noteOpener` is always defined — `runtime-context.ts:81` creates it unconditionally. The `openNote()` method itself is a no-op when `open_notes_on_access` is disabled. Removing the `?.` is safe.
+
+**Comparison with spec's complexity estimate:** The spec classifies `replace_in_note` as "Medium" at 80-280 lines and estimates ~130 lines. The scaffold is ~90 lines — below the estimate. This is because the tool has no helpers, no settings, and no external library dependencies. The logic is entirely self-contained: param validation → resolve → stale check → checkpoint → atomic vault.process → stale update → open → return. It's one of the cleanest medium-tier migrations — similar in structure to `write_note` but simpler (no frontmatter preservation, no directory creation, no create-vs-update branching).
