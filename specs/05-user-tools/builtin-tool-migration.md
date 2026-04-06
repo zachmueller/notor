@@ -581,3 +581,74 @@ This avoids duplicating ~200 lines of media processing code in the scaffold and 
 3. Edit the customized note (e.g., add logging) → reload → verify modified behavior
 4. Click "Reset to default" → reload → back to scaffold behavior
 5. Complex tool test: `write_docx` scaffold generates a valid `.docx` file
+
+---
+
+## Pre-Plan Research: Per-Tool Feasibility Assessment
+
+### `read_frontmatter` — Feasibility: Trivial ✅
+
+**Source:** `src/tools/read-frontmatter.ts` (95 lines total, ~50 lines of logic)
+
+**What the built-in class does:**
+1. Validates `path` param exists and is a string
+2. Resolves note via `resolveNote(path, this.app.vault, this.app.metadataCache)`
+3. Reads frontmatter from `this.app.metadataCache.getFileCache(file)`
+4. If no frontmatter, returns `{ success: true, result: {} }` (empty object, not an error)
+5. Clones frontmatter via destructuring, strips the internal `position` key
+6. Returns the cleaned frontmatter object
+
+**Dependencies:**
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.metadataCache` | `app.metadataCache` | ✅ |
+| `resolveNote(path, vault, metadataCache)` | `utils.resolveNote(path)` | ✅ |
+| `logger("ReadFrontmatterTool")` | `utils.logger("read_frontmatter")` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed.
+
+**Return value mapping:**
+- The built-in returns `result: {}` (empty object) when no frontmatter exists, and `result: frontmatter` (object) on success. The `UserToolAdapter.execute()` return-value mapper (manager.ts:106-113) handles objects correctly — `typeof returnValue === "object"` passes through as-is. Returning a plain object from the scaffold will produce `{ success: true, result: { ...frontmatter } }`.
+- For errors, the scaffold throws (adapter catches and wraps in `{ success: false, error }`).
+
+**Scaffold code (estimated ~20 lines):**
+```ts
+const log = utils.logger("read_frontmatter");
+
+if (!params.path || typeof params.path !== "string") {
+  throw new Error("Missing required parameter: path");
+}
+
+log.debug("Reading frontmatter", { path: params.path });
+
+const file = utils.resolveNote(params.path);
+if (!file) throw new Error(`Note not found: ${params.path}`);
+
+const cache = app.metadataCache.getFileCache(file);
+if (!cache?.frontmatter) {
+  log.debug("No frontmatter found", { path: params.path });
+  return {};
+}
+
+const { position: _, ...frontmatter } = cache.frontmatter;
+log.info("Read frontmatter", { path: params.path, keyCount: Object.keys(frontmatter).length });
+return frontmatter;
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed.
+
+**No `libs` or `obsidian` imports needed.** Pure `app` + `utils` usage.
+
+**Risk:** Effectively zero. This is the simplest possible migration — synchronous cache read, no settings, no file I/O, no external libraries. Good candidate for the first scaffold implementation to validate the pipeline end-to-end.
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  path:
+    type: string
+    description: "Path to the note relative to vault root."
+    path_namespace: vault
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
