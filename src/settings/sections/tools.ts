@@ -16,6 +16,7 @@ import type { SettingsContext } from "./context";
 import type { McpServerConfig } from "../../mcp/mcp-types";
 import type { McpHub } from "../../mcp/mcp-hub";
 import type { McpConnectionStatus } from "../../mcp/mcp-types";
+import type { UserToolDefinition } from "../../extensions/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -35,6 +36,7 @@ export function generateToolConfigSnippet(
 	toolEnabled: Record<string, boolean>,
 	mcpServers: Record<string, McpServerConfig>,
 	mcpHub: McpHub | undefined,
+	userTools?: Array<{ name: string; mode: "read" | "write" }>,
 ): string {
 	const lines: string[] = [];
 
@@ -46,6 +48,18 @@ export function generateToolConfigSnippet(
 		lines.push(`${toolId}:`);
 		lines.push(`  enabled: ${currentEnabled}`);
 		lines.push(`  auto_approve: ${currentAutoApprove}`);
+	}
+
+	// User tools
+	if (userTools) {
+		for (const tool of userTools) {
+			const defaultAutoApprove = tool.mode === "read";
+			const currentAutoApprove = autoApprove[tool.name] ?? defaultAutoApprove;
+			const currentEnabled = toolEnabled[tool.name] ?? true;
+			lines.push(`${tool.name}:`);
+			lines.push(`  enabled: ${currentEnabled}`);
+			lines.push(`  auto_approve: ${currentAutoApprove}`);
+		}
 	}
 
 	// MCP tools (namespaced as server__tool in the YAML)
@@ -64,6 +78,13 @@ export function generateToolConfigSnippet(
 	}
 
 	return `<notor_tool_config version="1.0">\n${lines.join("\n")}\n</notor_tool_config>`;
+}
+
+/** Get user-defined tools (excluding built-in scaffolds/overrides). */
+function getUserTools(ctx: SettingsContext): UserToolDefinition[] {
+	const manager = ctx.plugin.getExtensionManager();
+	const builtinNames = new Set(manager.getBuiltinToolNames());
+	return manager.getTools().filter((t) => !builtinNames.has(t.name));
 }
 
 /** Set a Lucide status icon on an element based on connection status. */
@@ -100,6 +121,9 @@ export function renderToolsSection(
 	// --- Built-in tools ---
 	renderBuiltinTools(containerEl, ctx);
 
+	// --- User tools ---
+	renderUserTools(containerEl, ctx);
+
 	// --- MCP tools ---
 	renderMcpTools(containerEl, ctx);
 
@@ -115,11 +139,15 @@ export function renderToolsSection(
 			btn
 				.setButtonText("Copy to clipboard")
 				.onClick(async () => {
+					const userToolsList = getUserTools(ctx).map(
+						(t) => ({ name: t.name, mode: t.mode }),
+					);
 					const snippet = generateToolConfigSnippet(
 						ctx.settings.auto_approve,
 						ctx.settings.tool_enabled,
 						ctx.settings.mcp_servers ?? {},
 						getMcpHub(ctx),
+						userToolsList,
 					);
 					await navigator.clipboard.writeText(snippet);
 					new Notice("Tool config YAML copied to clipboard.");
@@ -195,6 +223,85 @@ function renderBuiltinToolRow(
 			.setTooltip("Auto-approve")
 			.onChange(async (value) => {
 				ctx.settings.auto_approve[toolId] = value;
+				await ctx.saveSettings();
+			});
+		if (!isEnabled) {
+			toggle.setDisabled(true);
+		}
+	});
+
+	if (!isEnabled) {
+		setting.settingEl.addClass("notor-tool-row-disabled");
+	}
+}
+
+// ---------------------------------------------------------------------------
+// User tools
+// ---------------------------------------------------------------------------
+
+function renderUserTools(containerEl: HTMLElement, ctx: SettingsContext): void {
+	const userTools = getUserTools(ctx);
+	if (userTools.length === 0) return;
+
+	containerEl.createEl("hr", { cls: "notor-tool-divider" });
+	new Setting(containerEl).setHeading().setName("User tools");
+	containerEl.createEl("p", {
+		text: "Tools defined in your vault's notor/tools/ directory.",
+		cls: "setting-item-description",
+	});
+
+	const readTools = userTools.filter((t) => t.mode === "read");
+	const writeTools = userTools.filter((t) => t.mode === "write");
+
+	if (readTools.length > 0) {
+		new Setting(containerEl).setHeading().setName("Read-only");
+		renderColumnHeaders(containerEl);
+		for (const tool of readTools) {
+			renderUserToolRow(containerEl, tool, ctx, true);
+		}
+	}
+
+	if (writeTools.length > 0) {
+		new Setting(containerEl).setHeading().setName("Write");
+		renderColumnHeaders(containerEl);
+		for (const tool of writeTools) {
+			renderUserToolRow(containerEl, tool, ctx, false);
+		}
+	}
+}
+
+function renderUserToolRow(
+	containerEl: HTMLElement,
+	tool: UserToolDefinition,
+	ctx: SettingsContext,
+	defaultAutoApprove: boolean,
+): void {
+	const isEnabled = ctx.settings.tool_enabled[tool.name] ?? true;
+	const isAutoApproved = ctx.settings.auto_approve[tool.name] ?? defaultAutoApprove;
+
+	const setting = new Setting(containerEl)
+		.setName(tool.name)
+		.setDesc(tool.description);
+
+	// Enabled toggle
+	setting.addToggle((toggle) =>
+		toggle
+			.setValue(isEnabled)
+			.setTooltip("Enabled")
+			.onChange(async (value) => {
+				ctx.settings.tool_enabled[tool.name] = value;
+				await ctx.saveSettings();
+				ctx.redisplay();
+			})
+	);
+
+	// Auto-approve toggle
+	setting.addToggle((toggle) => {
+		toggle
+			.setValue(isAutoApproved)
+			.setTooltip("Auto-approve")
+			.onChange(async (value) => {
+				ctx.settings.auto_approve[tool.name] = value;
 				await ctx.saveSettings();
 			});
 		if (!isEnabled) {
