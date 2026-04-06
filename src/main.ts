@@ -569,6 +569,155 @@ export default class NotorPlugin extends Plugin {
 		} else {
 			this.settings = loaded;
 		}
+
+		// One-time migration of old tool settings into the extension settings system.
+		await this.migrateToolSettingsToExtensions();
+	}
+
+	/**
+	 * One-time migration of old NotorSettings tool fields into the extension
+	 * settings system (per-extension + shared). See spec D-2.
+	 *
+	 * Detection: per-tool-group check — migrate only if the extension settings
+	 * key is absent (undefined) AND the old field exists in loaded data.
+	 *
+	 * Atomicity: two-phase write.
+	 *   Phase 1: copy values into extension settings + saveSettings()
+	 *   Phase 2: delete old fields from settings object + saveSettings()
+	 * If the plugin crashes between phases, next boot sees old fields still
+	 * present but extension settings already populated — detection skips
+	 * already-migrated groups.
+	 */
+	private async migrateToolSettingsToExtensions(): Promise<void> {
+		let migrated = false;
+
+		// --- Per-extension settings groups ---
+
+		// fetch_webpage
+		if (
+			this.settings.user_extension_settings["fetch_webpage"] === undefined &&
+			this.settings.fetch_webpage_timeout !== undefined
+		) {
+			this.settings.user_extension_settings["fetch_webpage"] = {
+				fetch_webpage_timeout: this.settings.fetch_webpage_timeout,
+				fetch_webpage_max_download_mb: this.settings.fetch_webpage_max_download_mb,
+				fetch_webpage_max_output_chars: this.settings.fetch_webpage_max_output_chars,
+			};
+			migrated = true;
+		}
+
+		// web_search
+		if (
+			this.settings.user_extension_settings["web_search"] === undefined &&
+			this.settings.web_search_timeout !== undefined
+		) {
+			this.settings.user_extension_settings["web_search"] = {
+				web_search_timeout: this.settings.web_search_timeout,
+				web_search_default_num_results: this.settings.web_search_default_num_results,
+			};
+			migrated = true;
+		}
+
+		// execute_command
+		if (
+			this.settings.user_extension_settings["execute_command"] === undefined &&
+			this.settings.execute_command_timeout !== undefined
+		) {
+			this.settings.user_extension_settings["execute_command"] = {
+				execute_command_allowed_paths: this.settings.execute_command_allowed_paths,
+				execute_command_timeout: this.settings.execute_command_timeout,
+				execute_command_max_output_chars: this.settings.execute_command_max_output_chars,
+			};
+			migrated = true;
+		}
+
+		// read_file
+		if (
+			this.settings.user_extension_settings["read_file"] === undefined &&
+			this.settings.image_max_dimension !== undefined
+		) {
+			this.settings.user_extension_settings["read_file"] = {
+				image_max_dimension: this.settings.image_max_dimension,
+				image_compression_quality: this.settings.image_compression_quality,
+				pdf_prefer_native: this.settings.pdf_prefer_native,
+				pdf_text_max_chars: this.settings.pdf_text_max_chars,
+				pdf_native_max_size_mb: this.settings.pdf_native_max_size_mb,
+			};
+			migrated = true;
+		}
+
+		// write_docx
+		if (
+			this.settings.user_extension_settings["write_docx"] === undefined &&
+			this.settings.write_docx_default_output_dir !== undefined
+		) {
+			this.settings.user_extension_settings["write_docx"] = {
+				write_docx_default_output_dir: this.settings.write_docx_default_output_dir,
+				write_docx_default_template_path: this.settings.write_docx_default_template_path,
+			};
+			migrated = true;
+		}
+
+		// --- Shared settings ---
+
+		// domain_denylist
+		if (
+			this.settings.user_shared_settings["domain_denylist"] === undefined &&
+			this.settings.domain_denylist !== undefined
+		) {
+			this.settings.user_shared_settings["domain_denylist"] = this.settings.domain_denylist;
+			migrated = true;
+		}
+
+		// read_file_allowed_paths
+		if (
+			this.settings.user_shared_settings["read_file_allowed_paths"] === undefined &&
+			this.settings.read_file_allowed_paths !== undefined
+		) {
+			this.settings.user_shared_settings["read_file_allowed_paths"] = this.settings.read_file_allowed_paths;
+			migrated = true;
+		}
+
+		if (!migrated) return;
+
+		// Phase 1: persist the copied extension settings
+		await this.saveSettings();
+
+		// Phase 2: strip old fields from persisted data only.
+		// The in-memory settings object retains the old fields so that non-tool
+		// code (shell-executor, hooks, orchestrator, attachment-picker) which
+		// still references them continues working during this session. On next
+		// boot, loadSettings() merges defaults (which still provide these fields)
+		// with the cleaned data.json. Phase 7 will remove these legacy references.
+		const oldFields = [
+			"fetch_webpage_timeout",
+			"fetch_webpage_max_download_mb",
+			"fetch_webpage_max_output_chars",
+			"domain_denylist",
+			"web_search_timeout",
+			"web_search_default_num_results",
+			"execute_command_timeout",
+			"execute_command_max_output_chars",
+			"execute_command_allowed_paths",
+			"image_max_dimension",
+			"image_compression_quality",
+			"pdf_native_max_size_mb",
+			"pdf_text_max_chars",
+			"pdf_prefer_native",
+			"read_file_allowed_paths",
+			"write_docx_default_output_dir",
+			"write_docx_default_template_path",
+		];
+
+		const rawData = (await this.loadData()) as Record<string, unknown> | null;
+		if (rawData) {
+			for (const field of oldFields) {
+				delete rawData[field];
+			}
+			await this.saveData(rawData);
+		}
+
+		new Notice("Tool settings have been migrated to Extensions in Settings.");
 	}
 
 	// -----------------------------------------------------------------------

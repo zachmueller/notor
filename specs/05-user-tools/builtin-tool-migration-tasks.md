@@ -169,24 +169,24 @@ One-time migration of old `NotorSettings` tool fields into the extension setting
 
 Private method on the plugin class, called inside `loadSettings()` after `Object.assign()` merge.
 
-- [ ] Implement per-tool-group detection: check `user_extension_settings[toolName]` is `undefined` AND old field exists in settings
-- [ ] Migrate `fetch_webpage` group: `fetch_webpage_timeout`, `fetch_webpage_max_download_mb`, `fetch_webpage_max_output_chars`
-- [ ] Migrate `web_search` group: `web_search_timeout`, `web_search_default_num_results`
-- [ ] Migrate `execute_command` group: `execute_command_allowed_paths`, `execute_command_timeout`, `execute_command_max_output_chars`
-- [ ] Migrate `read_file` group: `image_max_dimension`, `image_compression_quality`, `pdf_prefer_native`, `pdf_text_max_chars`, `pdf_native_max_size_mb`
-- [ ] Migrate `write_docx` group: `write_docx_default_output_dir`, `write_docx_default_template_path`
-- [ ] Migrate shared settings: `domain_denylist` and `read_file_allowed_paths` into `user_shared_settings`
-- [ ] Two-phase write: (1) copy values + `saveSettings()`, (2) delete old fields + `saveSettings()`
-- [ ] Show `new Notice("Tool settings have been migrated to Extensions in Settings.")` on success
+- [x] Implement per-tool-group detection: check `user_extension_settings[toolName]` is `undefined` AND old field exists in settings
+- [x] Migrate `fetch_webpage` group: `fetch_webpage_timeout`, `fetch_webpage_max_download_mb`, `fetch_webpage_max_output_chars`
+- [x] Migrate `web_search` group: `web_search_timeout`, `web_search_default_num_results`
+- [x] Migrate `execute_command` group: `execute_command_allowed_paths`, `execute_command_timeout`, `execute_command_max_output_chars`
+- [x] Migrate `read_file` group: `image_max_dimension`, `image_compression_quality`, `pdf_prefer_native`, `pdf_text_max_chars`, `pdf_native_max_size_mb`
+- [x] Migrate `write_docx` group: `write_docx_default_output_dir`, `write_docx_default_template_path`
+- [x] Migrate shared settings: `domain_denylist` and `read_file_allowed_paths` into `user_shared_settings`
+- [x] Two-phase write: (1) copy values + `saveSettings()`, (2) strip old fields from persisted data + `saveData()`
+- [x] Show `new Notice("Tool settings have been migrated to Extensions in Settings.")` on success
 
 ### 6.2 Remove old settings UI sections
 
 These settings now render through the extension settings UI via each scaffold's `settingsSchema`.
 
-- [ ] Remove or gut the tool-specific settings sections: `src/settings/sections/fetch-webpage.ts`, `src/settings/sections/web-search.ts`, `src/settings/sections/execute-command.ts`, `src/settings/sections/docx-tools.ts`
-- [ ] Remove image/PDF settings from `src/settings/sections/media.ts` that are now per-extension settings on `read_file` (keep non-tool media settings if any)
-- [ ] Remove the old field declarations from `NotorSettings` in `src/settings/types.ts` (lines 138-177 for fetch/search/command, lines 268-295 for image/PDF/docx)
-- [ ] Remove old defaults from `src/settings/defaults.ts`
+- [x] Remove or gut the tool-specific settings sections: `src/settings/sections/fetch-webpage.ts`, `src/settings/sections/web-search.ts`, `src/settings/sections/execute-command.ts`, `src/settings/sections/docx-tools.ts`
+- [x] Remove image/PDF settings from `src/settings/sections/media.ts` that are now per-extension settings on `read_file` (keep non-tool media settings if any)
+- [ ] Remove the old field declarations from `NotorSettings` in `src/settings/types.ts` — **deferred to Phase 7** (tool class files and non-tool code still reference these fields; removing would break compilation)
+- [ ] Remove old defaults from `src/settings/defaults.ts` — **deferred to Phase 7** (same reason)
 
 ---
 

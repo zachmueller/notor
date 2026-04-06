@@ -1,64 +1,27 @@
 /**
- * Shell commands settings section renderer (TOOL-016).
+ * Shell configuration settings section renderer.
  *
- * @see specs/03a-settings-refactor/tasks.md — S-003
+ * Tool-specific settings (timeout, max output chars, allowed paths) have been
+ * migrated to per-extension settings on the `execute_command` scaffold.
+ * Only shell executable and shell arguments remain here — they are consumed
+ * by the shell resolver infrastructure, not by the tool scaffold directly.
  */
 
-import { Notice, Setting } from "obsidian";
+import { Setting } from "obsidian";
 import type { SettingsContext } from "./context";
 
-/** Render the "Shell commands" settings section. */
-export function renderExecuteCommandSection(
+/** Render the "Shell configuration" settings section. */
+export function renderShellSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	new Setting(containerEl).setHeading().setName("Shell commands");
+	new Setting(containerEl).setHeading().setName("Shell configuration");
 	containerEl.createEl("p", {
 		text:
-			"Settings for the execute_command tool. Controls shell configuration, " +
-			"timeouts, output limits, and allowed working directories. Desktop only.",
+			"Configure the shell used by execute_command. Timeout, output limits, " +
+			"and allowed directories are now configured per-tool in Extensions settings.",
 		cls: "setting-item-description",
 	});
-
-	new Setting(containerEl)
-		.setName("Command timeout (seconds)")
-		.setDesc(
-			"Maximum time a command can run before it is terminated."
-		)
-		.addText((text) =>
-			text
-				.setPlaceholder("30")
-				.setValue(
-					String(ctx.settings.execute_command_timeout)
-				)
-				.onChange(async (value) => {
-					const parsed = parseInt(value, 10);
-					if (!isNaN(parsed) && parsed > 0) {
-						ctx.settings.execute_command_timeout = parsed;
-						await ctx.saveSettings();
-					}
-				})
-		);
-
-	new Setting(containerEl)
-		.setName("Maximum output characters")
-		.setDesc(
-			"Maximum characters captured from command output. Output exceeding this is truncated."
-		)
-		.addText((text) =>
-			text
-				.setPlaceholder("50000")
-				.setValue(
-					String(ctx.settings.execute_command_max_output_chars)
-				)
-				.onChange(async (value) => {
-					const parsed = parseInt(value, 10);
-					if (!isNaN(parsed) && parsed > 0) {
-						ctx.settings.execute_command_max_output_chars = parsed;
-						await ctx.saveSettings();
-					}
-				})
-		);
 
 	new Setting(containerEl)
 		.setName("Shell executable")
@@ -95,54 +58,5 @@ export function renderExecuteCommandSection(
 						.filter((s) => s.length > 0);
 					await ctx.saveSettings();
 				})
-		);
-
-	// Allowed paths
-	new Setting(containerEl).setHeading().setName("Allowed working directories");
-	containerEl.createEl("p", {
-		text:
-			"Additional absolute paths where commands are allowed to run. " +
-			"The vault root is always allowed.",
-		cls: "setting-item-description",
-	});
-
-	const allowedPaths = ctx.settings.execute_command_allowed_paths;
-	for (let i = 0; i < allowedPaths.length; i++) {
-		const entry = allowedPaths[i] ?? "";
-		new Setting(containerEl)
-			.setName(entry || "(empty)")
-			.addButton((btn) =>
-				btn
-					.setButtonText("Remove")
-					.setWarning()
-					.onClick(async () => {
-						ctx.settings.execute_command_allowed_paths.splice(i, 1);
-						await ctx.saveSettings();
-						ctx.redisplay();
-					})
-			);
-	}
-
-	let newPath = "";
-	new Setting(containerEl)
-		.setName("Add allowed path")
-		.setDesc("Enter an absolute directory path.")
-		.addText((text) => {
-			text.setPlaceholder("/path/to/directory").onChange((v) => {
-				newPath = v.trim();
-			});
-		})
-		.addButton((btn) =>
-			btn.setButtonText("Add").onClick(async () => {
-				if (!newPath) {
-					new Notice("Enter a path to add.");
-					return;
-				}
-				ctx.settings.execute_command_allowed_paths.push(
-					newPath
-				);
-				await ctx.saveSettings();
-				ctx.redisplay();
-			})
 		);
 }

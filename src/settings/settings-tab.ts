@@ -19,14 +19,10 @@ import { renderAnthropicProviderSection } from "./sections/provider-anthropic";
 import { renderOpenAIProviderSection } from "./sections/provider-openai";
 import { renderBedrockProviderSection } from "./sections/provider-bedrock";
 import { renderAutoContextSection } from "./sections/auto-context";
-import { renderFetchWebpageSection } from "./sections/fetch-webpage";
-import { renderWebSearchSection } from "./sections/web-search";
-import { renderExecuteCommandSection } from "./sections/execute-command";
-import { renderDocxToolsSection } from "./sections/docx-tools";
+import { renderShellSection } from "./sections/execute-command";
 import { renderHooksSection } from "./sections/hooks";
 import { renderVaultEventHooksSection } from "./sections/vault-event-hooks";
 import { renderFileAttachmentsSection } from "./sections/file-attachments";
-import { renderMediaSection } from "./sections/media";
 import { renderCompactionSection } from "./sections/compaction";
 import { renderProviderModelReferenceSection } from "./sections/provider-reference";
 import { renderGeneralSection } from "./sections/general";
@@ -167,12 +163,11 @@ export class NotorSettingTab extends PluginSettingTab {
 		renderMcpServersSection(mcpGroup, ctx);
 
 		// --- Tool Configuration (collapsed by default) ---
+		// Per-tool settings (fetch_webpage, web_search, read_file, write_docx, etc.)
+		// are now configured through the extension settings UI. Only shell config
+		// and file attachments remain here.
 		const toolConfigGroup = createSettingsGroup(containerEl, "Tool configuration", false, persisted, onToggle);
-		renderFetchWebpageSection(toolConfigGroup, ctx);
-		renderWebSearchSection(toolConfigGroup, ctx);
-		renderExecuteCommandSection(toolConfigGroup, ctx);
-		renderDocxToolsSection(toolConfigGroup, ctx);
-		renderMediaSection(toolConfigGroup, ctx);
+		renderShellSection(toolConfigGroup, ctx);
 		renderFileAttachmentsSection(toolConfigGroup, ctx);
 
 		// --- Automation (collapsed by default) ---
