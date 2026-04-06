@@ -712,7 +712,7 @@ export default class NotorPlugin extends Plugin {
 			await this.saveData(rawData);
 		}
 
-		new Notice("Tool settings have been migrated to Extensions in Settings.");
+		new Notice("Tool settings have been migrated to Extensions in Settings.", 5000);
 	}
 
 	// -----------------------------------------------------------------------

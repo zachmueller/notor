@@ -428,6 +428,39 @@ export function buildDefaultSettings(overrides?: Record<string, unknown>): Recor
 		read_file_allowed_paths: [],
 		write_docx_default_output_dir: "",
 		write_docx_default_template_path: "",
+		// Extension settings — prevents settings migration from re-triggering on every reload.
+		// Values mirror the old-style fields above.
+		user_extension_settings: {
+			fetch_webpage: {
+				fetch_webpage_timeout: 15,
+				fetch_webpage_max_download_mb: 5,
+				fetch_webpage_max_output_chars: 50000,
+			},
+			web_search: {
+				web_search_timeout: 30,
+				web_search_default_num_results: 10,
+			},
+			execute_command: {
+				execute_command_allowed_paths: [],
+				execute_command_timeout: 30,
+				execute_command_max_output_chars: 50000,
+			},
+			read_file: {
+				image_max_dimension: 2048,
+				image_compression_quality: 0.85,
+				pdf_prefer_native: true,
+				pdf_text_max_chars: 50000,
+				pdf_native_max_size_mb: 10,
+			},
+			write_docx: {
+				write_docx_default_output_dir: "",
+				write_docx_default_template_path: "",
+			},
+		},
+		user_shared_settings: {
+			domain_denylist: [],
+			read_file_allowed_paths: [],
+		},
 	};
 
 	if (!overrides) return base;
@@ -435,9 +468,39 @@ export function buildDefaultSettings(overrides?: Record<string, unknown>): Recor
 	// Deep-merge auto_approve if provided
 	if (overrides.auto_approve && typeof overrides.auto_approve === "object") {
 		base.auto_approve = { ...(base.auto_approve as Record<string, unknown>), ...overrides.auto_approve as Record<string, unknown> };
-		const { auto_approve: _, ...rest } = overrides;
-		return { ...base, ...rest };
+		delete overrides.auto_approve;
 	}
 
-	return { ...base, ...overrides };
+	const result = { ...base, ...overrides } as Record<string, unknown>;
+
+	// Sync old-style field overrides into user_extension_settings / user_shared_settings
+	// so scaffold tools (which read per-extension settings) see the overridden values.
+	const extSettings = { ...(base.user_extension_settings as Record<string, Record<string, unknown>>) };
+	const sharedSettings = { ...(base.user_shared_settings as Record<string, unknown>) };
+
+	const extFieldMap: Record<string, string[]> = {
+		fetch_webpage: ["fetch_webpage_timeout", "fetch_webpage_max_download_mb", "fetch_webpage_max_output_chars"],
+		web_search: ["web_search_timeout", "web_search_default_num_results"],
+		execute_command: ["execute_command_allowed_paths", "execute_command_timeout", "execute_command_max_output_chars"],
+		read_file: ["image_max_dimension", "image_compression_quality", "pdf_prefer_native", "pdf_text_max_chars", "pdf_native_max_size_mb"],
+		write_docx: ["write_docx_default_output_dir", "write_docx_default_template_path"],
+	};
+	const sharedFields = ["domain_denylist", "read_file_allowed_paths"];
+
+	for (const [tool, fields] of Object.entries(extFieldMap)) {
+		for (const field of fields) {
+			if (field in overrides) {
+				extSettings[tool] = { ...extSettings[tool], [field]: overrides[field] };
+			}
+		}
+	}
+	for (const field of sharedFields) {
+		if (field in overrides) {
+			sharedSettings[field] = overrides[field];
+		}
+	}
+
+	result.user_extension_settings = extSettings;
+	result.user_shared_settings = sharedSettings;
+	return result;
 }
