@@ -154,10 +154,10 @@ These are the largest scaffolds. Feasible only because infrastructure logic was 
 
 Provides default shared settings (`domain_denylist`, `read_file_allowed_paths`) when no `notor/settings.md` exists.
 
-- [ ] Create a built-in shared settings schema constant (analogous to `BUILTIN_TOOL_SCAFFOLDS`)
-- [ ] In `ExtensionManager.reload()`, after checking `discovered.sharedSettings`, fall back to the built-in schema if no user-authored `notor/settings.md` was found
-- [ ] Schema declares `domain_denylist` (type: `string[]`, default: `[]`) and `read_file_allowed_paths` (type: `string[]`, default: `[]`)
-- [ ] Vault file wins if present (same precedence as tool scaffolds)
+- [x] Create a built-in shared settings schema constant (analogous to `BUILTIN_TOOL_SCAFFOLDS`)
+- [x] In `ExtensionManager.reload()`, after checking `discovered.sharedSettings`, fall back to the built-in schema if no user-authored `notor/settings.md` was found
+- [x] Schema declares `domain_denylist` (type: `string[]`, default: `[]`) and `read_file_allowed_paths` (type: `string[]`, default: `[]`)
+- [x] Vault file wins if present (same precedence as tool scaffolds)
 
 ---
 

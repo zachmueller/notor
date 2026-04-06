@@ -8,6 +8,8 @@
  * Follows the same pattern as `src/sub-agents/builtin-profiles.ts`.
  */
 
+import type { SettingsFieldSchema } from "./types";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -2501,3 +2503,31 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[REPLACE_IN_FILE.name, REPLACE_IN_FILE],
 		[EXTRACT_DOCX_COMMENTS.name, EXTRACT_DOCX_COMMENTS],
 	]);
+
+// ---------------------------------------------------------------------------
+// Built-in shared settings scaffold (D-8)
+// ---------------------------------------------------------------------------
+
+/**
+ * Default shared settings schema, used when no `notor/settings.md` exists.
+ *
+ * Declares the two cross-tool settings (`domain_denylist`, `read_file_allowed_paths`)
+ * so they are always available in the `shared` object passed to tool functions.
+ * If a user-authored `notor/settings.md` exists, it takes precedence.
+ */
+export const BUILTIN_SHARED_SETTINGS_SCHEMA: readonly SettingsFieldSchema[] = [
+	{
+		key: "domain_denylist",
+		name: "Domain denylist",
+		type: "string[]",
+		description: "Domains blocked from fetch_webpage and web_search requests.",
+		default: [],
+	},
+	{
+		key: "read_file_allowed_paths",
+		name: "Allowed file-system paths",
+		type: "string[]",
+		description: "Absolute paths outside the vault that read_file, write_file, replace_in_file, and DOCX tools may access.",
+		default: [],
+	},
+];

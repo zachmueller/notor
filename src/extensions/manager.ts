@@ -26,7 +26,7 @@ import { resolveSettings, resolveSharedSettings } from "./settings-schema";
 import { buildUtils, buildLibs, buildObsidianExports } from "./runtime-context";
 import type { ExtensionUtils, ExtensionLibs, ExtensionObsidianExports } from "./runtime-context";
 import { TOOL_PATH_PARAMS } from "../tool-config/path-enforcer";
-import { BUILTIN_TOOL_SCAFFOLDS } from "./builtin-tool-scaffolds";
+import { BUILTIN_TOOL_SCAFFOLDS, BUILTIN_SHARED_SETTINGS_SCHEMA } from "./builtin-tool-scaffolds";
 import { logger } from "../utils/logger";
 
 const log = logger("ExtensionManager");
@@ -280,8 +280,15 @@ export class ExtensionManager {
 			compiledAutomations.set(automation.filePath, automation);
 		}
 
-		// 4. Shared settings
-		this.sharedSettings = discovered.sharedSettings;
+		// 4. Shared settings — vault file wins; fall back to built-in scaffold (D-8)
+		if (discovered.sharedSettings) {
+			this.sharedSettings = discovered.sharedSettings;
+		} else {
+			this.sharedSettings = {
+				filePath: "(built-in shared settings scaffold)",
+				settingsSchema: [...BUILTIN_SHARED_SETTINGS_SCHEMA],
+			};
+		}
 
 		// 5. Detect built-in overrides (vault files that replace scaffold defaults)
 		const registry = this.plugin.getToolRegistry();
