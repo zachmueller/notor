@@ -175,9 +175,11 @@ export async function graftIntoTemplate(
 					}
 				}
 			}
-			for (let i = 0; i < node.childNodes.length; i++) {
-				const child = node.childNodes.item(i);
-				if (child) walkAndRemapElements(child);
+			if (node.childNodes) {
+				for (let i = 0; i < node.childNodes.length; i++) {
+					const child = node.childNodes.item(i);
+					if (child) walkAndRemapElements(child);
+				}
 			}
 		}
 		for (const bodyNode of generatedBodyNodes) {

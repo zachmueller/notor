@@ -140,8 +140,6 @@ export class UserToolAdapter implements Tool {
 			const message = err instanceof Error ? err.message : String(err);
 			const stack = err instanceof Error ? err.stack : undefined;
 
-			// 3-channel error reporting
-			new Notice(`Extension error in ${this.name}: ${message}`);
 			log.error("User tool execution failed", { tool: this.name, error: String(err), stack });
 
 			return {
