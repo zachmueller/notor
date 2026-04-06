@@ -10,7 +10,7 @@
 
 import { Notice, SecretComponent, Setting, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
-import type { SettingsFieldSchema, UserToolDefinition, UserAutomationDefinition } from "../../extensions/types";
+import type { SettingsFieldSchema } from "../../extensions/types";
 import { slugifySecretId } from "../../extensions/settings-schema";
 
 /** Render the "Extensions" settings section. */
@@ -23,12 +23,8 @@ export function renderExtensionsSection(
 	// --- Built-in tools ---
 	renderBuiltinToolsSection(containerEl, ctx);
 
-	// --- User extension settings ---
+	// --- Shared settings ---
 	const sharedDef = manager.getSharedSettingsDefinition();
-	const toolsWithSettings = manager.getTools().filter((t) => t.settingsSchema && t.settingsSchema.length > 0);
-	const automationsWithSettings = manager.getAutomations().filter((a) => a.settingsSchema && a.settingsSchema.length > 0);
-
-	// Shared settings
 	if (sharedDef) {
 		new Setting(containerEl).setHeading().setName("Shared settings");
 		renderFieldList(containerEl, ctx, sharedDef.settingsSchema, {
@@ -47,48 +43,11 @@ export function renderExtensionsSection(
 		);
 	}
 
-	// Per-tool settings
-	for (const tool of toolsWithSettings) {
-		new Setting(containerEl).setHeading().setName(`Tool: ${tool.name}`);
-		renderFieldList(containerEl, ctx, tool.settingsSchema!, {
-			kind: "extension",
-			extensionName: tool.name,
-		});
+	// --- User tools ---
+	renderUserToolsSection(containerEl, ctx);
 
-		new Setting(containerEl).addButton((btn) =>
-			btn
-				.setButtonText("Reset to defaults")
-				.setWarning()
-				.onClick(async () => {
-					delete ctx.settings.user_extension_settings[tool.name];
-					await ctx.saveSettings();
-					ctx.redisplay();
-				}),
-		);
-	}
-
-	// Per-automation settings
-	for (const automation of automationsWithSettings) {
-		const label = automation.displayName ?? automation.filePath.split("/").pop()?.replace(/\.md$/, "") ?? automation.filePath;
-		const extKey = automation.displayName ?? automation.filePath;
-
-		new Setting(containerEl).setHeading().setName(`Automation: ${label}`);
-		renderFieldList(containerEl, ctx, automation.settingsSchema!, {
-			kind: "extension",
-			extensionName: extKey,
-		});
-
-		new Setting(containerEl).addButton((btn) =>
-			btn
-				.setButtonText("Reset to defaults")
-				.setWarning()
-				.onClick(async () => {
-					delete ctx.settings.user_extension_settings[extKey];
-					await ctx.saveSettings();
-					ctx.redisplay();
-				}),
-		);
-	}
+	// --- User automations ---
+	renderUserAutomationsSection(containerEl, ctx);
 
 	// --- Reload button ---
 	new Setting(containerEl)
@@ -202,6 +161,141 @@ function renderBuiltinToolsSection(
 							const msg = e instanceof Error ? e.message : String(e);
 							new Notice(`Failed to create tool file: ${msg}`);
 						}
+					}),
+			);
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// User tools section
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a listing of all user-defined tools (excluding built-in overrides,
+ * which are already shown in the Built-in tools section).
+ */
+function renderUserToolsSection(
+	containerEl: HTMLElement,
+	ctx: SettingsContext,
+): void {
+	const manager = ctx.plugin.getExtensionManager();
+	const builtinNames = new Set(manager.getBuiltinToolNames());
+	const userTools = manager.getTools().filter((t) => !builtinNames.has(t.name));
+
+	if (userTools.length === 0) return;
+
+	new Setting(containerEl).setHeading().setName("User tools");
+
+	for (const tool of userTools) {
+		const setting = new Setting(containerEl)
+			.setName(tool.name)
+			.setDesc(tool.description);
+
+		// "User" badge
+		const badge = setting.nameEl.createSpan({
+			text: "User",
+			cls: "notor-extension-badge-user",
+		});
+		badge.style.marginLeft = "8px";
+		badge.style.fontSize = "0.75em";
+		badge.style.opacity = "0.7";
+		badge.style.fontStyle = "italic";
+
+		// Open button
+		setting.addButton((btn) =>
+			btn
+				.setIcon("square-arrow-out-up-right")
+				.setTooltip("Open extension file")
+				.onClick(async () => {
+					await ctx.app.workspace.openLinkText(tool.filePath, "", true);
+				}),
+		);
+
+		// Inline settings if present
+		if (tool.settingsSchema && tool.settingsSchema.length > 0) {
+			renderFieldList(containerEl, ctx, tool.settingsSchema, {
+				kind: "extension",
+				extensionName: tool.name,
+			});
+
+			new Setting(containerEl).addButton((btn) =>
+				btn
+					.setButtonText("Reset to defaults")
+					.setWarning()
+					.onClick(async () => {
+						delete ctx.settings.user_extension_settings[tool.name];
+						await ctx.saveSettings();
+						ctx.redisplay();
+					}),
+			);
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// User automations section
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a listing of all user-defined automations.
+ */
+function renderUserAutomationsSection(
+	containerEl: HTMLElement,
+	ctx: SettingsContext,
+): void {
+	const manager = ctx.plugin.getExtensionManager();
+	const automations = manager.getAutomations();
+
+	if (automations.length === 0) return;
+
+	new Setting(containerEl).setHeading().setName("User automations");
+
+	for (const automation of automations) {
+		const label = automation.displayName
+			?? automation.filePath.split("/").pop()?.replace(/\.md$/, "")
+			?? automation.filePath;
+		const extKey = automation.displayName ?? automation.filePath;
+
+		const setting = new Setting(containerEl)
+			.setName(label)
+			.setDesc(`Trigger: ${automation.trigger}`);
+
+		// "User" badge
+		const badge = setting.nameEl.createSpan({
+			text: "User",
+			cls: "notor-extension-badge-user",
+		});
+		badge.style.marginLeft = "8px";
+		badge.style.fontSize = "0.75em";
+		badge.style.opacity = "0.7";
+		badge.style.fontStyle = "italic";
+
+		// Open button
+		setting.addButton((btn) =>
+			btn
+				.setIcon("square-arrow-out-up-right")
+				.setTooltip("Open extension file")
+				.onClick(async () => {
+					await ctx.app.workspace.openLinkText(automation.filePath, "", true);
+				}),
+		);
+
+		// Inline settings if present
+		if (automation.settingsSchema && automation.settingsSchema.length > 0) {
+			renderFieldList(containerEl, ctx, automation.settingsSchema, {
+				kind: "extension",
+				extensionName: extKey,
+			});
+
+			new Setting(containerEl).addButton((btn) =>
+				btn
+					.setButtonText("Reset to defaults")
+					.setWarning()
+					.onClick(async () => {
+						delete ctx.settings.user_extension_settings[extKey];
+						await ctx.saveSettings();
+						ctx.redisplay();
 					}),
 			);
 		}
