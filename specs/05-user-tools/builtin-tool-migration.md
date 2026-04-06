@@ -2079,3 +2079,114 @@ params:
 **Risk: `noteOpener` optional chaining removal (none).** The class uses `this.noteOpener?.openNote()` because `noteOpener` is an optional constructor param (undefined in unit tests). In the scaffold, `utils.noteOpener` is always defined — `runtime-context.ts:81` creates it unconditionally. The `openNote()` method itself is a no-op when `open_notes_on_access` is disabled. Removing the `?.` is safe.
 
 **Comparison with spec's complexity estimate:** The spec classifies `replace_in_note` as "Medium" at 80-280 lines and estimates ~130 lines. The scaffold is ~90 lines — below the estimate. This is because the tool has no helpers, no settings, and no external library dependencies. The logic is entirely self-contained: param validation → resolve → stale check → checkpoint → atomic vault.process → stale update → open → return. It's one of the cleanest medium-tier migrations — similar in structure to `write_note` but simpler (no frontmatter preservation, no directory creation, no create-vs-update branching).
+
+### `web_search` — Feasibility: Moderate ✅
+
+**Source:** `src/tools/web-search.ts` (303 lines total, ~280 lines of logic)
+
+**What the built-in class does:**
+1. Validates `query` param (existence, string type)
+2. Clamps `num_results` to 1–10, defaulting to `settings.web_search_default_num_results`
+3. POSTs to `https://html.duckduckgo.com/html/` with form body `q={query}&kl=us-en` via `obsidian.requestUrl()`
+4. Implements timeout via `Promise.race` against `setTimeout` (uses `settings.web_search_timeout * 1000`)
+5. Handles HTTP status checks and network errors with structured error returns
+6. Parses HTML response via browser-native `DOMParser` (`text/html` mode) — selects `.result` containers, extracts `.result__title a` href/text and `.result__snippet` text
+7. Decodes DuckDuckGo redirect URLs (`//duckduckgo.com/l/?uddg={encoded_url}&...`) via `cleanDDGUrl()` helper
+8. Filters parsed results against domain denylist via `isDomainBlocked()` (imported from `fetch-webpage.ts`)
+9. Logs warning on possible selector drift (non-empty response, zero parsed results)
+10. Formats output as numbered markdown list: `1. **[Title](url)**\n   snippet`
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `requestUrl` | `obsidian.requestUrl` | ✅ |
+| `logger("WebSearchTool")` | `utils.logger("web_search")` | ✅ |
+| `this.settings.web_search_timeout` | `settings.web_search_timeout` | ✅ (per-extension setting — see D-2) |
+| `this.settings.web_search_default_num_results` | `settings.web_search_default_num_results` | ✅ (per-extension setting — see D-2) |
+| `this.settings.domain_denylist` | `shared.domain_denylist` | ✅ (shared setting — see D-2/D-8) |
+| `isDomainBlocked()` (imported from fetch-webpage.ts) | `utils.isDomainBlocked` (recommended expansion) | ⚠️ See note below |
+| `DOMParser` (browser global) | `DOMParser` (global in Electron renderer) | ✅ (see R-5) |
+
+**Settings:** Per-extension `settings` for `web_search_timeout` (default 10), `web_search_default_num_results` (default 5). Shared `shared` for `domain_denylist`. All fields have existing defaults in `src/settings/defaults.ts:136-137`.
+
+**Return value mapping:**
+- Success → return formatted markdown string (adapter wraps in `{ success: true, result }`)
+- No results → return `"No results found for query: {query}"` as success (not an error)
+- Validation/network failures → return structured `{ success: false, error }` directly (not thrown)
+
+**Helper functions (2 local functions to inline):**
+
+1. **`cleanDDGUrl()`** (~16 lines) — Decodes DuckDuckGo redirect URLs. Handles three patterns: DDG `/l/?uddg=` redirects (extracts `uddg` query param, URL-decodes), protocol-relative `//` URLs (prepends `https:`), and already-absolute `http(s)://` URLs. Returns `null` for unrecognized formats. Pure function, no external dependencies. **Exported** from the current file but only consumed internally — no external callers. Straightforward to inline in scaffold.
+
+2. **`parseDDGResults()`** (~28 lines) — Creates a `DOMParser`, parses HTML as `text/html`, iterates `.result` containers extracting title/URL/snippet via CSS selectors, calls `cleanDDGUrl()` on each href, respects `maxResults` cap. **Exported** but only consumed internally and in tests. Straightforward to inline in scaffold.
+
+**`isDomainBlocked` dependency:** Same cross-cutting concern as `fetch_webpage`. The `web_search` tool imports `isDomainBlocked` from `src/tools/fetch-webpage.ts:17`. After migration, this import disappears — the scaffold uses `utils.isDomainBlocked()` (the same recommended `utils` expansion from the `fetch_webpage` assessment). **Not a new blocker** — resolved by the same `utils.isDomainBlocked` addition already identified in the `fetch_webpage` assessment. The `web_search` scaffold simply calls `utils.isDomainBlocked(r.url, shared.domain_denylist)` in the filter loop.
+
+Note: unlike `fetch_webpage`, the dispatcher does **not** have a pre-dispatch denylist check for `web_search`. The denylist filtering happens entirely within the tool's execute body (post-parse, filtering individual result URLs). This means the `web_search` migration has no dispatcher import concern — only `fetch_webpage` creates the dispatcher.ts:16 import breakage.
+
+**Tricky patterns:**
+
+1. **Timeout via `Promise.race`** — identical pattern to `fetch_webpage`. `requestUrl()` has no native timeout; the class races it against a `setTimeout` reject promise. Straightforward to replicate in scaffold code. No special runtime support needed.
+
+2. **`DOMParser` availability** — Uses browser-native `new DOMParser()` with `text/html` mime type (line 82). This is a global in Electron's renderer process — the same execution context where extension code runs. NOT the same as `libs.xmldom` (which is XML-only and doesn't support CSS selectors like `querySelectorAll`). See R-5 in the risk assessment — confirmed viable. Tests use `@vitest-environment jsdom` to polyfill this.
+
+3. **CSS selector fragility** — The parser relies on DDG-specific CSS classes (`.result`, `.result__title a`, `.result__snippet`). The existing code already has a selector drift warning (lines 244-250). The scaffold preserves this exact behavior. This is inherent to the tool's design, not a migration concern.
+
+4. **`requestUrl` POST with form encoding** — The tool POSTs to DDG with `Content-Type: application/x-www-form-urlencoded` and a custom User-Agent. No special handling needed — `obsidian.requestUrl` supports all of this directly.
+
+**No `utils`, `libs`, or `obsidian` expansions needed beyond `utils.isDomainBlocked`** (already recommended for `fetch_webpage`). All other dependencies are browser globals or already-injected context.
+
+**Scaffold code (estimated ~130 lines):**
+```ts
+const log = utils.logger("web_search");
+
+if (!params.query || typeof params.query !== "string") {
+  return { success: false, error: "Missing required parameter: query" };
+}
+
+// --- helpers (inlined) ---
+
+function cleanDDGUrl(raw: string): string | null { /* ~16 lines */ }
+function parseDDGResults(html: string, maxResults: number): Array<{title: string; url: string; snippet: string}> { /* ~28 lines */ }
+
+// --- main logic ---
+// num_results clamping, timeout race, requestUrl POST to DDG,
+// HTTP status check, parse, selector drift warning,
+// domain denylist filter via utils.isDomainBlocked,
+// markdown formatting — ~65 lines
+```
+
+**YAML fence:**
+```yaml
+params:
+  query:
+    type: string
+    description: "Search query string."
+  num_results:
+    type: number
+    description: "Number of results to return. Defaults to 5. Maximum 10."
+    default: 5
+settings:
+  web_search_timeout:
+    name: "Request Timeout"
+    type: number
+    description: "Maximum time in seconds to wait for search results before aborting."
+    default: 10
+    min: 1
+    max: 120
+  web_search_default_num_results:
+    name: "Default Number of Results"
+    type: number
+    description: "Number of search results returned when the LLM does not specify a count (1–10)."
+    default: 5
+    min: 1
+    max: 10
+```
+
+**Scaffold `scaffold()` call change:** Needs the new 5th `code` parameter. The YAML fence includes both `params:` and `settings:` sections. The `settings` entries for `web_search_timeout` and `web_search_default_num_results` replace the current direct `NotorSettings` field references.
+
+**Settings UI migration:** The existing `src/settings/sections/web-search.ts` (61 lines) renders timeout and default num_results fields. After migration, these are auto-generated from the extension settings schema. The manual settings section file can be removed. The domain denylist note ("shared with fetch_webpage") is handled by the shared settings UI from D-8.
+
+**Comparison with spec's complexity estimate:** The spec classifies `web_search` as "Complex" at 200-400 lines and estimates ~200 lines. The scaffold is ~130 lines — below the estimate. This is because `isDomainBlocked` moves to `utils` (saving ~36 lines of inline code), and the tool has no Turndown conversion, no diagnostic fetch probe, and no error hint map (unlike `fetch_webpage`). The two inlined helpers (`cleanDDGUrl` + `parseDDGResults`) are compact pure functions. This is the simpler of the two web-facing tools — comparable to a mid-range "Straightforward" tool in actual scaffold complexity, elevated to "Moderate" only because of the `DOMParser` browser-global dependency and the shared `isDomainBlocked` migration coordination with `fetch_webpage`.
