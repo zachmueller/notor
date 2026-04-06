@@ -454,9 +454,24 @@ export default class NotorPlugin extends Plugin {
 			// EXT-017: Discover and compile user extensions (tools + automations).
 			// Scaffold defaults for all 20 built-in tools are injected here;
 			// vault-authored overrides win by last-write-wins.
-			// isInitialLoad=true skips dispatcher registration — the dispatcher
-			// doesn't exist yet and will pick up user tools via registry.getAll().
+			// isInitialLoad=true skips dispatcher registration during reload().
+			// However, if the dispatcher was already created (e.g., by workspace
+			// restore triggering wireView() → getOrchestrator() → getToolDispatcher()
+			// before this async reload completes), we must sync it afterwards.
 			this.getExtensionManager().reload(true).then(() => {
+				// Sync dispatcher if it was already lazily created before reload finished.
+				// The dispatcher populates from registry.getAll() at creation time, but
+				// if created before reload, it only had use_subagent. Re-register all
+				// extension tools now.
+				if (this._toolDispatcher) {
+					const registry = this.getToolRegistry();
+					for (const tool of registry.getAll()) {
+						if (!this._toolDispatcher.hasTool(tool.name)) {
+							this._toolDispatcher.registerTool(tool);
+						}
+					}
+				}
+
 				// Re-evaluate vault event listeners to pick up automation triggers
 				if (this._vaultEventListenerManager) {
 					this._vaultEventListenerManager.evaluateListeners();
