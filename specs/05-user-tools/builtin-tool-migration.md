@@ -1697,3 +1697,196 @@ params:
 **Risk: No external consumers of `docx-comment-parser.ts` (verified).** Grep confirms the module is imported only by `extract-docx-comments.ts` (the tool class) and `docx-comment-parser.test.ts` (its unit tests). No dispatcher, no other tool, no settings code imports it. The class file can be removed cleanly after migration.
 
 **Comparison with spec's complexity estimate:** The spec classifies `extract_docx_comments` as "Complex" at 200-400 lines. With the recommended `utils.docxComments` expansion, the scaffold is ~200 lines — at the low end of the estimate. Without the expansion (Option A, full inline), it would be ~550 lines — significantly exceeding the estimate and producing the second-largest scaffold after `write_docx`. The `utils` expansion is clearly the right call: it keeps the scaffold manageable, preserves the existing test coverage boundary, and follows the same pattern recommended for `write_docx`'s `graftIntoTemplate`.
+
+### `execute_command` — Feasibility: Straightforward ✅
+
+**Source:** `src/tools/execute-command.ts` (223 lines total, ~140 lines of logic)
+
+**What the built-in class does:**
+1. Validates `command` param (exists, is string)
+2. Desktop-only guard via `Platform.isDesktopApp`
+3. Resolves vault root via `app.vault.adapter.basePath`
+4. Validates `working_directory` against vault root and `settings.execute_command_allowed_paths` via `resolveAndValidatePath()`
+5. Executes command via `executeShellCommand(command, settings, { cwd, timeoutSeconds, maxOutputChars })`
+6. Handles three result cases: timeout (partial output + error), non-zero exit code (output + error), success (output)
+7. Catches spawn failures with special handling for "Shell not found" errors
+8. Appends truncation notice if output was capped at `max_output_chars`
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `Platform` from `"obsidian"` | `obsidian.Platform` | ⚠️ Planned (spec runtime-context.ts changes) |
+| `resolveAndValidatePath(path, vaultRoot, allowedPaths)` | `utils.resolveAndValidatePath(path, allowedPaths)` | ✅ — runtime-context.ts:85-90 accepts optional `allowedPaths` override |
+| `executeShellCommand(cmd, settings, opts)` | `utils.executeShellCommand(cmd, opts)` | ✅ — runtime-context.ts:92-93 injects `plugin.settings` internally |
+| `logger("ExecuteCommandTool")` | `utils.logger("execute_command")` | ✅ |
+
+**Settings:** Three per-extension `settings` fields:
+- `execute_command_allowed_paths` (string[], default `[]`) — passed as explicit override to `utils.resolveAndValidatePath(path, settings.execute_command_allowed_paths)`
+- `execute_command_timeout` (number, default `30`) — passed as `opts.timeoutSeconds` to `utils.executeShellCommand()`
+- `execute_command_max_output_chars` (number, default `50000`) — passed as `opts.maxOutputChars` to `utils.executeShellCommand()`
+
+**Note on `execute_command_shell` and `execute_command_shell_args`:** These two settings are intentionally NOT migrated to per-extension settings. They are consumed internally by `resolveShell()` (called within `executeShellCommand()`) via the `plugin.settings` object that `utils.executeShellCommand` injects. The shell/shell_args settings are shared infrastructure — they also apply to hook execution via the hook engine (`src/hooks/hook-engine.ts:149-153`). They stay in `NotorSettings` and continue to be configured via the existing settings UI section. The scaffold never reads them directly.
+
+**Return value mapping:**
+- Success → return string (adapter wraps in `{ success: true, result: string }`)
+- Timeout → throw with partial output embedded in message (adapter wraps in `{ success: false, error }`)
+- Non-zero exit → throw with output in message
+- Spawn failures → throw (adapter wraps in `{ success: false, error }`)
+
+**Note on timeout/exit-code result handling:** The built-in class returns `{ success: false, result: partialOutput, error: message }` for timeout and non-zero exit, setting both `result` and `error`. In the scaffold, throwing an error only populates the `error` field (adapter sets `result: ""`). To preserve the partial output behavior, the scaffold should embed the output in the error message string (e.g., `throw new Error(\`Command timed out after ${timeout}s. Partial output:\n${output}\`)`) rather than trying to set both fields. This is a minor behavioral change — the LLM sees the output in the error message rather than in a separate result field. This is acceptable because the LLM reads both fields as text context anyway.
+
+**Helper functions (1 trivial inline):**
+
+1. **`getVaultRootPath()`** (4 lines) — Extracts `basePath` from `app.vault.adapter`. Not needed in the scaffold because `utils.resolveAndValidatePath()` already knows the vault root (injected at build time in runtime-context.ts:71). The scaffold only needs the vault root for logging purposes, which can be omitted or read from the same adapter cast.
+
+**Dispatcher pre-validation concern (`dispatcher.ts:366-390`):**
+
+The dispatcher has a pre-execution validation for `execute_command` at lines 366-390 that reads `this.settings.execute_command_allowed_paths` directly from `NotorSettings`. After migration, this setting moves to `user_extension_settings["execute_command"]`.
+
+**Analysis:** This pre-check is *redundant* with the tool's own path validation — the tool itself calls `resolveAndValidatePath()` and returns an error if the path is rejected. The dispatcher pre-check exists as an early bail-out before the tool reaches execution (avoiding approval UI, checkpoint creation, etc. for a request that will definitely fail). Two resolution options:
+
+1. **Remove the dispatcher pre-check (recommended).** The scaffold's own validation produces the same error. The only downside is that the user sees the approval prompt before the path is rejected, but this is a minor UX difference — the command itself is what needs approval, not the working directory. This is the simplest approach and eliminates the coupling between the dispatcher and tool-specific settings.
+
+2. **Update the dispatcher to read from extension settings.** This requires the dispatcher to access `user_extension_settings["execute_command"].execute_command_allowed_paths`, which means either injecting the extension settings system into the dispatcher or reading from the resolved `settings` object. This adds coupling and complexity for a pre-check that provides marginal UX value.
+
+Recommendation: option 1. Remove `dispatcher.ts:366-390` as part of the migration. The scaffold handles validation; the dispatcher doesn't need tool-specific pre-checks for settings that live in the extension system.
+
+**Scaffold code (estimated ~75 lines):**
+```ts
+const log = utils.logger("execute_command");
+
+if (!params.command || typeof params.command !== "string") {
+  throw new Error("Missing required parameter: command");
+}
+
+if (!obsidian.Platform.isDesktopApp) {
+  throw new Error(
+    "execute_command is only available on desktop. " +
+    "Shell execution is not supported on mobile."
+  );
+}
+
+const workingDirectory = (params.working_directory as string) || "";
+
+// Validate working directory against vault root and allowed paths
+const cwdResult = utils.resolveAndValidatePath(
+  workingDirectory,
+  settings.execute_command_allowed_paths,
+);
+if (!cwdResult.valid) {
+  throw new Error(
+    `Working directory '${workingDirectory}' is outside the allowed paths. ` +
+    `Allowed: vault root and configured paths.`
+  );
+}
+
+log.info("Executing command", {
+  command: (params.command as string).substring(0, 200),
+  cwd: cwdResult.resolvedPath,
+  timeout: `${settings.execute_command_timeout}s`,
+});
+
+try {
+  const result = await utils.executeShellCommand(params.command as string, {
+    cwd: cwdResult.resolvedPath,
+    timeoutSeconds: settings.execute_command_timeout,
+    maxOutputChars: settings.execute_command_max_output_chars,
+  });
+
+  let output = result.stdout;
+
+  if (result.truncated) {
+    output +=
+      `\n\nNote: command output was truncated at ` +
+      `${settings.execute_command_max_output_chars.toLocaleString()} characters.`;
+  }
+
+  if (result.timedOut) {
+    const msg = `Command timed out after ${settings.execute_command_timeout} seconds.`;
+    throw new Error(output ? `${msg} Partial output:\n${output}` : msg);
+  }
+
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Command exited with code ${result.exitCode}` +
+      (output ? `\n${output}` : "")
+    );
+  }
+
+  return output;
+} catch (e) {
+  // Re-throw errors already created above
+  if (e instanceof Error && (
+    e.message.includes("timed out") ||
+    e.message.includes("exited with code")
+  )) {
+    throw e;
+  }
+
+  const message = e instanceof Error ? e.message : String(e);
+  log.error("Command execution failed", {
+    command: (params.command as string).substring(0, 200),
+    error: message,
+  });
+
+  if (message.includes("Shell not found")) {
+    throw new Error(`${message}. Check your shell configuration in Settings → Notor.`);
+  }
+
+  throw new Error(`Failed to execute command: ${message}`);
+}
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed or planned:
+- `utils.resolveAndValidatePath(path, allowedPaths?)` — exists, supports explicit allowed paths override
+- `utils.executeShellCommand(cmd, opts)` — exists, injects `plugin.settings` for shell resolution internally
+
+**Required runtime expansions (already planned in spec):**
+- `obsidian.Platform` — add to `buildObsidianExports()` (spec runtime-context.ts changes, shared with `replace_in_file` and other desktop-only tools)
+
+**No `libs` expansions needed.** The tool uses no Node.js modules or bundled libraries directly — all filesystem and shell operations are handled through `utils.executeShellCommand()` which is a self-contained wrapper.
+
+**YAML fence:**
+```yaml
+params:
+  command:
+    type: string
+    description: "Shell command to execute."
+  working_directory:
+    type: string
+    description: "Working directory for the command, relative to vault root or absolute."
+    default: ""
+    path_namespace: filesystem
+settings:
+  execute_command_allowed_paths:
+    name: "Allowed Working Directories"
+    type: string[]
+    description: "Additional filesystem paths allowed as working directories. The vault root is always allowed."
+    default: []
+  execute_command_timeout:
+    name: "Command Timeout"
+    type: number
+    description: "Maximum execution time in seconds before the command is killed."
+    default: 30
+    min: 1
+    max: 600
+  execute_command_max_output_chars:
+    name: "Max Output Characters"
+    type: number
+    description: "Maximum characters of command output returned. Longer output is truncated."
+    default: 50000
+    min: 1000
+    max: 500000
+```
+
+**Scaffold `scaffold()` call change:** Needs the new 5th `code` parameter and updated `yamlFenceContent` with the `settings:` section appended to the `params:` section.
+
+**Risk: Dispatcher pre-validation removal (low).** Removing `dispatcher.ts:366-390` means the path rejection happens inside the tool execution instead of before it. The user sees the approval prompt before the error, which is a minor UX regression. However, this pre-check pattern is specific to `execute_command` — no other tool has dispatcher-level pre-validation for settings-dependent constraints. Removing it simplifies the dispatcher and eliminates the coupling to a settings field that is migrating. The tool's own validation produces an identical error message.
+
+**Risk: `execute_command_shell`/`execute_command_shell_args` settings UI orphaning (none).** These settings remain in `NotorSettings` and their settings UI section (`src/settings/sections/execute-command.ts:63-98`) continues to function. The migration only moves the 3 tool-facing settings (`allowed_paths`, `timeout`, `max_output_chars`) to the extension settings UI. The shell configuration section stays where it is, serving both the execute_command tool and the hook engine. The settings UI section file will need its rendering logic split: the 3 migrated fields are removed (they now render via the extension settings UI from the scaffold's `settings:` schema), while the shell executable/args fields remain. If this partial removal makes the section too small, it could be folded into the main Notor settings section — but this is a cosmetic concern, not a blocker.
+
+**Risk: Partial output in error messages (low).** The behavioral change from separate `result`+`error` fields to combined error message string is acceptable. The LLM reads both fields as text. The format `"Command exited with code 1\n<output>"` is clear and preserves the diagnostic value. This matches the error handling pattern specified in D-4.
+
+**Comparison with spec's complexity estimate:** The spec classifies `execute_command` as "Medium" at 80-280 lines and estimates ~80 lines. The scaffold is ~75 lines — at the low end. This tool is one of the cleanest migrations because `utils.executeShellCommand()` already encapsulates the complex shell infrastructure (process spawning, shell resolution, timeout enforcement, output buffering). The scaffold is essentially param validation + a single `utils.executeShellCommand()` call + result formatting.
