@@ -2391,3 +2391,238 @@ settings:
 **Risk: `encoding` parameter edge cases (low).** The built-in class casts `encoding` to `BufferEncoding` for `buf.toString()`. Node.js `Buffer.toString()` accepts common encodings (`utf-8`, `ascii`, `latin1`, `base64`, `hex`, etc.) and throws on invalid ones. The scaffold passes `params.encoding ?? "utf-8"` directly — same behavior. No special handling needed.
 
 **Risk: 50 MB size limit as magic number (low).** The 50 MB binary file size limit is hardcoded in the scaffold (matching the built-in class). Not exposed as a setting — this is a safety guard against OOM, not a user-tunable preference. Acceptable to hardcode.
+
+### `search_vault` — Feasibility: Moderate ✅
+
+**Source:** `src/tools/search-vault.ts` (355 lines total, ~250 lines of logic)
+
+**What the built-in class does:**
+1. Validates `query` param (exists, is string)
+2. Parses and clamps parameter defaults: `context_lines` (0–10, default 3), `limit` (1–200, default 20), `offset` (≥0, default 0), `file_pattern` (default `*.md`), `sort_by` (default `match_count`)
+3. Compiles `query` as a RegExp with `/gm` flags; returns error if invalid regex
+4. Collects candidate files via `getCandidateFiles()` — filters `app.vault.getFiles()` by path prefix and glob pattern
+5. Builds a backlink count map via `getBacklinkCounts()` — single O(n) pass over `app.metadataCache.resolvedLinks`
+6. Iterates candidate files, reads each via `app.vault.cachedRead()`, searches line-by-line via `searchFile()`
+7. Caps matches per file at `MAX_MATCHES_PER_FILE` (10), exposes `total_match_count` for the real count
+8. Resets `regex.lastIndex` between files (stateful `/g` flag)
+9. Sorts results via `sortFileResults()` by `match_count`, `backlinks`, or `modified` (descending)
+10. Applies file-level pagination (`offset`/`limit` slice)
+11. Returns structured `SearchResult` object: `{ total_matches, total_files, files: FileResult[] }`
+
+**Dependencies:**
+
+| Dependency | Extension equivalent | Available today? |
+|---|---|---|
+| `this.app` | `app` (injected) | ✅ |
+| `this.app.vault.getFiles()` | `app.vault.getFiles()` | ✅ |
+| `this.app.vault.cachedRead(file)` | `app.vault.cachedRead(file)` | ✅ |
+| `this.app.metadataCache.resolvedLinks` | `app.metadataCache.resolvedLinks` | ✅ |
+| `TFile` from `"obsidian"` | `obsidian.TFile` | ✅ |
+| `logger("SearchVaultTool")` | `utils.logger("search_vault")` | ✅ |
+
+**Settings:** None. Zero `NotorSettings` fields referenced. No per-extension or shared settings needed.
+
+**Return value mapping:**
+- The built-in returns a structured `SearchResult` object (`{ total_matches, total_files, files }`) wrapped in `{ success: true, result: SearchResult }`. The `UserToolAdapter.execute()` return-value mapper (manager.ts:109-113) handles objects correctly — `typeof returnValue === "object"` passes through as-is. Returning the `SearchResult` object directly from the scaffold will produce `{ success: true, result: { total_matches, total_files, files } }`.
+- For errors (missing query, invalid regex), the scaffold throws (adapter catches and wraps in `{ success: false, error }`).
+
+**Helper functions (4 to inline):**
+
+All helper logic is private methods on the class with no external consumers. They must be inlined as local functions in the scaffold:
+
+1. **`getCandidateFiles(searchPath, filePattern)`** (~25 lines) — Filters `app.vault.getFiles()` by path prefix and glob pattern. Uses `matchesGlob()` internally. Pure filtering logic — straightforward to inline.
+
+2. **`matchesGlob(filename, pattern)`** (~12 lines) — Converts a simple glob pattern (e.g., `*.md`) to regex by escaping special chars and replacing `*` with `.*`. Falls back to exact match on regex compilation failure. Used only by `getCandidateFiles()`.
+
+3. **`getBacklinkCounts()`** (~13 lines) — Builds `Map<string, number>` by iterating `app.metadataCache.resolvedLinks`. Single O(n) pass, no disk I/O. Self-contained.
+
+4. **`sortFileResults(results, sortBy)`** (~16 lines) — Sorts `FileResult[]` descending by `total_match_count`, `backlink_count`, or `modified` timestamp. Pure comparison logic.
+
+5. **`searchFile(content, regex, contextLines)`** (~35 lines) — Core search logic: splits content into lines, tests each against regex, builds context windows with `>` prefix for the matching line. Tracks matched line numbers to avoid duplicate context. Resets `regex.lastIndex` per line (stateful `/g`). This is the most substantial helper but still straightforward procedural code.
+
+**Total inlined helper size:** ~100 lines. Combined with main orchestration (~50 lines), the scaffold is ~150 lines.
+
+**`MAX_MATCHES_PER_FILE` constant:** Hardcoded as `10` in the built-in class. Inline as a local `const` in the scaffold. Not worth exposing as a setting — it's a response-size guard, not a user preference.
+
+**Scaffold code (estimated ~150 lines):**
+```ts
+const log = utils.logger("search_vault");
+
+const MAX_MATCHES_PER_FILE = 10;
+
+if (!params.query || typeof params.query !== "string") {
+  throw new Error("Missing required parameter: query");
+}
+
+const query = params.query as string;
+const searchPath = ((params.path as string | undefined) ?? "").trim();
+const contextLines = Math.max(0, Math.min(10, Math.floor((params.context_lines as number | undefined) ?? 3)));
+const filePattern = ((params.file_pattern as string | undefined) ?? "*.md").trim();
+const sortBy = ((params.sort_by as string | undefined) ?? "match_count") as "match_count" | "backlinks" | "modified";
+const limit = Math.max(1, Math.min(200, Math.floor((params.limit as number | undefined) ?? 20)));
+const offset = Math.max(0, Math.floor((params.offset as number | undefined) ?? 0));
+
+// Compile regex — treat as literal string if not valid regex
+let regex: RegExp;
+try {
+  regex = new RegExp(query, "gm");
+} catch (e: any) {
+  throw new Error(`Invalid search pattern: ${e.message ?? String(e)}`);
+}
+
+log.debug("Searching vault", { query, searchPath, contextLines, filePattern });
+
+// --- Helper: simple glob matcher ---
+function matchesGlob(filename: string, pattern: string): boolean {
+  const regexStr = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*");
+  try {
+    return new RegExp(`^${regexStr}$`, "i").test(filename);
+  } catch {
+    return filename === pattern;
+  }
+}
+
+// --- Helper: collect candidate files ---
+const allFiles = app.vault.getFiles();
+const candidates = allFiles.filter((file: any) => {
+  if (searchPath) {
+    const normalizedPath = searchPath.endsWith("/") ? searchPath : searchPath + "/";
+    if (!file.path.startsWith(normalizedPath) && file.path !== searchPath) return false;
+  }
+  if (filePattern && filePattern !== "*") {
+    if (!matchesGlob(file.name, filePattern)) return false;
+  }
+  return true;
+});
+
+// --- Helper: build backlink counts ---
+const backlinkCounts = new Map<string, number>();
+for (const [sourcePath, links] of Object.entries(app.metadataCache.resolvedLinks)) {
+  for (const targetPath of Object.keys(links as Record<string, number>)) {
+    if (targetPath !== sourcePath) {
+      backlinkCounts.set(targetPath, (backlinkCounts.get(targetPath) ?? 0) + 1);
+    }
+  }
+}
+
+// --- Helper: search a single file ---
+function searchFile(content: string, re: RegExp, ctxLines: number) {
+  const lines = content.split("\n");
+  const matches: { line: number; match: string; context: string }[] = [];
+  const matchedLineNumbers = new Set<number>();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    re.lastIndex = 0;
+    if (re.test(line)) {
+      if (matchedLineNumbers.has(i)) continue;
+      matchedLineNumbers.add(i);
+      const ctxStart = Math.max(0, i - ctxLines);
+      const ctxEnd = Math.min(lines.length - 1, i + ctxLines);
+      const parts: string[] = [];
+      for (let ci = ctxStart; ci <= ctxEnd; ci++) {
+        const prefix = ci === i ? ">" : " ";
+        parts.push(`${prefix} ${lines[ci] ?? ""}`);
+      }
+      matches.push({ line: i + 1, match: line.trim(), context: parts.join("\n") });
+    }
+  }
+  return matches;
+}
+
+// --- Main search loop ---
+const fileResults: any[] = [];
+let totalMatches = 0;
+
+for (const file of candidates) {
+  try {
+    const content = await app.vault.cachedRead(file);
+    const matches = searchFile(content, regex, contextLines);
+    if (matches.length > 0) {
+      const totalMatchCount = matches.length;
+      const cappedMatches = matches.slice(0, MAX_MATCHES_PER_FILE);
+      fileResults.push({
+        path: file.path,
+        matches: cappedMatches,
+        match_count: cappedMatches.length,
+        total_match_count: totalMatchCount,
+        backlink_count: backlinkCounts.get(file.path) ?? 0,
+        modified: new Date(file.stat.mtime).toISOString(),
+      });
+      totalMatches += totalMatchCount;
+    }
+  } catch (e: any) {
+    log.debug("Skipping unreadable file", { path: file.path, error: e.message ?? String(e) });
+  }
+  regex.lastIndex = 0;
+}
+
+// --- Sort ---
+const sorted = [...fileResults].sort((a, b) => {
+  switch (sortBy) {
+    case "backlinks": return b.backlink_count - a.backlink_count;
+    case "modified": return new Date(b.modified).getTime() - new Date(a.modified).getTime();
+    default: return b.total_match_count - a.total_match_count;
+  }
+});
+
+// --- Paginate and return ---
+const totalFiles = sorted.length;
+const paginated = sorted.slice(offset, offset + limit);
+
+log.debug("Search complete", { query, totalMatches, filesSearched: candidates.length, filesWithMatches: totalFiles, returned: paginated.length });
+
+return { total_matches: totalMatches, total_files: totalFiles, files: paginated };
+```
+
+**No new `utils` expansions needed.** All dependencies are already exposed. The tool uses only `app.vault`, `app.metadataCache`, and `utils.logger` — all part of the shared runtime since day one.
+
+**No `libs` or `obsidian` imports needed beyond `TFile`.** The scaffold uses `app.vault.getFiles()` which returns `TFile[]` — but the scaffold treats these as opaque objects (accessing `.path`, `.name`, `.stat.mtime`), so no explicit `TFile` import is required. `obsidian.TFile` is available if needed for type assertions, but not necessary in the stripped JS output.
+
+**YAML fence (unchanged from current scaffold):**
+```yaml
+params:
+  query:
+    type: string
+    description: "Regex pattern or text string to search for"
+  path:
+    type: string
+    description: "Directory to search within, relative to vault root."
+    default: ""
+    path_namespace: vault
+  context_lines:
+    type: number
+    description: "Number of surrounding lines to include with each match."
+    default: 3
+  file_pattern:
+    type: string
+    description: "Glob pattern to filter which files to search."
+    default: "*.md"
+  sort_by:
+    type: string
+    description: "Sort order for results: 'match_count', 'backlinks', or 'modified'."
+    enum:
+      - match_count
+      - backlinks
+      - modified
+    default: "match_count"
+  limit:
+    type: number
+    description: "Maximum number of files to return."
+    default: 20
+  offset:
+    type: number
+    description: "Number of files to skip for pagination."
+    default: 0
+```
+
+**Scaffold `scaffold()` call change:** Only needs the new 5th `code` parameter added. No `settings:` section in the YAML fence.
+
+**Risk: Regex `lastIndex` statefulness (low).** The `/g` flag makes RegExp stateful — `lastIndex` must be reset between files and between lines. The scaffold preserves both resets (per-line in `searchFile()` and per-file in the main loop). This is a 1:1 port of the built-in behavior; no behavioral change.
+
+**Risk: Large vault performance (low).** The scaffold reads each candidate file individually via `cachedRead()` — the same approach as the built-in class. `cachedRead()` uses Obsidian's in-memory file cache, so for already-cached files this is fast. For vaults with 10,000+ markdown notes, the main cost is the linear scan. This is unchanged from the built-in and acceptable per NFR-1.
+
+**Risk: `matchesGlob` regex injection (low).** The glob-to-regex conversion escapes all special regex characters except `*`. This matches the built-in behavior. Malicious glob patterns from the LLM could theoretically produce pathological regexes (ReDoS), but the pattern is tested only against short filenames, making catastrophic backtracking effectively impossible.
+
+**Comparison with spec's complexity estimate:** The spec classifies `search_vault` as "Complex" at 200-400 lines. The actual scaffold is ~150 lines — lower than the floor estimate. This is because `search_vault` has no external dependencies, no settings, no filesystem I/O beyond `cachedRead()`, and no library usage. All helpers are pure procedural code (filtering, sorting, line matching) that inline cleanly. The "Complex" classification was driven by the helper count (5 private methods), not by dependency complexity. In practice, this tool is closer to "Medium" — more code than `read_frontmatter` or `get_outlinks`, but structurally simpler than `fetch_webpage` or `read_file` because it has zero settings, zero library deps, and zero `utils` expansions.
