@@ -7,7 +7,10 @@
 
 ## Phase 1: Per-Conversation Session Isolation
 
-> Bug fix + architecture. Independently shippable. Fixes data corruption on mid-stream conversation switch.
+> Bug fix + architecture. Fixes data corruption on mid-stream conversation switch.
+> Split into 4 sub-phases: 1A (pure refactors), 1B (session core), 1C (background loop), 1D (UI/lifecycle).
+
+### Phase 1A — Pure Refactors
 
 ### Step 1a: Extract tool policy from dispatcher (pure refactor)
 
@@ -69,9 +72,11 @@ Changes `resolveEffectiveConfig()` from mutating shared state to returning a str
   - [ ] `responseLoop()` (line 1378): Destructure result, update `session.effectiveConfig` and `session.parsedConfigs`, call `updateDisplayConfig()` for displayed conversation
   - [ ] `_backgroundResponseLoop()` (multiple sites): Destructure result
   - [ ] `handleUserMessage()` (if called there): Destructure result
-  - [ ] `executeWorkflow()` (line 472+): Destructure result
+  - [ ] `executeWorkflow()` (line 472+): Destructure result. Full session creation addressed in Step 1d-workflow.
 
 - [ ] **Verify:** Inspector still shows correct config. Background workflow tool config still works. `activeWorkflowAssemblyResult` save/restore hack (lines 851-852, 1076) will be eliminated in Step 1e.
+
+### Phase 1B — Session Core
 
 ### Step 1c: Create `ConversationSession` class
 
@@ -244,6 +249,29 @@ This is the largest step. Replaces all shared-state reads in the response path w
 
 - [ ] **Enforce isolation invariant:** After all substitutions, verify `this.conversationManager` has ZERO reads inside `responseLoop`, `processStream`, `checkAndPerformCompaction`, and `dispatchAfterCompletionHooks`
 
+### Step 1d-workflow: Update `executeWorkflow` to use `ConversationSession`
+
+`executeWorkflow()` is the second caller of `responseLoop()` (at L602). It must also create a `ConversationSession` to match the new signature.
+
+- [ ] **Modify `executeWorkflow()` in `src/chat/orchestrator.ts` (line 472)**
+  - [ ] After creating conversation and adding user message (L574-578), before response loop:
+    - [ ] Create isolated `ConversationManager` (same pattern as `handleUserMessage`)
+    - [ ] Snapshot persona: `this.personaManager?.getActivePersona() ?? null` (already switched by L485-498)
+    - [ ] Snapshot provider: from L536 `providerType`
+    - [ ] Snapshot model: from L538 `modelId`
+    - [ ] Snapshot extended context: from L556 `providerConfig?.use_extended_context ?? false`
+    - [ ] Resolve initial config via `resolveEffectiveConfig(matchedRules, assemblyResult, pinnedPersona)`
+    - [ ] Create `ConversationSession` with `workflowAssembly: assemblyResult`
+  - [ ] **Remove** `this.activeWorkflowAssemblyResult = assemblyResult` at L598 -- assembly is now on the session
+  - [ ] Register session in `this.activeSessions`
+  - [ ] Store `session.responsePromise = this.responseLoop(currentMode, session)`
+  - [ ] Preserve hook override lifecycle in try/finally:
+    - [ ] `workflowHookOverrideManager.activate()` before `responseLoop` (keep at L589-594)
+    - [ ] `workflowHookOverrideManager.deactivate()` in finally block (keep at L607-608)
+    - [ ] Add session cleanup to finally: `session.setStatus()`, `this.activeSessions.delete()`, `setRespondingState(false)`
+
+### Phase 1C — Background Loop
+
 ### Step 1e: Update `_backgroundResponseLoop` to use sessions
 
 Removes the `activeWorkflowAssemblyResult` save/restore hack and uses `ConversationSession` instead.
@@ -258,7 +286,10 @@ Removes the `activeWorkflowAssemblyResult` save/restore hack and uses `Conversat
   - [ ] L909: `use_extended_context: this.getActiveUseExtendedContext()` -> `session.useExtendedContext`
   - [ ] L962-964: direct `this.effectiveToolConfig` read -> `session.effectiveConfig.tools[toolName]?.auto_approve ?? false`
   - [ ] L975: `dispatcher.dispatch()` -> pass `session.buildPolicyContext()` and `session.approvalCallback`
-  - [ ] Remove `this.activeWorkflowAssemblyResult` field from class (if no other consumers)
+  - [ ] Remove `this.activeWorkflowAssemblyResult` field from class (dead after Step 1d-workflow + 1e -- no remaining consumers)
+  - [ ] Clean up dead shared-state writes in `newConversation()` at L278-281: remove `this.activeParsedConfigs = []`, `this.effectiveToolConfig = null`, `this.activeWorkflowAssemblyResult = null`, `this.dispatcher.setEffectiveToolConfig(null)` (all now passed per-session, not stored on orchestrator)
+
+### Phase 1D — UI Restoration & Lifecycle
 
 ### Step 1f: Display-restore persona + model on `switchConversation`
 
@@ -543,7 +574,7 @@ Audit all callbacks/listeners in `wireView()` and `ChatOrchestrator` constructor
 | `src/chat/conversation-session.ts` | 1c | **NEW** -- `ConversationSession` class |
 | `src/chat/dispatcher.ts` | 1a, 4e | Optional `policyCtx` + `approvalCallback` on `dispatch()`; remove global fallback (P4) |
 | `src/chat/tool-orchestration.ts` | 1a | Thread `policyCtx` + `approvalCallback` through batch execution |
-| `src/chat/orchestrator.ts` | 1b-1h, 2a-2c | Pure `resolveEffectiveConfig`, session creation/management, sync-back, display-restore, inspector, destroy |
+| `src/chat/orchestrator.ts` | 1b-1h (incl. 1d-workflow), 2a-2c | Pure `resolveEffectiveConfig`, session creation/management (handleUserMessage + executeWorkflow + background), sync-back, display-restore, inspector, destroy, dead shared-state cleanup |
 | `src/chat/conversation.ts` | 2b | `{ silent?: boolean }` option on `loadConversation()` |
 | `src/chat/history.ts` | -- | No changes (already has `updateConversationHeader`, `enqueueWrite`) |
 | `src/personas/persona-manager.ts` | 1f | Add `getPersonaByName()` read-only lookup |

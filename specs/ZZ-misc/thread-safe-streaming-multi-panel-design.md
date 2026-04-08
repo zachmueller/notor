@@ -120,7 +120,11 @@ Shared singletons (infrastructure only):
 
 **Goal:** In-flight LLM responses always write to the correct JSONL file regardless of UI navigation. All per-conversation state is scoped to a `ConversationSession`. Tool policy enforcement is pure (no shared mutable state). Loading a conversation restores its persona and model.
 
-**Scope:** This phase fixes the data corruption bug, eliminates the `resolveEffectiveConfig` concurrency hazard (former Phase 0), and ships the per-conversation state model. Independently shippable.
+**Scope:** This phase fixes the data corruption bug, eliminates the `resolveEffectiveConfig` concurrency hazard (former Phase 0), and ships the per-conversation state model. Split into 4 sub-phases for manageability:
+- **Phase 1A** (Steps 1a-1b): Pure refactors — extract tool policy, purify `resolveEffectiveConfig`. No behavioral change.
+- **Phase 1B** (Steps 1c-1d, 1d-workflow): Session core — create `ConversationSession`, wire `handleUserMessage()` and `executeWorkflow()`, all shared-state substitutions in response path.
+- **Phase 1C** (Step 1e): Background loop — migrate `_backgroundResponseLoop` to sessions, remove `activeWorkflowAssemblyResult` save/restore hack and dead shared-state fields.
+- **Phase 1D** (Steps 1f-1h): UI restoration and lifecycle — persona/model display on conversation switch, inspector scoping, plugin deactivation cleanup.
 
 #### 4.1.1 Step 1a: Extract tool policy from dispatcher (pure refactor)
 
@@ -499,15 +503,69 @@ Completed sessions are removed immediately — no grace period. Switch-back afte
 | L1458 | `this.calculateCost(in, out)` | `this.calculateCost(in, out, session.modelId)` |
 | L1489 | `this.calculateCost(in, out)` | `this.calculateCost(in, out, session.modelId)` |
 
-*Other global reads in `checkAndPerformCompaction` (2 sites):*
+*Other global reads in `checkAndPerformCompaction` (3 sites):*
 | Line | Current | Substitution |
 |------|---------|-------------|
 | L1760 | `this.getActiveModelId()` | `session.modelId` |
+| L1762 | `this.getActiveUseExtendedContext()` | `session.useExtendedContext` |
 | L1798 | `this.providerRegistry.getActiveProvider()` | `this.providerRegistry.getProvider(session.providerType)` |
+
+#### 4.1.4a Step 1d-workflow: Update `executeWorkflow` to use `ConversationSession`
+
+`executeWorkflow()` (L472) is the second caller of `responseLoop()` (at L602). It must also create a `ConversationSession` to match the new `responseLoop(mode, session)` signature.
+
+**Current shared-state patterns in `executeWorkflow()` that sessions must fix:**
+- L544: `this.personaManager?.getActivePersona()` — global persona read (snapshot as `session.pinnedPersona`)
+- L536-538: `this.providerRegistry.getActiveType()` / `getConfig()` — global provider/model read (snapshot as `session.providerType` / `session.modelId`)
+- L598: `this.activeWorkflowAssemblyResult = assemblyResult` — shared-state mutation (pass via `session.workflowAssembly` instead)
+
+**Changes to `executeWorkflow()` (~L472):**
+
+After creating the conversation and adding the user message (L574-578), before starting the response loop:
+
+1. Create isolated `ConversationManager` (same pattern as `handleUserMessage` — copy from `this.conversationManager`)
+2. Snapshot persona: the persona was already switched at L485-498, so `this.personaManager?.getActivePersona()` reflects the workflow's persona
+3. Snapshot provider/model: already resolved at L536-538
+4. Snapshot `useExtendedContext`: from `providerConfig?.use_extended_context ?? false` (already computed at L556)
+5. Resolve initial config via `resolveEffectiveConfig(matchedRules, assemblyResult, pinnedPersona)`
+6. Create `ConversationSession` with `workflowAssembly: assemblyResult`
+7. **Remove** `this.activeWorkflowAssemblyResult = assemblyResult` at L598 — assembly is now on the session
+8. Register in `this.activeSessions`
+9. Store `session.responsePromise = this.responseLoop(currentMode, session)`
+
+**Hook override lifecycle preservation:**
+
+The existing hook override activation (L589-594) and deactivation (L607-608) must be preserved in the session's finally block:
+
+```typescript
+try {
+  // G-006: Activate workflow-scoped hook overrides before the first LLM call
+  if (workflow.hooks && this.workflowHookOverrideManager) {
+    this.workflowHookOverrideManager.activate(conversation.id, workflow.hooks);
+  }
+  session.responsePromise = this.responseLoop(currentMode, session);
+  await session.responsePromise;
+} catch (e) {
+  session.setStatus("errored");
+  this.handleError(e);
+} finally {
+  // G-005: Deactivate workflow-scoped hook overrides on all exit paths
+  if (this.workflowHookOverrideManager) {
+    this.workflowHookOverrideManager.deactivate(conversation.id);
+  }
+  if (session.status === "running" || session.status === "waiting_approval") {
+    session.setStatus("completed");
+  }
+  this.activeSessions.delete(session.conversationId);
+  this.view?.setRespondingState(false);
+}
+```
 
 #### 4.1.5 Step 1e: Update `_backgroundResponseLoop` to use sessions
 
 The background loop currently uses a save/restore hack for `activeWorkflowAssemblyResult` (L851-852, L1076). With sessions, this goes away.
+
+After all callers of `responseLoop` and `_backgroundResponseLoop` use sessions, the `activeWorkflowAssemblyResult` field on the orchestrator becomes dead code. Remove it along with the shared-state cleanup in `newConversation()` at L278-281 (`this.activeParsedConfigs`, `this.effectiveToolConfig`, `this.activeWorkflowAssemblyResult`, `this.dispatcher.setEffectiveToolConfig(null)`).
 
 **Changes:**
 - Remove L850-852 (`previousAssemblyResult` save) and L1076 (restore)
@@ -660,7 +718,7 @@ async destroy(timeoutMs: number = 2000): Promise<void> {
 - `src/chat/conversation-session.ts` — **NEW**: `ConversationSession` class (no `lastDisplayedIndex` — sync-back uses full replace)
 - `src/chat/dispatcher.ts` — `dispatch()` gains optional `policyCtx` + `approvalCallback` params
 - `src/chat/tool-orchestration.ts` — `executeToolBatches()`, `safeDispatch()`, `runConcurrentBatch()` thread `policyCtx` + `approvalCallback`
-- `src/chat/orchestrator.ts` — `resolveEffectiveConfig()` (pure signature + body, return type changes from `ToolDefinition[]` to `{ effective, toolDefinitions, parsedConfigs }`), `handleUserMessage()` (session creation, stores `responsePromise` on session, snapshots `useExtendedContext`, header dirty-check + update), `responseLoop()` (uses session — see exhaustive shared-state substitution table in Step 1d), `processStream()` (session-aware view guarding via view-resolver), `checkAndPerformCompaction(session)` (uses session for conversation, model, extended context, provider, and view), `calculateCost()` (add optional `modelId` parameter with fallback to global), `dispatchAfterCompletionHooks()` (accept `conversationId` or session — no longer reads shared `conversationManager`), `_backgroundResponseLoop()` (uses session, removes save/restore hack), `switchConversation()` (persona+model restoration with display-AND-use semantics, display config update, isResponding reset, abort controller decoupling, full-replace sync-back for active sessions), `updateDisplayConfig()` helper, `getViewForSession()` helper, `getDisplayedConversation()` helper, `activeSessions` map, `destroy()` async with timeout
+- `src/chat/orchestrator.ts` — `resolveEffectiveConfig()` (pure signature + body, return type changes from `ToolDefinition[]` to `{ effective, toolDefinitions, parsedConfigs }`), `handleUserMessage()` (session creation, stores `responsePromise` on session, snapshots `useExtendedContext`, header dirty-check + update), `executeWorkflow()` (session creation with `workflowAssembly`, removes `this.activeWorkflowAssemblyResult` mutation, preserves hook override lifecycle), `responseLoop()` (uses session — see exhaustive shared-state substitution table in Step 1d), `processStream()` (session-aware view guarding via view-resolver), `checkAndPerformCompaction(session)` (uses session for conversation, model, extended context, provider, and view), `calculateCost()` (add optional `modelId` parameter with fallback to global), `dispatchAfterCompletionHooks()` (accept `conversationId` or session — no longer reads shared `conversationManager`), `_backgroundResponseLoop()` (uses session, removes save/restore hack, removes dead `activeWorkflowAssemblyResult` field and `newConversation()` shared-state cleanup at L278-281), `switchConversation()` (persona+model restoration with display-AND-use semantics, display config update, isResponding reset, abort controller decoupling, full-replace sync-back for active sessions), `updateDisplayConfig()` helper, `getViewForSession()` helper, `getDisplayedConversation()` helper, `activeSessions` map, `destroy()` async with timeout
 - `src/personas/persona-manager.ts` — add `getPersonaByName(name: string): Promise<Persona | null>` read-only lookup (calls `getDiscoveredPersonas()`, finds by name)
 - `src/ui/chat-view.ts` — decouple `AbortController` from view (session owns its own), add `updateProviderDisplay()`, `updateModelDisplay()` **NEW** display-only methods for conversation switch restoration (must update UI selector state without triggering global provider/model switch callbacks; `updatePersonaLabel()` already exists at L492)
 - `src/main.ts` — extend picker-change callbacks in `wireView()` to also call `historyManager.updateConversationHeader()` when persona/provider/model changes while viewing a conversation; extend `onModeToggle` callback to propagate mode changes to active sessions
@@ -1031,7 +1089,7 @@ view.setOnOpenInNewTab((filename: string) => {
 | Tool dispatcher contention | Two panels both need tool approval simultaneously | **Resolved in Phase 1 (Step 1a/1d).** Each `ConversationSession` owns its approval callback, passed per-`dispatch()` call. No global `setApprovalCallback()`. |
 | Persona state is global | Changing persona mid-stream affects in-flight sessions | **Resolved in Phase 1 (Step 1d).** Active persona snapshotted at session creation as `session.pinnedPersona`. Provider type and model ID also snapshotted as `session.providerType` and `session.modelId`. Mid-stream persona/provider changes don't affect in-flight sessions. `resolveEffectiveConfig()` accepts persona as a parameter — not read from global `PersonaManager`. |
 | `resolveEffectiveConfig` concurrency | Two concurrent sessions interleave tool config resolution, producing inconsistent state | **Resolved in Phase 1 (Steps 1a-1b).** `resolveEffectiveConfig()` is pure — returns results without mutating shared state. Policy enforcement is a pure function per-dispatch. Each session owns its resolved config. No shared mutable `effectiveToolConfig` on dispatcher. |
-| `activeWorkflowAssemblyResult` race | Background loop save/restore hack not concurrent-safe | **Resolved in Phase 1 (Step 1e).** `resolveEffectiveConfig()` accepts `workflowAssembly` as parameter. Background session passes its assembly directly. Save/restore hack eliminated. |
+| `activeWorkflowAssemblyResult` race | Background loop save/restore hack not concurrent-safe; `executeWorkflow()` also mutates the shared field | **Resolved in Phase 1 (Steps 1d-workflow + 1e).** `resolveEffectiveConfig()` accepts `workflowAssembly` as parameter. Both `executeWorkflow()` and background sessions pass assembly directly via the session. `activeWorkflowAssemblyResult` field removed after all callers migrated. |
 | Provider rate limits | Multiple concurrent conversations hit API rate limits | Not architecturally addressed — existing `RATE_LIMITED` error handling surfaces a Notice to the user. |
 | Memory pressure | Multiple ConversationManagers holding message arrays | Each manager only holds messages for one conversation. Lightweight compared to the LLM context window. |
 | Stale UI on return | User switches back to a conversation that streamed in the background — may not see latest messages | **Resolved in Phase 2 (Step 2.2).** Full replace from session's in-memory message array (`clearMessages()` + re-render). Same pattern as existing `switchConversation()`. Compaction-safe — no index tracking. JSONL reload for completed sessions without an active session. |
@@ -1052,13 +1110,23 @@ view.setOnOpenInNewTab((filename: string) => {
 ## 6. Implementation Order & Dependencies
 
 ```
-Phase 1 (per-conversation session isolation — bug fix + architecture)
-  ├── Step 1a: Extract policy from dispatcher (pure refactor, no behavior change)
-  ├── Step 1b: Make resolveEffectiveConfig pure (pure refactor)
+Phase 1A (pure refactors — no behavior change)
+  ├── Step 1a: Extract policy from dispatcher
+  └── Step 1b: Make resolveEffectiveConfig pure
+    ↓
+Phase 1B (session core — fixes the data corruption bug)
   ├── Step 1c: Create ConversationSession class
-  ├── Step 1d: Update responseLoop to use sessions (includes activeSessions map,
-  │            duplicate-send guard, mode toggle propagation)
-  ├── Step 1e: Update _backgroundResponseLoop to use sessions
+  ├── Step 1d: Update responseLoop + handleUserMessage to use sessions
+  │            (activeSessions map, duplicate-send guard, mode toggle propagation,
+  │             50+ shared-state substitutions)
+  └── Step 1d-workflow: Update executeWorkflow to use sessions
+                         (workflow assembly, hook overrides, persona snapshot)
+    ↓
+Phase 1C (background loop migration)
+  └── Step 1e: Update _backgroundResponseLoop to use sessions
+               (remove save/restore hack, clean up dead shared-state fields)
+    ↓
+Phase 1D (UI restoration + lifecycle)
   ├── Step 1f: JSONL persona + model restoration + header mutation on change
   ├── Step 1g: Inspector display-conversation scoping
   └── Step 1h: Session cleanup on plugin deactivation
@@ -1073,8 +1141,12 @@ Phase 2 (session registry enhancements + sync-back)
 ```
 
 - **Phase 0 is eliminated.** The `resolveEffectiveConfig` concurrency investigation is resolved: Steps 1a-1b make config resolution pure and tool policy a per-call function. No shared mutable config state remains.
-- **Phase 1** is independently shippable. Steps 1a-1b are pure refactors (backward compatible, can be verified independently). Steps 1c-1e fix the data corruption bug. Step 1d includes the `activeSessions` map, duplicate-send guard, and mode toggle propagation to active sessions. Step 1f adds persona/model restoration + header mutation on change. Step 1g scopes the inspector. Step 1h handles plugin deactivation. Step 1i (per-server MCP queue) deferred to Phase 4 — not needed until multi-panel.
-- **All open design questions are resolved:** Sync-back uses full replace with `silent: true` on `loadConversation` (no index tracking, no spurious header writes). Header updates only when persona/provider/model actually changes. Picker changes also update the conversation header. `processStream` uses a view-resolver function re-resolved per chunk. `checkAndPerformCompaction` accepts the full session. `ConversationSession` pins `useExtendedContext` alongside `providerType` and `modelId`. `calculateCost()` accepts an optional `modelId` parameter for session-aware pricing. `dispatchAfterCompletionHooks()` accepts session/conversationId to avoid reading the shared manager. Step 1d includes an exhaustive shared-state access enumeration table (14 `this.conversationManager`, 5 compaction, 17+2 `this.view`, 10 other global reads) as an implementation checklist.
+- **Phase 1 is split into 4 sub-phases** for manageability. Phase 1A is a prerequisite for all subsequent sub-phases. Phase 1B depends on 1A. Phase 1C depends on 1B. Phase 1D depends on 1B. All sub-phases are completed before moving to Phase 2.
+  - **Phase 1A** (Steps 1a-1b): Pure refactors — no behavioral change, verifiable by running existing tests.
+  - **Phase 1B** (Steps 1c, 1d, 1d-workflow): Session core — creates `ConversationSession`, wires both `handleUserMessage()` and `executeWorkflow()` (the two callers of `responseLoop()`), performs all 50+ shared-state substitutions. This is the core bug fix.
+  - **Phase 1C** (Step 1e): Background loop — migrates `_backgroundResponseLoop` to sessions, removes the `activeWorkflowAssemblyResult` save/restore hack, cleans up dead shared-state fields (`activeWorkflowAssemblyResult`, `newConversation()` L278-281 cleanup writes).
+  - **Phase 1D** (Steps 1f-1h): UI restoration and lifecycle — persona/model display on conversation switch, inspector scoping, plugin deactivation cleanup. Per-server MCP queue deferred to Phase 4 — not needed until multi-panel.
+- **All open design questions are resolved:** Sync-back uses full replace with `silent: true` on `loadConversation` (no index tracking, no spurious header writes). Header updates only when persona/provider/model actually changes. Picker changes also update the conversation header. `processStream` uses a view-resolver function re-resolved per chunk. `checkAndPerformCompaction` accepts the full session. `ConversationSession` pins `useExtendedContext` alongside `providerType` and `modelId`. `calculateCost()` accepts an optional `modelId` parameter for session-aware pricing. `dispatchAfterCompletionHooks()` accepts session/conversationId to avoid reading the shared manager. Step 1d includes an exhaustive shared-state access enumeration table (14 `this.conversationManager`, 5 compaction, 17+2 `this.view`, 11 other global reads) as an implementation checklist.
 - **Phase 2** builds on Phase 1 and is required for Phases 3-5. Adds public session accessors, sync-back (silent `loadConversation`), and deletion guard.
 - **Phase 4 scope expanded:** Includes per-panel orchestrators, per-orchestrator provider/model fields (replaces global ProviderRegistry mutation), per-server MCP dispatch queue (moved from Phase 1), and global listener audit (Section 4.4.8). The tool approval routing refactor is already handled by Phase 1 Steps 1a/1d.
 - **Phases 3, 4, 5** can be developed in parallel after Phase 2.
@@ -1085,13 +1157,13 @@ Phase 2 (session registry enhancements + sync-back)
 
 ### Phase 1 Verification
 
-**Steps 1a-1b (pure refactors):**
+**Phase 1A — Steps 1a-1b (pure refactors):**
 1. Run existing test suite — all pass (no behavior change)
 2. Manually verify tool dispatch still respects enabled/disabled, auto-approve, path constraints
 3. Verify inspector still shows correct config for single-conversation case
 4. Verify background workflow tool config resolution still works
 
-**Steps 1c-1e (session isolation — critical bug fix):**
+**Phase 1B — Steps 1c-1d, 1d-workflow (session core — critical bug fix):**
 1. Start a conversation, send a message that triggers a long LLM response
 2. While streaming, switch to a different conversation (or create a new one)
 3. Verify: the input area is unlocked in the new conversation (isResponding reset)
@@ -1101,13 +1173,19 @@ Phase 2 (session registry enhancements + sync-back)
 7. Verify: new conversation's JSONL is clean (no stray messages from the first response)
 8. Switch back to original conversation — verify all messages render correctly
 9. Verify: no stray DOM elements from the background response leaked into the new conversation's view
-10. Start a background workflow while a foreground conversation is streaming — verify both use correct tool configs (no cross-contamination)
-11. Try to send a second message to the same conversation while it's streaming — verify "already processing" notice (duplicate-send guard)
-12. While streaming, toggle plan→act mode — verify the next tool dispatch respects act mode (mode propagation)
-13. While streaming, navigate away — verify streaming text does NOT appear in the new conversation's view (processStream view-resolver)
-14. Trigger compaction mid-stream — verify it uses the session's model ID for token threshold, not the global active model
+10. Try to send a second message to the same conversation while it's streaming — verify "already processing" notice (duplicate-send guard)
+11. While streaming, toggle plan→act mode — verify the next tool dispatch respects act mode (mode propagation)
+12. While streaming, navigate away — verify streaming text does NOT appear in the new conversation's view (processStream view-resolver)
+13. Execute a workflow — verify it creates a session, uses correct tool config, preserves hook overrides, and completes cleanly
+14. Execute a workflow while a foreground conversation is streaming — verify both use correct tool configs (no cross-contamination via `activeWorkflowAssemblyResult`)
 
-**Step 1f (JSONL restoration):**
+**Phase 1C — Step 1e (background loop):**
+1. Start a background workflow while a foreground conversation is streaming — verify both use correct tool configs (no cross-contamination)
+2. Trigger compaction mid-stream — verify it uses the session's model ID for token threshold, not the global active model
+
+**Phase 1D — Steps 1f-1h (UI restoration + lifecycle):**
+
+*Step 1f (JSONL restoration):*
 1. Create conversation with persona "researcher" active
 2. Switch to a different conversation (persona changes/clears)
 3. Switch back to the first conversation
@@ -1115,7 +1193,7 @@ Phase 2 (session registry enhancements + sync-back)
 5. Load a conversation whose persona no longer exists — verify graceful fallback (keeps current persona, logs warning)
 6. Load a conversation from a provider that's no longer configured — verify graceful fallback
 
-**Step 1g (inspector):**
+*Step 1g (inspector):*
 1. Open inspector while a conversation is active — shows correct config
 2. Switch conversations — inspector still shows config for displayed conversation
 3. Start streaming, switch away, switch back — inspector shows session's current config

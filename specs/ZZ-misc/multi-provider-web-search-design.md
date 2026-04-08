@@ -77,7 +77,7 @@ The `web_search` scaffold remains a thin coordinator: validate input → call `u
 
 ### 4.1 Interface
 
-**File:** `src/tools/web-search/providers/provider.ts`
+**File:** `src/web-search/providers/provider.ts`
 
 ```typescript
 import type { App } from "obsidian";
@@ -197,7 +197,7 @@ The queue system has two layers: a generic `TaskLaneQueue` primitive (reusable b
 
 ### 5.2 WebSearchQueue — Search-Specific Layer
 
-**File:** `src/tools/web-search/queue.ts`
+**File:** `src/web-search/queue.ts`
 
 The `WebSearchQueue` is a thin domain-specific layer on top of `TaskLaneQueue`. It handles provider selection, round-robin, and fallback — but delegates all per-lane serialization and delay enforcement to the shared `TaskLaneQueue`.
 
@@ -314,7 +314,7 @@ Result: Tavily fires 3 requests immediately.
 
 ## 6. Provider Registry
 
-**File:** `src/tools/web-search/provider-registry.ts`
+**File:** `src/web-search/provider-registry.ts`
 
 A simple map from `WebSearchProviderType` to `SearchProvider` instance. **This is distinct from the LLM `ProviderRegistry`** in `src/providers/index.ts` — it's search-specific with a much smaller scope.
 
