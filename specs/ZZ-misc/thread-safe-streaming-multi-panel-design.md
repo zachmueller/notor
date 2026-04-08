@@ -32,10 +32,10 @@ Notor's `ChatOrchestrator` uses a single `ConversationManager` with one `activeC
 | Session tracking | `ResponseSession` class + `Map<string, ResponseSession>` on orchestrator | Lightweight wrapper capturing conversation ID, abort controller, status. Registry enables activity indicator and prevents duplicate requests to the same conversation. |
 | UI ↔ streaming decoupling | `this.conversationManager` becomes "UI display manager" only | The main orchestrator's `conversationManager` tracks what's *shown* in the panel. Response loops use isolated managers. Switching the display manager has no effect on in-flight responses. |
 | Activity indicator | Extend existing `WorkflowActivityIndicator` | Reuse the badge + dropdown pattern rather than adding a separate icon. Combined count: workflows + foreground sessions. |
-| Multi-panel approach | Register secondary view type with per-panel orchestrator | Each panel gets its own `ChatOrchestrator` (lightweight — shares expensive singletons like `ProviderRegistry`, `HistoryManager`, `SystemPromptBuilder`). Own `ConversationManager` for independent state. |
+| Multi-panel approach | Reuse `CHAT_VIEW_TYPE` with per-panel orchestrator | Same view type, differentiated by `{ isSecondary: true }` constructor option. Each panel gets its own `ChatOrchestrator` (lightweight — shares expensive singletons like `ProviderRegistry`, `HistoryManager`, `SystemPromptBuilder`). Own `ConversationManager` for independent state. Avoids maintaining two view registrations and divergent wire-up paths. |
 | Secondary panel simplification | Reduced header toolbar | Only: "New conversation", "Settings", "Conversation history". Omits: workflow indicator, MCP status, persona picker, mode toggle. |
-| Sync-back on return | Reload conversation from JSONL | When user switches back to a conversation that was streaming in the background, reload from disk (which has the latest messages). Live re-attachment of the stream to the UI is a v2 optimization. |
-| Tool approval routing | Per-invocation approval callback | The dispatcher accepts an optional approval callback per `dispatch()` call, allowing each panel/session to route approval prompts to its own view. |
+| Sync-back on return | In-memory diff from session manager | When user switches back to a conversation with an active session, diff the session manager's message array against the UI manager and append only new messages. Falls back to JSONL reload for completed sessions without an active session. Avoids expensive disk I/O during active streaming. |
+| Tool approval routing | Required per-invocation approval callback | Remove global `setApprovalCallback()`. The dispatcher requires an approval callback per `dispatch()` call — no global fallback. Each panel/session passes its own view-bound callback. |
 
 ---
 
@@ -46,8 +46,8 @@ Notor's `ChatOrchestrator` uses a single `ConversationManager` with one `activeC
 ```
 ChatView (UI)
     ↕ callbacks
-ChatOrchestrator (singleton)
-    → ConversationManager (singleton, mutable activeConversation)
+ChatOrchestrator (one per panel)
+    → ConversationManager (instance-per-orchestrator, mutable activeConversation)
         → onMessageAdded → HistoryManager.appendMessage(getActiveConversation(), msg)
 ```
 
@@ -156,6 +156,10 @@ After the existing conversation/model guards and before `responseLoop()`:
 6. Pass the session's `conversationManager` into `responseLoop()`
 
 ```typescript
+// Snapshot active persona at session start so mid-stream persona changes
+// don't affect this response (same isolation principle as conversation state)
+const pinnedPersona = this.personaManager?.getActivePersona() ?? null;
+
 // Create isolated manager for this response (same pattern as executeBackgroundWorkflow:710-724)
 const sessionManager = new ConversationManager(mode);
 sessionManager.setOnMessageAdded(async (message) => {
@@ -180,36 +184,49 @@ sessionManager.loadConversation(currentConv, [...currentMsgs]);
 ```typescript
 private async responseLoop(
   mode: ConversationMode,
-  sessionManager: ConversationManager  // NEW parameter
+  sessionManager: ConversationManager,  // NEW — isolated conversation state
+  pinnedPersona: Persona | null         // NEW — snapshot at session start
 ): Promise<void>
 ```
 
-All internal references change from `this.conversationManager` to `sessionManager`:
+Inside the loop, replace `this.personaManager?.getActivePersona() ?? null` (line 1386) with `pinnedPersona`. This ensures the system prompt stays consistent across multi-turn tool loops even if the user changes persona mid-stream.
+
+All internal `this.conversationManager` references change to `sessionManager`:
 - `sessionManager.getMessages()` (line 1400)
-- `sessionManager.getActiveConversation()` (line 1408, 1466, 1493, 1527)
-- `sessionManager.addMessage()` (lines 1453, 1484, 1511, etc.)
-- `sessionManager.addTokens()` (sub-agent token rollup)
+- `sessionManager.getActiveConversation()` (line 1408, 1466, 1493, 1527, 1638, 1661)
+- `sessionManager.addMessage()` (lines 1453, 1484, 1511, 1619, 1687, etc.)
+- `sessionManager.addTokens()` (sub-agent token rollup, line 1630)
+- `checkAndPerformCompaction()` (line 1368) — must accept `sessionManager` parameter since it reads conversation/messages from `this.conversationManager` internally (line 1755-1759)
+- Hook dispatch calls: `dispatchOnToolCall` (line 1527) and `dispatchOnToolResult` (line 1638) both resolve conversation ID via `this.conversationManager.getActiveConversation()` — must use `sessionManager` instead
+
+**View render guarding:** `responseLoop` also makes ~25 `this.view?.` calls for rendering (placeholders, tool calls, tool results, token footers, etc.). When the user navigates away mid-stream, these would render into the wrong conversation's DOM. Add a conversation-match guard:
+
+```typescript
+/** Returns the view only if it's currently displaying this session's conversation. */
+private getViewForSession(sessionManager: ConversationManager): NotorChatView | undefined {
+  const sessionConvId = sessionManager.getActiveConversation()?.id;
+  const displayConvId = this.conversationManager.getActiveConversation()?.id;
+  return sessionConvId === displayConvId ? this.view : undefined;
+}
+```
+
+All `this.view?.` calls inside `responseLoop` change to `this.getViewForSession(sessionManager)?.`. When the user navigates away, this returns `undefined` and render calls become no-ops. Data writes (via `sessionManager`) continue unaffected. When the user navigates back, subsequent loop iterations pick up the view again.
 
 **`switchConversation()` (line 356):**
 
-No changes needed to abort logic — switching just replaces the UI display manager's state. In-flight sessions continue on their isolated managers.
+In-flight sessions continue on their isolated managers, but the UI state must be reset for the new conversation:
 
-**Important:** The user message must be added to BOTH managers:
-- `this.conversationManager` — so it renders in the UI immediately
-- `sessionManager` — so the LLM response loop has it in context
+1. **Reset `isResponding`:** Call `this.view?.setRespondingState(false)` so the input area is unlocked for the new conversation. Without this, `handleSend()` (line 1166) returns early due to the `isResponding` guard, blocking all input until the old response finishes.
+2. **Decouple AbortController from the view:** The `ResponseSession` owns its own `AbortController` (not created via `this.view?.createAbortController()`). The session creates `new AbortController()` directly. The view's stop button must target the *current session's* controller:
+   - When switching TO a conversation with an active session (Phase 2), wire the view's stop button to `session.abortController.abort()`
+   - When switching TO a conversation without an active session, the stop button is hidden (responding state is false)
 
-Actually, since `sessionManager` is loaded from a snapshot that was taken BEFORE the user message was added, we need to add the user message to `sessionManager` instead. The UI rendering is handled separately via `this.view?.renderUserMessage()`. So the flow becomes:
-
-1. Snapshot conversation + messages into `sessionManager`
-2. Add user message to `sessionManager` (for LLM context + JSONL persistence)
-3. Add user message to `this.conversationManager` (for UI display only — but this also triggers `onMessageAdded` which writes to JSONL)
-
-Wait — this would double-write. Better approach: add the user message to `this.conversationManager` first (which persists it via its callback), THEN snapshot into `sessionManager` (which now includes the user message). The session manager's `onMessageAdded` only fires for NEW messages added during the response loop.
-
-**Revised flow:**
-1. Add user message to `this.conversationManager` (persists to JSONL, renders in UI)
+**Message flow:**
+1. Add user message to `this.conversationManager` (persists to JSONL via its `onMessageAdded` callback, renders in UI via `renderUserMessage()`)
 2. Snapshot conversation + messages (now including the user message) into `sessionManager`
 3. Run `responseLoop(mode, sessionManager)` — all assistant/tool messages go through `sessionManager`
+
+The session manager's `onMessageAdded` only fires for NEW messages added during the response loop, avoiding double-writes.
 
 #### 4.1.3 Handling `_backgroundResponseLoop` unification
 
@@ -218,7 +235,8 @@ The existing `_backgroundResponseLoop` (line 839) already uses a passed-in `Conv
 #### 4.1.4 Files modified
 
 - `src/chat/response-session.ts` — NEW
-- `src/chat/orchestrator.ts` — `handleUserMessage()`, `responseLoop()` signature + body, tool dispatch section
+- `src/chat/orchestrator.ts` — `handleUserMessage()` (session manager creation, persona snapshot), `responseLoop()` (signature + body: `sessionManager` param, `pinnedPersona` param, `getViewForSession()` guard on all view calls), `checkAndPerformCompaction()` (accept session manager param), `switchConversation()` (reset `isResponding`, decouple abort controller)
+- `src/ui/chat-view.ts` — decouple `AbortController` from view (stop button targets session's controller)
 
 ---
 
@@ -254,10 +272,13 @@ hasActiveSession(conversationId: string): boolean {
 
 **File:** `src/chat/orchestrator.ts` — `switchConversation()`
 
-When switching to a conversation:
-1. Load from `HistoryManager` as normal (gets latest JSONL including any in-flight writes)
-2. If `this.activeSessions.has(conversation.id)`, set `this.view?.setRespondingState(true)` to show the loading indicator
-3. Register a one-time callback on the session's `onStatusChange` to call `this.view?.setRespondingState(false)` when it completes
+When switching to a conversation that has an active session, use the session's in-memory state instead of reloading from JSONL:
+
+1. Check `this.activeSessions.has(conversation.id)`
+2. **If active session exists:** Diff the session manager's messages against the UI manager's messages. Append only new messages (those added since the snapshot) to the UI manager and render them. This avoids re-parsing JSONL and preserves any in-progress rendering state.
+3. Set `this.view?.setRespondingState(true)` and wire the stop button to `session.abortController`
+4. Register a one-time callback on the session's `onStatusChange` to call `this.view?.setRespondingState(false)` when it completes
+5. **If no active session:** Load from `HistoryManager` as normal (standard JSONL load for completed conversations)
 
 #### 4.2.3 Files modified
 
@@ -334,13 +355,11 @@ Wire the session's `onStatusChange` to trigger `indicator.update()` (or have the
 
 **Goal:** Allow opening additional simplified Notor chat leaves.
 
-#### 4.4.1 Secondary view type
+#### 4.4.1 Secondary panel option (same view type)
 
 **File:** `src/ui/chat-view.ts`
 
-```typescript
-export const CHAT_SECONDARY_VIEW_TYPE = "notor-chat-view-secondary";
-```
+Reuse the existing `CHAT_VIEW_TYPE` ("notor-chat-view"). No new view type registration needed.
 
 Add constructor option:
 ```typescript
@@ -358,17 +377,13 @@ Omits: workflow activity indicator, MCP status indicator.
 
 The input area remains the same (text input, send/stop, attachments).
 
+**Singleton-assumption updates:** Code in `main.ts` that assumes one leaf of `CHAT_VIEW_TYPE` (e.g., `getLeavesOfType(CHAT_VIEW_TYPE)` at line 2182) must be updated to handle multiple leaves. The primary panel is the first leaf opened; subsequent leaves are secondary.
+
 #### 4.4.2 Per-panel orchestrator
 
 **File:** `src/main.ts`
 
-```typescript
-this.registerView(CHAT_SECONDARY_VIEW_TYPE, (leaf) => {
-  const view = new NotorChatView(leaf, this, { isSecondary: true });
-  this.wireSecondaryView(view);
-  return view;
-});
-```
+The existing `registerView(CHAT_VIEW_TYPE, ...)` callback must detect whether this is a primary or secondary leaf and wire accordingly. Secondary leaves get `{ isSecondary: true }` passed to the constructor.
 
 `wireSecondaryView(view)` creates a new `ChatOrchestrator` sharing expensive singletons:
 
@@ -401,9 +416,9 @@ private wireSecondaryView(view: NotorChatView): void {
 
 #### 4.4.3 Tool approval routing
 
-**File:** `src/chat/dispatcher.ts` (or wherever the approval callback is set)
+**File:** `src/chat/dispatcher.ts`
 
-Currently the dispatcher has a global approval callback. Add an optional per-invocation override:
+Remove the global `setApprovalCallback()` method (line 148) and its backing field. Replace with a **required** per-invocation approval callback in `dispatch()`:
 
 ```typescript
 async dispatch(
@@ -411,11 +426,19 @@ async dispatch(
   parameters: Record<string, unknown>,
   mode: ConversationMode,
   messageId: string,
-  options?: { approvalCallback?: (toolName: string, params: Record<string, unknown>) => Promise<boolean> }
+  approvalCallback: ApprovalCallback,  // REQUIRED — no global fallback
+  options?: { abortSignal?: AbortSignal }
 ): Promise<ToolResult>
 ```
 
-Each panel's orchestrator passes its own view's approval rendering as the callback.
+All callers must pass their own callback:
+- **Foreground `responseLoop`:** Passes the panel's view-bound approval callback (renders approval UI in the correct panel)
+- **Background `_backgroundResponseLoop`:** Passes the `concurrencyManager` status-update callback (existing pattern)
+- **`executeToolBatches`:** Signature updated to accept and forward the callback
+
+This eliminates shared mutable state on the dispatcher. Each panel/session routes approvals to its own UI without conflict.
+
+**Migration:** The existing `setApprovalCallback()` wiring in `wireView()` (main.ts ~line 2070) is removed. Instead, the orchestrator captures the approval callback at construction time and passes it per-dispatch.
 
 #### 4.4.4 Command registration
 
@@ -427,7 +450,10 @@ this.addCommand({
   name: "Open new chat panel",
   callback: () => {
     const leaf = this.app.workspace.getLeaf('tab');
-    leaf.setViewState({ type: CHAT_SECONDARY_VIEW_TYPE });
+    leaf.setViewState({
+      type: CHAT_VIEW_TYPE,
+      state: { isSecondary: true },
+    });
   },
 });
 ```
@@ -445,18 +471,23 @@ getState(): Record<string, unknown> {
 }
 
 setState(state: Record<string, unknown>): Promise<void> {
+  this.isSecondary = !!state.isSecondary;
   if (state.conversationFilename) {
     // Load this conversation on view open
     this.onSwitchConversation?.(state.conversationFilename as string);
+  }
+  // Re-build header if isSecondary changed (e.g., on workspace restore)
+  if (this.isSecondary) {
+    this.rebuildHeader();
   }
 }
 ```
 
 #### 4.4.6 Files modified
 
-- `src/ui/chat-view.ts` — `CHAT_SECONDARY_VIEW_TYPE`, `isSecondary` option, reduced header, state persistence
-- `src/main.ts` — register secondary view, `wireSecondaryView()`, command
-- `src/chat/dispatcher.ts` — per-invocation approval callback
+- `src/ui/chat-view.ts` — `isSecondary` constructor option, reduced header, state persistence via `getState()`/`setState()`, `rebuildHeader()`
+- `src/main.ts` — update `registerView` callback to handle secondary leaves, `wireSecondaryView()`, command, update singleton-assumption code (`getLeavesOfType`)
+- `src/chat/dispatcher.ts` — remove global `setApprovalCallback()`, require per-invocation approval callback in `dispatch()` options
 
 ---
 
@@ -493,8 +524,8 @@ setOnOpenInNewTab(callback: (filename: string) => void): void {
 view.setOnOpenInNewTab((filename: string) => {
   const leaf = this.app.workspace.getLeaf('tab');
   leaf.setViewState({
-    type: CHAT_SECONDARY_VIEW_TYPE,
-    state: { conversationFilename: filename },
+    type: CHAT_VIEW_TYPE,
+    state: { conversationFilename: filename, isSecondary: true },
   });
 });
 ```
@@ -511,17 +542,20 @@ view.setOnOpenInNewTab((filename: string) => {
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | Tool dispatcher contention | Two panels both need tool approval simultaneously | Per-invocation approval callback (Phase 4.4.3). Each panel routes approval to its own view. |
-| Persona state is global | Changing persona in one panel affects all | Secondary panels inherit active persona but don't show picker. Persona switching remains global. v2 could scope personas per-panel. |
+| Persona state is global | Changing persona mid-stream affects in-flight sessions | Mitigated in Phase 1: active persona is snapshotted at session creation and passed into `responseLoop` as `pinnedPersona`. Secondary panels inherit persona at session start but don't show picker. Per-panel persona scoping deferred to v2. |
 | Provider rate limits | Multiple concurrent conversations hit API rate limits | Not architecturally addressed — existing `RATE_LIMITED` error handling surfaces a Notice to the user. |
 | Memory pressure | Multiple ConversationManagers holding message arrays | Each manager only holds messages for one conversation. Lightweight compared to the LLM context window. |
-| Stale UI on return | User switches back to a completed conversation — may not see latest messages | Reload from JSONL on switch (Phase 2). Renders the ground truth. |
+| Stale UI on return | User switches back to a conversation that streamed in the background — may not see latest messages | In-memory diff from session manager for active sessions (Phase 2). JSONL reload for completed sessions without an active session. |
 | AbortController scoping | Closing a panel while response is streaming | `ResponseSession` owns its `AbortController`. Panel `onClose()` aborts all sessions for that panel. |
+| `resolveEffectiveConfig` concurrency | Two concurrent sessions interleave tool config resolution, producing inconsistent state in the shared `ToolDispatcher` | **Blocking pre-Phase-1 investigation required.** Determine whether `resolveEffectiveConfig` can be made pure (return definitions without mutating dispatcher state) or whether tool config must be scoped per-session. Current code mutates shared dispatcher state on every loop iteration. |
 
 ---
 
 ## 6. Implementation Order & Dependencies
 
 ```
+Phase 0 (investigation — resolveEffectiveConfig concurrency)
+    ↓
 Phase 1 (bug fix — per-response isolation)
     ↓
 Phase 2 (session registry + sync-back)
@@ -533,6 +567,7 @@ Phase 2 (session registry + sync-back)
          Phase 5 (open in new tab)
 ```
 
+- **Phase 0** is a blocking investigation: determine whether `resolveEffectiveConfig` can be made pure or needs per-session scoping. This must be resolved before Phase 1 implementation begins.
 - **Phase 1** is independently shippable and fixes the critical data corruption bug.
 - **Phase 2** builds on Phase 1 and is required for Phases 3-5.
 - **Phases 3, 4, 5** can be developed in parallel after Phase 2.
@@ -544,16 +579,21 @@ Phase 2 (session registry + sync-back)
 ### Phase 1 Verification
 1. Start a conversation, send a message that triggers a long LLM response
 2. While streaming, switch to a different conversation (or create a new one)
-3. Wait for the original response to complete
-4. Verify: original conversation's JSONL has the complete assistant response
-5. Verify: new conversation's JSONL is clean (no stray messages)
-6. Switch back to original conversation — verify all messages render correctly
+3. Verify: the input area is unlocked in the new conversation (isResponding reset)
+4. Send a message in the new conversation — verify it works independently
+5. Wait for the original response to complete
+6. Verify: original conversation's JSONL has the complete assistant response
+7. Verify: new conversation's JSONL is clean (no stray messages from the first response)
+8. Switch back to original conversation — verify all messages render correctly
+9. Verify: no stray DOM elements from the background response leaked into the new conversation's view
 
 ### Phase 2 Verification
 1. Send a message, switch away mid-stream
 2. Try to send another message in the SAME original conversation (via navigating back) — verify "already processing" notice
-3. Wait for completion, navigate back — verify conversation shows the completed response
-4. Verify `activeSessions` map is empty after all responses complete
+3. Switch back to the streaming conversation mid-stream — verify new messages appear incrementally (in-memory diff, no full reload)
+4. Verify the stop button correctly targets the active session's AbortController
+5. Wait for completion, navigate back — verify conversation shows the completed response
+6. Verify `activeSessions` map is empty after all responses complete
 
 ### Phase 3 Verification
 1. Send a message, switch away mid-stream
