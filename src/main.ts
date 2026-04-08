@@ -1872,6 +1872,15 @@ export default class NotorPlugin extends Plugin {
 			});
 		});
 
+		// Toggle favorite
+		view.setOnToggleFavorite(async (filename: string) => {
+			await historyManager.toggleFavorite(filename);
+			const entries = await historyManager.listConversations();
+			view.renderConversationList(
+				view.isFavFilterActive() ? entries.filter((e) => e.is_favorite) : entries
+			);
+		});
+
 		// Delete conversation with confirmation
 		view.setOnDeleteConversation((filename: string) => {
 			new ConfirmModal(

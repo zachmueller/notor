@@ -167,6 +167,13 @@ export class NotorChatView extends ItemView {
 	// Fork callback
 	private onForkConversation?: (messageId: string) => Promise<void>;
 
+	// Favorite callback
+	private onToggleFavorite?: (filename: string) => Promise<void>;
+
+	// Favorites filter state
+	private favFilterActive = false;
+	private favFilterBtnEl?: HTMLElement;
+
 	// Settings deep-link callback
 	private onOpenSettingsGroup?: (groupTitle: string) => void;
 
@@ -222,6 +229,14 @@ export class NotorChatView extends ItemView {
 
 	setOnDeleteConversation(callback: (filename: string) => void): void {
 		this.onDeleteConversation = callback;
+	}
+
+	setOnToggleFavorite(callback: (filename: string) => Promise<void>): void {
+		this.onToggleFavorite = callback;
+	}
+
+	isFavFilterActive(): boolean {
+		return this.favFilterActive;
 	}
 
 	setOnImportConversation(callback: (htmlContent: string) => Promise<void>): void {
@@ -629,16 +644,18 @@ export class NotorChatView extends ItemView {
 			if (e.key === "Enter") {
 				e.preventDefault();
 				const query = this.conversationSearchInputEl.value.trim();
+				const applyFavFilter = (entries: ConversationListEntry[]) =>
+					this.favFilterActive ? entries.filter((en) => en.is_favorite) : entries;
 				if (!query) {
 					// Empty query — reload full list
 					this.onOpenConversationList?.().then((entries) => {
-						this.renderConversationList(entries);
+						this.renderConversationList(applyFavFilter(entries));
 					}).catch((err) => {
 						log.error("Failed to load conversation list", { error: String(err) });
 					});
 				} else {
 					this.onSearchConversations?.(query).then((entries) => {
-						this.renderConversationList(entries);
+						this.renderConversationList(applyFavFilter(entries));
 					}).catch((err) => {
 						log.error("Failed to search conversations", { error: String(err) });
 					});
@@ -654,6 +671,32 @@ export class NotorChatView extends ItemView {
 		setIcon(importBtn, "upload");
 		importBtn.addEventListener("click", () => {
 			this.openImportFilePicker();
+		});
+
+		// Favorites filter toggle
+		this.favFilterBtnEl = searchWrapper.createDiv({
+			cls: "notor-conversation-fav-filter-btn",
+			attr: { "aria-label": "Show favorites only" },
+		});
+		setIcon(this.favFilterBtnEl, "star");
+		this.favFilterBtnEl.addEventListener("click", () => {
+			this.favFilterActive = !this.favFilterActive;
+			this.favFilterBtnEl?.toggleClass("is-active", this.favFilterActive);
+			this.favFilterBtnEl?.setAttribute(
+				"aria-label",
+				this.favFilterActive ? "Show all conversations" : "Show favorites only"
+			);
+			// Re-fetch and render with filter
+			const query = this.conversationSearchInputEl.value.trim();
+			const fetcher = query
+				? this.onSearchConversations?.(query)
+				: this.onOpenConversationList?.();
+			fetcher?.then((entries) => {
+				if (this.favFilterActive) {
+					entries = entries.filter((e) => e.is_favorite);
+				}
+				this.renderConversationList(entries);
+			});
 		});
 
 		this.conversationListEl = container.createDiv({
@@ -1848,6 +1891,12 @@ export class NotorChatView extends ItemView {
 				cls: `notor-conversation-list-item${isActive ? " is-active" : ""}`,
 			});
 
+			// Favorite star indicator (always visible when favorited)
+			if (entry.is_favorite) {
+				const starEl = item.createDiv({ cls: "notor-conversation-favorite-indicator" });
+				setIcon(starEl, "star");
+			}
+
 			const contentCol = item.createDiv({ cls: "notor-conversation-list-content" });
 
 			const titleEl = contentCol.createDiv({ cls: "notor-conversation-list-title" });
@@ -1879,22 +1928,20 @@ export class NotorChatView extends ItemView {
 				previewEl.textContent = entry.preview;
 			}
 
-			// Export button
-			const exportBtn = item.createDiv({ cls: "notor-conversation-action-btn" });
-			setIcon(exportBtn, "download");
-			exportBtn.setAttribute("aria-label", "Export conversation");
-			exportBtn.addEventListener("click", (e) => {
+			// Three-dots menu button
+			const menuBtn = item.createDiv({ cls: "notor-conversation-menu-btn" });
+			setIcon(menuBtn, "more-vertical");
+			menuBtn.setAttribute("aria-label", "More options");
+			menuBtn.addEventListener("click", (e) => {
 				e.stopPropagation();
-				this.onExportConversation?.(entry.filename);
+				this.showConversationContextMenu(e, entry);
 			});
 
-			// Delete button
-			const deleteBtn = item.createDiv({ cls: "notor-conversation-action-btn" });
-			setIcon(deleteBtn, "trash-2");
-			deleteBtn.setAttribute("aria-label", "Delete conversation");
-			deleteBtn.addEventListener("click", (e) => {
+			// Right-click context menu
+			item.addEventListener("contextmenu", (e) => {
+				e.preventDefault();
 				e.stopPropagation();
-				this.onDeleteConversation?.(entry.filename);
+				this.showConversationContextMenu(e, entry);
 			});
 
 			item.addEventListener("click", () => {
@@ -1902,6 +1949,41 @@ export class NotorChatView extends ItemView {
 				this.toggleConversationList();
 			});
 		}
+	}
+
+	/**
+	 * Show a context menu for a conversation list item.
+	 */
+	private showConversationContextMenu(evt: MouseEvent, entry: ConversationListEntry): void {
+		const menu = new Menu();
+
+		menu.addItem((item) => {
+			item.setTitle(entry.is_favorite ? "Remove from favorites" : "Add to favorites")
+				.setIcon(entry.is_favorite ? "star-off" : "star")
+				.onClick(() => {
+					this.onToggleFavorite?.(entry.filename);
+				});
+		});
+
+		menu.addSeparator();
+
+		menu.addItem((item) => {
+			item.setTitle("Export conversation")
+				.setIcon("download")
+				.onClick(() => {
+					this.onExportConversation?.(entry.filename);
+				});
+		});
+
+		menu.addItem((item) => {
+			item.setTitle("Delete conversation")
+				.setIcon("trash-2")
+				.onClick(() => {
+					this.onDeleteConversation?.(entry.filename);
+				});
+		});
+
+		menu.showAtMouseEvent(evt);
 	}
 
 	/**

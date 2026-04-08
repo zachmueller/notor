@@ -85,6 +85,12 @@ export interface Conversation {
 	 * @see specs/ZZ-misc/conversation-fork-design.md
 	 */
 	forked_from_message_id?: string | null;
+	/**
+	 * Whether this conversation is marked as a favorite.
+	 * Favorites are sorted to the top of the conversation list.
+	 * Omitted (= false) for backward compatibility.
+	 */
+	is_favorite?: boolean;
 }
 
 /** Plan/Act mode. */

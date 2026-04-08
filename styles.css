@@ -379,7 +379,8 @@
 	min-width: 0;
 }
 
-.notor-conversation-action-btn {
+/* Three-dots menu button (replaces individual action buttons) */
+.notor-conversation-menu-btn {
 	flex-shrink: 0;
 	display: flex;
 	align-items: center;
@@ -393,16 +394,61 @@
 	transition: opacity 0.15s ease, color 0.15s ease;
 }
 
-.notor-conversation-list-item:hover .notor-conversation-action-btn {
+.notor-conversation-list-item:hover .notor-conversation-menu-btn {
 	opacity: 1;
 }
 
-.notor-conversation-action-btn:hover {
+.notor-conversation-menu-btn:hover {
 	color: var(--text-normal);
 	background: var(--background-modifier-hover);
 }
 
-.notor-conversation-action-btn svg {
+.notor-conversation-menu-btn svg {
+	width: 14px;
+	height: 14px;
+}
+
+/* Favorite star indicator (always visible on favorited items) */
+.notor-conversation-favorite-indicator {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	color: var(--text-warning);
+	margin-top: 2px;
+}
+
+.notor-conversation-favorite-indicator svg {
+	width: 12px;
+	height: 12px;
+}
+
+/* Favorites filter toggle in search bar */
+.notor-conversation-fav-filter-btn {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: var(--radius-s);
+	color: var(--text-faint);
+	cursor: pointer;
+	transition: color 0.15s ease, background 0.15s ease;
+}
+
+.notor-conversation-fav-filter-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.notor-conversation-fav-filter-btn.is-active {
+	color: var(--text-warning);
+}
+
+.notor-conversation-fav-filter-btn svg {
 	width: 14px;
 	height: 14px;
 }

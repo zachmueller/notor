@@ -70,6 +70,8 @@ export interface ConversationListEntry {
 	filename: string;
 	/** Parent conversation ID when this entry is a fork. */
 	forked_from_conversation_id?: string;
+	/** Whether this conversation is marked as a favorite. */
+	is_favorite?: boolean;
 }
 
 /**
@@ -224,6 +226,40 @@ export class HistoryManager {
 				});
 			}
 		});
+	}
+
+	/**
+	 * Toggle the `is_favorite` flag on a conversation's JSONL header.
+	 *
+	 * Returns the new value of `is_favorite` after toggling.
+	 */
+	async toggleFavorite(filename: string): Promise<boolean> {
+		const filePath = normalizePath(`${this.historyPath}/${filename}`);
+		let newValue = false;
+
+		await this.enqueueWrite(filePath, async () => {
+			try {
+				const content = await this.vault.adapter.read(filePath);
+				const firstNewline = content.indexOf("\n");
+				const headerLine = firstNewline >= 0 ? content.substring(0, firstNewline) : content;
+				const rest = firstNewline >= 0 ? content.substring(firstNewline) : "";
+				const headerObj = JSON.parse(headerLine) as Record<string, unknown>;
+				newValue = !headerObj.is_favorite;
+				if (newValue) {
+					headerObj.is_favorite = true;
+				} else {
+					delete headerObj.is_favorite;
+				}
+				await this.vault.adapter.write(filePath, JSON.stringify(headerObj) + rest);
+			} catch (e) {
+				log.warn("Failed to toggle favorite", {
+					filename,
+					error: String(e),
+				});
+			}
+		});
+
+		return newValue;
 	}
 
 	/**
@@ -522,6 +558,7 @@ export class HistoryManager {
 					model_id: convModelId,
 					filename,
 					forked_from_conversation_id: headerObj.forked_from_conversation_id as string | undefined,
+					is_favorite: !!headerObj.is_favorite,
 				});
 			} catch (e) {
 				log.warn("Failed to read conversation header", {
@@ -531,8 +568,13 @@ export class HistoryManager {
 			}
 		}
 
-		// Sort by most recent activity (newest first)
-		entries.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+		// Sort: favorites first, then by most recent activity (newest first)
+		entries.sort((a, b) => {
+			const aFav = a.is_favorite ? 1 : 0;
+			const bFav = b.is_favorite ? 1 : 0;
+			if (aFav !== bFav) return bFav - aFav;
+			return b.updated_at.localeCompare(a.updated_at);
+		});
 
 		return entries;
 	}
@@ -627,6 +669,7 @@ export class HistoryManager {
 					model_id: convModelId,
 					filename,
 					forked_from_conversation_id: headerObj.forked_from_conversation_id as string | undefined,
+					is_favorite: !!headerObj.is_favorite,
 				});
 			} catch (e) {
 				log.warn("Failed to search conversation", {
@@ -636,7 +679,13 @@ export class HistoryManager {
 			}
 		}
 
-		entries.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+		// Sort: favorites first, then by most recent activity (newest first)
+		entries.sort((a, b) => {
+			const aFav = a.is_favorite ? 1 : 0;
+			const bFav = b.is_favorite ? 1 : 0;
+			if (aFav !== bFav) return bFav - aFav;
+			return b.updated_at.localeCompare(a.updated_at);
+		});
 
 		return entries;
 	}
