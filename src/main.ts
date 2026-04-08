@@ -422,7 +422,7 @@ export default class NotorPlugin extends Plugin {
 				}
 				// Intentionally NOT clearing the cache on non-markdown leaf
 				// changes — that lets us recover the last active note when the
-				// chat panel steals focus.
+				// user switches to the chat panel (or any other non-markdown view).
 			})
 		);
 

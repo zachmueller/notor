@@ -1274,7 +1274,9 @@ export class NotorChatView extends ItemView {
 			this.textInputEl.setAttribute("contenteditable", "true");
 			this.textInputEl.removeClass("notor-text-input--disabled");
 			this.loadingIndicatorEl.addClass("notor-hidden");
-			this.textInputEl.focus();
+			if (this.app.workspace.activeLeaf === this.leaf) {
+				this.textInputEl.focus();
+			}
 		}
 	}
 
