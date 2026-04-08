@@ -1,6 +1,6 @@
 # Thread-Safe Streaming & Multi-Panel Chat
 
-**Status:** Design complete — revised after codebase cross-reference review
+**Status:** Design complete — revised after second codebase cross-reference audit (added `useExtendedContext` pin, `calculateCost` session-awareness, `dispatchAfterCompletionHooks` fix, compaction provider fix, exhaustive shared-state enumeration table)
 **Author:** Design spike
 **Date:** 2026-04-08
 
@@ -239,6 +239,7 @@ export class ConversationSession {
   readonly pinnedPersona: Persona | null;
   readonly providerType: LLMProviderType;
   readonly modelId: string;
+  readonly useExtendedContext: boolean;
   readonly workflowAssembly: WorkflowAssemblyResult | null;
 
   // Per-session routing
@@ -262,6 +263,7 @@ export class ConversationSession {
     pinnedPersona: Persona | null;
     providerType: LLMProviderType;
     modelId: string;
+    useExtendedContext: boolean;
     workflowAssembly?: WorkflowAssemblyResult | null;
     approvalCallback: ApprovalCallback;
     initialConfig: EffectiveToolConfig;
@@ -313,6 +315,7 @@ After existing guards, before `responseLoop()`:
 5. Snapshot persona: `const pinnedPersona = this.personaManager?.getActivePersona() ?? null`
 6. Snapshot provider: Use the conversation header's `provider_id` if the provider is still configured (restored conversation), otherwise fall back to `this.providerRegistry.getActiveType()` (new conversation or unavailable provider)
 7. Snapshot model: Use the conversation header's `model_id` if the provider is still configured (restored conversation), otherwise fall back to `this.getActiveModelId()` (new conversation or unavailable provider)
+7b. Snapshot extended context: `const useExtendedContext = this.providerRegistry.getConfig(providerType)?.use_extended_context ?? false` — pinned at session creation like provider/model, since it determines context window size for truncation and compaction thresholds
 8. Resolve initial config via pure `resolveEffectiveConfig(matchedRules, null, pinnedPersona)`
 9. Create `ConversationSession` with all the above (including `providerType`, `modelId`)
 10. Store response loop promise on session: `session.responsePromise = this.responseLoop(mode, session)`
@@ -331,10 +334,12 @@ Inside the loop, all shared state reads become session reads:
 - `this.personaManager?.getActivePersona()` → `session.pinnedPersona`
 - `this.providerRegistry.getActiveProvider()` → `this.providerRegistry.getProvider(session.providerType)` (provider pinned from conversation header or global state at session creation)
 - `this.getActiveModelId()` → `session.modelId` (model pinned from conversation header or global state at session creation)
+- `this.getActiveUseExtendedContext()` → `session.useExtendedContext` (pinned at session creation from provider config — determines context window size for truncation and compaction)
+- `this.calculateCost(inputTokens, outputTokens)` → `this.calculateCost(inputTokens, outputTokens, session.modelId)` (add optional `modelId` parameter to `calculateCost()` with fallback to `this.getActiveModelId()` for backward compat; the method internally calls `getActiveModelId()` to look up pricing — with sessions, the global active model may differ from the session's pinned model)
 - `resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona)` → updates `session.effectiveConfig` and `session.parsedConfigs`
 - If session matches displayed conversation: `this.updateDisplayConfig(session.effectiveConfig, session.parsedConfigs)`
 - `executeToolBatches()` passes `session.buildPolicyContext(this.settings, vaultRootPath)` and `session.approvalCallback`
-- `checkAndPerformCompaction(session)` accepts the full `ConversationSession`. The method currently reads four pieces of shared state that must all come from the session: (1) `this.conversationManager` → `session.conversationManager` for conversation and messages, (2) `this.getActiveModelId()` → `session.modelId` for token threshold calculation, (3) `this.getActiveUseExtendedContext()` → session's extended context flag for window size, (4) `this.view?.getMessagesContainer?.()` → `this.getViewForSession(session)?.getMessagesContainer?.()` for the compacting indicator. Getting model ID wrong would use the wrong compaction threshold; getting the view wrong would show the indicator in the wrong panel.
+- `checkAndPerformCompaction(session)` accepts the full `ConversationSession`. The method currently reads five pieces of shared state that must all come from the session: (1) `this.conversationManager` → `session.conversationManager` for conversation and messages, (2) `this.getActiveModelId()` → `session.modelId` for token threshold calculation, (3) `this.getActiveUseExtendedContext()` → `session.useExtendedContext` for window size, (4) `this.view?.getMessagesContainer?.()` → `this.getViewForSession(session)?.getMessagesContainer?.()` for the compacting indicator, (5) `this.providerRegistry.getActiveProvider()` → `this.providerRegistry.getProvider(session.providerType)` for the compaction summarization LLM call (L1798). Getting the provider wrong would send the compaction summary to the wrong LLM; getting model ID wrong would use the wrong compaction threshold; getting the view wrong would show the indicator in the wrong panel.
 - `toChatMessages()` is called at L1427 but defined at L2074. It is a `private` instance method on the orchestrator, not a free function. While its core logic doesn't read `this` state (it operates on the `messages` and `systemPrompt` parameters), it does call `log.warn()` (L2101). For session isolation, it can remain on the orchestrator (session calls through the orchestrator instance). The caller changes to pass messages from `session.conversationManager`
 
 **View render guarding:**
@@ -416,7 +421,89 @@ try {
 
 Completed sessions are removed immediately — no grace period. Switch-back after completion falls through to the standard JSONL reload path in `switchConversation()`.
 
-**Isolation invariant:** After this refactor, `this.conversationManager` must have **zero reads** inside `responseLoop`, `processStream`, and any method they call. Since `switchConversation()` mutates the shared manager mid-stream, any straggling `this.conversationManager` read in the response path would silently resolve to the wrong conversation. All reads must go through `session.conversationManager`.
+**`dispatchAfterCompletionHooks()` session awareness:** The `responseLoop`'s `finally` block (L1711) calls `dispatchAfterCompletionHooks()` (L1727), which reads `this.conversationManager.getActiveConversation()` at L1728 to obtain the `conversationId` for hook payloads. After mid-stream navigation, the shared manager points to the *new* conversation — so the hook fires with the wrong `conversationId`. Fix: change the method to accept a `conversationId: string` parameter (or the full session), and have the `finally` block pass `session.conversationManager.getActiveConversation()?.id`.
+
+**Isolation invariant:** After this refactor, `this.conversationManager` must have **zero reads** inside `responseLoop`, `processStream`, and any method they call (including `checkAndPerformCompaction` and `dispatchAfterCompletionHooks`). Since `switchConversation()` mutates the shared manager mid-stream, any straggling `this.conversationManager` read in the response path would silently resolve to the wrong conversation. All reads must go through `session.conversationManager`.
+
+**Complete shared-state access enumeration:** The following is an exhaustive list of every `this.conversationManager`, `this.view`, and other global-state read inside `responseLoop`, `processStream`, and `checkAndPerformCompaction` — each must be substituted during this step. Use this as a checklist during implementation.
+
+*`this.conversationManager` in `responseLoop` (14 sites):*
+| Line | Call | Substitution |
+|------|------|-------------|
+| L1400 | `getMessages()` | `session.conversationManager.getMessages()` |
+| L1408 | `getActiveConversation()!.id` | `session.conversationManager.getActiveConversation()!.id` |
+| L1453 | `addMessage()` (text result) | `session.conversationManager.addMessage()` |
+| L1466 | `getActiveConversation()` (token footer) | `session.conversationManager.getActiveConversation()` |
+| L1484 | `addMessage()` (tool call tokens) | `session.conversationManager.addMessage()` |
+| L1493 | `getActiveConversation()` (tool call token footer) | `session.conversationManager.getActiveConversation()` |
+| L1511 | `addMessage()` (tool_call) | `session.conversationManager.addMessage()` |
+| L1527 | `getActiveConversation()` (hook dispatch) | `session.conversationManager.getActiveConversation()` |
+| L1619 | `addMessage()` (tool_result) | `session.conversationManager.addMessage()` |
+| L1630 | `addTokens()` (sub-agent tokens) | `session.conversationManager.addTokens()` |
+| L1638 | `getActiveConversation()` (hook dispatch) | `session.conversationManager.getActiveConversation()` |
+| L1661 | `getActiveConversation()` (token footer after tool result) | `session.conversationManager.getActiveConversation()` |
+| L1687 | `addMessage()` (cancelled) | `session.conversationManager.addMessage()` |
+| L1728 | `getActiveConversation()` (after-completion hooks) | Pass `session` or `conversationId` to `dispatchAfterCompletionHooks()` |
+
+*`this.conversationManager` in `checkAndPerformCompaction` (5 sites):*
+| Line | Call | Substitution |
+|------|------|-------------|
+| L1756 | `getActiveConversation()` | `session.conversationManager.getActiveConversation()` |
+| L1759 | `getMessages()` | `session.conversationManager.getMessages()` |
+| L1811 | `replaceMessages()` | `session.conversationManager.replaceMessages()` |
+| L1818 | `addMessage()` (pending re-append) | `session.conversationManager.addMessage()` |
+| L1827 | `appendMessage(conv, ...)` via historyManager | No change needed — `conv` is a local variable |
+
+*`this.view` in `responseLoop` (17 sites) — all become `this.getViewForSession(session)?.`:*
+| Line | Call |
+|------|------|
+| L1423 | `showTruncationWarning()` |
+| L1430 | `setRespondingState(true)` |
+| L1431 | `createAbortController()` — **removed**: session owns its own `AbortController` |
+| L1436 | `createAssistantMessagePlaceholder()` |
+| L1462 | `finalizeAssistantMessage()` |
+| L1468 | `updateTokenFooter()` |
+| L1495 | `updateTokenFooter()` |
+| L1522 | `renderToolCall()` |
+| L1571 | `updateToolCallProgress()` |
+| L1595 | `updateToolCallStatus()` |
+| L1602 | `appendForkButton()` |
+| L1633 | `renderToolResult()` |
+| L1663 | `updateTokenFooter()` |
+| L1694 | `finalizeAssistantMessage()` |
+| L1697 | `createAssistantMessagePlaceholder()` |
+| L1699 | `finalizeAssistantMessage()` |
+| L1708 | `showError()` |
+
+*`this.view` in `processStream` (2 sites) — use view-resolver function:*
+| Line | Call |
+|------|------|
+| L1981 | `createAssistantMessagePlaceholder()` |
+| L1985 | `appendStreamChunk()` |
+
+*`this.view` in `checkAndPerformCompaction` (2 sites) — become `this.getViewForSession(session)?.`:*
+| Line | Call |
+|------|------|
+| L1786 | `getMessagesContainer()` |
+| L1836 | (compaction marker display) |
+
+*Other global reads in `responseLoop` (8 sites):*
+| Line | Current | Substitution |
+|------|---------|-------------|
+| L1386 | `this.personaManager?.getActivePersona()` | `session.pinnedPersona` |
+| L1418 | `this.getActiveModelId()` | `session.modelId` |
+| L1419 | `this.getActiveUseExtendedContext()` | `session.useExtendedContext` |
+| L1438 | `this.providerRegistry.getActiveProvider()` | `this.providerRegistry.getProvider(session.providerType)` |
+| L1440 | `this.getActiveModelId()` | `session.modelId` |
+| L1442 | `this.getActiveUseExtendedContext()` | `session.useExtendedContext` |
+| L1458 | `this.calculateCost(in, out)` | `this.calculateCost(in, out, session.modelId)` |
+| L1489 | `this.calculateCost(in, out)` | `this.calculateCost(in, out, session.modelId)` |
+
+*Other global reads in `checkAndPerformCompaction` (2 sites):*
+| Line | Current | Substitution |
+|------|---------|-------------|
+| L1760 | `this.getActiveModelId()` | `session.modelId` |
+| L1798 | `this.providerRegistry.getActiveProvider()` | `this.providerRegistry.getProvider(session.providerType)` |
 
 #### 4.1.5 Step 1e: Update `_backgroundResponseLoop` to use sessions
 
@@ -424,8 +511,10 @@ The background loop currently uses a save/restore hack for `activeWorkflowAssemb
 
 **Changes:**
 - Remove L850-852 (`previousAssemblyResult` save) and L1076 (restore)
-- Create a `ConversationSession` for the background execution using the existing `bgConvManager`, the `workflowAssembly` parameter, and the concurrency manager's approval callback
+- Create a `ConversationSession` for the background execution using the existing `bgConvManager`, the `workflowAssembly` parameter, and the concurrency manager's approval callback. Snapshot `useExtendedContext` from the provider config used for the background execution (L892-894 resolve provider type and model — extend to also resolve `use_extended_context`)
 - `resolveEffectiveConfig(matchedRules, session.workflowAssembly)` passes assembly directly
+- L895: `this.getActiveUseExtendedContext()` → `session.useExtendedContext` (context window assembly)
+- L909: `use_extended_context: this.getActiveUseExtendedContext()` → `use_extended_context: session.useExtendedContext` (send message options)
 - L962-964 (direct `this.effectiveToolConfig` read): replaced with `session.effectiveConfig.tools[toolName]?.auto_approve ?? false`
 - L975 `dispatcher.dispatch()` call: passes `session.buildPolicyContext()` and `session.approvalCallback`
 
@@ -571,7 +660,7 @@ async destroy(timeoutMs: number = 2000): Promise<void> {
 - `src/chat/conversation-session.ts` — **NEW**: `ConversationSession` class (no `lastDisplayedIndex` — sync-back uses full replace)
 - `src/chat/dispatcher.ts` — `dispatch()` gains optional `policyCtx` + `approvalCallback` params
 - `src/chat/tool-orchestration.ts` — `executeToolBatches()`, `safeDispatch()`, `runConcurrentBatch()` thread `policyCtx` + `approvalCallback`
-- `src/chat/orchestrator.ts` — `resolveEffectiveConfig()` (pure signature + body, return type changes from `ToolDefinition[]` to `{ effective, toolDefinitions, parsedConfigs }`), `handleUserMessage()` (session creation, stores `responsePromise` on session, header dirty-check + update), `responseLoop()` (uses session), `processStream()` (session-aware view guarding), `_backgroundResponseLoop()` (uses session, removes save/restore hack), `switchConversation()` (persona+model restoration with display-AND-use semantics, display config update, isResponding reset, abort controller decoupling, full-replace sync-back for active sessions), `updateDisplayConfig()` helper, `getViewForSession()` helper, `getDisplayedConversation()` helper, `activeSessions` map, `destroy()` async with timeout
+- `src/chat/orchestrator.ts` — `resolveEffectiveConfig()` (pure signature + body, return type changes from `ToolDefinition[]` to `{ effective, toolDefinitions, parsedConfigs }`), `handleUserMessage()` (session creation, stores `responsePromise` on session, snapshots `useExtendedContext`, header dirty-check + update), `responseLoop()` (uses session — see exhaustive shared-state substitution table in Step 1d), `processStream()` (session-aware view guarding via view-resolver), `checkAndPerformCompaction(session)` (uses session for conversation, model, extended context, provider, and view), `calculateCost()` (add optional `modelId` parameter with fallback to global), `dispatchAfterCompletionHooks()` (accept `conversationId` or session — no longer reads shared `conversationManager`), `_backgroundResponseLoop()` (uses session, removes save/restore hack), `switchConversation()` (persona+model restoration with display-AND-use semantics, display config update, isResponding reset, abort controller decoupling, full-replace sync-back for active sessions), `updateDisplayConfig()` helper, `getViewForSession()` helper, `getDisplayedConversation()` helper, `activeSessions` map, `destroy()` async with timeout
 - `src/personas/persona-manager.ts` — add `getPersonaByName(name: string): Promise<Persona | null>` read-only lookup (calls `getDiscoveredPersonas()`, finds by name)
 - `src/ui/chat-view.ts` — decouple `AbortController` from view (session owns its own), add `updateProviderDisplay()`, `updateModelDisplay()` **NEW** display-only methods for conversation switch restoration (must update UI selector state without triggering global provider/model switch callbacks; `updatePersonaLabel()` already exists at L492)
 - `src/main.ts` — extend picker-change callbacks in `wireView()` to also call `historyManager.updateConversationHeader()` when persona/provider/model changes while viewing a conversation; extend `onModeToggle` callback to propagate mode changes to active sessions
@@ -978,7 +1067,7 @@ Phase 2 (session registry enhancements + sync-back)
 
 - **Phase 0 is eliminated.** The `resolveEffectiveConfig` concurrency investigation is resolved: Steps 1a-1b make config resolution pure and tool policy a per-call function. No shared mutable config state remains.
 - **Phase 1** is independently shippable. Steps 1a-1b are pure refactors (backward compatible, can be verified independently). Steps 1c-1e fix the data corruption bug. Step 1d includes the `activeSessions` map, duplicate-send guard, and mode toggle propagation to active sessions. Step 1f adds persona/model restoration + header mutation on change. Step 1g scopes the inspector. Step 1h handles plugin deactivation. Step 1i (per-server MCP queue) deferred to Phase 4 — not needed until multi-panel.
-- **All open design questions are resolved:** Sync-back uses full replace with `silent: true` on `loadConversation` (no index tracking, no spurious header writes). Header updates only when persona/provider/model actually changes. Picker changes also update the conversation header. `processStream` uses a view-resolver function re-resolved per chunk. `checkAndPerformCompaction` accepts the full session.
+- **All open design questions are resolved:** Sync-back uses full replace with `silent: true` on `loadConversation` (no index tracking, no spurious header writes). Header updates only when persona/provider/model actually changes. Picker changes also update the conversation header. `processStream` uses a view-resolver function re-resolved per chunk. `checkAndPerformCompaction` accepts the full session. `ConversationSession` pins `useExtendedContext` alongside `providerType` and `modelId`. `calculateCost()` accepts an optional `modelId` parameter for session-aware pricing. `dispatchAfterCompletionHooks()` accepts session/conversationId to avoid reading the shared manager. Step 1d includes an exhaustive shared-state access enumeration table (14 `this.conversationManager`, 5 compaction, 17+2 `this.view`, 10 other global reads) as an implementation checklist.
 - **Phase 2** builds on Phase 1 and is required for Phases 3-5. Adds public session accessors, sync-back (silent `loadConversation`), and deletion guard.
 - **Phase 4 scope expanded:** Includes per-panel orchestrators, per-orchestrator provider/model fields (replaces global ProviderRegistry mutation), per-server MCP dispatch queue (moved from Phase 1), and global listener audit (Section 4.4.8). The tool approval routing refactor is already handled by Phase 1 Steps 1a/1d.
 - **Phases 3, 4, 5** can be developed in parallel after Phase 2.
