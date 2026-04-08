@@ -1,7 +1,7 @@
 # TaskLaneQueue: Implementation Tasks
 
 **Spec:** [task-lane-queue-design.md](./task-lane-queue-design.md)
-**Status:** Not started
+**Status:** Phase 1 complete
 **Date:** 2026-04-09
 
 ---
@@ -10,17 +10,17 @@
 
 Create `src/queue/task-lane-queue.ts` — the `TaskLaneQueue` class and internal `Lane` type.
 
-- [ ] **1.1 Create directory and file**
+- [x] **1.1 Create directory and file**
   - Create `src/queue/` directory
   - Create `src/queue/task-lane-queue.ts`
   - Export `TaskLaneQueue` class
 
-- [ ] **1.2 Define internal `Lane` interface**
+- [x] **1.2 Define internal `Lane` interface**
   - `lastCompletionTime: number` — timestamp of last completed task (init `0`)
   - `waitQueue: Array<{ resolve: () => void; delayMs: number }>` — FIFO pending tasks
   - `draining: boolean` — whether a drain loop is active
 
-- [ ] **1.3 Implement `enqueue<T>(laneKey, fn, delayMs?)`**
+- [x] **1.3 Implement `enqueue<T>(laneKey, fn, delayMs?)`**
   - Create lane on first access (`lastCompletionTime = 0`, empty queue, `draining = false`)
   - If lane is idle and `Date.now() - lastCompletionTime >= delayMs`: execute `fn` immediately
   - Otherwise: push to `waitQueue` with the caller's `delayMs`, return a Promise that resolves when the task completes
@@ -28,22 +28,22 @@ Create `src/queue/task-lane-queue.ts` — the `TaskLaneQueue` class and internal
   - Return `fn`'s return value; if `fn` throws, propagate error to caller and still release the lane
   - Guard against calling after `destroy()` — throw `Error("TaskLaneQueue destroyed")` immediately
 
-- [ ] **1.4 Implement drain loop**
+- [x] **1.4 Implement drain loop**
   - When a task completes and `waitQueue` is non-empty, compute remaining delay for the *next waiter* (`waiter.delayMs - (Date.now() - lastCompletionTime)`)
   - If remaining delay > 0: `setTimeout` for the remainder, then resolve the waiter
   - If remaining delay <= 0: resolve immediately (microtask)
   - Set `draining = false` when `waitQueue` is empty after the last task completes
 
-- [ ] **1.5 Implement `pending(laneKey)`**
+- [x] **1.5 Implement `pending(laneKey)`**
   - Return `lane.waitQueue.length` for existing lanes
   - Return `0` for non-existent lane keys
 
-- [ ] **1.6 Implement `removeLane(laneKey)`**
+- [x] **1.6 Implement `removeLane(laneKey)`**
   - Delete the lane from the `Map`
   - No-op if the lane doesn't exist
   - Note: this is internal-only, not exposed to extensions
 
-- [ ] **1.7 Implement `destroy()`**
+- [x] **1.7 Implement `destroy()`**
   - Set `destroyed` flag (checked by `enqueue`)
   - Iterate all lanes: reject every waiter in every `waitQueue` with `Error("TaskLaneQueue destroyed")`
   - Clear the lane `Map`
