@@ -190,9 +190,10 @@ The queue system has two layers: a generic `TaskLaneQueue` primitive (reusable b
 
 **Key behaviors relevant to web search:**
 - Each provider gets its own lane (keyed by provider type string: `"duckduckgo"`, `"tavily"`, etc.)
-- DDG lane uses `delayMs = 1500` to avoid throttling; API provider lanes use `delayMs = 0`
+- The built-in `WebSearchQueue` passes `delayMs = 1500` for DDG tasks and `delayMs = 0` for API provider tasks on each `enqueue()` call
+- Delay is per-task, not per-lane — each `enqueue()` call specifies how long to wait after the previous completion before *this* task starts
 - Across lanes, tasks are fully concurrent — a DDG delay does not block Tavily
-- First-writer-wins for delay config — extensions cannot lower the built-in delay on shared lanes
+- Lanes persist for the plugin session (no self-cleaning). Idle lanes consume negligible memory
 
 ### 5.2 WebSearchQueue — Search-Specific Layer
 
@@ -744,7 +745,7 @@ If the user reorders providers or toggles enabled state while searches are in-fl
 
 ### 13.7 Concurrent Lane Access
 
-Multiple concurrent callers may enter the same provider lane simultaneously. The lane's FIFO wait queue (Promise-based, same pattern as [`Semaphore`](../../src/sub-agents/semaphore.ts)) ensures correctness: only one request executes at a time per lane, with the configured delay between completions. No external locking needed — JavaScript's single-threaded event loop guarantees the queue operations are atomic.
+Multiple concurrent callers may enter the same provider lane simultaneously. The lane's FIFO wait queue ensures correctness: only one request executes at a time per lane, with each task's specified delay enforced before it starts. No external locking needed — JavaScript's single-threaded event loop guarantees the queue operations are atomic.
 
 ### 13.8 Extension Override Disables WebSearchQueue
 
@@ -758,13 +759,13 @@ This is documented but not enforced — users who override `web_search` accept r
 
 ### 13.9 Shared Lane Contention Between Extensions and Built-in
 
-An extension and the built-in web search tool sharing the same lane (e.g., both calling `enqueue("duckduckgo", ...)`) are properly serialized — the `TaskLaneQueue` enforces FIFO ordering with the configured delay. However, an extension creating heavy load on the `"duckduckgo"` lane will slow down built-in web search results (and vice versa).
+An extension and the built-in web search tool sharing the same lane (e.g., both calling `enqueue("duckduckgo", ...)`) are properly serialized — the `TaskLaneQueue` enforces FIFO ordering. Each caller controls its own delay: the built-in tool passes `delayMs=1500` to respect DDG's rate limits, while an extension might pass a different value. An extension creating heavy load on the `"duckduckgo"` lane will slow down built-in web search results (and vice versa).
 
-This is an accepted tradeoff and is in fact the desired behavior — the whole point of shared lanes is preventing aggregate request rates from exceeding provider limits. If an extension needs isolated throughput to DDG, it can use a different lane name (e.g., `"my-ext:duckduckgo"`), accepting that DDG may throttle if both lanes fire concurrently.
+This is an accepted tradeoff and is in fact the desired behavior — the whole point of shared lanes is serializing requests to the same resource. If an extension needs isolated throughput to DDG, it can use a different lane name (e.g., `"my-ext:duckduckgo"`), accepting that DDG may throttle if both lanes fire concurrently.
 
 ### 13.10 Lane Lifecycle
 
-Lanes in `TaskLaneQueue` are in-memory only — they reset on plugin restart. This is explicitly desired (no persistent state needed). Idle lanes consume negligible memory (a few fields of state). There is no auto-cleanup for unused lanes. If the plugin unloads while tasks are enqueued, pending promises never resolve — same behavior as any async work interrupted by plugin unload.
+Lanes in `TaskLaneQueue` are in-memory only — they persist for the plugin session and reset on plugin restart. This is explicitly desired (no persistent state needed). Idle lanes consume negligible memory (~100 bytes each). On plugin unload, `TaskLaneQueue.destroy()` rejects all pending waiters and marks the queue as destroyed (see [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 6.2).
 
 ---
 
@@ -947,8 +948,8 @@ This call shares the built-in scaffold's DDG lane, so the extension's requests a
 
 The full lane naming convention is defined in [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 4. The web-search-specific lanes are:
 
-| Lane Key | Default Delay | Used By |
-|----------|--------------|---------|
+| Lane Key | Typical `delayMs` | Used By |
+|----------|-------------------|---------|
 | `"duckduckgo"` | 1500ms | Built-in `web_search` tool |
 | `"tavily"` | 0ms | Built-in `web_search` (when Tavily is configured) |
 | `"brave"` | 0ms | Built-in `web_search` (when Brave is configured) |
@@ -957,7 +958,7 @@ The full lane naming convention is defined in [`task-lane-queue-design.md`](./ta
 
 **Lane scoping:** Lanes are global (not namespaced per-extension). This is intentional — two extensions hitting the same API should share rate limiting. Extensions wanting isolation can prefix their lane name (e.g., `"my-ext:duckduckgo"`), accepting that the API may throttle if both lanes fire concurrently.
 
-**First-writer-wins:** The delay is set when a lane is first created and cannot be changed by subsequent callers. This prevents extensions from lowering delays on shared lanes. See [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 3.2 for details.
+**Per-task delay:** Each `enqueue()` call specifies its own `delayMs` — the minimum time to wait after the previous task's completion before this task starts. The built-in web search passes `delayMs=1500` for DDG tasks on every call. Extensions sharing the lane can use a different delay appropriate for their use case. See [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 6.3 for details.
 
 ### 17.3 User Tool Override of `web_search`
 
