@@ -28,18 +28,18 @@ Notor's `ChatOrchestrator` uses a single `ConversationManager` with one `activeC
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Isolation unit | `ConversationSession` class per response | Each response gets a `ConversationSession` owning: isolated `ConversationManager`, resolved `EffectiveToolConfig`, pinned persona, approval callback, abort controller. All per-conversation state lives here — not on shared orchestrator/dispatcher fields. |
+| Isolation unit | `ConversationSession` class per response | Each response gets a `ConversationSession` owning: isolated `ConversationManager`, resolved `EffectiveToolConfig`, pinned persona, snapshotted provider type + model ID, approval callback, abort controller. All per-conversation state lives here — not on shared orchestrator/dispatcher fields. |
 | Dispatcher architecture | Split into registry (global) + policy (pure function, per-call) | `ToolDispatcher` becomes a pure registry: lookup + execute. Policy checks (enabled, auto-approve, path constraints) extracted to `evaluateToolPolicy()` pure function. Each session builds a `ToolPolicyContext` from its own resolved config. Eliminates all shared mutable config state on the dispatcher. |
-| Config resolution | `resolveEffectiveConfig` is pure (no side effects) | Accepts `(matchedRules, workflowAssembly?)`, returns `{ effective, toolDefinitions, parsedConfigs }`. No writes to orchestrator or dispatcher fields. Eliminates the `activeWorkflowAssemblyResult` save/restore hack in the background loop. |
-| Per-conversation persistence | Auto-restore persona + model from JSONL header on load | `Conversation` header already stores `persona_name`, `provider_id`, `model_id`. `switchConversation()` now calls `activatePersona()` and `switchProvider()` to restore them. Provides continuity when resuming old conversations. |
+| Config resolution | `resolveEffectiveConfig` is pure (no side effects) | Accepts `(matchedRules, workflowAssembly?, activePersona?)`, returns `{ effective, toolDefinitions, parsedConfigs }`. No writes to orchestrator or dispatcher fields. Eliminates the `activeWorkflowAssemblyResult` save/restore hack in the background loop. Persona passed explicitly — not read from global `PersonaManager`. |
+| Per-conversation persistence | Display-restore persona + model label from JSONL header on load | `Conversation` header already stores `persona_name` ([`types.ts:56`](../../src/types.ts)), `provider_id`, `model_id`. `switchConversation()` updates the UI display (persona label, model selector) without calling `activatePersona()` or `switchProvider()` — those mutate global state and would corrupt active sessions. The session's pinned persona/provider are used for actual LLM calls. |
 | UI ↔ streaming decoupling | `this.conversationManager` becomes "UI display manager" only | The main orchestrator's `conversationManager` tracks what's *shown* in the panel. Response loops use the session's isolated manager. Switching the display manager has no effect on in-flight responses. |
 | Inspector scoping | Shows config for the currently displayed conversation | Orchestrator keeps `effectiveToolConfig` / `activeParsedConfigs` fields for inspector, but only updates them from the displayed conversation's session (or on explicit conversation switch). |
 | Activity indicator | Extend existing `WorkflowActivityIndicator` | Reuse the badge + dropdown pattern rather than adding a separate icon. Combined count: workflows + foreground sessions. |
 | Multi-panel approach | Reuse `CHAT_VIEW_TYPE` with per-panel orchestrator | Same view type, differentiated by `{ isSecondary: true }` constructor option. Each panel gets its own `ChatOrchestrator` (lightweight — shares expensive singletons like `ProviderRegistry`, `HistoryManager`, `SystemPromptBuilder`). Own `ConversationManager` for independent state. Avoids maintaining two view registrations and divergent wire-up paths. |
-| Secondary panel simplification | Reduced header toolbar | Only: "New conversation", "Settings", "Conversation history". Omits: workflow indicator, MCP status, persona picker, mode toggle. |
-| Sync-back on return | In-memory diff from session manager | When user switches back to a conversation with an active session, diff the session manager's message array against the UI manager and append only new messages. Falls back to JSONL reload for completed sessions without an active session. Avoids expensive disk I/O during active streaming. |
+| Secondary panel toolbar | Full toolbar (same as primary) | Secondary panels get the same toolbar as primary. Per-session scoping from Phase 1 means persona, provider, and tool config are already isolated. No reason to artificially reduce secondary panel capability. |
+| Sync-back on return | Full replace from session manager | When user switches back to a conversation with an active session, load UI manager entirely from session manager's in-memory messages (skip JSONL). Falls back to JSONL reload for completed sessions without an active session. Simpler than diffing, avoids ambiguity around compaction and partial flushes. |
 | Tool approval routing | Per-session approval callback | Each `ConversationSession` owns its approval callback (bound to the correct panel's view). Passed per-`dispatch()` call — no global `setApprovalCallback()`. Each panel/session routes approvals to its own UI without conflict. |
-| Shared vs. per-conversation state | Only infrastructure stays global | Global: MCP connections, tool registry (implementations), provider registry (API connections), history manager (file I/O), vault rule manager, system prompt builder. Per-conversation: effective tool config, persona, mode, approval routing, abort controller, conversation manager. |
+| Shared vs. per-conversation state | Only infrastructure stays global | Global: MCP connections, tool registry (implementations), provider registry (API connections — instances cached, but which provider/model to use is per-session), history manager (file I/O), vault rule manager, system prompt builder. Per-conversation: effective tool config, persona, provider type, model ID, mode, approval routing, abort controller, conversation manager. |
 
 ---
 
@@ -50,7 +50,7 @@ Notor's `ChatOrchestrator` uses a single `ConversationManager` with one `activeC
 ```
 ChatView (UI)
     ↕ callbacks
-ChatOrchestrator (one per panel)
+ChatOrchestrator (singleton — shared across all views)
     → ConversationManager (instance-per-orchestrator, mutable activeConversation)
         → onMessageAdded → HistoryManager.appendMessage(getActiveConversation(), msg)
     → ToolDispatcher (shared singleton — mixes registry + policy + mutable config state)
@@ -156,7 +156,7 @@ export function evaluateToolPolicy(
 Extracts these checks from `dispatcher.ts`:
 - Enabled check (L293-310) → reads `ctx.effectiveConfig`
 - Plan/Act mode check (L312-332) → reads `ctx.mode` + `tool.mode`
-- Domain denylist check (L334-363) → reads `ctx.domainDenylist`
+- Domain denylist check (L334-363) → reads `ctx.domainDenylist` (note: currently hardcoded to `toolName === "fetch_webpage"` — the extracted function must preserve this tool-specific guard)
 - Auto-approve resolution (L365-381) → reads `ctx.effectiveConfig`
 - Path enforcement (L412-438) → reads `ctx.effectiveConfig` + `ctx.vaultRootPath`
 
@@ -184,6 +184,7 @@ Extracts these checks from `dispatcher.ts`:
 private async resolveEffectiveConfig(
   matchedRules?: VaultRule[],
   workflowAssembly?: WorkflowAssemblyResult | null,
+  activePersona?: Persona | null,
 ): Promise<{
   effective: EffectiveToolConfig;
   toolDefinitions: ToolDefinition[];
@@ -192,6 +193,7 @@ private async resolveEffectiveConfig(
 ```
 
 Changes inside the method:
+- L1141: Use `activePersona` parameter instead of `this.personaManager?.getActivePersona() ?? null`
 - L1148: `workflowAssembly?.toolConfigs ?? []` instead of `this.activeWorkflowAssemblyResult?.toolConfigs ?? []`
 - L1184-1188: **REMOVE** — no longer stores on orchestrator fields or injects into dispatcher
 - Returns `{ effective, toolDefinitions, parsedConfigs }`
@@ -223,8 +225,10 @@ export class ConversationSession {
   effectiveConfig: EffectiveToolConfig;
   parsedConfigs: ParsedToolConfig[];
 
-  // Snapshotted at session creation
+  // Snapshotted at session creation — immutable for the session's lifetime
   readonly pinnedPersona: Persona | null;
+  readonly providerType: LLMProviderType;
+  readonly modelId: string;
   readonly workflowAssembly: WorkflowAssemblyResult | null;
 
   // Per-session routing
@@ -238,6 +242,8 @@ export class ConversationSession {
     abortController: AbortController;
     title: string;
     pinnedPersona: Persona | null;
+    providerType: LLMProviderType;
+    modelId: string;
     workflowAssembly?: WorkflowAssemblyResult | null;
     approvalCallback: ApprovalCallback;
     initialConfig: EffectiveToolConfig;
@@ -270,8 +276,10 @@ After existing guards, before `responseLoop()`:
 3. Wire `onMessageAdded` / `onConversationChanged` to `this.historyManager`
 4. Load snapshot into new manager via `loadConversation()`
 5. Snapshot persona: `const pinnedPersona = this.personaManager?.getActivePersona() ?? null`
-6. Resolve initial config via pure `resolveEffectiveConfig(matchedRules)`
-7. Create `ConversationSession` with all the above
+6. Snapshot provider: `const providerType = this.providerRegistry.getActiveType()`
+7. Snapshot model: `const modelId = this.getActiveModelId()`
+8. Resolve initial config via pure `resolveEffectiveConfig(matchedRules, null, pinnedPersona)`
+9. Create `ConversationSession` with all the above (including `providerType`, `modelId`)
 8. Register in `this.activeSessions: Map<string, ConversationSession>`
 9. Pass session into `responseLoop()`
 
@@ -284,12 +292,15 @@ private async responseLoop(
 ```
 
 Inside the loop, all shared state reads become session reads:
-- `this.conversationManager` → `session.conversationManager`
+- `this.conversationManager` → `session.conversationManager` (also for `getMessages()` at L1400 and `addMessage()` calls)
 - `this.personaManager?.getActivePersona()` → `session.pinnedPersona`
-- `resolveEffectiveConfig(matchedRules, session.workflowAssembly)` → updates `session.effectiveConfig` and `session.parsedConfigs`
+- `this.providerRegistry.getActiveProvider()` → `this.providerRegistry.getProvider(session.providerType)`
+- `this.getActiveModelId()` → `session.modelId`
+- `resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona)` → updates `session.effectiveConfig` and `session.parsedConfigs`
 - If session matches displayed conversation: `this.updateDisplayConfig(session.effectiveConfig, session.parsedConfigs)`
 - `executeToolBatches()` passes `session.buildPolicyContext(this.settings, vaultRootPath)` and `session.approvalCallback`
-- `checkAndPerformCompaction()` accepts session's conversation manager
+- `checkAndPerformCompaction()` accepts session's conversation manager (explicit parameterization needed — currently reads `this.conversationManager`)
+- `toChatMessages()` at L1427 uses session's conversation manager
 
 **View render guarding:**
 ```typescript
@@ -305,7 +316,7 @@ All `this.view?.` calls inside `responseLoop` change to `this.getViewForSession(
 **`switchConversation()` (line 356):**
 
 1. **Reset `isResponding`:** Call `this.view?.setRespondingState(false)` to unlock input.
-2. **Decouple AbortController:** Session owns its own `AbortController` (not via `this.view?.createAbortController()`). Stop button targets current session's controller.
+2. **Decouple AbortController:** Session owns its own `AbortController` (not via `this.view?.createAbortController()`). The existing `onStopResponse` callback in `wireView()` is updated to dynamically resolve the session: find displayed conversation ID → look up in `activeSessions` map → call `session.abortController.abort()`. Falls back to existing behavior if no active session. No new view API needed.
 
 **Message flow:**
 1. Add user message to `this.conversationManager` (persists to JSONL, renders in UI)
@@ -325,32 +336,35 @@ The background loop currently uses a save/restore hack for `activeWorkflowAssemb
 - L962-964 (direct `this.effectiveToolConfig` read): replaced with `session.effectiveConfig.tools[toolName]?.auto_approve ?? false`
 - L975 `dispatcher.dispatch()` call: passes `session.buildPolicyContext()` and `session.approvalCallback`
 
-#### 4.1.6 Step 1f: JSONL persona + model restoration on `switchConversation`
+#### 4.1.6 Step 1f: Display-restore persona + model on `switchConversation`
 
-The `Conversation` header already stores `persona_name` (L544), `provider_id`, and `model_id`. Currently `switchConversation()` ignores them on load.
+The `Conversation` header already stores `persona_name` ([`types.ts:56`](../../src/types.ts)), `provider_id`, and `model_id`. Currently `switchConversation()` ignores them on load.
+
+**Important:** Restoration must NOT call `activatePersona()` or `switchProvider()` — those mutate global settings, persist to disk, and fire callbacks that would corrupt active sessions. Instead, use display-only updates.
 
 **Changes to `switchConversation()` (~L356):**
 
 After loading conversation from history manager:
 ```typescript
-// Restore persona from conversation header
-if (conversation.persona_name && this.personaManager) {
-  await this.personaManager.activatePersona(conversation.persona_name);
-} else if (this.personaManager) {
-  this.personaManager.deactivatePersona();
+// Display-restore persona label from conversation header
+// (Does NOT call activatePersona — no global mutation)
+if (conversation.persona_name) {
+  this.view?.updatePersonaLabel(conversation.persona_name);
+} else {
+  this.view?.updatePersonaLabel(null);
 }
 
-// Restore provider from conversation header
+// Display-restore provider/model in UI selectors
+// (Does NOT call switchProvider — no global mutation)
 if (conversation.provider_id) {
-  try {
-    this.providerRegistry.switchProvider(conversation.provider_id as LLMProviderType);
-  } catch {
-    log.warn("Conversation provider not available, keeping current", {
-      provider: conversation.provider_id
-    });
-  }
+  this.view?.updateProviderDisplay(conversation.provider_id);
+}
+if (conversation.model_id) {
+  this.view?.updateModelDisplay(conversation.model_id);
 }
 ```
+
+**Note:** When the user sends a NEW message in this conversation, `handleUserMessage()` snapshots the current global persona/provider/model into the session. If the user wants to change the persona for this conversation, they use the persona picker (which updates the global state) and the next message picks it up. The conversation header is updated when the session writes messages.
 
 Also ensure `updateConversationHeader()` propagates persona changes if the user switches persona mid-conversation (the header's `persona_name` should stay current).
 
@@ -369,7 +383,7 @@ Also ensure `updateConversationHeader()` propagates persona changes if the user 
 - `src/chat/dispatcher.ts` — `dispatch()` gains optional `policyCtx` + `approvalCallback` params
 - `src/chat/tool-orchestration.ts` — `executeToolBatches()`, `safeDispatch()`, `runConcurrentBatch()` thread `policyCtx` + `approvalCallback`
 - `src/chat/orchestrator.ts` — `resolveEffectiveConfig()` (pure signature + body), `handleUserMessage()` (session creation), `responseLoop()` (uses session), `_backgroundResponseLoop()` (uses session, removes save/restore hack), `switchConversation()` (persona+model restoration, display config update, isResponding reset, abort controller decoupling), `updateDisplayConfig()` helper, `getViewForSession()` helper, `activeSessions` map
-- `src/ui/chat-view.ts` — decouple `AbortController` from view (session owns its own)
+- `src/ui/chat-view.ts` — decouple `AbortController` from view (session owns its own), add `updatePersonaLabel()`, `updateProviderDisplay()`, `updateModelDisplay()` display-only methods for conversation switch restoration
 
 ---
 
@@ -382,7 +396,7 @@ Also ensure `updateConversationHeader()` propagates persona changes if the user 
 **File:** `src/chat/orchestrator.ts`
 
 ```typescript
-private activeSessions: Map<string, ResponseSession> = new Map();
+private activeSessions: Map<string, ConversationSession> = new Map();
 ```
 
 **In `handleUserMessage()`:**
@@ -392,7 +406,7 @@ private activeSessions: Map<string, ResponseSession> = new Map();
 
 **Public accessor:**
 ```typescript
-getActiveSessions(): ResponseSession[] {
+getActiveSessions(): ConversationSession[] {
   return Array.from(this.activeSessions.values());
 }
 
@@ -408,8 +422,8 @@ hasActiveSession(conversationId: string): boolean {
 When switching to a conversation that has an active session, use the session's in-memory state instead of reloading from JSONL:
 
 1. Check `this.activeSessions.has(conversation.id)`
-2. **If active session exists:** Diff the session manager's messages against the UI manager's messages. Append only new messages (those added since the snapshot) to the UI manager and render them. This avoids re-parsing JSONL and preserves any in-progress rendering state.
-3. Set `this.view?.setRespondingState(true)` and wire the stop button to `session.abortController`
+2. **If active session exists:** Load UI manager entirely from the session manager's in-memory messages via `this.conversationManager.loadConversation(session.conversation, session.conversationManager.getMessages())`. Re-render all messages. This is a full replace, not a diff — simpler and avoids ambiguity around compaction and partial flushes.
+3. Set `this.view?.setRespondingState(true)`. The stop button uses the existing `onStopResponse` callback — the orchestrator's handler looks up the displayed conversation's active session and calls `session.abortController.abort()`.
 4. Register a one-time callback on the session's `onStatusChange` to call `this.view?.setRespondingState(false)` when it completes
 5. **If no active session:** Load from `HistoryManager` as normal (standard JSONL load for completed conversations)
 
@@ -433,7 +447,7 @@ Add a second data source:
 constructor(
   containerEl: HTMLElement,
   tracker: WorkflowActivityTracker,
-  private readonly getActiveSessions?: () => ResponseSession[]
+  private readonly getActiveSessions?: () => ConversationSession[]
 )
 ```
 
@@ -454,7 +468,7 @@ const hasActive = this.tracker.hasActiveWorkflows() || (this.getActiveSessions?.
 **File:** `src/ui/workflow-activity-dropdown.ts`
 
 Add a "Conversations" section to the dropdown render method. Each entry shows:
-- Conversation title (from `ResponseSession.title`)
+- Conversation title (from `ConversationSession.title`)
 - Status badge: "Streaming" / "Waiting for approval"
 - Elapsed time since `session.startedAt`
 - Click handler: `onNavigate(session.conversationId)`
@@ -501,16 +515,11 @@ interface ChatViewOptions {
 }
 ```
 
-When `isSecondary === true`, `buildHeader()` renders only:
-- "New conversation" button (message-square-plus icon)
-- "Settings" gear button
-- "Conversation history" list toggle
-
-Omits: workflow activity indicator, MCP status indicator.
+Secondary panels render the **full toolbar** (same as primary). Per-session scoping from Phase 1 means persona, provider, and tool config are already isolated — no reason to reduce capability. The `isSecondary` flag is used for workspace restore logic and command behavior, not toolbar rendering.
 
 The input area remains the same (text input, send/stop, attachments).
 
-**Singleton-assumption updates:** Code in `main.ts` that assumes one leaf of `CHAT_VIEW_TYPE` (e.g., `getLeavesOfType(CHAT_VIEW_TYPE)` at line 2182) must be updated to handle multiple leaves. The primary panel is the first leaf opened; subsequent leaves are secondary.
+**Singleton-assumption updates:** Code in `main.ts` that assumes one leaf of `CHAT_VIEW_TYPE` (e.g., `getLeavesOfType(CHAT_VIEW_TYPE)` at line 2182 and line 2199) must be updated to handle multiple leaves. Add a `getPrimaryChatLeaf()` helper that filters `getLeavesOfType` results. The primary panel is the first leaf opened; subsequent leaves are secondary. Audit all call sites to use the helper where appropriate.
 
 #### 4.4.2 Per-panel orchestrator
 
@@ -598,7 +607,7 @@ setState(state: Record<string, unknown>): Promise<void> {
 
 #### 4.4.6 Files modified
 
-- `src/ui/chat-view.ts` — `isSecondary` constructor option, reduced header, state persistence via `getState()`/`setState()`, `rebuildHeader()`
+- `src/ui/chat-view.ts` — `isSecondary` constructor option (full toolbar, same as primary), state persistence via `getState()`/`setState()`
 - `src/main.ts` — update `registerView` callback to handle secondary leaves, `wireSecondaryView()`, command, update singleton-assumption code (`getLeavesOfType`)
 - `src/chat/dispatcher.ts` — remove global `setApprovalCallback()` fallback (per-call approval already added in Phase 1 Step 1a)
 
@@ -655,14 +664,14 @@ view.setOnOpenInNewTab((filename: string) => {
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | Tool dispatcher contention | Two panels both need tool approval simultaneously | **Resolved in Phase 1 (Step 1a/1d).** Each `ConversationSession` owns its approval callback, passed per-`dispatch()` call. No global `setApprovalCallback()`. |
-| Persona state is global | Changing persona mid-stream affects in-flight sessions | **Resolved in Phase 1 (Step 1d).** Active persona snapshotted at session creation as `session.pinnedPersona`. Mid-stream persona changes don't affect in-flight sessions. Secondary panels inherit persona at session start but don't show picker. Per-panel persona scoping deferred to v2. |
+| Persona state is global | Changing persona mid-stream affects in-flight sessions | **Resolved in Phase 1 (Step 1d).** Active persona snapshotted at session creation as `session.pinnedPersona`. Provider type and model ID also snapshotted as `session.providerType` and `session.modelId`. Mid-stream persona/provider changes don't affect in-flight sessions. `resolveEffectiveConfig()` accepts persona as a parameter — not read from global `PersonaManager`. |
 | `resolveEffectiveConfig` concurrency | Two concurrent sessions interleave tool config resolution, producing inconsistent state | **Resolved in Phase 1 (Steps 1a-1b).** `resolveEffectiveConfig()` is pure — returns results without mutating shared state. Policy enforcement is a pure function per-dispatch. Each session owns its resolved config. No shared mutable `effectiveToolConfig` on dispatcher. |
 | `activeWorkflowAssemblyResult` race | Background loop save/restore hack not concurrent-safe | **Resolved in Phase 1 (Step 1e).** `resolveEffectiveConfig()` accepts `workflowAssembly` as parameter. Background session passes its assembly directly. Save/restore hack eliminated. |
 | Provider rate limits | Multiple concurrent conversations hit API rate limits | Not architecturally addressed — existing `RATE_LIMITED` error handling surfaces a Notice to the user. |
 | Memory pressure | Multiple ConversationManagers holding message arrays | Each manager only holds messages for one conversation. Lightweight compared to the LLM context window. |
-| Stale UI on return | User switches back to a conversation that streamed in the background — may not see latest messages | In-memory diff from session manager for active sessions (Phase 2). JSONL reload for completed sessions without an active session. |
+| Stale UI on return | User switches back to a conversation that streamed in the background — may not see latest messages | Full replace from session manager's in-memory messages for active sessions (Phase 2). JSONL reload for completed sessions without an active session. |
 | AbortController scoping | Closing a panel while response is streaming | `ConversationSession` owns its `AbortController`. Panel `onClose()` aborts all sessions for that panel. |
-| Persona/model restoration edge cases | Conversation's persona deleted or provider unconfigured since last use | Graceful fallback: `activatePersona()` returns false if persona not found, keeps current persona with warning. `switchProvider()` wrapped in try/catch, keeps current provider on failure. |
+| Persona/model restoration edge cases | Conversation's persona deleted or provider unconfigured since last use | Graceful fallback: display-restore updates the UI label (no `activatePersona()` call). If persona not found, shows "(unknown persona)" label. If provider not configured, shows warning in model selector. No global state mutation on failure. |
 
 ---
 
@@ -767,7 +776,7 @@ Phase 2 (session registry + sync-back)
 | Background workflow isolation | [`orchestrator.ts:700-724`](../../src/chat/orchestrator.ts) | Per-response `ConversationManager` creation + wiring |
 | `_backgroundResponseLoop` | [`orchestrator.ts:839-1040`](../../src/chat/orchestrator.ts) | Self-contained response loop using passed-in manager |
 | Sub-agent dispatcher creation | [`use-subagent.ts:314-319`](../../src/tools/use-subagent.ts) | Separate config per dispatch context (proven per-session isolation pattern) |
-| Persona activate/deactivate | [`persona-manager.ts:117-147`](../../src/personas/persona-manager.ts) | `activatePersona(name)` for conversation load; handles provider/model overrides |
+| Persona activate/deactivate | [`persona-manager.ts:117-147`](../../src/personas/persona-manager.ts) | `activatePersona(name)` for user-initiated persona changes only; NOT used for conversation-switch restoration (display-only update instead) |
 | Provider switching | [`providers/index.ts:158`](../../src/providers/index.ts) | `switchProvider()` for conversation load |
 | `mergeToolConfigs` (pure) | [`tool-config/merger.ts:55-103`](../../src/tool-config/merger.ts) | Already pure — accepts inputs, returns merged config. No changes needed. |
 | `getFilteredToolDefinitions` | [`tools/index.ts:124`](../../src/tools/index.ts) | Already pure — accepts `EffectiveToolConfig`, returns filtered defs. |
@@ -775,4 +784,4 @@ Phase 2 (session registry + sync-back)
 | `WorkflowActivityDropdown` | [`src/ui/workflow-activity-dropdown.ts`](../../src/ui/workflow-activity-dropdown.ts) | Positioned popover with live-update entries |
 | HistoryManager write queues | [`src/chat/history.ts`](../../src/chat/history.ts) | Per-file promise chains serialize concurrent writes — no changes needed |
 | View state persistence | Obsidian `ItemView.getState()` / `setState()` | Standard pattern for workspace restore |
-| Conversation header persistence | [`types.ts:14-94`](../../src/types.ts) | `persona_name`, `provider_id`, `model_id` already stored in JSONL header — just need restoration on load |
+| Conversation header persistence | [`types.ts:14-94`](../../src/types.ts) | `persona_name` ([L56](../../src/types.ts)), `provider_id`, `model_id` already stored in JSONL header — used for display-restore on load and session snapshot at creation |
