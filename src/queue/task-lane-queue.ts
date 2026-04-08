@@ -129,7 +129,7 @@ export class TaskLaneQueue {
 			return;
 		}
 
-		const waiter = lane.waitQueue[0];
+		const waiter = lane.waitQueue[0]!;
 		const elapsed = Date.now() - lane.lastCompletionTime;
 		const remaining = waiter.delayMs - elapsed;
 

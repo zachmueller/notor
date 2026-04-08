@@ -1,7 +1,7 @@
 # TaskLaneQueue: Implementation Tasks
 
 **Spec:** [task-lane-queue-design.md](./task-lane-queue-design.md)
-**Status:** Phase 4 complete
+**Status:** Phase 5 in progress
 **Date:** 2026-04-09
 
 ---
@@ -156,14 +156,14 @@ Expose `enqueue` and `pending` to user extensions via `utils.queue` in `src/exte
 
 ## Phase 5: Verification
 
-- [ ] **5.1 Run full unit test suite**
-  - `npm run test` — confirm no regressions
+- [x] **5.1 Run full unit test suite**
+  - `npm run test` — confirm no regressions (477 tests pass, 25 files, 0 failures)
 
 - [ ] **5.2 Smoke test in Obsidian** (manual)
-  - Build plugin (`npm run build`)
+  - Build plugin (`npm run build`) — build succeeds
   - Load in Obsidian dev vault
   - Confirm plugin loads without errors in console
   - Confirm `getTaskLaneQueue()` is accessible (debug breakpoint or console log)
 
-- [ ] **5.3 Commit**
+- [x] **5.3 Commit**
   - Commit all new and modified files with descriptive message
