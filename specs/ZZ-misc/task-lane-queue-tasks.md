@@ -1,7 +1,7 @@
 # TaskLaneQueue: Implementation Tasks
 
 **Spec:** [task-lane-queue-design.md](./task-lane-queue-design.md)
-**Status:** Phase 1 complete
+**Status:** Phase 2 complete
 **Date:** 2026-04-09
 
 ---
@@ -55,49 +55,49 @@ Create `src/queue/task-lane-queue.ts` — the `TaskLaneQueue` class and internal
 
 Create `src/queue/__tests__/task-lane-queue.test.ts` using Vitest. Follow existing test conventions: `describe`/`it` blocks, `vi.fn()` mocks, `beforeEach` with `vi.clearAllMocks()`.
 
-- [ ] **2.1 Create test file scaffold**
+- [x] **2.1 Create test file scaffold**
   - Create `src/queue/__tests__/` directory
   - Create `src/queue/__tests__/task-lane-queue.test.ts`
   - Import `TaskLaneQueue`, set up fresh instance in `beforeEach`
 
-- [ ] **2.2 Serial execution tests**
+- [x] **2.2 Serial execution tests**
   - Two tasks on same lane execute serially (second waits for first to complete)
   - FIFO ordering — tasks complete in enqueue order
 
-- [ ] **2.3 Per-task delay enforcement tests**
+- [x] **2.3 Per-task delay enforcement tests**
   - Task with `delayMs=100` waits at least 100ms after previous task's completion
   - Two tasks with different `delayMs` on same lane get correct per-task spacing
   - Task with `delayMs=0` fires immediately after previous completion (no artificial delay)
 
-- [ ] **2.4 First-request-on-idle-lane test**
+- [x] **2.4 First-request-on-idle-lane test**
   - First `enqueue` on a new lane fires immediately regardless of `delayMs` value (lane's `lastCompletionTime` is `0`, so `Date.now() - 0` always exceeds any reasonable delay)
 
-- [ ] **2.5 Cross-lane concurrency test**
+- [x] **2.5 Cross-lane concurrency test**
   - Tasks on different lane keys execute concurrently (not serialized across lanes)
 
-- [ ] **2.6 `pending()` tests**
+- [x] **2.6 `pending()` tests**
   - Returns correct count of waiting tasks
   - Returns `0` for non-existent lanes
 
-- [ ] **2.7 Error handling tests**
+- [x] **2.7 Error handling tests**
   - If `fn` throws, the error propagates to the caller via rejected Promise
   - Lane still advances after a throwing task (next waiter proceeds)
 
-- [ ] **2.8 Return value passthrough test**
+- [x] **2.8 Return value passthrough test**
   - `enqueue` resolves with the value returned by `fn`
 
-- [ ] **2.9 `removeLane()` test**
+- [x] **2.9 `removeLane()` test**
   - After `removeLane(key)`, the lane no longer exists in the queue
 
-- [ ] **2.10 Lane persistence test**
+- [x] **2.10 Lane persistence test**
   - After all tasks drain, the lane object remains in the Map (no self-cleaning)
 
-- [ ] **2.11 `destroy()` tests**
+- [x] **2.11 `destroy()` tests**
   - All pending waiters receive rejection with `Error("TaskLaneQueue destroyed")`
   - New `enqueue()` calls after `destroy()` throw immediately
   - In-flight task continues to completion (not interrupted)
 
-- [ ] **2.12 Run tests and confirm all pass**
+- [x] **2.12 Run tests and confirm all pass**
   - `npm run test -- src/queue`
 
 ---
