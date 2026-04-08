@@ -1,14 +1,14 @@
 # Multi-Provider Web Search with Plugin-Wide Request Queuing
 
-**Status:** Draft
+**Status:** Draft — revised to align with extension scaffold architecture
 **Author:** Design spike
-**Date:** 2026-04-05
+**Date:** 2026-04-05 (revised 2026-04-09)
 
 ---
 
 ## 1. Motivation
 
-The `web_search` tool ([`src/tools/web-search.ts`](../../src/tools/web-search.ts)) uses DuckDuckGo's HTML endpoint as its sole search backend. This works well for serial use, but breaks down under concurrent load.
+The `web_search` tool (built-in extension scaffold in [`src/extensions/builtin-tool-scaffolds.ts:1217-1384`](../../src/extensions/builtin-tool-scaffolds.ts)) uses DuckDuckGo's HTML endpoint as its sole search backend. This works well for serial use, but breaks down under concurrent load.
 
 **The problem:** When `use_subagent` spawns multiple sub-agents (up to 3 concurrent, per [`src/sub-agents/semaphore.ts`](../../src/sub-agents/semaphore.ts)), each sub-agent runs its own tool dispatch loop with a concurrency cap of 5 ([`src/chat/tool-orchestration.ts:104`](../../src/chat/tool-orchestration.ts)). In a research-heavy workflow, this can produce 6+ simultaneous `web_search` calls — all hitting DuckDuckGo. DDG responds with HTTP 202 (throttled), and the searches fail silently or return no results.
 
@@ -24,11 +24,13 @@ The `web_search` tool ([`src/tools/web-search.ts`](../../src/tools/web-search.ts
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Provider abstraction | Interface + concrete classes | Mirrors the LLM provider pattern (`src/providers/`). Each search provider is a standalone class. |
-| Queue location | Plugin-level singleton | Must span all conversations/sub-agents. Created in `main.ts`, injected into `WebSearchTool`. Same pattern as `_mcpHub`, `_toolRegistry`. |
-| Provider selection | Queue selects, not the tool | `WebSearchTool` calls the queue; the queue picks the provider based on priority, availability, and round-robin state. The tool never knows which provider was used. |
-| Credential storage | Obsidian SecretStorage | Same pattern as existing API keys (`src/utils/secrets.ts`). API key IDs follow `notor-{provider}-{credential-type}` convention. |
-| Provider ordering UI | Up/down buttons, not drag-and-drop | Matches the existing hooks reordering pattern in [`src/settings/sections/hooks.ts`](../../src/settings/sections/hooks.ts). Simpler to implement; drag-and-drop can be added later. |
+| Provider abstraction | Interface + concrete classes | Mirrors the LLM provider pattern (`src/providers/`). Each search provider is a standalone class in `src/web-search/providers/`. |
+| Queue location | Plugin-level singleton | Must span all conversations/sub-agents. Created in `main.ts`, exposed to scaffold via `utils.webSearch`. Same lazy-init pattern as `_mcpHub`, `_toolRegistry`. |
+| Provider selection | Queue selects, not the scaffold | The scaffold calls `utils.webSearch.search()`; the queue picks the provider based on priority, availability, and round-robin state. The scaffold never knows which provider was used. |
+| Tool architecture | Built-in extension scaffold | `web_search` is a scaffold in `builtin-tool-scaffolds.ts`, consistent with all tools except `use_subagent`. The scaffold is a thin shim that delegates to `utils.webSearch` for provider orchestration. Users can override by creating `notor/tools/web_search.md`. |
+| Credential storage | Extension-level SecretStorage | API keys use `secret: true` on scaffold settings fields, stored via the extension settings system's `slugifySecretId("notor-ext", "web_search", field.key)` convention. No changes to `SECRET_IDS` in `src/utils/secrets.ts`. |
+| Settings model | Flat extension settings fields | All configuration (provider enable/disable, API keys, delays, priority, round-robin) defined in the scaffold's YAML settings fence using supported types (`string`, `number`, `boolean`, `string[]`). Rendered by the generic extension settings UI. |
+| Provider ordering UI | `string[]` add/remove (v1) | Priority ordering uses a `string[]` field. Generic renderer supports add/remove. Reordering by up/down buttons deferred to a future `reorderable` enhancement on `SettingsFieldSchema`. |
 | Delay enforcement | Per-provider serialization with timed gaps | Each provider has its own independent delay lane. Within a lane, requests are FIFO-serialized with a configurable minimum gap. Across lanes, requests are concurrent. |
 | Fallback behavior | Synchronous retry within same `search()` call | Failed provider → try next in priority order. No queue re-entry (avoids FIFO fairness issues). |
 | Round-robin scope | Per-queue (not per-conversation) | A single `roundRobinIndex` counter shared across all callers maximizes load distribution. |
@@ -38,15 +40,17 @@ The `web_search` tool ([`src/tools/web-search.ts`](../../src/tools/web-search.ts
 
 ## 3. Architecture Overview
 
-Four layers sit between callers and the HTTP transport. Both the built-in `WebSearchTool` and user-defined extensions share the same queue infrastructure:
+Four layers sit between callers and the HTTP transport. The built-in scaffold and user-defined extensions share the same queue infrastructure via `utils.webSearch` and `utils.queue`:
 
 ```
-WebSearchTool.execute()          User Extension (via utils.queue.enqueue)
+web_search scaffold              User Extension (via utils.queue.enqueue
+(builtin-tool-scaffolds.ts)       or utils.webSearch.search)
   │                                │
-  │  validate input, call queue    │  direct lane access
+  │  validate input,               │  direct lane access
+  │  call utils.webSearch.search() │  or full search API
   │                                │
   ▼                                │
-WebSearchQueue                     │
+WebSearchQueue  (src/web-search/queue.ts)
   │                                │
   │  select provider (priority /   │
   │  round-robin), handle fallback │
@@ -57,7 +61,7 @@ TaskLaneQueue  (plugin-level singleton, shared)
   │  per-lane FIFO serialization + delay enforcement
   │
   ▼
-SearchProvider  (interface)      / requestUrl()  (Obsidian HTTP transport)
+SearchProvider  (interface)
   │
   │  DuckDuckGoProvider  │  TavilyProvider  │  BraveSearchProvider  │  SerpApiProvider
   │
@@ -65,7 +69,7 @@ SearchProvider  (interface)      / requestUrl()  (Obsidian HTTP transport)
 requestUrl()  (Obsidian HTTP transport)
 ```
 
-`WebSearchTool` remains a thin coordinator: validate input → call queue → filter results (domain denylist) → format output. Provider selection, round-robin, and fallback logic lives in `WebSearchQueue`. Per-lane serialization and delay enforcement lives in the generic `TaskLaneQueue`, which is also exposed to user extensions via `utils.queue` (see [Section 17](#17-extension-system-interaction)).
+The `web_search` scaffold remains a thin coordinator: validate input → call `utils.webSearch.search()` → filter results (domain denylist) → format output. Provider selection, round-robin, and fallback logic lives in `WebSearchQueue`. Per-lane serialization and delay enforcement lives in the generic `TaskLaneQueue`, which is also exposed to user extensions via `utils.queue` (see [Section 17](#17-extension-system-interaction)).
 
 ---
 
@@ -130,16 +134,16 @@ export interface SearchProvider {
 
 ### 4.2 Concrete Providers
 
-All providers use Obsidian's `requestUrl()` for HTTP transport, consistent with [`src/tools/fetch-webpage.ts:332-387`](../../src/tools/fetch-webpage.ts) and the current [`src/tools/web-search.ts:193-209`](../../src/tools/web-search.ts).
+All providers use Obsidian's `requestUrl()` for HTTP transport (imported directly from `obsidian`, not via the extension runtime context). This is consistent with the current scaffold's usage at [`builtin-tool-scaffolds.ts:1315`](../../src/extensions/builtin-tool-scaffolds.ts).
 
 | File | Class | API | Auth | Default Delay | Notes |
 |------|-------|-----|------|---------------|-------|
-| `duckduckgo.ts` | `DuckDuckGoProvider` | POST `https://html.duckduckgo.com/html/` | None | 1500ms | Extracts existing logic from `web-search.ts`. `cleanDDGUrl()` and `parseDDGResults()` become internal helpers. HTML parsing via global `DOMParser`. |
+| `duckduckgo.ts` | `DuckDuckGoProvider` | POST `https://html.duckduckgo.com/html/` | None | 1500ms | Extracts existing logic from the `web_search` scaffold (`builtin-tool-scaffolds.ts:1248-1341`). `cleanDDGUrl()` and `parseDDGResults()` become internal helpers. HTML parsing via global `DOMParser`. |
 | `tavily.ts` | `TavilyProvider` | POST `https://api.tavily.com/search` | Bearer token | 0ms | JSON request/response. Returns structured results (title, url, content). Free tier: 1000 searches/month. |
 | `brave.ts` | `BraveSearchProvider` | GET `https://api.search.brave.com/res/v1/web/search` | `X-Subscription-Token` header | 0ms | JSON response. Free tier: 2000 queries/month. |
 | `serpapi.ts` | `SerpApiProvider` | GET `https://serpapi.com/search` | `api_key` query param | 0ms | JSON response. Wraps Google results. Free tier: 100 searches/month. |
 
-**All providers normalize output to `WebSearchResult[]`** (the existing type at [`src/tools/web-search.ts:27-31`](../../src/tools/web-search.ts)):
+**All providers normalize output to `WebSearchResult[]`:**
 
 ```typescript
 export interface WebSearchResult {
@@ -160,17 +164,17 @@ export interface WebSearchResult {
 
 ### 4.3 DuckDuckGo Provider — Extraction Details
 
-The current `web-search.ts` contains ~200 lines of HTTP + parsing logic. The extraction moves:
+The current `web_search` scaffold in [`builtin-tool-scaffolds.ts:1244-1341`](../../src/extensions/builtin-tool-scaffolds.ts) contains ~100 lines of HTTP + parsing logic in a TypeScript string template. The extraction moves this logic to a proper TypeScript module:
 
-- `cleanDDGUrl()` (lines 47-62) → `duckduckgo.ts` (private helper, still exported for tests)
-- `parseDDGResults()` (lines 78-106) → `duckduckgo.ts` (private helper, still exported for tests)
-- HTTP request logic (lines 180-234) → `DuckDuckGoProvider.search()`
-- Selector drift warning (lines 244-250) → `DuckDuckGoProvider.search()`
+- `cleanDDGUrl()` (scaffold lines 1248-1260) → `duckduckgo.ts` (private helper, still exported for tests)
+- `parseDDGResults()` (scaffold lines 1262-1287) → `duckduckgo.ts` (private helper, still exported for tests)
+- HTTP request logic (scaffold lines 1305-1341) → `DuckDuckGoProvider.search()`
+- Selector drift warning (scaffold lines 1345-1352) → `DuckDuckGoProvider.search()`
 
-What stays in `web-search.ts`:
-- Input validation (lines 152-162)
-- `isDomainBlocked` filtering (lines 253-262)
-- Output formatting (lines 276-301)
+What stays in the scaffold (thin shim):
+- Input validation (scaffold lines 1291-1295)
+- `isDomainBlocked` filtering via `utils.isDomainBlocked()` (scaffold lines 1354-1362)
+- Output formatting (scaffold lines 1368-1382)
 
 ---
 
@@ -333,219 +337,245 @@ export class SearchProviderRegistry {
 
 ---
 
-## 7. Updated WebSearchTool
+## 7. Updated web_search Scaffold
 
-**File:** `src/tools/web-search.ts` (modified in place)
+**File:** `src/extensions/builtin-tool-scaffolds.ts` (modified in place)
 
-The class becomes a thin coordinator:
+The scaffold becomes a thin coordinator that delegates to `utils.webSearch.search()`. The description changes from "Search the web using DuckDuckGo" to "Search the web and return results" since the provider is now an implementation detail.
+
+The YAML settings fence expands to include provider configuration (see [Section 8](#8-settings-data-model)). The TypeScript code block simplifies:
 
 ```typescript
-export class WebSearchTool implements Tool {
-  readonly name = "web_search";
-  readonly mode = "read" as const;
+const log = utils.logger("web_search");
 
-  constructor(
-    private readonly app: App,
-    private readonly settings: NotorSettings,
-    private readonly searchQueue: WebSearchQueue,  // NEW: injected from main.ts
-  ) {}
+const query = params.query as string;
 
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
-    // 1. Validate & clamp params (same as today — lines 152-171)
-    // 2. Call this.searchQueue.search(query, numResults, timeoutMs)
-    // 3. Filter results through isDomainBlocked (same as today — lines 253-262)
-    // 4. Format output as numbered markdown list (same as today — lines 276-301)
-  }
+if (!query || typeof query !== "string") {
+  throw new Error("Missing required parameter: query");
 }
+
+const rawNum = typeof params.num_results === "number"
+  ? params.num_results
+  : (settings.web_search_default_num_results as number);
+const numResults = Math.max(1, Math.min(10, Math.round(rawNum)));
+const timeoutMs = (settings.web_search_timeout as number) * 1000;
+
+log.info("Web search initiated", { query, numResults, timeoutMs });
+
+// Delegate to multi-provider queue infrastructure
+const searchResult = await utils.webSearch.search(query, numResults, timeoutMs);
+
+if (searchResult.failures.length > 0) {
+  log.warn("Some providers failed before success", { failures: searchResult.failures });
+}
+
+log.debug("Search fulfilled", { provider: searchResult.provider, rawCount: searchResult.results.length });
+
+// Filter out blocked domains
+const denylist = shared.domain_denylist ?? [];
+const results = searchResult.results.filter((r: any) => {
+  const check = utils.isDomainBlocked(r.url, denylist);
+  if (check.blocked) {
+    log.debug("Filtered blocked domain", { url: r.url, pattern: check.pattern });
+  }
+  return !check.blocked;
+});
+
+if (results.length === 0) {
+  return `No results found for query: ${query}`;
+}
+
+// Format output as numbered markdown list
+const lines: string[] = [
+  `Web search results for "${query}" (${results.length} result${results.length === 1 ? "" : "s"}):`,
+  "",
+];
+
+for (let i = 0; i < results.length; i++) {
+  const r = results[i];
+  lines.push(`${i + 1}. **[${r.title}](${r.url})**`);
+  if (r.snippet) lines.push(`   ${r.snippet}`);
+  lines.push("");
+}
+
+const output = lines.join("\n").trimEnd();
+log.info("Web search completed", { query, resultCount: results.length, provider: searchResult.provider });
+return output;
 ```
 
-The tool description changes from "Search the web using DuckDuckGo" to remove the DDG reference, since the provider is now an implementation detail.
+This reduces scaffold code from ~140 lines (inline DDG logic) to ~50 lines (delegation + formatting). The DDG HTTP logic, HTML parsing, timeout races, and selector drift warnings all move to `DuckDuckGoProvider` in `src/web-search/providers/duckduckgo.ts`.
+
+**`utils.webSearch` API** (added to `ExtensionUtils` in [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts)):
+
+```typescript
+webSearch: {
+  search(query: string, numResults: number, timeoutMs: number): Promise<WebSearchApiResult>;
+};
+```
+
+Where `WebSearchApiResult` is:
+
+```typescript
+interface WebSearchApiResult {
+  results: Array<{ title: string; url: string; snippet: string }>;
+  /** Which provider fulfilled the request (for logging). */
+  provider: string;
+  /** Providers that were tried and failed before success. */
+  failures: Array<{ provider: string; error: string }>;
+}
+```
 
 ---
 
 ## 8. Settings Data Model
 
-### 8.1 New Types
+### 8.1 Extension Settings (Scaffold YAML Fence)
 
-**File:** `src/settings/types.ts`
+All configuration uses the extension settings system. Settings are defined in the `web_search` scaffold's YAML settings fence in [`builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts) using flat fields of supported types (`string`, `number`, `boolean`, `string[]`). No changes to `src/settings/types.ts` or `src/settings/defaults.ts`.
+
+**Existing fields (unchanged):**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `web_search_timeout` | `number` | 10 | Request timeout in seconds |
+| `web_search_default_num_results` | `number` | 5 | Default result count (1-10) |
+
+**New global fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `web_search_round_robin` | `boolean` | false | Distribute requests across providers |
+| `web_search_provider_priority` | `string[]` | `["duckduckgo", "tavily", "brave", "serpapi"]` | Provider priority order (index 0 = highest) |
+
+**New per-provider fields** (repeated for `duckduckgo`, `tavily`, `brave`, `serpapi`):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `web_search_{provider}_enabled` | `boolean` | `true` for DDG, `false` for others | Whether provider is active |
+| `web_search_{provider}_api_key` | `string` (`secret: true`) | — | API key (not shown for DDG) |
+| `web_search_{provider}_delay_ms` | `number` | 1500 for DDG, 0 for API providers | Min ms between requests |
+
+### 8.2 Resolved Config Type
+
+The `WebSearchQueue` receives a typed config object resolved from the flat extension settings. This resolution happens in `main.ts` (see [Section 11](#11-registration-and-wiring)):
 
 ```typescript
-/** Web search provider identifiers. */
-export type WebSearchProviderType = "duckduckgo" | "tavily" | "brave" | "serpapi";
-
-/** Per-provider web search configuration (persisted in settings). */
-export interface WebSearchProviderSettings {
-  /** Provider identifier. */
-  type: WebSearchProviderType;
-  /** Whether this provider is active. Independent of API key presence. */
-  enabled: boolean;
-  /**
-   * Inter-request delay in ms. When undefined, the provider's built-in
-   * default is used (e.g. 1500ms for DDG, 0ms for API providers).
-   */
-  delay_ms?: number;
+/** Resolved web search configuration — built from flat extension settings. */
+export interface WebSearchResolvedConfig {
+  roundRobin: boolean;
+  providerPriority: string[];
+  providers: Record<string, {
+    enabled: boolean;
+    delayMs: number;
+    apiKey: string | null;
+  }>;
 }
 ```
 
-### 8.2 New Fields on NotorSettings
+### 8.3 Storage and Resolution
 
-```typescript
-// In NotorSettings (src/settings/types.ts)
-
-// -------------------------------------------------------------------
-// web_search provider settings
-// -------------------------------------------------------------------
-
-/** Ordered list of web search providers. Array order = priority for fallback. */
-web_search_providers: WebSearchProviderSettings[];
-
-/** Round-robin across available providers to maximize throughput. */
-web_search_round_robin: boolean;
-```
-
-The existing `web_search_timeout` and `web_search_default_num_results` fields are unchanged — they apply regardless of which provider fulfills the request.
-
-### 8.3 Defaults
-
-**File:** `src/settings/defaults.ts`
-
-```typescript
-/** Default web search provider configuration. DDG enabled by default. */
-export const DEFAULT_WEB_SEARCH_PROVIDERS: WebSearchProviderSettings[] = [
-  { type: "duckduckgo", enabled: true },
-  { type: "tavily", enabled: false },
-  { type: "brave", enabled: false },
-  { type: "serpapi", enabled: false },
-];
-```
-
-Within `createDefaultSettings()`:
-
-```typescript
-web_search_providers: DEFAULT_WEB_SEARCH_PROVIDERS,
-web_search_round_robin: false,
-```
+Settings are stored in `plugin.settings.user_extension_settings["web_search"]` (non-secret fields) and Obsidian SecretStorage (API key fields with `secret: true`). The extension settings resolver ([`settings-schema.ts:130-171`](../../src/extensions/settings-schema.ts)) handles this automatically:
+- Non-secret fields: read from `user_extension_settings["web_search"][field.key]`
+- Secret fields: read from SecretStorage via `getSecret(app, slugifySecretId("notor-ext", "web_search", field.key))`
+- Fallback to schema defaults when no persisted value exists
 
 ### 8.4 Backward Compatibility
 
-Users upgrading from the current single-provider `web_search` get the default provider list with DDG enabled. The standard settings merge pattern in `loadSettings()` (`{ ...defaults, ...loadedData }`) provides the new fields automatically. Existing `web_search_timeout` and `web_search_default_num_results` carry forward unchanged.
+The existing `web_search_timeout` and `web_search_default_num_results` fields were already migrated from `NotorSettings` to `user_extension_settings["web_search"]` by [`main.ts:604-614`](../../src/main.ts). New provider fields get their defaults from the scaffold YAML fence automatically — no additional migration needed. DDG remains the only enabled provider by default; new users get working web search out of the box.
 
 ---
 
 ## 9. Secrets
 
-**File:** `src/utils/secrets.ts`
+**No changes to `src/utils/secrets.ts`.**
 
-Three new entries in `SECRET_IDS`:
+API keys use the extension settings system's `secret: true` field type, not well-known `SECRET_IDS` constants. When a settings field has `secret: true`, the extension settings resolver ([`settings-schema.ts:142-148`](../../src/extensions/settings-schema.ts)) reads the value from SecretStorage via `getSecret(app, slugifySecretId("notor-ext", "web_search", field.key))`.
 
-```typescript
-export const SECRET_IDS = {
-  // ... existing ...
-  TAVILY_API_KEY: "notor-tavily-api-key",
-  BRAVE_SEARCH_API_KEY: "notor-brave-api-key",
-  SERPAPI_API_KEY: "notor-serpapi-api-key",
-} as const;
-```
+| Settings field | Secret ID (auto-generated) |
+|---------------|---------------------------|
+| `web_search_tavily_api_key` | `notor-ext-web-search-web-search-tavily-api-key` |
+| `web_search_brave_api_key` | `notor-ext-web-search-web-search-brave-api-key` |
+| `web_search_serpapi_api_key` | `notor-ext-web-search-web-search-serpapi-api-key` |
 
-Follows the established `notor-{provider}-{credential-type}` convention. Each key is stored and retrieved via `setSecret()` / `getSecret()` ([`src/utils/secrets.ts:44-82`](../../src/utils/secrets.ts)) and rendered in the settings UI via Obsidian's `SecretComponent`.
+Keys are stored and retrieved via `setSecret()` / `getSecret()` ([`src/utils/secrets.ts:44-82`](../../src/utils/secrets.ts)) and rendered in the generic extension settings UI via `SecretComponent` ([`src/settings/sections/extensions.ts:397-416`](../../src/settings/sections/extensions.ts)).
 
 ---
 
 ## 10. Settings UI
 
-**File:** `src/settings/sections/web-search.ts` (significant expansion)
+**No dedicated settings section file.** All web search settings are rendered by the generic extension settings UI in [`src/settings/sections/extensions.ts`](../../src/settings/sections/extensions.ts).
 
-The current section ([`src/settings/sections/web-search.ts`](../../src/settings/sections/web-search.ts)) has two settings: timeout and default result count. It expands to include:
+### 10.1 Rendered Layout
 
-### 10.1 Section Layout
+The extension settings renderer iterates the scaffold's YAML settings fields and renders each using the appropriate widget:
 
 ```
-Web search
-├── Request timeout (seconds)           [existing]
-├── Default number of results           [existing]
-├── Round-robin across providers        [new toggle]
-│
-├── Search providers                    [new subsection heading]
-│   ├── ┌─────────────────────────────────────────────────────┐
-│   │   │ [▲] [▼]  DuckDuckGo        [enabled ●]             │
-│   │   │          Delay: [1500] ms                           │
-│   │   ├─────────────────────────────────────────────────────┤
-│   │   │ [▲] [▼]  Tavily            [enabled ○]             │
-│   │   │          Delay: [0] ms     API key: [••••••••]      │
-│   │   ├─────────────────────────────────────────────────────┤
-│   │   │ [▲] [▼]  Brave Search      [enabled ○]             │
-│   │   │          Delay: [0] ms     API key: [••••••••]      │
-│   │   ├─────────────────────────────────────────────────────┤
-│   │   │ [▲] [▼]  SerpApi           [enabled ○]             │
-│   │   │          Delay: [0] ms     API key: [••••••••]      │
-│   │   └─────────────────────────────────────────────────────┘
+web_search (built-in tool)
+├── Request Timeout                     [number: 10]
+├── Default Number of Results           [number: 5]
+├── Round-robin across providers        [toggle: off]
+├── Provider priority order             [string[]: duckduckgo, tavily, brave, serpapi]
+│                                        (add/remove UI; reorder by remove + re-add)
+├── DuckDuckGo — Enabled                [toggle: on]
+├── DuckDuckGo — Delay (ms)             [number: 1500]
+├── Tavily — Enabled                    [toggle: off]
+├── Tavily — API Key                    [SecretComponent: ••••••••]
+├── Tavily — Delay (ms)                 [number: 0]
+├── Brave Search — Enabled              [toggle: off]
+├── Brave Search — API Key              [SecretComponent: ••••••••]
+├── Brave Search — Delay (ms)           [number: 0]
+├── SerpApi — Enabled                   [toggle: off]
+├── SerpApi — API Key                   [SecretComponent: ••••••••]
+└── SerpApi — Delay (ms)                [number: 0]
 ```
 
-### 10.2 Provider Row Components
+### 10.2 Provider Ordering
 
-Each provider row includes:
-- **Up/down arrows** — Splice the `web_search_providers` array and `ctx.redisplay()`. Same pattern as [`src/settings/sections/hooks.ts`](../../src/settings/sections/hooks.ts). First provider's up button and last provider's down button are disabled.
-- **Display name** — Static text from provider metadata.
-- **Enabled toggle** — Maps to `WebSearchProviderSettings.enabled`. Independent of API key. Toggling off does NOT remove the API key from SecretStorage.
-- **Delay override** — Text field. Placeholder shows provider's default delay (e.g. "1500" for DDG, "0" for API providers). Empty means "use default". Persisted as `WebSearchProviderSettings.delay_ms`.
-- **API key** — `SecretComponent` for providers that require one (Tavily, Brave, SerpApi). Not shown for DDG. Uses `SECRET_IDS.TAVILY_API_KEY` etc.
+The `web_search_provider_priority` field is a `string[]` rendered with the generic add/remove UI ([`extensions.ts:488-536`](../../src/settings/sections/extensions.ts)). Users manage priority by adding/removing entries. Reordering requires removing and re-adding in the desired position — functional but not ideal for a list of 4 items.
 
-### 10.3 Round-Robin Toggle
+**Future enhancement:** Add `reorderable?: boolean` to `SettingsFieldSchema` to enable up/down arrow buttons on `string[]` fields. This is deferred — the add/remove workflow is sufficient for the initial implementation.
 
-```typescript
-new Setting(containerEl)
-  .setName("Round-robin across providers")
-  .setDesc(
-    "Distribute search requests across all enabled providers instead of " +
-    "always starting with the highest-priority one. Maximizes throughput " +
-    "when multiple providers are configured."
-  )
-  .addToggle((toggle) =>
-    toggle
-      .setValue(ctx.settings.web_search_round_robin)
-      .onChange(async (value) => {
-        ctx.settings.web_search_round_robin = value;
-        await ctx.saveSettings();
-      })
-  );
-```
+### 10.3 UI Behavior Notes
+
+- Toggling a provider off does NOT remove its API key from SecretStorage.
+- API key fields are only shown for providers that require them (Tavily, Brave, SerpApi). DuckDuckGo has no API key field.
+- The generic renderer shows field `name` as the label and `description` as the help text.
+- Settings changes take effect immediately — the `WebSearchQueue` reads settings fresh on each `search()` call.
 
 ---
 
 ## 11. Registration and Wiring
 
+### 11.1 Plugin Singletons
+
 **File:** `src/main.ts`
 
-### 11.1 New Singleton Fields
+Three lazy-initialized singletons on the `NotorPlugin` class:
 
 ```typescript
-// On NotorPlugin class:
-// _taskLaneQueue — defined in task-lane-queue-design.md (shared singleton)
+private _taskLaneQueue?: TaskLaneQueue;
 private _searchProviderRegistry?: SearchProviderRegistry;
 private _webSearchQueue?: WebSearchQueue;
 ```
 
-### 11.2 Lazy Initialization
+### 11.2 Public Getters (accessed by `buildUtils()`)
 
-> **Note:** `getTaskLaneQueue()` is defined in [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 5.1 and must be implemented as part of that spec. The web search queue consumes it via `this.getTaskLaneQueue()`.
+> **Note:** `getTaskLaneQueue()` is defined in [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 5.1 and must be implemented as part of that spec.
 
 ```typescript
-private getSearchProviderRegistry(): SearchProviderRegistry {
-  if (!this._searchProviderRegistry) {
-    this._searchProviderRegistry = new SearchProviderRegistry();
-    this._searchProviderRegistry.register(new DuckDuckGoProvider(this.app, this.settings));
-    this._searchProviderRegistry.register(new TavilyProvider(this.app, this.settings));
-    this._searchProviderRegistry.register(new BraveSearchProvider(this.app, this.settings));
-    this._searchProviderRegistry.register(new SerpApiProvider(this.app, this.settings));
+/** Public — accessed by buildUtils() for utils.queue */
+getTaskLaneQueue(): TaskLaneQueue {
+  if (!this._taskLaneQueue) {
+    this._taskLaneQueue = new TaskLaneQueue();
   }
-  return this._searchProviderRegistry;
+  return this._taskLaneQueue;
 }
 
-private getWebSearchQueue(): WebSearchQueue {
+/** Public — accessed by buildUtils() for utils.webSearch */
+getWebSearchQueue(): WebSearchQueue {
   if (!this._webSearchQueue) {
     this._webSearchQueue = new WebSearchQueue(
-      this.app,
-      this.settings,
+      () => this.resolveWebSearchConfig(),
       this.getSearchProviderRegistry(),
       this.getTaskLaneQueue(),
     );
@@ -554,29 +584,91 @@ private getWebSearchQueue(): WebSearchQueue {
 }
 ```
 
-The other queue-related getters remain private. `getTaskLaneQueue()` is public — see [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 5.1.
+### 11.3 Private Getters
 
-### 11.3 Updated WebSearchTool Registration
-
-Current (line ~1052):
 ```typescript
-this._toolRegistry.register(new WebSearchTool(this.app, this.settings));
+private getSearchProviderRegistry(): SearchProviderRegistry {
+  if (!this._searchProviderRegistry) {
+    this._searchProviderRegistry = new SearchProviderRegistry();
+    this._searchProviderRegistry.register(new DuckDuckGoProvider());
+    this._searchProviderRegistry.register(new TavilyProvider());
+    this._searchProviderRegistry.register(new BraveSearchProvider());
+    this._searchProviderRegistry.register(new SerpApiProvider());
+  }
+  return this._searchProviderRegistry;
+}
 ```
 
-New:
+### 11.4 Settings Resolution
+
+The `WebSearchQueue` receives a `getSettings` closure that resolves flat extension settings into typed config. Settings are read fresh on each `search()` call — not cached at construction time.
+
 ```typescript
-this._toolRegistry.register(
-  new WebSearchTool(this.app, this.settings, this.getWebSearchQueue()),
-);
+private resolveWebSearchConfig(): WebSearchResolvedConfig {
+  const ext = this.settings.user_extension_settings["web_search"] ?? {};
+  return {
+    roundRobin: (ext.web_search_round_robin as boolean) ?? false,
+    providerPriority: (ext.web_search_provider_priority as string[]) ?? ["duckduckgo"],
+    providers: {
+      duckduckgo: {
+        enabled: (ext.web_search_duckduckgo_enabled as boolean) ?? true,
+        delayMs: (ext.web_search_duckduckgo_delay_ms as number) ?? 1500,
+        apiKey: null,
+      },
+      tavily: {
+        enabled: (ext.web_search_tavily_enabled as boolean) ?? false,
+        delayMs: (ext.web_search_tavily_delay_ms as number) ?? 0,
+        apiKey: getSecret(this.app, slugifySecretId("notor-ext", "web_search", "web_search_tavily_api_key")),
+      },
+      brave: {
+        enabled: (ext.web_search_brave_enabled as boolean) ?? false,
+        delayMs: (ext.web_search_brave_delay_ms as number) ?? 0,
+        apiKey: getSecret(this.app, slugifySecretId("notor-ext", "web_search", "web_search_brave_api_key")),
+      },
+      serpapi: {
+        enabled: (ext.web_search_serpapi_enabled as boolean) ?? false,
+        delayMs: (ext.web_search_serpapi_delay_ms as number) ?? 0,
+        apiKey: getSecret(this.app, slugifySecretId("notor-ext", "web_search", "web_search_serpapi_api_key")),
+      },
+    },
+  };
+}
 ```
 
-The queue singleton is created once and shared by all `WebSearchTool` invocations — including those triggered from sub-agent dispatch loops via [`SubAgentRunner`](../../src/chat/sub-agent-runner.ts), since sub-agents use the same tool registry.
+`getSecret()` is synchronous ([`secrets.ts:44-63`](../../src/utils/secrets.ts)), so the resolver is sync.
 
-### 11.4 Extension Runtime Wiring
+### 11.5 Extension Runtime Wiring
 
-> **Note:** The `utils.queue` extension API is defined in [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 5.2 and must be implemented as part of that spec. This section describes how the web search queue benefits from it.
+**File:** `src/extensions/runtime-context.ts`
 
-User extensions get access to the same `TaskLaneQueue` singleton via `utils.queue.enqueue()`. This means extensions can opt into the same rate-limited lanes used by the built-in web search tool (e.g., `"duckduckgo"`). See [Section 17](#17-extension-system-interaction) for details.
+Add to `ExtensionUtils` interface and `buildUtils()`:
+
+```typescript
+// In ExtensionUtils interface:
+queue: {
+  enqueue: <T>(lane: string, fn: () => Promise<T>, delayMs?: number) => Promise<T>;
+  pending: (lane: string) => number;
+};
+webSearch: {
+  search: (query: string, numResults: number, timeoutMs: number) => Promise<WebSearchApiResult>;
+};
+
+// In buildUtils(plugin):
+queue: {
+  enqueue: (lane, fn, delayMs) => plugin.getTaskLaneQueue().enqueue(lane, fn, delayMs),
+  pending: (lane) => plugin.getTaskLaneQueue().pending(lane),
+},
+webSearch: {
+  search: (query, numResults, timeoutMs) =>
+    plugin.getWebSearchQueue().search(query, numResults, timeoutMs),
+},
+```
+
+> **Note:** `utils.queue` is defined in [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 5.2. Both `utils.queue` and `utils.webSearch` are available to all extensions — including user overrides of `web_search`.
+
+### 11.6 No Registration Changes
+
+The `web_search` tool continues to be registered via the `ExtensionManager` scaffold injection flow ([`manager.ts:215-242`](../../src/extensions/manager.ts)). No `new WebSearchTool(...)` call in `main.ts`. The queue singleton is shared by all invocations — including those from sub-agent dispatch loops — because `buildUtils(plugin)` always returns the same plugin's queue.
 
 ---
 
@@ -587,17 +679,24 @@ src/queue/
   task-lane-queue.ts           Generic TaskLaneQueue class (no web search dependency)
   task-lane-queue.test.ts      Unit tests for the queue primitive
 
-src/tools/web-search/
+src/web-search/
   providers/
     provider.ts              SearchProvider interface, types, SearchProviderMeta
-    duckduckgo.ts            DuckDuckGoProvider (extracted from web-search.ts)
+    duckduckgo.ts            DuckDuckGoProvider (extracted from scaffold code)
+    duckduckgo.test.ts       DDG parsing and HTTP tests
     tavily.ts                TavilyProvider
+    tavily.test.ts           Tavily provider tests
     brave.ts                 BraveSearchProvider
+    brave.test.ts            Brave provider tests
     serpapi.ts               SerpApiProvider
+    serpapi.test.ts          SerpApi provider tests
   provider-registry.ts       SearchProviderRegistry
-  queue.ts                   WebSearchQueue — delegates to TaskLaneQueue
-  types.ts                   WebSearchProviderType, WebSearchProviderSettings, QueuedSearchResult
+  provider-registry.test.ts  Registry tests
+  queue.ts                   WebSearchQueue + WebSearchResolvedConfig + WebSearchApiResult
+  queue.test.ts              Queue unit tests (fallback, round-robin, lane delegation)
 ```
+
+Note: `src/web-search/` rather than `src/tools/web-search/` — these are provider infrastructure modules consumed by the scaffold via `utils.webSearch`, not tool implementations. The scaffold itself stays in `src/extensions/builtin-tool-scaffolds.ts`.
 
 ---
 
@@ -649,9 +748,13 @@ Multiple concurrent callers may enter the same provider lane simultaneously. The
 
 ### 13.8 Extension Override Disables WebSearchQueue
 
-When a user extension overrides `web_search` (via `notor-tool-name: web_search` in frontmatter), all LLM-initiated web searches bypass the `WebSearchQueue` and its provider selection/fallback logic. Sub-agent burst protection is lost for the built-in flow.
+When a user extension overrides `web_search` (by creating `notor/tools/web_search.md` in the vault), all LLM-initiated web searches bypass the `WebSearchQueue` and its provider selection/fallback logic. Sub-agent burst protection is lost for the built-in flow.
 
-**Mitigation:** The `ExtensionManager` already detects and reports built-in overrides via a Notice (`manager.ts:292-295`). The user's extension CAN still opt into per-lane rate limiting by calling `utils.queue.enqueue("duckduckgo", ...)` directly, sharing the same lane as the built-in tool would use. This is documented but not enforced — users who override `web_search` accept responsibility for rate limiting.
+**Mitigation:** The `ExtensionManager` already detects and reports built-in overrides via a Notice ([`manager.ts:292-295`](../../src/extensions/manager.ts)). The user's extension has access to both:
+- `utils.webSearch.search()` — delegates to the full multi-provider queue infrastructure, getting the same provider selection, fallback, and rate limiting as the built-in scaffold.
+- `utils.queue.enqueue("duckduckgo", ...)` — opts into per-lane rate limiting directly, sharing the same lane as the built-in tool would use.
+
+This is documented but not enforced — users who override `web_search` accept responsibility for rate limiting. The `utils.webSearch` API gives them the tools to do it correctly with zero effort.
 
 ### 13.9 Shared Lane Contention Between Extensions and Built-in
 
@@ -695,26 +798,43 @@ Lanes in `TaskLaneQueue` are in-memory only — they reset on plugin restart. Th
 
 ## 15. Files to Create / Modify
 
+### Files to Create
+
+| File | Purpose |
+|------|---------|
+| `src/queue/task-lane-queue.ts` | **Dependency** — `TaskLaneQueue` class. See [`task-lane-queue-design.md`](./task-lane-queue-design.md). Must be implemented first. |
+| `src/queue/task-lane-queue.test.ts` | **Dependency** — TaskLaneQueue unit tests. See [`task-lane-queue-design.md`](./task-lane-queue-design.md). |
+| `src/web-search/providers/provider.ts` | **Create** — `SearchProvider` interface, `SearchProviderMeta`, `SearchProviderResult`, `WebSearchProviderType` |
+| `src/web-search/providers/duckduckgo.ts` | **Create** — `DuckDuckGoProvider` (extracted from scaffold code in `builtin-tool-scaffolds.ts:1248-1341`) |
+| `src/web-search/providers/tavily.ts` | **Create** — `TavilyProvider` |
+| `src/web-search/providers/brave.ts` | **Create** — `BraveSearchProvider` |
+| `src/web-search/providers/serpapi.ts` | **Create** — `SerpApiProvider` |
+| `src/web-search/provider-registry.ts` | **Create** — `SearchProviderRegistry` |
+| `src/web-search/queue.ts` | **Create** — `WebSearchQueue`, `WebSearchResolvedConfig`, `WebSearchApiResult` |
+| `src/web-search/providers/duckduckgo.test.ts` | **Create** — DDG parsing tests (`cleanDDGUrl`, `parseDDGResults`, HTTP error handling, rate-limit detection) |
+| `src/web-search/providers/tavily.test.ts` | **Create** — Tavily provider tests |
+| `src/web-search/providers/brave.test.ts` | **Create** — Brave provider tests |
+| `src/web-search/providers/serpapi.test.ts` | **Create** — SerpApi provider tests |
+| `src/web-search/provider-registry.test.ts` | **Create** — Registry priority, filtering, availability tests |
+| `src/web-search/queue.test.ts` | **Create** — Queue fallback, round-robin, lane delegation, all-fail aggregation tests |
+
+### Files to Modify
+
 | File | Change |
 |------|--------|
-| `src/queue/task-lane-queue.ts` | **Dependency** — see [`task-lane-queue-design.md`](./task-lane-queue-design.md). Must be implemented first. |
-| `src/queue/task-lane-queue.test.ts` | **Dependency** — see [`task-lane-queue-design.md`](./task-lane-queue-design.md). |
-| `src/tools/web-search/providers/provider.ts` | **Create** — `SearchProvider` interface, `SearchProviderMeta`, `SearchProviderResult` |
-| `src/tools/web-search/providers/duckduckgo.ts` | **Create** — `DuckDuckGoProvider` (extracted from `web-search.ts`) |
-| `src/tools/web-search/providers/tavily.ts` | **Create** — `TavilyProvider` |
-| `src/tools/web-search/providers/brave.ts` | **Create** — `BraveSearchProvider` |
-| `src/tools/web-search/providers/serpapi.ts` | **Create** — `SerpApiProvider` |
-| `src/tools/web-search/provider-registry.ts` | **Create** — `SearchProviderRegistry` |
-| `src/tools/web-search/queue.ts` | **Create** — `WebSearchQueue` — delegates to `TaskLaneQueue` |
-| `src/tools/web-search/types.ts` | **Create** — `WebSearchProviderType`, `WebSearchProviderSettings`, `QueuedSearchResult` |
-| `src/tools/web-search.ts` | **Modify** — Simplify to delegate to queue; accept `WebSearchQueue` in constructor; update tool description |
-| `src/settings/types.ts` | **Modify** — Add `WebSearchProviderSettings` type, `web_search_providers` and `web_search_round_robin` fields to `NotorSettings` |
-| `src/settings/defaults.ts` | **Modify** — Add `DEFAULT_WEB_SEARCH_PROVIDERS`, new fields in `createDefaultSettings()` |
-| `src/utils/secrets.ts` | **Modify** — Add `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `SERPAPI_API_KEY` to `SECRET_IDS` |
-| `src/settings/sections/web-search.ts` | **Modify** — Expand with provider priority list, per-provider config, round-robin toggle |
-| `src/main.ts` | **Modify** — Add `_searchProviderRegistry` and `_webSearchQueue` singletons; update `WebSearchTool` registration. (`_taskLaneQueue` singleton added by [`task-lane-queue-design.md`](./task-lane-queue-design.md)) |
-| `src/extensions/runtime-context.ts` | **Dependency** — `utils.queue` added by [`task-lane-queue-design.md`](./task-lane-queue-design.md). |
-| `src/tools/web-search.test.ts` | **Modify** — Update tests to mock `WebSearchQueue` instead of `requestUrl`; move DDG parsing tests to provider-specific test file |
+| `src/extensions/builtin-tool-scaffolds.ts` | **Modify** — Replace `WEB_SEARCH` scaffold: expand YAML settings fence with provider fields, simplify TypeScript code to delegate to `utils.webSearch.search()` |
+| `src/extensions/runtime-context.ts` | **Modify** — Add `queue` and `webSearch` to `ExtensionUtils` interface and `buildUtils()` |
+| `src/main.ts` | **Modify** — Add `_taskLaneQueue`, `_searchProviderRegistry`, `_webSearchQueue` lazy singletons with getters; add `resolveWebSearchConfig()` private method |
+
+### Files NOT Modified (correcting earlier version of this spec)
+
+| File | Why |
+|------|-----|
+| `src/tools/web-search.ts` | Does not exist. Tool is a scaffold in `builtin-tool-scaffolds.ts`. |
+| `src/settings/types.ts` | No new top-level `NotorSettings` fields. All provider config in extension settings. |
+| `src/settings/defaults.ts` | No new defaults. Defaults come from the scaffold YAML fence. |
+| `src/settings/sections/web-search.ts` | Does not exist, not needed. Generic extension settings UI renders all fields. |
+| `src/utils/secrets.ts` | No changes to `SECRET_IDS`. API keys use extension-level SecretStorage via `secret: true`. |
 
 ---
 
@@ -722,20 +842,19 @@ Lanes in `TaskLaneQueue` are in-memory only — they reset on plugin restart. Th
 
 ### Unit Tests
 
-| Component | Test |
-|-----------|------|
-| `TaskLaneQueue` | See [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 8 for full test plan. Tests are implemented as part of that spec. |
-| `DuckDuckGoProvider` | Existing `cleanDDGUrl` and `parseDDGResults` tests (migrated from `web-search.test.ts`). New: HTTP error handling, rate-limit detection (202 → `rateLimited: true`). |
-| `TavilyProvider` | JSON response parsing. Auth header presence. Rate-limit detection (429). Timeout handling. |
-| `BraveSearchProvider` | JSON response parsing. `X-Subscription-Token` header. Rate-limit detection. |
-| `SerpApiProvider` | JSON response parsing. `api_key` query param. Rate-limit detection. |
-| `SearchProviderRegistry` | `getAvailableByPriority()` respects enabled state, API key presence, and priority order. |
-| `WebSearchQueue` | Delegates to `TaskLaneQueue` with correct lane keys. Round-robin: 3 providers, 6 requests, verify distribution. Fallback: first provider fails → second provider used. All fail → aggregated error. No available providers → immediate descriptive error. |
-| `WebSearchTool` | Delegates to queue. Domain denylist filtering still applied to results. Output format unchanged. |
+| Component | Test File | What it verifies |
+|-----------|-----------|-----------------|
+| `TaskLaneQueue` | `src/queue/task-lane-queue.test.ts` | See [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 8. |
+| `DuckDuckGoProvider` | `src/web-search/providers/duckduckgo.test.ts` | `cleanDDGUrl` parsing, `parseDDGResults` DOM parsing, HTTP error handling, rate-limit detection (202 → `rateLimited: true`), selector drift warning. |
+| `TavilyProvider` | `src/web-search/providers/tavily.test.ts` | JSON response parsing. Auth header presence. Rate-limit detection (429). Timeout handling. |
+| `BraveSearchProvider` | `src/web-search/providers/brave.test.ts` | JSON response parsing. `X-Subscription-Token` header. Rate-limit detection. |
+| `SerpApiProvider` | `src/web-search/providers/serpapi.test.ts` | JSON response parsing. `api_key` query param. Rate-limit detection. |
+| `SearchProviderRegistry` | `src/web-search/provider-registry.test.ts` | `getAvailableByPriority()` respects enabled state, API key presence, and priority order from `WebSearchResolvedConfig`. |
+| `WebSearchQueue` | `src/web-search/queue.test.ts` | Delegates to `TaskLaneQueue` with correct lane keys. Round-robin: 3 providers, 6 requests, verify distribution. Fallback: first provider fails → second provider used. All fail → aggregated error. No available providers → immediate descriptive error. |
 
 ### Integration / E2E Tests
 
-1. **Single provider, no queue contention** — One `web_search` call with only DDG enabled. Verify results returned, domain denylist applied, output formatted correctly.
+1. **Single provider, no queue contention** — One `web_search` call with only DDG enabled. Verify results returned, domain denylist applied, output formatted correctly. (Extends existing E2E coverage in `e2e/scripts/web-search-test.ts`.)
 2. **Multi-provider fallback** — DDG disabled, Tavily enabled with valid key. Verify Tavily is used.
 3. **Round-robin distribution** — DDG + Tavily enabled, round-robin ON. Fire 4 searches. Verify both providers receive requests (check logs or mock both providers).
 4. **Concurrent burst from sub-agents** — 3 sub-agents each fire 2 `web_search` calls. Verify all 6 complete without DDG 202 errors (with round-robin + Tavily as second provider).
@@ -745,15 +864,17 @@ Lanes in `TaskLaneQueue` are in-memory only — they reset on plugin restart. Th
 ### Extension Integration Tests
 
 7. **Extension `utils.queue.enqueue()`** — A user tool calling `utils.queue.enqueue("test-lane", fn, 100)` works end-to-end. Verify task executes and returns result.
-8. **Shared lane serialization** — Two extensions sharing a lane name are properly serialized (second task waits for first + delay).
-9. **Extension and built-in sharing a lane** — A user extension calling `utils.queue.enqueue("duckduckgo", fn, 1500)` is serialized with the built-in web search tool's DDG requests.
+8. **Extension `utils.webSearch.search()`** — A user tool calling `utils.webSearch.search(query, 5, 10000)` gets multi-provider results with fallback.
+9. **Shared lane serialization** — Two extensions sharing a lane name are properly serialized (second task waits for first + delay).
+10. **Extension and built-in sharing a lane** — A user extension calling `utils.queue.enqueue("duckduckgo", fn, 1500)` is serialized with the built-in web search scaffold's DDG requests.
 
 ### Manual Testing
 
-- Verify settings UI renders provider rows with up/down/toggle/delay/key controls.
+- Verify extension settings UI renders all provider fields (toggle, secret, number) under the `web_search` tool in Settings > Extensions.
 - Verify API key entry via `SecretComponent` persists across plugin reload.
 - Verify disabling a provider (toggle off) does not clear its API key.
-- Verify reordering providers updates the priority and persists.
+- Verify `web_search_provider_priority` `string[]` field allows adding/removing providers.
+- Verify the scaffold's tool description no longer mentions DuckDuckGo specifically.
 
 ---
 
@@ -769,6 +890,25 @@ The generic `TaskLaneQueue` is exposed to user extensions via `utils.queue` in t
 // Extension-facing API (added to ExtensionUtils):
 utils.queue.enqueue(lane: string, fn: () => Promise<T>, delayMs?: number): Promise<T>
 utils.queue.pending(lane: string): number
+```
+
+### 17.1a `utils.webSearch` API
+
+The multi-provider web search infrastructure is also exposed via `utils.webSearch`:
+
+```typescript
+utils.webSearch.search(query: string, numResults: number, timeoutMs: number): Promise<WebSearchApiResult>
+```
+
+This gives extensions access to the full provider selection, fallback, round-robin, and rate-limiting infrastructure without needing to understand the queue system. The built-in `web_search` scaffold uses this API internally.
+
+**Example — extension using multi-provider search:**
+
+```typescript
+const result = await utils.webSearch.search(params.query, 5, 10000);
+// result.results: Array<{ title, url, snippet }>
+// result.provider: which provider fulfilled the request
+// result.failures: providers that failed before success
 ```
 
 **Example — rate-limited translation tool:**
@@ -801,7 +941,7 @@ const html = await utils.queue.enqueue("duckduckgo", async () => {
 // Parse html...
 ```
 
-This call shares the built-in tool's DDG lane, so the extension's requests are properly interleaved and rate-limited alongside the built-in web search tool's requests.
+This call shares the built-in scaffold's DDG lane, so the extension's requests are properly interleaved and rate-limited alongside the built-in web search scaffold's requests.
 
 ### 17.2 Well-Known Lane Names
 
@@ -821,14 +961,15 @@ The full lane naming convention is defined in [`task-lane-queue-design.md`](./ta
 
 ### 17.3 User Tool Override of `web_search`
 
-A user extension with `notor-tool-name: web_search` in its frontmatter replaces the built-in `WebSearchTool` entirely via `ToolRegistry`'s last-write-wins semantics. When this happens:
+A user extension file at `notor/tools/web_search.md` replaces the built-in scaffold entirely via `ExtensionManager`'s vault-file-wins semantics ([`manager.ts:218`](../../src/extensions/manager.ts)). When this happens:
 
 - The user's implementation does **not** automatically use `WebSearchQueue` or its provider selection/fallback logic.
 - The queue's per-provider rate limiting is bypassed for all LLM-initiated `web_search` calls.
 - The `ExtensionManager` already detects and reports built-in overrides via a Notice ([`manager.ts:292-295`](../../src/extensions/manager.ts)).
-- The user's extension **can** opt into per-lane rate limiting by calling `utils.queue.enqueue("duckduckgo", ...)`, sharing the same lane as the built-in tool would use.
+- The user's extension **can** opt into the full multi-provider infrastructure by calling `utils.webSearch.search()` — getting the same provider selection, fallback, and rate limiting as the built-in scaffold.
+- Alternatively, the user can opt into per-lane rate limiting only by calling `utils.queue.enqueue("duckduckgo", ...)`, sharing the same lane as the built-in scaffold would use.
 
-This is an accepted tradeoff: users who override `web_search` take responsibility for rate limiting. The `utils.queue` API gives them the tools to do it correctly.
+This is an accepted tradeoff: users who override `web_search` take responsibility for rate limiting. The `utils.webSearch` and `utils.queue` APIs give them the tools to do it correctly.
 
 ### 17.4 Extension-Defined Search Providers (Deferred)
 
