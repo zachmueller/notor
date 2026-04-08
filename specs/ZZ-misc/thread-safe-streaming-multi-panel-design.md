@@ -1,6 +1,6 @@
 # Thread-Safe Streaming & Multi-Panel Chat
 
-**Status:** Draft
+**Status:** Design complete — revised after codebase cross-reference review
 **Author:** Design spike
 **Date:** 2026-04-08
 
@@ -37,10 +37,10 @@ Notor's `ChatOrchestrator` uses a single `ConversationManager` with one `activeC
 | Activity indicator | Extend existing `WorkflowActivityIndicator` | Reuse the badge + dropdown pattern rather than adding a separate icon. Combined count: workflows + foreground sessions. |
 | Multi-panel approach | Reuse `CHAT_VIEW_TYPE` with per-panel orchestrator | Same view type, differentiated by `{ isSecondary: true }` constructor option. Each panel gets its own `ChatOrchestrator` (lightweight — shares expensive singletons like `ProviderRegistry`, `HistoryManager`, `SystemPromptBuilder`). Own `ConversationManager` for independent state. Avoids maintaining two view registrations and divergent wire-up paths. |
 | Secondary panel toolbar | Full toolbar (same as primary) | Secondary panels get the same toolbar as primary. Per-session scoping from Phase 1 means persona, provider, and tool config are already isolated. No reason to artificially reduce secondary panel capability. |
-| Sync-back on return | **OPEN — needs research.** Incremental append vs. full replace | Two candidates: (1) Incremental append using `session.lastDisplayedIndex` — avoids re-rendering but adds fragile index tracking that can break under compaction. (2) Full replace from session's in-memory message array — simpler, no edge cases, but may cause visible jank for very long conversations. **Action:** Profile full-replace cost for conversations with 500+ messages before deciding. Falls back to JSONL reload for completed sessions without an active session. |
+| Sync-back on return | Full replace from session's in-memory message array | `clearMessages()` + re-render all messages from `session.conversationManager.getMessages()`. Same pattern already used by `switchConversation()` (orchestrator.ts:365-368). Compaction-safe (no index tracking to break). Performance is acceptable because compaction keeps conversations under ~200 messages in memory. Scroll lands at bottom (desired behavior when returning to active stream). Falls back to JSONL reload for completed sessions without an active session. |
 | Tool approval routing | Per-session approval callback | Each `ConversationSession` owns its approval callback (bound to the correct panel's view). Passed per-`dispatch()` call — no global `setApprovalCallback()`. Each panel/session routes approvals to its own UI without conflict. |
-| Shared vs. per-conversation state | Only infrastructure stays global | Global: MCP connections (with per-server dispatch queues — see below), tool registry (implementations), provider registry (API connections — instances cached, but which provider/model to use is per-session), history manager (file I/O), vault rule manager, system prompt builder. Per-conversation: effective tool config, persona, provider type, model ID, mode, approval routing, abort controller, conversation manager. |
-| MCP concurrency | Per-server dispatch queue | MCP servers may not handle concurrent JSON-RPC requests safely (many are single-threaded). Add a per-server dispatch queue (same pattern as `HistoryManager.writeQueues` at [`history.ts:93`](../../src/chat/history.ts)) to serialize tool calls per MCP server. This prevents concurrent access from multiple sessions or panels without requiring MCP server implementations to be thread-safe. |
+| Shared vs. per-conversation state | Only infrastructure stays global | Global: MCP connections (with per-server dispatch queues added in Phase 4), tool registry (implementations), provider registry (API connections — instances cached, but which provider/model to use is per-session; per-orchestrator active provider/model fields in Phase 4), history manager (file I/O), vault rule manager, system prompt builder. Per-conversation: effective tool config, persona, provider type, model ID, mode, approval routing, abort controller, conversation manager. |
+| MCP concurrency | Per-server promise queue in `McpHub` (Phase 4) | MCP servers may not handle concurrent JSON-RPC requests safely (many are single-threaded). Add a per-server promise queue to `McpHub.callTool()` using the same `Map<string, Promise>` + `enqueueWrite()` pattern as `HistoryManager.writeQueues` ([`history.ts:93-138`](../../src/chat/history.ts)). Note: MCP tools are already serialized *within* a single session by `tool-orchestration.ts:91` (`isMcpTool()` → sequential batch). The queue only matters for *cross-session* concurrent access (Phase 4 multi-panel) — deferred to Phase 4 to keep Phase 1 focused. |
 
 ---
 
@@ -249,9 +249,8 @@ export class ConversationSession {
 
   // Tracks the last message index rendered in the UI — used for incremental
   // append when the user switches back to this conversation mid-stream.
-  // NOTE: This field is part of the sync-back design which is an open question
-  // (incremental append vs. full replace). See Phase 2 decision table.
-  lastDisplayedIndex: number = 0;
+  // Not needed — sync-back uses full replace from session's in-memory messages.
+  // Incremental append was rejected due to fragility under compaction.
 
   private _status: SessionStatus = "running";
   onStatusChange?: (session: ConversationSession) => void;
@@ -284,6 +283,10 @@ export class ConversationSession {
    *   Users expect toggling plan→act to take immediate effect (e.g., to unblock
    *   a tool call that was blocked in plan mode). The risk of mid-stream policy
    *   change is accepted as a deliberate user action.
+   *
+   * Mode propagation: The mode toggle callback (main.ts) must propagate
+   * changes to the active session's ConversationManager — not just the
+   * display manager. See Step 1d "Mode toggle propagation" below.
    */
   buildPolicyContext(settings: NotorSettings, vaultRootPath: string): ToolPolicyContext {
     return {
@@ -302,6 +305,7 @@ export class ConversationSession {
 
 After existing guards, before `responseLoop()`:
 
+0. **Duplicate-send guard:** `if (this.activeSessions.has(conv.id))` → show `new Notice("This conversation is already processing")` and return. Prevents a second session for the same conversation, which would cause interleaved JSONL writes (the same corruption class this spec fixes).
 1. Snapshot current conversation + messages from `this.conversationManager`
 2. Create isolated `ConversationManager` (same pattern as `executeBackgroundWorkflow` L710-724)
 3. Wire `onMessageAdded` / `onConversationChanged` to `this.historyManager`
@@ -330,7 +334,7 @@ Inside the loop, all shared state reads become session reads:
 - `resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona)` → updates `session.effectiveConfig` and `session.parsedConfigs`
 - If session matches displayed conversation: `this.updateDisplayConfig(session.effectiveConfig, session.parsedConfigs)`
 - `executeToolBatches()` passes `session.buildPolicyContext(this.settings, vaultRootPath)` and `session.approvalCallback`
-- `checkAndPerformCompaction()` accepts session's conversation manager (explicit parameterization needed — currently reads `this.conversationManager`)
+- `checkAndPerformCompaction(session)` accepts the full `ConversationSession`. The method currently reads four pieces of shared state that must all come from the session: (1) `this.conversationManager` → `session.conversationManager` for conversation and messages, (2) `this.getActiveModelId()` → `session.modelId` for token threshold calculation, (3) `this.getActiveUseExtendedContext()` → session's extended context flag for window size, (4) `this.view?.getMessagesContainer?.()` → `this.getViewForSession(session)?.getMessagesContainer?.()` for the compacting indicator. Getting model ID wrong would use the wrong compaction threshold; getting the view wrong would show the indicator in the wrong panel.
 - `toChatMessages()` is called at L1427 but defined at L2074. It is a `private` instance method on the orchestrator, not a free function. While its core logic doesn't read `this` state (it operates on the `messages` and `systemPrompt` parameters), it does call `log.warn()` (L2101). For session isolation, it can remain on the orchestrator (session calls through the orchestrator instance). The caller changes to pass messages from `session.conversationManager`
 
 **View render guarding:**
@@ -344,9 +348,16 @@ private getViewForSession(session: ConversationSession): NotorChatView | undefin
 
 All `this.view?.` calls inside `responseLoop` change to `this.getViewForSession(session)?.`. When the user navigates away, render calls become no-ops. Data writes continue unaffected.
 
-**Critical: `processStream()` must also use session-aware view guarding.** `processStream()` (called at L1448) is the most view-intensive method in the response loop — it handles token-by-token streaming text rendering via `this.view` callbacks. If the user navigates away mid-stream and `processStream()` still references `this.view`, streaming tokens render into the wrong conversation's DOM. `processStream()` must either:
-- Accept a view-resolver function (e.g., `() => this.getViewForSession(session)`) and re-resolve on each chunk, or
-- Accept the session and perform the guard internally
+**Critical: `processStream()` must also use session-aware view guarding.** `processStream()` (called at L1448) is the most view-intensive method in the response loop — it handles token-by-token streaming text rendering via `this.view` callbacks. If the user navigates away mid-stream and `processStream()` still references `this.view`, streaming tokens render into the wrong conversation's DOM.
+
+**Approach:** `processStream()` accepts a view-resolver function `() => this.getViewForSession(session)` and re-resolves on each chunk. This handles mid-stream navigation: when the user switches away, the resolver returns `undefined` and rendering becomes a no-op while data writes continue. When the user switches back, sync-back re-renders all messages from the session's in-memory array.
+
+**`eagerContentEl` guarding:** The placeholder created at L1436 via `this.view?.createAssistantMessagePlaceholder()` must also use `getViewForSession`. If the user navigates away before `processStream` starts, the placeholder would be created in the wrong panel's DOM. Change to:
+```typescript
+const view = this.getViewForSession(session);
+const eagerContentEl = view?.createAssistantMessagePlaceholder();
+```
+If `eagerContentEl` is null (user already navigated away), `processStream` streams silently — the assistant message is still added to the session's `ConversationManager` and persisted to JSONL, just not rendered until sync-back.
 
 This is the most visible symptom of the navigation bug — streaming text appearing in the wrong panel — so it must not be missed.
 
@@ -354,6 +365,27 @@ This is the most visible symptom of the navigation bug — streaming text appear
 
 1. **Reset `isResponding`:** Call `this.view?.setRespondingState(false)` to unlock input.
 2. **Decouple AbortController:** Session owns its own `AbortController` (not via `this.view?.createAbortController()`). The existing `onStopResponse` callback in `wireView()` is updated to dynamically resolve the session: find displayed conversation ID → look up in `activeSessions` map → call `session.abortController.abort()`. Falls back to existing behavior if no active session. No new view API needed.
+
+**Mode toggle propagation:**
+
+The mode toggle callback in `main.ts` currently calls `orchestrator.getConversationManager().setMode(mode)` — this only updates the display manager. Since `buildPolicyContext()` reads mode from the **session's** `ConversationManager`, the toggle must also propagate to the active session:
+
+```typescript
+// In main.ts wireView(), extend the existing onModeToggle callback:
+view.setOnModeToggle((mode) => {
+  const convManager = orchestrator.getConversationManager();
+  convManager.setMode(mode);
+
+  // Propagate to active session so buildPolicyContext reads the new mode
+  const displayedConvId = convManager.getActiveConversation()?.id;
+  if (displayedConvId) {
+    const session = orchestrator.getActiveSession(displayedConvId);
+    session?.conversationManager.setMode(mode);
+  }
+});
+```
+
+Without this wiring, toggling plan→act mid-stream would have no effect on tool policy — `buildPolicyContext()` would keep returning the mode from session start.
 
 **Message flow:**
 1. Add user message to `this.conversationManager` (persists to JSONL, renders in UI)
@@ -417,18 +449,46 @@ if (conversation.model_id) {
 
 **Persona changes:** If the user switches persona mid-conversation via the persona picker, the new persona applies to the next message (picker updates global state, which `handleUserMessage()` reads for persona). The conversation header's `persona_name` should be updated to reflect the most-recently-used persona — see Step 1f-addendum below for header mutation requirements.
 
-#### 4.1.6a Step 1f-addendum: Investigate `HistoryManager.updateHeader()` for header mutation
+#### 4.1.6a Step 1f-addendum: Wire header mutation for persona/provider/model changes
 
-**Problem:** The JSONL conversation header (line 1 of the file) is written once at conversation creation time. If the user changes persona or model mid-conversation, the header becomes stale — `switchConversation()` display-restores the *original* persona/model, not the most recently used one.
+**Resolution:** `HistoryManager.updateConversationHeader()` **already exists** at [`history.ts:206-229`](../../src/chat/history.ts). It performs read-modify-write on line 0 of the JSONL file and is serialized through the existing per-file write queue (`enqueueWrite`). No new infrastructure needed.
 
-**Goal:** The conversation header should track the most-recently-used persona, provider, and model. This requires `HistoryManager` to support rewriting the JSONL header after creation.
+**When to update:** Only when persona/provider/model actually changes (avoids redundant I/O).
 
-**Investigation needed:**
-1. Does `HistoryManager` currently have any method to rewrite or update the first line of a JSONL file? (Likely no — it uses append-only writes via `writeQueues`.)
-2. Design `HistoryManager.updateConversationHeader(conversation: Conversation)`: read file, replace line 1 with updated header JSON, write file. Must integrate with existing per-file write queues to prevent concurrent read/write races.
-3. Determine when to call `updateConversationHeader()`: on every message send? Only when persona/provider/model changes? At session completion?
+**Trigger 1 — On message send (`handleUserMessage()`):**
 
-**Deferral option:** If header mutation is complex, the initial implementation can use creation-time snapshots (current behavior) with a TODO for header mutation. Display-restore would show the original persona/model, which is still better than showing nothing.
+After creating the `ConversationSession`, compare the session's pinned values against the conversation header:
+```typescript
+const conv = session.conversationManager.getActiveConversation()!;
+const headerDirty =
+    conv.persona_name !== (session.pinnedPersona?.name ?? null) ||
+    conv.provider_id !== session.providerType ||
+    conv.model_id !== session.modelId;
+
+if (headerDirty) {
+    conv.persona_name = session.pinnedPersona?.name ?? null;
+    conv.provider_id = session.providerType;
+    conv.model_id = session.modelId;
+    await this.historyManager.updateConversationHeader(conv);
+}
+```
+
+**Trigger 2 — On picker change (persona/provider/model picker while viewing a conversation):**
+
+When the user changes the persona, provider, or model picker while viewing a conversation — even before sending a message — update the header to reflect the user's intent. This requires wiring the existing picker-change callbacks in `wireView()` to also call `updateConversationHeader()` when there is an active conversation:
+
+```typescript
+// In wireView(), extend the existing onProviderChange / onModelChange / onPersonaChange callbacks:
+// After the global state mutation (switchProvider, activatePersona, etc.),
+// also update the displayed conversation's header:
+const conv = orchestrator.getDisplayedConversation();
+if (conv) {
+    conv.provider_id = newProviderId;  // or persona_name, model_id
+    await historyManager.updateConversationHeader(conv);
+}
+```
+
+**Note:** Picker changes update both the global state (existing behavior) AND the conversation header (new behavior). The next session created for this conversation will snapshot from the updated header values.
 
 #### 4.1.7 Step 1g: Inspector shows displayed conversation's config
 
@@ -477,34 +537,30 @@ async destroy(timeoutMs: number = 2000): Promise<void> {
 **Changes to `src/main.ts`:**
 - Call `orchestrator.destroy()` in the plugin's `onunload()` path. Since Obsidian's `onunload()` is synchronous, use `this.register(() => { orchestrator.destroy(); })` or fire-and-forget the async call (the timeout ensures it doesn't hang).
 
-#### 4.1.9 Files modified
+#### ~~4.1.9 Step 1i: Per-server MCP dispatch queue~~ → Moved to Phase 4
+
+**Rationale for deferral:** Within a single session, MCP tools are already serialized by `tool-orchestration.ts:91` (`isMcpTool()` → sequential batch). The per-server queue only matters for cross-session concurrent access, which cannot occur until Phase 4 (multi-panel) ships. Keeping Phase 1 focused on session isolation reduces scope and regression risk. See Phase 4, Section 4.4.7 for the full implementation.
+
+#### 4.1.10 Files modified
 
 - `src/chat/tool-policy.ts` — **NEW**: `evaluateToolPolicy()` pure function, `ToolPolicyContext` interface, `PolicyDecision` interface
-- `src/chat/conversation-session.ts` — **NEW**: `ConversationSession` class
+- `src/chat/conversation-session.ts` — **NEW**: `ConversationSession` class (no `lastDisplayedIndex` — sync-back uses full replace)
 - `src/chat/dispatcher.ts` — `dispatch()` gains optional `policyCtx` + `approvalCallback` params
 - `src/chat/tool-orchestration.ts` — `executeToolBatches()`, `safeDispatch()`, `runConcurrentBatch()` thread `policyCtx` + `approvalCallback`
-- `src/chat/orchestrator.ts` — `resolveEffectiveConfig()` (pure signature + body, return type changes from `ToolDefinition[]` to `{ effective, toolDefinitions, parsedConfigs }`), `handleUserMessage()` (session creation, stores `responsePromise` on session), `responseLoop()` (uses session), `processStream()` (session-aware view guarding), `_backgroundResponseLoop()` (uses session, removes save/restore hack), `switchConversation()` (persona+model restoration with display-AND-use semantics, display config update, isResponding reset, abort controller decoupling), `updateDisplayConfig()` helper, `getViewForSession()` helper, `activeSessions` map, `destroy()` async with timeout
+- `src/chat/orchestrator.ts` — `resolveEffectiveConfig()` (pure signature + body, return type changes from `ToolDefinition[]` to `{ effective, toolDefinitions, parsedConfigs }`), `handleUserMessage()` (session creation, stores `responsePromise` on session, header dirty-check + update), `responseLoop()` (uses session), `processStream()` (session-aware view guarding), `_backgroundResponseLoop()` (uses session, removes save/restore hack), `switchConversation()` (persona+model restoration with display-AND-use semantics, display config update, isResponding reset, abort controller decoupling, full-replace sync-back for active sessions), `updateDisplayConfig()` helper, `getViewForSession()` helper, `getDisplayedConversation()` helper, `activeSessions` map, `destroy()` async with timeout
 - `src/personas/persona-manager.ts` — add `getPersonaByName(name: string): Promise<Persona | null>` read-only lookup (calls `getDiscoveredPersonas()`, finds by name)
 - `src/ui/chat-view.ts` — decouple `AbortController` from view (session owns its own), add `updateProviderDisplay()`, `updateModelDisplay()` **NEW** display-only methods for conversation switch restoration (must update UI selector state without triggering global provider/model switch callbacks; `updatePersonaLabel()` already exists at L492)
+- `src/main.ts` — extend picker-change callbacks in `wireView()` to also call `historyManager.updateConversationHeader()` when persona/provider/model changes while viewing a conversation; extend `onModeToggle` callback to propagate mode changes to active sessions
 
 ---
 
-### Phase 2: Session Registry & Duplicate Prevention
+### Phase 2: Session Registry Enhancements & Sync-Back
 
-**Goal:** Track all in-flight response sessions. Prevent duplicate requests to the same conversation. Sync state when user returns.
+**Goal:** Public session accessors, sync state when user returns, deletion guard. (Note: the `activeSessions` map, session registration, duplicate-send guard, and `finally` cleanup were moved to Phase 1 Step 1d.)
 
-#### 4.2.1 Session registry
+#### 4.2.1 Public session accessors
 
 **File:** `src/chat/orchestrator.ts`
-
-```typescript
-private activeSessions: Map<string, ConversationSession> = new Map();
-```
-
-**In `handleUserMessage()`:**
-- Before creating a session, check: `if (this.activeSessions.has(conv.id))` → show `new Notice("This conversation is already processing")` and return
-- After creating session: `this.activeSessions.set(session.conversationId, session)`
-- In `finally` block: `this.activeSessions.delete(session.conversationId)`
 
 **Public accessor:**
 ```typescript
@@ -521,19 +577,35 @@ hasActiveSession(conversationId: string): boolean {
 
 **File:** `src/chat/orchestrator.ts` — `switchConversation()`
 
-> **OPEN DESIGN QUESTION:** The sync-back approach (incremental append vs. full replace) is pending research. Profile full-replace cost for conversations with 500+ messages before finalizing. The logic below describes the incremental approach; if full replace is chosen, steps 2a-2b simplify to a single full UI render from `session.conversationManager.getMessages()`.
+**Approach: Full replace** from session's in-memory message array. Same pattern already used by `switchConversation()` for JSONL-loaded conversations (orchestrator.ts:365-368). Compaction-safe — no index tracking to break when `replaceMessages()` swaps the array.
 
 When switching to a conversation that has an active session:
 
 1. Check `this.activeSessions.has(conversation.id)`
 2. **If active session exists:**
-   - *Incremental approach:* Get all messages from `session.conversationManager.getMessages()`, append only messages with index >= `session.lastDisplayedIndex` to the UI, update `session.lastDisplayedIndex`
-   - *Full replace approach:* Render all messages from `session.conversationManager.getMessages()` into the UI (simpler, no index tracking)
+   ```typescript
+   const session = this.activeSessions.get(conversation.id)!;
+   const messages = session.conversationManager.getMessages();
+   // Use silent: true to skip the onConversationChanged callback.
+   // Without this, loadConversation fires updateConversationHeader(),
+   // writing mid-stream token counts to the JSONL header — creating a
+   // timing dependency on when the user switches back. The session's
+   // own ConversationManager is the authoritative header writer.
+   this.conversationManager.loadConversation(
+     session.conversationManager.getActiveConversation()!,
+     messages,
+     { silent: true }
+   );
+   this.view?.clearMessages();
+   for (const msg of messages) {
+     this.renderMessage(msg);
+   }
+   ```
 3. Set `this.view?.setRespondingState(true)`. The stop button uses the existing `onStopResponse` callback — the orchestrator's handler looks up the displayed conversation's active session and calls `session.abortController.abort()`.
 4. Register a one-time callback on the session's `onStatusChange` to call `this.view?.setRespondingState(false)` when it completes
 5. **If no active session:** Load from `HistoryManager` as normal (standard JSONL load for completed conversations)
 
-**Note:** If using incremental approach, when the user navigates away from an active session, record the current message count as `session.lastDisplayedIndex`.
+**Why not incremental append:** Compaction calls `replaceMessages()` which replaces the entire message array with ~2 synthetic messages. Any `lastDisplayedIndex` tracking would break, requiring compaction detection + fallback — two code paths for marginal gain. Full replace is a single code path that handles all cases.
 
 #### 4.2.3 Deletion guard for active sessions
 
@@ -550,7 +622,8 @@ if (this.activeSessions.has(conversationId)) {
 
 #### 4.2.4 Files modified
 
-- `src/chat/orchestrator.ts` — session map, duplicate guard, sync-back logic, deletion guard
+- `src/chat/orchestrator.ts` — public session accessors, sync-back logic (uses `silent: true`), deletion guard
+- `src/chat/conversation.ts` — add `{ silent?: boolean }` option to `loadConversation()` to skip `onConversationChanged` callback
 
 ---
 
@@ -665,7 +738,9 @@ const orchestrator = new ChatOrchestrator(
 ```
 2. Call the **same** `wireView(view, orchestrator)` method used for the primary panel. This requires refactoring `wireView()` to accept the orchestrator as a parameter (currently it reads from `this._orchestrator`).
 
-**Alignment needed:** Audit `wireView()` and the `ChatOrchestrator` constructor for any primary-only assumptions (e.g., singleton references, global event listeners that should only fire once). Any such assumptions must be parameterized or guarded by `isSecondary`.
+**Per-orchestrator active provider/model:** Each `ChatOrchestrator` must track its own `activeProviderType` and `activeModelId` fields. Picker changes in one panel update that panel's orchestrator — NOT the global `ProviderRegistry.activeType`. New conversations snapshot from the orchestrator's fields. Without this, a provider change in Panel A would affect Panel B's next new conversation through the shared `ProviderRegistry` global state. Phase 1's conversation-header-based snapshotting handles restored conversations correctly regardless.
+
+**Alignment needed:** Audit `wireView()` and the `ChatOrchestrator` constructor for any primary-only assumptions (e.g., singleton references, global event listeners that should only fire once). Any such assumptions must be parameterized or guarded by `isSecondary`. See Section 4.4.8 for the required audit.
 
 #### 4.4.3 Tool approval routing
 
@@ -721,6 +796,63 @@ setState(state: Record<string, unknown>): Promise<void> {
 - `src/ui/chat-view.ts` — `isSecondary` constructor option (full toolbar, same as primary), state persistence via `getState()`/`setState()`
 - `src/main.ts` — update `registerView` callback to handle secondary leaves, refactor `wireView()` to accept orchestrator parameter, command, update singleton-assumption code (`getLeavesOfType`)
 - `src/chat/dispatcher.ts` — remove global `setApprovalCallback()` fallback (per-call approval already added in Phase 1 Step 1a)
+- `src/mcp/mcp-hub.ts` — add per-server promise queue (`callQueues` map), extract `executeCallTool()`, wrap `callTool()` with `enqueueCall()` (moved from Phase 1 Step 1i)
+
+#### 4.4.7 Per-server MCP dispatch queue (moved from Phase 1)
+
+**Problem:** `McpHub.callTool()` ([`mcp-hub.ts:449-528`](../../src/mcp/mcp-hub.ts)) dispatches tool calls immediately with no per-server serialization. Within a single session, MCP tools are already serialized by `tool-orchestration.ts:91` (`isMcpTool()` → sequential batch). With multi-panel support, two panels could dispatch tools to the same MCP server simultaneously. Many MCP servers are single-threaded and may not handle concurrent JSON-RPC requests safely.
+
+**Implementation:** Copy the `HistoryManager.writeQueues` pattern ([`history.ts:93-138`](../../src/chat/history.ts)) into `McpHub`:
+
+```typescript
+// In src/mcp/mcp-hub.ts:
+private readonly callQueues = new Map<string, Promise<unknown>>();
+
+private enqueueCall<T>(serverName: string, operation: () => Promise<T>): Promise<T> {
+    const current = this.callQueues.get(serverName) ?? Promise.resolve();
+    const next = current.then(operation, operation);
+    this.callQueues.set(serverName, next);
+    void next.finally(() => {
+        if (this.callQueues.get(serverName) === next) {
+            this.callQueues.delete(serverName);
+        }
+    });
+    return next;
+}
+```
+
+**Changes to `McpHub.callTool()`:**
+- Extract the actual call logic (connection lookup, timeout, `client.callTool()`, result extraction) into a private `executeCallTool()` method
+- `callTool()` becomes a thin wrapper: validation checks + `return this.enqueueCall(serverName, () => this.executeCallTool(...))`
+
+**Upgradability:** If users report that MCP serialization is too slow, this can be upgraded to a per-server semaphore with configurable concurrency limit (add `concurrency?: number` to `McpServerConfig`, default 1) without changing the external API.
+
+#### 4.4.8 Global listener audit for `wireView()` and `ChatOrchestrator` constructor
+
+The following audit enumerates every callback/listener registered during orchestrator construction and view wiring, categorized by whether it's safe to duplicate per-panel.
+
+**Safe to duplicate per-panel** (each orchestrator gets its own copy):
+- `conversationManager.setOnMessageAdded()` (orchestrator.ts:127) — per-instance, writes to own conv
+- `conversationManager.setOnConversationChanged()` (orchestrator.ts:134) — per-instance header updates
+- `view.setOnSendMessage()`, `view.setOnSendWorkflow()` — per-orchestrator message/workflow handling
+- `view.setOnModeToggle()` — per-orchestrator mode state
+- `view.setOnOpenConversationList()`, `view.setOnSearchConversations()` — read-only queries
+- `view.setGetAvailableProviders()`, `view.setGetAvailableModels()`, `view.setGetCurrentProvider()`, `view.setGetCurrentModel()` — read-only ProviderRegistry queries
+- `view.setOnSettingsOpen()`, `view.setOnOpenSettingsGroup()` — UI navigation only
+- `view.setOnExportConversation()` — read-only + modal
+- Checkpoint callbacks (`setOnListCheckpoints`, `setOnRestoreCheckpoint`, `setOnGetCurrentContent`) — per-conversation scope
+
+**Must NOT duplicate — wire once at plugin level or coordinate:**
+- `app.workspace.on("active-leaf-change")` (main.ts:417) — auto-context tracking; single global listener
+- `view.setOnProviderChange()` (main.ts:1969) — mutates global `ProviderRegistry.activeType` + settings. With per-orchestrator provider fields (Section 4.4.2), this must update the **panel's orchestrator**, not the global registry.
+- `view.setOnModelChange()` (main.ts:1978) — mutates global provider config + settings. Same treatment as provider change.
+- `toolDispatcher.setApprovalCallback()` (main.ts:2071) — overwrites single shared callback. Phase 1 Step 1a/1d already adds per-dispatch approval callbacks, so this global setter can be removed in Phase 4.
+- `view.setOnNewConversation()` (main.ts:1785) — calls `this.loadSettings()` (global reload) and `toolDispatcher.setAutoApprove()` (shared dispatcher). Extract settings reload to plugin level; per-panel part (`orchestrator.newConversation()`) is safe.
+- `view.setOnSwitchConversation()` (main.ts:1834) — clears global `StaleTracker` and `VaultRuleManager.accessedNotes`. Per-panel part (`orchestrator.switchConversation()`) is safe; global clears must be coordinated.
+- `view.setOnDeleteConversation()` (main.ts:1885) — same global-clear issue as switch
+- `view.setOnForkConversation()` (main.ts:1851) — same global-clear issue as switch
+
+**Refactoring approach for unsafe callbacks:** Split each callback into (a) a per-panel part that calls through the panel's orchestrator, and (b) a plugin-level part that handles global state (settings reload, stale tracker clear, vault rule clear). The per-panel part is wired in `wireView()`; the plugin-level part is a shared handler that any panel can invoke but that deduplicates or coordinates the global mutation.
 
 ---
 
@@ -780,13 +912,18 @@ view.setOnOpenInNewTab((filename: string) => {
 | `activeWorkflowAssemblyResult` race | Background loop save/restore hack not concurrent-safe | **Resolved in Phase 1 (Step 1e).** `resolveEffectiveConfig()` accepts `workflowAssembly` as parameter. Background session passes its assembly directly. Save/restore hack eliminated. |
 | Provider rate limits | Multiple concurrent conversations hit API rate limits | Not architecturally addressed — existing `RATE_LIMITED` error handling surfaces a Notice to the user. |
 | Memory pressure | Multiple ConversationManagers holding message arrays | Each manager only holds messages for one conversation. Lightweight compared to the LLM context window. |
-| Stale UI on return | User switches back to a conversation that streamed in the background — may not see latest messages | Sync-back from session manager's in-memory messages for active sessions (Phase 2 — approach TBD: incremental append vs. full replace, pending performance profiling). JSONL reload for completed sessions without an active session. |
+| Stale UI on return | User switches back to a conversation that streamed in the background — may not see latest messages | **Resolved in Phase 2 (Step 2.2).** Full replace from session's in-memory message array (`clearMessages()` + re-render). Same pattern as existing `switchConversation()`. Compaction-safe — no index tracking. JSONL reload for completed sessions without an active session. |
 | AbortController scoping | Closing a panel while response is streaming | `ConversationSession` owns its `AbortController`. Panel `onClose()` aborts all sessions for that panel. |
 | Persona/model restoration edge cases | Conversation's persona deleted or provider unconfigured since last use | Graceful fallback: `getPersonaByName()` returns null if persona deleted → `updatePersonaLabel(null)` clears the label. If provider not configured, shows warning in model selector. No global state mutation on failure. |
 | Plugin deactivation / hot-reload | Active sessions left dangling with live AbortControllers and callbacks | **Resolved in Phase 1 (Step 1h).** `orchestrator.destroy()` aborts all active sessions and awaits their cleanup with a 2-second timeout (best-effort JSONL flush). Called from plugin `onunload()`. |
 | Conversation deletion while streaming | Session continues writing to JSONL file the UI considers deleted | **Resolved in Phase 2 (Step 2.3).** Deletion handler checks `activeSessions` and blocks with a Notice if the conversation is still streaming. |
 | Per-panel orchestrator weight | Each secondary panel creates a full `ChatOrchestrator` (~2400 lines) | Same class, same wiring path (`wireView()`). Shares expensive singletons (ProviderRegistry, HistoryManager, etc.) so memory footprint is modest. No `wireSecondaryView()` — both primary and secondary panels use the same code path. |
-| MCP server concurrency | Multiple sessions dispatch tools to the same MCP server concurrently | **Mitigated by per-server dispatch queue.** Serializes tool calls per MCP server (same pattern as `HistoryManager.writeQueues`). Prevents concurrent access to MCP servers that may not be thread-safe. |
+| MCP server concurrency | Multiple sessions dispatch tools to the same MCP server concurrently | **Mitigated by per-server dispatch queue (Phase 4, Step 4.4.7).** Serializes tool calls per MCP server (same pattern as `HistoryManager.writeQueues`). Not needed until Phase 4 — within a single session, MCP tools are already serialized by `tool-orchestration.ts:91`. |
+| Mode toggle mid-stream | User toggles plan/act while a session is streaming — policy doesn't update | **Resolved in Phase 1 (Step 1d).** Mode toggle propagates to active session's ConversationManager via `activeSessions` map lookup. `buildPolicyContext()` reads the updated mode on each dispatch. |
+| Duplicate send to same conversation | User sends two messages to a conversation that already has an active session | **Resolved in Phase 1 (Step 1d).** Duplicate-send guard checks `activeSessions.has(conv.id)` before creating a session. Rejects with a Notice if a session already exists. |
+| Sync-back JSONL header write | Navigating back to streaming conversation fires `onConversationChanged`, writing mid-stream token counts | **Resolved in Phase 2 (Step 2.2).** Sync-back uses `loadConversation(..., { silent: true })` to skip the callback. Session's own ConversationManager is the authoritative header writer. |
+| Cross-panel provider/model mutation | Picker change in Panel A affects Panel B's new conversations via global ProviderRegistry | **Resolved in Phase 4 (Step 4.4.2).** Per-orchestrator `activeProviderType` and `activeModelId` fields. Picker changes update the panel's orchestrator, not the global registry. |
+| wireView global listener duplication | Multiple per-panel orchestrators duplicate global event listeners | **Resolved in Phase 4 (Step 4.4.8).** Audit identifies safe-to-duplicate vs. must-deduplicate callbacks. Unsafe callbacks split into per-panel + plugin-level parts. |
 
 ---
 
@@ -797,25 +934,27 @@ Phase 1 (per-conversation session isolation — bug fix + architecture)
   ├── Step 1a: Extract policy from dispatcher (pure refactor, no behavior change)
   ├── Step 1b: Make resolveEffectiveConfig pure (pure refactor)
   ├── Step 1c: Create ConversationSession class
-  ├── Step 1d: Update responseLoop to use sessions
+  ├── Step 1d: Update responseLoop to use sessions (includes activeSessions map,
+  │            duplicate-send guard, mode toggle propagation)
   ├── Step 1e: Update _backgroundResponseLoop to use sessions
-  ├── Step 1f: JSONL persona + model restoration
+  ├── Step 1f: JSONL persona + model restoration + header mutation on change
   ├── Step 1g: Inspector display-conversation scoping
   └── Step 1h: Session cleanup on plugin deactivation
     ↓
-Phase 2 (session registry + sync-back)
+Phase 2 (session registry enhancements + sync-back)
     ↓
     ├──→ Phase 3 (activity indicator)
     │
-    └──→ Phase 4 (multi-panel — simplified: approval routing already per-session)
+    └──→ Phase 4 (multi-panel + per-server MCP queue + global listener audit)
               ↓
          Phase 5 (open in new tab)
 ```
 
 - **Phase 0 is eliminated.** The `resolveEffectiveConfig` concurrency investigation is resolved: Steps 1a-1b make config resolution pure and tool policy a per-call function. No shared mutable config state remains.
-- **Phase 1** is independently shippable. Steps 1a-1b are pure refactors (backward compatible, can be verified independently). Steps 1c-1e fix the data corruption bug. Step 1f adds persona/model restoration. Step 1g scopes the inspector.
-- **Phase 2** builds on Phase 1 and is required for Phases 3-5.
-- **Phase 4 is simplified:** The spec's original Phase 4.4.3 (tool approval routing refactor) is already handled by Steps 1a/1d. Phase 4 only needs to wire per-panel callbacks when creating secondary orchestrators.
+- **Phase 1** is independently shippable. Steps 1a-1b are pure refactors (backward compatible, can be verified independently). Steps 1c-1e fix the data corruption bug. Step 1d includes the `activeSessions` map, duplicate-send guard, and mode toggle propagation to active sessions. Step 1f adds persona/model restoration + header mutation on change. Step 1g scopes the inspector. Step 1h handles plugin deactivation. Step 1i (per-server MCP queue) deferred to Phase 4 — not needed until multi-panel.
+- **All open design questions are resolved:** Sync-back uses full replace with `silent: true` on `loadConversation` (no index tracking, no spurious header writes). Header updates only when persona/provider/model actually changes. Picker changes also update the conversation header. `processStream` uses a view-resolver function re-resolved per chunk. `checkAndPerformCompaction` accepts the full session.
+- **Phase 2** builds on Phase 1 and is required for Phases 3-5. Adds public session accessors, sync-back (silent `loadConversation`), and deletion guard.
+- **Phase 4 scope expanded:** Includes per-panel orchestrators, per-orchestrator provider/model fields (replaces global ProviderRegistry mutation), per-server MCP dispatch queue (moved from Phase 1), and global listener audit (Section 4.4.8). The tool approval routing refactor is already handled by Phase 1 Steps 1a/1d.
 - **Phases 3, 4, 5** can be developed in parallel after Phase 2.
 
 ---
@@ -841,6 +980,10 @@ Phase 2 (session registry + sync-back)
 8. Switch back to original conversation — verify all messages render correctly
 9. Verify: no stray DOM elements from the background response leaked into the new conversation's view
 10. Start a background workflow while a foreground conversation is streaming — verify both use correct tool configs (no cross-contamination)
+11. Try to send a second message to the same conversation while it's streaming — verify "already processing" notice (duplicate-send guard)
+12. While streaming, toggle plan→act mode — verify the next tool dispatch respects act mode (mode propagation)
+13. While streaming, navigate away — verify streaming text does NOT appear in the new conversation's view (processStream view-resolver)
+14. Trigger compaction mid-stream — verify it uses the session's model ID for token threshold, not the global active model
 
 **Step 1f (JSONL restoration):**
 1. Create conversation with persona "researcher" active
@@ -857,11 +1000,12 @@ Phase 2 (session registry + sync-back)
 
 ### Phase 2 Verification
 1. Send a message, switch away mid-stream
-2. Try to send another message in the SAME original conversation (via navigating back) — verify "already processing" notice
-3. Switch back to the streaming conversation mid-stream — verify new messages appear incrementally (in-memory diff, no full reload)
+2. Duplicate-send guard already tested in Phase 1 (Step 1c-1e item 11)
+3. Switch back to the streaming conversation mid-stream — verify all messages render correctly via full replace (clearMessages + re-render from session's in-memory array). Verify JSONL header is NOT written during sync-back (silent loadConversation)
 4. Verify the stop button correctly targets the active session's AbortController
 5. Wait for completion, navigate back — verify conversation shows the completed response
 6. Verify `activeSessions` map is empty after all responses complete
+7. Trigger compaction mid-stream (long conversation), switch away and back — verify full replace handles the post-compaction message array correctly
 
 ### Phase 3 Verification
 1. Send a message, switch away mid-stream
@@ -876,6 +1020,9 @@ Phase 2 (session registry + sync-back)
 3. Send messages in both primary and secondary panels simultaneously
 4. Verify both conversations write to separate JSONL files
 5. Close and reopen Obsidian — verify secondary panel restores with its conversation
+6. Change provider picker in Panel A — verify Panel B's next new conversation uses Panel B's provider, not Panel A's (per-orchestrator provider fields)
+7. Dispatch MCP tools from both panels to the same MCP server — verify per-server serialization (no concurrent JSON-RPC)
+8. Verify settings changes, new conversation, and conversation switch callbacks don't double-fire across panels (global listener audit)
 
 ### Phase 5 Verification
 1. Open conversation history in the primary panel
@@ -901,3 +1048,5 @@ Phase 2 (session registry + sync-back)
 | HistoryManager write queues | [`src/chat/history.ts`](../../src/chat/history.ts) | Per-file promise chains serialize concurrent writes — no changes needed |
 | View state persistence | Obsidian `ItemView.getState()` / `setState()` | Standard pattern for workspace restore |
 | Conversation header persistence | [`types.ts:14-94`](../../src/types.ts) | `persona_name` ([L56](../../src/types.ts)), `provider_id`, `model_id` already stored in JSONL header — used for display-restore on load and session snapshot at creation |
+| Header mutation | [`history.ts:206-229`](../../src/chat/history.ts) | `updateConversationHeader()` already exists — read-modify-write on line 0, serialized via per-file write queue. Used for persona/provider/model updates on change. |
+| MCP tool dispatch | [`mcp-hub.ts:449-528`](../../src/mcp/mcp-hub.ts) | `callTool()` dispatches to MCP SDK. Will be wrapped with per-server promise queue (same pattern as `HistoryManager.writeQueues`). |
