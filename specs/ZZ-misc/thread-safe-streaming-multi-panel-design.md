@@ -51,12 +51,12 @@ Notor's `ChatOrchestrator` uses a single `ConversationManager` with one `activeC
 ```
 ChatView (UI)
     ↕ callbacks
-ChatOrchestrator (singleton — shared across all views)
+ChatOrchestrator (single shared instance — one per plugin, not enforced as singleton)
     → ConversationManager (instance-per-orchestrator, mutable activeConversation)
         → onMessageAdded → HistoryManager.appendMessage(getActiveConversation(), msg)
-    → ToolDispatcher (shared singleton — mixes registry + policy + mutable config state)
+    → ToolDispatcher (shared instance — mixes registry + policy + mutable config state)
         → effectiveToolConfig: set per-iteration, read at dispatch time (RACE!)
-        → approvalCallback: global singleton (can't route to correct panel)
+        → approvalCallback: shared instance field (can't route to correct panel)
 ```
 
 **Problems:**
@@ -311,8 +311,8 @@ After existing guards, before `responseLoop()`:
 3. Wire `onMessageAdded` / `onConversationChanged` to `this.historyManager`
 4. Load snapshot into new manager via `loadConversation()`
 5. Snapshot persona: `const pinnedPersona = this.personaManager?.getActivePersona() ?? null`
-6. Snapshot provider: Use the conversation header's `provider_id` if available (restored conversation), otherwise fall back to `this.providerRegistry.getActiveType()` (new conversation)
-7. Snapshot model: Use the conversation header's `model_id` if available (restored conversation), otherwise fall back to `this.getActiveModelId()` (new conversation)
+6. Snapshot provider: Use the conversation header's `provider_id` if the provider is still configured (restored conversation), otherwise fall back to `this.providerRegistry.getActiveType()` (new conversation or unavailable provider)
+7. Snapshot model: Use the conversation header's `model_id` if the provider is still configured (restored conversation), otherwise fall back to `this.getActiveModelId()` (new conversation or unavailable provider)
 8. Resolve initial config via pure `resolveEffectiveConfig(matchedRules, null, pinnedPersona)`
 9. Create `ConversationSession` with all the above (including `providerType`, `modelId`)
 10. Store response loop promise on session: `session.responsePromise = this.responseLoop(mode, session)`
@@ -393,6 +393,30 @@ Without this wiring, toggling plan→act mid-stream would have no effect on tool
 3. Run `responseLoop(mode, session)` — all assistant/tool messages go through session manager
 
 The session manager's `onMessageAdded` only fires for NEW messages added during the response loop, avoiding double-writes.
+
+**Session cleanup on completion:**
+
+The `responseLoop`'s `finally` block must remove the session from `activeSessions` and update its status. Without this, the duplicate-send guard permanently blocks re-sending to completed conversations, and Phase 3's activity indicator shows phantom "active" sessions.
+
+```typescript
+// In the finally block of the response loop (or handleUserMessage's try/catch wrapper):
+try {
+  await this.responseLoop(mode, session);
+} catch (e) {
+  session.setStatus("errored");
+  this.handleError(e);
+} finally {
+  if (session.status === "running" || session.status === "waiting_approval") {
+    session.setStatus("completed");
+  }
+  this.activeSessions.delete(session.conversationId);
+  this.view?.setRespondingState(false);
+}
+```
+
+Completed sessions are removed immediately — no grace period. Switch-back after completion falls through to the standard JSONL reload path in `switchConversation()`.
+
+**Isolation invariant:** After this refactor, `this.conversationManager` must have **zero reads** inside `responseLoop`, `processStream`, and any method they call. Since `switchConversation()` mutates the shared manager mid-stream, any straggling `this.conversationManager` read in the response path would silently resolve to the wrong conversation. All reads must go through `session.conversationManager`.
 
 #### 4.1.5 Step 1e: Update `_backgroundResponseLoop` to use sessions
 
@@ -740,6 +764,8 @@ const orchestrator = new ChatOrchestrator(
 
 **Per-orchestrator active provider/model:** Each `ChatOrchestrator` must track its own `activeProviderType` and `activeModelId` fields. Picker changes in one panel update that panel's orchestrator — NOT the global `ProviderRegistry.activeType`. New conversations snapshot from the orchestrator's fields. Without this, a provider change in Panel A would affect Panel B's next new conversation through the shared `ProviderRegistry` global state. Phase 1's conversation-header-based snapshotting handles restored conversations correctly regardless.
 
+**ProviderRegistry role change:** After Phase 4, `ProviderRegistry` becomes provider-instance management and defaults only. Its `activeType` serves as the initial default for newly created orchestrators (each orchestrator initializes its `activeProviderType` from `ProviderRegistry.getActiveType()` at construction time). All subsequent "which provider is active" reads go through the orchestrator, not the registry. `ProviderRegistry.switchProvider()` should no longer be called from picker-change callbacks — those update the orchestrator's fields instead.
+
 **Alignment needed:** Audit `wireView()` and the `ChatOrchestrator` constructor for any primary-only assumptions (e.g., singleton references, global event listeners that should only fire once). Any such assumptions must be parameterized or guarded by `isSecondary`. See Section 4.4.8 for the required audit.
 
 #### 4.4.3 Tool approval routing
@@ -914,7 +940,7 @@ view.setOnOpenInNewTab((filename: string) => {
 | Memory pressure | Multiple ConversationManagers holding message arrays | Each manager only holds messages for one conversation. Lightweight compared to the LLM context window. |
 | Stale UI on return | User switches back to a conversation that streamed in the background — may not see latest messages | **Resolved in Phase 2 (Step 2.2).** Full replace from session's in-memory message array (`clearMessages()` + re-render). Same pattern as existing `switchConversation()`. Compaction-safe — no index tracking. JSONL reload for completed sessions without an active session. |
 | AbortController scoping | Closing a panel while response is streaming | `ConversationSession` owns its `AbortController`. Panel `onClose()` aborts all sessions for that panel. |
-| Persona/model restoration edge cases | Conversation's persona deleted or provider unconfigured since last use | Graceful fallback: `getPersonaByName()` returns null if persona deleted → `updatePersonaLabel(null)` clears the label. If provider not configured, shows warning in model selector. No global state mutation on failure. |
+| Persona/model restoration edge cases | Conversation's persona deleted or provider unconfigured since last use | Graceful fallback: `getPersonaByName()` returns null if persona deleted → `updatePersonaLabel(null)` clears the label. If provider not configured, fall back silently to the current global provider/model — the session pins from global state instead of the stale header values. No global state mutation on failure. |
 | Plugin deactivation / hot-reload | Active sessions left dangling with live AbortControllers and callbacks | **Resolved in Phase 1 (Step 1h).** `orchestrator.destroy()` aborts all active sessions and awaits their cleanup with a 2-second timeout (best-effort JSONL flush). Called from plugin `onunload()`. |
 | Conversation deletion while streaming | Session continues writing to JSONL file the UI considers deleted | **Resolved in Phase 2 (Step 2.3).** Deletion handler checks `activeSessions` and blocks with a Notice if the conversation is still streaming. |
 | Per-panel orchestrator weight | Each secondary panel creates a full `ChatOrchestrator` (~2400 lines) | Same class, same wiring path (`wireView()`). Shares expensive singletons (ProviderRegistry, HistoryManager, etc.) so memory footprint is modest. No `wireSecondaryView()` — both primary and secondary panels use the same code path. |
