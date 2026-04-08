@@ -37,7 +37,7 @@ Notor's `ChatOrchestrator` uses a single `ConversationManager` with one `activeC
 | Activity indicator | Extend existing `WorkflowActivityIndicator` | Reuse the badge + dropdown pattern rather than adding a separate icon. Combined count: workflows + foreground sessions. |
 | Multi-panel approach | Reuse `CHAT_VIEW_TYPE` with per-panel orchestrator | Same view type, differentiated by `{ isSecondary: true }` constructor option. Each panel gets its own `ChatOrchestrator` (lightweight — shares expensive singletons like `ProviderRegistry`, `HistoryManager`, `SystemPromptBuilder`). Own `ConversationManager` for independent state. Avoids maintaining two view registrations and divergent wire-up paths. |
 | Secondary panel toolbar | Full toolbar (same as primary) | Secondary panels get the same toolbar as primary. Per-session scoping from Phase 1 means persona, provider, and tool config are already isolated. No reason to artificially reduce secondary panel capability. |
-| Sync-back on return | Full replace from session manager | When user switches back to a conversation with an active session, load UI manager entirely from session manager's in-memory messages (skip JSONL). Falls back to JSONL reload for completed sessions without an active session. Simpler than diffing, avoids ambiguity around compaction and partial flushes. |
+| Sync-back on return | Incremental append from session manager | When user switches back to a conversation with an active session, append only messages added since the user navigated away (tracked via `session.lastDisplayedIndex`). Falls back to JSONL reload for completed sessions without an active session. Avoids re-rendering existing content for long conversations. |
 | Tool approval routing | Per-session approval callback | Each `ConversationSession` owns its approval callback (bound to the correct panel's view). Passed per-`dispatch()` call — no global `setApprovalCallback()`. Each panel/session routes approvals to its own UI without conflict. |
 | Shared vs. per-conversation state | Only infrastructure stays global | Global: MCP connections, tool registry (implementations), provider registry (API connections — instances cached, but which provider/model to use is per-session), history manager (file I/O), vault rule manager, system prompt builder. Per-conversation: effective tool config, persona, provider type, model ID, mode, approval routing, abort controller, conversation manager. |
 
@@ -98,7 +98,7 @@ Primary NotorChatView
         → activeSessions Map<convId, ConversationSession>
 
 Secondary NotorChatView(s)
-    → ChatOrchestrator (per-panel — reduced toolbar)
+    → ChatOrchestrator (per-panel — full toolbar)
         → ConversationManager (independent display)
         → activeSessions Map<convId, ConversationSession>
 
@@ -234,6 +234,10 @@ export class ConversationSession {
   // Per-session routing
   readonly approvalCallback: ApprovalCallback;
 
+  // Tracks the last message index rendered in the UI — used for incremental
+  // append when the user switches back to this conversation mid-stream.
+  lastDisplayedIndex: number = 0;
+
   private _status: SessionStatus = "running";
   onStatusChange?: (session: ConversationSession) => void;
 
@@ -253,7 +257,12 @@ export class ConversationSession {
   get status(): SessionStatus;
   setStatus(status: SessionStatus): void;
 
-  /** Build a ToolPolicyContext from this session's resolved state. */
+  /**
+   * Build a ToolPolicyContext from this session's resolved state.
+   * Note: `mode` is intentionally read dynamically (not pinned) because the
+   * user can toggle plan/act mode mid-stream and the policy should reflect
+   * the current mode each iteration.
+   */
   buildPolicyContext(settings: NotorSettings, vaultRootPath: string): ToolPolicyContext {
     return {
       effectiveConfig: this.effectiveConfig,
@@ -300,7 +309,7 @@ Inside the loop, all shared state reads become session reads:
 - If session matches displayed conversation: `this.updateDisplayConfig(session.effectiveConfig, session.parsedConfigs)`
 - `executeToolBatches()` passes `session.buildPolicyContext(this.settings, vaultRootPath)` and `session.approvalCallback`
 - `checkAndPerformCompaction()` accepts session's conversation manager (explicit parameterization needed — currently reads `this.conversationManager`)
-- `toChatMessages()` at L1427 uses session's conversation manager
+- `toChatMessages()` at L1427 is already pure (receives messages array as parameter) — only the caller changes to pass messages from `session.conversationManager`
 
 **View render guarding:**
 ```typescript
@@ -348,11 +357,13 @@ After loading conversation from history manager:
 ```typescript
 // Display-restore persona label from conversation header
 // (Does NOT call activatePersona — no global mutation)
-if (conversation.persona_name) {
-  this.view?.updatePersonaLabel(conversation.persona_name);
-} else {
-  this.view?.updatePersonaLabel(null);
-}
+// Note: getPersonaByName() is a new read-only method on PersonaManager
+// that calls getDiscoveredPersonas() and finds by name. Returns null if
+// the persona has been deleted since the conversation was created.
+const persona = conversation.persona_name
+  ? await this.personaManager?.getPersonaByName(conversation.persona_name) ?? null
+  : null;
+this.view?.updatePersonaLabel(persona);
 
 // Display-restore provider/model in UI selectors
 // (Does NOT call switchProvider — no global mutation)
@@ -376,14 +387,34 @@ Also ensure `updateConversationHeader()` propagates persona changes if the user 
 - `getEffectiveToolConfig()` and `getActiveParsedConfigs()` continue returning these fields
 - No changes needed to `src/ui/effective-config-inspector.ts`
 
-#### 4.1.8 Files modified
+#### 4.1.8 Step 1h: Session cleanup on plugin deactivation
+
+The orchestrator must abort all active sessions when the plugin is disabled, hot-reloaded, or Obsidian closes.
+
+**Changes to `src/chat/orchestrator.ts`:**
+
+Add a `destroy()` method (called from `main.ts` `onunload()`):
+```typescript
+destroy(): void {
+  for (const session of this.activeSessions.values()) {
+    session.abortController.abort();
+  }
+  this.activeSessions.clear();
+}
+```
+
+**Changes to `src/main.ts`:**
+- Call `orchestrator.destroy()` in the plugin's `onunload()` path
+
+#### 4.1.9 Files modified
 
 - `src/chat/tool-policy.ts` — **NEW**: `evaluateToolPolicy()` pure function, `ToolPolicyContext` interface, `PolicyDecision` interface
 - `src/chat/conversation-session.ts` — **NEW**: `ConversationSession` class
 - `src/chat/dispatcher.ts` — `dispatch()` gains optional `policyCtx` + `approvalCallback` params
 - `src/chat/tool-orchestration.ts` — `executeToolBatches()`, `safeDispatch()`, `runConcurrentBatch()` thread `policyCtx` + `approvalCallback`
 - `src/chat/orchestrator.ts` — `resolveEffectiveConfig()` (pure signature + body), `handleUserMessage()` (session creation), `responseLoop()` (uses session), `_backgroundResponseLoop()` (uses session, removes save/restore hack), `switchConversation()` (persona+model restoration, display config update, isResponding reset, abort controller decoupling), `updateDisplayConfig()` helper, `getViewForSession()` helper, `activeSessions` map
-- `src/ui/chat-view.ts` — decouple `AbortController` from view (session owns its own), add `updatePersonaLabel()`, `updateProviderDisplay()`, `updateModelDisplay()` display-only methods for conversation switch restoration
+- `src/personas/persona-manager.ts` — add `getPersonaByName(name: string): Promise<Persona | null>` read-only lookup (calls `getDiscoveredPersonas()`, finds by name)
+- `src/ui/chat-view.ts` — decouple `AbortController` from view (session owns its own), add `updateProviderDisplay()`, `updateModelDisplay()` display-only methods for conversation switch restoration (`updatePersonaLabel()` already exists)
 
 ---
 
@@ -419,17 +450,35 @@ hasActiveSession(conversationId: string): boolean {
 
 **File:** `src/chat/orchestrator.ts` — `switchConversation()`
 
-When switching to a conversation that has an active session, use the session's in-memory state instead of reloading from JSONL:
+When switching to a conversation that has an active session, incrementally append new messages instead of reloading from JSONL:
 
 1. Check `this.activeSessions.has(conversation.id)`
-2. **If active session exists:** Load UI manager entirely from the session manager's in-memory messages via `this.conversationManager.loadConversation(session.conversation, session.conversationManager.getMessages())`. Re-render all messages. This is a full replace, not a diff — simpler and avoids ambiguity around compaction and partial flushes.
+2. **If active session exists:**
+   - Get all messages from `session.conversationManager.getMessages()`
+   - Append only messages with index >= `session.lastDisplayedIndex` to the UI (avoiding re-render of existing content)
+   - Update `session.lastDisplayedIndex` to the current message count
 3. Set `this.view?.setRespondingState(true)`. The stop button uses the existing `onStopResponse` callback — the orchestrator's handler looks up the displayed conversation's active session and calls `session.abortController.abort()`.
 4. Register a one-time callback on the session's `onStatusChange` to call `this.view?.setRespondingState(false)` when it completes
 5. **If no active session:** Load from `HistoryManager` as normal (standard JSONL load for completed conversations)
 
-#### 4.2.3 Files modified
+**Note:** When the user navigates away from an active session, record the current message count as `session.lastDisplayedIndex`.
 
-- `src/chat/orchestrator.ts` — session map, duplicate guard, sync-back logic
+#### 4.2.3 Deletion guard for active sessions
+
+**File:** `src/chat/orchestrator.ts` — in conversation delete handler
+
+Before deleting a conversation, check whether it has an active session:
+
+```typescript
+if (this.activeSessions.has(conversationId)) {
+  new Notice("Cannot delete — conversation is still streaming. Stop it first.");
+  return;
+}
+```
+
+#### 4.2.4 Files modified
+
+- `src/chat/orchestrator.ts` — session map, duplicate guard, sync-back logic, deletion guard
 
 ---
 
@@ -671,7 +720,10 @@ view.setOnOpenInNewTab((filename: string) => {
 | Memory pressure | Multiple ConversationManagers holding message arrays | Each manager only holds messages for one conversation. Lightweight compared to the LLM context window. |
 | Stale UI on return | User switches back to a conversation that streamed in the background — may not see latest messages | Full replace from session manager's in-memory messages for active sessions (Phase 2). JSONL reload for completed sessions without an active session. |
 | AbortController scoping | Closing a panel while response is streaming | `ConversationSession` owns its `AbortController`. Panel `onClose()` aborts all sessions for that panel. |
-| Persona/model restoration edge cases | Conversation's persona deleted or provider unconfigured since last use | Graceful fallback: display-restore updates the UI label (no `activatePersona()` call). If persona not found, shows "(unknown persona)" label. If provider not configured, shows warning in model selector. No global state mutation on failure. |
+| Persona/model restoration edge cases | Conversation's persona deleted or provider unconfigured since last use | Graceful fallback: `getPersonaByName()` returns null if persona deleted → `updatePersonaLabel(null)` clears the label. If provider not configured, shows warning in model selector. No global state mutation on failure. |
+| Plugin deactivation / hot-reload | Active sessions left dangling with live AbortControllers and callbacks | **Resolved in Phase 1 (Step 1h).** `orchestrator.destroy()` aborts all active sessions and clears the map. Called from plugin `onunload()`. |
+| Conversation deletion while streaming | Session continues writing to JSONL file the UI considers deleted | **Resolved in Phase 2 (Step 2.3).** Deletion handler checks `activeSessions` and blocks with a Notice if the conversation is still streaming. |
+| Per-panel orchestrator weight | Each secondary panel creates a full `ChatOrchestrator` (~2400 lines) | Pragmatic for Phase 4 — shares expensive singletons (ProviderRegistry, HistoryManager, etc.) so memory footprint is modest. Future refactoring could extract the response loop into a shared service if panel count grows. |
 
 ---
 
@@ -685,7 +737,8 @@ Phase 1 (per-conversation session isolation — bug fix + architecture)
   ├── Step 1d: Update responseLoop to use sessions
   ├── Step 1e: Update _backgroundResponseLoop to use sessions
   ├── Step 1f: JSONL persona + model restoration
-  └── Step 1g: Inspector display-conversation scoping
+  ├── Step 1g: Inspector display-conversation scoping
+  └── Step 1h: Session cleanup on plugin deactivation
     ↓
 Phase 2 (session registry + sync-back)
     ↓
@@ -756,7 +809,7 @@ Phase 2 (session registry + sync-back)
 
 ### Phase 4 Verification
 1. Open secondary panel via "Open new chat panel" command
-2. Verify reduced toolbar (no workflow indicator, no MCP status)
+2. Verify full toolbar (same capabilities as primary panel)
 3. Send messages in both primary and secondary panels simultaneously
 4. Verify both conversations write to separate JSONL files
 5. Close and reopen Obsidian — verify secondary panel restores with its conversation
@@ -774,7 +827,7 @@ Phase 2 (session registry + sync-back)
 | Pattern | Location | Reuse |
 |---------|----------|-------|
 | Background workflow isolation | [`orchestrator.ts:700-724`](../../src/chat/orchestrator.ts) | Per-response `ConversationManager` creation + wiring |
-| `_backgroundResponseLoop` | [`orchestrator.ts:839-1040`](../../src/chat/orchestrator.ts) | Self-contained response loop using passed-in manager |
+| `_backgroundResponseLoop` | [`orchestrator.ts:839-1078`](../../src/chat/orchestrator.ts) | Self-contained response loop using passed-in manager |
 | Sub-agent dispatcher creation | [`use-subagent.ts:314-319`](../../src/tools/use-subagent.ts) | Separate config per dispatch context (proven per-session isolation pattern) |
 | Persona activate/deactivate | [`persona-manager.ts:117-147`](../../src/personas/persona-manager.ts) | `activatePersona(name)` for user-initiated persona changes only; NOT used for conversation-switch restoration (display-only update instead) |
 | Provider switching | [`providers/index.ts:158`](../../src/providers/index.ts) | `switchProvider()` for conversation load |
