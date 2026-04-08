@@ -431,6 +431,8 @@ Completed sessions are removed immediately — no grace period. Switch-back afte
 
 **Complete shared-state access enumeration:** The following is an exhaustive list of every `this.conversationManager`, `this.view`, and other global-state read inside `responseLoop`, `processStream`, and `checkAndPerformCompaction` — each must be substituted during this step. Use this as a checklist during implementation.
 
+> **Note:** These line numbers are accurate as of 2026-04-08 and serve as an implementation checklist. Verify against the actual code at implementation time — any intervening changes will shift line numbers.
+
 *`this.conversationManager` in `responseLoop` (14 sites):*
 | Line | Call | Substitution |
 |------|------|-------------|
@@ -707,6 +709,13 @@ async destroy(timeoutMs: number = 2000): Promise<void> {
 
 **Changes to `src/main.ts`:**
 - Call `orchestrator.destroy()` in the plugin's `onunload()` path. Since Obsidian's `onunload()` is synchronous, use `this.register(() => { orchestrator.destroy(); })` or fire-and-forget the async call (the timeout ensures it doesn't hang).
+
+**Destroy ordering with `TaskLaneQueue`:** When [`task-lane-queue-design.md`](./task-lane-queue-design.md) is implemented, `onunload()` must call destroys in this order:
+1. `orchestrator.destroy()` — aborts all active sessions (which may have tasks queued in the `TaskLaneQueue`)
+2. `taskLaneQueue?.destroy()` — rejects remaining waiters, marks queue destroyed
+3. Existing cleanup (McpHub dispose, etc.)
+
+Reversing the order could cause sessions' abort handlers to enqueue work on an already-destroyed queue, producing unexpected `"TaskLaneQueue destroyed"` errors in finally blocks. If `TaskLaneQueue` is not yet implemented when this step lands, add a comment in `onunload()` noting the required ordering for when it is added.
 
 #### ~~4.1.9 Step 1i: Per-server MCP dispatch queue~~ → Moved to Phase 4
 
@@ -1241,8 +1250,8 @@ Phase 2 (session registry enhancements + sync-back)
 | Sub-agent dispatcher creation | [`use-subagent.ts:314-319`](../../src/tools/use-subagent.ts) | Separate config per dispatch context (proven per-session isolation pattern) |
 | Persona activate/deactivate | [`persona-manager.ts:117-147`](../../src/personas/persona-manager.ts) | `activatePersona(name)` for user-initiated persona changes only; NOT used for conversation-switch restoration (display-only update instead) |
 | Provider switching | [`providers/index.ts:158`](../../src/providers/index.ts) | `switchProvider()` for conversation load |
-| `mergeToolConfigs` (pure) | [`tool-config/merger.ts:55-103`](../../src/tool-config/merger.ts) | Already pure — accepts inputs, returns merged config. No changes needed. |
-| `getFilteredToolDefinitions` | [`tools/index.ts:124`](../../src/tools/index.ts) | Already pure — accepts `EffectiveToolConfig`, returns filtered defs. |
+| `mergeToolConfigs` (pure) | [`tool-config/merger.ts:55-95`](../../src/tool-config/merger.ts) | Already pure — accepts inputs, returns merged config. No changes needed. |
+| `getFilteredToolDefinitions` | [`tools/index.ts:124`](../../src/tools/index.ts) | Effectively stateless w.r.t. per-conversation state — reads from shared `ToolRegistry` instance only. No per-session changes needed. |
 | `WorkflowActivityTracker` | [`src/workflows/workflow-activity-tracker.ts`](../../src/workflows/workflow-activity-tracker.ts) | `onChange()` / `getActiveCount()` / `hasActiveWorkflows()` pattern |
 | `WorkflowActivityDropdown` | [`src/ui/workflow-activity-dropdown.ts`](../../src/ui/workflow-activity-dropdown.ts) | Positioned popover with live-update entries |
 | HistoryManager write queues | [`src/chat/history.ts`](../../src/chat/history.ts) | Per-file promise chains serialize concurrent writes — no changes needed |
