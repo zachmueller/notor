@@ -180,60 +180,15 @@ The queue system has two layers: a generic `TaskLaneQueue` primitive (reusable b
 
 ### 5.1 TaskLaneQueue — Generic Lane Primitive
 
-**File:** `src/queue/task-lane-queue.ts`
+> **Dependency:** The full `TaskLaneQueue` design is in [`task-lane-queue-design.md`](./task-lane-queue-design.md). That spec must be implemented first. This section describes how the web search queue consumes it.
 
-A general-purpose, per-lane serialization queue with configurable inter-completion delays. Has no knowledge of web search, providers, or extensions — it is a pure concurrency primitive.
+`TaskLaneQueue` is a general-purpose, per-lane serialization queue with configurable inter-completion delays. It is a shared plugin-level singleton (`src/queue/task-lane-queue.ts`) also used by MCP server dispatch and exposed to user extensions. See the standalone spec for API, internal structure, and implementation details.
 
-```typescript
-export class TaskLaneQueue {
-  private lanes = new Map<string, Lane>();
-
-  /**
-   * Enqueue an async task on the named lane. The task executes when the
-   * lane is available (previous task completed + delay elapsed).
-   *
-   * @param laneKey - Lane identifier (e.g., "duckduckgo", "deepl-api")
-   * @param fn      - Async function to execute when the lane is ready
-   * @param delayMs - Minimum ms between consecutive completions on this lane.
-   *                  Only used when the lane is first created (first-writer-wins).
-   *                  Default: 0 (no delay, but still serialized).
-   */
-  async enqueue<T>(laneKey: string, fn: () => Promise<T>, delayMs = 0): Promise<T>;
-
-  /** Number of tasks waiting in a lane's queue. 0 for non-existent lanes. */
-  pending(laneKey: string): number;
-
-  /** Remove a lane (used for cleanup/testing). */
-  removeLane(laneKey: string): void;
-}
-
-interface Lane {
-  /** Minimum delay between consecutive task completions (ms). */
-  delayMs: number;
-  /** Timestamp (ms) of the last completed task in this lane. */
-  lastCompletionTime: number;
-  /** FIFO queue of pending tasks awaiting this lane's delay window. */
-  waitQueue: Array<{ resolve: () => void }>;
-  /** Whether a drain loop is currently running for this lane. */
-  draining: boolean;
-}
-```
-
-**Delay enforcement within a lane:**
-
-1. Caller enters the lane via `enqueue(laneKey, fn, delayMs)`.
-2. If `Date.now() - lane.lastCompletionTime >= delayMs`, the task executes immediately.
-3. Otherwise, the caller is enqueued and a Promise resolves after the remaining delay.
-4. After the task completes (success or failure), `lane.lastCompletionTime` is updated and the next waiter (if any) is scheduled.
-5. The return value of `fn` is returned to the caller. If `fn` throws, the error propagates to the caller and the lane is still released for the next waiter.
-
-This is similar in spirit to the `Semaphore` in [`src/sub-agents/semaphore.ts`](../../src/sub-agents/semaphore.ts) but with a timed inter-release gap rather than a simple concurrency cap.
-
-**Across lanes, tasks are fully concurrent.** A DDG lane task waiting through its 1500ms delay does not block a Tavily lane task from firing immediately.
-
-**First-writer-wins for delay configuration:** The `delayMs` is set when a lane is first created and cannot be changed by subsequent callers. This prevents user extensions from inadvertently (or intentionally) lowering the delay on shared lanes. The `delayMs` parameter on subsequent `enqueue` calls to an existing lane is silently ignored.
-
-**Why `enqueue(lane, fn, delayMs)` over `acquire/release`:** The `fn` callback pattern eliminates the risk of forgetting `release()` in error paths. The queue automatically updates `lastCompletionTime` after `fn` completes or throws. This is a better fit for extension authors writing code in Markdown fences.
+**Key behaviors relevant to web search:**
+- Each provider gets its own lane (keyed by provider type string: `"duckduckgo"`, `"tavily"`, etc.)
+- DDG lane uses `delayMs = 1500` to avoid throttling; API provider lanes use `delayMs = 0`
+- Across lanes, tasks are fully concurrent — a DDG delay does not block Tavily
+- First-writer-wins for delay config — extensions cannot lower the built-in delay on shared lanes
 
 ### 5.2 WebSearchQueue — Search-Specific Layer
 
@@ -565,21 +520,16 @@ new Setting(containerEl)
 
 ```typescript
 // On NotorPlugin class:
-private _taskLaneQueue?: TaskLaneQueue;
+// _taskLaneQueue — defined in task-lane-queue-design.md (shared singleton)
 private _searchProviderRegistry?: SearchProviderRegistry;
 private _webSearchQueue?: WebSearchQueue;
 ```
 
 ### 11.2 Lazy Initialization
 
-```typescript
-getTaskLaneQueue(): TaskLaneQueue {
-  if (!this._taskLaneQueue) {
-    this._taskLaneQueue = new TaskLaneQueue();
-  }
-  return this._taskLaneQueue;
-}
+> **Note:** `getTaskLaneQueue()` is defined in [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 5.1 and must be implemented as part of that spec. The web search queue consumes it via `this.getTaskLaneQueue()`.
 
+```typescript
 private getSearchProviderRegistry(): SearchProviderRegistry {
   if (!this._searchProviderRegistry) {
     this._searchProviderRegistry = new SearchProviderRegistry();
@@ -604,7 +554,7 @@ private getWebSearchQueue(): WebSearchQueue {
 }
 ```
 
-Note: `getTaskLaneQueue()` is public (not private) because it is accessed by `buildUtils()` in `src/extensions/runtime-context.ts` for extension wiring. The other queue-related getters remain private.
+The other queue-related getters remain private. `getTaskLaneQueue()` is public — see [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 5.1.
 
 ### 11.3 Updated WebSearchTool Registration
 
@@ -624,33 +574,9 @@ The queue singleton is created once and shared by all `WebSearchTool` invocation
 
 ### 11.4 Extension Runtime Wiring
 
-**File:** `src/extensions/runtime-context.ts`
+> **Note:** The `utils.queue` extension API is defined in [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 5.2 and must be implemented as part of that spec. This section describes how the web search queue benefits from it.
 
-The `ExtensionUtils` interface and `buildUtils()` are extended to expose the `TaskLaneQueue` to user extensions:
-
-```typescript
-// Added to ExtensionUtils interface:
-queue: {
-  enqueue: <T>(lane: string, fn: () => Promise<T>, delayMs?: number) => Promise<T>;
-  pending: (lane: string) => number;
-};
-```
-
-```typescript
-// In buildUtils():
-export function buildUtils(plugin: NotorPlugin): ExtensionUtils {
-  const queue = plugin.getTaskLaneQueue();
-  return {
-    // ... existing utils ...
-    queue: {
-      enqueue: (lane, fn, delayMs) => queue.enqueue(lane, fn, delayMs),
-      pending: (lane) => queue.pending(lane),
-    },
-  };
-}
-```
-
-This gives user extensions access to the same lane infrastructure used by the built-in web search tool. See [Section 17](#17-extension-system-interaction) for details on how extensions interact with the queue.
+User extensions get access to the same `TaskLaneQueue` singleton via `utils.queue.enqueue()`. This means extensions can opt into the same rate-limited lanes used by the built-in web search tool (e.g., `"duckduckgo"`). See [Section 17](#17-extension-system-interaction) for details.
 
 ---
 
@@ -771,8 +697,8 @@ Lanes in `TaskLaneQueue` are in-memory only — they reset on plugin restart. Th
 
 | File | Change |
 |------|--------|
-| `src/queue/task-lane-queue.ts` | **Create** — Generic `TaskLaneQueue` class (no web search dependency) |
-| `src/queue/task-lane-queue.test.ts` | **Create** — Unit tests for the queue primitive |
+| `src/queue/task-lane-queue.ts` | **Dependency** — see [`task-lane-queue-design.md`](./task-lane-queue-design.md). Must be implemented first. |
+| `src/queue/task-lane-queue.test.ts` | **Dependency** — see [`task-lane-queue-design.md`](./task-lane-queue-design.md). |
 | `src/tools/web-search/providers/provider.ts` | **Create** — `SearchProvider` interface, `SearchProviderMeta`, `SearchProviderResult` |
 | `src/tools/web-search/providers/duckduckgo.ts` | **Create** — `DuckDuckGoProvider` (extracted from `web-search.ts`) |
 | `src/tools/web-search/providers/tavily.ts` | **Create** — `TavilyProvider` |
@@ -786,8 +712,8 @@ Lanes in `TaskLaneQueue` are in-memory only — they reset on plugin restart. Th
 | `src/settings/defaults.ts` | **Modify** — Add `DEFAULT_WEB_SEARCH_PROVIDERS`, new fields in `createDefaultSettings()` |
 | `src/utils/secrets.ts` | **Modify** — Add `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `SERPAPI_API_KEY` to `SECRET_IDS` |
 | `src/settings/sections/web-search.ts` | **Modify** — Expand with provider priority list, per-provider config, round-robin toggle |
-| `src/main.ts` | **Modify** — Add `_taskLaneQueue`, `_searchProviderRegistry`, and `_webSearchQueue` singletons; update `WebSearchTool` registration |
-| `src/extensions/runtime-context.ts` | **Modify** — Add `queue` to `ExtensionUtils` interface and `buildUtils()` |
+| `src/main.ts` | **Modify** — Add `_searchProviderRegistry` and `_webSearchQueue` singletons; update `WebSearchTool` registration. (`_taskLaneQueue` singleton added by [`task-lane-queue-design.md`](./task-lane-queue-design.md)) |
+| `src/extensions/runtime-context.ts` | **Dependency** — `utils.queue` added by [`task-lane-queue-design.md`](./task-lane-queue-design.md). |
 | `src/tools/web-search.test.ts` | **Modify** — Update tests to mock `WebSearchQueue` instead of `requestUrl`; move DDG parsing tests to provider-specific test file |
 
 ---
@@ -798,7 +724,7 @@ Lanes in `TaskLaneQueue` are in-memory only — they reset on plugin restart. Th
 
 | Component | Test |
 |-----------|------|
-| `TaskLaneQueue` | Two tasks on same lane execute serially. Delay enforcement: completions spaced by at least `delayMs`. Different lanes execute concurrently. `pending()` returns correct count. First-writer-wins: second `enqueue` with different `delayMs` uses original delay. Error in `fn` still releases lane for next waiter. Lane removal via `removeLane()`. |
+| `TaskLaneQueue` | See [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 8 for full test plan. Tests are implemented as part of that spec. |
 | `DuckDuckGoProvider` | Existing `cleanDDGUrl` and `parseDDGResults` tests (migrated from `web-search.test.ts`). New: HTTP error handling, rate-limit detection (202 → `rateLimited: true`). |
 | `TavilyProvider` | JSON response parsing. Auth header presence. Rate-limit detection (429). Timeout handling. |
 | `BraveSearchProvider` | JSON response parsing. `X-Subscription-Token` header. Rate-limit detection. |
@@ -879,7 +805,7 @@ This call shares the built-in tool's DDG lane, so the extension's requests are p
 
 ### 17.2 Well-Known Lane Names
 
-The built-in web search providers use these lane names. Extension authors can opt into shared rate limiting by using the same names:
+The full lane naming convention is defined in [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 4. The web-search-specific lanes are:
 
 | Lane Key | Default Delay | Used By |
 |----------|--------------|---------|
@@ -887,10 +813,11 @@ The built-in web search providers use these lane names. Extension authors can op
 | `"tavily"` | 0ms | Built-in `web_search` (when Tavily is configured) |
 | `"brave"` | 0ms | Built-in `web_search` (when Brave is configured) |
 | `"serpapi"` | 0ms | Built-in `web_search` (when SerpApi is configured) |
+| `"mcp:{serverName}"` | 0ms | MCP server dispatch (see [`thread-safe-streaming-multi-panel-design.md`](./thread-safe-streaming-multi-panel-design.md) Phase 4) |
 
 **Lane scoping:** Lanes are global (not namespaced per-extension). This is intentional — two extensions hitting the same API should share rate limiting. Extensions wanting isolation can prefix their lane name (e.g., `"my-ext:duckduckgo"`), accepting that the API may throttle if both lanes fire concurrently.
 
-**First-writer-wins:** The delay is set when a lane is first created and cannot be changed by subsequent callers. This prevents extensions from lowering delays on shared lanes. See Section 5.1 for details.
+**First-writer-wins:** The delay is set when a lane is first created and cannot be changed by subsequent callers. This prevents extensions from lowering delays on shared lanes. See [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 3.2 for details.
 
 ### 17.3 User Tool Override of `web_search`
 

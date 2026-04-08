@@ -40,7 +40,7 @@ Notor's `ChatOrchestrator` uses a single `ConversationManager` with one `activeC
 | Sync-back on return | Full replace from session's in-memory message array | `clearMessages()` + re-render all messages from `session.conversationManager.getMessages()`. Same pattern already used by `switchConversation()` (orchestrator.ts:365-368). Compaction-safe (no index tracking to break). Performance is acceptable because compaction keeps conversations under ~200 messages in memory. Scroll lands at bottom (desired behavior when returning to active stream). Falls back to JSONL reload for completed sessions without an active session. |
 | Tool approval routing | Per-session approval callback | Each `ConversationSession` owns its approval callback (bound to the correct panel's view). Passed per-`dispatch()` call — no global `setApprovalCallback()`. Each panel/session routes approvals to its own UI without conflict. |
 | Shared vs. per-conversation state | Only infrastructure stays global | Global: MCP connections (with per-server dispatch queues added in Phase 4), tool registry (implementations), provider registry (API connections — instances cached, but which provider/model to use is per-session; per-orchestrator active provider/model fields in Phase 4), history manager (file I/O), vault rule manager, system prompt builder. Per-conversation: effective tool config, persona, provider type, model ID, mode, approval routing, abort controller, conversation manager. |
-| MCP concurrency | Per-server promise queue in `McpHub` (Phase 4) | MCP servers may not handle concurrent JSON-RPC requests safely (many are single-threaded). Add a per-server promise queue to `McpHub.callTool()` using the same `Map<string, Promise>` + `enqueueWrite()` pattern as `HistoryManager.writeQueues` ([`history.ts:93-138`](../../src/chat/history.ts)). Note: MCP tools are already serialized *within* a single session by `tool-orchestration.ts:91` (`isMcpTool()` → sequential batch). The queue only matters for *cross-session* concurrent access (Phase 4 multi-panel) — deferred to Phase 4 to keep Phase 1 focused. |
+| MCP concurrency | Per-server serialization via shared `TaskLaneQueue` (Phase 4) | MCP servers may not handle concurrent JSON-RPC requests safely (many are single-threaded). `McpHub.callTool()` is wrapped with the shared `TaskLaneQueue` singleton (see [`task-lane-queue-design.md`](./task-lane-queue-design.md)) using `delayMs = 0` and `"mcp:{serverName}"` lane keys. Note: MCP tools are already serialized *within* a single session by `tool-orchestration.ts:91` (`isMcpTool()` → sequential batch). The queue only matters for *cross-session* concurrent access (Phase 4 multi-panel) — deferred to Phase 4 to keep Phase 1 focused. |
 
 ---
 
@@ -911,34 +911,41 @@ setState(state: Record<string, unknown>): Promise<void> {
 - `src/ui/chat-view.ts` — `isSecondary` constructor option (full toolbar, same as primary), state persistence via `getState()`/`setState()`
 - `src/main.ts` — update `registerView` callback to handle secondary leaves, refactor `wireView()` to accept orchestrator parameter, command, update singleton-assumption code (`getLeavesOfType`)
 - `src/chat/dispatcher.ts` — remove global `setApprovalCallback()` fallback (per-call approval already added in Phase 1 Step 1a)
-- `src/mcp/mcp-hub.ts` — add per-server promise queue (`callQueues` map), extract `executeCallTool()`, wrap `callTool()` with `enqueueCall()` (moved from Phase 1 Step 1i)
+- `src/mcp/mcp-hub.ts` — accept injected `TaskLaneQueue` (see [`task-lane-queue-design.md`](./task-lane-queue-design.md)), extract `executeCallTool()`, wrap `callTool()` with `taskQueue.enqueue("mcp:{serverName}", ...)` (moved from Phase 1 Step 1i)
 
 #### 4.4.7 Per-server MCP dispatch queue (moved from Phase 1)
 
+> **Dependency:** Requires [`task-lane-queue-design.md`](./task-lane-queue-design.md) to be implemented first. `TaskLaneQueue` is a shared plugin-level singleton that provides per-lane FIFO serialization with optional inter-completion delays.
+
 **Problem:** `McpHub.callTool()` ([`mcp-hub.ts:449-528`](../../src/mcp/mcp-hub.ts)) dispatches tool calls immediately with no per-server serialization. Within a single session, MCP tools are already serialized by `tool-orchestration.ts:91` (`isMcpTool()` → sequential batch). With multi-panel support, two panels could dispatch tools to the same MCP server simultaneously. Many MCP servers are single-threaded and may not handle concurrent JSON-RPC requests safely.
 
-**Implementation:** Copy the `HistoryManager.writeQueues` pattern ([`history.ts:93-138`](../../src/chat/history.ts)) into `McpHub`:
+**Implementation:** Inject the shared `TaskLaneQueue` singleton into `McpHub` and use it for per-server serialization with `delayMs = 0` (pure serialization, no inter-request delay):
 
 ```typescript
-// In src/mcp/mcp-hub.ts:
-private readonly callQueues = new Map<string, Promise<unknown>>();
+// In src/mcp/mcp-hub.ts constructor:
+constructor(
+  ...,
+  private readonly taskQueue?: TaskLaneQueue,  // optional for backward compat
+)
 
-private enqueueCall<T>(serverName: string, operation: () => Promise<T>): Promise<T> {
-    const current = this.callQueues.get(serverName) ?? Promise.resolve();
-    const next = current.then(operation, operation);
-    this.callQueues.set(serverName, next);
-    void next.finally(() => {
-        if (this.callQueues.get(serverName) === next) {
-            this.callQueues.delete(serverName);
-        }
-    });
-    return next;
+// callTool() wraps via shared queue:
+async callTool(serverName, toolName, args, mode): Promise<ToolResult> {
+  // validation checks (unchanged)...
+  const execute = () => this.executeCallTool(serverName, toolName, args, mode);
+  return this.taskQueue
+    ? this.taskQueue.enqueue(`mcp:${serverName}`, execute, 0)
+    : execute();  // fallback if no queue injected
 }
 ```
 
+Lane keys use the `"mcp:{serverName}"` convention to avoid collisions with web search provider lanes. See [`task-lane-queue-design.md`](./task-lane-queue-design.md) Section 4 for the full naming convention.
+
 **Changes to `McpHub.callTool()`:**
 - Extract the actual call logic (connection lookup, timeout, `client.callTool()`, result extraction) into a private `executeCallTool()` method
-- `callTool()` becomes a thin wrapper: validation checks + `return this.enqueueCall(serverName, () => this.executeCallTool(...))`
+- `callTool()` becomes a thin wrapper: validation checks + `return this.taskQueue.enqueue("mcp:{serverName}", () => this.executeCallTool(...))`
+
+**Changes to `src/main.ts`:**
+- Pass `this.getTaskLaneQueue()` to `McpHub` constructor
 
 **Upgradability:** If users report that MCP serialization is too slow, this can be upgraded to a per-server semaphore with configurable concurrency limit (add `concurrency?: number` to `McpServerConfig`, default 1) without changing the external API.
 
@@ -1033,7 +1040,7 @@ view.setOnOpenInNewTab((filename: string) => {
 | Plugin deactivation / hot-reload | Active sessions left dangling with live AbortControllers and callbacks | **Resolved in Phase 1 (Step 1h).** `orchestrator.destroy()` aborts all active sessions and awaits their cleanup with a 2-second timeout (best-effort JSONL flush). Called from plugin `onunload()`. |
 | Conversation deletion while streaming | Session continues writing to JSONL file the UI considers deleted | **Resolved in Phase 2 (Step 2.3).** Deletion handler checks `activeSessions` and blocks with a Notice if the conversation is still streaming. |
 | Per-panel orchestrator weight | Each secondary panel creates a full `ChatOrchestrator` (~2400 lines) | Same class, same wiring path (`wireView()`). Shares expensive singletons (ProviderRegistry, HistoryManager, etc.) so memory footprint is modest. No `wireSecondaryView()` — both primary and secondary panels use the same code path. |
-| MCP server concurrency | Multiple sessions dispatch tools to the same MCP server concurrently | **Mitigated by per-server dispatch queue (Phase 4, Step 4.4.7).** Serializes tool calls per MCP server (same pattern as `HistoryManager.writeQueues`). Not needed until Phase 4 — within a single session, MCP tools are already serialized by `tool-orchestration.ts:91`. |
+| MCP server concurrency | Multiple sessions dispatch tools to the same MCP server concurrently | **Mitigated by per-server dispatch queue (Phase 4, Step 4.4.7).** Serializes tool calls per MCP server via shared `TaskLaneQueue` singleton (see [`task-lane-queue-design.md`](./task-lane-queue-design.md)). Not needed until Phase 4 — within a single session, MCP tools are already serialized by `tool-orchestration.ts:91`. |
 | Mode toggle mid-stream | User toggles plan/act while a session is streaming — policy doesn't update | **Resolved in Phase 1 (Step 1d).** Mode toggle propagates to active session's ConversationManager via `activeSessions` map lookup. `buildPolicyContext()` reads the updated mode on each dispatch. |
 | Duplicate send to same conversation | User sends two messages to a conversation that already has an active session | **Resolved in Phase 1 (Step 1d).** Duplicate-send guard checks `activeSessions.has(conv.id)` before creating a session. Rejects with a Notice if a session already exists. |
 | Sync-back JSONL header write | Navigating back to streaming conversation fires `onConversationChanged`, writing mid-stream token counts | **Resolved in Phase 2 (Step 2.2).** Sync-back uses `loadConversation(..., { silent: true })` to skip the callback. Session's own ConversationManager is the authoritative header writer. |
@@ -1164,4 +1171,5 @@ Phase 2 (session registry enhancements + sync-back)
 | View state persistence | Obsidian `ItemView.getState()` / `setState()` | Standard pattern for workspace restore |
 | Conversation header persistence | [`types.ts:14-94`](../../src/types.ts) | `persona_name` ([L56](../../src/types.ts)), `provider_id`, `model_id` already stored in JSONL header — used for display-restore on load and session snapshot at creation |
 | Header mutation | [`history.ts:206-229`](../../src/chat/history.ts) | `updateConversationHeader()` already exists — read-modify-write on line 0, serialized via per-file write queue. Used for persona/provider/model updates on change. |
-| MCP tool dispatch | [`mcp-hub.ts:449-528`](../../src/mcp/mcp-hub.ts) | `callTool()` dispatches to MCP SDK. Will be wrapped with per-server promise queue (same pattern as `HistoryManager.writeQueues`). |
+| MCP tool dispatch | [`mcp-hub.ts:449-528`](../../src/mcp/mcp-hub.ts) | `callTool()` dispatches to MCP SDK. Will be wrapped with per-server serialization via shared `TaskLaneQueue` singleton (see [`task-lane-queue-design.md`](./task-lane-queue-design.md)). |
+| TaskLaneQueue | [`src/queue/task-lane-queue.ts`](../../src/queue/task-lane-queue.ts) | Generic per-lane FIFO serialization with optional inter-completion delays. Shared singleton for MCP dispatch, web search rate limiting, and extension use. |

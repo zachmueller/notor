@@ -454,11 +454,16 @@ Full replace from session's in-memory message array when switching to a conversa
 
 ### Step 4c: Per-server MCP dispatch queue
 
+> **Dependency:** Requires [`task-lane-queue-design.md`](./task-lane-queue-design.md) to be implemented first.
+
 - [ ] **Modify `src/mcp/mcp-hub.ts` (line 449)**
-  - [ ] Add `private readonly callQueues = new Map<string, Promise<unknown>>()`
-  - [ ] Implement `enqueueCall<T>(serverName, operation)` -- same pattern as `HistoryManager.enqueueWrite()` (history.ts:127-138)
+  - [ ] Add `private readonly taskQueue?: TaskLaneQueue` constructor parameter (optional for backward compat)
   - [ ] Extract call logic from `callTool()` into private `executeCallTool()`
-  - [ ] `callTool()` becomes: validation + `return this.enqueueCall(serverName, () => this.executeCallTool(...))`
+  - [ ] `callTool()` becomes: validation + `return this.taskQueue.enqueue(\`mcp:${serverName}\`, () => this.executeCallTool(...), 0)`
+  - [ ] Fallback to direct `executeCallTool()` when no `taskQueue` injected
+
+- [ ] **Modify `src/main.ts`**
+  - [ ] Pass `this.getTaskLaneQueue()` to `McpHub` constructor
 
 ### Step 4d: Command registration
 
@@ -546,4 +551,4 @@ Audit all callbacks/listeners in `wireView()` and `ChatOrchestrator` constructor
 | `src/main.ts` | 1d, 1f, 1h, 3c, 4b, 4d, 5b | Mode propagation, picker header updates, destroy wiring, indicator wiring, panel management |
 | `src/ui/workflow-activity-indicator.ts` | 3a | Dual data source (workflows + sessions) |
 | `src/ui/workflow-activity-dropdown.ts` | 3b | Conversation entries section |
-| `src/mcp/mcp-hub.ts` | 4c | Per-server promise queue |
+| `src/mcp/mcp-hub.ts` | 4c | Accept injected `TaskLaneQueue` for per-server serialization (see [`task-lane-queue-design.md`](./task-lane-queue-design.md)) |
