@@ -95,6 +95,9 @@ import { isExtensionFile, isExtensionPath } from "./extensions/watcher";
 import { McpHub } from "./mcp/mcp-hub";
 import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
 
+// Queue
+import { TaskLaneQueue } from "./queue/task-lane-queue";
+
 // UI
 import { NotorChatView, CHAT_VIEW_TYPE } from "./ui/chat-view";
 import { EffectiveConfigInspectorView, INSPECTOR_VIEW_TYPE } from "./ui/effective-config-inspector";
@@ -147,6 +150,14 @@ export default class NotorPlugin extends Plugin {
 	 * @see specs/04-mcp/tasks.md — ARCH-005
 	 */
 	private _mcpHub?: McpHub;
+
+	/**
+	 * Per-lane FIFO serialization queue — rate-limits async operations
+	 * by lane key. Used by web search, MCP dispatch, and user extensions.
+	 *
+	 * @see specs/ZZ-misc/task-lane-queue-design.md
+	 */
+	private _taskLaneQueue?: TaskLaneQueue;
 
 	/** Cached workflow discovery results (C-008). In-memory only — always re-discovered from vault. */
 	private _discoveredWorkflows: Workflow[] = [];
@@ -525,6 +536,10 @@ export default class NotorPlugin extends Plugin {
 		// Group G: Clear all workflow hook override state (G-005)
 		this._workflowHookOverrideManager?.destroy();
 		log.info("WorkflowHookOverrideManager destroyed");
+
+		// Destroy TaskLaneQueue — rejects all pending waiters
+		this._taskLaneQueue?.destroy();
+		log.info("TaskLaneQueue destroyed");
 
 		// EXT-017: Destroy extension manager (unregisters tools + path params)
 		this._extensionManager?.destroy();
@@ -1381,6 +1396,14 @@ export default class NotorPlugin extends Plugin {
 			this._extensionManager = new ExtensionManager(this, parseYaml);
 		}
 		return this._extensionManager;
+	}
+
+	/** Per-lane FIFO serialization queue for rate-limiting async operations. */
+	getTaskLaneQueue(): TaskLaneQueue {
+		if (!this._taskLaneQueue) {
+			this._taskLaneQueue = new TaskLaneQueue();
+		}
+		return this._taskLaneQueue;
 	}
 
 	/** Chat orchestrator — the main send/receive loop coordinator. */

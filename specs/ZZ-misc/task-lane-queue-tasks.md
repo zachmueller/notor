@@ -1,7 +1,7 @@
 # TaskLaneQueue: Implementation Tasks
 
 **Spec:** [task-lane-queue-design.md](./task-lane-queue-design.md)
-**Status:** Phase 2 complete
+**Status:** Phase 3 complete
 **Date:** 2026-04-09
 
 ---
@@ -106,18 +106,18 @@ Create `src/queue/__tests__/task-lane-queue.test.ts` using Vitest. Follow existi
 
 Wire `TaskLaneQueue` as a plugin-level singleton in `src/main.ts`, following the existing lazy-init getter pattern (see `_mcpHub`, `_orchestrator`, etc. around lines 120–149).
 
-- [ ] **3.1 Add import**
+- [x] **3.1 Add import**
   - Add `import { TaskLaneQueue } from "./queue/task-lane-queue"` to the import block in `main.ts` (near line 96, after MCP imports)
 
-- [ ] **3.2 Add private field**
+- [x] **3.2 Add private field**
   - Add `private _taskLaneQueue?: TaskLaneQueue;` to the lazy-init field block (around line 149, after `_mcpHub`)
 
-- [ ] **3.3 Add public getter**
+- [x] **3.3 Add public getter**
   - Add `getTaskLaneQueue(): TaskLaneQueue` method to the getter section (after line ~1143)
   - Lazy-initialize: `if (!this._taskLaneQueue) { this._taskLaneQueue = new TaskLaneQueue(); }`
   - Return `this._taskLaneQueue`
 
-- [ ] **3.4 Add `destroy()` call to `onunload()`**
+- [x] **3.4 Add `destroy()` call to `onunload()`**
   - Add `this._taskLaneQueue?.destroy();` to `onunload()` (around line 529, before extension manager destroy)
   - Add corresponding log statement: `log.info("TaskLaneQueue destroyed");`
 
