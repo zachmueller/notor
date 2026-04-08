@@ -99,6 +99,11 @@ export interface ExtensionUtils {
 		formatCommentsAsMarkdown: (comments: Comment[], filename: string, startNumber: number) => string;
 		extractExistingCommentIds: (existingContent: string) => { ids: Set<string>; maxNumber: number };
 	};
+	/** Per-lane FIFO serialization queue with optional inter-completion delays. */
+	queue: {
+		enqueue: <T>(lane: string, fn: () => Promise<T>, delayMs?: number) => Promise<T>;
+		pending: (lane: string) => number;
+	};
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 }
@@ -188,6 +193,14 @@ export function buildUtils(plugin: NotorPlugin): ExtensionUtils {
 			formatCommentsAsMarkdown,
 			extractExistingCommentIds,
 		},
+
+		queue: (() => {
+			const tlq = plugin.getTaskLaneQueue();
+			return {
+				enqueue: <T>(lane: string, fn: () => Promise<T>, delayMs?: number) => tlq.enqueue(lane, fn, delayMs),
+				pending: (lane: string) => tlq.pending(lane),
+			};
+		})(),
 	};
 }
 

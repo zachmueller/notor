@@ -1,7 +1,7 @@
 # TaskLaneQueue: Implementation Tasks
 
 **Spec:** [task-lane-queue-design.md](./task-lane-queue-design.md)
-**Status:** Phase 3 complete
+**Status:** Phase 4 complete
 **Date:** 2026-04-09
 
 ---
@@ -127,7 +127,7 @@ Wire `TaskLaneQueue` as a plugin-level singleton in `src/main.ts`, following the
 
 Expose `enqueue` and `pending` to user extensions via `utils.queue` in `src/extensions/runtime-context.ts`. Do NOT expose `removeLane()` or `destroy()`.
 
-- [ ] **4.1 Extend `ExtensionUtils` interface**
+- [x] **4.1 Extend `ExtensionUtils` interface**
   - Add `queue` property to the `ExtensionUtils` interface (after line 103, before `abortSignal`):
     ```typescript
     queue: {
@@ -136,7 +136,7 @@ Expose `enqueue` and `pending` to user extensions via `utils.queue` in `src/exte
     };
     ```
 
-- [ ] **4.2 Wire in `buildUtils()`**
+- [x] **4.2 Wire in `buildUtils()`**
   - In the `buildUtils()` function (around line 112–192), add `queue` to the returned object:
     ```typescript
     const tlq = plugin.getTaskLaneQueue();
@@ -148,7 +148,7 @@ Expose `enqueue` and `pending` to user extensions via `utils.queue` in `src/exte
     ```
   - Wrap through thin delegates (not exposing the `TaskLaneQueue` instance directly) to prevent extensions from accessing `removeLane()` or `destroy()`
 
-- [ ] **4.3 Verify extension scaffold compatibility**
+- [x] **4.3 Verify extension scaffold compatibility**
   - Confirm that the `utils` parameter destructuring in `compiler.ts` and `manager.ts` (`UserToolAdapter.execute()`) will pass the new `queue` property through without changes
   - No changes needed in these files — `buildUtils()` returns the full object and it's spread into the compiled function's `utils` parameter
 
