@@ -1241,10 +1241,13 @@ Phase 2 (session registry enhancements + sync-back)
 8. Verify settings changes, new conversation, and conversation switch callbacks don't double-fire across panels (global listener audit) — **covered** (Test 6)
 
 ### Phase 5 Verification
-1. Open conversation history in the primary panel
-2. Click 3-dot menu on a conversation → "Open in new tab"
-3. Verify the conversation opens in a new secondary panel tab
-4. Verify the conversation loads correctly with full message history
+
+**E2E test:** `e2e/scripts/phase5-open-in-new-tab-test.ts` — covers items 1-4 below.
+
+1. Open conversation history in the primary panel — **covered** (Tests 1-2: callback wired, context menu button exists)
+2. Click 3-dot menu on a conversation → "Open in new tab" — **covered** (Test 3: callback invocation exercises same code path; Obsidian Menu requires trusted browser events so synthetic dispatch is not possible via CDP)
+3. Verify the conversation opens in a new secondary panel tab — **covered** (Tests 3-5: verified for both favorited and non-favorited conversations)
+4. Verify the conversation loads correctly with full message history — **covered** (Tests 3, 6: message count verified, panel state isSecondary=true confirmed)
 
 ---
 

@@ -574,9 +574,9 @@ Audit all callbacks/listeners in `wireView()` and `ChatOrchestrator` constructor
 
 ### Phase 5 Verification
 
-- [ ] Open conversation history, click 3-dot menu -> "Open in new tab"
-- [ ] Conversation opens in new secondary panel with full message history
-- [ ] Works for favorited and non-favorited conversations
+- [x] Open conversation history, click 3-dot menu -> "Open in new tab" (E2E: `phase5-open-in-new-tab-test.ts` Tests 1-2 — callback wired + context menu button verified; Obsidian Menu requires trusted events so direct callback invocation used for functional tests)
+- [x] Conversation opens in new secondary panel with full message history (E2E: `phase5-open-in-new-tab-test.ts` Tests 3, 6)
+- [x] Works for favorited and non-favorited conversations (E2E: `phase5-open-in-new-tab-test.ts` Tests 4-5)
 
 ---
 
