@@ -1,6 +1,6 @@
 # Settings Reorganization for Extensions Paradigm
 
-**Status:** In progress — Phase 6 (rewire settings tab) complete
+**Status:** In progress — Phase 7 (delete extensions.ts) complete
 **Date:** 2026-04-09
 
 ---

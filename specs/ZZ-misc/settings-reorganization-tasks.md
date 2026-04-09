@@ -1,7 +1,7 @@
 # Settings Reorganization — Implementation Tasks
 
 **Design doc:** [settings-reorganization-design.md](settings-reorganization-design.md)
-**Status:** In progress — Phase 6 complete
+**Status:** In progress — Phase 7 complete
 **Date:** 2026-04-09
 
 ---
@@ -252,17 +252,17 @@
 
 > **Goal:** With all functionality relocated, remove or gut `extensions.ts`.
 
-- [ ] **7.1 Remove re-exports from `extensions.ts`**
+- [x] **7.1 Remove re-exports from `extensions.ts`**
   - Remove the temporary re-exports of `FieldTarget` and `renderField` added in Phase 1.2 (test imports were already updated in Phase 1.3)
 
-- [ ] **7.2 Delete `extensions.ts`**
+- [x] **7.2 Delete `extensions.ts`**
   - Verify no remaining imports reference `extensions.ts`:
     - `settings-tab.ts` — import removed in Phase 6.5
     - `extensions-string-array.test.ts` — import updated in Phase 1.3
     - Any other files — search with `grep -r "from.*extensions" src/settings/`
   - Delete `src/settings/sections/extensions.ts`
 
-- [ ] **7.3 Verify build after deletion**
+- [x] **7.3 Verify build after deletion**
   - Run `npm run build` to confirm no broken imports
   - Run `npx vitest run` to confirm all tests pass
 
