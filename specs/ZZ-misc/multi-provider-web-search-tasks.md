@@ -21,7 +21,7 @@ No work needed here. All phases below build on this foundation.
 
 ## Phase 1: Provider Interface & DuckDuckGo Extraction
 
-> Foundation layer. Creates the provider abstraction and extracts existing DDG logic from the scaffold into a proper module. No behavioral changes — the scaffold continues to work identically after this phase.
+> Foundation layer. Creates the provider abstraction and extracts existing DDG logic from the scaffold into a proper module. The scaffold continues to work identically after this phase (it is not modified). The extracted DDG provider adds rate-limit detection (HTTP 202, 0-results-from-non-empty-body → `rateLimited: true`) that the scaffold does not have — this new behavior supports the fallback chain in Phase 3.
 
 ### 1.1 Create provider interface and types
 
@@ -31,9 +31,10 @@ No work needed here. All phases below build on this foundation.
 - [ ] Define `WebSearchResult` interface: `{ title: string; url: string; snippet: string }`
 - [ ] Define `SearchProviderMeta` interface: `{ type, displayName, requiresApiKey, defaultDelayMs }`
 - [ ] Define `ProviderConfig` interface: `{ enabled: boolean; delayMs: number; apiKey: string | null }`
-- [ ] Define `SearchProviderResult` interface: `{ results: WebSearchResult[]; rateLimited?: boolean; error?: string }`
-- [ ] Define `SearchProvider` interface with `meta`, `search(query, numResults, timeoutMs, apiKey)`, and `isConfigured(config)` methods
+- [ ] Define `SearchProviderResult` interface: `{ results: WebSearchResult[]; rateLimited?: boolean; error?: string; warnings?: string[] }`
+- [ ] Define `SearchProvider` interface with `meta`, `search(query, numResults, timeoutMs, apiKey, signal?)`, and `isConfigured(config)` methods
   - `search()` receives only `apiKey: string | null` (not the full `ProviderConfig`) — `enabled` and `delayMs` are consumed upstream by the queue/lane-queue
+  - `signal?: AbortSignal` allows the caller to cancel in-flight requests (threaded from `ExtensionUtils.abortSignal`)
   - `isConfigured()` receives `config: ProviderConfig` — providers are stateless singletons, config flows in from outside at every call site
 - [ ] Export all types
 
@@ -55,7 +56,8 @@ Source code lives in `src/extensions/builtin-tool-scaffolds.ts:1248-1341` as str
   - Timeout race via `Promise.race()` with `setTimeout` reject
   - Import `requestUrl` from `obsidian` directly (note: the current scaffold uses `obsidian.requestUrl` via runtime injection — the extracted module uses a proper ES import instead)
   - Rate-limit detection: HTTP 202 OR 0 parsed results from non-empty response → `rateLimited: true`
-  - Include selector drift warning log (scaffold L1346-1352)
+  - Selector drift warning: when 0 results parsed from non-empty body, push a warning string into `result.warnings[]` (replaces direct logging — providers have no logger; the `WebSearchQueue` in Phase 3.3 logs these)
+  - If `signal` is provided, include it in the `Promise.race()` pattern (abort listener that rejects on `signal.abort`)
 - [ ] Implement `isConfigured()`: return `config.enabled` (no API key needed)
 
 ### 1.3 DuckDuckGo provider tests
@@ -79,7 +81,7 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - Mock `requestUrl` returning status 200 with HTML → parsed results
 - [ ] Test `search()` — rate-limit detection:
   - HTTP 202 → `rateLimited: true`
-  - HTTP 200 but 0 parsed results from non-empty body → `rateLimited: true`
+  - HTTP 200 but 0 parsed results from non-empty body → `rateLimited: true`, `warnings[]` populated with selector drift message
 - [ ] Test `search()` — error handling:
   - Non-200/202 status → error thrown
   - Network error → error propagated
@@ -105,6 +107,7 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - Parse JSON response: map `results[]` to `WebSearchResult[]` (fields: `title`, `url`, `content` → `snippet`)
   - Rate-limit detection: HTTP 429 → `rateLimited: true`
   - Timeout via `Promise.race()` pattern
+  - If `signal` is provided, include an abort listener in the `Promise.race()`
 - [ ] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
 
 **Note:** The provider receives `apiKey` as a parameter to `search()` at call time. The `WebSearchQueue` passes the resolved API key from settings. Providers are stateless singletons — config is external.
@@ -131,6 +134,7 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - Auth: `X-Subscription-Token` header
   - Parse JSON response: map `web.results[]` to `WebSearchResult[]` (fields: `title`, `url`, `description` → `snippet`)
   - Rate-limit detection: HTTP 429 → `rateLimited: true`
+  - Timeout via `Promise.race()` pattern; if `signal` is provided, include an abort listener
 - [ ] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
 
 ### 2.4 Brave Search provider tests
@@ -154,6 +158,7 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - Auth: `api_key` query parameter
   - Parse JSON response: map `organic_results[]` to `WebSearchResult[]` (fields: `title`, `link` → `url`, `snippet`)
   - Rate-limit detection: HTTP 429 OR JSON `error` field containing `"rate"` → `rateLimited: true`
+  - Timeout via `Promise.race()` pattern; if `signal` is provided, include an abort listener
 - [ ] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
 
 ### 2.6 SerpApi provider tests
@@ -222,17 +227,20 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - Falls back to sensible defaults (DDG enabled, others disabled)
 - [ ] Implement `resolveProviderChain(config)`:
   - Uses `providerRegistry.getAvailableByPriority(config.providers, config.providerPriority)`
-  - If round-robin ON: rotate starting index via `roundRobinIndex % available.length`, wrap cyclically so all providers are included (e.g. with [A,B,C] and index=1 → chain is [B,C,A])
+  - If round-robin ON: rotate starting index via `roundRobinIndex % available.length`, wrap cyclically so all providers are included (e.g. with [A,B,C] and index=1 → chain is [B,C,A]). Use modular assignment (`this.roundRobinIndex = (this.roundRobinIndex + 1) % chain.length`) rather than unbounded increment + post-hoc modulo.
   - If round-robin OFF: return as-is (highest priority first)
   - In both modes, the returned chain always contains ALL available providers — fallback iterates the full chain before giving up
-- [ ] Implement `search(query, numResults, timeoutMs)`:
+- [ ] Implement `search(query, numResults, timeoutMs, signal?)`:
+  - `signal?: AbortSignal` — if provided, check `signal.aborted` before each provider attempt and pass `signal` through to `provider.search()`
   - Call `getSettings()` → `buildConfig()` → `resolveProviderChain()`
-  - Iterate provider chain: `laneQueue.enqueue(provider.meta.type, () => provider.search(query, numResults, timeoutMs, apiKey), delayMs)`
+  - Iterate provider chain: `laneQueue.enqueue(provider.meta.type, () => provider.search(query, numResults, timeoutMs, apiKey, signal), delayMs)`
+  - After each provider call, log any `result.warnings[]` entries via the queue's logger
   - On success (no `rateLimited`): return `{ results, provider, failures }`
   - On `rateLimited` or error: record in `failures[]`, try next provider
   - All exhausted: return `{ results: [], provider: "", failures }` with descriptive error
   - No providers configured: return immediately with "No web search providers are configured" message
   - Increment `roundRobinIndex` on each call (before provider selection)
+  - **Note:** `timeoutMs` applies per-provider, not to the entire chain. Worst-case latency is `timeoutMs × numProviders`. Document this in a JSDoc comment on the method.
 
 ### 3.4 Web search queue tests
 
@@ -272,6 +280,7 @@ Add new settings fields after the existing `web_search_default_num_results`:
   - `options: ["duckduckgo", "tavily", "brave", "serpapi"]` (constrains "Add" input to known providers — see 4.2)
   - Name: "Provider priority order"
   - Description: "Order in which search providers are tried. First entry is highest priority."
+- [ ] Update existing `web_search_timeout` description to: "Maximum time **per provider** in seconds to wait for search results before aborting. When multiple providers are enabled and all fail, worst-case total wait is this value × number of enabled providers."
 - [ ] Add DuckDuckGo provider fields:
   - `web_search_duckduckgo_enabled`: `boolean`, default `true`, name "DuckDuckGo — Enabled"
   - `web_search_duckduckgo_delay_ms`: `number`, default `1500`, min `0`, max `10000`, name "DuckDuckGo — Delay (ms)"
@@ -300,7 +309,8 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 - [ ] When `field.options` exists: render a dropdown (`addDropdown`) instead of a text input (`addText`) for the "Add" action, populated with `field.options` values that aren't already in the list
 - [ ] When all options are already in the list: hide the Add row (dropdown + button) entirely
 - [ ] When `field.options` is absent: keep current free-text behavior (backward-compatible)
-- [ ] ~~Verify `parseSettingsSchema()`~~ — No changes needed: `parseSettingsSchema()` in `settings-schema.ts:104-106` already passes `options` through for all field types (the check is type-agnostic)
+- [ ] Update JSDoc on `SettingsFieldSchema.options` in `src/extensions/types.ts:69` — change from `"Enum constraint (string type only) — renders as dropdown."` to `"Constrains valid values — renders as dropdown for \`string\`, constrains Add input for \`string[]\`."`
+- [ ] ~~Verify `parseSettingsSchema()`~~ — No changes needed: `parseSettingsSchema()` in `settings-schema.ts` L104-106 (within the function at L51-112) already passes `options` through for all field types (the check is type-agnostic)
 
 ---
 
@@ -335,14 +345,14 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 - [ ] Add `webSearch` to `ExtensionUtils` interface (after `queue` at L106):
   ```typescript
   webSearch: {
-    search: (query: string, numResults: number, timeoutMs: number) => Promise<WebSearchApiResult>;
+    search: (query: string, numResults: number, timeoutMs: number, signal?: AbortSignal) => Promise<WebSearchApiResult>;
   };
   ```
 - [ ] Add `webSearch` to `buildUtils()` return object (after `queue` closure at L203):
   ```typescript
   webSearch: {
-    search: (query, numResults, timeoutMs) =>
-      plugin.getWebSearchQueue().search(query, numResults, timeoutMs),
+    search: (query, numResults, timeoutMs, signal?) =>
+      plugin.getWebSearchQueue().search(query, numResults, timeoutMs, signal),
   },
   ```
 
@@ -354,7 +364,7 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 - [ ] Replace the TypeScript code block (L1244-1383) with the simplified delegation code:
   - Keep: input validation (`query` param check)
   - Keep: `numResults` and `timeoutMs` computation from settings
-  - **Replace**: all DDG-specific code (`cleanDDGUrl`, `parseDDGResults`, HTTP request, timeout race) with single call: `const searchResult = await utils.webSearch.search(query, numResults, timeoutMs)`
+  - **Replace**: all DDG-specific code (`cleanDDGUrl`, `parseDDGResults`, HTTP request, timeout race) with single call: `const searchResult = await utils.webSearch.search(query, numResults, timeoutMs, utils.abortSignal)`
   - Keep: `isDomainBlocked` filtering (reads `shared.domain_denylist`)
   - Keep: markdown output formatting
   - Add: log `searchResult.failures` as warnings if non-empty
@@ -440,7 +450,7 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 
 The design spec has providers as stateless singletons registered once at plugin init. However, API keys are resolved per-call via the settings system. The `SearchProvider.search()` method needs access to the API key at call time.
 
-**Decision:** Pass only `apiKey: string | null` as a parameter to `search()`. The full `ProviderConfig` (`enabled`, `delayMs`, `apiKey`) is NOT passed — `enabled` is already consumed during provider chain resolution, and `delayMs` is consumed by the lane queue. Only `apiKey` crosses the boundary into the provider. Interface: `search(query, numResults, timeoutMs, apiKey: string | null)`.
+**Decision:** Pass only `apiKey: string | null` and an optional `signal?: AbortSignal` as extra parameters to `search()`. The full `ProviderConfig` (`enabled`, `delayMs`, `apiKey`) is NOT passed — `enabled` is already consumed during provider chain resolution, and `delayMs` is consumed by the lane queue. Only `apiKey` and `signal` cross the boundary into the provider. Interface: `search(query, numResults, timeoutMs, apiKey: string | null, signal?: AbortSignal)`.
 
 ### Spec Discrepancy: `getCompiledTool()`
 
