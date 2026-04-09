@@ -10,8 +10,8 @@
 
 The `TaskLaneQueue` dependency from [`task-lane-queue-design.md`](./task-lane-queue-design.md) is fully implemented:
 - `src/queue/task-lane-queue.ts` — class with `enqueue()`, `pending()`, `destroy()`
-- `src/queue/__tests__/task-lane-queue.test.ts` — 13 passing unit tests
-- `src/main.ts:173` — `_taskLaneQueue` field + `getTaskLaneQueue()` getter at L1462
+- `src/queue/__tests__/task-lane-queue.test.ts` — 18 passing unit tests
+- `src/main.ts:173` — `_taskLaneQueue` field + `getTaskLaneQueue()` getter at L1463
 - `src/extensions/runtime-context.ts:102-106` — `utils.queue` exposed to extensions
 - `src/main.ts:601-603` — `destroy()` in `onunload()`
 
@@ -32,7 +32,8 @@ No work needed here. All phases below build on this foundation.
 - [ ] Define `SearchProviderMeta` interface: `{ type, displayName, requiresApiKey, defaultDelayMs }`
 - [ ] Define `ProviderConfig` interface: `{ enabled: boolean; delayMs: number; apiKey: string | null }`
 - [ ] Define `SearchProviderResult` interface: `{ results: WebSearchResult[]; rateLimited?: boolean; error?: string }`
-- [ ] Define `SearchProvider` interface with `meta`, `search()`, and `isConfigured()` methods
+- [ ] Define `SearchProvider` interface with `meta`, `search(query, numResults, timeoutMs, apiKey)`, and `isConfigured()` methods
+  - `search()` receives only `apiKey: string | null` (not the full `ProviderConfig`) — `enabled` and `delayMs` are consumed upstream by the queue/lane-queue
 - [ ] Export all types
 
 ### 1.2 Extract DuckDuckGo provider from scaffold
@@ -51,7 +52,7 @@ Source code lives in `src/extensions/builtin-tool-scaffolds.ts:1248-1341` as str
   - POST to `https://html.duckduckgo.com/html/` with form-encoded body
   - User-Agent: Chrome/120 on Macintosh (matching current scaffold)
   - Timeout race via `Promise.race()` with `setTimeout` reject
-  - Import `requestUrl` from `obsidian` directly (same as current scaffold usage at L1315)
+  - Import `requestUrl` from `obsidian` directly (note: the current scaffold uses `obsidian.requestUrl` via runtime injection — the extracted module uses a proper ES import instead)
   - Rate-limit detection: HTTP 202 OR 0 parsed results from non-empty response → `rateLimited: true`
   - Include selector drift warning log (scaffold L1346-1352)
 - [ ] Implement `isConfigured()`: return `config.enabled` (no API key needed)
@@ -62,6 +63,7 @@ Source code lives in `src/extensions/builtin-tool-scaffolds.ts:1248-1341` as str
 
 Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `beforeEach(() => vi.clearAllMocks())`.
 
+- [ ] Add `// @vitest-environment jsdom` directive at top of file (DOMParser is not available in Vitest's default Node.js environment)
 - [ ] Test `cleanDDGUrl()`:
   - DDG redirect URL (`//duckduckgo.com/l/?uddg=...`) → decoded actual URL
   - Protocol-relative URL (`//example.com`) → `https://example.com`
@@ -97,18 +99,14 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
 - [ ] Set `meta`: `{ type: "tavily", displayName: "Tavily", requiresApiKey: true, defaultDelayMs: 0 }`
 - [ ] Implement `search()`:
   - POST to `https://api.tavily.com/search`
-  - Auth: Bearer token in `Authorization` header (from `this.apiKey`, passed at call time or stored)
+  - Auth: Bearer token in `Authorization` header (from `apiKey` parameter)
   - JSON body: `{ query, max_results: numResults }`
   - Parse JSON response: map `results[]` to `WebSearchResult[]` (fields: `title`, `url`, `content` → `snippet`)
   - Rate-limit detection: HTTP 429 → `rateLimited: true`
   - Timeout via `Promise.race()` pattern
 - [ ] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
 
-**Note:** The provider receives `apiKey` at search time, not construction. The `WebSearchQueue` passes the resolved config's API key. Design decision: providers are stateless singletons — config is external. Two options:
-1. Pass `apiKey` as a parameter to `search()` (requires interface change)
-2. Have `WebSearchQueue` set a transient `apiKey` property before calling `search()`
-
-Recommend option 1: add an optional `config?: ProviderConfig` parameter to `SearchProvider.search()` so providers needing API keys can read `config.apiKey`. This keeps providers stateless. **Update `provider.ts` interface accordingly.**
+**Note:** The provider receives `apiKey` as a parameter to `search()` at call time. The `WebSearchQueue` passes the resolved API key from settings. Providers are stateless singletons — config is external.
 
 ### 2.2 Tavily provider tests
 
@@ -227,7 +225,7 @@ Recommend option 1: add an optional `config?: ProviderConfig` parameter to `Sear
   - If round-robin OFF: return as-is (highest priority first)
 - [ ] Implement `search(query, numResults, timeoutMs)`:
   - Call `getSettings()` → `buildConfig()` → `resolveProviderChain()`
-  - Iterate provider chain: `laneQueue.enqueue(provider.meta.type, () => provider.search(...), delayMs)`
+  - Iterate provider chain: `laneQueue.enqueue(provider.meta.type, () => provider.search(query, numResults, timeoutMs, apiKey), delayMs)`
   - On success (no `rateLimited`): return `{ results, provider, failures }`
   - On `rateLimited` or error: record in `failures[]`, try next provider
   - All exhausted: return `{ results: [], provider: "", failures }` with descriptive error
@@ -269,6 +267,7 @@ Add new settings fields after the existing `web_search_default_num_results`:
   - Description: "Distribute search requests across all enabled providers instead of always using the highest-priority one."
 - [ ] Add `web_search_provider_priority` field:
   - `type: string[]`, `default: ["duckduckgo", "tavily", "brave", "serpapi"]`
+  - `options: ["duckduckgo", "tavily", "brave", "serpapi"]` (constrains "Add" input to known providers — see 4.2)
   - Name: "Provider priority order"
   - Description: "Order in which search providers are tried. First entry is highest priority."
 - [ ] Add DuckDuckGo provider fields:
@@ -287,7 +286,18 @@ Add new settings fields after the existing `web_search_default_num_results`:
   - `web_search_serpapi_api_key`: `string`, `secret: true`, name "SerpApi — API Key"
   - `web_search_serpapi_delay_ms`: `number`, default `0`, min `0`, max `10000`, name "SerpApi — Delay (ms)"
 
-**Verify:** Settings render correctly in the generic extension settings UI (`src/settings/sections/extensions.ts`). No UI code changes needed — the existing renderer handles `boolean`, `number`, `string` (with `secret`), and `string[]` field types.
+**Verify:** Settings render correctly in the generic extension settings UI (`src/settings/sections/extensions.ts`). No UI code changes needed for most fields — the existing renderer handles `boolean`, `number`, `string` (with `secret`), and `string[]` field types.
+
+### 4.2 Add `options` support to `string[]` settings renderer
+
+**File to modify:** `src/settings/sections/extensions.ts` (L488-536, `string[]` branch)
+
+The current `string[]` renderer uses a free-text input for adding entries. For `web_search_provider_priority`, entries must be valid provider names.
+
+- [ ] In the `string[]` branch of `renderExtensionSettingField()`, check if `field.options` is present
+- [ ] When `field.options` exists: render a dropdown (`addDropdown`) instead of a text input (`addText`) for the "Add" action, populated with `field.options` values that aren't already in the list
+- [ ] When `field.options` is absent: keep current free-text behavior (backward-compatible)
+- [ ] Verify `parseSettingsSchema()` in `src/extensions/settings-schema.ts` passes `options` through for `string[]` types (currently only checked for `string` type — may need to expand the condition)
 
 ---
 
@@ -362,11 +372,23 @@ Add new settings fields after the existing `web_search_default_num_results`:
 - [ ] **`src/settings/types.ts`** — Remove `web_search_timeout` (L155) and `web_search_default_num_results` (L158) from `NotorSettings` interface, including their comments (L151-158 section)
 - [ ] **`src/settings/defaults.ts`** — Remove `web_search_timeout: 10` (L136) and `web_search_default_num_results: 5` (L137) from `createDefaultSettings()`, including the `// web_search` comment (L135)
 
-### 6.2 Clean up legacy keys reference
+### 6.2 Fix migration block for removed types
 
-- [ ] **`src/main.ts`** — Remove `"web_search_timeout"` and `"web_search_default_num_results"` from the `oldFields` array at L768-769
-  - These are used in the Phase 2 cleanup block (L763-789) that strips old fields from `data.json`. Since the fields are being removed from `NotorSettings`, they no longer need to be in this cleanup list.
-- [ ] **Keep** the migration block at L680-690 — it still needs to run for users upgrading from pre-migration versions
+- [ ] **`src/main.ts:680-690`** — The migration block references `this.settings.web_search_timeout` and `this.settings.web_search_default_num_results`, which will fail TypeScript compilation after 6.1 removes them from `NotorSettings`. Fix by casting through the raw data:
+  ```typescript
+  const raw = this.settings as Record<string, unknown>;
+  if (
+    this.settings.user_extension_settings["web_search"] === undefined &&
+    raw.web_search_timeout !== undefined
+  ) {
+    this.settings.user_extension_settings["web_search"] = {
+      web_search_timeout: raw.web_search_timeout,
+      web_search_default_num_results: raw.web_search_default_num_results,
+    };
+    migrated = true;
+  }
+  ```
+- [ ] **Keep** `"web_search_timeout"` and `"web_search_default_num_results"` in the `oldFields` array at L768-769 — that array strips legacy keys from `data.json` on disk for upgrading users, which is still needed regardless of the TS type change
 
 ### 6.3 Verify no remaining references
 
@@ -413,12 +435,9 @@ Add new settings fields after the existing `web_search_default_num_results`:
 
 ### API Key Passing Design Decision
 
-The design spec has providers as stateless singletons registered once at plugin init. However, API keys are resolved per-call via the settings system. The `SearchProvider.search()` method needs access to the API key at call time. Two clean approaches:
+The design spec has providers as stateless singletons registered once at plugin init. However, API keys are resolved per-call via the settings system. The `SearchProvider.search()` method needs access to the API key at call time.
 
-1. **Add `config: ProviderConfig` parameter to `search()`** — providers read `config.apiKey` from the argument. Interface becomes: `search(query, numResults, timeoutMs, config: ProviderConfig)`. The `WebSearchQueue` passes the resolved config for each provider.
-2. **Queue wraps the call** — `WebSearchQueue` creates a closure that sets the key before calling `search()`.
-
-Recommend **option 1** for simplicity and testability. Update the `SearchProvider` interface in Phase 1.1 accordingly.
+**Decision:** Pass only `apiKey: string | null` as a parameter to `search()`. The full `ProviderConfig` (`enabled`, `delayMs`, `apiKey`) is NOT passed — `enabled` is already consumed during provider chain resolution, and `delayMs` is consumed by the lane queue. Only `apiKey` crosses the boundary into the provider. Interface: `search(query, numResults, timeoutMs, apiKey: string | null)`.
 
 ### Spec Discrepancy: `getCompiledTool()`
 
