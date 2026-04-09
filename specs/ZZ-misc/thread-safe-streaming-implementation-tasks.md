@@ -365,8 +365,8 @@ When loading a conversation, restore its persona/provider/model in the UI withou
 - [ ] Manual: Navigate away mid-stream -- streaming text does NOT appear in wrong view
 - [ ] Manual: Trigger compaction mid-stream -- uses session's model ID for threshold
 - [ ] Manual: Background workflow + foreground streaming simultaneously -- correct tool configs
-- [ ] Manual: Persona/model restoration on conversation switch (Step 1f)
-- [ ] Manual: Inspector shows correct config for displayed conversation (Step 1g)
+- [x] Manual: Persona/model restoration on conversation switch (Step 1f) (E2E: `phase1d-display-restore-test.ts` Tests 1-3)
+- [x] Manual: Inspector shows correct config for displayed conversation (Step 1g) (E2E: `phase1d-display-restore-test.ts` Tests 4-6)
 
 ---
 
