@@ -9,6 +9,7 @@
  */
 
 import { normalize, resolve, isAbsolute } from "path";
+import { homedir } from "os";
 
 // ---------------------------------------------------------------------------
 // isPathWithin
@@ -41,6 +42,25 @@ export function isPathWithin(target: string, base: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// expandTilde
+// ---------------------------------------------------------------------------
+
+/**
+ * Expand a leading `~` to the user's home directory.
+ *
+ * Only a bare `~` or `~/…` is expanded; `~username/…` style paths are left
+ * unchanged (Node has no portable way to resolve another user's home dir).
+ *
+ * @param inputPath - Raw path string (may start with `~`).
+ * @returns Path with leading tilde expanded, or the original string unchanged.
+ */
+export function expandTilde(inputPath: string): string {
+	if (inputPath === "~") return homedir();
+	if (inputPath.startsWith("~/")) return homedir() + inputPath.slice(1);
+	return inputPath;
+}
+
+// ---------------------------------------------------------------------------
 // resolveAndValidatePath
 // ---------------------------------------------------------------------------
 
@@ -70,10 +90,13 @@ export function resolveAndValidatePath(
 
 	if (!inputPath || inputPath.trim() === "") {
 		resolved = vaultRoot;
-	} else if (isAbsolute(inputPath)) {
-		resolved = normalize(inputPath);
 	} else {
-		resolved = normalize(resolve(vaultRoot, inputPath));
+		const expanded = expandTilde(inputPath);
+		if (isAbsolute(expanded)) {
+			resolved = normalize(expanded);
+		} else {
+			resolved = normalize(resolve(vaultRoot, expanded));
+		}
 	}
 
 	const normalizedVaultRoot = normalize(vaultRoot);
@@ -87,7 +110,7 @@ export function resolveAndValidatePath(
 	for (const allowed of allowedPaths) {
 		const trimmed = allowed.trim();
 		if (!trimmed) continue;
-		const normalizedAllowed = normalize(trimmed);
+		const normalizedAllowed = normalize(expandTilde(trimmed));
 		if (isPathWithin(resolved, normalizedAllowed)) {
 			return { valid: true, resolvedPath: resolved };
 		}

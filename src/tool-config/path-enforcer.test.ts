@@ -1,6 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { enforcePathConstraints, TOOL_PATH_PARAMS } from "./path-enforcer";
 import type { ResolvedToolConfigEntry } from "./types";
+
+// Mock os.homedir() for deterministic tilde expansion
+vi.mock("os", () => ({
+	homedir: () => "/Users/test",
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -213,6 +218,65 @@ describe("enforcePathConstraints", () => {
 			expect(TOOL_PATH_PARAMS).toHaveProperty("read_note");
 			expect(TOOL_PATH_PARAMS).toHaveProperty("write_docx");
 			expect(TOOL_PATH_PARAMS["write_docx"]).toHaveLength(2);
+		});
+	});
+
+	describe("filesystem-namespace: tilde expansion", () => {
+		it("allows tilde path within tilde-expanded allowed path", () => {
+			const entry = makeEntry({ allowed_paths: ["~/Documents"] });
+			const result = enforcePathConstraints(
+				"read_file",
+				{ path: "~/Documents/file.txt" },
+				entry,
+				VAULT_ROOT,
+			);
+			expect(result).toBeNull();
+		});
+
+		it("blocks tilde path outside allowed paths", () => {
+			const entry = makeEntry({ allowed_paths: ["~/Documents"] });
+			const result = enforcePathConstraints(
+				"read_file",
+				{ path: "~/Desktop/file.txt" },
+				entry,
+				VAULT_ROOT,
+			);
+			expect(result).not.toBeNull();
+			expect(result).toContain("not within any allowed path");
+		});
+
+		it("blocks tilde path matching tilde-expanded blocked path", () => {
+			const entry = makeEntry({ blocked_paths: ["~/secret"] });
+			const result = enforcePathConstraints(
+				"read_file",
+				{ path: "~/secret/file.txt" },
+				entry,
+				VAULT_ROOT,
+			);
+			expect(result).not.toBeNull();
+			expect(result).toContain("is blocked");
+		});
+
+		it("matches tilde path against equivalent absolute allowed path", () => {
+			const entry = makeEntry({ allowed_paths: ["/Users/test/Projects"] });
+			const result = enforcePathConstraints(
+				"read_file",
+				{ path: "~/Projects/file.txt" },
+				entry,
+				VAULT_ROOT,
+			);
+			expect(result).toBeNull();
+		});
+
+		it("matches absolute path against tilde-expanded allowed path", () => {
+			const entry = makeEntry({ allowed_paths: ["~/Projects"] });
+			const result = enforcePathConstraints(
+				"read_file",
+				{ path: "/Users/test/Projects/file.txt" },
+				entry,
+				VAULT_ROOT,
+			);
+			expect(result).toBeNull();
 		});
 	});
 

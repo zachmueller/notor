@@ -9,7 +9,7 @@
  */
 
 import type { PathNamespace, ResolvedToolConfigEntry, ToolPathParam } from "./types";
-import { isPathWithin } from "../utils/path-validation";
+import { isPathWithin, expandTilde } from "../utils/path-validation";
 import { normalize, resolve, isAbsolute } from "path";
 
 // ---------------------------------------------------------------------------
@@ -131,16 +131,18 @@ function checkFilesystemPath(
 	entry: ResolvedToolConfigEntry,
 	vaultRootPath: string,
 ): string | null {
-	const absolutePath = isAbsolute(rawPath)
-		? normalize(rawPath)
-		: normalize(resolve(vaultRootPath, rawPath));
+	const expandedPath = expandTilde(rawPath);
+	const absolutePath = isAbsolute(expandedPath)
+		? normalize(expandedPath)
+		: normalize(resolve(vaultRootPath, expandedPath));
 
 	// blocked_paths takes precedence
 	if (entry.blocked_paths.length > 0) {
 		for (const blocked of entry.blocked_paths) {
-			const absBlocked = isAbsolute(blocked)
-				? normalize(blocked)
-				: normalize(resolve(vaultRootPath, blocked));
+			const expandedBlocked = expandTilde(blocked);
+			const absBlocked = isAbsolute(expandedBlocked)
+				? normalize(expandedBlocked)
+				: normalize(resolve(vaultRootPath, expandedBlocked));
 			if (isPathWithin(absolutePath, absBlocked)) {
 				return `Path "${rawPath}" is blocked by path constraint "${blocked}".`;
 			}
@@ -150,9 +152,10 @@ function checkFilesystemPath(
 	// allowed_paths: empty means no restriction
 	if (entry.allowed_paths.length > 0) {
 		const allowed = entry.allowed_paths.some((prefix) => {
-			const absAllowed = isAbsolute(prefix)
-				? normalize(prefix)
-				: normalize(resolve(vaultRootPath, prefix));
+			const expandedPrefix = expandTilde(prefix);
+			const absAllowed = isAbsolute(expandedPrefix)
+				? normalize(expandedPrefix)
+				: normalize(resolve(vaultRootPath, expandedPrefix));
 			return isPathWithin(absolutePath, absAllowed);
 		});
 		if (!allowed) {
