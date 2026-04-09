@@ -27,16 +27,16 @@ No work needed here. All phases below build on this foundation.
 
 **File to create:** `src/web-search/providers/provider.ts`
 
-- [ ] Define `WebSearchProviderType` union: `"duckduckgo" | "tavily" | "brave" | "serpapi"`
-- [ ] Define `WebSearchResult` interface: `{ title: string; url: string; snippet: string }`
-- [ ] Define `SearchProviderMeta` interface: `{ type, displayName, requiresApiKey, defaultDelayMs }`
-- [ ] Define `ProviderConfig` interface: `{ enabled: boolean; delayMs: number; apiKey: string | null }`
-- [ ] Define `SearchProviderResult` interface: `{ results: WebSearchResult[]; rateLimited?: boolean; error?: string; warnings?: string[] }`
-- [ ] Define `SearchProvider` interface with `meta`, `search(query, numResults, timeoutMs, apiKey, signal?)`, and `isConfigured(config)` methods
+- [x] Define `WebSearchProviderType` union: `"duckduckgo" | "tavily" | "brave" | "serpapi"`
+- [x] Define `WebSearchResult` interface: `{ title: string; url: string; snippet: string }`
+- [x] Define `SearchProviderMeta` interface: `{ type, displayName, requiresApiKey, defaultDelayMs }`
+- [x] Define `ProviderConfig` interface: `{ enabled: boolean; delayMs: number; apiKey: string | null }`
+- [x] Define `SearchProviderResult` interface: `{ results: WebSearchResult[]; rateLimited?: boolean; error?: string; warnings?: string[] }`
+- [x] Define `SearchProvider` interface with `meta`, `search(query, numResults, timeoutMs, apiKey, signal?)`, and `isConfigured(config)` methods
   - `search()` receives only `apiKey: string | null` (not the full `ProviderConfig`) — `enabled` and `delayMs` are consumed upstream by the queue/lane-queue
   - `signal?: AbortSignal` allows the caller to cancel in-flight requests (threaded from `ExtensionUtils.abortSignal`)
   - `isConfigured()` receives `config: ProviderConfig` — providers are stateless singletons, config flows in from outside at every call site
-- [ ] Export all types
+- [x] Export all types
 
 ### 1.2 Extract DuckDuckGo provider from scaffold
 
@@ -44,13 +44,13 @@ No work needed here. All phases below build on this foundation.
 
 Source code lives in `src/extensions/builtin-tool-scaffolds.ts:1248-1341` as string-template TypeScript inside the `WEB_SEARCH` scaffold constant.
 
-- [ ] Create `DuckDuckGoProvider` class implementing `SearchProvider`
-- [ ] Set `meta`: `{ type: "duckduckgo", displayName: "DuckDuckGo", requiresApiKey: false, defaultDelayMs: 1500 }`
-- [ ] Extract `cleanDDGUrl()` from scaffold L1248-1260 — make it a private method (export for tests)
-- [ ] Extract `parseDDGResults()` from scaffold L1262-1287 — make it a private method (export for tests)
+- [x] Create `DuckDuckGoProvider` class implementing `SearchProvider`
+- [x] Set `meta`: `{ type: "duckduckgo", displayName: "DuckDuckGo", requiresApiKey: false, defaultDelayMs: 1500 }`
+- [x] Extract `cleanDDGUrl()` from scaffold L1248-1260 — make it a private method (export for tests)
+- [x] Extract `parseDDGResults()` from scaffold L1262-1287 — make it a private method (export for tests)
   - Uses browser-native `DOMParser` (not `@xmldom/xmldom`)
   - Selectors: `.result` container, `.result__title a` for title+link, `.result__snippet` for snippet
-- [ ] Implement `search()` method **based on** scaffold HTTP logic (L1305-1341), **adding rate-limit detection not present in the scaffold**:
+- [x] Implement `search()` method **based on** scaffold HTTP logic (L1305-1341), **adding rate-limit detection not present in the scaffold**:
   - POST to `https://html.duckduckgo.com/html/` with form-encoded body
   - User-Agent: Chrome/120 on Macintosh (matching current scaffold)
   - Timeout race via `Promise.race()` with `setTimeout` reject
@@ -60,7 +60,7 @@ Source code lives in `src/extensions/builtin-tool-scaffolds.ts:1248-1341` as str
     - **Delta from scaffold:** The scaffold throws on any non-200 status (including 202) and returns empty results on selector drift. The provider instead signals `rateLimited` for both cases, enabling fallback in the Phase 3 chain.
   - Selector drift warning: when 0 results parsed from non-empty body, push a warning string into `result.warnings[]` (replaces direct logging — providers have no logger; the `WebSearchQueue` in Phase 3.3 logs these)
   - If `signal` is provided, include it in the `Promise.race()` pattern (abort listener that rejects on `signal.abort`)
-- [ ] Implement `isConfigured()`: return `config.enabled` (no API key needed)
+- [x] Implement `isConfigured()`: return `config.enabled` (no API key needed)
 
 ### 1.3 DuckDuckGo provider tests
 
@@ -68,27 +68,27 @@ Source code lives in `src/extensions/builtin-tool-scaffolds.ts:1248-1341` as str
 
 Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `beforeEach(() => vi.clearAllMocks())`.
 
-- [ ] Add `// @vitest-environment jsdom` directive at top of file (DOMParser is not available in Vitest's default Node.js environment)
-- [ ] Test `cleanDDGUrl()`:
+- [x] Add `// @vitest-environment jsdom` directive at top of file (DOMParser is not available in Vitest's default Node.js environment)
+- [x] Test `cleanDDGUrl()`:
   - DDG redirect URL (`//duckduckgo.com/l/?uddg=...`) → decoded actual URL
   - Protocol-relative URL (`//example.com`) → `https://example.com`
   - Absolute HTTP/HTTPS URLs → passthrough
   - Invalid/empty input → `null`
-- [ ] Test `parseDDGResults()`:
+- [x] Test `parseDDGResults()`:
   - Valid HTML with multiple `.result` containers → correct extraction
   - `maxResults` cap honored
   - Missing title or URL → result skipped
   - Empty HTML → empty array
-- [ ] Test `search()` — HTTP success:
+- [x] Test `search()` — HTTP success:
   - Mock `requestUrl` returning status 200 with HTML → parsed results
-- [ ] Test `search()` — rate-limit detection:
+- [x] Test `search()` — rate-limit detection:
   - HTTP 202 → `rateLimited: true`
   - HTTP 200 but 0 parsed results from non-empty body → `rateLimited: true`, `warnings[]` populated with selector drift message
-- [ ] Test `search()` — error handling:
+- [x] Test `search()` — error handling:
   - Non-200/202 status → error thrown
   - Network error → error propagated
   - Timeout → error with timeout message
-- [ ] Test `isConfigured()`: returns `true` when `enabled: true`, `false` otherwise
+- [x] Test `isConfigured()`: returns `true` when `enabled: true`, `false` otherwise
 
 ---
 
