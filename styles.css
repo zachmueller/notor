@@ -444,6 +444,15 @@
 	height: 14px;
 }
 
+/* Right-side actions column (menu + star) */
+.notor-conversation-item-actions {
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+}
+
 /* Favorite star indicator (always visible on favorited items) */
 .notor-conversation-favorite-indicator {
 	flex-shrink: 0;
@@ -453,12 +462,12 @@
 	width: 16px;
 	height: 16px;
 	color: var(--text-warning);
-	margin-top: 2px;
 }
 
 .notor-conversation-favorite-indicator svg {
 	width: 12px;
 	height: 12px;
+	fill: currentColor;
 }
 
 /* Favorites filter toggle in search bar */
@@ -482,6 +491,10 @@
 
 .notor-conversation-fav-filter-btn.is-active {
 	color: var(--text-warning);
+}
+
+.notor-conversation-fav-filter-btn.is-active svg {
+	fill: currentColor;
 }
 
 .notor-conversation-fav-filter-btn svg {

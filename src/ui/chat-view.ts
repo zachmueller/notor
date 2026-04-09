@@ -2080,12 +2080,6 @@ export class NotorChatView extends ItemView {
 				cls: `notor-conversation-list-item${isActive ? " is-active" : ""}`,
 			});
 
-			// Favorite star indicator (always visible when favorited)
-			if (entry.is_favorite) {
-				const starEl = item.createDiv({ cls: "notor-conversation-favorite-indicator" });
-				setIcon(starEl, "star");
-			}
-
 			const contentCol = item.createDiv({ cls: "notor-conversation-list-content" });
 
 			const titleEl = contentCol.createDiv({ cls: "notor-conversation-list-title" });
@@ -2117,14 +2111,23 @@ export class NotorChatView extends ItemView {
 				previewEl.textContent = entry.preview;
 			}
 
+			// Right-side actions column
+			const actionsCol = item.createDiv({ cls: "notor-conversation-item-actions" });
+
 			// Three-dots menu button
-			const menuBtn = item.createDiv({ cls: "notor-conversation-menu-btn" });
+			const menuBtn = actionsCol.createDiv({ cls: "notor-conversation-menu-btn" });
 			setIcon(menuBtn, "more-vertical");
 			menuBtn.setAttribute("aria-label", "More options");
 			menuBtn.addEventListener("click", (e) => {
 				e.stopPropagation();
 				this.showConversationContextMenu(e, entry);
 			});
+
+			// Favorite star indicator (always visible when favorited)
+			if (entry.is_favorite) {
+				const starEl = actionsCol.createDiv({ cls: "notor-conversation-favorite-indicator" });
+				setIcon(starEl, "star");
+			}
 
 			// Right-click context menu
 			item.addEventListener("contextmenu", (e) => {
