@@ -47,6 +47,17 @@ export function notifyMarkdownLeafActivated(path: string | null): void {
 	_lastActiveMarkdownPath = path;
 }
 
+/**
+ * Return the cached last-active markdown path.
+ *
+ * Useful for command callbacks that need to resolve the active note
+ * when the active view might not be a MarkdownView (e.g., when the
+ * chat panel has focus).
+ */
+export function getLastActiveMarkdownPath(): string | null {
+	return _lastActiveMarkdownPath;
+}
+
 // ---------------------------------------------------------------------------
 // CTX-001: Open note paths collector
 // ---------------------------------------------------------------------------

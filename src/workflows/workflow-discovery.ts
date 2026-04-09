@@ -331,6 +331,7 @@ function parseWorkflowFile(
 
 	// Parse optional properties (C-003)
 	const personaName = parseStringOrNull(frontmatter["notor-workflow-persona"]);
+	const activeNotePrompt = parseStringOrNull(frontmatter["notor-active-note-prompt"]);
 
 	// Parse and validate schedule (C-005)
 	let schedule: string | null = null;
@@ -395,6 +396,7 @@ function parseWorkflowFile(
 		schedule,
 		persona_name: personaName,
 		hooks,
+		active_note_prompt: activeNotePrompt,
 		body_content: "", // Deferred — read lazily at execution time (NFR-10)
 	};
 }

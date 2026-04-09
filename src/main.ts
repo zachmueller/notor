@@ -13,11 +13,16 @@ import { MarkdownView } from "obsidian";
 import { createDefaultSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
-import { notifyMarkdownLeafActivated } from "./context/auto-context";
+import { notifyMarkdownLeafActivated, getLastActiveMarkdownPath } from "./context/auto-context";
 
 // Workflows
 import { discoverWorkflows } from "./workflows/workflow-discovery";
-import { showWorkflowPicker } from "./workflows/workflow-executor";
+import {
+	showWorkflowPicker,
+	showActiveNoteWorkflowPicker,
+	buildActiveNoteContent,
+	resolveActiveNotePrompt,
+} from "./workflows/workflow-executor";
 import type { Workflow } from "./types";
 
 // Group G: Workflow hook override manager
@@ -373,6 +378,66 @@ export default class NotorPlugin extends Plugin {
 				} catch (e) {
 					log.error("Run workflow command failed", { error: String(e) });
 					new Notice(`Failed to open workflow picker: ${e instanceof Error ? e.message : String(e)}`);
+				}
+			},
+		});
+
+		// Launch active-note-scoped workflow against the currently focused note.
+		// Opens a filtered picker showing only workflows with `notor-active-note-prompt`.
+		this.addCommand({
+			id: "launch-active-note-workflow",
+			name: "Launch active note workflow",
+			callback: () => {
+				try {
+					// Resolve active note path (two-stage: active view + cache fallback)
+					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+					let activeFilePath = activeView?.file?.path ?? null;
+					if (!activeFilePath) {
+						activeFilePath = getLastActiveMarkdownPath();
+					}
+					if (!activeFilePath) {
+						new Notice("No active note found.");
+						return;
+					}
+
+					const capturedPath = activeFilePath;
+
+					showActiveNoteWorkflowPicker(
+						this.app,
+						() => this.rescanWorkflows(),
+						(workflow) => {
+							(async () => {
+								const activeNoteContent = await buildActiveNoteContent(
+									capturedPath,
+									this.app.vault,
+								);
+								const resolvedPrompt = resolveActiveNotePrompt(
+									workflow.active_note_prompt!,
+									activeNoteContent,
+								);
+
+								await this.openChatPanel();
+								log.info("Active note workflow selected", {
+									display_name: workflow.display_name,
+									active_note: capturedPath,
+								});
+								await this.getOrchestrator().executeWorkflow(workflow, resolvedPrompt);
+							})().catch((e) => {
+								log.error("Failed to execute active note workflow", {
+									error: String(e),
+								});
+								new Notice(
+									`Active note workflow failed: ${e instanceof Error ? e.message : String(e)}`
+								);
+							});
+						},
+						this.settings.notor_dir
+					);
+				} catch (e) {
+					log.error("Launch active note workflow command failed", { error: String(e) });
+					new Notice(
+						`Failed to open active note workflow picker: ${e instanceof Error ? e.message : String(e)}`
+					);
 				}
 			},
 		});

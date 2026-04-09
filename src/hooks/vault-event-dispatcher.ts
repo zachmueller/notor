@@ -370,6 +370,7 @@ export async function executeRunWorkflowAction(
 		schedule: (fm["notor-schedule"] as string | null | undefined) ?? null,
 		persona_name: (fm["notor-workflow-persona"] as string | null | undefined) ?? null,
 		hooks: null, // Per-workflow hooks not needed here — handled by the execution pipeline
+		active_note_prompt: (fm["notor-active-note-prompt"] as string | null | undefined) ?? null,
 		body_content: "",
 	};
 

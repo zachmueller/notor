@@ -27,7 +27,7 @@ import type {
 	WorkflowExecutionRequest,
 } from "../types";
 import type { PersonaManager } from "../personas/persona-manager";
-import { resolveIncludeNotes } from "../include-note/resolver";
+import { resolveIncludeNotes, stripNoteFrontmatter } from "../include-note/resolver";
 import { extractToolConfigs } from "../tool-config/parser";
 import { assembleUserMessage } from "../context/message-assembler";
 import { logger } from "../utils/logger";
@@ -467,14 +467,19 @@ export async function revertWorkflowPersona(
  * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-009
  */
 class WorkflowPickerModal extends FuzzySuggestModal<Workflow> {
+	private readonly emptyMessage: string;
+
 	constructor(
 		app: App,
 		private readonly workflows: Workflow[],
 		private readonly onSelect: (workflow: Workflow) => void,
-		private readonly notorDir: string
+		private readonly notorDir: string,
+		placeholder?: string,
+		emptyMessage?: string,
 	) {
 		super(app);
-		this.setPlaceholder("Select a workflow to run…");
+		this.setPlaceholder(placeholder ?? "Select a workflow to run\u2026");
+		this.emptyMessage = emptyMessage ?? `No workflows found in ${this.notorDir}/workflows/`;
 	}
 
 	getItems(): Workflow[] {
@@ -496,7 +501,7 @@ class WorkflowPickerModal extends FuzzySuggestModal<Workflow> {
 		if (this.workflows.length === 0) {
 			this.resultContainerEl.empty();
 			const msg = this.resultContainerEl.createDiv({ cls: "notor-workflow-picker-empty" });
-			msg.textContent = `No workflows found in ${this.notorDir}/workflows/`;
+			msg.textContent = this.emptyMessage;
 		}
 	}
 }
@@ -541,4 +546,92 @@ export function showWorkflowPicker(
 
 	const modal = new WorkflowPickerModal(app, workflows, onSelect, notorDir);
 	modal.open();
+}
+
+// ---------------------------------------------------------------------------
+// Active-note workflow support
+// ---------------------------------------------------------------------------
+
+/**
+ * Open the workflow picker modal filtered to active-note workflows only.
+ *
+ * Only workflows with a non-null `active_note_prompt` property are shown.
+ * If none exist, a Notice is displayed and the picker is not opened.
+ *
+ * @param app - The Obsidian `App` instance.
+ * @param rescanWorkflows - Function that rescans and returns all discovered workflows.
+ * @param onSelect - Callback invoked with the selected `Workflow`.
+ * @param notorDir - The Notor directory path (for the empty-state message).
+ */
+export function showActiveNoteWorkflowPicker(
+	app: App,
+	rescanWorkflows: () => Workflow[],
+	onSelect: (workflow: Workflow) => void,
+	notorDir: string
+): void {
+	log.debug("Opening active-note workflow picker — rescanning workflows");
+
+	let workflows: Workflow[];
+	try {
+		workflows = rescanWorkflows().filter((w) => w.active_note_prompt !== null);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		log.error("Workflow rescan failed before active-note picker open", { error: msg });
+		new Notice(`Failed to load workflows: ${msg}`);
+		return;
+	}
+
+	if (workflows.length === 0) {
+		new Notice(`No active-note workflows found in ${notorDir}/workflows/`);
+		return;
+	}
+
+	log.info("Active-note workflow picker opened", { count: workflows.length });
+
+	const modal = new WorkflowPickerModal(
+		app,
+		workflows,
+		onSelect,
+		notorDir,
+		"Select an active-note workflow\u2026",
+		`No active-note workflows found in ${notorDir}/workflows/`,
+	);
+	modal.open();
+}
+
+/**
+ * Read the active note's content and wrap it in an `<active_note>` XML block.
+ *
+ * Strips YAML frontmatter so only the body content is included.
+ *
+ * @param filePath - Vault-relative path to the active note.
+ * @param vault - The Obsidian vault instance.
+ * @returns XML-wrapped note content string.
+ */
+export async function buildActiveNoteContent(
+	filePath: string,
+	vault: Vault,
+): Promise<string> {
+	const file = vault.getAbstractFileByPath(filePath);
+	if (!(file instanceof TFile)) {
+		throw new Error(`Active note not found: '${filePath}'`);
+	}
+	const raw = await vault.read(file);
+	const body = stripNoteFrontmatter(raw);
+	return `<active_note path="${filePath}">\n${body}\n</active_note>`;
+}
+
+/**
+ * Replace `{active_note}` placeholders in a template string with the
+ * provided active-note content.
+ *
+ * @param template - The `notor-active-note-prompt` template string.
+ * @param activeNoteContent - The XML-wrapped active note content.
+ * @returns The resolved prompt string.
+ */
+export function resolveActiveNotePrompt(
+	template: string,
+	activeNoteContent: string,
+): string {
+	return template.replace(/\{active_note\}/g, activeNoteContent);
 }

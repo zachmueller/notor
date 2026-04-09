@@ -1393,6 +1393,7 @@ async function testWorkflowNotFoundAtExecution(page: Page, ctx: TestContext, col
 				persona_name: null,
 				body_content: "",
 				hooks: null,
+				active_note_prompt: null,
 			});
 
 			return { success: true, reason: "executeWorkflow completed without throw" };

@@ -472,6 +472,8 @@ export interface Workflow {
 	persona_name: string | null;
 	/** Per-workflow LLM lifecycle hook overrides from `notor-hooks`. */
 	hooks: WorkflowHookConfig | null;
+	/** Template string from `notor-active-note-prompt` frontmatter (null if not set). Contains `{active_note}` placeholder. */
+	active_note_prompt: string | null;
 	/** Body content of the workflow note (empty string during discovery; read lazily at execution time). */
 	body_content: string;
 }
