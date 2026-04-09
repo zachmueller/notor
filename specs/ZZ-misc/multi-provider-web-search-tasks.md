@@ -351,15 +351,15 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 
 **File to modify:** `src/main.ts`
 
-- [ ] Add imports for `SearchProviderRegistry`, `WebSearchQueue`, and all four provider classes
-- [ ] Add private fields (near existing singletons at L124-173, add after `_taskLaneQueue` at L173):
+- [x] Add imports for `SearchProviderRegistry`, `WebSearchQueue`, and all four provider classes
+- [x] Add private fields (near existing singletons at L124-173, add after `_taskLaneQueue` at L173):
   ```typescript
   private _searchProviderRegistry?: SearchProviderRegistry;
   private _webSearchQueue?: WebSearchQueue;
   ```
-- [ ] Add private getter `getSearchProviderRegistry()` (lazy init):
+- [x] Add private getter `getSearchProviderRegistry()` (lazy init):
   - Creates registry, registers all four providers (`DuckDuckGoProvider`, `TavilyProvider`, `BraveSearchProvider`, `SerpApiProvider`)
-- [ ] Add public getter `getWebSearchQueue()` (lazy init):
+- [x] Add public getter `getWebSearchQueue()` (lazy init):
   - Creates `WebSearchQueue` with:
     - `getSettings` closure → delegates to `this.getExtensionManager().getResolvedSettings("web_search").values`
       - **Note:** Use `getResolvedSettings()` (L466-488 of manager.ts) — NOT the spec's `getCompiledTool()` which doesn't exist on `ExtensionManager`. The existing `getResolvedSettings()` already resolves both non-secret fields (from `user_extension_settings`) and secret fields (from SecretStorage via `slugifySecretId`).
@@ -370,14 +370,14 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 
 **File to modify:** `src/extensions/runtime-context.ts`
 
-- [ ] Add `WebSearchApiResult` import (from `src/web-search/queue.ts`)
-- [ ] Add `webSearch` to `ExtensionUtils` interface (after `queue` at L106):
+- [x] Add `WebSearchApiResult` import (from `src/web-search/queue.ts`)
+- [x] Add `webSearch` to `ExtensionUtils` interface (after `queue` at L106):
   ```typescript
   webSearch: {
     search: (query: string, numResults: number, timeoutMs: number, signal?: AbortSignal) => Promise<WebSearchApiResult>;
   };
   ```
-- [ ] Add `webSearch` to `buildUtils()` return object (after `queue` closure at L203):
+- [x] Add `webSearch` to `buildUtils()` return object (after `queue` closure at L203):
   ```typescript
   webSearch: {
     search: (query, numResults, timeoutMs, signal?) =>
@@ -391,8 +391,8 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 
 **File to modify:** `src/extensions/builtin-tool-scaffolds.ts` (WEB_SEARCH constant)
 
-- [ ] Update tool description from `"Search the web using DuckDuckGo..."` to `"Search the web and return results with titles, URLs, and snippets."` (L1219)
-- [ ] Replace the TypeScript code block (L1244-1383) with the simplified delegation code:
+- [x] Update tool description from `"Search the web using DuckDuckGo..."` to `"Search the web and return results with titles, URLs, and snippets."` (L1219)
+- [x] Replace the TypeScript code block (L1244-1383) with the simplified delegation code:
   - Keep: input validation (`query` param check)
   - Keep: `numResults` and `timeoutMs` computation from settings
   - **Replace**: all DDG-specific code (`cleanDDGUrl`, `parseDDGResults`, HTTP request, timeout race) with single call: `const searchResult = await utils.webSearch.search(query, numResults, timeoutMs, utils.abortSignal)`
@@ -402,7 +402,7 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
   - **Add**: check `searchResult.error` and return it as the tool error message if set
   - **Add**: log `searchResult.failures` as warnings if non-empty
   - **Add**: log `searchResult.provider` in completion message
-- [ ] Remove `cleanDDGUrl()` and `parseDDGResults()` helper functions from the scaffold string
+- [x] Remove `cleanDDGUrl()` and `parseDDGResults()` helper functions from the scaffold string
   - These now live in `src/web-search/providers/duckduckgo.ts`
 
 **Expected reduction:** ~140 lines of scaffold TypeScript code → ~50 lines.

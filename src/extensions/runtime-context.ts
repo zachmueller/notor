@@ -37,6 +37,7 @@ import {
 	extractExistingCommentIds,
 } from "../tools/docx-comment-parser";
 import type { RawComment, Comment } from "../tools/docx-comment-parser";
+import type { WebSearchApiResult } from "../web-search/queue";
 
 // Obsidian exports
 import { requestUrl, Notice, TFile as TFileClass, TFolder, getFrontMatterInfo, normalizePath, MarkdownView, Platform } from "obsidian";
@@ -103,6 +104,10 @@ export interface ExtensionUtils {
 	queue: {
 		enqueue: <T>(lane: string, fn: () => Promise<T>, delayMs?: number) => Promise<T>;
 		pending: (lane: string) => number;
+	};
+	/** Multi-provider web search with fallback and round-robin. */
+	webSearch: {
+		search: (query: string, numResults: number, timeoutMs: number, signal?: AbortSignal) => Promise<WebSearchApiResult>;
 	};
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
@@ -201,6 +206,11 @@ export function buildUtils(plugin: NotorPlugin): ExtensionUtils {
 				pending: (lane: string) => tlq.pending(lane),
 			};
 		})(),
+
+		webSearch: {
+			search: (query: string, numResults: number, timeoutMs: number, signal?: AbortSignal) =>
+				plugin.getWebSearchQueue().search(query, numResults, timeoutMs, signal),
+		},
 	};
 }
 

@@ -1216,7 +1216,7 @@ return content;`,
 
 const WEB_SEARCH = scaffold(
 	"web_search",
-	"Search the web using DuckDuckGo and return results with titles, URLs, and snippets.",
+	"Search the web and return results with titles, URLs, and snippets.",
 	"read",
 	`params:
   query:
@@ -1313,51 +1313,6 @@ settings:
     max: 10000`,
 	`const log = utils.logger("web_search");
 
-// --- Helpers ---
-
-function cleanDDGUrl(raw: string): string | null {
-  if (raw.startsWith("//duckduckgo.com/l/")) {
-    const qIndex = raw.indexOf("?");
-    if (qIndex === -1) return null;
-    const urlParams = new URLSearchParams(raw.substring(qIndex + 1));
-    const actual = urlParams.get("uddg");
-    if (!actual) return null;
-    return decodeURIComponent(actual);
-  }
-  if (raw.startsWith("//")) return "https:" + raw;
-  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
-  return null;
-}
-
-function parseDDGResults(html: string, maxResults: number): Array<{ title: string; url: string; snippet: string }> {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, "text/html");
-  const results: Array<{ title: string; url: string; snippet: string }> = [];
-
-  const containers = Array.from(doc.querySelectorAll(".result"));
-  for (const el of containers) {
-    if (results.length >= maxResults) break;
-
-    const titleEl = el.querySelector(".result__title a");
-    const snippetEl = el.querySelector(".result__snippet");
-
-    const title = titleEl?.textContent?.trim() ?? "";
-    const rawUrl = titleEl?.getAttribute("href") ?? "";
-    const snippet = snippetEl?.textContent?.trim() ?? "";
-
-    if (!title || !rawUrl) continue;
-
-    const url = cleanDDGUrl(rawUrl);
-    if (!url) continue;
-
-    results.push({ title, url, snippet });
-  }
-
-  return results;
-}
-
-// --- Main logic ---
-
 const query = params.query as string;
 
 if (!query || typeof query !== "string") {
@@ -1372,61 +1327,25 @@ const timeoutMs = (settings.web_search_timeout as number) * 1000;
 
 log.info("Web search initiated", { query, numResults, timeoutMs });
 
-let responseText: string;
-try {
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(
-      () => reject(new Error(\`Request timed out after \${Math.round(timeoutMs / 1000)} seconds.\`)),
-      timeoutMs,
-    ),
-  );
+// Delegate to multi-provider queue infrastructure
+const searchResult = await utils.webSearch.search(query, numResults, timeoutMs, utils.abortSignal);
 
-  const response = await Promise.race([
-    obsidian.requestUrl({
-      url: "https://html.duckduckgo.com/html/",
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        DNT: "1",
-      },
-      body: \`q=\${encodeURIComponent(query)}&kl=us-en\`,
-      throw: false,
-    }),
-    timeoutPromise,
-  ]);
-
-  if (response.status !== 200) {
-    log.warn("DuckDuckGo returned non-200 status", { status: response.status });
-    throw new Error(\`Search request failed with HTTP status \${response.status}.\`);
-  }
-
-  responseText = response.text;
-} catch (e: any) {
-  const message = e instanceof Error ? e.message : "Unknown network error";
-  log.warn("Web search request failed", { error: message });
-  throw new Error(\`Web search failed: \${message}\`);
+if (searchResult.error) {
+  throw new Error(searchResult.error);
 }
 
-const parsed = parseDDGResults(responseText, numResults);
-
-// Warn on possible selector drift
-if (parsed.length === 0 && responseText.length > 0) {
-  log.warn(
-    "DuckDuckGo returned a non-empty response but 0 results were parsed. " +
-    "The HTML structure may have changed (selector drift).",
-    { query, responseLength: responseText.length },
-  );
+if (searchResult.failures.length > 0) {
+  log.warn("Some providers failed before success", { failures: searchResult.failures });
 }
+
+log.debug("Search fulfilled", { provider: searchResult.provider, rawCount: searchResult.results.length });
 
 // Filter out blocked domains
 const denylist = shared.domain_denylist ?? [];
-const results = parsed.filter((r: any) => {
+const results = searchResult.results.filter((r: any) => {
   const check = utils.isDomainBlocked(r.url, denylist);
   if (check.blocked) {
-    log.debug("Filtered blocked domain from search results", { url: r.url, pattern: check.pattern });
+    log.debug("Filtered blocked domain", { url: r.url, pattern: check.pattern });
   }
   return !check.blocked;
 });
@@ -1449,7 +1368,7 @@ for (let i = 0; i < results.length; i++) {
 }
 
 const output = lines.join("\\n").trimEnd();
-log.info("Web search completed", { query, resultCount: results.length });
+log.info("Web search completed", { query, resultCount: results.length, provider: searchResult.provider });
 return output;`,
 );
 

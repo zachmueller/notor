@@ -98,6 +98,14 @@ import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
 // Queue
 import { TaskLaneQueue } from "./queue/task-lane-queue";
 
+// Web Search
+import { SearchProviderRegistry } from "./web-search/provider-registry";
+import { WebSearchQueue } from "./web-search/queue";
+import { DuckDuckGoProvider } from "./web-search/providers/duckduckgo";
+import { TavilyProvider } from "./web-search/providers/tavily";
+import { BraveSearchProvider } from "./web-search/providers/brave";
+import { SerpApiProvider } from "./web-search/providers/serpapi";
+
 // UI
 import { NotorChatView, CHAT_VIEW_TYPE } from "./ui/chat-view";
 import { EffectiveConfigInspectorView, INSPECTOR_VIEW_TYPE } from "./ui/effective-config-inspector";
@@ -171,6 +179,22 @@ export default class NotorPlugin extends Plugin {
 	 * @see specs/ZZ-misc/task-lane-queue-design.md
 	 */
 	private _taskLaneQueue?: TaskLaneQueue;
+
+	/**
+	 * Web search provider registry — maps provider type strings to singleton
+	 * provider instances (DuckDuckGo, Tavily, Brave, SerpApi).
+	 *
+	 * @see specs/ZZ-misc/multi-provider-web-search-design.md — Section 6
+	 */
+	private _searchProviderRegistry?: SearchProviderRegistry;
+
+	/**
+	 * Web search queue — orchestrates provider selection, round-robin,
+	 * and fallback on top of the shared TaskLaneQueue.
+	 *
+	 * @see specs/ZZ-misc/multi-provider-web-search-design.md — Section 5.2
+	 */
+	private _webSearchQueue?: WebSearchQueue;
 
 	/** Cached workflow discovery results (C-008). In-memory only — always re-discovered from vault. */
 	private _discoveredWorkflows: Workflow[] = [];
@@ -1465,6 +1489,30 @@ export default class NotorPlugin extends Plugin {
 			this._taskLaneQueue = new TaskLaneQueue();
 		}
 		return this._taskLaneQueue;
+	}
+
+	/** Web search provider registry — registers all built-in providers. */
+	private getSearchProviderRegistry(): SearchProviderRegistry {
+		if (!this._searchProviderRegistry) {
+			this._searchProviderRegistry = new SearchProviderRegistry();
+			this._searchProviderRegistry.register(new DuckDuckGoProvider());
+			this._searchProviderRegistry.register(new TavilyProvider());
+			this._searchProviderRegistry.register(new BraveSearchProvider());
+			this._searchProviderRegistry.register(new SerpApiProvider());
+		}
+		return this._searchProviderRegistry;
+	}
+
+	/** Web search queue — multi-provider orchestration with fallback and round-robin. */
+	getWebSearchQueue(): WebSearchQueue {
+		if (!this._webSearchQueue) {
+			this._webSearchQueue = new WebSearchQueue(
+				() => this.getExtensionManager().getResolvedSettings("web_search").values,
+				this.getSearchProviderRegistry(),
+				this.getTaskLaneQueue(),
+			);
+		}
+		return this._webSearchQueue;
 	}
 
 	/** Chat orchestrator — the main send/receive loop coordinator. */
