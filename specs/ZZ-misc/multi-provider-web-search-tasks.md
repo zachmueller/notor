@@ -21,7 +21,7 @@ No work needed here. All phases below build on this foundation.
 
 ## Phase 1: Provider Interface & DuckDuckGo Extraction
 
-> Foundation layer. Creates the provider abstraction and extracts existing DDG logic from the scaffold into a proper module. The scaffold continues to work identically after this phase (it is not modified). The extracted DDG provider adds rate-limit detection (HTTP 202, 0-results-from-non-empty-body → `rateLimited: true`) that the scaffold does not have — this new behavior supports the fallback chain in Phase 3.
+> Foundation layer. Creates the provider abstraction and extracts DDG logic from the scaffold into a proper module, **enhancing it with rate-limit detection** for the fallback chain in Phase 3. The scaffold continues to work identically after this phase (it is not modified).
 
 ### 1.1 Create provider interface and types
 
@@ -50,13 +50,14 @@ Source code lives in `src/extensions/builtin-tool-scaffolds.ts:1248-1341` as str
 - [ ] Extract `parseDDGResults()` from scaffold L1262-1287 — make it a private method (export for tests)
   - Uses browser-native `DOMParser` (not `@xmldom/xmldom`)
   - Selectors: `.result` container, `.result__title a` for title+link, `.result__snippet` for snippet
-- [ ] Implement `search()` method by extracting HTTP logic from scaffold L1305-1341:
+- [ ] Implement `search()` method **based on** scaffold HTTP logic (L1305-1341), **adding rate-limit detection not present in the scaffold**:
   - POST to `https://html.duckduckgo.com/html/` with form-encoded body
   - User-Agent: Chrome/120 on Macintosh (matching current scaffold)
   - Timeout race via `Promise.race()` with `setTimeout` reject
   - Import `requestUrl` from `obsidian` directly (note: the current scaffold uses `obsidian.requestUrl` via runtime injection — the extracted module uses a proper ES import instead)
   - Pass `throw: false` in the `requestUrl` options — without it Obsidian throws on non-2xx status codes, making HTTP 202 uninspectable
   - Rate-limit detection: HTTP 202 OR 0 parsed results from non-empty response → `rateLimited: true`
+    - **Delta from scaffold:** The scaffold throws on any non-200 status (including 202) and returns empty results on selector drift. The provider instead signals `rateLimited` for both cases, enabling fallback in the Phase 3 chain.
   - Selector drift warning: when 0 results parsed from non-empty body, push a warning string into `result.warnings[]` (replaces direct logging — providers have no logger; the `WebSearchQueue` in Phase 3.3 logs these)
   - If `signal` is provided, include it in the `Promise.race()` pattern (abort listener that rejects on `signal.abort`)
 - [ ] Implement `isConfigured()`: return `config.enabled` (no API key needed)
@@ -216,7 +217,7 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
 
 - [ ] Define `WebSearchResolvedConfig` interface (design spec Section 8.2):
   ```
-  { roundRobin, providerPriority, providers: Record<string, { enabled, delayMs, apiKey }> }
+  { roundRobin, providerPriority, maxFallbackProviders, providers: Record<string, { enabled, delayMs, apiKey }> }
   ```
 - [ ] Define `WebSearchApiResult` interface (design spec Section 7):
   ```
@@ -227,9 +228,10 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - Constructor: `(getSettings: () => Record<string, unknown>, providerRegistry: SearchProviderRegistry, laneQueue: TaskLaneQueue)`
   - Private `roundRobinIndex: number = 0`
 - [ ] Implement `buildConfig(settings)`: maps flat extension settings → `WebSearchResolvedConfig`
-  - Reads `web_search_round_robin`, `web_search_provider_priority`
+  - Reads `web_search_round_robin`, `web_search_provider_priority`, `web_search_max_fallback_providers`
   - Reads per-provider `web_search_{provider}_enabled`, `_delay_ms`, `_api_key`
-  - Falls back to sensible defaults (DDG enabled, others disabled)
+  - Falls back to sensible defaults (DDG enabled, others disabled, `maxFallbackProviders: 2`)
+  - **Implementation note:** Define setting key names as constants shared between `buildConfig()` and the YAML fence (or at minimum, add a comment cross-referencing the YAML keys) to prevent silent mismatches from typos.
 - [ ] Implement `resolveProviderChain(config, startIndex)` — **pure function, no side effects**:
   - Takes `startIndex: number` as a parameter (passed from `search()`)
   - Uses `providerRegistry.getAvailableByPriority(config.providers, config.providerPriority)`
@@ -244,9 +246,10 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - After each provider call, log any `result.warnings[]` entries via the queue's logger
   - On success (no `rateLimited`): return `{ results, provider, failures }`
   - On `rateLimited` or error: record in `failures[]`, try next provider
-  - All exhausted: return `{ results: [], provider: "", failures, error: "All search providers failed" }`
+  - Track attempt count. After `config.maxFallbackProviders` attempts, stop iterating even if providers remain in the chain. Return accumulated `failures`.
+  - All exhausted (or max attempts reached): return `{ results: [], provider: "", failures, error: "All search providers failed" }`
   - No providers configured: return immediately with `{ results: [], provider: "", failures: [], error: "No web search providers are configured" }`
-  - **Note:** `timeoutMs` applies per-provider, not to the entire chain. Worst-case latency is `timeoutMs × numProviders`. Document this in a JSDoc comment on the method.
+  - **Note:** `timeoutMs` applies per-provider, not to the entire chain. Worst-case latency is `timeoutMs × maxFallbackProviders`. Document this in a JSDoc comment on the method.
 
 ### 3.4 Web search queue tests
 
@@ -264,6 +267,7 @@ Use mock providers and a real `TaskLaneQueue` instance (lightweight, no HTTP).
 - [ ] Test `buildConfig()`: flat settings → typed config mapping
 - [ ] Test lane delegation: verify `laneQueue.enqueue()` called with correct lane key and delay
 - [ ] Test settings read fresh: changing `getSettings()` return value between calls → different behavior
+- [ ] Test `maxFallbackProviders`: with 4 available providers and `maxFallbackProviders: 2`, only first 2 are tried even if both fail
 
 ---
 
@@ -286,7 +290,11 @@ Add new settings fields after the existing `web_search_default_num_results`:
   - `options: ["duckduckgo", "tavily", "brave", "serpapi"]` (constrains "Add" input to known providers — see 4.2)
   - Name: "Provider priority order"
   - Description: "Order in which search providers are tried. First entry is highest priority."
-- [ ] Update existing `web_search_timeout` description to: "Maximum time **per provider** in seconds to wait for search results before aborting. When multiple providers are enabled and all fail, worst-case total wait is this value × number of enabled providers."
+- [ ] Add `web_search_max_fallback_providers` field:
+  - `type: number`, `default: 2`, `min: 1`, `max: 4`
+  - Name: "Max providers to try"
+  - Description: "Maximum number of search providers to try before giving up. Limits worst-case latency when multiple providers are configured."
+- [ ] Update existing `web_search_timeout` description to: "Maximum time **per provider** in seconds to wait for search results before aborting. With max-fallback-providers set to N, worst-case total wait is this value × N."
 - [ ] Add DuckDuckGo provider fields:
   - `web_search_duckduckgo_enabled`: `boolean`, default `true`, name "DuckDuckGo — Enabled"
   - `web_search_duckduckgo_delay_ms`: `number`, default `1500`, min `0`, max `10000`, name "DuckDuckGo — Delay (ms)"
@@ -322,6 +330,17 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 - [ ] Update JSDoc on `SettingsFieldSchema.options` in `src/extensions/types.ts:69` — change from `"Enum constraint (string type only) — renders as dropdown."` to `"Constrains valid values — renders as dropdown for \`string\`, constrains Add input for \`string[]\`."`
 - [ ] ~~Verify `parseSettingsSchema()`~~ — No changes needed: `parseSettingsSchema()` in `settings-schema.ts` L104-106 (within the function at L51-112) already passes `options` through for all field types (the check is type-agnostic)
 
+### 4.3 String array renderer tests
+
+**File to create:** `src/settings/sections/__tests__/extensions-string-array.test.ts`
+
+- [ ] Test reorder up: swaps entry with previous, persists new order
+- [ ] Test reorder down: swaps entry with next, persists new order
+- [ ] Test reorder boundaries: up button hidden on first entry, down button hidden on last
+- [ ] Test dropdown mode: when `field.options` present, Add row renders dropdown with unused options only
+- [ ] Test dropdown exhaustion: when all options in list, Add row is hidden
+- [ ] Test free-text fallback: when `field.options` absent, Add row renders text input (existing behavior preserved)
+
 ---
 
 ## Phase 5: Plugin Wiring & Scaffold Refactor
@@ -333,7 +352,7 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 **File to modify:** `src/main.ts`
 
 - [ ] Add imports for `SearchProviderRegistry`, `WebSearchQueue`, and all four provider classes
-- [ ] Add private fields (near existing singletons at L165-173):
+- [ ] Add private fields (near existing singletons at L124-173, add after `_taskLaneQueue` at L173):
   ```typescript
   private _searchProviderRegistry?: SearchProviderRegistry;
   private _webSearchQueue?: WebSearchQueue;
@@ -365,6 +384,8 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
       plugin.getWebSearchQueue().search(query, numResults, timeoutMs, signal),
   },
   ```
+
+**Note:** `abortSignal` is NOT part of `buildUtils()` — it is injected per-invocation by `UserToolAdapter.execute()` (see `runtime-context.ts:114-115`). The scaffold code accesses it as `utils.abortSignal` at call time, after injection has occurred. The `webSearch.search` closure receives it as the `signal` parameter.
 
 ### 5.3 Refactor scaffold code to delegate
 
@@ -413,7 +434,7 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
     migrated = true;
   }
   ```
-- [ ] **Keep** `"web_search_timeout"` and `"web_search_default_num_results"` in the `oldFields` array at L768-769 — that array strips legacy keys from `data.json` on disk for upgrading users, which is still needed regardless of the TS type change
+- [ ] **Keep** `"web_search_timeout"` and `"web_search_default_num_results"` in the `oldFields` array (starting L763) — specifically the entries at L768-769 — that array strips legacy keys from `data.json` on disk for upgrading users, which is still needed regardless of the TS type change
 
 ### 6.3 Verify no remaining references
 
