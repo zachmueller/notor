@@ -75,7 +75,7 @@ export class WebSearchQueue {
 		const maxAttempts = config.maxFallbackProviders;
 
 		for (let i = 0; i < chain.length && failures.length < maxAttempts; i++) {
-			const provider = chain[i];
+			const provider = chain[i]!;
 
 			if (signal?.aborted) {
 				failures.push({

@@ -450,8 +450,8 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 
 ### 7.1 Run full test suite
 
-- [ ] Run `npm test` — all existing tests must continue to pass
-- [ ] Run new test files specifically:
+- [x] Run `npm test` — all existing tests must continue to pass (593/593 passed, 32 test files)
+- [x] Run new test files specifically:
   - `src/web-search/providers/__tests__/duckduckgo.test.ts`
   - `src/web-search/providers/__tests__/tavily.test.ts`
   - `src/web-search/providers/__tests__/brave.test.ts`
@@ -461,10 +461,12 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 
 ### 7.2 Build verification
 
-- [ ] Run `npm run build` — no TypeScript compilation errors
-- [ ] Verify no circular imports between `src/web-search/`, `src/queue/`, `src/extensions/`, and `src/main.ts`
+- [x] Run `npm run build` — no TypeScript compilation errors (fixed TS18048 in queue.ts: non-null assertion on `chain[i]`)
+- [x] Verify no circular imports between `src/web-search/`, `src/queue/`, `src/extensions/`, and `src/main.ts` (40 pre-existing cycles in chat/settings/mcp — none in web-search or queue)
 
 ### 7.3 Manual smoke test checklist
+
+E2E test script: `e2e/scripts/multi-provider-web-search-test.ts` — automates scenarios 1-3 and 5-7.
 
 - [ ] Load plugin in Obsidian — no console errors on startup
 - [ ] Open Settings > Extensions > web_search — verify all new provider fields render:
