@@ -171,8 +171,8 @@ A new `ToolSettingsModal` provides focused access to a single tool's configurati
 │ (only if tool has settingsSchema)               │
 │                                                 │
 │ ── Shared settings ────────────────────         │
-│ [rendered shared settings fields]               │
-│ [Reset to defaults]                             │
+│ "This tool may use shared settings."            │
+│ [View shared settings →]  (link to Tools section│
 │ (only if shared settings definition exists)     │
 │                                                 │
 │                                    [Done]       │
@@ -183,21 +183,22 @@ A new `ToolSettingsModal` provides focused access to a single tool's configurati
 1. Tool name + description
 2. **Customize section:** "Customize" button (creates vault file) or "Open" + "Reset to default" buttons (if vault file exists)
 3. **Settings section:** Per-tool settings fields (if the tool's extension definition has a `settingsSchema`)
-4. **Shared settings section:** Global shared settings (if a `notor/settings.md` defines shared settings)
+4. **Shared settings link:** A brief note ("This tool may use shared settings") with a clickable link that scrolls to the Shared Settings heading in the Tools section (only if a shared settings definition exists). Not editable — shared settings are global, so they are edited in one place only.
 
 **For user tools**, the modal shows:
 1. Tool name + description
 2. **Open button** to open the extension file
 3. **Settings section:** Per-tool settings fields (if defined)
-4. **Shared settings section:** (same as above)
+4. **Shared settings link:** (same as above)
 
 **For tools with no settings and no customization possible** (e.g., MCP tools): no gear icon is shown, so no modal is needed.
 
 ### 4.2 Modal Behavior
 
 - Extends Obsidian's `Modal` class (same pattern as `ConfirmModal`)
-- Reuses the extracted `renderField()` / `renderFieldList()` helpers for settings fields
+- Reuses the extracted `renderField()` / `renderFieldList()` helpers for per-tool settings fields
 - On field change: saves immediately via `saveFieldValue()` (same as current inline behavior)
+- Shared settings link uses `scrollToGroup("Tools")` + scroll-to-heading to jump to the Shared Settings area (not editable in the modal)
 - "Done" button closes the modal
 - Parent settings tab calls `redisplay()` after the modal closes to reflect any changes (e.g., "customized" badge appearing)
 - The `onClose()` callback triggers `ctx.redisplay()` to ensure the Tools section reflects any state changes made inside the modal
@@ -279,21 +280,29 @@ export class ToolSettingsModal extends Modal {
             );
         }
 
-        // Shared settings
+        // Shared settings — link only (not editable in modal)
         const sharedDef = manager.getSharedSettingsDefinition();
         if (sharedDef) {
-            new Setting(contentEl).setHeading().setName("Shared settings");
-            renderFieldList(contentEl, this.ctx, sharedDef.settingsSchema, {
-                kind: "shared",
-            });
+            new Setting(contentEl)
+                .setHeading()
+                .setName("Shared settings");
+            new Setting(contentEl)
+                .setDesc("This tool may use shared settings.")
+                .addButton((btn) =>
+                    btn.setButtonText("View shared settings")
+                        .onClick(() => {
+                            this.close();
+                            // Scroll to Shared Settings in Tools section
+                            this.ctx.redisplay();
+                        })
+                );
         }
 
         // Done button
-        const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-        new ButtonComponent(buttonRow)
-            .setButtonText("Done")
-            .setCta()
-            .onClick(() => this.close());
+        new Setting(contentEl)
+            .addButton((btn) =>
+                btn.setButtonText("Done").setCta().onClick(() => this.close())
+            );
     }
 
     onClose(): void {
@@ -313,13 +322,13 @@ export class ToolSettingsModal extends Modal {
 
 ## 5. Field Renderer Extraction
 
-Currently, the field rendering infrastructure lives as private functions inside `extensions.ts`:
+Currently, the field rendering infrastructure lives inside `extensions.ts`. Two items are already exported (used by `extensions-string-array.test.ts`); the rest are module-private:
 
-- `renderFieldList()` — iterates schemas and calls `renderField()` per field
-- `renderField()` — renders a single field (string, number, boolean, string[], secret)
-- `getPersistedValue()` — reads a field's current value from settings
-- `saveFieldValue()` — writes a field's value to settings
-- `FieldTarget` type — discriminated union for shared vs. per-extension targeting
+- `renderFieldList()` — iterates schemas and calls `renderField()` per field *(not exported)*
+- `renderField()` — renders a single field (string, number, boolean, string[], secret) *(exported)*
+- `getPersistedValue()` — reads a field's current value from settings *(not exported)*
+- `saveFieldValue()` — writes a field's value to settings *(not exported)*
+- `FieldTarget` type — discriminated union for shared vs. per-extension targeting *(exported)*
 
 These must be extracted to a shared module so they can be used by:
 1. The new `ToolSettingsModal`
@@ -353,6 +362,7 @@ The orchestrator's `display()` method changes as follows:
  renderToolsSection(toolsGroup, ctx);
 +renderShellSection(toolsGroup, ctx);
 +renderSharedSettingsSection(toolsGroup, ctx);
++renderCopyToolConfigButton(toolsGroup, ctx);   // extracted from renderToolsSection
 +renderReloadExtensionsButton(toolsGroup, ctx);
 
  // --- MCP Servers (expanded by default) ---
@@ -377,10 +387,10 @@ The orchestrator's `display()` method changes as follows:
 
 ### 6.1 Persisted Collapsed-Section Migration
 
-Users who have a saved collapsed-section state for "Tool configuration" or "Extensions" need migration. Add to the migration block in `display()`:
+Users who have a saved collapsed-section state for "Tool configuration" or "Extensions" need migration. Add to the **existing** migration block in `display()` (lines 119-123 of `settings-tab.ts`, alongside the `"Built-in tools"` → `"Tools"` rename):
 
 ```typescript
-// Migrate removed section keys
+// Migrate removed section keys (alongside existing "Built-in tools" → "Tools" migration)
 delete persisted["Tool configuration"];
 delete persisted["Extensions"];
 ```
@@ -429,13 +439,14 @@ if (isCustomized) {
 
 ### 7.3 New Sub-Sections at Bottom
 
-After the existing "Copy tool config YAML" button, add:
+The "Copy tool config YAML" button is **extracted** from `renderToolsSection()` into its own `renderCopyToolConfigButton()` function so that `settings-tab.ts` controls ordering. The final order rendered by `settings-tab.ts` after `renderToolsSection()`:
 
 1. **Shell configuration** — calls the existing `renderShellSection()`
 2. **Shared settings** — extracted from `extensions.ts`, renders shared settings fields + reset button
-3. **Reload extensions** button — extracted from `extensions.ts`
+3. **Copy tool config YAML** — extracted from `tools.ts` into `renderCopyToolConfigButton()`
+4. **Reload extensions** button — extracted from `extensions.ts`
 
-Alternatively, these can be rendered by `settings-tab.ts` directly (passing `toolsGroup` as the container), keeping `tools.ts` focused on tool rows. This is the approach shown in the Section 6 diff.
+All four are rendered by `settings-tab.ts` directly (passing `toolsGroup` as the container), keeping `tools.ts` focused on tool rows.
 
 ---
 
@@ -476,12 +487,15 @@ Option B is cleaner. The new file is a straightforward extraction from `extensio
 | `src/settings/sections/field-renderer.ts` | **Create** | Extract `FieldTarget`, `renderFieldList`, `renderField`, `getPersistedValue`, `saveFieldValue` from extensions.ts |
 | `src/settings/sections/shared-settings.ts` | **Create** | Extract shared settings rendering (small, ~30 lines) |
 | `src/settings/sections/user-automations.ts` | **Create** | Extract user automations rendering from extensions.ts (~60 lines) |
-| `src/settings/sections/execute-command.ts` | **No change** | `renderShellSection()` is called from a different parent but the function itself is unchanged |
+| `src/settings/sections/execute-command.ts` | **Edit** | `renderShellSection()` is called from a different parent (function itself unchanged). Update stale comment on line 22 that references "Extensions settings" — should reference the gear-icon modal / Tools section instead. |
 | `src/settings/sections/file-attachments.ts` | **No change** | `renderFileAttachmentsSection()` is called from Conversation group instead of Tool configuration |
 | `src/ui/tool-settings-modal.ts` | **Create** | New modal for per-tool settings (~150-200 lines) |
 | `src/ui/confirm-modal.ts` | **No change** | Referenced as pattern for the new modal |
-| `src/settings/sections/__tests__/extensions.test.ts` | **Edit** | Update imports to `field-renderer.ts`, remove tests for deleted rendering, add tests for modal if applicable |
-| `styles.css` | **Edit** | Add `.notor-extension-badge-customized` styling, gear icon alignment in tool rows |
+| `src/settings/sections/__tests__/extensions-string-array.test.ts` | **Edit** | Update imports to `field-renderer.ts`, remove tests for deleted rendering, add tests for modal if applicable |
+| `src/sub-agents/builtin-profiles.ts` | **Edit** | Update hardcoded settings deep-link list: remove "Tool configuration" (section no longer exists). Shell config is now under "Tools", file attachments under "Conversation". |
+| `styles.css` | **Edit** | Add `.notor-extension-badge-customized` styling (use inline JS like existing badges, or migrate all badges to CSS — see note below), gear icon alignment in tool rows |
+
+**Note on badge styling:** The existing "Built-in" and "User" badges (`notor-extension-badge-builtin`, `notor-extension-badge-user`) are styled entirely via inline JavaScript in `extensions.ts` (marginLeft, fontSize, opacity, fontStyle), not through CSS classes defined in `styles.css`. The new "Customized" badge should follow the same inline-JS pattern for consistency, unless this redesign migrates all badges to CSS classes. Pick one approach and apply it uniformly.
 
 ---
 
@@ -503,6 +517,6 @@ Option B is cleaner. The new file is a straightforward extraction from `extensio
 13. Collapse/expand sections, close and reopen settings — verify persisted state is correct and no errors from removed section keys
 
 ### Automated Testing
-- Update existing `extensions.test.ts` to test extracted `renderField()` from `field-renderer.ts`
+- Update existing `extensions-string-array.test.ts` to test extracted `renderField()` from `field-renderer.ts`
 - Add unit tests for `ToolSettingsModal` rendering (tool name, description, settings fields, customize section)
 - Verify build succeeds with no circular imports after file moves
