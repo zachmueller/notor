@@ -35,14 +35,10 @@ export function renderUserAutomationsSection(
 			.setDesc(`Trigger: ${automation.trigger}`);
 
 		// "User" badge
-		const badge = setting.nameEl.createSpan({
+		setting.nameEl.createSpan({
 			text: "User",
 			cls: "notor-extension-badge-user",
 		});
-		badge.style.marginLeft = "8px";
-		badge.style.fontSize = "0.75em";
-		badge.style.opacity = "0.7";
-		badge.style.fontStyle = "italic";
 
 		// Open button
 		setting.addButton((btn) =>

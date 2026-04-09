@@ -19,7 +19,7 @@ export function renderShellSection(
 	containerEl.createEl("p", {
 		text:
 			"Configure the shell used by execute_command. Timeout, output limits, " +
-			"and allowed directories are now configured per-tool in Extensions settings.",
+			"and allowed directories are now configured per-tool via the gear icon in Tools settings.",
 		cls: "setting-item-description",
 	});
 

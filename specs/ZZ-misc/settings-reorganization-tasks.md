@@ -1,7 +1,7 @@
 # Settings Reorganization — Implementation Tasks
 
 **Design doc:** [settings-reorganization-design.md](settings-reorganization-design.md)
-**Status:** In progress — Phase 7 complete
+**Status:** In progress — Phase 8 complete
 **Date:** 2026-04-09
 
 ---
@@ -272,11 +272,11 @@
 
 > **Goal:** Update all references to the removed sections and polish the implementation.
 
-- [ ] **8.1 Update `execute-command.ts` description text**
+- [x] **8.1 Update `execute-command.ts` description text**
   - Line 22 currently says: `"and allowed directories are now configured per-tool in Extensions settings."`
   - Replace with: `"and allowed directories are now configured per-tool via the gear icon in Tools settings."`
 
-- [ ] **8.2 Update `builtin-profiles.ts` settings deep-link list**
+- [x] **8.2 Update `builtin-profiles.ts` settings deep-link list**
   - In `src/sub-agents/builtin-profiles.ts` around line 148:
     - Remove `"Tool configuration"` from the list of section names
     - Remove `"Extensions"` if present
@@ -284,7 +284,7 @@
     - Add guidance that file attachments are under "Conversation"
   - The AI sub-agent needs to know where these settings moved, not just that they were removed
 
-- [ ] **8.3 Review badge styling**
+- [x] **8.3 Review badge styling**
   - The "Built-in" and "User" badges in `extensions.ts` use inline JS styles (marginLeft, fontSize, opacity, fontStyle)
   - These badges are now rendered in:
     - `user-automations.ts` (User badge on automations)
@@ -292,7 +292,7 @@
   - Consider creating CSS classes (`notor-extension-badge-builtin`, `notor-extension-badge-user`) in `styles.css` to replace the inline styles
   - Low priority — can be deferred if the inline approach works fine
 
-- [ ] **8.4 Review and update CSS in `styles.css`**
+- [x] **8.4 Review and update CSS in `styles.css`**
   - Verify `.notor-tool-column-headers` alignment still works with the new icon columns
   - Add any needed styles for gear/open icons in tool rows (from Phase 3.8)
   - Test in both light and dark themes

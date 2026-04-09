@@ -238,6 +238,15 @@
 	background: var(--background-modifier-border);
 }
 
+/* Extension badges — "User" / "Built-in" labels on tool and automation rows */
+.notor-extension-badge-user,
+.notor-extension-badge-builtin {
+	margin-left: 8px;
+	font-size: 0.75em;
+	opacity: 0.7;
+	font-style: italic;
+}
+
 /* Insert a vertical divider between the two toggles in each tool row.
    Obsidian's Setting places controls inside .setting-item-control as
    a flex container, so we target adjacent toggle siblings. */

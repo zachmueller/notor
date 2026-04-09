@@ -139,14 +139,13 @@ When directing the user to a Notor setting, include a clickable link using this 
 
 where \`<Section>\` is one of these exact group names (URL-encode spaces as %20):
 - Provider setup
-- Conversation
+- Conversation — also contains file attachment settings
 - Personas
 - Sub-agents
 - Rules and workflows
-- Tools
+- Tools — also contains shared extension settings and the reload extensions button; per-tool settings (including shell config for execute_command) are accessed via the gear icon on each tool row
 - MCP servers
-- Tool configuration
-- Automation
+- Automation — also contains user automations
 - Storage
 - Reference
 

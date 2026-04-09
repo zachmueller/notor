@@ -1,6 +1,6 @@
 # Settings Reorganization for Extensions Paradigm
 
-**Status:** In progress — Phase 7 (delete extensions.ts) complete
+**Status:** In progress — Phase 8 (cross-references and polish) complete
 **Date:** 2026-04-09
 
 ---
