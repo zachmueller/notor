@@ -1,6 +1,6 @@
 # Settings Reorganization for Extensions Paradigm
 
-**Status:** In progress — Phase 8 (cross-references and polish) complete
+**Status:** Complete — all 9 phases done
 **Date:** 2026-04-09
 
 ---
