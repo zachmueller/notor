@@ -1,0 +1,437 @@
+# Multi-Provider Web Search — Implementation Tasks
+
+**Design spec:** [multi-provider-web-search-design.md](./multi-provider-web-search-design.md)
+**Dependency spec:** [task-lane-queue-design.md](./task-lane-queue-design.md)
+**Date:** 2026-04-09
+
+---
+
+## Prerequisite: TaskLaneQueue (DONE)
+
+The `TaskLaneQueue` dependency from [`task-lane-queue-design.md`](./task-lane-queue-design.md) is fully implemented:
+- `src/queue/task-lane-queue.ts` — class with `enqueue()`, `pending()`, `destroy()`
+- `src/queue/__tests__/task-lane-queue.test.ts` — 13 passing unit tests
+- `src/main.ts:173` — `_taskLaneQueue` field + `getTaskLaneQueue()` getter at L1462
+- `src/extensions/runtime-context.ts:102-106` — `utils.queue` exposed to extensions
+- `src/main.ts:601-603` — `destroy()` in `onunload()`
+
+No work needed here. All phases below build on this foundation.
+
+---
+
+## Phase 1: Provider Interface & DuckDuckGo Extraction
+
+> Foundation layer. Creates the provider abstraction and extracts existing DDG logic from the scaffold into a proper module. No behavioral changes — the scaffold continues to work identically after this phase.
+
+### 1.1 Create provider interface and types
+
+**File to create:** `src/web-search/providers/provider.ts`
+
+- [ ] Define `WebSearchProviderType` union: `"duckduckgo" | "tavily" | "brave" | "serpapi"`
+- [ ] Define `WebSearchResult` interface: `{ title: string; url: string; snippet: string }`
+- [ ] Define `SearchProviderMeta` interface: `{ type, displayName, requiresApiKey, defaultDelayMs }`
+- [ ] Define `ProviderConfig` interface: `{ enabled: boolean; delayMs: number; apiKey: string | null }`
+- [ ] Define `SearchProviderResult` interface: `{ results: WebSearchResult[]; rateLimited?: boolean; error?: string }`
+- [ ] Define `SearchProvider` interface with `meta`, `search()`, and `isConfigured()` methods
+- [ ] Export all types
+
+### 1.2 Extract DuckDuckGo provider from scaffold
+
+**File to create:** `src/web-search/providers/duckduckgo.ts`
+
+Source code lives in `src/extensions/builtin-tool-scaffolds.ts:1248-1341` as string-template TypeScript inside the `WEB_SEARCH` scaffold constant.
+
+- [ ] Create `DuckDuckGoProvider` class implementing `SearchProvider`
+- [ ] Set `meta`: `{ type: "duckduckgo", displayName: "DuckDuckGo", requiresApiKey: false, defaultDelayMs: 1500 }`
+- [ ] Extract `cleanDDGUrl()` from scaffold L1248-1260 — make it a private method (export for tests)
+- [ ] Extract `parseDDGResults()` from scaffold L1262-1287 — make it a private method (export for tests)
+  - Uses browser-native `DOMParser` (not `@xmldom/xmldom`)
+  - Selectors: `.result` container, `.result__title a` for title+link, `.result__snippet` for snippet
+- [ ] Implement `search()` method by extracting HTTP logic from scaffold L1305-1341:
+  - POST to `https://html.duckduckgo.com/html/` with form-encoded body
+  - User-Agent: Chrome/120 on Macintosh (matching current scaffold)
+  - Timeout race via `Promise.race()` with `setTimeout` reject
+  - Import `requestUrl` from `obsidian` directly (same as current scaffold usage at L1315)
+  - Rate-limit detection: HTTP 202 OR 0 parsed results from non-empty response → `rateLimited: true`
+  - Include selector drift warning log (scaffold L1346-1352)
+- [ ] Implement `isConfigured()`: return `config.enabled` (no API key needed)
+
+### 1.3 DuckDuckGo provider tests
+
+**File to create:** `src/web-search/providers/__tests__/duckduckgo.test.ts`
+
+Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `beforeEach(() => vi.clearAllMocks())`.
+
+- [ ] Test `cleanDDGUrl()`:
+  - DDG redirect URL (`//duckduckgo.com/l/?uddg=...`) → decoded actual URL
+  - Protocol-relative URL (`//example.com`) → `https://example.com`
+  - Absolute HTTP/HTTPS URLs → passthrough
+  - Invalid/empty input → `null`
+- [ ] Test `parseDDGResults()`:
+  - Valid HTML with multiple `.result` containers → correct extraction
+  - `maxResults` cap honored
+  - Missing title or URL → result skipped
+  - Empty HTML → empty array
+- [ ] Test `search()` — HTTP success:
+  - Mock `requestUrl` returning status 200 with HTML → parsed results
+- [ ] Test `search()` — rate-limit detection:
+  - HTTP 202 → `rateLimited: true`
+  - HTTP 200 but 0 parsed results from non-empty body → `rateLimited: true`
+- [ ] Test `search()` — error handling:
+  - Non-200/202 status → error thrown
+  - Network error → error propagated
+  - Timeout → error with timeout message
+- [ ] Test `isConfigured()`: returns `true` when `enabled: true`, `false` otherwise
+
+---
+
+## Phase 2: API Search Providers
+
+> Three independent providers. Can be implemented in parallel. Each follows the same pattern: implement `SearchProvider`, handle JSON request/response, detect rate limits.
+
+### 2.1 Tavily provider
+
+**File to create:** `src/web-search/providers/tavily.ts`
+
+- [ ] Create `TavilyProvider` class implementing `SearchProvider`
+- [ ] Set `meta`: `{ type: "tavily", displayName: "Tavily", requiresApiKey: true, defaultDelayMs: 0 }`
+- [ ] Implement `search()`:
+  - POST to `https://api.tavily.com/search`
+  - Auth: Bearer token in `Authorization` header (from `this.apiKey`, passed at call time or stored)
+  - JSON body: `{ query, max_results: numResults }`
+  - Parse JSON response: map `results[]` to `WebSearchResult[]` (fields: `title`, `url`, `content` → `snippet`)
+  - Rate-limit detection: HTTP 429 → `rateLimited: true`
+  - Timeout via `Promise.race()` pattern
+- [ ] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
+
+**Note:** The provider receives `apiKey` at search time, not construction. The `WebSearchQueue` passes the resolved config's API key. Design decision: providers are stateless singletons — config is external. Two options:
+1. Pass `apiKey` as a parameter to `search()` (requires interface change)
+2. Have `WebSearchQueue` set a transient `apiKey` property before calling `search()`
+
+Recommend option 1: add an optional `config?: ProviderConfig` parameter to `SearchProvider.search()` so providers needing API keys can read `config.apiKey`. This keeps providers stateless. **Update `provider.ts` interface accordingly.**
+
+### 2.2 Tavily provider tests
+
+**File to create:** `src/web-search/providers/__tests__/tavily.test.ts`
+
+- [ ] Test `search()` — success: mock `requestUrl` returning JSON with results → `WebSearchResult[]`
+- [ ] Test `search()` — verify `Authorization: Bearer <key>` header sent
+- [ ] Test `search()` — rate-limit: HTTP 429 → `rateLimited: true`
+- [ ] Test `search()` — timeout handling
+- [ ] Test `search()` — non-429 error status
+- [ ] Test `isConfigured()`: enabled + key → true; enabled + no key → false; disabled → false
+
+### 2.3 Brave Search provider
+
+**File to create:** `src/web-search/providers/brave.ts`
+
+- [ ] Create `BraveSearchProvider` class implementing `SearchProvider`
+- [ ] Set `meta`: `{ type: "brave", displayName: "Brave Search", requiresApiKey: true, defaultDelayMs: 0 }`
+- [ ] Implement `search()`:
+  - GET to `https://api.search.brave.com/res/v1/web/search?q={query}&count={numResults}`
+  - Auth: `X-Subscription-Token` header
+  - Parse JSON response: map `web.results[]` to `WebSearchResult[]` (fields: `title`, `url`, `description` → `snippet`)
+  - Rate-limit detection: HTTP 429 → `rateLimited: true`
+- [ ] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
+
+### 2.4 Brave Search provider tests
+
+**File to create:** `src/web-search/providers/__tests__/brave.test.ts`
+
+- [ ] Test `search()` — success: JSON response → `WebSearchResult[]`
+- [ ] Test `search()` — verify `X-Subscription-Token` header
+- [ ] Test `search()` — rate-limit: HTTP 429 → `rateLimited: true`
+- [ ] Test `search()` — timeout and error handling
+- [ ] Test `isConfigured()`
+
+### 2.5 SerpApi provider
+
+**File to create:** `src/web-search/providers/serpapi.ts`
+
+- [ ] Create `SerpApiProvider` class implementing `SearchProvider`
+- [ ] Set `meta`: `{ type: "serpapi", displayName: "SerpApi", requiresApiKey: true, defaultDelayMs: 0 }`
+- [ ] Implement `search()`:
+  - GET to `https://serpapi.com/search?q={query}&num={numResults}&api_key={key}&engine=google`
+  - Auth: `api_key` query parameter
+  - Parse JSON response: map `organic_results[]` to `WebSearchResult[]` (fields: `title`, `link` → `url`, `snippet`)
+  - Rate-limit detection: HTTP 429 OR JSON `error` field containing `"rate"` → `rateLimited: true`
+- [ ] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
+
+### 2.6 SerpApi provider tests
+
+**File to create:** `src/web-search/providers/__tests__/serpapi.test.ts`
+
+- [ ] Test `search()` — success: JSON response → `WebSearchResult[]`
+- [ ] Test `search()` — verify `api_key` in query params
+- [ ] Test `search()` — rate-limit: HTTP 429 → `rateLimited: true`
+- [ ] Test `search()` — rate-limit: JSON error containing "rate" → `rateLimited: true`
+- [ ] Test `search()` — timeout and error handling
+- [ ] Test `isConfigured()`
+
+---
+
+## Phase 3: Provider Registry & Web Search Queue
+
+> Core orchestration. Builds on Phase 1-2 providers and the existing TaskLaneQueue.
+
+### 3.1 Provider registry
+
+**File to create:** `src/web-search/provider-registry.ts`
+
+- [ ] Create `SearchProviderRegistry` class with internal `Map<WebSearchProviderType, SearchProvider>`
+- [ ] Implement `register(provider)`: stores by `provider.meta.type`
+- [ ] Implement `get(type)`: returns provider or `undefined`
+- [ ] Implement `getAll()`: returns all registered providers
+- [ ] Implement `getAvailable(providerConfigs)`: filters to providers where `isConfigured(config)` returns `true`
+- [ ] Implement `getAvailableByPriority(providerConfigs, priorityOrder)`:
+  - Filter by `isConfigured()` → sort by position in `priorityOrder` array
+  - Providers not in `priorityOrder` are excluded (not appended)
+
+### 3.2 Provider registry tests
+
+**File to create:** `src/web-search/__tests__/provider-registry.test.ts`
+
+- [ ] Test `register()` and `get()` basic operations
+- [ ] Test `getAll()` returns all registered providers
+- [ ] Test `getAvailable()`:
+  - Provider enabled + key present → included
+  - Provider enabled + key missing (for key-requiring) → excluded
+  - Provider disabled → excluded
+- [ ] Test `getAvailableByPriority()`:
+  - Respects priority order
+  - Excludes providers not in priority list
+  - Excludes unconfigured providers even if in priority list
+
+### 3.3 Web search queue
+
+**File to create:** `src/web-search/queue.ts`
+
+- [ ] Define `WebSearchResolvedConfig` interface (design spec Section 8.2):
+  ```
+  { roundRobin, providerPriority, providers: Record<string, { enabled, delayMs, apiKey }> }
+  ```
+- [ ] Define `WebSearchApiResult` interface (design spec Section 7):
+  ```
+  { results: WebSearchResult[], provider: string, failures: Array<{ provider, error }> }
+  ```
+- [ ] Create `WebSearchQueue` class:
+  - Constructor: `(getSettings: () => Record<string, unknown>, providerRegistry: SearchProviderRegistry, laneQueue: TaskLaneQueue)`
+  - Private `roundRobinIndex: number = 0`
+- [ ] Implement `buildConfig(settings)`: maps flat extension settings → `WebSearchResolvedConfig`
+  - Reads `web_search_round_robin`, `web_search_provider_priority`
+  - Reads per-provider `web_search_{provider}_enabled`, `_delay_ms`, `_api_key`
+  - Falls back to sensible defaults (DDG enabled, others disabled)
+- [ ] Implement `resolveProviderChain(config)`:
+  - Uses `providerRegistry.getAvailableByPriority(config.providers, config.providerPriority)`
+  - If round-robin ON: rotate starting index via `roundRobinIndex % available.length`, wrap cyclically
+  - If round-robin OFF: return as-is (highest priority first)
+- [ ] Implement `search(query, numResults, timeoutMs)`:
+  - Call `getSettings()` → `buildConfig()` → `resolveProviderChain()`
+  - Iterate provider chain: `laneQueue.enqueue(provider.meta.type, () => provider.search(...), delayMs)`
+  - On success (no `rateLimited`): return `{ results, provider, failures }`
+  - On `rateLimited` or error: record in `failures[]`, try next provider
+  - All exhausted: return `{ results: [], provider: "", failures }` with descriptive error
+  - No providers configured: return immediately with "No web search providers are configured" message
+  - Increment `roundRobinIndex` on each call (before provider selection)
+
+### 3.4 Web search queue tests
+
+**File to create:** `src/web-search/__tests__/queue.test.ts`
+
+Use mock providers and a real `TaskLaneQueue` instance (lightweight, no HTTP).
+
+- [ ] Test single provider success: DDG only → result returned with `provider: "duckduckgo"`
+- [ ] Test fallback: first provider rate-limited → second provider used
+- [ ] Test fallback: first provider throws → second provider used
+- [ ] Test all-providers-fail: aggregated error with all failure reasons
+- [ ] Test no providers configured: immediate descriptive error
+- [ ] Test round-robin OFF: always starts with highest-priority provider
+- [ ] Test round-robin ON with 3 providers: 6 requests distribute cyclically (verify starting provider)
+- [ ] Test `buildConfig()`: flat settings → typed config mapping
+- [ ] Test lane delegation: verify `laneQueue.enqueue()` called with correct lane key and delay
+- [ ] Test settings read fresh: changing `getSettings()` return value between calls → different behavior
+
+---
+
+## Phase 4: Scaffold Settings Expansion
+
+> Adds new YAML settings fields to the scaffold for provider configuration. No code logic changes yet — the scaffold still uses inline DDG logic. This phase can land independently.
+
+### 4.1 Expand scaffold YAML settings fence
+
+**File to modify:** `src/extensions/builtin-tool-scaffolds.ts` (WEB_SEARCH constant, L1221-1243)
+
+Add new settings fields after the existing `web_search_default_num_results`:
+
+- [ ] Add `web_search_round_robin` field:
+  - `type: boolean`, `default: false`
+  - Name: "Round-robin across providers"
+  - Description: "Distribute search requests across all enabled providers instead of always using the highest-priority one."
+- [ ] Add `web_search_provider_priority` field:
+  - `type: string[]`, `default: ["duckduckgo", "tavily", "brave", "serpapi"]`
+  - Name: "Provider priority order"
+  - Description: "Order in which search providers are tried. First entry is highest priority."
+- [ ] Add DuckDuckGo provider fields:
+  - `web_search_duckduckgo_enabled`: `boolean`, default `true`, name "DuckDuckGo — Enabled"
+  - `web_search_duckduckgo_delay_ms`: `number`, default `1500`, min `0`, max `10000`, name "DuckDuckGo — Delay (ms)"
+- [ ] Add Tavily provider fields:
+  - `web_search_tavily_enabled`: `boolean`, default `false`, name "Tavily — Enabled"
+  - `web_search_tavily_api_key`: `string`, `secret: true`, name "Tavily — API Key"
+  - `web_search_tavily_delay_ms`: `number`, default `0`, min `0`, max `10000`, name "Tavily — Delay (ms)"
+- [ ] Add Brave Search provider fields:
+  - `web_search_brave_enabled`: `boolean`, default `false`, name "Brave Search — Enabled"
+  - `web_search_brave_api_key`: `string`, `secret: true`, name "Brave Search — API Key"
+  - `web_search_brave_delay_ms`: `number`, default `0`, min `0`, max `10000`, name "Brave Search — Delay (ms)"
+- [ ] Add SerpApi provider fields:
+  - `web_search_serpapi_enabled`: `boolean`, default `false`, name "SerpApi — Enabled"
+  - `web_search_serpapi_api_key`: `string`, `secret: true`, name "SerpApi — API Key"
+  - `web_search_serpapi_delay_ms`: `number`, default `0`, min `0`, max `10000`, name "SerpApi — Delay (ms)"
+
+**Verify:** Settings render correctly in the generic extension settings UI (`src/settings/sections/extensions.ts`). No UI code changes needed — the existing renderer handles `boolean`, `number`, `string` (with `secret`), and `string[]` field types.
+
+---
+
+## Phase 5: Plugin Wiring & Scaffold Refactor
+
+> Wires everything together. The scaffold transitions from inline DDG logic to delegating to `utils.webSearch.search()`.
+
+### 5.1 Add singletons to main.ts
+
+**File to modify:** `src/main.ts`
+
+- [ ] Add imports for `SearchProviderRegistry`, `WebSearchQueue`, and all four provider classes
+- [ ] Add private fields (near existing singletons at L165-173):
+  ```typescript
+  private _searchProviderRegistry?: SearchProviderRegistry;
+  private _webSearchQueue?: WebSearchQueue;
+  ```
+- [ ] Add private getter `getSearchProviderRegistry()` (lazy init):
+  - Creates registry, registers all four providers (`DuckDuckGoProvider`, `TavilyProvider`, `BraveSearchProvider`, `SerpApiProvider`)
+- [ ] Add public getter `getWebSearchQueue()` (lazy init):
+  - Creates `WebSearchQueue` with:
+    - `getSettings` closure → delegates to `this.getExtensionManager().getResolvedSettings("web_search").values`
+      - **Note:** Use `getResolvedSettings()` (L466-488 of manager.ts) — NOT the spec's `getCompiledTool()` which doesn't exist on `ExtensionManager`. The existing `getResolvedSettings()` already resolves both non-secret fields (from `user_extension_settings`) and secret fields (from SecretStorage via `slugifySecretId`).
+    - `this.getSearchProviderRegistry()`
+    - `this.getTaskLaneQueue()`
+
+### 5.2 Wire `utils.webSearch` in runtime-context.ts
+
+**File to modify:** `src/extensions/runtime-context.ts`
+
+- [ ] Add `WebSearchApiResult` import (from `src/web-search/queue.ts`)
+- [ ] Add `webSearch` to `ExtensionUtils` interface (after `queue` at L106):
+  ```typescript
+  webSearch: {
+    search: (query: string, numResults: number, timeoutMs: number) => Promise<WebSearchApiResult>;
+  };
+  ```
+- [ ] Add `webSearch` to `buildUtils()` return object (after `queue` closure at L203):
+  ```typescript
+  webSearch: {
+    search: (query, numResults, timeoutMs) =>
+      plugin.getWebSearchQueue().search(query, numResults, timeoutMs),
+  },
+  ```
+
+### 5.3 Refactor scaffold code to delegate
+
+**File to modify:** `src/extensions/builtin-tool-scaffolds.ts` (WEB_SEARCH constant)
+
+- [ ] Update tool description from `"Search the web using DuckDuckGo..."` to `"Search the web and return results with titles, URLs, and snippets."` (L1219)
+- [ ] Replace the TypeScript code block (L1244-1383) with the simplified delegation code:
+  - Keep: input validation (`query` param check)
+  - Keep: `numResults` and `timeoutMs` computation from settings
+  - **Replace**: all DDG-specific code (`cleanDDGUrl`, `parseDDGResults`, HTTP request, timeout race) with single call: `const searchResult = await utils.webSearch.search(query, numResults, timeoutMs)`
+  - Keep: `isDomainBlocked` filtering (reads `shared.domain_denylist`)
+  - Keep: markdown output formatting
+  - Add: log `searchResult.failures` as warnings if non-empty
+  - Add: log `searchResult.provider` in completion message
+- [ ] Remove `cleanDDGUrl()` and `parseDDGResults()` helper functions from the scaffold string
+  - These now live in `src/web-search/providers/duckduckgo.ts`
+
+**Expected reduction:** ~140 lines of scaffold TypeScript code → ~50 lines.
+
+---
+
+## Phase 6: Legacy Settings Cleanup
+
+> Removes redundant settings fields from the core settings system. Safe to do because the migration at `main.ts:680-690` already copies values to `user_extension_settings["web_search"]` on first load.
+
+### 6.1 Remove legacy settings fields
+
+- [ ] **`src/settings/types.ts`** — Remove `web_search_timeout` (L155) and `web_search_default_num_results` (L158) from `NotorSettings` interface, including their comments (L151-158 section)
+- [ ] **`src/settings/defaults.ts`** — Remove `web_search_timeout: 10` (L136) and `web_search_default_num_results: 5` (L137) from `createDefaultSettings()`, including the `// web_search` comment (L135)
+
+### 6.2 Clean up legacy keys reference
+
+- [ ] **`src/main.ts`** — Remove `"web_search_timeout"` and `"web_search_default_num_results"` from the `oldFields` array at L768-769
+  - These are used in the Phase 2 cleanup block (L763-789) that strips old fields from `data.json`. Since the fields are being removed from `NotorSettings`, they no longer need to be in this cleanup list.
+- [ ] **Keep** the migration block at L680-690 — it still needs to run for users upgrading from pre-migration versions
+
+### 6.3 Verify no remaining references
+
+- [ ] Grep for `web_search_timeout` and `web_search_default_num_results` across the codebase (excluding specs/docs)
+  - Should only appear in: scaffold YAML settings fence, migration block, and test files
+  - Any other references → update or remove
+
+---
+
+## Phase 7: Unit Test Sweep & Verification
+
+> Final validation. Ensures all components work together.
+
+### 7.1 Run full test suite
+
+- [ ] Run `npm test` — all existing tests must continue to pass
+- [ ] Run new test files specifically:
+  - `src/web-search/providers/__tests__/duckduckgo.test.ts`
+  - `src/web-search/providers/__tests__/tavily.test.ts`
+  - `src/web-search/providers/__tests__/brave.test.ts`
+  - `src/web-search/providers/__tests__/serpapi.test.ts`
+  - `src/web-search/__tests__/provider-registry.test.ts`
+  - `src/web-search/__tests__/queue.test.ts`
+
+### 7.2 Build verification
+
+- [ ] Run `npm run build` — no TypeScript compilation errors
+- [ ] Verify no circular imports between `src/web-search/`, `src/queue/`, `src/extensions/`, and `src/main.ts`
+
+### 7.3 Manual smoke test checklist
+
+- [ ] Load plugin in Obsidian — no console errors on startup
+- [ ] Open Settings > Extensions > web_search — verify all new provider fields render:
+  - Round-robin toggle, provider priority list, per-provider enabled/delay/API-key fields
+- [ ] Run a basic `web_search` query with only DDG enabled — results returned correctly
+- [ ] Enter a Tavily API key, enable Tavily, disable DDG — search uses Tavily
+- [ ] Enable both DDG + Tavily with round-robin ON — verify both providers used (check logs)
+- [ ] Disable all providers — verify descriptive error returned
+- [ ] Test domain denylist filtering still works with new providers
+
+---
+
+## Implementation Notes
+
+### API Key Passing Design Decision
+
+The design spec has providers as stateless singletons registered once at plugin init. However, API keys are resolved per-call via the settings system. The `SearchProvider.search()` method needs access to the API key at call time. Two clean approaches:
+
+1. **Add `config: ProviderConfig` parameter to `search()`** — providers read `config.apiKey` from the argument. Interface becomes: `search(query, numResults, timeoutMs, config: ProviderConfig)`. The `WebSearchQueue` passes the resolved config for each provider.
+2. **Queue wraps the call** — `WebSearchQueue` creates a closure that sets the key before calling `search()`.
+
+Recommend **option 1** for simplicity and testability. Update the `SearchProvider` interface in Phase 1.1 accordingly.
+
+### Spec Discrepancy: `getCompiledTool()`
+
+The design spec (Section 11.4) references `extensionManager.getCompiledTool("web_search")` — this method does not exist on `ExtensionManager`. Use the existing `getResolvedSettings("web_search")` (manager.ts:466-488) instead, which already resolves both persisted and secret settings. The `getSettings` closure in the `WebSearchQueue` constructor should be:
+
+```typescript
+() => this.getExtensionManager().getResolvedSettings("web_search").values
+```
+
+### File Placement
+
+Tests use the `__tests__/` subdirectory pattern (matching `src/queue/__tests__/`), not co-located `.test.ts` files. This keeps the provider directory clean.
+
+### DOMParser Availability
+
+The DDG provider uses `DOMParser` which is available in Obsidian's Electron runtime (browser API). This is the same as the current scaffold — no polyfill needed. Tests will need to mock or provide a `DOMParser` (jsdom or similar via Vitest's `environment: 'jsdom'` config).
