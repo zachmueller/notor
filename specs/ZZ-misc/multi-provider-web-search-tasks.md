@@ -55,6 +55,7 @@ Source code lives in `src/extensions/builtin-tool-scaffolds.ts:1248-1341` as str
   - User-Agent: Chrome/120 on Macintosh (matching current scaffold)
   - Timeout race via `Promise.race()` with `setTimeout` reject
   - Import `requestUrl` from `obsidian` directly (note: the current scaffold uses `obsidian.requestUrl` via runtime injection — the extracted module uses a proper ES import instead)
+  - Pass `throw: false` in the `requestUrl` options — without it Obsidian throws on non-2xx status codes, making HTTP 202 uninspectable
   - Rate-limit detection: HTTP 202 OR 0 parsed results from non-empty response → `rateLimited: true`
   - Selector drift warning: when 0 results parsed from non-empty body, push a warning string into `result.warnings[]` (replaces direct logging — providers have no logger; the `WebSearchQueue` in Phase 3.3 logs these)
   - If `signal` is provided, include it in the `Promise.race()` pattern (abort listener that rejects on `signal.abort`)
@@ -104,6 +105,7 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - POST to `https://api.tavily.com/search`
   - Auth: Bearer token in `Authorization` header (from `apiKey` parameter)
   - JSON body: `{ query, max_results: numResults }`
+  - Pass `throw: false` in the `requestUrl` options — without it Obsidian throws on non-2xx status codes, making HTTP 429 uninspectable
   - Parse JSON response: map `results[]` to `WebSearchResult[]` (fields: `title`, `url`, `content` → `snippet`)
   - Rate-limit detection: HTTP 429 → `rateLimited: true`
   - Timeout via `Promise.race()` pattern
@@ -132,6 +134,7 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
 - [ ] Implement `search()`:
   - GET to `https://api.search.brave.com/res/v1/web/search?q={query}&count={numResults}`
   - Auth: `X-Subscription-Token` header
+  - Pass `throw: false` in the `requestUrl` options — without it Obsidian throws on non-2xx status codes, making HTTP 429 uninspectable
   - Parse JSON response: map `web.results[]` to `WebSearchResult[]` (fields: `title`, `url`, `description` → `snippet`)
   - Rate-limit detection: HTTP 429 → `rateLimited: true`
   - Timeout via `Promise.race()` pattern; if `signal` is provided, include an abort listener
@@ -156,6 +159,7 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
 - [ ] Implement `search()`:
   - GET to `https://serpapi.com/search?q={query}&num={numResults}&api_key={key}&engine=google`
   - Auth: `api_key` query parameter
+  - Pass `throw: false` in the `requestUrl` options — without it Obsidian throws on non-2xx status codes, making HTTP 429 uninspectable
   - Parse JSON response: map `organic_results[]` to `WebSearchResult[]` (fields: `title`, `link` → `url`, `snippet`)
   - Rate-limit detection: HTTP 429 OR JSON `error` field containing `"rate"` → `rateLimited: true`
   - Timeout via `Promise.race()` pattern; if `signal` is provided, include an abort listener
@@ -216,8 +220,9 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   ```
 - [ ] Define `WebSearchApiResult` interface (design spec Section 7):
   ```
-  { results: WebSearchResult[], provider: string, failures: Array<{ provider, error }> }
+  { results: WebSearchResult[], provider: string, failures: Array<{ provider, error }>, error?: string }
   ```
+  - `error` is set when the queue itself cannot proceed (e.g. "No web search providers are configured") — distinct from per-provider `failures`
 - [ ] Create `WebSearchQueue` class:
   - Constructor: `(getSettings: () => Record<string, unknown>, providerRegistry: SearchProviderRegistry, laneQueue: TaskLaneQueue)`
   - Private `roundRobinIndex: number = 0`
@@ -225,21 +230,22 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - Reads `web_search_round_robin`, `web_search_provider_priority`
   - Reads per-provider `web_search_{provider}_enabled`, `_delay_ms`, `_api_key`
   - Falls back to sensible defaults (DDG enabled, others disabled)
-- [ ] Implement `resolveProviderChain(config)`:
+- [ ] Implement `resolveProviderChain(config, startIndex)` — **pure function, no side effects**:
+  - Takes `startIndex: number` as a parameter (passed from `search()`)
   - Uses `providerRegistry.getAvailableByPriority(config.providers, config.providerPriority)`
-  - If round-robin ON: rotate starting index via `roundRobinIndex % available.length`, wrap cyclically so all providers are included (e.g. with [A,B,C] and index=1 → chain is [B,C,A]). Use modular assignment (`this.roundRobinIndex = (this.roundRobinIndex + 1) % chain.length`) rather than unbounded increment + post-hoc modulo.
-  - If round-robin OFF: return as-is (highest priority first)
+  - If round-robin ON: rotate starting position via `startIndex % available.length`, wrap cyclically so all providers are included (e.g. with [A,B,C] and startIndex=1 → chain is [B,C,A])
+  - If round-robin OFF: return as-is (highest priority first), ignoring `startIndex`
   - In both modes, the returned chain always contains ALL available providers — fallback iterates the full chain before giving up
 - [ ] Implement `search(query, numResults, timeoutMs, signal?)`:
   - `signal?: AbortSignal` — if provided, check `signal.aborted` before each provider attempt and pass `signal` through to `provider.search()`
-  - Call `getSettings()` → `buildConfig()` → `resolveProviderChain()`
+  - Call `getSettings()` → `buildConfig()` → `resolveProviderChain(config, this.roundRobinIndex)`
+  - Increment `roundRobinIndex` **after** chain resolution: `this.roundRobinIndex++` (unbounded; post-hoc modulo in `resolveProviderChain` handles wrapping — overflow is impossible in practice at 2^53)
   - Iterate provider chain: `laneQueue.enqueue(provider.meta.type, () => provider.search(query, numResults, timeoutMs, apiKey, signal), delayMs)`
   - After each provider call, log any `result.warnings[]` entries via the queue's logger
   - On success (no `rateLimited`): return `{ results, provider, failures }`
   - On `rateLimited` or error: record in `failures[]`, try next provider
-  - All exhausted: return `{ results: [], provider: "", failures }` with descriptive error
-  - No providers configured: return immediately with "No web search providers are configured" message
-  - Increment `roundRobinIndex` on each call (before provider selection)
+  - All exhausted: return `{ results: [], provider: "", failures, error: "All search providers failed" }`
+  - No providers configured: return immediately with `{ results: [], provider: "", failures: [], error: "No web search providers are configured" }`
   - **Note:** `timeoutMs` applies per-provider, not to the entire chain. Worst-case latency is `timeoutMs × numProviders`. Document this in a JSDoc comment on the method.
 
 ### 3.4 Web search queue tests
@@ -305,6 +311,10 @@ Add new settings fields after the existing `web_search_default_num_results`:
 
 The current `string[]` renderer uses a free-text input for adding entries. For `web_search_provider_priority`, entries must be valid provider names.
 
+- [ ] Add up/down reorder buttons to each `string[]` entry (before the existing "Remove" button):
+  - "▲" button: swaps entry with the one above (hidden for the first entry)
+  - "▼" button: swaps entry with the one below (hidden for the last entry)
+  - On click: splice + re-insert, `saveFieldValue()`, `ctx.redisplay()`
 - [ ] In the `string[]` branch of `renderField()`, check if `field.options` is present
 - [ ] When `field.options` exists: render a dropdown (`addDropdown`) instead of a text input (`addText`) for the "Add" action, populated with `field.options` values that aren't already in the list
 - [ ] When all options are already in the list: hide the Add row (dropdown + button) entirely
@@ -367,8 +377,10 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
   - **Replace**: all DDG-specific code (`cleanDDGUrl`, `parseDDGResults`, HTTP request, timeout race) with single call: `const searchResult = await utils.webSearch.search(query, numResults, timeoutMs, utils.abortSignal)`
   - Keep: `isDomainBlocked` filtering (reads `shared.domain_denylist`)
   - Keep: markdown output formatting
-  - Add: log `searchResult.failures` as warnings if non-empty
-  - Add: log `searchResult.provider` in completion message
+  - **Add** (new behavior): pass `utils.abortSignal` to `webSearch.search()` — the current scaffold does not use `abortSignal` at all; this is a new cancellation path
+  - **Add**: check `searchResult.error` and return it as the tool error message if set
+  - **Add**: log `searchResult.failures` as warnings if non-empty
+  - **Add**: log `searchResult.provider` in completion message
 - [ ] Remove `cleanDDGUrl()` and `parseDDGResults()` helper functions from the scaffold string
   - These now live in `src/web-search/providers/duckduckgo.ts`
 
@@ -382,7 +394,7 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 
 ### 6.1 Remove legacy settings fields
 
-- [ ] **`src/settings/types.ts`** — Remove `web_search_timeout` (L155) and `web_search_default_num_results` (L158) from `NotorSettings` interface, including their comments (L151-158 section)
+- [ ] **`src/settings/types.ts`** — Remove `web_search_timeout` (L155) and `web_search_default_num_results` (L158) from `NotorSettings` interface, including their comments (L150-158 section)
 - [ ] **`src/settings/defaults.ts`** — Remove `web_search_timeout: 10` (L136) and `web_search_default_num_results: 5` (L137) from `createDefaultSettings()`, including the `// web_search` comment (L135)
 
 ### 6.2 Fix migration block for removed types
