@@ -130,6 +130,19 @@ export default class NotorPlugin extends Plugin {
 	private _systemPromptBuilder?: SystemPromptBuilder;
 	private _vaultRuleManager?: VaultRuleManager;
 	private _orchestrator?: ChatOrchestrator;
+
+	/**
+	 * Orchestrators for secondary chat panels.
+	 *
+	 * Each secondary panel gets its own `ChatOrchestrator` sharing
+	 * infrastructure singletons. Tracked for cleanup in `onunload()`.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	private _secondaryOrchestrators: ChatOrchestrator[] = [];
+
+	/** Guard to prevent multiple wireView() calls from re-registering the persona name change callback. */
+	private _personaNameChangeWired = false;
 	private _noteOpener?: NoteOpener;
 	private _staleTracker?: StaleContentTracker;
 	private _personaManager?: PersonaManager;
@@ -246,10 +259,21 @@ export default class NotorPlugin extends Plugin {
 		this._settingTab = new NotorSettingTab(this.app, this);
 		this.addSettingTab(this._settingTab);
 
-		// 3. Register the chat panel view type
+		// 3. Register the chat panel view type.
+		// Both primary and secondary panels use the same view type.
+		// Secondary panels get their own orchestrator sharing infrastructure singletons.
+		// @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
 		this.registerView(CHAT_VIEW_TYPE, (leaf) => {
 			const view = new NotorChatView(leaf, this);
-			// Wire the view to the orchestrator once available
+
+			// Check if this is a secondary panel (set by setState during workspace
+			// restore or by setIsSecondary before wireView for command-created panels).
+			// At this point during initial registerView, the leaf state may not be
+			// set yet — secondary detection happens in two places:
+			// 1. Command-created: the command calls wireViewAsSecondary() explicitly
+			// 2. Workspace restore: setState() triggers re-wiring via a deferred callback
+			//
+			// Default wiring uses the primary orchestrator singleton.
 			this.wireView(view);
 			return view;
 		});
@@ -404,6 +428,27 @@ export default class NotorPlugin extends Plugin {
 			},
 		});
 
+		// Phase 4, Step 4d: Open a secondary chat panel in a new tab.
+		// Each secondary panel gets its own orchestrator for independent
+		// provider/model state and concurrent streaming.
+		// Obsidian calls the factory (registerView), creates the view, then
+		// calls setState() which detects isSecondary and re-wires with its
+		// own orchestrator.
+		this.addCommand({
+			id: "open-secondary-chat",
+			name: "Open new chat panel",
+			callback: () => {
+				const leaf = this.app.workspace.getLeaf("tab");
+				leaf.setViewState({
+					type: CHAT_VIEW_TYPE,
+					active: true,
+					state: { isSecondary: true },
+				}).catch((e) => {
+					log.error("Failed to open secondary chat panel", { error: String(e) });
+				});
+			},
+		});
+
 		// EXT-016: Reload user extensions from vault files.
 		this.addCommand({
 			id: "reload-extensions",
@@ -515,6 +560,14 @@ export default class NotorPlugin extends Plugin {
 		this._orchestrator?.destroy().catch((e) => {
 			log.error("Orchestrator destroy failed", { error: String(e) });
 		});
+
+		// Phase 4: Destroy secondary orchestrators
+		for (const orch of this._secondaryOrchestrators) {
+			orch.destroy().catch((e) => {
+				log.error("Secondary orchestrator destroy failed", { error: String(e) });
+			});
+		}
+		this._secondaryOrchestrators = [];
 
 		// Clear the last-active markdown path cache on unload
 		notifyMarkdownLeafActivated(null);
@@ -961,7 +1014,7 @@ export default class NotorPlugin extends Plugin {
 	private _initMcpHub(): void {
 		const vaultRootPath = this.vaultRootPath;
 
-		const mcpHub = new McpHub(this.manifest.version, vaultRootPath);
+		const mcpHub = new McpHub(this.manifest.version, vaultRootPath, this.getTaskLaneQueue());
 		this._mcpHub = mcpHub;
 
 		// Register cleanup via Obsidian lifecycle — ensures all connections
@@ -1461,6 +1514,79 @@ export default class NotorPlugin extends Plugin {
 	}
 
 	/**
+	 * Create a secondary orchestrator sharing infrastructure singletons.
+	 *
+	 * Each secondary panel gets its own `ChatOrchestrator` with its own
+	 * `ConversationManager`, `activeSessions` map, and per-orchestrator
+	 * provider/model fields. Expensive singletons (ProviderRegistry,
+	 * HistoryManager, etc.) are shared.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	createSecondaryOrchestrator(): ChatOrchestrator {
+		const dispatcher = this.getToolDispatcher();
+		const historyManager = this.getHistoryManager();
+		const systemPromptBuilder = this.getSystemPromptBuilder();
+		const providerRegistry = this.getProviderRegistry();
+		const vaultRuleManager = this.getVaultRuleManager();
+
+		const orchestrator = new ChatOrchestrator(
+			this.app,
+			providerRegistry,
+			systemPromptBuilder,
+			dispatcher,
+			historyManager,
+			this.settings,
+			undefined, // view wired later via wireView()
+			vaultRuleManager
+		);
+
+		// Wire same shared managers as primary
+		orchestrator.setPersonaManager(this.getPersonaManager());
+		orchestrator.setWorkflowHookOverrideManager(
+			this.getWorkflowHookOverrideManager()
+		);
+
+		const mgr = this.getExtensionManager();
+		orchestrator.setExtensionAccessors({
+			lifecycle: {
+				getForTrigger: (t) => mgr.getAutomationsForTrigger(t),
+				execute: (a, c) => mgr.executeAutomation(a, c),
+			},
+			toolEvent: {
+				getForToolEvent: (t, n) => mgr.getAutomationsForToolEvent(t, n),
+				execute: (a, c) => mgr.executeAutomation(a, c),
+			},
+		});
+
+		orchestrator.setGetToolDefinitions((config) => {
+			const toolRegistry = this.getToolRegistry();
+			if (config) {
+				return toolRegistry.getFilteredToolDefinitions(config) as import("./providers/provider").ToolDefinition[];
+			}
+			return toolRegistry.getToolDefinitions() as import("./providers/provider").ToolDefinition[];
+		});
+
+		this._secondaryOrchestrators.push(orchestrator);
+		log.info("Secondary orchestrator created", { total: this._secondaryOrchestrators.length });
+		return orchestrator;
+	}
+
+	/**
+	 * Wire a chat view as a secondary panel with its own orchestrator.
+	 *
+	 * Called from the "open-secondary-chat" command and from view setState()
+	 * when restoring a secondary panel from workspace state.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	wireViewAsSecondary(view: NotorChatView): void {
+		view.setIsSecondary(true);
+		const orchestrator = this.createSecondaryOrchestrator();
+		this.wireView(view, orchestrator);
+	}
+
+	/**
 	 * Workflow hook override manager — singleton, instantiated on first use.
 	 *
 	 * Shared by the orchestrator (for activate/deactivate) and hook dispatch
@@ -1728,10 +1854,19 @@ export default class NotorPlugin extends Plugin {
 	 * Wire a newly created chat view to the orchestrator.
 	 *
 	 * Called when the view is registered and every time the view is opened
-	 * (Obsidian may recreate views on workspace restore).
+	 * (Obsidian may recreate views on workspace restore). Each panel gets
+	 * its own orchestrator instance (sharing infrastructure singletons).
+	 *
+	 * @param view - The chat view to wire
+	 * @param orchestrator - The orchestrator for this panel. Primary panels
+	 *   use the shared singleton; secondary panels get their own instance.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
 	 */
-	private wireView(view: NotorChatView): void {
-		const orchestrator = this.getOrchestrator();
+	private wireView(view: NotorChatView, orchestrator?: ChatOrchestrator): void {
+		if (!orchestrator) {
+			orchestrator = this.getOrchestrator();
+		}
 		const toolRegistry = this.getToolRegistry();
 		const historyManager = this.getHistoryManager();
 		const checkpointManager = this.getCheckpointManager();
@@ -1769,29 +1904,39 @@ export default class NotorPlugin extends Plugin {
 		view.setPersonaManager(personaManager);
 
 		// B-007: Wire persona name changes to the dispatcher so auto-approve
-		// resolution tracks the active persona in real time. When the user
-		// switches personas via the picker, the PersonaManager fires this
-		// callback, which updates the dispatcher's active persona name.
-		personaManager.setOnPersonaNameChanged((name) => {
-			toolDispatcher.setActivePersonaName(name);
+		// resolution tracks the active persona in real time.
+		// Phase 4: This is a global callback (shared PersonaManager singleton).
+		// Only set once — guard against multiple wireView calls overwriting it.
+		// The dispatcher propagation is global; the header update iterates
+		// all orchestrators' displayed conversations.
+		if (!this._personaNameChangeWired) {
+			this._personaNameChangeWired = true;
+			personaManager.setOnPersonaNameChanged((name) => {
+				toolDispatcher.setActivePersonaName(name);
 
-			// Step 1f-addendum (Trigger 2): Update conversation header so the
-			// next session pins from the user's explicit persona choice.
-			const conv = orchestrator.getDisplayedConversation();
-			if (conv) {
-				conv.persona_name = name;
-				historyManager.updateConversationHeader(conv).catch((e) => {
-					log.error("Failed to update conversation header on persona change", { error: String(e) });
-				});
-			}
-		});
+				// Step 1f-addendum (Trigger 2): Update conversation header for
+				// all orchestrators that have a displayed conversation.
+				const allOrchestrators = [this._orchestrator, ...this._secondaryOrchestrators].filter(Boolean);
+				for (const orch of allOrchestrators) {
+					const conv = orch!.getDisplayedConversation();
+					if (conv) {
+						conv.persona_name = name;
+						historyManager.updateConversationHeader(conv).catch((e) => {
+							log.error("Failed to update conversation header on persona change", { error: String(e) });
+						});
+					}
+				}
+			});
+		}
 
 		// Restore active persona from settings on view wire (deferred, non-blocking).
 		// This ensures the persona label and provider/model state are restored
-		// when the chat panel opens after plugin load.
-		personaManager.restoreFromSettings().catch((e) => {
-			log.warn("Failed to restore active persona from settings", { error: String(e) });
-		});
+		// when the chat panel opens after plugin load. Only needs to run once.
+		if (!view.getIsSecondary()) {
+			personaManager.restoreFromSettings().catch((e) => {
+				log.warn("Failed to restore active persona from settings", { error: String(e) });
+			});
+		}
 
 		// E-015 / MAIN-001: Wire tool definitions callback. When an
 		// EffectiveToolConfig is provided, returns filtered tool definitions
@@ -2034,8 +2179,13 @@ export default class NotorPlugin extends Plugin {
 			}, 100);
 		});
 
-		// Provider change
+		// Provider change — updates per-orchestrator state (Phase 4, Step 4b).
+		// Also persists to global settings for the "default provider" behavior.
 		view.setOnProviderChange((providerId) => {
+			// Update per-orchestrator provider (Phase 4, Step 4b)
+			orchestrator!.setActiveProvider(providerId);
+
+			// Also update global state for backward compat and defaults
 			providerRegistry.switchProvider(providerId);
 			this.settings.active_provider = providerId;
 			this.saveSettings().catch((e) => {
@@ -2044,7 +2194,7 @@ export default class NotorPlugin extends Plugin {
 
 			// Step 1f-addendum (Trigger 2): Update conversation header so the
 			// next session pins from the user's explicit choice.
-			const conv = orchestrator.getDisplayedConversation();
+			const conv = orchestrator!.getDisplayedConversation();
 			if (conv) {
 				conv.provider_id = providerId;
 				historyManager.updateConversationHeader(conv).catch((e) => {
@@ -2053,9 +2203,13 @@ export default class NotorPlugin extends Plugin {
 			}
 		});
 
-		// Model change — parses ::1m suffix to set use_extended_context
+		// Model change — parses ::1m suffix to set use_extended_context.
+		// Updates per-orchestrator model state (Phase 4, Step 4b).
 		view.setOnModelChange((selectedValue) => {
 			const { modelId, isExtendedContext } = parseOptionValue(selectedValue);
+
+			// Update per-orchestrator model (Phase 4, Step 4b)
+			orchestrator!.setActiveModel(modelId, isExtendedContext);
 
 			const activeType = providerRegistry.getActiveType();
 			const config = providerRegistry.getConfig(activeType);
@@ -2131,14 +2285,15 @@ export default class NotorPlugin extends Plugin {
 			}
 		});
 
-		// Current provider
+		// Current provider — reads from per-orchestrator state (Phase 4, Step 4b)
 		view.setGetCurrentProvider(() => {
-			return providerRegistry.getActiveType();
+			return orchestrator!.getActiveProviderType();
 		});
 
-		// Current model — reconstructs ::1m composite value for picker selection
+		// Current model — reads from per-orchestrator state (Phase 4, Step 4b)
+		// Reconstructs ::1m composite value for picker selection.
 		view.setGetCurrentModel(() => {
-			const activeType = providerRegistry.getActiveType();
+			const activeType = orchestrator!.getActiveProviderType();
 			const config = providerRegistry.getConfig(activeType);
 			const modelId = config?.model_id ?? "";
 			return buildOptionValue(modelId, config?.use_extended_context ?? false);
@@ -2157,8 +2312,10 @@ export default class NotorPlugin extends Plugin {
 			return checkpointManager.getCurrentContent(notePath);
 		});
 
-		// Wire approval callback for tool dispatcher
-		toolDispatcher.setApprovalCallback(async (toolCall, abortSignal?, messageId?) => {
+		// Wire approval callback for this panel's orchestrator (Phase 4, Step 4e).
+		// Each orchestrator gets its own approval callback bound to the correct
+		// panel's view. Replaces the former ToolDispatcher.setApprovalCallback().
+		orchestrator.setApprovalCallback(async (toolCall, abortSignal?, messageId?) => {
 			// Look up the specific tool call element by message ID, falling back to
 			// the last rendered element for backward compatibility (e.g. sub-agent dispatchers).
 			const toolCallEl = messageId
@@ -2192,7 +2349,9 @@ export default class NotorPlugin extends Plugin {
 			]);
 		});
 
-		// Load conversation history and render it
+		// Load conversation history and render it.
+		// Skip for secondary panels — they get their conversation from setState().
+		if (view.getIsSecondary()) return;
 		historyManager.listConversations().then((entries) => {
 			view.renderConversationList(entries);
 
@@ -2264,15 +2423,32 @@ export default class NotorPlugin extends Plugin {
 		}
 	}
 
-	/** Open (or reveal) the Notor chat panel. */
+	/**
+	 * Get the primary chat panel leaf (the first non-secondary leaf).
+	 *
+	 * With multi-panel support, multiple leaves of CHAT_VIEW_TYPE may exist.
+	 * This helper returns the primary panel for operations that should target
+	 * the main panel (e.g., command palette "New conversation").
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	private getPrimaryChatLeaf(): WorkspaceLeaf | undefined {
+		const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
+		// Primary is the first leaf that is NOT secondary
+		return leaves.find((l) => {
+			const view = l.view as NotorChatView | undefined;
+			return view && !view.getIsSecondary();
+		}) ?? leaves[0];
+	}
+
+	/** Open (or reveal) the primary Notor chat panel. */
 	private async openChatPanel(): Promise<void> {
 		const { workspace } = this.app;
 
-		// Check if the view is already open
-		const existing = workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-		if (existing.length > 0) {
-			// Reveal the existing leaf
-			void workspace.revealLeaf(existing[0] as WorkspaceLeaf);
+		// Check if the primary panel is already open
+		const existing = this.getPrimaryChatLeaf();
+		if (existing) {
+			void workspace.revealLeaf(existing);
 			return;
 		}
 
@@ -2286,10 +2462,10 @@ export default class NotorPlugin extends Plugin {
 
 	/** Start a new conversation (command palette action). */
 	private newConversation(): void {
-		const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-		if (leaves.length > 0) {
+		const primaryLeaf = this.getPrimaryChatLeaf();
+		if (primaryLeaf) {
 			// Trigger via the view's new conversation callback
-			const view = leaves[0]?.view as NotorChatView | undefined;
+			const view = primaryLeaf.view as NotorChatView | undefined;
 			if (view) {
 				// Delegate to the orchestrator
 				this.getOrchestrator()

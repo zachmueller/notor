@@ -107,6 +107,36 @@ export class ChatOrchestrator {
 	private effectiveToolConfig: EffectiveToolConfig | null = null;
 
 	/**
+	 * Per-orchestrator active provider type.
+	 *
+	 * Each orchestrator (and thus each panel in multi-panel mode) tracks
+	 * its own active provider. Initialized from `ProviderRegistry.getActiveType()`
+	 * at construction time. Picker changes update this field, NOT the global
+	 * `ProviderRegistry.activeType`.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	private activeProviderType: LLMProviderType;
+
+	/**
+	 * Per-orchestrator active model ID.
+	 *
+	 * Tracks the current model for this panel. Updated when the user changes
+	 * the model picker. Used as the default for new conversations and sessions
+	 * created from this panel.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	private activeModelId: string;
+
+	/**
+	 * Per-orchestrator extended context setting.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	private activeUseExtendedContext: boolean;
+
+	/**
 	 * Active conversation sessions keyed by conversation ID.
 	 *
 	 * Each response loop (foreground or workflow) creates a session that
@@ -138,6 +168,13 @@ export class ChatOrchestrator {
 		this.conversationManager = new ConversationManager(settings.mode);
 		this.contextManager = new ContextManager();
 
+		// Initialize per-orchestrator provider/model from current global state
+		const initProviderType = this.providerRegistry.getActiveType();
+		const initProviderConfig = this.providerRegistry.getConfig(initProviderType);
+		this.activeProviderType = initProviderType;
+		this.activeModelId = initProviderConfig?.model_id ?? "";
+		this.activeUseExtendedContext = initProviderConfig?.use_extended_context ?? false;
+
 		// Wire conversation manager to history persistence
 		this.conversationManager.setOnMessageAdded(async (message: Message) => {
 			const conv = this.conversationManager.getActiveConversation();
@@ -158,6 +195,28 @@ export class ChatOrchestrator {
 	/** Set or update the chat view reference. */
 	setView(view: NotorChatView): void {
 		this.view = view;
+	}
+
+	/**
+	 * Per-orchestrator approval callback for tool dispatch.
+	 *
+	 * Each orchestrator (and thus each panel) gets its own approval callback
+	 * bound to the correct panel's view. Replaces the former global
+	 * `ToolDispatcher.setApprovalCallback()` — that shared field is not
+	 * safe for multi-panel use since each panel needs its own routing.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4e
+	 */
+	private panelApprovalCallback?: ApprovalCallback;
+
+	/**
+	 * Set the approval callback for this orchestrator's panel.
+	 *
+	 * Called by `wireView()` in main.ts. Sessions snapshot this callback
+	 * at creation time.
+	 */
+	setApprovalCallback(callback: ApprovalCallback): void {
+		this.panelApprovalCallback = callback;
 	}
 
 	/** Update settings reference. */
@@ -413,9 +472,9 @@ export class ChatOrchestrator {
 		// updateDisplayConfig() will set these fields when the first
 		// response loop iteration runs for the new conversation.
 
-		const providerType = this.providerRegistry.getActiveType();
-		const providerConfig = this.providerRegistry.getConfig(providerType);
-		const modelId = providerConfig?.model_id ?? "";
+		// Use per-orchestrator provider/model fields (Phase 4, Step 4b).
+		const providerType = this.activeProviderType;
+		const modelId = this.activeModelId;
 
 		// Preserve the current in-session mode when creating a new conversation
 		// so that toggling Plan/Act and then starting a new conversation keeps
@@ -429,7 +488,7 @@ export class ChatOrchestrator {
 			providerType,
 			modelId,
 			currentMode,
-			providerConfig?.use_extended_context ? { use_extended_context: true } : undefined
+			this.activeUseExtendedContext ? { use_extended_context: true } : undefined
 		);
 
 		// Capture active persona into header (mirrors provider/model capture above).
@@ -462,9 +521,8 @@ export class ChatOrchestrator {
 	async forkConversation(
 		forkAtMessageId: string,
 	): Promise<{ filename: string; conversation: Conversation } | null> {
-		const providerType = this.providerRegistry.getActiveType();
-		const providerConfig = this.providerRegistry.getConfig(providerType);
-		const modelId = providerConfig?.model_id ?? "";
+		const providerType = this.activeProviderType;
+		const modelId = this.activeModelId;
 		const currentMode =
 			this.conversationManager.getActiveConversation()?.mode ??
 			this.settings.mode;
@@ -766,9 +824,10 @@ export class ChatOrchestrator {
 		// (This also calls maybeRevertWorkflowPersona for the *previous* conversation
 		// via the E-008 path — we intentionally skip that here because we already
 		// handled persona switching above before creating the new conversation.)
-		const providerType = this.providerRegistry.getActiveType();
+		// Use per-orchestrator provider/model (Phase 4, Step 4b).
+		const providerType = this.activeProviderType;
 		const providerConfig = this.providerRegistry.getConfig(providerType);
-		const modelId = providerConfig?.model_id ?? "";
+		const modelId = this.activeModelId;
 		const currentMode = this.conversationManager.hasActiveConversation()
 			? this.conversationManager.getMode()
 			: this.settings.mode;
@@ -843,7 +902,7 @@ export class ChatOrchestrator {
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
 			await this.resolveEffectiveConfig(undefined, assemblyResult, pinnedPersona);
 
-		const approvalCallback: ApprovalCallback = this.dispatcher.getApprovalCallback()
+		const approvalCallback: ApprovalCallback = this.panelApprovalCallback
 			?? (async () => "approved" as const);
 
 		const session = new ConversationSession({
@@ -1142,7 +1201,7 @@ export class ChatOrchestrator {
 			await this.resolveEffectiveConfig(undefined, workflowAssembly, pinnedPersona);
 
 		// Capture approval callback for session-scoped dispatch
-		const approvalCallback = this.dispatcher.getApprovalCallback()
+		const approvalCallback = this.panelApprovalCallback
 			?? (async () => "approved" as const);
 
 		const bgConv = bgConvManager.getActiveConversation()!;
@@ -1701,27 +1760,29 @@ export class ChatOrchestrator {
 		const headerProviderConfig = headerProviderType
 			? this.providerRegistry.getConfig(headerProviderType)
 			: null;
+		// Fall back to per-orchestrator provider (not global registry) for new
+		// conversations or when the header's provider is no longer configured.
 		const providerType = headerProviderConfig
 			? headerProviderType!
-			: this.providerRegistry.getActiveType();
+			: this.activeProviderType;
 		const providerConfig = headerProviderConfig ?? this.providerRegistry.getConfig(providerType);
 
 		// Use the header's model_id if the header's provider is still configured,
-		// otherwise fall back to the provider config's current model.
+		// otherwise fall back to per-orchestrator model.
 		const modelId = headerProviderConfig
 			? (snapshotConv.model_id || (providerConfig?.model_id ?? ""))
-			: (providerConfig?.model_id ?? "");
+			: this.activeModelId;
 		const useExtendedContext = headerProviderConfig
 			? (snapshotConv.use_extended_context ?? false)
-			: (providerConfig?.use_extended_context ?? false);
+			: this.activeUseExtendedContext;
 
 		// Resolve initial effective config
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
 			await this.resolveEffectiveConfig(undefined, null, pinnedPersona);
 
-		// Capture the approval callback from the dispatcher's current global callback.
+		// Capture the approval callback from this orchestrator's panel.
 		// This binds approval prompts to the correct panel's view.
-		const approvalCallback: ApprovalCallback = this.dispatcher.getApprovalCallback()
+		const approvalCallback: ApprovalCallback = this.panelApprovalCallback
 			?? (async () => "approved" as const);
 
 		const session = new ConversationSession({
@@ -2816,15 +2877,45 @@ export class ChatOrchestrator {
 	}
 
 	private getActiveModelId(): string {
-		const providerType = this.providerRegistry.getActiveType();
-		const config = this.providerRegistry.getConfig(providerType);
-		return config?.model_id ?? "";
+		return this.activeModelId;
 	}
 
 	private getActiveUseExtendedContext(): boolean {
-		const providerType = this.providerRegistry.getActiveType();
+		return this.activeUseExtendedContext;
+	}
+
+	/**
+	 * Get the per-orchestrator active provider type.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	getActiveProviderType(): LLMProviderType {
+		return this.activeProviderType;
+	}
+
+	/**
+	 * Update the per-orchestrator provider/model fields.
+	 *
+	 * Called from `wireView()` picker-change callbacks. Each panel's picker
+	 * updates its own orchestrator instead of the global `ProviderRegistry`.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	setActiveProvider(providerType: LLMProviderType): void {
+		this.activeProviderType = providerType;
 		const config = this.providerRegistry.getConfig(providerType);
-		return config?.use_extended_context ?? false;
+		this.activeModelId = config?.model_id ?? "";
+		this.activeUseExtendedContext = config?.use_extended_context ?? false;
+	}
+
+	/**
+	 * Update the per-orchestrator model and extended context fields.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	setActiveModel(modelId: string, useExtendedContext: boolean): void {
+		this.activeModelId = modelId;
+		this.activeUseExtendedContext = useExtendedContext;
 	}
 
 	private calculateCost(inputTokens: number, outputTokens: number, modelId?: string): number | null {

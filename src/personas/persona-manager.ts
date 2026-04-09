@@ -33,8 +33,13 @@ export class PersonaManager {
 	/** Saved persona name for workflow revert (see savePersonaState / restorePersonaState). */
 	private savedPersonaName: string | null = null;
 
-	/** Callback fired when the active persona changes (for UI updates). */
-	private onPersonaChanged: ((persona: Persona | null) => void) | null = null;
+	/**
+	 * Callbacks fired when the active persona changes (for UI updates).
+	 *
+	 * Supports multiple listeners so each panel can update its own persona
+	 * label independently in multi-panel mode (Phase 4).
+	 */
+	private personaChangedCallbacks = new Set<(persona: Persona | null) => void>();
 
 	/**
 	 * Callback fired when the active persona name changes, specifically
@@ -66,10 +71,15 @@ export class PersonaManager {
 
 	/**
 	 * Register a callback that fires whenever the active persona changes.
-	 * Used by the chat view to update the persona label and provider/model display.
+	 *
+	 * Supports multiple listeners (one per panel in multi-panel mode).
+	 * Returns an unregister function.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4f
 	 */
-	setOnPersonaChanged(callback: (persona: Persona | null) => void): void {
-		this.onPersonaChanged = callback;
+	setOnPersonaChanged(callback: (persona: Persona | null) => void): () => void {
+		this.personaChangedCallbacks.add(callback);
+		return () => { this.personaChangedCallbacks.delete(callback); };
 	}
 
 	/**
@@ -155,7 +165,7 @@ export class PersonaManager {
 		this.applyProviderModelOverrides(persona);
 
 		// Notify listeners (UI label, chat view model selector)
-		this.onPersonaChanged?.(persona);
+		for (const cb of this.personaChangedCallbacks) cb(persona);
 
 		// Propagate persona name to dispatcher for auto-approve resolution (B-007)
 		this.onPersonaNameChanged?.(name);
@@ -185,7 +195,7 @@ export class PersonaManager {
 		log.info("Persona deactivated", { previousName });
 
 		// Notify listeners
-		this.onPersonaChanged?.(null);
+		for (const cb of this.personaChangedCallbacks) cb(null);
 
 		// Propagate null persona to dispatcher for auto-approve resolution (B-007)
 		this.onPersonaNameChanged?.(null);

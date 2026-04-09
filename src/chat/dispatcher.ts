@@ -97,7 +97,16 @@ export class ToolDispatcher {
 	/** Vault root path for working directory validation. */
 	private vaultRootPath?: string;
 
-	/** Callback for requesting user approval. */
+	/**
+	 * Callback for requesting user approval.
+	 *
+	 * Used by sub-agent dispatchers (each sub-agent run creates its own
+	 * ToolDispatcher with its own approval callback). For the shared
+	 * plugin-level dispatcher, approval is passed per-call via sessions —
+	 * this field is not set by main.ts.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4e
+	 */
 	private approvalCallback?: ApprovalCallback;
 
 	/** Event handlers for UI updates. */
@@ -145,14 +154,15 @@ export class ToolDispatcher {
 		this.vaultRootPath = path;
 	}
 
-	/** Set the approval callback for manual approval. */
+	/**
+	 * Set the approval callback for manual approval.
+	 *
+	 * Used by sub-agent dispatchers (each sub-agent creates its own
+	 * ToolDispatcher per-run). The shared plugin-level dispatcher does
+	 * NOT use this — approval is passed per-call via sessions.
+	 */
 	setApprovalCallback(callback: ApprovalCallback): void {
 		this.approvalCallback = callback;
-	}
-
-	/** Get the current approval callback (for session snapshot). */
-	getApprovalCallback(): ApprovalCallback | undefined {
-		return this.approvalCallback;
 	}
 
 	/** Set event handlers for UI updates. */
@@ -321,7 +331,7 @@ export class ToolDispatcher {
 			}
 
 			if (!decision.autoApproved) {
-				const approvalCb = perCallApprovalCallback ?? this.approvalCallback;
+				const approvalCb = perCallApprovalCallback;
 				if (!approvalCb) {
 					log.warn("No approval callback set, auto-approving", { toolName });
 				} else {
@@ -440,7 +450,11 @@ export class ToolDispatcher {
 			}
 
 			if (!isAutoApproved) {
-				// Request user approval
+				// Request user approval.
+				// Legacy path: falls back to instance-level callback (used by sub-agent
+				// dispatchers which set approval via setApprovalCallback on their own
+				// ToolDispatcher instance). The shared plugin-level dispatcher passes
+				// per-call approval from sessions.
 				const approvalCb = perCallApprovalCallback ?? this.approvalCallback;
 				if (!approvalCb) {
 					log.warn("No approval callback set, auto-approving", { toolName });

@@ -8,7 +8,7 @@
  * @see design/ux.md — chat panel layout, message display
  */
 
-import { ItemView, MarkdownRenderer, Menu, Modal, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownRenderer, Menu, Modal, Notice, setIcon, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
 import type { ConversationMode, Message, LLMProviderType, ModelInfo, Checkpoint, Persona } from "../types";
 import type { Attachment } from "../context/attachment";
@@ -144,6 +144,7 @@ export class NotorChatView extends ItemView {
 
 	// Persona state (A-009, A-010)
 	private personaManager?: PersonaManager;
+	private personaChangedUnregister?: () => void;
 	private personaLabelEl?: HTMLElement;
 
 	// Workflow activity indicator state (H-002, H-003)
@@ -157,6 +158,17 @@ export class NotorChatView extends ItemView {
 
 	// Active conversation tracking
 	private activeConversationId: string | null = null;
+
+	/**
+	 * Whether this panel is a secondary (additional) chat panel.
+	 *
+	 * Secondary panels get the same full toolbar as the primary panel.
+	 * The flag is used for workspace restore logic (`getState`/`setState`)
+	 * and command behavior (e.g., "Open new chat panel" targets secondary).
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4a
+	 */
+	private isSecondary = false;
 
 	// Callbacks (set by orchestrator)
 	private onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
@@ -515,10 +527,13 @@ export class NotorChatView extends ItemView {
 	 * programmatic switch, or workflow revert).
 	 */
 	setPersonaManager(manager: PersonaManager): void {
+		// Unregister previous listener if re-wiring (e.g. secondary panel re-wire)
+		this.personaChangedUnregister?.();
+
 		this.personaManager = manager;
 
-		// Listen for persona changes to update the label
-		manager.setOnPersonaChanged((persona) => {
+		// Listen for persona changes to update this panel's label
+		this.personaChangedUnregister = manager.setOnPersonaChanged((persona) => {
 			this.updatePersonaLabel(persona);
 		});
 
@@ -666,8 +681,72 @@ export class NotorChatView extends ItemView {
 		this.mcpStatusIndicator?.destroy();
 		this.mcpStatusIndicator = undefined;
 
+		// Phase 4: Unregister persona change listener to prevent stale callbacks
+		this.personaChangedUnregister?.();
+		this.personaChangedUnregister = undefined;
+
 		log.info("Chat view closed");
 		return Promise.resolve();
+	}
+
+	// -----------------------------------------------------------------------
+	// State persistence (Phase 4 — workspace restore for secondary panels)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Save view state for Obsidian workspace restore.
+	 *
+	 * Secondary panels store their conversation ID and `isSecondary` flag
+	 * so that closing and reopening Obsidian restores the panel correctly.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4a
+	 */
+	getState(): Record<string, unknown> {
+		return {
+			conversationId: this.activeConversationId,
+			isSecondary: this.isSecondary,
+		};
+	}
+
+	/**
+	 * Restore view state from a previous session (Obsidian workspace restore).
+	 *
+	 * Called by Obsidian when the workspace layout is restored after a reload.
+	 * Sets the `isSecondary` flag and triggers conversation loading via the
+	 * existing `onSwitchToConversationById` callback.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4a
+	 */
+	async setState(state: unknown, result: ViewStateResult): Promise<void> {
+		await super.setState(state, result);
+		const s = state as Record<string, unknown> | null;
+
+		if (s?.isSecondary && !this.isSecondary) {
+			// Workspace restore detected a secondary panel — re-wire with its
+			// own orchestrator. This replaces the primary orchestrator wiring
+			// that happened during registerView (which doesn't know about state yet).
+			this.plugin.wireViewAsSecondary(this);
+		}
+
+		this.isSecondary = !!s?.isSecondary;
+
+		if (s?.conversationId && typeof s.conversationId === "string") {
+			// Defer loading to the next tick so that wireView() has time to
+			// set up the orchestrator and callbacks.
+			setTimeout(() => {
+				void this.onSwitchToConversationById?.(s.conversationId as string);
+			}, 0);
+		}
+	}
+
+	/** Whether this panel is a secondary (additional) panel. */
+	getIsSecondary(): boolean {
+		return this.isSecondary;
+	}
+
+	/** Mark this panel as secondary (called by main.ts when creating new panels). */
+	setIsSecondary(value: boolean): void {
+		this.isSecondary = value;
 	}
 
 	// -----------------------------------------------------------------------

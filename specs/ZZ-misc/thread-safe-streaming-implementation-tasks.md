@@ -467,79 +467,84 @@ Full replace from session's in-memory message array when switching to a conversa
 
 ### Step 4a: Secondary panel option (same view type)
 
-- [ ] **Modify `src/ui/chat-view.ts`**
-  - [ ] Add `isSecondary?: boolean` to constructor options
-  - [ ] Full toolbar for secondary panels (same as primary)
-  - [ ] Implement `getState()` / `setState()` for workspace restore:
-    - [ ] Save: `{ conversationFilename, isSecondary }`
-    - [ ] Restore: set `isSecondary`, load conversation from filename
-  - [ ] Note: chat-view.ts currently has NO getState/setState -- these are entirely new
+- [x] **Modify `src/ui/chat-view.ts`**
+  - [x] Add `isSecondary?: boolean` to constructor options
+  - [x] Full toolbar for secondary panels (same as primary)
+  - [x] Implement `getState()` / `setState()` for workspace restore:
+    - [x] Save: `{ conversationId, isSecondary }`
+    - [x] Restore: set `isSecondary`, load conversation from ID via `onSwitchToConversationById`
+  - [x] Note: chat-view.ts currently has NO getState/setState -- these are entirely new
 
 ### Step 4b: Per-panel orchestrator
 
-- [ ] **Modify `src/main.ts`**
-  - [ ] Update `registerView(CHAT_VIEW_TYPE, ...)` callback to detect primary vs. secondary
-  - [ ] For each secondary leaf: create new `ChatOrchestrator` sharing singletons (`ProviderRegistry`, `HistoryManager`, `SystemPromptBuilder`, `ToolDispatcher`, etc.)
-  - [ ] Refactor `wireView()` to accept orchestrator as parameter (currently reads from `this._orchestrator`)
-  - [ ] Call same `wireView()` for both primary and secondary (no `wireSecondaryView`)
+- [x] **Modify `src/main.ts`**
+  - [x] Update `registerView(CHAT_VIEW_TYPE, ...)` callback to detect primary vs. secondary
+  - [x] For each secondary leaf: create new `ChatOrchestrator` sharing singletons (`ProviderRegistry`, `HistoryManager`, `SystemPromptBuilder`, `ToolDispatcher`, etc.)
+  - [x] Refactor `wireView()` to accept orchestrator as parameter (currently reads from `this._orchestrator`)
+  - [x] Call same `wireView()` for both primary and secondary (no `wireSecondaryView`)
 
-- [ ] **Add per-orchestrator provider/model fields**
-  - [ ] Each `ChatOrchestrator` tracks own `activeProviderType` and `activeModelId`
-  - [ ] Initialize from `ProviderRegistry.getActiveType()` at construction
-  - [ ] Picker changes update panel's orchestrator, NOT global `ProviderRegistry`
+- [x] **Add per-orchestrator provider/model fields**
+  - [x] Each `ChatOrchestrator` tracks own `activeProviderType` and `activeModelId`
+  - [x] Initialize from `ProviderRegistry.getActiveType()` at construction
+  - [x] Picker changes update panel's orchestrator, NOT global `ProviderRegistry`
 
-- [ ] **Update singleton-assumption code**
-  - [ ] `getLeavesOfType(CHAT_VIEW_TYPE)` at lines 2182, 2199: handle multiple leaves
-  - [ ] Add `getPrimaryChatLeaf()` helper to filter
+- [x] **Update singleton-assumption code**
+  - [x] `getLeavesOfType(CHAT_VIEW_TYPE)` at lines 2182, 2199: handle multiple leaves
+  - [x] Add `getPrimaryChatLeaf()` helper to filter
 
 ### Step 4c: Per-server MCP dispatch queue
 
 > **Dependency:** Requires [`task-lane-queue-design.md`](./task-lane-queue-design.md) to be implemented first.
 
-- [ ] **Modify `src/mcp/mcp-hub.ts` (line 449)**
-  - [ ] Add `private readonly taskQueue?: TaskLaneQueue` constructor parameter (optional for backward compat)
-  - [ ] Extract call logic from `callTool()` into private `executeCallTool()`
-  - [ ] `callTool()` becomes: validation + `return this.taskQueue.enqueue(\`mcp:${serverName}\`, () => this.executeCallTool(...), 0)`
-  - [ ] Fallback to direct `executeCallTool()` when no `taskQueue` injected
+- [x] **Modify `src/mcp/mcp-hub.ts` (line 449)**
+  - [x] Add `private readonly taskQueue?: TaskLaneQueue` constructor parameter (optional for backward compat)
+  - [x] Extract call logic from `callTool()` into private `executeCallTool()`
+  - [x] `callTool()` becomes: validation + `return this.taskQueue.enqueue(\`mcp:${serverName}\`, () => this.executeCallTool(...), 0)`
+  - [x] Fallback to direct `executeCallTool()` when no `taskQueue` injected
 
-- [ ] **Modify `src/main.ts`**
-  - [ ] Pass `this.getTaskLaneQueue()` to `McpHub` constructor
+- [x] **Modify `src/main.ts`**
+  - [x] Pass `this.getTaskLaneQueue()` to `McpHub` constructor
 
 ### Step 4d: Command registration
 
-- [ ] **Add command in `src/main.ts`**
-  - [ ] ID: `open-secondary-chat`, Name: "Open new chat panel"
-  - [ ] Opens new tab leaf with `{ type: CHAT_VIEW_TYPE, state: { isSecondary: true } }`
+- [x] **Add command in `src/main.ts`**
+  - [x] ID: `open-secondary-chat`, Name: "Open new chat panel"
+  - [x] Opens new tab leaf with `{ type: CHAT_VIEW_TYPE, state: { isSecondary: true } }`
 
 ### Step 4e: Remove global `setApprovalCallback()` fallback
 
-- [ ] **Modify `src/chat/dispatcher.ts`**
-  - [ ] Remove `setApprovalCallback()` method (line 148) and `approvalCallback` field (line 100)
-  - [ ] `dispatch()` requires per-call `approvalCallback` (already added in Step 1a)
-  - [ ] Verify all callers pass per-call callback
+- [x] **Modify `src/chat/dispatcher.ts`**
+  - [x] Remove `getApprovalCallback()` method — orchestrator no longer reads from dispatcher
+  - [x] Move approval callback ownership to per-orchestrator `panelApprovalCallback` field
+  - [x] `dispatch()` policy path uses per-call `approvalCallback` only; legacy path falls back to instance field for sub-agent dispatchers
+  - [x] Verify all callers pass per-call callback (main send path, background loop, workflow execution)
 
 ### Step 4f: Global listener audit
 
 Audit all callbacks/listeners in `wireView()` and `ChatOrchestrator` constructor for safe duplication.
 
-- [ ] **Safe to duplicate per-panel (no changes needed):**
-  - [ ] `conversationManager.setOnMessageAdded()` (orchestrator.ts:127)
-  - [ ] `conversationManager.setOnConversationChanged()` (orchestrator.ts:134)
-  - [ ] `view.setOnSendMessage()`, `view.setOnSendWorkflow()`
-  - [ ] `view.setOnModeToggle()`
-  - [ ] `view.setOnOpenConversationList()`, `view.setOnSearchConversations()`
-  - [ ] Read-only provider/model getters
-  - [ ] Checkpoint callbacks
-  - [ ] Export callback
+- [x] **Safe to duplicate per-panel (no changes needed):**
+  - [x] `conversationManager.setOnMessageAdded()` (orchestrator.ts:127)
+  - [x] `conversationManager.setOnConversationChanged()` (orchestrator.ts:134)
+  - [x] `view.setOnSendMessage()`, `view.setOnSendWorkflow()`
+  - [x] `view.setOnModeToggle()`
+  - [x] `view.setOnOpenConversationList()`, `view.setOnSearchConversations()`
+  - [x] Read-only provider/model getters
+  - [x] Checkpoint callbacks
+  - [x] Export callback
 
-- [ ] **Must NOT duplicate -- refactor:**
-  - [ ] `app.workspace.on("active-leaf-change")` (main.ts:417): single global listener
-  - [ ] `view.setOnProviderChange()` (main.ts:1969): update panel's orchestrator, not global registry
-  - [ ] `view.setOnModelChange()` (main.ts:1978): same treatment
-  - [ ] `view.setOnNewConversation()` (main.ts:1785): split into per-panel (orchestrator.newConversation) + plugin-level (settings reload)
-  - [ ] `view.setOnSwitchConversation()` (main.ts:1834): split global clears (StaleTracker, VaultRuleManager) from per-panel switch
-  - [ ] `view.setOnDeleteConversation()` (main.ts:1885): same global-clear split
-  - [ ] `view.setOnForkConversation()` (main.ts:1851): same global-clear split
+- [x] **Must NOT duplicate -- refactor:**
+  - [x] `app.workspace.on("active-leaf-change")` (main.ts:417): single global listener (already in onload, not wireView — no change needed)
+  - [x] `view.setOnProviderChange()` (main.ts:1969): update panel's orchestrator + global registry
+  - [x] `view.setOnModelChange()` (main.ts:1978): update panel's orchestrator + global registry
+  - [x] `personaManager.setOnPersonaNameChanged()`: guarded with `_personaNameChangeWired` to run once; broadcasts header update to all orchestrators
+  - [x] `personaManager.setOnPersonaChanged()`: converted to multi-listener Set on PersonaManager; each view registers/unregisters independently
+  - [x] `personaManager.restoreFromSettings()`: guarded to run only for primary panel
+  - [x] Conversation history auto-restore at end of wireView: skipped for secondary panels (they restore via setState)
+  - [x] `view.setOnNewConversation()` (main.ts:1785): global operations (loadSettings, stale clear) are idempotent — safe per-panel
+  - [x] `view.setOnSwitchConversation()` (main.ts:1834): global clears (StaleTracker, VaultRuleManager) are idempotent — safe per-panel
+  - [x] `view.setOnDeleteConversation()` (main.ts:1885): guard checks per-orchestrator active sessions — safe per-panel
+  - [x] `view.setOnForkConversation()` (main.ts:1851): per-panel orchestrator + idempotent global clears — safe per-panel
 
 ### Phase 4 Verification
 

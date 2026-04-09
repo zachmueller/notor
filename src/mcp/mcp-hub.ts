@@ -34,6 +34,7 @@ import type {
 	McpDiscoveredTool,
 } from "./mcp-types";
 import { mcpEnvSecretKey, mcpHeaderSecretKey } from "./mcp-types";
+import type { TaskLaneQueue } from "../queue/task-lane-queue";
 import { logger } from "../utils/logger";
 
 const log = logger("McpHub");
@@ -106,9 +107,22 @@ export class McpHub {
 	 */
 	private _loginShellPath: string | null = null;
 
-	constructor(pluginVersion: string, vaultRootPath: string) {
+	/**
+	 * Per-lane FIFO serialization queue for cross-session MCP dispatch.
+	 *
+	 * When provided, `callTool()` wraps execution via the queue using
+	 * `"mcp:{serverName}"` lane keys with `delayMs = 0` (pure serialization).
+	 * This prevents concurrent JSON-RPC requests to the same MCP server
+	 * from multiple panels.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4c
+	 */
+	private readonly taskQueue?: TaskLaneQueue;
+
+	constructor(pluginVersion: string, vaultRootPath: string, taskQueue?: TaskLaneQueue) {
 		this.pluginVersion = pluginVersion;
 		this.vaultRootPath = vaultRootPath;
+		this.taskQueue = taskQueue;
 	}
 
 	// -----------------------------------------------------------------------
@@ -442,9 +456,12 @@ export class McpHub {
 	 * Call a tool on a connected server.
 	 *
 	 * Injects `_meta.notor_mode` on every request per FR-58.
-	 * Returns ToolResult — never throws.
+	 * When a `TaskLaneQueue` is injected, tool calls to the same server are
+	 * serialized via `"mcp:{serverName}"` lane keys to prevent concurrent
+	 * JSON-RPC requests. Returns ToolResult — never throws.
 	 *
 	 * @see specs/04-mcp/contracts/mcp-tool-dispatch.md
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4c
 	 */
 	async callTool(
 		serverName: string,
@@ -452,9 +469,10 @@ export class McpHub {
 		toolArguments: Record<string, unknown> | undefined,
 		mode: "plan" | "act"
 	): Promise<ToolResult> {
+		// Validation checks run outside the queue — fast-fail without
+		// waiting for other tool calls in the lane.
 		const connection = this.connections.get(serverName);
 
-		// Validate connection state
 		if (!connection) {
 			return {
 				tool_name: `${serverName}__${toolName}`,
@@ -472,7 +490,6 @@ export class McpHub {
 			};
 		}
 
-		// Validate tool exists on this server
 		const tool = connection.tools.find((t) => t.name === toolName);
 		if (!tool) {
 			return {
@@ -483,8 +500,38 @@ export class McpHub {
 			};
 		}
 
+		const execute = () => this.executeCallTool(serverName, toolName, toolArguments, mode, connection);
+
+		return this.taskQueue
+			? this.taskQueue.enqueue(`mcp:${serverName}`, execute, 0)
+			: execute();
+	}
+
+	/**
+	 * Execute the actual MCP tool call (connection lookup, timeout, client.callTool,
+	 * result extraction). Separated from `callTool()` so the queue wraps only the
+	 * network-bound portion.
+	 */
+	private async executeCallTool(
+		serverName: string,
+		toolName: string,
+		toolArguments: Record<string, unknown> | undefined,
+		mode: "plan" | "act",
+		connection: McpConnection,
+	): Promise<ToolResult> {
 		const namespacedName = `${serverName}__${toolName}`;
 		const timeoutMs = (connection.config.timeout ?? DEFAULT_TIMEOUT_SECONDS) * 1000;
+
+		// Re-check connection state inside the queue — it may have changed
+		// while waiting for the lane.
+		if (connection.status !== "connected" || !connection.client) {
+			return {
+				tool_name: namespacedName,
+				success: false,
+				result: "",
+				error: `MCP server '${serverName}' is unavailable (${connection.status}${connection.error ? `: ${connection.error}` : ""}).`,
+			};
+		}
 
 		try {
 			// Send tools/call with _meta.notor_mode injection (FR-58)
@@ -500,12 +547,10 @@ export class McpHub {
 				{ timeout: timeoutMs }
 			);
 
-			// Extract text-only result
 			return this.extractToolResult(namespacedName, result);
 		} catch (e) {
 			const errorMsg = e instanceof Error ? e.message : String(e);
 
-			// Check for timeout
 			if (errorMsg.includes("timed out") || errorMsg.includes("timeout") || errorMsg.includes("aborted")) {
 				log.warn("Tool call timed out", { namespacedName, timeoutMs });
 				return {
@@ -516,7 +561,6 @@ export class McpHub {
 				};
 			}
 
-			// Check for transport error
 			log.error("Tool call failed", { namespacedName, error: errorMsg });
 			return {
 				tool_name: namespacedName,
