@@ -19,7 +19,6 @@ import { renderAnthropicProviderSection } from "./sections/provider-anthropic";
 import { renderOpenAIProviderSection } from "./sections/provider-openai";
 import { renderBedrockProviderSection } from "./sections/provider-bedrock";
 import { renderAutoContextSection } from "./sections/auto-context";
-import { renderShellSection } from "./sections/execute-command";
 import { renderHooksSection } from "./sections/hooks";
 import { renderVaultEventHooksSection } from "./sections/vault-event-hooks";
 import { renderFileAttachmentsSection } from "./sections/file-attachments";
@@ -34,7 +33,8 @@ import { renderMcpServersSection } from "./sections/mcp-servers";
 import { renderPersonasSection } from "./sections/personas";
 import { renderSubAgentsSection } from "./sections/sub-agents";
 import { renderRulesAndWorkflowsSection } from "./sections/rules-and-workflows";
-import { renderExtensionsSection } from "./sections/extensions";
+import { renderSharedSettingsSection, renderReloadExtensionsButton } from "./sections/tool-shared-settings";
+import { renderUserAutomationsSection } from "./sections/user-automations";
 import { createSettingsGroup, snapshotDetailsState, restoreDetailsState } from "./helpers";
 
 /**
@@ -116,12 +116,14 @@ export class NotorSettingTab extends PluginSettingTab {
 
 		const persisted = ctx.settings.settings_collapsed_sections;
 
-		// Migrate persisted collapsed-section key from old name to new
+		// Migrate persisted collapsed-section keys from old names
 		if ("Built-in tools" in persisted && !("Tools" in persisted)) {
 			persisted["Tools"] = persisted["Built-in tools"];
 			delete persisted["Built-in tools"];
 			ctx.saveSettings();
 		}
+		delete persisted["Tool configuration"];
+		delete persisted["Extensions"];
 
 		const onToggle = (title: string, open: boolean) => {
 			if (this.isRestoring) return;
@@ -142,6 +144,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		renderGeneralSection(conversationGroup, ctx);
 		renderAutoContextSection(conversationGroup, ctx);
 		renderCompactionSection(conversationGroup, ctx);
+		renderFileAttachmentsSection(conversationGroup, ctx);
 
 		// --- Personas (collapsed by default) ---
 		const personasGroup = createSettingsGroup(containerEl, "Personas", false, persisted, onToggle);
@@ -158,27 +161,18 @@ export class NotorSettingTab extends PluginSettingTab {
 		// --- Tools (expanded by default) ---
 		const toolsGroup = createSettingsGroup(containerEl, "Tools", true, persisted, onToggle);
 		renderToolsSection(toolsGroup, ctx);
+		renderSharedSettingsSection(toolsGroup, ctx);
+		renderReloadExtensionsButton(toolsGroup, ctx);
 
 		// --- MCP Servers (expanded by default) ---
 		const mcpGroup = createSettingsGroup(containerEl, "MCP servers", true, persisted, onToggle);
 		renderMcpServersSection(mcpGroup, ctx);
 
-		// --- Tool Configuration (collapsed by default) ---
-		// Per-tool settings (fetch_webpage, web_search, read_file, write_docx, etc.)
-		// are now configured through the extension settings UI. Only shell config
-		// and file attachments remain here.
-		const toolConfigGroup = createSettingsGroup(containerEl, "Tool configuration", false, persisted, onToggle);
-		renderShellSection(toolConfigGroup, ctx);
-		renderFileAttachmentsSection(toolConfigGroup, ctx);
-
 		// --- Automation (collapsed by default) ---
 		const automationGroup = createSettingsGroup(containerEl, "Automation", false, persisted, onToggle);
 		renderHooksSection(automationGroup, ctx);
 		renderVaultEventHooksSection(automationGroup, ctx);
-
-		// --- Extensions (collapsed by default) ---
-		const extensionsGroup = createSettingsGroup(containerEl, "Extensions", false, persisted, onToggle);
-		renderExtensionsSection(extensionsGroup, ctx);
+		renderUserAutomationsSection(automationGroup, ctx);
 
 		// --- Storage (collapsed by default) ---
 		const storageGroup = createSettingsGroup(containerEl, "Storage", false, persisted, onToggle);

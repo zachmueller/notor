@@ -1,7 +1,7 @@
 # Settings Reorganization — Implementation Tasks
 
 **Design doc:** [settings-reorganization-design.md](settings-reorganization-design.md)
-**Status:** In progress — Phase 5 complete
+**Status:** In progress — Phase 6 complete
 **Date:** 2026-04-09
 
 ---
@@ -192,14 +192,14 @@
 >
 > **Why now:** All the extracted pieces are ready. This is the big wiring change.
 
-- [ ] **6.1 Add file attachments to Conversation group**
+- [x] **6.1 Add file attachments to Conversation group**
   - In `settings-tab.ts`, after `renderCompactionSection(conversationGroup, ctx)` (around line 144), add:
     ```typescript
     renderFileAttachmentsSection(conversationGroup, ctx);
     ```
   - `renderFileAttachmentsSection` is already imported (used by the old Tool configuration group)
 
-- [ ] **6.2 Add shared settings and reload to Tools group**
+- [x] **6.2 Add shared settings and reload to Tools group**
   - After `renderToolsSection(toolsGroup, ctx)` (around line 160), add:
     ```typescript
     renderSharedSettingsSection(toolsGroup, ctx);
@@ -207,25 +207,25 @@
     ```
   - Add import for `renderSharedSettingsSection` and `renderReloadExtensionsButton` from `./sections/tool-shared-settings`
 
-- [ ] **6.3 Add user automations to Automation group**
+- [x] **6.3 Add user automations to Automation group**
   - After `renderVaultEventHooksSection(automationGroup, ctx)` (around line 177), add:
     ```typescript
     renderUserAutomationsSection(automationGroup, ctx);
     ```
   - Add import from `./sections/user-automations`
 
-- [ ] **6.4 Delete "Tool configuration" group**
+- [x] **6.4 Delete "Tool configuration" group**
   - Remove the `createSettingsGroup(containerEl, "Tool configuration", ...)` block (around lines 169-173)
   - Remove `renderShellSection(toolConfigGroup, ctx)` call — shell config is now in `execute_command`'s modal
   - Remove `renderFileAttachmentsSection(toolConfigGroup, ctx)` call — moved to Conversation
   - Remove import of `renderShellSection` from `./sections/execute-command` (it's still used by the modal, but not by settings-tab.ts)
 
-- [ ] **6.5 Delete "Extensions" group**
+- [x] **6.5 Delete "Extensions" group**
   - Remove the `createSettingsGroup(containerEl, "Extensions", ...)` block (around lines 179-181)
   - Remove `renderExtensionsSection(extensionsGroup, ctx)` call
   - Remove import of `renderExtensionsSection` from `./sections/extensions`
 
-- [ ] **6.6 Add persisted collapsed-section migration**
+- [x] **6.6 Add persisted collapsed-section migration**
   - In the migration block (lines 119-123 of `settings-tab.ts`), after the existing `"Built-in tools"` → `"Tools"` migration, add:
     ```typescript
     delete persisted["Tool configuration"];
@@ -233,7 +233,7 @@
     ```
   - This prevents stale keys from causing issues when those sections no longer exist
 
-- [ ] **6.7 Verify section ordering**
+- [x] **6.7 Verify section ordering**
   - Confirm the final order matches the design doc Section 3:
     1. Provider setup [expanded]
     2. Conversation [expanded] — now includes file attachments

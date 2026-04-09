@@ -1,6 +1,6 @@
 # Settings Reorganization for Extensions Paradigm
 
-**Status:** In progress — Phase 5 (user automations extraction) complete
+**Status:** In progress — Phase 6 (rewire settings tab) complete
 **Date:** 2026-04-09
 
 ---
