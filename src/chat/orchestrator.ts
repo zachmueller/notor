@@ -106,13 +106,6 @@ export class ChatOrchestrator {
 	private effectiveToolConfig: EffectiveToolConfig | null = null;
 
 	/**
-	 * Active workflow assembly result, stored when `executeWorkflow()` or
-	 * `executeBackgroundWorkflow()` completes assembly. Provides
-	 * `toolConfigs` for `resolveEffectiveConfig()`.
-	 */
-	private activeWorkflowAssemblyResult: WorkflowAssemblyResult | null = null;
-
-	/**
 	 * Active conversation sessions keyed by conversation ID.
 	 *
 	 * Each response loop (foreground or workflow) creates a session that
@@ -313,11 +306,9 @@ export class ChatOrchestrator {
 		// E-008: Revert workflow persona before leaving this conversation
 		await this.maybeRevertWorkflowPersona();
 
-		// Phase 4b: Clear tool config state for the new conversation
-		this.activeParsedConfigs = [];
-		this.effectiveToolConfig = null;
-		this.activeWorkflowAssemblyResult = null;
-		this.dispatcher.setEffectiveToolConfig(null);
+		// Tool config state is now per-session (ConversationSession).
+		// updateDisplayConfig() will set these fields when the first
+		// response loop iteration runs for the new conversation.
 
 		const providerType = this.providerRegistry.getActiveType();
 		const providerConfig = this.providerRegistry.getConfig(providerType);
@@ -938,6 +929,37 @@ export class ChatOrchestrator {
 		let continueLoop = true;
 		const vaultRootPath = this.getVaultRootPath();
 
+		// Snapshot provider/model/persona for session isolation
+		const pinnedPersona = this.personaManager?.getActivePersona() ?? null;
+		const providerType = this.providerRegistry.getActiveType();
+		const providerConfig = this.providerRegistry.getConfig(providerType);
+		const modelId = providerConfig?.model_id ?? "";
+		const useExtendedContext = providerConfig?.use_extended_context ?? false;
+
+		// Resolve initial effective config
+		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
+			await this.resolveEffectiveConfig(undefined, workflowAssembly, pinnedPersona);
+
+		// Capture approval callback for session-scoped dispatch
+		const approvalCallback = this.dispatcher.getApprovalCallback()
+			?? (async () => "approved" as const);
+
+		const bgConv = bgConvManager.getActiveConversation()!;
+		const session = new ConversationSession({
+			conversationId: bgConv.id,
+			conversationManager: bgConvManager,
+			abortController: new AbortController(),
+			title: bgConv.title ?? `Workflow: ${execution.id}`,
+			pinnedPersona,
+			providerType,
+			modelId,
+			useExtendedContext,
+			workflowAssembly,
+			approvalCallback,
+			initialConfig,
+			initialParsedConfigs,
+		});
+
 		try {
 		while (continueLoop) {
 			continueLoop = false;
@@ -947,9 +969,10 @@ export class ChatOrchestrator {
 				? await this.vaultRuleManager.getMatchedRules()
 				: undefined;
 
-			const activePersona = this.personaManager?.getActivePersona() ?? null;
-			const { effective: _effective, toolDefinitions, parsedConfigs: _parsedConfigs } =
-				await this.resolveEffectiveConfig(matchedRules, workflowAssembly, activePersona);
+			const { effective, toolDefinitions, parsedConfigs } =
+				await this.resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona);
+			session.effectiveConfig = effective;
+			session.parsedConfigs = parsedConfigs;
 
 			const { buildAutoContextBlock } = await import("../context/auto-context");
 			const autoContext = buildAutoContextBlock(this.app, this.settings);
@@ -958,7 +981,7 @@ export class ChatOrchestrator {
 				toolDefinitions,
 				undefined, // vaultRuleContent — now handled via cached stripped content
 				autoContext ?? undefined,
-				activePersona
+				session.pinnedPersona
 			);
 
 			// 2. Assemble messages
@@ -977,10 +1000,7 @@ export class ChatOrchestrator {
 			// 3. Assemble context window
 			const { ContextManager } = await import("./context");
 			const contextMgr = new ContextManager();
-			const modelId = this.providerRegistry.getConfig(
-				this.providerRegistry.getActiveType()
-			)?.model_id ?? "";
-			const contextResult = contextMgr.assembleContextWindow(allMessages, modelId, this.getActiveUseExtendedContext());
+			const contextResult = contextMgr.assembleContextWindow(allMessages, session.modelId, session.useExtendedContext);
 
 			// 4. Convert to ChatMessage format
 			const chatMessages = this._bgToChatMessages(
@@ -990,11 +1010,11 @@ export class ChatOrchestrator {
 
 			// 5. Send to LLM
 			const abortController = new AbortController();
-			const provider = this.providerRegistry.getActiveProvider();
+			const provider = this.providerRegistry.getProvider(session.providerType);
 			const stream = provider.sendMessage(chatMessages, toolDefinitions, {
-				model: modelId,
+				model: session.modelId,
 				abort_signal: abortController.signal,
-				use_extended_context: this.getActiveUseExtendedContext(),
+				use_extended_context: session.useExtendedContext,
 			});
 
 			// 6. Process stream (background — no UI rendering)
@@ -1046,10 +1066,7 @@ export class ChatOrchestrator {
 				});
 
 				// Update status to waiting_approval if the tool is not auto-approved
-				// Use effective config when available, fallback to global settings
-				const isAutoApproved = this.effectiveToolConfig
-					? (this.effectiveToolConfig.tools[toolName]?.auto_approve ?? false)
-					: (this.settings.auto_approve[toolName] ?? false);
+				const isAutoApproved = session.effectiveConfig.tools[toolName]?.auto_approve ?? false;
 
 				if (!isAutoApproved) {
 					concurrencyManager.updateStatus(execution.id, "waiting_approval");
@@ -1059,12 +1076,19 @@ export class ChatOrchestrator {
 					});
 				}
 
-				// Dispatch the tool
+				// Dispatch the tool with session-scoped policy context and approval
+				const policyCtx = vaultRootPath
+					? session.buildPolicyContext(this.settings, vaultRootPath)
+					: undefined;
 				const toolResult = await this.dispatcher.dispatch(
 					toolName,
 					parameters,
 					mode,
-					toolCallMessage.id
+					toolCallMessage.id,
+					undefined, // abortSignal
+					undefined, // onProgress
+					policyCtx,
+					session.approvalCallback,
 				);
 				toolResult.tool_call_id = toolCallId;
 
@@ -1076,13 +1100,13 @@ export class ChatOrchestrator {
 				// Dispatch hook events if applicable
 			// G-004: Pass override manager so workflow-scoped hooks are used when active
 			// EXT-017: Pass extension tool event automations
-				const bgConv = bgConvManager.getActiveConversation();
-				if (bgConv && vaultRootPath) {
+				const bgConvForHooks = bgConvManager.getActiveConversation();
+				if (bgConvForHooks && vaultRootPath) {
 					const { dispatchOnToolCall, dispatchOnToolResult } =
 						await import("../hooks/hook-events");
 					dispatchOnToolCall(
 						{
-							conversationId: bgConv.id,
+							conversationId: bgConvForHooks.id,
 							timestamp: new Date().toISOString(),
 							toolName,
 							toolParams: parameters,
@@ -1098,7 +1122,7 @@ export class ChatOrchestrator {
 						: JSON.stringify(toolResult.result);
 					dispatchOnToolResult(
 						{
-							conversationId: bgConv.id,
+							conversationId: bgConvForHooks.id,
 							timestamp: new Date().toISOString(),
 							toolName,
 							toolParams: parameters,
@@ -1160,8 +1184,9 @@ export class ChatOrchestrator {
 			}
 		}
 		} finally {
-			// No cleanup needed — workflowAssembly is passed as parameter,
-			// not stored on shared state.
+			// No cleanup needed — session is local to this method and not
+			// registered in activeSessions (background workflows are tracked
+			// by WorkflowConcurrencyManager instead).
 		}
 	}
 

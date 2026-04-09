@@ -276,18 +276,18 @@ This is the largest step. Replaces all shared-state reads in the response path w
 
 Removes the `activeWorkflowAssemblyResult` save/restore hack and uses `ConversationSession` instead.
 
-- [ ] **Modify `_backgroundResponseLoop()` in `src/chat/orchestrator.ts` (line 839)**
-  - [ ] Remove lines 850-852 (`previousAssemblyResult` save)
-  - [ ] Remove line 1076 (`previousAssemblyResult` restore)
-  - [ ] Create `ConversationSession` from existing `bgConvManager`, `workflowAssembly`, and concurrency manager's approval callback
-  - [ ] Snapshot `useExtendedContext` from provider config for the background execution (extend lines 892-894)
-  - [ ] Replace `resolveEffectiveConfig(matchedRules)` calls with `resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona)`
-  - [ ] L895: `this.getActiveUseExtendedContext()` -> `session.useExtendedContext`
-  - [ ] L909: `use_extended_context: this.getActiveUseExtendedContext()` -> `session.useExtendedContext`
-  - [ ] L962-964: direct `this.effectiveToolConfig` read -> `session.effectiveConfig.tools[toolName]?.auto_approve ?? false`
-  - [ ] L975: `dispatcher.dispatch()` -> pass `session.buildPolicyContext()` and `session.approvalCallback`
-  - [ ] Remove `this.activeWorkflowAssemblyResult` field from class (dead after Step 1d-workflow + 1e -- no remaining consumers)
-  - [ ] Clean up dead shared-state writes in `newConversation()` at L278-281: remove `this.activeParsedConfigs = []`, `this.effectiveToolConfig = null`, `this.activeWorkflowAssemblyResult = null`, `this.dispatcher.setEffectiveToolConfig(null)` (all now passed per-session, not stored on orchestrator)
+- [x] **Modify `_backgroundResponseLoop()` in `src/chat/orchestrator.ts` (line 839)**
+  - [x] Remove lines 850-852 (`previousAssemblyResult` save)
+  - [x] Remove line 1076 (`previousAssemblyResult` restore)
+  - [x] Create `ConversationSession` from existing `bgConvManager`, `workflowAssembly`, and concurrency manager's approval callback
+  - [x] Snapshot `useExtendedContext` from provider config for the background execution (extend lines 892-894)
+  - [x] Replace `resolveEffectiveConfig(matchedRules)` calls with `resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona)`
+  - [x] L895: `this.getActiveUseExtendedContext()` -> `session.useExtendedContext`
+  - [x] L909: `use_extended_context: this.getActiveUseExtendedContext()` -> `session.useExtendedContext`
+  - [x] L962-964: direct `this.effectiveToolConfig` read -> `session.effectiveConfig.tools[toolName]?.auto_approve ?? false`
+  - [x] L975: `dispatcher.dispatch()` -> pass `session.buildPolicyContext()` and `session.approvalCallback`
+  - [x] Remove `this.activeWorkflowAssemblyResult` field from class (dead after Step 1d-workflow + 1e -- no remaining consumers)
+  - [x] Clean up dead shared-state writes in `newConversation()` at L278-281: remove `this.activeParsedConfigs = []`, `this.effectiveToolConfig = null`, `this.activeWorkflowAssemblyResult = null`, `this.dispatcher.setEffectiveToolConfig(null)` (all now passed per-session, not stored on orchestrator)
 
 ### Phase 1D — UI Restoration & Lifecycle
 
