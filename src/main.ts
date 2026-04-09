@@ -1932,6 +1932,14 @@ export default class NotorPlugin extends Plugin {
 
 		// Delete conversation with confirmation
 		view.setOnDeleteConversation((filename: string) => {
+			// Step 2c: Block deletion of conversations with active sessions.
+			// Check if any active session's conversation ID is in the filename.
+			const activeSessions = orchestrator.getActiveSessions();
+			const streamingSession = activeSessions.find(s => filename.includes(s.conversationId));
+			if (streamingSession) {
+				new Notice("Cannot delete — conversation is still streaming. Stop it first.");
+				return;
+			}
 			new ConfirmModal(
 				this.app,
 				"Delete conversation",

@@ -280,6 +280,24 @@ export class ChatOrchestrator {
 	}
 
 	/**
+	 * Returns all currently active sessions (streaming or waiting for approval).
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 2, Step 2a
+	 */
+	getActiveSessions(): ConversationSession[] {
+		return Array.from(this.activeSessions.values());
+	}
+
+	/**
+	 * Check whether a conversation has an active session.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 2, Step 2a
+	 */
+	hasActiveSession(conversationId: string): boolean {
+		return this.activeSessions.has(conversationId);
+	}
+
+	/**
 	 * Returns the view only if it is currently displaying this session's conversation.
 	 *
 	 * When the user navigates away from a streaming conversation, this returns
@@ -445,12 +463,78 @@ export class ChatOrchestrator {
 		this.view?.setRespondingState(false);
 
 		try {
-			const { conversation, messages } = await this.historyManager.loadConversation(filename);
-			this.conversationManager.loadConversation(conversation, messages);
+			const { conversation, messages: historyMessages } = await this.historyManager.loadConversation(filename);
+
+			// Step 2b: If this conversation has an active session, sync-back
+			// from the session's in-memory messages instead of the JSONL file.
+			// The session's ConversationManager has the authoritative message
+			// array (including messages added since the last JSONL flush).
+			const activeSession = this.activeSessions.get(conversation.id);
+			if (activeSession) {
+				const sessionConv = activeSession.conversationManager.getActiveConversation()!;
+				const sessionMessages = activeSession.conversationManager.getMessages();
+
+				// Use silent: true to skip onConversationChanged — prevents
+				// mid-stream token count writes to JSONL header. The session's
+				// own ConversationManager is the authoritative header writer.
+				this.conversationManager.loadConversation(sessionConv, sessionMessages, { silent: true });
+
+				// Re-render all messages from session state
+				this.view?.clearMessages();
+				for (const msg of sessionMessages) {
+					this.renderMessage(msg);
+				}
+
+				this.view?.updateModeDisplay(sessionConv.mode);
+				this.view?.updateTokenFooter(
+					sessionConv.total_input_tokens,
+					sessionConv.total_output_tokens,
+					sessionConv.estimated_cost
+				);
+
+				// Stream is ongoing — show responding state
+				this.view?.setRespondingState(true);
+
+				// Register one-time callback to turn off responding state
+				// when the session completes (or errors/cancels).
+				const previousOnStatusChange = activeSession.onStatusChange;
+				activeSession.onStatusChange = (session) => {
+					previousOnStatusChange?.(session);
+					if (session.status === "completed" || session.status === "errored" || session.status === "cancelled") {
+						// Only update if this conversation is still displayed
+						const displayConvId = this.conversationManager.getActiveConversation()?.id;
+						if (displayConvId === session.conversationId) {
+							this.view?.setRespondingState(false);
+						}
+						// Restore original callback (remove our one-time wrapper)
+						activeSession.onStatusChange = previousOnStatusChange;
+					}
+				};
+
+				// Display-restore persona/provider/model from session's pinned state
+				this.view?.updatePersonaLabel(activeSession.pinnedPersona);
+				if (sessionConv.provider_id) {
+					this.view?.updateProviderDisplay(sessionConv.provider_id as LLMProviderType);
+				}
+				if (sessionConv.model_id) {
+					this.view?.updateModelDisplay(
+						buildOptionValue(sessionConv.model_id, activeSession.useExtendedContext)
+					);
+				}
+
+				// Update inspector with session's config
+				this.updateDisplayConfig(activeSession.effectiveConfig, activeSession.parsedConfigs);
+
+				log.info("Switched to active session conversation (sync-back)", { id: conversation.id });
+				return;
+			}
+
+			// No active session — standard JSONL load path for completed conversations
+			this.conversationManager.loadConversation(conversation, historyMessages);
 
 			// Re-render all messages in the view
 			this.view?.clearMessages();
-			for (const msg of messages) {
+			for (const msg of historyMessages) {
 				this.renderMessage(msg);
 			}
 
@@ -482,13 +566,6 @@ export class ChatOrchestrator {
 				this.view?.updateModelDisplay(
 					buildOptionValue(conversation.model_id, conversation.use_extended_context ?? false)
 				);
-			}
-
-			// Step 1g: If this conversation has an active session, show its config
-			// in the inspector. Otherwise clear display config (loaded from history).
-			const activeSession = this.activeSessions.get(conversation.id);
-			if (activeSession) {
-				this.updateDisplayConfig(activeSession.effectiveConfig, activeSession.parsedConfigs);
 			}
 
 			log.info("Switched to conversation", { id: conversation.id });

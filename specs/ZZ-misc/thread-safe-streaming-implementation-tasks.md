@@ -376,36 +376,36 @@ When loading a conversation, restore its persona/provider/model in the UI withou
 
 ### Step 2a: Public session accessors
 
-- [ ] **Add public methods to `src/chat/orchestrator.ts`**
-  - [ ] `getActiveSessions(): ConversationSession[]` -- returns `Array.from(this.activeSessions.values())`
-  - [ ] `hasActiveSession(conversationId: string): boolean` -- returns `this.activeSessions.has(conversationId)`
+- [x] **Add public methods to `src/chat/orchestrator.ts`**
+  - [x] `getActiveSessions(): ConversationSession[]` -- returns `Array.from(this.activeSessions.values())`
+  - [x] `hasActiveSession(conversationId: string): boolean` -- returns `this.activeSessions.has(conversationId)`
 
 ### Step 2b: Sync-back on conversation switch
 
 Full replace from session's in-memory message array when switching to a conversation with an active session.
 
-- [ ] **Add `{ silent?: boolean }` option to `loadConversation()` in `src/chat/conversation.ts`**
-  - [ ] Current signature at line 139: `loadConversation(conversation, messages)`
-  - [ ] New signature: `loadConversation(conversation, messages, opts?: { silent?: boolean })`
-  - [ ] When `silent: true`: skip `onConversationChanged` callback at line 148
-  - [ ] Purpose: prevent mid-stream token count writes during sync-back
+- [x] **Add `{ silent?: boolean }` option to `loadConversation()` in `src/chat/conversation.ts`**
+  - [x] Current signature at line 139: `loadConversation(conversation, messages)`
+  - [x] New signature: `loadConversation(conversation, messages, opts?: { silent?: boolean })`
+  - [x] When `silent: true`: skip `onConversationChanged` callback at line 148
+  - [x] Purpose: prevent mid-stream token count writes during sync-back
 
-- [ ] **Update `switchConversation()` in `src/chat/orchestrator.ts` (line 356)**
-  - [ ] Before loading from history, check `this.activeSessions.has(conversation.id)`
-  - [ ] **If active session exists:**
-    - [ ] Get messages from `session.conversationManager.getMessages()`
-    - [ ] Call `this.conversationManager.loadConversation(conv, messages, { silent: true })`
-    - [ ] `this.view?.clearMessages()`
-    - [ ] Re-render all messages via `this.renderMessage(msg)` loop
-    - [ ] `this.view?.setRespondingState(true)` (stream is ongoing)
-    - [ ] Register `session.onStatusChange` callback to call `this.view?.setRespondingState(false)` on completion
-  - [ ] **If no active session:** Load from `HistoryManager` as normal (existing path)
+- [x] **Update `switchConversation()` in `src/chat/orchestrator.ts` (line 356)**
+  - [x] Before loading from history, check `this.activeSessions.has(conversation.id)`
+  - [x] **If active session exists:**
+    - [x] Get messages from `session.conversationManager.getMessages()`
+    - [x] Call `this.conversationManager.loadConversation(conv, messages, { silent: true })`
+    - [x] `this.view?.clearMessages()`
+    - [x] Re-render all messages via `this.renderMessage(msg)` loop
+    - [x] `this.view?.setRespondingState(true)` (stream is ongoing)
+    - [x] Register `session.onStatusChange` callback to call `this.view?.setRespondingState(false)` on completion
+  - [x] **If no active session:** Load from `HistoryManager` as normal (existing path)
 
 ### Step 2c: Deletion guard for active sessions
 
-- [ ] **In conversation delete handler in `src/chat/orchestrator.ts`**
-  - [ ] Before deleting: `if (this.activeSessions.has(conversationId))` -> show Notice "Cannot delete -- conversation is still streaming. Stop it first." and return
-  - [ ] Also wire in `src/main.ts` `onDeleteConversation` callback (line 1885) if the guard is on the orchestrator side
+- [x] **In conversation delete handler in `src/main.ts` `onDeleteConversation` callback**
+  - [x] Before showing confirm dialog: check `orchestrator.getActiveSessions()` for matching conversation ID in filename
+  - [x] If match found: show Notice "Cannot delete -- conversation is still streaming. Stop it first." and return
 
 ### Phase 2 Verification
 

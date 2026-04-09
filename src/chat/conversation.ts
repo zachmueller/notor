@@ -135,8 +135,15 @@ export class ConversationManager {
 	 * Load an existing conversation and its messages into memory.
 	 *
 	 * Used when switching to a past conversation loaded from history.
+	 *
+	 * @param opts.silent - When true, skip the `onConversationChanged` callback.
+	 *   Used during sync-back from an active session to prevent mid-stream
+	 *   token count writes to the JSONL header — the session's own
+	 *   ConversationManager is the authoritative header writer.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 2, Step 2b
 	 */
-	loadConversation(conversation: Conversation, messages: Message[]): void {
+	loadConversation(conversation: Conversation, messages: Message[], opts?: { silent?: boolean }): void {
 		this.activeConversation = { ...conversation };
 		this.messages = [...messages];
 
@@ -145,7 +152,9 @@ export class ConversationManager {
 			messageCount: messages.length,
 		});
 
-		void this.onConversationChanged?.(this.activeConversation);
+		if (!opts?.silent) {
+			void this.onConversationChanged?.(this.activeConversation);
+		}
 	}
 
 	/**
