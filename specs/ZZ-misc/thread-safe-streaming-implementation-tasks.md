@@ -82,43 +82,43 @@ Changes `resolveEffectiveConfig()` from mutating shared state to returning a str
 
 New file encapsulating all per-conversation state for an active response loop.
 
-- [ ] **Create `src/chat/conversation-session.ts`**
-  - [ ] Define `SessionStatus` type: `"running" | "waiting_approval" | "completed" | "errored" | "cancelled"`
-  - [ ] Implement `ConversationSession` class with fields:
-    - [ ] `readonly conversationId: string`
-    - [ ] `readonly conversationManager: ConversationManager` (isolated per-session)
-    - [ ] `readonly abortController: AbortController` (independent per-session)
-    - [ ] `readonly title: string`
-    - [ ] `readonly startedAt: number`
-    - [ ] `effectiveConfig: EffectiveToolConfig` (updated each iteration)
-    - [ ] `parsedConfigs: ParsedToolConfig[]` (updated each iteration)
-    - [ ] `readonly pinnedPersona: Persona | null` (snapshotted, immutable)
-    - [ ] `readonly providerType: LLMProviderType` (snapshotted, immutable)
-    - [ ] `readonly modelId: string` (snapshotted, immutable)
-    - [ ] `readonly useExtendedContext: boolean` (snapshotted, immutable)
-    - [ ] `readonly workflowAssembly: WorkflowAssemblyResult | null` (snapshotted, immutable)
-    - [ ] `readonly approvalCallback: ApprovalCallback` (bound to correct panel)
-    - [ ] `responsePromise?: Promise<void>` (set by handleUserMessage, used by destroy)
-    - [ ] `private _status: SessionStatus` (defaults to "running")
-    - [ ] `onStatusChange?: (session: ConversationSession) => void`
-  - [ ] Implement `get status()` getter
-  - [ ] Implement `setStatus(status)` setter that calls `onStatusChange` callback
-  - [ ] Implement `buildPolicyContext(settings, vaultRootPath): ToolPolicyContext`
-    - [ ] Reads `effectiveConfig` from session
-    - [ ] Reads `mode` dynamically from `this.conversationManager.getActiveConversation()?.mode` (mode can toggle mid-stream)
-    - [ ] Reads `domainDenylist` from settings
-    - [ ] Reads `vaultRootPath` from parameter
-  - [ ] Constructor accepts options object with all readonly fields + `initialConfig` + `initialParsedConfigs`
+- [x] **Create `src/chat/conversation-session.ts`**
+  - [x] Define `SessionStatus` type: `"running" | "waiting_approval" | "completed" | "errored" | "cancelled"`
+  - [x] Implement `ConversationSession` class with fields:
+    - [x] `readonly conversationId: string`
+    - [x] `readonly conversationManager: ConversationManager` (isolated per-session)
+    - [x] `readonly abortController: AbortController` (independent per-session)
+    - [x] `readonly title: string`
+    - [x] `readonly startedAt: number`
+    - [x] `effectiveConfig: EffectiveToolConfig` (updated each iteration)
+    - [x] `parsedConfigs: ParsedToolConfig[]` (updated each iteration)
+    - [x] `readonly pinnedPersona: Persona | null` (snapshotted, immutable)
+    - [x] `readonly providerType: LLMProviderType` (snapshotted, immutable)
+    - [x] `readonly modelId: string` (snapshotted, immutable)
+    - [x] `readonly useExtendedContext: boolean` (snapshotted, immutable)
+    - [x] `readonly workflowAssembly: WorkflowAssemblyResult | null` (snapshotted, immutable)
+    - [x] `readonly approvalCallback: ApprovalCallback` (bound to correct panel)
+    - [x] `responsePromise?: Promise<void>` (set by handleUserMessage, used by destroy)
+    - [x] `private _status: SessionStatus` (defaults to "running")
+    - [x] `onStatusChange?: (session: ConversationSession) => void`
+  - [x] Implement `get status()` getter
+  - [x] Implement `setStatus(status)` setter that calls `onStatusChange` callback
+  - [x] Implement `buildPolicyContext(settings, vaultRootPath): ToolPolicyContext`
+    - [x] Reads `effectiveConfig` from session
+    - [x] Reads `mode` dynamically from `this.conversationManager.getActiveConversation()?.mode` (mode can toggle mid-stream)
+    - [x] Reads `domainDenylist` from settings
+    - [x] Reads `vaultRootPath` from parameter
+  - [x] Constructor accepts options object with all readonly fields + `initialConfig` + `initialParsedConfigs`
 
 ### Step 1d: Update `responseLoop` to use `ConversationSession`
 
 This is the largest step. Replaces all shared-state reads in the response path with session-scoped reads.
 
-- [ ] **Add `activeSessions` map to `src/chat/orchestrator.ts`**
-  - [ ] `private activeSessions = new Map<string, ConversationSession>()`
-  - [ ] Add `getActiveSession(conversationId: string): ConversationSession | undefined` accessor
+- [x] **Add `activeSessions` map to `src/chat/orchestrator.ts`**
+  - [x] `private activeSessions = new Map<string, ConversationSession>()`
+  - [x] Add `getActiveSession(conversationId: string): ConversationSession | undefined` accessor
 
-- [ ] **Add `getViewForSession()` helper**
+- [x] **Add `getViewForSession()` helper**
   ```typescript
   private getViewForSession(session: ConversationSession): NotorChatView | undefined {
     const displayConvId = this.conversationManager.getActiveConversation()?.id;
@@ -126,21 +126,21 @@ This is the largest step. Replaces all shared-state reads in the response path w
   }
   ```
 
-- [ ] **Modify `handleUserMessage()` (line 1217)**
-  - [ ] Add duplicate-send guard: `if (this.activeSessions.has(conv.id))` -> show Notice, return
-  - [ ] Snapshot conversation + messages from `this.conversationManager`
-  - [ ] Create isolated `ConversationManager` (pattern from `executeBackgroundWorkflow`, lines 710-724)
-  - [ ] Wire `onMessageAdded` / `onConversationChanged` to `this.historyManager`
-  - [ ] Load snapshot into new manager via `loadConversation()`
-  - [ ] Snapshot persona: `this.personaManager?.getActivePersona() ?? null`
-  - [ ] Snapshot provider: conversation header `provider_id` if provider still configured, else `this.providerRegistry.getActiveType()`
-  - [ ] Snapshot model: conversation header `model_id` if provider still configured, else `this.getActiveModelId()`
-  - [ ] Snapshot extended context: `this.providerRegistry.getConfig(providerType)?.use_extended_context ?? false`
-  - [ ] Resolve initial config via pure `resolveEffectiveConfig(matchedRules, null, pinnedPersona)`
-  - [ ] Create `ConversationSession` with all snapshots
-  - [ ] Register in `this.activeSessions`
-  - [ ] Store response loop promise: `session.responsePromise = this.responseLoop(mode, session)`
-  - [ ] Update finally block to clean up session:
+- [x] **Modify `handleUserMessage()` (line 1217)**
+  - [x] Add duplicate-send guard: `if (this.activeSessions.has(conv.id))` -> show Notice, return
+  - [x] Snapshot conversation + messages from `this.conversationManager`
+  - [x] Create isolated `ConversationManager` (pattern from `executeBackgroundWorkflow`, lines 710-724)
+  - [x] Wire `onMessageAdded` / `onConversationChanged` to `this.historyManager`
+  - [x] Load snapshot into new manager via `loadConversation()`
+  - [x] Snapshot persona: `this.personaManager?.getActivePersona() ?? null`
+  - [x] Snapshot provider: conversation header `provider_id` if provider still configured, else `this.providerRegistry.getActiveType()`
+  - [x] Snapshot model: conversation header `model_id` if provider still configured, else `this.getActiveModelId()`
+  - [x] Snapshot extended context: `this.providerRegistry.getConfig(providerType)?.use_extended_context ?? false`
+  - [x] Resolve initial config via pure `resolveEffectiveConfig(matchedRules, null, pinnedPersona)`
+  - [x] Create `ConversationSession` with all snapshots
+  - [x] Register in `this.activeSessions`
+  - [x] Store response loop promise: `session.responsePromise = this.responseLoop(mode, session)`
+  - [x] Update finally block to clean up session:
     ```typescript
     try { await session.responsePromise; }
     catch (e) { session.setStatus("errored"); this.handleError(e); }
@@ -152,123 +152,123 @@ This is the largest step. Replaces all shared-state reads in the response path w
     }
     ```
 
-- [ ] **Change `responseLoop()` signature**
+- [x] **Change `responseLoop()` signature**
   ```typescript
   private async responseLoop(mode: ConversationMode, session: ConversationSession): Promise<void>
   ```
 
-- [ ] **Substitute all `this.conversationManager` reads in `responseLoop` (14 sites)**
-  - [ ] L1400 `getMessages()` -> `session.conversationManager.getMessages()`
-  - [ ] L1408 `getActiveConversation()!.id` -> `session.conversationManager.getActiveConversation()!.id`
-  - [ ] L1453 `addMessage()` -> `session.conversationManager.addMessage()`
-  - [ ] L1466 `getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
-  - [ ] L1484 `addMessage()` -> `session.conversationManager.addMessage()`
-  - [ ] L1493 `getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
-  - [ ] L1511 `addMessage()` -> `session.conversationManager.addMessage()`
-  - [ ] L1527 `getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
-  - [ ] L1619 `addMessage()` -> `session.conversationManager.addMessage()`
-  - [ ] L1630 `addTokens()` -> `session.conversationManager.addTokens()`
-  - [ ] L1638 `getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
-  - [ ] L1661 `getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
-  - [ ] L1687 `addMessage()` -> `session.conversationManager.addMessage()`
-  - [ ] L1728 `getActiveConversation()` -> pass `session` or `conversationId` to `dispatchAfterCompletionHooks()`
+- [x] **Substitute all `this.conversationManager` reads in `responseLoop` (14 sites)**
+  - [x] L1400 `getMessages()` -> `session.conversationManager.getMessages()`
+  - [x] L1408 `getActiveConversation()!.id` -> `session.conversationManager.getActiveConversation()!.id`
+  - [x] L1453 `addMessage()` -> `session.conversationManager.addMessage()`
+  - [x] L1466 `getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
+  - [x] L1484 `addMessage()` -> `session.conversationManager.addMessage()`
+  - [x] L1493 `getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
+  - [x] L1511 `addMessage()` -> `session.conversationManager.addMessage()`
+  - [x] L1527 `getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
+  - [x] L1619 `addMessage()` -> `session.conversationManager.addMessage()`
+  - [x] L1630 `addTokens()` -> `session.conversationManager.addTokens()`
+  - [x] L1638 `getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
+  - [x] L1661 `getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
+  - [x] L1687 `addMessage()` -> `session.conversationManager.addMessage()`
+  - [x] L1728 `getActiveConversation()` -> pass `session` or `conversationId` to `dispatchAfterCompletionHooks()`
 
-- [ ] **Substitute all `this.view` reads in `responseLoop` (17 sites) with `this.getViewForSession(session)?.`**
-  - [ ] L1423 `showTruncationWarning()`
-  - [ ] L1430 `setRespondingState(true)`
-  - [ ] L1431 `createAbortController()` -> REMOVE, session owns its own `AbortController`
-  - [ ] L1436 `createAssistantMessagePlaceholder()`
-  - [ ] L1462 `finalizeAssistantMessage()`
-  - [ ] L1468 `updateTokenFooter()`
-  - [ ] L1495 `updateTokenFooter()`
-  - [ ] L1522 `renderToolCall()`
-  - [ ] L1571 `updateToolCallProgress()`
-  - [ ] L1595 `updateToolCallStatus()`
-  - [ ] L1602 `appendForkButton()`
-  - [ ] L1633 `renderToolResult()`
-  - [ ] L1663 `updateTokenFooter()`
-  - [ ] L1694 `finalizeAssistantMessage()`
-  - [ ] L1697 `createAssistantMessagePlaceholder()`
-  - [ ] L1699 `finalizeAssistantMessage()`
-  - [ ] L1708 `showError()`
+- [x] **Substitute all `this.view` reads in `responseLoop` (17 sites) with `this.getViewForSession(session)?.`**
+  - [x] L1423 `showTruncationWarning()`
+  - [x] L1430 `setRespondingState(true)`
+  - [x] L1431 `createAbortController()` -> REMOVE, session owns its own `AbortController`
+  - [x] L1436 `createAssistantMessagePlaceholder()`
+  - [x] L1462 `finalizeAssistantMessage()`
+  - [x] L1468 `updateTokenFooter()`
+  - [x] L1495 `updateTokenFooter()`
+  - [x] L1522 `renderToolCall()`
+  - [x] L1571 `updateToolCallProgress()`
+  - [x] L1595 `updateToolCallStatus()`
+  - [x] L1602 `appendForkButton()`
+  - [x] L1633 `renderToolResult()`
+  - [x] L1663 `updateTokenFooter()`
+  - [x] L1694 `finalizeAssistantMessage()`
+  - [x] L1697 `createAssistantMessagePlaceholder()`
+  - [x] L1699 `finalizeAssistantMessage()`
+  - [x] L1708 `showError()`
 
-- [ ] **Substitute other global reads in `responseLoop` (8 sites)**
-  - [ ] L1386 `this.personaManager?.getActivePersona()` -> `session.pinnedPersona`
-  - [ ] L1418 `this.getActiveModelId()` -> `session.modelId`
-  - [ ] L1419 `this.getActiveUseExtendedContext()` -> `session.useExtendedContext`
-  - [ ] L1438 `this.providerRegistry.getActiveProvider()` -> `this.providerRegistry.getProvider(session.providerType)`
-  - [ ] L1440 `this.getActiveModelId()` -> `session.modelId`
-  - [ ] L1442 `this.getActiveUseExtendedContext()` -> `session.useExtendedContext`
-  - [ ] L1458 `this.calculateCost(in, out)` -> `this.calculateCost(in, out, session.modelId)`
-  - [ ] L1489 `this.calculateCost(in, out)` -> `this.calculateCost(in, out, session.modelId)`
+- [x] **Substitute other global reads in `responseLoop` (8 sites)**
+  - [x] L1386 `this.personaManager?.getActivePersona()` -> `session.pinnedPersona`
+  - [x] L1418 `this.getActiveModelId()` -> `session.modelId`
+  - [x] L1419 `this.getActiveUseExtendedContext()` -> `session.useExtendedContext`
+  - [x] L1438 `this.providerRegistry.getActiveProvider()` -> `this.providerRegistry.getProvider(session.providerType)`
+  - [x] L1440 `this.getActiveModelId()` -> `session.modelId`
+  - [x] L1442 `this.getActiveUseExtendedContext()` -> `session.useExtendedContext`
+  - [x] L1458 `this.calculateCost(in, out)` -> `this.calculateCost(in, out, session.modelId)`
+  - [x] L1489 `this.calculateCost(in, out)` -> `this.calculateCost(in, out, session.modelId)`
 
-- [ ] **Substitute `resolveEffectiveConfig` call in `responseLoop`**
-  - [ ] Call `resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona)`
-  - [ ] Store result on `session.effectiveConfig` and `session.parsedConfigs`
-  - [ ] If session matches displayed conversation: call `this.updateDisplayConfig()`
+- [x] **Substitute `resolveEffectiveConfig` call in `responseLoop`**
+  - [x] Call `resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona)`
+  - [x] Store result on `session.effectiveConfig` and `session.parsedConfigs`
+  - [x] If session matches displayed conversation: call `this.updateDisplayConfig()`
 
-- [ ] **Thread policy context and approval through tool dispatch**
-  - [ ] `executeToolBatches()` receives `session.buildPolicyContext(this.settings, vaultRootPath)` and `session.approvalCallback`
+- [x] **Thread policy context and approval through tool dispatch**
+  - [x] `executeToolBatches()` receives `session.buildPolicyContext(this.settings, vaultRootPath)` and `session.approvalCallback`
 
-- [ ] **Update `processStream()` (line 1962) for session-aware view guarding**
-  - [ ] Add view-resolver parameter: `viewResolver: () => NotorChatView | undefined`
-  - [ ] L1981 `this.view?.createAssistantMessagePlaceholder()` -> `viewResolver()?.createAssistantMessagePlaceholder()`
-  - [ ] L1985 `this.view?.appendStreamChunk()` -> `viewResolver()?.appendStreamChunk()`
-  - [ ] Caller passes `() => this.getViewForSession(session)` as resolver
-  - [ ] Guard `eagerContentEl` creation at L1436 with `getViewForSession(session)`
+- [x] **Update `processStream()` (line 1962) for session-aware view guarding**
+  - [x] Add view-resolver parameter: `viewResolver: () => NotorChatView | undefined`
+  - [x] L1981 `this.view?.createAssistantMessagePlaceholder()` -> `viewResolver()?.createAssistantMessagePlaceholder()`
+  - [x] L1985 `this.view?.appendStreamChunk()` -> `viewResolver()?.appendStreamChunk()`
+  - [x] Caller passes `() => this.getViewForSession(session)` as resolver
+  - [x] Guard `eagerContentEl` creation at L1436 with `getViewForSession(session)`
 
-- [ ] **Update `checkAndPerformCompaction()` (line 1755) to accept session**
-  - [ ] Change signature to `checkAndPerformCompaction(session: ConversationSession)`
-  - [ ] L1756 `this.conversationManager.getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
-  - [ ] L1759 `this.conversationManager.getMessages()` -> `session.conversationManager.getMessages()`
-  - [ ] L1760 `this.getActiveModelId()` -> `session.modelId`
-  - [ ] L1762 `this.getActiveUseExtendedContext()` -> `session.useExtendedContext` (note: actual line may differ from spec -- verify)
-  - [ ] L1786 `this.view?.getMessagesContainer()` -> `this.getViewForSession(session)?.getMessagesContainer()`
-  - [ ] L1798 `this.providerRegistry.getActiveProvider()` -> `this.providerRegistry.getProvider(session.providerType)`
-  - [ ] L1811 `this.conversationManager.replaceMessages()` -> `session.conversationManager.replaceMessages()`
-  - [ ] L1818 `this.conversationManager.addMessage()` -> `session.conversationManager.addMessage()`
-  - [ ] L1836 compaction marker display -> `this.getViewForSession(session)?.`
+- [x] **Update `checkAndPerformCompaction()` (line 1755) to accept session**
+  - [x] Change signature to `checkAndPerformCompaction(session: ConversationSession)`
+  - [x] L1756 `this.conversationManager.getActiveConversation()` -> `session.conversationManager.getActiveConversation()`
+  - [x] L1759 `this.conversationManager.getMessages()` -> `session.conversationManager.getMessages()`
+  - [x] L1760 `this.getActiveModelId()` -> `session.modelId`
+  - [x] L1762 `this.getActiveUseExtendedContext()` -> `session.useExtendedContext` (note: actual line may differ from spec -- verify)
+  - [x] L1786 `this.view?.getMessagesContainer()` -> `this.getViewForSession(session)?.getMessagesContainer()`
+  - [x] L1798 `this.providerRegistry.getActiveProvider()` -> `this.providerRegistry.getProvider(session.providerType)`
+  - [x] L1811 `this.conversationManager.replaceMessages()` -> `session.conversationManager.replaceMessages()`
+  - [x] L1818 `this.conversationManager.addMessage()` -> `session.conversationManager.addMessage()`
+  - [x] L1836 compaction marker display -> `this.getViewForSession(session)?.`
 
-- [ ] **Update `calculateCost()` (line 2359) to accept optional `modelId`**
-  - [ ] Change signature: `calculateCost(inputTokens, outputTokens, modelId?: string)`
-  - [ ] L2360: Use `modelId ?? this.getActiveModelId()` for backward compat
+- [x] **Update `calculateCost()` (line 2359) to accept optional `modelId`**
+  - [x] Change signature: `calculateCost(inputTokens, outputTokens, modelId?: string)`
+  - [x] L2360: Use `modelId ?? this.getActiveModelId()` for backward compat
 
-- [ ] **Update `dispatchAfterCompletionHooks()` (line 1727) to accept session**
-  - [ ] Change signature to accept `conversationId: string` or full session
-  - [ ] L1728: Use parameter instead of `this.conversationManager.getActiveConversation()`
+- [x] **Update `dispatchAfterCompletionHooks()` (line 1727) to accept session**
+  - [x] Change signature to accept `conversationId: string` or full session
+  - [x] L1728: Use parameter instead of `this.conversationManager.getActiveConversation()`
 
-- [ ] **Update `switchConversation()` (line 356) for session compatibility**
-  - [ ] Call `this.view?.setRespondingState(false)` to unlock input on switch
-  - [ ] Decouple AbortController: session owns its own, not via `this.view?.createAbortController()`
-  - [ ] Update `onStopResponse` in `wireView()`: dynamically resolve displayed conversation's active session -> call `session.abortController.abort()`
+- [x] **Update `switchConversation()` (line 356) for session compatibility**
+  - [x] Call `this.view?.setRespondingState(false)` to unlock input on switch
+  - [x] Decouple AbortController: session owns its own, not via `this.view?.createAbortController()`
+  - [x] Update `onStopResponse` in `wireView()`: dynamically resolve displayed conversation's active session -> call `session.abortController.abort()`
 
-- [ ] **Wire mode toggle propagation in `src/main.ts`**
-  - [ ] In `wireView()` `onModeToggle` callback (line 1942):
-    - [ ] After `convManager.setMode(mode)`: look up displayed conversation's active session
-    - [ ] Call `session?.conversationManager.setMode(mode)` to propagate
+- [x] **Wire mode toggle propagation in `src/main.ts`**
+  - [x] In `wireView()` `onModeToggle` callback (line 1942):
+    - [x] After `convManager.setMode(mode)`: look up displayed conversation's active session
+    - [x] Call `session?.conversationManager.setMode(mode)` to propagate
 
-- [ ] **Enforce isolation invariant:** After all substitutions, verify `this.conversationManager` has ZERO reads inside `responseLoop`, `processStream`, `checkAndPerformCompaction`, and `dispatchAfterCompletionHooks`
+- [x] **Enforce isolation invariant:** After all substitutions, verify `this.conversationManager` has ZERO reads inside `responseLoop`, `processStream`, `checkAndPerformCompaction`, and `dispatchAfterCompletionHooks`
 
 ### Step 1d-workflow: Update `executeWorkflow` to use `ConversationSession`
 
 `executeWorkflow()` is the second caller of `responseLoop()` (at L602). It must also create a `ConversationSession` to match the new signature.
 
-- [ ] **Modify `executeWorkflow()` in `src/chat/orchestrator.ts` (line 472)**
-  - [ ] After creating conversation and adding user message (L574-578), before response loop:
-    - [ ] Create isolated `ConversationManager` (same pattern as `handleUserMessage`)
-    - [ ] Snapshot persona: `this.personaManager?.getActivePersona() ?? null` (already switched by L485-498)
-    - [ ] Snapshot provider: from L536 `providerType`
-    - [ ] Snapshot model: from L538 `modelId`
-    - [ ] Snapshot extended context: from L556 `providerConfig?.use_extended_context ?? false`
-    - [ ] Resolve initial config via `resolveEffectiveConfig(matchedRules, assemblyResult, pinnedPersona)`
-    - [ ] Create `ConversationSession` with `workflowAssembly: assemblyResult`
-  - [ ] **Remove** `this.activeWorkflowAssemblyResult = assemblyResult` at L598 -- assembly is now on the session
-  - [ ] Register session in `this.activeSessions`
-  - [ ] Store `session.responsePromise = this.responseLoop(currentMode, session)`
-  - [ ] Preserve hook override lifecycle in try/finally:
-    - [ ] `workflowHookOverrideManager.activate()` before `responseLoop` (keep at L589-594)
-    - [ ] `workflowHookOverrideManager.deactivate()` in finally block (keep at L607-608)
-    - [ ] Add session cleanup to finally: `session.setStatus()`, `this.activeSessions.delete()`, `setRespondingState(false)`
+- [x] **Modify `executeWorkflow()` in `src/chat/orchestrator.ts` (line 472)**
+  - [x] After creating conversation and adding user message (L574-578), before response loop:
+    - [x] Create isolated `ConversationManager` (same pattern as `handleUserMessage`)
+    - [x] Snapshot persona: `this.personaManager?.getActivePersona() ?? null` (already switched by L485-498)
+    - [x] Snapshot provider: from L536 `providerType`
+    - [x] Snapshot model: from L538 `modelId`
+    - [x] Snapshot extended context: from L556 `providerConfig?.use_extended_context ?? false`
+    - [x] Resolve initial config via `resolveEffectiveConfig(matchedRules, assemblyResult, pinnedPersona)`
+    - [x] Create `ConversationSession` with `workflowAssembly: assemblyResult`
+  - [x] **Remove** `this.activeWorkflowAssemblyResult = assemblyResult` at L598 -- assembly is now on the session
+  - [x] Register session in `this.activeSessions`
+  - [x] Store `session.responsePromise = this.responseLoop(currentMode, session)`
+  - [x] Preserve hook override lifecycle in try/finally:
+    - [x] `workflowHookOverrideManager.activate()` before `responseLoop` (keep at L589-594)
+    - [x] `workflowHookOverrideManager.deactivate()` in finally block (keep at L607-608)
+    - [x] Add session cleanup to finally: `session.setStatus()`, `this.activeSessions.delete()`, `setRespondingState(false)`
 
 ### Phase 1C — Background Loop
 

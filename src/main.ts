@@ -1799,9 +1799,17 @@ export default class NotorPlugin extends Plugin {
 			await orchestrator.handleUserMessage(content, attachments);
 		});
 
-		// Stop response
+		// Stop response — resolve displayed conversation's active session and abort it
 		view.setOnStopResponse(() => {
-			// AbortController is managed by the view; signal abort via the controller
+			const displayedConvId = orchestrator.getConversationManager().getActiveConversation()?.id;
+			if (displayedConvId) {
+				const session = orchestrator.getActiveSession(displayedConvId);
+				if (session) {
+					session.abortController.abort();
+					return;
+				}
+			}
+			// Fallback: no active session — the view's legacy AbortController is a no-op
 		});
 
 		// New conversation
@@ -1961,10 +1969,17 @@ export default class NotorPlugin extends Plugin {
 			}
 		});
 
-		// Mode toggle
+		// Mode toggle — propagate to active session so buildPolicyContext reads the new mode
 		view.setOnModeToggle((mode) => {
 			const convManager = orchestrator.getConversationManager();
 			convManager.setMode(mode);
+
+			// Propagate to active session's ConversationManager
+			const displayedConvId = convManager.getActiveConversation()?.id;
+			if (displayedConvId) {
+				const session = orchestrator.getActiveSession(displayedConvId);
+				session?.conversationManager.setMode(mode);
+			}
 		});
 
 		// Settings open (open Obsidian settings tab)

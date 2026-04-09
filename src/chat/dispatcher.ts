@@ -150,6 +150,11 @@ export class ToolDispatcher {
 		this.approvalCallback = callback;
 	}
 
+	/** Get the current approval callback (for session snapshot). */
+	getApprovalCallback(): ApprovalCallback | undefined {
+		return this.approvalCallback;
+	}
+
 	/** Set event handlers for UI updates. */
 	setEvents(events: DispatcherEvents): void {
 		this.events = events;

@@ -39,6 +39,8 @@ import type { Workflow, WorkflowExecutionRequest, WorkflowAssemblyResult, VaultR
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
 import { mergeToolConfigs } from "../tool-config/merger";
+import { ConversationSession } from "./conversation-session";
+import type { ApprovalCallback } from "./dispatcher";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatOrchestrator");
@@ -109,6 +111,17 @@ export class ChatOrchestrator {
 	 * `toolConfigs` for `resolveEffectiveConfig()`.
 	 */
 	private activeWorkflowAssemblyResult: WorkflowAssemblyResult | null = null;
+
+	/**
+	 * Active conversation sessions keyed by conversation ID.
+	 *
+	 * Each response loop (foreground or workflow) creates a session that
+	 * isolates all per-conversation state. Sessions are removed in the
+	 * response loop's finally block.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1d
+	 */
+	private activeSessions = new Map<string, ConversationSession>();
 
 	constructor(
 		private readonly app: App,
@@ -260,6 +273,32 @@ export class ChatOrchestrator {
 	}
 
 	// -----------------------------------------------------------------------
+	// Session accessors
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Get the active session for a given conversation ID.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1d
+	 */
+	getActiveSession(conversationId: string): ConversationSession | undefined {
+		return this.activeSessions.get(conversationId);
+	}
+
+	/**
+	 * Returns the view only if it is currently displaying this session's conversation.
+	 *
+	 * When the user navigates away from a streaming conversation, this returns
+	 * `undefined` so all render calls become no-ops while data writes continue.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1d
+	 */
+	private getViewForSession(session: ConversationSession): NotorChatView | undefined {
+		const displayConvId = this.conversationManager.getActiveConversation()?.id;
+		return session.conversationId === displayConvId ? this.view : undefined;
+	}
+
+	// -----------------------------------------------------------------------
 	// Conversation lifecycle
 	// -----------------------------------------------------------------------
 
@@ -356,6 +395,10 @@ export class ChatOrchestrator {
 	async switchConversation(filename: string): Promise<void> {
 		// E-008: Revert workflow persona before leaving this conversation
 		await this.maybeRevertWorkflowPersona();
+
+		// Unlock input — the session (if any) owns its own AbortController,
+		// so navigating away just unlocks the UI without affecting the stream.
+		this.view?.setRespondingState(false);
 
 		try {
 			const { conversation, messages } = await this.historyManager.loadConversation(filename);
@@ -585,6 +628,51 @@ export class ChatOrchestrator {
 			assembled_length: assemblyResult.assembledMessage.length,
 		});
 
+		// --- Create isolated ConversationSession for the workflow ---
+		const snapshotConv = this.conversationManager.getActiveConversation()!;
+		const snapshotMessages = this.conversationManager.getMessages();
+
+		const { ConversationManager: ConvManagerClass } = await import("./conversation");
+		const sessionConvManager = new ConvManagerClass(currentMode);
+
+		sessionConvManager.setOnMessageAdded(async (message) => {
+			const sessionConv = sessionConvManager.getActiveConversation();
+			if (sessionConv) {
+				await this.historyManager.appendMessage(sessionConv, message);
+			}
+		});
+		sessionConvManager.setOnConversationChanged(async (sessionConv) => {
+			await this.historyManager.updateConversationHeader(sessionConv);
+		});
+
+		sessionConvManager.loadConversation(snapshotConv, snapshotMessages);
+
+		const pinnedPersona = this.personaManager?.getActivePersona() ?? null;
+		const useExtendedContext = providerConfig?.use_extended_context ?? false;
+
+		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
+			await this.resolveEffectiveConfig(undefined, assemblyResult, pinnedPersona);
+
+		const approvalCallback: ApprovalCallback = this.dispatcher.getApprovalCallback()
+			?? (async () => "approved" as const);
+
+		const session = new ConversationSession({
+			conversationId: conversation.id,
+			conversationManager: sessionConvManager,
+			abortController: new AbortController(),
+			title: conversation.title ?? `Workflow: ${workflow.display_name}`,
+			pinnedPersona,
+			providerType,
+			modelId,
+			useExtendedContext,
+			workflowAssembly: assemblyResult,
+			approvalCallback,
+			initialConfig,
+			initialParsedConfigs,
+		});
+
+		this.activeSessions.set(session.conversationId, session);
+
 		// G-006: Activate workflow-scoped hook overrides before the first LLM call
 		if (workflow.hooks && this.workflowHookOverrideManager) {
 			this.workflowHookOverrideManager.activate(conversation.id, workflow.hooks);
@@ -594,19 +682,22 @@ export class ChatOrchestrator {
 			});
 		}
 
-		// Step 9: Store workflow assembly result for tool config resolution
-		this.activeWorkflowAssemblyResult = assemblyResult;
-
 		// Step 10: Start the response loop
+		session.responsePromise = this.responseLoop(currentMode, session);
 		try {
-			await this.responseLoop(currentMode);
+			await session.responsePromise;
 		} catch (e) {
+			session.setStatus("errored");
 			this.handleError(e);
 		} finally {
 			// G-005: Deactivate workflow-scoped hook overrides on all exit paths
 			if (this.workflowHookOverrideManager) {
 				this.workflowHookOverrideManager.deactivate(conversation.id);
 			}
+			if (session.status === "running" || session.status === "waiting_approval") {
+				session.setStatus("completed");
+			}
+			this.activeSessions.delete(session.conversationId);
 			this.view?.setRespondingState(false);
 		}
 	}
@@ -1214,8 +1305,13 @@ export class ChatOrchestrator {
 	/**
 	 * Handle a user message — the main entry point for the send/receive loop.
 	 *
+	 * Creates an isolated `ConversationSession` that owns all per-conversation
+	 * state, then runs the response loop against that session.
+	 *
 	 * @param content - User message text
 	 * @param attachments - Optional file attachments
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1d
 	 */
 	async handleUserMessage(
 		content: string,
@@ -1224,6 +1320,15 @@ export class ChatOrchestrator {
 		// Ensure we have an active conversation
 		if (!this.conversationManager.hasActiveConversation()) {
 			await this.newConversation();
+		}
+
+		const conv = this.conversationManager.getActiveConversation();
+		if (!conv) return;
+
+		// Duplicate-send guard: prevent a second session for the same conversation
+		if (this.activeSessions.has(conv.id)) {
+			new Notice("This conversation is already processing");
+			return;
 		}
 
 		// Guard: require a model to be selected before doing any work
@@ -1268,8 +1373,7 @@ export class ChatOrchestrator {
 		// G-004: Pass override manager so workflow-scoped hooks are used when active
 		// EXT-017: Pass extension lifecycle automations
 		let hookInjections: string[] | undefined;
-		const conv = this.conversationManager.getActiveConversation();
-		if (conv) {
+		{
 			const vaultRootPath = this.getVaultRootPath();
 			if (vaultRootPath) {
 				hookInjections = await dispatchPreSend(
@@ -1337,12 +1441,73 @@ export class ChatOrchestrator {
 
 		this.view?.renderUserMessage(userMessage);
 
-		// Start the response loop (vault rules evaluated dynamically inside)
+		// --- Create isolated ConversationSession ---
+		// Snapshot conversation + messages from display manager into an isolated
+		// ConversationManager so the response loop never reads shared state.
+		const snapshotConv = this.conversationManager.getActiveConversation()!;
+		const snapshotMessages = this.conversationManager.getMessages();
+
+		const { ConversationManager: ConvManagerClass } = await import("./conversation");
+		const sessionConvManager = new ConvManagerClass(mode);
+
+		// Wire persistence callbacks (same pattern as executeBackgroundWorkflow)
+		sessionConvManager.setOnMessageAdded(async (message) => {
+			const sessionConv = sessionConvManager.getActiveConversation();
+			if (sessionConv) {
+				await this.historyManager.appendMessage(sessionConv, message);
+			}
+		});
+		sessionConvManager.setOnConversationChanged(async (sessionConv) => {
+			await this.historyManager.updateConversationHeader(sessionConv);
+		});
+
+		sessionConvManager.loadConversation(snapshotConv, snapshotMessages);
+
+		// Snapshot persona, provider, model, extended context
+		const pinnedPersona = this.personaManager?.getActivePersona() ?? null;
+		const providerType = this.providerRegistry.getActiveType();
+		const providerConfig = this.providerRegistry.getConfig(providerType);
+		const modelId = providerConfig?.model_id ?? "";
+		const useExtendedContext = providerConfig?.use_extended_context ?? false;
+
+		// Resolve initial effective config
+		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
+			await this.resolveEffectiveConfig(undefined, null, pinnedPersona);
+
+		// Capture the approval callback from the dispatcher's current global callback.
+		// This binds approval prompts to the correct panel's view.
+		const approvalCallback: ApprovalCallback = this.dispatcher.getApprovalCallback()
+			?? (async () => "approved" as const);
+
+		const session = new ConversationSession({
+			conversationId: snapshotConv.id,
+			conversationManager: sessionConvManager,
+			abortController: new AbortController(),
+			title: snapshotConv.title ?? "Untitled",
+			pinnedPersona,
+			providerType,
+			modelId,
+			useExtendedContext,
+			workflowAssembly: null,
+			approvalCallback,
+			initialConfig,
+			initialParsedConfigs,
+		});
+
+		// Register session and start response loop
+		this.activeSessions.set(session.conversationId, session);
+
+		session.responsePromise = this.responseLoop(mode, session);
 		try {
-			await this.responseLoop(mode);
+			await session.responsePromise;
 		} catch (e) {
+			session.setStatus("errored");
 			this.handleError(e);
 		} finally {
+			if (session.status === "running" || session.status === "waiting_approval") {
+				session.setStatus("completed");
+			}
+			this.activeSessions.delete(session.conversationId);
 			this.view?.setRespondingState(false);
 		}
 	}
@@ -1355,20 +1520,29 @@ export class ChatOrchestrator {
 	 * (which extracts tool configs and caches stripped content), then
 	 * assembles the system prompt with filtered tool definitions.
 	 *
+	 * All per-conversation state is read from the session — not from shared
+	 * orchestrator fields. The shared `this.conversationManager` is the UI
+	 * display manager only; `this.view` calls are guarded by
+	 * `getViewForSession()` so render becomes a no-op when the user navigates
+	 * away mid-stream.
+	 *
 	 * @see specs/04b-tool-toggle/tasks.md — ORCH-002
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1d
 	 */
 	private async responseLoop(
-		mode: ConversationMode
+		mode: ConversationMode,
+		session: ConversationSession,
 	): Promise<void> {
 		let continueLoop = true;
 		const vaultRootPath = this.getVaultRootPath();
+		const convManager = session.conversationManager;
 
 		try {
 			while (continueLoop) {
 				continueLoop = false;
 
 				// 0. Phase 3 (COMP-005): Check compaction threshold before each LLM call
-				await this.checkAndPerformCompaction();
+				await this.checkAndPerformCompaction(session);
 
 				// 1. Evaluate vault rules (re-evaluated each turn after tool calls)
 				const matchedRules = this.vaultRuleManager
@@ -1377,13 +1551,18 @@ export class ChatOrchestrator {
 
 				// 1b. Resolve effective tool config (extracts tool configs from
 				// persona + rules + workflow, merges, and returns filtered tool definitions)
-				const activePersona = this.personaManager?.getActivePersona() ?? null;
 				const { effective, toolDefinitions, parsedConfigs } = await this.resolveEffectiveConfig(
 					matchedRules,
-					this.activeWorkflowAssemblyResult,
-					activePersona,
+					session.workflowAssembly,
+					session.pinnedPersona,
 				);
-				this.updateDisplayConfig(effective, parsedConfigs);
+				session.effectiveConfig = effective;
+				session.parsedConfigs = parsedConfigs;
+
+				// Update display config only if this session matches the displayed conversation
+				if (this.getViewForSession(session)) {
+					this.updateDisplayConfig(effective, parsedConfigs);
+				}
 
 				// 1c. ACI-001: Build fresh auto-context before each LLM call
 				// so open-notes and vault structure reflect the latest state.
@@ -1393,7 +1572,7 @@ export class ChatOrchestrator {
 					toolDefinitions,
 					undefined, // vaultRuleContent — now handled via cached stripped content
 					autoContext ?? undefined,
-					activePersona
+					session.pinnedPersona
 				);
 
 				// Emit assembled system prompt as a structured log so E2E tests
@@ -1401,7 +1580,7 @@ export class ChatOrchestrator {
 				log.debug("System prompt assembled", { systemPrompt });
 
 				// 3. Build messages for LLM
-				const allMessages = this.conversationManager.getMessages();
+				const allMessages = convManager.getMessages();
 
 				// Ensure system message is first
 				const hasSystemMessage = allMessages.some((m) => m.role === "system");
@@ -1409,7 +1588,7 @@ export class ChatOrchestrator {
 					// Add system message (not persisted as a separate message, just in context)
 					allMessages.unshift({
 						id: "system",
-						conversation_id: this.conversationManager.getActiveConversation()!.id,
+						conversation_id: convManager.getActiveConversation()!.id,
 						role: "system",
 						content: systemPrompt,
 						timestamp: new Date().toISOString(),
@@ -1419,57 +1598,63 @@ export class ChatOrchestrator {
 				// 4. Assemble context window (truncate if needed)
 				const contextResult = this.contextManager.assembleContextWindow(
 					allMessages,
-					this.getActiveModelId(),
-					this.getActiveUseExtendedContext()
+					session.modelId,
+					session.useExtendedContext,
 				);
 
 				if (contextResult.wasTruncated) {
-					this.view?.showTruncationWarning(contextResult.truncatedCount);
+					this.getViewForSession(session)?.showTruncationWarning(contextResult.truncatedCount);
 				}
 
 				// 5. Convert to ChatMessage format for provider
 				const chatMessages = this.toChatMessages(contextResult.messages, systemPrompt);
 
 				// 6. Send to LLM
-				this.view?.setRespondingState(true);
-				const abortController = this.view?.createAbortController() ?? new AbortController();
+				const view = this.getViewForSession(session);
+				view?.setRespondingState(true);
+				const abortController = session.abortController;
 
 				// Eagerly create the assistant placeholder so the DOM element exists
 				// the moment we enter responding state. This ensures the element is
 				// present even if the abort fires before any text_delta chunks arrive.
-				const eagerContentEl = this.view?.createAssistantMessagePlaceholder();
+				const eagerContentEl = view?.createAssistantMessagePlaceholder();
 
-				const provider = this.providerRegistry.getActiveProvider();
+				const provider = this.providerRegistry.getProvider(session.providerType);
 				const options: SendMessageOptions = {
-					model: this.getActiveModelId(),
+					model: session.modelId,
 					abort_signal: abortController.signal,
-					use_extended_context: this.getActiveUseExtendedContext(),
+					use_extended_context: session.useExtendedContext,
 				};
 
 				const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
 
-				// 7. Process stream (pass in the already-created placeholder)
-				const result = await this.processStream(stream, abortController, eagerContentEl);
+				// 7. Process stream (pass in the already-created placeholder + session-aware view resolver)
+				const result = await this.processStream(
+					stream,
+					abortController,
+					eagerContentEl,
+					() => this.getViewForSession(session),
+				);
 
 				// 8. Handle result
 				if (result.type === "text") {
 					// Final text response — loop ends
-					const assistantMessage = this.conversationManager.addMessage({
+					const assistantMessage = convManager.addMessage({
 						role: "assistant",
 						content: result.text,
 						input_tokens: result.inputTokens,
 						output_tokens: result.outputTokens,
-						cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens),
+						cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens, session.modelId),
 					});
 
 					if (result.contentEl) {
-						await this.view?.finalizeAssistantMessage(result.contentEl, assistantMessage);
+						await this.getViewForSession(session)?.finalizeAssistantMessage(result.contentEl, assistantMessage);
 					}
 
 					// Update token footer
-					const conv = this.conversationManager.getActiveConversation();
+					const conv = convManager.getActiveConversation();
 					if (conv) {
-						this.view?.updateTokenFooter(
+						this.getViewForSession(session)?.updateTokenFooter(
 							conv.total_input_tokens,
 							conv.total_output_tokens,
 							conv.estimated_cost
@@ -1485,18 +1670,18 @@ export class ChatOrchestrator {
 					// Track tokens from message_end (now correctly captured
 					// because processStream consumes the full stream).
 					if (result.inputTokens || result.outputTokens) {
-						this.conversationManager.addMessage({
+						convManager.addMessage({
 							role: "assistant",
 							content: result.text || "",
 							input_tokens: result.inputTokens,
 							output_tokens: result.outputTokens,
-							cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens),
+							cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens, session.modelId),
 						});
 
 						// Update token footer after tool-call turn tokens are recorded
-						const convAfterToolTokens = this.conversationManager.getActiveConversation();
+						const convAfterToolTokens = convManager.getActiveConversation();
 						if (convAfterToolTokens) {
-							this.view?.updateTokenFooter(
+							this.getViewForSession(session)?.updateTokenFooter(
 								convAfterToolTokens.total_input_tokens,
 								convAfterToolTokens.total_output_tokens,
 								convAfterToolTokens.estimated_cost
@@ -1512,7 +1697,7 @@ export class ChatOrchestrator {
 					}> = [];
 
 					for (const call of result.calls) {
-						const toolCallMessage = this.conversationManager.addMessage({
+						const toolCallMessage = convManager.addMessage({
 							role: "tool_call",
 							content: "",
 							tool_call: {
@@ -1523,12 +1708,12 @@ export class ChatOrchestrator {
 							},
 						});
 
-						const toolCallEl = this.view?.renderToolCall(toolCallMessage);
+						const toolCallEl = this.getViewForSession(session)?.renderToolCall(toolCallMessage);
 
 						// HOOK-005: Fire on_tool_call hooks sequentially
 						// G-004: Pass override manager so workflow-scoped hooks are used when active
 						// EXT-017: Pass extension tool event automations
-						const currentConv = this.conversationManager.getActiveConversation();
+						const currentConv = convManager.getActiveConversation();
 						if (currentConv && vaultRootPath) {
 							const { dispatchOnToolCall } = await import("../hooks/hook-events");
 							dispatchOnToolCall(
@@ -1572,10 +1757,15 @@ export class ChatOrchestrator {
 						if (entry.el) {
 							const el = entry.el;
 							onProgressMap.set(entry.call.toolCallId, (status: string) => {
-								this.view?.updateToolCallProgress(el, status);
+								this.getViewForSession(session)?.updateToolCallProgress(el, status);
 							});
 						}
 					}
+
+					// Build policy context and pass per-session approval callback
+					const policyCtx = vaultRootPath
+						? session.buildPolicyContext(this.settings, vaultRootPath)
+						: undefined;
 
 					const batchResults = await executeToolBatches(
 						batches,
@@ -1585,6 +1775,8 @@ export class ChatOrchestrator {
 						abortController.signal,
 						undefined, // concurrencyCap — use default
 						onProgressMap,
+						policyCtx,
+						session.approvalCallback,
 					);
 
 					// Map results back to entries for UI updates
@@ -1596,14 +1788,14 @@ export class ChatOrchestrator {
 
 						// Update tool call status badge in the UI
 						if (entry?.el) {
-							this.view?.updateToolCallStatus(
+							this.getViewForSession(session)?.updateToolCallStatus(
 								entry.el,
 								batchResult.result.success ? "success" : "error"
 							);
 							// Set message ID after dispatch completes so only
 							// finished tool calls are forkable (not pending ones)
 							entry.el.dataset.messageId = entry.message.id;
-							this.view?.appendForkButton(entry.el);
+							this.getViewForSession(session)?.appendForkButton(entry.el);
 						}
 
 						toolResults.push(batchResult.result);
@@ -1620,7 +1812,7 @@ export class ChatOrchestrator {
 							this.vaultRuleManager.recordNoteAccess(notePath);
 						}
 
-						const toolResultMessage = this.conversationManager.addMessage({
+						const toolResultMessage = convManager.addMessage({
 							role: "tool_result",
 							content: "",
 							tool_result: toolResult,
@@ -1631,15 +1823,15 @@ export class ChatOrchestrator {
 						// compaction/truncation).
 						const subAgentTokens = toolResult.sub_agent_metadata?.token_usage;
 						if (subAgentTokens) {
-							this.conversationManager.addTokens(subAgentTokens.input, subAgentTokens.output);
+							convManager.addTokens(subAgentTokens.input, subAgentTokens.output);
 						}
 
-						this.view?.renderToolResult(toolResultMessage);
+						this.getViewForSession(session)?.renderToolResult(toolResultMessage);
 
 						// HOOK-005: Fire on_tool_result hooks sequentially
 						// G-004: Pass override manager so workflow-scoped hooks are used when active
 						// EXT-017: Pass extension tool event automations
-						const convForToolResult = this.conversationManager.getActiveConversation();
+						const convForToolResult = convManager.getActiveConversation();
 						if (convForToolResult && vaultRootPath) {
 							const { dispatchOnToolResult } = await import("../hooks/hook-events");
 							const toolResultStr = typeof toolResult.result === "string"
@@ -1662,9 +1854,9 @@ export class ChatOrchestrator {
 						}
 
 						// Update token footer after sub-agent token rollup
-						const convAfterToolResult = this.conversationManager.getActiveConversation();
+						const convAfterToolResult = convManager.getActiveConversation();
 						if (convAfterToolResult) {
-							this.view?.updateTokenFooter(
+							this.getViewForSession(session)?.updateTokenFooter(
 								convAfterToolResult.total_input_tokens,
 								convAfterToolResult.total_output_tokens,
 								convAfterToolResult.estimated_cost
@@ -1688,19 +1880,20 @@ export class ChatOrchestrator {
 						? result.text + "\n\n*[Response cancelled]*"
 						: "*[Response cancelled]*";
 
-					const cancelledMsg = this.conversationManager.addMessage({
+					const cancelledMsg = convManager.addMessage({
 						role: "assistant",
 						content: cancelledContent,
 					});
 
+					const cancelView = this.getViewForSession(session);
 					if (result.contentEl) {
 						// We already have a streaming placeholder — finalize it
-						await this.view?.finalizeAssistantMessage(result.contentEl, cancelledMsg);
+						await cancelView?.finalizeAssistantMessage(result.contentEl, cancelledMsg);
 					} else {
 						// No placeholder yet — create one and finalize immediately
-						const el = this.view?.createAssistantMessagePlaceholder();
+						const el = cancelView?.createAssistantMessagePlaceholder();
 						if (el) {
-							await this.view?.finalizeAssistantMessage(el, cancelledMsg);
+							await cancelView?.finalizeAssistantMessage(el, cancelledMsg);
 						}
 					}
 				} else if (result.type === "error") {
@@ -1709,14 +1902,15 @@ export class ChatOrchestrator {
 						: (result.error as unknown) instanceof Error
 							? (result.error as unknown as Error).message
 							: JSON.stringify(result.error);
-					this.view?.showError(errStr);
+					this.getViewForSession(session)?.showError(errStr);
 				}
 			}
 		} finally {
 			// Phase 3 (HOOK-005): Fire after_completion hooks when response loop ends.
 			// The finally block ensures hooks fire even when a provider exception
 			// escapes the loop. Hooks are fire-and-forget so they never suppress errors.
-			this.dispatchAfterCompletionHooks();
+			const completionConvId = convManager.getActiveConversation()?.id;
+			this.dispatchAfterCompletionHooks(completionConvId);
 		}
 	}
 
@@ -1728,13 +1922,13 @@ export class ChatOrchestrator {
 	 * when a workflow-scoped override is active for this conversation.
 	 * EXT-017: Passes extension lifecycle automations.
 	 */
-	private dispatchAfterCompletionHooks(): void {
-		const convForCompletion = this.conversationManager.getActiveConversation();
+	private dispatchAfterCompletionHooks(conversationId?: string): void {
+		const resolvedId = conversationId ?? this.conversationManager.getActiveConversation()?.id;
 		const vaultRootPath = this.getVaultRootPath();
-		if (convForCompletion && vaultRootPath) {
+		if (resolvedId && vaultRootPath) {
 			dispatchAfterCompletion(
 				{
-					conversationId: convForCompletion.id,
+					conversationId: resolvedId,
 					timestamp: new Date().toISOString(),
 				},
 				this.settings,
@@ -1756,14 +1950,15 @@ export class ChatOrchestrator {
 	 * When threshold is crossed, sends conversation to LLM for summarization,
 	 * constructs new context window, and logs the compaction record.
 	 */
-	private async checkAndPerformCompaction(): Promise<void> {
-		const conv = this.conversationManager.getActiveConversation();
+	private async checkAndPerformCompaction(session?: ConversationSession): Promise<void> {
+		const convManager = session?.conversationManager ?? this.conversationManager;
+		const conv = convManager.getActiveConversation();
 		if (!conv) return;
 
-		const messages = this.conversationManager.getMessages();
-		const modelId = this.getActiveModelId();
+		const messages = convManager.getMessages();
+		const modelId = session?.modelId ?? this.getActiveModelId();
 
-		const useExtendedContext = this.getActiveUseExtendedContext();
+		const useExtendedContext = session?.useExtendedContext ?? this.getActiveUseExtendedContext();
 		if (!shouldCompact(messages, this.settings, modelId, useExtendedContext)) {
 			return;
 		}
@@ -1786,8 +1981,9 @@ export class ChatOrchestrator {
 			lastCompletedRole: completedMessages[completedMessages.length - 1]?.role ?? "none",
 		});
 
-		// Show compacting indicator in chat UI
-		const messagesContainer = this.view?.getMessagesContainer?.();
+		// Show compacting indicator in chat UI (session-aware)
+		const viewForCompaction = session ? this.getViewForSession(session) : this.view;
+		const messagesContainer = viewForCompaction?.getMessagesContainer?.();
 		let indicator: HTMLElement | null = null;
 		if (messagesContainer) {
 			indicator = showCompactingIndicator(messagesContainer);
@@ -1799,7 +1995,9 @@ export class ChatOrchestrator {
 		});
 
 		try {
-			const provider = this.providerRegistry.getActiveProvider();
+			const provider = session
+				? this.providerRegistry.getProvider(session.providerType)
+				: this.providerRegistry.getActiveProvider();
 			const result = await performCompaction(
 				completedMessages,
 				provider,
@@ -1812,14 +2010,14 @@ export class ChatOrchestrator {
 
 			if (result.success && result.newMessages && result.record) {
 				// Replace conversation messages with compacted context
-				this.conversationManager.replaceMessages(result.newMessages);
+				convManager.replaceMessages(result.newMessages);
 
 				// Re-append pending messages so the conversation ends with a user
 				// turn. Without this, providers like Bedrock reject the next call
 				// because the last message in the compacted context is an assistant
 				// acknowledgment ("Understood. I have the context…").
 				for (const pending of pendingMessages) {
-					this.conversationManager.addMessage({
+					convManager.addMessage({
 						role: pending.role,
 						content: pending.content,
 						tool_call: pending.tool_call ?? undefined,
@@ -1966,7 +2164,8 @@ export class ChatOrchestrator {
 	private async processStream(
 		stream: AsyncIterable<StreamChunk>,
 		abortController: AbortController,
-		eagerContentEl?: HTMLElement
+		eagerContentEl?: HTMLElement,
+		viewResolver?: () => NotorChatView | undefined,
 	): Promise<StreamResult> {
 		let textContent = "";
 		let inputTokens = 0;
@@ -1975,20 +2174,26 @@ export class ChatOrchestrator {
 		// will use it rather than creating a second element.
 		let contentEl: HTMLElement | undefined = eagerContentEl;
 
+		// Resolve view dynamically per-chunk so mid-stream navigation
+		// causes rendering to become a no-op while data writes continue.
+		const resolveView = viewResolver ?? (() => this.view);
+
 		const accumulatedToolCalls: ToolCallInfo[] = [];
 
 		for await (const event of parseStreamEvents(stream, abortController.signal)) {
 			switch (event.type) {
-				case "text_delta":
+				case "text_delta": {
 					// contentEl may already be set from the eager placeholder
+					const view = resolveView();
 					if (!contentEl) {
-						contentEl = this.view?.createAssistantMessagePlaceholder();
+						contentEl = view?.createAssistantMessagePlaceholder();
 					}
 					textContent = event.text;
 					if (contentEl) {
-						this.view?.appendStreamChunk(contentEl, event.delta);
+						view?.appendStreamChunk(contentEl, event.delta);
 					}
 					break;
+				}
 
 				case "tool_call":
 					accumulatedToolCalls.push({
@@ -2360,11 +2565,11 @@ export class ChatOrchestrator {
 		return config?.use_extended_context ?? false;
 	}
 
-	private calculateCost(inputTokens: number, outputTokens: number): number | null {
-		const modelId = this.getActiveModelId();
+	private calculateCost(inputTokens: number, outputTokens: number, modelId?: string): number | null {
+		const resolvedModelId = modelId ?? this.getActiveModelId();
 
 		// Check user-configured pricing first
-		const userPricing = this.settings.model_pricing[modelId] as ModelPricing | undefined;
+		const userPricing = this.settings.model_pricing[resolvedModelId] as ModelPricing | undefined;
 		if (userPricing) {
 			return (
 				(inputTokens / 1000) * userPricing.input +
@@ -2373,7 +2578,7 @@ export class ChatOrchestrator {
 		}
 
 		// Fall back to static metadata pricing
-		const metadata = getModelMetadata(modelId);
+		const metadata = getModelMetadata(resolvedModelId);
 		if (metadata?.input_price_per_1k != null && metadata?.output_price_per_1k != null) {
 			return (
 				(inputTokens / 1000) * metadata.input_price_per_1k +
