@@ -17,6 +17,7 @@ import { isDomainBlocked } from "../utils/domain-denylist";
 import { enforcePathConstraints } from "../tool-config/path-enforcer";
 import { resolveAutoApprove } from "../personas/auto-approve-resolver";
 import { isMcpTool, McpRegisteredTool } from "../mcp/mcp-tool-adapter";
+import { evaluateToolPolicy, type ToolPolicyContext } from "./tool-policy";
 import { logger } from "../utils/logger";
 
 const log = logger("ToolDispatcher");
@@ -266,6 +267,8 @@ export class ToolDispatcher {
 		messageId: string,
 		abortSignal?: AbortSignal,
 		onProgress?: (status: string) => void,
+		policyCtx?: ToolPolicyContext,
+		perCallApprovalCallback?: ApprovalCallback,
 	): Promise<ToolResult> {
 		// 1. Look up tool in registry
 		const tool = this.tools.get(toolName);
@@ -289,10 +292,14 @@ export class ToolDispatcher {
 		// Emit started event
 		this.events.onToolCallStarted?.(toolCall, messageId);
 
-		// 2. Enabled check — block disabled tools before any other check (FR-83)
-		if (this.effectiveToolConfig) {
-			const toolEntry = this.effectiveToolConfig.tools[toolName];
-			if (toolEntry && !toolEntry.enabled) {
+		// --- Policy evaluation ---
+		// When policyCtx is provided (session-scoped), use the pure evaluateToolPolicy()
+		// function. Otherwise, fall back to inline checks reading from shared state
+		// (backward compat during migration to per-session policy).
+		if (policyCtx) {
+			const decision = evaluateToolPolicy(toolName, parameters, tool, policyCtx);
+
+			if (!decision.allowed) {
 				toolCall.status = "error";
 				this.events.onToolCallStatusChanged?.(toolCall, messageId);
 
@@ -300,139 +307,188 @@ export class ToolDispatcher {
 					tool_name: toolName,
 					success: false,
 					result: "",
-					error: `Tool '${toolName}' is disabled and cannot be used in this context.`,
+					error: decision.error ?? "Tool call blocked by policy.",
 				};
 
-				log.info("Blocked disabled tool", { toolName });
+				log.info("Tool blocked by policy", { toolName, error: decision.error });
 				this.events.onToolCallResult?.(toolCall, result, messageId);
 				return result;
 			}
-		}
 
-		// 3. Check Plan/Act mode — block write tools in Plan mode
-		if (mode === "plan" && tool.mode === "write") {
-			toolCall.status = "error";
+			if (!decision.autoApproved) {
+				const approvalCb = perCallApprovalCallback ?? this.approvalCallback;
+				if (!approvalCb) {
+					log.warn("No approval callback set, auto-approving", { toolName });
+				} else {
+					const userDecision = await approvalCb(toolCall, abortSignal, messageId);
+					if (userDecision === "rejected") {
+						toolCall.status = "rejected";
+						this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+						const result: ToolResult = {
+							tool_name: toolName,
+							success: false,
+							result: "",
+							error: `Tool call rejected by user. The user chose not to approve this ${toolName} operation.`,
+						};
+
+						log.info("Tool call rejected by user", { toolName });
+						this.events.onToolCallResult?.(toolCall, result, messageId);
+						return result;
+					}
+				}
+			}
+
+			// Mark as approved
+			toolCall.status = "approved";
+			this.events.onToolCallStatusChanged?.(toolCall, messageId);
+		} else {
+			// --- Legacy inline policy checks (no policyCtx provided) ---
+
+			// 2. Enabled check — block disabled tools before any other check (FR-83)
+			if (this.effectiveToolConfig) {
+				const toolEntry = this.effectiveToolConfig.tools[toolName];
+				if (toolEntry && !toolEntry.enabled) {
+					toolCall.status = "error";
+					this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+					const result: ToolResult = {
+						tool_name: toolName,
+						success: false,
+						result: "",
+						error: `Tool '${toolName}' is disabled and cannot be used in this context.`,
+					};
+
+					log.info("Blocked disabled tool", { toolName });
+					this.events.onToolCallResult?.(toolCall, result, messageId);
+					return result;
+				}
+			}
+
+			// 3. Check Plan/Act mode — block write tools in Plan mode
+			if (mode === "plan" && tool.mode === "write") {
+				toolCall.status = "error";
+				this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+				// FEAT-001: MCP tools get a specific error message format per spec FR-59
+				const planModeError = isMcpTool(toolName)
+					? `Tool '${toolName}' is write-only and blocked in Plan mode. Switch to Act mode to use this tool.`
+					: `${toolName} is not available in Plan mode. Switch to Act mode to ${this.getWriteToolDescription(toolName)}.`;
+
+				const result: ToolResult = {
+					tool_name: toolName,
+					success: false,
+					result: "",
+					error: planModeError,
+				};
+
+				log.info("Blocked write tool in Plan mode", { toolName });
+				this.events.onToolCallResult?.(toolCall, result, messageId);
+				return result;
+			}
+
+			// 3a. fetch_webpage: domain denylist check
+			if (toolName === "fetch_webpage" && this.settings) {
+				const url = parameters["url"] as string;
+				if (url) {
+					const denyCheck = isDomainBlocked(url, this.settings.domain_denylist);
+					if (denyCheck.blocked) {
+						let hostname: string;
+						try {
+							hostname = new URL(url).hostname;
+						} catch {
+							hostname = url;
+						}
+						toolCall.status = "error";
+						this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+						const result: ToolResult = {
+							tool_name: toolName,
+							success: false,
+							result: "",
+							error: `Domain ${hostname} is blocked by your denylist.`,
+						};
+
+						log.info("Domain blocked by denylist", { toolName, url, pattern: denyCheck.pattern });
+						this.events.onToolCallResult?.(toolCall, result, messageId);
+						return result;
+					}
+				}
+			}
+
+			// 4. Check auto-approve settings
+			// When effectiveToolConfig is active, use its merged auto_approve as unified early-return
+			// before consulting legacy MCP/built-in branching (DISP-004)
+			let isAutoApproved: boolean;
+			if (this.effectiveToolConfig) {
+				const toolEntry = this.effectiveToolConfig.tools[toolName];
+				isAutoApproved = toolEntry?.auto_approve ?? false;
+			} else {
+				// Fallback: legacy MCP/built-in branching when no effective config
+				// For MCP tools: server-level per-tool → default false (FEAT-002)
+				// For built-in tools: global setting
+				if (isMcpTool(toolName) && tool instanceof McpRegisteredTool) {
+					isAutoApproved = resolveMcpAutoApprove(tool);
+				} else {
+					isAutoApproved = resolveAutoApprove(toolName, this.autoApprove);
+				}
+			}
+
+			if (!isAutoApproved) {
+				// Request user approval
+				const approvalCb = perCallApprovalCallback ?? this.approvalCallback;
+				if (!approvalCb) {
+					log.warn("No approval callback set, auto-approving", { toolName });
+				} else {
+					const decision = await approvalCb(toolCall, abortSignal, messageId);
+
+					if (decision === "rejected") {
+						toolCall.status = "rejected";
+						this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+						const result: ToolResult = {
+							tool_name: toolName,
+							success: false,
+							result: "",
+							error: `Tool call rejected by user. The user chose not to approve this ${toolName} operation.`,
+						};
+
+						log.info("Tool call rejected by user", { toolName });
+						this.events.onToolCallResult?.(toolCall, result, messageId);
+						return result;
+					}
+				}
+			}
+
+			// Mark as approved
+			toolCall.status = "approved";
 			this.events.onToolCallStatusChanged?.(toolCall, messageId);
 
-			// FEAT-001: MCP tools get a specific error message format per spec FR-59
-			const planModeError = isMcpTool(toolName)
-				? `Tool '${toolName}' is write-only and blocked in Plan mode. Switch to Act mode to use this tool.`
-				: `${toolName} is not available in Plan mode. Switch to Act mode to ${this.getWriteToolDescription(toolName)}.`;
+			// 5. Path enforcement — check allowed_paths/blocked_paths (FR-84)
+			if (this.effectiveToolConfig) {
+				const toolEntry = this.effectiveToolConfig.tools[toolName];
+				if (toolEntry) {
+					const pathError = enforcePathConstraints(
+						toolName,
+						parameters,
+						toolEntry,
+						this.vaultRootPath ?? "",
+					);
+					if (pathError) {
+						toolCall.status = "error";
+						this.events.onToolCallStatusChanged?.(toolCall, messageId);
 
-			const result: ToolResult = {
-				tool_name: toolName,
-				success: false,
-				result: "",
-				error: planModeError,
-			};
+						const result: ToolResult = {
+							tool_name: toolName,
+							success: false,
+							result: "",
+							error: pathError,
+						};
 
-			log.info("Blocked write tool in Plan mode", { toolName });
-			this.events.onToolCallResult?.(toolCall, result, messageId);
-			return result;
-		}
-
-		// 3. Tool-specific pre-execution checks (Phase 3)
-
-		// 3a. fetch_webpage: domain denylist check
-		if (toolName === "fetch_webpage" && this.settings) {
-			const url = parameters["url"] as string;
-			if (url) {
-				const denyCheck = isDomainBlocked(url, this.settings.domain_denylist);
-				if (denyCheck.blocked) {
-					let hostname: string;
-					try {
-						hostname = new URL(url).hostname;
-					} catch {
-						hostname = url;
+						log.info("Blocked tool by path constraint", { toolName, error: pathError });
+						this.events.onToolCallResult?.(toolCall, result, messageId);
+						return result;
 					}
-					toolCall.status = "error";
-					this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-					const result: ToolResult = {
-						tool_name: toolName,
-						success: false,
-						result: "",
-						error: `Domain ${hostname} is blocked by your denylist.`,
-					};
-
-					log.info("Domain blocked by denylist", { toolName, url, pattern: denyCheck.pattern });
-					this.events.onToolCallResult?.(toolCall, result, messageId);
-					return result;
-				}
-			}
-		}
-
-		// 4. Check auto-approve settings
-		// When effectiveToolConfig is active, use its merged auto_approve as unified early-return
-		// before consulting legacy MCP/built-in branching (DISP-004)
-		let isAutoApproved: boolean;
-		if (this.effectiveToolConfig) {
-			const toolEntry = this.effectiveToolConfig.tools[toolName];
-			isAutoApproved = toolEntry?.auto_approve ?? false;
-		} else {
-			// Fallback: legacy MCP/built-in branching when no effective config
-			// For MCP tools: server-level per-tool → default false (FEAT-002)
-			// For built-in tools: global setting
-			if (isMcpTool(toolName) && tool instanceof McpRegisteredTool) {
-				isAutoApproved = resolveMcpAutoApprove(tool);
-			} else {
-				isAutoApproved = resolveAutoApprove(toolName, this.autoApprove);
-			}
-		}
-
-		if (!isAutoApproved) {
-			// Request user approval
-			if (!this.approvalCallback) {
-				log.warn("No approval callback set, auto-approving", { toolName });
-			} else {
-				const decision = await this.approvalCallback(toolCall, abortSignal, messageId);
-
-				if (decision === "rejected") {
-					toolCall.status = "rejected";
-					this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-					const result: ToolResult = {
-						tool_name: toolName,
-						success: false,
-						result: "",
-						error: `Tool call rejected by user. The user chose not to approve this ${toolName} operation.`,
-					};
-
-					log.info("Tool call rejected by user", { toolName });
-					this.events.onToolCallResult?.(toolCall, result, messageId);
-					return result;
-				}
-			}
-		}
-
-		// Mark as approved
-		toolCall.status = "approved";
-		this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-		// 5. Path enforcement — check allowed_paths/blocked_paths (FR-84)
-		if (this.effectiveToolConfig) {
-			const toolEntry = this.effectiveToolConfig.tools[toolName];
-			if (toolEntry) {
-				const pathError = enforcePathConstraints(
-					toolName,
-					parameters,
-					toolEntry,
-					this.vaultRootPath ?? "",
-				);
-				if (pathError) {
-					toolCall.status = "error";
-					this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-					const result: ToolResult = {
-						tool_name: toolName,
-						success: false,
-						result: "",
-						error: pathError,
-					};
-
-					log.info("Blocked tool by path constraint", { toolName, error: pathError });
-					this.events.onToolCallResult?.(toolCall, result, messageId);
-					return result;
 				}
 			}
 		}

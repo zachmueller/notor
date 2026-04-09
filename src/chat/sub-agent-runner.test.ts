@@ -213,6 +213,8 @@ describe("SubAgentRunner", () => {
 				"tc-1",
 				expect.anything(), // AbortSignal
 				undefined, // onProgress (not used by sub-agent runner)
+				undefined, // policyCtx (not used by sub-agent runner)
+				undefined, // approvalCallback (not used by sub-agent runner)
 			);
 		});
 
@@ -545,6 +547,8 @@ describe("SubAgentRunner", () => {
 				expect.anything(),
 				expect.anything(), // AbortSignal
 				undefined, // onProgress
+				undefined, // policyCtx
+				undefined, // approvalCallback
 			);
 			expect(result.iterationCount).toBe(2);
 		});

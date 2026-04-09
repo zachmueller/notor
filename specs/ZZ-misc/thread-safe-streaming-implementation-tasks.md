@@ -16,38 +16,38 @@
 
 Extracts policy enforcement from `ToolDispatcher.dispatch()` into a pure function. No behavior change -- all existing tests must continue to pass.
 
-- [ ] **Create `src/chat/tool-policy.ts`**
-  - [ ] Define `ToolPolicyContext` interface with fields: `effectiveConfig: EffectiveToolConfig`, `mode: ConversationMode`, `domainDenylist?: string[]`, `vaultRootPath: string`
-  - [ ] Define `PolicyDecision` interface with fields: `allowed: boolean`, `autoApproved: boolean`, `error?: string`
-  - [ ] Implement `evaluateToolPolicy(toolName, parameters, tool, ctx)` pure function extracting these checks from `dispatcher.ts`:
-    - [ ] Enabled check (dispatcher.ts:292-310) -- reads `ctx.effectiveConfig`
-    - [ ] Plan/Act mode check (dispatcher.ts:312-332) -- reads `ctx.mode` + `tool.mode`
-    - [ ] Domain denylist check (dispatcher.ts:337-363) -- reads `ctx.domainDenylist`, preserves `toolName === "fetch_webpage"` guard
-    - [ ] Auto-approve resolution (dispatcher.ts:365-406) -- reads `ctx.effectiveConfig`, handles MCP/built-in branching
-    - [ ] Path enforcement (dispatcher.ts:412-438) -- reads `ctx.effectiveConfig` + `ctx.vaultRootPath`
-  - [ ] Export all types and the function
+- [x] **Create `src/chat/tool-policy.ts`**
+  - [x] Define `ToolPolicyContext` interface with fields: `effectiveConfig: EffectiveToolConfig`, `mode: ConversationMode`, `domainDenylist?: string[]`, `vaultRootPath: string`
+  - [x] Define `PolicyDecision` interface with fields: `allowed: boolean`, `autoApproved: boolean`, `error?: string`
+  - [x] Implement `evaluateToolPolicy(toolName, parameters, tool, ctx)` pure function extracting these checks from `dispatcher.ts`:
+    - [x] Enabled check (dispatcher.ts:292-310) -- reads `ctx.effectiveConfig`
+    - [x] Plan/Act mode check (dispatcher.ts:312-332) -- reads `ctx.mode` + `tool.mode`
+    - [x] Domain denylist check (dispatcher.ts:337-363) -- reads `ctx.domainDenylist`, preserves `toolName === "fetch_webpage"` guard
+    - [x] Auto-approve resolution (dispatcher.ts:365-406) -- reads `ctx.effectiveConfig`, handles MCP/built-in branching
+    - [x] Path enforcement (dispatcher.ts:412-438) -- reads `ctx.effectiveConfig` + `ctx.vaultRootPath`
+  - [x] Export all types and the function
 
-- [ ] **Modify `src/chat/dispatcher.ts`**
-  - [ ] Add optional `policyCtx?: ToolPolicyContext` parameter to `dispatch()` (line 262)
-  - [ ] Add optional `approvalCallback?: ApprovalCallback` parameter to `dispatch()` (line 262)
-  - [ ] When `policyCtx` provided: call `evaluateToolPolicy()` instead of inline policy checks
-  - [ ] When `approvalCallback` provided: use it instead of `this.approvalCallback`
-  - [ ] When omitted: fallback to current behavior (backward compat during migration)
+- [x] **Modify `src/chat/dispatcher.ts`**
+  - [x] Add optional `policyCtx?: ToolPolicyContext` parameter to `dispatch()` (line 262)
+  - [x] Add optional `approvalCallback?: ApprovalCallback` parameter to `dispatch()` (line 262)
+  - [x] When `policyCtx` provided: call `evaluateToolPolicy()` instead of inline policy checks
+  - [x] When `approvalCallback` provided: use it instead of `this.approvalCallback`
+  - [x] When omitted: fallback to current behavior (backward compat during migration)
 
-- [ ] **Modify `src/chat/tool-orchestration.ts`**
-  - [ ] Add `policyCtx?: ToolPolicyContext` parameter to `executeToolBatches()` (line 112)
-  - [ ] Add `approvalCallback?: ApprovalCallback` parameter to `executeToolBatches()` (line 112)
-  - [ ] Thread both through to `runConcurrentBatch()` (line 186) and `safeDispatch()` (line 249)
-  - [ ] `safeDispatch()` passes them to `dispatcher.dispatch()` (line 258)
+- [x] **Modify `src/chat/tool-orchestration.ts`**
+  - [x] Add `policyCtx?: ToolPolicyContext` parameter to `executeToolBatches()` (line 112)
+  - [x] Add `approvalCallback?: ApprovalCallback` parameter to `executeToolBatches()` (line 112)
+  - [x] Thread both through to `runConcurrentBatch()` (line 186) and `safeDispatch()` (line 249)
+  - [x] `safeDispatch()` passes them to `dispatcher.dispatch()` (line 258)
 
-- [ ] **Verify:** All existing tests pass unchanged (pure refactor, fallback path exercises old code)
+- [x] **Verify:** All existing tests pass (pure refactor, fallback path exercises old code)
 
 ### Step 1b: Make `resolveEffectiveConfig` pure (pure refactor)
 
 Changes `resolveEffectiveConfig()` from mutating shared state to returning a structured result. Breaking change to return type -- all call sites must be updated.
 
-- [ ] **Modify `resolveEffectiveConfig()` in `src/chat/orchestrator.ts` (line 1138)**
-  - [ ] Change signature to accept explicit parameters:
+- [x] **Modify `resolveEffectiveConfig()` in `src/chat/orchestrator.ts` (line 1138)**
+  - [x] Change signature to accept explicit parameters:
     ```typescript
     private async resolveEffectiveConfig(
       matchedRules?: VaultRule[],
@@ -59,22 +59,22 @@ Changes `resolveEffectiveConfig()` from mutating shared state to returning a str
       parsedConfigs: ParsedToolConfig[];
     }>
     ```
-  - [ ] Line 1141: Use `activePersona` parameter instead of `this.personaManager?.getActivePersona() ?? null`
-  - [ ] Line 1148: Use `workflowAssembly?.toolConfigs ?? []` instead of `this.activeWorkflowAssemblyResult?.toolConfigs ?? []`
-  - [ ] Lines 1184-1188: REMOVE the three mutations (`this.activeParsedConfigs`, `this.effectiveToolConfig`, `this.dispatcher.setEffectiveToolConfig()`)
-  - [ ] Return `{ effective, toolDefinitions, parsedConfigs }` instead of just `ToolDefinition[]`
+  - [x] Line 1141: Use `activePersona` parameter instead of `this.personaManager?.getActivePersona() ?? null`
+  - [x] Line 1148: Use `workflowAssembly?.toolConfigs ?? []` instead of `this.activeWorkflowAssemblyResult?.toolConfigs ?? []`
+  - [x] Lines 1184-1188: REMOVE the three mutations (`this.activeParsedConfigs`, `this.effectiveToolConfig`, `this.dispatcher.setEffectiveToolConfig()`)
+  - [x] Return `{ effective, toolDefinitions, parsedConfigs }` instead of just `ToolDefinition[]`
 
-- [ ] **Add `updateDisplayConfig()` helper to `src/chat/orchestrator.ts`**
-  - [ ] Method stores `effective` and `parsedConfigs` on orchestrator fields for inspector access
-  - [ ] `getEffectiveToolConfig()` (line 249) and `getActiveParsedConfigs()` (line 258) continue returning these fields
+- [x] **Add `updateDisplayConfig()` helper to `src/chat/orchestrator.ts`**
+  - [x] Method stores `effective` and `parsedConfigs` on orchestrator fields for inspector access
+  - [x] `getEffectiveToolConfig()` (line 249) and `getActiveParsedConfigs()` (line 258) continue returning these fields
 
-- [ ] **Update all call sites** (return type changes from `ToolDefinition[]` to structured object):
-  - [ ] `responseLoop()` (line 1378): Destructure result, update `session.effectiveConfig` and `session.parsedConfigs`, call `updateDisplayConfig()` for displayed conversation
-  - [ ] `_backgroundResponseLoop()` (multiple sites): Destructure result
-  - [ ] `handleUserMessage()` (if called there): Destructure result
-  - [ ] `executeWorkflow()` (line 472+): Destructure result. Full session creation addressed in Step 1d-workflow.
+- [x] **Update all call sites** (return type changes from `ToolDefinition[]` to structured object):
+  - [x] `responseLoop()` (line 1384): Destructure result, call `updateDisplayConfig()` for displayed conversation
+  - [x] `_backgroundResponseLoop()`: Destructure result, pass `workflowAssembly` parameter directly (removes save/restore hack)
+  - [x] `handleUserMessage()`: No call site (calls `responseLoop()` which handles it)
+  - [x] `executeWorkflow()` (line 472+): No direct call (calls `responseLoop()` which handles it). Full session creation addressed in Step 1d-workflow.
 
-- [ ] **Verify:** Inspector still shows correct config. Background workflow tool config still works. `activeWorkflowAssemblyResult` save/restore hack (lines 851-852, 1076) will be eliminated in Step 1e.
+- [x] **Verify:** Inspector still shows correct config via `updateDisplayConfig()`. Background workflow tool config works via direct `workflowAssembly` parameter. `activeWorkflowAssemblyResult` save/restore hack removed from `_backgroundResponseLoop` (restore line deleted; field still exists for `responseLoop`/`executeWorkflow` path until Step 1e).
 
 ### Phase 1B — Session Core
 
