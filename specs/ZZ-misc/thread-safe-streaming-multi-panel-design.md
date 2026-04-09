@@ -1228,14 +1228,17 @@ Phase 2 (session registry enhancements + sync-back)
 5. Wait for completion — verify badge returns to 0
 
 ### Phase 4 Verification
-1. Open secondary panel via "Open new chat panel" command
-2. Verify full toolbar (same capabilities as primary panel)
-3. Send messages in both primary and secondary panels simultaneously
-4. Verify both conversations write to separate JSONL files
-5. Close and reopen Obsidian — verify secondary panel restores with its conversation
-6. Change provider picker in Panel A — verify Panel B's next new conversation uses Panel B's provider, not Panel A's (per-orchestrator provider fields)
-7. Dispatch MCP tools from both panels to the same MCP server — verify per-server serialization (no concurrent JSON-RPC)
-8. Verify settings changes, new conversation, and conversation switch callbacks don't double-fire across panels (global listener audit)
+
+**E2E test:** `e2e/scripts/phase4-multi-panel-test.ts` — covers items 1-4, 6-8 below.
+
+1. Open secondary panel via "Open new chat panel" command — **covered** (Test 1)
+2. Verify full toolbar (same capabilities as primary panel) — **covered** (Test 1)
+3. Send messages in both primary and secondary panels simultaneously — **covered** (Test 2)
+4. Verify both conversations write to separate JSONL files — **covered** (Test 2)
+5. Close and reopen Obsidian — verify secondary panel restores with its conversation — **manual only** (requires Obsidian restart; state persistence verified programmatically in Test 3)
+6. Change provider picker in Panel A — verify Panel B's next new conversation uses Panel B's provider, not Panel A's (per-orchestrator provider fields) — **covered** (Test 4)
+7. Dispatch MCP tools from both panels to the same MCP server — verify per-server serialization (no concurrent JSON-RPC) — **covered** (Test 5 — API-level verification of TaskLaneQueue wiring into McpHub)
+8. Verify settings changes, new conversation, and conversation switch callbacks don't double-fire across panels (global listener audit) — **covered** (Test 6)
 
 ### Phase 5 Verification
 1. Open conversation history in the primary panel

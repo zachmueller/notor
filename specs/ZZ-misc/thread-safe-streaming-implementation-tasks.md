@@ -548,12 +548,12 @@ Audit all callbacks/listeners in `wireView()` and `ChatOrchestrator` constructor
 
 ### Phase 4 Verification
 
-- [ ] Open secondary panel via command -- full toolbar appears
-- [ ] Send messages in both panels simultaneously -- separate JSONL files
-- [ ] Close + reopen Obsidian -- secondary panel restores with its conversation
-- [ ] Change provider in Panel A -- Panel B's next new conversation uses Panel B's provider
-- [ ] MCP tools from both panels to same server -- per-server serialization (no concurrent JSON-RPC)
-- [ ] Settings changes, new conversation, switch callbacks don't double-fire across panels
+- [x] Open secondary panel via command -- full toolbar appears (E2E: `phase4-multi-panel-test.ts` Test 1)
+- [x] Send messages in both panels simultaneously -- separate JSONL files (E2E: `phase4-multi-panel-test.ts` Test 2)
+- [ ] Close + reopen Obsidian -- secondary panel restores with its conversation (manual only -- requires Obsidian restart; state persistence verified programmatically in E2E Test 3)
+- [x] Change provider in Panel A -- Panel B's next new conversation uses Panel B's provider (E2E: `phase4-multi-panel-test.ts` Test 4)
+- [x] MCP tools from both panels to same server -- per-server serialization (no concurrent JSON-RPC) (E2E: `phase4-multi-panel-test.ts` Test 5 — API-level verification of TaskLaneQueue wiring)
+- [x] Settings changes, new conversation, switch callbacks don't double-fire across panels (E2E: `phase4-multi-panel-test.ts` Test 6)
 
 ---
 
