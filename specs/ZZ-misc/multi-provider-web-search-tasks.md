@@ -100,9 +100,9 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
 
 **File to create:** `src/web-search/providers/tavily.ts`
 
-- [ ] Create `TavilyProvider` class implementing `SearchProvider`
-- [ ] Set `meta`: `{ type: "tavily", displayName: "Tavily", requiresApiKey: true, defaultDelayMs: 0 }`
-- [ ] Implement `search()`:
+- [x] Create `TavilyProvider` class implementing `SearchProvider`
+- [x] Set `meta`: `{ type: "tavily", displayName: "Tavily", requiresApiKey: true, defaultDelayMs: 0 }`
+- [x] Implement `search()`:
   - POST to `https://api.tavily.com/search`
   - Auth: Bearer token in `Authorization` header (from `apiKey` parameter)
   - JSON body: `{ query, max_results: numResults }`
@@ -111,7 +111,7 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - Rate-limit detection: HTTP 429 → `rateLimited: true`
   - Timeout via `Promise.race()` pattern
   - If `signal` is provided, include an abort listener in the `Promise.race()`
-- [ ] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
+- [x] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
 
 **Note:** The provider receives `apiKey` as a parameter to `search()` at call time. The `WebSearchQueue` passes the resolved API key from settings. Providers are stateless singletons — config is external.
 
@@ -119,63 +119,63 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
 
 **File to create:** `src/web-search/providers/__tests__/tavily.test.ts`
 
-- [ ] Test `search()` — success: mock `requestUrl` returning JSON with results → `WebSearchResult[]`
-- [ ] Test `search()` — verify `Authorization: Bearer <key>` header sent
-- [ ] Test `search()` — rate-limit: HTTP 429 → `rateLimited: true`
-- [ ] Test `search()` — timeout handling
-- [ ] Test `search()` — non-429 error status
-- [ ] Test `isConfigured()`: enabled + key → true; enabled + no key → false; disabled → false
+- [x] Test `search()` — success: mock `requestUrl` returning JSON with results → `WebSearchResult[]`
+- [x] Test `search()` — verify `Authorization: Bearer <key>` header sent
+- [x] Test `search()` — rate-limit: HTTP 429 → `rateLimited: true`
+- [x] Test `search()` — timeout handling
+- [x] Test `search()` — non-429 error status
+- [x] Test `isConfigured()`: enabled + key → true; enabled + no key → false; disabled → false
 
 ### 2.3 Brave Search provider
 
 **File to create:** `src/web-search/providers/brave.ts`
 
-- [ ] Create `BraveSearchProvider` class implementing `SearchProvider`
-- [ ] Set `meta`: `{ type: "brave", displayName: "Brave Search", requiresApiKey: true, defaultDelayMs: 0 }`
-- [ ] Implement `search()`:
+- [x] Create `BraveSearchProvider` class implementing `SearchProvider`
+- [x] Set `meta`: `{ type: "brave", displayName: "Brave Search", requiresApiKey: true, defaultDelayMs: 0 }`
+- [x] Implement `search()`:
   - GET to `https://api.search.brave.com/res/v1/web/search?q={query}&count={numResults}`
   - Auth: `X-Subscription-Token` header
   - Pass `throw: false` in the `requestUrl` options — without it Obsidian throws on non-2xx status codes, making HTTP 429 uninspectable
   - Parse JSON response: map `web.results[]` to `WebSearchResult[]` (fields: `title`, `url`, `description` → `snippet`)
   - Rate-limit detection: HTTP 429 → `rateLimited: true`
   - Timeout via `Promise.race()` pattern; if `signal` is provided, include an abort listener
-- [ ] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
+- [x] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
 
 ### 2.4 Brave Search provider tests
 
 **File to create:** `src/web-search/providers/__tests__/brave.test.ts`
 
-- [ ] Test `search()` — success: JSON response → `WebSearchResult[]`
-- [ ] Test `search()` — verify `X-Subscription-Token` header
-- [ ] Test `search()` — rate-limit: HTTP 429 → `rateLimited: true`
-- [ ] Test `search()` — timeout and error handling
-- [ ] Test `isConfigured()`
+- [x] Test `search()` — success: JSON response → `WebSearchResult[]`
+- [x] Test `search()` — verify `X-Subscription-Token` header
+- [x] Test `search()` — rate-limit: HTTP 429 → `rateLimited: true`
+- [x] Test `search()` — timeout and error handling
+- [x] Test `isConfigured()`
 
 ### 2.5 SerpApi provider
 
 **File to create:** `src/web-search/providers/serpapi.ts`
 
-- [ ] Create `SerpApiProvider` class implementing `SearchProvider`
-- [ ] Set `meta`: `{ type: "serpapi", displayName: "SerpApi", requiresApiKey: true, defaultDelayMs: 0 }`
-- [ ] Implement `search()`:
+- [x] Create `SerpApiProvider` class implementing `SearchProvider`
+- [x] Set `meta`: `{ type: "serpapi", displayName: "SerpApi", requiresApiKey: true, defaultDelayMs: 0 }`
+- [x] Implement `search()`:
   - GET to `https://serpapi.com/search?q={query}&num={numResults}&api_key={key}&engine=google`
   - Auth: `api_key` query parameter
   - Pass `throw: false` in the `requestUrl` options — without it Obsidian throws on non-2xx status codes, making HTTP 429 uninspectable
   - Parse JSON response: map `organic_results[]` to `WebSearchResult[]` (fields: `title`, `link` → `url`, `snippet`)
   - Rate-limit detection: HTTP 429 OR JSON `error` field containing `"rate"` → `rateLimited: true`
   - Timeout via `Promise.race()` pattern; if `signal` is provided, include an abort listener
-- [ ] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
+- [x] Implement `isConfigured()`: `config.enabled && !!config.apiKey`
 
 ### 2.6 SerpApi provider tests
 
 **File to create:** `src/web-search/providers/__tests__/serpapi.test.ts`
 
-- [ ] Test `search()` — success: JSON response → `WebSearchResult[]`
-- [ ] Test `search()` — verify `api_key` in query params
-- [ ] Test `search()` — rate-limit: HTTP 429 → `rateLimited: true`
-- [ ] Test `search()` — rate-limit: JSON error containing "rate" → `rateLimited: true`
-- [ ] Test `search()` — timeout and error handling
-- [ ] Test `isConfigured()`
+- [x] Test `search()` — success: JSON response → `WebSearchResult[]`
+- [x] Test `search()` — verify `api_key` in query params
+- [x] Test `search()` — rate-limit: HTTP 429 → `rateLimited: true`
+- [x] Test `search()` — rate-limit: JSON error containing "rate" → `rateLimited: true`
+- [x] Test `search()` — timeout and error handling
+- [x] Test `isConfigured()`
 
 ---
 
