@@ -111,6 +111,7 @@ export class NotorSettingTab extends PluginSettingTab {
 			saveSettings: () => this.plugin.saveSettings(),
 			redisplay: () => this.display(),
 			addCleanup: (fn) => this.cleanupFns.push(fn),
+			scrollToGroup: (groupTitle) => this.scrollToGroup(groupTitle),
 		};
 
 		const persisted = ctx.settings.settings_collapsed_sections;

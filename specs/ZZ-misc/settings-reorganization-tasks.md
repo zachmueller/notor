@@ -1,7 +1,7 @@
 # Settings Reorganization — Implementation Tasks
 
 **Design doc:** [settings-reorganization-design.md](settings-reorganization-design.md)
-**Status:** In progress — Phase 2 complete
+**Status:** In progress — Phase 3 complete
 **Date:** 2026-04-09
 
 ---
@@ -93,17 +93,17 @@
 >
 > **Why now:** With the modal ready, we can wire gear icons to open it. The open-file icon replaces the old "Customize" button from extensions.ts.
 
-- [ ] **3.1 Refactor `renderBuiltinToolRow()` to return `Setting`**
+- [x] **3.1 Refactor `renderBuiltinToolRow()` to return `Setting`**
   - Current signature (tools.ts:193): returns `void`, creates `Setting` internally
   - Change return type to `Setting`
   - Add `return setting;` at end of function
   - Update caller in `renderBuiltinTools()` (tools.ts:162-183) — capture the returned `Setting` for icon attachment
 
-- [ ] **3.2 Refactor `renderUserToolRow()` to return `Setting`**
+- [x] **3.2 Refactor `renderUserToolRow()` to return `Setting`**
   - Same pattern as 3.1 — change return type to `Setting`, return the object
   - Update caller in `renderUserTools()` (tools.ts:242-271)
 
-- [ ] **3.3 Add open-file icon to built-in tool rows**
+- [x] **3.3 Add open-file icon to built-in tool rows**
   - After the auto-approve toggle, add: `setting.addExtraButton(btn => btn.setIcon("square-arrow-out-up-right").setTooltip("Open tool definition").onClick(...))`
   - On click logic (mirrors existing "Customize"/"Open" in extensions.ts:122-181):
     - Check if vault override file exists at `normalizePath({notor_dir}/tools/{toolName}.md)`
@@ -112,11 +112,11 @@
   - Need access to extension manager: `ctx.plugin.getExtensionManager()`
   - Consider using `addExtraButton` instead of `addButton` to get the smaller icon-only button style
 
-- [ ] **3.4 Add open-file icon to user tool rows**
+- [x] **3.4 Add open-file icon to user tool rows**
   - Similar to 3.3 but simpler: always open `tool.filePath` directly
   - `setting.addExtraButton(btn => btn.setIcon("square-arrow-out-up-right").setTooltip("Open tool definition").onClick(...))`
 
-- [ ] **3.5 Add gear icon to built-in tool rows (conditional)**
+- [x] **3.5 Add gear icon to built-in tool rows (conditional)**
   - After the open-file icon, conditionally add gear icon
   - Show gear icon when ANY of:
     - Tool has `settingsSchema` (from extension manager's tool definitions)
@@ -126,16 +126,16 @@
   - Import `ToolSettingsModal` from `../../ui/tool-settings-modal`
   - Need to look up tool definitions: `manager.getTools()` → build `Map<string, ToolDef>` at top of section renderer
 
-- [ ] **3.6 Add gear icon to user tool rows (conditional)**
+- [x] **3.6 Add gear icon to user tool rows (conditional)**
   - Show gear icon only if `tool.settingsSchema?.length > 0` (user tool has settings)
   - On click: `new ToolSettingsModal(ctx, tool.name).open()`
 
-- [ ] **3.7 Update column headers**
+- [x] **3.7 Update column headers**
   - `renderColumnHeaders()` (tools.ts:185-191) currently renders "Enabled" and "Auto-approve" only
   - Add spacer column(s) for the open-file and gear icon columns to maintain alignment
   - The exact approach depends on how Obsidian `Setting` renders extra buttons — may need CSS adjustments
 
-- [ ] **3.8 Add CSS for icon alignment in tool rows**
+- [x] **3.8 Add CSS for icon alignment in tool rows**
   - Add styles to `styles.css` for consistent icon sizing and spacing
   - Ensure open-file and gear icons don't push toggles out of alignment
   - Test with tools that have icons and tools that don't (MCP tools have neither)

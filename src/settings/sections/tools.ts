@@ -10,13 +10,14 @@
  * and the per-server tool controls that lived inside "MCP servers".
  */
 
-import { Notice, Setting, setIcon } from "obsidian";
+import { Notice, Setting, normalizePath, setIcon } from "obsidian";
 import { TOOL_DISPLAY_NAMES } from "../constants";
 import type { SettingsContext } from "./context";
 import type { McpServerConfig } from "../../mcp/mcp-types";
 import type { McpHub } from "../../mcp/mcp-hub";
 import type { McpConnectionStatus } from "../../mcp/mcp-types";
 import type { UserToolDefinition } from "../../extensions/types";
+import { ToolSettingsModal } from "../../ui/tool-settings-modal";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -160,6 +161,9 @@ export function renderToolsSection(
 // ---------------------------------------------------------------------------
 
 function renderBuiltinTools(containerEl: HTMLElement, ctx: SettingsContext): void {
+	const manager = ctx.plugin.getExtensionManager();
+	const toolDefs = new Map(manager.getTools().map((t) => [t.name, t]));
+
 	const readTools = Object.entries(TOOL_DISPLAY_NAMES).filter(
 		([, meta]) => !meta.isWrite
 	);
@@ -169,25 +173,30 @@ function renderBuiltinTools(containerEl: HTMLElement, ctx: SettingsContext): voi
 
 	// Read-only tools
 	new Setting(containerEl).setHeading().setName("Read-only tools");
-	renderColumnHeaders(containerEl);
+	renderColumnHeaders(containerEl, true);
 	for (const [toolId, meta] of readTools) {
-		renderBuiltinToolRow(containerEl, toolId, meta, ctx, true);
+		const setting = renderBuiltinToolRow(containerEl, toolId, meta, ctx, true);
+		addBuiltinToolIcons(setting, toolId, toolDefs, ctx);
 	}
 
 	// Write tools
 	new Setting(containerEl).setHeading().setName("Write tools");
-	renderColumnHeaders(containerEl);
+	renderColumnHeaders(containerEl, true);
 	for (const [toolId, meta] of writeTools) {
-		renderBuiltinToolRow(containerEl, toolId, meta, ctx, false);
+		const setting = renderBuiltinToolRow(containerEl, toolId, meta, ctx, false);
+		addBuiltinToolIcons(setting, toolId, toolDefs, ctx);
 	}
 }
 
-function renderColumnHeaders(containerEl: HTMLElement): void {
+function renderColumnHeaders(containerEl: HTMLElement, includeIconSpacers = false): void {
 	const headerEl = containerEl.createDiv({ cls: "notor-tool-column-headers" });
 	headerEl.createSpan({ cls: "notor-tool-column-spacer" });
 	headerEl.createSpan({ cls: "notor-tool-column-label", text: "Enabled" });
 	headerEl.createSpan({ cls: "notor-tool-column-divider" });
 	headerEl.createSpan({ cls: "notor-tool-column-label", text: "Auto-approve" });
+	if (includeIconSpacers) {
+		headerEl.createSpan({ cls: "notor-tool-column-icon-spacer" });
+	}
 }
 
 function renderBuiltinToolRow(
@@ -196,7 +205,7 @@ function renderBuiltinToolRow(
 	meta: { name: string; desc: string; isWrite: boolean },
 	ctx: SettingsContext,
 	defaultAutoApprove: boolean,
-): void {
+): Setting {
 	const isEnabled = ctx.settings.tool_enabled[toolId] ?? true;
 	const isAutoApproved = ctx.settings.auto_approve[toolId] ?? defaultAutoApprove;
 
@@ -233,6 +242,68 @@ function renderBuiltinToolRow(
 	if (!isEnabled) {
 		setting.settingEl.addClass("notor-tool-row-disabled");
 	}
+
+	return setting;
+}
+
+/** Add open-file and gear icons to a built-in tool row. */
+function addBuiltinToolIcons(
+	setting: Setting,
+	toolId: string,
+	toolDefs: Map<string, UserToolDefinition>,
+	ctx: SettingsContext,
+): void {
+	const manager = ctx.plugin.getExtensionManager();
+	const vaultFilePath = normalizePath(
+		`${ctx.settings.notor_dir}/tools/${toolId}.md`,
+	);
+	const vaultFileExists =
+		ctx.app.vault.getAbstractFileByPath(vaultFilePath) !== null;
+
+	// Open-file icon (all built-in tools)
+	setting.addExtraButton((btn) =>
+		btn
+			.setIcon("square-arrow-out-up-right")
+			.setTooltip("Open tool definition")
+			.onClick(async () => {
+				if (vaultFileExists) {
+					await ctx.app.workspace.openLinkText(vaultFilePath, "", true);
+				} else {
+					try {
+						const path = await manager.ensureBuiltinToolVaultFile(toolId);
+						await ctx.app.workspace.openLinkText(path, "", true);
+						new Notice(
+							`Created ${path} — reload extensions to activate.`,
+						);
+						ctx.redisplay();
+					} catch (e) {
+						const msg = e instanceof Error ? e.message : String(e);
+						new Notice(`Failed to create tool file: ${msg}`);
+					}
+				}
+			}),
+	);
+
+	// Gear icon (conditional: has settings, vault override, or execute_command)
+	const toolDef = toolDefs.get(toolId);
+	const hasSettings = (toolDef?.settingsSchema?.length ?? 0) > 0;
+	const isExecuteCommand = toolId === "execute_command";
+
+	if (hasSettings || vaultFileExists || isExecuteCommand) {
+		setting.addExtraButton((btn) =>
+			btn
+				.setIcon("settings")
+				.setTooltip("Configure tool settings")
+				.onClick(() => {
+					new ToolSettingsModal(ctx, toolId, ctx.scrollToGroup).open();
+				}),
+		);
+	} else {
+		// Invisible placeholder for column alignment
+		setting.addExtraButton((btn) => {
+			btn.extraSettingsEl.addClass("notor-tool-icon-placeholder");
+		});
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -255,17 +326,19 @@ function renderUserTools(containerEl: HTMLElement, ctx: SettingsContext): void {
 
 	if (readTools.length > 0) {
 		new Setting(containerEl).setHeading().setName("Read-only");
-		renderColumnHeaders(containerEl);
+		renderColumnHeaders(containerEl, true);
 		for (const tool of readTools) {
-			renderUserToolRow(containerEl, tool, ctx, true);
+			const setting = renderUserToolRow(containerEl, tool, ctx, true);
+			addUserToolIcons(setting, tool, ctx);
 		}
 	}
 
 	if (writeTools.length > 0) {
 		new Setting(containerEl).setHeading().setName("Write");
-		renderColumnHeaders(containerEl);
+		renderColumnHeaders(containerEl, true);
 		for (const tool of writeTools) {
-			renderUserToolRow(containerEl, tool, ctx, false);
+			const setting = renderUserToolRow(containerEl, tool, ctx, false);
+			addUserToolIcons(setting, tool, ctx);
 		}
 	}
 }
@@ -275,7 +348,7 @@ function renderUserToolRow(
 	tool: UserToolDefinition,
 	ctx: SettingsContext,
 	defaultAutoApprove: boolean,
-): void {
+): Setting {
 	const isEnabled = ctx.settings.tool_enabled[tool.name] ?? true;
 	const isAutoApproved = ctx.settings.auto_approve[tool.name] ?? defaultAutoApprove;
 
@@ -311,6 +384,42 @@ function renderUserToolRow(
 
 	if (!isEnabled) {
 		setting.settingEl.addClass("notor-tool-row-disabled");
+	}
+
+	return setting;
+}
+
+/** Add open-file and gear icons to a user tool row. */
+function addUserToolIcons(
+	setting: Setting,
+	tool: UserToolDefinition,
+	ctx: SettingsContext,
+): void {
+	// Open-file icon (all user tools)
+	setting.addExtraButton((btn) =>
+		btn
+			.setIcon("square-arrow-out-up-right")
+			.setTooltip("Open tool definition")
+			.onClick(async () => {
+				await ctx.app.workspace.openLinkText(tool.filePath, "", true);
+			}),
+	);
+
+	// Gear icon (only if tool has settings schema)
+	if (tool.settingsSchema && tool.settingsSchema.length > 0) {
+		setting.addExtraButton((btn) =>
+			btn
+				.setIcon("settings")
+				.setTooltip("Configure tool settings")
+				.onClick(() => {
+					new ToolSettingsModal(ctx, tool.name, ctx.scrollToGroup).open();
+				}),
+		);
+	} else {
+		// Invisible placeholder for column alignment
+		setting.addExtraButton((btn) => {
+			btn.extraSettingsEl.addClass("notor-tool-icon-placeholder");
+		});
 	}
 }
 

@@ -247,6 +247,19 @@
 	border-left: 1px solid var(--background-modifier-border);
 }
 
+/* Column header spacer accounting for open-file + gear icon button widths */
+.notor-tool-column-icon-spacer {
+	width: 56px;
+	flex-shrink: 0;
+}
+
+/* Invisible placeholder for gear icon — maintains column alignment on rows
+   where the gear icon is not shown. */
+.notor-tool-icon-placeholder {
+	visibility: hidden;
+	pointer-events: none;
+}
+
 .notor-tool-divider {
 	margin: 16px 0;
 	border: none;
