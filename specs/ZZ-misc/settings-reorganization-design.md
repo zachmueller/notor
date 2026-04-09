@@ -1,6 +1,6 @@
 # Settings Reorganization for Extensions Paradigm
 
-**Status:** Draft
+**Status:** Draft (revised after code review)
 **Date:** 2026-04-09
 
 ---
@@ -34,13 +34,13 @@ After migrating built-in tools to user extensions, the settings UI has four sect
 |----------|--------|-----------|
 | Section count | 4 tool-related sections become 3 total | Eliminates both "Tool configuration" and "Extensions." Clear mental model: Tools = tool config, MCP servers = server infra, Automation = automated behaviors. |
 | Tool detail access | Gear-icon modal per tool | Focused UX: user clicks gear on the tool they care about, sees its settings in isolation. No scrolling through a flat list. Modal pattern already exists (`ConfirmModal`). |
-| Shell config home | Absorbed into "Tools" section | Shell executable/args are global tool infrastructure. They don't warrant their own section. |
+| Shell config home | Absorbed into `execute_command` gear-icon modal | Shell executable/args affect only `execute_command` (per `execute-command.ts` docstring). The modal is the focused UX surface for per-tool config. |
 | File attachment home | Absorbed into "Conversation" section | File attachments are a conversation-level feature (attaching files to messages), not tool-specific. |
 | Shared settings home | Rendered in "Tools" section | Shared settings apply to all tools/extensions; keeping them near tool controls is logical. |
 | Automations home | Move to "Automation" section | Automations are event-triggered behaviors, like hooks and vault event hooks. Grouping them together is semantically correct. |
 | Field renderer extraction | Shared module | `renderField()` and helpers must be usable by both the modal and the Automation section's inline automation settings. Extract to `src/settings/sections/field-renderer.ts`. |
 | Existing deep-link system | Extended, not replaced | `scrollToGroup()` continues working for group-level navigation. The new modal is a different access pattern (click gear icon). |
-| "Customized" badge | Show on built-in tools with vault overrides | Quick indicator in the Tools list that a tool has been customized, without needing to open the modal. |
+| Open-file icon on all tool rows | Replace "Customized" badge with an actionable open-file icon on every built-in and user tool row | For built-in tools: creates vault override if needed, then opens the file. For user tools: opens source file. Makes customization discoverable without a static badge. MCP tools have no open icon. |
 
 ---
 
@@ -72,20 +72,20 @@ Tools [expanded]
 │
 ├─ [Heading] Read-only tools
 │  ├─ [Column headers: Enabled | Auto-approve]
-│  ├─ read_note        [toggle] [toggle]  [⚙️ gear]?  [customized badge]?
-│  ├─ search_vault     [toggle] [toggle]  [⚙️ gear]?
+│  ├─ read_note        [toggle] [toggle]  [📂 open]  [⚙️ gear]
+│  ├─ search_vault     [toggle] [toggle]  [📂 open]  [⚙️ gear]
 │  └─ ...
 │
 ├─ [Heading] Write tools
 │  ├─ [Column headers: Enabled | Auto-approve]
-│  ├─ execute_command  [toggle] [toggle]  [⚙️ gear]   [customized badge]?
-│  ├─ write_note       [toggle] [toggle]  [⚙️ gear]?
+│  ├─ execute_command  [toggle] [toggle]  [📂 open]  [⚙️ gear]
+│  ├─ write_note       [toggle] [toggle]  [📂 open]  [⚙️ gear]
 │  └─ ...
 │
 ├─ [Divider]
 ├─ [Heading] User tools  (only if user tools exist)
 │  ├─ [Column headers]
-│  ├─ my_tool          [toggle] [toggle]  [⚙️ gear]?
+│  ├─ my_tool          [toggle] [toggle]  [📂 open]  [⚙️ gear]?
 │  └─ ...
 │
 ├─ [Divider]
@@ -97,11 +97,6 @@ Tools [expanded]
 │  └─ ...
 │
 ├─ [Divider]
-├─ [Heading] Shell configuration  (absorbed from old "Tool configuration") *
-│  ├─ [Description] "Configure the shell used by execute_command..."
-│  ├─ Shell executable  [text input]
-│  └─ Shell arguments   [text input]
-│
 ├─ [Heading] Shared settings  (absorbed from old "Extensions") *
 │  ├─ [rendered shared settings fields]
 │  └─ [Button] Reset to defaults
@@ -111,11 +106,16 @@ Tools [expanded]
 ```
 
 **Gear icon rules:**
-- Built-in tools: gear icon shown if the tool has a settings schema OR the tool can be customized (has a scaffold). In practice, this means all built-in tools get a gear icon since they are all customizable.
+- Built-in tools: all built-in tools get a gear icon (they are all customizable, and the modal provides access to settings, shell config for `execute_command`, shared settings, and reset-to-default).
 - User tools: gear icon shown if the tool has a settings schema.
 - MCP tools: no gear icon (MCP tools don't have extension settings).
 
-**"Customized" badge:** Shown next to a built-in tool's name when a vault override file exists at `notor/tools/{toolName}.md`.
+**Open-file icon rules:**
+- Built-in tools: all built-in tools get an open-file icon. If no vault override file exists yet, clicking creates it (same as existing "Customize" logic in `extensions.ts`) and opens it. If the file exists, opens it directly.
+- User tools: all user tools get an open-file icon that opens the source extension file.
+- MCP tools: no open icon (no source file to open).
+
+**Implementation note:** `renderBuiltinToolRow()` and `renderUserToolRow()` in `tools.ts` currently create the `Setting` object internally without returning it. These functions must be refactored (e.g., return the `Setting`, or accept a post-render callback) so the gear and open icons can be added to each row.
 
 ### 3.2 New "Automation" Section Layout
 
@@ -161,18 +161,23 @@ A new `ToolSettingsModal` provides focused access to a single tool's configurati
 │ [Tool name]                                     │
 │ [Tool description — from registry or extension] │
 │                                                 │
-│ ── Customize ──────────────────────────         │
-│ [Customize] or [Open] + [Reset to default]      │
-│ (only for built-in tools)                       │
+│ ── Reset ──────────────────────────────         │
+│ [Reset to default]                              │
+│ (only for built-in tools with vault override)   │
+│                                                 │
+│ ── Shell configuration ────────────────         │
+│ Shell executable  [text input]                  │
+│ Shell arguments   [text input]                  │
+│ (only for execute_command)                      │
 │                                                 │
 │ ── Settings ───────────────────────────         │
 │ [rendered settings fields from schema]          │
 │ [Reset to defaults]                             │
 │ (only if tool has settingsSchema)               │
 │                                                 │
-│ ── Shared settings ────────────────────         │
-│ "This tool may use shared settings."            │
-│ [View shared settings →]  (link to Tools section│
+│ ── Shared settings (read-only) ────────         │
+│ [read-only rendered shared settings fields]     │
+│ [Edit shared settings →]  (scrolls to section)  │
 │ (only if shared settings definition exists)     │
 │                                                 │
 │                                    [Done]       │
@@ -181,24 +186,25 @@ A new `ToolSettingsModal` provides focused access to a single tool's configurati
 
 **For built-in tools**, the modal shows:
 1. Tool name + description
-2. **Customize section:** "Customize" button (creates vault file) or "Open" + "Reset to default" buttons (if vault file exists)
-3. **Settings section:** Per-tool settings fields (if the tool's extension definition has a `settingsSchema`)
-4. **Shared settings link:** A brief note ("This tool may use shared settings") with a clickable link that scrolls to the Shared Settings heading in the Tools section (only if a shared settings definition exists). Not editable — shared settings are global, so they are edited in one place only.
+2. **Reset section:** "Reset to default" button (only if a vault override file exists). The "Customize" and "Open" actions have moved to the open-file icon on the tool row.
+3. **Shell configuration:** Shell executable + shell arguments fields (only for `execute_command` — absorbed from old "Tool configuration" section).
+4. **Settings section:** Per-tool settings fields (if the tool's extension definition has a `settingsSchema`)
+5. **Shared settings (read-only):** Current shared settings values rendered read-only, plus an "Edit shared settings" link that closes the modal and scrolls to the Shared Settings heading in the Tools section (only if a shared settings definition exists).
 
 **For user tools**, the modal shows:
 1. Tool name + description
-2. **Open button** to open the extension file
-3. **Settings section:** Per-tool settings fields (if defined)
-4. **Shared settings link:** (same as above)
+2. **Settings section:** Per-tool settings fields (if defined)
+3. **Shared settings (read-only):** (same as above)
 
 **For tools with no settings and no customization possible** (e.g., MCP tools): no gear icon is shown, so no modal is needed.
 
 ### 4.2 Modal Behavior
 
 - Extends Obsidian's `Modal` class (same pattern as `ConfirmModal`)
-- Reuses the extracted `renderField()` / `renderFieldList()` helpers for per-tool settings fields
+- Reuses the extracted `renderField()` / `renderFieldList()` helpers for per-tool settings fields and read-only shared settings display
 - On field change: saves immediately via `saveFieldValue()` (same as current inline behavior)
-- Shared settings link uses `scrollToGroup("Tools")` + scroll-to-heading to jump to the Shared Settings area (not editable in the modal)
+- For `execute_command`: renders shell executable/args fields (non-schema settings) using standard `Setting` components, reading/writing `execute_command_shell` and `execute_command_shell_args` from settings
+- Shared settings are rendered **read-only** inside the modal. The "Edit shared settings" link closes the modal and uses `scrollToGroup("Tools")` + DOM scroll to the Shared Settings heading
 - "Done" button closes the modal
 - Parent settings tab calls `redisplay()` after the modal closes to reflect any changes (e.g., "customized" badge appearing)
 - The `onClose()` callback triggers `ctx.redisplay()` to ensure the Tools section reflects any state changes made inside the modal
@@ -209,7 +215,7 @@ A new `ToolSettingsModal` provides focused access to a single tool's configurati
 
 ```typescript
 // Sketch — not final implementation
-import { Modal, Setting } from "obsidian";
+import { Modal, Setting, normalizePath } from "obsidian";
 import type { SettingsContext } from "../settings/sections/context";
 import { renderFieldList, type FieldTarget } from "../settings/sections/field-renderer";
 
@@ -222,6 +228,16 @@ export class ToolSettingsModal extends Modal {
     }
 
     onOpen(): void {
+        this.renderContent();
+    }
+
+    onClose(): void {
+        this.contentEl.empty();
+        // Refresh the settings tab to reflect changes
+        this.ctx.redisplay();
+    }
+
+    private renderContent(): void {
         const { contentEl } = this;
         contentEl.empty();
 
@@ -242,20 +258,32 @@ export class ToolSettingsModal extends Modal {
             });
         }
 
-        // Customize section (built-in only)
+        // Reset to default (built-in only, when vault override exists)
         if (isBuiltin) {
-            this.renderCustomizeSection(contentEl);
-        } else if (toolDef) {
-            // User tool — open button
-            new Setting(contentEl).addButton(btn =>
-                btn.setIcon("square-arrow-out-up-right")
-                    .setTooltip("Open extension file")
-                    .onClick(async () => {
-                        await this.ctx.app.workspace.openLinkText(
-                            toolDef.filePath, "", true
-                        );
-                    })
+            const vaultFilePath = normalizePath(
+                `${this.ctx.settings.notor_dir}/tools/${this.toolName}.md`,
             );
+            const vaultFileExists =
+                this.ctx.app.vault.getAbstractFileByPath(vaultFilePath) !== null;
+
+            if (vaultFileExists) {
+                new Setting(contentEl)
+                    .setName("Custom definition active")
+                    .addButton(btn =>
+                        btn.setButtonText("Reset to default")
+                            .setWarning()
+                            .onClick(async () => {
+                                // Same deletion logic as current extensions.ts
+                                // ... delete vault file, reload, re-render
+                                this.renderContent();
+                            })
+                    );
+            }
+        }
+
+        // Shell configuration (execute_command only)
+        if (this.toolName === "execute_command") {
+            this.renderShellConfig(contentEl);
         }
 
         // Per-tool settings
@@ -274,26 +302,27 @@ export class ToolSettingsModal extends Modal {
                         delete this.ctx.settings
                             .user_extension_settings[this.toolName];
                         await this.ctx.saveSettings();
-                        // Re-render modal content
-                        this.onOpen();
+                        this.renderContent();
                     })
             );
         }
 
-        // Shared settings — link only (not editable in modal)
+        // Shared settings — read-only display + link to edit
         const sharedDef = manager.getSharedSettingsDefinition();
         if (sharedDef) {
             new Setting(contentEl)
                 .setHeading()
                 .setName("Shared settings");
+
+            // Render shared settings read-only
+            // (use renderFieldList with a read-only flag, or render values as descriptions)
+
             new Setting(contentEl)
-                .setDesc("This tool may use shared settings.")
                 .addButton((btn) =>
-                    btn.setButtonText("View shared settings")
+                    btn.setButtonText("Edit shared settings")
                         .onClick(() => {
                             this.close();
-                            // Scroll to Shared Settings in Tools section
-                            this.ctx.redisplay();
+                            // scrollToGroup("Tools") + scroll to Shared Settings heading
                         })
                 );
         }
@@ -305,15 +334,10 @@ export class ToolSettingsModal extends Modal {
             );
     }
 
-    onClose(): void {
-        this.contentEl.empty();
-        // Refresh the settings tab to reflect changes
-        this.ctx.redisplay();
-    }
-
-    private renderCustomizeSection(containerEl: HTMLElement): void {
-        // Same logic as current extensions.ts built-in tool rendering:
-        // check vault file existence, show Customize or Open + Reset buttons
+    private renderShellConfig(containerEl: HTMLElement): void {
+        new Setting(containerEl).setHeading().setName("Shell configuration");
+        // Renders shell executable + shell arguments fields
+        // Same as execute-command.ts renderShellSection() but inline
     }
 }
 ```
@@ -360,10 +384,10 @@ The orchestrator's `display()` method changes as follows:
  // --- Tools (expanded by default) ---
  const toolsGroup = createSettingsGroup(containerEl, "Tools", true, persisted, onToggle);
  renderToolsSection(toolsGroup, ctx);
-+renderShellSection(toolsGroup, ctx);
 +renderSharedSettingsSection(toolsGroup, ctx);
 +renderCopyToolConfigButton(toolsGroup, ctx);   // extracted from renderToolsSection
 +renderReloadExtensionsButton(toolsGroup, ctx);
+ // Note: Shell config moved to execute_command's ToolSettingsModal
 
  // --- MCP Servers (expanded by default) ---
  const mcpGroup = createSettingsGroup(containerEl, "MCP servers", true, persisted, onToggle);
@@ -399,17 +423,28 @@ delete persisted["Extensions"];
 
 ## 7. Changes to `tools.ts`
 
-### 7.1 Gear Icon on Tool Rows
+### 7.1 Open-File Icon and Gear Icon on Tool Rows
 
-Each built-in and user tool row gains a gear icon button (rendered after the auto-approve toggle):
+Each built-in and user tool row gains two icon buttons (rendered after the auto-approve toggle). Note: `renderBuiltinToolRow()` and `renderUserToolRow()` must be refactored to return the `Setting` object (or accept a callback), since they currently create it internally without exposing it.
 
 ```typescript
 // After the auto-approve toggle on each row:
+
+// Open-file icon (built-in + user tools, not MCP)
+setting.addButton((btn) =>
+    btn
+        .setIcon("square-arrow-out-up-right")
+        .setTooltip("Open tool definition")
+        .onClick(async () => {
+            // For built-in tools: create vault override if needed, then open
+            // For user tools: open source file directly
+        })
+);
+
+// Gear icon (built-in tools always; user tools only if settingsSchema)
 const hasSettings = toolDef?.settingsSchema?.length;
 const isBuiltin = builtinNames.has(toolId);
-const isCustomizable = isBuiltin || hasSettings;
-
-if (isCustomizable) {
+if (isBuiltin || hasSettings) {
     setting.addButton((btn) =>
         btn
             .setIcon("settings")  // Lucide gear icon
@@ -421,32 +456,21 @@ if (isCustomizable) {
 }
 ```
 
-### 7.2 "Customized" Badge
-
-For built-in tools, check if a vault override file exists and show a badge:
-
-```typescript
-const vaultFilePath = normalizePath(`${ctx.settings.notor_dir}/tools/${toolId}.md`);
-const isCustomized = ctx.app.vault.getAbstractFileByPath(vaultFilePath) !== null;
-
-if (isCustomized) {
-    setting.nameEl.createSpan({
-        text: "Customized",
-        cls: "notor-extension-badge-customized",
-    });
-}
-```
+The "Customized" badge from the original design is **removed**. The open-file icon on every built-in tool row makes customization discoverable without a static indicator.
 
 ### 7.3 New Sub-Sections at Bottom
 
-The "Copy tool config YAML" button is **extracted** from `renderToolsSection()` into its own `renderCopyToolConfigButton()` function so that `settings-tab.ts` controls ordering. The final order rendered by `settings-tab.ts` after `renderToolsSection()`:
+The "Copy tool config YAML" button is **extracted** from `renderToolsSection()` into its own `renderCopyToolConfigButton()` function so that `settings-tab.ts` controls ordering. **Note:** This extraction also requires exporting `generateToolConfigSnippet()` (line 34) and `getMcpHub()` (line 26) from `tools.ts`, or moving them with the button.
 
-1. **Shell configuration** — calls the existing `renderShellSection()`
-2. **Shared settings** — extracted from `extensions.ts`, renders shared settings fields + reset button
-3. **Copy tool config YAML** — extracted from `tools.ts` into `renderCopyToolConfigButton()`
-4. **Reload extensions** button — extracted from `extensions.ts`
+The final order rendered by `settings-tab.ts` after `renderToolsSection()`:
 
-All four are rendered by `settings-tab.ts` directly (passing `toolsGroup` as the container), keeping `tools.ts` focused on tool rows.
+1. **Shared settings** — extracted from `extensions.ts`, renders shared settings fields + reset button
+2. **Copy tool config YAML** — extracted from `tools.ts` into `renderCopyToolConfigButton()`
+3. **Reload extensions** button — extracted from `extensions.ts`
+
+Shell configuration has moved to the `execute_command` tool's `ToolSettingsModal` and is no longer rendered as a standalone sub-section.
+
+All three are rendered by `settings-tab.ts` directly (passing `toolsGroup` as the container), keeping `tools.ts` focused on tool rows.
 
 ---
 
@@ -482,41 +506,63 @@ Option B is cleaner. The new file is a straightforward extraction from `extensio
 | File | Action | Details |
 |------|--------|---------|
 | `src/settings/settings-tab.ts` | **Edit** | Reorder section group creation, delete "Tool configuration" and "Extensions" groups, add file attachments to Conversation, add shell/shared/reload to Tools, add user automations to Automation |
-| `src/settings/sections/tools.ts` | **Edit** | Add gear icon + modal trigger to tool rows, add "Customized" badge to built-in tools |
+| `src/settings/sections/tools.ts` | **Edit** | Add open-file icon + gear icon + modal trigger to tool rows. Refactor `renderBuiltinToolRow()` and `renderUserToolRow()` to return `Setting` (or accept callback). Export `generateToolConfigSnippet()`/`getMcpHub()` for extraction. |
 | `src/settings/sections/extensions.ts` | **Delete** | All functionality relocated to modal, field-renderer, user-automations, and settings-tab |
 | `src/settings/sections/field-renderer.ts` | **Create** | Extract `FieldTarget`, `renderFieldList`, `renderField`, `getPersistedValue`, `saveFieldValue` from extensions.ts |
 | `src/settings/sections/shared-settings.ts` | **Create** | Extract shared settings rendering (small, ~30 lines) |
 | `src/settings/sections/user-automations.ts` | **Create** | Extract user automations rendering from extensions.ts (~60 lines) |
-| `src/settings/sections/execute-command.ts` | **Edit** | `renderShellSection()` is called from a different parent (function itself unchanged). Update stale comment on line 22 that references "Extensions settings" — should reference the gear-icon modal / Tools section instead. |
-| `src/settings/sections/file-attachments.ts` | **No change** | `renderFileAttachmentsSection()` is called from Conversation group instead of Tool configuration |
+| `src/settings/sections/execute-command.ts` | **Edit** | `renderShellSection()` is no longer called from `settings-tab.ts` — it is rendered inside `ToolSettingsModal` for `execute_command` only. Update stale description text on line 22 that says "configured per-tool in Extensions settings" — should reference the gear-icon modal instead. |
+| `src/settings/sections/file-attachments.ts` | **No change** | `renderFileAttachmentsSection()` is called from Conversation group instead of Tool configuration. |
 | `src/ui/tool-settings-modal.ts` | **Create** | New modal for per-tool settings (~150-200 lines) |
 | `src/ui/confirm-modal.ts` | **No change** | Referenced as pattern for the new modal |
 | `src/settings/sections/__tests__/extensions-string-array.test.ts` | **Edit** | Update imports to `field-renderer.ts`, remove tests for deleted rendering, add tests for modal if applicable |
-| `src/sub-agents/builtin-profiles.ts` | **Edit** | Update hardcoded settings deep-link list: remove "Tool configuration" (section no longer exists). Shell config is now under "Tools", file attachments under "Conversation". |
-| `styles.css` | **Edit** | Add `.notor-extension-badge-customized` styling (use inline JS like existing badges, or migrate all badges to CSS — see note below), gear icon alignment in tool rows |
+| `src/sub-agents/builtin-profiles.ts` | **Edit** | Update hardcoded settings deep-link list: remove "Tool configuration" (section no longer exists). **Replace** with guidance that shell config is in the `execute_command` gear-icon modal and file attachments are under "Conversation." Do not simply delete — the AI sub-agent needs to know where these settings moved. |
+| `styles.css` | **Edit** | Add CSS for open-file and gear icon alignment in tool rows. Consider migrating existing badge inline styles to CSS classes for consistency. |
 
-**Note on badge styling:** The existing "Built-in" and "User" badges (`notor-extension-badge-builtin`, `notor-extension-badge-user`) are styled entirely via inline JavaScript in `extensions.ts` (marginLeft, fontSize, opacity, fontStyle), not through CSS classes defined in `styles.css`. The new "Customized" badge should follow the same inline-JS pattern for consistency, unless this redesign migrates all badges to CSS classes. Pick one approach and apply it uniformly.
+**Note on badge styling:** The existing "Built-in" and "User" badges (`notor-extension-badge-builtin`, `notor-extension-badge-user`) are styled entirely via inline JavaScript in `extensions.ts` (marginLeft, fontSize, opacity, fontStyle), not through CSS classes defined in `styles.css`. Since the "Customized" badge is removed (replaced by the open-file icon), this is less urgent, but migrating existing badges to CSS classes during this redesign would improve maintainability.
 
 ---
 
 ## 11. Verification
 
 ### Manual Testing
-1. Open Settings > Tools — verify gear icons appear on built-in and user tools with settings/scaffolds
-2. Click a gear icon — verify modal opens with correct tool name, description, customize actions, and settings fields
-3. Change a setting in the modal, close it — verify the change persists and the Tools section reflects updates
-4. Click "Customize" in the modal for a built-in tool — verify vault file is created and modal updates to show "Open" + "Reset"
-5. Verify "Customized" badge appears on tool rows with vault override files
-6. Open Settings > Automation — verify user automations appear after hooks and vault event hooks, with correct settings and open buttons
-7. Open Settings > Conversation — verify file attachment threshold appears after compaction settings
-8. Verify "Tool configuration" and "Extensions" sections no longer appear
-9. Verify shell config appears at the bottom of the Tools section
-10. Verify shared settings appear at the bottom of the Tools section with reset button
-11. Verify "Reload extensions" button works from the Tools section
-12. Verify "Copy tool config YAML" still works
-13. Collapse/expand sections, close and reopen settings — verify persisted state is correct and no errors from removed section keys
+1. Open Settings > Tools — verify open-file icons and gear icons appear on built-in and user tool rows
+2. Click the open-file icon on a non-customized built-in tool — verify vault override file is created and opened
+3. Click the open-file icon on a customized built-in tool — verify vault file opens
+4. Click the open-file icon on a user tool — verify source file opens
+5. Click a gear icon — verify modal opens with correct tool name, description, and settings fields
+6. Click the gear icon on `execute_command` — verify shell configuration fields appear in the modal
+7. Change a setting in the modal, close it — verify the change persists and the Tools section reflects updates
+8. In the modal, verify shared settings appear read-only with an "Edit shared settings" link
+9. Click "Edit shared settings" — verify modal closes and scrolls to the Shared Settings heading
+10. Click "Reset to default" in the modal for a customized built-in tool — verify vault file is deleted and tool reverts
+11. Open Settings > Automation — verify user automations appear after hooks and vault event hooks, with correct settings and open buttons
+12. Open Settings > Conversation — verify file attachment threshold appears after compaction settings
+13. Verify "Tool configuration" and "Extensions" sections no longer appear
+14. Verify shared settings appear at the bottom of the Tools section with reset button
+15. Verify "Reload extensions" button works from the Tools section
+16. Verify "Copy tool config YAML" still works
+17. Collapse/expand sections, close and reopen settings — verify persisted state is correct and no errors from removed section keys
 
 ### Automated Testing
 - Update existing `extensions-string-array.test.ts` to test extracted `renderField()` from `field-renderer.ts`
-- Add unit tests for `ToolSettingsModal` rendering (tool name, description, settings fields, customize section)
+- Add unit tests for `ToolSettingsModal` rendering (tool name, description, settings fields, shell config for execute_command, read-only shared settings)
 - Verify build succeeds with no circular imports after file moves
+
+---
+
+## 12. Code Review Notes
+
+Issues identified during cross-referencing this design against the codebase (2026-04-09):
+
+### Implementation Gaps (must address before implementation)
+1. **`renderBuiltinToolRow()` / `renderUserToolRow()` encapsulate `Setting` creation** — these functions must be refactored to expose the `Setting` object for icon attachment (Section 7.1).
+2. **`generateToolConfigSnippet()` and `getMcpHub()` are private** in `tools.ts` — must be exported or co-located when extracting `renderCopyToolConfigButton()` (Section 7.3).
+3. **Column headers** (`tools.ts:185-191`) render only "Enabled" and "Auto-approve" — need updating for the new open/gear icon columns.
+4. **`execute-command.ts` line 22** description text references "Extensions settings" — needs concrete replacement text.
+5. **`shared.ts` already exists** in `src/settings/sections/` (contains name-prompt helpers). The proposed `shared-settings.ts` won't conflict but may cause confusion — consider naming it `tool-shared-settings.ts`.
+
+### Minor Implementation Notes
+- Modal uses `renderContent()` instead of re-calling `onOpen()` for re-renders.
+- Shared settings "Edit" link must implement actual DOM scroll to heading, not just `redisplay()`.
+- Section 6.1 migration (`delete persisted[...]`) runs on every `display()` call — acceptable (matches existing pattern) but not ideal.
