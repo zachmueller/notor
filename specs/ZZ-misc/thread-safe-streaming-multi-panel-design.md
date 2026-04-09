@@ -1208,13 +1208,17 @@ Phase 2 (session registry enhancements + sync-back)
 3. Start streaming, switch away, switch back — inspector shows session's current config
 
 ### Phase 2 Verification
-1. Send a message, switch away mid-stream
+
+**E2E test:** `e2e/scripts/session-sync-back-test.ts` — covers items 1-6 and 8 below.
+
+1. Send a message, switch away mid-stream — **covered** (Test 1-2)
 2. Duplicate-send guard already tested in Phase 1 (Step 1c-1e item 11)
-3. Switch back to the streaming conversation mid-stream — verify all messages render correctly via full replace (clearMessages + re-render from session's in-memory array). Verify JSONL header is NOT written during sync-back (silent loadConversation)
-4. Verify the stop button correctly targets the active session's AbortController
-5. Wait for completion, navigate back — verify conversation shows the completed response
-6. Verify `activeSessions` map is empty after all responses complete
-7. Trigger compaction mid-stream (long conversation), switch away and back — verify full replace handles the post-compaction message array correctly
+3. Switch back to the streaming conversation mid-stream — verify all messages render correctly via full replace (clearMessages + re-render from session's in-memory array). Verify JSONL header is NOT written during sync-back (silent loadConversation) — **covered** (Tests 2-3)
+4. Verify the stop button correctly targets the active session's AbortController — **covered** (Test 4)
+5. Wait for completion, navigate back — verify conversation shows the completed response — **covered** (Test 6)
+6. Verify `activeSessions` map is empty after all responses complete — **covered** (Test 5)
+7. Trigger compaction mid-stream (long conversation), switch away and back — verify full replace handles the post-compaction message array correctly — **manual only** (requires specific token count thresholds)
+8. Cannot delete a conversation that is still streaming — **covered** (Test 7)
 
 ### Phase 3 Verification
 1. Send a message, switch away mid-stream

@@ -409,13 +409,13 @@ Full replace from session's in-memory message array when switching to a conversa
 
 ### Phase 2 Verification
 
-- [ ] Send message, switch away mid-stream, switch back -- all messages render via full replace
-- [ ] Verify JSONL header NOT written during sync-back (silent loadConversation)
-- [ ] Stop button targets active session's AbortController
-- [ ] Wait for completion, navigate back -- shows completed response (JSONL reload path)
-- [ ] `activeSessions` map is empty after all responses complete
-- [ ] Trigger compaction mid-stream, switch away and back -- full replace handles post-compaction array
-- [ ] Cannot delete a conversation that is still streaming
+- [x] Send message, switch away mid-stream, switch back -- all messages render via full replace (E2E: `session-sync-back-test.ts` Test 2)
+- [x] Verify JSONL header NOT written during sync-back (silent loadConversation) (E2E: `session-sync-back-test.ts` Test 3)
+- [x] Stop button targets active session's AbortController (E2E: `session-sync-back-test.ts` Test 4)
+- [x] Wait for completion, navigate back -- shows completed response (JSONL reload path) (E2E: `session-sync-back-test.ts` Test 6)
+- [x] `activeSessions` map is empty after all responses complete (E2E: `session-sync-back-test.ts` Test 5)
+- [ ] Trigger compaction mid-stream, switch away and back -- full replace handles post-compaction array (manual only -- requires specific token count thresholds)
+- [x] Cannot delete a conversation that is still streaming (E2E: `session-sync-back-test.ts` Test 7)
 
 ---
 
