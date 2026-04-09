@@ -187,12 +187,12 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
 
 **File to create:** `src/web-search/provider-registry.ts`
 
-- [ ] Create `SearchProviderRegistry` class with internal `Map<WebSearchProviderType, SearchProvider>`
-- [ ] Implement `register(provider)`: stores by `provider.meta.type`
-- [ ] Implement `get(type)`: returns provider or `undefined`
-- [ ] Implement `getAll()`: returns all registered providers
-- [ ] Implement `getAvailable(providerConfigs)`: filters to providers where `isConfigured(config)` returns `true`
-- [ ] Implement `getAvailableByPriority(providerConfigs, priorityOrder)`:
+- [x] Create `SearchProviderRegistry` class with internal `Map<WebSearchProviderType, SearchProvider>`
+- [x] Implement `register(provider)`: stores by `provider.meta.type`
+- [x] Implement `get(type)`: returns provider or `undefined`
+- [x] Implement `getAll()`: returns all registered providers
+- [x] Implement `getAvailable(providerConfigs)`: filters to providers where `isConfigured(config)` returns `true`
+- [x] Implement `getAvailableByPriority(providerConfigs, priorityOrder)`:
   - Filter by `isConfigured()` → sort by position in `priorityOrder` array
   - Providers not in `priorityOrder` are excluded (not appended)
 
@@ -200,13 +200,13 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
 
 **File to create:** `src/web-search/__tests__/provider-registry.test.ts`
 
-- [ ] Test `register()` and `get()` basic operations
-- [ ] Test `getAll()` returns all registered providers
-- [ ] Test `getAvailable()`:
+- [x] Test `register()` and `get()` basic operations
+- [x] Test `getAll()` returns all registered providers
+- [x] Test `getAvailable()`:
   - Provider enabled + key present → included
   - Provider enabled + key missing (for key-requiring) → excluded
   - Provider disabled → excluded
-- [ ] Test `getAvailableByPriority()`:
+- [x] Test `getAvailableByPriority()`:
   - Respects priority order
   - Excludes providers not in priority list
   - Excludes unconfigured providers even if in priority list
@@ -215,30 +215,30 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
 
 **File to create:** `src/web-search/queue.ts`
 
-- [ ] Define `WebSearchResolvedConfig` interface (design spec Section 8.2):
+- [x] Define `WebSearchResolvedConfig` interface (design spec Section 8.2):
   ```
   { roundRobin, providerPriority, maxFallbackProviders, providers: Record<string, { enabled, delayMs, apiKey }> }
   ```
-- [ ] Define `WebSearchApiResult` interface (design spec Section 7):
+- [x] Define `WebSearchApiResult` interface (design spec Section 7):
   ```
   { results: WebSearchResult[], provider: string, failures: Array<{ provider, error }>, error?: string }
   ```
   - `error` is set when the queue itself cannot proceed (e.g. "No web search providers are configured") — distinct from per-provider `failures`
-- [ ] Create `WebSearchQueue` class:
+- [x] Create `WebSearchQueue` class:
   - Constructor: `(getSettings: () => Record<string, unknown>, providerRegistry: SearchProviderRegistry, laneQueue: TaskLaneQueue)`
   - Private `roundRobinIndex: number = 0`
-- [ ] Implement `buildConfig(settings)`: maps flat extension settings → `WebSearchResolvedConfig`
+- [x] Implement `buildConfig(settings)`: maps flat extension settings → `WebSearchResolvedConfig`
   - Reads `web_search_round_robin`, `web_search_provider_priority`, `web_search_max_fallback_providers`
   - Reads per-provider `web_search_{provider}_enabled`, `_delay_ms`, `_api_key`
   - Falls back to sensible defaults (DDG enabled, others disabled, `maxFallbackProviders: 2`)
   - **Implementation note:** Define setting key names as constants shared between `buildConfig()` and the YAML fence (or at minimum, add a comment cross-referencing the YAML keys) to prevent silent mismatches from typos.
-- [ ] Implement `resolveProviderChain(config, startIndex)` — **pure function, no side effects**:
+- [x] Implement `resolveProviderChain(config, startIndex)` — **pure function, no side effects**:
   - Takes `startIndex: number` as a parameter (passed from `search()`)
   - Uses `providerRegistry.getAvailableByPriority(config.providers, config.providerPriority)`
   - If round-robin ON: rotate starting position via `startIndex % available.length`, wrap cyclically so all providers are included (e.g. with [A,B,C] and startIndex=1 → chain is [B,C,A])
   - If round-robin OFF: return as-is (highest priority first), ignoring `startIndex`
   - In both modes, the returned chain always contains ALL available providers — fallback iterates the full chain before giving up
-- [ ] Implement `search(query, numResults, timeoutMs, signal?)`:
+- [x] Implement `search(query, numResults, timeoutMs, signal?)`:
   - `signal?: AbortSignal` — if provided, check `signal.aborted` before each provider attempt and pass `signal` through to `provider.search()`
   - Call `getSettings()` → `buildConfig()` → `resolveProviderChain(config, this.roundRobinIndex)`
   - Increment `roundRobinIndex` **after** chain resolution: `this.roundRobinIndex++` (unbounded; post-hoc modulo in `resolveProviderChain` handles wrapping — overflow is impossible in practice at 2^53)
@@ -257,17 +257,17 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
 
 Use mock providers and a real `TaskLaneQueue` instance (lightweight, no HTTP).
 
-- [ ] Test single provider success: DDG only → result returned with `provider: "duckduckgo"`
-- [ ] Test fallback: first provider rate-limited → second provider used
-- [ ] Test fallback: first provider throws → second provider used
-- [ ] Test all-providers-fail: aggregated error with all failure reasons
-- [ ] Test no providers configured: immediate descriptive error
-- [ ] Test round-robin OFF: always starts with highest-priority provider
-- [ ] Test round-robin ON with 3 providers: 6 requests distribute cyclically (verify starting provider)
-- [ ] Test `buildConfig()`: flat settings → typed config mapping
-- [ ] Test lane delegation: verify `laneQueue.enqueue()` called with correct lane key and delay
-- [ ] Test settings read fresh: changing `getSettings()` return value between calls → different behavior
-- [ ] Test `maxFallbackProviders`: with 4 available providers and `maxFallbackProviders: 2`, only first 2 are tried even if both fail
+- [x] Test single provider success: DDG only → result returned with `provider: "duckduckgo"`
+- [x] Test fallback: first provider rate-limited → second provider used
+- [x] Test fallback: first provider throws → second provider used
+- [x] Test all-providers-fail: aggregated error with all failure reasons
+- [x] Test no providers configured: immediate descriptive error
+- [x] Test round-robin OFF: always starts with highest-priority provider
+- [x] Test round-robin ON with 3 providers: 6 requests distribute cyclically (verify starting provider)
+- [x] Test `buildConfig()`: flat settings → typed config mapping
+- [x] Test lane delegation: verify `laneQueue.enqueue()` called with correct lane key and delay
+- [x] Test settings read fresh: changing `getSettings()` return value between calls → different behavior
+- [x] Test `maxFallbackProviders`: with 4 available providers and `maxFallbackProviders: 2`, only first 2 are tried even if both fail
 
 ---
 
