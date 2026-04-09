@@ -247,11 +247,31 @@ async function testDisplayRestorePersonaProviderModel(ctx: TestContext): Promise
 	console.log("\nTest 1: Persona/provider/model restored on conversation switch");
 	const { page } = ctx;
 
-	// Step 1: Send a message first (to create the JSONL file), THEN select persona.
-	// This tests Trigger 2 (header mutation on picker change while viewing a conversation).
-	// Note: selecting persona before the first message fails silently because the
-	// JSONL file doesn't exist yet — updateConversationHeader can't read line 0.
-	console.log("  Sending initial message to create conversation...");
+	// Step 1: Select researcher persona, then create a NEW conversation.
+	// newConversation() captures the active persona into the JSONL header
+	// (mirrors provider/model), so persona_name is correct from creation.
+	const personaSelected = await selectPersona(page, "researcher");
+	if (!personaSelected) {
+		const shot = await ctx.screenshot("01-persona-select-failed");
+		ctx.fail("Display-restore: select persona", "Could not select researcher persona", shot);
+		return;
+	}
+	await page.waitForTimeout(1_000);
+
+	// Create a NEW conversation — this exercises the newConversation() persona capture fix
+	await newConversation(page);
+	await page.waitForTimeout(1_500);
+
+	// Verify persona label shows "researcher" in the new conversation
+	const labelBefore = await getPersonaLabelText(page);
+	if (!labelBefore?.includes("researcher")) {
+		const shot = await ctx.screenshot("01-no-persona-label");
+		ctx.fail("Display-restore: persona label before send", `Expected researcher label, got: "${labelBefore}"`, shot);
+		return;
+	}
+
+	// Send message in the new conversation
+	console.log("  Sending message with researcher persona active...");
 	const responded = await sendMessage(page, "What is 2+2? Reply with just the number.");
 	if (!responded) {
 		const shot = await ctx.screenshot("01-no-response");
@@ -279,25 +299,7 @@ async function testDisplayRestorePersonaProviderModel(ctx: TestContext): Promise
 		await page.waitForTimeout(1_000);
 	}
 
-	// Step 2: NOW select researcher persona — this triggers Trigger 2 (header update)
-	// The JSONL file exists, so updateConversationHeader will succeed.
-	const personaSelected = await selectPersona(page, "researcher");
-	if (!personaSelected) {
-		const shot = await ctx.screenshot("01-persona-select-failed");
-		ctx.fail("Display-restore: select persona", "Could not select researcher persona", shot);
-		return;
-	}
-	await page.waitForTimeout(2_000);
-
-	// Verify persona label shows "researcher"
-	const labelBefore = await getPersonaLabelText(page);
-	if (!labelBefore?.includes("researcher")) {
-		const shot = await ctx.screenshot("01-no-persona-label");
-		ctx.fail("Display-restore: persona label", `Expected researcher label, got: "${labelBefore}"`, shot);
-		return;
-	}
-
-	// Step 3: Switch to a new conversation FIRST, then deactivate persona.
+	// Step 2: Switch to a new conversation FIRST, then deactivate persona.
 	// Order matters: deactivating while viewing conv A would trigger
 	// onPersonaNameChanged(null) which overwrites conv A's header.
 	await newConversation(page);

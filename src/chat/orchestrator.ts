@@ -396,6 +396,11 @@ export class ChatOrchestrator {
 			providerConfig?.use_extended_context ? { use_extended_context: true } : undefined
 		);
 
+		// Capture active persona into header (mirrors provider/model capture above).
+		// Without this, the JSONL file is created without persona_name, and
+		// switchConversation() cannot display-restore the persona label.
+		conversation.persona_name = this.personaManager?.getActivePersona()?.name ?? null;
+
 		await this.historyManager.createConversationFile(conversation);
 
 		this.view?.clearMessages();
