@@ -1,7 +1,7 @@
 # Settings Reorganization — Implementation Tasks
 
 **Design doc:** [settings-reorganization-design.md](settings-reorganization-design.md)
-**Status:** In progress — Phase 3 complete
+**Status:** In progress — Phase 4 complete
 **Date:** 2026-04-09
 
 ---
@@ -146,7 +146,7 @@
 
 > **Goal:** Extract the shared settings renderer and the reload button from `extensions.ts` into standalone functions that `settings-tab.ts` can call within the Tools section.
 
-- [ ] **4.1 Create `src/settings/sections/tool-shared-settings.ts`**
+- [x] **4.1 Create `src/settings/sections/tool-shared-settings.ts`**
   - Export `renderSharedSettingsSection(containerEl, ctx)`
   - Extract logic from `extensions.ts` lines 28-45:
     - Get shared settings definition from `manager.getSharedSettingsDefinition()`
@@ -156,7 +156,7 @@
     - Render "Reset to defaults" button that clears `ctx.settings.user_shared_settings` and redisplays
   - Approximately 30 lines
 
-- [ ] **4.2 Extract reload button to a standalone function**
+- [x] **4.2 Extract reload button to a standalone function**
   - Option A: Add `renderReloadExtensionsButton(containerEl, ctx)` to `tool-shared-settings.ts`
   - Option B: Create a separate tiny file
   - Prefer Option A (keeps related tools-section extras together)
