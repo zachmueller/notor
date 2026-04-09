@@ -1747,6 +1747,11 @@ export default class NotorPlugin extends Plugin {
 			view.setWorkflowActivityTracker(this._workflowActivityTracker);
 		}
 
+		// Phase 3: Wire active session accessor so the activity indicator
+		// includes detached foreground conversations in badge count + dropdown.
+		view.setGetActiveSessions(() => orchestrator.getActiveSessions());
+		orchestrator.onSessionsChanged(() => view.updateActivityIndicator());
+
 		// H-005: Wire conversation-by-ID switching for the activity dropdown.
 		// When a user clicks a workflow entry in the dropdown, it calls
 		// switchToConversation(conversationId) on the view, which delegates

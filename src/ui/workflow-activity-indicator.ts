@@ -16,6 +16,7 @@
 import { setIcon } from "obsidian";
 import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tracker";
 import { WorkflowActivityDropdown, type NavigateToConversationCallback } from "./workflow-activity-dropdown";
+import type { ConversationSession } from "../chat/conversation-session";
 import { logger } from "../utils/logger";
 
 const log = logger("WorkflowActivityIndicator");
@@ -43,14 +44,22 @@ export class WorkflowActivityIndicator {
 	private dropdown: WorkflowActivityDropdown | null = null;
 	/** Callback for navigating to a conversation (H-005). */
 	private onNavigateToConversation: NavigateToConversationCallback | null = null;
+	/** Optional accessor for active foreground conversation sessions (Phase 3). */
+	private readonly getActiveSessions?: () => ConversationSession[];
 
 	/**
 	 * @param containerEl - The chat panel header element to render into.
 	 * @param tracker - The workflow activity tracker providing state data.
+	 * @param getActiveSessions - Optional accessor for active foreground conversation sessions.
 	 */
-	constructor(containerEl: HTMLElement, tracker: WorkflowActivityTracker) {
+	constructor(
+		containerEl: HTMLElement,
+		tracker: WorkflowActivityTracker,
+		getActiveSessions?: () => ConversationSession[],
+	) {
 		this.containerEl = containerEl;
 		this.tracker = tracker;
+		this.getActiveSessions = getActiveSessions;
 	}
 
 	// -----------------------------------------------------------------------
@@ -114,7 +123,8 @@ export class WorkflowActivityIndicator {
 			this.tracker,
 			(conversationId: string) => {
 				this.onNavigateToConversation?.(conversationId);
-			}
+			},
+			this.getActiveSessions,
 		);
 
 		// Register the onChange callback for reactive updates
@@ -153,7 +163,9 @@ export class WorkflowActivityIndicator {
 	updateBadge(): void {
 		if (!this.badgeEl) return;
 
-		const count = this.tracker.getActiveCount();
+		const workflowCount = this.tracker.getActiveCount();
+		const sessionCount = this.getActiveSessions?.().length ?? 0;
+		const count = workflowCount + sessionCount;
 
 		if (count > 0) {
 			this.badgeEl.textContent = String(count);
@@ -178,8 +190,10 @@ export class WorkflowActivityIndicator {
 	updateAnimationState(): void {
 		if (!this.indicatorEl) return;
 
-		const hasActive = this.tracker.hasActiveWorkflows();
-		const hasWaiting = this.tracker.hasWaitingApproval();
+		const sessions = this.getActiveSessions?.() ?? [];
+		const hasActive = this.tracker.hasActiveWorkflows() || sessions.length > 0;
+		const hasWaiting = this.tracker.hasWaitingApproval() ||
+			sessions.some(s => s.status === "waiting_approval");
 
 		if (hasWaiting) {
 			this.indicatorEl.addClass("is-waiting-approval");

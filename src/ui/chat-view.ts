@@ -47,6 +47,7 @@ import { resolveNote } from "../utils/resolve-note";
 import { findExistingLeaf } from "../tools/note-opener";
 import { WorkflowActivityIndicator } from "./workflow-activity-indicator";
 import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tracker";
+import type { ConversationSession } from "../chat/conversation-session";
 import type { Workflow } from "../types";
 import { McpStatusIndicator } from "./mcp-status-indicator";
 import { getTextContent } from "../media/types";
@@ -148,6 +149,8 @@ export class NotorChatView extends ItemView {
 	// Workflow activity indicator state (H-002, H-003)
 	private workflowActivityTracker?: WorkflowActivityTracker;
 	private workflowActivityIndicator?: WorkflowActivityIndicator;
+	/** Accessor for active foreground conversation sessions (Phase 3). */
+	private getActiveSessions?: () => ConversationSession[];
 
 	// MCP status indicator (INT-005)
 	private mcpStatusIndicator?: McpStatusIndicator;
@@ -394,6 +397,35 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Set the accessor for active foreground conversation sessions (Phase 3).
+	 *
+	 * Used by the activity indicator to include detached foreground
+	 * conversations in the badge count and dropdown entries.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 3, Step 3c
+	 */
+	setGetActiveSessions(getter: () => ConversationSession[]): void {
+		this.getActiveSessions = getter;
+
+		// Re-initialize indicator if it's already rendered, to pass the getter
+		if (this.headerEl && this.workflowActivityTracker) {
+			this.initActivityIndicator();
+		}
+	}
+
+	/**
+	 * Trigger an update of the activity indicator (badge + animation).
+	 *
+	 * Called when the orchestrator's session set changes so the indicator
+	 * reactively reflects the current count.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 3, Step 3c
+	 */
+	updateActivityIndicator(): void {
+		this.workflowActivityIndicator?.update();
+	}
+
+	/**
 	 * Initialize the workflow activity indicator in the chat panel header.
 	 *
 	 * Called from `onOpen()` (if tracker is already set) or from
@@ -408,7 +440,8 @@ export class NotorChatView extends ItemView {
 
 		this.workflowActivityIndicator = new WorkflowActivityIndicator(
 			this.headerEl,
-			this.workflowActivityTracker
+			this.workflowActivityTracker,
+			this.getActiveSessions,
 		);
 
 		// Wire the conversation navigation callback (H-005)

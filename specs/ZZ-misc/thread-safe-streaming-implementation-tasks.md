@@ -425,24 +425,32 @@ Full replace from session's in-memory message array when switching to a conversa
 
 ### Step 3a: Extend `WorkflowActivityIndicator`
 
-- [ ] **Modify `src/ui/workflow-activity-indicator.ts`**
-  - [ ] Add `getActiveSessions?: () => ConversationSession[]` to constructor (line 51)
-  - [ ] `updateBadge()` (line 153): include `sessionCount` in total: `const count = workflowCount + sessionCount`
-  - [ ] `updateAnimationState()` (line 178): include sessions in `hasActive` check
+- [x] **Modify `src/ui/workflow-activity-indicator.ts`**
+  - [x] Add `getActiveSessions?: () => ConversationSession[]` to constructor (line 51)
+  - [x] `updateBadge()` (line 153): include `sessionCount` in total: `const count = workflowCount + sessionCount`
+  - [x] `updateAnimationState()` (line 178): include sessions in `hasActive` check
 
 ### Step 3b: Extend `WorkflowActivityDropdown`
 
-- [ ] **Modify `src/ui/workflow-activity-dropdown.ts`**
-  - [ ] Add `getActiveSessions?: () => ConversationSession[]` to constructor (line 59)
-  - [ ] Add "Conversations" section to `renderEntries()` (line 189+)
-    - [ ] Each entry shows: conversation title, status badge ("Streaming" / "Waiting for approval"), elapsed time
-    - [ ] Click handler calls `onNavigate(session.conversationId)`
+- [x] **Modify `src/ui/workflow-activity-dropdown.ts`**
+  - [x] Add `getActiveSessions?: () => ConversationSession[]` to constructor (line 59)
+  - [x] Add "Conversations" section to `renderEntries()` (line 189+)
+    - [x] Each entry shows: conversation title, status badge ("Streaming" / "Waiting for approval"), elapsed time
+    - [x] Click handler calls `onNavigate(session.conversationId)`
 
 ### Step 3c: Wire in `main.ts`
 
-- [ ] **Modify `src/main.ts`**
-  - [ ] Pass session accessor when constructing indicator: `() => orchestrator.getActiveSessions()`
-  - [ ] Wire `session.onStatusChange` to trigger `indicator.update()` (or have orchestrator emit event)
+- [x] **Modify `src/main.ts`**
+  - [x] Pass session accessor when constructing indicator: `() => orchestrator.getActiveSessions()`
+  - [x] Wire `session.onStatusChange` to trigger `indicator.update()` (or have orchestrator emit event)
+- [x] **Modify `src/chat/orchestrator.ts`**
+  - [x] Add `onSessionsChanged(callback): () => void` public method with `sessionChangeCallbacks` set
+  - [x] Add `notifySessionsChanged()` private method fired on session add/remove
+  - [x] Clean up callbacks in `destroy()`
+- [x] **Modify `src/ui/chat-view.ts`**
+  - [x] Add `setGetActiveSessions(getter)` method to accept session accessor
+  - [x] Add `updateActivityIndicator()` method for reactive updates
+  - [x] Pass `getActiveSessions` to `WorkflowActivityIndicator` constructor
 
 ### Phase 3 Verification
 

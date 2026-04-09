@@ -117,6 +117,14 @@ export class ChatOrchestrator {
 	 */
 	private activeSessions = new Map<string, ConversationSession>();
 
+	/**
+	 * Callbacks fired when the set of active sessions changes (add/remove/status).
+	 * Used by the activity indicator to update badge count and animation state.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 3
+	 */
+	private sessionChangeCallbacks = new Set<() => void>();
+
 	constructor(
 		private readonly app: App,
 		private readonly providerRegistry: ProviderRegistry,
@@ -298,6 +306,33 @@ export class ChatOrchestrator {
 	}
 
 	/**
+	 * Register a listener that fires whenever the set of active sessions changes.
+	 * Fires on session creation, removal, and status changes.
+	 *
+	 * @returns An unregister function that removes the callback.
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 3, Step 3c
+	 */
+	onSessionsChanged(callback: () => void): () => void {
+		this.sessionChangeCallbacks.add(callback);
+		return () => {
+			this.sessionChangeCallbacks.delete(callback);
+		};
+	}
+
+	/**
+	 * Notify all registered listeners that the active session set has changed.
+	 */
+	private notifySessionsChanged(): void {
+		for (const cb of this.sessionChangeCallbacks) {
+			try {
+				cb();
+			} catch (e) {
+				log.error("sessionChange callback error", { error: String(e) });
+			}
+		}
+	}
+
+	/**
 	 * Returns the view only if it is currently displaying this session's conversation.
 	 *
 	 * When the user navigates away from a streaming conversation, this returns
@@ -355,6 +390,7 @@ export class ChatOrchestrator {
 		}
 
 		this.activeSessions.clear();
+		this.sessionChangeCallbacks.clear();
 		log.info("Orchestrator destroyed", { abortedSessions: sessionPromises.length });
 	}
 
@@ -826,6 +862,7 @@ export class ChatOrchestrator {
 		});
 
 		this.activeSessions.set(session.conversationId, session);
+		this.notifySessionsChanged();
 
 		// G-006: Activate workflow-scoped hook overrides before the first LLM call
 		if (workflow.hooks && this.workflowHookOverrideManager) {
@@ -852,6 +889,7 @@ export class ChatOrchestrator {
 				session.setStatus("completed");
 			}
 			this.activeSessions.delete(session.conversationId);
+			this.notifySessionsChanged();
 			this.view?.setRespondingState(false);
 		}
 	}
@@ -1703,6 +1741,7 @@ export class ChatOrchestrator {
 
 		// Register session and start response loop
 		this.activeSessions.set(session.conversationId, session);
+		this.notifySessionsChanged();
 
 		// Step 1f-addendum (Trigger 1): Update conversation header if the
 		// pinned values differ from what's stored (e.g. user changed provider
@@ -1730,6 +1769,7 @@ export class ChatOrchestrator {
 				session.setStatus("completed");
 			}
 			this.activeSessions.delete(session.conversationId);
+			this.notifySessionsChanged();
 			this.view?.setRespondingState(false);
 		}
 	}

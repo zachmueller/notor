@@ -15,6 +15,7 @@
 import { setIcon } from "obsidian";
 import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tracker";
 import type { WorkflowExecution, WorkflowExecutionStatus } from "../types";
+import type { ConversationSession } from "../chat/conversation-session";
 import { logger } from "../utils/logger";
 
 const log = logger("WorkflowActivityDropdown");
@@ -51,17 +52,23 @@ export class WorkflowActivityDropdown {
 	/** The anchor element the dropdown is positioned relative to. */
 	private anchorEl: HTMLElement | null = null;
 
+	/** Optional accessor for active foreground conversation sessions (Phase 3). */
+	private readonly getActiveSessions?: () => ConversationSession[];
+
 	/**
-	 * @param tracker    - The workflow activity tracker providing execution data.
-	 * @param onNavigate - Callback invoked when the user clicks an entry to navigate
-	 *                     to that workflow's conversation.
+	 * @param tracker           - The workflow activity tracker providing execution data.
+	 * @param onNavigate        - Callback invoked when the user clicks an entry to navigate
+	 *                            to that workflow's conversation.
+	 * @param getActiveSessions - Optional accessor for active foreground conversation sessions.
 	 */
 	constructor(
 		tracker: WorkflowActivityTracker,
-		onNavigate: NavigateToConversationCallback
+		onNavigate: NavigateToConversationCallback,
+		getActiveSessions?: () => ConversationSession[],
 	) {
 		this.tracker = tracker;
 		this.onNavigate = onNavigate;
+		this.getActiveSessions = getActiveSessions;
 	}
 
 	// -----------------------------------------------------------------------
@@ -191,19 +198,51 @@ export class WorkflowActivityDropdown {
 
 		this.dropdownEl.empty();
 
-		const entries = this.tracker.getIndicatorEntries();
+		const workflowEntries = this.tracker.getIndicatorEntries();
+		const sessions = this.getActiveSessions?.() ?? [];
 
-		if (entries.length === 0) {
+		if (workflowEntries.length === 0 && sessions.length === 0) {
 			// Empty state
 			const emptyEl = this.dropdownEl.createDiv({
 				cls: "notor-workflow-activity-empty",
 			});
-			emptyEl.textContent = "No recent workflow activity";
+			emptyEl.textContent = "No recent activity";
 			return;
 		}
 
-		for (const execution of entries) {
-			this.renderEntry(this.dropdownEl, execution);
+		// Conversations section (active foreground sessions)
+		if (sessions.length > 0) {
+			const sectionEl = this.dropdownEl.createDiv({
+				cls: "notor-workflow-activity-section",
+			});
+			sectionEl.createDiv({
+				cls: "notor-workflow-activity-section-header",
+				text: "Conversations",
+			});
+			for (const session of sessions) {
+				this.renderSessionEntry(sectionEl, session);
+			}
+		}
+
+		// Workflows section
+		if (workflowEntries.length > 0) {
+			if (sessions.length > 0) {
+				// Add section header only when both sections are present
+				const sectionEl = this.dropdownEl.createDiv({
+					cls: "notor-workflow-activity-section",
+				});
+				sectionEl.createDiv({
+					cls: "notor-workflow-activity-section-header",
+					text: "Workflows",
+				});
+				for (const execution of workflowEntries) {
+					this.renderEntry(sectionEl, execution);
+				}
+			} else {
+				for (const execution of workflowEntries) {
+					this.renderEntry(this.dropdownEl, execution);
+				}
+			}
 		}
 	}
 
@@ -246,6 +285,59 @@ export class WorkflowActivityDropdown {
 		// Click handler — navigate to the workflow's conversation (H-005)
 		entryEl.addEventListener("click", () => {
 			this.onNavigate(execution.conversation_id);
+			this.close();
+		});
+	}
+
+	/**
+	 * Render a single active conversation session entry row.
+	 *
+	 * Each entry shows: conversation title, status badge, and elapsed time.
+	 * Clicking the entry navigates to the session's conversation.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 3, Step 3b
+	 */
+	private renderSessionEntry(container: HTMLElement, session: ConversationSession): void {
+		const entryEl = container.createDiv({
+			cls: "notor-workflow-activity-entry",
+		});
+
+		// Top row: conversation title + status badge
+		const topRow = entryEl.createDiv({ cls: "notor-workflow-activity-entry-top" });
+
+		const nameEl = topRow.createSpan({ cls: "workflow-name" });
+		nameEl.textContent = session.title || "Untitled conversation";
+
+		const statusLabel = session.status === "waiting_approval"
+			? "Waiting for approval"
+			: "Streaming";
+		const statusClass = session.status === "waiting_approval"
+			? "waiting_approval"
+			: "running";
+
+		const badgeEl = topRow.createSpan({
+			cls: `status-badge status-${statusClass}`,
+		});
+		badgeEl.textContent = statusLabel;
+
+		// Add status icon
+		const iconEl = createSpan({ cls: "status-icon" });
+		if (session.status === "waiting_approval") {
+			setIcon(iconEl, "alert-circle");
+		} else {
+			setIcon(iconEl, "loader");
+		}
+		badgeEl.insertBefore(iconEl, badgeEl.firstChild);
+
+		// Bottom row: elapsed time
+		const bottomRow = entryEl.createDiv({ cls: "notor-workflow-activity-entry-bottom" });
+
+		const timestampEl = bottomRow.createSpan({ cls: "timestamp" });
+		timestampEl.textContent = this.formatRelativeTime(new Date(session.startedAt));
+
+		// Click handler — navigate to the session's conversation
+		entryEl.addEventListener("click", () => {
+			this.onNavigate(session.conversationId);
 			this.close();
 		});
 	}
