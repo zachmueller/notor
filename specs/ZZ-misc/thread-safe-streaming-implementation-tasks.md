@@ -564,7 +564,7 @@ Audit all callbacks/listeners in `wireView()` and `ChatOrchestrator` constructor
 ### Step 5a: Add menu item
 
 - [ ] **Modify `src/ui/chat-view.ts`**
-  - [ ] In conversation list 3-dot context menu: add "Open in new tab" item with `external-link` icon
+  - [ ] In conversation list 3-dot context menu: add "Open in new tab" item with `blocks` icon
   - [ ] Add callback setter: `setOnOpenInNewTab(callback: (filename: string) => void)`
 
 ### Step 5b: Wire callback
