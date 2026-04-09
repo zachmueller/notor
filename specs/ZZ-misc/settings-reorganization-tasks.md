@@ -1,7 +1,7 @@
 # Settings Reorganization — Implementation Tasks
 
 **Design doc:** [settings-reorganization-design.md](settings-reorganization-design.md)
-**Status:** Not started
+**Status:** In progress — Phase 1 complete
 **Date:** 2026-04-09
 
 ---
@@ -12,7 +12,7 @@
 >
 > **Why first:** This is a pure refactor with no behavioral changes, and every subsequent phase depends on these exports being available from the new location.
 
-- [ ] **1.1 Create `src/settings/sections/field-renderer.ts`**
+- [x] **1.1 Create `src/settings/sections/field-renderer.ts`**
   - Copy these items from `extensions.ts`:
     - `FieldTarget` type (lines 345-347) — discriminated union: `{ kind: "shared" } | { kind: "extension"; extensionName: string }`
     - `renderFieldList()` (lines 352-361) — iterates schema array, calls `renderField()` per field
@@ -23,17 +23,17 @@
   - Preserve the `@internal Exported for tests` JSDoc on `renderField` and `FieldTarget`
   - Imports needed: `Setting`, `Notice` from obsidian; `SecretComponent` from `../../secret/secret-component`; `SettingsContext` from `./context`; `SettingsFieldSchema` from `../../extensions/types`
 
-- [ ] **1.2 Update `extensions.ts` to import from `field-renderer.ts`**
+- [x] **1.2 Update `extensions.ts` to import from `field-renderer.ts`**
   - Remove the copied function/type bodies from `extensions.ts`
   - Add `import { FieldTarget, renderFieldList, renderField, getPersistedValue, saveFieldValue } from "./field-renderer"`
   - Re-export `FieldTarget` and `renderField` from `extensions.ts` for backward compatibility with the test file (temporary — removed in Phase 7)
 
-- [ ] **1.3 Update test imports**
+- [x] **1.3 Update test imports**
   - In `src/settings/sections/__tests__/extensions-string-array.test.ts`:
     - Change `import { renderField, type FieldTarget } from "../extensions"` to `import { renderField, type FieldTarget } from "../field-renderer"`
   - Run tests to confirm no regressions: `npx vitest run src/settings/sections/__tests__/extensions-string-array.test.ts`
 
-- [ ] **1.4 Verify build**
+- [x] **1.4 Verify build**
   - Run `npm run build` (or equivalent) to confirm no circular imports or missing references
 
 ---

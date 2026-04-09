@@ -1,6 +1,6 @@
 # Settings Reorganization for Extensions Paradigm
 
-**Status:** Draft (revised after code review + cross-reference review)
+**Status:** In progress — Phase 1 (field renderer extraction) complete
 **Date:** 2026-04-09
 
 ---

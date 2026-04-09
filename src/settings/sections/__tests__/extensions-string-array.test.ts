@@ -160,7 +160,7 @@ vi.mock("obsidian", () => ({
 }));
 
 // Import after mocks are set up
-import { renderField, type FieldTarget } from "../extensions";
+import { renderField, type FieldTarget } from "../field-renderer";
 
 // ---------------------------------------------------------------------------
 // Helpers
