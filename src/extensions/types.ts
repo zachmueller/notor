@@ -66,7 +66,7 @@ export interface SettingsFieldSchema {
 	min?: number;
 	/** Max value (number type only). */
 	max?: number;
-	/** Enum constraint (string type only) — renders as dropdown. */
+	/** Constrains valid values — renders as dropdown for `string`, constrains Add input for `string[]`. */
 	options?: string[];
 }
 

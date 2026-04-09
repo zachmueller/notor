@@ -281,32 +281,32 @@ Use mock providers and a real `TaskLaneQueue` instance (lightweight, no HTTP).
 
 Add new settings fields after the existing `web_search_default_num_results`:
 
-- [ ] Add `web_search_round_robin` field:
+- [x] Add `web_search_round_robin` field:
   - `type: boolean`, `default: false`
   - Name: "Round-robin across providers"
   - Description: "Distribute search requests across all enabled providers instead of always using the highest-priority one."
-- [ ] Add `web_search_provider_priority` field:
+- [x] Add `web_search_provider_priority` field:
   - `type: string[]`, `default: ["duckduckgo", "tavily", "brave", "serpapi"]`
   - `options: ["duckduckgo", "tavily", "brave", "serpapi"]` (constrains "Add" input to known providers — see 4.2)
   - Name: "Provider priority order"
   - Description: "Order in which search providers are tried. First entry is highest priority."
-- [ ] Add `web_search_max_fallback_providers` field:
+- [x] Add `web_search_max_fallback_providers` field:
   - `type: number`, `default: 2`, `min: 1`, `max: 4`
   - Name: "Max providers to try"
   - Description: "Maximum number of search providers to try before giving up. Limits worst-case latency when multiple providers are configured."
-- [ ] Update existing `web_search_timeout` description to: "Maximum time **per provider** in seconds to wait for search results before aborting. With max-fallback-providers set to N, worst-case total wait is this value × N."
-- [ ] Add DuckDuckGo provider fields:
+- [x] Update existing `web_search_timeout` description to: "Maximum time **per provider** in seconds to wait for search results before aborting. With max-fallback-providers set to N, worst-case total wait is this value × N."
+- [x] Add DuckDuckGo provider fields:
   - `web_search_duckduckgo_enabled`: `boolean`, default `true`, name "DuckDuckGo — Enabled"
   - `web_search_duckduckgo_delay_ms`: `number`, default `1500`, min `0`, max `10000`, name "DuckDuckGo — Delay (ms)"
-- [ ] Add Tavily provider fields:
+- [x] Add Tavily provider fields:
   - `web_search_tavily_enabled`: `boolean`, default `false`, name "Tavily — Enabled"
   - `web_search_tavily_api_key`: `string`, `secret: true`, name "Tavily — API Key"
   - `web_search_tavily_delay_ms`: `number`, default `0`, min `0`, max `10000`, name "Tavily — Delay (ms)"
-- [ ] Add Brave Search provider fields:
+- [x] Add Brave Search provider fields:
   - `web_search_brave_enabled`: `boolean`, default `false`, name "Brave Search — Enabled"
   - `web_search_brave_api_key`: `string`, `secret: true`, name "Brave Search — API Key"
   - `web_search_brave_delay_ms`: `number`, default `0`, min `0`, max `10000`, name "Brave Search — Delay (ms)"
-- [ ] Add SerpApi provider fields:
+- [x] Add SerpApi provider fields:
   - `web_search_serpapi_enabled`: `boolean`, default `false`, name "SerpApi — Enabled"
   - `web_search_serpapi_api_key`: `string`, `secret: true`, name "SerpApi — API Key"
   - `web_search_serpapi_delay_ms`: `number`, default `0`, min `0`, max `10000`, name "SerpApi — Delay (ms)"
@@ -319,27 +319,27 @@ Add new settings fields after the existing `web_search_default_num_results`:
 
 The current `string[]` renderer uses a free-text input for adding entries. For `web_search_provider_priority`, entries must be valid provider names.
 
-- [ ] Add up/down reorder buttons to each `string[]` entry (before the existing "Remove" button):
+- [x] Add up/down reorder buttons to each `string[]` entry (before the existing "Remove" button):
   - "▲" button: swaps entry with the one above (hidden for the first entry)
   - "▼" button: swaps entry with the one below (hidden for the last entry)
   - On click: splice + re-insert, `saveFieldValue()`, `ctx.redisplay()`
-- [ ] In the `string[]` branch of `renderField()`, check if `field.options` is present
-- [ ] When `field.options` exists: render a dropdown (`addDropdown`) instead of a text input (`addText`) for the "Add" action, populated with `field.options` values that aren't already in the list
-- [ ] When all options are already in the list: hide the Add row (dropdown + button) entirely
-- [ ] When `field.options` is absent: keep current free-text behavior (backward-compatible)
-- [ ] Update JSDoc on `SettingsFieldSchema.options` in `src/extensions/types.ts:69` — change from `"Enum constraint (string type only) — renders as dropdown."` to `"Constrains valid values — renders as dropdown for \`string\`, constrains Add input for \`string[]\`."`
-- [ ] ~~Verify `parseSettingsSchema()`~~ — No changes needed: `parseSettingsSchema()` in `settings-schema.ts` L104-106 (within the function at L51-112) already passes `options` through for all field types (the check is type-agnostic)
+- [x] In the `string[]` branch of `renderField()`, check if `field.options` is present
+- [x] When `field.options` exists: render a dropdown (`addDropdown`) instead of a text input (`addText`) for the "Add" action, populated with `field.options` values that aren't already in the list
+- [x] When all options are already in the list: hide the Add row (dropdown + button) entirely
+- [x] When `field.options` is absent: keep current free-text behavior (backward-compatible)
+- [x] Update JSDoc on `SettingsFieldSchema.options` in `src/extensions/types.ts:69` — change from `"Enum constraint (string type only) — renders as dropdown."` to `"Constrains valid values — renders as dropdown for \`string\`, constrains Add input for \`string[]\`."`
+- [x] ~~Verify `parseSettingsSchema()`~~ — No changes needed: `parseSettingsSchema()` in `settings-schema.ts` L104-106 (within the function at L51-112) already passes `options` through for all field types (the check is type-agnostic)
 
 ### 4.3 String array renderer tests
 
 **File to create:** `src/settings/sections/__tests__/extensions-string-array.test.ts`
 
-- [ ] Test reorder up: swaps entry with previous, persists new order
-- [ ] Test reorder down: swaps entry with next, persists new order
-- [ ] Test reorder boundaries: up button hidden on first entry, down button hidden on last
-- [ ] Test dropdown mode: when `field.options` present, Add row renders dropdown with unused options only
-- [ ] Test dropdown exhaustion: when all options in list, Add row is hidden
-- [ ] Test free-text fallback: when `field.options` absent, Add row renders text input (existing behavior preserved)
+- [x] Test reorder up: swaps entry with previous, persists new order
+- [x] Test reorder down: swaps entry with next, persists new order
+- [x] Test reorder boundaries: up button hidden on first entry, down button hidden on last
+- [x] Test dropdown mode: when `field.options` present, Add row renders dropdown with unused options only
+- [x] Test dropdown exhaustion: when all options in list, Add row is hidden
+- [x] Test free-text fallback: when `field.options` absent, Add row renders text input (existing behavior preserved)
 
 ---
 

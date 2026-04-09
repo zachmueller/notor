@@ -341,7 +341,8 @@ function renderUserAutomationsSection(
 // Field rendering
 // ---------------------------------------------------------------------------
 
-type FieldTarget =
+/** @internal Exported for tests. */
+export type FieldTarget =
 	| { kind: "shared" }
 	| { kind: "extension"; extensionName: string };
 
@@ -387,8 +388,8 @@ async function saveFieldValue(
 	await ctx.saveSettings();
 }
 
-/** Render a single settings field using the appropriate UI component. */
-function renderField(
+/** @internal Render a single settings field using the appropriate UI component. Exported for tests. */
+export function renderField(
 	containerEl: HTMLElement,
 	ctx: SettingsContext,
 	field: SettingsFieldSchema,
@@ -484,7 +485,7 @@ function renderField(
 		return;
 	}
 
-	// string[] -> dynamic list with add/remove
+	// string[] -> dynamic list with add/remove/reorder
 	if (field.type === "string[]") {
 		const persisted = getPersistedValue(ctx, field, target);
 		const currentList: string[] = Array.isArray(persisted)
@@ -496,42 +497,93 @@ function renderField(
 		const setting = new Setting(containerEl).setName(field.name);
 		if (field.description) setting.setDesc(field.description);
 
-		// Render existing entries with Remove button
+		// Render existing entries with reorder + remove buttons
 		for (let i = 0; i < currentList.length; i++) {
 			const entry = currentList[i] ?? "";
-			new Setting(containerEl)
-				.setName(entry || "(empty)")
-				.addButton((btn) =>
-					btn
-						.setButtonText("Remove")
-						.setWarning()
-						.onClick(async () => {
-							currentList.splice(i, 1);
+			const entrySetting = new Setting(containerEl).setName(entry || "(empty)");
+
+			// Up button (hidden for first entry)
+			if (i > 0) {
+				entrySetting.addButton((btn) =>
+					btn.setButtonText("\u25B2").onClick(async () => {
+						const tmp = currentList[i - 1]!;
+						currentList[i - 1] = currentList[i]!;
+						currentList[i] = tmp;
+						await saveFieldValue(ctx, field, target, currentList);
+						ctx.redisplay();
+					}),
+				);
+			}
+
+			// Down button (hidden for last entry)
+			if (i < currentList.length - 1) {
+				entrySetting.addButton((btn) =>
+					btn.setButtonText("\u25BC").onClick(async () => {
+						const tmp = currentList[i + 1]!;
+						currentList[i + 1] = currentList[i]!;
+						currentList[i] = tmp;
+						await saveFieldValue(ctx, field, target, currentList);
+						ctx.redisplay();
+					}),
+				);
+			}
+
+			entrySetting.addButton((btn) =>
+				btn
+					.setButtonText("Remove")
+					.setWarning()
+					.onClick(async () => {
+						currentList.splice(i, 1);
+						await saveFieldValue(ctx, field, target, currentList);
+						ctx.redisplay();
+					}),
+			);
+		}
+
+		// Add new entry — dropdown when field.options present, free text otherwise
+		const hasOptions = field.options && field.options.length > 0;
+		if (hasOptions) {
+			const unusedOptions = field.options!.filter((o) => !currentList.includes(o));
+			if (unusedOptions.length > 0) {
+				let selectedOption = unusedOptions[0]!;
+				new Setting(containerEl)
+					.setName(`Add to ${field.name}`)
+					.addDropdown((dropdown) => {
+						for (const option of unusedOptions) {
+							dropdown.addOption(option, option);
+						}
+						dropdown.setValue(selectedOption).onChange((v) => {
+							selectedOption = v;
+						});
+					})
+					.addButton((btn) =>
+						btn.setButtonText("Add").onClick(async () => {
+							currentList.push(selectedOption);
 							await saveFieldValue(ctx, field, target, currentList);
 							ctx.redisplay();
 						}),
+					);
+			}
+		} else {
+			let newValue = "";
+			new Setting(containerEl)
+				.setName(`Add to ${field.name}`)
+				.addText((text) => {
+					text.setPlaceholder("Enter value").onChange((v) => {
+						newValue = v.trim();
+					});
+				})
+				.addButton((btn) =>
+					btn.setButtonText("Add").onClick(async () => {
+						if (!newValue) {
+							new Notice("Enter a value to add.");
+							return;
+						}
+						currentList.push(newValue);
+						await saveFieldValue(ctx, field, target, currentList);
+						ctx.redisplay();
+					}),
 				);
 		}
-
-		// Add new entry input
-		let newValue = "";
-		new Setting(containerEl)
-			.setName(`Add to ${field.name}`)
-			.addText((text) => {
-				text.setPlaceholder("Enter value").onChange((v) => {
-					newValue = v.trim();
-				});
-			})
-			.addButton((btn) =>
-				btn.setButtonText("Add").onClick(async () => {
-					if (!newValue) {
-						new Notice("Enter a value to add.");
-						return;
-					}
-					currentList.push(newValue);
-					await saveFieldValue(ctx, field, target, currentList);
-					ctx.redisplay();
-				}),
-			);
 	}
 }
