@@ -11,6 +11,7 @@
 import { Notice, Setting } from "obsidian";
 import type { SettingsContext } from "./context";
 import { renderFieldList } from "./field-renderer";
+import { markSubsection } from "../helpers";
 
 /**
  * Render the "Shared settings" sub-section: heading, field list, and
@@ -24,7 +25,8 @@ export function renderSharedSettingsSection(
 	const sharedDef = manager.getSharedSettingsDefinition();
 	if (!sharedDef) return;
 
-	new Setting(containerEl).setHeading().setName("Shared settings");
+	const heading = new Setting(containerEl).setHeading().setName("Shared settings");
+	markSubsection(heading, "Shared settings");
 	renderFieldList(containerEl, ctx, sharedDef.settingsSchema, {
 		kind: "shared",
 	});

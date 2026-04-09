@@ -19,7 +19,7 @@ export class ToolSettingsModal extends Modal {
 	constructor(
 		private ctx: SettingsContext,
 		private toolName: string,
-		private scrollToGroup?: (groupTitle: string) => void,
+		private scrollToGroup?: (groupTitle: string, subsection?: string) => void,
 	) {
 		super(ctx.app);
 	}
@@ -125,14 +125,15 @@ export class ToolSettingsModal extends Modal {
 			const note = new Setting(contentEl).setDesc(
 				"This tool may also be affected by shared settings.",
 			);
+			note.descEl.appendText(" ");
 			const linkEl = note.descEl.createEl("a", {
-				text: " Edit shared settings \u2192",
+				text: "Edit shared settings \u2192",
 				href: "#",
 			});
 			linkEl.addEventListener("click", (e) => {
 				e.preventDefault();
 				this.close();
-				this.scrollToGroup?.("Tools");
+				this.scrollToGroup?.("Tools", "Shared settings");
 			});
 		}
 

@@ -205,6 +205,20 @@
 	}
 }
 
+/* Subsection deep-link highlight */
+[data-notor-subsection].notor-subsection-highlight {
+	animation: notor-group-highlight 1.5s ease-out forwards;
+	border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	[data-notor-subsection].notor-subsection-highlight {
+		animation: none;
+		outline: 2px solid var(--interactive-accent);
+		outline-offset: -1px;
+	}
+}
+
 /* ==========================================================================
    Unified Tools section
    ========================================================================== */

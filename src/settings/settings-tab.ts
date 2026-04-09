@@ -67,35 +67,54 @@ export class NotorSettingTab extends PluginSettingTab {
 	}
 
 	/**
-	 * Scroll to and expand a specific settings group by title.
+	 * Scroll to and expand a specific settings group by title,
+	 * optionally targeting a subsection within the group.
 	 * Used by settings deep-links from chat messages.
 	 */
-	scrollToGroup(groupTitle: string): void {
+	scrollToGroup(groupTitle: string, subsection?: string): void {
 		const details = this.containerEl.querySelector<HTMLDetailsElement>(
 			`details[data-notor-group="${CSS.escape(groupTitle)}"]`
 		);
 		if (!details) return;
 		details.open = true;
-		details.scrollIntoView({ behavior: "smooth", block: "start" });
 
-		// Wait until the element is visible in the viewport before highlighting,
-		// so the glow doesn't start (and partially fade) during the smooth scroll.
-		details.classList.remove("notor-settings-group-highlight");
+		// If a subsection is requested, try to find it within the group.
+		if (subsection) {
+			const subsectionEl = details.querySelector<HTMLElement>(
+				`[data-notor-subsection="${CSS.escape(subsection)}"]`
+			);
+			if (subsectionEl) {
+				subsectionEl.scrollIntoView({ behavior: "smooth", block: "start" });
+				this.highlightElement(subsectionEl, "notor-subsection-highlight");
+				return;
+			}
+			// Fall through to group-level scroll if subsection not found
+		}
+
+		details.scrollIntoView({ behavior: "smooth", block: "start" });
+		this.highlightElement(details, "notor-settings-group-highlight");
+	}
+
+	/**
+	 * Wait for an element to be visible, then apply a temporary highlight animation.
+	 */
+	private highlightElement(el: HTMLElement, cls: string): void {
+		el.classList.remove(cls);
 		const observer = new IntersectionObserver(
 			(entries) => {
 				if (!entries[0]?.isIntersecting) return;
 				observer.disconnect();
 
-				void details.offsetWidth; // force reflow to restart animation
-				details.classList.add("notor-settings-group-highlight");
+				void el.offsetWidth; // force reflow to restart animation
+				el.classList.add(cls);
 
-				const cleanup = () => details.classList.remove("notor-settings-group-highlight");
-				details.addEventListener("animationend", cleanup, { once: true });
+				const cleanup = () => el.classList.remove(cls);
+				el.addEventListener("animationend", cleanup, { once: true });
 				setTimeout(cleanup, 2000);
 			},
 			{ threshold: 0.1 },
 		);
-		observer.observe(details);
+		observer.observe(el);
 	}
 
 	display(): void {
@@ -111,7 +130,7 @@ export class NotorSettingTab extends PluginSettingTab {
 			saveSettings: () => this.plugin.saveSettings(),
 			redisplay: () => this.display(),
 			addCleanup: (fn) => this.cleanupFns.push(fn),
-			scrollToGroup: (groupTitle) => this.scrollToGroup(groupTitle),
+			scrollToGroup: (groupTitle, subsection) => this.scrollToGroup(groupTitle, subsection),
 		};
 
 		const persisted = ctx.settings.settings_collapsed_sections;

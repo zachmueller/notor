@@ -5,6 +5,7 @@
  * validation. Used by the settings UI and potentially by other modules.
  */
 
+import type { Setting } from "obsidian";
 import type { LLMProviderConfig } from "../types";
 import type { NotorSettings } from "./types";
 
@@ -105,6 +106,20 @@ export function createSettingsGroup(
 		});
 	}
 	return details.createDiv({ cls: "notor-settings-group-body" });
+}
+
+// ---------------------------------------------------------------------------
+// Subsection marking
+// ---------------------------------------------------------------------------
+
+/**
+ * Stamp an element as a deep-linkable subsection within a settings group.
+ *
+ * Section renderers call this on heading `Setting` elements they want to
+ * expose as targets for `notor-settings://Group/Subsection` URIs.
+ */
+export function markSubsection(setting: Setting, name: string): void {
+	setting.settingEl.setAttribute("data-notor-subsection", name);
 }
 
 // ---------------------------------------------------------------------------

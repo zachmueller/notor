@@ -16,6 +16,7 @@ import {
 	renderVaultEventHookSubsection,
 	type VaultEventMeta,
 } from "./vault-event-hook-subsection";
+import { markSubsection } from "../helpers";
 
 /**
  * Render the "Vault event hooks" section in **Settings → Notor**.
@@ -29,7 +30,8 @@ export function renderVaultEventHooksSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	new Setting(containerEl).setHeading().setName("Vault event hooks");
+	const heading = new Setting(containerEl).setHeading().setName("Vault event hooks");
+	markSubsection(heading, "Vault event hooks");
 	containerEl.createEl("p", {
 		text:
 			"Actions that run automatically when vault events occur — note opened, " +

@@ -7,13 +7,15 @@
 import { Notice, Setting } from "obsidian";
 import type { Hook, HookConfig } from "../types";
 import type { SettingsContext } from "./context";
+import { markSubsection } from "../helpers";
 
 /** Render the "Hooks" settings section. */
 export function renderHooksSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	new Setting(containerEl).setHeading().setName("Hooks");
+	const heading = new Setting(containerEl).setHeading().setName("Hooks");
+	markSubsection(heading, "Hooks");
 	containerEl.createEl("p", {
 		text:
 			"Shell commands that run at specific points in the AI conversation lifecycle. " +

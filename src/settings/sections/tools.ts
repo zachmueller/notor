@@ -18,6 +18,12 @@ import type { McpHub } from "../../mcp/mcp-hub";
 import type { McpConnectionStatus } from "../../mcp/mcp-types";
 import type { UserToolDefinition } from "../../extensions/types";
 import { ToolSettingsModal } from "../../ui/tool-settings-modal";
+import type { CreationField } from "./shared";
+import { promptForCreation, ensureDirectory } from "./shared";
+import { markSubsection } from "../helpers";
+import { logger } from "../../utils/logger";
+
+const log = logger("ToolsSection");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -307,19 +313,113 @@ function addBuiltinToolIcons(
 }
 
 // ---------------------------------------------------------------------------
+// User tool skeleton
+// ---------------------------------------------------------------------------
+
+const TOOL_MODE_OPTIONS: Array<{ value: string; label: string }> = [
+	{ value: "read", label: "Read-only" },
+	{ value: "write", label: "Write" },
+];
+
+function buildToolSkeleton(name: string, description: string, mode: string): string {
+	const lines: string[] = [
+		"---",
+		"notor-type: tool",
+		`notor-tool-name: ${name}`,
+		`notor-description: "${description}"`,
+		`notor-mode: ${mode}`,
+		"---",
+		"",
+		`# ${name}`,
+		"",
+		"<!-- Describe what this tool does. This prose is ignored by the runtime. -->",
+		"",
+		"```yaml",
+		"params:",
+		"  example_param:",
+		"    type: string",
+		'    description: "Replace with your parameters"',
+		"```",
+		"",
+		"```ts",
+		"// Implement your tool logic here.",
+		`return { success: true, result: "Hello from ${name}!" };`,
+		"```",
+		"",
+	];
+	return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // User tools
 // ---------------------------------------------------------------------------
 
 function renderUserTools(containerEl: HTMLElement, ctx: SettingsContext): void {
 	const userTools = getUserTools(ctx);
-	if (userTools.length === 0) return;
 
 	containerEl.createEl("hr", { cls: "notor-tool-divider" });
-	new Setting(containerEl).setHeading().setName("User tools");
+	const userToolsHeading = new Setting(containerEl).setHeading().setName("User tools");
+	markSubsection(userToolsHeading, "User tools");
 	containerEl.createEl("p", {
 		text: "Tools defined in your vault's notor/tools/ directory.",
 		cls: "setting-item-description",
 	});
+
+	// "Create new tool" button
+	const toolFields: CreationField[] = [
+		{ type: "text", key: "name", placeholder: "Tool name (e.g. search_notes)" },
+		{ type: "text", key: "description", placeholder: "Short description for the AI" },
+		{ type: "select", key: "mode", options: TOOL_MODE_OPTIONS },
+	];
+
+	new Setting(containerEl)
+		.setName("Create new tool")
+		.setDesc(
+			"Creates a skeleton tool file you can customize with parameters and code."
+		)
+		.addButton((btn) =>
+			btn.setButtonText("Create").onClick(async () => {
+				const result = await promptForCreation(containerEl, toolFields);
+				if (!result) return;
+
+				const toolsDir = normalizePath(
+					`${ctx.settings.notor_dir}/tools`
+				);
+				const filePath = normalizePath(`${toolsDir}/${result["name"]}.md`);
+
+				if (ctx.app.vault.getAbstractFileByPath(filePath)) {
+					new Notice(`Tool "${result["name"]}" already exists.`);
+					return;
+				}
+
+				const name = result["name"] || "";
+				const description = result["description"] || "";
+				const mode = result["mode"] || "read";
+
+				try {
+					await ensureDirectory(ctx, toolsDir);
+					await ctx.app.vault.create(
+						filePath,
+						buildToolSkeleton(name, description, mode)
+					);
+					new Notice(`Tool "${name}" created — reload extensions to activate.`);
+					await ctx.app.workspace.openLinkText(filePath, "", true);
+					ctx.redisplay();
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : String(e);
+					log.error("Failed to create tool", { name, error: msg });
+					new Notice(`Failed to create tool: ${msg}`);
+				}
+			})
+		);
+
+	if (userTools.length === 0) {
+		containerEl.createEl("p", {
+			text: "No user tools yet.",
+			cls: "setting-item-description",
+		});
+		return;
+	}
 
 	const readTools = userTools.filter((t) => t.mode === "read");
 	const writeTools = userTools.filter((t) => t.mode === "write");
@@ -435,7 +535,8 @@ function renderMcpTools(containerEl: HTMLElement, ctx: SettingsContext): void {
 	if (serverNames.length === 0) return;
 
 	containerEl.createEl("hr", { cls: "notor-tool-divider" });
-	new Setting(containerEl).setHeading().setName("MCP tools");
+	const mcpHeading = new Setting(containerEl).setHeading().setName("MCP tools");
+	markSubsection(mcpHeading, "MCP tools");
 	containerEl.createEl("p", {
 		text: "Tools discovered from connected MCP servers. Server-reported classification hints are shown but your override takes precedence.",
 		cls: "setting-item-description",

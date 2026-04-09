@@ -151,7 +151,18 @@ where \`<Section>\` is one of these exact group names (URL-encode spaces as %20)
 
 Example: \`[Open Provider setup](notor-settings://Provider%20setup)\`
 
-These links render as clickable buttons in the Notor chat panel that open Obsidian settings directly to that section.
+You can also link to specific subsections within a group using a path separator:
+
+\`[Open <Section>/<Subsection>](notor-settings://<Section>/<Subsection>)\`
+
+Available subsections (URL-encode spaces as %20):
+- Tools → Shared settings, User tools, MCP tools
+- Rules and workflows → Rules, Workflows
+- Automation → Hooks, Vault event hooks, User automations
+
+Example: \`[Open Shared settings](notor-settings://Tools/Shared%20settings)\`
+
+These links render as clickable buttons in the Notor chat panel that open Obsidian settings directly to that section or subsection.
 
 ## Behavior
 

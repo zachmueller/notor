@@ -21,6 +21,6 @@ export interface SettingsContext {
 	redisplay: () => void;
 	/** Register a teardown function to be called when the settings tab hides or re-displays. */
 	addCleanup?: (fn: () => void) => void;
-	/** Scroll to and expand a specific settings group by title. */
-	scrollToGroup?: (groupTitle: string) => void;
+	/** Scroll to and expand a specific settings group by title, optionally targeting a subsection within. */
+	scrollToGroup?: (groupTitle: string, subsection?: string) => void;
 }

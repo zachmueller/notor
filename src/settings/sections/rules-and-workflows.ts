@@ -11,6 +11,7 @@ import type { SettingsContext } from "./context";
 import { discoverWorkflows } from "../../workflows/workflow-discovery";
 import type { CreationField } from "./shared";
 import { promptForCreation, ensureDirectory } from "./shared";
+import { markSubsection } from "../helpers";
 import { logger } from "../../utils/logger";
 
 const log = logger("RulesAndWorkflowsSection");
@@ -101,7 +102,8 @@ function renderRulesSubsection(
 	// Wrap in a scoped div so the inline name prompt appears within this subsection
 	const section = containerEl.createDiv({ cls: "notor-rules-subsection" });
 
-	new Setting(section).setHeading().setName("Rules");
+	const rulesHeading = new Setting(section).setHeading().setName("Rules");
+	markSubsection(rulesHeading, "Rules");
 	section.createEl("p", {
 		text:
 			"Rules inject instructions into the system prompt based on trigger conditions " +
@@ -209,7 +211,8 @@ function renderWorkflowsSubsection(
 	// Wrap in a scoped div so the inline name prompt appears within this subsection
 	const section = containerEl.createDiv({ cls: "notor-workflows-subsection" });
 
-	new Setting(section).setHeading().setName("Workflows");
+	const workflowsHeading = new Setting(section).setHeading().setName("Workflows");
+	markSubsection(workflowsHeading, "Workflows");
 	section.createEl("p", {
 		text:
 			"Workflows are AI-driven automations triggered by events or manual commands. " +

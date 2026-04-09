@@ -205,7 +205,7 @@ export class NotorChatView extends ItemView {
 	private onOpenInNewTab?: (filename: string) => void;
 
 	// Settings deep-link callback
-	private onOpenSettingsGroup?: (groupTitle: string) => void;
+	private onOpenSettingsGroup?: (groupTitle: string, subsection?: string) => void;
 
 	// Checkpoint callbacks
 	private onListCheckpoints?: () => Promise<Checkpoint[]>;
@@ -354,7 +354,7 @@ export class NotorChatView extends ItemView {
 		this.onOpenInNewTab = callback;
 	}
 
-	setOnOpenSettingsGroup(callback: (groupTitle: string) => void): void {
+	setOnOpenSettingsGroup(callback: (groupTitle: string, subsection?: string) => void): void {
 		this.onOpenSettingsGroup = callback;
 	}
 
@@ -1722,15 +1722,18 @@ export class NotorChatView extends ItemView {
 			if (!href.startsWith(prefix)) continue;
 			matched++;
 
-			const groupTitle = decodeURIComponent(href.slice(prefix.length));
-			log.debug("activateSettingsLinks: matched settings link", { groupTitle, href });
+			const raw = href.slice(prefix.length);
+			const slashIdx = raw.indexOf("/");
+			const groupTitle = decodeURIComponent(slashIdx === -1 ? raw : raw.slice(0, slashIdx));
+			const subsection = slashIdx === -1 ? undefined : decodeURIComponent(raw.slice(slashIdx + 1));
+			log.debug("activateSettingsLinks: matched settings link", { groupTitle, subsection, href });
 
 			// Attach directly so it fires before Obsidian's external-link handler.
 			link.addEventListener("click", (e: MouseEvent) => {
-				log.debug("activateSettingsLinks: click fired", { groupTitle });
+				log.debug("activateSettingsLinks: click fired", { groupTitle, subsection });
 				e.preventDefault();
 				e.stopPropagation();
-				this.onOpenSettingsGroup?.(groupTitle);
+				this.onOpenSettingsGroup?.(groupTitle, subsection);
 			});
 
 			// Remove href so Obsidian doesn't also try to open it externally.

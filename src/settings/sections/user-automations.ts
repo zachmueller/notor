@@ -11,6 +11,7 @@
 import { Setting } from "obsidian";
 import type { SettingsContext } from "./context";
 import { renderFieldList } from "./field-renderer";
+import { markSubsection } from "../helpers";
 
 /** Render the "User automations" sub-section. */
 export function renderUserAutomationsSection(
@@ -22,7 +23,8 @@ export function renderUserAutomationsSection(
 
 	if (automations.length === 0) return;
 
-	new Setting(containerEl).setHeading().setName("User automations");
+	const heading = new Setting(containerEl).setHeading().setName("User automations");
+	markSubsection(heading, "User automations");
 
 	for (const automation of automations) {
 		const label = automation.displayName
