@@ -1,7 +1,7 @@
 # Settings Reorganization — Implementation Tasks
 
 **Design doc:** [settings-reorganization-design.md](settings-reorganization-design.md)
-**Status:** In progress — Phase 4 complete
+**Status:** In progress — Phase 5 complete
 **Date:** 2026-04-09
 
 ---
@@ -170,7 +170,7 @@
 
 > **Goal:** Move user automations rendering from `extensions.ts` to a standalone file so the Automation section can import it.
 
-- [ ] **5.1 Create `src/settings/sections/user-automations.ts`**
+- [x] **5.1 Create `src/settings/sections/user-automations.ts`**
   - Export `renderUserAutomationsSection(containerEl, ctx)`
   - Extract logic from `extensions.ts` lines 278-338:
     - Get extension manager and automations list
@@ -180,9 +180,9 @@
   - Import `renderFieldList` and `FieldTarget` from `./field-renderer`
   - Approximately 60-70 lines
 
-- [ ] **5.2 Verify automations render correctly**
-  - Temporarily add a call to `renderUserAutomationsSection()` somewhere visible to confirm it renders the same output as the current extensions.ts version
-  - Remove temporary call after verification (the real wiring happens in Phase 6)
+- [x] **5.2 Verify automations render correctly**
+  - `extensions.ts` now imports from the new module and delegates to it — the existing Extensions section renders automations identically
+  - Build and all 593 tests pass
 
 ---
 
