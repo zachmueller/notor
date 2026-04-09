@@ -32,8 +32,9 @@ No work needed here. All phases below build on this foundation.
 - [ ] Define `SearchProviderMeta` interface: `{ type, displayName, requiresApiKey, defaultDelayMs }`
 - [ ] Define `ProviderConfig` interface: `{ enabled: boolean; delayMs: number; apiKey: string | null }`
 - [ ] Define `SearchProviderResult` interface: `{ results: WebSearchResult[]; rateLimited?: boolean; error?: string }`
-- [ ] Define `SearchProvider` interface with `meta`, `search(query, numResults, timeoutMs, apiKey)`, and `isConfigured()` methods
+- [ ] Define `SearchProvider` interface with `meta`, `search(query, numResults, timeoutMs, apiKey)`, and `isConfigured(config)` methods
   - `search()` receives only `apiKey: string | null` (not the full `ProviderConfig`) — `enabled` and `delayMs` are consumed upstream by the queue/lane-queue
+  - `isConfigured()` receives `config: ProviderConfig` — providers are stateless singletons, config flows in from outside at every call site
 - [ ] Export all types
 
 ### 1.2 Extract DuckDuckGo provider from scaffold
@@ -221,8 +222,9 @@ Follow existing test patterns: Vitest, `vi.mock("obsidian")` for `requestUrl`, `
   - Falls back to sensible defaults (DDG enabled, others disabled)
 - [ ] Implement `resolveProviderChain(config)`:
   - Uses `providerRegistry.getAvailableByPriority(config.providers, config.providerPriority)`
-  - If round-robin ON: rotate starting index via `roundRobinIndex % available.length`, wrap cyclically
+  - If round-robin ON: rotate starting index via `roundRobinIndex % available.length`, wrap cyclically so all providers are included (e.g. with [A,B,C] and index=1 → chain is [B,C,A])
   - If round-robin OFF: return as-is (highest priority first)
+  - In both modes, the returned chain always contains ALL available providers — fallback iterates the full chain before giving up
 - [ ] Implement `search(query, numResults, timeoutMs)`:
   - Call `getSettings()` → `buildConfig()` → `resolveProviderChain()`
   - Iterate provider chain: `laneQueue.enqueue(provider.meta.type, () => provider.search(query, numResults, timeoutMs, apiKey), delayMs)`
@@ -294,10 +296,11 @@ Add new settings fields after the existing `web_search_default_num_results`:
 
 The current `string[]` renderer uses a free-text input for adding entries. For `web_search_provider_priority`, entries must be valid provider names.
 
-- [ ] In the `string[]` branch of `renderExtensionSettingField()`, check if `field.options` is present
+- [ ] In the `string[]` branch of `renderField()`, check if `field.options` is present
 - [ ] When `field.options` exists: render a dropdown (`addDropdown`) instead of a text input (`addText`) for the "Add" action, populated with `field.options` values that aren't already in the list
+- [ ] When all options are already in the list: hide the Add row (dropdown + button) entirely
 - [ ] When `field.options` is absent: keep current free-text behavior (backward-compatible)
-- [ ] Verify `parseSettingsSchema()` in `src/extensions/settings-schema.ts` passes `options` through for `string[]` types (currently only checked for `string` type — may need to expand the condition)
+- [ ] ~~Verify `parseSettingsSchema()`~~ — No changes needed: `parseSettingsSchema()` in `settings-schema.ts:104-106` already passes `options` through for all field types (the check is type-agnostic)
 
 ---
 
