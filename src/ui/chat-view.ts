@@ -201,6 +201,9 @@ export class NotorChatView extends ItemView {
 	private favFilterActive = false;
 	private favFilterBtnEl?: HTMLElement;
 
+	// Open conversation in new tab callback
+	private onOpenInNewTab?: (filename: string) => void;
+
 	// Settings deep-link callback
 	private onOpenSettingsGroup?: (groupTitle: string) => void;
 
@@ -345,6 +348,10 @@ export class NotorChatView extends ItemView {
 
 	setOnForkConversation(callback: (messageId: string) => Promise<void>): void {
 		this.onForkConversation = callback;
+	}
+
+	setOnOpenInNewTab(callback: (filename: string) => void): void {
+		this.onOpenInNewTab = callback;
 	}
 
 	setOnOpenSettingsGroup(callback: (groupTitle: string) => void): void {
@@ -730,7 +737,13 @@ export class NotorChatView extends ItemView {
 
 		this.isSecondary = !!s?.isSecondary;
 
-		if (s?.conversationId && typeof s.conversationId === "string") {
+		if (s?.conversationFilename && typeof s.conversationFilename === "string") {
+			// "Open in new tab" passes a filename — load it via the switch callback.
+			// Defer to next tick so wireView() has time to set up callbacks.
+			setTimeout(() => {
+				this.onSwitchConversation?.(s.conversationFilename as string);
+			}, 0);
+		} else if (s?.conversationId && typeof s.conversationId === "string") {
 			// Defer loading to the next tick so that wireView() has time to
 			// set up the orchestrator and callbacks.
 			setTimeout(() => {
@@ -2139,6 +2152,14 @@ export class NotorChatView extends ItemView {
 		});
 
 		menu.addSeparator();
+
+		menu.addItem((item) => {
+			item.setTitle("Open in new tab")
+				.setIcon("blocks")
+				.onClick(() => {
+					this.onOpenInNewTab?.(entry.filename);
+				});
+		});
 
 		menu.addItem((item) => {
 			item.setTitle("Export conversation")

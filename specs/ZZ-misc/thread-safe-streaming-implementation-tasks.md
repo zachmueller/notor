@@ -563,14 +563,14 @@ Audit all callbacks/listeners in `wireView()` and `ChatOrchestrator` constructor
 
 ### Step 5a: Add menu item
 
-- [ ] **Modify `src/ui/chat-view.ts`**
-  - [ ] In conversation list 3-dot context menu: add "Open in new tab" item with `blocks` icon
-  - [ ] Add callback setter: `setOnOpenInNewTab(callback: (filename: string) => void)`
+- [x] **Modify `src/ui/chat-view.ts`**
+  - [x] In conversation list 3-dot context menu: add "Open in new tab" item with `blocks` icon
+  - [x] Add callback setter: `setOnOpenInNewTab(callback: (filename: string) => void)`
 
 ### Step 5b: Wire callback
 
-- [ ] **Modify `src/main.ts`**
-  - [ ] Wire `view.setOnOpenInNewTab()` to create new tab leaf with `{ type: CHAT_VIEW_TYPE, state: { conversationFilename: filename, isSecondary: true } }`
+- [x] **Modify `src/main.ts`**
+  - [x] Wire `view.setOnOpenInNewTab()` to create new tab leaf with `{ type: CHAT_VIEW_TYPE, state: { conversationFilename: filename, isSecondary: true } }`
 
 ### Phase 5 Verification
 

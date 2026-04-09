@@ -2080,6 +2080,18 @@ export default class NotorPlugin extends Plugin {
 			);
 		});
 
+		// Open conversation in a new secondary tab
+		view.setOnOpenInNewTab((filename: string) => {
+			const leaf = this.app.workspace.getLeaf("tab");
+			leaf.setViewState({
+				type: CHAT_VIEW_TYPE,
+				active: true,
+				state: { isSecondary: true, conversationFilename: filename },
+			}).catch((e) => {
+				log.error("Failed to open conversation in new tab", { error: String(e) });
+			});
+		});
+
 		// Delete conversation with confirmation
 		view.setOnDeleteConversation((filename: string) => {
 			// Step 2c: Block deletion of conversations with active sessions.
