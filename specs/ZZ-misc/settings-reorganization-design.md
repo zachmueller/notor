@@ -1,6 +1,6 @@
 # Settings Reorganization for Extensions Paradigm
 
-**Status:** In progress — Phase 1 (field renderer extraction) complete
+**Status:** In progress — Phase 2 (tool settings modal) complete
 **Date:** 2026-04-09
 
 ---

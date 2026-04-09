@@ -1,7 +1,7 @@
 # Settings Reorganization — Implementation Tasks
 
 **Design doc:** [settings-reorganization-design.md](settings-reorganization-design.md)
-**Status:** In progress — Phase 1 complete
+**Status:** In progress — Phase 2 complete
 **Date:** 2026-04-09
 
 ---
@@ -44,47 +44,46 @@
 >
 > **Why now:** The modal is the centerpiece of the new UX. Building it before wiring it into tool rows lets us test it in isolation.
 
-- [ ] **2.1 Create `src/ui/tool-settings-modal.ts`**
+- [x] **2.1 Create `src/ui/tool-settings-modal.ts`**
   - Extend Obsidian's `Modal` class (same pattern as `confirm-modal.ts`)
-  - Constructor takes `SettingsContext` and `toolName: string`
+  - Constructor takes `SettingsContext`, `toolName: string`, and optional `scrollToGroup` callback
   - `onOpen()` calls `renderContent()`
   - `onClose()` empties `contentEl` and calls `ctx.redisplay()` to refresh the parent settings tab
 
-- [ ] **2.2 Implement modal header**
+- [x] **2.2 Implement modal header**
   - Render `<h2>` with tool name
   - Render `<p class="setting-item-description">` with tool description (from `registry.get(toolName)?.description`)
 
-- [ ] **2.3 Implement "Reset to default" section (built-in tools only)**
+- [x] **2.3 Implement "Reset to default" section (built-in tools only)**
   - Check if tool is built-in via `manager.getBuiltinToolNames()`
   - Check if vault override file exists at `normalizePath({notor_dir}/tools/{toolName}.md)`
   - If override exists: render a `Setting` with "Custom definition active" name and "Reset to default" warning button
-  - On click: show `ConfirmModal`, then delete vault file via `app.vault.adapter.remove()`, call `manager.reload(false)`, show `Notice`, re-render modal content
+  - On click: show `ConfirmModal`, then call `manager.resetBuiltinToolToDefault()`, `manager.reload(false)`, show `Notice`, re-render modal content
   - Import `ConfirmModal` from `./confirm-modal`
 
-- [ ] **2.4 Implement shell configuration section (`execute_command` only)**
+- [x] **2.4 Implement shell configuration section (`execute_command` only)**
   - If `toolName === "execute_command"`: call `renderShellSection(contentEl, ctx)` from `execute-command.ts`
   - The existing `renderShellSection` renders its own heading ("Shell configuration") — this is fine inside the modal
-  - No changes needed to `execute-command.ts` at this point (description text update is Phase 6)
+  - No changes needed to `execute-command.ts` at this point (description text update is Phase 8)
 
-- [ ] **2.5 Implement per-tool settings section**
+- [x] **2.5 Implement per-tool settings section**
   - Look up tool definition via `manager.getTools()` to find `settingsSchema`
   - If `settingsSchema` exists and has entries:
     - Render "Settings" heading via `new Setting(contentEl).setHeading().setName("Settings")`
     - Call `renderFieldList(contentEl, ctx, toolDef.settingsSchema, { kind: "extension", extensionName: toolName })`
     - Render "Reset to defaults" warning button that deletes `ctx.settings.user_extension_settings[toolName]`, saves, and re-renders
 
-- [ ] **2.6 Implement shared settings note**
+- [x] **2.6 Implement shared settings note**
   - If `manager.getSharedSettingsDefinition()` returns a definition:
     - Render a `Setting` with description: "This tool may also be affected by shared settings."
-    - Add an anchor element "Edit shared settings →" that on click: closes modal, then calls `scrollToGroup("Tools")` on the settings tab
-    - For the scroll-to-shared-settings link: the modal needs access to the settings tab's `scrollToGroup`. Pass this as a callback in the constructor or access it via `ctx.plugin` → settings tab reference. Evaluate which approach is cleaner.
+    - Add an anchor element "Edit shared settings →" that on click: closes modal, then calls `scrollToGroup("Tools")` via callback
+    - `scrollToGroup` is passed as an optional callback in the constructor (cleanest approach since `_settingTab` is private on the plugin)
 
-- [ ] **2.7 Implement "Done" button**
+- [x] **2.7 Implement "Done" button**
   - Render `new Setting(contentEl).addButton(btn => btn.setButtonText("Done").setCta().onClick(() => this.close()))`
 
-- [ ] **2.8 Add modal CSS (if needed)**
-  - Test the modal layout — Obsidian's default modal styling may be sufficient
-  - If the description text or sections need spacing adjustments, add minimal CSS classes to `styles.css`
+- [x] **2.8 Add modal CSS (if needed)**
+  - Tested: Obsidian's default modal styling is sufficient — no additional CSS needed
 
 ---
 
