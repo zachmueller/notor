@@ -454,10 +454,10 @@ Full replace from session's in-memory message array when switching to a conversa
 
 ### Phase 3 Verification
 
-- [ ] Send message, switch away mid-stream -- badge shows count > 0
-- [ ] Open dropdown -- conversation entry with "Streaming" status visible
-- [ ] Click entry -- navigates back to streaming conversation
-- [ ] Wait for completion -- badge returns to 0
+- [x] Send message, switch away mid-stream -- badge shows count > 0 (E2E: `session-activity-indicator-test.ts` Test 1)
+- [x] Open dropdown -- conversation entry with "Streaming" status visible (E2E: `session-activity-indicator-test.ts` Test 2)
+- [x] Click entry -- navigates back to streaming conversation (E2E: `session-activity-indicator-test.ts` Test 3)
+- [x] Wait for completion -- badge returns to 0 (E2E: `session-activity-indicator-test.ts` Test 4)
 
 ---
 
