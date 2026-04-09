@@ -100,6 +100,23 @@ export class PersonaManager {
 		return discoverPersonas(this.vault, this.metadataCache, this.settings.notor_dir);
 	}
 
+	/**
+	 * Look up a persona by name without activating it.
+	 *
+	 * Used by `switchConversation()` to display-restore the persona label
+	 * from the JSONL header without calling `activatePersona()` (which
+	 * would mutate global state and fire callbacks).
+	 *
+	 * @param name - Persona name (subdirectory name, e.g. `"researcher"`)
+	 * @returns The persona if found, `null` if deleted or not discoverable
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1f
+	 */
+	async getPersonaByName(name: string): Promise<Persona | null> {
+		const personas = await this.getDiscoveredPersonas();
+		return personas.find((p) => p.name === name) ?? null;
+	}
+
 	// -----------------------------------------------------------------------
 	// Activation / deactivation
 	// -----------------------------------------------------------------------

@@ -508,6 +508,14 @@ export default class NotorPlugin extends Plugin {
 	onunload() {
 		log.info("Plugin unloading");
 
+		// Step 1h: Abort all active sessions first so their response loops can
+		// flush JSONL writes before infrastructure singletons are torn down.
+		// Fire-and-forget since onunload() is synchronous — the 2s timeout
+		// in destroy() prevents hanging.
+		this._orchestrator?.destroy().catch((e) => {
+			log.error("Orchestrator destroy failed", { error: String(e) });
+		});
+
 		// Clear the last-active markdown path cache on unload
 		notifyMarkdownLeafActivated(null);
 
@@ -1761,6 +1769,16 @@ export default class NotorPlugin extends Plugin {
 		// callback, which updates the dispatcher's active persona name.
 		personaManager.setOnPersonaNameChanged((name) => {
 			toolDispatcher.setActivePersonaName(name);
+
+			// Step 1f-addendum (Trigger 2): Update conversation header so the
+			// next session pins from the user's explicit persona choice.
+			const conv = orchestrator.getDisplayedConversation();
+			if (conv) {
+				conv.persona_name = name;
+				historyManager.updateConversationHeader(conv).catch((e) => {
+					log.error("Failed to update conversation header on persona change", { error: String(e) });
+				});
+			}
 		});
 
 		// Restore active persona from settings on view wire (deferred, non-blocking).
@@ -2010,6 +2028,16 @@ export default class NotorPlugin extends Plugin {
 			this.saveSettings().catch((e) => {
 				log.error("Failed to save provider change", { error: String(e) });
 			});
+
+			// Step 1f-addendum (Trigger 2): Update conversation header so the
+			// next session pins from the user's explicit choice.
+			const conv = orchestrator.getDisplayedConversation();
+			if (conv) {
+				conv.provider_id = providerId;
+				historyManager.updateConversationHeader(conv).catch((e) => {
+					log.error("Failed to update conversation header on provider change", { error: String(e) });
+				});
+			}
 		});
 
 		// Model change — parses ::1m suffix to set use_extended_context
@@ -2031,6 +2059,17 @@ export default class NotorPlugin extends Plugin {
 						log.error("Failed to save model change", { error: String(e) });
 					});
 				}
+			}
+
+			// Step 1f-addendum (Trigger 2): Update conversation header so the
+			// next session pins from the user's explicit choice.
+			const conv = orchestrator.getDisplayedConversation();
+			if (conv) {
+				conv.model_id = modelId;
+				conv.use_extended_context = isExtendedContext;
+				historyManager.updateConversationHeader(conv).catch((e) => {
+					log.error("Failed to update conversation header on model change", { error: String(e) });
+				});
 			}
 		});
 

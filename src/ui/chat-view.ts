@@ -129,6 +129,18 @@ export class NotorChatView extends ItemView {
 	private settingsOutsideClickHandler?: (e: MouseEvent) => void;
 	private settingsEscapeHandler?: (e: KeyboardEvent) => void;
 
+	/**
+	 * Display-only overrides for provider/model shown in the settings popover.
+	 *
+	 * Set by `updateProviderDisplay()` / `updateModelDisplay()` when the user
+	 * switches to a conversation that was using a different provider/model.
+	 * Cleared when the user explicitly changes the picker.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1f
+	 */
+	private displayedProviderId: LLMProviderType | null = null;
+	private displayedModelValue: string | null = null;
+
 	// Persona state (A-009, A-010)
 	private personaManager?: PersonaManager;
 	private personaLabelEl?: HTMLElement;
@@ -515,6 +527,53 @@ export class NotorChatView extends ItemView {
 			this.personaLabelEl.textContent = "";
 			this.personaLabelEl.addClass("notor-hidden");
 		}
+	}
+
+	/**
+	 * Update the displayed provider in the settings popover without triggering
+	 * the global `onProviderChange` callback.
+	 *
+	 * Called by the orchestrator when switching to a conversation that used a
+	 * different provider. The override is cleared when the user explicitly
+	 * changes the provider via the picker.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1f
+	 */
+	updateProviderDisplay(providerId: LLMProviderType): void {
+		this.displayedProviderId = providerId;
+		// If the popover is currently open, close and reopen to reflect the change
+		if (this.settingsPopoverEl) {
+			this.closeSettingsPopover();
+			this.openSettingsPopover();
+		}
+	}
+
+	/**
+	 * Update the displayed model in the settings popover without triggering
+	 * the global `onModelChange` callback.
+	 *
+	 * Accepts the composite option value (e.g. `"claude-3-opus::1m"` for
+	 * extended context), same format as `getCurrentModel()` returns.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1f
+	 */
+	updateModelDisplay(modelValue: string): void {
+		this.displayedModelValue = modelValue;
+		if (this.settingsPopoverEl) {
+			this.refreshModelSelect();
+		}
+	}
+
+	/**
+	 * Clear display-only provider/model overrides.
+	 *
+	 * Called when the user explicitly changes the provider/model via the
+	 * picker (the override should no longer apply), or when creating a new
+	 * conversation (which snapshots from global state).
+	 */
+	clearDisplayOverrides(): void {
+		this.displayedProviderId = null;
+		this.displayedModelValue = null;
 	}
 
 	/**
@@ -2303,7 +2362,7 @@ export class NotorChatView extends ItemView {
 
 		const providerSelect = providerSection.createEl("select", { cls: "notor-settings-select" });
 		const providers = this.getAvailableProviders?.() ?? [];
-		const currentProvider = this.getCurrentProvider?.() ?? "local";
+		const currentProvider = this.displayedProviderId ?? this.getCurrentProvider?.() ?? "local";
 
 		for (const p of providers) {
 			const opt = providerSelect.createEl("option", {
@@ -2316,6 +2375,9 @@ export class NotorChatView extends ItemView {
 		}
 
 		providerSelect.addEventListener("change", () => {
+			// Clear display overrides — user is explicitly choosing
+			this.displayedProviderId = null;
+			this.displayedModelValue = null;
 			this.onProviderChange?.(providerSelect.value as LLMProviderType);
 			// Refresh model list when provider changes
 			this.refreshModelSelect();
@@ -2365,7 +2427,7 @@ export class NotorChatView extends ItemView {
 
 		const wrapper = container.createDiv({ cls: "notor-model-select-wrapper" });
 		const models = this.getAvailableModels?.() ?? [];
-		const currentModel = this.getCurrentModel?.() ?? "";
+		const currentModel = this.displayedModelValue ?? this.getCurrentModel?.() ?? "";
 
 		if (models.length > 0) {
 			const modelSelect = wrapper.createEl("select", { cls: "notor-settings-select" });
@@ -2388,6 +2450,7 @@ export class NotorChatView extends ItemView {
 			}
 
 			modelSelect.addEventListener("change", () => {
+				this.displayedModelValue = null; // User explicitly changed
 				this.onModelChange?.(modelSelect.value);
 			});
 		} else {
@@ -2402,6 +2465,7 @@ export class NotorChatView extends ItemView {
 			});
 
 			modelInput.addEventListener("change", () => {
+				this.displayedModelValue = null; // User explicitly changed
 				this.onModelChange?.(modelInput.value);
 			});
 		}

@@ -9,11 +9,12 @@
  */
 
 import { type App, Notice } from "obsidian";
-import type { Conversation, ConversationMode, Message, Persona, ToolResult, WorkflowExecution, ExecutionChain } from "../types";
+import type { Conversation, ConversationMode, Message, Persona, ToolResult, WorkflowExecution, ExecutionChain, LLMProviderType } from "../types";
 import type { ChatMessage, ToolDefinition, StreamChunk, SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
 import { getModelMetadata } from "../providers/model-metadata";
+import { buildOptionValue } from "../providers/model-grouping";
 import { ConversationManager } from "./conversation";
 import { ContextManager } from "./context";
 import type { SystemPromptBuilder } from "./system-prompt";
@@ -291,6 +292,54 @@ export class ChatOrchestrator {
 		return session.conversationId === displayConvId ? this.view : undefined;
 	}
 
+	/**
+	 * Get the currently displayed conversation (from the UI display manager).
+	 *
+	 * Used by picker-change callbacks in main.ts to update the conversation
+	 * header when the user changes provider/model/persona while viewing a
+	 * conversation.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1f-addendum
+	 */
+	getDisplayedConversation(): Conversation | null {
+		return this.conversationManager.getActiveConversation();
+	}
+
+	// -----------------------------------------------------------------------
+	// Lifecycle — teardown
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Abort all active sessions and await their cleanup.
+	 *
+	 * Called from `main.ts` `onunload()` when the plugin is disabled,
+	 * hot-reloaded, or Obsidian closes. Best-effort: awaits response loop
+	 * completion up to `timeoutMs` so that JSONL writes can flush, then
+	 * clears the session map regardless.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1h
+	 */
+	async destroy(timeoutMs: number = 2000): Promise<void> {
+		const sessionPromises: Promise<void>[] = [];
+
+		for (const session of this.activeSessions.values()) {
+			if (session.responsePromise) {
+				sessionPromises.push(session.responsePromise);
+			}
+			session.abortController.abort();
+		}
+
+		if (sessionPromises.length > 0) {
+			await Promise.race([
+				Promise.allSettled(sessionPromises),
+				new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+			]);
+		}
+
+		this.activeSessions.clear();
+		log.info("Orchestrator destroyed", { abortedSessions: sessionPromises.length });
+	}
+
 	// -----------------------------------------------------------------------
 	// Conversation lifecycle
 	// -----------------------------------------------------------------------
@@ -333,6 +382,10 @@ export class ChatOrchestrator {
 
 		this.view?.clearMessages();
 		this.view?.updateModeDisplay(conversation.mode);
+
+		// New conversation uses global state — clear any display overrides
+		// from the previously viewed conversation.
+		this.view?.clearDisplayOverrides();
 
 		log.info("New conversation started", { id: conversation.id });
 	}
@@ -409,6 +462,34 @@ export class ChatOrchestrator {
 				conversation.total_output_tokens,
 				conversation.estimated_cost
 			);
+
+			// Step 1f: Display-restore persona from conversation header.
+			// Does NOT call activatePersona() — no global state mutation.
+			if (conversation.persona_name) {
+				const persona = await this.personaManager?.getPersonaByName(conversation.persona_name) ?? null;
+				this.view?.updatePersonaLabel(persona);
+			} else {
+				// No persona stored — show current global persona (or none)
+				this.view?.updatePersonaLabel(this.personaManager?.getActivePersona() ?? null);
+			}
+
+			// Step 1f: Display-restore provider/model from conversation header.
+			// Does NOT call switchProvider() — no global state mutation.
+			if (conversation.provider_id) {
+				this.view?.updateProviderDisplay(conversation.provider_id as LLMProviderType);
+			}
+			if (conversation.model_id) {
+				this.view?.updateModelDisplay(
+					buildOptionValue(conversation.model_id, conversation.use_extended_context ?? false)
+				);
+			}
+
+			// Step 1g: If this conversation has an active session, show its config
+			// in the inspector. Otherwise clear display config (loaded from history).
+			const activeSession = this.activeSessions.get(conversation.id);
+			if (activeSession) {
+				this.updateDisplayConfig(activeSession.effectiveConfig, activeSession.parsedConfigs);
+			}
 
 			log.info("Switched to conversation", { id: conversation.id });
 		} catch (e) {
@@ -1488,12 +1569,31 @@ export class ChatOrchestrator {
 
 		sessionConvManager.loadConversation(snapshotConv, snapshotMessages);
 
-		// Snapshot persona, provider, model, extended context
+		// Snapshot persona, provider, model, extended context.
+		//
+		// Step 1f: Pin from the conversation header's stored values when available
+		// (restored conversation), so continuing an old conversation uses the same
+		// provider/model it was using before. Fall back to global state for new
+		// conversations or if the stored provider is no longer configured.
 		const pinnedPersona = this.personaManager?.getActivePersona() ?? null;
-		const providerType = this.providerRegistry.getActiveType();
-		const providerConfig = this.providerRegistry.getConfig(providerType);
-		const modelId = providerConfig?.model_id ?? "";
-		const useExtendedContext = providerConfig?.use_extended_context ?? false;
+
+		const headerProviderType = snapshotConv.provider_id as LLMProviderType | undefined;
+		const headerProviderConfig = headerProviderType
+			? this.providerRegistry.getConfig(headerProviderType)
+			: null;
+		const providerType = headerProviderConfig
+			? headerProviderType!
+			: this.providerRegistry.getActiveType();
+		const providerConfig = headerProviderConfig ?? this.providerRegistry.getConfig(providerType);
+
+		// Use the header's model_id if the header's provider is still configured,
+		// otherwise fall back to the provider config's current model.
+		const modelId = headerProviderConfig
+			? (snapshotConv.model_id || (providerConfig?.model_id ?? ""))
+			: (providerConfig?.model_id ?? "");
+		const useExtendedContext = headerProviderConfig
+			? (snapshotConv.use_extended_context ?? false)
+			: (providerConfig?.use_extended_context ?? false);
 
 		// Resolve initial effective config
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
@@ -1521,6 +1621,21 @@ export class ChatOrchestrator {
 
 		// Register session and start response loop
 		this.activeSessions.set(session.conversationId, session);
+
+		// Step 1f-addendum (Trigger 1): Update conversation header if the
+		// pinned values differ from what's stored (e.g. user changed provider
+		// via picker since the conversation was last used).
+		const sessionConv = sessionConvManager.getActiveConversation()!;
+		const headerDirty =
+			sessionConv.persona_name !== (pinnedPersona?.name ?? null) ||
+			sessionConv.provider_id !== providerType ||
+			sessionConv.model_id !== modelId;
+		if (headerDirty) {
+			sessionConv.persona_name = pinnedPersona?.name ?? null;
+			sessionConv.provider_id = providerType;
+			sessionConv.model_id = modelId;
+			await this.historyManager.updateConversationHeader(sessionConv);
+		}
 
 		session.responsePromise = this.responseLoop(mode, session);
 		try {

@@ -295,61 +295,62 @@ Removes the `activeWorkflowAssemblyResult` save/restore hack and uses `Conversat
 
 When loading a conversation, restore its persona/provider/model in the UI without mutating global state.
 
-- [ ] **Add `getPersonaByName()` to `src/personas/persona-manager.ts`**
-  - [ ] New read-only method: `async getPersonaByName(name: string): Promise<Persona | null>`
-  - [ ] Implementation: call existing `getDiscoveredPersonas()` (line 99), find by name
-  - [ ] Return `null` if persona has been deleted
+- [x] **Add `getPersonaByName()` to `src/personas/persona-manager.ts`**
+  - [x] New read-only method: `async getPersonaByName(name: string): Promise<Persona | null>`
+  - [x] Implementation: call existing `getDiscoveredPersonas()` (line 99), find by name
+  - [x] Return `null` if persona has been deleted
 
-- [ ] **Add display-only update methods to `src/ui/chat-view.ts`**
-  - [ ] Add `updateProviderDisplay(providerId: string)` -- updates provider selector UI without triggering global `onProviderChange` callback
-  - [ ] Add `updateModelDisplay(modelId: string)` -- updates model selector UI without triggering global `onModelChange` callback
-  - [ ] Note: `updatePersonaLabel()` already exists at line 492
+- [x] **Add display-only update methods to `src/ui/chat-view.ts`**
+  - [x] Add `updateProviderDisplay(providerId: string)` -- updates provider selector UI without triggering global `onProviderChange` callback
+  - [x] Add `updateModelDisplay(modelId: string)` -- updates model selector UI without triggering global `onModelChange` callback
+  - [x] Add `clearDisplayOverrides()` -- clears display overrides on new conversation or explicit picker change
+  - [x] Note: `updatePersonaLabel()` already exists at line 492
 
-- [ ] **Modify `switchConversation()` in `src/chat/orchestrator.ts` (line 356)**
-  - [ ] After loading conversation from history:
-    - [ ] Display-restore persona: `getPersonaByName(conversation.persona_name)` -> `this.view?.updatePersonaLabel(persona)`
-    - [ ] Display-restore provider: `this.view?.updateProviderDisplay(conversation.provider_id)` if provider_id present
-    - [ ] Display-restore model: `this.view?.updateModelDisplay(conversation.model_id)` if model_id present
-  - [ ] Do NOT call `activatePersona()` or `switchProvider()` (would mutate global state)
+- [x] **Modify `switchConversation()` in `src/chat/orchestrator.ts` (line 356)**
+  - [x] After loading conversation from history:
+    - [x] Display-restore persona: `getPersonaByName(conversation.persona_name)` -> `this.view?.updatePersonaLabel(persona)`
+    - [x] Display-restore provider: `this.view?.updateProviderDisplay(conversation.provider_id)` if provider_id present
+    - [x] Display-restore model: `this.view?.updateModelDisplay(conversation.model_id)` if model_id present
+  - [x] Do NOT call `activatePersona()` or `switchProvider()` (would mutate global state)
 
-- [ ] **Pin from restored values on new message send**
-  - [ ] In `handleUserMessage()`: check if displayed conversation has restored provider/model from JSONL header
-  - [ ] If so: session pins from header values, not `this.providerRegistry.getActiveType()`
-  - [ ] If user explicitly changes picker: update both global state AND conversation header
-  - [ ] For new conversations (no header yet): snapshot from global state as before
+- [x] **Pin from restored values on new message send**
+  - [x] In `handleUserMessage()`: check if displayed conversation has restored provider/model from JSONL header
+  - [x] If so: session pins from header values, not `this.providerRegistry.getActiveType()`
+  - [x] If user explicitly changes picker: update both global state AND conversation header
+  - [x] For new conversations (no header yet): snapshot from global state as before
 
-- [ ] **Wire header mutation on change (Step 1f-addendum)**
-  - [ ] Note: `HistoryManager.updateConversationHeader()` already exists at history.ts:206-229
-  - [ ] **Trigger 1 -- On message send (`handleUserMessage()`):**
-    - [ ] After creating session, compare pinned values against conversation header
-    - [ ] If dirty: update header fields + call `this.historyManager.updateConversationHeader(conv)`
-  - [ ] **Trigger 2 -- On picker change in `src/main.ts` `wireView()`:**
-    - [ ] In `onProviderChange` callback (line 1969): also update conversation header if viewing one
-    - [ ] In `onModelChange` callback (line 1978): also update conversation header if viewing one
-    - [ ] In persona change callback: also update conversation header if viewing one
+- [x] **Wire header mutation on change (Step 1f-addendum)**
+  - [x] Note: `HistoryManager.updateConversationHeader()` already exists at history.ts:206-229
+  - [x] **Trigger 1 -- On message send (`handleUserMessage()`):**
+    - [x] After creating session, compare pinned values against conversation header
+    - [x] If dirty: update header fields + call `this.historyManager.updateConversationHeader(conv)`
+  - [x] **Trigger 2 -- On picker change in `src/main.ts` `wireView()`:**
+    - [x] In `onProviderChange` callback (line 1969): also update conversation header if viewing one
+    - [x] In `onModelChange` callback (line 1978): also update conversation header if viewing one
+    - [x] In persona change callback: also update conversation header if viewing one
 
 ### Step 1g: Inspector shows displayed conversation's config
 
-- [ ] **Wire `updateDisplayConfig()` in orchestrator**
-  - [ ] Call from `responseLoop()` when session matches displayed conversation
-  - [ ] Call from `switchConversation()` when switching to a conversation with active session (use session's config)
-  - [ ] `getEffectiveToolConfig()` and `getActiveParsedConfigs()` continue returning stored fields
-  - [ ] No changes needed to `src/ui/effective-config-inspector.ts`
+- [x] **Wire `updateDisplayConfig()` in orchestrator**
+  - [x] Call from `responseLoop()` when session matches displayed conversation
+  - [x] Call from `switchConversation()` when switching to a conversation with active session (use session's config)
+  - [x] `getEffectiveToolConfig()` and `getActiveParsedConfigs()` continue returning stored fields
+  - [x] No changes needed to `src/ui/effective-config-inspector.ts`
 
 ### Step 1h: Session cleanup on plugin deactivation
 
-- [ ] **Add `destroy()` method to `src/chat/orchestrator.ts`**
+- [x] **Add `destroy()` method to `src/chat/orchestrator.ts`**
   ```typescript
   async destroy(timeoutMs: number = 2000): Promise<void>
   ```
-  - [ ] Signal all active sessions to abort via `session.abortController.abort()`
-  - [ ] Collect all `session.responsePromise` values
-  - [ ] `Promise.race([Promise.allSettled(sessionPromises), timeout])` for best-effort cleanup
-  - [ ] `this.activeSessions.clear()`
+  - [x] Signal all active sessions to abort via `session.abortController.abort()`
+  - [x] Collect all `session.responsePromise` values
+  - [x] `Promise.race([Promise.allSettled(sessionPromises), timeout])` for best-effort cleanup
+  - [x] `this.activeSessions.clear()`
 
-- [ ] **Wire in `src/main.ts` `onunload()` (line 497)**
-  - [ ] Call `orchestrator.destroy()` -- fire-and-forget since `onunload()` is synchronous
-  - [ ] Add before existing cleanup at line 501
+- [x] **Wire in `src/main.ts` `onunload()` (line 497)**
+  - [x] Call `orchestrator.destroy()` -- fire-and-forget since `onunload()` is synchronous
+  - [x] Add before existing cleanup at line 501
 
 ### Step 1 Verification
 
