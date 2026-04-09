@@ -701,14 +701,15 @@ export default class NotorPlugin extends Plugin {
 			migrated = true;
 		}
 
-		// web_search
+		// web_search (fields removed from NotorSettings — cast through raw data)
+		const rawWs = this.settings as unknown as Record<string, unknown>;
 		if (
 			this.settings.user_extension_settings["web_search"] === undefined &&
-			this.settings.web_search_timeout !== undefined
+			rawWs.web_search_timeout !== undefined
 		) {
 			this.settings.user_extension_settings["web_search"] = {
-				web_search_timeout: this.settings.web_search_timeout,
-				web_search_default_num_results: this.settings.web_search_default_num_results,
+				web_search_timeout: rawWs.web_search_timeout as number,
+				web_search_default_num_results: rawWs.web_search_default_num_results as number,
 			};
 			migrated = true;
 		}

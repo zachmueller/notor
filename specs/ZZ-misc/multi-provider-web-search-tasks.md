@@ -415,12 +415,12 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
 
 ### 6.1 Remove legacy settings fields
 
-- [ ] **`src/settings/types.ts`** — Remove `web_search_timeout` (L155) and `web_search_default_num_results` (L158) from `NotorSettings` interface, including their comments (L150-158 section)
-- [ ] **`src/settings/defaults.ts`** — Remove `web_search_timeout: 10` (L136) and `web_search_default_num_results: 5` (L137) from `createDefaultSettings()`, including the `// web_search` comment (L135)
+- [x] **`src/settings/types.ts`** — Remove `web_search_timeout` (L155) and `web_search_default_num_results` (L158) from `NotorSettings` interface, including their comments (L150-158 section)
+- [x] **`src/settings/defaults.ts`** — Remove `web_search_timeout: 10` (L136) and `web_search_default_num_results: 5` (L137) from `createDefaultSettings()`, including the `// web_search` comment (L135)
 
 ### 6.2 Fix migration block for removed types
 
-- [ ] **`src/main.ts:680-690`** — The migration block references `this.settings.web_search_timeout` and `this.settings.web_search_default_num_results`, which will fail TypeScript compilation after 6.1 removes them from `NotorSettings`. Fix by casting through the raw data:
+- [x] **`src/main.ts:680-690`** — The migration block references `this.settings.web_search_timeout` and `this.settings.web_search_default_num_results`, which will fail TypeScript compilation after 6.1 removes them from `NotorSettings`. Fix by casting through the raw data:
   ```typescript
   const raw = this.settings as Record<string, unknown>;
   if (
@@ -434,11 +434,11 @@ The current `string[]` renderer uses a free-text input for adding entries. For `
     migrated = true;
   }
   ```
-- [ ] **Keep** `"web_search_timeout"` and `"web_search_default_num_results"` in the `oldFields` array (starting L763) — specifically the entries at L768-769 — that array strips legacy keys from `data.json` on disk for upgrading users, which is still needed regardless of the TS type change
+- [x] **Keep** `"web_search_timeout"` and `"web_search_default_num_results"` in the `oldFields` array (starting L763) — specifically the entries at L768-769 — that array strips legacy keys from `data.json` on disk for upgrading users, which is still needed regardless of the TS type change
 
 ### 6.3 Verify no remaining references
 
-- [ ] Grep for `web_search_timeout` and `web_search_default_num_results` across the codebase (excluding specs/docs)
+- [x] Grep for `web_search_timeout` and `web_search_default_num_results` across the codebase (excluding specs/docs)
   - Should only appear in: scaffold YAML settings fence, migration block, and test files
   - Any other references → update or remove
 

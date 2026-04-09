@@ -132,10 +132,6 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	fetch_webpage_max_output_chars: 50000,
 	domain_denylist: [],
 
-	// web_search
-	web_search_timeout: 10,
-	web_search_default_num_results: 5,
-
 	// Phase 3: execute_command
 	execute_command_timeout: 30,
 	execute_command_max_output_chars: 50000,
