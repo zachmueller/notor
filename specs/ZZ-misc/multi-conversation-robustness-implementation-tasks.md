@@ -49,8 +49,10 @@
   - Do NOT call `personaManager.restoreFromSettings()` here (moves to `onload()` — Amendment R5)
 
 - [ ] **A1.6 — Make `CheckpointManager` per-orchestrator** (`src/checkpoints/checkpoint.ts`, `src/main.ts`)
-  - **⚠ Before starting:** Run `grep -n "getCheckpointManager" src/` to enumerate all call sites and confirm A1.6c's list is complete. The only plugin-level call site found in the initial audit is `wireView()` L2001, but verify nothing else was missed before deleting the getter.
-  - Remove singleton `_checkpointManager` field and `getCheckpointManager()` lazy getter from plugin class
+  - **Pre-implementation grep completed (2026-04-11).** Two plugin-level call sites for `getCheckpointManager` found:
+    1. `src/main.ts:2001` — in `wireView()` (handled by A1.6c)
+    2. `src/extensions/runtime-context.ts:131` — in `buildUtils()` for user-defined extensions (handled by A1.6d below)
+  - Remove singleton `_checkpointManager` field (`src/main.ts:142`) and `getCheckpointManager()` lazy getter (`src/main.ts:1405`) from plugin class — **only after A1.6c and A1.6d are complete**
   - Create a new `CheckpointManager` instance inside `createOrchestrator()` for each orchestrator; `CheckpointStorage` remains a shared singleton
   - Pass the per-orchestrator checkpoint manager to the orchestrator (add a setter or constructor param)
   - Remove all `checkpointManager.setConversationId()` calls from `wireView()` callbacks (L2142, 2167, 2185, 2251, 2258, 2504, 2517, 2525) — orchestrator manages its own checkpoint manager's conversation scope internally
@@ -60,6 +62,13 @@
   - In `wireView()`, replace the existing `const checkpointManager = this.getCheckpointManager()` call (L2001) with `const checkpointManager = orchestrator.getCheckpointManager()` — the plugin-level getter no longer exists after A1.6
   - The three wireView callbacks that use `checkpointManager` (list L2444, restore L2448, getCurrentContent L2452) will then correctly reference the per-orchestrator manager via the new accessor
   - **⚠ Must be done as part of A1.6** — removing `this.getCheckpointManager()` from the plugin without updating wireView will break the list/restore/getCurrentContent callbacks
+
+- [ ] **A1.6d — Update extension runtime context to use plugin-level checkpoint storage** (`src/extensions/runtime-context.ts`, `src/main.ts`)
+  - `buildUtils()` at `runtime-context.ts:122` currently calls `plugin.getCheckpointManager()` (L131) — this will break when the plugin-level singleton getter is deleted in A1.6
+  - Extensions (user-defined tools) set their own conversation ID on the manager before use; they do not need per-orchestrator scoping
+  - **Fix:** Add a `getSharedCheckpointManager(): CheckpointManager` method to the plugin class that creates a lazily-initialized shared manager backed by the same `CheckpointStorage` singleton (separate from the per-orchestrator managers). Update `buildUtils()` to call `plugin.getSharedCheckpointManager()` instead of `plugin.getCheckpointManager()`
+  - This preserves backward-compatible extension behavior while keeping per-orchestrator managers for conversation-scoped tracking
+  - **⚠ Must be done before A1.6 deletes `getCheckpointManager()`**
 
 - [ ] **A1.6b — Wire `checkpointManager.setConversationId()` inside orchestrator** (`src/chat/orchestrator.ts`)
   - After each conversation transition, call `this.checkpointManager?.setConversationId(conv.id)`:
@@ -188,7 +197,12 @@
 
 - [ ] **A3.8 — Add `clearCallbacks()` method to `NotorChatView`** (`src/ui/chat-view.ts`)
   - Nulls all `setOn*` / callback properties to release GC references (Amendment A6)
-  - There are **23 `setOn*` methods and 34 total setter methods** in `chat-view.ts` — audit the complete list before implementing to ensure none are missed (the prior "27+" count was incorrect)
+  - **Pre-implementation audit completed (2026-04-11).** Confirmed counts:
+    - 23 `setOn*` methods (L240–392): `setOnSendMessage`, `setOnStopResponse`, `setOnNewConversation`, `setOnSwitchConversation`, `setOnExportConversation`, `setOnDeleteConversation`, `setOnToggleFavorite`, `setOnImportConversation`, `setOnSwitchToConversationById`, `setOnOpenConversationList`, `setOnSearchConversations`, `setOnModeToggle`, `setOnSettingsOpen`, `setOnProviderChange`, `setOnModelChange`, `setOnRefreshModels`, `setOnListCheckpoints`, `setOnRestoreCheckpoint`, `setOnGetCurrentContent`, `setOnForkConversation`, `setOnOpenInNewTab`, `setOnOpenSettingsGroup`, `setOnSendWorkflow`
+    - 6 `setGet*` methods: `setGetAvailableProviders`, `setGetAvailableModels`, `setGetCurrentProvider`, `setGetCurrentModel`, `setGetWorkflows`, `setGetActiveSessions`
+    - 5 other setters (not callback-holders, exclude from `clearCallbacks()`): `setActiveConversationId` (L236), `setWorkflowActivityTracker` (L409), `setPersonaManager` (L536), `setIsSecondary` (L761, deleted in A4.6), `setRespondingState` (L1446)
+    - 1 new setter added by A7.2: `setOnCloseCleanup` — include in `clearCallbacks()`
+  - `clearCallbacks()` must null the backing properties for all 23 + 6 + `setOnCloseCleanup` = **30 callback slots** after A7.2 is complete
   - Called from `onClose()` after cleanup callback (Amendment R2-8 ordering)
 
 - [ ] **A3.9 — Remove all `checkpointManager.setConversationId()` from wireView callbacks** (`src/main.ts`)
@@ -326,9 +340,10 @@
 - [ ] **A5.4 — Await `flushConversation()` in `executeWorkflow()` finally block** (`src/chat/orchestrator.ts`, L942-953)
   - Same pattern as A5.3
 
-- [ ] **A5.5 — Add workflow hook deactivation to `handleUserMessage` finally block** (`src/chat/orchestrator.ts`)
-  - **Investigate first:** `handleUserMessage()` creates plain user sessions; `workflowAssembly` is only set by `executeWorkflow()`. Verify whether any code path through `handleUserMessage()` can produce a session with a non-null `workflowAssembly`. If no such path exists, skip this task and add a comment in `handleUserMessage()`'s finally block pointing to `executeWorkflow()`'s existing deactivation call (L942-953) explaining why no call is needed here.
-  - If such a path does exist: call `workflowHookOverrideManager.deactivate(session.conversationId)` in the finally block guarded by `if (session.workflowAssembly && this.workflowHookOverrideManager)`
+- [ ] **A5.5 — Add comment to `handleUserMessage` finally block** (`src/chat/orchestrator.ts`)
+  - **Pre-implementation investigation completed (2026-04-11): SKIP the deactivation call.**
+  - `handleUserMessage()` always creates sessions with `workflowAssembly: null` (verified: `orchestrator.ts:1797`). No code path through `handleUserMessage()` sets a non-null `workflowAssembly` — that field is only populated by `executeWorkflow()` (L917: `workflowAssembly: assemblyResult`).
+  - **Action:** Add a comment in `handleUserMessage()`'s finally block explaining that workflow hook deactivation is intentionally absent because `workflowAssembly` is always null for user-message sessions; point to `executeWorkflow()`'s finally block (L942-953) which handles the workflow case.
   - Note: `deactivate()` is **already idempotent** (verified: `src/hooks/workflow-hook-override.ts:84` — "Safe to call when no override is active (no-op in that case)"). No changes to `WorkflowHookOverrideManager` are required for Amendment R4.
 
 - [ ] **A5.6 — Enhance `destroy()` with flush + hook cleanup + guard unregister** (`src/chat/orchestrator.ts`, L434-454)
