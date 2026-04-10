@@ -468,6 +468,10 @@ export class ChatOrchestrator {
 		// E-008: Revert workflow persona before leaving this conversation
 		await this.maybeRevertWorkflowPersona();
 
+		// Unlock input — any active session on the previous conversation
+		// continues in the background, but the UI should be ready for input.
+		this.view?.setRespondingState(false);
+
 		// Tool config state is now per-session (ConversationSession).
 		// updateDisplayConfig() will set these fields when the first
 		// response loop iteration runs for the new conversation.
@@ -600,11 +604,7 @@ export class ChatOrchestrator {
 				activeSession.onStatusChange = (session) => {
 					previousOnStatusChange?.(session);
 					if (session.status === "completed" || session.status === "errored" || session.status === "cancelled") {
-						// Only update if this conversation is still displayed
-						const displayConvId = this.conversationManager.getActiveConversation()?.id;
-						if (displayConvId === session.conversationId) {
-							this.view?.setRespondingState(false);
-						}
+						this.getViewForSession(session)?.setRespondingState(false);
 						// Restore original callback (remove our one-time wrapper)
 						activeSession.onStatusChange = previousOnStatusChange;
 					}
@@ -949,7 +949,7 @@ export class ChatOrchestrator {
 			}
 			this.activeSessions.delete(session.conversationId);
 			this.notifySessionsChanged();
-			this.view?.setRespondingState(false);
+			this.getViewForSession(session)?.setRespondingState(false);
 		}
 	}
 
@@ -1831,7 +1831,7 @@ export class ChatOrchestrator {
 			}
 			this.activeSessions.delete(session.conversationId);
 			this.notifySessionsChanged();
-			this.view?.setRespondingState(false);
+			this.getViewForSession(session)?.setRespondingState(false);
 		}
 	}
 
