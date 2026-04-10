@@ -49,6 +49,7 @@
   - Do NOT call `personaManager.restoreFromSettings()` here (moves to `onload()` — Amendment R5)
 
 - [ ] **A1.6 — Make `CheckpointManager` per-orchestrator** (`src/checkpoints/checkpoint.ts`, `src/main.ts`)
+  - **⚠ Before starting:** Run `grep -n "getCheckpointManager" src/` to enumerate all call sites and confirm A1.6c's list is complete. The only plugin-level call site found in the initial audit is `wireView()` L2001, but verify nothing else was missed before deleting the getter.
   - Remove singleton `_checkpointManager` field and `getCheckpointManager()` lazy getter from plugin class
   - Create a new `CheckpointManager` instance inside `createOrchestrator()` for each orchestrator; `CheckpointStorage` remains a shared singleton
   - Pass the per-orchestrator checkpoint manager to the orchestrator (add a setter or constructor param)
@@ -77,6 +78,7 @@
   - **⚠ Requires A2.1 fields first** — A1.8 references `view._loadFallbackTimeout` and `view.isConversationLoaded`, both added by A2.1. Add those two fields to `NotorChatView` before implementing A1.8 (or batch both together).
   - In the factory callback:
     1. Check for stale orchestrator at `leaf.id` and destroy it if found (Amendment R2-7)
+       - **Known limitation:** The factory is synchronous so the stale `destroy()` is fire-and-forget. If the stale orchestrator has an active session, `sessionGuard.isActive()` returns `true` for that conversation for up to ~2s while the destroy drains, causing a transient "being processed in another panel" notice if the user immediately re-sends. Recoverable by retrying; comment this constraint in the code.
     2. Call `createOrchestrator()` to create a new orchestrator for this view
     3. Store in `_orchestrators.set(leaf.id, orchestrator)`
     4. Call `wireView(view, orchestrator)` (callbacks only — no history loading)
@@ -229,7 +231,7 @@
   - Replace `orchestrator: this.getOrchestrator()` with `orchestrator: this.getActiveOrchestrator()` inside that closure (Amendment A7/R8)
   - Ensure the dispatcher handles `null` orchestrator gracefully (skip workflow execution)
 
-- [ ] **A4.4 — Wire `UseSubAgentTool` via dispatch context** (`src/tools/tool.ts`, `src/chat/orchestrator.ts`, `src/chat/dispatcher.ts`, `src/tools/use-subagent.ts`, `src/main.ts`)
+- [ ] **A4.4 — Wire `UseSubAgentTool` via dispatch context** (`src/tools/tool.ts`, `src/chat/orchestrator.ts`, `src/chat/tool-orchestration.ts`, `src/chat/dispatcher.ts`, `src/tools/use-subagent.ts`, `src/main.ts`)
   - **Do A4.4a–e before A4.1** — A4.1 removes `getOrchestrator()` from the closures at L1429/L1431, but A4.4f updates those closures to `getActiveOrchestrator()` as a fallback. Sequence: A4.4a → A4.4b → A4.4c → A4.4d → A4.4e → A4.1 → A4.4f
   - **⚠ Must be complete before Phase A ships** — without it, sub-agents executing in a session use the wrong orchestrator's effective config and conversation state
 
@@ -246,12 +248,13 @@
 - [ ] **A4.4b — `ChatOrchestrator` implements `ToolSessionContext`** (`src/chat/orchestrator.ts`)
   - Add `implements ToolSessionContext` to the class declaration (import the interface from `../tools/tool`)
   - Add `getActiveConversation(): Conversation | null` proxy method: `return this.conversationManager.getActiveConversation()`
+    - **Note:** This reads the orchestrator's **display** `ConversationManager`, not the session's isolated one. If the user switches conversations mid-session, this returns the new displayed conversation — the same pre-existing limitation as the L1431 closure fallback. Add a code comment noting this so a future refactor can target `session.conversationManager` instead.
   - `getEffectiveToolConfig()` already exists on the orchestrator
 
-- [ ] **A4.4c — Thread `sessionContext` through dispatch chain** (`src/chat/dispatcher.ts`, and wherever `executeToolBatches()` is defined)
-  - Add `sessionContext?: ToolSessionContext` as the last parameter to `dispatcher.dispatch()`
-  - Include it in the `executeOptions` object passed to `tool.execute()`: `const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext }`
-  - Add `sessionContext?` parameter to `executeToolBatches()`; pass it through to each `dispatcher.dispatch()` call
+- [ ] **A4.4c — Thread `sessionContext` through dispatch chain** (`src/chat/tool-orchestration.ts`, `src/chat/dispatcher.ts`)
+  - **`executeToolBatches()` is in `src/chat/tool-orchestration.ts` (L113), not `dispatcher.ts`** — edit both files:
+    - `src/chat/tool-orchestration.ts`: add `sessionContext?: ToolSessionContext` parameter to `executeToolBatches()`; pass it through to each `dispatcher.dispatch()` call
+    - `src/chat/dispatcher.ts`: add `sessionContext?: ToolSessionContext` as the last parameter to `dispatch()`; include it in the `executeOptions` object passed to `tool.execute()`: `const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext }`
 
 - [ ] **A4.4d — Update `UseSubagentTool` to use `sessionContext`** (`src/tools/use-subagent.ts`)
   - In `execute()` and `executeInner()`, replace direct closure reads with sessionContext-first lookups:
@@ -324,8 +327,8 @@
   - Same pattern as A5.3
 
 - [ ] **A5.5 — Add workflow hook deactivation to `handleUserMessage` finally block** (`src/chat/orchestrator.ts`)
-  - In `handleUserMessage`'s finally block, call `workflowHookOverrideManager.deactivate(session.conversationId)` if the session has a `workflowAssembly`
-  - Note: `executeWorkflow()`'s finally block **already has** this call at L942-953 — no change needed there
+  - **Investigate first:** `handleUserMessage()` creates plain user sessions; `workflowAssembly` is only set by `executeWorkflow()`. Verify whether any code path through `handleUserMessage()` can produce a session with a non-null `workflowAssembly`. If no such path exists, skip this task and add a comment in `handleUserMessage()`'s finally block pointing to `executeWorkflow()`'s existing deactivation call (L942-953) explaining why no call is needed here.
+  - If such a path does exist: call `workflowHookOverrideManager.deactivate(session.conversationId)` in the finally block guarded by `if (session.workflowAssembly && this.workflowHookOverrideManager)`
   - Note: `deactivate()` is **already idempotent** (verified: `src/hooks/workflow-hook-override.ts:84` — "Safe to call when no override is active (no-op in that case)"). No changes to `WorkflowHookOverrideManager` are required for Amendment R4.
 
 - [ ] **A5.6 — Enhance `destroy()` with flush + hook cleanup + guard unregister** (`src/chat/orchestrator.ts`, L434-454)
@@ -379,11 +382,12 @@
 
 - [ ] **A7.3 — Wire close cleanup in `wireView()`** (`src/main.ts`)
   - Set `view.setOnCloseCleanup(async () => { ... })` that:
-    1. Clears fallback timeout: `clearTimeout(view._loadFallbackTimeout)` (Amendment R2-2)
-    2. Detaches view: `orchestrator.setView(undefined)`
-    3. Cleans up session listener: `view._unregisterSessionsChanged?.()`
-    4. Removes from registry: `this._orchestrators.delete(leafId)`
-    5. `await orchestrator.destroy()` — awaiting ensures JSONL flush completes before panel teardown (Amendment R2-3)
+    1. Aborts any in-flight `loadConversation()`: `view._loadConversationAbort?.abort()` — **must be first** to prevent `syncViewAfterLoad()` from mutating the closing view after orchestrator teardown
+    2. Clears fallback timeout: `clearTimeout(view._loadFallbackTimeout)` (Amendment R2-2)
+    3. Detaches view: `orchestrator.setView(undefined)`
+    4. Cleans up session listener: `view._unregisterSessionsChanged?.()`
+    5. Removes from registry: `this._orchestrators.delete(leafId)`
+    6. `await orchestrator.destroy()` — awaiting ensures JSONL flush completes before panel teardown (Amendment R2-3)
 
 - [ ] **A7.4 — Update `onClose()`** (`src/ui/chat-view.ts`, L670-698)
   - Make async: `async onClose(): Promise<void>`

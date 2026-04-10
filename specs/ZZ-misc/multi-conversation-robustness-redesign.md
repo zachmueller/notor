@@ -954,19 +954,27 @@ Wire a `setOnCloseCleanup` callback during `wireView()`. The callback is `async`
 view.setOnCloseCleanup(async () => {
     const leafId = view.leaf.id;
 
-    // 1. Clear deferred load timeout (prevent post-close spurious load)
+    // 1. Abort any in-flight loadConversation() — must be first.
+    // loadConversation() stores its AbortController on view._loadConversationAbort.
+    // Without this, a concurrent load can continue after orchestrator teardown and
+    // call syncViewAfterLoad() → view.setActiveConversationId() on a closing view,
+    // bypassing the orchestrator's this.view?. guards (syncViewAfterLoad touches
+    // the view directly, not through the orchestrator).
+    view._loadConversationAbort?.abort();
+
+    // 2. Clear deferred load timeout (prevent post-close spurious load)
     clearTimeout(view._loadFallbackTimeout);
 
-    // 2. Detach view — renders become no-ops via existing this.view?. guards
+    // 3. Detach view — renders become no-ops via existing this.view?. guards
     orchestrator.setView(undefined);
 
-    // 3. Clean up session-change listener
+    // 4. Clean up session-change listener
     view._unregisterSessionsChanged?.();
 
-    // 4. Remove from registry
+    // 5. Remove from registry
     this._orchestrators.delete(leafId);
 
-    // 5. Destroy (aborts active sessions, flushes JSONL writes).
+    // 6. Destroy (aborts active sessions, flushes JSONL writes).
     // Closing a panel does NOT imply consent for unreviewed tool execution —
     // abort is the safe default. The user can re-run if needed.
     await orchestrator.destroy();
