@@ -1269,3 +1269,305 @@ Phase A: Unified view model + bug fixes
   │
   └── A7: View close lifecycle (Section 7)
 ```
+
+---
+
+## 13. Architecture Review Amendments (Round 2)
+
+The following issues were identified during a second cross-referencing pass of the spec against the codebase (2026-04-10). All original bug analysis, line numbers, and race condition traces in Sections 1–7 were re-validated as accurate. The amendments below address design gaps in the proposed implementation that could cause new bugs.
+
+### Amendment R2-1: `switchConversation()` Must Accept an AbortSignal (HIGH)
+
+**Problem:** The `AbortController` in `loadConversation()` (Section 4.5) only prevents `.then()` continuations from running — it does **not** cancel an already-dispatched `switchConversation()` call. When `setState()` overrides the `setTimeout(0)` fallback, two `switchConversation()` calls execute simultaneously on the same orchestrator:
+
+1. Fallback fires → `orchestrator.switchConversation("most-recent")` → async JSONL load starts
+2. `setState()` fires → aborts controller → calls `loadConversation()` again → `orchestrator.switchConversation("saved-conv")` on the **same orchestrator**
+3. Both calls execute `this.view?.clearMessages()` and render messages. User sees a flash of wrong content.
+
+The final state is correct (second call wins), but the visual glitching and wasted rendering are unacceptable.
+
+**Resolution:** Thread an `AbortSignal` into `switchConversation()`:
+
+```typescript
+async switchConversation(
+    filename: string,
+    opts?: { signal?: AbortSignal }
+): Promise<void> {
+    // After each await point:
+    if (opts?.signal?.aborted) return;
+    // ... continue
+}
+```
+
+The `loadConversation()` AbortController creates the signal; `switchConversation(filename, { signal })` checks `signal.aborted` after each async step (JSONL read, conversation load, message render) and bails early if superseded. This is composable — other callers (user-initiated switches, conversation deletion) can also use it.
+
+Also apply to `switchToConversationById()` and `newConversation()` as called from `loadConversation()`.
+
+**Spec changes required:**
+- Section 4.5: `loadConversation()` passes `{ signal: controller.signal }` to all orchestrator switch/new calls
+- Section 9: `orchestrator.ts` — update `switchConversation()`, `switchToConversationById()`, `newConversation()` signatures
+
+### Amendment R2-2: Close-Before-setTimeout Race (HIGH)
+
+**Problem:** If a view is created and immediately closed (e.g., Obsidian workspace rearrangement during startup), the `setTimeout(0)` fallback fires after close cleanup has destroyed the orchestrator:
+
+1. Factory creates orchestrator, registers in `_orchestrators`, schedules `setTimeout(0)`
+2. View closes immediately → `onCloseCleanup` removes orchestrator, calls `destroy()`
+3. `setTimeout(0)` fires → `isConversationLoaded` is `false` → calls `loadConversation()` on destroyed orchestrator
+
+The `_loadConversationAbort` AbortController doesn't help because close cleanup doesn't know about the timeout's scope.
+
+**Resolution:** Store the timeout ID on the view and clear it in close cleanup:
+
+```typescript
+// In registerView factory:
+view._loadFallbackTimeout = setTimeout(() => {
+    if (!view.isConversationLoaded) {
+        this.loadConversation(view, orchestrator);
+    }
+}, 0);
+
+// In onCloseCleanup:
+clearTimeout(view._loadFallbackTimeout);
+```
+
+Add `_loadFallbackTimeout?: ReturnType<typeof setTimeout>` to `NotorChatView`.
+
+**Spec changes required:**
+- Section 4.3: Store timeout ID on view
+- Section 7.2: Add `clearTimeout(view._loadFallbackTimeout)` to close cleanup
+- Section 9: `chat-view.ts` — add `_loadFallbackTimeout` field
+
+### Amendment R2-3: `onCloseCleanup` Must Be Async (MEDIUM)
+
+**Problem:** Section 7.2 defines `onCloseCleanup` as `() => void` and calls `orchestrator.destroy()` without awaiting. `destroy()` performs critical work: aborting sessions, flushing JSONL writes (Section 5.3), unregistering session guards. Fire-and-forgetting means:
+- Session guard entries may not clean up before another panel uses that conversation
+- JSONL flush may not complete before Obsidian tears down
+- The 2s timeout in `destroy()` is meaningless if nothing awaits
+
+Obsidian's `onClose()` returns `Promise<void>` — the current implementation at [`chat-view.ts:670`](../../src/ui/chat-view.ts) is `return Promise.resolve()`, so async is supported.
+
+**Resolution:** Make `onCloseCleanup` async, await `destroy()`:
+
+```typescript
+// Field type:
+onCloseCleanup?: () => Promise<void>;
+
+// In wireView():
+view.setOnCloseCleanup(async () => {
+    clearTimeout(view._loadFallbackTimeout);
+    orchestrator.setView(undefined);
+    view._unregisterSessionsChanged?.();
+    this._orchestrators.delete(leafId);
+    await orchestrator.destroy();  // awaited — flushes JSONL + cleans guards
+});
+
+// In onClose():
+async onClose(): Promise<void> {
+    await this.onCloseCleanup?.();
+    this.clearCallbacks();
+    // ... existing DOM cleanup ...
+}
+```
+
+**Spec changes required:**
+- Section 7.2: Update `onCloseCleanup` type to `() => Promise<void>`, await `destroy()`, await in `onClose()`
+
+### Amendment R2-4: `createOrchestrator()` Consolidated Setup Checklist (MEDIUM)
+
+**Problem:** The spec replaces both `getOrchestrator()` (L1585-1627) and `createSecondaryOrchestrator()` (L1640-1687) with a single `createOrchestrator()`. These methods have **different** setup sequences, and the required setup steps are scattered across amendments R1, R3, R5, R6 without a unified checklist. Missing a step causes silent failures.
+
+**Resolution:** The new `createOrchestrator()` must perform the following (union of both existing methods + amendments):
+
+| # | Setup Step | Currently In | Moves To |
+|---|-----------|-------------|----------|
+| 1 | Construct `ChatOrchestrator` with shared singletons | Both methods | `createOrchestrator()` |
+| 2 | Wire `PersonaManager` (setPersonaManager) | `getOrchestrator()` L1605, `createSecondary` L1663 | `createOrchestrator()` |
+| 3 | Wire `WorkflowHookOverrideManager` (setWorkflowHookOverrideManager) | `getOrchestrator()` L1608, `createSecondary` L1666 | `createOrchestrator()` |
+| 4 | Wire extension accessors (setExtensionAccessors) | `getOrchestrator()` L1616, `createSecondary` L1672 | `createOrchestrator()` |
+| 5 | Set tool definitions (setGetToolDefinitions) | `wireView()` L2073 for primary, `createSecondary` L1676 | `createOrchestrator()` (Amendment R3) |
+| 6 | Create per-orchestrator `CheckpointManager` | Singleton in `onload()` | `createOrchestrator()` (Amendment A1) |
+| 7 | Pass `SessionGuard` as constructor param | N/A (new) | `createOrchestrator()` (Section 6.2) |
+| 8 | `personaManager.restoreFromSettings()` | `wireView()` L2061-2068 | `onload()` — one-time only (Amendment R5) |
+
+**Spec changes required:**
+- Section 4.3 or new Section 4.3.1: Add this table as the canonical `createOrchestrator()` contract
+
+### Amendment R2-5: `getActiveOrchestrator()` Should Track Last-Focused Panel (MEDIUM)
+
+**Problem:** Section 4.9's `getActiveOrchestrator()` falls back to `leaves[0]` when no chat panel is focused. `leaves[0]` is non-deterministic — Obsidian returns leaves in DOM order which varies by workspace layout. Commands like "Run workflow", "Export conversation", and "Manual compaction" could target a random panel.
+
+**Resolution:** Track the most-recently-focused chat panel:
+
+```typescript
+private _lastFocusedChatLeafId?: string;
+
+// In onload():
+this.registerEvent(
+    this.app.workspace.on('active-leaf-change', (leaf) => {
+        if (leaf?.view instanceof NotorChatView) {
+            this._lastFocusedChatLeafId = leaf.id;
+        }
+    })
+);
+
+// In getActiveOrchestrator():
+getActiveOrchestrator(): ChatOrchestrator | null {
+    const activeView = this.app.workspace.getActiveViewOfType(NotorChatView);
+    if (activeView) {
+        return this._orchestrators.get(activeView.leaf.id) ?? null;
+    }
+    // Fall back to last-focused chat panel
+    if (this._lastFocusedChatLeafId) {
+        const orch = this._orchestrators.get(this._lastFocusedChatLeafId);
+        if (orch) return orch;
+    }
+    // Last resort: any open panel
+    const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
+    if (leaves.length > 0) {
+        return this._orchestrators.get(leaves[0].id) ?? null;
+    }
+    return null;
+}
+```
+
+**Spec changes required:**
+- Section 4.9: Update `getActiveOrchestrator()` with last-focused fallback
+- Section 9: `main.ts` — add `_lastFocusedChatLeafId` field + `active-leaf-change` listener
+
+### Amendment R2-6: `loadConversation()` Should Use async/await (LOW-MEDIUM)
+
+**Problem:** Section 4.5's `loadConversation()` uses nested `.then()/.catch()` chains (4 levels deep in the `savedId` branch). Each branch must manually check `controller.signal.aborted`, and a missed check creates a silent race condition. This is the **single owner of all conversation loading** — the most critical new code path — and should be maximally readable.
+
+**Resolution:** Rewrite as an `async` method. The abort checks become a repeatable `if (signal.aborted) return` pattern:
+
+```typescript
+async loadConversation(
+    view: NotorChatView,
+    orchestrator: ChatOrchestrator,
+    savedState?: Record<string, unknown> | null,
+): Promise<void> {
+    view._loadConversationAbort?.abort();
+    const controller = new AbortController();
+    view._loadConversationAbort = controller;
+    const signal = controller.signal;
+
+    view.isConversationLoaded = true;
+
+    try {
+        const entries = await this.getHistoryManager().listConversations();
+        if (signal.aborted) return;
+        view.renderConversationList(entries);
+
+        const savedFilename = savedState?.conversationFilename as string | undefined;
+        const savedId = savedState?.conversationId as string | undefined;
+
+        if (savedFilename) {
+            await orchestrator.switchConversation(savedFilename, { signal });
+        } else if (savedId) {
+            try {
+                await orchestrator.switchToConversationById(savedId, { signal });
+            } catch {
+                if (signal.aborted) return;
+                if (entries.length > 0) {
+                    await orchestrator.switchConversation(entries[0].filename, { signal });
+                } else {
+                    await orchestrator.newConversation({ signal });
+                }
+            }
+        } else if (entries.length === 0) {
+            await orchestrator.newConversation({ signal });
+        } else {
+            await orchestrator.switchConversation(entries[0].filename, { signal });
+        }
+
+        if (signal.aborted) return;
+        this.syncViewAfterLoad(view, orchestrator);
+    } catch (e) {
+        if (signal.aborted) return;
+        log.error("Failed to load conversation history", { error: String(e) });
+        try { await orchestrator.newConversation(); } catch { /* last resort */ }
+    }
+}
+```
+
+**Spec changes required:**
+- Section 4.5: Replace `loadConversation()` implementation with async/await version
+
+### Amendment R2-7: Leaf ID Reuse Guard in Factory (LOW-MEDIUM)
+
+**Problem:** The `_orchestrators` Map (Section 4.2) is keyed by `leaf.id`. If Obsidian reuses leaf IDs during workspace restore, the factory overwrites the old entry without destroying the orphaned orchestrator — leaking it along with its session guard entries.
+
+**Resolution:** Check and destroy stale entries in the factory:
+
+```typescript
+// In registerView factory, before creating new orchestrator:
+const existing = this._orchestrators.get(leaf.id);
+if (existing) {
+    log.warn("Stale orchestrator found for leaf, destroying", { leafId: leaf.id });
+    existing.destroy();  // fire-and-forget OK here — stale, no active view
+}
+```
+
+**Spec changes required:**
+- Section 4.3: Add stale orchestrator check before `_orchestrators.set()`
+
+### Amendment R2-8: `clearCallbacks()` Sequencing (LOW)
+
+**Problem:** Amendment A6 proposes `clearCallbacks()` but doesn't specify ordering relative to `onCloseCleanup()`. If `clearCallbacks()` runs first, the cleanup callback can't use view callbacks. If it runs after, there's a window where callbacks reference a destroyed orchestrator.
+
+**Resolution:** The correct order is:
+1. `await this.onCloseCleanup?.()` — detaches orchestrator (sets `view` to undefined), destroys orchestrator
+2. `this.clearCallbacks()` — nulls all `setOn*` properties to release GC references
+
+After step 1, the orchestrator's `this.view` is `undefined`, so all `this.view?.` callback invocations become no-ops. Step 2 ensures the view doesn't retain references to the destroyed orchestrator's closures.
+
+**Spec changes required:**
+- Section 7.2 / Amendment A6: Specify ordering — cleanup first, then clearCallbacks
+
+### Amendment R2-9: Leaf Detach/Reattach Is a Known Limitation (LOW)
+
+**Problem:** Obsidian can detach leaves (move to sidebar, popout window) and reattach them without triggering `onClose()`/`registerView`. The spec's lifecycle model assumes create-once/destroy-once. Detached leaves have valid orchestrators but disconnected DOMs — renders go nowhere.
+
+**Resolution:** Acknowledge as a known limitation. This is a pre-existing issue not introduced by this redesign. The unified model is no worse than the current primary/secondary model in this regard. A future improvement could add a `workspace.on('layout-change')` listener that validates orchestrator-view DOM bindings, but this is out of scope for this spec.
+
+### Updated Implementation Order (with R2 amendments)
+
+```
+Phase A: Unified view model + bug fixes
+  ├── A1: Orchestrator registry + factory rewrite (Section 4.1-4.3)
+  │       + Amendment A1: Per-orchestrator CheckpointManager
+  │       + Amendment A7/R8: Replace getOrchestrator() with getActiveOrchestrator()
+  │       + Amendment R3: Move setGetToolDefinitions() to createOrchestrator()
+  │       + Amendment R5: Move restoreFromSettings() to onload()
+  │       + Amendment R2-4: Consolidated setup checklist
+  │       + Amendment R2-5: Track _lastFocusedChatLeafId
+  │       + Amendment R2-7: Leaf ID reuse guard in factory
+  │
+  ├── A2: Conversation loading extraction (Section 4.4-4.5)
+  │       + Amendment A5: setState override of fallback loading
+  │       + Amendment R2: AbortController in loadConversation()
+  │       + Amendment R2-1: Thread AbortSignal into switchConversation()
+  │       + Amendment R2-2: Store timeout ID on view, clear in close cleanup
+  │       + Amendment R2-6: Rewrite loadConversation() as async/await
+  │       + Amendment R7: Remove checkpointManager from syncViewAfterLoad()
+  │
+  ├── A3: wireView simplification (Section 4.6-4.7)
+  │       + Amendment A6: clearCallbacks() on view close
+  │       + Amendment R2-8: clearCallbacks() sequencing (after onCloseCleanup)
+  │       + Amendment R1: Audit wireView closures for hardcoded orchestrator refs
+  │       + Amendment R6: Update _personaNameChangeWired callback body
+  │
+  ├── A4: Command routing + eliminated code (Section 4.8-4.9)
+  │       + Amendment A2/R9: UseSubAgentTool via ToolExecuteOptions dispatch context
+  │       + Amendment A4: Inspector view focus subscription
+  │
+  ├── A5: Persistence flush (Section 5)
+  │       + Amendment R4: Note deactivate() idempotency requirement
+  │
+  ├── A6: Session guard (Section 6)
+  │       + Amendment A3: Per-orchestrator guard in executeWorkflow()
+  │
+  └── A7: View close lifecycle (Section 7)
+          + Amendment R2-3: Make onCloseCleanup async, await destroy()
+```
