@@ -378,6 +378,8 @@ this.registerView(CHAT_VIEW_TYPE, (leaf) => {
 
 **Why `setTimeout` and not `queueMicrotask`:** `setState()` is an `async` method that hits `await super.setState(state, result)` on its first line ([`chat-view.ts:728`](../../src/ui/chat-view.ts)). Even if `super.setState()` resolves immediately, the `await` schedules the continuation as a microtask. A `queueMicrotask` registered in the factory would fire BEFORE setState's continuation (microtask queue is FIFO — factory's microtask was queued first). `setTimeout(fn, 0)` schedules a macrotask, which runs after all microtasks drain, guaranteeing setState wins the race when it fires.
 
+**Note (Amendment R2):** The `setTimeout(0)` ordering is an **optimization** (avoids an unnecessary most-recent load when setState fires), not a **correctness requirement**. If Obsidian defers setState to a later macrotask, the fallback fires first but setState overrides it. `loadConversation()` uses an AbortController to cancel the fallback's in-flight async chain, preventing races. See Section 4.4 and 4.5.
+
 ### 4.4 Updated `setState()`
 
 `setState()` no longer detects secondary panels or re-wires orchestrators. It only loads the correct conversation:
@@ -386,10 +388,16 @@ this.registerView(CHAT_VIEW_TYPE, (leaf) => {
 async setState(state: unknown, result: ViewStateResult): Promise<void> {
     await super.setState(state, result);
     const s = state as Record<string, unknown> | null;
+    const savedConversationId = (s?.conversationId ?? s?.conversationFilename) as string | undefined;
 
     // Load the saved conversation. The orchestrator was already correctly
     // bound in the registerView factory — no re-wiring needed.
-    if (!this.isConversationLoaded) {
+    //
+    // Amendment A5 + R2: If the setTimeout fallback already loaded
+    // (isConversationLoaded === true), but we have a saved conversation to
+    // restore, override it. loadConversation() uses an AbortController to
+    // cancel any in-flight fallback load, preventing races.
+    if (!this.isConversationLoaded || savedConversationId) {
         this.isConversationLoaded = true;
         const orchestrator = this.plugin.getOrchestratorForView(this);
         if (orchestrator) {
@@ -399,9 +407,11 @@ async setState(state: unknown, result: ViewStateResult): Promise<void> {
 }
 ```
 
-Add `isConversationLoaded: boolean = false` flag to `NotorChatView`. Set to `true` by both `setState()` and the `setTimeout` fallback. This flag ensures exactly one path loads:
-- If `setState()` fires first: sets `isConversationLoaded = true`, loads the saved conversation. The `setTimeout` fallback finds the flag set and exits.
-- If the `setTimeout` fires first (no `setState` call): sets `isConversationLoaded = true`, loads the most-recent conversation. If `setState()` subsequently fires, it finds the flag set and skips.
+Add to `NotorChatView`:
+- `isConversationLoaded: boolean = false` — set by both `setState()` and the `setTimeout` fallback
+- `_loadConversationAbort?: AbortController` — used by `loadConversation()` to cancel superseded loads (Amendment R2)
+
+The `isConversationLoaded` flag is an optimization, not a correctness requirement. `setTimeout(0)` ensures `setState()` wins the race in the common case (avoids an unnecessary most-recent load). The AbortController ensures correctness if Obsidian defers `setState()` to a later macrotask — the fallback's in-flight async chain is cancelled before the override starts.
 
 **Important:** The deferred `setTimeout` blocks at [`chat-view.ts:740-752`](../../src/ui/chat-view.ts) that called `onSwitchConversation` and `onSwitchToConversationById` must be **removed**. The new `loadConversation()` method is the single owner of all conversation loading, preventing double-load races.
 
@@ -422,11 +432,19 @@ loadConversation(
     orchestrator: ChatOrchestrator,
     savedState?: Record<string, unknown> | null,
 ): void {
+    // Abort any in-flight load for this view (Amendment R2).
+    // This prevents races when setState() overrides the setTimeout fallback
+    // (Amendment A5) — the fallback's async chain is cancelled before the
+    // override's chain starts.
+    view._loadConversationAbort?.abort();
+    const controller = new AbortController();
+    view._loadConversationAbort = controller;
+
     view.isConversationLoaded = true;
     const historyManager = this.getHistoryManager();
-    const checkpointManager = this.getCheckpointManager();
 
     historyManager.listConversations().then((entries) => {
+        if (controller.signal.aborted) return;  // superseded by a later load
         view.renderConversationList(entries);
 
         const savedFilename = savedState?.conversationFilename as string | undefined;
@@ -435,17 +453,18 @@ loadConversation(
         if (savedFilename) {
             // "Open in new tab" passes a filename — load it directly
             orchestrator.switchConversation(savedFilename)
-                .then(() => this.syncViewAfterLoad(view, orchestrator, checkpointManager))
+                .then(() => { if (!controller.signal.aborted) this.syncViewAfterLoad(view, orchestrator); })
                 .catch(() => orchestrator.newConversation());
         } else if (savedId) {
             // Workspace restore passes a conversation ID — resolve and load
             orchestrator.switchToConversationById(savedId)
-                .then(() => this.syncViewAfterLoad(view, orchestrator, checkpointManager))
+                .then(() => { if (!controller.signal.aborted) this.syncViewAfterLoad(view, orchestrator); })
                 .catch(() => {
+                    if (controller.signal.aborted) return;
                     // Conversation may have been deleted — fall back to most recent
                     if (entries.length > 0) {
                         orchestrator.switchConversation(entries[0].filename)
-                            .then(() => this.syncViewAfterLoad(view, orchestrator, checkpointManager))
+                            .then(() => { if (!controller.signal.aborted) this.syncViewAfterLoad(view, orchestrator); })
                             .catch(() => orchestrator.newConversation());
                     } else {
                         orchestrator.newConversation();
@@ -453,11 +472,11 @@ loadConversation(
                 });
         } else if (entries.length === 0) {
             orchestrator.newConversation()
-                .then(() => this.syncViewAfterLoad(view, orchestrator, checkpointManager));
+                .then(() => { if (!controller.signal.aborted) this.syncViewAfterLoad(view, orchestrator); });
         } else {
             // No saved state — load most recent
             orchestrator.switchConversation(entries[0].filename)
-                .then(() => this.syncViewAfterLoad(view, orchestrator, checkpointManager))
+                .then(() => { if (!controller.signal.aborted) this.syncViewAfterLoad(view, orchestrator); })
                 .catch(() => orchestrator.newConversation());
         }
     }).catch((e) => {
@@ -466,15 +485,16 @@ loadConversation(
     });
 }
 
-/** Sync view state (conversation ID, checkpoint manager) after conversation load. */
+/**
+ * Sync view state after conversation load (Amendment R7: checkpoint manager
+ * removed per Amendment A1 — orchestrator manages its own CheckpointManager).
+ */
 private syncViewAfterLoad(
     view: NotorChatView,
     orchestrator: ChatOrchestrator,
-    checkpointManager: CheckpointManager,
 ): void {
     const conv = orchestrator.getConversationManager().getActiveConversation();
     if (conv) {
-        checkpointManager.setConversationId(conv.id);
         view.setActiveConversationId(conv.id);
     }
 }
@@ -492,6 +512,12 @@ Changes to the existing `wireView()` at [`main.ts:1995-2537`](../../src/main.ts)
 4. **Keep** `onSessionsChanged` listener registration (L2017) — but store the unregister function (see Section 4.7).
 5. **Remove** the entire history loading block (L2493-2536) — moved to `loadConversation()`.
 6. **Remove** the `if (view.getIsSecondary()) return` guard (L2495) — no longer needed.
+7. **Remove** `setGetToolDefinitions()` call — moved to `createOrchestrator()` (Amendment R3).
+8. **Remove** `personaManager.restoreFromSettings()` call (L2061-2068) — moved to `onload()` (Amendment R5).
+
+**Amendment R1 — Closure audit:** All callback closures in `wireView()` that reference `this._orchestrator`, `this.getOrchestrator()`, or `this._secondaryOrchestrators` must be changed to use either the closure-captured `orchestrator` parameter (for single-panel operations) or `this._orchestrators.values()` (for broadcast operations like settings propagation). Known instances:
+- `setOnNewConversation` (L2128-2129): `this._orchestrator.updateSettings()` → `orchestrator.updateSettings()`
+- `_personaNameChangeWired` callback (L2043-2059): `[this._orchestrator, ...this._secondaryOrchestrators]` → `this._orchestrators.values()` (Amendment R6)
 
 ### 4.7 Session-Change Listener Cleanup
 
@@ -523,9 +549,11 @@ The following code is **deleted** (not refactored — removed entirely):
 | `getIsSecondary()` / `setIsSecondary()` | [`chat-view.ts:756-763`](../../src/ui/chat-view.ts) | Eliminated |
 | `isSecondary` detection in `setState()` | [`chat-view.ts:731-735`](../../src/ui/chat-view.ts) | Eliminated — setState only loads conversation |
 | `isSecondary` guard in `wireView()` | [`main.ts:2495`](../../src/main.ts) | Eliminated — history loading moved out entirely |
-| `_personaNameChangeWired` guard | [`main.ts:158`](../../src/main.ts) | Still needed but iterates `_orchestrators.values()` |
+| `_personaNameChangeWired` guard | [`main.ts:158`](../../src/main.ts) | Still needed but callback body iterates `_orchestrators.values()` (Amendment R6) |
 | "open-secondary-chat" command `state: { isSecondary: true }` | [`main.ts:534`](../../src/main.ts) | Simplified — just opens a new leaf (no special state needed) |
 | `isSecondary` in `getState()` | [`chat-view.ts:714`](../../src/ui/chat-view.ts) | Removed from saved state |
+| `setGetToolDefinitions()` in `wireView()` | [`main.ts:2078-2084`](../../src/main.ts) | Moved to `createOrchestrator()` (Amendment R3) |
+| `personaManager.restoreFromSettings()` in `wireView()` | [`main.ts:2061-2068`](../../src/main.ts) | Moved to `onload()` — one-time global restore (Amendment R5) |
 
 ### 4.9 `getActiveOrchestrator()` — Command Routing
 
@@ -726,6 +754,9 @@ async destroy(timeoutMs: number = 2000): Promise<void> {
     // Deactivate workflow hook overrides for all active sessions.
     // This runs regardless of whether the finally blocks completed
     // (destroy may have won the timeout race).
+    // NOTE (Amendment R4): deactivate() must be idempotent — it may be
+    // called here AND from the session cleanup finally block (Section 5.2)
+    // for the same conversation ID if the finally block runs before destroy.
     for (const session of this.activeSessions.values()) {
         if (session.workflowAssembly && this.workflowHookOverrideManager) {
             this.workflowHookOverrideManager.deactivate(session.conversationId);
@@ -1135,11 +1166,11 @@ This is a **pre-existing bug** — 9 call sites in `wireView()` already overwrit
 
 **Problem:** `UseSubAgentTool` at [`main.ts:1429-1431`](../../src/main.ts) captures closures that call `this.getOrchestrator()` to resolve effective tool config and active conversation at call time. The spec's Section 4.9 says to update these to `getActiveOrchestrator()`, but sub-agents are spawned from a specific session in a specific orchestrator. If the user focuses a different panel while a sub-agent runs, `getActiveOrchestrator()` resolves to the wrong orchestrator.
 
-**Resolution:** Extend `ToolDispatcher` context to include the source orchestrator reference. When a session dispatches a tool call, the orchestrator that owns the session is passed through the dispatch context. `UseSubAgentTool` reads the orchestrator from context instead of using a global accessor. This ensures sub-agents always resolve config from the orchestrator that spawned them.
+**Resolution:** Keep `UseSubAgentTool` as a singleton. Extend `ToolExecuteOptions` (or equivalent) with an optional `sourceOrchestrator` field. The orchestrator passes itself when dispatching tool calls for a session. `UseSubAgentTool.execute()` reads the orchestrator from options instead of closure accessors. Closure accessors remain as fallback for non-session contexts (e.g., sub-agent tool preview in UI). This ensures sub-agents always resolve config from the orchestrator that spawned them.
 
 **Spec changes required:**
-- Section 4.9 table: UseSubAgentTool entry should say "Pass orchestrator via dispatch context" instead of `getActiveOrchestrator()`
-- Section 9: Add `tool-dispatcher.ts` — extend dispatch context type with optional orchestrator reference
+- Section 4.9 table: UseSubAgentTool entry should say "Pass orchestrator via dispatch context (keep singleton, extend ToolExecuteOptions)"
+- Section 9: Add `tool-dispatcher.ts` — extend `ToolExecuteOptions` with optional `sourceOrchestrator` reference
 
 ### Amendment A3: `executeWorkflow()` Needs Per-Orchestrator Duplicate Guard (MEDIUM)
 
@@ -1165,23 +1196,12 @@ This is a **pre-existing bug** — 9 call sites in `wireView()` already overwrit
 
 **Problem:** Section 4.3 argues `setTimeout(fn, 0)` guarantees `setState()` wins the race. This is correct per the JS event loop spec but assumes Obsidian calls `setState()` synchronously or via microtask in the same turn as the factory return. If Obsidian defers to a later macrotask, the fallback fires first and loads the wrong conversation.
 
-**Resolution:** Allow `setState()` to override the fallback. If `setState()` fires after the fallback already loaded (`isConversationLoaded === true`), reset the flag and re-load the saved conversation. This makes the system correct regardless of Obsidian's internal scheduling:
+**Resolution:** Allow `setState()` to override the fallback. If `setState()` fires after the fallback already loaded (`isConversationLoaded === true`), re-call `loadConversation()` with the saved state. `loadConversation()` uses an `AbortController` (Amendment R2) to cancel any in-flight fallback load, preventing two async `switchConversation()` chains from racing.
 
-```typescript
-// In setState():
-if (this.isConversationLoaded && savedConversationId) {
-    // Fallback already loaded most-recent — override with saved state
-    this.isConversationLoaded = true; // keep flag set
-    const orchestrator = this.plugin.getOrchestratorForView(this);
-    if (orchestrator) {
-        this.plugin.loadConversation(this, orchestrator, s);
-    }
-    return;
-}
-```
+See updated Section 4.4 for the `setState()` implementation and Section 4.5 for the AbortController integration in `loadConversation()`.
 
 **Spec changes required:**
-- Section 4.4: Update `setState()` to handle the override case
+- Section 4.4: Updated — `setState()` handles the override case, `loadConversation()` AbortController prevents races
 - Section 4.3: Add note that `setTimeout(0)` is an optimization (avoids unnecessary most-recent load), not a correctness requirement
 
 ### Amendment A6: Null Callback References on View Close (LOW)
@@ -1199,19 +1219,21 @@ if (this.isConversationLoaded && savedConversationId) {
 
 **Resolution:** The vault event dispatcher should capture the orchestrator reference at dispatch time (when the event fires), not resolve it lazily during execution. The captured reference remains valid for the workflow's duration. If no orchestrator is available at dispatch time, skip the workflow.
 
+**Clarification (Amendment R8):** The current `getDispatcherDeps()` pattern already captures at call time (it's a function called per dispatch). The actual change is replacing `this.getOrchestrator()` with `this.getActiveOrchestrator()` inside `getDispatcherDeps()`. The call-time capture pattern is already correct.
+
 **Spec changes required:**
-- Section 4.10: Change from lazy accessor to captured reference at dispatch time
+- Section 4.10: Replace `this.getOrchestrator()` with `this.getActiveOrchestrator()` in `getDispatcherDeps()`
 
 ### Updated Files to Modify (incorporating amendments)
 
 | File | Additional Changes | Amendment |
 |------|-------------------|-----------|
 | [`src/checkpoints/checkpoint.ts`](../../src/checkpoints/checkpoint.ts) | Per-orchestrator instantiation (remove singleton assumption) | A1 |
-| [`src/main.ts`](../../src/main.ts) | Create CheckpointManager per orchestrator in `createOrchestrator()`, remove all `checkpointManager.setConversationId()` from wireView callbacks, capture orchestrator at vault event dispatch time | A1, A7 |
+| [`src/main.ts`](../../src/main.ts) | Create CheckpointManager per orchestrator in `createOrchestrator()`, move `setGetToolDefinitions()` to `createOrchestrator()`, move `restoreFromSettings()` to `onload()`, remove all `checkpointManager.setConversationId()` from wireView callbacks, audit wireView closures for hardcoded orchestrator refs, update `_personaNameChangeWired` callback to iterate `_orchestrators.values()`, capture orchestrator at vault event dispatch time | A1, A7, R1, R3, R5, R6 |
 | [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts) | Add per-orchestrator `activeSessions.has()` guard to `executeWorkflow()` | A3 |
-| [`src/tools/tool-dispatcher.ts`](../../src/tools/tool-dispatcher.ts) | Extend dispatch context with source orchestrator reference | A2 |
+| [`src/tools/tool-dispatcher.ts`](../../src/tools/tool-dispatcher.ts) | Extend `ToolExecuteOptions` with optional `sourceOrchestrator` reference | A2, R9 |
 | [`src/ui/effective-config-inspector.ts`](../../src/ui/effective-config-inspector.ts) | Subscribe to `active-leaf-change`, update orchestrator on chat panel focus | A4 |
-| [`src/ui/chat-view.ts`](../../src/ui/chat-view.ts) | Add `clearCallbacks()` method, call from `onClose()`. Update `setState()` to allow override of fallback loading. | A5, A6 |
+| [`src/ui/chat-view.ts`](../../src/ui/chat-view.ts) | Add `clearCallbacks()` method, call from `onClose()`. Add `_loadConversationAbort` field. Update `setState()` to allow override of fallback loading with AbortController race protection. | A5, A6, R2 |
 
 ### Updated Implementation Order
 
@@ -1221,19 +1243,26 @@ Amendments slot into Phase A as follows:
 Phase A: Unified view model + bug fixes
   ├── A1: Orchestrator registry + factory rewrite (Section 4.1-4.3)
   │       + Amendment A1: Per-orchestrator CheckpointManager
-  │       + Amendment A7: Capture orchestrator at vault event dispatch time
+  │       + Amendment A7/R8: Replace getOrchestrator() with getActiveOrchestrator() in vault event dispatcher
+  │       + Amendment R3: Move setGetToolDefinitions() to createOrchestrator()
+  │       + Amendment R5: Move restoreFromSettings() to onload()
   │
   ├── A2: Conversation loading extraction (Section 4.4-4.5)
   │       + Amendment A5: setState override of fallback loading
+  │       + Amendment R2: AbortController in loadConversation() to prevent races
+  │       + Amendment R7: Remove checkpointManager from syncViewAfterLoad()
   │
   ├── A3: wireView simplification (Section 4.6-4.7)
   │       + Amendment A6: clearCallbacks() on view close
+  │       + Amendment R1: Audit wireView closures for hardcoded orchestrator refs
+  │       + Amendment R6: Update _personaNameChangeWired callback body
   │
   ├── A4: Command routing + eliminated code (Section 4.8-4.9)
-  │       + Amendment A2: UseSubAgentTool via dispatch context
+  │       + Amendment A2/R9: UseSubAgentTool via ToolExecuteOptions dispatch context
   │       + Amendment A4: Inspector view focus subscription
   │
   ├── A5: Persistence flush (Section 5)
+  │       + Amendment R4: Note deactivate() idempotency requirement
   │
   ├── A6: Session guard (Section 6)
   │       + Amendment A3: Per-orchestrator guard in executeWorkflow()
