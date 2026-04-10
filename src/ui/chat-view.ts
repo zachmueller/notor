@@ -160,6 +160,36 @@ export class NotorChatView extends ItemView {
 	private activeConversationId: string | null = null;
 
 	/**
+	 * Whether a conversation has been loaded into this view.
+	 *
+	 * Set to `true` by both `setState()` and the `setTimeout(0)` fallback
+	 * in the registerView factory. Prevents duplicate loads when both fire.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.4
+	 */
+	isConversationLoaded = false;
+
+	/**
+	 * AbortController for the in-flight `loadConversation()` call.
+	 *
+	 * When a new load is triggered (e.g. setState overriding a fallback),
+	 * the previous controller is aborted to cancel its async chain.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Amendment R2
+	 */
+	_loadConversationAbort?: AbortController;
+
+	/**
+	 * Timeout ID for the `setTimeout(0)` fallback conversation load.
+	 *
+	 * Stored so it can be cleared on view close to prevent loading into
+	 * a destroyed view.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Amendment R2-2
+	 */
+	_loadFallbackTimeout?: ReturnType<typeof setTimeout>;
+
+	/**
 	 * Whether this panel is a secondary (additional) chat panel.
 	 *
 	 * Secondary panels get the same full toolbar as the primary panel.
@@ -718,37 +748,33 @@ export class NotorChatView extends ItemView {
 	/**
 	 * Restore view state from a previous session (Obsidian workspace restore).
 	 *
-	 * Called by Obsidian when the workspace layout is restored after a reload.
-	 * Sets the `isSecondary` flag and triggers conversation loading via the
-	 * existing `onSwitchToConversationById` callback.
+	 * Called by Obsidian after the registerView factory returns. No longer
+	 * detects secondary panels or re-wires orchestrators — the factory
+	 * creates a fresh orchestrator for every panel. setState only loads
+	 * the correct conversation via `loadConversation()`.
 	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4a
+	 * Amendment A5 + R2: If the setTimeout fallback already loaded
+	 * (isConversationLoaded === true), but we have a saved conversation to
+	 * restore, override it. loadConversation() uses an AbortController to
+	 * cancel any in-flight fallback load, preventing races.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.4
 	 */
 	async setState(state: unknown, result: ViewStateResult): Promise<void> {
 		await super.setState(state, result);
 		const s = state as Record<string, unknown> | null;
+		const savedConversationId = (s?.conversationId ?? s?.conversationFilename) as string | undefined;
 
-		if (s?.isSecondary && !this.isSecondary) {
-			// Workspace restore detected a secondary panel — re-wire with its
-			// own orchestrator. This replaces the primary orchestrator wiring
-			// that happened during registerView (which doesn't know about state yet).
-			this.plugin.wireViewAsSecondary(this);
-		}
-
-		this.isSecondary = !!s?.isSecondary;
-
-		if (s?.conversationFilename && typeof s.conversationFilename === "string") {
-			// "Open in new tab" passes a filename — load it via the switch callback.
-			// Defer to next tick so wireView() has time to set up callbacks.
-			setTimeout(() => {
-				this.onSwitchConversation?.(s.conversationFilename as string);
-			}, 0);
-		} else if (s?.conversationId && typeof s.conversationId === "string") {
-			// Defer loading to the next tick so that wireView() has time to
-			// set up the orchestrator and callbacks.
-			setTimeout(() => {
-				void this.onSwitchToConversationById?.(s.conversationId as string);
-			}, 0);
+		// Load the saved conversation. The orchestrator was already correctly
+		// bound in the registerView factory — no re-wiring needed.
+		if (!this.isConversationLoaded || savedConversationId) {
+			this.isConversationLoaded = true;
+			const orchestrator = this.plugin.getOrchestratorForView(this);
+			if (orchestrator) {
+				this.plugin.loadConversation(this, orchestrator, s);
+			} else {
+				log.warn("setState: no orchestrator found for view — setTimeout fallback will retry");
+			}
 		}
 	}
 

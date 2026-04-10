@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A1 in progress
+**Status:** Phase A2 complete, A3 next
 
 ---
 
@@ -126,17 +126,17 @@
 
 **Bugs addressed:** A (completes fix)
 
-- [ ] **A2.1 — Add new fields to `NotorChatView`** (`src/ui/chat-view.ts`)
+- [x] **A2.1 — Add new fields to `NotorChatView`** (`src/ui/chat-view.ts`) *(done 2026-04-11)*
   - Add `isConversationLoaded: boolean = false`
   - Add `_loadConversationAbort?: AbortController`
   - Add `_loadFallbackTimeout?: ReturnType<typeof setTimeout>`
 
-- [ ] **A2.2 — Thread `AbortSignal` into orchestrator switch methods** (`src/chat/orchestrator.ts`)
+- [x] **A2.2 — Thread `AbortSignal` into orchestrator switch methods** (`src/chat/orchestrator.ts`) *(done 2026-04-11)*
   - Update `switchConversation(filename, opts?: { signal?: AbortSignal })` — check `signal.aborted` after each `await` point and bail early (Amendment R2-1)
   - Update `switchToConversationById(id, opts?: { signal?: AbortSignal })` — same pattern
   - Update `newConversation(opts?: { signal?: AbortSignal })` — same pattern
 
-- [ ] **A2.3 — Implement `loadConversation()` on plugin class** (`src/main.ts`)
+- [x] **A2.3 — Implement `loadConversation()` on plugin class** (`src/main.ts`) *(done 2026-04-11)*
   - `async loadConversation(view, orchestrator, savedState?): Promise<void>` — callers do NOT await it (fire-and-forget from setState and setTimeout, but correctly awaitable for testing)
   - Aborts any in-flight load for this view via `view._loadConversationAbort?.abort()`
   - Creates new `AbortController`, stores on `view._loadConversationAbort`; destructure `{ signal }` for passing to orchestrator calls
@@ -149,11 +149,11 @@
   - On orchestrator call failure (outer try/catch): reset `view.isConversationLoaded = false`; show a Notice to the user (do not fail silently); check signal before Notice
   - See spec Section 4.5 for reference implementation
 
-- [ ] **A2.4 — Implement `syncViewAfterLoad()`** (`src/main.ts`)
+- [x] **A2.4 — Implement `syncViewAfterLoad()`** (`src/main.ts`) *(done 2026-04-11)*
   - Sets `view.setActiveConversationId(conv.id)` from orchestrator's active conversation
   - No checkpoint manager involvement (Amendment R7 / A1 handles that internally)
 
-- [ ] **A2.5 — Rewrite `setState()`** (`src/ui/chat-view.ts`, L727-753)
+- [x] **A2.5 — Rewrite `setState()`** (`src/ui/chat-view.ts`, L727-753) *(done 2026-04-11)*
   - Remove secondary panel detection (`isSecondary` checks, `wireViewAsSecondary()` call)
   - Remove deferred `setTimeout` blocks for `onSwitchConversation`/`onSwitchToConversationById`
   - New logic: if `!isConversationLoaded || savedConversationId`, call `plugin.loadConversation(this, orchestrator, savedState)` via `plugin.getOrchestratorForView(this)`

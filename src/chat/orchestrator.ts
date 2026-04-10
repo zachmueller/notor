@@ -524,9 +524,12 @@ export class ChatOrchestrator {
 	 * a persona switch (E-008), the persona is reverted before creating the
 	 * new conversation.
 	 */
-	async newConversation(): Promise<void> {
+	async newConversation(opts?: { signal?: AbortSignal }): Promise<void> {
+		const signal = opts?.signal;
+
 		// E-008: Revert workflow persona before leaving this conversation
 		await this.maybeRevertWorkflowPersona();
+		if (signal?.aborted) return;
 
 		// Unlock input — any active session on the previous conversation
 		// continues in the background, but the UI should be ready for input.
@@ -561,6 +564,7 @@ export class ChatOrchestrator {
 		conversation.persona_name = this.personaManager?.getActivePersona()?.name ?? null;
 
 		await this.historyManager.createConversationFile(conversation);
+		if (signal?.aborted) return;
 
 		this.view?.clearMessages();
 		this.view?.updateModeDisplay(conversation.mode);
@@ -620,9 +624,12 @@ export class ChatOrchestrator {
 	 * If the current conversation was a workflow conversation that performed
 	 * a persona switch (E-008), the persona is reverted before switching.
 	 */
-	async switchConversation(filename: string): Promise<void> {
+	async switchConversation(filename: string, opts?: { signal?: AbortSignal }): Promise<void> {
+		const signal = opts?.signal;
+
 		// E-008: Revert workflow persona before leaving this conversation
 		await this.maybeRevertWorkflowPersona();
+		if (signal?.aborted) return;
 
 		// Unlock input — the session (if any) owns its own AbortController,
 		// so navigating away just unlocks the UI without affecting the stream.
@@ -630,6 +637,7 @@ export class ChatOrchestrator {
 
 		try {
 			const { conversation, messages: historyMessages } = await this.historyManager.loadConversation(filename);
+			if (signal?.aborted) return;
 
 			// Step 2b: If this conversation has an active session, sync-back
 			// from the session's in-memory messages instead of the JSONL file.
@@ -716,6 +724,7 @@ export class ChatOrchestrator {
 			// Does NOT call activatePersona() — no global state mutation.
 			if (conversation.persona_name) {
 				const persona = await this.personaManager?.getPersonaByName(conversation.persona_name) ?? null;
+				if (signal?.aborted) return;
 				this.view?.updatePersonaLabel(persona);
 			} else {
 				// No persona stored — show current global persona (or none)
@@ -756,15 +765,17 @@ export class ChatOrchestrator {
 	 *
 	 * @see specs/03-workflows-personas/tasks/group-h-tasks.md — H-005
 	 */
-	async switchToConversationById(conversationId: string): Promise<boolean> {
+	async switchToConversationById(conversationId: string, opts?: { signal?: AbortSignal }): Promise<boolean> {
+		const signal = opts?.signal;
 		try {
 			const entries = await this.historyManager.listConversations();
+			if (signal?.aborted) return false;
 			const match = entries.find((e) => e.id === conversationId);
 			if (!match) {
 				log.warn("Conversation not found by ID", { conversationId });
 				return false;
 			}
-			await this.switchConversation(match.filename);
+			await this.switchConversation(match.filename, { signal });
 			return true;
 		} catch (e) {
 			log.error("Failed to switch to conversation by ID", {

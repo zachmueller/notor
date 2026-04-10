@@ -1935,6 +1935,109 @@ export default class NotorPlugin extends Plugin {
 	}
 
 	/**
+	 * Load a conversation into a panel. Determines which conversation to load
+	 * from savedState (workspace restore) or falls back to most-recent.
+	 *
+	 * Called from setState() (workspace restore) and the setTimeout fallback
+	 * (fresh install). This is the ONLY place conversation loading happens.
+	 *
+	 * Implemented as async — callers (setState, setTimeout fallback) do not
+	 * await it. AbortController handles races between concurrent calls.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.5
+	 */
+	async loadConversation(
+		view: NotorChatView,
+		orchestrator: ChatOrchestrator,
+		savedState?: Record<string, unknown> | null,
+	): Promise<void> {
+		// Abort any in-flight load for this view (Amendment R2).
+		view._loadConversationAbort?.abort();
+		const controller = new AbortController();
+		const { signal } = controller;
+		view._loadConversationAbort = controller;
+		view.isConversationLoaded = true;
+
+		const historyManager = this.getHistoryManager();
+		let entries: import("./chat/history").ConversationListEntry[];
+		try {
+			entries = await historyManager.listConversations();
+		} catch (e) {
+			log.error("Failed to load conversation history", { error: String(e) });
+			view.isConversationLoaded = false; // allow retry
+			return;
+		}
+		if (signal.aborted) return;
+
+		view.renderConversationList(entries);
+
+		const savedFilename = savedState?.conversationFilename as string | undefined;
+		const savedId = savedState?.conversationId as string | undefined;
+
+		try {
+			if (savedFilename) {
+				// "Open in new tab" passes a filename — load it directly
+				await orchestrator.switchConversation(savedFilename, { signal });
+				if (signal.aborted) return;
+				this.syncViewAfterLoad(view, orchestrator);
+			} else if (savedId) {
+				// Workspace restore passes a conversation ID — resolve and load
+				let switched: boolean;
+				try {
+					switched = await orchestrator.switchToConversationById(savedId, { signal });
+				} catch {
+					switched = false;
+				}
+				if (signal.aborted) return;
+				if (!switched) {
+					// Conversation may have been deleted — fall back to most recent
+					if (entries.length > 0) {
+						await orchestrator.switchConversation(entries[0]!.filename, { signal });
+						if (signal.aborted) return;
+					} else {
+						await orchestrator.newConversation({ signal });
+						if (signal.aborted) return;
+					}
+				}
+				this.syncViewAfterLoad(view, orchestrator);
+			} else if (entries.length === 0) {
+				await orchestrator.newConversation({ signal });
+				if (signal.aborted) return;
+				this.syncViewAfterLoad(view, orchestrator);
+			} else {
+				// No saved state — load most recent
+				await orchestrator.switchConversation(entries[0]!.filename, { signal });
+				if (signal.aborted) return;
+				this.syncViewAfterLoad(view, orchestrator);
+			}
+		} catch (e) {
+			if (signal.aborted) return;
+			log.error("Failed to load conversation", { error: String(e) });
+			view.isConversationLoaded = false; // allow retry
+			new Notice("Failed to load conversation — please try reopening the panel.");
+		}
+	}
+
+	/**
+	 * Sync view state after a conversation has been loaded.
+	 *
+	 * Sets the view's active conversation ID from the orchestrator's
+	 * conversation manager. Checkpoint manager is handled internally
+	 * by the orchestrator (Amendment A1 / A1.6b).
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.5
+	 */
+	private syncViewAfterLoad(
+		view: NotorChatView,
+		orchestrator: ChatOrchestrator,
+	): void {
+		const conv = orchestrator.getConversationManager().getActiveConversation();
+		if (conv) {
+			view.setActiveConversationId(conv.id);
+		}
+	}
+
+	/**
 	 * Workflow hook override manager — singleton, instantiated on first use.
 	 *
 	 * Shared by the orchestrator (for activate/deactivate) and hook dispatch
