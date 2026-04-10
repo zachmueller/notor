@@ -1,6 +1,6 @@
 # Multi-Conversation Robustness Redesign
 
-**Status:** Draft (v2 — unified view model)
+**Status:** Draft (v2.1 — unified view model + architecture review amendments)
 **Date:** 2026-04-10
 **Prerequisite:** [thread-safe-streaming-multi-panel-design.md](done/thread-safe-streaming-multi-panel-design.md) (all 5 phases implemented)
 
@@ -1110,3 +1110,133 @@ A1 through A3 together fix Bug A (the highest-severity reported bug). A5 fixes B
 3. Workflow execution works (foreground + background)
 4. Plugin hot-reload preserves state
 5. Workspace restore with multiple panels restores each panel's conversation correctly
+
+---
+
+## 12. Architecture Review Amendments
+
+The following issues were identified during cross-referencing the spec against the codebase. All bug analysis, line numbers, and race condition traces in Sections 1–7 have been validated as accurate. The amendments below address design gaps not covered by the original spec.
+
+### Amendment A1: CheckpointManager Must Be Per-Orchestrator (HIGH)
+
+**Problem:** `CheckpointManager` ([`checkpoint.ts:25`](../../src/checkpoints/checkpoint.ts)) is a singleton with a single mutable `conversationId` field (L27). The spec's `syncViewAfterLoad()` (Section 4.5) calls `checkpointManager.setConversationId(conv.id)` for every panel that loads. With multiple panels, the last panel to load/switch wins — checkpoint operations from other panels silently target the wrong conversation.
+
+This is a **pre-existing bug** — 9 call sites in `wireView()` already overwrite the singleton (`main.ts:2142,2167,2185,2251,2258,2504,2517,2525`). The unified model makes it systematically worse.
+
+**Resolution:** Each orchestrator creates its own `CheckpointManager` instance. The `CheckpointStorage` layer is unchanged (it already takes `conversationId` as a parameter to query methods). Remove all `checkpointManager.setConversationId()` calls from `syncViewAfterLoad()` and `wireView()` callbacks. The orchestrator sets its CheckpointManager's conversation ID when switching conversations internally.
+
+**Spec changes required:**
+- Section 4.5: Remove `checkpointManager` from `syncViewAfterLoad()` parameters and body
+- Section 4.5: Remove `checkpointManager.setConversationId(conv.id)` from `loadConversation()`
+- Section 9: Add `checkpoint.ts` — change constructor to accept per-instance conversation scoping
+- Section 9: Add `main.ts` — `createOrchestrator()` creates a new `CheckpointManager` per orchestrator
+
+### Amendment A2: UseSubAgentTool Must Resolve via Dispatch Context (MEDIUM)
+
+**Problem:** `UseSubAgentTool` at [`main.ts:1429-1431`](../../src/main.ts) captures closures that call `this.getOrchestrator()` to resolve effective tool config and active conversation at call time. The spec's Section 4.9 says to update these to `getActiveOrchestrator()`, but sub-agents are spawned from a specific session in a specific orchestrator. If the user focuses a different panel while a sub-agent runs, `getActiveOrchestrator()` resolves to the wrong orchestrator.
+
+**Resolution:** Extend `ToolDispatcher` context to include the source orchestrator reference. When a session dispatches a tool call, the orchestrator that owns the session is passed through the dispatch context. `UseSubAgentTool` reads the orchestrator from context instead of using a global accessor. This ensures sub-agents always resolve config from the orchestrator that spawned them.
+
+**Spec changes required:**
+- Section 4.9 table: UseSubAgentTool entry should say "Pass orchestrator via dispatch context" instead of `getActiveOrchestrator()`
+- Section 9: Add `tool-dispatcher.ts` — extend dispatch context type with optional orchestrator reference
+
+### Amendment A3: `executeWorkflow()` Needs Per-Orchestrator Duplicate Guard (MEDIUM)
+
+**Problem:** The spec's Section 6.3 shows both per-orchestrator and cross-orchestrator guards being added to `handleUserMessage()` and `executeWorkflow()`. However, `executeWorkflow()` ([`orchestrator.ts:763-954`](../../src/chat/orchestrator.ts)) currently has **no** `activeSessions.has(conv.id)` guard — unlike `handleUserMessage()` which has one at L1614. The spec implicitly assumes it exists.
+
+**Resolution:** Add `activeSessions.has(conv.id)` check at the top of `executeWorkflow()`, before the cross-orchestrator `sessionGuard.isActive()` check. This is independent of the unified model — it's a pre-existing gap.
+
+**Spec changes required:**
+- Section 6.3: Note that the per-orchestrator guard is being *added* to `executeWorkflow()`, not just the cross-orchestrator one
+- Section 9: `orchestrator.ts` changes should list this explicitly
+
+### Amendment A4: Inspector View Must Subscribe to Focus Changes (LOW-MEDIUM)
+
+**Problem:** The inspector view at [`main.ts:311-314`](../../src/main.ts) calls `inspectorView.setOrchestrator(this.getOrchestrator())` once in its factory. The spec's Section 4.9 says to "Use `getActiveOrchestrator()` or subscribe to focus changes" but doesn't specify which.
+
+**Resolution:** The inspector subscribes to Obsidian's `workspace.on('active-leaf-change')` event. When a chat panel gains focus, the inspector updates its orchestrator reference via `setOrchestrator()`. When a non-chat leaf gains focus, the inspector retains its last orchestrator reference (doesn't clear). Unsubscribe on inspector close.
+
+**Spec changes required:**
+- Section 4.9 table: Inspector row should say "Subscribe to `active-leaf-change`, update on chat panel focus"
+- Section 9: Add `effective-config-inspector.ts` to modified files list
+
+### Amendment A5: `setState()` Should Override Fallback Loading (LOW)
+
+**Problem:** Section 4.3 argues `setTimeout(fn, 0)` guarantees `setState()` wins the race. This is correct per the JS event loop spec but assumes Obsidian calls `setState()` synchronously or via microtask in the same turn as the factory return. If Obsidian defers to a later macrotask, the fallback fires first and loads the wrong conversation.
+
+**Resolution:** Allow `setState()` to override the fallback. If `setState()` fires after the fallback already loaded (`isConversationLoaded === true`), reset the flag and re-load the saved conversation. This makes the system correct regardless of Obsidian's internal scheduling:
+
+```typescript
+// In setState():
+if (this.isConversationLoaded && savedConversationId) {
+    // Fallback already loaded most-recent — override with saved state
+    this.isConversationLoaded = true; // keep flag set
+    const orchestrator = this.plugin.getOrchestratorForView(this);
+    if (orchestrator) {
+        this.plugin.loadConversation(this, orchestrator, s);
+    }
+    return;
+}
+```
+
+**Spec changes required:**
+- Section 4.4: Update `setState()` to handle the override case
+- Section 4.3: Add note that `setTimeout(0)` is an optimization (avoids unnecessary most-recent load), not a correctness requirement
+
+### Amendment A6: Null Callback References on View Close (LOW)
+
+**Problem:** Section 7.2's close cleanup detaches the view from the orchestrator and calls `destroy()`, but `wireView()` sets 29+ callback closures on the view that capture the orchestrator. If Obsidian retains references to the closed view, those closures keep the orchestrator alive.
+
+**Resolution:** Add a `clearCallbacks()` method to `NotorChatView` that nulls all `setOn*` properties. Call it from `onClose()` after the cleanup callback.
+
+**Spec changes required:**
+- Section 7.2: Add `view.clearCallbacks()` call in `onClose()` after `this.onCloseCleanup?.()`
+
+### Amendment A7: Vault Event Dispatcher Must Capture Orchestrator at Dispatch Time (LOW)
+
+**Problem:** Section 4.10 proposes using `getActiveOrchestrator()` for vault-event workflows. But `executeBackgroundWorkflow()` uses the orchestrator's shared singletons (`historyManager`, `providerRegistry`, `personaManager`). If `getActiveOrchestrator()` returns a different orchestrator each time (user switched focus) and that orchestrator is later destroyed (panel closed), the background workflow breaks mid-execution.
+
+**Resolution:** The vault event dispatcher should capture the orchestrator reference at dispatch time (when the event fires), not resolve it lazily during execution. The captured reference remains valid for the workflow's duration. If no orchestrator is available at dispatch time, skip the workflow.
+
+**Spec changes required:**
+- Section 4.10: Change from lazy accessor to captured reference at dispatch time
+
+### Updated Files to Modify (incorporating amendments)
+
+| File | Additional Changes | Amendment |
+|------|-------------------|-----------|
+| [`src/checkpoints/checkpoint.ts`](../../src/checkpoints/checkpoint.ts) | Per-orchestrator instantiation (remove singleton assumption) | A1 |
+| [`src/main.ts`](../../src/main.ts) | Create CheckpointManager per orchestrator in `createOrchestrator()`, remove all `checkpointManager.setConversationId()` from wireView callbacks, capture orchestrator at vault event dispatch time | A1, A7 |
+| [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts) | Add per-orchestrator `activeSessions.has()` guard to `executeWorkflow()` | A3 |
+| [`src/tools/tool-dispatcher.ts`](../../src/tools/tool-dispatcher.ts) | Extend dispatch context with source orchestrator reference | A2 |
+| [`src/ui/effective-config-inspector.ts`](../../src/ui/effective-config-inspector.ts) | Subscribe to `active-leaf-change`, update orchestrator on chat panel focus | A4 |
+| [`src/ui/chat-view.ts`](../../src/ui/chat-view.ts) | Add `clearCallbacks()` method, call from `onClose()`. Update `setState()` to allow override of fallback loading. | A5, A6 |
+
+### Updated Implementation Order
+
+Amendments slot into Phase A as follows:
+
+```
+Phase A: Unified view model + bug fixes
+  ├── A1: Orchestrator registry + factory rewrite (Section 4.1-4.3)
+  │       + Amendment A1: Per-orchestrator CheckpointManager
+  │       + Amendment A7: Capture orchestrator at vault event dispatch time
+  │
+  ├── A2: Conversation loading extraction (Section 4.4-4.5)
+  │       + Amendment A5: setState override of fallback loading
+  │
+  ├── A3: wireView simplification (Section 4.6-4.7)
+  │       + Amendment A6: clearCallbacks() on view close
+  │
+  ├── A4: Command routing + eliminated code (Section 4.8-4.9)
+  │       + Amendment A2: UseSubAgentTool via dispatch context
+  │       + Amendment A4: Inspector view focus subscription
+  │
+  ├── A5: Persistence flush (Section 5)
+  │
+  ├── A6: Session guard (Section 6)
+  │       + Amendment A3: Per-orchestrator guard in executeWorkflow()
+  │
+  └── A7: View close lifecycle (Section 7)
+```
