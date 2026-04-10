@@ -97,6 +97,7 @@
   - Used by `setState()` to find the correct orchestrator
 
 - [ ] **A1.11 — Delete obsolete methods** (`src/main.ts`)
+  - **⚠ Requires A4.1 first** — the private `newConversation()` method (L2605) calls `getPrimaryChatLeaf()`. A4.1 rewrites that method to remove the call. Do not delete `getPrimaryChatLeaf()` before A4.1 has updated `newConversation()`, or batch both in the same commit.
   - Delete `getOrchestrator()` (L1585-1628)
   - Delete `createSecondaryOrchestrator()` (L1640-1687)
   - Delete `wireViewAsSecondary()` (L1697-1716)
@@ -202,14 +203,21 @@
 
 **Bugs addressed:** Settings propagation bug, correct command targeting
 
-- [ ] **A4.1 — Update all `getOrchestrator()` call sites to `getActiveOrchestrator()`** (`src/main.ts`)
+- [ ] **A4.1 — Update all `getOrchestrator()` call sites to `getActiveOrchestrator()`** (`src/main.ts`, `src/chat/orchestrator.ts`)
   - Inspector view factory (L313) — see A4.5 instead
   - Manual compaction command (L335)
   - Run workflow command (L368)
   - Active note workflow command (L424)
   - Export conversation (L451)
   - Import conversation (L499)
-  - New conversation command (L2612-2615)
+  - New conversation command — **requires a full rewrite of the private `newConversation()` method (L2605-2645)**:
+    1. Add `getView(): NotorChatView | undefined` accessor to `ChatOrchestrator` (returns `this.view`) — needed for the view update below
+    2. Remove `const primaryLeaf = this.getPrimaryChatLeaf()` (L2606) and the leaf-based `view` lookup — `getPrimaryChatLeaf()` is deleted in A1.11
+    3. Replace both `getOrchestrator()` calls (L2612, L2615) with `getActiveOrchestrator()` (null-guarded)
+    4. Obtain the view via `orchestrator.getView()` — consistent with `getActiveOrchestrator()`'s `_lastFocusedChatLeafId` fallback (avoids mismatch with `workspace.getActiveViewOfType()` when focus is on a non-chat view)
+    5. Replace the `.then()` chain with `syncViewAfterLoad(view, orchestrator)` + a `renderConversationList()` call
+    6. Fallback: `if (!orchestrator) { this.openChatPanel(); }`
+    - **⚠ Must be done before A1.11** — A1.11 deletes `getPrimaryChatLeaf()`, which this method calls at L2606
   - Add null guards (`?.`) since `getActiveOrchestrator()` can return `null`
 
 - [ ] **A4.2 — Fix settings propagation** (`src/main.ts`, L1218-1220)
