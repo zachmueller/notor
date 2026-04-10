@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Not started
+**Status:** Phase A1 in progress
 
 ---
 
@@ -14,29 +14,29 @@
 
 **Bugs addressed:** A (primary), D (partial)
 
-- [ ] **A1.1 — Define `SessionGuard` interface**
+- [x] **A1.1 — Define `SessionGuard` interface** *(done 2026-04-11)*
   - Add `SessionGuard` interface to `src/chat/orchestrator.ts` (or a shared types file): `isActive(id)`, `register(id)`, `unregister(id)`
   - This is needed by the orchestrator constructor change in A1.4, so define it first
 
-- [ ] **A1.2 — Replace orchestrator fields on plugin class** (`src/main.ts`)
-  - Delete `_orchestrator?: ChatOrchestrator` field (L145)
-  - Delete `_secondaryOrchestrators: ChatOrchestrator[]` field (L155)
+- [x] **A1.2 — Replace orchestrator fields on plugin class** (`src/main.ts`) *(done 2026-04-11)*
+  - ~~Delete `_orchestrator?: ChatOrchestrator` field (L145)~~ — retained temporarily; deleted in A1.11 after A4.1
+  - ~~Delete `_secondaryOrchestrators: ChatOrchestrator[]` field (L155)~~ — retained temporarily; deleted in A1.11 after A4.1
   - Add `_orchestrators = new Map<string, ChatOrchestrator>()`
   - Add `_activeConversationSessions = new Set<string>()` for session guard
   - Add `_sessionGuard: SessionGuard` implementation object (using `_activeConversationSessions`)
   - Add `_lastFocusedChatLeafId?: string` field (Amendment R2-5)
 
-- [ ] **A1.3 — Register `active-leaf-change` listener** (`src/main.ts`)
+- [x] **A1.3 — Register `active-leaf-change` listener** (`src/main.ts`) *(done 2026-04-11)*
   - In `onload()`, use `this.registerEvent(this.app.workspace.on('active-leaf-change', ...))` to track `_lastFocusedChatLeafId` when a `NotorChatView` gains focus
   - **Must use `registerEvent`** — raw `workspace.on()` calls are not cleaned up on plugin unload and will leak
   - There is already a separate `active-leaf-change` listener at L562-572 (for auto-context); add this as a second `registerEvent` call alongside it, not as a replacement
 
-- [ ] **A1.4 — Update `ChatOrchestrator` constructor** (`src/chat/orchestrator.ts`)
+- [x] **A1.4 — Update `ChatOrchestrator` constructor** (`src/chat/orchestrator.ts`) *(done 2026-04-11)*
   - Add `sessionGuard: SessionGuard` as a required parameter (before the optional `view` and `vaultRuleManager` params)
   - Store as `private readonly sessionGuard: SessionGuard`
   - Update all existing call sites that construct `ChatOrchestrator`
 
-- [ ] **A1.5 — Create unified `createOrchestrator()` method** (`src/main.ts`)
+- [x] **A1.5 — Create unified `createOrchestrator()` method** (`src/main.ts`) *(done 2026-04-11)*
   - Consolidate `getOrchestrator()` (L1585-1628) and `createSecondaryOrchestrator()` (L1640-1687) into a single `createOrchestrator()` that returns a new `ChatOrchestrator` every time
   - Follow Amendment R2-4 consolidated setup checklist:
     1. Construct `ChatOrchestrator` with shared singletons + `this._sessionGuard`
@@ -47,41 +47,42 @@
     6. Create per-orchestrator `CheckpointManager` and wire it (Amendment A1)
     7. `sessionGuard` already passed as constructor param
   - Do NOT call `personaManager.restoreFromSettings()` here (moves to `onload()` — Amendment R5)
+  - **Note:** Old `getOrchestrator()` and `createSecondaryOrchestrator()` retained alongside until A1.11
 
-- [ ] **A1.6 — Make `CheckpointManager` per-orchestrator** (`src/checkpoints/checkpoint.ts`, `src/main.ts`)
+- [x] **A1.6 — Make `CheckpointManager` per-orchestrator** (`src/checkpoints/checkpoint.ts`, `src/main.ts`) *(done 2026-04-11)*
   - **Pre-implementation grep completed (2026-04-11).** Two plugin-level call sites for `getCheckpointManager` found:
     1. `src/main.ts:2001` — in `wireView()` (handled by A1.6c)
     2. `src/extensions/runtime-context.ts:131` — in `buildUtils()` for user-defined extensions (handled by A1.6d below)
-  - Remove singleton `_checkpointManager` field (`src/main.ts:142`) and `getCheckpointManager()` lazy getter (`src/main.ts:1405`) from plugin class — **only after A1.6c and A1.6d are complete**
+  - ~~Remove singleton `_checkpointManager` field and `getCheckpointManager()` lazy getter from plugin class~~ — retained temporarily as backward-compat shim; plugin-level getter still used by wireView (A1.6c deferred update); will be fully removed when A3 strips wireView history loading
   - Create a new `CheckpointManager` instance inside `createOrchestrator()` for each orchestrator; `CheckpointStorage` remains a shared singleton
-  - Pass the per-orchestrator checkpoint manager to the orchestrator (add a setter or constructor param)
-  - Remove all `checkpointManager.setConversationId()` calls from `wireView()` callbacks (L2142, 2167, 2185, 2251, 2258, 2504, 2517, 2525) — orchestrator manages its own checkpoint manager's conversation scope internally
+  - Pass the per-orchestrator checkpoint manager to the orchestrator via `setCheckpointManager()` setter
+  - ~~Remove all `checkpointManager.setConversationId()` calls from `wireView()` callbacks~~ — deferred to A3.9; A1.6b adds internal orchestrator wiring first
 
-- [ ] **A1.6c — Add `getCheckpointManager()` accessor to `ChatOrchestrator` and update `wireView()`** (`src/chat/orchestrator.ts`, `src/main.ts`)
+- [x] **A1.6c — Add `getCheckpointManager()` accessor to `ChatOrchestrator` and update `wireView()`** (`src/chat/orchestrator.ts`, `src/main.ts`) *(done 2026-04-11)*
   - Add a public `getCheckpointManager(): CheckpointManager | undefined` method to `ChatOrchestrator` — returns the per-orchestrator checkpoint manager added in A1.6
-  - In `wireView()`, replace the existing `const checkpointManager = this.getCheckpointManager()` call (L2001) with `const checkpointManager = orchestrator.getCheckpointManager()` — the plugin-level getter no longer exists after A1.6
-  - The three wireView callbacks that use `checkpointManager` (list L2444, restore L2448, getCurrentContent L2452) will then correctly reference the per-orchestrator manager via the new accessor
-  - **⚠ Must be done as part of A1.6** — removing `this.getCheckpointManager()` from the plugin without updating wireView will break the list/restore/getCurrentContent callbacks
+  - Also added `setCheckpointManager()` setter and `getView()` accessor
+  - wireView() update deferred — plugin-level `getCheckpointManager()` still exists as backward-compat; wireView switchover happens when A3 strips history loading
 
-- [ ] **A1.6d — Update extension runtime context to use plugin-level checkpoint storage** (`src/extensions/runtime-context.ts`, `src/main.ts`)
+- [x] **A1.6d — Update extension runtime context to use plugin-level checkpoint storage** (`src/extensions/runtime-context.ts`, `src/main.ts`) *(done 2026-04-11)*
   - `buildUtils()` at `runtime-context.ts:122` currently calls `plugin.getCheckpointManager()` (L131) — this will break when the plugin-level singleton getter is deleted in A1.6
   - Extensions (user-defined tools) set their own conversation ID on the manager before use; they do not need per-orchestrator scoping
   - **Fix:** Add a `getSharedCheckpointManager(): CheckpointManager` method to the plugin class that creates a lazily-initialized shared manager backed by the same `CheckpointStorage` singleton (separate from the per-orchestrator managers). Update `buildUtils()` to call `plugin.getSharedCheckpointManager()` instead of `plugin.getCheckpointManager()`
   - This preserves backward-compatible extension behavior while keeping per-orchestrator managers for conversation-scoped tracking
   - **⚠ Must be done before A1.6 deletes `getCheckpointManager()`**
 
-- [ ] **A1.6b — Wire `checkpointManager.setConversationId()` inside orchestrator** (`src/chat/orchestrator.ts`)
+- [x] **A1.6b — Wire `checkpointManager.setConversationId()` inside orchestrator** (`src/chat/orchestrator.ts`) *(done 2026-04-11)*
   - After each conversation transition, call `this.checkpointManager?.setConversationId(conv.id)`:
     - End of `newConversation()` — after new conversation is created and active
-    - End of `switchConversation()` — after conversation and messages are loaded
+    - End of `switchConversation()` — after conversation and messages are loaded (both sync-back and standard JSONL paths)
     - End of `switchToConversationById()` — delegates to `switchConversation()`, so covered there
-    - End of `forkConversation()` — after the forked conversation becomes active
+    - End of `forkConversation()` — doesn't switch (caller does via switchConversation), so covered there
   - This replaces the calls removed from `wireView()` callbacks in A3.9
   - **⚠ Do not remove A3.9 calls without completing this task first — checkpoints will silently break**
 
-- [ ] **A1.7 — Move `personaManager.restoreFromSettings()` to `onload()`** (`src/main.ts`)
+- [x] **A1.7 — Move `personaManager.restoreFromSettings()` to `onload()`** (`src/main.ts`) *(done 2026-04-11)*
   - Currently called inside `wireView()` (L2061-2068), which runs on every wireView call
-  - Move to `onload()` as a one-time global restore (Amendment R5)
+  - Added to `onload()` as a one-time global restore (Amendment R5)
+  - wireView() call retained temporarily — removed in A3.4
 
 - [ ] **A1.8 — Update `registerView` factory** (`src/main.ts`, L295-308)
   - **⚠ Requires A2.1 fields first** — A1.8 references `view._loadFallbackTimeout` and `view.isConversationLoaded`, both added by A2.1. Add those two fields to `NotorChatView` before implementing A1.8 (or batch both together).
@@ -95,15 +96,16 @@
        - **The fallback callback must check `if (!view.isConversationLoaded)` before calling `loadConversation()`** — `setState()` fires synchronously after the factory returns and will set `isConversationLoaded = true`; without this guard, every panel open fires a redundant load
   - Remove the old default-to-primary wireView pattern
 
-- [ ] **A1.9 — Add `getActiveOrchestrator()` method** (`src/main.ts`)
+- [x] **A1.9 — Add `getActiveOrchestrator()` method** (`src/main.ts`) *(done 2026-04-11)*
   - Three-level fallback (see spec Section 4.9):
     1. `workspace.getActiveViewOfType(NotorChatView)` → its leaf.id
     2. `_lastFocusedChatLeafId` (populated by A1.3 listener) → `_orchestrators.get(...)`
     3. `getLeavesOfType(CHAT_VIEW_TYPE)[0]` → first available leaf
     4. `null` if no panels exist
   - The `_lastFocusedChatLeafId` fallback is required — without it, vault-event workflows and commands route to an arbitrary panel when the user is focused on a non-chat view
+  - Also added `WorkspaceLeaf.id` type augmentation in `obsidian-augments.d.ts`
 
-- [ ] **A1.10 — Add `getOrchestratorForView()` method** (`src/main.ts`)
+- [x] **A1.10 — Add `getOrchestratorForView()` method** (`src/main.ts`) *(done 2026-04-11)*
   - Returns `_orchestrators.get(view.leaf.id) ?? null`
   - Used by `setState()` to find the correct orchestrator
 

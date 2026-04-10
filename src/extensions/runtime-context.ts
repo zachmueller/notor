@@ -128,7 +128,7 @@ export function buildUtils(plugin: NotorPlugin): ExtensionUtils {
 
 		staleTracker: plugin.getStaleTracker(),
 
-		checkpointManager: plugin.getCheckpointManager(),
+		checkpointManager: plugin.getSharedCheckpointManager(),
 
 		noteOpener: plugin.getNoteOpener(),
 

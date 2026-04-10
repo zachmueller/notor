@@ -74,7 +74,7 @@ import { NoteOpener } from "./tools/note-opener";
 import { ToolDispatcher } from "./chat/dispatcher";
 import { HistoryManager } from "./chat/history";
 import { SystemPromptBuilder } from "./chat/system-prompt";
-import { ChatOrchestrator } from "./chat/orchestrator";
+import { ChatOrchestrator, type SessionGuard } from "./chat/orchestrator";
 import { StaleContentTracker } from "./chat/stale-tracker";
 
 // Checkpoints
@@ -140,6 +140,7 @@ export default class NotorPlugin extends Plugin {
 	private _historyManager?: HistoryManager;
 	private _checkpointStorage?: CheckpointStorage;
 	private _checkpointManager?: CheckpointManager;
+	private _sharedCheckpointManager?: CheckpointManager;
 	private _systemPromptBuilder?: SystemPromptBuilder;
 	private _vaultRuleManager?: VaultRuleManager;
 	private _orchestrator?: ChatOrchestrator;
@@ -153,6 +154,51 @@ export default class NotorPlugin extends Plugin {
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
 	 */
 	private _secondaryOrchestrators: ChatOrchestrator[] = [];
+
+	/**
+	 * Unified orchestrator registry — maps leaf ID to its orchestrator.
+	 *
+	 * All panels (primary and secondary) are equal. The factory in
+	 * `registerView` creates an orchestrator for each panel and stores
+	 * it here. Existing `_orchestrator` and `_secondaryOrchestrators`
+	 * fields are retained temporarily for backward compatibility until
+	 * all call sites are migrated (Phase A4).
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.1
+	 */
+	private _orchestrators = new Map<string, ChatOrchestrator>();
+
+	/**
+	 * Cross-orchestrator active conversation session set.
+	 *
+	 * Used by `_sessionGuard` to prevent two orchestrators from
+	 * processing the same conversation concurrently.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.3
+	 */
+	private _activeConversationSessions = new Set<string>();
+
+	/**
+	 * Session guard implementation backed by `_activeConversationSessions`.
+	 *
+	 * Passed to each orchestrator at construction time.
+	 */
+	private _sessionGuard: SessionGuard = {
+		isActive: (id: string) => this._activeConversationSessions.has(id),
+		register: (id: string) => { this._activeConversationSessions.add(id); },
+		unregister: (id: string) => { this._activeConversationSessions.delete(id); },
+	};
+
+	/**
+	 * Leaf ID of the last focused chat panel.
+	 *
+	 * Populated by the `active-leaf-change` listener (A1.3). Used by
+	 * `getActiveOrchestrator()` as a fallback when no chat panel is
+	 * currently focused (e.g. user is in a markdown editor).
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.9
+	 */
+	private _lastFocusedChatLeafId?: string;
 
 	/** Guard to prevent multiple wireView() calls from re-registering the persona name change callback. */
 	private _personaNameChangeWired = false;
@@ -571,9 +617,29 @@ export default class NotorPlugin extends Plugin {
 			})
 		);
 
+		// 5b. Track the last focused chat panel leaf for command routing.
+		// When a non-chat view gains focus, the last chat leaf ID is retained
+		// so getActiveOrchestrator() can route to the correct panel.
+		// @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.9
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				if (leaf?.view instanceof NotorChatView) {
+					this._lastFocusedChatLeafId = leaf.id;
+				}
+			})
+		);
+
 		// 6. Start vault rule manager (watches rules directory for changes)
 		// This is lightweight — just sets up file watchers
 		this.getVaultRuleManager().start();
+
+		// 6b. One-time global persona restore from settings (Amendment R5 / A1.7).
+		// Ensures the persona label and provider/model state are restored when
+		// the plugin loads. Previously called per-wireView for non-secondary
+		// panels; now a single global call.
+		this.getPersonaManager().restoreFromSettings().catch((e) => {
+			log.warn("Failed to restore active persona from settings", { error: String(e) });
+		});
 
 		// 7. Initialize Group F: vault event hook components (F-023).
 		// Heavy init (tag shadow cache) is deferred to onLayoutReady.
@@ -1401,7 +1467,7 @@ export default class NotorPlugin extends Plugin {
 		return this._checkpointStorage;
 	}
 
-	/** Checkpoint manager. */
+	/** Checkpoint manager (legacy plugin-level singleton — retained for backward compat). */
 	getCheckpointManager(): CheckpointManager {
 		if (!this._checkpointManager) {
 			this._checkpointManager = new CheckpointManager(
@@ -1410,6 +1476,26 @@ export default class NotorPlugin extends Plugin {
 			);
 		}
 		return this._checkpointManager;
+	}
+
+	/**
+	 * Shared checkpoint manager for user-defined extensions.
+	 *
+	 * Extensions set their own conversation ID before use and don't need
+	 * per-orchestrator scoping. This lazily-initialized manager is backed
+	 * by the same `CheckpointStorage` singleton as the per-orchestrator
+	 * managers, keeping behavior backward-compatible.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — A1.6d
+	 */
+	getSharedCheckpointManager(): CheckpointManager {
+		if (!this._sharedCheckpointManager) {
+			this._sharedCheckpointManager = new CheckpointManager(
+				this.app,
+				this.getCheckpointStorage()
+			);
+		}
+		return this._sharedCheckpointManager;
 	}
 
 	/**
@@ -1597,6 +1683,7 @@ export default class NotorPlugin extends Plugin {
 				dispatcher,
 				historyManager,
 				this.settings,
+				this._sessionGuard,
 				undefined, // view wired later via wireView()
 				vaultRuleManager
 			);
@@ -1651,6 +1738,7 @@ export default class NotorPlugin extends Plugin {
 			dispatcher,
 			historyManager,
 			this.settings,
+			this._sessionGuard,
 			undefined, // view wired later via wireView()
 			vaultRuleManager
 		);
@@ -1713,6 +1801,137 @@ export default class NotorPlugin extends Plugin {
 				return;
 			}
 		}
+	}
+
+	/**
+	 * Create a new orchestrator with all shared singletons and managers wired.
+	 *
+	 * Unified factory replacing `getOrchestrator()` (primary singleton) and
+	 * `createSecondaryOrchestrator()`. Returns a new `ChatOrchestrator`
+	 * every time — caller stores it in `_orchestrators`.
+	 *
+	 * Setup checklist (Amendment R2-4):
+	 *  1. Construct ChatOrchestrator with shared singletons + sessionGuard
+	 *  2. Wire PersonaManager
+	 *  3. Wire WorkflowHookOverrideManager
+	 *  4. Wire extension accessors
+	 *  5. Set tool definitions callback (moved from wireView — Amendment R3)
+	 *  6. Create per-orchestrator CheckpointManager and wire it (Amendment A1)
+	 *
+	 * Does NOT call personaManager.restoreFromSettings() — that moves to
+	 * onload() as a one-time global restore (Amendment R5 / A1.7).
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.2
+	 */
+	createOrchestrator(): ChatOrchestrator {
+		const dispatcher = this.getToolDispatcher();
+		const historyManager = this.getHistoryManager();
+		const systemPromptBuilder = this.getSystemPromptBuilder();
+		const providerRegistry = this.getProviderRegistry();
+		const vaultRuleManager = this.getVaultRuleManager();
+
+		const orchestrator = new ChatOrchestrator(
+			this.app,
+			providerRegistry,
+			systemPromptBuilder,
+			dispatcher,
+			historyManager,
+			this.settings,
+			this._sessionGuard,
+			undefined, // view wired later via wireView()
+			vaultRuleManager
+		);
+
+		// Wire shared managers
+		orchestrator.setPersonaManager(this.getPersonaManager());
+		orchestrator.setWorkflowHookOverrideManager(
+			this.getWorkflowHookOverrideManager()
+		);
+
+		// Wire extension automation accessors
+		const mgr = this.getExtensionManager();
+		orchestrator.setExtensionAccessors({
+			lifecycle: {
+				getForTrigger: (t) => mgr.getAutomationsForTrigger(t),
+				execute: (a, c) => mgr.executeAutomation(a, c),
+			},
+			toolEvent: {
+				getForToolEvent: (t, n) => mgr.getAutomationsForToolEvent(t, n),
+				execute: (a, c) => mgr.executeAutomation(a, c),
+			},
+		});
+
+		// Set tool definitions callback (Amendment R3 — moved from wireView)
+		const toolRegistry = this.getToolRegistry();
+		orchestrator.setGetToolDefinitions((config) => {
+			if (config) {
+				return toolRegistry.getFilteredToolDefinitions(config) as import("./providers/provider").ToolDefinition[];
+			}
+			return toolRegistry.getToolDefinitions() as import("./providers/provider").ToolDefinition[];
+		});
+
+		// Per-orchestrator CheckpointManager (Amendment A1)
+		const checkpointManager = new CheckpointManager(
+			this.app,
+			this.getCheckpointStorage()
+		);
+		orchestrator.setCheckpointManager(checkpointManager);
+
+		log.info("Orchestrator created via unified factory");
+		return orchestrator;
+	}
+
+	/**
+	 * Get the orchestrator for the currently active/focused chat panel.
+	 *
+	 * Three-level fallback:
+	 *  1. `workspace.getActiveViewOfType(NotorChatView)` → its leaf.id
+	 *  2. `_lastFocusedChatLeafId` → `_orchestrators.get(...)`
+	 *  3. First available chat leaf → `_orchestrators.get(...)`
+	 *  4. `null` if no panels exist
+	 *
+	 * The `_lastFocusedChatLeafId` fallback is required — without it,
+	 * vault-event workflows and commands route to an arbitrary panel
+	 * when the user is focused on a non-chat view.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.9
+	 */
+	getActiveOrchestrator(): ChatOrchestrator | null {
+		// Level 1: currently focused chat view
+		const activeView = this.app.workspace.getActiveViewOfType(NotorChatView);
+		if (activeView) {
+			const orch = this._orchestrators.get(activeView.leaf.id);
+			if (orch) return orch;
+		}
+
+		// Level 2: last focused chat panel
+		if (this._lastFocusedChatLeafId) {
+			const orch = this._orchestrators.get(this._lastFocusedChatLeafId);
+			if (orch) return orch;
+		}
+
+		// Level 3: first available chat leaf
+		const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
+		const firstLeaf = leaves[0];
+		if (firstLeaf) {
+			const orch = this._orchestrators.get(firstLeaf.id);
+			if (orch) return orch;
+		}
+
+		// Level 4: no panels exist
+		return null;
+	}
+
+	/**
+	 * Get the orchestrator for a specific chat view.
+	 *
+	 * @param view - The chat view to look up
+	 * @returns The orchestrator for this view, or null if not found
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.2
+	 */
+	getOrchestratorForView(view: NotorChatView): ChatOrchestrator | null {
+		return this._orchestrators.get(view.leaf.id) ?? null;
 	}
 
 	/**

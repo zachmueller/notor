@@ -52,4 +52,12 @@ declare module "obsidian" {
 			cb: (containerEl: HTMLElement) => T
 		): this;
 	}
+
+	/**
+	 * WorkspaceLeaf has a string `id` property at runtime, used by
+	 * `workspace.getLeafById()`. Not yet in the published type definitions.
+	 */
+	interface WorkspaceLeaf {
+		id: string;
+	}
 }

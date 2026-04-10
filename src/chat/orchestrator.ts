@@ -42,9 +42,28 @@ import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types
 import { mergeToolConfigs } from "../tool-config/merger";
 import { ConversationSession } from "./conversation-session";
 import type { ApprovalCallback } from "./dispatcher";
+import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatOrchestrator");
+
+/**
+ * Cross-orchestrator session guard — prevents two orchestrators from
+ * creating sessions for the same conversation concurrently.
+ *
+ * Implemented by the plugin class (`main.ts`) and passed to each
+ * orchestrator at construction time.
+ *
+ * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.3
+ */
+export interface SessionGuard {
+	/** Check whether a conversation ID has an active session in any orchestrator. */
+	isActive(conversationId: string): boolean;
+	/** Register a conversation ID as having an active session. */
+	register(conversationId: string): void;
+	/** Unregister a conversation ID when its session ends. */
+	unregister(conversationId: string): void;
+}
 
 /**
  * Orchestrates the complete chat send/receive loop.
@@ -107,6 +126,17 @@ export class ChatOrchestrator {
 	private effectiveToolConfig: EffectiveToolConfig | null = null;
 
 	/**
+	 * Per-orchestrator checkpoint manager.
+	 *
+	 * Each orchestrator (and thus each panel) gets its own CheckpointManager
+	 * that tracks the conversation scope internally. Replaces the former
+	 * plugin-level singleton.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Amendment A1
+	 */
+	private checkpointManager?: CheckpointManager;
+
+	/**
 	 * Per-orchestrator active provider type.
 	 *
 	 * Each orchestrator (and thus each panel in multi-panel mode) tracks
@@ -162,6 +192,7 @@ export class ChatOrchestrator {
 		private readonly dispatcher: ToolDispatcher,
 		private readonly historyManager: HistoryManager,
 		private settings: NotorSettings,
+		private readonly sessionGuard: SessionGuard,
 		private view?: NotorChatView,
 		private readonly vaultRuleManager?: VaultRuleManager
 	) {
@@ -195,6 +226,11 @@ export class ChatOrchestrator {
 	/** Set or update the chat view reference. */
 	setView(view: NotorChatView): void {
 		this.view = view;
+	}
+
+	/** Get the current view reference (if any). */
+	getView(): NotorChatView | undefined {
+		return this.view;
 	}
 
 	/**
@@ -284,6 +320,30 @@ export class ChatOrchestrator {
 	}): void {
 		this.extensionLifecycleAccessors = accessors.lifecycle;
 		this.extensionToolEventAccessors = accessors.toolEvent;
+	}
+
+	/**
+	 * Set the per-orchestrator checkpoint manager.
+	 *
+	 * Called by `createOrchestrator()` in main.ts. Each orchestrator manages
+	 * its own checkpoint scope internally via conversation lifecycle methods.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Amendment A1
+	 */
+	setCheckpointManager(manager: CheckpointManager): void {
+		this.checkpointManager = manager;
+	}
+
+	/**
+	 * Get the per-orchestrator checkpoint manager.
+	 *
+	 * Used by wireView() to bind checkpoint list/restore/getCurrentContent
+	 * callbacks to the correct per-orchestrator manager.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Amendment A1
+	 */
+	getCheckpointManager(): CheckpointManager | undefined {
+		return this.checkpointManager;
 	}
 
 	/**
@@ -509,6 +569,9 @@ export class ChatOrchestrator {
 		// from the previously viewed conversation.
 		this.view?.clearDisplayOverrides();
 
+		// Scope checkpoint manager to the new conversation (A1.6b)
+		this.checkpointManager?.setConversationId(conversation.id);
+
 		log.info("New conversation started", { id: conversation.id });
 	}
 
@@ -624,6 +687,9 @@ export class ChatOrchestrator {
 				// Update inspector with session's config
 				this.updateDisplayConfig(activeSession.effectiveConfig, activeSession.parsedConfigs);
 
+				// Scope checkpoint manager to the active session's conversation (A1.6b)
+				this.checkpointManager?.setConversationId(conversation.id);
+
 				log.info("Switched to active session conversation (sync-back)", { id: conversation.id });
 				return;
 			}
@@ -667,7 +733,10 @@ export class ChatOrchestrator {
 				);
 			}
 
-			log.info("Switched to conversation", { id: conversation.id });
+			// Scope checkpoint manager to the loaded conversation (A1.6b)
+				this.checkpointManager?.setConversationId(conversation.id);
+
+				log.info("Switched to conversation", { id: conversation.id });
 		} catch (e) {
 			log.error("Failed to switch conversation", { filename, error: String(e) });
 			this.view?.showError(`Failed to load conversation: ${e instanceof Error ? e.message : String(e)}`);
