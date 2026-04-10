@@ -426,63 +426,80 @@ New method on the plugin class — the **single owner of all conversation loadin
  *
  * Called from setState() (workspace restore) and the setTimeout fallback
  * (fresh install). This is the ONLY place conversation loading happens.
+ *
+ * Implemented as async void — callers (setState, setTimeout fallback) do not
+ * await it. AbortController handles races between concurrent calls.
  */
-loadConversation(
+async loadConversation(
     view: NotorChatView,
     orchestrator: ChatOrchestrator,
     savedState?: Record<string, unknown> | null,
-): void {
+): Promise<void> {
     // Abort any in-flight load for this view (Amendment R2).
-    // This prevents races when setState() overrides the setTimeout fallback
-    // (Amendment A5) — the fallback's async chain is cancelled before the
-    // override's chain starts.
     view._loadConversationAbort?.abort();
     const controller = new AbortController();
+    const { signal } = controller;
     view._loadConversationAbort = controller;
-
     view.isConversationLoaded = true;
+
     const historyManager = this.getHistoryManager();
+    let entries: ConversationListEntry[];
+    try {
+        entries = await historyManager.listConversations();
+    } catch (e) {
+        log.error("Failed to load conversation history", { error: String(e) });
+        view.isConversationLoaded = false;  // allow retry
+        return;
+    }
+    if (signal.aborted) return;
 
-    historyManager.listConversations().then((entries) => {
-        if (controller.signal.aborted) return;  // superseded by a later load
-        view.renderConversationList(entries);
+    view.renderConversationList(entries);
 
-        const savedFilename = savedState?.conversationFilename as string | undefined;
-        const savedId = savedState?.conversationId as string | undefined;
+    const savedFilename = savedState?.conversationFilename as string | undefined;
+    const savedId = savedState?.conversationId as string | undefined;
 
+    try {
         if (savedFilename) {
             // "Open in new tab" passes a filename — load it directly
-            orchestrator.switchConversation(savedFilename)
-                .then(() => { if (!controller.signal.aborted) this.syncViewAfterLoad(view, orchestrator); })
-                .catch(() => orchestrator.newConversation());
+            await orchestrator.switchConversation(savedFilename, { signal });
+            if (signal.aborted) return;
+            this.syncViewAfterLoad(view, orchestrator);
         } else if (savedId) {
             // Workspace restore passes a conversation ID — resolve and load
-            orchestrator.switchToConversationById(savedId)
-                .then(() => { if (!controller.signal.aborted) this.syncViewAfterLoad(view, orchestrator); })
-                .catch(() => {
-                    if (controller.signal.aborted) return;
-                    // Conversation may have been deleted — fall back to most recent
-                    if (entries.length > 0) {
-                        orchestrator.switchConversation(entries[0].filename)
-                            .then(() => { if (!controller.signal.aborted) this.syncViewAfterLoad(view, orchestrator); })
-                            .catch(() => orchestrator.newConversation());
-                    } else {
-                        orchestrator.newConversation();
-                    }
-                });
+            let switched: boolean;
+            try {
+                switched = await orchestrator.switchToConversationById(savedId, { signal });
+            } catch {
+                switched = false;
+            }
+            if (signal.aborted) return;
+            if (!switched) {
+                // Conversation may have been deleted — fall back to most recent
+                if (entries.length > 0) {
+                    await orchestrator.switchConversation(entries[0].filename, { signal });
+                    if (signal.aborted) return;
+                } else {
+                    await orchestrator.newConversation({ signal });
+                    if (signal.aborted) return;
+                }
+            }
+            this.syncViewAfterLoad(view, orchestrator);
         } else if (entries.length === 0) {
-            orchestrator.newConversation()
-                .then(() => { if (!controller.signal.aborted) this.syncViewAfterLoad(view, orchestrator); });
+            await orchestrator.newConversation({ signal });
+            if (signal.aborted) return;
+            this.syncViewAfterLoad(view, orchestrator);
         } else {
             // No saved state — load most recent
-            orchestrator.switchConversation(entries[0].filename)
-                .then(() => { if (!controller.signal.aborted) this.syncViewAfterLoad(view, orchestrator); })
-                .catch(() => orchestrator.newConversation());
+            await orchestrator.switchConversation(entries[0].filename, { signal });
+            if (signal.aborted) return;
+            this.syncViewAfterLoad(view, orchestrator);
         }
-    }).catch((e) => {
-        log.error("Failed to load conversation history", { error: String(e) });
-        orchestrator.newConversation().catch(() => {});
-    });
+    } catch (e) {
+        if (signal.aborted) return;
+        log.error("Failed to load conversation", { error: String(e) });
+        view.isConversationLoaded = false;  // allow retry
+        new Notice("Failed to load conversation — please try reopening the panel.");
+    }
 }
 
 /**
@@ -561,16 +578,32 @@ Commands that previously targeted `getOrchestrator()` (the primary singleton) no
 
 ```typescript
 /**
- * Return the orchestrator for the currently focused chat panel,
- * or any open panel if none is focused, or null if no panels exist.
+ * Return the orchestrator for the currently focused chat panel.
+ *
+ * Fallback order (Amendment A1.9):
+ * 1. Currently focused NotorChatView (workspace.getActiveViewOfType)
+ * 2. Last focused chat panel (_lastFocusedChatLeafId, updated by active-leaf-change listener)
+ * 3. Any open chat panel (getLeavesOfType order)
+ * 4. null — no panels open
+ *
+ * The _lastFocusedChatLeafId fallback ensures that commands and vault-event
+ * workflows route to the last panel the user was actively using, even when
+ * they've since focused a markdown note or another non-chat view.
+ * The active-leaf-change listener that maintains _lastFocusedChatLeafId is
+ * registered in onload() via registerEvent (see task A1.3).
  */
 getActiveOrchestrator(): ChatOrchestrator | null {
-    // Prefer the focused chat panel
+    // 1. Prefer the focused chat panel
     const activeView = this.app.workspace.getActiveViewOfType(NotorChatView);
     if (activeView) {
         return this._orchestrators.get(activeView.leaf.id) ?? null;
     }
-    // Fall back to any open chat panel
+    // 2. Fall back to the last panel the user focused
+    if (this._lastFocusedChatLeafId) {
+        const orch = this._orchestrators.get(this._lastFocusedChatLeafId);
+        if (orch) return orch;
+    }
+    // 3. Fall back to any open chat panel
     const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
     if (leaves.length > 0) {
         return this._orchestrators.get(leaves[0].id) ?? null;
@@ -596,7 +629,7 @@ This is better UX — workflows, exports, and compaction affect the panel the us
 | Active note workflow command | L424 | Executes active-note workflow | `getActiveOrchestrator()?.executeWorkflow(workflow, resolvedPrompt)` |
 | Export conversation | L451 | Exports active conversation | `getActiveOrchestrator()?.getConversationManager()` |
 | Import conversation | L499 | Loads imported conversation | `getActiveOrchestrator()?.switchConversation(filename)` |
-| UseSubAgentTool accessors | L1429-1431 | Gets effective config + active conversation | `getActiveOrchestrator()?.getEffectiveToolConfig()` |
+| UseSubAgentTool accessors | L1429-1431 | Gets effective config + active conversation | Use `ToolSessionContext` from dispatch options (see Section 4.14 and task A4.4) |
 | Vault event dispatcher | L974 | Runs background workflows from vault events | See Section 4.10 |
 | Settings update | L1218-1219 | Propagates settings changes | Iterate `_orchestrators.values()` |
 | New conversation command | L2612-2615 | Creates new conversation in primary | `getActiveOrchestrator()?.newConversation()` |
@@ -643,7 +676,25 @@ for (const orch of this._orchestrators.values()) {
 }
 ```
 
-### 4.13 Updated `getState()` / Workspace Restore
+### 4.13 `UseSubAgentTool` — `ToolSessionContext` Interface
+
+`UseSubagentTool` at [`src/tools/use-subagent.ts`](../../src/tools/use-subagent.ts) currently accesses parent orchestrator state via two construction-time closures that call `this.getOrchestrator()` (the primary singleton). After the unified model removes the primary orchestrator, those closures would need to call `getActiveOrchestrator()` — but that returns whichever panel is focused at execution time, not the panel whose session spawned the sub-agent.
+
+**Solution:** Inject the dispatching orchestrator through the tool call chain via a `ToolSessionContext` interface. The interface lives in `src/tools/tool.ts` (alongside `ToolExecuteOptions`) to avoid circular imports:
+
+```typescript
+/** Minimal orchestrator state visible to tools executing within a session. */
+export interface ToolSessionContext {
+    getEffectiveToolConfig(): EffectiveToolConfig | null;
+    getActiveConversation(): Conversation | null;
+}
+```
+
+Add `sessionContext?: ToolSessionContext` to `ToolExecuteOptions`. The orchestrator implements `ToolSessionContext` (adding a thin `getActiveConversation()` proxy). When dispatching tool batches, the orchestrator passes `this` as `sessionContext`. `UseSubagentTool` reads it first, falling back to its closure accessors for non-session contexts.
+
+See task A4.4 (subtasks A4.4a–f) for the full implementation steps and the `dispatcher.dispatch()` / `executeToolBatches()` threading changes.
+
+### 4.14 Updated `getState()` / Workspace Restore
 
 `getState()` at [`chat-view.ts:711-716`](../../src/ui/chat-view.ts) no longer saves `isSecondary`:
 
@@ -896,45 +947,43 @@ this.activeSessions.clear();
 
 ### 7.2 Close Cleanup Callback
 
-Wire a `setOnCloseCleanup` callback during `wireView()`:
+Wire a `setOnCloseCleanup` callback during `wireView()`. The callback is `async` and awaited by `onClose()` — Obsidian types `ItemView.onClose()` as `Promise<void>` (`obsidian.d.ts:6445`) and awaits it, so the JSONL flush in `destroy()` completes before the panel is torn down:
 
 ```typescript
 // In wireView():
-view.setOnCloseCleanup(() => {
+view.setOnCloseCleanup(async () => {
     const leafId = view.leaf.id;
 
-    // 1. Detach view — renders become no-ops via existing this.view?. guards
+    // 1. Clear deferred load timeout (prevent post-close spurious load)
+    clearTimeout(view._loadFallbackTimeout);
+
+    // 2. Detach view — renders become no-ops via existing this.view?. guards
     orchestrator.setView(undefined);
 
-    // 2. Clean up session-change listener
+    // 3. Clean up session-change listener
     view._unregisterSessionsChanged?.();
 
-    // 3. Remove from registry
+    // 4. Remove from registry
     this._orchestrators.delete(leafId);
 
-    // 4. Check for active sessions
-    const activeSessions = orchestrator.getActiveSessions();
-
-    if (activeSessions.length === 0) {
-        // No active sessions — destroy immediately
-        orchestrator.destroy();
-        return;
-    }
-
-    // 5. Active sessions exist — abort them.
-    // Closing a panel does NOT imply consent for unreviewed tool execution.
-    // Abort is the safe default; the user can re-run if needed.
-    orchestrator.destroy();
+    // 5. Destroy (aborts active sessions, flushes JSONL writes).
+    // Closing a panel does NOT imply consent for unreviewed tool execution —
+    // abort is the safe default. The user can re-run if needed.
+    await orchestrator.destroy();
 });
 ```
 
-In `onClose()` at [`chat-view.ts:670-697`](../../src/ui/chat-view.ts), add at the start:
+In `onClose()` at [`chat-view.ts:670-697`](../../src/ui/chat-view.ts), make the method `async` and await the cleanup:
 
 ```typescript
-this.onCloseCleanup?.();
+async onClose(): Promise<void> {
+    await this.onCloseCleanup?.();
+    this.clearCallbacks();  // release GC references (Amendment A6)
+    // ... existing DOM cleanup code ...
+}
 ```
 
-Add `onCloseCleanup?: () => void` field and `setOnCloseCleanup(cb)` setter to `NotorChatView`.
+Add `onCloseCleanup?: () => Promise<void>` field and `setOnCloseCleanup(cb: () => Promise<void>)` setter to `NotorChatView`.
 
 **Why abort (not auto-approve):** The previous design proposed auto-approving tool calls when a panel closes. This is unsafe — closing a panel does not signal consent for unreviewed file writes, command execution, or other destructive tools. Aborting sessions on close is the safe default. The `destroy()` method already handles abort + await with a 2s timeout and JSONL flush (Section 5.3), so in-flight messages are persisted before cleanup.
 

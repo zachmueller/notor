@@ -78,7 +78,12 @@
   - Remove the old default-to-primary wireView pattern
 
 - [ ] **A1.9 — Add `getActiveOrchestrator()` method** (`src/main.ts`)
-  - Returns orchestrator for focused chat panel, falling back to `_lastFocusedChatLeafId`, then any open panel, then `null` (Amendment R2-5 pattern)
+  - Three-level fallback (see spec Section 4.9):
+    1. `workspace.getActiveViewOfType(NotorChatView)` → its leaf.id
+    2. `_lastFocusedChatLeafId` (populated by A1.3 listener) → `_orchestrators.get(...)`
+    3. `getLeavesOfType(CHAT_VIEW_TYPE)[0]` → first available leaf
+    4. `null` if no panels exist
+  - The `_lastFocusedChatLeafId` fallback is required — without it, vault-event workflows and commands route to an arbitrary panel when the user is focused on a non-chat view
 
 - [ ] **A1.10 — Add `getOrchestratorForView()` method** (`src/main.ts`)
   - Returns `_orchestrators.get(view.leaf.id) ?? null`
@@ -111,18 +116,17 @@
   - Update `newConversation(opts?: { signal?: AbortSignal })` — same pattern
 
 - [ ] **A2.3 — Implement `loadConversation()` on plugin class** (`src/main.ts`)
-  - Async method (Amendment R2-6 rewrite) that is the single owner of all conversation loading
-  - Aborts any in-flight load for this view via `_loadConversationAbort`
-  - Creates new `AbortController`, stores on view
+  - `async loadConversation(view, orchestrator, savedState?): Promise<void>` — callers do NOT await it (fire-and-forget from setState and setTimeout, but correctly awaitable for testing)
+  - Aborts any in-flight load for this view via `view._loadConversationAbort?.abort()`
+  - Creates new `AbortController`, stores on `view._loadConversationAbort`; destructure `{ signal }` for passing to orchestrator calls
   - Sets `view.isConversationLoaded = true` immediately (prevents duplicate loads from the fallback timer)
-    - **On abort or error: reset `view.isConversationLoaded = false`** in the catch/abort path only — this allows the fallback or a future `setState()` call to retry after failure
-    - The finally block must NOT reset it — a successful load must keep the flag true
-  - Lists conversations, renders conversation list on view
+  - **Use `async/await` with `try/catch` throughout — do NOT use `.then()/.catch()` chains.** Every `await` is followed by `if (signal.aborted) return`
+  - `listConversations()` result is awaited; if it throws: reset `view.isConversationLoaded = false`, log error, return early (no notice needed — this is an infrastructure failure)
   - Determines what to load: `savedFilename` > `savedId` > most-recent > new conversation
-  - Passes `{ signal }` to all orchestrator switch/new calls
-  - Calls `syncViewAfterLoad()` on success
-  - On failure: show a notice to the user (do not fail silently)
-  - See spec Section 4.5 / Amendment R2-6 for full implementation
+  - **Passes `{ signal }` to ALL orchestrator calls:** `switchConversation(filename, { signal })`, `switchToConversationById(id, { signal })`, `newConversation({ signal })`
+  - After each `await` on an orchestrator call, check `if (signal.aborted) return` before calling `syncViewAfterLoad()`
+  - On orchestrator call failure (outer try/catch): reset `view.isConversationLoaded = false`; show a Notice to the user (do not fail silently); check signal before Notice
+  - See spec Section 4.5 for reference implementation
 
 - [ ] **A2.4 — Implement `syncViewAfterLoad()`** (`src/main.ts`)
   - Sets `view.setActiveConversationId(conv.id)` from orchestrator's active conversation
@@ -210,12 +214,49 @@
   - Replace `orchestrator: this.getOrchestrator()` with `orchestrator: this.getActiveOrchestrator()` inside that closure (Amendment A7/R8)
   - Ensure the dispatcher handles `null` orchestrator gracefully (skip workflow execution)
 
-- [ ] **A4.4 — Wire `UseSubAgentTool` via dispatch context** (`src/main.ts`, L1425-1441; `src/chat/dispatcher.ts`)
-  - Amendment A2/R9: Extend tool execute options with an optional `sourceOrchestrator` field
-  - The orchestrator passes itself when dispatching tool calls in a session
-  - `UseSubAgentTool` reads orchestrator from options to resolve effective tool config and active conversation
-  - Keep closure accessors as fallback for non-session contexts
-  - **⚠ Requires a focused design pass before implementation:** determine which interface/type gets `sourceOrchestrator?`, which call sites need updating (session-originated only vs. all), and the exact fallback behavior when the field is absent. Do not implement from current spec text alone.
+- [ ] **A4.4 — Wire `UseSubAgentTool` via dispatch context** (`src/tools/tool.ts`, `src/chat/orchestrator.ts`, `src/chat/dispatcher.ts`, `src/tools/use-subagent.ts`, `src/main.ts`)
+  - **Do A4.4a–e before A4.1** — A4.1 removes `getOrchestrator()` from the closures at L1429/L1431, but A4.4f updates those closures to `getActiveOrchestrator()` as a fallback. Sequence: A4.4a → A4.4b → A4.4c → A4.4d → A4.4e → A4.1 → A4.4f
+  - **⚠ Must be complete before Phase A ships** — without it, sub-agents executing in a session use the wrong orchestrator's effective config and conversation state
+
+- [ ] **A4.4a — Define `ToolSessionContext` interface** (`src/tools/tool.ts`)
+  - Add to `src/tools/tool.ts` (alongside `ToolExecuteOptions`) to avoid circular imports:
+    ```typescript
+    export interface ToolSessionContext {
+        getEffectiveToolConfig(): EffectiveToolConfig | null;
+        getActiveConversation(): Conversation | null;
+    }
+    ```
+  - Add `sessionContext?: ToolSessionContext` field to `ToolExecuteOptions`
+
+- [ ] **A4.4b — `ChatOrchestrator` implements `ToolSessionContext`** (`src/chat/orchestrator.ts`)
+  - Add `implements ToolSessionContext` to the class declaration (import the interface from `../tools/tool`)
+  - Add `getActiveConversation(): Conversation | null` proxy method: `return this.conversationManager.getActiveConversation()`
+  - `getEffectiveToolConfig()` already exists on the orchestrator
+
+- [ ] **A4.4c — Thread `sessionContext` through dispatch chain** (`src/chat/dispatcher.ts`, and wherever `executeToolBatches()` is defined)
+  - Add `sessionContext?: ToolSessionContext` as the last parameter to `dispatcher.dispatch()`
+  - Include it in the `executeOptions` object passed to `tool.execute()`: `const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext }`
+  - Add `sessionContext?` parameter to `executeToolBatches()`; pass it through to each `dispatcher.dispatch()` call
+
+- [ ] **A4.4d — Update `UseSubagentTool` to use `sessionContext`** (`src/tools/use-subagent.ts`)
+  - In `execute()` and `executeInner()`, replace direct closure reads with sessionContext-first lookups:
+    ```typescript
+    const parentConfig = options?.sessionContext?.getEffectiveToolConfig()
+        ?? this.getParentEffectiveConfig();
+    const parentConv = options?.sessionContext?.getActiveConversation()
+        ?? this.getParentConversation?.();
+    ```
+  - The closure fallback (`getParentEffectiveConfig`, `getParentConversation`) remains for non-session contexts
+
+- [ ] **A4.4e — Pass `this` as `sessionContext` at both dispatch call sites** (`src/chat/orchestrator.ts`)
+  - Batch dispatch (~L2093, `executeToolBatches()` call): add `sessionContext: this`
+  - Direct dispatch (~L1343, `dispatcher.dispatch()` call): add `sessionContext: this` as the new last argument
+
+- [ ] **A4.4f — Update fallback closures in `main.ts`** (`src/main.ts`, L1429-1431)
+  - After Phase A ships (i.e., after A4.1 removes `getOrchestrator()`), update the closure fallbacks:
+    - `() => this.getOrchestrator()?.getEffectiveToolConfig() ?? null` → `() => this.getActiveOrchestrator()?.getEffectiveToolConfig() ?? null`
+    - `() => this.getOrchestrator()?.getConversationManager()?.getActiveConversation() ?? null` → `() => this.getActiveOrchestrator()?.getConversationManager()?.getActiveConversation() ?? null`
+  - These closures now serve only as fallback for non-session contexts
 
 - [ ] **A4.5 — Update inspector view to subscribe to focus changes** (`src/ui/effective-config-inspector.ts`)
   - Amendment A4: Subscribe to `workspace.on('active-leaf-change')`
@@ -318,7 +359,7 @@
   - Existing `this.view?.` guards throughout the orchestrator already handle `undefined`
 
 - [ ] **A7.2 — Add close cleanup infrastructure to `NotorChatView`** (`src/ui/chat-view.ts`)
-  - Add `onCloseCleanup?: () => Promise<void>` field
+  - Add `onCloseCleanup?: () => Promise<void>` field — **must be async**: Obsidian awaits `ItemView.onClose(): Promise<void>` (verified: `node_modules/obsidian/obsidian.d.ts:6445`), so async cleanup completes before the panel tears down
   - Add `setOnCloseCleanup(cb: () => Promise<void>)` setter
 
 - [ ] **A7.3 — Wire close cleanup in `wireView()`** (`src/main.ts`)
@@ -327,11 +368,11 @@
     2. Detaches view: `orchestrator.setView(undefined)`
     3. Cleans up session listener: `view._unregisterSessionsChanged?.()`
     4. Removes from registry: `this._orchestrators.delete(leafId)`
-    5. Awaits `orchestrator.destroy()` (Amendment R2-3 — async + awaited)
+    5. `await orchestrator.destroy()` — awaiting ensures JSONL flush completes before panel teardown (Amendment R2-3)
 
 - [ ] **A7.4 — Update `onClose()`** (`src/ui/chat-view.ts`, L670-698)
   - Make async: `async onClose(): Promise<void>`
-  - At the start: `await this.onCloseCleanup?.()`
+  - At the start: `await this.onCloseCleanup?.()` — Obsidian awaits this, so cleanup is guaranteed complete before DOM teardown
   - After cleanup: `this.clearCallbacks()` (Amendment R2-8 ordering)
   - Keep existing DOM cleanup code after
 
