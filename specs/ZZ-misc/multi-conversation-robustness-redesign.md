@@ -1,6 +1,6 @@
 # Multi-Conversation Robustness Redesign
 
-**Status:** Draft
+**Status:** Draft (v2 — unified view model)
 **Date:** 2026-04-10
 **Prerequisite:** [thread-safe-streaming-multi-panel-design.md](done/thread-safe-streaming-multi-panel-design.md) (all 5 phases implemented)
 
@@ -14,27 +14,34 @@ However, post-implementation edge cases reveal that the **orchestrator ↔ view 
 
 > Had a weird situation arise where the chat history apparently got dropped while continuously just chatting in a single thread. I don't recall changing into another conversation (though I did happen to have a secondary Notor chat panel opened elsewhere, though was not interacting with it at all when this arose). Also, when I ran Cmd + Shift + T to re-open the secondary Notor Chat Panel that I had just then closed, most of the chat history in the primary Notor chat panel (where I was in the middle of an active chat with Notor) flatly disappeared on me. Re-opening the conversation from the Conversation history tab seemed to solve these.
 
-This spec addresses both the **immediate bugs** and the **structural weaknesses** that enable them.
+Investigation reveals that the root cause is the **primary/secondary orchestrator distinction** — the factory must guess which orchestrator to bind a view to before Obsidian's `setState()` fires, then re-wire after the fact. This spec **eliminates that distinction entirely** in favor of a unified view model where every panel gets its own orchestrator from creation. It also addresses fire-and-forget persistence and cross-panel session conflicts.
 
 ### Key Architecture Reference
 
 The multi-panel system is built on these classes (all implemented per the original spec):
 
-- **`ChatOrchestrator`** ([`orchestrator.ts:63`](../../src/chat/orchestrator.ts)) — ~2,976 lines, manages conversations, sessions, and LLM interactions. Each panel (primary + secondary) gets its own instance. Key mutable fields: `conversationManager` (L64, display state), `activeSessions` (L148, `Map<string, ConversationSession>`), `view` (L165, single view pointer), `activeProviderType`/`activeModelId`/`activeUseExtendedContext` (L119/L130/L137, per-orchestrator state).
+- **`ChatOrchestrator`** ([`orchestrator.ts:63`](../../src/chat/orchestrator.ts)) — ~2,976 lines, manages conversations, sessions, and LLM interactions. Each panel gets its own instance. Key mutable fields: `conversationManager` (L64, display state), `activeSessions` (L148, `Map<string, ConversationSession>`), `view` (L165, single view pointer), `activeProviderType`/`activeModelId`/`activeUseExtendedContext` (L119/L130/L137, per-orchestrator state).
 - **`ConversationSession`** ([`conversation-session.ts:41`](../../src/chat/conversation-session.ts)) — 110 lines, isolates all per-conversation state: own `ConversationManager` (L43), pinned persona/provider/model (L53-57), approval callback (L60), abort controller (L44). Created in `handleUserMessage()` at [`orchestrator.ts:1788-1801`](../../src/chat/orchestrator.ts) and `executeWorkflow()` at [`orchestrator.ts:908-921`](../../src/chat/orchestrator.ts).
 - **`ConversationManager`** ([`conversation.ts`](../../src/chat/conversation.ts)) — Tracks `activeConversation` (L34) and `messages[]` (L37). Fire-and-forget persistence callbacks: `onMessageAdded` (L369) and `onConversationChanged` (L370/L130/L156).
 - **`HistoryManager`** ([`history.ts:86`](../../src/chat/history.ts)) — JSONL persistence with per-file write queues (`writeQueues` Map at L93, serialized via `enqueueWrite()` at L127-138). No `flush()` method exists.
-- **`NotorChatView`** ([`chat-view.ts`](../../src/ui/chat-view.ts)) — ~2,953 lines, 24+ callback properties (L173-213). `isSecondary` flag at L171 (default `false`). `getState()`/`setState()` at L711-753 for workspace restore.
+- **`NotorChatView`** ([`chat-view.ts`](../../src/ui/chat-view.ts)) — ~2,953 lines, 27+ callback properties (L240-392). `isSecondary` flag at L171 (default `false`). `getState()`/`setState()` at L711-753 for workspace restore.
 - **`wireView()`** ([`main.ts:1995-2537`](../../src/main.ts)) — 542 lines, binds orchestrator ↔ view. Called from `registerView` factory (L295-308) and `wireViewAsSecondary` (L1697-1716).
+
+### Current Primary/Secondary Model (Being Replaced)
+
+The current multi-panel implementation distinguishes between a "primary" orchestrator (singleton, created eagerly in `getOrchestrator()` at [`main.ts:1585-1627`](../../src/main.ts)) and "secondary" orchestrators (created on-demand, tracked in `_secondaryOrchestrators[]` at [`main.ts:155`](../../src/main.ts)). Secondary orchestrators are **functionally identical** to the primary — `createSecondaryOrchestrator()` at [`main.ts:1640-1687`](../../src/main.ts) constructs the same `ChatOrchestrator` class with the same shared singletons. The only difference is lifecycle tracking and the `isSecondary` flag on the view.
+
+This distinction is the source of the bugs described below.
 
 ---
 
 ## 2. Bug Analysis
 
-### Bug A: Primary Panel History Vanishes on Secondary Panel Restore
+### Bug A: Panel History Vanishes on Secondary Panel Restore
 
 **Severity:** High — active conversation state destroyed
 **Trigger:** Cmd+Shift+T reopens a closed secondary panel
+**Fix:** Section 4 (Unified View Model) — eliminated structurally
 
 **Root cause:** `wireView()` ([`main.ts:1995-2537`](../../src/main.ts)) is called from the `registerView()` factory ([`main.ts:295-308`](../../src/main.ts)) **before** Obsidian calls `setState()` ([`chat-view.ts:727-753`](../../src/ui/chat-view.ts)) on the view. At this point, the view's `isSecondary` flag is `false` (default, [`chat-view.ts:171`](../../src/ui/chat-view.ts)). `wireView()` performs three dangerous operations that should only happen for the primary panel:
 
@@ -106,6 +113,7 @@ The multi-panel system is built on these classes (all implemented per the origin
 
 **Severity:** Medium — data loss on session cleanup or plugin close
 **Trigger:** Session cleanup runs before JSONL writes flush
+**Fix:** Section 5 (Persistence Flush)
 
 **Root cause:** `ConversationManager.addMessage()` ([`conversation.ts:293-373`](../../src/chat/conversation.ts)) fires persistence callbacks with `void` at L369-370:
 
@@ -158,6 +166,7 @@ Plugin unload at [`main.ts:642-679`](../../src/main.ts) calls `orchestrator.dest
 
 **Severity:** Low — display-only, self-healing on re-switch
 **Trigger:** Switching to a conversation with an active session while messages arrive
+**Fix:** None required (see analysis below — the race window cannot occur in practice)
 
 **Root cause:** In `switchConversation()` ([`orchestrator.ts:560-675`](../../src/chat/orchestrator.ts)), the sync-back path (L575-628) handles the case where the target conversation has an active session:
 
@@ -182,12 +191,13 @@ If the response loop (`responseLoop()` at [`orchestrator.ts:1855`](../../src/cha
 
 After the re-render, `getViewForSession(session)` ([`orchestrator.ts:402-405`](../../src/chat/orchestrator.ts)) will return `this.view` (since the display manager's conversation ID now matches the session), so subsequent messages from the response loop WILL render. The missed message is the one that fell into the gap.
 
-This is a narrow race window (single JS event loop — the response loop yields at `for await` boundaries in `processStream()`), but it's possible if a message was enqueued as a pending microtask just before the snapshot.
+This appears to be a narrow race window. However, the snapshot at L578 and the render loop at L586-589 are in the same synchronous execution block with no `await` between them. Microtasks cannot interrupt synchronous JavaScript execution. Therefore, no messages can arrive between the snapshot and the render — the race window is theoretical, not practical. No fix is needed.
 
 ### Bug D: Cross-Orchestrator Same-Conversation Conflict
 
 **Severity:** Medium — potential JSONL corruption and state divergence
 **Trigger:** Two panels send messages to the same conversation simultaneously
+**Fix:** Section 6 (Registry-Based Session Guard)
 
 **Root cause:** The duplicate-send guard at [`orchestrator.ts:1614-1617`](../../src/chat/orchestrator.ts) is per-orchestrator:
 
@@ -216,7 +226,7 @@ If the user sends a message in both panels:
 
 ## 3. Structural Weaknesses
 
-These are not bugs per se, but architectural properties that make bugs like the above easy to create and hard to prevent.
+These are not bugs per se, but architectural properties that make bugs like the above easy to create and hard to prevent. All five weaknesses trace back to the primary/secondary orchestrator distinction. The unified view model (Section 4) eliminates W1, W3, W4, and W5 structurally, and Section 5 addresses W2.
 
 ### W1: `wireView()` is a 542-line All-or-Nothing Operation
 
@@ -297,232 +307,330 @@ Problems:
 
 ---
 
-## 4. Design: Two-Phase View Wiring
+## 4. Design: Unified View Model
 
-**Goal:** Split `wireView()` so that identity-dependent operations only run after the view's primary/secondary status is known.
+**Goal:** Eliminate the primary/secondary orchestrator distinction. Every chat panel gets its own orchestrator from creation — no guessing, no re-wiring, no re-wiring loop.
 
-### 4.1 Phase 1: Callback Wiring (Safe Pre-setState)
+### 4.1 Architectural Change
 
-New method `wireViewCallbacks(view, orchestrator?)`:
-- Sets up all 24+ `setOn*` callback handlers
-- Does NOT call `orchestrator.setView(view)`
-- Does NOT register `onSessionsChanged` listener
-- Does NOT load conversation history
-- Uses the primary orchestrator by default for callback closures — these closures will be rebound if the view turns out to be secondary
+Replace the current model:
 
-Called from `registerView()` factory:
+```
+Plugin
+  ├── _orchestrator (primary singleton)        ◄── special, lives forever
+  ├── _secondaryOrchestrators[]                ◄── separate tracking
+  └── isSecondary flag on each view            ◄── conditional logic everywhere
+```
+
+With a unified model:
+
+```
+Plugin
+  └── _orchestrators: Map<leafId, ChatOrchestrator>    ◄── one per view, all equal
+```
+
+Every view gets its own orchestrator when the `registerView` factory creates it. No orchestrator is "primary" or "secondary" — they are all identical instances sharing the same infrastructure singletons (`HistoryManager`, `ProviderRegistry`, `ToolDispatcher`, etc.).
+
+### 4.2 Orchestrator Registry
+
+Replace `_orchestrator` ([`main.ts:145`](../../src/main.ts)) and `_secondaryOrchestrators` ([`main.ts:155`](../../src/main.ts)) with a single registry:
+
+```typescript
+/**
+ * One orchestrator per open chat panel, keyed by leaf ID.
+ * All orchestrators are equal — no primary/secondary distinction.
+ * Created in registerView factory, removed in onClose cleanup.
+ */
+private _orchestrators = new Map<string, ChatOrchestrator>();
+```
+
+### 4.3 Updated `registerView` Factory
+
+The factory creates an orchestrator per view and wires everything **except** conversation loading (which must wait for `setState()` to know which conversation to restore):
 
 ```typescript
 this.registerView(CHAT_VIEW_TYPE, (leaf) => {
     const view = new NotorChatView(leaf, this);
-    this.wireViewCallbacks(view);  // Phase 1 only
+
+    // Create this view's own orchestrator — always correct, no guessing
+    const orchestrator = this.createOrchestrator();
+    this._orchestrators.set(leaf.id, orchestrator);
+
+    // Wire orchestrator ↔ view + all callbacks (safe — correct orch from the start)
+    this.wireView(view, orchestrator);
+    // wireView NO LONGER loads conversation history (moved to loadConversation below)
+
+    // Deferred conversation loading — setState() wins if it fires, otherwise
+    // the fallback loads the most-recent conversation.
+    // setTimeout (not queueMicrotask) because setState() is async — its
+    // continuation is scheduled as a microtask after `await super.setState()`.
+    // A queueMicrotask would fire BEFORE setState completes, losing saved state.
+    setTimeout(() => {
+        if (!view.isConversationLoaded) {
+            // setState didn't fire (brand-new install, no saved workspace)
+            this.loadConversation(view, orchestrator);
+        }
+    }, 0);
+
     return view;
 });
 ```
 
-### 4.2 Phase 2: Identity Binding (Post-setState)
+**Why `setTimeout` and not `queueMicrotask`:** `setState()` is an `async` method that hits `await super.setState(state, result)` on its first line ([`chat-view.ts:728`](../../src/ui/chat-view.ts)). Even if `super.setState()` resolves immediately, the `await` schedules the continuation as a microtask. A `queueMicrotask` registered in the factory would fire BEFORE setState's continuation (microtask queue is FIFO — factory's microtask was queued first). `setTimeout(fn, 0)` schedules a macrotask, which runs after all microtasks drain, guaranteeing setState wins the race when it fires.
 
-New method `finalizeViewWiring(view, orchestrator?, savedState?)`:
-- Calls `orchestrator.setView(view)`
-- Registers `onSessionsChanged` listener (with cleanup — see Section 4.4)
-- Loads conversation history — **this is the single owner of all conversation loading** (see Section 4.5)
-- Accepts an optional `savedState` parameter containing `conversationId` and/or `conversationFilename` from workspace restore
+### 4.4 Updated `setState()`
 
-Called from two places:
+`setState()` no longer detects secondary panels or re-wires orchestrators. It only loads the correct conversation:
 
-**A. `setState()` in `chat-view.ts`** (workspace restore path):
 ```typescript
-async setState(state, result) {
+async setState(state: unknown, result: ViewStateResult): Promise<void> {
     await super.setState(state, result);
     const s = state as Record<string, unknown> | null;
 
-    if (s?.isSecondary && !this.isSecondary) {
-        // Secondary panel — wireViewAsSecondary handles finalizeViewWiring internally
-        this.plugin.wireViewAsSecondary(this);
-    } else if (!this.isSecondary) {
-        // Primary panel — finalize with primary orchestrator.
-        // Pass the saved state so finalizeViewWiring can load the correct
-        // conversation directly (not the most recent). This replaces the
-        // previous setTimeout-deferred loading that was in setState.
-        this.plugin.finalizeViewWiring(this, undefined, s);
+    // Load the saved conversation. The orchestrator was already correctly
+    // bound in the registerView factory — no re-wiring needed.
+    if (!this.isConversationLoaded) {
+        this.isConversationLoaded = true;
+        const orchestrator = this.plugin.getOrchestratorForView(this);
+        if (orchestrator) {
+            this.plugin.loadConversation(this, orchestrator, s);
+        }
     }
-
-    this.isSecondary = !!s?.isSecondary;
-    // NOTE: The previous setTimeout-deferred conversation loading that was
-    // here (onSwitchConversation / onSwitchToConversationById) has been
-    // removed. All conversation loading is now handled by finalizeViewWiring()
-    // to prevent double-load races. See Section 4.5.
 }
 ```
 
-**Important: `setState` no longer loads conversations.** The existing deferred `setTimeout` blocks at [`chat-view.ts:740-752`](../../src/ui/chat-view.ts) that called `onSwitchConversation` and `onSwitchToConversationById` must be removed. `finalizeViewWiring()` is the single owner of conversation loading for all panels. This prevents the double-load race where `finalizeViewWiring` loads the most-recent conversation and then `setState`'s `setTimeout` overwrites it with the saved conversation ID.
+Add `isConversationLoaded: boolean = false` flag to `NotorChatView`. Set to `true` by both `setState()` and the `setTimeout` fallback. This flag ensures exactly one path loads:
+- If `setState()` fires first: sets `isConversationLoaded = true`, loads the saved conversation. The `setTimeout` fallback finds the flag set and exits.
+- If the `setTimeout` fires first (no `setState` call): sets `isConversationLoaded = true`, loads the most-recent conversation. If `setState()` subsequently fires, it finds the flag set and skips.
 
-**B. Deferred fallback** (initial plugin load — no `setState` called):
+**Important:** The deferred `setTimeout` blocks at [`chat-view.ts:740-752`](../../src/ui/chat-view.ts) that called `onSwitchConversation` and `onSwitchToConversationById` must be **removed**. The new `loadConversation()` method is the single owner of all conversation loading, preventing double-load races.
 
-Obsidian calls `setState()` whenever it restores workspace layout (including on first plugin load if workspace.json has saved state). However, in edge cases (brand-new install, no saved workspace), `setState()` may not fire. Use a microtask fallback as a safety net:
+### 4.5 `loadConversation()` Method
+
+New method on the plugin class — the **single owner of all conversation loading** for all panels:
 
 ```typescript
-// In registerView factory, after wireViewCallbacks:
-queueMicrotask(() => {
-    if (!view.isWiringFinalized) {
-        // setState didn't run — this is a fresh panel with no saved state
-        this.finalizeViewWiring(view);
+/**
+ * Load a conversation into a panel. Determines which conversation to load
+ * from savedState (workspace restore) or falls back to most-recent.
+ *
+ * Called from setState() (workspace restore) and the setTimeout fallback
+ * (fresh install). This is the ONLY place conversation loading happens.
+ */
+loadConversation(
+    view: NotorChatView,
+    orchestrator: ChatOrchestrator,
+    savedState?: Record<string, unknown> | null,
+): void {
+    view.isConversationLoaded = true;
+    const historyManager = this.getHistoryManager();
+    const checkpointManager = this.getCheckpointManager();
+
+    historyManager.listConversations().then((entries) => {
+        view.renderConversationList(entries);
+
+        const savedFilename = savedState?.conversationFilename as string | undefined;
+        const savedId = savedState?.conversationId as string | undefined;
+
+        if (savedFilename) {
+            // "Open in new tab" passes a filename — load it directly
+            orchestrator.switchConversation(savedFilename)
+                .then(() => this.syncViewAfterLoad(view, orchestrator, checkpointManager))
+                .catch(() => orchestrator.newConversation());
+        } else if (savedId) {
+            // Workspace restore passes a conversation ID — resolve and load
+            orchestrator.switchToConversationById(savedId)
+                .then(() => this.syncViewAfterLoad(view, orchestrator, checkpointManager))
+                .catch(() => {
+                    // Conversation may have been deleted — fall back to most recent
+                    if (entries.length > 0) {
+                        orchestrator.switchConversation(entries[0].filename)
+                            .then(() => this.syncViewAfterLoad(view, orchestrator, checkpointManager))
+                            .catch(() => orchestrator.newConversation());
+                    } else {
+                        orchestrator.newConversation();
+                    }
+                });
+        } else if (entries.length === 0) {
+            orchestrator.newConversation()
+                .then(() => this.syncViewAfterLoad(view, orchestrator, checkpointManager));
+        } else {
+            // No saved state — load most recent
+            orchestrator.switchConversation(entries[0].filename)
+                .then(() => this.syncViewAfterLoad(view, orchestrator, checkpointManager))
+                .catch(() => orchestrator.newConversation());
+        }
+    }).catch((e) => {
+        log.error("Failed to load conversation history", { error: String(e) });
+        orchestrator.newConversation().catch(() => {});
+    });
+}
+
+/** Sync view state (conversation ID, checkpoint manager) after conversation load. */
+private syncViewAfterLoad(
+    view: NotorChatView,
+    orchestrator: ChatOrchestrator,
+    checkpointManager: CheckpointManager,
+): void {
+    const conv = orchestrator.getConversationManager().getActiveConversation();
+    if (conv) {
+        checkpointManager.setConversationId(conv.id);
+        view.setActiveConversationId(conv.id);
     }
-});
-```
-
-Add `isWiringFinalized: boolean` flag to `NotorChatView`, set to `true` by `finalizeViewWiring()`.
-
-**Ordering guarantee:** The `isWiringFinalized` flag ensures exactly one path runs:
-- If `setState()` runs first (synchronously after factory return), it calls `finalizeViewWiring()` which sets `isWiringFinalized = true`. The microtask fires later, finds the flag set, and exits.
-- If the microtask runs first (no `setState` call), it calls `finalizeViewWiring()` without `savedState`, loading the most-recent conversation. If `setState()` subsequently fires, it finds `isWiringFinalized = true` and skips finalization.
-- Both paths are idempotent — the flag prevents double-finalization regardless of timing.
-
-### 4.3 Updated `wireViewAsSecondary()`
-
-With two-phase wiring, the primary orchestrator is never mis-wired to a secondary view. The re-wiring loop (W5) is no longer needed:
-
-```typescript
-wireViewAsSecondary(view: NotorChatView): void {
-    view.setIsSecondary(true);
-    const orchestrator = this.createSecondaryOrchestrator();
-    
-    // Rebind callbacks to secondary orchestrator
-    this.wireViewCallbacks(view, orchestrator);
-    
-    // Finalize with secondary orchestrator
-    this.finalizeViewWiring(view, orchestrator);
-    
-    // No loop to find and re-wire primary — it was never mis-wired
 }
 ```
 
-### 4.4 Session-Change Listener Cleanup
+### 4.6 Simplified `wireView()`
 
-Add a field to `NotorChatView`:
+`wireView()` is simplified: it **always** receives the correct orchestrator (created in the factory) and **no longer loads conversation history**. The conversation loading concern is fully extracted to `loadConversation()`.
+
+Changes to the existing `wireView()` at [`main.ts:1995-2537`](../../src/main.ts):
+
+1. **Remove the orchestrator default fallback** (L1996-1998) — orchestrator is now always passed explicitly.
+2. **Keep** all 27+ `setOn*` callback wiring (L2031-2491) — unchanged.
+3. **Keep** `orchestrator.setView(view)` (L2006) — safe now because the orchestrator is always correct.
+4. **Keep** `onSessionsChanged` listener registration (L2017) — but store the unregister function (see Section 4.7).
+5. **Remove** the entire history loading block (L2493-2536) — moved to `loadConversation()`.
+6. **Remove** the `if (view.getIsSecondary()) return` guard (L2495) — no longer needed.
+
+### 4.7 Session-Change Listener Cleanup
+
+Since `wireView()` is now called exactly once per view (at creation in the factory), listener accumulation (W3) cannot occur. However, for defense-in-depth and to support the close lifecycle, store the unregister function:
 
 ```typescript
-/** Unregister function for the onSessionsChanged listener. */
-_unregisterSessionsChanged?: () => void;
-```
-
-In `finalizeViewWiring()`:
-
-```typescript
-// Clean up previous listener before registering new one
+// In wireView():
 view._unregisterSessionsChanged?.();
 view._unregisterSessionsChanged = orchestrator.onSessionsChanged(
     () => view.updateActivityIndicator()
 );
 ```
 
-### 4.5 Conversation Loading in `finalizeViewWiring()`
+Add `_unregisterSessionsChanged?: () => void` to `NotorChatView`.
 
-`finalizeViewWiring()` is the **single owner of all conversation loading** for both primary and secondary panels. This replaces the previous split where `setState()` had its own deferred `setTimeout` loading at [`chat-view.ts:740-752`](../../src/ui/chat-view.ts).
+### 4.8 Eliminated Code
 
-The `savedState` parameter (passed from `setState()` on workspace restore) determines which conversation to load:
+The following code is **deleted** (not refactored — removed entirely):
+
+| Code | Location | Why |
+|------|----------|-----|
+| `_orchestrator` field | [`main.ts:145`](../../src/main.ts) | Replaced by `_orchestrators` Map |
+| `_secondaryOrchestrators` field | [`main.ts:155`](../../src/main.ts) | Replaced by `_orchestrators` Map |
+| `getOrchestrator()` method | [`main.ts:1585-1627`](../../src/main.ts) | Replaced by `getActiveOrchestrator()` and `getOrchestratorForView()` |
+| `createSecondaryOrchestrator()` method | [`main.ts:1640-1687`](../../src/main.ts) | Replaced by `createOrchestrator()` (identical body, no "secondary" concept) |
+| `wireViewAsSecondary()` method | [`main.ts:1697-1716`](../../src/main.ts) | Eliminated — no re-wiring needed |
+| `getPrimaryChatLeaf()` method | [`main.ts:2576-2583`](../../src/main.ts) | Replaced by `getActiveChatLeaf()` (returns focused panel) |
+| `isSecondary` field | [`chat-view.ts:171`](../../src/ui/chat-view.ts) | Eliminated — all panels are equal |
+| `getIsSecondary()` / `setIsSecondary()` | [`chat-view.ts:756-763`](../../src/ui/chat-view.ts) | Eliminated |
+| `isSecondary` detection in `setState()` | [`chat-view.ts:731-735`](../../src/ui/chat-view.ts) | Eliminated — setState only loads conversation |
+| `isSecondary` guard in `wireView()` | [`main.ts:2495`](../../src/main.ts) | Eliminated — history loading moved out entirely |
+| `_personaNameChangeWired` guard | [`main.ts:158`](../../src/main.ts) | Still needed but iterates `_orchestrators.values()` |
+| "open-secondary-chat" command `state: { isSecondary: true }` | [`main.ts:534`](../../src/main.ts) | Simplified — just opens a new leaf (no special state needed) |
+| `isSecondary` in `getState()` | [`chat-view.ts:714`](../../src/ui/chat-view.ts) | Removed from saved state |
+
+### 4.9 `getActiveOrchestrator()` — Command Routing
+
+Commands that previously targeted `getOrchestrator()` (the primary singleton) now route to the focused panel:
 
 ```typescript
-// In finalizeViewWiring(view, orchestrator?, savedState?):
-view.isWiringFinalized = true;
-orchestrator.setView(view);
+/**
+ * Return the orchestrator for the currently focused chat panel,
+ * or any open panel if none is focused, or null if no panels exist.
+ */
+getActiveOrchestrator(): ChatOrchestrator | null {
+    // Prefer the focused chat panel
+    const activeView = this.app.workspace.getActiveViewOfType(NotorChatView);
+    if (activeView) {
+        return this._orchestrators.get(activeView.leaf.id) ?? null;
+    }
+    // Fall back to any open chat panel
+    const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
+    if (leaves.length > 0) {
+        return this._orchestrators.get(leaves[0].id) ?? null;
+    }
+    return null;
+}
 
-// ... onSessionsChanged listener setup (Section 4.4) ...
-
-// Conversation loading — only for primary panels without an active conversation.
-// The !orchestrator.getDisplayedConversation() guard is defense-in-depth:
-// it prevents re-wiring paths from clobbering in-flight state.
-if (!view.getIsSecondary() && !orchestrator.getDisplayedConversation()) {
-    historyManager.listConversations().then((entries) => {
-        view.renderConversationList(entries);
-
-        // Determine target conversation: saved state takes priority over most-recent.
-        // savedState comes from setState() on workspace restore — it contains the
-        // conversationId or conversationFilename that was active when the panel closed.
-        const savedFilename = savedState?.conversationFilename as string | undefined;
-        const savedId = savedState?.conversationId as string | undefined;
-
-        if (savedFilename) {
-            // "Open in new tab" passes a filename — load it directly
-            orchestrator.switchConversation(savedFilename).then(/* ... */).catch(/* fallback to new */);
-        } else if (savedId) {
-            // Workspace restore passes a conversation ID — resolve and load
-            orchestrator.switchToConversationById(savedId).then(/* ... */).catch(/* fallback to most recent */);
-        } else if (entries.length === 0) {
-            orchestrator.newConversation().then(/* ... */);
-        } else {
-            // No saved state — load most recent (default for fresh panels / microtask fallback)
-            orchestrator.switchConversation(entries[0].filename).then(/* ... */);
-        }
-    });
+/** Return the orchestrator for a specific view (used by setState). */
+getOrchestratorForView(view: NotorChatView): ChatOrchestrator | null {
+    return this._orchestrators.get(view.leaf.id) ?? null;
 }
 ```
 
-This design prevents the double-load race that existed when `setState()` and `wireView()` both attempted to load conversations independently.
+This is better UX — workflows, exports, and compaction affect the panel the user is looking at, not a hardcoded "primary" one.
 
-### 4.6 View Close Lifecycle
+**Call sites to update** (all currently call `this.getOrchestrator()`):
 
-**Goal:** Handle panel closure gracefully — especially for secondary panels with active sessions.
+| Call Site | Line | What It Does | Update |
+|-----------|------|-------------|--------|
+| Inspector view | L313 | Sets orchestrator for tool config inspector | Use `getActiveOrchestrator()` or subscribe to focus changes |
+| Manual compaction command | L335 | Triggers compaction | `getActiveOrchestrator()?.manualCompaction()` |
+| Run workflow command | L368 | Executes workflow from command palette | `getActiveOrchestrator()?.executeWorkflow(workflow)` |
+| Active note workflow command | L424 | Executes active-note workflow | `getActiveOrchestrator()?.executeWorkflow(workflow, resolvedPrompt)` |
+| Export conversation | L451 | Exports active conversation | `getActiveOrchestrator()?.getConversationManager()` |
+| Import conversation | L499 | Loads imported conversation | `getActiveOrchestrator()?.switchConversation(filename)` |
+| UseSubAgentTool accessors | L1429-1431 | Gets effective config + active conversation | `getActiveOrchestrator()?.getEffectiveToolConfig()` |
+| Vault event dispatcher | L974 | Runs background workflows from vault events | See Section 4.10 |
+| Settings update | L1218-1219 | Propagates settings changes | Iterate `_orchestrators.values()` |
+| New conversation command | L2612-2615 | Creates new conversation in primary | `getActiveOrchestrator()?.newConversation()` |
 
-**Problem:** `onClose()` at [`chat-view.ts:670-697`](../../src/ui/chat-view.ts) performs basic DOM cleanup but does no orchestrator lifecycle management. When a secondary panel is closed mid-session:
-1. The orchestrator's `this.view` references a destroyed view — renders hit detached DOM
-2. Tool approval callbacks reference destroyed UI — approvals hang forever
-3. The orchestrator leaks in `_secondaryOrchestrators` until plugin unload
+### 4.10 Background Vault-Event Workflows
 
-**Design:** Detach the view immediately but defer orchestrator destruction until active sessions complete. This preserves the user's expectation that in-progress work finishes even after closing the panel.
+The vault event dispatcher at [`main.ts:974`](../../src/main.ts) currently references `this.getOrchestrator()` to execute background workflows triggered by file changes. With the unified model, there may be no focused panel when a vault event fires.
 
-Wire a `setOnCloseCleanup` callback in `finalizeViewWiring()`:
-
-```typescript
-// In finalizeViewWiring():
-view.setOnCloseCleanup(() => {
-    // 1. Detach view — renders become no-ops via existing this.view?. guards
-    orchestrator.setView(undefined);
-
-    // 2. Clean up session-change listener
-    view._unregisterSessionsChanged?.();
-
-    // 3. Check for active sessions
-    const activeSessions = orchestrator.getActiveSessions();
-
-    if (activeSessions.length === 0) {
-        // No active sessions — destroy immediately
-        orchestrator.destroy();
-        this.removeSecondaryOrchestrator(orchestrator);
-        return;
-    }
-
-    // 4. Active sessions exist — let them finish, then destroy.
-    // Auto-approve tool calls when view is detached (the user closed
-    // the panel, implying they trust the remaining work to complete).
-    let remaining = activeSessions.length;
-    for (const session of activeSessions) {
-        const previousOnStatusChange = session.onStatusChange;
-        session.onStatusChange = (s) => {
-            previousOnStatusChange?.(s);
-            if (s.status === "completed" || s.status === "errored" || s.status === "cancelled") {
-                remaining--;
-                if (remaining === 0) {
-                    // All sessions done — safe to destroy
-                    orchestrator.destroy();
-                    this.removeSecondaryOrchestrator(orchestrator);
-                }
-            }
-        };
-    }
-});
-```
-
-In `onClose()` at [`chat-view.ts:670-697`](../../src/ui/chat-view.ts), add at the start:
+**Solution:** Use a lazy accessor that returns any available orchestrator:
 
 ```typescript
-// Notify plugin to handle orchestrator lifecycle
-this.onCloseCleanup?.();
+// In vault event dispatcher deps:
+orchestrator: (() => {
+    // Prefer focused panel, fall back to any open panel
+    const orch = this.getActiveOrchestrator();
+    if (orch) return orch;
+    // No panels open — open one first
+    // (vault-event workflows are user-configured, so opening a panel is expected)
+    return null; // Dispatcher should skip execution if null
+})(),
 ```
 
-**Primary panel close:** When the primary panel is closed while a secondary exists, `orchestrator.setView(undefined)` makes renders no-ops. The primary orchestrator stays alive (it's a singleton). When the primary panel is reopened, `finalizeViewWiring()` restores the view reference via `orchestrator.setView(view)`. The `!orchestrator.getDisplayedConversation()` guard in Section 4.5 allows re-loading only when the orchestrator has no active conversation.
+The vault event dispatcher already handles the "no orchestrator" case gracefully — if the orchestrator is null, the workflow is skipped and a warning is logged. This is acceptable because vault-event workflows require user interaction (configuring the workflow file) and a chat panel to show results.
 
-**Helper method:** Add `removeSecondaryOrchestrator(orch)` to the plugin class that removes from `_secondaryOrchestrators` and unregisters from the global session guard.
+**Alternative (deferred):** Create a headless orchestrator pool for background work that doesn't need a view. This is a larger refactor best done in Phase B (orchestrator decomposition) when session management is extracted from the view-bound orchestrator.
+
+### 4.11 `setView()` Type Update
+
+`setView()` at [`orchestrator.ts:196-198`](../../src/chat/orchestrator.ts) must accept `undefined` for the close lifecycle (Section 7):
+
+```typescript
+setView(view: NotorChatView | undefined): void {
+    this.view = view;
+}
+```
+
+### 4.12 Settings Propagation Fix
+
+Settings updates at [`main.ts:1218-1219`](../../src/main.ts) currently only update the primary orchestrator. This is a **pre-existing bug** — secondary orchestrators don't receive settings updates. Fix by iterating all orchestrators:
+
+```typescript
+for (const orch of this._orchestrators.values()) {
+    orch.updateSettings(this.settings);
+}
+```
+
+### 4.13 Updated `getState()` / Workspace Restore
+
+`getState()` at [`chat-view.ts:711-716`](../../src/ui/chat-view.ts) no longer saves `isSecondary`:
+
+```typescript
+getState(): Record<string, unknown> {
+    return {
+        conversationId: this.activeConversationId,
+        // isSecondary removed — all panels are equal
+    };
+}
+```
+
+On workspace restore, Obsidian recreates each leaf and calls `setState()` with the saved state. Each recreated view gets its own orchestrator from the factory, then `setState()` loads the saved `conversationId`. No special handling needed.
+
+The "Open in new tab" command at [`main.ts:2213-2222`](../../src/main.ts) still passes `conversationFilename` via `setViewState()` state — this is handled by `loadConversation()` (Section 4.5).
 
 ---
 
@@ -530,7 +638,7 @@ this.onCloseCleanup?.();
 
 **Goal:** Ensure all JSONL writes complete before session cleanup and plugin unload.
 
-### 5.1 `HistoryManager.flush()` and `flushFile()`
+### 5.1 `HistoryManager.flush()` and `flushConversation()`
 
 Add two public methods to [`history.ts`](../../src/chat/history.ts):
 
@@ -556,13 +664,14 @@ async flush(): Promise<void> {
  * avoiding cross-conversation blocking where a slow write for conversation Y
  * would delay cleanup of conversation X.
  *
- * @param conversationId - The conversation ID whose JSONL writes to drain.
- *   Resolves to the file path via the same logic as appendMessage().
+ * @param conversation - The conversation whose JSONL writes to drain.
+ *   The conversation object is required (not just the ID) because the
+ *   filename encodes both `created_at` and `id`. The writeQueues Map is
+ *   keyed by file path, so we need the full conversation to resolve the path.
  */
-async flushFile(conversationId: string): Promise<void> {
-    // Resolve the JSONL file path for this conversation.
-    // The writeQueues Map is keyed by file path, not conversation ID.
-    const filePath = this.getConversationFilePath(conversationId);
+async flushConversation(conversation: Conversation): Promise<void> {
+    const filename = this.getFilename(conversation);
+    const filePath = this.getFilePath(filename);
     const pending = this.writeQueues.get(filePath);
     if (pending) {
         await pending;
@@ -570,11 +679,11 @@ async flushFile(conversationId: string): Promise<void> {
 }
 ```
 
-**Note:** `getConversationFilePath()` must be extracted or exposed from the existing path-resolution logic used by `appendMessage()` at [`history.ts:176-199`](../../src/chat/history.ts).
+**Note on API design:** The earlier draft proposed `flushFile(conversationId: string)`, but the filename is derived from both `created_at` and `id` ([`history.ts:783-791`](../../src/chat/history.ts)). A conversation ID alone cannot resolve to a file path. The session cleanup has access to the full `Conversation` object via `session.conversationManager.getActiveConversation()`, so accepting the full object is natural.
 
 ### 5.2 Flush Before Session Deletion
 
-In session cleanup finally blocks ([`orchestrator.ts:1828-1835`](../../src/chat/orchestrator.ts) for `handleUserMessage`, and the equivalent block in `executeWorkflow`):
+In session cleanup finally blocks ([`orchestrator.ts:1828-1835`](../../src/chat/orchestrator.ts) for `handleUserMessage`, and the equivalent block in `executeWorkflow` at [`orchestrator.ts:942-953`](../../src/chat/orchestrator.ts)):
 
 ```typescript
 finally {
@@ -582,34 +691,48 @@ finally {
         session.setStatus("completed");
     }
     // Drain pending JSONL writes for THIS conversation before removing the session.
-    // Uses flushFile() (not flush()) to avoid blocking on unrelated conversations.
-    // The sync-back path in switchConversation() checks activeSessions
-    // to decide whether to use session state or JSONL — if we delete
-    // the session before writes flush, sync-back falls through to
-    // JSONL which may be incomplete.
+    // The sync-back path in switchConversation() checks activeSessions to decide
+    // whether to use session state or JSONL — if we delete the session before writes
+    // flush, sync-back falls through to JSONL which may be incomplete.
     try {
-        await this.historyManager.flushFile(session.conversationId);
+        const conv = session.conversationManager.getActiveConversation();
+        if (conv) {
+            await this.historyManager.flushConversation(conv);
+        }
     } catch {
         // Best-effort — don't block session cleanup on write errors
     }
-    this.globalSessionGuard.unregister(session.conversationId);
+    // Deactivate workflow hook overrides (if this was a workflow session)
+    if (session.workflowAssembly && this.workflowHookOverrideManager) {
+        this.workflowHookOverrideManager.deactivate(session.conversationId);
+    }
+    this.sessionGuard.unregister(session.conversationId);
     this.activeSessions.delete(session.conversationId);
     this.notifySessionsChanged();
     this.getViewForSession(session)?.setRespondingState(false);
 }
 ```
 
+**Note:** Workflow hook deactivation (`workflowHookOverrideManager.deactivate()`) is included here because `destroy()` may win the timeout race against the finally block, leaving hook overrides active. Having it in both the finally block and `destroy()` (see below) ensures cleanup regardless of which path runs.
+
 ### 5.3 Flush in `destroy()`
 
-Extend [`orchestrator.ts:434-454`](../../src/chat/orchestrator.ts) to also flush after awaiting response promises:
+Extend [`orchestrator.ts:434-454`](../../src/chat/orchestrator.ts):
 
 ```typescript
 async destroy(timeoutMs: number = 2000): Promise<void> {
     // ... existing session abort + await logic ...
 
+    // Deactivate workflow hook overrides for all active sessions.
+    // This runs regardless of whether the finally blocks completed
+    // (destroy may have won the timeout race).
+    for (const session of this.activeSessions.values()) {
+        if (session.workflowAssembly && this.workflowHookOverrideManager) {
+            this.workflowHookOverrideManager.deactivate(session.conversationId);
+        }
+    }
+
     // Flush any writes that may have been enqueued in finally blocks.
-    // Uses global flush() here (not flushFile) because destroy() tears
-    // down the entire orchestrator — draining all writes is correct.
     try {
         await Promise.race([
             this.historyManager.flush(),
@@ -623,7 +746,7 @@ async destroy(timeoutMs: number = 2000): Promise<void> {
     // clearing the map. Without this, destroyed orchestrators leave
     // phantom entries that permanently block those conversations.
     for (const id of this.activeSessions.keys()) {
-        this.globalSessionGuard.unregister(id);
+        this.sessionGuard.unregister(id);
     }
 
     this.activeSessions.clear();
@@ -634,96 +757,61 @@ async destroy(timeoutMs: number = 2000): Promise<void> {
 
 ---
 
-## 6. Design: Sync-Back Delta Check
-
-**Goal:** Close the narrow race window where messages arrive between the sync-back snapshot and re-render.
-
-After the sync-back render loop in [`orchestrator.ts:586-589`](../../src/chat/orchestrator.ts):
-
-```typescript
-// Existing: snapshot and render
-const sessionMessages = activeSession.conversationManager.getMessages();
-this.conversationManager.loadConversation(sessionConv, sessionMessages, { silent: true });
-this.view?.clearMessages();
-for (const msg of sessionMessages) {
-    this.renderMessage(msg);
-}
-
-// NEW: catch messages that arrived during re-render
-const postRenderMessages = activeSession.conversationManager.getMessages();
-if (postRenderMessages.length > sessionMessages.length) {
-    for (const msg of postRenderMessages.slice(sessionMessages.length)) {
-        this.renderMessage(msg);
-    }
-    // Update display manager with the complete set
-    this.conversationManager.loadConversation(
-        activeSession.conversationManager.getActiveConversation()!,
-        postRenderMessages,
-        { silent: true }
-    );
-}
-```
-
-This is safe because:
-- `getMessages()` returns a copy (`[...this.messages]`)
-- The response loop yields at `for await` boundaries, so during synchronous re-rendering no new messages can arrive
-
-**Note on rationale:** The snapshot at L578 and the render loop at L586-589 are in the same synchronous execution block with no `await` between them. Microtasks cannot interrupt synchronous JavaScript execution. Therefore, in the current code structure, the delta check has zero practical value — no messages can arrive between the snapshot and the render.
-
-However, this check is retained as **defense-in-depth** against future code changes that might introduce an `await` between the snapshot and the render (e.g., an async render pipeline). The cost is negligible (one array length comparison) and it makes the sync-back path robust to refactoring.
-
----
-
-## 7. Design: Global Active-Session Guard
+## 6. Design: Registry-Based Session Guard
 
 **Goal:** Prevent two orchestrators from creating sessions for the same conversation.
 
-### 7.1 Shared Guard in Plugin
+### 6.1 The Guard IS the Registry
 
-Add to [`main.ts`](../../src/main.ts):
+With the unified model, the plugin already tracks all orchestrators in `_orchestrators`. The session guard is a simple `Set<string>` on the plugin, exposed to orchestrators as an interface:
 
 ```typescript
+// In plugin class:
+
 /**
  * Global set of conversation IDs with active sessions across ALL orchestrators.
  * Prevents two panels from creating sessions for the same conversation,
  * which would cause divergent in-memory state and interleaved JSONL writes.
  */
-private _globalActiveConversationIds = new Set<string>();
+private _activeConversationSessions = new Set<string>();
+
+private _sessionGuard: SessionGuard = {
+    isActive: (id) => this._activeConversationSessions.has(id),
+    register: (id) => { this._activeConversationSessions.add(id); },
+    unregister: (id) => { this._activeConversationSessions.delete(id); },
+};
 ```
 
-### 7.2 Guard Interface
+### 6.2 Guard Interface
 
 ```typescript
-interface GlobalSessionGuard {
+interface SessionGuard {
     isActive(conversationId: string): boolean;
     register(conversationId: string): void;
     unregister(conversationId: string): void;
 }
 ```
 
-Injected into each orchestrator (primary + secondary) as a **required constructor parameter**:
+Passed to each orchestrator via `createOrchestrator()`. Making it a required constructor parameter ensures it cannot be accidentally omitted:
 
 ```typescript
 // In ChatOrchestrator constructor:
 constructor(
-    // ... existing params ...
-    private readonly globalSessionGuard: GlobalSessionGuard,
+    private readonly app: App,
+    private readonly providerRegistry: ProviderRegistry,
+    private readonly systemPromptBuilder: SystemPromptBuilder,
+    private readonly dispatcher: ToolDispatcher,
+    private readonly historyManager: HistoryManager,
+    private settings: NotorSettings,
+    private readonly sessionGuard: SessionGuard,    // NEW — required, before optional params
+    private view?: NotorChatView,
+    private readonly vaultRuleManager?: VaultRuleManager
 ) { /* ... */ }
-
-// In main.ts — create the guard once, pass to all orchestrators:
-private _globalSessionGuard: GlobalSessionGuard = {
-    isActive: (id) => this._globalActiveConversationIds.has(id),
-    register: (id) => this._globalActiveConversationIds.add(id),
-    unregister: (id) => this._globalActiveConversationIds.delete(id),
-};
-
-// In getOrchestrator() and createSecondaryOrchestrator():
-new ChatOrchestrator(/* ... */, this._globalSessionGuard);
 ```
 
-Making this a constructor parameter (not a setter) ensures the guard cannot be accidentally omitted. Optional chaining is not used — the guard is always present.
+**Note:** The guard is placed before the optional `view` and `vaultRuleManager` parameters to satisfy TypeScript's requirement that required parameters precede optional ones.
 
-### 7.3 Check Before Session Creation
+### 6.3 Check Before Session Creation
 
 In `handleUserMessage()` and `executeWorkflow()`, before creating a session:
 
@@ -734,27 +822,102 @@ if (this.activeSessions.has(conv.id)) {
     return;
 }
 
-// NEW: cross-orchestrator guard (non-optional — constructor-injected)
-if (this.globalSessionGuard.isActive(conv.id)) {
+// Cross-orchestrator guard
+if (this.sessionGuard.isActive(conv.id)) {
     new Notice("This conversation is being processed in another panel.");
     return;
 }
 
 // Register globally before creating session
-this.globalSessionGuard.register(conv.id);
+this.sessionGuard.register(conv.id);
 ```
 
-In session cleanup finally blocks (already shown in Section 5.2):
+### 6.4 Unregister on Session Cleanup
+
+In session cleanup finally blocks (shown in Section 5.2):
 
 ```typescript
-this.globalSessionGuard.unregister(session.conversationId);
+this.sessionGuard.unregister(session.conversationId);
+this.activeSessions.delete(session.conversationId);
 ```
+
+In `destroy()` (shown in Section 5.3), unregister all before clearing:
+
+```typescript
+for (const id of this.activeSessions.keys()) {
+    this.sessionGuard.unregister(id);
+}
+this.activeSessions.clear();
+```
+
+---
+
+## 7. Design: View Close Lifecycle
+
+**Goal:** Handle panel closure gracefully — detach the view, drain sessions, then destroy the orchestrator.
+
+### 7.1 Problem
+
+`onClose()` at [`chat-view.ts:670-697`](../../src/ui/chat-view.ts) performs DOM cleanup but no orchestrator lifecycle management. When a panel is closed mid-session:
+1. The orchestrator's `this.view` references a destroyed view — renders hit detached DOM
+2. Tool approval callbacks reference destroyed UI — approvals hang forever
+3. The orchestrator leaks in `_orchestrators` until plugin unload
+
+### 7.2 Close Cleanup Callback
+
+Wire a `setOnCloseCleanup` callback during `wireView()`:
+
+```typescript
+// In wireView():
+view.setOnCloseCleanup(() => {
+    const leafId = view.leaf.id;
+
+    // 1. Detach view — renders become no-ops via existing this.view?. guards
+    orchestrator.setView(undefined);
+
+    // 2. Clean up session-change listener
+    view._unregisterSessionsChanged?.();
+
+    // 3. Remove from registry
+    this._orchestrators.delete(leafId);
+
+    // 4. Check for active sessions
+    const activeSessions = orchestrator.getActiveSessions();
+
+    if (activeSessions.length === 0) {
+        // No active sessions — destroy immediately
+        orchestrator.destroy();
+        return;
+    }
+
+    // 5. Active sessions exist — abort them.
+    // Closing a panel does NOT imply consent for unreviewed tool execution.
+    // Abort is the safe default; the user can re-run if needed.
+    orchestrator.destroy();
+});
+```
+
+In `onClose()` at [`chat-view.ts:670-697`](../../src/ui/chat-view.ts), add at the start:
+
+```typescript
+this.onCloseCleanup?.();
+```
+
+Add `onCloseCleanup?: () => void` field and `setOnCloseCleanup(cb)` setter to `NotorChatView`.
+
+**Why abort (not auto-approve):** The previous design proposed auto-approving tool calls when a panel closes. This is unsafe — closing a panel does not signal consent for unreviewed file writes, command execution, or other destructive tools. Aborting sessions on close is the safe default. The `destroy()` method already handles abort + await with a 2s timeout and JSONL flush (Section 5.3), so in-flight messages are persisted before cleanup.
+
+### 7.3 Panel Reopen
+
+When a panel reopens (user opens a new chat leaf), the `registerView` factory creates a fresh orchestrator. The `setState()` / `setTimeout` fallback loads the saved conversation from JSONL. Since `destroy()` flushed pending writes (Section 5.3), the JSONL is complete.
+
+If the orchestrator had an active displayed conversation when the panel closed (i.e., the user was viewing Conv_A), that state was in-memory only. On reopen, the conversation is loaded from JSONL, which is the correct behavior — the persistence flush ensures nothing is lost.
 
 ---
 
 ## 8. Architectural Improvements (Medium-Term)
 
-These are not required for the immediate bug fixes but would make the multi-conversation system significantly more robust.
+These are not required for the immediate bug fixes but would make the multi-conversation system significantly more robust. The unified view model makes these easier because each orchestrator is a self-contained unit.
 
 ### 8.1 Decompose Orchestrator into Focused Classes
 
@@ -763,21 +926,13 @@ The `ChatOrchestrator` ([`orchestrator.ts:63`](../../src/chat/orchestrator.ts)) 
 | New Class | Responsibility | Extracted Methods | Extracted Fields |
 |-----------|---------------|-------------------|-----------------|
 | `ConversationLifecycleManager` | Create, switch, fork, load conversations | `newConversation()` (L467-513), `switchConversation()` (L560-675), `forkConversation()` (L525-552), `switchToConversationById()` (L677-700) | `conversationManager` (L64), `workflowPreviousPersona` (L90) |
-| `SessionManager` | Session creation, registry, cleanup, global guard | Session setup from `handleUserMessage()` (L1729-1804), `executeWorkflow()` (L860-924), `destroy()` (L434-454) | `activeSessions` (L148), `sessionChangeCallbacks` (L156) |
+| `SessionManager` | Session creation, registry, cleanup, session guard | Session setup from `handleUserMessage()` (L1729-1804), `executeWorkflow()` (L860-924), `destroy()` (L434-454) | `activeSessions` (L148), `sessionChangeCallbacks` (L156) |
 | `ViewRouter` | Route renders to correct panel, manage view binding | `setView()` (L196-198), `getViewForSession()` (L402-405), `renderMessage()`, `updateDisplayConfig()` (L1575-1579) | `view` (L165), `effectiveToolConfig` (L107), `activeParsedConfigs` (L99) |
 | `ConfigResolver` | Resolve effective tool config per iteration | `resolveEffectiveConfig()` (L1508-1567) | None — already pure (returns result, no mutations) |
 
-The `ChatOrchestrator` becomes a thin facade delegating to these classes. The `responseLoop()` (L1855-2210) stays on the orchestrator (it coordinates across all managers) but reads state through the focused classes.
+**Benefit:** Each class is independently testable. The unified view model means there's no "primary orchestrator" special casing to complicate extraction boundaries.
 
-**Extraction boundaries based on current field access patterns:**
-
-- `ViewRouter` reads: `this.view`, `this.conversationManager.getActiveConversation()?.id` (for `getViewForSession`). No cross-dependency with `SessionManager`.
-- `SessionManager` reads: `this.historyManager` (for flush), `this.panelApprovalCallback` (for session creation). Notifies `ViewRouter` via callback when sessions change.
-- `ConversationLifecycleManager` reads: `this.conversationManager`, `this.historyManager`, `this.view` (for render). Checks `SessionManager.hasActiveSession()` for sync-back. This is the most coupled — it reads from all other managers.
-
-**Benefit:** Each class is independently testable. View routing bugs are isolated to `ViewRouter`. Session lifecycle bugs are isolated to `SessionManager`. The wiring in `main.ts` becomes clearer because each callback maps to a specific manager.
-
-**Implementation approach:** Incremental extraction — move one responsibility at a time, keeping the `ChatOrchestrator` facade's public API stable. Start with `ViewRouter` (most relevant to Bug A) and `SessionManager` (most relevant to Bugs B and D). `ConfigResolver` is already effectively pure — just needs to be moved to its own file.
+**Implementation approach:** Incremental extraction — move one responsibility at a time, keeping the `ChatOrchestrator` facade's public API stable.
 
 ### 8.2 Centralized State with Change Notifications
 
@@ -809,35 +964,20 @@ class StateStore {
 }
 ```
 
-**Benefit:** Single source of truth per orchestrator. All state mutations go through `update()`, making them traceable. Subscribers (view rendering, activity indicator, inspector) are registered once and automatically updated. Eliminates the need for per-callback `getViewForSession()` guards — the view subscribes to state changes and re-renders when the displayed conversation changes.
+**This is the largest change** and should be deferred until the immediate bugs are fixed. The class decomposition (8.1) is a prerequisite.
 
-**This is the largest change** and should be deferred until the immediate bugs are fixed. The class decomposition (8.1) is a prerequisite — it's much easier to introduce a state store into focused classes than into a 3,000-line monolith.
+### 8.3 Headless Orchestrator Pool
 
-### 8.3 Persistence with Acknowledgment
-
-Replace fire-and-forget persistence with an acknowledged write pattern:
+For background vault-event workflows (Section 4.10), create orchestrators that don't require a view:
 
 ```typescript
-// Instead of:
-void this.onMessageAdded?.(message);
-
-// Use:
-const writePromise = this.onMessageAdded?.(message);
-this.pendingWrites.push(writePromise);
-```
-
-With a drain method:
-
-```typescript
-async drainPendingWrites(): Promise<void> {
-    await Promise.allSettled(this.pendingWrites);
-    this.pendingWrites = [];
+class HeadlessOrchestrator extends ChatOrchestrator {
+    // No view — all render calls are no-ops (view is undefined)
+    // Sessions run to completion; results persisted to JSONL only
 }
 ```
 
-**Benefit:** The ConversationManager itself tracks whether its persistence callbacks have completed. Session cleanup can call `convManager.drainPendingWrites()` instead of relying on `historyManager.flush()` (which flushes ALL writes across all conversations, not just this session's).
-
-**Simpler alternative (recommended for now):** Keep fire-and-forget in `addMessage()` but add `historyManager.flush()` calls at cleanup boundaries (Section 5). The acknowledged pattern is cleaner but requires changing the callback signature from `void | Promise<void>` to `Promise<void>` and propagating that through all callers.
+This cleanly separates "user-facing panels" from "background execution" and eliminates the need for the fallback accessor in Section 4.10.
 
 ---
 
@@ -847,10 +987,10 @@ async drainPendingWrites(): Promise<void> {
 
 | File | Changes | Bug |
 |------|---------|-----|
-| [`src/main.ts`](../../src/main.ts) | Split `wireView()` into `wireViewCallbacks()` + `finalizeViewWiring(view, orch?, savedState?)`, update `registerView` factory (Phase 1 + microtask fallback), update `wireViewAsSecondary()` (remove re-wiring loop), create `GlobalSessionGuard` instance, pass as constructor param, add `removeSecondaryOrchestrator()` helper | A, D |
-| [`src/ui/chat-view.ts`](../../src/ui/chat-view.ts) | Add `isWiringFinalized` flag, add `_unregisterSessionsChanged` field, add `onCloseCleanup` callback field, update `setState()` to pass state to `finalizeViewWiring()` and **remove** deferred `setTimeout` conversation loading (L740-752), update `onClose()` to call cleanup callback | A |
-| [`src/chat/history.ts`](../../src/chat/history.ts) | Add `flush()` method (global), add `flushFile(conversationId)` method (per-file), extract `getConversationFilePath()` helper | B |
-| [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts) | Add `globalSessionGuard` as required constructor parameter, await `flushFile()` in session cleanup finally blocks, unregister from guard in cleanup + `destroy()`, improve `destroy()` with flush + guard cleanup, add sync-back delta check | B, C, D |
+| [`src/main.ts`](../../src/main.ts) | Replace `_orchestrator` + `_secondaryOrchestrators` with `_orchestrators` Map, replace `getOrchestrator()` with `getActiveOrchestrator()` + `getOrchestratorForView()`, replace `createSecondaryOrchestrator()` with `createOrchestrator()`, delete `wireViewAsSecondary()` + `getPrimaryChatLeaf()`, update `registerView` factory (create orch + setTimeout fallback), extract `loadConversation()` from `wireView()`, simplify `wireView()` (remove history loading + isSecondary guard), create `SessionGuard` instance + pass as constructor param, add close cleanup callback in wireView, update `onunload()` to iterate `_orchestrators`, fix settings propagation to iterate all orchestrators, update command routing to `getActiveOrchestrator()`, update persona name change propagation, update vault event dispatcher accessor | A, D |
+| [`src/ui/chat-view.ts`](../../src/ui/chat-view.ts) | Add `isConversationLoaded` flag, add `_unregisterSessionsChanged` field, add `onCloseCleanup` callback field + setter, remove `isSecondary` field + `getIsSecondary()` + `setIsSecondary()`, update `setState()` (remove secondary detection + deferred setTimeout loading, add loadConversation call), update `getState()` (remove `isSecondary`), update `onClose()` (call cleanup callback) | A |
+| [`src/chat/history.ts`](../../src/chat/history.ts) | Add `flush()` method (global), add `flushConversation(conversation)` method (per-file) | B |
+| [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts) | Add `sessionGuard: SessionGuard` as required constructor parameter (before optional params), register/unregister in session creation + cleanup, await `flushConversation()` in session cleanup finally blocks, deactivate workflow hooks in cleanup + `destroy()`, improve `destroy()` with flush + hook cleanup + guard unregister, update `setView()` to accept `undefined` | B, D |
 
 ### Medium-Term (Section 8)
 
@@ -866,11 +1006,49 @@ async drainPendingWrites(): Promise<void> {
 ## 10. Implementation Order
 
 ```
-Phase A: Immediate bug fixes (Sections 4–7)
-  ├── A1: Two-phase view wiring (Section 4) ← fixes Bug A
-  ├── A2: Persistence flush (Section 5)     ← fixes Bug B
-  ├── A3: Sync-back delta check (Section 6) ← fixes Bug C
-  └── A4: Global session guard (Section 7)  ← fixes Bug D
+Phase A: Unified view model + bug fixes (Sections 4–7)
+  ├── A1: Orchestrator registry + factory rewrite (Section 4.1-4.3)
+  │       Replace _orchestrator + _secondaryOrchestrators with _orchestrators Map
+  │       Update registerView factory to create per-view orchestrator
+  │       Add setTimeout fallback for conversation loading
+  │
+  ├── A2: Conversation loading extraction (Section 4.4-4.5)
+  │       Extract loadConversation() from wireView()
+  │       Update setState() — remove secondary detection, add loadConversation call
+  │       Remove deferred setTimeout loading from setState()
+  │       Add isConversationLoaded flag
+  │
+  ├── A3: wireView simplification (Section 4.6-4.7)
+  │       Remove history loading block from wireView()
+  │       Remove isSecondary guard from wireView()
+  │       Remove wireViewAsSecondary() entirely
+  │       Store onSessionsChanged unregister function
+  │
+  ├── A4: Command routing + eliminated code (Section 4.8-4.9)
+  │       Replace getOrchestrator() with getActiveOrchestrator()
+  │       Delete isSecondary flag + getIsSecondary/setIsSecondary
+  │       Update getState() — remove isSecondary
+  │       Delete getPrimaryChatLeaf() → getActiveChatLeaf()
+  │       Fix settings propagation to all orchestrators
+  │       Update vault event dispatcher accessor
+  │
+  ├── A5: Persistence flush (Section 5)
+  │       Add flush() + flushConversation() to HistoryManager
+  │       Await flushConversation() in session cleanup finally blocks
+  │       Add flush to destroy() with timeout
+  │       Add workflow hook deactivation to cleanup + destroy()
+  │
+  ├── A6: Session guard (Section 6)
+  │       Add SessionGuard interface + implementation on plugin
+  │       Add sessionGuard as required constructor param on ChatOrchestrator
+  │       Add cross-orchestrator check before session creation
+  │       Add unregister in session cleanup + destroy()
+  │
+  └── A7: View close lifecycle (Section 7)
+          Add onCloseCleanup callback to NotorChatView
+          Wire cleanup in wireView()
+          Update onClose() to call cleanup
+          Update setView() to accept undefined
 
 Phase B: Orchestrator decomposition (Section 8.1)
   ├── B1: Extract ViewRouter
@@ -881,24 +1059,24 @@ Phase B: Orchestrator decomposition (Section 8.1)
 Phase C: Centralized state (Section 8.2) — optional, depends on B
 ```
 
-Phase A items are independent and can be implemented in any order. A1 is highest priority as it directly addresses the reported bug.
+**Recommended execution order for Phase A:** A1 → A2 → A3 (these three are sequential — each builds on the previous). Then A5, A6, A7 can be done in any order (independent concerns). A4 can be interleaved after A1.
 
-Phase B is incremental — each extraction is a standalone refactor that doesn't change behavior.
-
-Phase C depends on B and is optional — evaluate after B whether the complexity justifies the investment.
+A1 through A3 together fix Bug A (the highest-severity reported bug). A5 fixes Bug B. A6 fixes Bug D. A7 completes the lifecycle robustness.
 
 ---
 
 ## 11. Verification
 
-### Bug A (Two-Phase Wiring)
-1. Open primary panel with active conversation A
-2. Open secondary panel → close it → Cmd+Shift+T to reopen
-3. **Verify:** Primary panel still shows conversation A with full message history
-4. **Verify:** Secondary panel loads independently (empty or restored from state)
+### Bug A (Unified View Model — Sections 4 + 7)
+1. Open a chat panel with active conversation A
+2. Open a second chat panel → close it → Cmd+Shift+T to reopen
+3. **Verify:** First panel still shows conversation A with full message history
+4. **Verify:** Second panel loads independently (restored from saved state or most-recent)
 5. **Verify:** No duplicate `onSessionsChanged` listeners (check via debug logging)
+6. **Verify:** Closing a panel mid-session aborts the session and flushes writes
+7. **Verify:** Reopening after close loads the conversation correctly from JSONL
 
-### Bug B (Persistence Flush)
+### Bug B (Persistence Flush — Section 5)
 1. Send several messages rapidly in a conversation
 2. Close plugin immediately (or kill Obsidian process)
 3. Reopen → load conversation from history
@@ -906,22 +1084,29 @@ Phase C depends on B and is optional — evaluate after B whether the complexity
 5. Start a streaming response → wait for completion → immediately close plugin
 6. Reopen → **Verify:** Complete response in JSONL
 
-### Bug C (Sync-Back Delta)
-1. Start a streaming response that produces tool calls (multi-message)
-2. Switch to a different conversation
-3. Switch back to the streaming conversation
-4. **Verify:** All messages rendered, including any that arrived during the switch
-
-### Bug D (Global Session Guard)
-1. Open same conversation in primary and secondary panels
+### Bug D (Session Guard — Section 6)
+1. Open same conversation in two panels
 2. Send a message in one panel
 3. While streaming, try to send a message in the other panel
 4. **Verify:** Second panel shows "This conversation is being processed in another panel" notice
 5. Wait for first response to complete
 6. **Verify:** Can now send from either panel
 
+### Command Routing
+1. Open two chat panels side by side
+2. Focus panel 2, run "Run workflow" from command palette
+3. **Verify:** Workflow executes in panel 2 (the focused one), not panel 1
+4. Focus panel 1, run "New conversation"
+5. **Verify:** New conversation created in panel 1
+
+### Settings Propagation
+1. Open two chat panels
+2. Change a setting (e.g., switch provider)
+3. **Verify:** Both panels reflect the updated setting
+
 ### Regression
 1. All existing E2E tests pass (`e2e/scripts/session-sync-back-test.ts`, `e2e/scripts/phase4-multi-panel-test.ts`, `e2e/scripts/phase5-open-in-new-tab-test.ts`)
 2. Normal single-panel chat works (new conversation, send messages, switch conversations)
 3. Workflow execution works (foreground + background)
 4. Plugin hot-reload preserves state
+5. Workspace restore with multiple panels restores each panel's conversation correctly
