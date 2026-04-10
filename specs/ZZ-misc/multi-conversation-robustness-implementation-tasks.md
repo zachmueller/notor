@@ -27,7 +27,9 @@
   - Add `_lastFocusedChatLeafId?: string` field (Amendment R2-5)
 
 - [ ] **A1.3 — Register `active-leaf-change` listener** (`src/main.ts`)
-  - In `onload()`, register `this.app.workspace.on('active-leaf-change', ...)` to track `_lastFocusedChatLeafId` when a `NotorChatView` gains focus
+  - In `onload()`, use `this.registerEvent(this.app.workspace.on('active-leaf-change', ...))` to track `_lastFocusedChatLeafId` when a `NotorChatView` gains focus
+  - **Must use `registerEvent`** — raw `workspace.on()` calls are not cleaned up on plugin unload and will leak
+  - There is already a separate `active-leaf-change` listener at L562-572 (for auto-context); add this as a second `registerEvent` call alongside it, not as a replacement
 
 - [ ] **A1.4 — Update `ChatOrchestrator` constructor** (`src/chat/orchestrator.ts`)
   - Add `sessionGuard: SessionGuard` as a required parameter (before the optional `view` and `vaultRuleManager` params)
@@ -48,9 +50,18 @@
 
 - [ ] **A1.6 — Make `CheckpointManager` per-orchestrator** (`src/checkpoints/checkpoint.ts`, `src/main.ts`)
   - Remove singleton `_checkpointManager` field and `getCheckpointManager()` lazy getter from plugin class
-  - Create a new `CheckpointManager` instance inside `createOrchestrator()` for each orchestrator
+  - Create a new `CheckpointManager` instance inside `createOrchestrator()` for each orchestrator; `CheckpointStorage` remains a shared singleton
   - Pass the per-orchestrator checkpoint manager to the orchestrator (add a setter or constructor param)
   - Remove all `checkpointManager.setConversationId()` calls from `wireView()` callbacks (L2142, 2167, 2185, 2251, 2258, 2504, 2517, 2525) — orchestrator manages its own checkpoint manager's conversation scope internally
+
+- [ ] **A1.6b — Wire `checkpointManager.setConversationId()` inside orchestrator** (`src/chat/orchestrator.ts`)
+  - After each conversation transition, call `this.checkpointManager?.setConversationId(conv.id)`:
+    - End of `newConversation()` — after new conversation is created and active
+    - End of `switchConversation()` — after conversation and messages are loaded
+    - End of `switchToConversationById()` — delegates to `switchConversation()`, so covered there
+    - End of `forkConversation()` — after the forked conversation becomes active
+  - This replaces the calls removed from `wireView()` callbacks in A3.9
+  - **⚠ Do not remove A3.9 calls without completing this task first — checkpoints will silently break**
 
 - [ ] **A1.7 — Move `personaManager.restoreFromSettings()` to `onload()`** (`src/main.ts`)
   - Currently called inside `wireView()` (L2061-2068), which runs on every wireView call
@@ -63,6 +74,7 @@
     3. Store in `_orchestrators.set(leaf.id, orchestrator)`
     4. Call `wireView(view, orchestrator)` (callbacks only — no history loading)
     5. Schedule `setTimeout(0)` fallback for conversation loading; store timeout ID on `view._loadFallbackTimeout` (Amendment R2-2)
+       - **The fallback callback must check `if (!view.isConversationLoaded)` before calling `loadConversation()`** — `setState()` fires synchronously after the factory returns and will set `isConversationLoaded = true`; without this guard, every panel open fires a redundant load
   - Remove the old default-to-primary wireView pattern
 
 - [ ] **A1.9 — Add `getActiveOrchestrator()` method** (`src/main.ts`)
@@ -102,11 +114,14 @@
   - Async method (Amendment R2-6 rewrite) that is the single owner of all conversation loading
   - Aborts any in-flight load for this view via `_loadConversationAbort`
   - Creates new `AbortController`, stores on view
-  - Sets `view.isConversationLoaded = true`
+  - Sets `view.isConversationLoaded = true` immediately (prevents duplicate loads from the fallback timer)
+    - **On abort or error: reset `view.isConversationLoaded = false`** in the catch/abort path only — this allows the fallback or a future `setState()` call to retry after failure
+    - The finally block must NOT reset it — a successful load must keep the flag true
   - Lists conversations, renders conversation list on view
   - Determines what to load: `savedFilename` > `savedId` > most-recent > new conversation
   - Passes `{ signal }` to all orchestrator switch/new calls
   - Calls `syncViewAfterLoad()` on success
+  - On failure: show a notice to the user (do not fail silently)
   - See spec Section 4.5 / Amendment R2-6 for full implementation
 
 - [ ] **A2.4 — Implement `syncViewAfterLoad()`** (`src/main.ts`)
@@ -117,6 +132,7 @@
   - Remove secondary panel detection (`isSecondary` checks, `wireViewAsSecondary()` call)
   - Remove deferred `setTimeout` blocks for `onSwitchConversation`/`onSwitchToConversationById`
   - New logic: if `!isConversationLoaded || savedConversationId`, call `plugin.loadConversation(this, orchestrator, savedState)` via `plugin.getOrchestratorForView(this)`
+  - If `plugin.getOrchestratorForView(this)` returns `null`: emit a warning log and return early (indicates a wiring-order bug; the `setTimeout(0)` fallback will still attempt the load)
   - `setState()` overrides fallback loading when it fires later (Amendment A5) — AbortController handles the race
 
 ---
@@ -138,6 +154,7 @@
 
 - [ ] **A3.3 — Remove `setGetToolDefinitions()` from `wireView()`** (`src/main.ts`, L2073-2084)
   - Already moved to `createOrchestrator()` in A1.5 (Amendment R3)
+  - **⚠ Do not remove this call before A1.5 is complete.** The primary orchestrator currently does NOT have `setGetToolDefinitions()` called on it in `getOrchestrator()` — only secondary orchestrators get it. `wireView()` is currently the only path that sets it for the primary. Removing A3.3's call before A1.5 adds it to `createOrchestrator()` will leave the primary orchestrator with no tool definitions.
 
 - [ ] **A3.4 — Remove `personaManager.restoreFromSettings()` from `wireView()`** (`src/main.ts`, L2061-2068)
   - Already moved to `onload()` in A1.7 (Amendment R5)
@@ -156,7 +173,8 @@
   - Amendment R6: Replace `[this._orchestrator, ...this._secondaryOrchestrators].filter(Boolean)` with `[...this._orchestrators.values()]`
 
 - [ ] **A3.8 — Add `clearCallbacks()` method to `NotorChatView`** (`src/ui/chat-view.ts`)
-  - Nulls all 27+ `setOn*` / callback properties to release GC references (Amendment A6)
+  - Nulls all `setOn*` / callback properties to release GC references (Amendment A6)
+  - There are **23 `setOn*` methods and 34 total setter methods** in `chat-view.ts` — audit the complete list before implementing to ensure none are missed (the prior "27+" count was incorrect)
   - Called from `onClose()` after cleanup callback (Amendment R2-8 ordering)
 
 - [ ] **A3.9 — Remove all `checkpointManager.setConversationId()` from wireView callbacks** (`src/main.ts`)
@@ -187,8 +205,9 @@
   - Replace `if (this._orchestrator) { this._orchestrator.updateSettings(...) }` with iteration: `for (const orch of this._orchestrators.values()) { orch.updateSettings(this.settings); }`
   - Also update the settings change handler around L2128-2135
 
-- [ ] **A4.3 — Update vault event dispatcher** (`src/main.ts`, L970-982)
-  - Replace `orchestrator: this.getOrchestrator()` with `orchestrator: this.getActiveOrchestrator()` in `getDispatcherDeps()` (Amendment A7/R8)
+- [ ] **A4.3 — Update vault event dispatcher** (`src/main.ts`, inside `_initVaultEventHooks()`)
+  - `getDispatcherDeps` is a **local `const` closure inside `_initVaultEventHooks()`** (not a class method) — edit it there, not as a plugin method
+  - Replace `orchestrator: this.getOrchestrator()` with `orchestrator: this.getActiveOrchestrator()` inside that closure (Amendment A7/R8)
   - Ensure the dispatcher handles `null` orchestrator gracefully (skip workflow execution)
 
 - [ ] **A4.4 — Wire `UseSubAgentTool` via dispatch context** (`src/main.ts`, L1425-1441; `src/chat/dispatcher.ts`)
@@ -196,6 +215,7 @@
   - The orchestrator passes itself when dispatching tool calls in a session
   - `UseSubAgentTool` reads orchestrator from options to resolve effective tool config and active conversation
   - Keep closure accessors as fallback for non-session contexts
+  - **⚠ Requires a focused design pass before implementation:** determine which interface/type gets `sourceOrchestrator?`, which call sites need updating (session-originated only vs. all), and the exact fallback behavior when the field is absent. Do not implement from current spec text alone.
 
 - [ ] **A4.5 — Update inspector view to subscribe to focus changes** (`src/ui/effective-config-inspector.ts`)
   - Amendment A4: Subscribe to `workspace.on('active-leaf-change')`
@@ -247,8 +267,9 @@
 - [ ] **A5.4 — Await `flushConversation()` in `executeWorkflow()` finally block** (`src/chat/orchestrator.ts`, L942-953)
   - Same pattern as A5.3
 
-- [ ] **A5.5 — Add workflow hook deactivation to both finally blocks** (`src/chat/orchestrator.ts`)
-  - In both `handleUserMessage` and `executeWorkflow` finally blocks, call `workflowHookOverrideManager.deactivate(session.conversationId)` if the session has a `workflowAssembly`
+- [ ] **A5.5 — Add workflow hook deactivation to `handleUserMessage` finally block** (`src/chat/orchestrator.ts`)
+  - In `handleUserMessage`'s finally block, call `workflowHookOverrideManager.deactivate(session.conversationId)` if the session has a `workflowAssembly`
+  - Note: `executeWorkflow()`'s finally block **already has** this call at L942-953 — no change needed there
   - Ensure `deactivate()` is idempotent (Amendment R4) — it may also be called from `destroy()`
 
 - [ ] **A5.6 — Enhance `destroy()` with flush + hook cleanup + guard unregister** (`src/chat/orchestrator.ts`, L434-454)
