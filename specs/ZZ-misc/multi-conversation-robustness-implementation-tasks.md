@@ -54,6 +54,12 @@
   - Pass the per-orchestrator checkpoint manager to the orchestrator (add a setter or constructor param)
   - Remove all `checkpointManager.setConversationId()` calls from `wireView()` callbacks (L2142, 2167, 2185, 2251, 2258, 2504, 2517, 2525) — orchestrator manages its own checkpoint manager's conversation scope internally
 
+- [ ] **A1.6c — Add `getCheckpointManager()` accessor to `ChatOrchestrator` and update `wireView()`** (`src/chat/orchestrator.ts`, `src/main.ts`)
+  - Add a public `getCheckpointManager(): CheckpointManager | undefined` method to `ChatOrchestrator` — returns the per-orchestrator checkpoint manager added in A1.6
+  - In `wireView()`, replace the existing `const checkpointManager = this.getCheckpointManager()` call (L2001) with `const checkpointManager = orchestrator.getCheckpointManager()` — the plugin-level getter no longer exists after A1.6
+  - The three wireView callbacks that use `checkpointManager` (list L2444, restore L2448, getCurrentContent L2452) will then correctly reference the per-orchestrator manager via the new accessor
+  - **⚠ Must be done as part of A1.6** — removing `this.getCheckpointManager()` from the plugin without updating wireView will break the list/restore/getCurrentContent callbacks
+
 - [ ] **A1.6b — Wire `checkpointManager.setConversationId()` inside orchestrator** (`src/chat/orchestrator.ts`)
   - After each conversation transition, call `this.checkpointManager?.setConversationId(conv.id)`:
     - End of `newConversation()` — after new conversation is created and active
@@ -68,6 +74,7 @@
   - Move to `onload()` as a one-time global restore (Amendment R5)
 
 - [ ] **A1.8 — Update `registerView` factory** (`src/main.ts`, L295-308)
+  - **⚠ Requires A2.1 fields first** — A1.8 references `view._loadFallbackTimeout` and `view.isConversationLoaded`, both added by A2.1. Add those two fields to `NotorChatView` before implementing A1.8 (or batch both together).
   - In the factory callback:
     1. Check for stale orchestrator at `leaf.id` and destroy it if found (Amendment R2-7)
     2. Call `createOrchestrator()` to create a new orchestrator for this view
@@ -311,7 +318,7 @@
 - [ ] **A5.5 — Add workflow hook deactivation to `handleUserMessage` finally block** (`src/chat/orchestrator.ts`)
   - In `handleUserMessage`'s finally block, call `workflowHookOverrideManager.deactivate(session.conversationId)` if the session has a `workflowAssembly`
   - Note: `executeWorkflow()`'s finally block **already has** this call at L942-953 — no change needed there
-  - Ensure `deactivate()` is idempotent (Amendment R4) — it may also be called from `destroy()`
+  - Note: `deactivate()` is **already idempotent** (verified: `src/hooks/workflow-hook-override.ts:84` — "Safe to call when no override is active (no-op in that case)"). No changes to `WorkflowHookOverrideManager` are required for Amendment R4.
 
 - [ ] **A5.6 — Enhance `destroy()` with flush + hook cleanup + guard unregister** (`src/chat/orchestrator.ts`, L434-454)
   - After existing session abort + await logic:
