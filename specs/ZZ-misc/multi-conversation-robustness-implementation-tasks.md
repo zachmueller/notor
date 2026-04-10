@@ -457,72 +457,325 @@
 
 ## Phase B: Orchestrator Decomposition (Medium-Term)
 
-**Goal:** Break up the ~2,976-line `ChatOrchestrator` into focused, independently testable classes behind the existing facade.
+**Goal:** Break up the ~2,976-line `ChatOrchestrator` into focused, independently testable classes behind the existing facade. After decomposition, the facade retains `responseLoop()` and `handleUserMessage()` as coordination hubs; all other responsibilities live in extracted classes.
 
 **Prerequisite:** Phase A complete.
 
 **Files:** New files + `src/chat/orchestrator.ts`
 
-### B1: Extract ViewRouter
+**Extraction order:** B7 → B4 → B8 → B6 → B1 → B2 → B3 → B5 (ordered by ascending coupling — pure utilities first, highly-coupled extractions last)
 
-- [ ] **B1.1 — Create `src/chat/view-router.ts`**
-  - Extract view routing responsibility: `setView()`, `getViewForSession()`, `renderMessage()`, `updateDisplayConfig()`
-  - Extract fields: `view` (L165), `effectiveToolConfig` (L107), `activeParsedConfigs` (L99)
+### Architectural Principles
 
-- [ ] **B1.2 — Wire ViewRouter into orchestrator**
-  - Orchestrator delegates view-related calls to ViewRouter
-  - Public API of ChatOrchestrator remains stable
+1. **Facade stability:** `ChatOrchestrator`'s public API remains unchanged throughout Phase B. All extractions are internal refactors. External callers (plugin class, wireView callbacks) are not modified.
+2. **Dependency direction:** Extracted classes depend on shared infrastructure singletons (HistoryManager, ProviderRegistry, etc.) and on each other via constructor-injected interfaces or callbacks — never via back-references to the orchestrator facade.
+3. **Straddling methods are split:** Methods that cross extraction boundaries are decomposed. The "owner" class holds the primary logic; it calls into other extracted classes via injected references. The facade delegates to the owner.
+4. **What stays on the facade:** `responseLoop()` (L1855-2238) and `handleUserMessage()` (L1601-1836) remain on the orchestrator. `responseLoop()` is the core coordination hub calling into ViewRouter, ConfigResolver, CompactionManager, MessagePipeline, HookDispatcher, and the external tool dispatch chain. `handleUserMessage()` is 80% user-input pre-processing and 20% coordination — its logic doesn't recur elsewhere.
 
-### B2: Extract SessionManager
+---
 
-- [ ] **B2.1 — Create `src/chat/session-manager.ts`**
-  - Extract session lifecycle: session creation from `handleUserMessage()` (L1729-1804) and `executeWorkflow()` (L860-924), `destroy()` (L434-454)
-  - Extract fields: `activeSessions` (L148), `sessionChangeCallbacks` (L156)
-  - Include `SessionGuard` integration
+### B7: Extract MessagePipeline (pure utilities, no dependencies)
 
-- [ ] **B2.2 — Wire SessionManager into orchestrator**
-  - Orchestrator delegates session operations to SessionManager
-  - Public API of ChatOrchestrator remains stable
+**~310 lines.** These are pure transformations with no orchestrator state access — the cleanest extraction.
 
-### B3: Extract ConversationLifecycleManager
+- [ ] **B7.1 — Create `src/chat/message-pipeline.ts`**
+  - Extract `toChatMessages(messages: Message[], systemPrompt: string): ChatMessage[]` (L2606-2827) — 100% pure function. Handles role mapping, tool call coalescing, synthetic result injection, orphaned tool_call repair. No orchestrator fields accessed.
+  - Extract `processStream(stream, abortController, eagerContentEl?, viewResolver?): Promise<StreamResult>` (L2487-2578) — transforms stream events into typed `StreamResult`. View rendering is done via the `viewResolver` callback parameter (already parameterized). No orchestrator state access.
+  - Both functions become module-level exports (no class needed — they're stateless)
 
-- [ ] **B3.1 — Create `src/chat/conversation-lifecycle.ts`**
-  - Extract conversation CRUD: `newConversation()` (L467-513), `switchConversation()` (L560-675), `forkConversation()` (L525-552), `switchToConversationById()` (L677-700)
-  - Extract fields: `conversationManager` (L64), `workflowPreviousPersona` (L90)
+- [ ] **B7.2 — Update orchestrator to import from message-pipeline**
+  - Replace `this.toChatMessages(...)` calls in `responseLoop()` with imported `toChatMessages(...)`
+  - Replace `this.processStream(...)` calls in `responseLoop()` with imported `processStream(...)`
+  - Also update `_backgroundResponseLoop()`'s call to `this._bgToChatMessages()` (L1457-1462) — this is a thin wrapper around `toChatMessages()` and can be inlined at the call site using the imported function
+  - Delete the private methods from `ChatOrchestrator`
 
-- [ ] **B3.2 — Wire ConversationLifecycleManager into orchestrator**
-  - Orchestrator delegates conversation operations to lifecycle manager
-  - Public API of ChatOrchestrator remains stable
+---
 
-### B4: Extract ConfigResolver
+### B4: Extract ConfigResolver (mostly pure, minimal deps)
+
+**~150 lines.** Returns a result object — no mutations to orchestrator state.
 
 - [ ] **B4.1 — Create `src/chat/config-resolver.ts`**
-  - Extract `resolveEffectiveConfig()` (L1508-1567)
-  - Already pure (returns result, no mutations) — cleanest extraction
+  - Create `ConfigResolver` class with constructor:
+    ```typescript
+    constructor(
+      private readonly systemPromptBuilder: SystemPromptBuilder,
+      private readonly settings: NotorSettings,       // updated via setter
+      private readonly dispatcher: ToolDispatcher,
+      private getToolDefinitions?: (config?: EffectiveToolConfig) => ToolDefinition[],
+    )
+    ```
+  - Extract `resolveEffectiveConfig(matchedRules?, workflowAssembly?, activePersona?): Promise<{effective, toolDefinitions, parsedConfigs}>` (L1508-1567)
+  - Extract `updateDisplayConfig(effective, parsedConfigs): void` — but this mutates `effectiveToolConfig` and `activeParsedConfigs` fields. These fields move to ConfigResolver since they are display-only copies of the last resolved config.
+  - Add `getEffectiveToolConfig(): EffectiveToolConfig | null` and `getActiveParsedConfigs(): ParsedToolConfig[]` accessors (currently on orchestrator at L323, L332)
+  - Add `updateSettings(settings: NotorSettings)` setter for settings propagation
 
 - [ ] **B4.2 — Wire ConfigResolver into orchestrator**
-  - Orchestrator delegates config resolution
-  - Public API of ChatOrchestrator remains stable
+  - Create ConfigResolver in orchestrator constructor, passing shared singletons
+  - Delegate `resolveEffectiveConfig()`, `getEffectiveToolConfig()`, `getActiveParsedConfigs()` calls
+  - `responseLoop()` calls `this.configResolver.resolveEffectiveConfig()` + `this.configResolver.updateDisplayConfig()`
+  - `ToolSessionContext.getEffectiveToolConfig()` delegates to `this.configResolver`
+  - Delete extracted methods and fields from `ChatOrchestrator`
+
+---
+
+### B8: Extract HookDispatcher (consolidates scattered dispatch sites)
+
+**~50 lines of method bodies, but simplifies 4 inline dispatch sites in responseLoop.**
+
+- [ ] **B8.1 — Create `src/chat/hook-dispatcher.ts`**
+  - Create `HookDispatcher` class with constructor:
+    ```typescript
+    constructor(
+      private settings: NotorSettings,                          // updated via setter
+      private workflowHookOverrideManager?: WorkflowHookOverrideManager,
+      private extensionLifecycleAccessors?: LifecycleAutomationAccessors,
+      private extensionToolEventAccessors?: ToolEventAutomationAccessors,
+    )
+    ```
+  - Extract `dispatchAfterCompletionHooks(conversationId?: string)` (L2248-2263)
+  - Add unified dispatch methods that consolidate the inline patterns:
+    - `dispatchPreSend(context: HookContext): Promise<HookInjection[]>` — wraps L1664-1673 pattern
+    - `dispatchToolCall(context: ToolCallHookContext): void` — wraps L2042-2053 pattern
+    - `dispatchToolResult(context: ToolResultHookContext): void` — wraps L2163-2176 pattern
+    - `dispatchAfterCompletion(context: HookContext): void` — wraps L2252-2261
+  - Add `updateSettings(settings)` setter
+  - Note: The imported functions `dispatchPreSend()`, `dispatchOnToolCall()`, `dispatchOnToolResult()`, `dispatchAfterCompletion()` from `../hooks/` remain as the actual implementations — HookDispatcher is a facade over them that bundles the common parameters (settings, overrideManager, extensionAccessors)
+
+- [ ] **B8.2 — Wire HookDispatcher into orchestrator**
+  - Create HookDispatcher in orchestrator constructor
+  - Replace 4 inline dispatch call sites in `responseLoop()` with `this.hookDispatcher.dispatchX(...)` calls
+  - Replace `dispatchPreSend()` call in `handleUserMessage()` (L1664-1673) with `this.hookDispatcher.dispatchPreSend(...)`
+  - Replace `dispatchAfterCompletionHooks()` private method (L2248-2263) with delegation
+  - Also replace hook dispatch calls in `_backgroundResponseLoop()` (L1367-1397)
+  - Delete extracted private method from `ChatOrchestrator`
+
+---
+
+### B6: Extract CompactionManager (moderate coupling, view callbacks)
+
+**~200 lines.** Uses ConversationManager, HistoryManager, ProviderRegistry, and view (for UI indicators only).
+
+- [ ] **B6.1 — Create `src/chat/compaction-manager.ts`**
+  - Create `CompactionManager` class with constructor:
+    ```typescript
+    constructor(
+      private readonly historyManager: HistoryManager,
+      private readonly providerRegistry: ProviderRegistry,
+      private settings: NotorSettings,                          // updated via setter
+    )
+    ```
+  - Extract `checkAndPerformCompaction(session?, convManager?, modelId?, useExtended?, viewAccessor?): Promise<void>` (L2276-2390)
+    - Currently reads `this.conversationManager`, `this.activeModelId`, `this.activeUseExtendedContext` as fallbacks when no session is passed. Change to explicit parameters: caller passes the appropriate ConversationManager, model ID, and extended context flag.
+    - View interaction (L2309 `getMessagesContainer()`, compacting indicator, compaction marker) is parameterized via a `viewAccessor?: () => NotorChatView | undefined` callback — avoids CompactionManager depending on ViewRouter
+  - Extract `manualCompaction(): Promise<void>` (L2397-2480) — same pattern, takes ConversationManager + model config + viewAccessor as parameters
+  - Extract `extractPendingMessages(messages: Message[]): Message[]` (L2596-2604) — pure utility, could also go in MessagePipeline but conceptually belongs with compaction
+  - Add `updateSettings(settings)` setter
+
+- [ ] **B6.2 — Wire CompactionManager into orchestrator**
+  - Create CompactionManager in orchestrator constructor
+  - `responseLoop()` calls `this.compactionManager.checkAndPerformCompaction(session, session.conversationManager, ...)` passing session state and a `() => this.viewRouter.getViewForSession(session)` callback
+  - `manualCompaction()` on orchestrator delegates to `this.compactionManager.manualCompaction(this.conversationManager, ...)` passing display state
+  - Delete extracted methods from `ChatOrchestrator`
+
+---
+
+### B1: Extract ViewRouter (owns view field, significant coupling)
+
+**~200 lines.** Owns the `view` field and all view-method calls. The key coupling point is `getViewForSession()` which checks session conversation ID against the displayed conversation.
+
+- [ ] **B1.1 — Create `src/chat/view-router.ts`**
+  - Create `ViewRouter` class with constructor:
+    ```typescript
+    constructor(
+      private getDisplayedConversationId: () => string | null,  // callback, avoids circular dep
+    )
+    ```
+  - Extract fields: `view` (L165)
+  - Extract methods:
+    - `setView(view: NotorChatView | undefined): void` (L196-198)
+    - `getView(): NotorChatView | undefined` — new accessor for the view field
+    - `getViewForSession(session: ConversationSession): NotorChatView | undefined` (L402-405) — uses injected `getDisplayedConversationId()` callback instead of directly accessing `conversationManager`
+    - `renderMessage(message: Message): void` (L2948-2968) — dispatches to view's render methods by role
+    - `renderMessages(messages: Message[]): void` — new convenience method that iterates and calls `renderMessage()` for each; used by `switchConversation()` split
+  - **Does NOT extract** the 15+ inline `this.getViewForSession(session)?.someMethod()` calls in `responseLoop()` — those stay in the facade, calling `this.viewRouter.getViewForSession(session)` to get the view reference, then calling view methods directly. ViewRouter provides the routing logic; the facade decides what to render.
+  - **Does NOT own** `effectiveToolConfig` or `activeParsedConfigs` — those moved to ConfigResolver in B4
+
+- [ ] **B1.2 — Wire ViewRouter into orchestrator**
+  - Create ViewRouter in orchestrator constructor, injecting `() => this.conversationLifecycle.getDisplayedConversationId()` as the callback (after B3 is wired). **During B1 wiring (before B3), use a temporary `() => this.conversationManager.getActiveConversation()?.id ?? null` callback that will be replaced when B3 is wired.**
+  - All `this.view?.` calls in `switchConversation()` (L505-510, L586-589, L591-594, L614-621, L635-645, L653-667) are replaced with `this.viewRouter` calls
+  - All `this.getViewForSession(session)` calls become `this.viewRouter.getViewForSession(session)`
+  - `orchestrator.setView(view)` delegates to `this.viewRouter.setView(view)`
+  - `handleError()` (L2833-2867) calls `this.viewRouter.getView()?.showError(...)` instead of `this.view?.showError(...)`
+  - Delete `view` field, `setView()`, `getViewForSession()`, `renderMessage()` from `ChatOrchestrator`
+
+---
+
+### B2: Extract SessionManager (owns activeSessions, session creation)
+
+**~200 lines.** Owns session lifecycle including creation, tracking, cleanup, and the session guard.
+
+- [ ] **B2.1 — Create `src/chat/session-manager.ts`**
+  - Create `SessionManager` class with constructor:
+    ```typescript
+    constructor(
+      private readonly historyManager: HistoryManager,
+      private readonly sessionGuard: SessionGuard,
+    )
+    ```
+  - Extract fields: `activeSessions` (L148), `sessionChangeCallbacks` (L156)
+  - Extract methods:
+    - `getActiveSession(conversationId: string): ConversationSession | undefined` (L345)
+    - `getActiveSessions(): ConversationSession[]` (L354)
+    - `hasActiveSession(conversationId: string): boolean` (L363)
+    - `onSessionsChanged(callback: () => void): () => void` (L374-379)
+    - `notifySessionsChanged(): void` (L384-392)
+    - `registerSession(session: ConversationSession): void` — new method encapsulating `activeSessions.set()` + `sessionGuard.register()` + `notifySessionsChanged()`
+    - `unregisterSession(conversationId: string): void` — new method encapsulating `sessionGuard.unregister()` + `activeSessions.delete()` + `notifySessionsChanged()`
+  - Extract session creation factory: `createSession(params: SessionCreationParams): ConversationSession`
+    - Consolidates the duplicated ~80-line session setup pattern from `handleUserMessage()` (L1729-1804), `executeWorkflow()` (L880-921), and `_backgroundResponseLoop()` (L1207-1221)
+    - Takes a `SessionCreationParams` object with: conversation snapshot, mode, persona, provider/model, approval callback, workflow assembly (optional), persistence callbacks
+    - Creates session-scoped `ConversationManager` (dynamic import), wires persistence callbacks, creates `ConversationSession` object
+    - Returns the session but does NOT register it — caller decides whether to register (background workflows don't register in `activeSessions`)
+  - Extract cleanup: `destroySessions(timeoutMs?: number): Promise<void>` — the session abort + await logic from `destroy()` (L434-454), unregisters all sessions from guard, clears maps
+  - Add `flushAndUnregister(session: ConversationSession): Promise<void>` — the finally-block pattern from A5.3/A6.3 (flush conversation writes, unregister session guard, delete from activeSessions, notify)
+
+- [ ] **B2.2 — Wire SessionManager into orchestrator**
+  - Create SessionManager in orchestrator constructor
+  - `handleUserMessage()` calls `this.sessionManager.createSession(...)` then `this.sessionManager.registerSession(session)` — replacing ~80 lines of inline setup
+  - `executeWorkflow()` same pattern
+  - `_backgroundResponseLoop()` calls `this.sessionManager.createSession(...)` but does NOT call `registerSession()` (background sessions tracked externally)
+  - All `this.activeSessions.has/get/set/delete` calls delegate to SessionManager
+  - Session cleanup finally blocks call `this.sessionManager.flushAndUnregister(session)`
+  - `destroy()` calls `this.sessionManager.destroySessions(timeoutMs)`
+  - Delete extracted fields and methods from `ChatOrchestrator`
+
+---
+
+### B3: Extract ConversationLifecycleManager (depends on ViewRouter + SessionManager)
+
+**~250 lines.** Owns conversation CRUD operations. This is the most coupled extraction because `switchConversation()` straddles ViewRouter, SessionManager, and conversation loading.
+
+- [ ] **B3.1 — Create `src/chat/conversation-lifecycle.ts`**
+  - Create `ConversationLifecycleManager` class with constructor:
+    ```typescript
+    constructor(
+      private readonly conversationManager: ConversationManager,
+      private readonly historyManager: HistoryManager,
+      private readonly viewRouter: ViewRouter,
+      private readonly sessionManager: SessionManager,
+      private personaManager?: PersonaManager,        // optional, set via setter
+    )
+    ```
+  - Extract fields: `conversationManager` (L64), `workflowPreviousPersona` (L90)
+  - Extract methods:
+    - `getDisplayedConversationId(): string | null` — returns `this.conversationManager.getActiveConversation()?.id ?? null`. This is the callback used by ViewRouter's `getViewForSession()` to avoid circular imports.
+    - `getDisplayedConversation(): Conversation | null` (L416) — proxy to `conversationManager.getActiveConversation()`
+    - `getConversationManager(): ConversationManager` — accessor (needed by facade for `handleUserMessage()` pre-processing)
+    - `newConversation(opts?: { signal?: AbortSignal }): Promise<void>` (L467-513)
+      - Persona revert logic stays here (`maybeRevertWorkflowPersona`)
+      - View updates (`clearMessages`, `updateModeDisplay`, `clearDisplayOverrides`) call `this.viewRouter`
+    - `forkConversation(forkAtMessageId: string): Promise<{...} | null>` (L525-552)
+    - `switchConversation(filename: string, opts?: { signal?: AbortSignal }): Promise<void>` (L560-675) — **split as follows:**
+      1. Load JSONL via `this.historyManager.loadConversation(filename)` (L569)
+      2. Check for active session via `this.sessionManager.getActiveSession(conversation.id)` (L575)
+      3. If active session: sync-back from session's ConversationManager (L577-589) — calls `this.viewRouter.renderMessages(sessionMessages)` for re-rendering
+      4. If no active session: load from JSONL into `this.conversationManager` (L632-638) — calls `this.viewRouter.renderMessages(messages)`
+      5. Restore display state: persona label, provider/model display via `this.viewRouter.getView()?.updatePersonaLabel(...)` etc. (L650-668)
+      6. Token footer update via `this.viewRouter.getView()?.updateTokenFooter(...)` (L643-645)
+    - `switchToConversationById(id: string, opts?: { signal?: AbortSignal }): Promise<boolean>` (L690-700)
+    - `maybeRevertWorkflowPersona(): Promise<void>` (L719-733) — private helper
+  - Add `updatePersonaManager(manager)` setter for late-binding
+
+- [ ] **B3.2 — Wire ConversationLifecycleManager into orchestrator**
+  - Create ConversationLifecycleManager in orchestrator constructor, passing ViewRouter, SessionManager, shared singletons
+  - **Update ViewRouter's callback:** Replace the temporary `getDisplayedConversationId` callback (from B1.2) with `() => this.conversationLifecycle.getDisplayedConversationId()`
+  - `responseLoop()` still accesses session's `conversationManager` (from the ConversationSession object), NOT from ConversationLifecycleManager — session isolation is preserved
+  - `handleUserMessage()` calls `this.conversationLifecycle.getConversationManager()` for the pre-processing phase (checking active conversation, adding messages)
+  - Facade's `newConversation()`, `switchConversation()`, `forkConversation()`, `switchToConversationById()` delegate to ConversationLifecycleManager
+  - `ToolSessionContext.getActiveConversation()` delegates to `this.conversationLifecycle.getDisplayedConversation()`
+  - Delete extracted fields and methods from `ChatOrchestrator`
+
+---
+
+### B5: Extract WorkflowExecutor (depends on SessionManager + ConversationLifecycleManager + ConfigResolver)
+
+**~620 lines.** The largest extraction. Owns both foreground and background workflow execution, including `_backgroundResponseLoop()`.
+
+- [ ] **B5.1 — Create `src/chat/workflow-executor.ts`**
+  - Create `WorkflowExecutor` class with constructor:
+    ```typescript
+    constructor(
+      private readonly app: App,
+      private readonly providerRegistry: ProviderRegistry,
+      private readonly systemPromptBuilder: SystemPromptBuilder,
+      private readonly dispatcher: ToolDispatcher,
+      private readonly historyManager: HistoryManager,
+      private readonly sessionManager: SessionManager,
+      private readonly conversationLifecycle: ConversationLifecycleManager,
+      private readonly configResolver: ConfigResolver,
+      private readonly hookDispatcher: HookDispatcher,
+      private readonly messagePipeline: MessagePipelineModule,  // imported module, not class
+      private settings: NotorSettings,
+      private personaManager?: PersonaManager,
+      private workflowHookOverrideManager?: WorkflowHookOverrideManager,
+      private vaultRuleManager?: VaultRuleManager,
+    )
+    ```
+  - Extract methods:
+    - `executeWorkflow(workflow: Workflow, supplementaryText?: string): Promise<void>` (L763-954)
+      - Calls `this.conversationLifecycle.newConversation()` for conversation creation
+      - Calls `this.sessionManager.createSession(...)` then `this.sessionManager.registerSession(session)`
+      - Calls `this.configResolver.resolveEffectiveConfig()` for initial config
+      - **Does NOT own `responseLoop()`** — receives it as a callback: `runResponseLoop: (mode, session) => Promise<void>` injected at construction. This avoids WorkflowExecutor depending back on the facade.
+      - View updates (clearMessages, updateModeDisplay, renderUserMessage) via `this.viewRouter` (add to constructor)
+      - Session cleanup in finally block via `this.sessionManager.flushAndUnregister(session)`
+    - `executeBackgroundWorkflow(request, execution, chain, concurrencyManager, personaSwitchResult): Promise<void>` (L986-1165)
+      - Creates its own isolated ConversationManager (not registered in activeSessions)
+      - Calls `this.sessionManager.createSession(...)` but does NOT register
+      - Runs `this._backgroundResponseLoop()` instead of facade's `responseLoop()`
+    - `_backgroundResponseLoop(bgConvManager, workflowAssembly, mode, execution, concurrencyManager, chain): Promise<void>` (L1181-1451) — entirely self-contained loop with no view access
+  - Add `updateSettings(settings)`, `updatePersonaManager(manager)`, `updateWorkflowHookOverrideManager(manager)` setters
+
+- [ ] **B5.2 — Wire WorkflowExecutor into orchestrator**
+  - Create WorkflowExecutor in orchestrator constructor, passing all dependencies
+  - Inject `responseLoop` callback: `(mode, session) => this.responseLoop(mode, session)` — keeps `responseLoop()` on the facade while letting WorkflowExecutor invoke it
+  - `orchestrator.executeWorkflow(...)` delegates to `this.workflowExecutor.executeWorkflow(...)`
+  - `orchestrator.executeBackgroundWorkflow(...)` delegates to `this.workflowExecutor.executeBackgroundWorkflow(...)`
+  - Delete extracted methods from `ChatOrchestrator`
+
+---
+
+### B-Verify: Verification & Regression Testing
+
+- [ ] **BV.1 — After each extraction: TypeScript compiles + E2E tests pass**
+  - Run `npm run build` after each B*.2 wiring step
+  - Run E2E tests: `e2e/scripts/session-sync-back-test.ts`, `e2e/scripts/phase4-multi-panel-test.ts`, `e2e/scripts/phase5-open-in-new-tab-test.ts`
+
+- [ ] **BV.2 — After B1+B2+B3 (the coupled trio): Multi-panel integration test**
+  - Verify `switchConversation` sync-back: open same conversation in two panels, send message in one, switch to it in the other → verify messages appear
+  - Verify session isolation: concurrent sessions in different panels don't interfere
+  - Verify `getViewForSession` routing: renders go to the correct panel
+
+- [ ] **BV.3 — After B5: Workflow verification**
+  - Foreground workflow execution in focused panel
+  - Background workflow triggered by vault event
+  - Workflow with tool calls requiring approval
+  - Concurrent foreground + background workflows
+
+- [ ] **BV.4 — After all extractions: Full regression**
+  - Single-panel chat: new conversation, send messages, switch conversations, fork
+  - Multi-panel: independent conversations, session guard, command routing
+  - Compaction: auto-compaction threshold, manual compaction command
+  - Plugin hot-reload preserves state
+  - Workspace restore with multiple panels
 
 ---
 
 ## Phase C: Centralized State (Optional, Long-Term)
 
-**Goal:** Replace ad-hoc callback sync with a lightweight observable state pattern per orchestrator.
+**Design spec:** [centralized-state-design.md](centralized-state-design.md)
 
 **Prerequisite:** Phase B complete.
 
-- [ ] **C1 — Design `OrchestratorState` interface**
-  - `displayedConversation`, `messages`, `isResponding`, `activeSessions`, `effectiveConfig`, `parsedConfigs`
-
-- [ ] **C2 — Implement `StateStore` class**
-  - Immutable update pattern: `update(patch)` creates new state, notifies subscribers
-  - `subscribe(fn)` returns unsubscriber
-
-- [ ] **C3 — Migrate orchestrator internals to StateStore**
-  - Replace direct field mutations with `store.update()`
-  - Replace callback registrations with `store.subscribe()`
-
-- [ ] **C4 — Migrate view layer to subscribe to state**
-  - `NotorChatView` subscribes to orchestrator's state store
-  - Remove manual callback wiring from `wireView()`
+**Status:** Design phase — tasks will be added after the spec is finalized.
