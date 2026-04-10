@@ -1698,6 +1698,21 @@ export default class NotorPlugin extends Plugin {
 		view.setIsSecondary(true);
 		const orchestrator = this.createSecondaryOrchestrator();
 		this.wireView(view, orchestrator);
+
+		// The registerView factory always calls wireView(view) which defaults
+		// to the primary orchestrator (state isn't known until setState runs).
+		// That overwrites the primary orchestrator's view reference, approval
+		// callback, and session-change listener with closures bound to the
+		// secondary view.  Restore by re-wiring the primary orchestrator with
+		// the actual primary panel view.
+		const primaryOrch = this.getOrchestrator();
+		for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)) {
+			const v = leaf.view;
+			if (v instanceof NotorChatView && !v.getIsSecondary() && v !== view) {
+				this.wireView(v, primaryOrch);
+				return;
+			}
+		}
 	}
 
 	/**
