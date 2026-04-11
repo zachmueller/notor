@@ -24,6 +24,7 @@ import { toChatMessages, processStream, calculateCost, type StreamResult } from 
 import { ConfigResolver } from "./config-resolver";
 import { HookDispatcher } from "./hook-dispatcher";
 import { CompactionManager } from "./compaction-manager";
+import { ViewRouter } from "./view-router";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings } from "../settings";
@@ -85,6 +86,12 @@ export class ChatOrchestrator implements ToolSessionContext {
 	private readonly configResolver: ConfigResolver;
 	private readonly hookDispatcher: HookDispatcher;
 	private readonly compactionManager: CompactionManager;
+	private readonly viewRouter: ViewRouter;
+
+	/** Proxy getter — delegates to ViewRouter. All `this.view?.` references resolve through here. */
+	private get view(): NotorChatView | undefined {
+		return this.viewRouter.getView();
+	}
 
 	/** Persona manager for active persona state (Phase 4, A-013). */
 	private personaManager?: PersonaManager;
@@ -180,12 +187,18 @@ export class ChatOrchestrator implements ToolSessionContext {
 		private readonly historyManager: HistoryManager,
 		private settings: NotorSettings,
 		private readonly sessionGuard: SessionGuard,
-		private view?: NotorChatView,
+		view?: NotorChatView,
 		private readonly vaultRuleManager?: VaultRuleManager
 	) {
 		this.conversationManager = new ConversationManager(settings.mode);
 		this.contextManager = new ContextManager();
 		this.configResolver = new ConfigResolver(settings, systemPromptBuilder, dispatcher);
+		this.viewRouter = new ViewRouter(
+			() => this.conversationManager.getActiveConversation()?.id,
+		);
+		if (view) {
+			this.viewRouter.setView(view);
+		}
 		this.hookDispatcher = new HookDispatcher(
 			() => this.settings,
 			() => this.getVaultRootPath(),
@@ -239,12 +252,12 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 7.2
 	 */
 	setView(view: NotorChatView | undefined): void {
-		this.view = view;
+		this.viewRouter.setView(view);
 	}
 
 	/** Get the current view reference (if any). */
 	getView(): NotorChatView | undefined {
-		return this.view;
+		return this.viewRouter.getView();
 	}
 
 	/**
@@ -475,8 +488,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1d
 	 */
 	private getViewForSession(session: ConversationSession): NotorChatView | undefined {
-		const displayConvId = this.conversationManager.getActiveConversation()?.id;
-		return session.conversationId === displayConvId ? this.view : undefined;
+		return this.viewRouter.getViewForSession(session);
 	}
 
 	/**
@@ -2340,29 +2352,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 
 
-	/**
-	 * Render a message in the view based on its role.
-	 */
+	/** Render a message in the view based on its role. */
 	private renderMessage(message: Message): void {
-		switch (message.role) {
-			case "user":
-				this.view?.renderUserMessage(message);
-				break;
-			case "assistant": {
-				const el = this.view?.createAssistantMessagePlaceholder();
-				if (el) {
-					void this.view?.finalizeAssistantMessage(el, message);
-				}
-				break;
-			}
-			case "tool_call":
-				this.view?.renderToolCall(message);
-				break;
-			case "tool_result":
-				this.view?.renderToolResult(message);
-				break;
-			// system messages are not rendered
-		}
+		this.viewRouter.renderMessage(message);
 	}
 }
 

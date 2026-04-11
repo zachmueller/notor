@@ -593,7 +593,7 @@
 
 **~200 lines.** Owns the `view` field and all view-method calls. The key coupling point is `getViewForSession()` which checks session conversation ID against the displayed conversation.
 
-- [ ] **B1.1 — Create `src/chat/view-router.ts`**
+- [x] **B1.1 — Create `src/chat/view-router.ts`** *(done 2026-04-11)*
   - Create `ViewRouter` class with constructor:
     ```typescript
     constructor(
@@ -610,7 +610,7 @@
   - **Does NOT extract** the 15+ inline `this.getViewForSession(session)?.someMethod()` calls in `responseLoop()` — those stay in the facade, calling `this.viewRouter.getViewForSession(session)` to get the view reference, then calling view methods directly. ViewRouter provides the routing logic; the facade decides what to render.
   - **Does NOT own** `effectiveToolConfig` or `activeParsedConfigs` — those moved to ConfigResolver in B4
 
-- [ ] **B1.2 — Wire ViewRouter into orchestrator**
+- [x] **B1.2 — Wire ViewRouter into orchestrator** *(done 2026-04-11)*
   - Create ViewRouter in orchestrator constructor, injecting `() => this.conversationLifecycle.getDisplayedConversationId()` as the callback (after B3 is wired). **During B1 wiring (before B3), use a temporary `() => this.conversationManager.getActiveConversation()?.id ?? null` callback that will be replaced when B3 is wired.**
   - All `this.view?.` calls in `switchConversation()` (L505-510, L586-589, L591-594, L614-621, L635-645, L653-667) are replaced with `this.viewRouter` calls
   - All `this.getViewForSession(session)` calls become `this.viewRouter.getViewForSession(session)`
