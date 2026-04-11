@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A complete (A1–A7 + A-Verify); Phase B largely complete (B7/B4/B8/B6/B1/B2/B3 done, B5 deferred — see note below); B-Verify done (BV.1–BV.4)
+**Status:** Phase A complete (A1–A7 + A-Verify); Phase B complete (B7/B4/B8/B6/B1/B2/B3/B5 all done); B-Verify done (BV.1–BV.4)
 
 ---
 
@@ -473,7 +473,7 @@
 
 **Files:** New files + `src/chat/orchestrator.ts`
 
-**Extraction order:** B7 → B4 → B8 → B6 → B1 → B2 → B3 → B5 (ordered by ascending coupling — pure utilities first, highly-coupled extractions last)
+**Extraction order:** B7 → B4 → B8 → B6 → B1 → B2 → B3 → B5 (ordered by ascending coupling — pure utilities first, highly-coupled extractions last; all complete)
 
 ### Architectural Principles
 
@@ -712,48 +712,26 @@
 
 **~620 lines.** The largest extraction. Owns both foreground and background workflow execution, including `_backgroundResponseLoop()`.
 
-- [ ] **B5.1 — Create `src/chat/workflow-executor.ts`** *(deferred — see note)*
-  - **Deferral note (2026-04-11):** B5 is the most coupled extraction (~700 lines, 15+ dependencies). With B7/B4/B8/B6/B1/B2/B3 complete, the orchestrator is reduced from 3,164→1,972 lines (37% reduction). The remaining workflow methods (`executeWorkflow`, `executeBackgroundWorkflow`, `_backgroundResponseLoop`) reference `this.app`, `this.view`, `this.conversationManager`, `this.providerRegistry`, `this.dispatcher`, `this.sessionManager`, `this.configResolver`, `this.hookDispatcher`, `this.personaManager`, `this.workflowHookOverrideManager`, `this.panelApprovalCallback`, `this.vaultRuleManager`, `this.settings`, `this.systemPromptBuilder`, `this.activeProviderType/ModelId/UseExtendedContext`, and pass `this` as `ToolSessionContext`. Extracting these requires either a 15+ parameter constructor or a back-reference to the orchestrator, which violates the dependency direction principle. Deferred to Phase C or a future refactor when the orchestrator is further simplified.
-  - Create `WorkflowExecutor` class with constructor:
-    ```typescript
-    constructor(
-      private readonly app: App,
-      private readonly providerRegistry: ProviderRegistry,
-      private readonly systemPromptBuilder: SystemPromptBuilder,
-      private readonly dispatcher: ToolDispatcher,
-      private readonly historyManager: HistoryManager,
-      private readonly sessionManager: SessionManager,
-      private readonly conversationLifecycle: ConversationLifecycleManager,
-      private readonly configResolver: ConfigResolver,
-      private readonly hookDispatcher: HookDispatcher,
-      private readonly messagePipeline: MessagePipelineModule,  // imported module, not class
-      private settings: NotorSettings,
-      private personaManager?: PersonaManager,
-      private workflowHookOverrideManager?: WorkflowHookOverrideManager,
-      private vaultRuleManager?: VaultRuleManager,
-    )
-    ```
-  - Extract methods:
-    - `executeWorkflow(workflow: Workflow, supplementaryText?: string): Promise<void>` (L763-954)
-      - Calls `this.conversationLifecycle.newConversation()` for conversation creation
-      - Calls `this.sessionManager.createSession(...)` then `this.sessionManager.registerSession(session)`
-      - Calls `this.configResolver.resolveEffectiveConfig()` for initial config
-      - **Does NOT own `responseLoop()`** — receives it as a callback: `runResponseLoop: (mode, session) => Promise<void>` injected at construction. This avoids WorkflowExecutor depending back on the facade.
-      - View updates (clearMessages, updateModeDisplay, renderUserMessage) via `this.viewRouter` (add to constructor)
-      - Session cleanup in finally block via `this.sessionManager.flushAndUnregister(session)`
-    - `executeBackgroundWorkflow(request, execution, chain, concurrencyManager, personaSwitchResult): Promise<void>` (L986-1165)
-      - Creates its own isolated ConversationManager (not registered in activeSessions)
-      - Calls `this.sessionManager.createSession(...)` but does NOT register
-      - Runs `this._backgroundResponseLoop()` instead of facade's `responseLoop()`
-    - `_backgroundResponseLoop(bgConvManager, workflowAssembly, mode, execution, concurrencyManager, chain): Promise<void>` (L1181-1451) — entirely self-contained loop with no view access
-  - Add `updateSettings(settings)`, `updatePersonaManager(manager)`, `updateWorkflowHookOverrideManager(manager)` setters
+- [x] **B5.1 — Create `src/chat/workflow-executor.ts`** *(done 2026-04-11)*
+  - ~~**Deferral note (2026-04-11):**~~ Resolved: with B1-B8 complete, most of the 15+ dependencies dissolved into already-extracted classes or shared singletons. Used a `WorkflowExecutorDeps` interface to group all dependencies into a single typed deps object (avoids a 23-param constructor while keeping the dependency contract explicit).
+  - Created `WorkflowExecutor` class with `WorkflowExecutorDeps` constructor pattern:
+    - **Readonly singletons (5):** `app`, `providerRegistry`, `systemPromptBuilder`, `dispatcher`, `historyManager`
+    - **Extracted class references (4):** `sessionManager`, `configResolver`, `hookDispatcher`, `viewRouter`
+    - **Getter callbacks (9):** `getSettings`, `getPersonaManager`, `getWorkflowHookOverrideManager`, `getVaultRuleManager`, `getPanelApprovalCallback`, `getConversationManager`, `getActiveProviderType`, `getActiveModelId`, `getActiveUseExtendedContext`
+    - **Utility getters (2):** `getVaultRootPath`, `getSessionContext` (returns orchestrator as `ToolSessionContext`)
+    - **Method bridges (3):** `runResponseLoop`, `setWorkflowPersonaRevert`, `handleError`
+  - Extracted methods:
+    - `executeWorkflow()` (~207 lines) — foreground manual workflow execution
+    - `executeBackgroundWorkflow()` (~180 lines) — background event-triggered execution
+    - `_backgroundResponseLoop()` (~240 lines) — LLM loop for background workflows
 
-- [ ] **B5.2 — Wire WorkflowExecutor into orchestrator** *(deferred with B5.1)*
-  - Create WorkflowExecutor in orchestrator constructor, passing all dependencies
-  - Inject `responseLoop` callback: `(mode, session) => this.responseLoop(mode, session)` — keeps `responseLoop()` on the facade while letting WorkflowExecutor invoke it
+- [x] **B5.2 — Wire WorkflowExecutor into orchestrator** *(done 2026-04-11)*
+  - Created `WorkflowExecutor` in orchestrator constructor with getter-closure wiring (same pattern as HookDispatcher/CompactionManager)
+  - Injected `responseLoop` callback: `(mode, session) => this.responseLoop(mode, session)`
   - `orchestrator.executeWorkflow(...)` delegates to `this.workflowExecutor.executeWorkflow(...)`
   - `orchestrator.executeBackgroundWorkflow(...)` delegates to `this.workflowExecutor.executeBackgroundWorkflow(...)`
-  - Delete extracted methods from `ChatOrchestrator`
+  - Deleted `_backgroundResponseLoop` from orchestrator (private to WorkflowExecutor)
+  - Removed unused imports: `parseStreamEvents`, `revertWorkflowPersona`, `switchWorkflowPersona`, `assembleWorkflowPrompt`, `WorkflowAssemblyResult`
 
 ---
 
