@@ -190,6 +190,16 @@ export class NotorChatView extends ItemView {
 	_loadFallbackTimeout?: ReturnType<typeof setTimeout>;
 
 	/**
+	 * Unregister function for the orchestrator session-change listener.
+	 *
+	 * Stored so previous listeners can be cleaned up before re-registering
+	 * (prevents listener accumulation across wireView calls).
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Phase A3.5
+	 */
+	_unregisterSessionsChanged?: () => void;
+
+	/**
 	 * Whether this panel is a secondary (additional) chat panel.
 	 *
 	 * Secondary panels get the same full toolbar as the primary panel.
@@ -722,8 +732,56 @@ export class NotorChatView extends ItemView {
 		this.personaChangedUnregister?.();
 		this.personaChangedUnregister = undefined;
 
+		// A3.8: Release all callback references to prevent GC leaks.
+		// When A7 adds onCloseCleanup, it must be called BEFORE this
+		// (Amendment R2-8 ordering).
+		this.clearCallbacks();
+
 		log.info("Chat view closed");
 		return Promise.resolve();
+	}
+
+	/**
+	 * Null all callback properties to release GC references.
+	 *
+	 * Called from `onClose()` after orchestrator cleanup. Covers all
+	 * 23 `setOn*` + 6 `setGet*` callback slots.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Amendment A6
+	 */
+	clearCallbacks(): void {
+		// setOn* callbacks (23)
+		this.onSendMessage = undefined;
+		this.onStopResponse = undefined;
+		this.onNewConversation = undefined;
+		this.onSwitchConversation = undefined;
+		this.onExportConversation = undefined;
+		this.onDeleteConversation = undefined;
+		this.onToggleFavorite = undefined;
+		this.onImportConversation = undefined;
+		this.onSwitchToConversationById = undefined;
+		this.onOpenConversationList = undefined;
+		this.onSearchConversations = undefined;
+		this.onModeToggle = undefined;
+		this.onSettingsOpen = undefined;
+		this.onProviderChange = undefined;
+		this.onModelChange = undefined;
+		this.onRefreshModels = undefined;
+		this.onListCheckpoints = undefined;
+		this.onRestoreCheckpoint = undefined;
+		this.onGetCurrentContent = undefined;
+		this.onForkConversation = undefined;
+		this.onOpenInNewTab = undefined;
+		this.onOpenSettingsGroup = undefined;
+		this.onSendWorkflow = undefined;
+
+		// setGet* callbacks (6)
+		this.getAvailableProviders = undefined;
+		this.getAvailableModels = undefined;
+		this.getCurrentProvider = undefined;
+		this.getCurrentModel = undefined;
+		this.getWorkflowsCallback = undefined;
+		this.getActiveSessions = undefined;
 	}
 
 	// -----------------------------------------------------------------------

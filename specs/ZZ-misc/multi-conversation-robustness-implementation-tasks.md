@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A2 complete, A3 next
+**Status:** Phase A3 complete, A1.8 done (prerequisite for A3.2); A4 next
 
 ---
 
@@ -84,7 +84,7 @@
   - Added to `onload()` as a one-time global restore (Amendment R5)
   - wireView() call retained temporarily — removed in A3.4
 
-- [ ] **A1.8 — Update `registerView` factory** (`src/main.ts`, L295-308)
+- [x] **A1.8 — Update `registerView` factory** (`src/main.ts`, L295-308) *(done 2026-04-11)*
   - **⚠ Requires A2.1 fields first** — A1.8 references `view._loadFallbackTimeout` and `view.isConversationLoaded`, both added by A2.1. Add those two fields to `NotorChatView` before implementing A1.8 (or batch both together).
   - In the factory callback:
     1. Check for stale orchestrator at `leaf.id` and destroy it if found (Amendment R2-7)
@@ -170,34 +170,34 @@
 
 **Bugs addressed:** A (structural prevention), W1/W3/W5 (eliminated)
 
-- [ ] **A3.1 — Remove history loading block from `wireView()`** (`src/main.ts`, L2493-2537)
+- [x] **A3.1 — Remove history loading block from `wireView()`** (`src/main.ts`, L2493-2537) *(done 2026-04-11)*
   - Delete the entire `historyManager.listConversations().then(...)` block and all nested conversation loading logic
   - Delete the `if (view.getIsSecondary()) return` guard (L2495)
 
-- [ ] **A3.2 — Remove orchestrator default fallback from `wireView()`** (`src/main.ts`, L1996-1998)
+- [x] **A3.2 — Remove orchestrator default fallback from `wireView()`** (`src/main.ts`, L1996-1998) *(done 2026-04-11)*
   - The `if (!orchestrator) { orchestrator = this.getOrchestrator(); }` fallback is no longer needed — orchestrator is always passed explicitly from the factory
 
-- [ ] **A3.3 — Remove `setGetToolDefinitions()` from `wireView()`** (`src/main.ts`, L2073-2084)
+- [x] **A3.3 — Remove `setGetToolDefinitions()` from `wireView()`** (`src/main.ts`, L2073-2084) *(done 2026-04-11)*
   - Already moved to `createOrchestrator()` in A1.5 (Amendment R3)
   - **⚠ Do not remove this call before A1.5 is complete.** The primary orchestrator currently does NOT have `setGetToolDefinitions()` called on it in `getOrchestrator()` — only secondary orchestrators get it. `wireView()` is currently the only path that sets it for the primary. Removing A3.3's call before A1.5 adds it to `createOrchestrator()` will leave the primary orchestrator with no tool definitions.
 
-- [ ] **A3.4 — Remove `personaManager.restoreFromSettings()` from `wireView()`** (`src/main.ts`, L2061-2068)
+- [x] **A3.4 — Remove `personaManager.restoreFromSettings()` from `wireView()`** (`src/main.ts`, L2061-2068) *(done 2026-04-11)*
   - Already moved to `onload()` in A1.7 (Amendment R5)
 
-- [ ] **A3.5 — Store session-change listener unregister function** (`src/main.ts`)
+- [x] **A3.5 — Store session-change listener unregister function** (`src/main.ts`) *(done 2026-04-11)*
   - Add `_unregisterSessionsChanged?: () => void` field to `NotorChatView`
   - In `wireView()`: call `view._unregisterSessionsChanged?.()` before registering, then store the return value of `orchestrator.onSessionsChanged(...)` on `view._unregisterSessionsChanged`
 
-- [ ] **A3.6 — Audit wireView closures for hardcoded orchestrator refs** (`src/main.ts`)
+- [x] **A3.6 — Audit wireView closures for hardcoded orchestrator refs** (`src/main.ts`) *(done 2026-04-11)*
   - Amendment R1: All closures that reference `this._orchestrator`, `this.getOrchestrator()`, or `this._secondaryOrchestrators` must use the closure-captured `orchestrator` parameter or `this._orchestrators.values()`
   - Known instances:
     - `setOnNewConversation` (L2128-2129): `this._orchestrator.updateSettings()` → `orchestrator.updateSettings()`
     - Any other direct `_orchestrator` references in callbacks
 
-- [ ] **A3.7 — Update `_personaNameChangeWired` callback** (`src/main.ts`, L2041-2060)
+- [x] **A3.7 — Update `_personaNameChangeWired` callback** (`src/main.ts`, L2041-2060) *(done 2026-04-11)*
   - Amendment R6: Replace `[this._orchestrator, ...this._secondaryOrchestrators].filter(Boolean)` with `[...this._orchestrators.values()]`
 
-- [ ] **A3.8 — Add `clearCallbacks()` method to `NotorChatView`** (`src/ui/chat-view.ts`)
+- [x] **A3.8 — Add `clearCallbacks()` method to `NotorChatView`** (`src/ui/chat-view.ts`) *(done 2026-04-11)*
   - Nulls all `setOn*` / callback properties to release GC references (Amendment A6)
   - **Pre-implementation audit completed (2026-04-11).** Confirmed counts:
     - 23 `setOn*` methods (L240–392): `setOnSendMessage`, `setOnStopResponse`, `setOnNewConversation`, `setOnSwitchConversation`, `setOnExportConversation`, `setOnDeleteConversation`, `setOnToggleFavorite`, `setOnImportConversation`, `setOnSwitchToConversationById`, `setOnOpenConversationList`, `setOnSearchConversations`, `setOnModeToggle`, `setOnSettingsOpen`, `setOnProviderChange`, `setOnModelChange`, `setOnRefreshModels`, `setOnListCheckpoints`, `setOnRestoreCheckpoint`, `setOnGetCurrentContent`, `setOnForkConversation`, `setOnOpenInNewTab`, `setOnOpenSettingsGroup`, `setOnSendWorkflow`
@@ -207,7 +207,7 @@
   - `clearCallbacks()` must null the backing properties for all 23 + 6 + `setOnCloseCleanup` = **30 callback slots** after A7.2 is complete
   - Called from `onClose()` after cleanup callback (Amendment R2-8 ordering)
 
-- [ ] **A3.9 — Remove all `checkpointManager.setConversationId()` from wireView callbacks** (`src/main.ts`)
+- [x] **A3.9 — Remove all `checkpointManager.setConversationId()` from wireView callbacks** (`src/main.ts`) *(done 2026-04-11)*
   - Remove from switch conversation callback (~L2167), new conversation callback (~L2142), fork callback (~L2185), delete callback (~L2251, 2258), and history loading blocks (~L2504, 2517, 2525)
   - Per Amendment A1: the orchestrator manages its own checkpoint manager internally
 

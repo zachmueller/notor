@@ -334,22 +334,43 @@ export default class NotorPlugin extends Plugin {
 		this._settingTab = new NotorSettingTab(this.app, this);
 		this.addSettingTab(this._settingTab);
 
-		// 3. Register the chat panel view type.
-		// Both primary and secondary panels use the same view type.
-		// Secondary panels get their own orchestrator sharing infrastructure singletons.
-		// @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+		// 3. Register the chat panel view type (A1.8).
+		// Every panel gets its own orchestrator via createOrchestrator().
+		// Conversation loading is deferred to setState() or a setTimeout(0)
+		// fallback — wireView only wires callbacks.
+		// @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.2
 		this.registerView(CHAT_VIEW_TYPE, (leaf) => {
 			const view = new NotorChatView(leaf, this);
 
-			// Check if this is a secondary panel (set by setState during workspace
-			// restore or by setIsSecondary before wireView for command-created panels).
-			// At this point during initial registerView, the leaf state may not be
-			// set yet — secondary detection happens in two places:
-			// 1. Command-created: the command calls wireViewAsSecondary() explicitly
-			// 2. Workspace restore: setState() triggers re-wiring via a deferred callback
-			//
-			// Default wiring uses the primary orchestrator singleton.
-			this.wireView(view);
+			// Destroy any stale orchestrator at this leaf ID (Amendment R2-7).
+			// The factory is synchronous so the stale destroy() is fire-and-forget.
+			// If the stale orchestrator has an active session, sessionGuard.isActive()
+			// returns true for that conversation for up to ~2s while the destroy
+			// drains, causing a transient "being processed in another panel" notice
+			// if the user immediately re-sends. Recoverable by retrying.
+			const staleOrch = this._orchestrators.get(leaf.id);
+			if (staleOrch) {
+				this._orchestrators.delete(leaf.id);
+				staleOrch.destroy().catch((e) => {
+					log.warn("Stale orchestrator destroy failed", { error: String(e) });
+				});
+			}
+
+			// Create a fresh orchestrator for this panel
+			const orchestrator = this.createOrchestrator();
+			this._orchestrators.set(leaf.id, orchestrator);
+			this.wireView(view, orchestrator);
+
+			// Schedule setTimeout(0) fallback for conversation loading
+			// (Amendment R2-2). setState() fires synchronously after the
+			// factory returns and will set isConversationLoaded = true;
+			// without this guard, every panel open fires a redundant load.
+			view._loadFallbackTimeout = setTimeout(() => {
+				if (!view.isConversationLoaded) {
+					this.loadConversation(view, orchestrator);
+				}
+			}, 0);
+
 			return view;
 		});
 
@@ -2314,13 +2335,8 @@ export default class NotorPlugin extends Plugin {
 	 *
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
 	 */
-	private wireView(view: NotorChatView, orchestrator?: ChatOrchestrator): void {
-		if (!orchestrator) {
-			orchestrator = this.getOrchestrator();
-		}
-		const toolRegistry = this.getToolRegistry();
+	private wireView(view: NotorChatView, orchestrator: ChatOrchestrator): void {
 		const historyManager = this.getHistoryManager();
-		const checkpointManager = this.getCheckpointManager();
 		const providerRegistry = this.getProviderRegistry();
 		const toolDispatcher = this.getToolDispatcher();
 
@@ -2336,7 +2352,13 @@ export default class NotorPlugin extends Plugin {
 		// Phase 3: Wire active session accessor so the activity indicator
 		// includes detached foreground conversations in badge count + dropdown.
 		view.setGetActiveSessions(() => orchestrator.getActiveSessions());
-		orchestrator.onSessionsChanged(() => view.updateActivityIndicator());
+
+		// A3.5: Clean up previous session-change listener before registering
+		// a new one to prevent listener accumulation across wireView calls.
+		view._unregisterSessionsChanged?.();
+		view._unregisterSessionsChanged = orchestrator.onSessionsChanged(
+			() => view.updateActivityIndicator()
+		);
 
 		// H-005: Wire conversation-by-ID switching for the activity dropdown.
 		// When a user clicks a workflow entry in the dropdown, it calls
@@ -2367,9 +2389,10 @@ export default class NotorPlugin extends Plugin {
 
 				// Step 1f-addendum (Trigger 2): Update conversation header for
 				// all orchestrators that have a displayed conversation.
-				const allOrchestrators = [this._orchestrator, ...this._secondaryOrchestrators].filter(Boolean);
-				for (const orch of allOrchestrators) {
-					const conv = orch!.getDisplayedConversation();
+				// A3.7: Use unified _orchestrators registry instead of
+				// primary/secondary distinction.
+				for (const orch of this._orchestrators.values()) {
+					const conv = orch.getDisplayedConversation();
 					if (conv) {
 						conv.persona_name = name;
 						historyManager.updateConversationHeader(conv).catch((e) => {
@@ -2380,24 +2403,11 @@ export default class NotorPlugin extends Plugin {
 			});
 		}
 
-		// Restore active persona from settings on view wire (deferred, non-blocking).
-		// This ensures the persona label and provider/model state are restored
-		// when the chat panel opens after plugin load. Only needs to run once.
-		if (!view.getIsSecondary()) {
-			personaManager.restoreFromSettings().catch((e) => {
-				log.warn("Failed to restore active persona from settings", { error: String(e) });
-			});
-		}
+		// personaManager.restoreFromSettings() moved to onload() (A1.7 / Amendment R5).
+		// No longer called per-wireView — single global restore at plugin startup.
 
-		// E-015 / MAIN-001: Wire tool definitions callback. When an
-		// EffectiveToolConfig is provided, returns filtered tool definitions
-		// (disabled tools excluded). When omitted, returns all tools.
-		orchestrator.setGetToolDefinitions((config) => {
-			if (config) {
-				return toolRegistry.getFilteredToolDefinitions(config) as import("./providers/provider").ToolDefinition[];
-			}
-			return toolRegistry.getToolDefinitions() as import("./providers/provider").ToolDefinition[];
-		});
+		// Tool definitions callback moved to createOrchestrator() (A1.5 / Amendment R3).
+		// No longer set here — each orchestrator receives it at construction time.
 
 		// E-012 / E-015: Wire the workflow send callback from the chat view
 		// to the orchestrator's executeWorkflow() method. When the user sends
@@ -2447,9 +2457,8 @@ export default class NotorPlugin extends Plugin {
 				toolDispatcher.setActivePersonaName(
 					this.settings.active_persona || null
 				);
-				if (this._orchestrator) {
-					this._orchestrator.updateSettings(this.settings);
-				}
+				// A3.6: Use closure-captured orchestrator, not hardcoded _orchestrator
+				orchestrator.updateSettings(this.settings);
 				// Phase 4.1: Keep McpHub settings reference in sync after reload
 				// so servers configured after the last reload can still be found.
 				if (this._mcpHub) {
@@ -2458,10 +2467,8 @@ export default class NotorPlugin extends Plugin {
 
 				return orchestrator.newConversation();
 			}).then(() => {
-				const convManager = orchestrator.getConversationManager();
-				const conv = convManager.getActiveConversation();
+				const conv = orchestrator.getConversationManager().getActiveConversation();
 				if (conv) {
-					checkpointManager.setConversationId(conv.id);
 					view.setActiveConversationId(conv.id);
 				}
 			}).catch((e) => {
@@ -2483,10 +2490,8 @@ export default class NotorPlugin extends Plugin {
 		// Switch conversation
 		view.setOnSwitchConversation((filename: string) => {
 			orchestrator.switchConversation(filename).then(() => {
-				const convManager = orchestrator.getConversationManager();
-				const conv = convManager.getActiveConversation();
+				const conv = orchestrator.getConversationManager().getActiveConversation();
 				if (conv) {
-					checkpointManager.setConversationId(conv.id);
 					view.setActiveConversationId(conv.id);
 				}
 				// Clear stale tracker and vault rule accessed notes when switching
@@ -2504,7 +2509,6 @@ export default class NotorPlugin extends Plugin {
 
 			await orchestrator.switchConversation(result.filename);
 
-			checkpointManager.setConversationId(result.conversation.id);
 			view.setActiveConversationId(result.conversation.id);
 			this.getStaleTracker().clear?.();
 			this.getVaultRuleManager().clearAccessedNotes();
@@ -2570,14 +2574,12 @@ export default class NotorPlugin extends Plugin {
 						await orchestrator.switchConversation(nextEntry.filename);
 						const conv = convManager.getActiveConversation();
 						if (conv) {
-							checkpointManager.setConversationId(conv.id);
 							view.setActiveConversationId(conv.id);
 						}
 					} else if (entries.length === 0) {
 						await orchestrator.newConversation();
 						const conv = convManager.getActiveConversation();
 						if (conv) {
-							checkpointManager.setConversationId(conv.id);
 							view.setActiveConversationId(conv.id);
 						}
 					}
@@ -2762,17 +2764,18 @@ export default class NotorPlugin extends Plugin {
 			return buildOptionValue(modelId, config?.use_extended_context ?? false);
 		});
 
-		// Checkpoint callbacks
+		// Checkpoint callbacks — use per-orchestrator checkpoint manager (A1.6c / A3)
+		const checkpointMgr = orchestrator.getCheckpointManager();
 		view.setOnListCheckpoints(async () => {
-			return checkpointManager.listCheckpoints();
+			return checkpointMgr?.listCheckpoints() ?? [];
 		});
 
 		view.setOnRestoreCheckpoint(async (checkpointId) => {
-			return checkpointManager.restore(checkpointId);
+			return checkpointMgr?.restore(checkpointId) ?? false;
 		});
 
 		view.setOnGetCurrentContent(async (notePath) => {
-			return checkpointManager.getCurrentContent(notePath);
+			return checkpointMgr?.getCurrentContent(notePath) ?? null;
 		});
 
 		// Wire approval callback for this panel's orchestrator (Phase 4, Step 4e).
@@ -2812,50 +2815,10 @@ export default class NotorPlugin extends Plugin {
 			]);
 		});
 
-		// Load conversation history and render it.
-		// Skip for secondary panels — they get their conversation from setState().
-		if (view.getIsSecondary()) return;
-		historyManager.listConversations().then((entries) => {
-			view.renderConversationList(entries);
-
-			// Auto-start a new conversation if none exist, or restore last
-			if (entries.length === 0) {
-				orchestrator.newConversation().then(() => {
-					const conv = orchestrator.getConversationManager().getActiveConversation();
-					if (conv) {
-						checkpointManager.setConversationId(conv.id);
-						view.setActiveConversationId(conv.id);
-					}
-				}).catch((e) => {
-					log.error("Failed to start initial conversation", { error: String(e) });
-				});
-			} else {
-				// Restore most recent conversation
-				const mostRecent = entries[0];
-				if (mostRecent) {
-					orchestrator.switchConversation(mostRecent.filename).then(() => {
-						const conv = orchestrator.getConversationManager().getActiveConversation();
-						if (conv) {
-							checkpointManager.setConversationId(conv.id);
-							view.setActiveConversationId(conv.id);
-						}
-					}).catch(() => {
-						// Fallback to new conversation on load error
-						orchestrator.newConversation().then(() => {
-							const conv = orchestrator.getConversationManager().getActiveConversation();
-							if (conv) {
-								checkpointManager.setConversationId(conv.id);
-								view.setActiveConversationId(conv.id);
-							}
-						}).catch(() => {});
-					});
-				}
-			}
-		}).catch((e) => {
-			log.error("Failed to load conversation history", { error: String(e) });
-			// Start fresh on error
-			orchestrator.newConversation().catch(() => {});
-		});
+		// History loading removed — conversation loading is now the sole
+		// responsibility of loadConversation(), called from setState() and
+		// the setTimeout(0) fallback in the registerView factory.
+		// See specs/ZZ-misc/multi-conversation-robustness-redesign.md — Phase A3.1
 	}
 
 	// -----------------------------------------------------------------------
