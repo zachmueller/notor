@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A5 complete; A1.11 partially done (wireViewAsSecondary + getPrimaryChatLeaf deleted); A6 next
+**Status:** Phase A6 complete; A1.11 partially done (wireViewAsSecondary + getPrimaryChatLeaf deleted); A7 next
 
 ---
 
@@ -365,19 +365,19 @@
 
 **Bugs addressed:** D
 
-- [ ] **A6.1 — Add cross-orchestrator guard to `handleUserMessage()`** (`src/chat/orchestrator.ts`, after L1614-1617)
+- [x] **A6.1 — Add cross-orchestrator guard to `handleUserMessage()`** (`src/chat/orchestrator.ts`, after L1614-1617) *(done 2026-04-11)*
   - After the existing per-orchestrator `activeSessions.has(conv.id)` check, add: `if (this.sessionGuard.isActive(conv.id)) { new Notice("This conversation is being processed in another panel."); return; }`
   - After both guards pass: `this.sessionGuard.register(conv.id)`
 
-- [ ] **A6.2 — Add both guards to `executeWorkflow()`** (`src/chat/orchestrator.ts`)
+- [x] **A6.2 — Add both guards to `executeWorkflow()`** (`src/chat/orchestrator.ts`) *(done 2026-04-11)*
   - Amendment A3: `executeWorkflow()` currently has NO `activeSessions.has(conv.id)` guard — add it
   - Then add cross-orchestrator `sessionGuard.isActive()` check
   - Then `sessionGuard.register(conv.id)` before creating session
 
-- [ ] **A6.3 — Add `sessionGuard.unregister()` to cleanup paths** (`src/chat/orchestrator.ts`)
+- [x] **A6.3 — Add `sessionGuard.unregister()` to cleanup paths** (`src/chat/orchestrator.ts`) *(done 2026-04-11)*
   - In `handleUserMessage()` finally block: add `this.sessionGuard.unregister(session.conversationId)` before `activeSessions.delete()`
   - In `executeWorkflow()` finally block: same pattern
-  - In `destroy()`: loop all `activeSessions.keys()` and unregister before clearing
+  - In `destroy()`: loop all `activeSessions.keys()` and unregister before clearing (already done in A5.6)
 
 ---
 

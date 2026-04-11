@@ -1003,6 +1003,20 @@ export class ChatOrchestrator implements ToolSessionContext {
 		});
 
 		// --- Create isolated ConversationSession for the workflow ---
+
+		// Per-orchestrator duplicate-send guard (Amendment A3: was missing for workflows)
+		if (this.activeSessions.has(conversation.id)) {
+			new Notice("This conversation is already processing");
+			return;
+		}
+
+		// Cross-orchestrator guard: prevent two panels from creating sessions
+		// for the same conversation (Bug D — interleaved JSONL writes + divergent state)
+		if (this.sessionGuard.isActive(conversation.id)) {
+			new Notice("This conversation is being processed in another panel.");
+			return;
+		}
+
 		const snapshotConv = this.conversationManager.getActiveConversation()!;
 		const snapshotMessages = this.conversationManager.getMessages();
 
@@ -1046,6 +1060,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 		});
 
 		this.activeSessions.set(session.conversationId, session);
+		this.sessionGuard.register(session.conversationId);
 		this.notifySessionsChanged();
 
 		// G-006: Activate workflow-scoped hook overrides before the first LLM call
@@ -1082,6 +1097,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			if (session.workflowAssembly && this.workflowHookOverrideManager) {
 				this.workflowHookOverrideManager.deactivate(session.conversationId);
 			}
+			this.sessionGuard.unregister(session.conversationId);
 			this.activeSessions.delete(session.conversationId);
 			this.notifySessionsChanged();
 			this.getViewForSession(session)?.setRespondingState(false);
@@ -1752,6 +1768,13 @@ export class ChatOrchestrator implements ToolSessionContext {
 			return;
 		}
 
+		// Cross-orchestrator guard: prevent two panels from creating sessions
+		// for the same conversation (Bug D — interleaved JSONL writes + divergent state)
+		if (this.sessionGuard.isActive(conv.id)) {
+			new Notice("This conversation is being processed in another panel.");
+			return;
+		}
+
 		// Guard: require a model to be selected before doing any work
 		if (!this.getActiveModelId()) {
 			this.view?.showError(
@@ -1938,6 +1961,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 		// Register session and start response loop
 		this.activeSessions.set(session.conversationId, session);
+		this.sessionGuard.register(session.conversationId);
 		this.notifySessionsChanged();
 
 		// Step 1f-addendum (Trigger 1): Update conversation header if the
@@ -1983,6 +2007,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			// handleUserMessage() sets a non-null workflowAssembly — that field is
 			// only populated by executeWorkflow(). See executeWorkflow()'s finally
 			// block which handles the workflow case.
+			this.sessionGuard.unregister(session.conversationId);
 			this.activeSessions.delete(session.conversationId);
 			this.notifySessionsChanged();
 			this.getViewForSession(session)?.setRespondingState(false);
