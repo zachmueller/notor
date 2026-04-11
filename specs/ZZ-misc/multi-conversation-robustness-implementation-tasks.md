@@ -487,12 +487,12 @@
 
 **~310 lines.** These are pure transformations with no orchestrator state access — the cleanest extraction.
 
-- [ ] **B7.1 — Create `src/chat/message-pipeline.ts`**
+- [x] **B7.1 — Create `src/chat/message-pipeline.ts`** *(done 2026-04-11)*
   - Extract `toChatMessages(messages: Message[], systemPrompt: string): ChatMessage[]` (L2606-2827) — 100% pure function. Handles role mapping, tool call coalescing, synthetic result injection, orphaned tool_call repair. No orchestrator fields accessed.
   - Extract `processStream(stream, abortController, eagerContentEl?, viewResolver?): Promise<StreamResult>` (L2487-2578) — transforms stream events into typed `StreamResult`. View rendering is done via the `viewResolver` callback parameter (already parameterized). No orchestrator state access.
   - Both functions become module-level exports (no class needed — they're stateless)
 
-- [ ] **B7.2 — Update orchestrator to import from message-pipeline**
+- [x] **B7.2 — Update orchestrator to import from message-pipeline** *(done 2026-04-11)*
   - Replace `this.toChatMessages(...)` calls in `responseLoop()` with imported `toChatMessages(...)`
   - Replace `this.processStream(...)` calls in `responseLoop()` with imported `processStream(...)`
   - Also update `_backgroundResponseLoop()`'s call to `this._bgToChatMessages()` (L1457-1462) — this is a thin wrapper around `toChatMessages()` and can be inlined at the call site using the imported function

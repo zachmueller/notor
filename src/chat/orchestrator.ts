@@ -13,7 +13,6 @@ import type { Conversation, ConversationMode, Message, Persona, ToolResult, Work
 import type { ChatMessage, ToolDefinition, StreamChunk, SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
-import { getModelMetadata } from "../providers/model-metadata";
 import { buildOptionValue } from "../providers/model-grouping";
 import { ConversationManager } from "./conversation";
 import { ContextManager } from "./context";
@@ -21,9 +20,10 @@ import type { SystemPromptBuilder } from "./system-prompt";
 import type { ToolDispatcher } from "./dispatcher";
 import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./tool-orchestration";
 import { parseStreamEvents } from "./stream-utils";
+import { toChatMessages, processStream, extractPendingMessages, calculateCost, type StreamResult } from "./message-pipeline";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
-import type { NotorSettings, ModelPricing } from "../settings";
+import type { NotorSettings } from "../settings";
 import type { VaultRuleManager } from "../rules/vault-rules";
 import type { PersonaManager } from "../personas/persona-manager";
 import { buildAutoContextBlock } from "../context/auto-context";
@@ -1422,7 +1422,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			const contextResult = contextMgr.assembleContextWindow(allMessages, session.modelId, session.useExtendedContext);
 
 			// 4. Convert to ChatMessage format
-			const chatMessages = this._bgToChatMessages(
+			const chatMessages = toChatMessages(
 				contextResult.messages,
 				systemPrompt
 			);
@@ -1614,13 +1614,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * Convert internal messages to ChatMessage format for the background response loop.
 	 * Mirrors `toChatMessages()` but without the full class context.
 	 */
-	private _bgToChatMessages(
-		messages: Message[],
-		systemPrompt: string
-	): import("../providers/provider").ChatMessage[] {
-		return this.toChatMessages(messages, systemPrompt);
-	}
-
 	/**
 	 * Callback that provides tool definitions for the response loop.
 	 *
@@ -2117,7 +2110,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 				}
 
 				// 5. Convert to ChatMessage format for provider
-				const chatMessages = this.toChatMessages(contextResult.messages, systemPrompt);
+				const chatMessages = toChatMessages(contextResult.messages, systemPrompt);
 
 				// 6. Send to LLM
 				const view = this.getViewForSession(session);
@@ -2139,7 +2132,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 				const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
 
 				// 7. Process stream (pass in the already-created placeholder + session-aware view resolver)
-				const result = await this.processStream(
+				const result = await processStream(
 					stream,
 					abortController,
 					eagerContentEl,
@@ -2154,7 +2147,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 						content: result.text,
 						input_tokens: result.inputTokens,
 						output_tokens: result.outputTokens,
-						cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens, session.modelId),
+						cost_estimate: calculateCost(result.inputTokens, result.outputTokens, session.modelId, this.settings),
 					});
 
 					if (result.contentEl) {
@@ -2185,7 +2178,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 							content: result.text || "",
 							input_tokens: result.inputTokens,
 							output_tokens: result.outputTokens,
-							cost_estimate: this.calculateCost(result.inputTokens, result.outputTokens, session.modelId),
+							cost_estimate: calculateCost(result.inputTokens, result.outputTokens, session.modelId, this.settings),
 						});
 
 						// Update token footer after tool-call turn tokens are recorded
@@ -2480,7 +2473,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 		// (the pending question + "Please summarize…" would both be user role).
 		// Pending messages are re-appended after compaction so the conversation
 		// still ends on a user turn, as required by Bedrock and similar providers.
-		const pendingMessages = this.extractPendingMessages(messages);
+		const pendingMessages = extractPendingMessages(messages);
 		const completedMessages = messages.slice(0, messages.length - pendingMessages.length);
 
 		log.info("Compaction message split", {
@@ -2601,7 +2594,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 		// Separate pending messages from the completed conversation (same reason
 		// as auto-compaction: avoids consecutive user messages in the summarization
 		// request and preserves the pending turn after compaction).
-		const pendingMessages = this.extractPendingMessages(messages);
+		const pendingMessages = extractPendingMessages(messages);
 		const completedMessages = messages.slice(0, messages.length - pendingMessages.length);
 
 		// Show compacting indicator
@@ -2668,351 +2661,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 
 	// -----------------------------------------------------------------------
-	// Stream processing
+	// Message conversion (extracted to src/chat/message-pipeline.ts — B7)
 	// -----------------------------------------------------------------------
-
-	/** Result type for stream processing. */
-	private async processStream(
-		stream: AsyncIterable<StreamChunk>,
-		abortController: AbortController,
-		eagerContentEl?: HTMLElement,
-		viewResolver?: () => NotorChatView | undefined,
-	): Promise<StreamResult> {
-		let textContent = "";
-		let inputTokens = 0;
-		let outputTokens = 0;
-		// Use the eagerly-created placeholder if provided; first text_delta
-		// will use it rather than creating a second element.
-		let contentEl: HTMLElement | undefined = eagerContentEl;
-
-		// Resolve view dynamically per-chunk so mid-stream navigation
-		// causes rendering to become a no-op while data writes continue.
-		const resolveView = viewResolver ?? (() => this.view);
-
-		const accumulatedToolCalls: ToolCallInfo[] = [];
-
-		for await (const event of parseStreamEvents(stream, abortController.signal)) {
-			switch (event.type) {
-				case "text_delta": {
-					// contentEl may already be set from the eager placeholder
-					const view = resolveView();
-					if (!contentEl) {
-						contentEl = view?.createAssistantMessagePlaceholder();
-					}
-					textContent = event.text;
-					if (contentEl) {
-						view?.appendStreamChunk(contentEl, event.delta);
-					}
-					break;
-				}
-
-				case "tool_call":
-					accumulatedToolCalls.push({
-						toolCallId: event.id,
-						toolName: event.name,
-						parameters: event.parameters,
-					});
-					break;
-
-				case "message_end":
-					inputTokens = event.inputTokens;
-					outputTokens = event.outputTokens;
-					log.debug("processStream message_end", {
-						inputTokens,
-						outputTokens,
-						toolCallCount: accumulatedToolCalls.length,
-					});
-					break;
-
-				case "error":
-					return {
-						type: "error",
-						error: event.message,
-						text: textContent,
-						inputTokens,
-						outputTokens,
-					};
-
-				case "cancelled":
-					return {
-						type: "cancelled",
-						text: event.text,
-						inputTokens,
-						outputTokens,
-						contentEl,
-					};
-			}
-		}
-
-		// If we accumulated tool calls, return them all
-		if (accumulatedToolCalls.length > 0) {
-			return {
-				type: "tool_calls",
-				calls: accumulatedToolCalls,
-				text: textContent,
-				inputTokens,
-				outputTokens,
-				contentEl,
-			};
-		}
-
-		return {
-			type: "text",
-			text: textContent,
-			inputTokens,
-			outputTokens,
-			contentEl,
-		};
-	}
-
-	// -----------------------------------------------------------------------
-	// Message conversion
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Convert internal Message objects to ChatMessage format for the provider.
-	 */
-	/**
-	 * Extract messages that follow the last assistant turn.
-	 *
-	 * These are "pending" messages the LLM hasn't responded to yet (typically
-	 * the current user message, or tool_call + tool_result during a tool loop).
-	 * They must be re-appended after compaction so the conversation ends on a
-	 * user turn, as required by providers like Bedrock that reject assistant
-	 * message prefill.
-	 */
-	private extractPendingMessages(messages: Message[]): Message[] {
-		for (let i = messages.length - 1; i >= 0; i--) {
-			if (messages[i]?.role === "assistant") {
-				return messages.slice(i + 1);
-			}
-		}
-		// No prior assistant response — all messages are pending
-		return [...messages];
-	}
-
-	private toChatMessages(messages: Message[], systemPrompt: string): ChatMessage[] {
-		const chatMessages: ChatMessage[] = [];
-
-		for (const msg of messages) {
-			switch (msg.role) {
-				case "system":
-					chatMessages.push({
-						role: "system",
-						content: systemPrompt,
-					});
-					break;
-
-				case "user":
-					chatMessages.push({
-						role: "user",
-						content: msg.content,
-					});
-					break;
-
-				case "assistant": {
-					// Defensive: skip assistant messages with blank content.
-					// Providers like Bedrock reject empty text fields. This can
-					// happen if a response is cancelled before any text arrives.
-					const assistantText = typeof msg.content === "string"
-						? msg.content
-						: (() => { throw new Error("Expected string content for assistant message"); })();
-					if (!assistantText.trim()) {
-						log.warn("Skipping assistant message with empty content", { id: msg.id });
-						break;
-					}
-					chatMessages.push({
-						role: "assistant",
-						content: assistantText,
-					});
-					break;
-				}
-
-				case "tool_call":
-					if (msg.tool_call) {
-						chatMessages.push({
-							role: "tool_call",
-							content: "",
-							tool_calls: [
-								{
-									// Use the provider-assigned ID (e.g., Bedrock toolUseId) when
-									// available; fall back to the message UUID for other providers.
-									id: msg.tool_call.id ?? msg.id,
-									tool_name: msg.tool_call.tool_name,
-									parameters: msg.tool_call.parameters,
-								},
-							],
-						});
-					}
-					break;
-
-				case "tool_result":
-					if (msg.tool_result) {
-						const resultStr = typeof msg.tool_result.result === "string"
-							? msg.tool_result.result
-							: JSON.stringify(msg.tool_result.result);
-
-						chatMessages.push({
-							role: "tool_result",
-							content: "",
-							tool_results: [
-								{
-									// Must match the tool_calls[].id used above for the same call.
-									tool_call_id: msg.tool_result.tool_call_id ?? msg.id,
-									tool_name: msg.tool_result.tool_name,
-									result: resultStr || msg.tool_result.error || "",
-									is_error: !msg.tool_result.success,
-									...(msg.tool_result.content_blocks?.length ? { content_blocks: msg.tool_result.content_blocks } : {}),
-								},
-							],
-						});
-					}
-					break;
-			}
-		}
-
-		// Safety net: ensure every tool_call has a matching tool_result.
-		// Providers (Bedrock, Anthropic) reject conversations where a tool_use
-		// block is not immediately followed by a tool_result block.
-		//
-		// With grouped ordering (Phase 2), consecutive tool_calls are followed
-		// by consecutive tool_results:
-		//   [tool_call_A, tool_call_B, tool_result_A, tool_result_B]
-		// We scan each run of tool_calls, collect the subsequent tool_results,
-		// and match by tool_call_id.  Unmatched tool_calls get synthetic results.
-		const repaired: ChatMessage[] = [];
-		let i = 0;
-		while (i < chatMessages.length) {
-			const msg = chatMessages[i]!;
-
-			// Not a tool_call — pass through
-			if (msg.role !== "tool_call" || !msg.tool_calls?.length) {
-				repaired.push(msg);
-				i++;
-				continue;
-			}
-
-			// Collect the run of consecutive tool_call messages
-			const toolCallRun: ChatMessage[] = [];
-			while (i < chatMessages.length && chatMessages[i]!.role === "tool_call" && chatMessages[i]!.tool_calls?.length) {
-				toolCallRun.push(chatMessages[i]!);
-				i++;
-			}
-
-			// Collect the run of consecutive tool_result messages that follow
-			const toolResultRun: ChatMessage[] = [];
-			while (i < chatMessages.length && chatMessages[i]!.role === "tool_result" && chatMessages[i]!.tool_results?.length) {
-				toolResultRun.push(chatMessages[i]!);
-				i++;
-			}
-
-			// Build a set of tool_call_ids that have matching results
-			const matchedIds = new Set(
-				toolResultRun.flatMap((r) => r.tool_results!.map((tr) => tr.tool_call_id))
-			);
-
-			// Emit all tool_calls
-			for (const tc of toolCallRun) {
-				repaired.push(tc);
-			}
-
-			// Emit all existing tool_results
-			for (const tr of toolResultRun) {
-				repaired.push(tr);
-			}
-
-			// Inject synthetic results for any unmatched tool_calls
-			for (const tc of toolCallRun) {
-				for (const tcData of tc.tool_calls!) {
-					if (!matchedIds.has(tcData.id)) {
-						repaired.push({
-							role: "tool_result",
-							content: "",
-							tool_results: [
-								{
-									tool_call_id: tcData.id,
-									tool_name: tcData.tool_name,
-									result: "Tool call was cancelled by the user.",
-									is_error: true,
-								},
-							],
-						});
-						log.warn("Injected synthetic tool_result for orphaned tool_call", {
-							toolName: tcData.tool_name,
-							toolCallId: tcData.id,
-						});
-					}
-				}
-			}
-		}
-
-		// Phase 3: Coalesce consecutive tool_call/tool_result messages into
-		// single messages with arrays, matching the provider-expected format
-		// (one assistant message with N tool_use blocks, one user message with
-		// N tool_result blocks).
-		const coalesced: ChatMessage[] = [];
-		let j = 0;
-		while (j < repaired.length) {
-			const msg = repaired[j]!;
-
-			if (msg.role === "tool_call" && msg.tool_calls?.length) {
-				// Look back: if the preceding coalesced message is an assistant
-				// message (pre-tool-call text + token carrier), absorb its content
-				// into the coalesced tool_call message.
-				let preToolCallText = "";
-				const prev = coalesced[coalesced.length - 1];
-				if (prev && prev.role === "assistant" && !prev.tool_calls) {
-					preToolCallText = typeof prev.content === "string"
-						? prev.content
-						: (() => { throw new Error("Expected string content for assistant message"); })();
-					coalesced.pop(); // absorb into the coalesced message
-				}
-
-				// Collect all consecutive tool_call entries
-				const allToolCalls: ChatMessage["tool_calls"] = [];
-				while (j < repaired.length && repaired[j]!.role === "tool_call" && repaired[j]!.tool_calls?.length) {
-					allToolCalls.push(...repaired[j]!.tool_calls!);
-					j++;
-				}
-
-				coalesced.push({
-					role: "tool_call",
-					content: preToolCallText,
-					tool_calls: allToolCalls,
-				});
-				continue;
-			}
-
-			if (msg.role === "tool_result" && msg.tool_results?.length) {
-				// Collect all consecutive tool_result entries
-				const allToolResults: ChatMessage["tool_results"] = [];
-				while (j < repaired.length && repaired[j]!.role === "tool_result" && repaired[j]!.tool_results?.length) {
-					allToolResults.push(...repaired[j]!.tool_results!);
-					j++;
-				}
-
-				coalesced.push({
-					role: "tool_result",
-					content: "",
-					tool_results: allToolResults,
-				});
-				continue;
-			}
-
-			coalesced.push(msg);
-			j++;
-		}
-
-		log.info("ChatMessages built for provider", {
-			totalCount: coalesced.length,
-			firstRole: coalesced[0]?.role ?? "none",
-			secondRole: coalesced[1]?.role ?? "none",
-			lastRole: coalesced[coalesced.length - 1]?.role ?? "none",
-			roles: coalesced.map((m) => m.role),
-		});
-
-		return coalesced;
-	}
 
 	// -----------------------------------------------------------------------
 	// Error handling
@@ -3106,29 +2756,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 		this.activeUseExtendedContext = useExtendedContext;
 	}
 
-	private calculateCost(inputTokens: number, outputTokens: number, modelId?: string): number | null {
-		const resolvedModelId = modelId ?? this.getActiveModelId();
-
-		// Check user-configured pricing first
-		const userPricing = this.settings.model_pricing[resolvedModelId] as ModelPricing | undefined;
-		if (userPricing) {
-			return (
-				(inputTokens / 1000) * userPricing.input +
-				(outputTokens / 1000) * userPricing.output
-			);
-		}
-
-		// Fall back to static metadata pricing
-		const metadata = getModelMetadata(resolvedModelId);
-		if (metadata?.input_price_per_1k != null && metadata?.output_price_per_1k != null) {
-			return (
-				(inputTokens / 1000) * metadata.input_price_per_1k +
-				(outputTokens / 1000) * metadata.output_price_per_1k
-			);
-		}
-
-		return null;
-	}
 
 	/**
 	 * Render a message in the view based on its role.
@@ -3156,9 +2783,3 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 }
 
-/** Internal result type for stream processing. */
-type StreamResult =
-	| { type: "text"; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "cancelled"; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "error"; error: string; text: string; inputTokens: number; outputTokens: number };
