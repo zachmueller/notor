@@ -31,10 +31,7 @@ import { runTest, type TestContext } from "../lib/test-harness";
 import {
 	buildDefaultSettings,
 	waitForSelector,
-	sendMessage,
-	newConversation,
 	ensureCleanState,
-	waitForResponse,
 	VAULT_PATH,
 } from "../lib/test-helpers";
 
@@ -49,23 +46,31 @@ const HISTORY_DIR = ".obsidian/plugins/notor/history/";
 // Local helpers
 // ---------------------------------------------------------------------------
 
-/** Send a message without waiting for the response to complete. */
-async function sendMessageNoWait(page: any, message: string): Promise<void> {
-	const found = await page.evaluate((msg: string) => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+/**
+ * Send a message in a specific leaf without waiting for the response.
+ * Scopes the input to the leaf's container to avoid DOM ordering issues
+ * when multiple panels are open.
+ */
+async function sendMessageNoWaitInLeaf(page: any, leafIndex: number, message: string): Promise<void> {
+	const found = await page.evaluate((args: { viewType: string; index: number; msg: string }) => {
+		const app = (window as any).app;
+		if (!app) return false;
+		const leaves = app.workspace.getLeavesOfType(args.viewType);
+		if (args.index >= leaves.length) return false;
+		const view = leaves[args.index]?.view;
+		if (!view) return false;
+		const el = view.containerEl?.querySelector(".notor-text-input") as HTMLElement | null;
 		if (!el) return false;
 		el.focus();
-		el.textContent = msg;
+		el.textContent = args.msg;
 		el.dispatchEvent(new Event("input", { bubbles: true }));
+		// Dispatch Enter keydown directly on the input to trigger the send handler
+		el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
 		return true;
-	}, message);
-	if (!found) throw new Error("Chat input not found");
-
-	await page.waitForTimeout(300);
-	await page.focus(".notor-text-input");
-	await page.keyboard.press("Enter");
+	}, { viewType: CHAT_VIEW_TYPE, index: leafIndex, msg: message });
+	if (!found) throw new Error(`Chat input not found in leaf ${leafIndex}`);
 	await page.waitForTimeout(400);
-	console.log(`    -> Sent (no wait): "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
+	console.log(`    -> Sent in leaf ${leafIndex} (no wait): "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
 }
 
 /** Wait until the contenteditable input is re-enabled. */
@@ -243,23 +248,26 @@ async function getLeafModelId(page: any, leafIndex: number): Promise<string | nu
 	}, { viewType: CHAT_VIEW_TYPE, index: leafIndex });
 }
 
-/** Send a message in a specific leaf (activating it first). */
-async function sendMessageInLeaf(
-	page: any,
-	leafIndex: number,
-	message: string,
-	waitForComplete: boolean,
-): Promise<boolean> {
-	const activated = await activateLeaf(page, leafIndex);
-	if (!activated) return false;
-	await page.waitForTimeout(1_000);
-
-	if (waitForComplete) {
-		return sendMessage(page, message);
-	} else {
-		await sendMessageNoWait(page, message);
+/**
+ * Start a new conversation in a specific leaf by clicking the button within
+ * that leaf's container. Avoids the issue where page.$() finds the first
+ * DOM match (which may be in a different, non-visible panel).
+ */
+async function newConversationInLeaf(page: any, leafIndex: number): Promise<void> {
+	const clicked = await page.evaluate((args: { viewType: string; index: number }) => {
+		const app = (window as any).app;
+		if (!app) return false;
+		const leaves = app.workspace.getLeavesOfType(args.viewType);
+		if (args.index >= leaves.length) return false;
+		const view = leaves[args.index]?.view;
+		if (!view) return false;
+		const btn = view.containerEl?.querySelector(".notor-chat-header-btn[aria-label='New conversation']") as HTMLElement;
+		if (!btn) return false;
+		btn.click();
 		return true;
-	}
+	}, { viewType: CHAT_VIEW_TYPE, index: leafIndex });
+	if (!clicked) throw new Error(`Could not click New conversation button in leaf ${leafIndex}`);
+	await page.waitForTimeout(1_500);
 }
 
 /**
@@ -407,12 +415,12 @@ async function testSimultaneousMessages(ctx: TestContext): Promise<void> {
 	console.log("\n-- Test 2: Send messages in both panels simultaneously — separate JSONL files --");
 	const { page } = ctx;
 
-	// Create new conversations in both panels
+	// Create new conversations in both panels (use leaf-scoped helper to avoid
+	// page.$() picking up the wrong panel's button in DOM order)
 	// Primary panel
 	await activateLeaf(page, shared.primaryLeafIndex);
 	await page.waitForTimeout(500);
-	await newConversation(page);
-	await page.waitForTimeout(1_500);
+	await newConversationInLeaf(page, shared.primaryLeafIndex);
 	const primaryConvId = await getLeafConversationId(page, shared.primaryLeafIndex);
 	shared.primaryConvId = primaryConvId ?? undefined;
 	console.log(`  Primary conversation: ${primaryConvId?.substring(0, 8)}`);
@@ -420,8 +428,7 @@ async function testSimultaneousMessages(ctx: TestContext): Promise<void> {
 	// Secondary panel
 	await activateLeaf(page, shared.secondaryLeafIndex);
 	await page.waitForTimeout(500);
-	await newConversation(page);
-	await page.waitForTimeout(1_500);
+	await newConversationInLeaf(page, shared.secondaryLeafIndex);
 	const secondaryConvId = await getLeafConversationId(page, shared.secondaryLeafIndex);
 	shared.secondaryConvId = secondaryConvId ?? undefined;
 	console.log(`  Secondary conversation: ${secondaryConvId?.substring(0, 8)}`);
@@ -448,11 +455,13 @@ async function testSimultaneousMessages(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	// Send message in primary panel (no wait)
+	// Send message in primary panel (no wait) — use leaf-scoped sender to ensure
+	// the message goes to the correct panel's input
 	await activateLeaf(page, shared.primaryLeafIndex);
 	await page.waitForTimeout(500);
-	await sendMessageNoWait(
+	await sendMessageNoWaitInLeaf(
 		page,
+		shared.primaryLeafIndex,
 		"You are in Panel A (primary). Write a 500-word essay about the history of astronomy.",
 	);
 	await page.waitForTimeout(1_000);
@@ -460,8 +469,9 @@ async function testSimultaneousMessages(ctx: TestContext): Promise<void> {
 	// Send message in secondary panel (no wait)
 	await activateLeaf(page, shared.secondaryLeafIndex);
 	await page.waitForTimeout(500);
-	await sendMessageNoWait(
+	await sendMessageNoWaitInLeaf(
 		page,
+		shared.secondaryLeafIndex,
 		"You are in Panel B (secondary). Write a 500-word essay about the history of mathematics.",
 	);
 
@@ -790,11 +800,11 @@ async function testCallbackIsolation(ctx: TestContext): Promise<void> {
 	// Record secondary panel conversation state before
 	const secondaryConvBefore = await getLeafConversationId(page, shared.secondaryLeafIndex);
 
-	// Create new conversation in primary panel
+	// Create new conversation in primary panel (use leaf-scoped click)
 	await activateLeaf(page, shared.primaryLeafIndex);
 	await page.waitForTimeout(500);
-	await newConversation(page);
-	await page.waitForTimeout(2_000);
+	await newConversationInLeaf(page, shared.primaryLeafIndex);
+	await page.waitForTimeout(1_000);
 
 	// Verify secondary panel's conversation is unchanged
 	const secondaryConvAfter = await getLeafConversationId(page, shared.secondaryLeafIndex);
