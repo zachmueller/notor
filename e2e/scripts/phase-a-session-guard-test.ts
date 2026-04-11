@@ -30,6 +30,7 @@ import {
 	newConversation,
 	ensureCleanState,
 	waitForResponse,
+	writeCleanWorkspace,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -408,9 +409,11 @@ async function testSendAfterCompletion(ctx: TestContext): Promise<void> {
 	await ensureCleanState(page);
 	await page.waitForTimeout(500);
 
-	// Create a new conversation in panel 2 for a clean send
-	await newConversation(page);
-	await page.waitForTimeout(1_500);
+	// Create a new conversation in panel 2 via command (routes to active panel)
+	await page.evaluate(() => {
+		(window as any).app?.commands?.executeCommandById("notor:new-conversation");
+	});
+	await page.waitForTimeout(2_000);
 
 	const responded = await sendMessage(page, "Say 'Panel 2 works!' and nothing else.");
 	const shot = await ctx.screenshot("04-panel2-sends");
@@ -567,4 +570,8 @@ const settings = buildDefaultSettings({
 	mode: "plan",
 });
 
-runTest({ name: "phase-a-session-guard", settings }, tests);
+runTest({
+	name: "phase-a-session-guard",
+	settings,
+	setupVault: (vaultPath) => writeCleanWorkspace(vaultPath),
+}, tests);

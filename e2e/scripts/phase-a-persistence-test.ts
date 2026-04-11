@@ -29,6 +29,7 @@ import {
 	sendMessage,
 	newConversation,
 	ensureCleanState,
+	writeCleanWorkspace,
 	VAULT_PATH,
 } from "../lib/test-helpers";
 
@@ -420,4 +421,8 @@ const settings = buildDefaultSettings({
 	mode: "plan",
 });
 
-runTest({ name: "phase-a-persistence", settings }, tests);
+runTest({
+	name: "phase-a-persistence",
+	settings,
+	setupVault: (vaultPath) => writeCleanWorkspace(vaultPath),
+}, tests);

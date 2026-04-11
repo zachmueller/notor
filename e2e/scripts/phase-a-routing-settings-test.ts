@@ -24,6 +24,7 @@ import {
 	sendMessage,
 	newConversation,
 	ensureCleanState,
+	writeCleanWorkspace,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -316,8 +317,7 @@ async function testSettingsPropagation(ctx: TestContext): Promise<void> {
 			// Read current mode from each orchestrator's settings before change
 			const beforeModes: string[] = [];
 			for (const orch of registry.values()) {
-				const settings = orch.getSettings?.();
-				beforeModes.push(settings?.mode ?? "unknown");
+				beforeModes.push((orch as any).settings?.mode ?? "unknown");
 			}
 
 			// Trigger a settings update via the plugin's standard path
@@ -331,8 +331,7 @@ async function testSettingsPropagation(ctx: TestContext): Promise<void> {
 			// Read modes after
 			const afterModes: string[] = [];
 			for (const orch of registry.values()) {
-				const settings = orch.getSettings?.();
-				afterModes.push(settings?.mode ?? "unknown");
+				afterModes.push((orch as any).settings?.mode ?? "unknown");
 			}
 
 			// Restore original mode
@@ -484,4 +483,8 @@ const settings = buildDefaultSettings({
 	mode: "plan",
 });
 
-runTest({ name: "phase-a-routing-settings", settings }, tests);
+runTest({
+	name: "phase-a-routing-settings",
+	settings,
+	setupVault: (vaultPath) => writeCleanWorkspace(vaultPath),
+}, tests);

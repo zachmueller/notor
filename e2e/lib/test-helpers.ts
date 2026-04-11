@@ -5,6 +5,7 @@
  * so individual test scripts can focus on test logic only.
  */
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page, Browser, ElementHandle } from "playwright-core";
@@ -503,4 +504,43 @@ export function buildDefaultSettings(overrides?: Record<string, unknown>): Recor
 	result.user_extension_settings = extSettings;
 	result.user_shared_settings = sharedSettings;
 	return result;
+}
+
+// ---------------------------------------------------------------------------
+// Workspace helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a clean workspace.json with a single chat panel.
+ *
+ * Call from a test config's `setupVault` callback to ensure Obsidian starts
+ * with exactly one chat panel — prevents stale multi-panel layouts from
+ * previous test runs affecting leaf count assertions.
+ */
+export function writeCleanWorkspace(vaultPath: string): void {
+	const workspace = {
+		main: {
+			id: "e2e-main-split",
+			type: "split",
+			children: [{
+				id: "e2e-main-tabs",
+				type: "tabs",
+				children: [{
+					id: "e2e-chat-leaf",
+					type: "leaf",
+					state: {
+						type: "notor-chat-view",
+						state: {},
+						icon: "message-square",
+						title: "Notor chat",
+					},
+				}],
+			}],
+			direction: "vertical",
+		},
+		active: "e2e-chat-leaf",
+		lastOpenFiles: [],
+	};
+	const wsPath = path.join(vaultPath, ".obsidian", "workspace.json");
+	fs.writeFileSync(wsPath, JSON.stringify(workspace, null, 2));
 }

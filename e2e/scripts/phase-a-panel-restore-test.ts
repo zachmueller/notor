@@ -29,6 +29,7 @@ import {
 	sendMessage,
 	newConversation,
 	ensureCleanState,
+	writeCleanWorkspace,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -535,4 +536,8 @@ const settings = buildDefaultSettings({
 	mode: "plan",
 });
 
-runTest({ name: "phase-a-panel-restore", settings }, tests);
+runTest({
+	name: "phase-a-panel-restore",
+	settings,
+	setupVault: (vaultPath) => writeCleanWorkspace(vaultPath),
+}, tests);
