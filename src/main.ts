@@ -375,9 +375,13 @@ export default class NotorPlugin extends Plugin {
 		});
 
 		// 3b. Register the tool config inspector view type (UI-003 / FR-88)
+		// A4.5: Inspector follows focus changes via resolver callback
 		this.registerView(INSPECTOR_VIEW_TYPE, (leaf) => {
 			const inspectorView = new EffectiveConfigInspectorView(leaf);
-			inspectorView.setOrchestrator(this.getOrchestrator());
+			inspectorView.setOrchestrator(this.getActiveOrchestrator());
+			inspectorView.setOrchestratorResolver((targetLeaf) => {
+				return this._orchestrators.get(targetLeaf.id) ?? null;
+			});
 			return inspectorView;
 		});
 
@@ -399,7 +403,12 @@ export default class NotorPlugin extends Plugin {
 			id: "compact-context",
 			name: "Compact context",
 			callback: () => {
-				this.getOrchestrator().manualCompaction().catch((e) => {
+				const orchestrator = this.getActiveOrchestrator();
+				if (!orchestrator) {
+					new Notice("No active chat panel");
+					return;
+				}
+				orchestrator.manualCompaction().catch((e) => {
 					log.error("Manual compaction failed", { error: String(e) });
 					new Notice(`Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
 				});
@@ -432,7 +441,12 @@ export default class NotorPlugin extends Plugin {
 									file_path: workflow.file_path,
 								});
 								// E-013: Execute the workflow via the orchestrator.
-								return this.getOrchestrator().executeWorkflow(workflow);
+								const orchestrator = this.getActiveOrchestrator();
+								if (!orchestrator) {
+									new Notice("No active chat panel");
+									return;
+								}
+								return orchestrator.executeWorkflow(workflow);
 							}).catch((e) => {
 								log.error("Failed to execute workflow from command palette", {
 									error: String(e),
@@ -488,7 +502,12 @@ export default class NotorPlugin extends Plugin {
 									display_name: workflow.display_name,
 									active_note: capturedPath,
 								});
-								await this.getOrchestrator().executeWorkflow(workflow, resolvedPrompt);
+								const orchestrator = this.getActiveOrchestrator();
+								if (!orchestrator) {
+									new Notice("No active chat panel");
+									return;
+								}
+								await orchestrator.executeWorkflow(workflow, resolvedPrompt);
 							})().catch((e) => {
 								log.error("Failed to execute active note workflow", {
 									error: String(e),
@@ -515,7 +534,11 @@ export default class NotorPlugin extends Plugin {
 			name: "Export conversation",
 			callback: () => {
 				try {
-					const orchestrator = this.getOrchestrator();
+					const orchestrator = this.getActiveOrchestrator();
+					if (!orchestrator) {
+						new Notice("No active chat panel");
+						return;
+					}
 					const convManager = orchestrator.getConversationManager();
 					const conversation = convManager.getActiveConversation();
 					const messages = convManager.getMessages();
@@ -563,7 +586,10 @@ export default class NotorPlugin extends Plugin {
 								extracted.messages
 							);
 							const filename = await this.getHistoryManager().importConversation(conversation, messages);
-							await this.getOrchestrator().switchConversation(filename);
+							const orchestrator = this.getActiveOrchestrator();
+							if (orchestrator) {
+								await orchestrator.switchConversation(filename);
+							}
 							new Notice(`Imported conversation: ${conversation.title ?? "Untitled"}`);
 						} catch (e) {
 							log.error("Import conversation command failed", { error: String(e) });
@@ -584,12 +610,9 @@ export default class NotorPlugin extends Plugin {
 			},
 		});
 
-		// Phase 4, Step 4d: Open a secondary chat panel in a new tab.
-		// Each secondary panel gets its own orchestrator for independent
-		// provider/model state and concurrent streaming.
-		// Obsidian calls the factory (registerView), creates the view, then
-		// calls setState() which detects isSecondary and re-wires with its
-		// own orchestrator.
+		// Open an additional chat panel in a new tab.
+		// The factory creates a fresh orchestrator automatically — no
+		// isSecondary state needed (A4.7).
 		this.addCommand({
 			id: "open-secondary-chat",
 			name: "Open new chat panel",
@@ -598,9 +621,8 @@ export default class NotorPlugin extends Plugin {
 				leaf.setViewState({
 					type: CHAT_VIEW_TYPE,
 					active: true,
-					state: { isSecondary: true },
 				}).catch((e) => {
-					log.error("Failed to open secondary chat panel", { error: String(e) });
+					log.error("Failed to open chat panel", { error: String(e) });
 				});
 			},
 		});
@@ -729,21 +751,16 @@ export default class NotorPlugin extends Plugin {
 	onunload() {
 		log.info("Plugin unloading");
 
-		// Step 1h: Abort all active sessions first so their response loops can
-		// flush JSONL writes before infrastructure singletons are torn down.
+		// Abort all active sessions so their response loops can flush JSONL
+		// writes before infrastructure singletons are torn down.
 		// Fire-and-forget since onunload() is synchronous — the 2s timeout
-		// in destroy() prevents hanging.
-		this._orchestrator?.destroy().catch((e) => {
-			log.error("Orchestrator destroy failed", { error: String(e) });
-		});
-
-		// Phase 4: Destroy secondary orchestrators
-		for (const orch of this._secondaryOrchestrators) {
+		// in destroy() prevents hanging. (A4.8)
+		for (const orch of this._orchestrators.values()) {
 			orch.destroy().catch((e) => {
-				log.error("Secondary orchestrator destroy failed", { error: String(e) });
+				log.error("Orchestrator destroy failed", { error: String(e) });
 			});
 		}
-		this._secondaryOrchestrators = [];
+		this._orchestrators.clear();
 
 		// Clear the last-active markdown path cache on unload
 		notifyMarkdownLeafActivated(null);
@@ -1048,8 +1065,8 @@ export default class NotorPlugin extends Plugin {
 		this._vaultEventScheduler = vaultEventScheduler;
 
 		// Step 8: Build the dispatcher deps object (assembled here for access
-		// by handler closures). Orchestrator is accessed lazily via getter so
-		// it isn't initialized until first use (lazy init pattern).
+		// by handler closures). Orchestrator resolved lazily via
+		// getActiveOrchestrator() so vault events route to the focused panel.
 		const getDispatcherDeps = (): DispatcherDeps => {
 			return {
 				app: this.app,
@@ -1058,7 +1075,7 @@ export default class NotorPlugin extends Plugin {
 				getSettings: () => this.settings,
 				vaultRootPath: this.vaultRootPath,
 				concurrencyManager: workflowConcurrencyManager,
-				orchestrator: this.getOrchestrator(),
+				orchestrator: this.getActiveOrchestrator(),
 				personaManager: this._personaManager,
 				chainTracker: executionChainTracker,
 				// EXT-017: Wire extension automation accessor + executor for vault event hooks.
@@ -1302,8 +1319,9 @@ export default class NotorPlugin extends Plugin {
 			);
 		}
 
-		if (this._orchestrator) {
-			this._orchestrator.updateSettings(this.settings);
+		// Propagate settings to all active orchestrators (A4.2)
+		for (const orch of this._orchestrators.values()) {
+			orch.updateSettings(this.settings);
 		}
 
 		if (this._noteOpener) {
@@ -1533,9 +1551,11 @@ export default class NotorPlugin extends Plugin {
 				this.getProviderRegistry(),
 				this._toolRegistry,
 				this.settings,
-				() => this.getOrchestrator()?.getEffectiveToolConfig() ?? null,
+				// Fallback closures for non-session contexts (A4.4f);
+				// session-scoped dispatch uses sessionContext instead.
+				() => this.getActiveOrchestrator()?.getEffectiveToolConfig() ?? null,
 				this.getHistoryManager(),
-				() => this.getOrchestrator()?.getConversationManager()?.getActiveConversation() ?? null,
+				() => this.getActiveOrchestrator()?.getConversationManager()?.getActiveConversation() ?? null,
 			);
 			if (this.vaultRootPath) {
 				useSubagentTool.setVaultRootPath(this.vaultRootPath);
@@ -1795,34 +1815,7 @@ export default class NotorPlugin extends Plugin {
 		return orchestrator;
 	}
 
-	/**
-	 * Wire a chat view as a secondary panel with its own orchestrator.
-	 *
-	 * Called from the "open-secondary-chat" command and from view setState()
-	 * when restoring a secondary panel from workspace state.
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
-	 */
-	wireViewAsSecondary(view: NotorChatView): void {
-		view.setIsSecondary(true);
-		const orchestrator = this.createSecondaryOrchestrator();
-		this.wireView(view, orchestrator);
 
-		// The registerView factory always calls wireView(view) which defaults
-		// to the primary orchestrator (state isn't known until setState runs).
-		// That overwrites the primary orchestrator's view reference, approval
-		// callback, and session-change listener with closures bound to the
-		// secondary view.  Restore by re-wiring the primary orchestrator with
-		// the actual primary panel view.
-		const primaryOrch = this.getOrchestrator();
-		for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)) {
-			const v = leaf.view;
-			if (v instanceof NotorChatView && !v.getIsSecondary() && v !== view) {
-				this.wireView(v, primaryOrch);
-				return;
-			}
-		}
-	}
 
 	/**
 	 * Create a new orchestrator with all shared singletons and managers wired.
@@ -2535,13 +2528,14 @@ export default class NotorPlugin extends Plugin {
 			);
 		});
 
-		// Open conversation in a new secondary tab
+		// Open conversation in a new tab — the factory creates a fresh
+		// orchestrator automatically; setState loads the conversation.
 		view.setOnOpenInNewTab((filename: string) => {
 			const leaf = this.app.workspace.getLeaf("tab");
 			leaf.setViewState({
 				type: CHAT_VIEW_TYPE,
 				active: true,
-				state: { isSecondary: true, conversationFilename: filename },
+				state: { conversationFilename: filename },
 			}).catch((e) => {
 				log.error("Failed to open conversation in new tab", { error: String(e) });
 			});
@@ -2849,32 +2843,14 @@ export default class NotorPlugin extends Plugin {
 		}
 	}
 
-	/**
-	 * Get the primary chat panel leaf (the first non-secondary leaf).
-	 *
-	 * With multi-panel support, multiple leaves of CHAT_VIEW_TYPE may exist.
-	 * This helper returns the primary panel for operations that should target
-	 * the main panel (e.g., command palette "New conversation").
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
-	 */
-	private getPrimaryChatLeaf(): WorkspaceLeaf | undefined {
-		const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-		// Primary is the first leaf that is NOT secondary
-		return leaves.find((l) => {
-			const view = l.view as NotorChatView | undefined;
-			return view && !view.getIsSecondary();
-		}) ?? leaves[0];
-	}
-
-	/** Open (or reveal) the primary Notor chat panel. */
+	/** Open (or reveal) a Notor chat panel. */
 	private async openChatPanel(): Promise<void> {
 		const { workspace } = this.app;
 
-		// Check if the primary panel is already open
-		const existing = this.getPrimaryChatLeaf();
-		if (existing) {
-			void workspace.revealLeaf(existing);
+		// Reveal an existing chat panel if one is open
+		const leaves = workspace.getLeavesOfType(CHAT_VIEW_TYPE);
+		if (leaves.length > 0) {
+			void workspace.revealLeaf(leaves[0]!);
 			return;
 		}
 
@@ -2886,45 +2862,47 @@ export default class NotorPlugin extends Plugin {
 		}
 	}
 
-	/** Start a new conversation (command palette action). */
+	/**
+	 * Start a new conversation (command palette action).
+	 *
+	 * Routes to the active/focused orchestrator via `getActiveOrchestrator()`.
+	 * View is obtained via `orchestrator.getView()` for consistency with the
+	 * `_lastFocusedChatLeafId` fallback (avoids mismatch when focus is on a
+	 * non-chat view).
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — A4.1
+	 */
 	private newConversation(): void {
-		const primaryLeaf = this.getPrimaryChatLeaf();
-		if (primaryLeaf) {
-			// Trigger via the view's new conversation callback
-			const view = primaryLeaf.view as NotorChatView | undefined;
-			if (view) {
-				// Delegate to the orchestrator
-				this.getOrchestrator()
-					.newConversation()
-					.then(() => {
-						const conv = this.getOrchestrator().getConversationManager().getActiveConversation();
-						if (conv) {
-							view.setActiveConversationId(conv.id);
-						}
-						// Refresh conversation list
-						this.getHistoryManager()
-							.listConversations()
-							.then((entries) => {
-								view.renderConversationList(entries);
-							})
-							.catch(() => {});
-					})
-					.catch((e) => {
-						log.error("Failed to create new conversation from command", {
-							error: String(e),
-						});
-						new Notice(
-							`Failed to create conversation: ${e instanceof Error ? e.message : String(e)}`
-						);
-					});
-				return;
-			}
+		const orchestrator = this.getActiveOrchestrator();
+		if (!orchestrator) {
+			// No panel open — open one first, then it will auto-start a conversation
+			this.openChatPanel().catch((e) => {
+				log.error("Failed to open chat panel", { error: String(e) });
+			});
+			return;
 		}
 
-		// Panel not open — open it first, then it will auto-start a conversation
-		this.openChatPanel().catch((e) => {
-			log.error("Failed to open chat panel", { error: String(e) });
-		});
+		const view = orchestrator.getView();
+		orchestrator
+			.newConversation()
+			.then(() => {
+				this.syncViewAfterLoad(view!, orchestrator);
+				// Refresh conversation list
+				this.getHistoryManager()
+					.listConversations()
+					.then((entries) => {
+						view?.renderConversationList(entries);
+					})
+					.catch(() => {});
+			})
+			.catch((e) => {
+				log.error("Failed to create new conversation from command", {
+					error: String(e),
+				});
+				new Notice(
+					`Failed to create conversation: ${e instanceof Error ? e.message : String(e)}`
+				);
+			});
 	}
 
 	// -----------------------------------------------------------------------

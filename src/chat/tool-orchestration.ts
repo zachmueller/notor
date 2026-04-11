@@ -11,6 +11,7 @@
 import type { ToolResult, ConversationMode } from "../types";
 import type { ToolDispatcher, ApprovalCallback } from "./dispatcher";
 import type { ToolPolicyContext } from "./tool-policy";
+import type { ToolSessionContext } from "../tools/tool";
 import { isMcpTool } from "../mcp/mcp-tool-adapter";
 import { logger } from "../utils/logger";
 
@@ -120,6 +121,7 @@ export async function executeToolBatches(
 	onProgressMap?: Map<string, (status: string) => void>,
 	policyCtx?: ToolPolicyContext,
 	approvalCallback?: ApprovalCallback,
+	sessionContext?: ToolSessionContext,
 ): Promise<ToolCallResult[]> {
 	const allResults: ToolCallResult[] = [];
 
@@ -154,6 +156,7 @@ export async function executeToolBatches(
 				onProgressMap,
 				policyCtx,
 				approvalCallback,
+				sessionContext,
 			);
 			allResults.push(...results);
 		} else {
@@ -173,7 +176,7 @@ export async function executeToolBatches(
 					continue;
 				}
 
-				const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback);
+				const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext);
 				allResults.push({ call, result });
 			}
 		}
@@ -198,6 +201,7 @@ async function runConcurrentBatch(
 	onProgressMap?: Map<string, (status: string) => void>,
 	policyCtx?: ToolPolicyContext,
 	approvalCallback?: ApprovalCallback,
+	sessionContext?: ToolSessionContext,
 ): Promise<ToolCallResult[]> {
 	log.info("Running concurrent batch", { count: calls.length, cap: concurrencyCap });
 
@@ -239,7 +243,7 @@ async function runConcurrentBatch(
 					},
 				};
 			}
-			const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback);
+			const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext);
 			return { call, result };
 		} finally {
 			release();
@@ -262,6 +266,7 @@ async function safeDispatch(
 	onProgress?: (status: string) => void,
 	policyCtx?: ToolPolicyContext,
 	approvalCallback?: ApprovalCallback,
+	sessionContext?: ToolSessionContext,
 ): Promise<ToolResult> {
 	try {
 		const result = await dispatcher.dispatch(
@@ -273,6 +278,7 @@ async function safeDispatch(
 			onProgress,
 			policyCtx,
 			approvalCallback,
+			sessionContext,
 		);
 		result.tool_call_id = call.toolCallId;
 		return result;

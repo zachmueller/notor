@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A3 complete, A1.8 done (prerequisite for A3.2); A4 next
+**Status:** Phase A4 complete; A1.11 partially done (wireViewAsSecondary + getPrimaryChatLeaf deleted); A5 next
 
 ---
 
@@ -113,8 +113,8 @@
   - **⚠ Requires A4.1 first** — the private `newConversation()` method (L2605) calls `getPrimaryChatLeaf()`. A4.1 rewrites that method to remove the call. Do not delete `getPrimaryChatLeaf()` before A4.1 has updated `newConversation()`, or batch both in the same commit.
   - Delete `getOrchestrator()` (L1585-1628)
   - Delete `createSecondaryOrchestrator()` (L1640-1687)
-  - Delete `wireViewAsSecondary()` (L1697-1716)
-  - Delete `getPrimaryChatLeaf()` (L2576-2583)
+  - ~~Delete `wireViewAsSecondary()` (L1697-1716)~~ — deleted in A4.6 (type-broken after isSecondary removal)
+  - ~~Delete `getPrimaryChatLeaf()` (L2576-2583)~~ — deleted in A4.6 (type-broken after isSecondary removal)
 
 ---
 
@@ -221,7 +221,7 @@
 
 **Bugs addressed:** Settings propagation bug, correct command targeting
 
-- [ ] **A4.1 — Update all `getOrchestrator()` call sites to `getActiveOrchestrator()`** (`src/main.ts`, `src/chat/orchestrator.ts`)
+- [x] **A4.1 — Update all `getOrchestrator()` call sites to `getActiveOrchestrator()`** (`src/main.ts`, `src/chat/orchestrator.ts`) *(done 2026-04-11)*
   - Inspector view factory (L313) — see A4.5 instead
   - Manual compaction command (L335)
   - Run workflow command (L368)
@@ -238,20 +238,20 @@
     - **⚠ Must be done before A1.11** — A1.11 deletes `getPrimaryChatLeaf()`, which this method calls at L2606
   - Add null guards (`?.`) since `getActiveOrchestrator()` can return `null`
 
-- [ ] **A4.2 — Fix settings propagation** (`src/main.ts`, L1218-1220)
+- [x] **A4.2 — Fix settings propagation** (`src/main.ts`, L1218-1220) *(done 2026-04-11)*
   - Replace `if (this._orchestrator) { this._orchestrator.updateSettings(...) }` with iteration: `for (const orch of this._orchestrators.values()) { orch.updateSettings(this.settings); }`
   - Also update the settings change handler around L2128-2135
 
-- [ ] **A4.3 — Update vault event dispatcher** (`src/main.ts`, inside `_initVaultEventHooks()`)
+- [x] **A4.3 — Update vault event dispatcher** (`src/main.ts`, inside `_initVaultEventHooks()`) *(done 2026-04-11)*
   - `getDispatcherDeps` is a **local `const` closure inside `_initVaultEventHooks()`** (not a class method) — edit it there, not as a plugin method
   - Replace `orchestrator: this.getOrchestrator()` with `orchestrator: this.getActiveOrchestrator()` inside that closure (Amendment A7/R8)
   - Ensure the dispatcher handles `null` orchestrator gracefully (skip workflow execution)
 
-- [ ] **A4.4 — Wire `UseSubAgentTool` via dispatch context** (`src/tools/tool.ts`, `src/chat/orchestrator.ts`, `src/chat/tool-orchestration.ts`, `src/chat/dispatcher.ts`, `src/tools/use-subagent.ts`, `src/main.ts`)
+- [x] **A4.4 — Wire `UseSubAgentTool` via dispatch context** (`src/tools/tool.ts`, `src/chat/orchestrator.ts`, `src/chat/tool-orchestration.ts`, `src/chat/dispatcher.ts`, `src/tools/use-subagent.ts`, `src/main.ts`) *(done 2026-04-11)*
   - **Do A4.4a–e before A4.1** — A4.1 removes `getOrchestrator()` from the closures at L1429/L1431, but A4.4f updates those closures to `getActiveOrchestrator()` as a fallback. Sequence: A4.4a → A4.4b → A4.4c → A4.4d → A4.4e → A4.1 → A4.4f
   - **⚠ Must be complete before Phase A ships** — without it, sub-agents executing in a session use the wrong orchestrator's effective config and conversation state
 
-- [ ] **A4.4a — Define `ToolSessionContext` interface** (`src/tools/tool.ts`)
+- [x] **A4.4a — Define `ToolSessionContext` interface** (`src/tools/tool.ts`) *(done 2026-04-11)*
   - Add to `src/tools/tool.ts` (alongside `ToolExecuteOptions`) to avoid circular imports:
     ```typescript
     export interface ToolSessionContext {
@@ -261,18 +261,18 @@
     ```
   - Add `sessionContext?: ToolSessionContext` field to `ToolExecuteOptions`
 
-- [ ] **A4.4b — `ChatOrchestrator` implements `ToolSessionContext`** (`src/chat/orchestrator.ts`)
+- [x] **A4.4b — `ChatOrchestrator` implements `ToolSessionContext`** (`src/chat/orchestrator.ts`) *(done 2026-04-11)*
   - Add `implements ToolSessionContext` to the class declaration (import the interface from `../tools/tool`)
   - Add `getActiveConversation(): Conversation | null` proxy method: `return this.conversationManager.getActiveConversation()`
     - **Note:** This reads the orchestrator's **display** `ConversationManager`, not the session's isolated one. If the user switches conversations mid-session, this returns the new displayed conversation — the same pre-existing limitation as the L1431 closure fallback. Add a code comment noting this so a future refactor can target `session.conversationManager` instead.
   - `getEffectiveToolConfig()` already exists on the orchestrator
 
-- [ ] **A4.4c — Thread `sessionContext` through dispatch chain** (`src/chat/tool-orchestration.ts`, `src/chat/dispatcher.ts`)
+- [x] **A4.4c — Thread `sessionContext` through dispatch chain** (`src/chat/tool-orchestration.ts`, `src/chat/dispatcher.ts`) *(done 2026-04-11)*
   - **`executeToolBatches()` is in `src/chat/tool-orchestration.ts` (L113), not `dispatcher.ts`** — edit both files:
     - `src/chat/tool-orchestration.ts`: add `sessionContext?: ToolSessionContext` parameter to `executeToolBatches()`; pass it through to each `dispatcher.dispatch()` call
     - `src/chat/dispatcher.ts`: add `sessionContext?: ToolSessionContext` as the last parameter to `dispatch()`; include it in the `executeOptions` object passed to `tool.execute()`: `const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext }`
 
-- [ ] **A4.4d — Update `UseSubagentTool` to use `sessionContext`** (`src/tools/use-subagent.ts`)
+- [x] **A4.4d — Update `UseSubagentTool` to use `sessionContext`** (`src/tools/use-subagent.ts`) *(done 2026-04-11)*
   - In `execute()` and `executeInner()`, replace direct closure reads with sessionContext-first lookups:
     ```typescript
     const parentConfig = options?.sessionContext?.getEffectiveToolConfig()
@@ -282,34 +282,34 @@
     ```
   - The closure fallback (`getParentEffectiveConfig`, `getParentConversation`) remains for non-session contexts
 
-- [ ] **A4.4e — Pass `this` as `sessionContext` at both dispatch call sites** (`src/chat/orchestrator.ts`)
+- [x] **A4.4e — Pass `this` as `sessionContext` at both dispatch call sites** (`src/chat/orchestrator.ts`) *(done 2026-04-11)*
   - Batch dispatch (~L2093, `executeToolBatches()` call): add `sessionContext: this`
   - Direct dispatch (~L1343, `dispatcher.dispatch()` call): add `sessionContext: this` as the new last argument
 
-- [ ] **A4.4f — Update fallback closures in `main.ts`** (`src/main.ts`, L1429-1431)
+- [x] **A4.4f — Update fallback closures in `main.ts`** (`src/main.ts`, L1429-1431) *(done 2026-04-11)*
   - After Phase A ships (i.e., after A4.1 removes `getOrchestrator()`), update the closure fallbacks:
     - `() => this.getOrchestrator()?.getEffectiveToolConfig() ?? null` → `() => this.getActiveOrchestrator()?.getEffectiveToolConfig() ?? null`
     - `() => this.getOrchestrator()?.getConversationManager()?.getActiveConversation() ?? null` → `() => this.getActiveOrchestrator()?.getConversationManager()?.getActiveConversation() ?? null`
   - These closures now serve only as fallback for non-session contexts
 
-- [ ] **A4.5 — Update inspector view to subscribe to focus changes** (`src/ui/effective-config-inspector.ts`)
+- [x] **A4.5 — Update inspector view to subscribe to focus changes** (`src/ui/effective-config-inspector.ts`) *(done 2026-04-11)*
   - Amendment A4: Subscribe to `workspace.on('active-leaf-change')`
   - When a chat panel gains focus, update orchestrator reference via `setOrchestrator()`
   - When a non-chat leaf gains focus, retain last orchestrator
   - Unsubscribe on inspector close
 
-- [ ] **A4.6 — Delete `isSecondary` infrastructure** (`src/ui/chat-view.ts`)
+- [x] **A4.6 — Delete `isSecondary` infrastructure** (`src/ui/chat-view.ts`) *(done 2026-04-11)*
   - Delete `isSecondary` field (L171)
   - Delete `getIsSecondary()` method (L756-758)
   - Delete `setIsSecondary()` method (L761-763)
   - Remove `isSecondary` from `getState()` return (L714)
   - Remove all `isSecondary` detection from `setState()` (L731-738)
 
-- [ ] **A4.7 — Simplify "open-secondary-chat" command** (`src/main.ts`, L534)
+- [x] **A4.7 — Simplify "open-secondary-chat" command** (`src/main.ts`, L534) *(done 2026-04-11)*
   - Remove `state: { isSecondary: true }` from the leaf state — just open a new leaf
   - The factory creates a fresh orchestrator automatically
 
-- [ ] **A4.8 — Update `onunload()`** (`src/main.ts`, L642-690)
+- [x] **A4.8 — Update `onunload()`** (`src/main.ts`, L642-690) *(done 2026-04-11)*
   - Replace separate destroy loops for `_orchestrator` and `_secondaryOrchestrators` with:
     ```
     for (const orch of this._orchestrators.values()) { orch.destroy().catch(...); }

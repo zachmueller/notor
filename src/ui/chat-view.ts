@@ -199,16 +199,6 @@ export class NotorChatView extends ItemView {
 	 */
 	_unregisterSessionsChanged?: () => void;
 
-	/**
-	 * Whether this panel is a secondary (additional) chat panel.
-	 *
-	 * Secondary panels get the same full toolbar as the primary panel.
-	 * The flag is used for workspace restore logic (`getState`/`setState`)
-	 * and command behavior (e.g., "Open new chat panel" targets secondary).
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4a
-	 */
-	private isSecondary = false;
 
 	// Callbacks (set by orchestrator)
 	private onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
@@ -791,15 +781,12 @@ export class NotorChatView extends ItemView {
 	/**
 	 * Save view state for Obsidian workspace restore.
 	 *
-	 * Secondary panels store their conversation ID and `isSecondary` flag
-	 * so that closing and reopening Obsidian restores the panel correctly.
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4a
+	 * Stores the active conversation ID so that closing and reopening
+	 * Obsidian restores the panel to the correct conversation.
 	 */
 	getState(): Record<string, unknown> {
 		return {
 			conversationId: this.activeConversationId,
-			isSecondary: this.isSecondary,
 		};
 	}
 
@@ -834,16 +821,6 @@ export class NotorChatView extends ItemView {
 				log.warn("setState: no orchestrator found for view — setTimeout fallback will retry");
 			}
 		}
-	}
-
-	/** Whether this panel is a secondary (additional) panel. */
-	getIsSecondary(): boolean {
-		return this.isSecondary;
-	}
-
-	/** Mark this panel as secondary (called by main.ts when creating new panels). */
-	setIsSecondary(value: boolean): void {
-		this.isSecondary = value;
 	}
 
 	// -----------------------------------------------------------------------

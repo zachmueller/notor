@@ -8,7 +8,8 @@
  * @see design/tools.md — tool classification table
  */
 
-import type { ConversationMode, ToolResult } from "../types";
+import type { Conversation, ConversationMode, ToolResult } from "../types";
+import type { EffectiveToolConfig } from "../tool-config/types";
 
 // Re-export ToolResult for tool implementations
 export type { ToolResult };
@@ -22,6 +23,20 @@ export type { ToolResult };
  *
  * @see specs/ZZ-misc/sub-agents-design.md — Section 9.5
  */
+/**
+ * Session-scoped context for tools that need to read the current
+ * orchestrator's effective config or active conversation.
+ *
+ * Passed through the dispatch chain so tools like `use_subagent` can
+ * read the correct orchestrator's state without closure-based fallbacks.
+ *
+ * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — A4.4a
+ */
+export interface ToolSessionContext {
+	getEffectiveToolConfig(): EffectiveToolConfig | null;
+	getActiveConversation(): Conversation | null;
+}
+
 export interface ToolExecuteOptions {
 	/** Progress callback for long-running tools. */
 	onProgress?: (status: string) => void;
@@ -29,6 +44,8 @@ export interface ToolExecuteOptions {
 	mode?: ConversationMode;
 	/** Abort signal — tools like use_subagent pass this to SubAgentRunner. */
 	abortSignal?: AbortSignal;
+	/** Session-scoped context — tools use this to read the dispatching orchestrator's state. */
+	sessionContext?: ToolSessionContext;
 }
 
 /**

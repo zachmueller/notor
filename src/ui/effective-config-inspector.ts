@@ -10,7 +10,7 @@
  * @see specs/04b-tool-toggle/spec.md — FR-88
  */
 
-import { ItemView, type WorkspaceLeaf } from "obsidian";
+import { ItemView, type WorkspaceLeaf, type EventRef } from "obsidian";
 import type { ChatOrchestrator } from "../chat/orchestrator";
 import type {
 	EffectiveToolConfig,
@@ -33,6 +33,17 @@ export class EffectiveConfigInspectorView extends ItemView {
 	private orchestrator: ChatOrchestrator | null = null;
 	private contentEl_: HTMLElement | null = null;
 
+	/**
+	 * Callback to resolve the orchestrator for a given leaf.
+	 * Injected by main.ts so the inspector can follow focus changes.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — A4.5
+	 */
+	private resolveOrchestrator?: (leaf: WorkspaceLeaf) => ChatOrchestrator | null;
+
+	/** Event ref for the active-leaf-change listener (A4.5). */
+	private leafChangeRef?: EventRef;
+
 	constructor(leaf: WorkspaceLeaf) {
 		super(leaf);
 	}
@@ -49,9 +60,19 @@ export class EffectiveConfigInspectorView extends ItemView {
 		return "settings";
 	}
 
-	/** Inject the orchestrator reference (called by main.ts after view creation). */
-	setOrchestrator(orchestrator: ChatOrchestrator): void {
+	/** Inject the orchestrator reference. */
+	setOrchestrator(orchestrator: ChatOrchestrator | null): void {
 		this.orchestrator = orchestrator;
+	}
+
+	/**
+	 * Set the resolver used to follow focus changes (A4.5).
+	 *
+	 * Called by main.ts after view creation. The resolver returns the
+	 * orchestrator for a given leaf, or null if the leaf is not a chat panel.
+	 */
+	setOrchestratorResolver(resolver: (leaf: WorkspaceLeaf) => ChatOrchestrator | null): void {
+		this.resolveOrchestrator = resolver;
 	}
 
 	onOpen(): Promise<void> {
@@ -63,11 +84,27 @@ export class EffectiveConfigInspectorView extends ItemView {
 			cls: "notor-config-inspector-content",
 		});
 
+		// A4.5: Follow focus changes — update orchestrator when a chat panel gains focus
+		this.leafChangeRef = this.app.workspace.on("active-leaf-change", (leaf) => {
+			if (!leaf || !this.resolveOrchestrator) return;
+			const orch = this.resolveOrchestrator(leaf);
+			if (orch) {
+				this.orchestrator = orch;
+				this.refresh();
+			}
+			// When a non-chat leaf gains focus, retain last orchestrator
+		});
+
 		this.refresh();
 		return Promise.resolve();
 	}
 
 	onClose(): Promise<void> {
+		// A4.5: Unsubscribe from active-leaf-change
+		if (this.leafChangeRef) {
+			this.app.workspace.offref(this.leafChangeRef);
+			this.leafChangeRef = undefined;
+		}
 		this.contentEl_ = null;
 		return Promise.resolve();
 	}

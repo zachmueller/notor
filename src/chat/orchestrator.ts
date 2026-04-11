@@ -42,6 +42,7 @@ import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types
 import { mergeToolConfigs } from "../tool-config/merger";
 import { ConversationSession } from "./conversation-session";
 import type { ApprovalCallback } from "./dispatcher";
+import type { ToolSessionContext } from "../tools/tool";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { logger } from "../utils/logger";
 
@@ -79,7 +80,7 @@ export interface SessionGuard {
  * 8. Send tool result back to LLM
  * 9. Loop until final text response
  */
-export class ChatOrchestrator {
+export class ChatOrchestrator implements ToolSessionContext {
 	private conversationManager: ConversationManager;
 	private contextManager: ContextManager;
 
@@ -474,6 +475,21 @@ export class ChatOrchestrator {
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1f-addendum
 	 */
 	getDisplayedConversation(): Conversation | null {
+		return this.conversationManager.getActiveConversation();
+	}
+
+	/**
+	 * ToolSessionContext implementation — returns the orchestrator's display
+	 * ConversationManager's active conversation.
+	 *
+	 * Note: This reads the orchestrator's **display** ConversationManager, not
+	 * the session's isolated one. If the user switches conversations mid-session,
+	 * this returns the new displayed conversation. A future refactor could target
+	 * `session.conversationManager` instead for true session isolation.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — A4.4b
+	 */
+	getActiveConversation(): Conversation | null {
 		return this.conversationManager.getActiveConversation();
 	}
 
@@ -1429,6 +1445,7 @@ export class ChatOrchestrator {
 					undefined, // onProgress
 					policyCtx,
 					session.approvalCallback,
+					this, // sessionContext (A4.4e)
 				);
 				toolResult.tool_call_id = toolCallId;
 
@@ -2180,6 +2197,7 @@ export class ChatOrchestrator {
 						onProgressMap,
 						policyCtx,
 						session.approvalCallback,
+						this, // sessionContext (A4.4e)
 					);
 
 					// Map results back to entries for UI updates

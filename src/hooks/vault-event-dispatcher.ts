@@ -57,8 +57,8 @@ export interface DispatcherDeps {
 	vaultRootPath: string;
 	/** Concurrency manager for background workflow executions. */
 	concurrencyManager: WorkflowConcurrencyManager;
-	/** Chat orchestrator for background workflow execution pipeline. */
-	orchestrator: ChatOrchestrator;
+	/** Chat orchestrator for background workflow execution pipeline (null if no active panel). */
+	orchestrator: ChatOrchestrator | null;
 	/** Persona manager for workflow persona switching. */
 	personaManager?: PersonaManager;
 	/** Execution chain tracker instance. */
@@ -456,10 +456,19 @@ export async function executeRunWorkflowAction(
 		workflowName: workflow.display_name,
 	});
 
+	// Null guard: skip execution if no orchestrator (no active panel)
+	if (!deps.orchestrator) {
+		log.warn("Skipping background workflow — no active orchestrator", {
+			workflowName: workflow.display_name,
+		});
+		return;
+	}
+	const orchestrator = deps.orchestrator;
+
 	// Submit to the concurrency manager — run function is the background pipeline
 	deps.concurrencyManager.submit(execution, async () => {
 		try {
-			await deps.orchestrator.executeBackgroundWorkflow(
+			await orchestrator.executeBackgroundWorkflow(
 				{
 					workflow,
 					supplementaryText: null,

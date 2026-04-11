@@ -12,7 +12,7 @@ import type { ConversationMode, ToolCall, ToolResult } from "../types";
 import type { StreamChunk } from "../providers/provider";
 import type { NotorSettings } from "../settings";
 import type { EffectiveToolConfig } from "../tool-config/types";
-import type { ToolExecuteOptions } from "../tools/tool";
+import type { ToolExecuteOptions, ToolSessionContext } from "../tools/tool";
 import { isDomainBlocked } from "../utils/domain-denylist";
 import { enforcePathConstraints } from "../tool-config/path-enforcer";
 import { resolveAutoApprove } from "../personas/auto-approve-resolver";
@@ -284,6 +284,7 @@ export class ToolDispatcher {
 		onProgress?: (status: string) => void,
 		policyCtx?: ToolPolicyContext,
 		perCallApprovalCallback?: ApprovalCallback,
+		sessionContext?: ToolSessionContext,
 	): Promise<ToolResult> {
 		// 1. Look up tool in registry
 		const tool = this.tools.get(toolName);
@@ -517,7 +518,7 @@ export class ToolDispatcher {
 		//    the background but its result is discarded.
 		const startTime = Date.now();
 		try {
-			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal };
+			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext };
 			const executePromise = tool.execute(parameters, executeOptions);
 
 			let result: ToolResult;

@@ -250,7 +250,10 @@ export class UseSubagentTool implements Tool {
 		}
 
 		// Step 5: Build sub-agent's effective tool config
-		const parentConfig = this.getParentEffectiveConfig();
+		// Prefer sessionContext (A4.4d) for correct per-orchestrator state;
+		// fall back to closure-based accessors for non-session contexts.
+		const parentConfig = options?.sessionContext?.getEffectiveToolConfig()
+			?? this.getParentEffectiveConfig();
 		const effectiveParent = parentConfig ?? this.buildPermissiveDefault();
 
 		// Merge the profile's tool_configs array into a single ParsedToolConfig
@@ -358,7 +361,10 @@ export class UseSubagentTool implements Tool {
 
 		// Phase 6.1: Persist sub-agent conversation to its own JSONL file
 		let jsonlFilename: string | null = null;
-		const parentConversation = this.getParentConversation?.();
+		// Prefer sessionContext (A4.4d) for correct per-orchestrator conversation;
+		// fall back to closure-based accessor for non-session contexts.
+		const parentConversation = options?.sessionContext?.getActiveConversation()
+			?? this.getParentConversation?.();
 		if (this.historyManager && parentConversation) {
 			try {
 				const invocationId = crypto.randomUUID();
