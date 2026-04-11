@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A7 complete; A1.11 partially done (wireViewAsSecondary + getPrimaryChatLeaf deleted); A-Verify passed (AV.1–AV.5, AV.7 — 38/38 tests, 2026-04-11); AV.6 pending (existing tests need API migration)
+**Status:** Phase A7 complete; A1.11 partially done; A-Verify passed (AV.1–AV.5, AV.7); AV.6 pending; Phase B largely complete (B7/B4/B8/B6/B1/B2/B3 done, B5 deferred — see note below)
 
 ---
 
@@ -711,7 +711,8 @@
 
 **~620 lines.** The largest extraction. Owns both foreground and background workflow execution, including `_backgroundResponseLoop()`.
 
-- [ ] **B5.1 — Create `src/chat/workflow-executor.ts`**
+- [ ] **B5.1 — Create `src/chat/workflow-executor.ts`** *(deferred — see note)*
+  - **Deferral note (2026-04-11):** B5 is the most coupled extraction (~700 lines, 15+ dependencies). With B7/B4/B8/B6/B1/B2/B3 complete, the orchestrator is reduced from 3,164→1,972 lines (37% reduction). The remaining workflow methods (`executeWorkflow`, `executeBackgroundWorkflow`, `_backgroundResponseLoop`) reference `this.app`, `this.view`, `this.conversationManager`, `this.providerRegistry`, `this.dispatcher`, `this.sessionManager`, `this.configResolver`, `this.hookDispatcher`, `this.personaManager`, `this.workflowHookOverrideManager`, `this.panelApprovalCallback`, `this.vaultRuleManager`, `this.settings`, `this.systemPromptBuilder`, `this.activeProviderType/ModelId/UseExtendedContext`, and pass `this` as `ToolSessionContext`. Extracting these requires either a 15+ parameter constructor or a back-reference to the orchestrator, which violates the dependency direction principle. Deferred to Phase C or a future refactor when the orchestrator is further simplified.
   - Create `WorkflowExecutor` class with constructor:
     ```typescript
     constructor(
@@ -746,7 +747,7 @@
     - `_backgroundResponseLoop(bgConvManager, workflowAssembly, mode, execution, concurrencyManager, chain): Promise<void>` (L1181-1451) — entirely self-contained loop with no view access
   - Add `updateSettings(settings)`, `updatePersonaManager(manager)`, `updateWorkflowHookOverrideManager(manager)` setters
 
-- [ ] **B5.2 — Wire WorkflowExecutor into orchestrator**
+- [ ] **B5.2 — Wire WorkflowExecutor into orchestrator** *(deferred with B5.1)*
   - Create WorkflowExecutor in orchestrator constructor, passing all dependencies
   - Inject `responseLoop` callback: `(mode, session) => this.responseLoop(mode, session)` — keeps `responseLoop()` on the facade while letting WorkflowExecutor invoke it
   - `orchestrator.executeWorkflow(...)` delegates to `this.workflowExecutor.executeWorkflow(...)`
