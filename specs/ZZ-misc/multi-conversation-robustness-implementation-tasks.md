@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A7 complete; A1.11 partially done; A-Verify passed (AV.1–AV.5, AV.7); AV.6 pending; Phase B largely complete (B7/B4/B8/B6/B1/B2/B3 done, B5 deferred — see note below)
+**Status:** Phase A7 complete; A1.11 partially done; A-Verify passed (AV.1–AV.5, AV.7); AV.6 pending; Phase B largely complete (B7/B4/B8/B6/B1/B2/B3 done, B5 deferred — see note below); B-Verify scripts written (BV.1–BV.4), pending execution
 
 ---
 
@@ -761,17 +761,21 @@
 - [ ] **BV.1 — After each extraction: TypeScript compiles + E2E tests pass**
   - Run `npm run build` after each B*.2 wiring step
   - Run E2E tests: `e2e/scripts/session-sync-back-test.ts`, `e2e/scripts/phase4-multi-panel-test.ts`, `e2e/scripts/phase5-open-in-new-tab-test.ts`
+  - **Script:** `e2e/scripts/phase-b-structural-test.ts` — 10 scenarios: plugin loads, ViewRouter/SessionManager/ConversationLifecycleManager/ConfigResolver/HookDispatcher/CompactionManager wired, MessagePipeline extracted, facade delegation, error check
 
 - [ ] **BV.2 — After B1+B2+B3 (the coupled trio): Multi-panel integration test**
   - Verify `switchConversation` sync-back: open same conversation in two panels, send message in one, switch to it in the other → verify messages appear
   - Verify session isolation: concurrent sessions in different panels don't interfere
   - Verify `getViewForSession` routing: renders go to the correct panel
+  - **Script:** `e2e/scripts/phase-b-multi-panel-integration-test.ts` — 8 scenarios: setup, sync-back renders, send in panel 1, session isolation, ViewRouter routing, lifecycle delegation, SessionManager guard integration, error check
 
 - [ ] **BV.3 — After B5: Workflow verification**
   - Foreground workflow execution in focused panel
   - Background workflow triggered by vault event
   - Workflow with tool calls requiring approval
   - Concurrent foreground + background workflows
+  - **Note:** B5 deferred — workflows remain on facade, but tests verify that extracted dependencies (ConfigResolver, HookDispatcher, SessionManager) work correctly during workflow execution
+  - **Script:** `e2e/scripts/phase-b-workflow-verification-test.ts` — 8 scenarios: foreground execution, conversation creation, ConfigResolver/HookDispatcher/SessionManager in workflow, tool call infrastructure, background workflow infrastructure, error check
 
 - [ ] **BV.4 — After all extractions: Full regression**
   - Single-panel chat: new conversation, send messages, switch conversations, fork
@@ -779,6 +783,7 @@
   - Compaction: auto-compaction threshold, manual compaction command
   - Plugin hot-reload preserves state
   - Workspace restore with multiple panels
+  - **Script:** `e2e/scripts/phase-b-full-regression-test.ts` — 11 scenarios: new conversation, switch, fork, multi-panel independence, session guard, command routing, settings propagation, compaction manager, registry consistency, workspace restore, error check
 
 ---
 
