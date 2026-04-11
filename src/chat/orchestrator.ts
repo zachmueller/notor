@@ -20,9 +20,10 @@ import type { SystemPromptBuilder } from "./system-prompt";
 import type { ToolDispatcher } from "./dispatcher";
 import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./tool-orchestration";
 import { parseStreamEvents } from "./stream-utils";
-import { toChatMessages, processStream, extractPendingMessages, calculateCost, type StreamResult } from "./message-pipeline";
+import { toChatMessages, processStream, calculateCost, type StreamResult } from "./message-pipeline";
 import { ConfigResolver } from "./config-resolver";
 import { HookDispatcher } from "./hook-dispatcher";
+import { CompactionManager } from "./compaction-manager";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings } from "../settings";
@@ -34,8 +35,6 @@ import type { Attachment } from "../context/attachment";
 import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment";
 import type { LifecycleAutomationAccessors, ToolEventAutomationAccessors } from "../hooks/hook-events";
 import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-override";
-import { shouldCompact, performCompaction } from "../context/compaction";
-import { showCompactingIndicator, showCompactionMarker } from "../ui/compaction-marker";
 import { revertWorkflowPersona, switchWorkflowPersona, assembleWorkflowPrompt } from "../workflows/workflow-executor";
 import type { Workflow, WorkflowExecutionRequest, WorkflowAssemblyResult, VaultRule } from "../types";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
@@ -85,6 +84,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	private contextManager: ContextManager;
 	private readonly configResolver: ConfigResolver;
 	private readonly hookDispatcher: HookDispatcher;
+	private readonly compactionManager: CompactionManager;
 
 	/** Persona manager for active persona state (Phase 4, A-013). */
 	private personaManager?: PersonaManager;
@@ -212,6 +212,17 @@ export class ChatOrchestrator implements ToolSessionContext {
 		this.conversationManager.setOnConversationChanged(async (conv) => {
 			await this.historyManager.updateConversationHeader(conv);
 		});
+
+		this.compactionManager = new CompactionManager(
+			() => this.settings,
+			this.providerRegistry,
+			this.historyManager,
+			() => this.conversationManager,
+			() => this.view,
+			(session) => this.getViewForSession(session),
+			() => this.activeModelId,
+			() => this.activeUseExtendedContext,
+		);
 	}
 
 	// -----------------------------------------------------------------------
@@ -1883,7 +1894,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 				continueLoop = false;
 
 				// 0. Phase 3 (COMP-005): Check compaction threshold before each LLM call
-				await this.checkAndPerformCompaction(session);
+				await this.compactionManager.checkAndPerformCompaction(session);
 
 				// 1. Evaluate vault rules (re-evaluated each turn after tool calls)
 				const matchedRules = this.vaultRuleManager
@@ -2228,225 +2239,13 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 
 	// -----------------------------------------------------------------------
-	// Compaction (COMP-005)
+	// Compaction (extracted to src/chat/compaction-manager.ts — B6)
 	// -----------------------------------------------------------------------
 
-	/**
-	 * Check compaction threshold and perform compaction if needed.
-	 *
-	 * Called before every LLM API call (user messages and tool-result round-trips).
-	 * When threshold is crossed, sends conversation to LLM for summarization,
-	 * constructs new context window, and logs the compaction record.
-	 */
-	private async checkAndPerformCompaction(session?: ConversationSession): Promise<void> {
-		const convManager = session?.conversationManager ?? this.conversationManager;
-		const conv = convManager.getActiveConversation();
-		if (!conv) return;
-
-		const messages = convManager.getMessages();
-		const modelId = session?.modelId ?? this.getActiveModelId();
-
-		const useExtendedContext = session?.useExtendedContext ?? this.getActiveUseExtendedContext();
-		if (!shouldCompact(messages, this.settings, modelId, useExtendedContext)) {
-			return;
-		}
-
-		// Separate pending messages (after last assistant turn) from the completed
-		// conversation. Only the completed part is sent to performCompaction — this
-		// avoids consecutive user messages at the end of the summarization request
-		// (the pending question + "Please summarize…" would both be user role).
-		// Pending messages are re-appended after compaction so the conversation
-		// still ends on a user turn, as required by Bedrock and similar providers.
-		const pendingMessages = extractPendingMessages(messages);
-		const completedMessages = messages.slice(0, messages.length - pendingMessages.length);
-
-		log.info("Compaction message split", {
-			totalMessages: messages.length,
-			pendingCount: pendingMessages.length,
-			completedCount: completedMessages.length,
-			firstPendingRole: pendingMessages[0]?.role ?? "none",
-			firstCompletedRole: completedMessages[0]?.role ?? "none",
-			lastCompletedRole: completedMessages[completedMessages.length - 1]?.role ?? "none",
-		});
-
-		// Show compacting indicator in chat UI (session-aware)
-		const viewForCompaction = session ? this.getViewForSession(session) : this.view;
-		const messagesContainer = viewForCompaction?.getMessagesContainer?.();
-		let indicator: HTMLElement | null = null;
-		if (messagesContainer) {
-			indicator = showCompactingIndicator(messagesContainer);
-		}
-
-		log.info("Auto-compaction triggered", {
-			conversationId: conv.id,
-			messageCount: messages.length,
-		});
-
-		try {
-			const provider = session
-				? this.providerRegistry.getProvider(session.providerType)
-				: this.providerRegistry.getActiveProvider();
-			const result = await performCompaction(
-				completedMessages,
-				provider,
-				this.settings,
-				modelId,
-				conv.id,
-				"automatic",
-				useExtendedContext
-			);
-
-			if (result.success && result.newMessages && result.record) {
-				// Replace conversation messages with compacted context
-				convManager.replaceMessages(result.newMessages);
-
-				// Re-append pending messages so the conversation ends with a user
-				// turn. Without this, providers like Bedrock reject the next call
-				// because the last message in the compacted context is an assistant
-				// acknowledgment ("Understood. I have the context…").
-				for (const pending of pendingMessages) {
-					convManager.addMessage({
-						role: pending.role,
-						content: pending.content,
-						tool_call: pending.tool_call ?? undefined,
-						tool_result: pending.tool_result ?? undefined,
-					});
-				}
-
-				// Log compaction record to JSONL
-				await this.historyManager.appendMessage(conv, {
-					id: result.record.id,
-					conversation_id: conv.id,
-					role: "system",
-					content: JSON.stringify(result.record),
-					timestamp: result.record.timestamp,
-				} as Message);
-
-				// Show permanent marker
-				if (messagesContainer) {
-					showCompactionMarker(
-						messagesContainer,
-						indicator,
-						result.record.timestamp,
-						result.record.token_count_at_compaction
-					);
-				} else {
-					indicator?.remove();
-				}
-
-				new Notice("Context compacted successfully");
-				log.info("Auto-compaction complete", {
-					conversationId: conv.id,
-					summaryTokens: result.summaryTokens,
-				});
-			} else {
-				// Compaction failed — fall back to existing truncation
-				indicator?.remove();
-				const errMsg = result.error ?? "Unknown compaction error";
-				log.warn("Compaction failed, falling back to truncation", { error: errMsg });
-				new Notice(`Context compaction failed: ${errMsg}. Falling back to truncation.`);
-			}
-		} catch (e) {
-			indicator?.remove();
-			const errorMsg = e instanceof Error ? e.message : String(e);
-			log.error("Compaction error", { error: errorMsg });
-			new Notice(`Context compaction error: ${errorMsg}`);
-		}
-	}
-
-	/**
-	 * Manually trigger context compaction.
-	 *
-	 * Registered as the "Notor: Compact context" command.
-	 */
+	/** Manually trigger context compaction. */
 	async manualCompaction(): Promise<void> {
-		const conv = this.conversationManager.getActiveConversation();
-		if (!conv) {
-			new Notice("No active conversation to compact.");
-			return;
-		}
-
-		const messages = this.conversationManager.getMessages();
-		if (messages.length < 2) {
-			new Notice("Conversation is too short to compact.");
-			return;
-		}
-
-		const modelId = this.getActiveModelId();
-		const useExtendedContext = this.getActiveUseExtendedContext();
-
-		// Separate pending messages from the completed conversation (same reason
-		// as auto-compaction: avoids consecutive user messages in the summarization
-		// request and preserves the pending turn after compaction).
-		const pendingMessages = extractPendingMessages(messages);
-		const completedMessages = messages.slice(0, messages.length - pendingMessages.length);
-
-		// Show compacting indicator
-		const messagesContainer = this.view?.getMessagesContainer?.();
-		let indicator: HTMLElement | null = null;
-		if (messagesContainer) {
-			indicator = showCompactingIndicator(messagesContainer);
-		}
-
-		try {
-			const provider = this.providerRegistry.getActiveProvider();
-			const result = await performCompaction(
-				completedMessages,
-				provider,
-				this.settings,
-				modelId,
-				conv.id,
-				"manual",
-				useExtendedContext
-			);
-
-			if (result.success && result.newMessages && result.record) {
-				this.conversationManager.replaceMessages(result.newMessages);
-
-				// Re-append any pending messages so the conversation ends on a user turn.
-				for (const pending of pendingMessages) {
-					this.conversationManager.addMessage({
-						role: pending.role,
-						content: pending.content,
-						tool_call: pending.tool_call ?? undefined,
-						tool_result: pending.tool_result ?? undefined,
-					});
-				}
-
-				await this.historyManager.appendMessage(conv, {
-					id: result.record.id,
-					conversation_id: conv.id,
-					role: "system",
-					content: JSON.stringify(result.record),
-					timestamp: result.record.timestamp,
-				} as Message);
-
-				if (messagesContainer) {
-					showCompactionMarker(
-						messagesContainer,
-						indicator,
-						result.record.timestamp,
-						result.record.token_count_at_compaction
-					);
-				} else {
-					indicator?.remove();
-				}
-
-				new Notice("Context compacted successfully");
-			} else {
-				indicator?.remove();
-				new Notice(`Compaction failed: ${result.error ?? "Unknown error"}`);
-			}
-		} catch (e) {
-			indicator?.remove();
-			const errorMsg = e instanceof Error ? e.message : String(e);
-			new Notice(`Compaction error: ${errorMsg}`);
-		}
+		return this.compactionManager.manualCompaction();
 	}
-
-	// -----------------------------------------------------------------------
-	// Message conversion (extracted to src/chat/message-pipeline.ts — B7)
-	// -----------------------------------------------------------------------
 
 	// -----------------------------------------------------------------------
 	// Error handling

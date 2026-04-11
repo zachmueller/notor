@@ -565,7 +565,7 @@
 
 **~200 lines.** Uses ConversationManager, HistoryManager, ProviderRegistry, and view (for UI indicators only).
 
-- [ ] **B6.1 — Create `src/chat/compaction-manager.ts`**
+- [x] **B6.1 — Create `src/chat/compaction-manager.ts`** *(done 2026-04-11)*
   - Create `CompactionManager` class with constructor:
     ```typescript
     constructor(
@@ -581,7 +581,7 @@
   - Extract `extractPendingMessages(messages: Message[]): Message[]` (L2596-2604) — pure utility, could also go in MessagePipeline but conceptually belongs with compaction
   - Add `updateSettings(settings)` setter
 
-- [ ] **B6.2 — Wire CompactionManager into orchestrator**
+- [x] **B6.2 — Wire CompactionManager into orchestrator** *(done 2026-04-11)*
   - Create CompactionManager in orchestrator constructor
   - `responseLoop()` calls `this.compactionManager.checkAndPerformCompaction(session, session.conversationManager, ...)` passing session state and a `() => this.viewRouter.getViewForSession(session)` callback
   - `manualCompaction()` on orchestrator delegates to `this.compactionManager.manualCompaction(this.conversationManager, ...)` passing display state
