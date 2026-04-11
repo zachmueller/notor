@@ -805,6 +805,49 @@ export class HistoryManager {
 		}
 	}
 
+	// -----------------------------------------------------------------------
+	// Flush operations
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Await all pending write queues (best-effort).
+	 *
+	 * Returns when every in-flight enqueueWrite chain has settled.
+	 * Safe to call when no writes are pending (returns immediately).
+	 * Use for plugin unload where all writes must drain.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 5.1
+	 */
+	async flush(): Promise<void> {
+		const pending = Array.from(this.writeQueues.values());
+		if (pending.length > 0) {
+			await Promise.allSettled(pending);
+		}
+	}
+
+	/**
+	 * Await pending writes for a specific conversation's JSONL file (best-effort).
+	 *
+	 * More precise than flush() — only blocks on writes for the given conversation,
+	 * avoiding cross-conversation blocking where a slow write for conversation Y
+	 * would delay cleanup of conversation X.
+	 *
+	 * @param conversation - The conversation whose JSONL writes to drain.
+	 *   The conversation object is required (not just the ID) because the
+	 *   filename encodes both `created_at` and `id`. The writeQueues Map is
+	 *   keyed by file path, so we need the full conversation to resolve the path.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 5.1
+	 */
+	async flushConversation(conversation: Conversation): Promise<void> {
+		const filename = this.getFilename(conversation);
+		const filePath = this.getFilePath(filename);
+		const pending = this.writeQueues.get(filePath);
+		if (pending) {
+			await pending;
+		}
+	}
+
 	/** Delete a conversation file. */
 	async deleteConversationFile(filename: string): Promise<void> {
 		const path = this.getFilePath(filename);

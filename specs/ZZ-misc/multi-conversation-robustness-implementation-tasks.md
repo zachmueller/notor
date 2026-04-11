@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A4 complete; A1.11 partially done (wireViewAsSecondary + getPrimaryChatLeaf deleted); A5 next
+**Status:** Phase A5 complete; A1.11 partially done (wireViewAsSecondary + getPrimaryChatLeaf deleted); A6 next
 
 ---
 
@@ -326,29 +326,29 @@
 
 **Bugs addressed:** B
 
-- [ ] **A5.1 — Add `flush()` method to `HistoryManager`** (`src/chat/history.ts`)
+- [x] **A5.1 — Add `flush()` method to `HistoryManager`** (`src/chat/history.ts`) *(done 2026-04-11)*
   - Awaits all pending write queues via `Promise.allSettled(Array.from(this.writeQueues.values()))`
   - Safe to call when no writes are pending (returns immediately)
 
-- [ ] **A5.2 — Add `flushConversation()` method to `HistoryManager`** (`src/chat/history.ts`)
+- [x] **A5.2 — Add `flushConversation()` method to `HistoryManager`** (`src/chat/history.ts`) *(done 2026-04-11)*
   - Takes a `Conversation` object (not just ID — filename requires `created_at` + `id`)
   - Resolves the file path via `getFilename()` + `getFilePath()`
   - Awaits the pending write for that specific file path from `writeQueues`
 
-- [ ] **A5.3 — Await `flushConversation()` in `handleUserMessage()` finally block** (`src/chat/orchestrator.ts`, L1828-1835)
+- [x] **A5.3 — Await `flushConversation()` in `handleUserMessage()` finally block** (`src/chat/orchestrator.ts`, L1828-1835) *(done 2026-04-11)*
   - Before `this.activeSessions.delete(...)`, await `this.historyManager.flushConversation(conv)` wrapped in try/catch (best-effort)
   - Get `conv` from `session.conversationManager.getActiveConversation()`
 
-- [ ] **A5.4 — Await `flushConversation()` in `executeWorkflow()` finally block** (`src/chat/orchestrator.ts`, L942-953)
+- [x] **A5.4 — Await `flushConversation()` in `executeWorkflow()` finally block** (`src/chat/orchestrator.ts`, L942-953) *(done 2026-04-11)*
   - Same pattern as A5.3
 
-- [ ] **A5.5 — Add comment to `handleUserMessage` finally block** (`src/chat/orchestrator.ts`)
+- [x] **A5.5 — Add comment to `handleUserMessage` finally block** (`src/chat/orchestrator.ts`) *(done 2026-04-11)*
   - **Pre-implementation investigation completed (2026-04-11): SKIP the deactivation call.**
   - `handleUserMessage()` always creates sessions with `workflowAssembly: null` (verified: `orchestrator.ts:1797`). No code path through `handleUserMessage()` sets a non-null `workflowAssembly` — that field is only populated by `executeWorkflow()` (L917: `workflowAssembly: assemblyResult`).
   - **Action:** Add a comment in `handleUserMessage()`'s finally block explaining that workflow hook deactivation is intentionally absent because `workflowAssembly` is always null for user-message sessions; point to `executeWorkflow()`'s finally block (L942-953) which handles the workflow case.
   - Note: `deactivate()` is **already idempotent** (verified: `src/hooks/workflow-hook-override.ts:84` — "Safe to call when no override is active (no-op in that case)"). No changes to `WorkflowHookOverrideManager` are required for Amendment R4.
 
-- [ ] **A5.6 — Enhance `destroy()` with flush + hook cleanup + guard unregister** (`src/chat/orchestrator.ts`, L434-454)
+- [x] **A5.6 — Enhance `destroy()` with flush + hook cleanup + guard unregister** (`src/chat/orchestrator.ts`, L434-454) *(done 2026-04-11)*
   - After existing session abort + await logic:
     1. Deactivate workflow hook overrides for all active sessions
     2. Flush all pending writes via `historyManager.flush()` with timeout (half of `timeoutMs`, min 500ms)

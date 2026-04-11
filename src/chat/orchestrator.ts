@@ -524,6 +524,35 @@ export class ChatOrchestrator implements ToolSessionContext {
 			]);
 		}
 
+		// Deactivate workflow hook overrides for all active sessions.
+		// This runs regardless of whether the finally blocks completed
+		// (destroy may have won the timeout race).
+		// NOTE (Amendment R4): deactivate() is idempotent — it may be
+		// called here AND from the session cleanup finally block for the
+		// same conversation ID if the finally block runs before destroy.
+		for (const session of this.activeSessions.values()) {
+			if (session.workflowAssembly && this.workflowHookOverrideManager) {
+				this.workflowHookOverrideManager.deactivate(session.conversationId);
+			}
+		}
+
+		// Flush any writes that may have been enqueued in finally blocks.
+		try {
+			await Promise.race([
+				this.historyManager.flush(),
+				new Promise<void>((r) => setTimeout(r, Math.max(timeoutMs / 2, 500))),
+			]);
+		} catch {
+			// Best-effort
+		}
+
+		// Unregister all active session IDs from the global guard BEFORE
+		// clearing the map. Without this, destroyed orchestrators leave
+		// phantom entries that permanently block those conversations.
+		for (const id of this.activeSessions.keys()) {
+			this.sessionGuard.unregister(id);
+		}
+
 		this.activeSessions.clear();
 		this.sessionChangeCallbacks.clear();
 		log.info("Orchestrator destroyed", { abortedSessions: sessionPromises.length });
@@ -1036,12 +1065,22 @@ export class ChatOrchestrator implements ToolSessionContext {
 			session.setStatus("errored");
 			this.handleError(e);
 		} finally {
-			// G-005: Deactivate workflow-scoped hook overrides on all exit paths
-			if (this.workflowHookOverrideManager) {
-				this.workflowHookOverrideManager.deactivate(conversation.id);
-			}
 			if (session.status === "running" || session.status === "waiting_approval") {
 				session.setStatus("completed");
+			}
+			// Drain pending JSONL writes for THIS conversation before removing the session.
+			try {
+				const conv = session.conversationManager.getActiveConversation();
+				if (conv) {
+					await this.historyManager.flushConversation(conv);
+				}
+			} catch {
+				// Best-effort — don't block session cleanup on write errors
+			}
+			// G-005: Deactivate workflow-scoped hook overrides on all exit paths.
+			// deactivate() is idempotent — safe if destroy() also calls it.
+			if (session.workflowAssembly && this.workflowHookOverrideManager) {
+				this.workflowHookOverrideManager.deactivate(session.conversationId);
 			}
 			this.activeSessions.delete(session.conversationId);
 			this.notifySessionsChanged();
@@ -1926,6 +1965,24 @@ export class ChatOrchestrator implements ToolSessionContext {
 			if (session.status === "running" || session.status === "waiting_approval") {
 				session.setStatus("completed");
 			}
+			// Drain pending JSONL writes for THIS conversation before removing the session.
+			// The sync-back path in switchConversation() checks activeSessions to decide
+			// whether to use session state or JSONL — if we delete the session before writes
+			// flush, sync-back falls through to JSONL which may be incomplete.
+			try {
+				const conv = session.conversationManager.getActiveConversation();
+				if (conv) {
+					await this.historyManager.flushConversation(conv);
+				}
+			} catch {
+				// Best-effort — don't block session cleanup on write errors
+			}
+			// Workflow hook deactivation is intentionally absent here because
+			// handleUserMessage() always creates sessions with workflowAssembly: null
+			// (verified: orchestrator.ts session creation). No code path through
+			// handleUserMessage() sets a non-null workflowAssembly — that field is
+			// only populated by executeWorkflow(). See executeWorkflow()'s finally
+			// block which handles the workflow case.
 			this.activeSessions.delete(session.conversationId);
 			this.notifySessionsChanged();
 			this.getViewForSession(session)?.setRespondingState(false);
