@@ -504,7 +504,7 @@
 
 **~150 lines.** Returns a result object — no mutations to orchestrator state.
 
-- [ ] **B4.1 — Create `src/chat/config-resolver.ts`**
+- [x] **B4.1 — Create `src/chat/config-resolver.ts`** *(done 2026-04-11)*
   - Create `ConfigResolver` class with constructor:
     ```typescript
     constructor(
@@ -519,7 +519,7 @@
   - Add `getEffectiveToolConfig(): EffectiveToolConfig | null` and `getActiveParsedConfigs(): ParsedToolConfig[]` accessors (currently on orchestrator at L323, L332)
   - Add `updateSettings(settings: NotorSettings)` setter for settings propagation
 
-- [ ] **B4.2 — Wire ConfigResolver into orchestrator**
+- [x] **B4.2 — Wire ConfigResolver into orchestrator** *(done 2026-04-11)*
   - Create ConfigResolver in orchestrator constructor, passing shared singletons
   - Delegate `resolveEffectiveConfig()`, `getEffectiveToolConfig()`, `getActiveParsedConfigs()` calls
   - `responseLoop()` calls `this.configResolver.resolveEffectiveConfig()` + `this.configResolver.updateDisplayConfig()`

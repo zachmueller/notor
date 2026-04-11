@@ -21,6 +21,7 @@ import type { ToolDispatcher } from "./dispatcher";
 import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./tool-orchestration";
 import { parseStreamEvents } from "./stream-utils";
 import { toChatMessages, processStream, extractPendingMessages, calculateCost, type StreamResult } from "./message-pipeline";
+import { ConfigResolver } from "./config-resolver";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings } from "../settings";
@@ -39,7 +40,6 @@ import { revertWorkflowPersona, switchWorkflowPersona, assembleWorkflowPrompt } 
 import type { Workflow, WorkflowExecutionRequest, WorkflowAssemblyResult, VaultRule } from "../types";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
-import { mergeToolConfigs } from "../tool-config/merger";
 import { ConversationSession } from "./conversation-session";
 import type { ApprovalCallback } from "./dispatcher";
 import type { ToolSessionContext } from "../tools/tool";
@@ -83,6 +83,7 @@ export interface SessionGuard {
 export class ChatOrchestrator implements ToolSessionContext {
 	private conversationManager: ConversationManager;
 	private contextManager: ContextManager;
+	private readonly configResolver: ConfigResolver;
 
 	/** Persona manager for active persona state (Phase 4, A-013). */
 	private personaManager?: PersonaManager;
@@ -109,22 +110,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	private workflowPreviousPersona: string | null | undefined = undefined;
 
-	/**
-	 * Contributing `ParsedToolConfig[]` from the current iteration's
-	 * `resolveEffectiveConfig()` call. Used by the inspector to show
-	 * source provenance for each tool field.
-	 *
-	 * @see specs/04b-tool-toggle/tasks.md — ORCH-001, ORCH-004
-	 */
-	private activeParsedConfigs: ParsedToolConfig[] = [];
-
-	/**
-	 * Merged effective tool config for the current iteration. Stored for
-	 * inspector access and cleared on `newConversation()`.
-	 *
-	 * @see specs/04b-tool-toggle/tasks.md — ORCH-001, ORCH-004
-	 */
-	private effectiveToolConfig: EffectiveToolConfig | null = null;
 
 	/**
 	 * Per-orchestrator checkpoint manager.
@@ -199,6 +184,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	) {
 		this.conversationManager = new ConversationManager(settings.mode);
 		this.contextManager = new ContextManager();
+		this.configResolver = new ConfigResolver(settings, systemPromptBuilder, dispatcher);
 
 		// Initialize per-orchestrator provider/model from current global state
 		const initProviderType = this.providerRegistry.getActiveType();
@@ -268,6 +254,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	updateSettings(settings: NotorSettings): void {
 		this.settings = settings;
 		this.dispatcher.setAutoApprove(settings.auto_approve);
+		this.configResolver.updateSettings(settings);
 	}
 
 	/** Get the conversation manager. */
@@ -390,7 +377,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/04b-tool-toggle/tasks.md — ORCH-004
 	 */
 	getEffectiveToolConfig(): EffectiveToolConfig | null {
-		return this.effectiveToolConfig;
+		return this.configResolver.getEffectiveToolConfig();
 	}
 
 	/**
@@ -399,7 +386,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/04b-tool-toggle/tasks.md — ORCH-004
 	 */
 	getActiveParsedConfigs(): ParsedToolConfig[] {
-		return this.activeParsedConfigs;
+		return this.configResolver.getActiveParsedConfigs();
 	}
 
 	// -----------------------------------------------------------------------
@@ -746,7 +733,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 				}
 
 				// Update inspector with session's config
-				this.updateDisplayConfig(activeSession.effectiveConfig, activeSession.parsedConfigs);
+				this.configResolver.updateDisplayConfig(activeSession.effectiveConfig, activeSession.parsedConfigs);
 
 				// Scope checkpoint manager to the active session's conversation (A1.6b)
 				this.checkpointManager?.setConversationId(conversation.id);
@@ -1047,7 +1034,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 		const useExtendedContext = providerConfig?.use_extended_context ?? false;
 
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
-			await this.resolveEffectiveConfig(undefined, assemblyResult, pinnedPersona);
+			await this.configResolver.resolveEffectiveConfig(undefined, assemblyResult, pinnedPersona);
 
 		const approvalCallback: ApprovalCallback = this.panelApprovalCallback
 			?? (async () => "approved" as const);
@@ -1357,7 +1344,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 		// Resolve initial effective config
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
-			await this.resolveEffectiveConfig(undefined, workflowAssembly, pinnedPersona);
+			await this.configResolver.resolveEffectiveConfig(undefined, workflowAssembly, pinnedPersona);
 
 		// Capture approval callback for session-scoped dispatch
 		const approvalCallback = this.panelApprovalCallback
@@ -1389,7 +1376,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 				: undefined;
 
 			const { effective, toolDefinitions, parsedConfigs } =
-				await this.resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona);
+				await this.configResolver.resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona);
 			session.effectiveConfig = effective;
 			session.parsedConfigs = parsedConfigs;
 
@@ -1611,125 +1598,18 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 
 	/**
-	 * Convert internal messages to ChatMessage format for the background response loop.
-	 * Mirrors `toChatMessages()` but without the full class context.
-	 */
-	/**
-	 * Callback that provides tool definitions for the response loop.
-	 *
-	 * Set by main.ts via `setGetToolDefinitions()` so `executeWorkflow()`
-	 * can call `responseLoop()` without direct access to the tool registry.
-	 *
-	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-015
-	 */
-	private getToolDefinitionsCallback?: (config?: EffectiveToolConfig) => import("../providers/provider").ToolDefinition[];
-
-	/**
 	 * Set the callback that provides tool definitions for the response loop.
-	 *
-	 * Called by main.ts during view wiring so `executeWorkflow()` can start
-	 * the response loop without a direct reference to the tool registry.
-	 *
-	 * When an `EffectiveToolConfig` is provided, returns filtered tool
-	 * definitions (disabled tools excluded). When omitted, returns all tools.
 	 *
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-015
 	 * @see specs/04b-tool-toggle/tasks.md — MAIN-001
 	 */
 	setGetToolDefinitions(callback: (config?: EffectiveToolConfig) => import("../providers/provider").ToolDefinition[]): void {
-		this.getToolDefinitionsCallback = callback;
+		this.configResolver.setGetToolDefinitions(callback);
 	}
 
 	// -----------------------------------------------------------------------
-	// Tool config resolution (Phase 4b)
+	// Tool config resolution (extracted to src/chat/config-resolver.ts — B4)
 	// -----------------------------------------------------------------------
-
-	/**
-	 * Resolve the effective tool config for the current iteration.
-	 *
-	 * Pure function — accepts all variable inputs as parameters and returns
-	 * a structured result without mutating any orchestrator or dispatcher fields.
-	 *
-	 * @param matchedRules      - Rules matched by VaultRuleManager for the current context.
-	 * @param workflowAssembly  - Active workflow assembly result (null for non-workflow conversations).
-	 * @param activePersona     - The persona to use for config resolution (null for no persona).
-	 * @returns Structured result with effective config, tool definitions, and parsed configs.
-	 *
-	 * @see specs/04b-tool-toggle/tasks.md — ORCH-001
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1b
-	 */
-	private async resolveEffectiveConfig(
-		matchedRules?: VaultRule[],
-		workflowAssembly?: WorkflowAssemblyResult | null,
-		activePersona?: Persona | null,
-	): Promise<{
-		effective: EffectiveToolConfig;
-		toolDefinitions: ToolDefinition[];
-		parsedConfigs: ParsedToolConfig[];
-	}> {
-		// Phase 1: Extract tool configs from persona and rules
-		const { personaToolConfigs, ruleToolConfigs } =
-			await this.systemPromptBuilder.extractSourceToolConfigs(matchedRules, activePersona ?? null);
-
-		// Collect workflow tool configs from assembly parameter
-		const workflowToolConfigs = workflowAssembly?.toolConfigs ?? [];
-
-		// Collect all parsed configs
-		const allConfigs: ParsedToolConfig[] = [
-			...ruleToolConfigs,
-			...personaToolConfigs,
-			...workflowToolConfigs,
-		];
-
-		// Build globalAutoApprove and globalEnabled per-iteration from current settings
-		const globalAutoApprove: Record<string, boolean> = {
-			...this.settings.auto_approve,
-		};
-		const globalEnabled: Record<string, boolean> = {
-			...this.settings.tool_enabled,
-		};
-
-		// Expand MCP server-level autoApprove[] into namespaced keys
-		if (this.settings.mcp_servers) {
-			for (const [serverName, serverConfig] of Object.entries(this.settings.mcp_servers)) {
-				if (serverConfig.disabled) continue;
-				if (serverConfig.autoApprove) {
-					for (const rawToolName of serverConfig.autoApprove) {
-						globalAutoApprove[`${serverName}__${rawToolName}`] = true;
-					}
-				}
-			}
-		}
-
-		// Get all registered tool names for default fill
-		const allToolNames = this.dispatcher.getRegisteredToolNames();
-
-		// Merge all configs
-		const effective = mergeToolConfigs(allConfigs, globalAutoApprove, allToolNames, globalEnabled);
-
-		// Compute filtered tool definitions
-		const toolDefinitions = this.getToolDefinitionsCallback?.(effective) ?? [];
-
-		log.debug("Effective tool config resolved", {
-			totalConfigs: allConfigs.length,
-			enabledTools: toolDefinitions.length,
-			totalTools: allToolNames.length,
-		});
-
-		return { effective, toolDefinitions, parsedConfigs: allConfigs };
-	}
-
-	/**
-	 * Update the display-facing config fields for the inspector.
-	 *
-	 * Called when the displayed conversation's config changes (either from
-	 * a session's resolveEffectiveConfig result or on conversation switch).
-	 */
-	private updateDisplayConfig(effective: EffectiveToolConfig, parsedConfigs: ParsedToolConfig[]): void {
-		this.activeParsedConfigs = parsedConfigs;
-		this.effectiveToolConfig = effective;
-		this.dispatcher.setEffectiveToolConfig(effective);
-	}
 
 	// -----------------------------------------------------------------------
 	// Send/receive loop
@@ -1938,7 +1818,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 		// Resolve initial effective config
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
-			await this.resolveEffectiveConfig(undefined, null, pinnedPersona);
+			await this.configResolver.resolveEffectiveConfig(undefined, null, pinnedPersona);
 
 		// Capture the approval callback from this orchestrator's panel.
 		// This binds approval prompts to the correct panel's view.
@@ -2054,7 +1934,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 				// 1b. Resolve effective tool config (extracts tool configs from
 				// persona + rules + workflow, merges, and returns filtered tool definitions)
-				const { effective, toolDefinitions, parsedConfigs } = await this.resolveEffectiveConfig(
+				const { effective, toolDefinitions, parsedConfigs } = await this.configResolver.resolveEffectiveConfig(
 					matchedRules,
 					session.workflowAssembly,
 					session.pinnedPersona,
@@ -2064,7 +1944,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 				// Update display config only if this session matches the displayed conversation
 				if (this.getViewForSession(session)) {
-					this.updateDisplayConfig(effective, parsedConfigs);
+					this.configResolver.updateDisplayConfig(effective, parsedConfigs);
 				}
 
 				// 1c. ACI-001: Build fresh auto-context before each LLM call
