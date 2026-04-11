@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A7 complete; A1.11 partially done; A-Verify passed (AV.1–AV.7); Phase B largely complete (B7/B4/B8/B6/B1/B2/B3 done, B5 deferred — see note below); B-Verify done (BV.1–BV.4)
+**Status:** Phase A complete (A1–A7 + A-Verify); Phase B largely complete (B7/B4/B8/B6/B1/B2/B3 done, B5 deferred — see note below); B-Verify done (BV.1–BV.4)
 
 ---
 
@@ -109,10 +109,12 @@
   - Returns `_orchestrators.get(view.leaf.id) ?? null`
   - Used by `setState()` to find the correct orchestrator
 
-- [ ] **A1.11 — Delete obsolete methods** (`src/main.ts`)
+- [x] **A1.11 — Delete obsolete methods** (`src/main.ts`) *(done 2026-04-11)*
   - **⚠ Requires A4.1 first** — the private `newConversation()` method (L2605) calls `getPrimaryChatLeaf()`. A4.1 rewrites that method to remove the call. Do not delete `getPrimaryChatLeaf()` before A4.1 has updated `newConversation()`, or batch both in the same commit.
-  - Delete `getOrchestrator()` (L1585-1628)
-  - Delete `createSecondaryOrchestrator()` (L1640-1687)
+  - Deleted `getOrchestrator()` — old lazy-singleton primary orchestrator factory
+  - Deleted `createSecondaryOrchestrator()` — old secondary panel factory
+  - Deleted `_orchestrator` field and `_secondaryOrchestrators` field
+  - Updated remaining `this._orchestrator` reference (getModeCallback in MCP tool registration) to use `this.getActiveOrchestrator()`
   - ~~Delete `wireViewAsSecondary()` (L1697-1716)~~ — deleted in A4.6 (type-broken after isSecondary removal)
   - ~~Delete `getPrimaryChatLeaf()` (L2576-2583)~~ — deleted in A4.6 (type-broken after isSecondary removal)
 

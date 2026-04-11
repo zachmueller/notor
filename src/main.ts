@@ -143,26 +143,11 @@ export default class NotorPlugin extends Plugin {
 	private _sharedCheckpointManager?: CheckpointManager;
 	private _systemPromptBuilder?: SystemPromptBuilder;
 	private _vaultRuleManager?: VaultRuleManager;
-	private _orchestrator?: ChatOrchestrator;
-
-	/**
-	 * Orchestrators for secondary chat panels.
-	 *
-	 * Each secondary panel gets its own `ChatOrchestrator` sharing
-	 * infrastructure singletons. Tracked for cleanup in `onunload()`.
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
-	 */
-	private _secondaryOrchestrators: ChatOrchestrator[] = [];
-
 	/**
 	 * Unified orchestrator registry — maps leaf ID to its orchestrator.
 	 *
-	 * All panels (primary and secondary) are equal. The factory in
-	 * `registerView` creates an orchestrator for each panel and stores
-	 * it here. Existing `_orchestrator` and `_secondaryOrchestrators`
-	 * fields are retained temporarily for backward compatibility until
-	 * all call sites are migrated (Phase A4).
+	 * All panels are equal. The factory in `registerView` creates an
+	 * orchestrator for each panel and stores it here.
 	 *
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.1
 	 */
@@ -710,7 +695,7 @@ export default class NotorPlugin extends Plugin {
 			// vault-authored overrides win by last-write-wins.
 			// isInitialLoad=true skips dispatcher registration during reload().
 			// However, if the dispatcher was already created (e.g., by workspace
-			// restore triggering wireView() → getOrchestrator() → getToolDispatcher()
+			// restore triggering wireView() → createOrchestrator() → getToolDispatcher()
 			// before this async reload completes), we must sync it afterwards.
 			this.getExtensionManager().reload(true).then(() => {
 				// Sync dispatcher if it was already lazily created before reload finished.
@@ -1235,7 +1220,7 @@ export default class NotorPlugin extends Plugin {
 				// conversation manager at call time
 				const getModeCallback = (): "plan" | "act" => {
 					try {
-						const convManager = this._orchestrator?.getConversationManager();
+						const convManager = this.getActiveOrchestrator()?.getConversationManager();
 						return convManager?.getActiveConversation()?.mode ?? this.settings.mode;
 					} catch {
 						return this.settings.mode;
@@ -1708,112 +1693,6 @@ export default class NotorPlugin extends Plugin {
 		return this._webSearchQueue;
 	}
 
-	/** Chat orchestrator — the main send/receive loop coordinator. */
-	getOrchestrator(): ChatOrchestrator {
-		if (!this._orchestrator) {
-			const dispatcher = this.getToolDispatcher();
-			const historyManager = this.getHistoryManager();
-			const systemPromptBuilder = this.getSystemPromptBuilder();
-			const providerRegistry = this.getProviderRegistry();
-			const vaultRuleManager = this.getVaultRuleManager();
-
-			this._orchestrator = new ChatOrchestrator(
-				this.app,
-				providerRegistry,
-				systemPromptBuilder,
-				dispatcher,
-				historyManager,
-				this.settings,
-				this._sessionGuard,
-				undefined, // view wired later via wireView()
-				vaultRuleManager
-			);
-
-			// Wire persona manager to orchestrator (A-013)
-			this._orchestrator.setPersonaManager(this.getPersonaManager());
-
-			// G-005/G-006/G-007: Wire workflow hook override manager to orchestrator
-			this._orchestrator.setWorkflowHookOverrideManager(
-				this.getWorkflowHookOverrideManager()
-			);
-
-			// EXT-017: Wire extension automation accessors to orchestrator.
-			// Uses lazy accessor closures so the extension manager is only
-			// created when the orchestrator is first used (not at import time).
-			const mgr = this.getExtensionManager();
-			this._orchestrator.setExtensionAccessors({
-				lifecycle: {
-					getForTrigger: (t) => mgr.getAutomationsForTrigger(t),
-					execute: (a, c) => mgr.executeAutomation(a, c),
-				},
-				toolEvent: {
-					getForToolEvent: (t, n) => mgr.getAutomationsForToolEvent(t, n),
-					execute: (a, c) => mgr.executeAutomation(a, c),
-				},
-			});
-		}
-		return this._orchestrator;
-	}
-
-	/**
-	 * Create a secondary orchestrator sharing infrastructure singletons.
-	 *
-	 * Each secondary panel gets its own `ChatOrchestrator` with its own
-	 * `ConversationManager`, `activeSessions` map, and per-orchestrator
-	 * provider/model fields. Expensive singletons (ProviderRegistry,
-	 * HistoryManager, etc.) are shared.
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
-	 */
-	createSecondaryOrchestrator(): ChatOrchestrator {
-		const dispatcher = this.getToolDispatcher();
-		const historyManager = this.getHistoryManager();
-		const systemPromptBuilder = this.getSystemPromptBuilder();
-		const providerRegistry = this.getProviderRegistry();
-		const vaultRuleManager = this.getVaultRuleManager();
-
-		const orchestrator = new ChatOrchestrator(
-			this.app,
-			providerRegistry,
-			systemPromptBuilder,
-			dispatcher,
-			historyManager,
-			this.settings,
-			this._sessionGuard,
-			undefined, // view wired later via wireView()
-			vaultRuleManager
-		);
-
-		// Wire same shared managers as primary
-		orchestrator.setPersonaManager(this.getPersonaManager());
-		orchestrator.setWorkflowHookOverrideManager(
-			this.getWorkflowHookOverrideManager()
-		);
-
-		const mgr = this.getExtensionManager();
-		orchestrator.setExtensionAccessors({
-			lifecycle: {
-				getForTrigger: (t) => mgr.getAutomationsForTrigger(t),
-				execute: (a, c) => mgr.executeAutomation(a, c),
-			},
-			toolEvent: {
-				getForToolEvent: (t, n) => mgr.getAutomationsForToolEvent(t, n),
-				execute: (a, c) => mgr.executeAutomation(a, c),
-			},
-		});
-
-		orchestrator.setGetToolDefinitions((config) => {
-			const toolRegistry = this.getToolRegistry();
-			if (config) {
-				return toolRegistry.getFilteredToolDefinitions(config) as import("./providers/provider").ToolDefinition[];
-			}
-			return toolRegistry.getToolDefinitions() as import("./providers/provider").ToolDefinition[];
-		});
-
-		this._secondaryOrchestrators.push(orchestrator);
-		log.info("Secondary orchestrator created", { total: this._secondaryOrchestrators.length });
-		return orchestrator;
-	}
 
 
 
