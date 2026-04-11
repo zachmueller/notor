@@ -25,6 +25,7 @@ import { ConfigResolver } from "./config-resolver";
 import { HookDispatcher } from "./hook-dispatcher";
 import { CompactionManager } from "./compaction-manager";
 import { ViewRouter } from "./view-router";
+import { SessionManager } from "./session-manager";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings } from "../settings";
@@ -87,6 +88,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	private readonly hookDispatcher: HookDispatcher;
 	private readonly compactionManager: CompactionManager;
 	private readonly viewRouter: ViewRouter;
+	private readonly sessionManager: SessionManager;
 
 	/** Proxy getter — delegates to ViewRouter. All `this.view?.` references resolve through here. */
 	private get view(): NotorChatView | undefined {
@@ -160,24 +162,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	private activeUseExtendedContext: boolean;
 
-	/**
-	 * Active conversation sessions keyed by conversation ID.
-	 *
-	 * Each response loop (foreground or workflow) creates a session that
-	 * isolates all per-conversation state. Sessions are removed in the
-	 * response loop's finally block.
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1d
-	 */
-	private activeSessions = new Map<string, ConversationSession>();
-
-	/**
-	 * Callbacks fired when the set of active sessions changes (add/remove/status).
-	 * Used by the activity indicator to update badge count and animation state.
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 3
-	 */
-	private sessionChangeCallbacks = new Set<() => void>();
 
 	constructor(
 		private readonly app: App,
@@ -205,6 +189,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 			() => this.workflowHookOverrideManager,
 			() => this.extensionLifecycleAccessors,
 			() => this.extensionToolEventAccessors,
+		);
+		this.sessionManager = new SessionManager(
+			this.sessionGuard,
+			this.historyManager,
+			() => this.workflowHookOverrideManager,
 		);
 
 		// Initialize per-orchestrator provider/model from current global state
@@ -431,52 +420,19 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1d
 	 */
 	getActiveSession(conversationId: string): ConversationSession | undefined {
-		return this.activeSessions.get(conversationId);
+		return this.sessionManager.getActiveSession(conversationId);
 	}
 
-	/**
-	 * Returns all currently active sessions (streaming or waiting for approval).
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 2, Step 2a
-	 */
 	getActiveSessions(): ConversationSession[] {
-		return Array.from(this.activeSessions.values());
+		return this.sessionManager.getActiveSessions();
 	}
 
-	/**
-	 * Check whether a conversation has an active session.
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 2, Step 2a
-	 */
 	hasActiveSession(conversationId: string): boolean {
-		return this.activeSessions.has(conversationId);
+		return this.sessionManager.hasActiveSession(conversationId);
 	}
 
-	/**
-	 * Register a listener that fires whenever the set of active sessions changes.
-	 * Fires on session creation, removal, and status changes.
-	 *
-	 * @returns An unregister function that removes the callback.
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 3, Step 3c
-	 */
 	onSessionsChanged(callback: () => void): () => void {
-		this.sessionChangeCallbacks.add(callback);
-		return () => {
-			this.sessionChangeCallbacks.delete(callback);
-		};
-	}
-
-	/**
-	 * Notify all registered listeners that the active session set has changed.
-	 */
-	private notifySessionsChanged(): void {
-		for (const cb of this.sessionChangeCallbacks) {
-			try {
-				cb();
-			} catch (e) {
-				log.error("sessionChange callback error", { error: String(e) });
-			}
-		}
+		return this.sessionManager.onSessionsChanged(callback);
 	}
 
 	/**
@@ -534,54 +490,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1h
 	 */
 	async destroy(timeoutMs: number = 2000): Promise<void> {
-		const sessionPromises: Promise<void>[] = [];
-
-		for (const session of this.activeSessions.values()) {
-			if (session.responsePromise) {
-				sessionPromises.push(session.responsePromise);
-			}
-			session.abortController.abort();
-		}
-
-		if (sessionPromises.length > 0) {
-			await Promise.race([
-				Promise.allSettled(sessionPromises),
-				new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
-			]);
-		}
-
-		// Deactivate workflow hook overrides for all active sessions.
-		// This runs regardless of whether the finally blocks completed
-		// (destroy may have won the timeout race).
-		// NOTE (Amendment R4): deactivate() is idempotent — it may be
-		// called here AND from the session cleanup finally block for the
-		// same conversation ID if the finally block runs before destroy.
-		for (const session of this.activeSessions.values()) {
-			if (session.workflowAssembly && this.workflowHookOverrideManager) {
-				this.workflowHookOverrideManager.deactivate(session.conversationId);
-			}
-		}
-
-		// Flush any writes that may have been enqueued in finally blocks.
-		try {
-			await Promise.race([
-				this.historyManager.flush(),
-				new Promise<void>((r) => setTimeout(r, Math.max(timeoutMs / 2, 500))),
-			]);
-		} catch {
-			// Best-effort
-		}
-
-		// Unregister all active session IDs from the global guard BEFORE
-		// clearing the map. Without this, destroyed orchestrators leave
-		// phantom entries that permanently block those conversations.
-		for (const id of this.activeSessions.keys()) {
-			this.sessionGuard.unregister(id);
-		}
-
-		this.activeSessions.clear();
-		this.sessionChangeCallbacks.clear();
-		log.info("Orchestrator destroyed", { abortedSessions: sessionPromises.length });
+		return this.sessionManager.destroy(timeoutMs);
 	}
 
 	// -----------------------------------------------------------------------
@@ -714,7 +623,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			// from the session's in-memory messages instead of the JSONL file.
 			// The session's ConversationManager has the authoritative message
 			// array (including messages added since the last JSONL flush).
-			const activeSession = this.activeSessions.get(conversation.id);
+			const activeSession = this.sessionManager.getActiveSession(conversation.id);
 			if (activeSession) {
 				const sessionConv = activeSession.conversationManager.getActiveConversation()!;
 				const sessionMessages = activeSession.conversationManager.getMessages();
@@ -1030,16 +939,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 		// --- Create isolated ConversationSession for the workflow ---
 
-		// Per-orchestrator duplicate-send guard (Amendment A3: was missing for workflows)
-		if (this.activeSessions.has(conversation.id)) {
-			new Notice("This conversation is already processing");
-			return;
-		}
-
-		// Cross-orchestrator guard: prevent two panels from creating sessions
-		// for the same conversation (Bug D — interleaved JSONL writes + divergent state)
-		if (this.sessionGuard.isActive(conversation.id)) {
-			new Notice("This conversation is being processed in another panel.");
+		// Session guards: prevent duplicate sessions per-orchestrator and cross-orchestrator
+		const guardError = this.sessionManager.checkSessionGuards(conversation.id);
+		if (guardError) {
+			new Notice(guardError);
 			return;
 		}
 
@@ -1085,9 +988,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			initialParsedConfigs,
 		});
 
-		this.activeSessions.set(session.conversationId, session);
-		this.sessionGuard.register(session.conversationId);
-		this.notifySessionsChanged();
+		this.sessionManager.registerSession(session);
 
 		// G-006: Activate workflow-scoped hook overrides before the first LLM call
 		if (workflow.hooks && this.workflowHookOverrideManager) {
@@ -1123,9 +1024,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			if (session.workflowAssembly && this.workflowHookOverrideManager) {
 				this.workflowHookOverrideManager.deactivate(session.conversationId);
 			}
-			this.sessionGuard.unregister(session.conversationId);
-			this.activeSessions.delete(session.conversationId);
-			this.notifySessionsChanged();
+			this.sessionManager.unregisterSession(session.conversationId);
 			this.getViewForSession(session)?.setRespondingState(false);
 		}
 	}
@@ -1642,16 +1541,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 		const conv = this.conversationManager.getActiveConversation();
 		if (!conv) return;
 
-		// Duplicate-send guard: prevent a second session for the same conversation
-		if (this.activeSessions.has(conv.id)) {
-			new Notice("This conversation is already processing");
-			return;
-		}
-
-		// Cross-orchestrator guard: prevent two panels from creating sessions
-		// for the same conversation (Bug D — interleaved JSONL writes + divergent state)
-		if (this.sessionGuard.isActive(conv.id)) {
-			new Notice("This conversation is being processed in another panel.");
+		// Session guards: prevent duplicate sessions per-orchestrator and cross-orchestrator
+		const guardError = this.sessionManager.checkSessionGuards(conv.id);
+		if (guardError) {
+			new Notice(guardError);
 			return;
 		}
 
@@ -1822,9 +1715,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 		});
 
 		// Register session and start response loop
-		this.activeSessions.set(session.conversationId, session);
-		this.sessionGuard.register(session.conversationId);
-		this.notifySessionsChanged();
+		this.sessionManager.registerSession(session);
 
 		// Step 1f-addendum (Trigger 1): Update conversation header if the
 		// pinned values differ from what's stored (e.g. user changed provider
@@ -1869,9 +1760,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			// handleUserMessage() sets a non-null workflowAssembly — that field is
 			// only populated by executeWorkflow(). See executeWorkflow()'s finally
 			// block which handles the workflow case.
-			this.sessionGuard.unregister(session.conversationId);
-			this.activeSessions.delete(session.conversationId);
-			this.notifySessionsChanged();
+			this.sessionManager.unregisterSession(session.conversationId);
 			this.getViewForSession(session)?.setRespondingState(false);
 		}
 	}

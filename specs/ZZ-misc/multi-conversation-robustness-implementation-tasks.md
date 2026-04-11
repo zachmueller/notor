@@ -624,7 +624,7 @@
 
 **~200 lines.** Owns session lifecycle including creation, tracking, cleanup, and the session guard.
 
-- [ ] **B2.1 — Create `src/chat/session-manager.ts`**
+- [x] **B2.1 — Create `src/chat/session-manager.ts`** *(done 2026-04-11)*
   - Create `SessionManager` class with constructor:
     ```typescript
     constructor(
@@ -649,7 +649,7 @@
   - Extract cleanup: `destroySessions(timeoutMs?: number): Promise<void>` — the session abort + await logic from `destroy()` (L434-454), unregisters all sessions from guard, clears maps
   - Add `flushAndUnregister(session: ConversationSession): Promise<void>` — the finally-block pattern from A5.3/A6.3 (flush conversation writes, unregister session guard, delete from activeSessions, notify)
 
-- [ ] **B2.2 — Wire SessionManager into orchestrator**
+- [x] **B2.2 — Wire SessionManager into orchestrator** *(done 2026-04-11)*
   - Create SessionManager in orchestrator constructor
   - `handleUserMessage()` calls `this.sessionManager.createSession(...)` then `this.sessionManager.registerSession(session)` — replacing ~80 lines of inline setup
   - `executeWorkflow()` same pattern
