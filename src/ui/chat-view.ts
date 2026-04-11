@@ -199,6 +199,19 @@ export class NotorChatView extends ItemView {
 	 */
 	_unregisterSessionsChanged?: () => void;
 
+	/**
+	 * Async cleanup callback invoked on panel close.
+	 *
+	 * Set by `wireView()` in `main.ts`. Aborts in-flight loads, detaches the
+	 * view from the orchestrator, removes from registry, and awaits
+	 * `orchestrator.destroy()` for JSONL flush + session guard cleanup.
+	 *
+	 * Must be async: Obsidian awaits `ItemView.onClose(): Promise<void>`,
+	 * so the flush completes before the panel tears down.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 7.2
+	 */
+	onCloseCleanup?: () => Promise<void>;
 
 	// Callbacks (set by orchestrator)
 	private onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
@@ -386,6 +399,10 @@ export class NotorChatView extends ItemView {
 
 	setOnOpenSettingsGroup(callback: (groupTitle: string, subsection?: string) => void): void {
 		this.onOpenSettingsGroup = callback;
+	}
+
+	setOnCloseCleanup(callback: () => Promise<void>): void {
+		this.onCloseCleanup = callback;
 	}
 
 	// -----------------------------------------------------------------------
@@ -697,7 +714,13 @@ export class NotorChatView extends ItemView {
 		return Promise.resolve();
 	}
 
-	onClose(): Promise<void> {
+	async onClose(): Promise<void> {
+		// A7.4: Await orchestrator cleanup first — aborts in-flight loads,
+		// detaches view, flushes JSONL writes, unregisters session guards.
+		// Must complete before DOM teardown (Obsidian awaits onClose).
+		// @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 7.2
+		await this.onCloseCleanup?.();
+
 		this.abortController?.abort();
 
 		// Disconnect the inline token mutation observer
@@ -723,12 +746,11 @@ export class NotorChatView extends ItemView {
 		this.personaChangedUnregister = undefined;
 
 		// A3.8: Release all callback references to prevent GC leaks.
-		// When A7 adds onCloseCleanup, it must be called BEFORE this
-		// (Amendment R2-8 ordering).
+		// Called AFTER onCloseCleanup (Amendment R2-8 ordering) so the
+		// cleanup callback can still use view callbacks if needed.
 		this.clearCallbacks();
 
 		log.info("Chat view closed");
-		return Promise.resolve();
 	}
 
 	/**
@@ -772,6 +794,9 @@ export class NotorChatView extends ItemView {
 		this.getCurrentModel = undefined;
 		this.getWorkflowsCallback = undefined;
 		this.getActiveSessions = undefined;
+
+		// Close cleanup callback (A7.2)
+		this.onCloseCleanup = undefined;
 	}
 
 	// -----------------------------------------------------------------------

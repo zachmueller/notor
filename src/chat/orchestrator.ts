@@ -224,8 +224,16 @@ export class ChatOrchestrator implements ToolSessionContext {
 	// Configuration
 	// -----------------------------------------------------------------------
 
-	/** Set or update the chat view reference. */
-	setView(view: NotorChatView): void {
+	/**
+	 * Set or update the chat view reference.
+	 *
+	 * Pass `undefined` to detach the view (e.g. on panel close).
+	 * All view interactions throughout the orchestrator use `this.view?.`
+	 * optional chaining, so detaching is safe at any point.
+	 *
+	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 7.2
+	 */
+	setView(view: NotorChatView | undefined): void {
 		this.view = view;
 	}
 

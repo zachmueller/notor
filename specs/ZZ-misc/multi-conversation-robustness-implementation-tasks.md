@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A6 complete; A1.11 partially done (wireViewAsSecondary + getPrimaryChatLeaf deleted); A7 next
+**Status:** Phase A7 complete; A1.11 partially done (wireViewAsSecondary + getPrimaryChatLeaf deleted); A-Verify next
 
 ---
 
@@ -389,15 +389,15 @@
 
 **Bugs addressed:** Lifecycle robustness (renders to destroyed DOM, hanging approvals, orchestrator leaks)
 
-- [ ] **A7.1 — Update `setView()` to accept `undefined`** (`src/chat/orchestrator.ts`, L196-198)
+- [x] **A7.1 — Update `setView()` to accept `undefined`** (`src/chat/orchestrator.ts`, L196-198) *(done 2026-04-11)*
   - Change signature from `setView(view: NotorChatView)` to `setView(view: NotorChatView | undefined)`
   - Existing `this.view?.` guards throughout the orchestrator already handle `undefined`
 
-- [ ] **A7.2 — Add close cleanup infrastructure to `NotorChatView`** (`src/ui/chat-view.ts`)
+- [x] **A7.2 — Add close cleanup infrastructure to `NotorChatView`** (`src/ui/chat-view.ts`) *(done 2026-04-11)*
   - Add `onCloseCleanup?: () => Promise<void>` field — **must be async**: Obsidian awaits `ItemView.onClose(): Promise<void>` (verified: `node_modules/obsidian/obsidian.d.ts:6445`), so async cleanup completes before the panel tears down
   - Add `setOnCloseCleanup(cb: () => Promise<void>)` setter
 
-- [ ] **A7.3 — Wire close cleanup in `wireView()`** (`src/main.ts`)
+- [x] **A7.3 — Wire close cleanup in `wireView()`** (`src/main.ts`) *(done 2026-04-11)*
   - Set `view.setOnCloseCleanup(async () => { ... })` that:
     1. Aborts any in-flight `loadConversation()`: `view._loadConversationAbort?.abort()` — **must be first** to prevent `syncViewAfterLoad()` from mutating the closing view after orchestrator teardown
     2. Clears fallback timeout: `clearTimeout(view._loadFallbackTimeout)` (Amendment R2-2)
@@ -406,7 +406,7 @@
     5. Removes from registry: `this._orchestrators.delete(leafId)`
     6. `await orchestrator.destroy()` — awaiting ensures JSONL flush completes before panel teardown (Amendment R2-3)
 
-- [ ] **A7.4 — Update `onClose()`** (`src/ui/chat-view.ts`, L670-698)
+- [x] **A7.4 — Update `onClose()`** (`src/ui/chat-view.ts`, L670-698) *(done 2026-04-11)*
   - Make async: `async onClose(): Promise<void>`
   - At the start: `await this.onCloseCleanup?.()` — Obsidian awaits this, so cleanup is guaranteed complete before DOM teardown
   - After cleanup: `this.clearCallbacks()` (Amendment R2-8 ordering)

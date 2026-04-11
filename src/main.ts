@@ -2336,6 +2336,35 @@ export default class NotorPlugin extends Plugin {
 		// Wire orchestrator ↔ view
 		orchestrator.setView(view);
 
+		// A7.3: Wire close cleanup — orderly teardown when the panel closes.
+		// Obsidian awaits onClose(), so the async cleanup (JSONL flush,
+		// session guard unregister) completes before DOM teardown.
+		// @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 7.2
+		const leafId = view.leaf.id;
+		view.setOnCloseCleanup(async () => {
+			// 1. Abort any in-flight loadConversation() — must be first.
+			//    Without this, a concurrent load can continue after orchestrator
+			//    teardown and call syncViewAfterLoad() on a closing view.
+			view._loadConversationAbort?.abort();
+
+			// 2. Clear deferred load timeout (prevent post-close spurious load)
+			clearTimeout(view._loadFallbackTimeout);
+
+			// 3. Detach view — renders become no-ops via existing this.view?. guards
+			orchestrator.setView(undefined);
+
+			// 4. Clean up session-change listener
+			view._unregisterSessionsChanged?.();
+
+			// 5. Remove from registry
+			this._orchestrators.delete(leafId);
+
+			// 6. Destroy (aborts active sessions, flushes JSONL writes).
+			//    Closing a panel does NOT imply consent for unreviewed tool
+			//    execution — abort is the safe default.
+			await orchestrator.destroy();
+		});
+
 		// H-006: Wire workflow activity tracker to the chat view so the
 		// indicator is created in onOpen() and destroyed in onClose().
 		if (this._workflowActivityTracker) {
