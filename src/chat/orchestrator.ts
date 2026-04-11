@@ -22,6 +22,7 @@ import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./too
 import { parseStreamEvents } from "./stream-utils";
 import { toChatMessages, processStream, extractPendingMessages, calculateCost, type StreamResult } from "./message-pipeline";
 import { ConfigResolver } from "./config-resolver";
+import { HookDispatcher } from "./hook-dispatcher";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings } from "../settings";
@@ -31,7 +32,6 @@ import { buildAutoContextBlock } from "../context/auto-context";
 import { assembleUserMessage, assembleUserContent } from "../context/message-assembler";
 import type { Attachment } from "../context/attachment";
 import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment";
-import { dispatchPreSend, dispatchAfterCompletion } from "../hooks/hook-events";
 import type { LifecycleAutomationAccessors, ToolEventAutomationAccessors } from "../hooks/hook-events";
 import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-override";
 import { shouldCompact, performCompaction } from "../context/compaction";
@@ -84,6 +84,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	private conversationManager: ConversationManager;
 	private contextManager: ContextManager;
 	private readonly configResolver: ConfigResolver;
+	private readonly hookDispatcher: HookDispatcher;
 
 	/** Persona manager for active persona state (Phase 4, A-013). */
 	private personaManager?: PersonaManager;
@@ -185,6 +186,13 @@ export class ChatOrchestrator implements ToolSessionContext {
 		this.conversationManager = new ConversationManager(settings.mode);
 		this.contextManager = new ContextManager();
 		this.configResolver = new ConfigResolver(settings, systemPromptBuilder, dispatcher);
+		this.hookDispatcher = new HookDispatcher(
+			() => this.settings,
+			() => this.getVaultRootPath(),
+			() => this.workflowHookOverrideManager,
+			() => this.extensionLifecycleAccessors,
+			() => this.extensionToolEventAccessors,
+		);
 
 		// Initialize per-orchestrator provider/model from current global state
 		const initProviderType = this.providerRegistry.getActiveType();
@@ -1505,42 +1513,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 				}
 
 				// Dispatch hook events if applicable
-			// G-004: Pass override manager so workflow-scoped hooks are used when active
-			// EXT-017: Pass extension tool event automations
 				const bgConvForHooks = bgConvManager.getActiveConversation();
-				if (bgConvForHooks && vaultRootPath) {
-					const { dispatchOnToolCall, dispatchOnToolResult } =
-						await import("../hooks/hook-events");
-					dispatchOnToolCall(
-						{
-							conversationId: bgConvForHooks.id,
-							timestamp: new Date().toISOString(),
-							toolName,
-							toolParams: parameters,
-						},
-						this.settings,
-						vaultRootPath,
-						this.workflowHookOverrideManager,
-						this.extensionToolEventAccessors,
-					);
-
-					const toolResultStr = typeof toolResult.result === "string"
-						? toolResult.result
-						: JSON.stringify(toolResult.result);
-					dispatchOnToolResult(
-						{
-							conversationId: bgConvForHooks.id,
-							timestamp: new Date().toISOString(),
-							toolName,
-							toolParams: parameters,
-							toolResult: toolResultStr,
-							toolStatus: toolResult.success ? "success" : "error",
-						},
-						this.settings,
-						vaultRootPath,
-						this.workflowHookOverrideManager,
-						this.extensionToolEventAccessors,
-					);
+				if (bgConvForHooks) {
+					this.hookDispatcher.dispatchToolCallHook(bgConvForHooks.id, toolName, parameters);
+					this.hookDispatcher.dispatchToolResultHook(bgConvForHooks.id, toolName, parameters, toolResult);
 				}
 
 				// Add tool result message
@@ -1695,27 +1671,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 		}
 
 		// Phase 3 (HOOK-004): Dispatch pre-send hooks and capture stdout
-		// G-004: Pass override manager so workflow-scoped hooks are used when active
-		// EXT-017: Pass extension lifecycle automations
 		let hookInjections: string[] | undefined;
 		{
-			const vaultRootPath = this.getVaultRootPath();
-			if (vaultRootPath) {
-				hookInjections = await dispatchPreSend(
-					{
-						conversationId: conv.id,
-						timestamp: new Date().toISOString(),
-					},
-					this.settings,
-					vaultRootPath,
-					this.workflowHookOverrideManager,
-					this.extensionLifecycleAccessors,
-				);
-				// Filter empty results
-				if (hookInjections && hookInjections.length === 0) {
-					hookInjections = undefined;
-				}
-			}
+			hookInjections = await this.hookDispatcher.dispatchPreSendHooks(conv.id);
 		}
 
 		// Assemble the user message content: attachments → user text
@@ -2093,24 +2051,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 						const toolCallEl = this.getViewForSession(session)?.renderToolCall(toolCallMessage);
 
-						// HOOK-005: Fire on_tool_call hooks sequentially
-						// G-004: Pass override manager so workflow-scoped hooks are used when active
-						// EXT-017: Pass extension tool event automations
+						// HOOK-005: Fire on_tool_call hooks
 						const currentConv = convManager.getActiveConversation();
-						if (currentConv && vaultRootPath) {
-							const { dispatchOnToolCall } = await import("../hooks/hook-events");
-							dispatchOnToolCall(
-								{
-									conversationId: currentConv.id,
-									timestamp: new Date().toISOString(),
-									toolName: call.toolName,
-									toolParams: call.parameters,
-								},
-								this.settings,
-								vaultRootPath,
-								this.workflowHookOverrideManager,
-								this.extensionToolEventAccessors,
-							);
+						if (currentConv) {
+							this.hookDispatcher.dispatchToolCallHook(currentConv.id, call.toolName, call.parameters);
 						}
 
 						toolCallEntries.push({
@@ -2212,28 +2156,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 						this.getViewForSession(session)?.renderToolResult(toolResultMessage);
 
-						// HOOK-005: Fire on_tool_result hooks sequentially
-						// G-004: Pass override manager so workflow-scoped hooks are used when active
-						// EXT-017: Pass extension tool event automations
+						// HOOK-005: Fire on_tool_result hooks
 						const convForToolResult = convManager.getActiveConversation();
-						if (convForToolResult && vaultRootPath) {
-							const { dispatchOnToolResult } = await import("../hooks/hook-events");
-							const toolResultStr = typeof toolResult.result === "string"
-								? toolResult.result
-								: JSON.stringify(toolResult.result);
-							dispatchOnToolResult(
-								{
-									conversationId: convForToolResult.id,
-									timestamp: new Date().toISOString(),
-									toolName: entry.call.toolName,
-									toolParams: entry.call.parameters,
-									toolResult: toolResultStr,
-									toolStatus: toolResult.success ? "success" : "error",
-								},
-								this.settings,
-								vaultRootPath,
-								this.workflowHookOverrideManager,
-								this.extensionToolEventAccessors,
+						if (convForToolResult) {
+							this.hookDispatcher.dispatchToolResultHook(
+								convForToolResult.id, entry.call.toolName, entry.call.parameters, toolResult,
 							);
 						}
 
@@ -2293,35 +2220,12 @@ export class ChatOrchestrator implements ToolSessionContext {
 			// Phase 3 (HOOK-005): Fire after_completion hooks when response loop ends.
 			// The finally block ensures hooks fire even when a provider exception
 			// escapes the loop. Hooks are fire-and-forget so they never suppress errors.
-			const completionConvId = convManager.getActiveConversation()?.id;
-			this.dispatchAfterCompletionHooks(completionConvId);
+			const completionConvId = convManager.getActiveConversation()?.id
+				?? this.conversationManager.getActiveConversation()?.id;
+			this.hookDispatcher.dispatchAfterCompletionHooks(completionConvId);
 		}
 	}
 
-	/**
-	 * Dispatch after_completion hooks. Called from responseLoopWithHooks so the
-	 * hooks always fire regardless of how the loop terminates.
-	 *
-	 * G-004: Passes the override manager so workflow-scoped hooks are used
-	 * when a workflow-scoped override is active for this conversation.
-	 * EXT-017: Passes extension lifecycle automations.
-	 */
-	private dispatchAfterCompletionHooks(conversationId?: string): void {
-		const resolvedId = conversationId ?? this.conversationManager.getActiveConversation()?.id;
-		const vaultRootPath = this.getVaultRootPath();
-		if (resolvedId && vaultRootPath) {
-			dispatchAfterCompletion(
-				{
-					conversationId: resolvedId,
-					timestamp: new Date().toISOString(),
-				},
-				this.settings,
-				vaultRootPath,
-				this.workflowHookOverrideManager,
-				this.extensionLifecycleAccessors,
-			);
-		}
-	}
 
 	// -----------------------------------------------------------------------
 	// Compaction (COMP-005)

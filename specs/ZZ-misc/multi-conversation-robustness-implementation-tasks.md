@@ -532,7 +532,7 @@
 
 **~50 lines of method bodies, but simplifies 4 inline dispatch sites in responseLoop.**
 
-- [ ] **B8.1 — Create `src/chat/hook-dispatcher.ts`**
+- [x] **B8.1 — Create `src/chat/hook-dispatcher.ts`** *(done 2026-04-11)*
   - Create `HookDispatcher` class with constructor:
     ```typescript
     constructor(
@@ -551,7 +551,7 @@
   - Add `updateSettings(settings)` setter
   - Note: The imported functions `dispatchPreSend()`, `dispatchOnToolCall()`, `dispatchOnToolResult()`, `dispatchAfterCompletion()` from `../hooks/` remain as the actual implementations — HookDispatcher is a facade over them that bundles the common parameters (settings, overrideManager, extensionAccessors)
 
-- [ ] **B8.2 — Wire HookDispatcher into orchestrator**
+- [x] **B8.2 — Wire HookDispatcher into orchestrator** *(done 2026-04-11)*
   - Create HookDispatcher in orchestrator constructor
   - Replace 4 inline dispatch call sites in `responseLoop()` with `this.hookDispatcher.dispatchX(...)` calls
   - Replace `dispatchPreSend()` call in `handleUserMessage()` (L1664-1673) with `this.hookDispatcher.dispatchPreSend(...)`
