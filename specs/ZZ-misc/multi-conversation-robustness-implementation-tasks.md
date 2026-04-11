@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A7 complete; A1.11 partially done; A-Verify passed (AV.1–AV.5, AV.7); AV.6 pending; Phase B largely complete (B7/B4/B8/B6/B1/B2/B3 done, B5 deferred — see note below); B-Verify done (BV.1–BV.4)
+**Status:** Phase A7 complete; A1.11 partially done; A-Verify passed (AV.1–AV.7); Phase B largely complete (B7/B4/B8/B6/B1/B2/B3 done, B5 deferred — see note below); B-Verify done (BV.1–BV.4)
 
 ---
 
@@ -449,11 +449,10 @@
   - Open two panels, change a setting → verify both panels reflect the update
   - **Script:** `e2e/scripts/phase-a-routing-settings-test.ts` — combined with AV.4 (test 5: settings propagation)
 
-- [ ] **AV.6 — Regression: Existing E2E tests pass**
-  - `e2e/scripts/session-sync-back-test.ts`
-  - `e2e/scripts/phase4-multi-panel-test.ts`
-  - `e2e/scripts/phase5-open-in-new-tab-test.ts`
-  - **Note:** These existing tests reference removed APIs (`getIsSecondary()`, `_secondaryOrchestrators`, `getOrchestrator()`). They need to be updated to use the new unified registry APIs before they can pass.
+- [x] **AV.6 — Regression: Existing E2E tests updated for unified registry APIs** *(done 2026-04-11)*
+  - `e2e/scripts/session-sync-back-test.ts` — replaced `getOrchestrator()` with `getActiveOrchestrator()` and `_orchestrators` iteration for cross-orchestrator session queries
+  - `e2e/scripts/phase4-multi-panel-test.ts` — replaced `getIsSecondary()`, `_secondaryOrchestrators`, `getOrchestrator()` with `_orchestrators` registry, index-based panel identification, and `getOrchestratorRegistrySize()`
+  - `e2e/scripts/phase5-open-in-new-tab-test.ts` — replaced `getIsSecondary()`, `closeSecondaryPanel()` with `closeLastExtraPanel()`, removed `isSecondary` state checks, all panels treated as equal
 
 - [x] **AV.7 — Regression: Core functionality** *(verified 2026-04-11, 8/8 pass)*
   - Single-panel chat: new conversation, send messages, switch conversations

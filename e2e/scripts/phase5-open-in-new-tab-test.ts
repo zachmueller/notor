@@ -16,10 +16,10 @@
  * Scenarios:
  *   1. onOpenInNewTab callback is wired on the view
  *   2. Context menu button and handler exist on conversation list items
- *   3. Opening a conversation in a new tab creates a secondary panel with messages
+ *   3. Opening a conversation in a new tab creates a new panel with messages
  *   4. Works for favorited conversations
  *   5. Works for non-favorited conversations
- *   6. Opened panel has correct state (isSecondary=true, conversationFilename set)
+ *   6. Opened panel has correct state (conversationId set)
  *   7. No unexpected error logs from open-in-new-tab operations
  *
  * Prerequisites:
@@ -82,7 +82,7 @@ async function getChatLeafCount(page: any): Promise<number> {
 
 /** Get information about all chat leaves. */
 async function getChatLeafInfo(page: any): Promise<Array<{
-	isSecondary: boolean;
+	leafId: string;
 	hasContainer: boolean;
 	conversationId: string | null;
 	hasToolbar: boolean;
@@ -94,10 +94,10 @@ async function getChatLeafInfo(page: any): Promise<Array<{
 		const leaves = app.workspace.getLeavesOfType(viewType);
 		return leaves.map((leaf: any) => {
 			const view = leaf.view;
-			if (!view) return { isSecondary: false, hasContainer: false, conversationId: null, hasToolbar: false, messageCount: 0 };
+			if (!view) return { leafId: leaf.id ?? "", hasContainer: false, conversationId: null, hasToolbar: false, messageCount: 0 };
 			const containerEl = view.containerEl as HTMLElement;
 			return {
-				isSecondary: view.getIsSecondary?.() ?? false,
+				leafId: leaf.id ?? "",
 				hasContainer: !!containerEl?.querySelector(".notor-chat-container"),
 				conversationId: view.activeConversationId ?? null,
 				hasToolbar: !!containerEl?.querySelector(".notor-chat-header-actions"),
@@ -132,21 +132,16 @@ async function activateLeaf(page: any, leafIndex: number): Promise<boolean> {
 	}, { viewType: CHAT_VIEW_TYPE, index: leafIndex });
 }
 
-/** Close the most recently opened secondary panel. */
-async function closeSecondaryPanel(page: any): Promise<boolean> {
+/** Close the most recently opened extra panel (last leaf if more than one exists). */
+async function closeLastExtraPanel(page: any): Promise<boolean> {
 	return page.evaluate((viewType: string) => {
 		const app = (window as any).app;
 		if (!app) return false;
 		const leaves = app.workspace.getLeavesOfType(viewType);
-		// Find the last secondary leaf
-		for (let i = leaves.length - 1; i >= 0; i--) {
-			const view = leaves[i]?.view;
-			if (view?.getIsSecondary?.()) {
-				leaves[i].detach();
-				return true;
-			}
-		}
-		return false;
+		// Close the last leaf if more than one exists (all panels are equal in the unified model)
+		if (leaves.length <= 1) return false;
+		leaves[leaves.length - 1].detach();
+		return true;
 	}, CHAT_VIEW_TYPE);
 }
 
@@ -204,7 +199,7 @@ async function getConversationListEntries(page: any): Promise<Array<{
 
 /**
  * Open a conversation in a new tab by directly invoking the onOpenInNewTab
- * callback on the primary panel's view. This exercises the same code path
+ * callback on an existing panel's view. This exercises the same code path
  * as clicking "Open in new tab" in the context menu.
  *
  * Returns true if the callback was invoked successfully.
@@ -214,17 +209,15 @@ async function openInNewTabViaCallback(page: any, filename: string): Promise<boo
 		const app = (window as any).app;
 		if (!app) return false;
 		const leaves = app.workspace.getLeavesOfType(args.viewType);
-		// Find the primary leaf (first non-secondary)
+		// Use the first available leaf (all panels are equal in the unified model)
 		for (const leaf of leaves) {
 			const view = leaf.view;
-			if (view && !view.getIsSecondary?.()) {
-				// Access the private onOpenInNewTab callback
+			if (view) {
 				const cb = (view as any).onOpenInNewTab;
 				if (typeof cb === "function") {
 					cb(args.filename);
 					return true;
 				}
-				return false;
 			}
 		}
 		return false;
@@ -371,16 +364,17 @@ async function testSetup(ctx: TestContext): Promise<void> {
 }
 
 async function testCallbackWired(ctx: TestContext): Promise<void> {
-	console.log("\n-- Test 1: onOpenInNewTab callback is wired on the primary view --");
+	console.log("\n-- Test 1: onOpenInNewTab callback is wired on the view --");
 	const { page } = ctx;
 
 	const callbackInfo = await page.evaluate((viewType: string) => {
 		const app = (window as any).app;
 		if (!app) return { error: "app not found" };
 		const leaves = app.workspace.getLeavesOfType(viewType);
+		// Check the first available view (all panels are equal in the unified model)
 		for (const leaf of leaves) {
 			const view = leaf.view;
-			if (view && !view.getIsSecondary?.()) {
+			if (view) {
 				const cb = (view as any).onOpenInNewTab;
 				return {
 					hasCallback: typeof cb === "function",
@@ -388,7 +382,7 @@ async function testCallbackWired(ctx: TestContext): Promise<void> {
 				};
 			}
 		}
-		return { error: "no primary view found" };
+		return { error: "no view found" };
 	}, CHAT_VIEW_TYPE);
 
 	const shot = await ctx.screenshot("01-callback-wired");
@@ -402,7 +396,7 @@ async function testCallbackWired(ctx: TestContext): Promise<void> {
 	if (info.hasCallback && info.hasSetterMethod) {
 		ctx.pass(
 			"Callback wired",
-			`onOpenInNewTab callback is set on the primary view (hasCallback=${info.hasCallback}, hasSetterMethod=${info.hasSetterMethod})`,
+			`onOpenInNewTab callback is set on the view (hasCallback=${info.hasCallback}, hasSetterMethod=${info.hasSetterMethod})`,
 			shot,
 		);
 	} else {
@@ -493,18 +487,18 @@ async function testOpenInNewTab(ctx: TestContext): Promise<void> {
 	console.log(`  Leaves after: ${leafCountAfter}`);
 
 	const leaves = await getChatLeafInfo(page);
-	const secondaryLeaves = leaves.filter((l) => l.isSecondary);
-	console.log(`  Secondary leaves: ${secondaryLeaves.length}`);
+	const extraLeaves = leaves.length > leafCountBefore;
+	console.log(`  Extra panels: ${extraLeaves ? leaves.length - leafCountBefore : 0}`);
 	for (let i = 0; i < leaves.length; i++) {
 		const l = leaves[i]!;
-		console.log(`    Leaf ${i}: secondary=${l.isSecondary}, convId=${l.conversationId?.substring(0, 8) ?? "null"}, msgs=${l.messageCount}`);
+		console.log(`    Leaf ${i}: leafId=${l.leafId.substring(0, 8)}, convId=${l.conversationId?.substring(0, 8) ?? "null"}, msgs=${l.messageCount}`);
 	}
 
-	// Activate the secondary panel and count messages
-	const secondaryIdx = leaves.findIndex((l) => l.isSecondary);
+	// Activate the new panel (last leaf) and count messages
+	const newPanelIdx = leaves.length > leafCountBefore ? leaves.length - 1 : -1;
 	let msgCount = 0;
-	if (secondaryIdx >= 0) {
-		await activateLeaf(page, secondaryIdx);
+	if (newPanelIdx >= 0) {
+		await activateLeaf(page, newPanelIdx);
 		await page.waitForTimeout(2_000);
 		msgCount = await page.evaluate(() => {
 			return document.querySelectorAll(".notor-message-assistant, .notor-message-user").length;
@@ -514,16 +508,16 @@ async function testOpenInNewTab(ctx: TestContext): Promise<void> {
 	const expectedMsgCount = countJSONLMessages(filename);
 	const shot = await ctx.screenshot("03-opened-in-new-tab");
 
-	console.log(`  Messages in secondary panel: ${msgCount}`);
+	console.log(`  Messages in new panel: ${msgCount}`);
 	console.log(`  Messages in JSONL: ${expectedMsgCount}`);
 
-	const newPanelCreated = leafCountAfter > leafCountBefore && secondaryLeaves.length > 0;
+	const newPanelCreated = leafCountAfter > leafCountBefore;
 	const hasMessages = msgCount >= 2; // At least user + assistant
 
 	if (newPanelCreated && hasMessages) {
 		ctx.pass(
 			"Open in new tab",
-			`Secondary panel created with ${msgCount} messages (JSONL has ${expectedMsgCount}). ` +
+			`New panel created with ${msgCount} messages (JSONL has ${expectedMsgCount}). ` +
 			`Leaves: ${leafCountBefore} -> ${leafCountAfter}`,
 			shot,
 		);
@@ -537,7 +531,7 @@ async function testOpenInNewTab(ctx: TestContext): Promise<void> {
 	}
 
 	// Clean up
-	await closeSecondaryPanel(page);
+	await closeLastExtraPanel(page);
 	await page.waitForTimeout(1_000);
 }
 
@@ -567,13 +561,13 @@ async function testWorksForFavorited(ctx: TestContext): Promise<void> {
 
 	const leafCountAfter = await getChatLeafCount(page);
 	const leaves = await getChatLeafInfo(page);
-	const secondaryLeaves = leaves.filter((l) => l.isSecondary);
+	const newPanelCreated = leafCountAfter > leafCountBefore;
 
-	// Count messages in secondary panel
-	const secondaryIdx = leaves.findIndex((l) => l.isSecondary);
+	// Count messages in the new panel (last leaf)
+	const newPanelIdx = newPanelCreated ? leaves.length - 1 : -1;
 	let msgCount = 0;
-	if (secondaryIdx >= 0) {
-		await activateLeaf(page, secondaryIdx);
+	if (newPanelIdx >= 0) {
+		await activateLeaf(page, newPanelIdx);
 		await page.waitForTimeout(2_000);
 		msgCount = await page.evaluate(() => {
 			return document.querySelectorAll(".notor-message-assistant, .notor-message-user").length;
@@ -582,7 +576,7 @@ async function testWorksForFavorited(ctx: TestContext): Promise<void> {
 
 	const shot = await ctx.screenshot("04-favorited-opened");
 
-	if (leafCountAfter > leafCountBefore && secondaryLeaves.length > 0 && msgCount >= 2) {
+	if (newPanelCreated && msgCount >= 2) {
 		ctx.pass(
 			"Works for favorited",
 			`Favorited conversation opened in new tab with ${msgCount} messages. ` +
@@ -593,13 +587,13 @@ async function testWorksForFavorited(ctx: TestContext): Promise<void> {
 		ctx.fail(
 			"Works for favorited",
 			`Failed. Leaves: ${leafCountBefore} -> ${leafCountAfter}, ` +
-			`secondary: ${secondaryLeaves.length}, msgs: ${msgCount}, isFav: ${isFav}`,
+			`newPanel: ${newPanelCreated}, msgs: ${msgCount}, isFav: ${isFav}`,
 			shot,
 		);
 	}
 
 	// Clean up
-	await closeSecondaryPanel(page);
+	await closeLastExtraPanel(page);
 	await page.waitForTimeout(1_000);
 }
 
@@ -625,13 +619,13 @@ async function testWorksForNonFavorited(ctx: TestContext): Promise<void> {
 
 	const leafCountAfter = await getChatLeafCount(page);
 	const leaves = await getChatLeafInfo(page);
-	const secondaryLeaves = leaves.filter((l) => l.isSecondary);
+	const newPanelCreated = leafCountAfter > leafCountBefore;
 
-	// Count messages in secondary panel
-	const secondaryIdx = leaves.findIndex((l) => l.isSecondary);
+	// Count messages in the new panel (last leaf)
+	const newPanelIdx = newPanelCreated ? leaves.length - 1 : -1;
 	let msgCount = 0;
-	if (secondaryIdx >= 0) {
-		await activateLeaf(page, secondaryIdx);
+	if (newPanelIdx >= 0) {
+		await activateLeaf(page, newPanelIdx);
 		await page.waitForTimeout(2_000);
 		msgCount = await page.evaluate(() => {
 			return document.querySelectorAll(".notor-message-assistant, .notor-message-user").length;
@@ -640,7 +634,7 @@ async function testWorksForNonFavorited(ctx: TestContext): Promise<void> {
 
 	const shot = await ctx.screenshot("05-non-favorited-opened");
 
-	if (leafCountAfter > leafCountBefore && secondaryLeaves.length > 0 && msgCount >= 2) {
+	if (newPanelCreated && msgCount >= 2) {
 		ctx.pass(
 			"Works for non-favorited",
 			`Non-favorited conversation opened in new tab with ${msgCount} messages. ` +
@@ -651,20 +645,21 @@ async function testWorksForNonFavorited(ctx: TestContext): Promise<void> {
 		ctx.fail(
 			"Works for non-favorited",
 			`Failed. Leaves: ${leafCountBefore} -> ${leafCountAfter}, ` +
-			`secondary: ${secondaryLeaves.length}, msgs: ${msgCount}, isFav: ${isFav}`,
+			`newPanel: ${newPanelCreated}, msgs: ${msgCount}, isFav: ${isFav}`,
 			shot,
 		);
 	}
 
 	// Clean up
-	await closeSecondaryPanel(page);
+	await closeLastExtraPanel(page);
 	await page.waitForTimeout(1_000);
 }
 
-async function testSecondaryPanelState(ctx: TestContext): Promise<void> {
-	console.log("\n-- Test 6: Opened panel has correct state (isSecondary=true, conversationFilename) --");
+async function testNewPanelState(ctx: TestContext): Promise<void> {
+	console.log("\n-- Test 6: Opened panel has correct state (conversationId set) --");
 	const { page } = ctx;
 
+	const leafCountBefore = await getChatLeafCount(page);
 	const filename = shared.conv1Filename!;
 	const invoked = await openInNewTabViaCallback(page, filename);
 
@@ -676,53 +671,52 @@ async function testSecondaryPanelState(ctx: TestContext): Promise<void> {
 
 	await page.waitForTimeout(4_000);
 
-	const leaves = await getChatLeafInfo(page);
-	const secondaryIdx = leaves.findIndex((l) => l.isSecondary);
+	const leafCountAfter = await getChatLeafCount(page);
+	const newPanelIdx = leafCountAfter > leafCountBefore ? leafCountAfter - 1 : -1;
 
-	if (secondaryIdx === -1) {
-		const shot = await ctx.screenshot("06-no-secondary");
-		ctx.fail("Panel state", "No secondary panel found", shot);
+	if (newPanelIdx === -1) {
+		const shot = await ctx.screenshot("06-no-new-panel");
+		ctx.fail("Panel state", "No new panel created", shot);
 		return;
 	}
 
-	const state = await getLeafState(page, secondaryIdx);
+	const state = await getLeafState(page, newPanelIdx);
 
 	const shot = await ctx.screenshot("06-panel-state");
 
 	if (!state) {
-		ctx.fail("Panel state", "Could not retrieve state from secondary panel", shot);
-		await closeSecondaryPanel(page);
+		ctx.fail("Panel state", "Could not retrieve state from new panel", shot);
+		await closeLastExtraPanel(page);
 		return;
 	}
 
-	const isSecondary = state.isSecondary === true;
+	// In the unified model, isSecondary is no longer part of state — just verify
+	// the panel has the correct conversation loaded
 	const hasConvFilename = typeof state.conversationFilename === "string" &&
 		(state.conversationFilename as string).length > 0;
 	const hasConvId = typeof state.conversationId === "string" &&
 		(state.conversationId as string).length > 0;
 
-	console.log(`  State: isSecondary=${state.isSecondary}, conversationFilename=${state.conversationFilename}, conversationId=${(state.conversationId as string)?.substring(0, 8) ?? "null"}`);
+	console.log(`  State: conversationFilename=${state.conversationFilename}, conversationId=${(state.conversationId as string)?.substring(0, 8) ?? "null"}`);
 
-	if (isSecondary && (hasConvFilename || hasConvId)) {
+	if (hasConvFilename || hasConvId) {
 		ctx.pass(
 			"Panel state",
-			`Correct state: isSecondary=${state.isSecondary}, ` +
-			`conversationFilename=${state.conversationFilename ?? "null"}, ` +
+			`Correct state: conversationFilename=${state.conversationFilename ?? "null"}, ` +
 			`conversationId=${(state.conversationId as string)?.substring(0, 8) ?? "null"}`,
 			shot,
 		);
 	} else {
 		ctx.fail(
 			"Panel state",
-			`Incorrect state: isSecondary=${state.isSecondary} (expected true), ` +
-			`conversationFilename=${state.conversationFilename ?? "null"}, ` +
+			`Missing conversation reference: conversationFilename=${state.conversationFilename ?? "null"}, ` +
 			`conversationId=${(state.conversationId as string)?.substring(0, 8) ?? "null"}`,
 			shot,
 		);
 	}
 
 	// Clean up
-	await closeSecondaryPanel(page);
+	await closeLastExtraPanel(page);
 	await page.waitForTimeout(1_000);
 }
 
@@ -805,7 +799,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	await safeRun(ctx, "Works for non-favorited", () => testWorksForNonFavorited(ctx));
 
 	// Test 6: Panel state correctness
-	await safeRun(ctx, "Panel state", () => testSecondaryPanelState(ctx));
+	await safeRun(ctx, "Panel state", () => testNewPanelState(ctx));
 
 	// Test 7: Error log check (always last)
 	await safeRun(ctx, "No unexpected errors", () => testNoUnexpectedErrors(ctx));

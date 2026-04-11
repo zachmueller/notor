@@ -8,13 +8,13 @@
  * state persistence, and callback isolation.
  *
  * Scenarios:
- *   1. Open secondary panel via command — full toolbar appears
+ *   1. Open second panel via command — full toolbar appears
  *   2. Send messages in both panels simultaneously — separate JSONL files
- *   3. State persistence — getState returns correct isSecondary and conversationId
+ *   3. State persistence — getState returns correct conversationId
  *   4. Per-orchestrator provider/model independence
  *   5. Per-server MCP serialization via TaskLaneQueue
  *   6. Callbacks don't double-fire across panels (new conversation)
- *   7. Secondary panel cleanup on close
+ *   7. Panel cleanup on close (leaf + orchestrator registry)
  *   8. No unexpected error logs from multi-panel sources
  *
  * Prerequisites:
@@ -123,7 +123,7 @@ async function getChatLeafCount(page: any): Promise<number> {
 
 /** Get information about all chat leaves. */
 async function getChatLeafInfo(page: any): Promise<Array<{
-	isSecondary: boolean;
+	leafId: string;
 	hasContainer: boolean;
 	conversationId: string | null;
 	hasToolbar: boolean;
@@ -137,10 +137,10 @@ async function getChatLeafInfo(page: any): Promise<Array<{
 		const leaves = app.workspace.getLeavesOfType(viewType);
 		return leaves.map((leaf: any) => {
 			const view = leaf.view;
-			if (!view) return { isSecondary: false, hasContainer: false, conversationId: null, hasToolbar: false, hasNewConvBtn: false, hasSettingsBtn: false, hasModeToggle: false };
+			if (!view) return { leafId: leaf.id ?? "", hasContainer: false, conversationId: null, hasToolbar: false, hasNewConvBtn: false, hasSettingsBtn: false, hasModeToggle: false };
 			const containerEl = view.containerEl as HTMLElement;
 			return {
-				isSecondary: view.getIsSecondary?.() ?? false,
+				leafId: leaf.id ?? "",
 				hasContainer: !!containerEl?.querySelector(".notor-chat-container"),
 				conversationId: view.activeConversationId ?? null,
 				hasToolbar: !!containerEl?.querySelector(".notor-chat-header-actions"),
@@ -152,14 +152,13 @@ async function getChatLeafInfo(page: any): Promise<Array<{
 	}, CHAT_VIEW_TYPE);
 }
 
-/** Get secondary orchestrator count from plugin internals. */
-async function getSecondaryOrchestratorCount(page: any): Promise<number> {
+/** Get the number of orchestrators in the unified registry. */
+async function getOrchestratorRegistrySize(page: any): Promise<number> {
 	return page.evaluate(() => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return -1;
 		try {
-			// Access private _secondaryOrchestrators field
-			return (plugin as any)._secondaryOrchestrators?.length ?? -1;
+			return plugin._orchestrators?.size ?? -1;
 		} catch {
 			return -1;
 		}
@@ -211,23 +210,13 @@ async function getLeafProviderType(page: any, leafIndex: number): Promise<string
 		if (!app) return null;
 		const leaves = app.workspace.getLeavesOfType(args.viewType);
 		if (args.index >= leaves.length) return null;
-		const view = leaves[args.index]?.view;
-		if (!view) return null;
-		// Access the orchestrator associated with this view
+		const leaf = leaves[args.index];
 		const plugin = app.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 		try {
-			// Primary panel: use plugin.getOrchestrator()
-			// Secondary panels: each has its own orchestrator stored on the view
-			const orch = (view as any).orchestrator;
-			if (orch?.getActiveProviderType) {
-				return orch.getActiveProviderType();
-			}
-			// Fallback: for primary, try plugin.getOrchestrator()
-			if (!view.getIsSecondary?.()) {
-				return plugin.getOrchestrator()?.getActiveProviderType?.() ?? null;
-			}
-			return null;
+			// Look up orchestrator via the unified registry by leaf ID
+			const orch = plugin._orchestrators?.get(leaf.id);
+			return orch?.getActiveProviderType?.() ?? null;
 		} catch {
 			return null;
 		}
@@ -241,19 +230,13 @@ async function getLeafModelId(page: any, leafIndex: number): Promise<string | nu
 		if (!app) return null;
 		const leaves = app.workspace.getLeavesOfType(args.viewType);
 		if (args.index >= leaves.length) return null;
-		const view = leaves[args.index]?.view;
-		if (!view) return null;
+		const leaf = leaves[args.index];
 		const plugin = app.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 		try {
-			const orch = (view as any).orchestrator;
-			if (orch?.getActiveModelId) {
-				return orch.getActiveModelId();
-			}
-			if (!view.getIsSecondary?.()) {
-				return plugin.getOrchestrator()?.getActiveModelId?.() ?? null;
-			}
-			return null;
+			// Look up orchestrator via the unified registry by leaf ID
+			const orch = plugin._orchestrators?.get(leaf.id);
+			return orch?.getActiveModelId?.() ?? null;
 		} catch {
 			return null;
 		}
@@ -363,45 +346,39 @@ async function testOpenSecondaryPanel(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	// Verify a secondary orchestrator was created
-	const orchCount = await getSecondaryOrchestratorCount(page);
-	console.log(`  Secondary orchestrators: ${orchCount}`);
+	// Verify the orchestrator registry grew
+	const registrySize = await getOrchestratorRegistrySize(page);
+	console.log(`  Orchestrator registry size: ${registrySize}`);
 
 	// Get info about all chat leaves
 	const leaves = await getChatLeafInfo(page);
 	console.log(`  Chat leaves: ${leaves.length}`);
 	for (let i = 0; i < leaves.length; i++) {
 		const l = leaves[i]!;
-		console.log(`    Leaf ${i}: secondary=${l.isSecondary}, container=${l.hasContainer}, toolbar=${l.hasToolbar}`);
+		console.log(`    Leaf ${i}: leafId=${l.leafId.substring(0, 8)}, container=${l.hasContainer}, toolbar=${l.hasToolbar}`);
 	}
 
-	// Find which leaf is secondary
-	const secondaryLeaf = leaves.find((l) => l.isSecondary);
-	const primaryLeaf = leaves.find((l) => !l.isSecondary);
-
-	// Update shared state with correct indices
-	for (let i = 0; i < leaves.length; i++) {
-		if (!leaves[i]!.isSecondary) shared.primaryLeafIndex = i;
-		if (leaves[i]!.isSecondary) shared.secondaryLeafIndex = i;
-	}
-
-	if (!secondaryLeaf) {
+	if (leaves.length < 2) {
 		ctx.fail(
 			"Open secondary panel",
-			`${leaves.length} leaves but none marked as secondary. ` +
-			`isSecondary values: ${leaves.map((l) => l.isSecondary).join(", ")}`,
+			`Expected at least 2 leaves but found ${leaves.length}`,
 			shot,
 		);
 		return;
 	}
 
-	// Verify full toolbar in secondary panel
+	// In the unified model, all panels are equal — the first is panel 1, the new one is panel 2
+	shared.primaryLeafIndex = 0;
+	shared.secondaryLeafIndex = leaves.length - 1;
+	const newLeaf = leaves[shared.secondaryLeafIndex]!;
+
+	// Verify full toolbar in the new panel
 	const toolbarChecks = {
-		container: secondaryLeaf.hasContainer,
-		toolbar: secondaryLeaf.hasToolbar,
-		newConvBtn: secondaryLeaf.hasNewConvBtn,
-		settingsBtn: secondaryLeaf.hasSettingsBtn,
-		modeToggle: secondaryLeaf.hasModeToggle,
+		container: newLeaf.hasContainer,
+		toolbar: newLeaf.hasToolbar,
+		newConvBtn: newLeaf.hasNewConvBtn,
+		settingsBtn: newLeaf.hasSettingsBtn,
+		modeToggle: newLeaf.hasModeToggle,
 	};
 
 	const allPresent = Object.values(toolbarChecks).every(Boolean);
@@ -412,15 +389,14 @@ async function testOpenSecondaryPanel(ctx: TestContext): Promise<void> {
 	if (allPresent) {
 		ctx.pass(
 			"Open secondary panel",
-			`Secondary panel created with full toolbar. ` +
-			`Leaves: ${leaves.length} (primary=${!!primaryLeaf}, secondary=${!!secondaryLeaf}), ` +
-			`orchestrators: ${orchCount}`,
+			`New panel created with full toolbar. ` +
+			`Leaves: ${leaves.length}, registry: ${registrySize}`,
 			shot,
 		);
 	} else {
 		ctx.fail(
 			"Open secondary panel",
-			`Secondary panel missing elements: ${missingItems.join(", ")}. ` +
+			`New panel missing elements: ${missingItems.join(", ")}. ` +
 			`Present: ${JSON.stringify(toolbarChecks)}`,
 			shot,
 		);
@@ -496,18 +472,20 @@ async function testSimultaneousMessages(ctx: TestContext): Promise<void> {
 
 		const primaryActive = await page.evaluate((convId: string) => {
 			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			return plugin?.getOrchestrator()?.hasActiveSession(convId) ?? false;
+			if (!plugin) return false;
+			for (const orch of plugin._orchestrators.values()) {
+				if (orch.hasActiveSession(convId)) return true;
+			}
+			return false;
 		}, primaryConvId);
 
 		const secondaryActive = await page.evaluate((convId: string) => {
 			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			// Check all orchestrators
-			const secondaryOrchs = (plugin as any)?._secondaryOrchestrators ?? [];
-			for (const orch of secondaryOrchs) {
+			if (!plugin) return false;
+			for (const orch of plugin._orchestrators.values()) {
 				if (orch.hasActiveSession(convId)) return true;
 			}
-			// Also check primary in case convId assignment differs
-			return plugin?.getOrchestrator()?.hasActiveSession(convId) ?? false;
+			return false;
 		}, secondaryConvId);
 
 		const elapsed = (attempt + 1) * 2;
@@ -585,43 +563,45 @@ async function testSimultaneousMessages(ctx: TestContext): Promise<void> {
 }
 
 async function testStatePersistence(ctx: TestContext): Promise<void> {
-	console.log("\n-- Test 3: State persistence — getState returns correct values --");
+	console.log("\n-- Test 3: State persistence — getState returns correct conversationId --");
 	const { page } = ctx;
 
-	// Check getState for primary panel
-	const primaryState = await getLeafState(page, shared.primaryLeafIndex);
-	// Check getState for secondary panel
-	const secondaryState = await getLeafState(page, shared.secondaryLeafIndex);
+	// Check getState for both panels
+	const panel1State = await getLeafState(page, shared.primaryLeafIndex);
+	const panel2State = await getLeafState(page, shared.secondaryLeafIndex);
 
 	const shot = await ctx.screenshot("03-state-persistence");
 
-	if (!primaryState || !secondaryState) {
+	if (!panel1State || !panel2State) {
 		ctx.fail(
 			"State persistence",
-			`Could not get state. primary=${JSON.stringify(primaryState)}, secondary=${JSON.stringify(secondaryState)}`,
+			`Could not get state. panel1=${JSON.stringify(panel1State)}, panel2=${JSON.stringify(panel2State)}`,
 			shot,
 		);
 		return;
 	}
 
-	const primaryCorrect = primaryState.isSecondary === false;
-	const secondaryCorrect = secondaryState.isSecondary === true;
-	const secondaryHasConvId = typeof secondaryState.conversationId === "string" &&
-		secondaryState.conversationId.length > 0;
+	// In the unified model, isSecondary is no longer part of state — both panels
+	// should have a valid conversationId for workspace restore
+	const panel1HasConvId = typeof panel1State.conversationId === "string" &&
+		(panel1State.conversationId as string).length > 0;
+	const panel2HasConvId = typeof panel2State.conversationId === "string" &&
+		(panel2State.conversationId as string).length > 0;
 
-	if (primaryCorrect && secondaryCorrect) {
+	if (panel1HasConvId && panel2HasConvId) {
 		ctx.pass(
 			"State persistence",
-			`Primary: isSecondary=${primaryState.isSecondary}, convId=${(primaryState.conversationId as string)?.substring(0, 8) ?? "null"}. ` +
-			`Secondary: isSecondary=${secondaryState.isSecondary}, convId=${(secondaryState.conversationId as string)?.substring(0, 8) ?? "null"} ` +
-			`(hasConvId=${secondaryHasConvId})`,
+			`Both panels have conversationId for restore. ` +
+			`Panel 1: convId=${(panel1State.conversationId as string)?.substring(0, 8)}. ` +
+			`Panel 2: convId=${(panel2State.conversationId as string)?.substring(0, 8)}`,
 			shot,
 		);
 	} else {
 		ctx.fail(
 			"State persistence",
-			`Primary: isSecondary=${primaryState.isSecondary} (expected false). ` +
-			`Secondary: isSecondary=${secondaryState.isSecondary} (expected true).`,
+			`Missing conversationId. ` +
+			`Panel 1: ${panel1HasConvId ? (panel1State.conversationId as string)?.substring(0, 8) : "null"}. ` +
+			`Panel 2: ${panel2HasConvId ? (panel2State.conversationId as string)?.substring(0, 8) : "null"}.`,
 			shot,
 		);
 	}
@@ -656,23 +636,24 @@ async function testPerOrchestratorProviderModelIndependence(ctx: TestContext): P
 		if (leaves.length < 2) return { error: `only ${leaves.length} leaves` };
 
 		try {
-			const primaryOrch = plugin.getOrchestrator();
-			const secondaryOrchs = (plugin as any)._secondaryOrchestrators ?? [];
-			if (secondaryOrchs.length === 0) return { error: "no secondary orchestrators" };
+			// Look up orchestrators via the unified registry
+			const orch1 = plugin._orchestrators.get(leaves[0].id);
+			const orch2 = plugin._orchestrators.get(leaves[1].id);
+			if (!orch1 || !orch2) return { error: `orchestrator not found: orch1=${!!orch1}, orch2=${!!orch2}` };
 
 			// Check that they are different objects
-			const areDifferentObjects = primaryOrch !== secondaryOrchs[0];
+			const areDifferentObjects = orch1 !== orch2;
 
 			// Check that each has its own ConversationManager
-			const primaryConvMgr = primaryOrch.getConversationManager();
-			const secondaryConvMgr = secondaryOrchs[0].getConversationManager();
-			const differentConvManagers = primaryConvMgr !== secondaryConvMgr;
+			const convMgr1 = orch1.getConversationManager();
+			const convMgr2 = orch2.getConversationManager();
+			const differentConvManagers = convMgr1 !== convMgr2;
 
 			return {
 				areDifferentObjects,
 				differentConvManagers,
-				primaryProviderType: primaryOrch.getActiveProviderType?.() ?? "unknown",
-				secondaryProviderType: secondaryOrchs[0].getActiveProviderType?.() ?? "unknown",
+				orch1ProviderType: orch1.getActiveProviderType?.() ?? "unknown",
+				orch2ProviderType: orch2.getActiveProviderType?.() ?? "unknown",
 			};
 		} catch (e: any) {
 			return { error: e.message };
@@ -693,8 +674,8 @@ async function testPerOrchestratorProviderModelIndependence(ctx: TestContext): P
 	const result = areIndependent as {
 		areDifferentObjects: boolean;
 		differentConvManagers: boolean;
-		primaryProviderType: string;
-		secondaryProviderType: string;
+		orch1ProviderType: string;
+		orch2ProviderType: string;
 	};
 
 	if (result.areDifferentObjects && result.differentConvManagers && bothHaveState) {
@@ -702,8 +683,8 @@ async function testPerOrchestratorProviderModelIndependence(ctx: TestContext): P
 			"Provider/model independence",
 			`Independent orchestrators: different objects=${result.areDifferentObjects}, ` +
 			`different ConversationManagers=${result.differentConvManagers}. ` +
-			`Primary: ${result.primaryProviderType}/${primaryModel?.substring(0, 30)}, ` +
-			`Secondary: ${result.secondaryProviderType}/${secondaryModel?.substring(0, 30)}`,
+			`Panel 1: ${result.orch1ProviderType}/${primaryModel?.substring(0, 30)}, ` +
+			`Panel 2: ${result.orch2ProviderType}/${secondaryModel?.substring(0, 30)}`,
 			shot,
 		);
 	} else {
@@ -857,35 +838,39 @@ async function testCallbackIsolation(ctx: TestContext): Promise<void> {
 	}
 }
 
-async function testSecondaryPanelCleanup(ctx: TestContext): Promise<void> {
-	console.log("\n-- Test 7: Secondary panel cleanup on close --");
+async function testPanelCleanup(ctx: TestContext): Promise<void> {
+	console.log("\n-- Test 7: Panel cleanup on close --");
 	const { page } = ctx;
 
-	const orchCountBefore = await getSecondaryOrchestratorCount(page);
+	const registrySizeBefore = await getOrchestratorRegistrySize(page);
 	const leafCountBefore = await getChatLeafCount(page);
-	console.log(`  Before close: ${leafCountBefore} leaves, ${orchCountBefore} secondary orchestrators`);
+	console.log(`  Before close: ${leafCountBefore} leaves, ${registrySizeBefore} orchestrators in registry`);
 
-	// Activate the secondary panel and close it
+	// Activate the second panel and close it
 	await activateLeaf(page, shared.secondaryLeafIndex);
 	await page.waitForTimeout(500);
 	await closeActiveLeaf(page);
 	await page.waitForTimeout(2_000);
 
 	const leafCountAfter = await getChatLeafCount(page);
-	const shot = await ctx.screenshot("07-secondary-cleanup");
+	const registrySizeAfter = await getOrchestratorRegistrySize(page);
+	const shot = await ctx.screenshot("07-panel-cleanup");
 
 	const leafRemoved = leafCountAfter < leafCountBefore;
+	const orchestratorRemoved = registrySizeAfter < registrySizeBefore;
 
-	if (leafRemoved) {
+	if (leafRemoved && orchestratorRemoved) {
 		ctx.pass(
-			"Secondary panel cleanup",
-			`Leaf removed: ${leafCountBefore} -> ${leafCountAfter}`,
+			"Panel cleanup",
+			`Leaf removed: ${leafCountBefore} -> ${leafCountAfter}, ` +
+			`registry: ${registrySizeBefore} -> ${registrySizeAfter}`,
 			shot,
 		);
 	} else {
 		ctx.fail(
-			"Secondary panel cleanup",
-			`Leaf not removed: ${leafCountBefore} -> ${leafCountAfter}`,
+			"Panel cleanup",
+			`leafRemoved=${leafRemoved} (${leafCountBefore} -> ${leafCountAfter}), ` +
+			`orchestratorRemoved=${orchestratorRemoved} (${registrySizeBefore} -> ${registrySizeAfter})`,
 			shot,
 		);
 	}
@@ -974,8 +959,8 @@ async function tests(ctx: TestContext): Promise<void> {
 	await ensureCleanState(page);
 	await page.waitForTimeout(1_000);
 
-	// Test 7: Secondary panel cleanup
-	await safeRun(ctx, "Secondary panel cleanup", () => testSecondaryPanelCleanup(ctx));
+	// Test 7: Panel cleanup
+	await safeRun(ctx, "Panel cleanup", () => testPanelCleanup(ctx));
 
 	// Test 8: Error log check (always last)
 	await safeRun(ctx, "No error-level logs", () => testNoErrorLevelLogs(ctx));

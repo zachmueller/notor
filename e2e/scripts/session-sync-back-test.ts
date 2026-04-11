@@ -108,7 +108,8 @@ async function getConversationState(page: any): Promise<{
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
+			if (!orchestrator) return null;
 			const convManager = orchestrator.getConversationManager();
 			const conv = convManager.getActiveConversation();
 			const messages = convManager.getMessages();
@@ -126,54 +127,65 @@ async function getConversationState(page: any): Promise<{
 	});
 }
 
-/** Get the number of active sessions from the orchestrator. */
+/** Get the total number of active sessions across all orchestrators. */
 async function getActiveSessionCount(page: any): Promise<number> {
 	return page.evaluate(() => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return -1;
 		try {
-			return plugin.getOrchestrator().getActiveSessions().length;
+			let count = 0;
+			for (const orch of plugin._orchestrators.values()) {
+				count += orch.getActiveSessions().length;
+			}
+			return count;
 		} catch {
 			return -1;
 		}
 	});
 }
 
-/** Check if a specific conversation has an active session. */
+/** Check if a specific conversation has an active session in any orchestrator. */
 async function hasActiveSession(page: any, conversationId: string): Promise<boolean> {
 	return page.evaluate((convId: string) => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return false;
 		try {
-			return plugin.getOrchestrator().hasActiveSession(convId);
+			for (const orch of plugin._orchestrators.values()) {
+				if (orch.hasActiveSession(convId)) return true;
+			}
+			return false;
 		} catch {
 			return false;
 		}
 	}, conversationId);
 }
 
-/** Get the session's in-memory message count for a conversation. */
+/** Get the session's in-memory message count for a conversation (searches all orchestrators). */
 async function getSessionMessageCount(page: any, conversationId: string): Promise<number> {
 	return page.evaluate((convId: string) => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return -1;
 		try {
-			const session = plugin.getOrchestrator().getActiveSession(convId);
-			if (!session) return -1;
-			return session.conversationManager.getMessages().length;
+			for (const orch of plugin._orchestrators.values()) {
+				const session = orch.getActiveSession(convId);
+				if (session) return session.conversationManager.getMessages().length;
+			}
+			return -1;
 		} catch {
 			return -1;
 		}
 	}, conversationId);
 }
 
-/** Switch to a conversation by filename via the orchestrator. */
+/** Switch to a conversation by filename via the active orchestrator. */
 async function switchToConversation(page: any, filename: string): Promise<boolean> {
 	return page.evaluate(async (fname: string) => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return false;
 		try {
-			await plugin.getOrchestrator().switchConversation(fname);
+			const orchestrator = plugin.getActiveOrchestrator();
+			if (!orchestrator) return false;
+			await orchestrator.switchConversation(fname);
 			return true;
 		} catch {
 			return false;
@@ -367,7 +379,7 @@ async function testSyncBackOnMidStreamSwitch(ctx: TestContext): Promise<void> {
 		await newConversation(page);
 		await page.evaluate(() => {
 			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			plugin?.getOrchestrator()?.view?.setRespondingState(false);
+			plugin?.getActiveOrchestrator()?.getView()?.setRespondingState(false);
 		});
 	}
 	await page.waitForTimeout(2_000);
@@ -632,12 +644,16 @@ async function testActiveSessionsEmptyAfterCompletion(ctx: TestContext): Promise
 	if (sessionCount === 0) {
 		ctx.pass("Sessions empty after completion", "activeSessions.size === 0", shot);
 	} else {
-		// Get details about any lingering sessions
+		// Get details about any lingering sessions across all orchestrators
 		const details = await page.evaluate(() => {
 			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 			if (!plugin) return "plugin not found";
 			try {
-				return plugin.getOrchestrator().getActiveSessions().map((s: any) => ({
+				const sessions: any[] = [];
+				for (const orch of plugin._orchestrators.values()) {
+					sessions.push(...orch.getActiveSessions());
+				}
+				return sessions.map((s: any) => ({
 					id: s.conversationId?.substring(0, 8),
 					status: s.status,
 					title: s.title,
@@ -804,17 +820,20 @@ async function testCannotDeleteStreamingConversation(ctx: TestContext): Promise<
 	}
 
 	// Verify the deletion guard: the same check performed by main.ts onDeleteConversation
+	// In the unified model, sessions may be on any orchestrator — check all of them
 	const guardResult = await page.evaluate((fname: string) => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "plugin not found" };
 		try {
-			const orchestrator = plugin.getOrchestrator();
-			const activeSessions = orchestrator.getActiveSessions();
-			const wouldBlock = activeSessions.some((s: any) => fname.includes(s.conversationId));
+			const allSessions: any[] = [];
+			for (const orch of plugin._orchestrators.values()) {
+				allSessions.push(...orch.getActiveSessions());
+			}
+			const wouldBlock = allSessions.some((s: any) => fname.includes(s.conversationId));
 			return {
 				wouldBlock,
-				sessionCount: activeSessions.length,
-				conversationIds: activeSessions.map((s: any) => s.conversationId?.substring(0, 8)),
+				sessionCount: allSessions.length,
+				conversationIds: allSessions.map((s: any) => s.conversationId?.substring(0, 8)),
 			};
 		} catch (e: any) {
 			return { error: e.message };
@@ -852,8 +871,8 @@ async function testCannotDeleteStreamingConversation(ctx: TestContext): Promise<
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return;
 		try {
-			const orchestrator = plugin.getOrchestrator();
-			const view = orchestrator.view;
+			const orchestrator = plugin.getActiveOrchestrator();
+			const view = orchestrator?.getView();
 			// Call the private onDeleteConversation callback set by main.ts
 			if (view && (view as any).onDeleteConversation) {
 				(view as any).onDeleteConversation(fname);
