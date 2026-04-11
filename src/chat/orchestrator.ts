@@ -13,7 +13,6 @@ import type { Conversation, ConversationMode, Message, Persona, ToolResult, Work
 import type { ChatMessage, ToolDefinition, StreamChunk, SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
-import { buildOptionValue } from "../providers/model-grouping";
 import { ConversationManager } from "./conversation";
 import { ContextManager } from "./context";
 import type { SystemPromptBuilder } from "./system-prompt";
@@ -26,6 +25,7 @@ import { HookDispatcher } from "./hook-dispatcher";
 import { CompactionManager } from "./compaction-manager";
 import { ViewRouter } from "./view-router";
 import { SessionManager } from "./session-manager";
+import { ConversationLifecycleManager } from "./conversation-lifecycle";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings } from "../settings";
@@ -89,6 +89,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	private readonly compactionManager: CompactionManager;
 	private readonly viewRouter: ViewRouter;
 	private readonly sessionManager: SessionManager;
+	private readonly lifecycle: ConversationLifecycleManager;
 
 	/** Proxy getter — delegates to ViewRouter. All `this.view?.` references resolve through here. */
 	private get view(): NotorChatView | undefined {
@@ -107,18 +108,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	private workflowHookOverrideManager?: WorkflowHookOverrideManager;
 
-	/**
-	 * Tracks whether the currently active conversation is a workflow conversation
-	 * that performed a persona switch (E-008). When non-null, leaving this
-	 * conversation triggers a persona revert via `revertWorkflowPersona()`.
-	 *
-	 * Stores the persona name that was active *before* the workflow switched it,
-	 * or `null` if no persona was active before (i.e., the workflow activated a
-	 * persona from global defaults).
-	 *
-	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-008
-	 */
-	private workflowPreviousPersona: string | null | undefined = undefined;
 
 
 	/**
@@ -222,6 +211,19 @@ export class ChatOrchestrator implements ToolSessionContext {
 			() => this.conversationManager,
 			() => this.view,
 			(session) => this.getViewForSession(session),
+			() => this.activeModelId,
+			() => this.activeUseExtendedContext,
+		);
+		this.lifecycle = new ConversationLifecycleManager(
+			() => this.settings,
+			this.historyManager,
+			() => this.conversationManager,
+			this.viewRouter,
+			this.sessionManager,
+			this.configResolver,
+			() => this.personaManager,
+			() => this.checkpointManager,
+			() => this.activeProviderType,
 			() => this.activeModelId,
 			() => this.activeUseExtendedContext,
 		);
@@ -381,7 +383,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-008
 	 */
 	setWorkflowPersonaRevert(previousPersona: string | null | undefined): void {
-		this.workflowPreviousPersona = previousPersona;
+		this.lifecycle.setWorkflowPersonaRevert(previousPersona);
 		log.debug("Workflow persona revert state set", { previousPersona });
 	}
 
@@ -494,302 +496,23 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 
 	// -----------------------------------------------------------------------
-	// Conversation lifecycle
+	// Conversation lifecycle (extracted to src/chat/conversation-lifecycle.ts — B3)
 	// -----------------------------------------------------------------------
 
-	/**
-	 * Start a new conversation.
-	 *
-	 * If the current conversation was a workflow conversation that performed
-	 * a persona switch (E-008), the persona is reverted before creating the
-	 * new conversation.
-	 */
 	async newConversation(opts?: { signal?: AbortSignal }): Promise<void> {
-		const signal = opts?.signal;
-
-		// E-008: Revert workflow persona before leaving this conversation
-		await this.maybeRevertWorkflowPersona();
-		if (signal?.aborted) return;
-
-		// Unlock input — any active session on the previous conversation
-		// continues in the background, but the UI should be ready for input.
-		this.view?.setRespondingState(false);
-
-		// Tool config state is now per-session (ConversationSession).
-		// updateDisplayConfig() will set these fields when the first
-		// response loop iteration runs for the new conversation.
-
-		// Use per-orchestrator provider/model fields (Phase 4, Step 4b).
-		const providerType = this.activeProviderType;
-		const modelId = this.activeModelId;
-
-		// Preserve the current in-session mode when creating a new conversation
-		// so that toggling Plan/Act and then starting a new conversation keeps
-		// the user's chosen mode. Only fall back to the saved setting when no
-		// conversation has been started yet (initial load).
-		const currentMode = this.conversationManager.hasActiveConversation()
-			? this.conversationManager.getMode()
-			: this.settings.mode;
-
-		const conversation = this.conversationManager.createConversation(
-			providerType,
-			modelId,
-			currentMode,
-			this.activeUseExtendedContext ? { use_extended_context: true } : undefined
-		);
-
-		// Capture active persona into header (mirrors provider/model capture above).
-		// Without this, the JSONL file is created without persona_name, and
-		// switchConversation() cannot display-restore the persona label.
-		conversation.persona_name = this.personaManager?.getActivePersona()?.name ?? null;
-
-		await this.historyManager.createConversationFile(conversation);
-		if (signal?.aborted) return;
-
-		this.view?.clearMessages();
-		this.view?.updateModeDisplay(conversation.mode);
-
-		// New conversation uses global state — clear any display overrides
-		// from the previously viewed conversation.
-		this.view?.clearDisplayOverrides();
-
-		// Scope checkpoint manager to the new conversation (A1.6b)
-		this.checkpointManager?.setConversationId(conversation.id);
-
-		log.info("New conversation started", { id: conversation.id });
+		return this.lifecycle.newConversation(opts);
 	}
 
-	/**
-	 * Fork the current conversation at a specific message.
-	 *
-	 * Creates a new conversation containing all messages up to (and including)
-	 * the fork-point message, persists it, and returns the filename and
-	 * conversation object. Does NOT switch to the fork — the caller (main.ts)
-	 * handles post-switch wiring.
-	 *
-	 * Returns `null` (with a Notice) if the fork-point message is not found.
-	 */
-	async forkConversation(
-		forkAtMessageId: string,
-	): Promise<{ filename: string; conversation: Conversation } | null> {
-		const providerType = this.activeProviderType;
-		const modelId = this.activeModelId;
-		const currentMode =
-			this.conversationManager.getActiveConversation()?.mode ??
-			this.settings.mode;
-
-		const forkData = this.conversationManager.prepareFork(
-			forkAtMessageId,
-			providerType,
-			modelId,
-			currentMode,
-		);
-
-		if (!forkData) {
-			new Notice("Could not fork: message not found in current conversation.");
-			return null;
-		}
-
-		const filename = await this.historyManager.importConversation(
-			forkData.conversation,
-			forkData.messages,
-		);
-
-		return { filename, conversation: forkData.conversation };
+	async forkConversation(forkAtMessageId: string): Promise<{ filename: string; conversation: Conversation } | null> {
+		return this.lifecycle.forkConversation(forkAtMessageId);
 	}
 
-	/**
-	 * Switch to an existing conversation.
-	 *
-	 * If the current conversation was a workflow conversation that performed
-	 * a persona switch (E-008), the persona is reverted before switching.
-	 */
 	async switchConversation(filename: string, opts?: { signal?: AbortSignal }): Promise<void> {
-		const signal = opts?.signal;
-
-		// E-008: Revert workflow persona before leaving this conversation
-		await this.maybeRevertWorkflowPersona();
-		if (signal?.aborted) return;
-
-		// Unlock input — the session (if any) owns its own AbortController,
-		// so navigating away just unlocks the UI without affecting the stream.
-		this.view?.setRespondingState(false);
-
-		try {
-			const { conversation, messages: historyMessages } = await this.historyManager.loadConversation(filename);
-			if (signal?.aborted) return;
-
-			// Step 2b: If this conversation has an active session, sync-back
-			// from the session's in-memory messages instead of the JSONL file.
-			// The session's ConversationManager has the authoritative message
-			// array (including messages added since the last JSONL flush).
-			const activeSession = this.sessionManager.getActiveSession(conversation.id);
-			if (activeSession) {
-				const sessionConv = activeSession.conversationManager.getActiveConversation()!;
-				const sessionMessages = activeSession.conversationManager.getMessages();
-
-				// Use silent: true to skip onConversationChanged — prevents
-				// mid-stream token count writes to JSONL header. The session's
-				// own ConversationManager is the authoritative header writer.
-				this.conversationManager.loadConversation(sessionConv, sessionMessages, { silent: true });
-
-				// Re-render all messages from session state
-				this.view?.clearMessages();
-				for (const msg of sessionMessages) {
-					this.renderMessage(msg);
-				}
-
-				this.view?.updateModeDisplay(sessionConv.mode);
-				this.view?.updateTokenFooter(
-					sessionConv.total_input_tokens,
-					sessionConv.total_output_tokens,
-					sessionConv.estimated_cost
-				);
-
-				// Stream is ongoing — show responding state
-				this.view?.setRespondingState(true);
-
-				// Register one-time callback to turn off responding state
-				// when the session completes (or errors/cancels).
-				const previousOnStatusChange = activeSession.onStatusChange;
-				activeSession.onStatusChange = (session) => {
-					previousOnStatusChange?.(session);
-					if (session.status === "completed" || session.status === "errored" || session.status === "cancelled") {
-						this.getViewForSession(session)?.setRespondingState(false);
-						// Restore original callback (remove our one-time wrapper)
-						activeSession.onStatusChange = previousOnStatusChange;
-					}
-				};
-
-				// Display-restore persona/provider/model from session's pinned state
-				this.view?.updatePersonaLabel(activeSession.pinnedPersona);
-				if (sessionConv.provider_id) {
-					this.view?.updateProviderDisplay(sessionConv.provider_id as LLMProviderType);
-				}
-				if (sessionConv.model_id) {
-					this.view?.updateModelDisplay(
-						buildOptionValue(sessionConv.model_id, activeSession.useExtendedContext)
-					);
-				}
-
-				// Update inspector with session's config
-				this.configResolver.updateDisplayConfig(activeSession.effectiveConfig, activeSession.parsedConfigs);
-
-				// Scope checkpoint manager to the active session's conversation (A1.6b)
-				this.checkpointManager?.setConversationId(conversation.id);
-
-				log.info("Switched to active session conversation (sync-back)", { id: conversation.id });
-				return;
-			}
-
-			// No active session — standard JSONL load path for completed conversations
-			this.conversationManager.loadConversation(conversation, historyMessages);
-
-			// Re-render all messages in the view
-			this.view?.clearMessages();
-			for (const msg of historyMessages) {
-				this.renderMessage(msg);
-			}
-
-			this.view?.updateModeDisplay(conversation.mode);
-
-			// Update token footer
-			this.view?.updateTokenFooter(
-				conversation.total_input_tokens,
-				conversation.total_output_tokens,
-				conversation.estimated_cost
-			);
-
-			// Step 1f: Display-restore persona from conversation header.
-			// Does NOT call activatePersona() — no global state mutation.
-			if (conversation.persona_name) {
-				const persona = await this.personaManager?.getPersonaByName(conversation.persona_name) ?? null;
-				if (signal?.aborted) return;
-				this.view?.updatePersonaLabel(persona);
-			} else {
-				// No persona stored — show current global persona (or none)
-				this.view?.updatePersonaLabel(this.personaManager?.getActivePersona() ?? null);
-			}
-
-			// Step 1f: Display-restore provider/model from conversation header.
-			// Does NOT call switchProvider() — no global state mutation.
-			if (conversation.provider_id) {
-				this.view?.updateProviderDisplay(conversation.provider_id as LLMProviderType);
-			}
-			if (conversation.model_id) {
-				this.view?.updateModelDisplay(
-					buildOptionValue(conversation.model_id, conversation.use_extended_context ?? false)
-				);
-			}
-
-			// Scope checkpoint manager to the loaded conversation (A1.6b)
-				this.checkpointManager?.setConversationId(conversation.id);
-
-				log.info("Switched to conversation", { id: conversation.id });
-		} catch (e) {
-			log.error("Failed to switch conversation", { filename, error: String(e) });
-			this.view?.showError(`Failed to load conversation: ${e instanceof Error ? e.message : String(e)}`);
-		}
+		return this.lifecycle.switchConversation(filename, opts);
 	}
 
-	/**
-	 * Switch to a conversation by its unique ID (H-005).
-	 *
-	 * Searches the conversation history for an entry matching the given ID,
-	 * then delegates to `switchConversation()` with the matching filename.
-	 * Used by the workflow activity dropdown to navigate to a specific
-	 * workflow's conversation.
-	 *
-	 * @param conversationId - The conversation ID to find and switch to.
-	 * @returns `true` if the conversation was found and loaded, `false` otherwise.
-	 *
-	 * @see specs/03-workflows-personas/tasks/group-h-tasks.md — H-005
-	 */
 	async switchToConversationById(conversationId: string, opts?: { signal?: AbortSignal }): Promise<boolean> {
-		const signal = opts?.signal;
-		try {
-			const entries = await this.historyManager.listConversations();
-			if (signal?.aborted) return false;
-			const match = entries.find((e) => e.id === conversationId);
-			if (!match) {
-				log.warn("Conversation not found by ID", { conversationId });
-				return false;
-			}
-			await this.switchConversation(match.filename, { signal });
-			return true;
-		} catch (e) {
-			log.error("Failed to switch to conversation by ID", {
-				conversationId,
-				error: String(e),
-			});
-			return false;
-		}
-	}
-
-	/**
-	 * Revert the workflow persona if the current conversation had one active.
-	 *
-	 * Checks `workflowPreviousPersona` — if set (not `undefined`), calls
-	 * `revertWorkflowPersona()` and clears the state. A value of `null` means
-	 * "the workflow activated a persona from global defaults; deactivate on
-	 * revert". A value of `undefined` means "no workflow persona was switched".
-	 *
-	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-008
-	 */
-	private async maybeRevertWorkflowPersona(): Promise<void> {
-		if (this.workflowPreviousPersona === undefined || !this.personaManager) {
-			return;
-		}
-
-		const previousPersona = this.workflowPreviousPersona;
-		// Clear state first so a revert error doesn't leave us in a loop
-		this.workflowPreviousPersona = undefined;
-
-		try {
-			await revertWorkflowPersona(previousPersona, this.personaManager);
-		} catch (e) {
-			log.error("Failed to revert workflow persona", { error: String(e) });
-		}
+		return this.lifecycle.switchToConversationById(conversationId, opts);
 	}
 
 	// -----------------------------------------------------------------------
@@ -919,7 +642,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			this.setWorkflowPersonaRevert(personaSwitchResult.previousPersona);
 		} else {
 			// No switch performed — clear any stale revert state from a previous workflow
-			this.workflowPreviousPersona = undefined;
+			this.setWorkflowPersonaRevert(undefined);
 		}
 
 		// Step 8: Add the assembled message as the first user message

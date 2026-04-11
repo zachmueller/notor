@@ -665,7 +665,7 @@
 
 **~250 lines.** Owns conversation CRUD operations. This is the most coupled extraction because `switchConversation()` straddles ViewRouter, SessionManager, and conversation loading.
 
-- [ ] **B3.1 — Create `src/chat/conversation-lifecycle.ts`**
+- [x] **B3.1 — Create `src/chat/conversation-lifecycle.ts`** *(done 2026-04-11)*
   - Create `ConversationLifecycleManager` class with constructor:
     ```typescript
     constructor(
@@ -696,7 +696,7 @@
     - `maybeRevertWorkflowPersona(): Promise<void>` (L719-733) — private helper
   - Add `updatePersonaManager(manager)` setter for late-binding
 
-- [ ] **B3.2 — Wire ConversationLifecycleManager into orchestrator**
+- [x] **B3.2 — Wire ConversationLifecycleManager into orchestrator** *(done 2026-04-11)*
   - Create ConversationLifecycleManager in orchestrator constructor, passing ViewRouter, SessionManager, shared singletons
   - **Update ViewRouter's callback:** Replace the temporary `getDisplayedConversationId` callback (from B1.2) with `() => this.conversationLifecycle.getDisplayedConversationId()`
   - `responseLoop()` still accesses session's `conversationManager` (from the ConversationSession object), NOT from ConversationLifecycleManager — session isolation is preserved
