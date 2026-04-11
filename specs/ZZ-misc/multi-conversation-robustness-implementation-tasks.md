@@ -2,7 +2,7 @@
 
 **Spec:** [multi-conversation-robustness-redesign.md](multi-conversation-robustness-redesign.md)
 **Created:** 2026-04-10
-**Status:** Phase A7 complete; A1.11 partially done (wireViewAsSecondary + getPrimaryChatLeaf deleted); A-Verify next
+**Status:** Phase A7 complete; A1.11 partially done (wireViewAsSecondary + getPrimaryChatLeaf deleted); A-Verify e2e scripts written (2026-04-11)
 
 ---
 
@@ -418,42 +418,49 @@
 
 **Goal:** Confirm all bug fixes and no regressions.
 
-- [ ] **AV.1 — Bug A verification: Panel restore doesn't destroy primary panel state**
+- [ ] **AV.1 — Bug A verification: Panel restore doesn't destroy primary panel state** *(e2e script written 2026-04-11)*
   - Open chat panel with active conversation A
   - Open second panel, close it, Cmd+Shift+T to reopen
   - Verify: first panel still shows conversation A with full history
   - Verify: second panel loads independently
+  - **Script:** `e2e/scripts/phase-a-panel-restore-test.ts` — 7 scenarios: setup conversation, open/close/restore second panel, verify primary preserved, registry consistency, error check
 
-- [ ] **AV.2 — Bug B verification: Persistence flush prevents message loss**
+- [ ] **AV.2 — Bug B verification: Persistence flush prevents message loss** *(e2e script written 2026-04-11)*
   - Send several messages rapidly, close plugin immediately
   - Reopen and verify all messages present in JSONL
   - Start streaming response, wait for completion, close plugin immediately
   - Reopen and verify complete response in JSONL
+  - **Script:** `e2e/scripts/phase-a-persistence-test.ts` — 6 scenarios: single/multiple message persistence, flush() method exists, destroy() includes flush, message count match, error check
 
-- [ ] **AV.3 — Bug D verification: Cross-panel session guard**
+- [ ] **AV.3 — Bug D verification: Cross-panel session guard** *(e2e script written 2026-04-11)*
   - Open same conversation in two panels
   - Send message in one, try to send in other while streaming
   - Verify: "being processed in another panel" notice appears
   - Wait for completion, verify can now send from either panel
+  - **Script:** `e2e/scripts/phase-a-session-guard-test.ts` — 6 scenarios: setup, switch to same conversation, guard blocks during streaming, send after completion, SessionGuard infrastructure, error check
 
-- [ ] **AV.4 — Command routing verification**
+- [ ] **AV.4 — Command routing verification** *(e2e script written 2026-04-11)*
   - Open two panels side by side
   - Focus panel 2, run workflow from command palette → verify executes in panel 2
   - Focus panel 1, run "New conversation" → verify created in panel 1
+  - **Script:** `e2e/scripts/phase-a-routing-settings-test.ts` — 7 scenarios: setup, command→panel2, command→panel1, getActiveOrchestrator follows focus, settings propagation, _lastFocusedChatLeafId tracking, error check
 
-- [ ] **AV.5 — Settings propagation verification**
+- [ ] **AV.5 — Settings propagation verification** *(e2e script written 2026-04-11)*
   - Open two panels, change a setting → verify both panels reflect the update
+  - **Script:** `e2e/scripts/phase-a-routing-settings-test.ts` — combined with AV.4 (test 5: settings propagation)
 
 - [ ] **AV.6 — Regression: Existing E2E tests pass**
   - `e2e/scripts/session-sync-back-test.ts`
   - `e2e/scripts/phase4-multi-panel-test.ts`
   - `e2e/scripts/phase5-open-in-new-tab-test.ts`
+  - **Note:** These existing tests reference removed APIs (`getIsSecondary()`, `_secondaryOrchestrators`, `getOrchestrator()`). They need to be updated to use the new unified registry APIs before they can pass.
 
-- [ ] **AV.7 — Regression: Core functionality**
+- [ ] **AV.7 — Regression: Core functionality** *(e2e script written 2026-04-11)*
   - Single-panel chat: new conversation, send messages, switch conversations
   - Workflow execution (foreground + background)
   - Plugin hot-reload preserves state
   - Workspace restore with multiple panels restores each panel's conversation
+  - **Script:** `e2e/scripts/phase-a-regression-test.ts` — 7 scenarios: new conversation + messages, switch conversations, multi-panel independence, registry matches panels, isSecondary removed, view lifecycle infrastructure, error check
 
 ---
 
