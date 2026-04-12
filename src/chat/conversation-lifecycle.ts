@@ -42,6 +42,9 @@ export class ConversationLifecycleManager {
 		private readonly getActiveProviderType: () => LLMProviderType,
 		private readonly getActiveModelId: () => string,
 		private readonly getActiveUseExtendedContext: () => boolean,
+		private readonly setActiveProviderType: (type: LLMProviderType) => void,
+		private readonly setActiveModelId: (modelId: string) => void,
+		private readonly setActiveUseExtendedContext: (useExtended: boolean) => void,
 	) {}
 
 	/**
@@ -185,6 +188,16 @@ export class ConversationLifecycleManager {
 				);
 			}
 
+			// Sync per-orchestrator state so subsequent actions (new conversation,
+			// getCurrentModel callback) reflect the loaded conversation's model.
+			if (conversation.provider_id) {
+				this.setActiveProviderType(conversation.provider_id as LLMProviderType);
+			}
+			if (conversation.model_id) {
+				this.setActiveModelId(conversation.model_id);
+				this.setActiveUseExtendedContext(conversation.use_extended_context ?? false);
+			}
+
 			this.getCheckpointManager()?.setConversationId(conversation.id);
 			log.info("Switched to conversation", { id: conversation.id });
 		} catch (e) {
@@ -235,11 +248,14 @@ export class ConversationLifecycleManager {
 		view?.updatePersonaLabel(activeSession.pinnedPersona);
 		if (sessionConv.provider_id) {
 			view?.updateProviderDisplay(sessionConv.provider_id as LLMProviderType);
+			this.setActiveProviderType(sessionConv.provider_id as LLMProviderType);
 		}
 		if (sessionConv.model_id) {
 			view?.updateModelDisplay(
 				buildOptionValue(sessionConv.model_id, activeSession.useExtendedContext)
 			);
+			this.setActiveModelId(sessionConv.model_id);
+			this.setActiveUseExtendedContext(activeSession.useExtendedContext);
 		}
 
 		this.configResolver.updateDisplayConfig(activeSession.effectiveConfig, activeSession.parsedConfigs);

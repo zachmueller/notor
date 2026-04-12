@@ -2578,7 +2578,7 @@ export default class NotorPlugin extends Plugin {
 			// Update per-orchestrator model (Phase 4, Step 4b)
 			orchestrator!.setActiveModel(modelId, isExtendedContext);
 
-			const activeType = providerRegistry.getActiveType();
+			const activeType = orchestrator!.getActiveProviderType();
 			const config = providerRegistry.getConfig(activeType);
 			if (config) {
 				const updated = { ...config, model_id: modelId, use_extended_context: isExtendedContext };
@@ -2628,7 +2628,7 @@ export default class NotorPlugin extends Plugin {
 
 		// Available models
 		view.setGetAvailableModels(() => {
-			const activeType = providerRegistry.getActiveType();
+			const activeType = orchestrator!.getActiveProviderType();
 			// Return cached models synchronously (stale-while-revalidate).
 			// The cache is populated when refreshModels() is called (e.g. via
 			// the refresh button in the settings popover). If no cache exists yet,
@@ -2660,10 +2660,9 @@ export default class NotorPlugin extends Plugin {
 		// Current model — reads from per-orchestrator state (Phase 4, Step 4b)
 		// Reconstructs ::1m composite value for picker selection.
 		view.setGetCurrentModel(() => {
-			const activeType = orchestrator!.getActiveProviderType();
-			const config = providerRegistry.getConfig(activeType);
-			const modelId = config?.model_id ?? "";
-			return buildOptionValue(modelId, config?.use_extended_context ?? false);
+			const modelId = orchestrator!.getActiveModelId();
+			const useExtended = orchestrator!.getActiveUseExtendedContext();
+			return buildOptionValue(modelId, useExtended);
 		});
 
 		// Checkpoint callbacks — use per-orchestrator checkpoint manager (A1.6c / A3)

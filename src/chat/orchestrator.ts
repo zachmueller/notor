@@ -226,6 +226,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 			() => this.activeProviderType,
 			() => this.activeModelId,
 			() => this.activeUseExtendedContext,
+			(type) => { this.activeProviderType = type; },
+			(modelId) => { this.activeModelId = modelId; },
+			(useExtended) => { this.activeUseExtendedContext = useExtended; },
 		);
 		this.workflowExecutor = new WorkflowExecutor({
 			app: this.app,
@@ -1265,11 +1268,21 @@ export class ChatOrchestrator implements ToolSessionContext {
 		return adapter.basePath;
 	}
 
-	private getActiveModelId(): string {
+	/**
+	 * Get the per-orchestrator active model ID.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	getActiveModelId(): string {
 		return this.activeModelId;
 	}
 
-	private getActiveUseExtendedContext(): boolean {
+	/**
+	 * Get the per-orchestrator extended context setting.
+	 *
+	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
+	 */
+	getActiveUseExtendedContext(): boolean {
 		return this.activeUseExtendedContext;
 	}
 
