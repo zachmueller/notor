@@ -40,7 +40,7 @@ Settings Popover (chat-view.ts)
 main.ts callback (L2566)
   ├── parseOptionValue() → { modelId, isExtendedContext }
   ├── orchestrator.setActiveModel(modelId, isExtendedContext)
-  ├── registry.updateProviderConfig(model_id)
+  ├── registry.updateConfig(model_id)
   └── historyManager.updateConversationHeader()
           │
           ▼
@@ -361,7 +361,9 @@ The orchestrator's `activeProviderType` / `activeModelId` / `activeUseExtendedCo
 
 ### 8.3 Background workflows
 
-Background workflow execution (in [`workflows/workflow-executor.ts`](../../src/workflows/workflow-executor.ts)) currently reads `getActiveProviderType()` etc. This should resolve the default preset at launch time via `resolvePreset(settings.default_preset, settings.model_presets)`, falling back to existing `active_provider` + provider config if the preset is unconfigured.
+Background workflow model resolution flows through the **persona system**, not the workflow executor. `WorkflowExecutor` ([`workflows/workflow-executor.ts`](../../src/workflows/workflow-executor.ts)) is a stateless prompt-assembly pipeline (body reading, include resolution, wrapping, context building) — it does not interact with the provider registry.
+
+Provider/model resolution for workflows happens in `PersonaManager.applyProviderModelOverrides()` ([`personas/persona-manager.ts`](../../src/personas/persona-manager.ts), private method called during `activatePersona()`), which calls `providerRegistry.switchProvider()` and `providerRegistry.updateConfig()`. The preset-aware integration point is therefore `persona-manager.ts`: when a workflow activates a persona with `preferred_preset`, the `applyProviderModelOverrides()` resolution priority (see Section 9.1) handles preset resolution. For workflows without a persona override, the orchestrator's active preset (resolved at session creation time) applies.
 
 ---
 
@@ -412,11 +414,13 @@ In the orchestrator's response loop (or the `addMessage()` path), detect the fir
 
 ### 10.3 Automation context
 
-The `on_conversation_start` automations receive:
-- `conversationId` — the conversation UUID
-- `firstMessage` — text content of the first user message
-- `conversationApi` — the new metadata API (see Section 11)
-- Standard `utils` object (settings, vault access, etc.)
+The `on_conversation_start` automations receive their data via the `context` parameter (the 7th positional arg to the compiled automation function — `Record<string, unknown>`, see `executeAutomation()` in [`manager.ts:418-455`](../../src/extensions/manager.ts)). The `context` object for this trigger contains:
+
+- `context.conversationId` — the conversation UUID
+- `context.firstMessage` — text content of the first user message
+- `context.conversationApi` — the new metadata API (see Section 11)
+
+The standard `utils`, `libs`, `settings`, and `shared` objects are passed as separate positional args by `executeAutomation()` as usual.
 
 ### Files modified
 - [`src/extensions/types.ts`](../../src/extensions/types.ts) — add `"on_conversation_start"` to `AutomationTrigger`
@@ -476,13 +480,17 @@ setFavorite(favorite: boolean): void;
 
 ### 12.1 Ships as built-in automation scaffold
 
-Similar to how built-in tools ship with the `isScaffold` pattern, ship a title generation automation:
+Ship title generation as a built-in automation scaffold, parallel to the existing tool scaffold system (`BUILTIN_TOOL_SCAFFOLDS`, `isScaffold` on `UserToolDefinition`). **Note:** The automation scaffold system does not exist yet — `UserAutomationDefinition` has no `isScaffold` field and there is no `BUILTIN_AUTOMATION_SCAFFOLDS` map. This requires new infrastructure (see Phase G scope below).
+
+Configuration:
 
 - Trigger: `on_conversation_start`
 - Default: **disabled** (setting `title_generation_enabled: false`)
 - Preset: configurable via `title_generation_preset` setting (default: `"small"`)
 
 ### 12.2 Automation logic (pseudo-code)
+
+**LLM access:** `ExtensionUtils` ([`runtime-context.ts`](../../src/extensions/runtime-context.ts)) does not currently expose provider or LLM access. To enable automations to make LLM calls, inject a scoped `llmCall` helper into the `context` object for `on_conversation_start` triggers. This helper resolves a preset name to concrete provider+model, calls `provider.sendMessage()` internally, and returns the response. It is **not** added to `ExtensionUtils` (which is shared across all triggers) — it's trigger-specific context, keeping the general automation API surface unchanged.
 
 ```typescript
 // Built-in scaffold: title-generation automation
@@ -492,18 +500,12 @@ const messageText = context.firstMessage;
 if (!messageText || messageText.length < 10) return; // Skip trivial messages
 
 const presetName = settings.title_generation_preset ?? "small";
-const resolved = resolvePreset(presetName, settings.model_presets);
-if (!resolved) return; // Preset not configured
 
-const provider = utils.getProvider(resolved.providerType);
-const response = await provider.sendMessage(
-  [
-    { role: "system", content: "Generate a concise title (5-8 words) for this conversation based on the user's message. Reply with ONLY the title text, no quotes, no punctuation wrapping." },
-    { role: "user", content: messageText.substring(0, 500) },
-  ],
-  [], // no tools
-  { model: resolved.modelId },
-);
+const response = await context.llmCall(presetName, [
+  { role: "system", content: "Generate a concise title (5-8 words) for this conversation based on the user's message. Reply with ONLY the title text, no quotes, no punctuation wrapping." },
+  { role: "user", content: messageText.substring(0, 500) },
+]);
+if (!response) return; // Preset not configured or LLM call failed
 
 const title = extractTextContent(response).trim();
 if (title) {
@@ -511,7 +513,29 @@ if (title) {
 }
 ```
 
-### 12.3 Settings UI
+**`context.llmCall` signature:**
+
+```typescript
+/** Resolve a preset and make an LLM call. Returns null if preset is unconfigured or call fails. */
+llmCall(presetName: string, messages: Message[], options?: { tools?: Tool[] }): Promise<LLMResponse | null>;
+```
+
+Implementation lives in the orchestrator's trigger dispatch code — it has access to `ProviderRegistry` and `resolvePreset()`. The compiled automation never touches the provider directly.
+
+### 12.3 Title race behavior
+
+The `on_conversation_start` trigger fires **asynchronously** (Section 10.1), but `ConversationManager.addMessage()` ([`conversation.ts:353-361`](../../src/chat/conversation.ts)) already generates a truncated 80-char title **synchronously** from the first user message. This creates a deliberate two-phase title flow:
+
+1. **Immediate:** `addMessage()` sets `title = generateTitle(firstMessage)` (80-char truncation). The sidebar shows this immediately.
+2. **Async:** The title generation automation's LLM call completes and overwrites via `conversationApi.setTitle()`. The sidebar updates to the LLM-generated title.
+
+This means:
+- Users will see a brief "flash" from truncated title → LLM title (typically 1-3 seconds).
+- If the LLM call fails silently, the truncated title remains — **graceful degradation, no data loss.**
+- The existing `generateTitle()` in `addMessage()` continues to run regardless of `title_generation_enabled` — it serves as the fallback.
+- `historyManager.updateConversationHeader()` is race-safe via the per-file write queue (`enqueueWrite()` in [`history.ts`](../../src/chat/history.ts)), so concurrent title writes from `addMessage()` and `setTitle()` are serialized correctly.
+
+### 12.4 Settings UI
 
 In the **Automation** settings section, add a prominent subsection:
 
@@ -600,9 +624,15 @@ The `active_provider` setting field remains for backward compat and as the ultim
 - `on_conversation_start` trigger type
 - Conversation metadata API (`setTitle`, `setFavorite`)
 - Wire trigger firing point
+- **Automation scaffold system** (new infra, parallel to tool scaffolds):
+  - Add `isScaffold?: boolean` to `UserAutomationDefinition` in `src/extensions/types.ts`
+  - Create `BUILTIN_AUTOMATION_SCAFFOLDS` map (analogous to `BUILTIN_TOOL_SCAFFOLDS` in `src/extensions/builtin-tool-scaffolds.ts`)
+  - Modify `ExtensionManager.reload()` in `src/extensions/manager.ts` to inject missing automation scaffolds (same pattern as tool scaffold injection at L216-240)
+  - Add override detection for automations (vault file with same trigger/name overrides scaffold)
+  - Update `src/settings/sections/user-automations.ts` to distinguish built-in automations from user-defined ones
 
 ### Phase H: Title generation automation
-- Built-in scaffold
+- Title generation scaffold (registered in `BUILTIN_AUTOMATION_SCAFFOLDS`)
 - Settings UI (toggle + preset selector in Automation section)
 - End-to-end wiring
 
