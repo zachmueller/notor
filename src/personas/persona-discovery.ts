@@ -157,6 +157,7 @@ async function parsePersona(
 	const promptMode = parsePromptMode(frontmatter, name);
 	const preferredProvider = parseStringOrNull(frontmatter?.["notor-preferred-provider"]);
 	const preferredModel = parseStringOrNull(frontmatter?.["notor-preferred-model"]);
+	const preferredPreset = parseStringOrNull(frontmatter?.["notor-preferred-preset"]);
 
 	// Extract body content (after frontmatter)
 	const promptContent = stripFrontmatter(rawContent);
@@ -169,6 +170,7 @@ async function parsePersona(
 		prompt_mode: promptMode,
 		preferred_provider: preferredProvider,
 		preferred_model: preferredModel,
+		preferred_preset: preferredPreset,
 	};
 }
 

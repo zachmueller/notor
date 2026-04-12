@@ -8,7 +8,7 @@
  * @see specs/01-mvp/data-model.md — Plugin Settings table
  */
 
-import type { LLMProviderConfig, VaultEventHookConfig } from "../types";
+import type { LLMProviderConfig, ModelPreset, VaultEventHookConfig } from "../types";
 import type { HookConfig, NotorSettings } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -79,6 +79,14 @@ export const DEFAULT_HOOKS: HookConfig = {
 	on_tool_result: [],
 	after_completion: [],
 };
+
+/** Default model presets (all unconfigured — user must assign provider+model). */
+export const DEFAULT_MODEL_PRESETS: ModelPreset[] = [
+	{ name: "tiny", provider_type: null, model_id: null, use_extended_context: false },
+	{ name: "small", provider_type: null, model_id: null, use_extended_context: false },
+	{ name: "medium", provider_type: null, model_id: null, use_extended_context: false },
+	{ name: "large", provider_type: null, model_id: null, use_extended_context: false },
+];
 
 /** Default empty vault event hook configuration. */
 export const DEFAULT_VAULT_EVENT_HOOKS: VaultEventHookConfig = {
@@ -159,6 +167,12 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 
 	// Phase 4.1: MCP servers
 	mcp_servers: {},
+
+	// Model presets
+	model_presets: [...DEFAULT_MODEL_PRESETS],
+	default_preset: "medium",
+	title_generation_enabled: false,
+	title_generation_preset: "small",
 
 	// Sub-agents
 	sub_agent_visibility: {},

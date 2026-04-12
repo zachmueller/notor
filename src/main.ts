@@ -10,7 +10,7 @@
 
 import { Notice, Platform, Plugin, WorkspaceLeaf, TFile, TAbstractFile, normalizePath, parseYaml } from "obsidian";
 import { MarkdownView } from "obsidian";
-import { createDefaultSettings, NotorSettingTab } from "./settings";
+import { createDefaultSettings, DEFAULT_MODEL_PRESETS, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
 import { notifyMarkdownLeafActivated, getLastActiveMarkdownPath } from "./context/auto-context";
@@ -815,6 +815,9 @@ export default class NotorPlugin extends Plugin {
 
 		// One-time migration of old tool settings into the extension settings system.
 		await this.migrateToolSettingsToExtensions();
+
+		// One-time migration: initialize model presets for existing installs.
+		await this.migrateModelPresets();
 	}
 
 	/**
@@ -962,6 +965,39 @@ export default class NotorPlugin extends Plugin {
 		}
 
 		new Notice("Tool settings have been migrated to Extensions in Settings.", 5000);
+	}
+
+	/**
+	 * One-time migration: initialize model presets for existing installs.
+	 *
+	 * If `model_presets` is absent (pre-preset install), initializes with
+	 * default presets and auto-configures the `medium` preset from the
+	 * current active provider + model, so existing users can continue
+	 * chatting immediately.
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 13.1
+	 */
+	private async migrateModelPresets(): Promise<void> {
+		if (this.settings.model_presets?.length > 0) return;
+
+		this.settings.model_presets = DEFAULT_MODEL_PRESETS.map((p) => ({ ...p }));
+		this.settings.default_preset = "medium";
+		this.settings.title_generation_enabled = false;
+		this.settings.title_generation_preset = "small";
+
+		// Auto-configure the "medium" preset from the current active provider+model
+		const activeType = this.settings.active_provider;
+		const activeConfig = this.settings.providers.find((p) => p.type === activeType);
+		if (activeType && activeConfig?.model_id) {
+			const medium = this.settings.model_presets.find((p) => p.name === "medium");
+			if (medium) {
+				medium.provider_type = activeConfig.type;
+				medium.model_id = activeConfig.model_id;
+				medium.use_extended_context = activeConfig.use_extended_context ?? false;
+			}
+		}
+
+		await this.saveSettings();
 	}
 
 	// -----------------------------------------------------------------------

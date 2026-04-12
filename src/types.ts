@@ -91,6 +91,13 @@ export interface Conversation {
 	 * Omitted (= false) for backward compatibility.
 	 */
 	is_favorite?: boolean;
+	/**
+	 * Preset name active when conversation was created (null/undefined for pre-preset
+	 * conversations or "Custom" manual selection).
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 3.3
+	 */
+	preset_name?: string | null;
 }
 
 /** Plan/Act mode. */
@@ -300,6 +307,26 @@ export interface ModelInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Model Preset
+// ---------------------------------------------------------------------------
+
+/**
+ * A named model preset mapping a user-facing name to concrete provider+model details.
+ *
+ * @see specs/ZZ-misc/model-presets-design.md — Section 3.1
+ */
+export interface ModelPreset {
+	/** User-visible name — unique key (e.g., "tiny", "small", "medium", "large", or custom). */
+	name: string;
+	/** Provider type this preset maps to (null = not yet configured by user). */
+	provider_type: LLMProviderType | null;
+	/** Model ID this preset maps to (null = not yet configured by user). */
+	model_id: string | null;
+	/** Whether to use extended context (1M) for this model. */
+	use_extended_context: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Vault Rule
 // ---------------------------------------------------------------------------
 
@@ -354,6 +381,14 @@ export interface Persona {
 	preferred_provider: string | null;
 	/** Override model identifier (null = use global default). */
 	preferred_model: string | null;
+	/**
+	 * Override preset name (null = use global default). Takes precedence over
+	 * preferred_provider/preferred_model when set and the preset is valid.
+	 * Parsed from frontmatter key `notor-preferred-preset`.
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 3.4
+	 */
+	preferred_preset: string | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@
  * @see specs/01-mvp/data-model.md — Plugin Settings table
  */
 
-import type { ConversationMode, LLMProviderConfig, VaultEventHookConfig } from "../types";
+import type { ConversationMode, LLMProviderConfig, ModelPreset, VaultEventHookConfig } from "../types";
 import type { McpServerConfig } from "../mcp/mcp-types";
 import type { LogLevel } from "../utils/logger";
 
@@ -330,6 +330,38 @@ export interface NotorSettings {
 	 * 0 means no token limit (only iteration cap applies).
 	 */
 	sub_agent_token_limit: number;
+
+	// -------------------------------------------------------------------
+	// Model presets
+	// -------------------------------------------------------------------
+
+	/**
+	 * Ordered list of model presets. Order determines display order in chat panel dropdown.
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 3.2
+	 */
+	model_presets: ModelPreset[];
+
+	/**
+	 * Name of the default preset for new conversations (must reference a configured preset).
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 3.2
+	 */
+	default_preset: string;
+
+	/**
+	 * Whether the built-in title generation automation is enabled. Default: false.
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 12
+	 */
+	title_generation_enabled: boolean;
+
+	/**
+	 * Preset name to use for title generation LLM calls. Default: "small".
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 12
+	 */
+	title_generation_preset: string;
 
 	// -------------------------------------------------------------------
 	// Phase 5: User-defined extension settings
