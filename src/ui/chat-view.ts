@@ -10,7 +10,7 @@
 
 import { ItemView, MarkdownRenderer, Menu, Modal, Notice, setIcon, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
-import type { ConversationMode, Message, LLMProviderType, ModelInfo, Checkpoint, Persona } from "../types";
+import type { ConversationMode, Message, LLMProviderType, ModelInfo, ModelPreset, Checkpoint, Persona } from "../types";
 import type { Attachment } from "../context/attachment";
 import {
 	createVaultNoteAttachment,
@@ -141,6 +141,8 @@ export class NotorChatView extends ItemView {
 	 */
 	private displayedProviderId: LLMProviderType | null = null;
 	private displayedModelValue: string | null = null;
+	/** Display-only preset name override (set during conversation switch). */
+	private displayedPresetName: string | null | undefined = undefined;
 
 	// Persona state (A-009, A-010)
 	private personaManager?: PersonaManager;
@@ -233,6 +235,9 @@ export class NotorChatView extends ItemView {
 	private getAvailableModels?: () => ModelInfo[];
 	private getCurrentProvider?: () => LLMProviderType;
 	private getCurrentModel?: () => string;
+	private onPresetChange?: (presetName: string | null, providerType?: LLMProviderType, modelId?: string, useExtendedContext?: boolean) => void;
+	private getAvailablePresets?: () => ModelPreset[];
+	private getCurrentPreset?: () => string | null;
 
 	// Fork callback
 	private onForkConversation?: (messageId: string) => Promise<void>;
@@ -375,6 +380,18 @@ export class NotorChatView extends ItemView {
 
 	setGetCurrentModel(callback: () => string): void {
 		this.getCurrentModel = callback;
+	}
+
+	setOnPresetChange(callback: (presetName: string | null, providerType?: LLMProviderType, modelId?: string, useExtendedContext?: boolean) => void): void {
+		this.onPresetChange = callback;
+	}
+
+	setGetAvailablePresets(callback: () => ModelPreset[]): void {
+		this.getAvailablePresets = callback;
+	}
+
+	setGetCurrentPreset(callback: () => string | null): void {
+		this.getCurrentPreset = callback;
 	}
 
 	setOnListCheckpoints(callback: () => Promise<Checkpoint[]>): void {
@@ -667,6 +684,21 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Update the displayed preset in the settings popover without triggering
+	 * callbacks. Used during conversation switch to show the correct preset.
+	 *
+	 * @param presetName - Preset name, or null for "Custom" display
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 6.3
+	 */
+	updatePresetDisplay(presetName: string | null): void {
+		this.displayedPresetName = presetName;
+		if (this.settingsPopoverEl) {
+			this.closeSettingsPopover();
+			this.openSettingsPopover();
+		}
+	}
+
+	/**
 	 * Clear display-only provider/model overrides.
 	 *
 	 * Called when the user explicitly changes the provider/model via the
@@ -676,6 +708,7 @@ export class NotorChatView extends ItemView {
 	clearDisplayOverrides(): void {
 		this.displayedProviderId = null;
 		this.displayedModelValue = null;
+		this.displayedPresetName = undefined;
 	}
 
 	/**
@@ -2620,11 +2653,116 @@ export class NotorChatView extends ItemView {
 		};
 		document.addEventListener("keydown", this.settingsEscapeHandler, true);
 
-		// Provider selection
-		const providerSection = this.settingsPopoverEl.createDiv({ cls: "notor-settings-section" });
-		providerSection.createDiv({ cls: "notor-settings-label", text: "Provider" });
+		// Model preset selection
+		this.buildPresetSelect(this.settingsPopoverEl);
 
-		const providerSelect = providerSection.createEl("select", { cls: "notor-settings-select" });
+		// Persona picker (A-009) — triggers rescan on each popover open
+		if (this.personaManager) {
+			buildPersonaPicker(this.settingsPopoverEl, this.personaManager);
+		}
+
+		// Checkpoints section
+		this.buildCheckpointsSection(this.settingsPopoverEl);
+	}
+
+	/**
+	 * Build the preset-based model selector for the settings popover.
+	 *
+	 * Shows a single dropdown of configured presets + "Custom..." option.
+	 * When "Custom" is selected, reveals legacy provider+model dropdowns.
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 6.1
+	 */
+	private buildPresetSelect(container: HTMLElement): void {
+		const presetSection = container.createDiv({ cls: "notor-settings-section notor-preset-section" });
+		presetSection.createDiv({ cls: "notor-settings-label", text: "Model Preset" });
+
+		const presets = this.getAvailablePresets?.() ?? [];
+		const PROVIDER_LABELS: Record<string, string> = {
+			local: "Local",
+			anthropic: "Anthropic",
+			openai: "OpenAI",
+			bedrock: "Bedrock",
+		};
+
+		// Determine current selection
+		const currentPreset = this.displayedPresetName !== undefined
+			? this.displayedPresetName
+			: this.getCurrentPreset?.() ?? null;
+
+		const presetSelect = presetSection.createEl("select", { cls: "notor-settings-select" });
+
+		// Render preset options
+		for (const p of presets) {
+			const isConfigured = p.provider_type !== null && p.model_id !== null;
+			const detail = isConfigured
+				? `${PROVIDER_LABELS[p.provider_type!] ?? p.provider_type} \u00B7 ${p.model_id}${p.use_extended_context ? " \u00B7 1M" : ""}`
+				: "(not configured)";
+			const opt = presetSelect.createEl("option", {
+				text: `${p.name}  \u2014  ${detail}`,
+				attr: { value: p.name },
+			});
+			if (!isConfigured) {
+				opt.disabled = true;
+			}
+			if (p.name === currentPreset) {
+				opt.selected = true;
+			}
+		}
+
+		// Separator + Custom option
+		const separatorOpt = presetSelect.createEl("option", {
+			text: "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+			attr: { value: "__separator" },
+		});
+		separatorOpt.disabled = true;
+
+		const customOpt = presetSelect.createEl("option", {
+			text: "Custom\u2026  \u2014  Select specific provider & model",
+			attr: { value: "__custom" },
+		});
+		if (currentPreset === null) {
+			customOpt.selected = true;
+		}
+
+		// Custom provider+model section (hidden by default, shown when "Custom" selected)
+		const customSection = container.createDiv({ cls: "notor-settings-section notor-custom-model-section" });
+		if (currentPreset !== null) {
+			customSection.style.display = "none";
+		}
+
+		// Build legacy provider+model dropdowns inside customSection
+		this.buildCustomModelSection(customSection);
+
+		presetSelect.addEventListener("change", () => {
+			const value = presetSelect.value;
+			if (value === "__separator") return;
+
+			// Clear display overrides — user is explicitly choosing
+			this.displayedPresetName = undefined;
+			this.displayedProviderId = null;
+			this.displayedModelValue = null;
+
+			if (value === "__custom") {
+				customSection.style.display = "";
+				this.onPresetChange?.(null);
+			} else {
+				customSection.style.display = "none";
+				this.onPresetChange?.(value);
+			}
+		});
+	}
+
+	/**
+	 * Build the legacy provider + model dropdowns for "Custom" mode.
+	 * Reuses the same logic as the old provider/model dropdowns.
+	 */
+	private buildCustomModelSection(container: HTMLElement): void {
+		// Provider selection
+		const providerLabel = container.createDiv({ cls: "notor-settings-label", text: "Provider" });
+		void providerLabel; // Used for DOM layout
+
+		const providerSelect = container.createEl("select", { cls: "notor-settings-select" });
 		const providers = this.getAvailableProviders?.() ?? [];
 		const currentProvider = this.displayedProviderId ?? this.getCurrentProvider?.() ?? "local";
 
@@ -2639,28 +2777,26 @@ export class NotorChatView extends ItemView {
 		}
 
 		providerSelect.addEventListener("change", () => {
-			// Clear display overrides — user is explicitly choosing
 			this.displayedProviderId = null;
 			this.displayedModelValue = null;
 			this.onProviderChange?.(providerSelect.value as LLMProviderType);
-			// Refresh model list when provider changes
 			this.refreshModelSelect();
 		});
 
 		// Model selection
-		const modelSection = this.settingsPopoverEl.createDiv({ cls: "notor-settings-section" });
-		const modelHeader = modelSection.createDiv({ cls: "notor-settings-label-row" });
+		const modelWrapper = container.createDiv({ cls: "notor-settings-section" });
+		const modelHeader = modelWrapper.createDiv({ cls: "notor-settings-label-row" });
 		modelHeader.createDiv({ cls: "notor-settings-label", text: "Model" });
 
 		const refreshBtn = modelHeader.createEl("button", {
 			cls: "notor-settings-refresh-btn clickable-icon",
 			attr: { "aria-label": "Refresh model list" },
 		});
-		refreshBtn.textContent = "↻";
+		refreshBtn.textContent = "\u21BB";
 		refreshBtn.addEventListener("click", () => {
 			void (async () => {
 				refreshBtn.disabled = true;
-				refreshBtn.textContent = "…";
+				refreshBtn.textContent = "\u2026";
 				try {
 					await this.onRefreshModels?.();
 					this.refreshModelSelect();
@@ -2668,20 +2804,12 @@ export class NotorChatView extends ItemView {
 					// Fall through to text input
 				} finally {
 					refreshBtn.disabled = false;
-					refreshBtn.textContent = "↻";
+					refreshBtn.textContent = "\u21BB";
 				}
 			})();
 		});
 
-		this.buildModelSelect(modelSection);
-
-		// Persona picker (A-009) — triggers rescan on each popover open
-		if (this.personaManager) {
-			buildPersonaPicker(this.settingsPopoverEl, this.personaManager);
-		}
-
-		// Checkpoints section
-		this.buildCheckpointsSection(this.settingsPopoverEl);
+		this.buildModelSelect(modelWrapper);
 	}
 
 	private buildModelSelect(container: HTMLElement): void {
@@ -2910,9 +3038,13 @@ export class NotorChatView extends ItemView {
 
 	private refreshModelSelect(): void {
 		if (!this.settingsPopoverEl) return;
-		const modelSection = this.settingsPopoverEl.querySelectorAll(".notor-settings-section")[1];
-		if (modelSection) {
-			this.buildModelSelect(modelSection as HTMLElement);
+		// Find the model select wrapper inside the custom model section
+		const customSection = this.settingsPopoverEl.querySelector(".notor-custom-model-section");
+		if (customSection) {
+			const modelWrapper = customSection.querySelector(".notor-settings-section");
+			if (modelWrapper) {
+				this.buildModelSelect(modelWrapper as HTMLElement);
+			}
 		}
 	}
 

@@ -151,6 +151,17 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	private activeUseExtendedContext: boolean;
 
+	/**
+	 * Per-orchestrator active preset name.
+	 *
+	 * Tracks the currently selected preset for this panel, or null if
+	 * "Custom" mode is active. Used for conversation header pinning and
+	 * display-restore on conversation switch.
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 6
+	 */
+	private activePresetName: string | null = null;
+
 
 	constructor(
 		private readonly app: App,
@@ -1318,6 +1329,16 @@ export class ChatOrchestrator implements ToolSessionContext {
 	setActiveModel(modelId: string, useExtendedContext: boolean): void {
 		this.activeModelId = modelId;
 		this.activeUseExtendedContext = useExtendedContext;
+	}
+
+	/** Get the per-orchestrator active preset name (null = Custom mode). */
+	getActivePresetName(): string | null {
+		return this.activePresetName;
+	}
+
+	/** Set the per-orchestrator active preset name (null = Custom mode). */
+	setActivePresetName(presetName: string | null): void {
+		this.activePresetName = presetName;
 	}
 
 

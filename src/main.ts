@@ -64,6 +64,7 @@ import { LocalProvider } from "./providers/local-provider";
 import { AnthropicProvider } from "./providers/anthropic-provider";
 import { OpenAIProvider } from "./providers/openai-provider";
 import { parseOptionValue, buildOptionValue } from "./providers/model-grouping";
+import { resolvePreset } from "./presets/preset-resolver";
 import type { LLMProviderType } from "./types";
 
 // Tools
@@ -2690,6 +2691,69 @@ export default class NotorPlugin extends Plugin {
 			const modelId = orchestrator!.getActiveModelId();
 			const useExtended = orchestrator!.getActiveUseExtendedContext();
 			return buildOptionValue(modelId, useExtended);
+		});
+
+		// Preset change — resolves preset to concrete provider+model, updates state.
+		view.setOnPresetChange((presetName, providerType, modelId, useExtendedContext) => {
+			if (presetName !== null) {
+				// Resolve preset to concrete values
+				const resolved = resolvePreset(presetName, this.settings.model_presets);
+				if (!resolved) {
+					log.warn("Preset not configured", { presetName });
+					return;
+				}
+				providerType = resolved.providerType;
+				modelId = resolved.modelId;
+				useExtendedContext = resolved.useExtendedContext;
+			}
+
+			if (providerType) {
+				orchestrator!.setActiveProvider(providerType);
+				providerRegistry.switchProvider(providerType);
+				this.settings.active_provider = providerType;
+			}
+			if (modelId !== undefined) {
+				orchestrator!.setActiveModel(modelId, useExtendedContext ?? false);
+				const config = providerRegistry.getConfig(orchestrator!.getActiveProviderType());
+				if (config) {
+					const updated = { ...config, model_id: modelId, use_extended_context: useExtendedContext ?? false };
+					providerRegistry.updateConfig(updated);
+					const idx = this.settings.providers.findIndex((p) => p.type === config.type);
+					if (idx >= 0) {
+						this.settings.providers[idx] = updated;
+					}
+				}
+			}
+
+			// Track active preset on orchestrator
+			orchestrator!.setActivePresetName(presetName);
+
+			// Persist and update conversation header
+			this.saveSettings().catch((e) => {
+				log.error("Failed to save preset change", { error: String(e) });
+			});
+			const conv = orchestrator!.getDisplayedConversation();
+			if (conv) {
+				conv.preset_name = presetName;
+				if (providerType) conv.provider_id = providerType;
+				if (modelId) {
+					conv.model_id = modelId;
+					conv.use_extended_context = useExtendedContext ?? false;
+				}
+				historyManager.updateConversationHeader(conv).catch((e) => {
+					log.error("Failed to update conversation header on preset change", { error: String(e) });
+				});
+			}
+		});
+
+		// Available presets
+		view.setGetAvailablePresets(() => {
+			return this.settings.model_presets;
+		});
+
+		// Current preset — reads from per-orchestrator state
+		view.setGetCurrentPreset(() => {
+			return orchestrator!.getActivePresetName();
 		});
 
 		// Checkpoint callbacks — use per-orchestrator checkpoint manager (A1.6c / A3)
