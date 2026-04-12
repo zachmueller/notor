@@ -265,12 +265,13 @@ export class ExtensionManager {
 
 		// 2b. Inject scaffold fallbacks for missing built-in automations
 		for (const [name, scaffold] of BUILTIN_AUTOMATION_SCAFFOLDS) {
-			// Skip if a vault automation with the same trigger+name already exists
-			if (discovered.automations.some(a =>
-				a.trigger === scaffold.trigger &&
-				(a.displayName === scaffold.displayName || a.filePath.includes(name))
-			)) continue;
+			// Skip if vault file was discovered with this name (same pattern as tools)
+			const vaultPath = normalizePath(
+				`${this.plugin.settings.notor_dir}/automations/${name}.md`,
+			);
+			if (discovered.automations.some(a => a.filePath === vaultPath)) continue;
 
+			// Construct frontmatter directly from scaffold metadata (no re-parsing)
 			const frontmatter: Record<string, unknown> = {
 				"notor-type": "automation",
 				"notor-trigger": scaffold.trigger,
@@ -611,6 +612,67 @@ export class ExtensionManager {
 			await this.plugin.app.vault.delete(existing);
 		}
 		log.info("Reset built-in tool to default scaffold", { tool: toolName, path: filePath });
+	}
+
+	// -----------------------------------------------------------------------
+	// Built-in automation scaffold helpers
+	// -----------------------------------------------------------------------
+
+	/** Get the set of built-in automation scaffold names. */
+	getBuiltinAutomationNames(): Set<string> {
+		return new Set(BUILTIN_AUTOMATION_SCAFFOLDS.keys());
+	}
+
+	/**
+	 * Ensure a vault file exists for a built-in automation scaffold.
+	 *
+	 * If the file doesn't exist, creates it with the scaffold content
+	 * so the user can customize it. Returns the vault-relative path.
+	 */
+	async ensureBuiltinAutomationVaultFile(automationName: string): Promise<string> {
+		const scaffold = BUILTIN_AUTOMATION_SCAFFOLDS.get(automationName);
+		if (!scaffold) {
+			throw new Error(`No built-in scaffold for automation "${automationName}"`);
+		}
+
+		const dir = normalizePath(`${this.plugin.settings.notor_dir}/automations`);
+		const filePath = normalizePath(`${dir}/${automationName}.md`);
+
+		// If file already exists, return its path
+		if (this.plugin.app.vault.getAbstractFileByPath(filePath)) {
+			return filePath;
+		}
+
+		// Ensure directory exists
+		const dirFile = this.plugin.app.vault.getAbstractFileByPath(dir);
+		if (!dirFile) {
+			await this.plugin.app.vault.createFolder(dir);
+		}
+
+		await this.plugin.app.vault.create(filePath, scaffold.scaffoldContent);
+		log.info("Created built-in automation scaffold", { automation: automationName, path: filePath });
+		return filePath;
+	}
+
+	/**
+	 * Reset a built-in automation to its default scaffold by deleting the vault file.
+	 *
+	 * After deletion, the next `reload()` will inject the scaffold fallback.
+	 */
+	async resetBuiltinAutomationToDefault(automationName: string): Promise<void> {
+		const scaffold = BUILTIN_AUTOMATION_SCAFFOLDS.get(automationName);
+		if (!scaffold) {
+			throw new Error(`No built-in scaffold for automation "${automationName}"`);
+		}
+
+		const dir = normalizePath(`${this.plugin.settings.notor_dir}/automations`);
+		const filePath = normalizePath(`${dir}/${automationName}.md`);
+
+		const existing = this.plugin.app.vault.getAbstractFileByPath(filePath);
+		if (existing) {
+			await this.plugin.app.vault.delete(existing);
+		}
+		log.info("Reset built-in automation to default scaffold", { automation: automationName, path: filePath });
 	}
 
 	// -----------------------------------------------------------------------
