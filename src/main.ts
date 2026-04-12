@@ -602,13 +602,7 @@ export default class NotorPlugin extends Plugin {
 			id: "open-secondary-chat",
 			name: "Open new chat panel",
 			callback: () => {
-				const leaf = this.app.workspace.getLeaf("tab");
-				leaf.setViewState({
-					type: CHAT_VIEW_TYPE,
-					active: true,
-				}).catch((e) => {
-					log.error("Failed to open chat panel", { error: String(e) });
-				});
+				this.openChatInNewTab();
 			},
 		});
 
@@ -2439,14 +2433,7 @@ export default class NotorPlugin extends Plugin {
 		// Open conversation in a new tab — the factory creates a fresh
 		// orchestrator automatically; setState loads the conversation.
 		view.setOnOpenInNewTab((filename: string) => {
-			const leaf = this.app.workspace.getLeaf("tab");
-			leaf.setViewState({
-				type: CHAT_VIEW_TYPE,
-				active: true,
-				state: { conversationFilename: filename },
-			}).catch((e) => {
-				log.error("Failed to open conversation in new tab", { error: String(e) });
-			});
+			this.openChatInNewTab(filename);
 		});
 
 		// Delete conversation with confirmation
@@ -2767,6 +2754,21 @@ export default class NotorPlugin extends Plugin {
 			await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
 			void workspace.revealLeaf(leaf);
 		}
+	}
+
+	/**
+	 * Open a Notor chat panel in a new tab.
+	 * If conversationFilename is provided, that conversation is loaded via setState.
+	 */
+	openChatInNewTab(conversationFilename?: string): void {
+		const leaf = this.app.workspace.getLeaf("tab");
+		leaf.setViewState({
+			type: CHAT_VIEW_TYPE,
+			active: true,
+			...(conversationFilename ? { state: { conversationFilename } } : {}),
+		}).catch((e) => {
+			log.error("Failed to open chat panel in new tab", { error: String(e) });
+		});
 	}
 
 	/**

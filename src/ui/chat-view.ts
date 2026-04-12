@@ -898,6 +898,19 @@ export class NotorChatView extends ItemView {
 			this.onNewConversation?.();
 			this.textInputEl.focus();
 		});
+
+		// Right-click: show context menu with "current panel" vs "new panel" options
+		newBtn.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
+			this.showNewConversationMenu(e);
+		});
+
+		// Middle-click: immediately open a new chat panel
+		newBtn.addEventListener("auxclick", (e) => {
+			if (e.button !== 1) return;
+			e.preventDefault();
+			this.plugin.openChatInNewTab();
+		});
 	}
 
 	private buildConversationList(container: HTMLElement): void {
@@ -2266,6 +2279,32 @@ export class NotorChatView extends ItemView {
 				.setIcon("trash-2")
 				.onClick(() => {
 					this.onDeleteConversation?.(entry.filename);
+				});
+		});
+
+		menu.showAtMouseEvent(evt);
+	}
+
+	private showNewConversationMenu(evt: MouseEvent): void {
+		const menu = new Menu();
+
+		menu.addItem((item) => {
+			item.setTitle("New conversation")
+				.setIcon("message-square-plus")
+				.onClick(() => {
+					if (this.showConversationList) {
+						this.toggleConversationList();
+					}
+					this.onNewConversation?.();
+					this.textInputEl.focus();
+				});
+		});
+
+		menu.addItem((item) => {
+			item.setTitle("New conversation in new panel")
+				.setIcon("layout-dashboard")
+				.onClick(() => {
+					this.plugin.openChatInNewTab();
 				});
 		});
 
