@@ -59,8 +59,10 @@ post-processing. Reload extensions to apply changes.
 const messageText = context.firstMessage as string;
 if (!messageText || messageText.length < 10) return;
 
-const presetName = (settings as Record<string, unknown>).title_generation_preset as string ?? "small";
-const enabled = (settings as Record<string, unknown>).title_generation_enabled as boolean ?? false;
+// Plugin-level settings are passed via context (not the per-extension "settings" argument)
+const pluginSettings = context.pluginSettings as Record<string, unknown>;
+const presetName = pluginSettings.title_generation_preset as string ?? "small";
+const enabled = pluginSettings.title_generation_enabled as boolean ?? false;
 if (!enabled) return;
 
 const llmCall = context.llmCall as (preset: string, msgs: Array<{role: string; content: string}>) => Promise<string | null>;

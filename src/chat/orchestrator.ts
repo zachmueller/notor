@@ -1428,6 +1428,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			firstMessage: firstMessageText,
 			conversationApi,
 			llmCall,
+			pluginSettings: this.settings,
 		};
 
 		// Execute all automations in parallel, fire-and-forget with error logging
