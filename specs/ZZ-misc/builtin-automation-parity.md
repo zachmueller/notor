@@ -30,12 +30,12 @@ This creates inconsistency for users who want to customize automations the same 
 
 | Area | Built-in Tools Pattern | Current Automation Pattern | Required Change |
 |------|----------------------|--------------------------|-----------------|
-| **Settings access** | Per-extension `settings` from YAML `settings` fence + `shared` from `notor/settings.md`. The `settings` arg (pos 5) in compiled fn IS the resolved values. ([`manager.ts:478`](../../src/extensions/manager.ts), [`compiler.ts:52`](../../src/extensions/compiler.ts)) | Title gen reads `context.pluginSettings` — a direct `NotorSettings` ref injected from orchestrator. Violates D-2 from migration spec. ([`orchestrator.ts:1427`](../../src/chat/orchestrator.ts), [`builtin-automation-scaffolds.ts:62-63`](../../src/extensions/builtin-automation-scaffolds.ts)) | Declare `title_generation_enabled` and `title_generation_preset` as `settingsSchema` fields on the scaffold. Read from `settings` arg. |
-| **Settings UI** | Schema-driven: tools with `settingsSchema` get a gear icon -> `ToolSettingsModal` renders fields automatically. ([`tools.ts:294-312`](../../src/settings/sections/tools.ts)) | Hard-coded: `renderTitleGenerationSection()` manually creates toggle + dropdown. ([`user-automations.ts:29-62`](../../src/settings/sections/user-automations.ts)) | Use `renderFieldList()` driven by the automation's `settingsSchema`. Remove hard-coded toggle/dropdown. |
-| **Settings defaults** | Declared in YAML fence `settings` block with `default:` field per schema entry. Resolved via `resolveSettings()`. ([`settings-schema.ts:129-170`](../../src/extensions/settings-schema.ts)) | Defaults hard-coded in scaffold code (`?? "small"`, `?? false`). | Move defaults to schema `default:` fields. |
-| **Scaffold override detection** | Reload tracks `builtinOverrides[]` — vault files with same tool name as scaffold. UI shows override status. ([`manager.ts:322-329`](../../src/extensions/manager.ts)) | No override detection for automations. `builtinOverrides` only tracks tools. | Add automation override detection to reload result and settings UI. |
-| **Dispatch location** | N/A (tools dispatched by LLM via ToolDispatcher) | Existing triggers (`pre_send`, `on_tool_call`, etc.) dispatched from centralized functions in [`hook-events.ts`](../../src/hooks/hook-events.ts) (L322-799). `on_conversation_start` dispatched ad-hoc from `orchestrator.ts:fireConversationStartTrigger()`. | Add `dispatchOnConversationStart()` to `hook-events.ts`. |
-| **Context shape** | `params` (from LLM tool call JSON) | Existing triggers use standard shapes: `{ hookEvent, timestamp, conversationId, toolName?, params?, result? }` built in `hook-events.ts`. `on_conversation_start` has ad-hoc shape `{ conversationId, firstMessage, conversationApi, llmCall, pluginSettings }` built in orchestrator. | Define standard context shape for `on_conversation_start` in `hook-events.ts`. |
+| **Settings access** | Per-extension `settings` from YAML `settings` fence + `shared` from `notor/settings.md`. The `settings` parameter in the compiled fn IS the resolved values (see `AUTOMATION_ARG_NAMES` in [`compiler.ts`](../../src/extensions/compiler.ts) and `executeAutomation()` in [`manager.ts`](../../src/extensions/manager.ts)). | Title gen reads `context.pluginSettings` — a direct `NotorSettings` ref injected from orchestrator. Violates D-2 from migration spec. ([`orchestrator.ts` `fireConversationStartTrigger()`](../../src/chat/orchestrator.ts), [`builtin-automation-scaffolds.ts`](../../src/extensions/builtin-automation-scaffolds.ts)) | Declare `title_generation_enabled` and `title_generation_preset` as `settingsSchema` fields on the scaffold. Read from `settings` parameter. |
+| **Settings UI** | Schema-driven: tools with `settingsSchema` get a gear icon -> `ToolSettingsModal` renders fields automatically. ([`tools.ts` `addBuiltinToolIcons()`](../../src/settings/sections/tools.ts)) | Hard-coded: `renderTitleGenerationSection()` (~100 lines) creates toggle, dynamic preset dropdown, open/reset buttons. ([`user-automations.ts` `renderTitleGenerationSection()`](../../src/settings/sections/user-automations.ts)) | Use `renderFieldList()` driven by the automation's `settingsSchema`. Remove `renderTitleGenerationSection()`. Inject dynamic preset options at render time. |
+| **Settings defaults** | Declared in YAML fence `settings` block with `default:` field per schema entry. Resolved via `resolveSettings()`. ([`settings-schema.ts`](../../src/extensions/settings-schema.ts)) | Defaults hard-coded in scaffold code (`?? "small"`, `?? false`). | Move defaults to schema `default:` fields. |
+| **Scaffold override detection** | Reload tracks `builtinOverrides[]` — vault files with same tool name as scaffold. UI shows override status. ([`manager.ts` `reload()`](../../src/extensions/manager.ts)) | No override detection for automations. `builtinOverrides` only tracks tools. | Extend `builtinOverrides` in `reload()` to also detect automation overrides. |
+| **Dispatch location** | N/A (tools dispatched by LLM via ToolDispatcher) | Existing triggers (`pre_send`, `on_tool_call`, etc.) dispatched from centralized functions in [`hook-events.ts`](../../src/hooks/hook-events.ts). `on_conversation_start` dispatched ad-hoc from `orchestrator.ts` `fireConversationStartTrigger()`. | Add `dispatchOnConversationStart()` to `hook-events.ts`. |
+| **Context shape** | `params` (from LLM tool call JSON) | Existing triggers use standard shapes: `{ hookEvent, timestamp, conversationId, toolName?, params?, result? }` built in `hook-events.ts`. `on_conversation_start` has ad-hoc shape `{ conversationId, firstMessage, conversationApi, llmCall, pluginSettings }` built in orchestrator `fireConversationStartTrigger()`. | Define standard context shape for `on_conversation_start` in `hook-events.ts`. Move `llmCall` and `conversationApi` to `ExtensionUtils`. |
 | **LLM access** | N/A (tools are called BY the LLM) | `context.llmCall` built inline in orchestrator — streaming collection, preset resolution, error handling all in one closure. Only available to `on_conversation_start`. | Promote to `ExtensionUtils.llmCall()` so ANY extension can make LLM calls. |
 | **Conversation API** | N/A | `context.conversationApi` with `getTitle/setTitle/isFavorite/setFavorite`. Only available to `on_conversation_start`. Built inline in orchestrator. | Promote to `ExtensionUtils.conversationApi` available to all conversation-scoped triggers. |
 
@@ -63,13 +63,9 @@ settings:
 
 ### 3.2 Settings field type for preset
 
-The `title_generation_preset` field is a `string` type. The settingsSchema system currently supports `options?: string[]` for enum-style dropdowns ([`types.ts:184`](../../src/extensions/types.ts)). However, the list of configured presets is dynamic (changes as users add/remove presets). Two options:
+The `title_generation_preset` field is a `string` type. The settingsSchema system currently supports `options?: string[]` for enum-style dropdowns ([`types.ts`](../../src/extensions/types.ts)), and [`field-renderer.ts`](../../src/settings/sections/field-renderer.ts) auto-renders string fields with `options` as dropdowns. However, the list of configured presets is dynamic (changes as users add/remove presets).
 
-**Option A: Static string field** — User types or pastes the preset name. Simple, no new infrastructure. The field renders as a text input.
-
-**Option B: Dynamic options via callback** — Add a new `optionsProvider?: string` field to `SettingsFieldSchema` that names a function on `ExtensionUtils` returning `string[]`. The settings UI calls `utils[optionsProvider]()` to populate dropdown options. More complex, but better UX.
-
-**Recommendation:** Start with Option A. The preset name is a short string users already know from the Models settings section. Option B can be added later as a general-purpose enhancement if demand arises.
+**Approach: Dynamic options at render time** — The scaffold declares `title_generation_preset` as `type: string` with no static `options`. At render time, the automation settings renderer injects `field.options = currentPresetNames` (from `settings.model_presets`, filtering to presets with a configured provider and model) before passing the schema to `renderFieldList()`. This preserves the existing dropdown UX ([`user-automations.ts` `renderTitleGenerationSection()`](../../src/settings/sections/user-automations.ts) already renders a dynamic preset dropdown) without requiring new infrastructure like an `optionsProvider` callback.
 
 ### 3.3 Scaffold code changes
 
@@ -90,7 +86,7 @@ const presetName = settings.title_generation_preset as string;
 const enabled = settings.title_generation_enabled as boolean;
 ```
 
-The `settings` arg at position 5 is automatically populated from the extension's `settingsSchema` via `resolveSettings()`. Defaults are handled by the schema, not by `??` fallbacks.
+The `settings` parameter is automatically populated from the extension's `settingsSchema` via `resolveSettings()`. Defaults are handled by the schema, not by `??` fallbacks.
 
 ### 3.4 NotorSettings cleanup
 
@@ -117,8 +113,13 @@ Add to [`hook-events.ts`](../../src/hooks/hook-events.ts):
  * Dispatch all `on_conversation_start` automations non-blocking.
  *
  * Fires once per conversation after the first user message is submitted,
- * before the LLM call. No shell hooks exist for this trigger — only
- * user automations.
+ * before the LLM call.
+ *
+ * NOTE: Unlike `dispatchOnToolCall` / `dispatchOnToolResult` / `dispatchAfterCompletion`,
+ * this dispatcher handles only extension automations — no shell hooks and no
+ * workflow-scoped override support. This is intentional: `on_conversation_start`
+ * has no corresponding shell hook trigger, and workflow overrides are not
+ * applicable to conversation-level events.
  *
  * @see specs/ZZ-misc/model-presets-design.md — Section 10
  */
@@ -206,7 +207,18 @@ llmCall: (
 
 This is the same logic currently in `fireConversationStartTrigger()` but extracted to a reusable utility.
 
-### 5.3 Scaffold code update
+### 5.3 Recursion guard
+
+`llmCall` is available to all extensions, including tools. Since tools are invoked BY the LLM, a tool calling `llmCall` could create a recursive loop (LLM → tool → LLM → tool → ...). To prevent this:
+
+- `buildUtils()` maintains a `_llmCallDepth` counter (scoped per-execution via closure)
+- Each `llmCall` invocation increments the counter before the call and decrements on completion
+- If depth exceeds the limit (default: 1), `llmCall` returns `null` and logs a warning: `"llmCall recursion depth exceeded"`
+- The depth limit of 1 allows a single level of LLM calls from extensions (the common case for title generation, summarization, etc.) but prevents unbounded recursion
+
+This enables "agentic tools" that do single-step LLM reasoning while maintaining a safety bound.
+
+### 5.4 Scaffold code update
 
 The scaffold changes from:
 
@@ -248,14 +260,15 @@ conversationApi: {
 
 ### 6.2 Implementation in buildUtils()
 
-The active `ConversationManager` is accessible via the plugin's orchestrator(s). Since `buildUtils()` is called per-execution, it can capture the current active conversation at call time:
+`buildUtils()` accepts an optional `conversationId?: string` parameter. When provided, `conversationApi` resolves the correct `ConversationManager` by ID lookup rather than relying on "currently active":
 
-1. Access the plugin's active orchestrator(s)
-2. Get the displayed `ConversationManager`
-3. Build the API object delegating to `convManager.setTitle()` and `convManager.setFavorite()`
-4. Return null if no active conversation exists
+1. If `conversationId` is provided: look up the `ConversationManager` by ID across the plugin's orchestrator(s)
+2. Build the API object delegating to `convManager.setTitle()` and `convManager.setFavorite()`
+3. Return `conversationApi: null` if no `conversationId` was provided (e.g., tool context) or if the conversation is no longer found
 
-**Important:** The `conversationApi` captures the conversation state at execution time. For automations running asynchronously (like `on_conversation_start`), the conversation may have changed by the time `setTitle()` is called. This is acceptable — `setTitle()` operates on whichever conversation is currently active. The existing race-safe write queue in `HistoryManager.enqueueWrite()` handles concurrent writes.
+**Why ID-based lookup:** The current implementation in `fireConversationStartTrigger()` captures the per-orchestrator `ConversationManager` at trigger time, which is bound to the correct conversation. If `buildUtils()` instead relied on "currently active conversation" (plugin-scoped), and the user switched tabs during an async automation, `setTitle()` could operate on the wrong conversation. Passing `conversationId` makes the API conversation-safe while still being a universal utility.
+
+The dispatch function (`dispatchOnConversationStart()`) passes the `conversationId` from its context into `buildUtils()`. The existing race-safe write queue in `HistoryManager.enqueueWrite()` handles concurrent writes.
 
 ### 6.3 Scaffold code update
 
@@ -310,66 +323,65 @@ This migration is safe to run after `loadSettings()` because:
 - The migration copies them to the extension settings key before any automation runs
 - The next `saveSettings()` persists the cleaned state
 
+### 7.3 Downgrade behavior
+
+This is a one-way migration. If a user downgrades the plugin to a version that expects `title_generation_enabled` and `title_generation_preset` on `NotorSettings`, those fields will be `undefined` and the old code will use its defaults (disabled, "small" preset). This is acceptable: the defaults are safe (title generation off), and plugin downgrades are rare.
+
 ---
 
 ## 8. Automation Settings UI Parity
 
 ### 8.1 Current state
 
-Built-in automations currently render via `renderUserAutomationsSection()` in [`user-automations.ts`](../../src/settings/sections/user-automations.ts). Title generation has a dedicated hard-coded section. Other automations show name + trigger + Open button.
+The settings reorganization ([`settings-reorganization-design.md`](./done/settings-reorganization-design.md)) is complete. The automation settings infrastructure already exists:
+
+- [`field-renderer.ts`](../../src/settings/sections/field-renderer.ts) exports `renderFieldList()`, `renderField()`, `getPersistedValue()`, `saveFieldValue()`
+- [`user-automations.ts`](../../src/settings/sections/user-automations.ts) renders user automations with schema-driven settings via `renderFieldList()` and shows "Built-in" / "Customized" / "User" badges via `renderBuiltinAutomations()`
+- The "Extensions" section has been deleted; automations live in the Automation settings section
+
+The only gap: title generation has a dedicated `renderTitleGenerationSection()` (~100 lines) with a hard-coded toggle, dynamic preset dropdown, and open/reset buttons. Other built-in automations already render via the generic `renderBuiltinAutomations()` path.
 
 ### 8.2 Target state
 
-After this work, the automation settings UI should mirror how tools work:
+Replace `renderTitleGenerationSection()` with schema-driven rendering. Once the scaffold has a `settingsSchema` (Section 3.1), the title generation automation renders through the same `renderBuiltinAutomations()` path as all other built-in automations — with badge, auto-rendered settings fields, open button, and reset button. The dedicated function is deleted.
 
-1. **Built-in automations** section showing each scaffold:
-   - Name + trigger description
-   - "Built-in" or "Customized" badge (based on vault file presence)
-   - Auto-rendered settings fields from `settingsSchema` via `renderFieldList()`
-   - Open button (creates vault file on demand)
-   - Reset button (if vault file exists)
-
-2. **User automations** section showing vault-authored automations:
-   - Name + trigger
-   - "User" badge
-   - Open button
-   - Auto-rendered settings fields
+The dynamic preset dropdown is preserved by injecting `options` at render time (Section 3.2).
 
 ### 8.3 Override detection
 
-Add `builtinAutomationOverrides: string[]` to `ExtensionReloadResult` ([`types.ts:177-186`](../../src/extensions/types.ts)). Populate in `reload()` by checking if any compiled automation has a vault file path matching a scaffold name but is not marked `isScaffold`.
+Extend the existing `builtinOverrides: string[]` on `ExtensionReloadResult` ([`types.ts`](../../src/extensions/types.ts)) to also track automation overrides. Tool and automation names cannot collide (different vault directories: `notor/tools/` vs `notor/automations/`), so a single array suffices. In `reload()`, add a check for automation vault files matching scaffold names (same pattern as the existing tool override detection).
 
 ---
 
 ## 9. Implementation Phases
 
 ### Phase 1: ExtensionUtils additions
-- Add `llmCall` to `ExtensionUtils` interface and `buildUtils()`
-- Add `conversationApi` to `ExtensionUtils` interface and `buildUtils()`
+- Add `llmCall` (with recursion depth guard) to `ExtensionUtils` interface and `buildUtils()`
+- Add optional `conversationId` parameter to `buildUtils()`; build `conversationApi` via ID lookup when provided
 - Files: `runtime-context.ts`
 
 ### Phase 2: Centralize dispatch
 - Add `dispatchOnConversationStart()` to `hook-events.ts`
 - Update orchestrator to call it instead of inline `fireConversationStartTrigger()`
 - Delete `fireConversationStartTrigger()` and `context.pluginSettings` injection
+- Pass `conversationId` through dispatch context into `buildUtils()`
 - Files: `hook-events.ts`, `orchestrator.ts`
 
 ### Phase 3: Settings via settingsSchema
 - Add YAML `settings` fence to title-generation scaffold
-- Update scaffold code to read from `settings` arg and `utils.llmCall` / `utils.conversationApi`
+- Update scaffold code to read from `settings` parameter and `utils.llmCall` / `utils.conversationApi`
 - Files: `builtin-automation-scaffolds.ts`
 
 ### Phase 4: Settings migration + cleanup
-- Add `migrateAutomationSettings()` to `main.ts`
+- Add `migrateAutomationSettings()` to `main.ts` (one-way migration; document that downgrade resets to defaults)
 - Remove `title_generation_enabled` and `title_generation_preset` from `NotorSettings`
-- Remove `renderTitleGenerationSection()` hard-coded UI
+- Remove `renderTitleGenerationSection()` — title generation now renders through the existing `renderBuiltinAutomations()` path
+- Add dynamic preset options injection at render time for the `title_generation_preset` field
 - Files: `main.ts`, `settings/types.ts`, `settings/defaults.ts`, `user-automations.ts`
 
-### Phase 5: Automation settings UI parity
-- Rewrite automation settings to auto-render `settingsSchema` fields
-- Add automation override detection to `ExtensionReloadResult`
-- Show badges (Built-in / Customized / User) consistently
-- Files: `user-automations.ts`, `manager.ts`, `types.ts`
+### Phase 5: Automation override detection
+- Extend `builtinOverrides` in `reload()` to also detect automation vault files overriding scaffolds
+- Files: `manager.ts`
 
 ---
 
@@ -377,13 +389,16 @@ Add `builtinAutomationOverrides: string[]` to `ExtensionReloadResult` ([`types.t
 
 ### Unit-level
 - `resolveSettings()` correctly resolves title generation settings from `user_extension_settings["Title Generation"]`
-- `buildUtils().llmCall()` resolves preset and collects stream
+- `buildUtils().llmCall()` resolves preset, collects stream, and enforces recursion depth limit
+- `buildUtils()` with `conversationId` builds `conversationApi` bound to the correct conversation
+- `buildUtils()` without `conversationId` returns `conversationApi: null`
 - `dispatchOnConversationStart()` fires automations with correct context shape
 - Settings migration copies values and removes old fields
 
 ### Manual testing
-1. Fresh install: title generation automation appears in Automation settings with schema-driven toggle + text input
+1. Fresh install: title generation automation appears in Automation settings with schema-driven toggle + preset dropdown
 2. Enable title generation -> new conversation -> title updates asynchronously
 3. Open automation -> vault file created with full working code -> edit prompt -> reload -> custom prompt used
 4. Reset to default -> vault file deleted -> scaffold restored on next reload
 5. Upgrade from pre-parity install: existing `title_generation_enabled: true` migrated to extension settings, automation continues working
+6. Preset dropdown shows only configured presets (same as current behavior)
