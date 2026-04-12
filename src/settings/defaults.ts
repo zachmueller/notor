@@ -115,6 +115,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	providers: DEFAULT_PROVIDERS,
 	auto_approve: DEFAULT_AUTO_APPROVE,
 	tool_enabled: DEFAULT_TOOL_ENABLED,
+	automation_enabled: {},
 	mode: "plan",
 	open_notes_on_access: true,
 	focus_notes_on_access: false,

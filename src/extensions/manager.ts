@@ -290,6 +290,10 @@ export class ExtensionManager {
 			if ("trigger" in parsed) {
 				const automationDef = parsed as UserAutomationDefinition;
 				automationDef.isScaffold = true;
+				// Carry over code-side settingsSchema if the scaffold defines one
+				if (scaffold.settingsSchema && !automationDef.settingsSchema?.length) {
+					automationDef.settingsSchema = scaffold.settingsSchema;
+				}
 				discovered.automations.push(automationDef);
 			}
 		}

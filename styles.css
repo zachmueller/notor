@@ -283,6 +283,15 @@
 	pointer-events: none;
 }
 
+/* Automation section column headers — same layout as tools but single toggle column */
+.notor-automation-column-headers {
+	display: flex;
+	justify-content: flex-end;
+	align-items: center;
+	gap: 8px;
+	padding: 0 18px 4px;
+}
+
 .notor-tool-divider {
 	margin: 16px 0;
 	border: none;

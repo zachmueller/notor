@@ -819,6 +819,9 @@ export default class NotorPlugin extends Plugin {
 
 		// One-time migration: initialize model presets for existing installs.
 		await this.migrateModelPresets();
+
+		// One-time migration: move title_generation_* into generic automation settings.
+		await this.migrateAutomationSettings();
 	}
 
 	/**
@@ -996,6 +999,32 @@ export default class NotorPlugin extends Plugin {
 				medium.model_id = activeConfig.model_id;
 				medium.use_extended_context = activeConfig.use_extended_context ?? false;
 			}
+		}
+
+		await this.saveSettings();
+	}
+
+	/**
+	 * Migrate legacy `title_generation_enabled` / `title_generation_preset`
+	 * into the generic `automation_enabled` / `user_extension_settings` system.
+	 */
+	private async migrateAutomationSettings(): Promise<void> {
+		// Skip if already migrated
+		if (this.settings.automation_enabled["title-generation"] !== undefined) return;
+
+		// Only migrate if the legacy fields were ever set (model presets migration sets them)
+		const legacyEnabled = (this.settings as unknown as Record<string, unknown>).title_generation_enabled;
+		if (legacyEnabled === undefined) return;
+
+		this.settings.automation_enabled["title-generation"] =
+			this.settings.title_generation_enabled ?? false;
+
+		const legacyPreset = this.settings.title_generation_preset;
+		if (legacyPreset) {
+			if (!this.settings.user_extension_settings["title-generation"]) {
+				this.settings.user_extension_settings["title-generation"] = {};
+			}
+			this.settings.user_extension_settings["title-generation"]["preset"] = legacyPreset;
 		}
 
 		await this.saveSettings();

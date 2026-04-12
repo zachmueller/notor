@@ -103,6 +103,16 @@ export function renderField(
 		return;
 	}
 
+	// Resolve dynamic options source before checking for dropdown
+	if (field.optionsSource && !field.options?.length) {
+		if (field.optionsSource === "model_presets") {
+			const presetNames = ctx.settings.model_presets
+				.filter((p) => p.provider_type !== null && p.model_id !== null)
+				.map((p) => p.name);
+			field = { ...field, options: presetNames };
+		}
+	}
+
 	// String with options -> dropdown
 	if (field.type === "string" && field.options && field.options.length > 0) {
 		const persisted = getPersistedValue(ctx, field, target);

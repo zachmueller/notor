@@ -68,6 +68,8 @@ export interface SettingsFieldSchema {
 	max?: number;
 	/** Constrains valid values — renders as dropdown for `string`, constrains Add input for `string[]`. */
 	options?: string[];
+	/** Dynamic options source key. When set, `options` is populated at render time (e.g. "model_presets"). */
+	optionsSource?: string;
 }
 
 // ---------------------------------------------------------------------------

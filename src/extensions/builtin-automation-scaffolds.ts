@@ -11,7 +11,7 @@
  * @see specs/ZZ-misc/model-presets-design.md — Section 12.1, Phase G
  */
 
-import type { AutomationTrigger } from "./types";
+import type { AutomationTrigger, SettingsFieldSchema } from "./types";
 
 /** Definition of a built-in automation scaffold (code-side constant). */
 export interface BuiltinAutomationScaffold {
@@ -26,6 +26,8 @@ export interface BuiltinAutomationScaffold {
 	 * and TS code fence — identical to what gets written to the vault.
 	 */
 	scaffoldContent: string;
+	/** Optional settings schema for per-automation settings (rendered in gear modal). */
+	settingsSchema?: SettingsFieldSchema[];
 }
 
 /**
@@ -38,6 +40,16 @@ export const BUILTIN_AUTOMATION_SCAFFOLDS: ReadonlyMap<string, BuiltinAutomation
 			name: "title-generation",
 			displayName: "Title Generation",
 			trigger: "on_conversation_start" as AutomationTrigger,
+			settingsSchema: [
+				{
+					key: "preset",
+					name: "Title generation preset",
+					type: "string",
+					description: "The model preset used for LLM title generation calls.",
+					optionsSource: "model_presets",
+					default: "small",
+				},
+			],
 			scaffoldContent:
 `---
 notor-type: automation
@@ -59,11 +71,15 @@ post-processing. Reload extensions to apply changes.
 const messageText = context.firstMessage as string;
 if (!messageText || messageText.length < 10) return;
 
-// Plugin-level settings are passed via context (not the per-extension "settings" argument)
+// Check enabled state via automation_enabled (fallback to legacy title_generation_enabled)
 const pluginSettings = context.pluginSettings as Record<string, unknown>;
-const presetName = pluginSettings.title_generation_preset as string ?? "small";
-const enabled = pluginSettings.title_generation_enabled as boolean ?? false;
+const automationEnabled = pluginSettings.automation_enabled as Record<string, boolean> | undefined;
+const enabled = automationEnabled?.["title-generation"] ?? (pluginSettings.title_generation_enabled as boolean ?? false);
 if (!enabled) return;
+
+// Preset from per-extension settings (fallback to legacy title_generation_preset)
+const presetName = (settings as Record<string, unknown>).preset as string
+  ?? (pluginSettings.title_generation_preset as string ?? "small");
 
 const llmCall = context.llmCall as (preset: string, msgs: Array<{role: string; content: string}>) => Promise<string | null>;
 if (!llmCall) return;

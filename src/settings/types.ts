@@ -81,6 +81,9 @@ export interface NotorSettings {
 	/** Per-tool enabled/disabled state. Tools default to enabled when absent. */
 	tool_enabled: Record<string, boolean>;
 
+	/** Per-automation enabled/disabled state. Automations default to enabled when absent. */
+	automation_enabled: Record<string, boolean>;
+
 	/** Current Plan/Act mode. */
 	mode: ConversationMode;
 
