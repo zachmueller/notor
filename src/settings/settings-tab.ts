@@ -150,6 +150,10 @@ export class NotorSettingTab extends PluginSettingTab {
 			ctx.saveSettings();
 		};
 
+		// --- General (expanded by default) ---
+		const generalGroup = createSettingsGroup(containerEl, "General", true, persisted, onToggle);
+		renderGeneralSection(generalGroup, ctx);
+
 		// --- Provider Setup (expanded by default) ---
 		const providerGroup = createSettingsGroup(containerEl, "Provider setup", true, persisted, onToggle);
 		renderActiveProviderSection(providerGroup, ctx);
@@ -160,7 +164,6 @@ export class NotorSettingTab extends PluginSettingTab {
 
 		// --- Conversation (expanded by default) ---
 		const conversationGroup = createSettingsGroup(containerEl, "Conversation", true, persisted, onToggle);
-		renderGeneralSection(conversationGroup, ctx);
 		renderAutoContextSection(conversationGroup, ctx);
 		renderCompactionSection(conversationGroup, ctx);
 		renderFileAttachmentsSection(conversationGroup, ctx);

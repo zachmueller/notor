@@ -3,7 +3,8 @@
  *
  * When Notor reads or modifies a note, it optionally opens the note in an
  * editor leaf so the user can follow along. Respects the `open_notes_on_access`
- * setting. Avoids opening duplicate tabs for the same note.
+ * and `focus_notes_on_access` settings. Avoids opening duplicate tabs for the
+ * same note.
  *
  * @see specs/01-mvp/spec.md — FR-13
  * @see design/ux.md — note opening, editor behavior
@@ -19,29 +20,43 @@ const log = logger("NoteOpener");
  * Utility for opening notes in the Obsidian editor after tool reads/writes.
  *
  * Behaviour:
- * - If the note is already open in a leaf, that leaf is activated (brought
- *   to the front) rather than opening a new tab.
- * - If the note is not open, it is opened in a new leaf using the workspace
- *   `openLinkText` method.
+ * - If opening is disabled (`open_notes_on_access` = false), all calls are
+ *   no-ops.
+ * - If focusing is disabled (`focus_notes_on_access` = false), notes open in
+ *   background tabs without stealing focus from the chat panel.
+ * - If focusing is enabled, notes are activated and given editor focus.
+ * - If the note is already open in a leaf and focus is disabled, the call is a
+ *   no-op. If focus is enabled, the existing leaf is activated.
  * - Does nothing for non-existent files (safe to call before creation).
- * - Does nothing when `open_notes_on_access` is false.
  */
 export class NoteOpener {
 	/** Whether to open notes on access (mirrors `open_notes_on_access` setting). */
-	private enabled: boolean;
+	private openEnabled: boolean;
+
+	/** Whether to focus opened notes (mirrors `focus_notes_on_access` setting). */
+	private focusEnabled: boolean;
 
 	constructor(
 		private readonly app: App,
-		enabled: boolean
+		openEnabled: boolean,
+		focusEnabled: boolean
 	) {
-		this.enabled = enabled;
+		this.openEnabled = openEnabled;
+		this.focusEnabled = focusEnabled;
 	}
 
 	/**
-	 * Update the enabled state when settings change.
+	 * Update the open-enabled state when settings change.
 	 */
 	setEnabled(enabled: boolean): void {
-		this.enabled = enabled;
+		this.openEnabled = enabled;
+	}
+
+	/**
+	 * Update the focus-enabled state when settings change.
+	 */
+	setFocusEnabled(enabled: boolean): void {
+		this.focusEnabled = enabled;
 	}
 
 	/**
@@ -50,7 +65,7 @@ export class NoteOpener {
 	 * @param notePath - Vault-relative path to the note
 	 */
 	async openNote(notePath: string): Promise<void> {
-		if (!this.enabled) return;
+		if (!this.openEnabled) return;
 
 		// Resolve the file — skip if it doesn't exist yet (e.g., before creation)
 		const file = this.app.vault.getFileByPath(notePath);
@@ -64,15 +79,25 @@ export class NoteOpener {
 			const existingLeaf = this.findExistingLeaf(file);
 
 			if (existingLeaf) {
-				// Activate the existing leaf rather than opening a duplicate
-				this.app.workspace.setActiveLeaf(existingLeaf, { focus: false });
-				log.debug("Activated existing leaf", { notePath });
-			} else {
-				// Open in a new leaf (background, don't steal focus from chat panel).
+				if (this.focusEnabled) {
+					// User opted in to focus — activate and focus the existing leaf
+					this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+					log.debug("Focused existing leaf", { notePath });
+				}
+				// When focus is disabled and the note is already open, do nothing —
+				// it's already visible in a tab somewhere.
+				log.debug("Note already open, skipping (focus disabled)", { notePath });
+			} else if (this.focusEnabled) {
+				// Open in a new leaf and make it active + focused.
 				// Pass newLeaf=true so Obsidian creates a fresh tab rather than
 				// replacing whatever the user currently has open in the active leaf.
 				await this.app.workspace.openLinkText(notePath, "", true);
-				log.debug("Opened note in new leaf", { notePath });
+				log.debug("Opened note in new leaf (focused)", { notePath });
+			} else {
+				// Open in a background tab — don't steal focus from the chat panel.
+				const leaf = this.app.workspace.getLeaf("tab");
+				await leaf.openFile(file, { active: false });
+				log.debug("Opened note in background tab", { notePath });
 			}
 		} catch (e) {
 			// Non-fatal — log and continue

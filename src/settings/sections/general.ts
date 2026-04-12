@@ -12,8 +12,6 @@ export function renderGeneralSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
-	new Setting(containerEl).setHeading().setName("General");
-
 	new Setting(containerEl)
 		.setName("Notor directory")
 		.setDesc(
@@ -41,6 +39,21 @@ export function renderGeneralSection(
 				.setValue(ctx.settings.open_notes_on_access)
 				.onChange(async (value) => {
 					ctx.settings.open_notes_on_access = value;
+					await ctx.saveSettings();
+				})
+		);
+
+	new Setting(containerEl)
+		.setName("Focus notes on access")
+		.setDesc(
+			"When a note is opened by the AI, make it the active tab and give it editor focus. " +
+				"When disabled, notes open in background tabs without interrupting your current view."
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(ctx.settings.focus_notes_on_access)
+				.onChange(async (value) => {
+					ctx.settings.focus_notes_on_access = value;
 					await ctx.saveSettings();
 				})
 		);

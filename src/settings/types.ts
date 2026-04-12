@@ -87,6 +87,9 @@ export interface NotorSettings {
 	/** Open notes in editor when AI reads/modifies them. */
 	open_notes_on_access: boolean;
 
+	/** Set opened notes as the active tab and give them editor focus. */
+	focus_notes_on_access: boolean;
+
 	/** Chat history storage path (vault-relative). */
 	history_path: string;
 

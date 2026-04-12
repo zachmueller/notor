@@ -1305,6 +1305,7 @@ export default class NotorPlugin extends Plugin {
 
 		if (this._noteOpener) {
 			this._noteOpener.setEnabled(this.settings.open_notes_on_access);
+			this._noteOpener.setFocusEnabled(this.settings.focus_notes_on_access);
 		}
 
 		if (this._historyManager) {
@@ -1466,7 +1467,8 @@ export default class NotorPlugin extends Plugin {
 		if (!this._noteOpener) {
 			this._noteOpener = new NoteOpener(
 				this.app,
-				this.settings.open_notes_on_access
+				this.settings.open_notes_on_access,
+				this.settings.focus_notes_on_access
 			);
 		}
 		return this._noteOpener;

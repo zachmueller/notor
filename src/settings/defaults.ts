@@ -109,6 +109,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	tool_enabled: DEFAULT_TOOL_ENABLED,
 	mode: "plan",
 	open_notes_on_access: true,
+	focus_notes_on_access: false,
 	history_path: `${configDir}/plugins/notor/history/`,
 	history_max_size_mb: 500,
 	history_max_age_days: 90,
