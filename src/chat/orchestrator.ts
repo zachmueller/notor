@@ -36,6 +36,7 @@ import { assembleUserMessage, assembleUserContent } from "../context/message-ass
 import type { Attachment } from "../context/attachment";
 import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment";
 import type { LifecycleAutomationAccessors, ToolEventAutomationAccessors } from "../hooks/hook-events";
+import { dispatchOnConversationStart } from "../hooks/hook-events";
 import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-override";
 import type { Workflow, WorkflowExecutionRequest, VaultRule } from "../types";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
@@ -731,9 +732,14 @@ export class ChatOrchestrator implements ToolSessionContext {
 				(m) => m.role === "user" && !m.is_hook_injection
 			);
 			if (userMessages.length === 1) {
-				this.fireConversationStartTrigger(content, conv).catch((e) => {
-					log.warn("on_conversation_start trigger failed", { error: String(e) });
-				});
+				dispatchOnConversationStart(
+					{
+						conversationId: conv.id,
+						firstMessage: content,
+						timestamp: new Date().toISOString(),
+					},
+					this.extensionLifecycleAccessors,
+				);
 			}
 		}
 
@@ -1357,90 +1363,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 		this.activePresetName = presetName;
 	}
 
-
-	/**
-	 * Fire `on_conversation_start` automations asynchronously (non-blocking).
-	 *
-	 * Builds the conversation metadata API and fires all registered automations
-	 * for the trigger in parallel with error isolation.
-	 *
-	 * @see specs/ZZ-misc/model-presets-design.md — Section 10
-	 */
-	private async fireConversationStartTrigger(firstMessageText: string, conversation: Conversation): Promise<void> {
-		if (!this.extensionLifecycleAccessors) return;
-
-		const automations = this.extensionLifecycleAccessors.getForTrigger("on_conversation_start");
-		if (automations.length === 0) return;
-
-		// Build conversation metadata API (safe subset)
-		const convManager = this.conversationManager;
-		const conversationApi = {
-			getTitle: () => convManager.getActiveConversation()?.title,
-			setTitle: async (title: string) => {
-				convManager.setTitle(title);
-			},
-			isFavorite: () => convManager.getActiveConversation()?.is_favorite ?? false,
-			setFavorite: async (favorite: boolean) => {
-				convManager.setFavorite(favorite);
-			},
-		};
-
-		// Build llmCall helper for automations that need LLM access
-		const registry = this.providerRegistry;
-		const settings = this.settings;
-		const llmCall = async (
-			presetName: string,
-			messages: Array<{ role: string; content: string }>,
-		): Promise<string | null> => {
-			const { resolvePreset: resolve } = await import("../presets/preset-resolver");
-			const resolved = resolve(presetName, settings.model_presets);
-			if (!resolved) return null;
-
-			try {
-				const provider = registry.getProvider(resolved.providerType);
-				const stream = provider.sendMessage(
-					messages.map((m) => ({
-						role: m.role as "user" | "assistant" | "system",
-						content: m.content,
-					})),
-					[], // no tools
-					{ model: resolved.modelId },
-				);
-				// Collect text_delta chunks from the stream
-				let text = "";
-				for await (const chunk of stream) {
-					if (chunk.type === "text_delta") {
-						text += chunk.text;
-					} else if (chunk.type === "error") {
-						log.warn("llmCall stream error", { error: chunk.error });
-						return text || null;
-					}
-				}
-				return text || null;
-			} catch (e) {
-				log.warn("llmCall in on_conversation_start failed", { preset: presetName, error: String(e) });
-				return null;
-			}
-		};
-
-		const context: Record<string, unknown> = {
-			conversationId: conversation.id,
-			firstMessage: firstMessageText,
-			conversationApi,
-			llmCall,
-			pluginSettings: this.settings,
-		};
-
-		// Execute all automations in parallel, fire-and-forget with error logging
-		for (const automation of automations) {
-			this.extensionLifecycleAccessors.execute(automation, context).catch((e) => {
-				log.warn("on_conversation_start automation failed", {
-					automation: automation.filePath,
-					error: String(e),
-				});
-			});
-		}
-	}
 
 	/** Render a message in the view based on its role. */
 	private renderMessage(message: Message): void {

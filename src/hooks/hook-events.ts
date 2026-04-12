@@ -797,3 +797,65 @@ export function dispatchAfterCompletion(
 		});
 	})();
 }
+
+// ---------------------------------------------------------------------------
+// on_conversation_start dispatch (fire-and-forget, extension automations only)
+// ---------------------------------------------------------------------------
+
+/** Context for on_conversation_start dispatch. */
+export interface ConversationStartContext {
+	conversationId: string;
+	firstMessage: string;
+	timestamp: string;
+}
+
+/**
+ * Dispatch all `on_conversation_start` automations non-blocking.
+ *
+ * Fires once per conversation after the first user message is submitted,
+ * before the LLM call.
+ *
+ * NOTE: Unlike other dispatchers, this handles only extension automations —
+ * no shell hooks and no workflow-scoped override support. This is intentional:
+ * `on_conversation_start` has no corresponding shell hook trigger, and workflow
+ * overrides are not applicable to conversation-level events.
+ */
+export function dispatchOnConversationStart(
+	context: ConversationStartContext,
+	extensionAutomations?: LifecycleAutomationAccessors,
+): void {
+	const automations = extensionAutomations?.getForTrigger("on_conversation_start") ?? [];
+	if (automations.length === 0) return;
+
+	log.info("Dispatching on_conversation_start automations", {
+		count: automations.length,
+	});
+
+	void (async () => {
+		const automationCtx: Record<string, unknown> = {
+			hookEvent: "on_conversation_start",
+			timestamp: context.timestamp,
+			conversationId: context.conversationId,
+			firstMessage: context.firstMessage,
+		};
+		for (const automation of automations) {
+			try {
+				await extensionAutomations!.execute(automation, automationCtx);
+			} catch (e) {
+				const displayName = automation.displayName ?? automation.filePath;
+				const message = e instanceof Error ? e.message : String(e);
+				new Notice(`Automation error in ${displayName}: ${message}`);
+				log.error("User automation execution failed", {
+					automation: displayName,
+					trigger: "on_conversation_start",
+					error: String(e),
+					stack: e instanceof Error ? e.stack : undefined,
+				});
+			}
+		}
+
+		log.info("on_conversation_start automations complete", {
+			count: automations.length,
+		});
+	})();
+}

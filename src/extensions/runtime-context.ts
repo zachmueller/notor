@@ -109,6 +109,31 @@ export interface ExtensionUtils {
 	webSearch: {
 		search: (query: string, numResults: number, timeoutMs: number, signal?: AbortSignal) => Promise<WebSearchApiResult>;
 	};
+	/**
+	 * Make an LLM call using a named model preset.
+	 *
+	 * Resolves the preset to a provider+model, sends the messages, and
+	 * collects the streaming response into a string. Returns null if the
+	 * preset is unconfigured or the call fails.
+	 *
+	 * A recursion depth guard (max depth 1) prevents unbounded LLM→tool→LLM loops.
+	 */
+	llmCall: (
+		presetName: string,
+		messages: Array<{ role: string; content: string }>,
+	) => Promise<string | null>;
+	/**
+	 * API for reading/writing conversation metadata.
+	 *
+	 * Returns null when no active conversation exists (e.g., tool executed
+	 * outside a conversation context).
+	 */
+	conversationApi: {
+		getTitle: () => string | undefined;
+		setTitle: (title: string) => void;
+		isFavorite: () => boolean;
+		setFavorite: (favorite: boolean) => void;
+	} | null;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 }
@@ -116,10 +141,15 @@ export interface ExtensionUtils {
 /**
  * Build the `utils` object for extensions.
  *
+ * @param plugin - The plugin instance.
+ * @param conversationId - Optional conversation ID. When provided, `conversationApi`
+ *   is bound to the correct conversation via ID lookup. When omitted, `conversationApi`
+ *   is null.
+ *
  * Note: `abortSignal` is NOT included — it's per-call only.
  * `UserToolAdapter.execute()` merges it into the returned object per-invocation.
  */
-export function buildUtils(plugin: NotorPlugin): ExtensionUtils {
+export function buildUtils(plugin: NotorPlugin, conversationId?: string): ExtensionUtils {
 	const vaultRootPath = (plugin.app.vault.adapter as { basePath?: string }).basePath ?? "";
 
 	return {
@@ -211,6 +241,68 @@ export function buildUtils(plugin: NotorPlugin): ExtensionUtils {
 			search: (query: string, numResults: number, timeoutMs: number, signal?: AbortSignal) =>
 				plugin.getWebSearchQueue().search(query, numResults, timeoutMs, signal),
 		},
+
+		llmCall: (() => {
+			const log = logger("ext:llmCall");
+			let depth = 0;
+			return async (
+				presetName: string,
+				messages: Array<{ role: string; content: string }>,
+			): Promise<string | null> => {
+				if (depth >= 1) {
+					log.warn("llmCall recursion depth exceeded");
+					return null;
+				}
+				const { resolvePreset: resolve } = await import("../presets/preset-resolver");
+				const resolved = resolve(presetName, plugin.settings.model_presets);
+				if (!resolved) return null;
+
+				depth++;
+				try {
+					const provider = plugin.getProviderRegistry().getProvider(resolved.providerType);
+					const stream = provider.sendMessage(
+						messages.map((m) => ({
+							role: m.role as "user" | "assistant" | "system",
+							content: m.content,
+						})),
+						[], // no tools
+						{ model: resolved.modelId },
+					);
+					let text = "";
+					for await (const chunk of stream) {
+						if (chunk.type === "text_delta") {
+							text += chunk.text;
+						} else if (chunk.type === "error") {
+							log.warn("llmCall stream error", { error: chunk.error });
+							return text || null;
+						}
+					}
+					return text || null;
+				} catch (e) {
+					log.warn("llmCall failed", { preset: presetName, error: String(e) });
+					return null;
+				} finally {
+					depth--;
+				}
+			};
+		})(),
+
+		conversationApi: (() => {
+			if (!conversationId) return null;
+			const orchestrator = plugin.getActiveOrchestrator?.();
+			if (!orchestrator) return null;
+			const convManager = orchestrator.getConversationManager();
+			if (!convManager) return null;
+			// Verify the conversation exists
+			const conv = convManager.getActiveConversation();
+			if (!conv || conv.id !== conversationId) return null;
+			return {
+				getTitle: () => convManager.getActiveConversation()?.title,
+				setTitle: (title: string) => { convManager.setTitle(title); },
+				isFavorite: () => convManager.getActiveConversation()?.is_favorite ?? false,
+				setFavorite: (favorite: boolean) => { convManager.setFavorite(favorite); },
+			};
+		})(),
 	};
 }
 

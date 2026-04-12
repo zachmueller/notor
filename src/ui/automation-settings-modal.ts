@@ -106,7 +106,8 @@ export class AutomationSettingsModal extends Modal {
 		const settingsSchema = automationDef?.settingsSchema ?? scaffold?.settingsSchema;
 		if (settingsSchema && settingsSchema.length > 0) {
 			new Setting(contentEl).setHeading().setName("Settings");
-			const extensionName = this.automationName;
+			// Use displayName as extension key — must match executeAutomation()'s extensionName
+			const extensionName = displayName;
 			const target: FieldTarget = {
 				kind: "extension",
 				extensionName,

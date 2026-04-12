@@ -59,7 +59,8 @@ notor-display-name: Title Generation
 
 Automatically generates a descriptive conversation title using an LLM call.
 Fires once when the first user message is sent. The title generation preset
-and enable/disable toggle are controlled from Automation settings.
+is configured via the gear icon in Automation settings; the enable/disable
+toggle controls whether this automation runs.
 
 Edit the code below to customize the prompt, model selection, or title
 post-processing. Reload extensions to apply changes.
@@ -67,33 +68,25 @@ post-processing. Reload extensions to apply changes.
 \`\`\`ts
 // Built-in: title-generation automation
 // Trigger: on_conversation_start
+// Settings: preset (model preset name, resolved via settingsSchema)
 
 const messageText = context.firstMessage as string;
 if (!messageText || messageText.length < 10) return;
 
-// Check enabled state via automation_enabled (fallback to legacy title_generation_enabled)
-const pluginSettings = context.pluginSettings as Record<string, unknown>;
-const automationEnabled = pluginSettings.automation_enabled as Record<string, boolean> | undefined;
-const enabled = automationEnabled?.["title-generation"] ?? (pluginSettings.title_generation_enabled as boolean ?? false);
-if (!enabled) return;
+// Read preset from per-extension settings (resolved via settingsSchema defaults)
+const presetName = (settings as Record<string, unknown>).preset as string;
+if (!presetName) return;
 
-// Preset from per-extension settings (fallback to legacy title_generation_preset)
-const presetName = (settings as Record<string, unknown>).preset as string
-  ?? (pluginSettings.title_generation_preset as string ?? "small");
-
-const llmCall = context.llmCall as (preset: string, msgs: Array<{role: string; content: string}>) => Promise<string | null>;
-if (!llmCall) return;
-
-const response = await llmCall(presetName, [
+// Use utils.llmCall (available to all extensions) and utils.conversationApi
+const response = await utils.llmCall(presetName, [
   { role: "system", content: "Generate a concise title (5-8 words) for this conversation based on the user's message. Reply with ONLY the title text, no quotes, no punctuation wrapping." },
   { role: "user", content: messageText.substring(0, 500) },
 ]);
 if (!response) return;
 
 const title = response.trim();
-if (title) {
-  const api = context.conversationApi as { setTitle: (t: string) => Promise<void> };
-  await api.setTitle(title);
+if (title && utils.conversationApi) {
+  utils.conversationApi.setTitle(title);
 }
 \`\`\`
 `,

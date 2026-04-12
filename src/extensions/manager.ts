@@ -331,6 +331,14 @@ export class ExtensionManager {
 				builtinOverrides.push(toolName);
 			}
 		}
+		// Also detect automation overrides (vault files with same name as scaffold)
+		for (const [, automation] of compiledAutomations) {
+			if (automation.isScaffold) continue;
+			const filename = automation.filePath.split("/").pop()?.replace(/\.md$/, "") ?? "";
+			if (BUILTIN_AUTOMATION_SCAFFOLDS.has(filename)) {
+				builtinOverrides.push(filename);
+			}
+		}
 
 		// 6. Unregister previous user tools
 		for (const name of this.registeredToolNames) {
@@ -366,7 +374,7 @@ export class ExtensionManager {
 		const automationCount = compiledAutomations.size;
 
 		if (builtinOverrides.length > 0) {
-			new Notice(`User extensions override built-in tools: ${builtinOverrides.join(", ")}`);
+			new Notice(`User extensions override built-ins: ${builtinOverrides.join(", ")}`);
 		}
 
 		const summary = `Extensions reloaded: ${toolCount} tool${toolCount !== 1 ? "s" : ""}, ${automationCount} automation${automationCount !== 1 ? "s" : ""}` +
@@ -459,6 +467,12 @@ export class ExtensionManager {
 			throw new Error(`Automation '${automation.displayName ?? automation.filePath}' has no compiled function`);
 		}
 
+		// Check automation_enabled — keyed by filename (e.g., "title-generation")
+		const filename = automation.filePath.split("/").pop()?.replace(/\.md$/, "") ?? "";
+		const defaultEnabled = filename === "title-generation" ? false : true;
+		const isEnabled = this.plugin.settings.automation_enabled[filename] ?? defaultEnabled;
+		if (!isEnabled) return;
+
 		const extensionName = automation.displayName ?? automation.filePath;
 
 		// Resolve per-extension settings (sync)
@@ -474,8 +488,9 @@ export class ExtensionManager {
 		// Resolve shared settings (sync)
 		const { values: shared } = this.getResolvedSharedSettings();
 
-		// Build runtime context
-		const utils = buildUtils(this.plugin);
+		// Build runtime context — pass conversationId so utils.conversationApi can bind
+		const conversationId = typeof context.conversationId === "string" ? context.conversationId : undefined;
+		const utils = buildUtils(this.plugin, conversationId);
 		const libs = this.getCachedLibs();
 		const obsidian = this.getCachedObsidianExports();
 

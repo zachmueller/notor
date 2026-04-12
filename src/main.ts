@@ -986,8 +986,12 @@ export default class NotorPlugin extends Plugin {
 
 		this.settings.model_presets = DEFAULT_MODEL_PRESETS.map((p) => ({ ...p }));
 		this.settings.default_preset = "medium";
-		this.settings.title_generation_enabled = false;
-		this.settings.title_generation_preset = "small";
+		// Title generation defaults: disabled, "small" preset — stored in generic systems
+		this.settings.automation_enabled["title-generation"] = false;
+		if (!this.settings.user_extension_settings["Title Generation"]) {
+			this.settings.user_extension_settings["Title Generation"] = {};
+		}
+		this.settings.user_extension_settings["Title Generation"]["preset"] = "small";
 
 		// Auto-configure the "medium" preset from the current active provider+model
 		const activeType = this.settings.active_provider;
@@ -1019,13 +1023,20 @@ export default class NotorPlugin extends Plugin {
 		this.settings.automation_enabled["title-generation"] =
 			this.settings.title_generation_enabled ?? false;
 
+		// Extension key must match displayName used by executeAutomation()
+		const extKey = "Title Generation";
 		const legacyPreset = this.settings.title_generation_preset;
 		if (legacyPreset) {
-			if (!this.settings.user_extension_settings["title-generation"]) {
-				this.settings.user_extension_settings["title-generation"] = {};
+			if (!this.settings.user_extension_settings[extKey]) {
+				this.settings.user_extension_settings[extKey] = {};
 			}
-			this.settings.user_extension_settings["title-generation"]["preset"] = legacyPreset;
+			this.settings.user_extension_settings[extKey]["preset"] = legacyPreset;
 		}
+
+		// Remove legacy fields from persisted data
+		const raw = this.settings as unknown as Record<string, unknown>;
+		delete raw.title_generation_enabled;
+		delete raw.title_generation_preset;
 
 		await this.saveSettings();
 	}

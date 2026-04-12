@@ -353,16 +353,14 @@ export interface NotorSettings {
 	default_preset: string;
 
 	/**
-	 * Whether the built-in title generation automation is enabled. Default: false.
-	 *
-	 * @see specs/ZZ-misc/model-presets-design.md — Section 12
+	 * @deprecated Migrated to `automation_enabled["title-generation"]`.
+	 * Kept temporarily for migration support; will be removed in a future version.
 	 */
 	title_generation_enabled: boolean;
 
 	/**
-	 * Preset name to use for title generation LLM calls. Default: "small".
-	 *
-	 * @see specs/ZZ-misc/model-presets-design.md — Section 12
+	 * @deprecated Migrated to `user_extension_settings["Title Generation"].preset`.
+	 * Kept temporarily for migration support; will be removed in a future version.
 	 */
 	title_generation_preset: string;
 
