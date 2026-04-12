@@ -17,6 +17,7 @@ import type { MetadataCache, Vault } from "obsidian";
 import type { Persona, LLMProviderType } from "../types";
 import type { NotorSettings } from "../settings";
 import type { ProviderRegistry } from "../providers/index";
+import { resolvePreset } from "../presets/preset-resolver";
 import { discoverPersonas } from "./persona-discovery";
 import { logger } from "../utils/logger";
 
@@ -286,7 +287,43 @@ export class PersonaManager {
 	 * non-blocking notice (A-008).
 	 */
 	private applyProviderModelOverrides(persona: Persona): void {
-		// --- Provider switch ---
+		// --- Preset resolution (highest priority) ---
+		if (persona.preferred_preset) {
+			const resolved = resolvePreset(persona.preferred_preset, this.settings.model_presets);
+			if (resolved) {
+				try {
+					const config = this.providerRegistry.getConfig(resolved.providerType);
+					if (config) {
+						this.providerRegistry.switchProvider(resolved.providerType);
+						const updated = {
+							...config,
+							model_id: resolved.modelId,
+							use_extended_context: resolved.useExtendedContext,
+						};
+						this.providerRegistry.updateConfig(updated);
+						log.info("Applied preset override for persona", {
+							persona: persona.name,
+							preset: persona.preferred_preset,
+							provider: resolved.providerType,
+							model: resolved.modelId,
+						});
+						return; // Preset fully applied — skip legacy provider/model overrides
+					}
+				} catch (e) {
+					log.warn("Failed to apply persona preset override", {
+						persona: persona.name,
+						preset: persona.preferred_preset,
+						error: String(e),
+					});
+				}
+			}
+			// Preset not configured or failed — fall through to legacy overrides
+			new Notice(
+				`Preset '${persona.preferred_preset}' not available; falling back to provider/model overrides.`
+			);
+		}
+
+		// --- Provider switch (legacy fallback) ---
 		if (persona.preferred_provider) {
 			try {
 				// Verify the provider is configured
