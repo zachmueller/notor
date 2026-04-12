@@ -83,6 +83,7 @@ export class ConversationManager {
 			is_background?: boolean;
 			title?: string;
 			use_extended_context?: boolean;
+			preset_name?: string | null;
 		}
 	): Conversation {
 		const now = new Date().toISOString();
@@ -96,6 +97,10 @@ export class ConversationManager {
 			total_output_tokens: 0,
 			estimated_cost: null,
 			mode: mode ?? this.defaultMode,
+			// Preset name tracking
+			...(workflowMetadata?.preset_name !== undefined && {
+				preset_name: workflowMetadata.preset_name,
+			}),
 			// Workflow metadata (E-013) — undefined fields are omitted from JSONL
 			...(workflowMetadata?.workflow_path !== undefined && {
 				workflow_path: workflowMetadata.workflow_path,

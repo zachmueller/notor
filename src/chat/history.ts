@@ -72,6 +72,8 @@ export interface ConversationListEntry {
 	forked_from_conversation_id?: string;
 	/** Whether this conversation is marked as a favorite. */
 	is_favorite?: boolean;
+	/** Preset name active when conversation was created. */
+	preset_name?: string;
 }
 
 /**
@@ -559,6 +561,7 @@ export class HistoryManager {
 					filename,
 					forked_from_conversation_id: headerObj.forked_from_conversation_id as string | undefined,
 					is_favorite: !!headerObj.is_favorite,
+					preset_name: headerObj.preset_name as string | undefined,
 				});
 			} catch (e) {
 				log.warn("Failed to read conversation header", {
@@ -670,6 +673,7 @@ export class HistoryManager {
 					filename,
 					forked_from_conversation_id: headerObj.forked_from_conversation_id as string | undefined,
 					is_favorite: !!headerObj.is_favorite,
+					preset_name: headerObj.preset_name as string | undefined,
 				});
 			} catch (e) {
 				log.warn("Failed to search conversation", {

@@ -12,6 +12,7 @@
 import { Notice } from "obsidian";
 import type { Conversation, LLMProviderType, Message } from "../types";
 import { buildOptionValue } from "../providers/model-grouping";
+import { isPresetStale } from "../presets/preset-resolver";
 import type { ConversationManager } from "./conversation";
 import type { HistoryManager } from "./history";
 import type { ConversationSession } from "./conversation-session";
@@ -45,6 +46,8 @@ export class ConversationLifecycleManager {
 		private readonly setActiveProviderType: (type: LLMProviderType) => void,
 		private readonly setActiveModelId: (modelId: string) => void,
 		private readonly setActiveUseExtendedContext: (useExtended: boolean) => void,
+		private readonly getActivePresetName: () => string | null,
+		private readonly setActivePresetName: (name: string | null) => void,
 	) {}
 
 	/**
@@ -74,11 +77,16 @@ export class ConversationLifecycleManager {
 			? convManager.getMode()
 			: settings.mode;
 
+		const presetName = this.getActivePresetName();
+		const useExtendedContext = this.getActiveUseExtendedContext();
 		const conversation = convManager.createConversation(
 			providerType,
 			modelId,
 			currentMode,
-			this.getActiveUseExtendedContext() ? { use_extended_context: true } : undefined
+			{
+				...(useExtendedContext && { use_extended_context: true }),
+				...(presetName !== undefined && { preset_name: presetName }),
+			},
 		);
 
 		// Capture active persona into header
@@ -178,18 +186,31 @@ export class ConversationLifecycleManager {
 				view?.updatePersonaLabel(this.getPersonaManager()?.getActivePersona() ?? null);
 			}
 
-			// Display-restore provider/model from conversation header
-			if (conversation.provider_id) {
-				view?.updateProviderDisplay(conversation.provider_id as LLMProviderType);
-			}
-			if (conversation.model_id) {
-				view?.updateModelDisplay(
-					buildOptionValue(conversation.model_id, conversation.use_extended_context ?? false)
+			// Display-restore preset (or provider/model for legacy conversations)
+			if (conversation.preset_name) {
+				const stale = isPresetStale(
+					conversation.preset_name,
+					conversation.provider_id,
+					conversation.model_id,
+					this.getSettings().model_presets,
 				);
+				view?.updatePresetDisplay(stale ? null : conversation.preset_name);
+			} else {
+				// Legacy conversation or Custom — show as Custom with provider/model overrides
+				view?.updatePresetDisplay(null);
+				if (conversation.provider_id) {
+					view?.updateProviderDisplay(conversation.provider_id as LLMProviderType);
+				}
+				if (conversation.model_id) {
+					view?.updateModelDisplay(
+						buildOptionValue(conversation.model_id, conversation.use_extended_context ?? false)
+					);
+				}
 			}
 
 			// Sync per-orchestrator state so subsequent actions (new conversation,
 			// getCurrentModel callback) reflect the loaded conversation's model.
+			this.setActivePresetName(conversation.preset_name ?? null);
 			if (conversation.provider_id) {
 				this.setActiveProviderType(conversation.provider_id as LLMProviderType);
 			}
@@ -246,14 +267,31 @@ export class ConversationLifecycleManager {
 
 		// Display-restore from session's pinned state
 		view?.updatePersonaLabel(activeSession.pinnedPersona);
+		// Preset-aware display restore
+		this.setActivePresetName(sessionConv.preset_name ?? null);
+		if (sessionConv.preset_name) {
+			const stale = isPresetStale(
+				sessionConv.preset_name,
+				sessionConv.provider_id,
+				sessionConv.model_id,
+				this.getSettings().model_presets,
+			);
+			view?.updatePresetDisplay(stale ? null : sessionConv.preset_name);
+		} else {
+			view?.updatePresetDisplay(null);
+			if (sessionConv.provider_id) {
+				view?.updateProviderDisplay(sessionConv.provider_id as LLMProviderType);
+			}
+			if (sessionConv.model_id) {
+				view?.updateModelDisplay(
+					buildOptionValue(sessionConv.model_id, activeSession.useExtendedContext)
+				);
+			}
+		}
 		if (sessionConv.provider_id) {
-			view?.updateProviderDisplay(sessionConv.provider_id as LLMProviderType);
 			this.setActiveProviderType(sessionConv.provider_id as LLMProviderType);
 		}
 		if (sessionConv.model_id) {
-			view?.updateModelDisplay(
-				buildOptionValue(sessionConv.model_id, activeSession.useExtendedContext)
-			);
 			this.setActiveModelId(sessionConv.model_id);
 			this.setActiveUseExtendedContext(activeSession.useExtendedContext);
 		}

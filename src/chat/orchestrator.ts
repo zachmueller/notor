@@ -240,6 +240,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 			(type) => { this.activeProviderType = type; },
 			(modelId) => { this.activeModelId = modelId; },
 			(useExtended) => { this.activeUseExtendedContext = useExtended; },
+			() => this.activePresetName,
+			(name) => { this.activePresetName = name; },
 		);
 		this.workflowExecutor = new WorkflowExecutor({
 			app: this.app,
