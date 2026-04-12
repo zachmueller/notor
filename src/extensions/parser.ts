@@ -26,6 +26,7 @@ const VALID_TRIGGERS = new Set<string>([
 	"on_tool_call",
 	"on_tool_result",
 	"after_completion",
+	"on_conversation_start",
 	"on_note_open",
 	"on_note_create",
 	"on_save",

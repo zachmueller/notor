@@ -489,6 +489,28 @@ export class ConversationManager {
 	// -----------------------------------------------------------------------
 
 	/**
+	 * Set the conversation title programmatically. Fires onConversationChanged.
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 11.3
+	 */
+	setTitle(title: string): void {
+		if (!this.activeConversation) throw new Error("No active conversation");
+		this.activeConversation.title = title;
+		void this.onConversationChanged?.(this.activeConversation);
+	}
+
+	/**
+	 * Set the favorite state programmatically. Fires onConversationChanged.
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 11.3
+	 */
+	setFavorite(favorite: boolean): void {
+		if (!this.activeConversation) throw new Error("No active conversation");
+		this.activeConversation.is_favorite = favorite;
+		void this.onConversationChanged?.(this.activeConversation);
+	}
+
+	/**
 	 * Generate a display title from the first user message.
 	 * Truncates to MAX_TITLE_LENGTH and adds ellipsis if needed.
 	 */

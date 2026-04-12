@@ -120,6 +120,7 @@ export type AutomationTrigger =
 	| "on_tool_call"
 	| "on_tool_result"
 	| "after_completion"
+	| "on_conversation_start"
 	| "on_note_open"
 	| "on_note_create"
 	| "on_save"
@@ -147,6 +148,14 @@ export interface UserAutomationDefinition {
 	rawCode: string;
 	/** Compiled async function (null until compilation succeeds). */
 	compiledFn: CompiledExtensionFn | null;
+	/**
+	 * Whether this is a built-in scaffold automation (analogous to tool scaffolds).
+	 * Scaffold automations are injected when no user-defined automation with
+	 * the same trigger/name exists.
+	 *
+	 * @see specs/ZZ-misc/model-presets-design.md — Section 12.1
+	 */
+	isScaffold?: boolean;
 }
 
 // ---------------------------------------------------------------------------

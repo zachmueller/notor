@@ -27,6 +27,7 @@ import { buildUtils, buildLibs, buildObsidianExports } from "./runtime-context";
 import type { ExtensionUtils, ExtensionLibs, ExtensionObsidianExports } from "./runtime-context";
 import { TOOL_PATH_PARAMS } from "../tool-config/path-enforcer";
 import { BUILTIN_TOOL_SCAFFOLDS, BUILTIN_SHARED_SETTINGS_SCHEMA } from "./builtin-tool-scaffolds";
+import { BUILTIN_AUTOMATION_SCAFFOLDS } from "./builtin-automation-scaffolds";
 import { logger } from "../utils/logger";
 
 const log = logger("ExtensionManager");
@@ -260,6 +261,36 @@ export class ExtensionManager {
 			}
 			tool.compiledFn = result.fn;
 			compiledTools.set(tool.name, tool);
+		}
+
+		// 2b. Inject scaffold fallbacks for missing built-in automations
+		for (const [name, scaffold] of BUILTIN_AUTOMATION_SCAFFOLDS) {
+			// Skip if a vault automation with the same trigger+name already exists
+			if (discovered.automations.some(a =>
+				a.trigger === scaffold.trigger &&
+				(a.displayName === scaffold.displayName || a.filePath.includes(name))
+			)) continue;
+
+			const frontmatter: Record<string, unknown> = {
+				"notor-type": "automation",
+				"notor-trigger": scaffold.trigger,
+				"notor-display-name": scaffold.displayName,
+			};
+			const parsed = parseExtensionFile(
+				scaffold.scaffoldContent,
+				frontmatter,
+				`(built-in scaffold: ${name})`,
+				this.parseYAML,
+			);
+			if ("message" in parsed) {
+				errors.push({ filePath: `(built-in scaffold: ${name})`, message: parsed.message });
+				continue;
+			}
+			if ("trigger" in parsed) {
+				const automationDef = parsed as UserAutomationDefinition;
+				automationDef.isScaffold = true;
+				discovered.automations.push(automationDef);
+			}
 		}
 
 		// 3. Compile automations
