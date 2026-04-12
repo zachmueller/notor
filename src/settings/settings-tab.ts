@@ -35,6 +35,7 @@ import { renderSubAgentsSection } from "./sections/sub-agents";
 import { renderRulesAndWorkflowsSection } from "./sections/rules-and-workflows";
 import { renderSharedSettingsSection, renderReloadExtensionsButton } from "./sections/tool-shared-settings";
 import { renderUserAutomationsSection } from "./sections/user-automations";
+import { renderModelPresetsSection } from "./sections/model-presets";
 import { createSettingsGroup, snapshotDetailsState, restoreDetailsState } from "./helpers";
 
 /**
@@ -141,6 +142,11 @@ export class NotorSettingTab extends PluginSettingTab {
 			delete persisted["Built-in tools"];
 			ctx.saveSettings();
 		}
+		if ("Provider setup" in persisted && !("Providers" in persisted)) {
+			persisted["Providers"] = persisted["Provider setup"];
+			delete persisted["Provider setup"];
+			ctx.saveSettings();
+		}
 		delete persisted["Tool configuration"];
 		delete persisted["Extensions"];
 
@@ -154,13 +160,17 @@ export class NotorSettingTab extends PluginSettingTab {
 		const generalGroup = createSettingsGroup(containerEl, "General", true, persisted, onToggle);
 		renderGeneralSection(generalGroup, ctx);
 
-		// --- Provider Setup (expanded by default) ---
-		const providerGroup = createSettingsGroup(containerEl, "Provider setup", true, persisted, onToggle);
+		// --- Providers (expanded by default) ---
+		const providerGroup = createSettingsGroup(containerEl, "Providers", true, persisted, onToggle);
 		renderActiveProviderSection(providerGroup, ctx);
 		renderLocalProviderSection(providerGroup, ctx);
 		renderAnthropicProviderSection(providerGroup, ctx);
 		renderOpenAIProviderSection(providerGroup, ctx);
 		renderBedrockProviderSection(providerGroup, ctx);
+
+		// --- Models (expanded by default) ---
+		const modelsGroup = createSettingsGroup(containerEl, "Models", true, persisted, onToggle);
+		renderModelPresetsSection(modelsGroup, ctx);
 
 		// --- Conversation (expanded by default) ---
 		const conversationGroup = createSettingsGroup(containerEl, "Conversation", true, persisted, onToggle);
