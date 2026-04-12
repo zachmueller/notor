@@ -602,7 +602,7 @@ export default class NotorPlugin extends Plugin {
 			id: "open-secondary-chat",
 			name: "Open new chat panel",
 			callback: () => {
-				this.openChatInNewTab();
+				this.openChatInNewTab(undefined, true);
 			},
 		});
 
@@ -1862,6 +1862,7 @@ export default class NotorPlugin extends Plugin {
 
 		const savedFilename = savedState?.conversationFilename as string | undefined;
 		const savedId = savedState?.conversationId as string | undefined;
+		const createNew = savedState?.createNew as boolean | undefined;
 
 		try {
 			if (savedFilename) {
@@ -1889,7 +1890,8 @@ export default class NotorPlugin extends Plugin {
 					}
 				}
 				this.syncViewAfterLoad(view, orchestrator);
-			} else if (entries.length === 0) {
+			} else if (createNew || entries.length === 0) {
+				// Explicit "new panel" command or no existing conversations
 				await orchestrator.newConversation({ signal });
 				if (signal.aborted) return;
 				this.syncViewAfterLoad(view, orchestrator);
@@ -2762,12 +2764,18 @@ export default class NotorPlugin extends Plugin {
 	 * Open a Notor chat panel in a new tab.
 	 * If conversationFilename is provided, that conversation is loaded via setState.
 	 */
-	openChatInNewTab(conversationFilename?: string): void {
+	openChatInNewTab(conversationFilename?: string, createNew = false): void {
 		const leaf = this.app.workspace.getLeaf("tab");
+		const state: Record<string, unknown> = {};
+		if (conversationFilename) {
+			state.conversationFilename = conversationFilename;
+		} else if (createNew) {
+			state.createNew = true;
+		}
 		leaf.setViewState({
 			type: CHAT_VIEW_TYPE,
 			active: true,
-			...(conversationFilename ? { state: { conversationFilename } } : {}),
+			...(Object.keys(state).length > 0 ? { state } : {}),
 		}).catch((e) => {
 			log.error("Failed to open chat panel in new tab", { error: String(e) });
 		});

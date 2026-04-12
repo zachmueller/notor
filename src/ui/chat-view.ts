@@ -909,7 +909,7 @@ export class NotorChatView extends ItemView {
 		newBtn.addEventListener("auxclick", (e) => {
 			if (e.button !== 1) return;
 			e.preventDefault();
-			this.plugin.openChatInNewTab();
+			this.plugin.openChatInNewTab(undefined, true);
 		});
 	}
 
@@ -2304,7 +2304,7 @@ export class NotorChatView extends ItemView {
 			item.setTitle("New conversation in new panel")
 				.setIcon("layout-dashboard")
 				.onClick(() => {
-					this.plugin.openChatInNewTab();
+					this.plugin.openChatInNewTab(undefined, true);
 				});
 		});
 
