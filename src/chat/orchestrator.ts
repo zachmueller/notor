@@ -218,6 +218,17 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 		this.conversationManager.setOnTitleChanged((conversationId, title) => {
 			this.view?.updateConversationTitleInList(conversationId, title);
+			// Propagate title to active session so its header writes don't clobber
+			// the new title. The session has a snapshot taken before the automation
+			// completed, so without this its onConversationChanged writes would
+			// overwrite the title set by the automation.
+			const session = this.sessionManager.getActiveSession(conversationId);
+			if (session) {
+				const sessionConv = session.conversationManager.getActiveConversation();
+				if (sessionConv && sessionConv.title !== title) {
+					session.conversationManager.setTitle(title);
+				}
+			}
 		});
 
 		this.compactionManager = new CompactionManager(
