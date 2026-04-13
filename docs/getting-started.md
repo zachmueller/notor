@@ -3,10 +3,22 @@
 ## Requirements
 
 - Obsidian **1.11.4** or later (desktop only)
-- Node.js 18+ (for building from source)
 - A running LLM provider (local or cloud)
 
-## Install and build
+## Install via BRAT (recommended)
+
+[BRAT](https://tfthacker.com/BRAT) (Beta Reviewer's Auto-update Tool) is an Obsidian community plugin that installs and updates plugins directly from GitHub.
+
+1. Install **BRAT** from **Settings → Community plugins → Browse** and enable it
+2. Open the command palette (Ctrl/Cmd+P) and run **BRAT: Add a beta plugin for testing**
+3. Paste the repository path `zachmueller/notor` and click **Add Plugin**
+4. Go to **Settings → Community plugins**, refresh the list, and enable **Notor**
+
+BRAT can also keep the plugin up to date automatically — enable auto-updates in **Settings → Obsidian42-BRAT**, or run **BRAT: Check for updates to all beta plugins and UPDATE** from the command palette at any time.
+
+## Install from source
+
+Requires Node.js 18+.
 
 ```bash
 git clone https://github.com/zachmueller/notor.git
