@@ -9,6 +9,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../mcp/mcp-tool-adapter", () => ({
 	isMcpTool: (name: string) => name.includes("__"),
+	parseMcpToolName: (name: string) => {
+		const idx = name.indexOf("__");
+		if (idx === -1) return { serverName: "", toolName: name };
+		return { serverName: name.substring(0, idx), toolName: name.substring(idx + 2) };
+	},
 }));
 
 import { extractToolConfigs } from "./parser";
@@ -26,6 +31,7 @@ const ALL_TOOLS = [
 	"search_vault", "list_vault",
 	"read_file", "read_docx", "write_docx",
 	"execute_command", "fetch_webpage",
+	"browser__screenshot", "browser__click", "browser__navigate", "browser__type",
 ];
 
 /** Simple mock parser for YAML-like content */
@@ -231,6 +237,69 @@ Continue with your task.`;
 			const effective = mergeToolConfigs(result.configs, {}, ALL_TOOLS);
 			expect(effective.tools.execute_command!.enabled).toBe(false);
 			expect(effective.tools.read_note!.auto_approve).toBe(true);
+		});
+	});
+
+	describe("MCP server wildcard -> disable all, re-enable specific tools", () => {
+		it("persona wildcard disables server, specific entries re-enable subset", () => {
+			const personaConfigs: ParsedToolConfig[] = [{
+				source: "persona",
+				sourceFile: "personas/focused.md",
+				documentPosition: 0,
+				tools: {
+					"browser__screenshot": { enabled: true },
+					"browser__click": { enabled: true, auto_approve: true },
+				},
+				serverDefaults: {
+					browser: { enabled: false },
+				},
+			}];
+
+			const effective = mergeToolConfigs(personaConfigs, {}, ALL_TOOLS);
+
+			// Wildcard-disabled tools
+			expect(effective.tools["browser__navigate"]!.enabled).toBe(false);
+			expect(effective.tools["browser__type"]!.enabled).toBe(false);
+			// Explicitly re-enabled tools
+			expect(effective.tools["browser__screenshot"]!.enabled).toBe(true);
+			expect(effective.tools["browser__click"]!.enabled).toBe(true);
+			expect(effective.tools["browser__click"]!.auto_approve).toBe(true);
+			// Built-in tools unaffected
+			expect(effective.tools.read_note!.enabled).toBe(true);
+
+			// Simulate LLM tool filtering
+			const enabledTools = ALL_TOOLS.filter((t) => effective.tools[t]?.enabled !== false);
+			expect(enabledTools).toContain("browser__screenshot");
+			expect(enabledTools).toContain("browser__click");
+			expect(enabledTools).not.toContain("browser__navigate");
+			expect(enabledTools).not.toContain("browser__type");
+			expect(enabledTools).toContain("read_note");
+		});
+
+		it("workflow re-enables tool that persona wildcard disabled", () => {
+			const personaConfigs: ParsedToolConfig[] = [{
+				source: "persona",
+				sourceFile: "personas/p.md",
+				documentPosition: 0,
+				tools: {},
+				serverDefaults: { browser: { enabled: false } },
+			}];
+			const workflowConfigs: ParsedToolConfig[] = [{
+				source: "workflow",
+				sourceFile: "workflows/w.md",
+				documentPosition: 0,
+				tools: {
+					"browser__navigate": { enabled: true },
+				},
+			}];
+
+			const effective = mergeToolConfigs(
+				[...personaConfigs, ...workflowConfigs], {}, ALL_TOOLS,
+			);
+
+			expect(effective.tools["browser__navigate"]!.enabled).toBe(true);
+			expect(effective.tools["browser__screenshot"]!.enabled).toBe(false);
+			expect(effective.tools["browser__click"]!.enabled).toBe(false);
 		});
 	});
 

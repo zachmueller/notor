@@ -452,6 +452,61 @@ placeholder
 		});
 	});
 
+	describe("MCP server wildcard keys", () => {
+		const knownToolsWithMcp = ["read_note", "write_note", "myserver__tool1", "myserver__tool2", "other__x"];
+
+		it("parses serverName__* wildcard into serverDefaults", () => {
+			const mockParser = () => ({
+				"myserver__*": { enabled: false },
+				"myserver__tool1": { enabled: true },
+			});
+			const text = `<notor_tool_config>\nplaceholder\n</notor_tool_config>`;
+			const result = extractToolConfigs(text, "persona", "test.md", knownToolsWithMcp, mockParser);
+
+			expect(result.errors).toHaveLength(0);
+			expect(result.configs[0]!.serverDefaults).toEqual({
+				myserver: { enabled: false },
+			});
+			expect(result.configs[0]!.tools["myserver__tool1"]).toEqual({ enabled: true });
+			expect(result.configs[0]!.tools).not.toHaveProperty("myserver__*");
+		});
+
+		it("rejects path fields on wildcard keys", () => {
+			const mockParser = () => ({
+				"myserver__*": { enabled: false, allowed_paths: ["notes/"] },
+			});
+			const text = `<notor_tool_config>\nplaceholder\n</notor_tool_config>`;
+			const result = extractToolConfigs(text, "persona", "test.md", knownToolsWithMcp, mockParser);
+
+			expect(result.errors).toHaveLength(1);
+			expect(result.errors[0]!.detail).toContain("not yet implemented for MCP tools");
+			expect(result.configs[0]!.serverDefaults).toEqual({
+				myserver: { enabled: false },
+			});
+		});
+
+		it("does not set serverDefaults when no wildcards present", () => {
+			const mockParser = () => ({
+				"myserver__tool1": { enabled: true },
+			});
+			const text = `<notor_tool_config>\nplaceholder\n</notor_tool_config>`;
+			const result = extractToolConfigs(text, "persona", "test.md", knownToolsWithMcp, mockParser);
+
+			expect(result.configs[0]!.serverDefaults).toBeUndefined();
+		});
+
+		it("wildcard with only invalid fields produces no serverDefaults entry", () => {
+			const mockParser = () => ({
+				"myserver__*": { bad_field: true },
+			});
+			const text = `<notor_tool_config>\nplaceholder\n</notor_tool_config>`;
+			const result = extractToolConfigs(text, "persona", "test.md", knownToolsWithMcp, mockParser);
+
+			expect(result.errors).toHaveLength(1);
+			expect(result.configs[0]!.serverDefaults).toBeUndefined();
+		});
+	});
+
 	describe("empty tool entry (no valid fields)", () => {
 		it("does not add tool entry when all fields are invalid", () => {
 			const mockParser = () => ({

@@ -40,6 +40,9 @@ const VERSION_ATTR_REGEX = /version\s*=\s*"([^"]*)"/;
 /** Valid per-tool fields in a `<notor_tool_config>` block. */
 const VALID_FIELDS = new Set(["enabled", "auto_approve", "allowed_paths", "blocked_paths"]);
 
+/** Regex to detect MCP server wildcard keys like `serverName__*`. */
+const MCP_WILDCARD_REGEX = /^(.+)__\*$/;
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -113,9 +116,15 @@ export function extractToolConfigs(
 
 		// 4. Validate and extract per-tool entries
 		const tools: Record<string, ToolConfigEntry> = {};
+		const serverDefaults: Record<string, ToolConfigEntry> = {};
 		for (const [toolName, rawEntry] of Object.entries(parsed as Record<string, unknown>)) {
-			// Validate tool name
-			if (knownSet && !knownSet.has(toolName)) {
+			// Check for MCP server wildcard key (e.g., "serverName__*")
+			const wildcardMatch = MCP_WILDCARD_REGEX.exec(toolName);
+			const isWildcard = wildcardMatch !== null;
+			const wildcardServerName = wildcardMatch?.[1] ?? "";
+
+			// Validate tool name (skip for wildcards — they don't match a specific tool)
+			if (!isWildcard && knownSet && !knownSet.has(toolName)) {
 				errors.push({
 					sourceFile,
 					detail: `Unrecognized tool name "${toolName}" in <notor_tool_config>. Skipping this tool entry.`,
@@ -133,7 +142,8 @@ export function extractToolConfigs(
 			}
 
 			const entry: ToolConfigEntry = {};
-			const isMcp = isMcpTool(toolName);
+			// Wildcards are always MCP-scoped; individual tools check via isMcpTool
+			const isMcp = isWildcard || isMcpTool(toolName);
 
 			for (const [field, value] of Object.entries(rawEntry as Record<string, unknown>)) {
 				// Unrecognized field
@@ -196,16 +206,24 @@ export function extractToolConfigs(
 
 			// Only add if at least one valid field was extracted
 			if (Object.keys(entry).length > 0) {
-				tools[toolName] = entry;
+				if (isWildcard) {
+					serverDefaults[wildcardServerName] = entry;
+				} else {
+					tools[toolName] = entry;
+				}
 			}
 		}
 
-		configs.push({
+		const config: ParsedToolConfig = {
 			source,
 			sourceFile,
 			documentPosition: offset,
 			tools,
-		});
+		};
+		if (Object.keys(serverDefaults).length > 0) {
+			config.serverDefaults = serverDefaults;
+		}
+		configs.push(config);
 
 		return "";
 	});

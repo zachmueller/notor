@@ -14,6 +14,7 @@ import type {
 	ResolvedToolConfigEntry,
 	ToolConfigEntry,
 } from "./types";
+import { parseMcpToolName } from "../mcp/mcp-tool-adapter";
 
 // ---------------------------------------------------------------------------
 // Precedence Levels
@@ -67,10 +68,29 @@ export function mergeToolConfigs(
 		return a.documentPosition - b.documentPosition;
 	});
 
-	// Accumulate sparse entries per tool across all configs
+	// Accumulate sparse entries per tool across all configs.
+	// Server wildcards (serverDefaults) are expanded first as a base,
+	// then specific tool entries override within the same config.
 	const merged: Record<string, Partial<ResolvedToolConfigEntry>> = {};
 
 	for (const config of sorted) {
+		// Phase 1: Expand server wildcards to all matching tools
+		if (config.serverDefaults) {
+			for (const [serverName, wildcardEntry] of Object.entries(config.serverDefaults)) {
+				for (const toolName of allToolNames) {
+					const parsed = parseMcpToolName(toolName);
+					if (parsed.serverName !== serverName) continue;
+					// Only apply wildcard if this tool is NOT explicitly configured in the same block
+					if (config.tools[toolName]) continue;
+					if (!merged[toolName]) {
+						merged[toolName] = {};
+					}
+					applyEntry(merged[toolName], wildcardEntry);
+				}
+			}
+		}
+
+		// Phase 2: Apply specific tool entries (override wildcards)
 		for (const [toolName, entry] of Object.entries(config.tools)) {
 			if (!merged[toolName]) {
 				merged[toolName] = {};

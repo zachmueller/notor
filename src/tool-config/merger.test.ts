@@ -1,4 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("../mcp/mcp-tool-adapter", () => ({
+	isMcpTool: (name: string) => name.includes("__"),
+	parseMcpToolName: (name: string) => {
+		const idx = name.indexOf("__");
+		if (idx === -1) return { serverName: "", toolName: name };
+		return { serverName: name.substring(0, idx), toolName: name.substring(idx + 2) };
+	},
+}));
+
 import { mergeToolConfigs, intersectToolConfig } from "./merger";
 import type { EffectiveToolConfig, ParsedToolConfig } from "./types";
 
@@ -230,6 +240,116 @@ describe("mergeToolConfigs", () => {
 
 			expect(result.tools["myserver__list"]!.enabled).toBe(false);
 			expect(result.tools["myserver__search"]!.enabled).toBe(true);
+		});
+	});
+
+	describe("MCP server wildcard expansion", () => {
+		const MCP_TOOLS = [...ALL_TOOLS, "myserver__list", "myserver__search", "myserver__delete", "other__tool"];
+
+		it("wildcard disables all tools on a server", () => {
+			const configs: ParsedToolConfig[] = [{
+				source: "persona",
+				sourceFile: "p.md",
+				documentPosition: 0,
+				tools: {},
+				serverDefaults: { myserver: { enabled: false } },
+			}];
+
+			const result = mergeToolConfigs(configs, {}, MCP_TOOLS);
+
+			expect(result.tools["myserver__list"]!.enabled).toBe(false);
+			expect(result.tools["myserver__search"]!.enabled).toBe(false);
+			expect(result.tools["myserver__delete"]!.enabled).toBe(false);
+			// Other server unaffected
+			expect(result.tools["other__tool"]!.enabled).toBe(true);
+			// Built-in tools unaffected
+			expect(result.tools.read_note!.enabled).toBe(true);
+		});
+
+		it("specific tool entry in same block overrides wildcard", () => {
+			const configs: ParsedToolConfig[] = [{
+				source: "persona",
+				sourceFile: "p.md",
+				documentPosition: 0,
+				tools: {
+					"myserver__search": { enabled: true },
+				},
+				serverDefaults: { myserver: { enabled: false } },
+			}];
+
+			const result = mergeToolConfigs(configs, {}, MCP_TOOLS);
+
+			expect(result.tools["myserver__list"]!.enabled).toBe(false);
+			expect(result.tools["myserver__search"]!.enabled).toBe(true); // overridden
+			expect(result.tools["myserver__delete"]!.enabled).toBe(false);
+		});
+
+		it("higher-precedence specific entry overrides lower-precedence wildcard", () => {
+			const configs: ParsedToolConfig[] = [
+				{
+					source: "persona",
+					sourceFile: "p.md",
+					documentPosition: 0,
+					tools: {},
+					serverDefaults: { myserver: { enabled: false } },
+				},
+				{
+					source: "workflow",
+					sourceFile: "w.md",
+					documentPosition: 0,
+					tools: {
+						"myserver__search": { enabled: true },
+					},
+				},
+			];
+
+			const result = mergeToolConfigs(configs, {}, MCP_TOOLS);
+
+			expect(result.tools["myserver__list"]!.enabled).toBe(false);
+			expect(result.tools["myserver__search"]!.enabled).toBe(true); // workflow override
+			expect(result.tools["myserver__delete"]!.enabled).toBe(false);
+		});
+
+		it("wildcard auto_approve applies to all server tools", () => {
+			const configs: ParsedToolConfig[] = [{
+				source: "persona",
+				sourceFile: "p.md",
+				documentPosition: 0,
+				tools: {},
+				serverDefaults: { myserver: { auto_approve: true } },
+			}];
+
+			const result = mergeToolConfigs(configs, {}, MCP_TOOLS);
+
+			expect(result.tools["myserver__list"]!.auto_approve).toBe(true);
+			expect(result.tools["myserver__search"]!.auto_approve).toBe(true);
+			expect(result.tools["other__tool"]!.auto_approve).toBe(false);
+		});
+
+		it("wildcard with sparse merge: omitted fields don't override", () => {
+			const configs: ParsedToolConfig[] = [
+				{
+					source: "rule",
+					sourceFile: "r.md",
+					documentPosition: 0,
+					tools: {
+						"myserver__list": { auto_approve: true },
+					},
+				},
+				{
+					source: "persona",
+					sourceFile: "p.md",
+					documentPosition: 0,
+					tools: {},
+					serverDefaults: { myserver: { enabled: false } },
+					// auto_approve not set in wildcard — should preserve rule's value
+				},
+			];
+
+			const result = mergeToolConfigs(configs, {}, MCP_TOOLS);
+
+			expect(result.tools["myserver__list"]!.enabled).toBe(false);
+			expect(result.tools["myserver__list"]!.auto_approve).toBe(true); // from rule
 		});
 	});
 

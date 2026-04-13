@@ -34,6 +34,13 @@ export interface ParsedToolConfig {
 	documentPosition: number;
 	/** Per-tool configuration entries extracted from this block. */
 	tools: Record<string, ToolConfigEntry>;
+	/**
+	 * Server-level defaults extracted from `serverName__*` wildcard keys.
+	 * Keyed by MCP server name (without the `__*` suffix).
+	 * Applied to all tools on that server as a base, overridden by specific
+	 * tool entries in the same or higher-precedence block.
+	 */
+	serverDefaults?: Record<string, ToolConfigEntry>;
 }
 
 /**
