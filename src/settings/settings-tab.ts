@@ -13,7 +13,6 @@ import type NotorPlugin from "../main";
 import type { SettingsContext } from "./sections/context";
 
 // Section renderers
-import { renderActiveProviderSection } from "./sections/active-provider";
 import { renderLocalProviderSection } from "./sections/provider-local";
 import { renderAnthropicProviderSection } from "./sections/provider-anthropic";
 import { renderOpenAIProviderSection } from "./sections/provider-openai";
@@ -162,7 +161,6 @@ export class NotorSettingTab extends PluginSettingTab {
 
 		// --- Providers (expanded by default) ---
 		const providerGroup = createSettingsGroup(containerEl, "Providers", true, persisted, onToggle);
-		renderActiveProviderSection(providerGroup, ctx);
 		renderLocalProviderSection(providerGroup, ctx);
 		renderAnthropicProviderSection(providerGroup, ctx);
 		renderOpenAIProviderSection(providerGroup, ctx);
