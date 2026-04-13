@@ -127,36 +127,33 @@ export function markSubsection(setting: Setting, name: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Apply consistent left-indent to a tool description to account for the
- * expand/collapse chevron icon. Long descriptions (>threshold) get a
- * clickable chevron and truncated text; short descriptions get an invisible
- * spacer so the text aligns at the same indent.
+ * Turn a container element into a collapsible description block.
  *
- * The entire description block is clickable to toggle, but text selection
- * is preserved — a click that produces a selection is ignored.
+ * Long descriptions (>threshold) get a clickable chevron and truncated text;
+ * short descriptions get an invisible spacer so text aligns at the same indent.
+ * The entire block is clickable to toggle, but text selection is preserved.
  */
-export function applyDescriptionTruncation(
-	setting: Setting,
+export function applyTruncationToElement(
+	containerEl: HTMLElement,
 	fullText: string,
 	threshold = 255,
 ): void {
 	if (!fullText) return;
 
-	const descEl = setting.descEl;
-	descEl.empty();
-	descEl.addClass("notor-desc-wrapper");
+	containerEl.empty();
+	containerEl.addClass("notor-desc-wrapper");
 
 	const isLong = fullText.length > threshold;
 
 	if (isLong) {
 		// Visible chevron icon
-		const iconEl = descEl.createSpan({ cls: "notor-desc-icon" });
+		const iconEl = containerEl.createSpan({ cls: "notor-desc-icon" });
 		setIcon(iconEl, "chevron-right");
 
-		const truncatedSpan = descEl.createSpan({ cls: "notor-desc-truncated" });
+		const truncatedSpan = containerEl.createSpan({ cls: "notor-desc-truncated" });
 		truncatedSpan.textContent = fullText.slice(0, threshold) + "…";
 
-		const fullSpan = descEl.createSpan({ cls: "notor-desc-full notor-hidden" });
+		const fullSpan = containerEl.createSpan({ cls: "notor-desc-full notor-hidden" });
 		fullSpan.textContent = fullText;
 
 		let expanded = false;
@@ -165,24 +162,24 @@ export function applyDescriptionTruncation(
 			truncatedSpan.toggleClass("notor-hidden", expanded);
 			fullSpan.toggleClass("notor-hidden", !expanded);
 			setIcon(iconEl, expanded ? "chevron-down" : "chevron-right");
-			descEl.setAttribute(
+			containerEl.setAttribute(
 				"aria-label",
 				expanded ? "Collapse description" : "Show full description",
 			);
 		};
 
-		descEl.setAttribute("role", "button");
-		descEl.tabIndex = 0;
-		descEl.setAttribute("aria-label", "Show full description");
-		descEl.addClass("notor-desc-clickable");
+		containerEl.setAttribute("role", "button");
+		containerEl.tabIndex = 0;
+		containerEl.setAttribute("aria-label", "Show full description");
+		containerEl.addClass("notor-desc-clickable");
 
 		// Toggle on click, but not if the user is selecting text
-		descEl.addEventListener("click", () => {
+		containerEl.addEventListener("click", () => {
 			const sel = window.getSelection();
 			if (sel && sel.toString().length > 0) return;
 			toggle();
 		});
-		descEl.addEventListener("keydown", (e) => {
+		containerEl.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" || e.key === " ") {
 				e.preventDefault();
 				toggle();
@@ -190,11 +187,23 @@ export function applyDescriptionTruncation(
 		});
 	} else {
 		// Invisible spacer to match the chevron width
-		descEl.createSpan({ cls: "notor-desc-icon notor-desc-icon-spacer" });
+		containerEl.createSpan({ cls: "notor-desc-icon notor-desc-icon-spacer" });
 
-		const textSpan = descEl.createSpan();
+		const textSpan = containerEl.createSpan();
 		textSpan.textContent = fullText;
 	}
+}
+
+/**
+ * Convenience wrapper: apply truncation to an Obsidian Setting's description.
+ */
+export function applyDescriptionTruncation(
+	setting: Setting,
+	fullText: string,
+	threshold = 255,
+): void {
+	if (!fullText) return;
+	applyTruncationToElement(setting.descEl, fullText, threshold);
 }
 
 // ---------------------------------------------------------------------------

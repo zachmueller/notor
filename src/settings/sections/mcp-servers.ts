@@ -25,6 +25,7 @@ import {
 import { parseShellArgs, serializeShellArgs } from "../../utils/shell-args";
 import type { McpHub } from "../../mcp/mcp-hub";
 import type { McpConnectionStatus } from "../../mcp/mcp-types";
+import { applyTruncationToElement } from "../helpers";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -637,7 +638,8 @@ function renderToolsSummary(
 		const toolMeta = toolRowEl.createDiv({ cls: "notor-mcp-tool-meta" });
 		toolMeta.createSpan({ cls: "notor-mcp-tool-name", text: tool.name });
 		if (tool.description) {
-			toolMeta.createSpan({ cls: "notor-mcp-tool-desc", text: tool.description });
+			const descSpan = toolMeta.createSpan({ cls: "notor-mcp-tool-desc" });
+			applyTruncationToElement(descSpan, tool.description);
 		}
 	}
 }
