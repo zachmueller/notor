@@ -34,8 +34,8 @@ npm run dev
 1. Open **Settings → Notor**
 2. Choose a provider (defaults to local OpenAI-compatible at `http://localhost:11434/v1`)
 3. Enter credentials if required (stored securely via Obsidian's secrets manager)
-4. Select a model from the dropdown (or type a model ID if the list is unavailable)
-5. Open the Notor chat panel from the sidebar ribbon and start a conversation
+4. Configure model presets in **Settings → Notor → Models** — assign a provider and model to at least one preset (e.g., `medium`). See [model-presets.md](model-presets.md) for the full reference.
+5. Open the Notor chat panel from the sidebar ribbon — your default preset is selected automatically. Start a conversation.
 
 You can control which tools are available and configure auto-approve in **Settings → Notor → Tools**. See [vault-tools.md](vault-tools.md#enabling-and-disabling-tools) for details.
 
@@ -68,6 +68,8 @@ All Notor commands are accessible via the Obsidian command palette (Ctrl/Cmd+P):
 | **Notor: Import conversation from HTML** | Imports a previously exported HTML conversation |
 | **Notor: Open tool config inspector** | Opens a debugging view showing the effective tool configuration |
 | **Notor: Reload user extensions** | Re-discovers and recompiles all user-defined tools and automations |
+| **Notor: Launch active note workflow** | Opens a picker filtered to workflows with `notor-active-note-prompt`, runs against the active note |
+| **Notor: Open secondary chat panel** | Opens an additional chat panel in a new tab |
 
 ## Create your first persona
 
@@ -79,10 +81,10 @@ Personas let you define specialized AI personalities with their own system promp
    ```yaml
    ---
    notor-persona-prompt-mode: "append"
-   notor-preferred-provider: "anthropic"
-   notor-preferred-model: "claude-opus-4-5"
+   notor-preferred-preset: "large"
    ---
    ```
+   You can also use `notor-preferred-provider` and `notor-preferred-model` instead of a preset — see [personas.md](personas.md) for details.
 4. Open the Notor chat panel → click the gear icon → select your persona
 
 ## Create your first workflow

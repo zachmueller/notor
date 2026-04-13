@@ -31,6 +31,20 @@ After connecting, Notor queries the server for its available tools and input sch
 
 MCP tools appear alongside built-in tools in the unified **Settings → Notor → Tools** section with per-tool Enabled and Auto-approve toggles and a status dot showing server health. Per-context overrides via `<notor_tool_config>` blocks use the `server__tool` naming convention. See [Per-context tool configuration](vault-tools.md#per-context-tool-configuration).
 
+### Wildcard tool configuration
+
+Use `serverName__*` in `<notor_tool_config>` blocks to set defaults for all tools from a given MCP server at once. Individual tool entries override the wildcard for that specific tool.
+
+```yaml
+filesystem__*:
+  enabled: true
+  auto_approve: false
+filesystem__read_file:
+  auto_approve: true
+```
+
+In this example, all `filesystem` tools are enabled with approval required, except `read_file` which is auto-approved.
+
 ## Plan/Act enforcement and approval
 
 MCP tool calls go through the same pipeline as built-in tools:

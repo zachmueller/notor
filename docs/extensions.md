@@ -149,6 +149,7 @@ return { success: true, result: content };
 | `on_manual_save` | Vault event | A note is saved by explicit user action (Cmd+S / Ctrl+S). |
 | `on_tag_change` | Vault event | Tags are added to or removed from a note's frontmatter. |
 | `on_schedule` | Scheduled | A cron schedule fires (while Obsidian is running). |
+| `on_conversation_start` | LLM lifecycle | After the first user message in a new conversation, before the LLM call. **Non-blocking.** Fires once per conversation. Not available as a shell hook — automation-only. |
 
 ### Context object
 
@@ -165,7 +166,7 @@ Automation code receives a `context` object with event-specific data.
 
 | Field | Available on | Type | Description |
 |---|---|---|---|
-| `context.conversationId` | all LLM events | `string` | Current conversation UUID |
+| `context.conversationId` | all LLM events, `on_conversation_start` | `string` | Current conversation UUID |
 | `context.toolName` | `on_tool_call`, `on_tool_result` | `string` | Tool that was called |
 | `context.params` | `on_tool_call`, `on_tool_result` | `Record<string, unknown>` | Tool parameters |
 | `context.result` | `on_tool_result` | `string` | Tool result output |

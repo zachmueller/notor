@@ -11,8 +11,11 @@ Personas are stored as directories under `notor/personas/{persona-name}/`, each 
 | Property | Values | Description |
 |---|---|---|
 | `notor-persona-prompt-mode` | `"append"` (default) or `"replace"` | `append` adds the persona prompt after the global system prompt. `replace` uses only the persona's prompt as the base. Vault-level rule injections always apply regardless of this setting. |
+| `notor-preferred-preset` | preset name string | Automatically resolves to the preset's provider and model when this persona is active. See [model-presets.md](model-presets.md). |
 | `notor-preferred-provider` | provider identifier string | Automatically switches to this provider when the persona is active. |
 | `notor-preferred-model` | model identifier string | Automatically switches to this model when the persona is active. |
+
+**Model resolution priority** (highest to lowest): `notor-preferred-preset` → `notor-preferred-provider` + `notor-preferred-model` → global default preset. If a preset is specified but doesn't exist or isn't configured, a notice is shown and resolution falls through to the legacy provider/model overrides.
 
 A reference section in **Settings → Notor** lists all configured providers and their available models with exact identifier strings and one-click copy buttons, making it easy to fill in persona frontmatter without guessing.
 
@@ -21,12 +24,13 @@ A reference section in **Settings → Notor** lists all configured providers and
 ```markdown
 ---
 notor-persona-prompt-mode: "append"
-notor-preferred-provider: "anthropic"
-notor-preferred-model: "claude-opus-4-5"
+notor-preferred-preset: "large"
 ---
 You are a focused research assistant. Prefer concise, structured responses.
 Always cite the specific vault notes you reference.
 ```
+
+> You can also use `notor-preferred-provider` and `notor-preferred-model` instead of a preset for direct provider/model control.
 
 ## Using the persona picker
 

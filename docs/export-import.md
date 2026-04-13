@@ -31,4 +31,22 @@ Only HTML exports can be imported (Markdown exports are read-only snapshots and 
 
 ## Conversation forking
 
-You can fork a conversation at any message by right-clicking the message and selecting **Fork conversation**. This creates a new conversation containing all messages up to and including the selected message, allowing you to explore alternative directions without losing the original thread. The forked conversation tracks its parent for reference.
+Fork a conversation to explore alternative directions without losing the original thread. The forked conversation contains all messages up to and including the fork point and is fully independent from that point forward.
+
+**Two ways to fork:**
+
+- **Right-click** any completed message and select **Fork conversation**.
+- **Hover** over a message to reveal the fork button (branch icon in the top-right corner) and click it.
+
+**Behavior details:**
+
+- If you fork at a tool call message, the paired tool result is automatically included so the forked conversation is never left with an unpaired tool call.
+- The fork uses your current session's provider, model, and Plan/Act mode — not the parent conversation's stored settings.
+- The forked conversation's title is set to "Fork of [original title]".
+- The original conversation is not modified.
+
+**Fork badge in conversation list:** Forked conversations show a branch icon badge next to their title. Clicking the badge navigates to the parent conversation.
+
+## Favorite conversations
+
+Right-click a conversation in the history list and select **Add to favorites** (or **Remove from favorites** to undo). Favorited conversations display a star icon and are sorted to the top of the conversation list. A filter toggle in the list header switches between showing all conversations and showing only favorites.

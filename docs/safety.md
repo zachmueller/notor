@@ -33,6 +33,19 @@ Before any write operation, the affected note is automatically snapshotted as a 
 - You can preview, compare (diff), or restore any checkpoint from the conversation timeline.
 - Checkpoint data is stored in `.obsidian/plugins/notor/checkpoints/` and is not visible as vault notes.
 
+### History and checkpoint storage settings
+
+Conversation history (JSONL files) and checkpoint snapshots are stored in your vault's plugin data directory. These settings are configurable in **Settings → Notor**:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| History path | `.obsidian/plugins/notor/history/` | Storage directory for conversation JSONL files |
+| History max size | 500 MB | Maximum total history storage size; oldest conversations are cleaned up first |
+| History max age | 90 days | Conversations older than this are eligible for cleanup |
+| Checkpoint path | `.obsidian/plugins/notor/checkpoints/` | Storage directory for checkpoint files |
+| Checkpoints per conversation | 100 | Maximum checkpoints retained per conversation |
+| Checkpoint max age | 30 days | Checkpoints older than this are eligible for cleanup |
+
 ## Sub-agent security
 
 [Sub-agents](sub-agents.md) operate under a stricter security model than the main conversation:

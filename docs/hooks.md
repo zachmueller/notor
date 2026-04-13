@@ -17,6 +17,8 @@ Configure shell commands to fire automatically at key points in the conversation
 | `on-tool-result` | After tool execution, before result is returned to the LLM | No |
 | `after-completion` | After the LLM's full response turn completes | No |
 
+> **Note:** An additional trigger, `on_conversation_start`, is available for [user-defined automations](extensions.md) (not shell hooks). It fires once per conversation when the first user message is submitted.
+
 **Behavior:**
 
 - Hook stdout from `pre-send` hooks is sent to the LLM as a separate context message and displayed as a collapsible **Hook output** element in the chat panel (not inline in the user's message bubble).

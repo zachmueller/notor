@@ -14,6 +14,7 @@ Workflow notes are stored under `notor/workflows/` and identified by `notor-work
 | `notor-trigger` | `manual` or a vault event type | How the workflow is triggered. See [Vault event hooks](hooks.md#vault-event-hooks) for event types. |
 | `notor-workflow-persona` | `"{persona-name}"` | Automatically activates a persona when the workflow runs. Persists for the entire workflow conversation. |
 | `notor-hooks` | YAML mapping | Per-workflow hook overrides. Overrides global LLM lifecycle hooks for this workflow's duration. Non-overridden events continue using global hooks. |
+| `notor-active-note-prompt` | template string | Prompt template with a `{active_note}` placeholder. Marks this workflow as eligible for the **Launch active note workflow** command. See [Active note prompt templates](#active-note-prompt-templates) below. |
 
 Subdirectories under `notor/workflows/` are supported. The plugin rescans workflows on plugin load and when the workflow list is opened.
 
@@ -38,6 +39,20 @@ notor-trigger: manual
 aliases: [dr, review]
 ---
 ```
+
+## Active note prompt templates
+
+A workflow can declare a `notor-active-note-prompt` in its frontmatter — a template string containing a `{active_note}` placeholder that is replaced with the content of the currently focused note at execution time.
+
+```yaml
+---
+notor-workflow: true
+notor-trigger: manual
+notor-active-note-prompt: "Analyze the following note and suggest improvements:\n\n{active_note}"
+---
+```
+
+Run these workflows via the **Notor: Launch active note workflow** command (command palette). The picker shows only workflows that have `notor-active-note-prompt` set. If no note is currently active in the editor, a notice is shown and the command is aborted.
 
 ## Workflow instructions rendering
 

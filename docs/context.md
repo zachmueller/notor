@@ -10,6 +10,18 @@ You can provide the AI with specific content directly — no `read_note` tool ca
 - **Graceful failures** — if an attached note is deleted or renamed after the chip is added, the message still sends without that attachment and an inline warning is shown.
 - Attachment contents are embedded in the message context sent to the LLM but are not rendered in full in the chat thread (chips only).
 
+### Image and PDF processing
+
+When images or PDFs are attached to messages, Notor processes them before sending to the LLM. These settings are configurable in **Settings → Notor**:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Image max dimension | 2000 px | Maximum width or height in pixels. Larger images are resized proportionally. |
+| Image compression quality | 80 | JPEG compression quality (0–100) used during the compression cascade. |
+| PDF max size (native) | 10 MB | Maximum file size for sending PDFs as native document blocks. |
+| PDF max text chars | 400,000 | Maximum characters extracted when using text-based PDF processing. |
+| PDF prefer native | true | Use native PDF document blocks when the provider supports them; falls back to text extraction otherwise. |
+
 ## Searching chat history
 
 The conversation history panel supports text search across past conversations. Searches match against conversation titles, message previews, and full message content. Matching is case-insensitive, and results are ordered by most recent activity.
@@ -26,7 +38,11 @@ Each source can be individually enabled or disabled in **Settings → Notor**. A
 
 ## Token usage and cost tracking
 
-Notor tracks cumulative input and output token counts for each conversation, displayed in the chat footer. If per-model pricing is configured in **Settings → Notor**, an estimated cost is calculated and shown alongside token counts. Pricing is set per 1K tokens for both input and output. Token counts and costs are also included in HTML and Markdown exports.
+Notor tracks cumulative input and output token counts for each conversation, displayed in the chat footer. Token counts and costs are also included in HTML and Markdown exports.
+
+### Configuring model pricing
+
+Open **Settings → Notor → Model pricing** to configure cost estimates. Each entry maps a model ID (e.g., `claude-sonnet-4-5`, `gpt-4o`) to input and output costs in USD per 1,000 tokens. If no pricing entry exists for the active model, token counts are still displayed but cost estimates are omitted. Changes take effect for subsequent messages immediately.
 
 ## Auto-compaction for long sessions
 
