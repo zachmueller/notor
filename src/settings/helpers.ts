@@ -5,7 +5,7 @@
  * validation. Used by the settings UI and potentially by other modules.
  */
 
-import type { Setting } from "obsidian";
+import { setIcon, type Setting } from "obsidian";
 import type { LLMProviderConfig } from "../types";
 import type { NotorSettings } from "./types";
 
@@ -120,6 +120,59 @@ export function createSettingsGroup(
  */
 export function markSubsection(setting: Setting, name: string): void {
 	setting.settingEl.setAttribute("data-notor-subsection", name);
+}
+
+// ---------------------------------------------------------------------------
+// Description truncation
+// ---------------------------------------------------------------------------
+
+/**
+ * If a Setting's description exceeds the character threshold, replace it
+ * with a truncated version and a clickable toggle icon to expand/collapse.
+ * Descriptions at or below the threshold are left unchanged.
+ */
+export function applyDescriptionTruncation(
+	setting: Setting,
+	fullText: string,
+	threshold = 255,
+): void {
+	if (!fullText || fullText.length <= threshold) return;
+
+	const descEl = setting.descEl;
+	descEl.empty();
+
+	const truncatedSpan = descEl.createSpan({ cls: "notor-desc-truncated" });
+	truncatedSpan.textContent = fullText.slice(0, threshold) + "…";
+
+	const fullSpan = descEl.createSpan({ cls: "notor-desc-full notor-hidden" });
+	fullSpan.textContent = fullText;
+
+	const toggleSpan = descEl.createSpan({ cls: "notor-desc-toggle" });
+	const iconEl = toggleSpan.createSpan();
+	setIcon(iconEl, "chevron-right");
+	toggleSpan.setAttribute("aria-label", "Show full description");
+	toggleSpan.setAttribute("role", "button");
+	toggleSpan.tabIndex = 0;
+
+	let expanded = false;
+	const toggle = () => {
+		expanded = !expanded;
+		truncatedSpan.toggleClass("notor-hidden", expanded);
+		fullSpan.toggleClass("notor-hidden", !expanded);
+		setIcon(iconEl, expanded ? "chevron-down" : "chevron-right");
+		toggleSpan.setAttribute(
+			"aria-label",
+			expanded ? "Collapse description" : "Show full description",
+		);
+	};
+
+	toggleSpan.addEventListener("click", toggle);
+	toggleSpan.addEventListener("keydown", (e) => {
+		if (e.key === "Enter" || e.key === " ") {
+			e.preventDefault();
+			toggle();
+		}
+	});
 }
 
 // ---------------------------------------------------------------------------

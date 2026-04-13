@@ -314,6 +314,25 @@
 	padding-left: 18px;
 }
 
+/* Tool description truncation — expand/collapse long descriptions */
+.notor-desc-toggle {
+	display: inline-flex;
+	align-items: center;
+	cursor: pointer;
+	color: var(--text-accent);
+	margin-left: 4px;
+	vertical-align: middle;
+}
+
+.notor-desc-toggle:hover {
+	color: var(--text-accent-hover);
+}
+
+.notor-desc-toggle svg {
+	width: 14px;
+	height: 14px;
+}
+
 /* Fixed-width variants for inline settings inputs */
 .notor-input-w-80 { width: 80px; }
 .notor-input-w-120 { width: 120px; }

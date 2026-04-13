@@ -20,7 +20,7 @@ import type { UserToolDefinition } from "../../extensions/types";
 import { ToolSettingsModal } from "../../ui/tool-settings-modal";
 import type { CreationField } from "./shared";
 import { promptForCreation, ensureDirectory } from "./shared";
-import { markSubsection } from "../helpers";
+import { markSubsection, applyDescriptionTruncation } from "../helpers";
 import { logger } from "../../utils/logger";
 
 const log = logger("ToolsSection");
@@ -218,6 +218,7 @@ function renderBuiltinToolRow(
 	const setting = new Setting(containerEl)
 		.setName(meta.name)
 		.setDesc(meta.desc);
+	applyDescriptionTruncation(setting, meta.desc);
 
 	// Enabled toggle
 	setting.addToggle((toggle) =>
@@ -455,6 +456,7 @@ function renderUserToolRow(
 	const setting = new Setting(containerEl)
 		.setName(tool.name)
 		.setDesc(tool.description);
+	applyDescriptionTruncation(setting, tool.description);
 
 	// Enabled toggle
 	setting.addToggle((toggle) =>
@@ -629,6 +631,7 @@ function renderMcpToolRow(
 	const setting = new Setting(containerEl)
 		.setName(rawName)
 		.setDesc(desc);
+	applyDescriptionTruncation(setting, desc);
 
 	// Classification dropdown
 	setting.addDropdown((dropdown) => {
