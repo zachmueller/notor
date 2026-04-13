@@ -315,22 +315,43 @@
 }
 
 /* Tool description truncation — expand/collapse long descriptions */
-.notor-desc-toggle {
-	display: inline-flex;
-	align-items: center;
-	cursor: pointer;
-	color: var(--text-accent);
-	margin-left: 4px;
-	vertical-align: middle;
+.notor-desc-wrapper {
+	display: flex;
+	align-items: flex-start;
+	gap: 4px;
 }
 
-.notor-desc-toggle:hover {
-	color: var(--text-accent-hover);
-}
-
-.notor-desc-toggle svg {
+.notor-desc-icon {
+	flex-shrink: 0;
 	width: 14px;
 	height: 14px;
+	margin-top: 1px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-muted);
+}
+
+.notor-desc-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.notor-desc-icon-spacer {
+	visibility: hidden;
+}
+
+.notor-desc-clickable {
+	cursor: pointer;
+}
+
+.notor-desc-clickable:hover .notor-desc-icon {
+	color: var(--text-accent);
+}
+
+.notor-desc-clickable .notor-desc-truncated,
+.notor-desc-clickable .notor-desc-full {
+	user-select: text;
 }
 
 /* Fixed-width variants for inline settings inputs */

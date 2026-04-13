@@ -127,52 +127,74 @@ export function markSubsection(setting: Setting, name: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * If a Setting's description exceeds the character threshold, replace it
- * with a truncated version and a clickable toggle icon to expand/collapse.
- * Descriptions at or below the threshold are left unchanged.
+ * Apply consistent left-indent to a tool description to account for the
+ * expand/collapse chevron icon. Long descriptions (>threshold) get a
+ * clickable chevron and truncated text; short descriptions get an invisible
+ * spacer so the text aligns at the same indent.
+ *
+ * The entire description block is clickable to toggle, but text selection
+ * is preserved — a click that produces a selection is ignored.
  */
 export function applyDescriptionTruncation(
 	setting: Setting,
 	fullText: string,
 	threshold = 255,
 ): void {
-	if (!fullText || fullText.length <= threshold) return;
+	if (!fullText) return;
 
 	const descEl = setting.descEl;
 	descEl.empty();
+	descEl.addClass("notor-desc-wrapper");
 
-	const truncatedSpan = descEl.createSpan({ cls: "notor-desc-truncated" });
-	truncatedSpan.textContent = fullText.slice(0, threshold) + "…";
+	const isLong = fullText.length > threshold;
 
-	const fullSpan = descEl.createSpan({ cls: "notor-desc-full notor-hidden" });
-	fullSpan.textContent = fullText;
+	if (isLong) {
+		// Visible chevron icon
+		const iconEl = descEl.createSpan({ cls: "notor-desc-icon" });
+		setIcon(iconEl, "chevron-right");
 
-	const toggleSpan = descEl.createSpan({ cls: "notor-desc-toggle" });
-	const iconEl = toggleSpan.createSpan();
-	setIcon(iconEl, "chevron-right");
-	toggleSpan.setAttribute("aria-label", "Show full description");
-	toggleSpan.setAttribute("role", "button");
-	toggleSpan.tabIndex = 0;
+		const truncatedSpan = descEl.createSpan({ cls: "notor-desc-truncated" });
+		truncatedSpan.textContent = fullText.slice(0, threshold) + "…";
 
-	let expanded = false;
-	const toggle = () => {
-		expanded = !expanded;
-		truncatedSpan.toggleClass("notor-hidden", expanded);
-		fullSpan.toggleClass("notor-hidden", !expanded);
-		setIcon(iconEl, expanded ? "chevron-down" : "chevron-right");
-		toggleSpan.setAttribute(
-			"aria-label",
-			expanded ? "Collapse description" : "Show full description",
-		);
-	};
+		const fullSpan = descEl.createSpan({ cls: "notor-desc-full notor-hidden" });
+		fullSpan.textContent = fullText;
 
-	toggleSpan.addEventListener("click", toggle);
-	toggleSpan.addEventListener("keydown", (e) => {
-		if (e.key === "Enter" || e.key === " ") {
-			e.preventDefault();
+		let expanded = false;
+		const toggle = () => {
+			expanded = !expanded;
+			truncatedSpan.toggleClass("notor-hidden", expanded);
+			fullSpan.toggleClass("notor-hidden", !expanded);
+			setIcon(iconEl, expanded ? "chevron-down" : "chevron-right");
+			descEl.setAttribute(
+				"aria-label",
+				expanded ? "Collapse description" : "Show full description",
+			);
+		};
+
+		descEl.setAttribute("role", "button");
+		descEl.tabIndex = 0;
+		descEl.setAttribute("aria-label", "Show full description");
+		descEl.addClass("notor-desc-clickable");
+
+		// Toggle on click, but not if the user is selecting text
+		descEl.addEventListener("click", () => {
+			const sel = window.getSelection();
+			if (sel && sel.toString().length > 0) return;
 			toggle();
-		}
-	});
+		});
+		descEl.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault();
+				toggle();
+			}
+		});
+	} else {
+		// Invisible spacer to match the chevron width
+		descEl.createSpan({ cls: "notor-desc-icon notor-desc-icon-spacer" });
+
+		const textSpan = descEl.createSpan();
+		textSpan.textContent = fullText;
+	}
 }
 
 // ---------------------------------------------------------------------------
