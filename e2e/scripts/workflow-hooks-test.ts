@@ -713,6 +713,18 @@ async function tests(ctx: TestContext) {
 	// ── Test 7: Revert on success ─────────────────────────────────────────────
 	console.log("\n── Test 7: Revert on success ─────────────────────────────────");
 
+	// Wait for the workflow from test 6 to fully complete before checking logs.
+	// Without this, the previous workflow's response loop may still be running,
+	// and its scoped hook dispatches would pollute the log window.
+	const maxDeactivateWaitMs = 30_000;
+	const deactivatePollMs = 2_000;
+	for (let waited = 0; waited < maxDeactivateWaitMs; waited += deactivatePollMs) {
+		const logs = getWorkflowHookOverrideLogs(collector);
+		if (logs.some((e) => e.message.includes("deactivated"))) break;
+		console.log(`    Waiting for workflow deactivation... (${waited / 1000}s)`);
+		await page.waitForTimeout(deactivatePollMs);
+	}
+
 	// After a workflow conversation completes, a new conversation should use global hooks.
 	// Check for deactivation logs from the previous workflow execution (tests 5/6).
 	const overrideLogsAll7 = getWorkflowHookOverrideLogs(collector);
