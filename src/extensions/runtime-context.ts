@@ -288,17 +288,37 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string): Extens
 		})(),
 
 		conversationApi: (() => {
-			if (!conversationId) return null;
+			const apiLog = logger("ext:conversationApi");
+			if (!conversationId) {
+				apiLog.debug("conversationApi: no conversationId, returning null");
+				return null;
+			}
 			const orchestrator = plugin.getActiveOrchestrator?.();
-			if (!orchestrator) return null;
+			if (!orchestrator) {
+				apiLog.debug("conversationApi: no active orchestrator, returning null", { conversationId });
+				return null;
+			}
 			const convManager = orchestrator.getConversationManager();
-			if (!convManager) return null;
+			if (!convManager) {
+				apiLog.debug("conversationApi: no conversation manager, returning null", { conversationId });
+				return null;
+			}
 			// Verify the conversation exists
 			const conv = convManager.getActiveConversation();
-			if (!conv || conv.id !== conversationId) return null;
+			if (!conv || conv.id !== conversationId) {
+				apiLog.debug("conversationApi: conversation mismatch, returning null", {
+					conversationId,
+					activeConvId: conv?.id ?? null,
+				});
+				return null;
+			}
+			apiLog.debug("conversationApi: bound successfully", { conversationId });
 			return {
 				getTitle: () => convManager.getActiveConversation()?.title,
-				setTitle: (title: string) => { convManager.setTitle(title); },
+				setTitle: (title: string) => {
+					apiLog.info("setTitle called", { title, conversationId });
+					convManager.setTitle(title);
+				},
 				isFavorite: () => convManager.getActiveConversation()?.is_favorite ?? false,
 				setFavorite: (favorite: boolean) => { convManager.setFavorite(favorite); },
 			};

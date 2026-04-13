@@ -495,6 +495,7 @@ export class ConversationManager {
 	 */
 	setTitle(title: string): void {
 		if (!this.activeConversation) throw new Error("No active conversation");
+		log.info("setTitle", { conversationId: this.activeConversation.id, oldTitle: this.activeConversation.title, newTitle: title });
 		this.activeConversation.title = title;
 		void this.onConversationChanged?.(this.activeConversation);
 	}
