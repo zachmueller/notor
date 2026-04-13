@@ -2,29 +2,37 @@
 
 **A transparent, extensible AI assistant for note-taking and knowledge management in Obsidian.**
 
-Notor brings AI-powered assistance directly into your Obsidian workflow. It gives you a full AI chat panel with the ability to read, search, create, and surgically edit notes in your vault — with full transparency into every AI action, a safety-first approval model, diff previews for proposed changes, and rollback via checkpoints.
-
-> **Status:** Phases 0–5.2 of the roadmap implemented.
+Notor gives you a full AI chat panel inside Obsidian with the ability to read, search, create, and surgically edit notes in your vault. Every AI action is visible inline, write operations require approval by default, and automatic checkpoints let you roll back any change. Bring your own LLM — local or cloud — and keep your data under your control.
 
 ---
 
 ## What Notor can do
 
-- **Chat with an AI inside Obsidian** — side panel chat with streaming responses, multiple LLM providers (local, Anthropic, OpenAI, AWS Bedrock), [model presets](docs/model-presets.md) for quick switching between provider/model combinations, and conversation history
-- **[Read, write, and edit notes](docs/vault-tools.md)** — 19 built-in tools including vault note operations (read, write, search, move, backlinks/outlinks), web search and fetching, shell command execution, filesystem read/write with Word (`.docx`) support (including comment extraction), and sub-agent dispatch
-- **[Safety-first approval model](docs/safety.md)** — Plan/Act mode, diff previews with per-hunk accept/reject, approval gates for write operations, and automatic checkpoints for rollback
-- **[Note and file attachments](docs/context.md)** — attach vault notes (with section-level references) or external files directly to messages; ambient workspace context injected automatically
-- **[Vault-level instruction files](docs/rules.md)** — store Markdown rule files under `notor/rules/` that inject instructions automatically based on note directory or tag
-- **[Personas](docs/personas.md)** — file-based AI personalities with custom system prompts, model preferences, and per-persona approval overrides
-- **[Workflows](docs/workflows.md)** — reusable step-by-step instruction sets stored as vault notes; run manually or triggered by vault events
-- **[`<include_note>` tag](docs/include-note.md)** — dynamically inject vault note content into workflow bodies, system prompts, and rule files
-- **[LLM interaction hooks](docs/hooks.md)** — shell commands or workflows that fire at key conversation lifecycle events (pre-send, on-tool-call, after-completion, etc.)
-- **[Vault event hooks](docs/hooks.md#vault-event-hooks)** — hooks triggered by vault events: note open/save/create, tag changes, and cron schedules
-- **[Custom MCP tool servers](docs/mcp-servers.md)** — connect stdio or HTTP MCP servers to extend the AI's tool set; uniform dispatch with Plan/Act enforcement and approval UI
-- **[Sub-agents](docs/sub-agents.md)** — spawn focused child conversations for vault search, web lookup, or custom tasks; isolated context, default-deny tool access, concurrent execution (up to 3), and three built-in profiles (`search-vault`, `search-web`, `notor-help`)
-- **[User-defined extensions](docs/extensions.md)** — create custom tools and automations as Markdown files in your vault with TypeScript/JavaScript code fences; tools are called by the AI alongside built-in tools, automations fire at lifecycle and vault events; per-extension settings with auto-generated UI; shared settings across extensions
-- **[Conversation export & import](docs/export-import.md)** — export conversations to self-contained HTML or Markdown; import previously exported HTML conversations; conversation forking and favorites
+### Chat and context
+
+- **Side-panel AI chat** with streaming responses, conversation history, [model presets](docs/model-presets.md) for quick switching between providers/models, [conversation forking and favorites](docs/export-import.md), and [export/import](docs/export-import.md) to HTML or Markdown
+- **[Attach notes and files](docs/context.md)** directly to messages — vault notes (with section-level references like `[[Note#Section]]`), external files, images, and PDFs. Ambient workspace context (open notes, vault structure, OS) is injected automatically.
 - **Auto-compaction** — automatic context summarization when conversations approach the model's context window limit
+- **Multiple LLM providers** — local OpenAI-compatible endpoints (Ollama, LM Studio), Anthropic, OpenAI, and AWS Bedrock
+
+### Vault tools
+
+- **[19 built-in tools](docs/vault-tools.md)** — read, write, search, and move notes; manage frontmatter and tags; follow backlinks and outlinks; search the web and fetch pages; run shell commands; read and write filesystem files and Word documents (`.docx`)
+- **[Safety-first approval model](docs/safety.md)** — Plan/Act mode toggle, diff previews with per-hunk accept/reject, approval gates for write operations, and automatic checkpoints for rollback
+- **[Sub-agents](docs/sub-agents.md)** — the AI can spawn focused child conversations for vault search, web research, or custom tasks with isolated context and default-deny tool access
+
+### Customization and automation
+
+- **[Personas](docs/personas.md)** — file-based AI personalities with custom system prompts, model preferences, and per-persona approval overrides
+- **[Workflows](docs/workflows.md)** — reusable step-by-step instruction sets stored as vault notes; run manually, via slash-command, or triggered by vault events and cron schedules
+- **[Rules](docs/rules.md)** — vault-level instruction files that inject context automatically based on note directory or tag
+- **[Hooks](docs/hooks.md)** — shell commands or workflows that fire at conversation lifecycle events (pre-send, on-tool-call, after-completion) and vault events (note open/save/create, tag changes, cron schedules)
+- **[`<include_note>` tag](docs/include-note.md)** — dynamically inject vault note content into workflow bodies, system prompts, and rule files
+
+### Extensibility
+
+- **[MCP tool servers](docs/mcp-servers.md)** — connect local (stdio) or remote (SSE, Streamable HTTP) MCP servers to extend the AI's tool set with uniform Plan/Act enforcement and approval UI
+- **[User-defined extensions](docs/extensions.md)** — create custom tools and automations as Markdown files in your vault with TypeScript/JavaScript code fences, per-extension settings with auto-generated UI, and full access to Obsidian APIs
 
 ---
 
@@ -76,24 +84,6 @@ For full setup walkthroughs — including creating your first persona, workflow,
 
 ---
 
-## Roadmap
-
-| Phase | Description | Status |
-|---|---|---|
-| **Phase 0** | Foundation: LLM providers, chat panel, streaming, system prompt, credentials | ✅ Complete |
-| **Phase 1** | Core note operations: read/write/search/list tools, diff preview, Plan/Act mode, auto-approve | ✅ Complete |
-| **Phase 2** | Trust & observability: checkpoints/rollback, token tracking, chat history, frontmatter & tag tools, vault rules | ✅ Complete |
-| **Phase 3** | Context & intelligence: note/file attachment, auto-context injection, auto-compaction, web fetching, shell execution, LLM interaction hooks | ✅ Complete |
-| **Phase 4** | Workflows & personas: file-based personas, reusable workflow notes, `<include_note>` tag, vault event hooks | ✅ Complete |
-| **Phase 4.1** | Custom MCP servers: stdio/SSE/Streamable HTTP transports, tool discovery, uniform dispatch, read/write classification, Plan/Act signaling, auto-approve, chat panel status indicator | ✅ Complete |
-| **Phase 4c** | Word & file tools: `read_file`, `read_docx`, `write_docx` with optional template grafting; shared path-validation utility; settings UI | ✅ Complete |
-| **Phase 5** | Sub-agents: `use_subagent` tool, isolated child conversations, built-in profiles (`search-vault`, `search-web`, `notor-help`), default-deny tool access, concurrency control, progress UI | ✅ Complete |
-| **Phase 5.1** | User-defined extensions: vault-authored tools and automations as Markdown files, TypeScript runtime with Obsidian API access, per-extension settings with auto-generated UI, shared settings, file watcher with reload | ✅ Complete |
-| **Phase 5.2** | Model presets, conversation forking, favorite conversations, active note workflow templates, title generation automation, MCP wildcard tool configuration | ✅ Complete |
-| **Phase 6** | Advanced & multi-agent: agent monitor panel, background agents, browser capabilities | 🔜 Planned |
-
----
-
 ## Project structure
 
 ```
@@ -129,7 +119,7 @@ e2e/                   # End-to-end test scripts and Playwright configuration
 
 ## Design documentation
 
-The `design/` directory contains the full medium-term vision for Notor, written to inform architectural decisions across phases. Not everything described there is implemented yet — see the roadmap above for phased delivery.
+The `design/` directory contains the full medium-term vision for Notor, written to inform architectural decisions. Not everything described there is implemented yet.
 
 | Document | Contents |
 |---|---|
