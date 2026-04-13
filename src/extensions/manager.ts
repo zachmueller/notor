@@ -467,10 +467,14 @@ export class ExtensionManager {
 			throw new Error(`Automation '${automation.displayName ?? automation.filePath}' has no compiled function`);
 		}
 
-		// Check automation_enabled — keyed by filename (e.g., "title-generation")
-		const filename = automation.filePath.split("/").pop()?.replace(/\.md$/, "") ?? "";
-		const defaultEnabled = filename === "title-generation" ? false : true;
-		const isEnabled = this.plugin.settings.automation_enabled[filename] ?? defaultEnabled;
+		// Check automation_enabled — keyed by automation name (filename or scaffold name)
+		// Scaffold file paths use format "(built-in scaffold: name)", normal paths end with "name.md"
+		const scaffoldMatch = automation.filePath.match(/^\(built-in scaffold: (.+)\)$/);
+		const automationKey = scaffoldMatch
+			? scaffoldMatch[1]!
+			: (automation.filePath.split("/").pop()?.replace(/\.md$/, "") ?? "");
+		const defaultEnabled = automationKey === "title-generation" ? false : true;
+		const isEnabled = this.plugin.settings.automation_enabled[automationKey] ?? defaultEnabled;
 		if (!isEnabled) return;
 
 		const extensionName = automation.displayName ?? automation.filePath;
