@@ -335,8 +335,13 @@ export class ExtensionManager {
 		for (const [, automation] of compiledAutomations) {
 			if (automation.isScaffold) continue;
 			const filename = automation.filePath.split("/").pop()?.replace(/\.md$/, "") ?? "";
-			if (BUILTIN_AUTOMATION_SCAFFOLDS.has(filename)) {
+			const scaffold = BUILTIN_AUTOMATION_SCAFFOLDS.get(filename);
+			if (scaffold) {
 				builtinOverrides.push(filename);
+				// Carry over code-side settingsSchema if vault file doesn't define its own
+				if (scaffold.settingsSchema && !automation.settingsSchema?.length) {
+					automation.settingsSchema = scaffold.settingsSchema;
+				}
 			}
 		}
 
