@@ -42,6 +42,9 @@ export class ConversationManager {
 	/** Callback invoked when the conversation metadata changes. */
 	private onConversationChanged?: (conversation: Conversation) => void | Promise<void>;
 
+	/** Callback invoked specifically when the conversation title is set programmatically. */
+	private onTitleChanged?: (conversationId: string, title: string) => void;
+
 	constructor(
 		private defaultMode: ConversationMode = "plan"
 	) {}
@@ -58,6 +61,11 @@ export class ConversationManager {
 	/** Register a callback for when conversation metadata changes. */
 	setOnConversationChanged(callback: (conversation: Conversation) => void | Promise<void>): void {
 		this.onConversationChanged = callback;
+	}
+
+	/** Register a callback for when the conversation title is changed programmatically. */
+	setOnTitleChanged(callback: (conversationId: string, title: string) => void): void {
+		this.onTitleChanged = callback;
 	}
 
 	// -----------------------------------------------------------------------
@@ -498,6 +506,7 @@ export class ConversationManager {
 		log.info("setTitle", { conversationId: this.activeConversation.id, oldTitle: this.activeConversation.title, newTitle: title });
 		this.activeConversation.title = title;
 		void this.onConversationChanged?.(this.activeConversation);
+		this.onTitleChanged?.(this.activeConversation.id, title);
 	}
 
 	/**

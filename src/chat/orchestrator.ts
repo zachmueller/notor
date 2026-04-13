@@ -216,6 +216,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 			await this.historyManager.updateConversationHeader(conv);
 		});
 
+		this.conversationManager.setOnTitleChanged((conversationId, title) => {
+			this.view?.updateConversationTitleInList(conversationId, title);
+		});
+
 		this.compactionManager = new CompactionManager(
 			() => this.settings,
 			this.providerRegistry,

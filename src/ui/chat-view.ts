@@ -2276,6 +2276,24 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Update the title of a specific conversation in the list DOM without
+	 * re-rendering the entire list. No-op if the item isn't rendered.
+	 */
+	updateConversationTitleInList(conversationId: string, title: string): void {
+		const items = this.conversationListEl.querySelectorAll(".notor-conversation-list-item");
+		for (const item of items) {
+			const titleEl = item.querySelector(".notor-conversation-list-title");
+			if (!titleEl) continue;
+			// Match by active class for current conversation, or check data attribute
+			// The list items don't carry an ID, so we match against the active item
+			if (conversationId === this.activeConversationId && item.hasClass("is-active")) {
+				titleEl.textContent = title;
+				return;
+			}
+		}
+	}
+
+	/**
 	 * Show a context menu for a conversation list item.
 	 */
 	private showConversationContextMenu(evt: MouseEvent, entry: ConversationListEntry): void {
