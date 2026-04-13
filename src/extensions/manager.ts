@@ -415,6 +415,16 @@ export class ExtensionManager {
 				matching.push(automation);
 			}
 		}
+		log.debug("getAutomationsForTrigger", {
+			trigger,
+			totalAutomations: this.automations.size,
+			matching: matching.length,
+			allTriggers: [...this.automations.values()].map(a => ({
+				name: a.displayName ?? a.filePath,
+				trigger: a.trigger,
+				hasCompiledFn: !!a.compiledFn,
+			})),
+		});
 		// Already sorted by order from discovery, but re-sort to be safe
 		return matching.sort((a, b) => {
 			if (a.order !== b.order) return a.order - b.order;
@@ -475,12 +485,25 @@ export class ExtensionManager {
 			: (automation.filePath.split("/").pop()?.replace(/\.md$/, "") ?? "");
 		const defaultEnabled = automationKey === "title-generation" ? false : true;
 		const isEnabled = this.plugin.settings.automation_enabled[automationKey] ?? defaultEnabled;
+		log.debug("executeAutomation enabled check", {
+			automationKey,
+			isEnabled,
+			defaultEnabled,
+			filePath: automation.filePath,
+			trigger: automation.trigger,
+		});
 		if (!isEnabled) return;
 
 		const extensionName = automation.displayName ?? automation.filePath;
 
 		// Resolve per-extension settings (sync)
 		const { values: settings, missing: missingSettings } = this.getResolvedSettings(extensionName);
+		log.debug("executeAutomation settings resolved", {
+			extensionName,
+			settingsKeys: Object.keys(settings),
+			settingsValues: settings,
+			missing: missingSettings,
+		});
 
 		if (missingSettings.length > 0) {
 			const msg = `Automation '${extensionName}' requires setting${missingSettings.length > 1 ? "s" : ""} '${missingSettings.join("', '")}' to be configured in Settings.`;

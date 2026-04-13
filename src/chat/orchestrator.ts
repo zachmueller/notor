@@ -731,6 +731,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 			const userMessages = allMessages.filter(
 				(m) => m.role === "user" && !m.is_hook_injection
 			);
+			log.debug("on_conversation_start check", {
+				totalMessages: allMessages.length,
+				userMessages: userMessages.length,
+				hasAccessors: !!this.extensionLifecycleAccessors,
+			});
 			if (userMessages.length === 1) {
 				dispatchOnConversationStart(
 					{

@@ -825,7 +825,12 @@ export function dispatchOnConversationStart(
 	extensionAutomations?: LifecycleAutomationAccessors,
 ): void {
 	const automations = extensionAutomations?.getForTrigger("on_conversation_start") ?? [];
-	if (automations.length === 0) return;
+	if (automations.length === 0) {
+		log.debug("on_conversation_start: no automations registered, skipping", {
+			hasAccessors: !!extensionAutomations,
+		});
+		return;
+	}
 
 	log.info("Dispatching on_conversation_start automations", {
 		count: automations.length,
