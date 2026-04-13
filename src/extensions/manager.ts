@@ -554,13 +554,17 @@ export class ExtensionManager {
 		if (!schemas || schemas.length === 0) {
 			// Check automations by display name or file path
 			for (const automation of this.automations.values()) {
-				if (
-					(automation.displayName === extensionName || automation.filePath === extensionName) &&
-					automation.settingsSchema &&
-					automation.settingsSchema.length > 0
-				) {
-					const persisted = this.plugin.settings.user_extension_settings[extensionName] ?? {};
-					return resolveSettings(automation.settingsSchema, extensionName, persisted, this.plugin.app);
+				if (automation.displayName === extensionName || automation.filePath === extensionName) {
+					// Use automation's own schema, or fall back to scaffold schema for vault overrides
+					let effectiveSchema = automation.settingsSchema;
+					if (!effectiveSchema?.length) {
+						const filename = automation.filePath.split("/").pop()?.replace(/\.md$/, "") ?? "";
+						effectiveSchema = BUILTIN_AUTOMATION_SCAFFOLDS.get(filename)?.settingsSchema ?? null;
+					}
+					if (effectiveSchema && effectiveSchema.length > 0) {
+						const persisted = this.plugin.settings.user_extension_settings[extensionName] ?? {};
+						return resolveSettings(effectiveSchema, extensionName, persisted, this.plugin.app);
+					}
 				}
 			}
 			return { values: {}, missing: [] };
