@@ -416,8 +416,9 @@ async function testExtensionManagerState(ctx: TestContext): Promise<void> {
 	// We expect 2 user vault tools (echo + error) + 20 scaffold built-in tools = 22 total.
 	// The broken tool should be excluded from tools but we get 3 files discovered;
 	// only 2 user tools compile successfully, plus all 20 scaffolds.
+	// Automations: 2 user (after_completion) + 1 built-in scaffold (title-generation) = 3 total.
 	const toolsOk = state.toolCount === 22;
-	const automationsOk = state.automationCount === 2;
+	const automationsOk = state.automationCount === 3;
 	const sharedOk = state.hasSharedSettings;
 
 	if (toolsOk && automationsOk && sharedOk) {
@@ -430,7 +431,7 @@ async function testExtensionManagerState(ctx: TestContext): Promise<void> {
 	} else {
 		ctx.fail(
 			"Extension manager state",
-			`Expected 22 tools (2 user + 20 scaffolds), 2 automations, sharedSettings=true. ` +
+			`Expected 22 tools (2 user + 20 scaffolds), 3 automations (2 user + 1 scaffold), sharedSettings=true. ` +
 				`Got tools=${state.toolCount} (${state.toolNames.join(", ")}), ` +
 				`automations=${state.automationCount}, sharedSettings=${state.hasSharedSettings}`,
 			shot,
@@ -570,17 +571,18 @@ async function testAutomationDiscovery(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	if (state.automationCount !== 2) {
+	// 3 total: 2 user after_completion + 1 built-in scaffold (title-generation on_conversation_start)
+	if (state.automationCount !== 3) {
 		ctx.fail(
 			"Automation discovery",
-			`Expected 2 automations, got ${state.automationCount}. ` +
+			`Expected 3 automations (2 user + 1 scaffold), got ${state.automationCount}. ` +
 				`Triggers: ${JSON.stringify(state.automationTriggers)}`,
 			shot,
 		);
 		return;
 	}
 
-	// Verify both automations have after_completion trigger
+	// Verify the 2 user automations have after_completion trigger
 	const afterCompletionAutomations = state.automationTriggers.filter(
 		(a) => a.trigger === "after_completion",
 	);
@@ -595,21 +597,28 @@ async function testAutomationDiscovery(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	// Verify ordering: order=5 should come before order=10
+	// Verify the built-in title-generation scaffold is present
+	const titleGenAutomation = state.automationTriggers.find(
+		(a) => a.trigger === "on_conversation_start",
+	);
+
+	// Verify ordering of after_completion automations: order=5 should come before order=10
 	const orders = afterCompletionAutomations.map((a) => a.order);
 	const isOrdered = orders[0] === 5 && orders[1] === 10;
 
-	if (isOrdered) {
+	if (isOrdered && titleGenAutomation) {
 		ctx.pass(
 			"Automation discovery",
-			`2 after_completion automations in correct order (5, 10). ` +
-				`Names: ${afterCompletionAutomations.map((a) => a.displayName ?? a.filePath).join(", ")}`,
+			`3 automations: 2 after_completion in correct order (5, 10), ` +
+				`1 on_conversation_start scaffold (${titleGenAutomation.displayName}). ` +
+				`Names: ${state.automationTriggers.map((a) => a.displayName ?? a.filePath).join(", ")}`,
 			shot,
 		);
 	} else {
 		ctx.fail(
 			"Automation discovery",
-			`Automation order incorrect. Expected [5, 10], got [${orders.join(", ")}].`,
+			`Automation check failed. after_completion order=[${orders.join(", ")}] (expected [5, 10]), ` +
+				`titleGenScaffold=${!!titleGenAutomation}.`,
 			shot,
 		);
 	}
@@ -679,18 +688,20 @@ async function testExtensionReload(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	// Verify reload returned same counts as initial discovery (2 user + 20 scaffolds = 22)
-	if (reloadResult.toolCount === 22 && reloadResult.automationCount === 2) {
+	// Verify reload returned same counts as initial discovery:
+	// 2 user + 20 scaffolds = 22 tools, 2 user + 1 scaffold = 3 automations, 1 error (broken tool)
+	if (reloadResult.toolCount === 22 && reloadResult.automationCount === 3) {
 		ctx.pass(
 			"Extension reload",
 			`Reload: ${reloadResult.toolCount} tools, ${reloadResult.automationCount} automations, ` +
-				`${reloadResult.errors} errors, overrides: [${reloadResult.builtinOverrides.join(", ")}]`,
+				`${reloadResult.errors} error(s), overrides: [${reloadResult.builtinOverrides.join(", ")}]`,
 			shot,
 		);
 	} else {
 		ctx.fail(
 			"Extension reload",
-			`Unexpected reload counts: tools=${reloadResult.toolCount}, automations=${reloadResult.automationCount}, ` +
+			`Unexpected reload counts: tools=${reloadResult.toolCount} (expected 22), ` +
+				`automations=${reloadResult.automationCount} (expected 3), ` +
 				`errors=${reloadResult.errors}`,
 			shot,
 		);
