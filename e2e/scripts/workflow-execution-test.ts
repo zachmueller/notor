@@ -579,8 +579,8 @@ async function testWorkflowPromptAssemblyLogged(ctx: TestContext, collector: Log
 async function testWorkflowConversationCreationLogged(ctx: TestContext, collector: LogCollector): Promise<void> {
 	console.log("\nTest 12: Structured logs confirm workflow conversation created");
 
-	const orchLogs = getChatOrchestratorLogs(collector);
-	const convLog = orchLogs.find(
+	const execLogs = getWorkflowExecutorLogs(collector);
+	const convLog = execLogs.find(
 		(e) =>
 			e.message.includes("Workflow conversation created") ||
 			e.message.includes("Executing workflow")
@@ -590,18 +590,18 @@ async function testWorkflowConversationCreationLogged(ctx: TestContext, collecto
 		const data = convLog.data as Record<string, unknown> | undefined;
 		ctx.pass(
 			"Workflow conversation creation logged",
-			`Found orchestrator log: "${convLog.message}". data=${JSON.stringify(data)}`
+			`Found WorkflowExecutor log: "${convLog.message}". data=${JSON.stringify(data)}`
 		);
 	} else {
-		const allOrchLogs = orchLogs;
-		if (allOrchLogs.length > 0) {
+		const allExecLogs = execLogs;
+		if (allExecLogs.length > 0) {
 			ctx.fail(
 				"Workflow conversation creation logged",
-				`${allOrchLogs.length} ChatOrchestrator log(s) found but none about workflow: ` +
-					allOrchLogs.slice(0, 3).map((e) => `"${e.message}"`).join("; ")
+				`${allExecLogs.length} WorkflowExecutor log(s) found but none about workflow: ` +
+					allExecLogs.slice(0, 3).map((e) => `"${e.message}"`).join("; ")
 			);
 		} else {
-			ctx.fail("Workflow conversation creation logged", "No ChatOrchestrator logs found");
+			ctx.fail("Workflow conversation creation logged", "No WorkflowExecutor logs found");
 		}
 	}
 }

@@ -105,7 +105,7 @@ async function getConversationState(page: any): Promise<{
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			const convManager = orchestrator.getConversationManager();
 			const conversation = convManager.getActiveConversation();
 			const messages = convManager.getMessages();
@@ -138,7 +138,7 @@ async function forkAtMessage(
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			const result = await orchestrator.forkConversation(msgId);
 			if (!result) return null;
 			return {
@@ -161,7 +161,7 @@ async function switchToConversation(page: any, filename: string): Promise<boolea
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return false;
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			await orchestrator.switchConversation(fname);
 			return true;
 		} catch {
@@ -590,7 +590,7 @@ async function testForkAtToolCallNoResult(ctx: TestContext): Promise<void> {
 		if (!plugin) return { error: "Plugin not found" };
 
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			const hm = plugin.getHistoryManager();
 
 			const convId = crypto.randomUUID();
@@ -676,7 +676,7 @@ async function testForkMidMultiTool(ctx: TestContext): Promise<void> {
 		if (!plugin) return { error: "Plugin not found" };
 
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			const hm = plugin.getHistoryManager();
 
 			const convId = crypto.randomUUID();
@@ -991,7 +991,7 @@ async function testForkImportedConversation(ctx: TestContext): Promise<void> {
 		if (!plugin) return { error: "Plugin not found" };
 
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			const hm = plugin.getHistoryManager();
 
 			const importedId = crypto.randomUUID();
@@ -1318,7 +1318,7 @@ async function testNoContextMenuOnPendingToolCall(ctx: TestContext): Promise<voi
 		if (!plugin) return { error: "Plugin not found" };
 
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			const view = orchestrator.view;
 			if (!view) return { error: "Chat view not found" };
 
@@ -1431,7 +1431,7 @@ async function testContextMenuOnEarlierDuringPendingTool(ctx: TestContext): Prom
 		if (!plugin) return { error: "Plugin not found" };
 
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			const view = orchestrator.view;
 			if (!view) return { error: "Chat view not found" };
 

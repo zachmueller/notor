@@ -86,7 +86,7 @@ async function getConversationId(page: any): Promise<string | null> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 		try {
-			return plugin.getOrchestrator().getConversationManager().getActiveConversation()?.id ?? null;
+			return plugin.getActiveOrchestrator().getConversationManager().getActiveConversation()?.id ?? null;
 		} catch {
 			return null;
 		}
@@ -99,7 +99,7 @@ async function hasActiveSession(page: any, conversationId: string): Promise<bool
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return false;
 		try {
-			return plugin.getOrchestrator().hasActiveSession(convId);
+			return plugin.getActiveOrchestrator().hasActiveSession(convId);
 		} catch {
 			return false;
 		}
@@ -127,7 +127,7 @@ async function switchToConversation(page: any, filename: string): Promise<boolea
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return false;
 		try {
-			await plugin.getOrchestrator().switchConversation(fname);
+			await plugin.getActiveOrchestrator().switchConversation(fname);
 			return true;
 		} catch {
 			return false;
@@ -646,6 +646,10 @@ async function testModeSurvivesReload(ctx: TestContext): Promise<void> {
 	const convId = await getConversationId(page);
 	console.log(`    Conversation ID: ${convId}`);
 
+	// Get the filename so we can switch back after reload
+	const convFilename = convId ? await findConversationFilename(page, convId) : null;
+	console.log(`    Conversation filename: ${convFilename}`);
+
 	// Give JSONL header time to flush
 	await page.waitForTimeout(2_000);
 
@@ -654,7 +658,15 @@ async function testModeSurvivesReload(ctx: TestContext): Promise<void> {
 	await page.reload({ waitUntil: "load" });
 	await page.waitForTimeout(8_000); // Wait for Obsidian + plugin to reinitialize
 
-	// Step 4: Verify the mode was restored
+	// Step 4: Switch to the target conversation (reload may restore a different one)
+	const restoredConvId = await getConversationId(page);
+	if (restoredConvId !== convId && convFilename) {
+		console.log(`    Restored different conversation (${restoredConvId}), switching to ${convId}...`);
+		await switchToConversation(page, convFilename);
+		await page.waitForTimeout(1_000);
+	}
+
+	// Step 5: Verify the mode was restored
 	const restoredMode = await getCurrentMode(page);
 	const ss = await ctx.screenshot("test5-after-reload");
 
@@ -664,12 +676,12 @@ async function testModeSurvivesReload(ctx: TestContext): Promise<void> {
 		ctx.fail("Mode survives reload", `Expected "Plan" after reload, got "${restoredMode}"`, ss);
 	}
 
-	// Also verify the conversation ID matches (same conversation was restored)
-	const restoredConvId = await getConversationId(page);
-	if (restoredConvId === convId) {
-		ctx.pass("Same conversation restored after reload", `Conversation ${convId} was restored`);
+	// Also verify the conversation ID matches
+	const finalConvId = await getConversationId(page);
+	if (finalConvId === convId) {
+		ctx.pass("Same conversation restored after reload", `Conversation ${convId} was restored/switched`);
 	} else {
-		ctx.pass("Conversation restored after reload", `Restored ${restoredConvId} (may differ if most-recent logic changed)`);
+		ctx.pass("Conversation restored after reload", `Restored ${finalConvId} (may differ if most-recent logic changed)`);
 	}
 }
 

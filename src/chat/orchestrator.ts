@@ -877,6 +877,18 @@ export class ChatOrchestrator implements ToolSessionContext {
 			} catch {
 				// Best-effort — don't block session cleanup on write errors
 			}
+			// Sync session state back to display manager so getMessages() reflects
+			// the full conversation (assistant + tool messages added during the
+			// response loop). Only sync if the display manager is still showing
+			// the same conversation — if the user switched away, don't clobber.
+			const displayConv = this.conversationManager.getActiveConversation();
+			if (displayConv && displayConv.id === session.conversationId) {
+				const finalConv = session.conversationManager.getActiveConversation();
+				const finalMessages = session.conversationManager.getMessages();
+				if (finalConv && finalMessages.length > 0) {
+					this.conversationManager.loadConversation(finalConv, finalMessages, { silent: true });
+				}
+			}
 			// Workflow hook deactivation is intentionally absent here because
 			// handleUserMessage() always creates sessions with workflowAssembly: null
 			// (verified: orchestrator.ts session creation). No code path through

@@ -96,6 +96,7 @@ export class ConversationLifecycleManager {
 		if (signal?.aborted) return;
 
 		view?.clearMessages();
+		view?.setRespondingState(false);
 		view?.updateModeDisplay(conversation.mode);
 		view?.clearDisplayOverrides();
 
