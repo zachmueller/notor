@@ -2463,7 +2463,7 @@ export class NotorChatView extends ItemView {
 			item.setTitle("Copy conversation link")
 				.setIcon("link")
 				.onClick(async () => {
-					const uri = `obsidian://notor?action=open-conversation&id=${encodeURIComponent(entry.id)}`;
+					const uri = `obsidian://notor?id=${encodeURIComponent(entry.id)}`;
 					await navigator.clipboard.writeText(uri);
 					new Notice("Conversation link copied to clipboard");
 				});

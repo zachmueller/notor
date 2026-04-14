@@ -695,7 +695,10 @@ export default class NotorPlugin extends Plugin {
 
 		// 6c. Register obsidian://notor protocol handler for deep-links.
 		this.registerObsidianProtocolHandler("notor", async (params) => {
-			if (params.action === "open-conversation") {
+			log.info("Protocol handler invoked", { params });
+			// Obsidian reserves 'action' for its own routing, so we use 'do' as the verb param.
+			const verb = params.do;
+			if (verb === "open-conversation") {
 				const id = params.id;
 				if (!id) {
 					new Notice("Missing conversation ID in link");
@@ -711,6 +714,56 @@ export default class NotorPlugin extends Plugin {
 				if (!found) {
 					new Notice("Conversation not found — it may have been deleted");
 				}
+			} else if (params.id) {
+				// Shorthand: obsidian://notor?id=<uuid> — open conversation directly
+				await this.openChatPanel();
+				const orchestrator = this.getActiveOrchestrator();
+				if (!orchestrator) {
+					new Notice("No active chat panel");
+					return;
+				}
+				const found = await orchestrator.switchToConversationById(params.id);
+				if (!found) {
+					new Notice("Conversation not found — it may have been deleted");
+				}
+			} else {
+				log.warn("Unknown protocol params", { params });
+			}
+		});
+
+		// 6d. Markdown post-processor: intercept obsidian://notor links in vault notes
+		// so they work reliably without depending on the OS protocol round-trip.
+		this.registerMarkdownPostProcessor((el) => {
+			const prefix = "obsidian://notor?";
+			const links = el.querySelectorAll<HTMLAnchorElement>("a.external-link");
+			for (const link of links) {
+				const href = link.getAttribute("href") ?? "";
+				if (!href.startsWith(prefix)) continue;
+
+				const params = new URLSearchParams(href.slice(prefix.length));
+				const conversationId = params.get("id");
+				if (!conversationId) continue;
+
+				link.addEventListener("click", (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					this.openChatPanel().then(() => {
+						const orchestrator = this.getActiveOrchestrator();
+						if (!orchestrator) {
+							new Notice("No active chat panel");
+							return;
+						}
+						orchestrator.switchToConversationById(conversationId).then((found) => {
+							if (!found) {
+								new Notice("Conversation not found — it may have been deleted");
+							}
+						});
+					});
+				});
+
+				link.classList.remove("external-link");
+				link.classList.add("notor-conversation-link");
+				link.removeAttribute("href");
 			}
 		});
 
