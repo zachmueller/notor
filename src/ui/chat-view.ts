@@ -1996,7 +1996,7 @@ export class NotorChatView extends ItemView {
 			link.addEventListener("click", (e: MouseEvent) => {
 				e.preventDefault();
 				e.stopPropagation();
-				void this.switchToConversation(conversationId);
+				this.plugin.openChatInNewTab(undefined, false, undefined, conversationId);
 			});
 
 			link.removeAttribute("href");

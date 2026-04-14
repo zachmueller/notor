@@ -3039,11 +3039,14 @@ export default class NotorPlugin extends Plugin {
 	/**
 	 * Open a Notor chat panel in a new tab.
 	 * If conversationFilename is provided, that conversation is loaded via setState.
+	 * Optionally accepts conversationId to load by ID instead of filename.
 	 */
-	openChatInNewTab(conversationFilename?: string, createNew = false, initialText?: string): void {
+	openChatInNewTab(conversationFilename?: string, createNew = false, initialText?: string, conversationId?: string): void {
 		const leaf = this.app.workspace.getLeaf("tab");
 		const state: Record<string, unknown> = {};
-		if (conversationFilename) {
+		if (conversationId) {
+			state.conversationId = conversationId;
+		} else if (conversationFilename) {
 			state.conversationFilename = conversationFilename;
 		} else if (createNew) {
 			state.createNew = true;
