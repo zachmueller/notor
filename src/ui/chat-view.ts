@@ -147,8 +147,9 @@ export class NotorChatView extends ItemView {
 
 	// Persona state (A-009, A-010)
 	private personaManager?: PersonaManager;
-	private personaChangedUnregister?: () => void;
 	private personaLabelEl?: HTMLElement;
+	private onPersonaChange?: (persona: Persona | null) => void;
+	private getCurrentConversationPersonaName?: () => string | null;
 
 	// Workflow activity indicator state (H-002, H-003)
 	private workflowActivityTracker?: WorkflowActivityTracker;
@@ -395,6 +396,14 @@ export class NotorChatView extends ItemView {
 		this.getCurrentPreset = callback;
 	}
 
+	setOnPersonaChange(callback: (persona: Persona | null) => void): void {
+		this.onPersonaChange = callback;
+	}
+
+	setGetCurrentConversationPersonaName(callback: () => string | null): void {
+		this.getCurrentConversationPersonaName = callback;
+	}
+
 	setOnListCheckpoints(callback: () => Promise<Checkpoint[]>): void {
 		this.onListCheckpoints = callback;
 	}
@@ -599,18 +608,7 @@ export class NotorChatView extends ItemView {
 	 * programmatic switch, or workflow revert).
 	 */
 	setPersonaManager(manager: PersonaManager): void {
-		// Unregister previous listener if re-wiring (e.g. secondary panel re-wire)
-		this.personaChangedUnregister?.();
-
 		this.personaManager = manager;
-
-		// Listen for persona changes to update this panel's label
-		this.personaChangedUnregister = manager.setOnPersonaChanged((persona) => {
-			this.updatePersonaLabel(persona);
-		});
-
-		// Initialize label with current state
-		this.updatePersonaLabel(manager.getActivePersona());
 	}
 
 	/**
@@ -775,10 +773,6 @@ export class NotorChatView extends ItemView {
 		this.mcpStatusIndicator?.destroy();
 		this.mcpStatusIndicator = undefined;
 
-		// Phase 4: Unregister persona change listener to prevent stale callbacks
-		this.personaChangedUnregister?.();
-		this.personaChangedUnregister = undefined;
-
 		// A3.8: Release all callback references to prevent GC leaks.
 		// Called AFTER onCloseCleanup (Amendment R2-8 ordering) so the
 		// cleanup callback can still use view callbacks if needed.
@@ -820,14 +814,16 @@ export class NotorChatView extends ItemView {
 		this.onOpenInNewTab = undefined;
 		this.onOpenSettingsGroup = undefined;
 		this.onSendWorkflow = undefined;
+		this.onPersonaChange = undefined;
 
-		// setGet* callbacks (6)
+		// setGet* callbacks (7)
 		this.getAvailableProviders = undefined;
 		this.getAvailableModels = undefined;
 		this.getCurrentProvider = undefined;
 		this.getCurrentModel = undefined;
 		this.getWorkflowsCallback = undefined;
 		this.getActiveSessions = undefined;
+		this.getCurrentConversationPersonaName = undefined;
 
 		// Close cleanup callback (A7.2)
 		this.onCloseCleanup = undefined;
@@ -2730,8 +2726,18 @@ export class NotorChatView extends ItemView {
 		this.buildPresetSelect(this.settingsPopoverEl);
 
 		// Persona picker (A-009) — triggers rescan on each popover open
+		// Per-conversation scoping: picker reflects this panel's conversation
+		// persona, and selection updates only this panel (not all panels).
 		if (this.personaManager) {
-			buildPersonaPicker(this.settingsPopoverEl, this.personaManager);
+			buildPersonaPicker(
+				this.settingsPopoverEl,
+				this.personaManager,
+				this.getCurrentConversationPersonaName?.() ?? null,
+				(persona) => {
+					this.updatePersonaLabel(persona);
+					this.onPersonaChange?.(persona);
+				},
+			);
 		}
 
 		// Checkpoints section

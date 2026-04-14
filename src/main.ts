@@ -649,6 +649,11 @@ export default class NotorPlugin extends Plugin {
 			this.app.workspace.on("active-leaf-change", (leaf) => {
 				if (leaf?.view instanceof NotorChatView) {
 					this._lastFocusedChatLeafId = leaf.id;
+					// Sync ToolDispatcher persona to the focused panel's conversation
+					// so auto-approve resolution uses the correct persona context.
+					const orch = this._orchestrators.get(leaf.id);
+					const conv = orch?.getDisplayedConversation();
+					this.getToolDispatcher().setActivePersonaName(conv?.persona_name ?? null);
 				}
 			})
 		);
@@ -2022,6 +2027,20 @@ export default class NotorPlugin extends Plugin {
 		const conv = orchestrator.getConversationManager().getActiveConversation();
 		if (conv) {
 			view.setActiveConversationId(conv.id);
+
+			// Ensure persona label is set after DOM is built. This covers
+			// all load paths including new conversations opened in stacked
+			// panels where the initial setPersonaManager() fires before onOpen().
+			if (conv.persona_name) {
+				const pm = this.getPersonaManager();
+				pm.getPersonaByName(conv.persona_name).then((p) => {
+					view.updatePersonaLabel(p);
+				}).catch(() => {
+					view.updatePersonaLabel(null);
+				});
+			} else {
+				view.updatePersonaLabel(this.getPersonaManager().getActivePersona() ?? null);
+			}
 		}
 	}
 
@@ -2372,30 +2391,34 @@ export default class NotorPlugin extends Plugin {
 		const personaManager = this.getPersonaManager();
 		view.setPersonaManager(personaManager);
 
+		// Per-conversation persona scoping: the picker reads the current
+		// conversation's persona and updates only this panel's conversation.
+		view.setGetCurrentConversationPersonaName(() => {
+			return orchestrator.getDisplayedConversation()?.persona_name ?? null;
+		});
+
+		view.setOnPersonaChange((persona) => {
+			const conv = orchestrator.getDisplayedConversation();
+			if (conv) {
+				conv.persona_name = persona?.name ?? null;
+				historyManager.updateConversationHeader(conv).catch((e) => {
+					log.error("Failed to update conversation header on persona change", { error: String(e) });
+				});
+			}
+			// Sync ToolDispatcher to the persona of the panel that just changed
+			toolDispatcher.setActivePersonaName(persona?.name ?? null);
+		});
+
 		// B-007: Wire persona name changes to the dispatcher so auto-approve
 		// resolution tracks the active persona in real time.
 		// Phase 4: This is a global callback (shared PersonaManager singleton).
 		// Only set once — guard against multiple wireView calls overwriting it.
-		// The dispatcher propagation is global; the header update iterates
-		// all orchestrators' displayed conversations.
+		// Only propagates to the ToolDispatcher (for workflow persona switches);
+		// per-panel conversation headers are updated by the per-panel callback above.
 		if (!this._personaNameChangeWired) {
 			this._personaNameChangeWired = true;
 			personaManager.setOnPersonaNameChanged((name) => {
 				toolDispatcher.setActivePersonaName(name);
-
-				// Step 1f-addendum (Trigger 2): Update conversation header for
-				// all orchestrators that have a displayed conversation.
-				// A3.7: Use unified _orchestrators registry instead of
-				// primary/secondary distinction.
-				for (const orch of this._orchestrators.values()) {
-					const conv = orch.getDisplayedConversation();
-					if (conv) {
-						conv.persona_name = name;
-						historyManager.updateConversationHeader(conv).catch((e) => {
-							log.error("Failed to update conversation header on persona change", { error: String(e) });
-						});
-					}
-				}
 			});
 		}
 

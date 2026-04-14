@@ -100,6 +100,15 @@ export class ConversationLifecycleManager {
 		view?.updateModeDisplay(conversation.mode);
 		view?.clearDisplayOverrides();
 
+		// Display persona label for the new conversation
+		if (conversation.persona_name) {
+			const persona = await this.getPersonaManager()?.getPersonaByName(conversation.persona_name) ?? null;
+			if (signal?.aborted) return;
+			view?.updatePersonaLabel(persona);
+		} else {
+			view?.updatePersonaLabel(null);
+		}
+
 		// Scope checkpoint manager to the new conversation (A1.6b)
 		this.getCheckpointManager()?.setConversationId(conversation.id);
 

@@ -27,11 +27,15 @@ const NONE_VALUE = "__none__";
  *
  * @param container - Parent container element for the picker section
  * @param personaManager - PersonaManager instance for discovery and activation
+ * @param currentPersonaName - The current conversation's persona name (for initial selection)
+ * @param onPersonaSelected - Callback fired when the user selects a persona (per-panel update)
  * @returns The created section element (for cleanup if needed)
  */
 export function buildPersonaPicker(
 	container: HTMLElement,
-	personaManager: PersonaManager
+	personaManager: PersonaManager,
+	currentPersonaName: string | null,
+	onPersonaSelected: (persona: Persona | null) => void,
 ): HTMLElement {
 	const section = container.createDiv({ cls: "notor-settings-section" });
 	section.createDiv({ cls: "notor-settings-label", text: "Persona" });
@@ -49,12 +53,12 @@ export function buildPersonaPicker(
 	personaManager
 		.getDiscoveredPersonas()
 		.then((personas) => {
-			renderPersonaSelect(selectWrapper, loadingEl, personas, personaManager);
+			renderPersonaSelect(selectWrapper, loadingEl, personas, personaManager, currentPersonaName, onPersonaSelected);
 		})
 		.catch((e) => {
 			log.warn("Failed to discover personas for picker", { error: String(e) });
 			// Replace loading with an error-state dropdown showing only "None"
-			renderPersonaSelect(selectWrapper, loadingEl, [], personaManager);
+			renderPersonaSelect(selectWrapper, loadingEl, [], personaManager, currentPersonaName, onPersonaSelected);
 		});
 
 	return section;
@@ -62,24 +66,29 @@ export function buildPersonaPicker(
 
 /**
  * Render the persona <select> dropdown, replacing the loading placeholder.
+ *
+ * Uses `currentPersonaName` (the conversation's persona) for initial
+ * selection instead of the global PersonaManager state, so each panel
+ * reflects its own conversation's persona independently.
  */
 function renderPersonaSelect(
 	wrapper: HTMLElement,
 	loadingEl: HTMLElement,
 	personas: Persona[],
-	personaManager: PersonaManager
+	personaManager: PersonaManager,
+	currentPersonaName: string | null,
+	onPersonaSelected: (persona: Persona | null) => void,
 ): void {
 	loadingEl.remove();
 
 	const select = wrapper.createEl("select", { cls: "notor-settings-select" });
-	const activePersona = personaManager.getActivePersona();
 
 	// "None" option at the top
 	const noneOpt = select.createEl("option", {
 		text: "None",
 		attr: { value: NONE_VALUE },
 	});
-	if (!activePersona) {
+	if (!currentPersonaName) {
 		noneOpt.selected = true;
 	}
 
@@ -90,7 +99,7 @@ function renderPersonaSelect(
 			text: p.name,
 			attr: { value: p.name },
 		});
-		if (activePersona && activePersona.name === p.name) {
+		if (currentPersonaName && currentPersonaName === p.name) {
 			opt.selected = true;
 		}
 	}
@@ -99,10 +108,14 @@ function renderPersonaSelect(
 		const value = select.value;
 		if (value === NONE_VALUE) {
 			personaManager.deactivatePersona();
+			onPersonaSelected(null);
 			log.info("Persona deactivated via picker");
 		} else {
 			void personaManager.activatePersona(value).then((success) => {
-				if (!success) {
+				if (success) {
+					const selectedPersona = sorted.find((p) => p.name === value) ?? null;
+					onPersonaSelected(selectedPersona);
+				} else {
 					log.warn("Failed to activate persona from picker", { name: value });
 				}
 			}).catch((err) => log.error("Persona activation error", { name: value, err }));
