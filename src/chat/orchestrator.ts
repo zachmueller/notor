@@ -1292,7 +1292,14 @@ export class ChatOrchestrator implements ToolSessionContext {
 			let suggestion = "";
 			switch (e.code) {
 				case "AUTH_FAILED":
-					suggestion = " Check your API key or credentials in Settings → Notor.";
+					// Auto-clear cached credentials for Bedrock so the next
+					// attempt picks up refreshed tokens without restarting.
+					if (e.provider === "bedrock") {
+						this.providerRegistry.resetProviderCredentials("bedrock");
+						suggestion = " Cached credentials have been cleared — please try again. If the error persists, refresh your Midway token and retry.";
+					} else {
+						suggestion = " Check your API key or credentials in Settings → Notor.";
+					}
 					break;
 				case "CONNECTION_FAILED":
 					suggestion = " Check that your provider is running and accessible.";

@@ -229,6 +229,20 @@ export class BedrockProvider implements LLMProvider {
 	}
 
 	/**
+	 * Clear cached AWS clients so the next request creates fresh ones
+	 * with new credentials from the credential chain.
+	 */
+	private clearCachedClients(): void {
+		this.runtimeClient = null;
+		this.bedrockClient = null;
+	}
+
+	/** @inheritdoc */
+	resetCredentials(): void {
+		this.clearCachedClients();
+	}
+
+	/**
 	 * Create AWS credentials based on auth method.
 	 */
 	private getCredentials():
@@ -393,6 +407,18 @@ export class BedrockProvider implements LLMProvider {
 					"The 1M context beta flag was rejected by Bedrock. The beta may have been updated or revoked — check for a plugin update.",
 					"bedrock",
 					"PROVIDER_ERROR",
+					e instanceof Error ? e : undefined
+				);
+			}
+			if (
+				errName === "ExpiredTokenException" ||
+				(errMsg.includes("security token") && errMsg.includes("expired"))
+			) {
+				this.clearCachedClients();
+				throw new ProviderError(
+					"AWS security token has expired. Credentials have been refreshed — please try again. If the error persists, refresh your Midway token (e.g. via `ada credentials update`) and try again.",
+					"bedrock",
+					"AUTH_FAILED",
 					e instanceof Error ? e : undefined
 				);
 			}
@@ -577,6 +603,18 @@ export class BedrockProvider implements LLMProvider {
 					"AWS Bedrock access denied. The bedrock:ListInferenceProfiles " +
 						"IAM permission is required. Check your IAM policy and ensure " +
 						"it includes bedrock:ListInferenceProfiles.",
+					"bedrock",
+					"AUTH_FAILED",
+					e instanceof Error ? e : undefined
+				);
+			}
+			if (
+				errName === "ExpiredTokenException" ||
+				(errMsg.includes("security token") && errMsg.includes("expired"))
+			) {
+				this.clearCachedClients();
+				throw new ProviderError(
+					"AWS security token has expired. Credentials have been refreshed — please try again.",
 					"bedrock",
 					"AUTH_FAILED",
 					e instanceof Error ? e : undefined

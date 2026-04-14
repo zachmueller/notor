@@ -185,6 +185,23 @@ export class ProviderRegistry {
 		log.debug("Updated provider config", { type: config.type });
 	}
 
+	/**
+	 * Reset cached credentials for a provider.
+	 *
+	 * Calls `resetCredentials()` on the cached instance (if it implements it),
+	 * then destroys the cached instance and model list so the next access
+	 * creates a fresh provider with new credentials.
+	 */
+	resetProviderCredentials(type: LLMProviderType): void {
+		const instance = this.instances.get(type);
+		if (instance?.resetCredentials) {
+			instance.resetCredentials();
+		}
+		this.instances.delete(type);
+		this.modelCaches.delete(type);
+		log.info("Reset provider credentials", { type });
+	}
+
 	// -----------------------------------------------------------------------
 	// Model list caching (PROV-007)
 	// -----------------------------------------------------------------------

@@ -190,6 +190,12 @@ export interface LLMProvider {
 	 * @throws ProviderError with descriptive message on failure
 	 */
 	validateConnection(): Promise<boolean>;
+
+	/**
+	 * Clear cached credentials/clients so the next request creates fresh ones.
+	 * Optional — only providers that cache credentials need to implement this.
+	 */
+	resetCredentials?(): void;
 }
 
 // ---------------------------------------------------------------------------
