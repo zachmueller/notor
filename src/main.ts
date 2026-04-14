@@ -34,6 +34,7 @@ import { WorkflowActivityTracker } from "./workflows/workflow-activity-tracker";
 // Export / Import
 import { ExportModal, type ExportFormat } from "./export/export-modal";
 import { ConfirmModal } from "./ui/confirm-modal";
+import { RenameModal } from "./ui/rename-modal";
 import { exportToMarkdown } from "./export/markdown-exporter";
 import { exportToHtml, type SubAgentConversationMap } from "./export/html-exporter";
 import { USE_SUBAGENT_TOOL_NAME } from "./sub-agents/constants";
@@ -728,6 +729,12 @@ export default class NotorPlugin extends Plugin {
 				this.registerExtensionVaultWatcher();
 			}).catch((e) => {
 				log.warn("Initial extension discovery failed", { error: String(e) });
+			});
+
+			// Enforce chat history retention policy (age + size limits).
+			// Fire-and-forget — non-blocking, runs once per startup.
+			this.getHistoryManager().enforceRetention().catch((e) => {
+				log.warn("History retention enforcement failed", { error: String(e) });
 			});
 		});
 
@@ -2552,6 +2559,29 @@ export default class NotorPlugin extends Plugin {
 			view.renderConversationList(
 				view.isFavFilterActive() ? entries.filter((e) => e.is_favorite) : entries
 			);
+		});
+
+		// Rename conversation
+		view.setOnRenameConversation((filename: string, currentTitle: string) => {
+			new RenameModal(
+				this.app,
+				currentTitle,
+				async (newTitle: string) => {
+					const { conversation } = await historyManager.loadConversation(filename);
+					conversation.title = newTitle;
+					await historyManager.updateConversationHeader(conversation);
+
+					// If this is the active conversation, update in-memory state
+					// (setTitle fires onTitleChanged → updateConversationTitleInList)
+					const convManager = orchestrator.getConversationManager();
+					const activeConv = convManager.getActiveConversation();
+					if (activeConv && activeConv.id === conversation.id) {
+						convManager.setTitle(newTitle);
+					} else {
+						view.updateConversationTitleInList(conversation.id, newTitle);
+					}
+				},
+			).open();
 		});
 
 		// Open conversation in a new tab — the factory creates a fresh

@@ -36,7 +36,8 @@ export function renderHistorySection(
 		.setName("Maximum size (MB)")
 		.setDesc(
 			"Maximum total size of stored history in megabytes. " +
-				"Oldest conversations are pruned when this limit is exceeded."
+				"Oldest conversations are pruned when this limit is exceeded. " +
+				"Favorited conversations are never pruned."
 		)
 		.addText((text) =>
 			text
@@ -56,7 +57,8 @@ export function renderHistorySection(
 	new Setting(containerEl)
 		.setName("Maximum age (days)")
 		.setDesc(
-			"Conversations older than this many days are automatically pruned."
+			"Conversations older than this many days are automatically pruned. " +
+				"Favorited conversations are never pruned."
 		)
 		.addText((text) =>
 			text

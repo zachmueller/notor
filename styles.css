@@ -3115,3 +3115,51 @@
 	opacity: 0.8;
 	background: var(--background-modifier-hover);
 }
+
+/* ── Rename modal ────────────────────────────────────────── */
+
+.notor-rename-input {
+	width: 100%;
+	margin: 8px 0 16px;
+}
+
+/* ── Tool search / filter ────────────────────────────────── */
+
+.notor-tool-search-wrapper {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 12px;
+}
+
+.notor-tool-search-input {
+	flex: 1;
+	padding: 6px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+}
+
+.notor-tool-search-input:focus {
+	border-color: var(--interactive-accent);
+	outline: none;
+}
+
+.notor-tool-search-clear {
+	cursor: pointer;
+	color: var(--text-muted);
+	display: flex;
+	align-items: center;
+}
+
+.notor-tool-search-clear:hover {
+	color: var(--text-normal);
+}
+
+.notor-tool-search-no-match {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	padding: 8px 0;
+}

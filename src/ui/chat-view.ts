@@ -247,6 +247,9 @@ export class NotorChatView extends ItemView {
 	// Favorite callback
 	private onToggleFavorite?: (filename: string) => Promise<void>;
 
+	// Rename callback
+	private onRenameConversation?: (filename: string, currentTitle: string) => void;
+
 	// Favorites filter state
 	private favFilterActive = false;
 	private favFilterBtnEl?: HTMLElement;
@@ -313,6 +316,10 @@ export class NotorChatView extends ItemView {
 
 	setOnToggleFavorite(callback: (filename: string) => Promise<void>): void {
 		this.onToggleFavorite = callback;
+	}
+
+	setOnRenameConversation(callback: (filename: string, currentTitle: string) => void): void {
+		this.onRenameConversation = callback;
 	}
 
 	isFavFilterActive(): boolean {
@@ -2262,6 +2269,7 @@ export class NotorChatView extends ItemView {
 			const item = this.conversationListEl.createDiv({
 				cls: `notor-conversation-list-item${isActive ? " is-active" : ""}`,
 			});
+			item.setAttribute("data-conversation-id", entry.id);
 
 			const contentCol = item.createDiv({ cls: "notor-conversation-list-content" });
 
@@ -2333,14 +2341,12 @@ export class NotorChatView extends ItemView {
 	updateConversationTitleInList(conversationId: string, title: string): void {
 		const items = this.conversationListEl.querySelectorAll(".notor-conversation-list-item");
 		for (const item of items) {
+			if (item.getAttribute("data-conversation-id") !== conversationId) continue;
 			const titleEl = item.querySelector(".notor-conversation-list-title");
-			if (!titleEl) continue;
-			// Match by active class for current conversation, or check data attribute
-			// The list items don't carry an ID, so we match against the active item
-			if (conversationId === this.activeConversationId && item.hasClass("is-active")) {
+			if (titleEl) {
 				titleEl.textContent = title;
-				return;
 			}
+			return;
 		}
 	}
 
@@ -2355,6 +2361,14 @@ export class NotorChatView extends ItemView {
 				.setIcon(entry.is_favorite ? "star-off" : "star")
 				.onClick(() => {
 					this.onToggleFavorite?.(entry.filename);
+				});
+		});
+
+		menu.addItem((item) => {
+			item.setTitle("Rename")
+				.setIcon("pencil")
+				.onClick(() => {
+					this.onRenameConversation?.(entry.filename, entry.title ?? "Untitled");
 				});
 		});
 

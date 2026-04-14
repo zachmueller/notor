@@ -712,9 +712,11 @@ export class HistoryManager {
 		const maxAgeMs = this.maxAgeDays * 24 * 60 * 60 * 1000;
 		const maxSizeBytes = this.maxSizeMb * 1024 * 1024;
 
-		// Prune by age first (entries are newest-first)
+		// Prune by age first (entries are newest-first).
+		// Favorited conversations are always exempt from retention pruning.
 		const toPruneByAge: ConversationListEntry[] = [];
 		for (const entry of entries) {
+			if (entry.is_favorite) continue;
 			const age = now - new Date(entry.updated_at).getTime();
 			if (age > maxAgeMs) {
 				toPruneByAge.push(entry);
@@ -746,12 +748,13 @@ export class HistoryManager {
 			}
 		}
 
-		// If over limit, remove oldest until under
+		// If over limit, remove oldest until under (skip favorites)
 		if (totalSize > maxSizeBytes) {
 			// Work from oldest to newest
 			const oldestFirst = [...remaining].reverse();
 			for (const entry of oldestFirst) {
 				if (totalSize <= maxSizeBytes) break;
+				if (entry.is_favorite) continue;
 
 				try {
 					const filePath = this.getFilePath(entry.filename);
@@ -775,6 +778,7 @@ export class HistoryManager {
 			log.info("Enforced retention policy", {
 				prunedByAge: toPruneByAge.length,
 				prunedBySize: toPruneBySize.length,
+				favoritesProtected: entries.filter((e) => e.is_favorite).length,
 			});
 		}
 	}

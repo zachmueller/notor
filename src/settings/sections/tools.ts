@@ -10,7 +10,7 @@
  * and the per-server tool controls that lived inside "MCP servers".
  */
 
-import { Notice, Setting, normalizePath, setIcon } from "obsidian";
+import { Notice, Setting, normalizePath, setIcon, prepareFuzzySearch } from "obsidian";
 import { TOOL_DISPLAY_NAMES } from "../constants";
 import type { SettingsContext } from "./context";
 import type { McpServerConfig } from "../../mcp/mcp-types";
@@ -24,6 +24,23 @@ import { markSubsection, applyDescriptionTruncation } from "../helpers";
 import { logger } from "../../utils/logger";
 
 const log = logger("ToolsSection");
+
+// ---------------------------------------------------------------------------
+// Filter types
+// ---------------------------------------------------------------------------
+
+interface ToolFilterEntry {
+	settingEl: HTMLElement;
+	searchTexts: string[];
+}
+
+interface SectionGroup {
+	elements: HTMLElement[];
+	entries: ToolFilterEntry[];
+}
+
+/** Persistent search query — survives ctx.redisplay() re-renders. */
+let persistedToolSearchQuery = "";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -125,6 +142,23 @@ export function renderToolsSection(
 		cls: "setting-item-description",
 	});
 
+	// --- Search / filter input ---
+	const groups: SectionGroup[] = [];
+
+	const searchWrapper = containerEl.createDiv({ cls: "notor-tool-search-wrapper" });
+	const searchInput = searchWrapper.createEl("input", {
+		type: "search",
+		cls: "notor-tool-search-input",
+		placeholder: "Filter tools\u2026",
+	});
+	const clearBtn = searchWrapper.createDiv({ cls: "notor-tool-search-clear notor-hidden" });
+	setIcon(clearBtn, "x");
+
+	const noMatchEl = containerEl.createDiv({
+		cls: "notor-tool-search-no-match notor-hidden",
+		text: "No tools match your filter.",
+	});
+
 	// --- Approval timeout ---
 	new Setting(containerEl)
 		.setName("Tool approval timeout (seconds)")
@@ -144,13 +178,13 @@ export function renderToolsSection(
 		);
 
 	// --- Built-in tools ---
-	renderBuiltinTools(containerEl, ctx);
+	renderBuiltinTools(containerEl, ctx, groups);
 
 	// --- User tools ---
-	renderUserTools(containerEl, ctx);
+	renderUserTools(containerEl, ctx, groups);
 
 	// --- MCP tools ---
-	renderMcpTools(containerEl, ctx);
+	renderMcpTools(containerEl, ctx, groups);
 
 	// --- Copy tool config YAML ---
 	new Setting(containerEl)
@@ -178,13 +212,75 @@ export function renderToolsSection(
 					new Notice("Tool config YAML copied to clipboard.");
 				})
 		);
+
+	// --- Wire filter handler ---
+	const applyFilter = (query: string) => {
+		persistedToolSearchQuery = query;
+		if (!query) {
+			// Show everything
+			for (const group of groups) {
+				for (const el of group.elements) el.removeClass("notor-hidden");
+				for (const entry of group.entries) entry.settingEl.removeClass("notor-hidden");
+			}
+			clearBtn.addClass("notor-hidden");
+			noMatchEl.addClass("notor-hidden");
+			return;
+		}
+
+		clearBtn.removeClass("notor-hidden");
+		const fuzzy = prepareFuzzySearch(query);
+		let totalVisible = 0;
+
+		for (const group of groups) {
+			let groupVisible = 0;
+			for (const entry of group.entries) {
+				const matched = entry.searchTexts.some((t) => fuzzy(t) !== null);
+				if (matched) {
+					entry.settingEl.removeClass("notor-hidden");
+					groupVisible++;
+				} else {
+					entry.settingEl.addClass("notor-hidden");
+				}
+			}
+			for (const el of group.elements) {
+				if (groupVisible > 0) {
+					el.removeClass("notor-hidden");
+				} else {
+					el.addClass("notor-hidden");
+				}
+			}
+			totalVisible += groupVisible;
+		}
+
+		if (totalVisible === 0) {
+			noMatchEl.removeClass("notor-hidden");
+		} else {
+			noMatchEl.addClass("notor-hidden");
+		}
+	};
+
+	searchInput.addEventListener("input", () => {
+		applyFilter(searchInput.value.trim());
+	});
+
+	clearBtn.addEventListener("click", () => {
+		searchInput.value = "";
+		applyFilter("");
+		searchInput.focus();
+	});
+
+	// Restore persisted search query after redisplay
+	if (persistedToolSearchQuery) {
+		searchInput.value = persistedToolSearchQuery;
+		applyFilter(persistedToolSearchQuery);
+	}
 }
 
 // ---------------------------------------------------------------------------
 // Built-in tools
 // ---------------------------------------------------------------------------
 
-function renderBuiltinTools(containerEl: HTMLElement, ctx: SettingsContext): void {
+function renderBuiltinTools(containerEl: HTMLElement, ctx: SettingsContext, groups: SectionGroup[]): void {
 	const manager = ctx.plugin.getExtensionManager();
 	const toolDefs = new Map(manager.getTools().map((t) => [t.name, t]));
 
@@ -196,23 +292,29 @@ function renderBuiltinTools(containerEl: HTMLElement, ctx: SettingsContext): voi
 	);
 
 	// Read-only tools
-	new Setting(containerEl).setHeading().setName("Read-only tools");
-	renderColumnHeaders(containerEl, true);
+	const readHeading = new Setting(containerEl).setHeading().setName("Read-only tools");
+	const readHeaders = renderColumnHeaders(containerEl, true);
+	const readGroup: SectionGroup = { elements: [readHeading.settingEl, readHeaders], entries: [] };
 	for (const [toolId, meta] of readTools) {
 		const setting = renderBuiltinToolRow(containerEl, toolId, meta, ctx, true);
 		addBuiltinToolIcons(setting, toolId, toolDefs, ctx);
+		readGroup.entries.push({ settingEl: setting.settingEl, searchTexts: [meta.name, meta.desc, toolId] });
 	}
+	groups.push(readGroup);
 
 	// Write tools
-	new Setting(containerEl).setHeading().setName("Write tools");
-	renderColumnHeaders(containerEl, true);
+	const writeHeading = new Setting(containerEl).setHeading().setName("Write tools");
+	const writeHeaders = renderColumnHeaders(containerEl, true);
+	const writeGroup: SectionGroup = { elements: [writeHeading.settingEl, writeHeaders], entries: [] };
 	for (const [toolId, meta] of writeTools) {
 		const setting = renderBuiltinToolRow(containerEl, toolId, meta, ctx, false);
 		addBuiltinToolIcons(setting, toolId, toolDefs, ctx);
+		writeGroup.entries.push({ settingEl: setting.settingEl, searchTexts: [meta.name, meta.desc, toolId] });
 	}
+	groups.push(writeGroup);
 }
 
-function renderColumnHeaders(containerEl: HTMLElement, includeIconSpacers = false): void {
+function renderColumnHeaders(containerEl: HTMLElement, includeIconSpacers = false): HTMLElement {
 	const headerEl = containerEl.createDiv({ cls: "notor-tool-column-headers" });
 	headerEl.createSpan({ cls: "notor-tool-column-spacer" });
 	headerEl.createSpan({ cls: "notor-tool-column-label", text: "Enabled" });
@@ -221,6 +323,7 @@ function renderColumnHeaders(containerEl: HTMLElement, includeIconSpacers = fals
 	if (includeIconSpacers) {
 		headerEl.createSpan({ cls: "notor-tool-column-icon-spacer" });
 	}
+	return headerEl;
 }
 
 function renderBuiltinToolRow(
@@ -373,13 +476,13 @@ function buildToolSkeleton(name: string, description: string, mode: string): str
 // User tools
 // ---------------------------------------------------------------------------
 
-function renderUserTools(containerEl: HTMLElement, ctx: SettingsContext): void {
+function renderUserTools(containerEl: HTMLElement, ctx: SettingsContext, groups: SectionGroup[]): void {
 	const userTools = getUserTools(ctx);
 
 	containerEl.createEl("hr", { cls: "notor-tool-divider" });
 	const userToolsHeading = new Setting(containerEl).setHeading().setName("User tools");
 	markSubsection(userToolsHeading, "User tools");
-	containerEl.createEl("p", {
+	const userToolsDesc = containerEl.createEl("p", {
 		text: "Tools defined in your vault's notor/tools/ directory.",
 		cls: "setting-item-description",
 	});
@@ -433,32 +536,45 @@ function renderUserTools(containerEl: HTMLElement, ctx: SettingsContext): void {
 		);
 
 	if (userTools.length === 0) {
-		containerEl.createEl("p", {
+		const emptyMsg = containerEl.createEl("p", {
 			text: "No user tools yet.",
 			cls: "setting-item-description",
 		});
+		// Track the whole empty section so it hides on search
+		groups.push({ elements: [userToolsHeading.settingEl, userToolsDesc, emptyMsg], entries: [] });
 		return;
 	}
+
+	// Track the parent heading/desc for hiding when all user tools are filtered out
+	const userParentElements = [userToolsHeading.settingEl, userToolsDesc];
 
 	const readTools = userTools.filter((t) => t.mode === "read");
 	const writeTools = userTools.filter((t) => t.mode === "write");
 
 	if (readTools.length > 0) {
-		new Setting(containerEl).setHeading().setName("Read-only");
-		renderColumnHeaders(containerEl, true);
+		const heading = new Setting(containerEl).setHeading().setName("Read-only");
+		const headers = renderColumnHeaders(containerEl, true);
+		const group: SectionGroup = { elements: [...userParentElements, heading.settingEl, headers], entries: [] };
 		for (const tool of readTools) {
 			const setting = renderUserToolRow(containerEl, tool, ctx, true);
 			addUserToolIcons(setting, tool, ctx);
+			group.entries.push({ settingEl: setting.settingEl, searchTexts: [tool.name, tool.description] });
 		}
+		groups.push(group);
 	}
 
 	if (writeTools.length > 0) {
-		new Setting(containerEl).setHeading().setName("Write");
-		renderColumnHeaders(containerEl, true);
+		const heading = new Setting(containerEl).setHeading().setName("Write");
+		const headers = renderColumnHeaders(containerEl, true);
+		// Only include parent elements if read group didn't already
+		const parentEls = readTools.length > 0 ? [] : userParentElements;
+		const group: SectionGroup = { elements: [...parentEls, heading.settingEl, headers], entries: [] };
 		for (const tool of writeTools) {
 			const setting = renderUserToolRow(containerEl, tool, ctx, false);
 			addUserToolIcons(setting, tool, ctx);
+			group.entries.push({ settingEl: setting.settingEl, searchTexts: [tool.name, tool.description] });
 		}
+		groups.push(group);
 	}
 }
 
@@ -547,7 +663,7 @@ function addUserToolIcons(
 // MCP tools
 // ---------------------------------------------------------------------------
 
-function renderMcpTools(containerEl: HTMLElement, ctx: SettingsContext): void {
+function renderMcpTools(containerEl: HTMLElement, ctx: SettingsContext, groups: SectionGroup[]): void {
 	const mcpHub = getMcpHub(ctx);
 	const servers = ctx.settings.mcp_servers ?? {};
 	const serverNames = Object.keys(servers);
@@ -557,15 +673,17 @@ function renderMcpTools(containerEl: HTMLElement, ctx: SettingsContext): void {
 	containerEl.createEl("hr", { cls: "notor-tool-divider" });
 	const mcpHeading = new Setting(containerEl).setHeading().setName("MCP tools");
 	markSubsection(mcpHeading, "MCP tools");
-	containerEl.createEl("p", {
+	const mcpDesc = containerEl.createEl("p", {
 		text: "Tools discovered from connected MCP servers. Server-reported classification hints are shown but your override takes precedence.",
 		cls: "setting-item-description",
 	});
 
+	const mcpParentElements = [mcpHeading.settingEl, mcpDesc];
+
 	for (const serverName of serverNames) {
 		const config = servers[serverName];
 		if (!config) continue;
-		renderMcpServerTools(containerEl, serverName, config, ctx, mcpHub);
+		renderMcpServerTools(containerEl, serverName, config, ctx, mcpHub, groups, mcpParentElements);
 	}
 
 	// Subscribe to live status changes so tool lists update as servers connect.
@@ -580,6 +698,8 @@ function renderMcpServerTools(
 	config: McpServerConfig,
 	ctx: SettingsContext,
 	mcpHub: McpHub | undefined,
+	groups: SectionGroup[],
+	mcpParentElements: HTMLElement[],
 ): void {
 	const conn = mcpHub?.getConnection(serverName);
 	const status = conn?.status;
@@ -594,36 +714,42 @@ function renderMcpServerTools(
 	headerEl.createSpan({ text: serverName, cls: "notor-tool-mcp-server-name" });
 
 	if (config.disabled) {
-		containerEl.createEl("p", {
+		const noteEl = containerEl.createEl("p", {
 			text: "Server is disabled. Enable it in the MCP servers section.",
 			cls: "setting-item-description notor-tool-mcp-note",
 		});
+		groups.push({ elements: [...mcpParentElements, headerEl, noteEl], entries: [] });
 		return;
 	}
 
 	if (status !== "connected") {
-		containerEl.createEl("p", {
+		const noteEl = containerEl.createEl("p", {
 			text: status === "connecting"
-				? "Connecting to server…"
+				? "Connecting to server\u2026"
 				: "Server is not connected.",
 			cls: "setting-item-description notor-tool-mcp-note",
 		});
+		groups.push({ elements: [...mcpParentElements, headerEl, noteEl], entries: [] });
 		return;
 	}
 
 	const tools = conn?.tools ?? [];
 	if (tools.length === 0) {
-		containerEl.createEl("p", {
+		const noteEl = containerEl.createEl("p", {
 			text: "No tools discovered for this server.",
 			cls: "setting-item-description notor-tool-mcp-note",
 		});
+		groups.push({ elements: [...mcpParentElements, headerEl, noteEl], entries: [] });
 		return;
 	}
 
-	renderColumnHeaders(containerEl);
+	const colHeaders = renderColumnHeaders(containerEl);
+	const group: SectionGroup = { elements: [...mcpParentElements, headerEl, colHeaders], entries: [] };
 	for (const tool of tools) {
-		renderMcpToolRow(containerEl, serverName, tool, config, ctx);
+		const setting = renderMcpToolRow(containerEl, serverName, tool, config, ctx);
+		group.entries.push({ settingEl: setting.settingEl, searchTexts: [tool.name, tool.description, serverName] });
 	}
+	groups.push(group);
 }
 
 function renderMcpToolRow(
@@ -632,7 +758,7 @@ function renderMcpToolRow(
 	tool: { name: string; description: string; annotations?: { readOnlyHint?: boolean } },
 	config: McpServerConfig,
 	ctx: SettingsContext,
-): void {
+): Setting {
 	const rawName = tool.name;
 	const namespacedName = `${serverName}__${rawName}`;
 
@@ -707,4 +833,6 @@ function renderMcpToolRow(
 	if (!isEnabled) {
 		setting.settingEl.addClass("notor-tool-row-disabled");
 	}
+
+	return setting;
 }
