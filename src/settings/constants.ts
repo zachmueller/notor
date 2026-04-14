@@ -135,4 +135,9 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Spawn a sub-agent to handle a delegated task.",
 		isWrite: false,
 	},
+	sleep: {
+		name: "Sleep",
+		desc: "Pause execution for a specified duration (cancellable).",
+		isWrite: false,
+	},
 };

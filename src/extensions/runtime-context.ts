@@ -136,6 +136,8 @@ export interface ExtensionUtils {
 	} | null;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
+	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */
+	onProgress?: (status: string) => void;
 }
 
 /**
@@ -146,8 +148,8 @@ export interface ExtensionUtils {
  *   is bound to the correct conversation via ID lookup. When omitted, `conversationApi`
  *   is null.
  *
- * Note: `abortSignal` is NOT included — it's per-call only.
- * `UserToolAdapter.execute()` merges it into the returned object per-invocation.
+ * Note: `abortSignal` and `onProgress` are NOT included — they're per-call only.
+ * `UserToolAdapter.execute()` merges them into the returned object per-invocation.
  */
 export function buildUtils(plugin: NotorPlugin, conversationId?: string): ExtensionUtils {
 	const vaultRootPath = (plugin.app.vault.adapter as { basePath?: string }).basePath ?? "";

@@ -83,9 +83,12 @@ export class UserToolAdapter implements Tool {
 
 			// 4. Build injected context objects
 			const utils: ExtensionUtils = buildUtils(this.plugin);
-			// Merge abort signal per-invocation
+			// Merge per-invocation options
 			if (options?.abortSignal) {
 				utils.abortSignal = options.abortSignal;
+			}
+			if (options?.onProgress) {
+				utils.onProgress = options.onProgress;
 			}
 
 			const libs = this.manager.getCachedLibs();
