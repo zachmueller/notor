@@ -90,6 +90,7 @@ export class NotorChatView extends ItemView {
 	private inputAreaEl!: HTMLElement;
 	private inputToolbarEl!: HTMLElement;
 	private resizeHandler?: () => void;
+	private userDragHeight: number | null = null;
 	private textInputEl!: HTMLDivElement;
 	private sendButtonEl!: HTMLButtonElement;
 	private stopButtonEl!: HTMLButtonElement;
@@ -1105,12 +1106,26 @@ export class NotorChatView extends ItemView {
 	/**
 	 * Recalculate the text input height. The input grows to fit its content up
 	 * to the greater of 10% of the window height or 3 full lines of text.
+	 * When the user has manually dragged the resize handle, their chosen
+	 * height is used as the minimum (content can still push beyond it).
 	 */
 	private recalcInputHeight(): void {
 		this.textInputEl.setCssProps({ '--notor-input-height': 'auto' });
 		const lineHeight = parseFloat(getComputedStyle(this.textInputEl).lineHeight) || 20;
 		const padding = 12 + 2; // 6px top + 6px bottom padding + 2px border
 		const threeLines = (lineHeight * 3) + padding;
+
+		if (this.userDragHeight !== null) {
+			// User has manually set the height — use it as minimum, but still
+			// allow auto-expand if content exceeds it
+			const newHeight = Math.max(this.userDragHeight, this.textInputEl.scrollHeight);
+			this.textInputEl.setCssProps({
+				'--notor-input-height': newHeight + 'px',
+				'--notor-input-max-height': newHeight + 'px',
+			});
+			return;
+		}
+
 		const tenPercent = window.innerHeight * 0.1;
 		const maxH = Math.max(tenPercent, threeLines);
 		const newHeight = Math.min(this.textInputEl.scrollHeight, maxH);
@@ -1120,8 +1135,47 @@ export class NotorChatView extends ItemView {
 		});
 	}
 
+	/**
+	 * Wire up pointer events on the resize handle so the user can
+	 * drag-resize the input height vertically. Dragging up increases
+	 * height; dragging down decreases it (clamped to a 3-line minimum).
+	 */
+	private setupInputResizeHandle(handle: HTMLElement): void {
+		handle.addEventListener("pointerdown", (startEvent) => {
+			startEvent.preventDefault();
+			const startY = startEvent.clientY;
+			const startHeight = this.textInputEl.getBoundingClientRect().height;
+			const lineHeight = parseFloat(getComputedStyle(this.textInputEl).lineHeight) || 20;
+			const padding = 12 + 2;
+			const minHeight = (lineHeight * 3) + padding;
+
+			const onPointerMove = (moveEvent: PointerEvent) => {
+				// Handle is above the input: dragging up (negative deltaY) increases height
+				const deltaY = startY - moveEvent.clientY;
+				const newHeight = Math.max(minHeight, startHeight + deltaY);
+				this.userDragHeight = newHeight;
+				this.textInputEl.setCssProps({
+					'--notor-input-height': newHeight + 'px',
+					'--notor-input-max-height': newHeight + 'px',
+				});
+			};
+
+			const onPointerUp = () => {
+				document.removeEventListener("pointermove", onPointerMove);
+				document.removeEventListener("pointerup", onPointerUp);
+			};
+
+			document.addEventListener("pointermove", onPointerMove);
+			document.addEventListener("pointerup", onPointerUp);
+		});
+	}
+
 	private buildInputArea(container: HTMLElement): void {
 		this.inputAreaEl = container.createDiv({ cls: "notor-input-area" });
+
+		// Resize handle — allows the user to drag-resize the input height
+		const resizeHandle = this.inputAreaEl.createDiv({ cls: "notor-input-resize-handle" });
+		this.setupInputResizeHandle(resizeHandle);
 
 		// Text input wrapper (full width, above toolbar)
 		const inputWrapper = this.inputAreaEl.createDiv({ cls: "notor-input-wrapper" });
@@ -1504,6 +1558,7 @@ export class NotorChatView extends ItemView {
 		this.pendingWorkflow = null;
 
 		this.textInputEl.textContent = "";
+		this.userDragHeight = null;
 		this.textInputEl.setCssProps({ '--notor-input-height': 'auto', '--notor-input-max-height': '' });
 
 		try {

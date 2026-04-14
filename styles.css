@@ -950,6 +950,28 @@
 	border-width: 2px;
 }
 
+.notor-input-resize-handle {
+	height: 6px;
+	cursor: ns-resize;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+}
+
+.notor-input-resize-handle::after {
+	content: "";
+	width: 32px;
+	height: 3px;
+	border-radius: 2px;
+	background: var(--background-modifier-border);
+	transition: background 0.15s;
+}
+
+.notor-input-resize-handle:hover::after {
+	background: var(--text-muted);
+}
+
 .notor-input-wrapper {
 	width: 100%;
 }
