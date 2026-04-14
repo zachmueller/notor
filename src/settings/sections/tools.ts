@@ -586,6 +586,7 @@ function renderMcpServerTools(
 
 	// Server sub-heading with status dot
 	const headerEl = containerEl.createDiv({ cls: "notor-tool-mcp-server-header" });
+	headerEl.setAttribute("data-notor-subsection", `mcp-server:${serverName}`);
 	const dotSpan = headerEl.createSpan({
 		cls: `notor-mcp-status-dot notor-mcp-dot-${status ?? "disconnected"}`,
 	});

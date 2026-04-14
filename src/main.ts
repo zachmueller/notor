@@ -100,6 +100,7 @@ import { isExtensionFile, isExtensionPath } from "./extensions/watcher";
 // MCP
 import { McpHub } from "./mcp/mcp-hub";
 import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
+import { showMcpMissingAnnotationsNotice } from "./tool-config/notices";
 
 // Queue
 import { TaskLaneQueue } from "./queue/task-lane-queue";
@@ -208,6 +209,9 @@ export default class NotorPlugin extends Plugin {
 	 * @see specs/04-mcp/tasks.md — ARCH-005
 	 */
 	private _mcpHub?: McpHub;
+
+	/** Servers that have already shown the readOnlyHint missing notice (once per session). */
+	private _mcpAnnotationNotifiedServers = new Set<string>();
 
 	/**
 	 * Per-lane FIFO serialization queue — rate-limits async operations
@@ -1315,6 +1319,17 @@ export default class NotorPlugin extends Plugin {
 					toolCount: connection.tools.length,
 					tools: connection.tools.map((t) => `${serverName}__${t.name}`),
 				});
+
+				// Warn if tools lack readOnlyHint annotations (once per session per server)
+				if (!this._mcpAnnotationNotifiedServers.has(serverName)) {
+					const toolsMissingHint = connection.tools.filter(
+						(t) => t.annotations?.readOnlyHint === undefined
+					);
+					if (toolsMissingHint.length > 0) {
+						this._mcpAnnotationNotifiedServers.add(serverName);
+						showMcpMissingAnnotationsNotice(this, serverName, toolsMissingHint.length);
+					}
+				}
 			} else if (status === "disconnected" || status === "error") {
 				// Server disconnected → unregister its tools from both
 				// ToolRegistry and ToolDispatcher (FEAT-004)

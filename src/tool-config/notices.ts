@@ -38,3 +38,42 @@ export function showToolConfigError(
 		};
 	}
 }
+
+/**
+ * Show a Notice when an MCP server's tools lack readOnlyHint annotations.
+ *
+ * Warns the user that tools without classification hints default to "write"
+ * and suggests verifying the settings. On desktop, right-clicking opens
+ * Settings > Tools scrolled to the specific server's tool list.
+ *
+ * @param plugin     - The Notor plugin instance.
+ * @param serverName - The MCP server's slug name.
+ * @param toolCount  - Number of tools missing readOnlyHint.
+ */
+export function showMcpMissingAnnotationsNotice(
+	plugin: NotorPlugin,
+	serverName: string,
+	toolCount: number,
+): void {
+	const plural = toolCount === 1 ? "tool lacks" : "tools lack";
+	const message =
+		`MCP server "${serverName}": ${toolCount} ${plural} read/write hints — ` +
+		`defaulting to Write. Verify classifications in Settings > Tools.` +
+		(Platform.isDesktop ? "\n(right-click to open tool settings)" : "");
+
+	const notice = new Notice(message, 10000);
+
+	if (Platform.isDesktop) {
+		notice.messageEl.oncontextmenu = () => {
+			const appSetting = (plugin.app as import("obsidian").App & {
+				setting?: { open: () => void; openTabById: (id: string) => void };
+			}).setting;
+			appSetting?.open();
+			appSetting?.openTabById("notor");
+			setTimeout(() => {
+				(plugin as unknown as { _settingTab?: { scrollToGroup: (g: string, s?: string) => void } })
+					._settingTab?.scrollToGroup("Tools", `mcp-server:${serverName}`);
+			}, 100);
+		};
+	}
+}
