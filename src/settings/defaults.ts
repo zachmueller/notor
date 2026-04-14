@@ -21,7 +21,7 @@ export const DEFAULT_PROVIDERS: LLMProviderConfig[] = [
 		type: "local",
 		enabled: true,
 		display_name: "Local (OpenAI-compatible)",
-		endpoint: "http://localhost:11434/v1",
+		endpoint: "",
 	},
 	{
 		type: "anthropic",

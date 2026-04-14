@@ -2,7 +2,7 @@
  * Local OpenAI-compatible LLM provider.
  *
  * Connects to locally-hosted LLMs via OpenAI-compatible API (Ollama,
- * LM Studio, etc.). Default endpoint: http://localhost:11434/v1
+ * LM Studio, etc.). User must configure the endpoint in settings.
  *
  * Uses standard fetch API for HTTP requests. SSE stream parsing for
  * streaming responses.
@@ -28,9 +28,6 @@ import { estimateTokenCount } from "../utils/tokens";
 import { logger } from "../utils/logger";
 
 const log = logger("LocalProvider");
-
-/** Default endpoint for Ollama's OpenAI-compatible API. */
-const DEFAULT_ENDPOINT = "http://localhost:11434/v1";
 
 /** Timeout in ms for connection validation requests. */
 const VALIDATION_TIMEOUT_MS = 10_000;
@@ -181,9 +178,22 @@ export class LocalProvider implements LLMProvider {
 	private readonly apiKeyId: string | undefined;
 
 	constructor(config: LLMProviderConfig, app: App) {
-		this.endpoint = (config.endpoint || DEFAULT_ENDPOINT).replace(/\/+$/, "");
+		this.endpoint = (config.endpoint || "").replace(/\/+$/, "");
 		this.app = app;
 		this.apiKeyId = undefined; // Local providers typically don't need auth
+	}
+
+	/**
+	 * Guard that throws a clear error if no endpoint is configured.
+	 */
+	private requireEndpoint(): void {
+		if (!this.endpoint) {
+			throw new ProviderError(
+				"No endpoint configured. Set your Local provider endpoint in Settings → Notor → Providers.",
+				"local",
+				"AUTH_FAILED"
+			);
+		}
 	}
 
 	async *sendMessage(
@@ -191,6 +201,7 @@ export class LocalProvider implements LLMProvider {
 		tools: ToolDefinition[],
 		options: SendMessageOptions
 	): AsyncIterable<StreamChunk> {
+		this.requireEndpoint();
 		const url = `${this.endpoint}/chat/completions`;
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
@@ -358,6 +369,7 @@ export class LocalProvider implements LLMProvider {
 	}
 
 	async listModels(): Promise<ModelInfo[]> {
+		this.requireEndpoint();
 		const url = `${this.endpoint}/models`;
 		const headers: Record<string, string> = {};
 
@@ -410,6 +422,7 @@ export class LocalProvider implements LLMProvider {
 	}
 
 	async validateConnection(): Promise<boolean> {
+		this.requireEndpoint();
 		// Test connectivity by fetching the models endpoint with a timeout
 		const url = `${this.endpoint}/models`;
 		const headers: Record<string, string> = {};

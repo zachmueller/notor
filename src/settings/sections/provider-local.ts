@@ -27,10 +27,10 @@ export function renderLocalProviderSection(
 		.addText((text) =>
 			text
 				.setPlaceholder("http://localhost:11434/v1")
-				.setValue(provider.endpoint ?? "http://localhost:11434/v1")
+				.setValue(provider.endpoint ?? "")
 				.onChange(async (value) => {
 					const updated = { ...getProvider(ctx.settings, "local") };
-					updated.endpoint = value.trim() || "http://localhost:11434/v1";
+					updated.endpoint = value.trim();
 					updateProvider(ctx.settings, updated);
 					await ctx.saveSettings();
 				})
