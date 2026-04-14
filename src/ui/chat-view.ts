@@ -241,8 +241,9 @@ export class NotorChatView extends ItemView {
 	private getAvailablePresets?: () => ModelPreset[];
 	private getCurrentPreset?: () => string | null;
 
-	// Fork callback
+	// Fork callbacks
 	private onForkConversation?: (messageId: string) => Promise<void>;
+	private onForkToNewPanel?: (messageId: string | undefined, initialText?: string) => Promise<void>;
 
 	// Favorite callback
 	private onToggleFavorite?: (filename: string) => Promise<void>;
@@ -425,6 +426,10 @@ export class NotorChatView extends ItemView {
 
 	setOnForkConversation(callback: (messageId: string) => Promise<void>): void {
 		this.onForkConversation = callback;
+	}
+
+	setOnForkToNewPanel(callback: (messageId: string | undefined, initialText?: string) => Promise<void>): void {
+		this.onForkToNewPanel = callback;
 	}
 
 	setOnOpenInNewTab(callback: (filename: string) => void): void {
@@ -818,6 +823,7 @@ export class NotorChatView extends ItemView {
 		this.onRestoreCheckpoint = undefined;
 		this.onGetCurrentContent = undefined;
 		this.onForkConversation = undefined;
+		this.onForkToNewPanel = undefined;
 		this.onOpenInNewTab = undefined;
 		this.onOpenSettingsGroup = undefined;
 		this.onSendWorkflow = undefined;
@@ -1080,10 +1086,17 @@ export class NotorChatView extends ItemView {
 
 			const menu = new Menu();
 			menu.addItem((item) => {
-				item.setTitle("Fork conversation from here")
+				item.setTitle("Fork here")
 					.setIcon("git-branch-plus")
 					.onClick(() => {
 						this.onForkConversation?.(messageId);
+					});
+			});
+			menu.addItem((item) => {
+				item.setTitle("/btw")
+					.setIcon("message-square-plus")
+					.onClick(() => {
+						this.onForkToNewPanel?.(messageId);
 					});
 			});
 			menu.showAtMouseEvent(evt);
@@ -1222,6 +1235,7 @@ export class NotorChatView extends ItemView {
 		this.textInputEl.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
+				if (this.tryHandleBtw()) return;
 				void this.handleSend();
 			} else if (e.key === "Tab") {
 				if (this.workflowSuggest?.active) {
@@ -1405,7 +1419,10 @@ export class NotorChatView extends ItemView {
 			attr: { "aria-label": "Send message" },
 		});
 		setIcon(this.sendButtonEl, "send");
-		this.sendButtonEl.addEventListener("click", () => void this.handleSend());
+		this.sendButtonEl.addEventListener("click", () => {
+			if (this.tryHandleBtw()) return;
+			void this.handleSend();
+		});
 
 		// Stop button (hidden by default)
 		this.stopButtonEl = buttonWrapper.createEl("button", {
@@ -1535,6 +1552,21 @@ export class NotorChatView extends ItemView {
 	// User interactions
 	// -----------------------------------------------------------------------
 
+	/**
+	 * Check if the input starts with `/btw` and handle it as a fork-to-new-panel.
+	 * Returns true if handled (caller should return early).
+	 */
+	private tryHandleBtw(): boolean {
+		const content = this.getInputContentExcludingWorkflowToken();
+		const match = content.match(/^\/btw(?:\s+([\s\S]*))?$/i);
+		if (!match) return false;
+
+		const initialText = match[1]?.trim() || undefined;
+		this.textInputEl.textContent = "";
+		this.onForkToNewPanel?.(undefined, initialText);
+		return true;
+	}
+
 	private async handleSend(): Promise<void> {
 		if (this.isResponding) return;
 
@@ -1633,20 +1665,28 @@ export class NotorChatView extends ItemView {
 	 * Set whether the AI is currently responding.
 	 * Controls send/stop button visibility and input state.
 	 */
+	/** Pre-fill the input box with text (used by /btw auto-send in new panels). */
+	setInputText(text: string): void {
+		this.textInputEl.textContent = text;
+	}
+
+	/** Programmatically trigger a send (used after setInputText for /btw auto-send). */
+	triggerSend(): void {
+		void this.handleSend();
+	}
+
 	setRespondingState(responding: boolean): void {
 		this.isResponding = responding;
 
 		if (responding) {
 			this.sendButtonEl.addClass("notor-hidden");
 			this.stopButtonEl.removeClass("notor-hidden");
-			this.textInputEl.setAttribute("contenteditable", "false");
-			this.textInputEl.addClass("notor-text-input--disabled");
+			// Input stays editable so the user can type /btw during streaming.
+			// The isResponding guard in handleSend() blocks normal sends.
 			this.loadingIndicatorEl.removeClass("notor-hidden");
 		} else {
 			this.sendButtonEl.removeClass("notor-hidden");
 			this.stopButtonEl.addClass("notor-hidden");
-			this.textInputEl.setAttribute("contenteditable", "true");
-			this.textInputEl.removeClass("notor-text-input--disabled");
 			this.loadingIndicatorEl.addClass("notor-hidden");
 			if (this.app.workspace.activeLeaf === this.leaf) {
 				this.textInputEl.focus();

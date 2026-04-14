@@ -609,6 +609,28 @@ export default class NotorPlugin extends Plugin {
 			},
 		});
 
+		// /btw — fork current conversation into a new panel (side conversation)
+		this.addCommand({
+			id: "btw-side-conversation",
+			name: "/btw — Open side conversation in new panel",
+			callback: () => {
+				const leafId = this._lastFocusedChatLeafId;
+				if (!leafId) return;
+				const orch = this._orchestrators.get(leafId);
+				if (!orch) return;
+				const messages = orch.getConversationManager().getMessages();
+				const lastId = messages[messages.length - 1]?.id;
+				if (!lastId) return;
+				orch.forkConversation(lastId).then((result) => {
+					if (!result) return;
+					this.openChatInNewTab(result.filename);
+					new Notice(`Side conversation: ${result.conversation.title}`);
+				}).catch((e) => {
+					log.error("Failed to create side conversation", { error: String(e) });
+				});
+			},
+		});
+
 		// EXT-016: Reload user extensions from vault files.
 		this.addCommand({
 			id: "reload-extensions",
@@ -1979,6 +2001,13 @@ export default class NotorPlugin extends Plugin {
 				await orchestrator.switchConversation(savedFilename, { signal });
 				if (signal.aborted) return;
 				this.syncViewAfterLoad(view, orchestrator);
+
+				// /btw auto-send: if the fork was created with initial text, send it
+				const initialText = savedState?.initialText as string | undefined;
+				if (initialText) {
+					view.setInputText(initialText);
+					view.triggerSend();
+				}
 			} else if (savedId) {
 				// Workspace restore passes a conversation ID — resolve and load
 				let switched: boolean;
@@ -2542,6 +2571,19 @@ export default class NotorPlugin extends Plugin {
 			new Notice(`Forked: ${result.conversation.title}`);
 		});
 
+		// /btw — fork conversation to a new panel (side conversation)
+		view.setOnForkToNewPanel(async (messageId, initialText) => {
+			const messages = orchestrator.getConversationManager().getMessages();
+			const forkMessageId = messageId ?? messages[messages.length - 1]?.id;
+			if (!forkMessageId) return;
+
+			const result = await orchestrator.forkConversation(forkMessageId);
+			if (!result) return;
+
+			this.openChatInNewTab(result.filename, false, initialText);
+			new Notice(`Side conversation: ${result.conversation.title}`);
+		});
+
 		// Export conversation from history list
 		view.setOnExportConversation((filename: string) => {
 			historyManager.loadConversation(filename).then(({ conversation, messages }) => {
@@ -2977,13 +3019,16 @@ export default class NotorPlugin extends Plugin {
 	 * Open a Notor chat panel in a new tab.
 	 * If conversationFilename is provided, that conversation is loaded via setState.
 	 */
-	openChatInNewTab(conversationFilename?: string, createNew = false): void {
+	openChatInNewTab(conversationFilename?: string, createNew = false, initialText?: string): void {
 		const leaf = this.app.workspace.getLeaf("tab");
 		const state: Record<string, unknown> = {};
 		if (conversationFilename) {
 			state.conversationFilename = conversationFilename;
 		} else if (createNew) {
 			state.createNew = true;
+		}
+		if (initialText) {
+			state.initialText = initialText;
 		}
 		leaf.setViewState({
 			type: CHAT_VIEW_TYPE,
