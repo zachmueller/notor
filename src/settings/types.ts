@@ -78,6 +78,13 @@ export interface NotorSettings {
 	/** Per-tool auto-approve settings. */
 	auto_approve: Record<string, boolean>;
 
+	/**
+	 * Seconds to wait for manual tool approval before auto-skipping.
+	 * 0 means no timeout (wait indefinitely). When a tool call times out,
+	 * the AI receives an error and can proceed without user input.
+	 */
+	approval_timeout: number;
+
 	/** Per-tool enabled/disabled state. Tools default to enabled when absent. */
 	tool_enabled: Record<string, boolean>;
 

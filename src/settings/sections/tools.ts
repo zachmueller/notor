@@ -125,6 +125,24 @@ export function renderToolsSection(
 		cls: "setting-item-description",
 	});
 
+	// --- Approval timeout ---
+	new Setting(containerEl)
+		.setName("Tool approval timeout (seconds)")
+		.setDesc(
+			"How long to wait for manual tool approval before auto-skipping. " +
+			"Set to 0 for no timeout (wait indefinitely). When a tool call times out, " +
+			"the AI receives an error and can proceed without user input."
+		)
+		.addText((text) =>
+			text
+				.setPlaceholder("0")
+				.setValue(ctx.settings.approval_timeout ? String(ctx.settings.approval_timeout) : "")
+				.onChange(async (value) => {
+					ctx.settings.approval_timeout = Math.max(0, parseInt(value) || 0);
+					await ctx.saveSettings();
+				})
+		);
+
 	// --- Built-in tools ---
 	renderBuiltinTools(containerEl, ctx);
 

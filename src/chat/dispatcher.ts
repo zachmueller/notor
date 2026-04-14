@@ -336,19 +336,32 @@ export class ToolDispatcher {
 				if (!approvalCb) {
 					log.warn("No approval callback set, auto-approving", { toolName });
 				} else {
-					const userDecision = await approvalCb(toolCall, abortSignal, messageId);
-					if (userDecision === "rejected") {
+					const approvalTimeout = this.settings?.approval_timeout ?? 0;
+					const userDecision = await (approvalTimeout > 0
+						? Promise.race([
+							approvalCb(toolCall, abortSignal, messageId),
+							new Promise<"timed_out">((resolve) =>
+								setTimeout(() => resolve("timed_out"), approvalTimeout * 1000)
+							),
+						])
+						: approvalCb(toolCall, abortSignal, messageId));
+
+					if (userDecision === "rejected" || userDecision === "timed_out") {
 						toolCall.status = "rejected";
 						this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+						const error = userDecision === "timed_out"
+							? `Tool call '${toolName}' was not approved within ${approvalTimeout} seconds and was automatically skipped. The user may be away — proceed without this tool's output.`
+							: `Tool call rejected by user. The user chose not to approve this ${toolName} operation.`;
 
 						const result: ToolResult = {
 							tool_name: toolName,
 							success: false,
 							result: "",
-							error: `Tool call rejected by user. The user chose not to approve this ${toolName} operation.`,
+							error,
 						};
 
-						log.info("Tool call rejected by user", { toolName });
+						log.info(userDecision === "timed_out" ? "Tool call timed out waiting for approval" : "Tool call rejected by user", { toolName });
 						this.events.onToolCallResult?.(toolCall, result, messageId);
 						return result;
 					}
@@ -460,20 +473,32 @@ export class ToolDispatcher {
 				if (!approvalCb) {
 					log.warn("No approval callback set, auto-approving", { toolName });
 				} else {
-					const decision = await approvalCb(toolCall, abortSignal, messageId);
+					const approvalTimeout = this.settings?.approval_timeout ?? 0;
+					const decision = await (approvalTimeout > 0
+						? Promise.race([
+							approvalCb(toolCall, abortSignal, messageId),
+							new Promise<"timed_out">((resolve) =>
+								setTimeout(() => resolve("timed_out"), approvalTimeout * 1000)
+							),
+						])
+						: approvalCb(toolCall, abortSignal, messageId));
 
-					if (decision === "rejected") {
+					if (decision === "rejected" || decision === "timed_out") {
 						toolCall.status = "rejected";
 						this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+						const error = decision === "timed_out"
+							? `Tool call '${toolName}' was not approved within ${approvalTimeout} seconds and was automatically skipped. The user may be away — proceed without this tool's output.`
+							: `Tool call rejected by user. The user chose not to approve this ${toolName} operation.`;
 
 						const result: ToolResult = {
 							tool_name: toolName,
 							success: false,
 							result: "",
-							error: `Tool call rejected by user. The user chose not to approve this ${toolName} operation.`,
+							error,
 						};
 
-						log.info("Tool call rejected by user", { toolName });
+						log.info(decision === "timed_out" ? "Tool call timed out waiting for approval" : "Tool call rejected by user", { toolName });
 						this.events.onToolCallResult?.(toolCall, result, messageId);
 						return result;
 					}

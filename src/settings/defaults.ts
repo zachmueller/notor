@@ -114,6 +114,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	active_provider: "local",
 	providers: DEFAULT_PROVIDERS,
 	auto_approve: DEFAULT_AUTO_APPROVE,
+	approval_timeout: 0,
 	tool_enabled: DEFAULT_TOOL_ENABLED,
 	automation_enabled: {},
 	mode: "plan",
