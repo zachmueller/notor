@@ -41,7 +41,12 @@ declare module "mammoth" {
 		input: { buffer: Buffer },
 	): Promise<{ value: string }>;
 
-	export default mammoth;
+	const _default: {
+		images: typeof images;
+		convertToHtml: typeof convertToHtml;
+		extractRawText: typeof extractRawText;
+	};
+	export default _default;
 	export { convertToHtml, extractRawText, images };
 	export type { Options, ImageConverter, Image, ImageAttributes };
 }
