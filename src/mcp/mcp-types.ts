@@ -116,6 +116,13 @@ export interface McpServerConfig {
 	 * for this server.
 	 */
 	autoApprove?: string[];
+
+	/**
+	 * Set to true after the missing-annotations Notice has been shown for this
+	 * server. Prevents the Notice from re-firing on subsequent plugin reloads.
+	 * @default false
+	 */
+	annotationsNoticeShown?: boolean;
 }
 
 // ---------------------------------------------------------------------------

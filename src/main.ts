@@ -210,9 +210,6 @@ export default class NotorPlugin extends Plugin {
 	 */
 	private _mcpHub?: McpHub;
 
-	/** Servers that have already shown the readOnlyHint missing notice (once per session). */
-	private _mcpAnnotationNotifiedServers = new Set<string>();
-
 	/**
 	 * Per-lane FIFO serialization queue — rate-limits async operations
 	 * by lane key. Used by web search, MCP dispatch, and user extensions.
@@ -1320,13 +1317,21 @@ export default class NotorPlugin extends Plugin {
 					tools: connection.tools.map((t) => `${serverName}__${t.name}`),
 				});
 
-				// Warn if tools lack readOnlyHint annotations (once per session per server)
-				if (!this._mcpAnnotationNotifiedServers.has(serverName)) {
+				// Warn if tools lack readOnlyHint annotations (once per server, ever).
+				// Skip if: (a) notice was already shown, or (b) user has already
+				// overridden any tool classification for this server.
+				const serverConfig = this.settings.mcp_servers?.[serverName];
+				const hasUserOverrides = serverConfig?.toolClassifications
+					&& Object.keys(serverConfig.toolClassifications).length > 0;
+				if (serverConfig && !serverConfig.annotationsNoticeShown && !hasUserOverrides) {
 					const toolsMissingHint = connection.tools.filter(
 						(t) => t.annotations?.readOnlyHint === undefined
 					);
 					if (toolsMissingHint.length > 0) {
-						this._mcpAnnotationNotifiedServers.add(serverName);
+						serverConfig.annotationsNoticeShown = true;
+						this.saveSettings().catch((e) => {
+							log.error("Failed to persist annotationsNoticeShown", { serverName, error: String(e) });
+						});
 						showMcpMissingAnnotationsNotice(this, serverName, toolsMissingHint.length);
 					}
 				}
