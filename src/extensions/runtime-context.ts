@@ -23,7 +23,7 @@ import { isDomainBlocked } from "../utils/domain-denylist";
 import { detectMediaFormat } from "../media/format-detector";
 import { processImage } from "../media/image-processor";
 import { processPdf } from "../media/pdf-processor";
-import type { ContentBlock, ImageMediaType } from "../media/types";
+import { getTextContent, type ContentBlock, type ImageMediaType } from "../media/types";
 import { resolveImageForDocx } from "../tools/docx-image-utils";
 import type { DocxImageData } from "../tools/docx-image-utils";
 import { graftIntoTemplate } from "../tools/docx-template-graft";
@@ -55,6 +55,27 @@ import { Cron } from "croner";
 // ---------------------------------------------------------------------------
 // Utils builder
 // ---------------------------------------------------------------------------
+
+/** Lightweight conversation summary returned by chat history tools. */
+export interface ChatHistorySummary {
+	id: string;
+	title?: string;
+	preview?: string;
+	created_at: string;
+	updated_at: string;
+	is_favorite?: boolean;
+	deep_link: string;
+}
+
+/** Full conversation with messages returned by chat history tools. */
+export interface ChatHistoryConversation {
+	id: string;
+	title?: string;
+	created_at: string;
+	updated_at: string;
+	messages: Array<{ role: string; content: string; timestamp: string }>;
+	deep_link: string;
+}
 
 /** Shape of the `utils` object injected into extension functions. */
 export interface ExtensionUtils {
@@ -133,6 +154,17 @@ export interface ExtensionUtils {
 		setTitle: (title: string) => void;
 		isFavorite: () => boolean;
 		setFavorite: (favorite: boolean) => void;
+	} | null;
+	/**
+	 * API for searching and reading past chat conversations from local history.
+	 *
+	 * Wraps `HistoryManager` methods with simplified return types suitable
+	 * for tool consumption. Returns null only if history is unavailable.
+	 */
+	chatHistory: {
+		search: (query: string) => Promise<ChatHistorySummary[]>;
+		loadConversation: (conversationId: string) => Promise<ChatHistoryConversation | null>;
+		listRecent: (limit?: number) => Promise<ChatHistorySummary[]>;
 	} | null;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
@@ -286,6 +318,50 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string): Extens
 				} finally {
 					depth--;
 				}
+			};
+		})(),
+
+		chatHistory: (() => {
+			const hm = plugin.getHistoryManager();
+			if (!hm) return null;
+			const toSummary = (e: { id: string; title?: string; preview?: string; created_at: string; updated_at: string; is_favorite?: boolean }): ChatHistorySummary => ({
+				id: e.id,
+				title: e.title,
+				preview: e.preview,
+				created_at: e.created_at,
+				updated_at: e.updated_at,
+				is_favorite: e.is_favorite,
+				deep_link: `notor-conversation://${e.id}`,
+			});
+			return {
+				search: async (query: string) => {
+					const entries = await hm.searchConversations(query);
+					return entries.map(toSummary);
+				},
+				loadConversation: async (conversationId: string) => {
+					const entries = await hm.listConversations();
+					const match = entries.find(e => e.id === conversationId);
+					if (!match) return null;
+					const { conversation, messages } = await hm.loadConversation(match.filename);
+					return {
+						id: conversation.id,
+						title: conversation.title,
+						created_at: conversation.created_at,
+						updated_at: conversation.updated_at,
+						messages: messages
+							.filter(m => m.role === "user" || m.role === "assistant")
+							.map(m => ({
+								role: m.role,
+								content: getTextContent(m.content),
+								timestamp: m.timestamp,
+							})),
+						deep_link: `notor-conversation://${conversation.id}`,
+					};
+				},
+				listRecent: async (limit = 20) => {
+					const entries = await hm.listConversations();
+					return entries.slice(0, limit).map(toSummary);
+				},
 			};
 		})(),
 

@@ -11,7 +11,7 @@
  */
 
 import { Notice, Setting, normalizePath, setIcon, prepareFuzzySearch } from "obsidian";
-import { TOOL_DISPLAY_NAMES } from "../constants";
+import { TOOL_DISPLAY_NAMES, TOOLS_DEFAULT_DISABLED } from "../constants";
 import type { SettingsContext } from "./context";
 import type { McpServerConfig } from "../../mcp/mcp-types";
 import type { McpHub } from "../../mcp/mcp-hub";
@@ -68,7 +68,7 @@ export function generateToolConfigSnippet(
 	for (const [toolId, meta] of Object.entries(TOOL_DISPLAY_NAMES)) {
 		const defaultAutoApprove = !meta.isWrite;
 		const currentAutoApprove = autoApprove[toolId] ?? defaultAutoApprove;
-		const currentEnabled = toolEnabled[toolId] ?? true;
+		const currentEnabled = toolEnabled[toolId] ?? !TOOLS_DEFAULT_DISABLED.has(toolId);
 		lines.push(`${toolId}:`);
 		lines.push(`  enabled: ${currentEnabled}`);
 		lines.push(`  auto_approve: ${currentAutoApprove}`);
@@ -333,7 +333,7 @@ function renderBuiltinToolRow(
 	ctx: SettingsContext,
 	defaultAutoApprove: boolean,
 ): Setting {
-	const isEnabled = ctx.settings.tool_enabled[toolId] ?? true;
+	const isEnabled = ctx.settings.tool_enabled[toolId] ?? !TOOLS_DEFAULT_DISABLED.has(toolId);
 	const isAutoApproved = ctx.settings.auto_approve[toolId] ?? defaultAutoApprove;
 
 	const setting = new Setting(containerEl)

@@ -693,6 +693,27 @@ export default class NotorPlugin extends Plugin {
 			log.warn("Failed to restore active persona from settings", { error: String(e) });
 		});
 
+		// 6c. Register obsidian://notor protocol handler for deep-links.
+		this.registerObsidianProtocolHandler("notor", async (params) => {
+			if (params.action === "open-conversation") {
+				const id = params.id;
+				if (!id) {
+					new Notice("Missing conversation ID in link");
+					return;
+				}
+				await this.openChatPanel();
+				const orchestrator = this.getActiveOrchestrator();
+				if (!orchestrator) {
+					new Notice("No active chat panel");
+					return;
+				}
+				const found = await orchestrator.switchToConversationById(id);
+				if (!found) {
+					new Notice("Conversation not found — it may have been deleted");
+				}
+			}
+		});
+
 		// 7. Initialize Group F: vault event hook components (F-023).
 		// Heavy init (tag shadow cache) is deferred to onLayoutReady.
 		this._initVaultEventHooks();

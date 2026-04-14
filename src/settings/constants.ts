@@ -140,4 +140,24 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Pause execution for a specified duration (cancellable).",
 		isWrite: false,
 	},
+	search_chat_history: {
+		name: "Search chat history",
+		desc: "Search past conversations by keyword.",
+		isWrite: false,
+	},
+	read_chat_history: {
+		name: "Read chat history",
+		desc: "Read the full message history of a past conversation.",
+		isWrite: false,
+	},
 };
+
+// ---------------------------------------------------------------------------
+// Tools that default to disabled (user must opt-in via Settings → Tools)
+// ---------------------------------------------------------------------------
+
+export const TOOLS_DEFAULT_DISABLED: ReadonlySet<string> = new Set([
+	"sleep",
+	"search_chat_history",
+	"read_chat_history",
+]);

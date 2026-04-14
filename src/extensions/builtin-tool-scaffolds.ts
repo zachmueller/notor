@@ -2563,6 +2563,121 @@ return result;`,
 );
 
 // ---------------------------------------------------------------------------
+// search_chat_history — search past Notor conversations by keyword
+// ---------------------------------------------------------------------------
+
+const SEARCH_CHAT_HISTORY = scaffold(
+	"search_chat_history",
+	"Search past Notor conversations by keyword. Returns matching conversation metadata with IDs that can be used with read_chat_history.",
+	"read",
+	`params:
+  query:
+    type: string
+    description: "Search query to match against conversation titles and message content. Case-insensitive. Leave empty to list recent conversations."
+    default: ""
+  limit:
+    type: number
+    description: "Maximum number of results to return (1–50)."
+    default: 10`,
+	`const log = utils.logger("search_chat_history");
+
+if (!utils.chatHistory) {
+  throw new Error("Chat history is not available.");
+}
+
+const query = ((params.query as string) || "").trim();
+const limit = Math.min(Math.max(1, (params.limit as number) || 10), 50);
+
+if (!query) {
+  log.info("Listing recent conversations", { limit });
+  const recent = await utils.chatHistory.listRecent(limit);
+  return {
+    conversations: recent,
+    total: recent.length,
+    note: "No query provided — showing most recent conversations. Each conversation includes a deep_link that can be used in markdown links.",
+  };
+}
+
+log.info("Searching conversations", { query, limit });
+const results = await utils.chatHistory.search(query);
+const trimmed = results.slice(0, limit);
+
+return {
+  query,
+  conversations: trimmed,
+  total_matches: results.length,
+  returned: trimmed.length,
+};`,
+);
+
+// ---------------------------------------------------------------------------
+// read_chat_history — read the message history of a past conversation
+// ---------------------------------------------------------------------------
+
+const READ_CHAT_HISTORY = scaffold(
+	"read_chat_history",
+	"Read the full message history of a past Notor conversation by its ID. Use search_chat_history first to find the conversation ID.",
+	"read",
+	`params:
+  conversation_id:
+    type: string
+    description: "The UUID of the conversation to read. Obtain this from search_chat_history results."
+  max_messages:
+    type: number
+    description: "Maximum number of messages to return (most recent first). Set to 0 for all messages."
+    default: 50`,
+	`const log = utils.logger("read_chat_history");
+
+if (!utils.chatHistory) {
+  throw new Error("Chat history is not available.");
+}
+
+const conversationId = ((params.conversation_id as string) || "").trim();
+if (!conversationId) {
+  throw new Error("Missing required parameter: conversation_id");
+}
+
+const maxMessages = Math.max(0, (params.max_messages as number) ?? 50);
+
+log.info("Loading conversation", { conversationId, maxMessages });
+const result = await utils.chatHistory.loadConversation(conversationId);
+
+if (!result) {
+  return {
+    error: "not_found",
+    message: "Conversation not found. It may have been deleted by the retention policy. Use search_chat_history to find valid conversation IDs.",
+  };
+}
+
+let messages = result.messages;
+if (maxMessages > 0 && messages.length > maxMessages) {
+  const skipped = messages.length - maxMessages;
+  messages = messages.slice(-maxMessages);
+  return {
+    conversation_id: result.id,
+    title: result.title,
+    created_at: result.created_at,
+    updated_at: result.updated_at,
+    messages,
+    total_messages: result.messages.length,
+    returned_messages: messages.length,
+    note: skipped + " earlier messages omitted. Set max_messages to 0 for all.",
+    deep_link: result.deep_link,
+  };
+}
+
+return {
+  conversation_id: result.id,
+  title: result.title,
+  created_at: result.created_at,
+  updated_at: result.updated_at,
+  messages,
+  total_messages: messages.length,
+  deep_link: result.deep_link,
+};`,
+);
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -2597,6 +2712,8 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[REPLACE_IN_FILE.name, REPLACE_IN_FILE],
 		[EXTRACT_DOCX_COMMENTS.name, EXTRACT_DOCX_COMMENTS],
 		[SLEEP.name, SLEEP],
+		[SEARCH_CHAT_HISTORY.name, SEARCH_CHAT_HISTORY],
+		[READ_CHAT_HISTORY.name, READ_CHAT_HISTORY],
 	]);
 
 // ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ import type {
 	ToolConfigEntry,
 } from "./types";
 import { parseMcpToolName } from "../mcp/mcp-tool-adapter";
+import { TOOLS_DEFAULT_DISABLED } from "../settings/constants";
 
 // ---------------------------------------------------------------------------
 // Precedence Levels
@@ -104,7 +105,7 @@ export function mergeToolConfigs(
 	for (const toolName of allToolNames) {
 		const partial = merged[toolName] ?? {};
 		tools[toolName] = {
-			enabled: partial.enabled ?? (globalEnabled[toolName] ?? true),
+			enabled: partial.enabled ?? (globalEnabled[toolName] ?? !TOOLS_DEFAULT_DISABLED.has(toolName)),
 			auto_approve: partial.auto_approve ?? (globalAutoApprove[toolName] ?? false),
 			allowed_paths: partial.allowed_paths ?? [],
 			blocked_paths: partial.blocked_paths ?? [],

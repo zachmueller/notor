@@ -229,6 +229,27 @@ describe("mergeToolConfigs", () => {
 			expect(result.tools.read_note!.enabled).toBe(true);
 		});
 
+		it("tools in TOOLS_DEFAULT_DISABLED default to false when not in globalEnabled", () => {
+			const toolsWithSleep = [...ALL_TOOLS, "sleep", "search_chat_history", "read_chat_history"];
+			const result = mergeToolConfigs([], {}, toolsWithSleep, {});
+
+			// Normal tools default to enabled
+			expect(result.tools.read_note!.enabled).toBe(true);
+			expect(result.tools.fetch_webpage!.enabled).toBe(true);
+			// Default-disabled tools default to disabled
+			expect(result.tools.sleep!.enabled).toBe(false);
+			expect(result.tools.search_chat_history!.enabled).toBe(false);
+			expect(result.tools.read_chat_history!.enabled).toBe(false);
+		});
+
+		it("globalEnabled overrides TOOLS_DEFAULT_DISABLED", () => {
+			const toolsWithSleep = [...ALL_TOOLS, "sleep"];
+			const globalEnabled = { sleep: true };
+			const result = mergeToolConfigs([], {}, toolsWithSleep, globalEnabled);
+
+			expect(result.tools.sleep!.enabled).toBe(true);
+		});
+
 		it("handles MCP tool enabled in namespaced format", () => {
 			const mcpTools = [...ALL_TOOLS, "myserver__list", "myserver__search"];
 			const globalEnabled = {

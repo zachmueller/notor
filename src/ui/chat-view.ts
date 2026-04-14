@@ -1888,6 +1888,7 @@ export class NotorChatView extends ItemView {
 		);
 		this.activateInternalLinks(contentEl);
 		this.activateSettingsLinks(contentEl);
+		this.activateConversationLinks(contentEl);
 
 		// Add token annotation if available
 		if (message.input_tokens || message.output_tokens) {
@@ -1973,6 +1974,34 @@ export class NotorChatView extends ItemView {
 		}
 
 		log.debug("activateSettingsLinks: scan complete", { matched, total: allLinks.length });
+	}
+
+	/**
+	 * Attach click handlers to conversation deep-links (notor-conversation:// URLs)
+	 * within a rendered message element. Navigates to the referenced conversation.
+	 *
+	 * Same attachment strategy as activateSettingsLinks — must bind directly to
+	 * `<a>` elements before Obsidian's external-link handler intercepts them.
+	 */
+	private activateConversationLinks(containerEl: HTMLElement): void {
+		const prefix = "notor-conversation://";
+		const allLinks = containerEl.querySelectorAll<HTMLAnchorElement>("a");
+
+		for (const link of allLinks) {
+			const href = link.getAttribute("href") ?? link.getAttribute("data-href") ?? "";
+			if (!href.startsWith(prefix)) continue;
+
+			const conversationId = decodeURIComponent(href.slice(prefix.length));
+
+			link.addEventListener("click", (e: MouseEvent) => {
+				e.preventDefault();
+				e.stopPropagation();
+				void this.switchToConversation(conversationId);
+			});
+
+			link.removeAttribute("href");
+			link.classList.add("notor-conversation-link");
+		}
 	}
 
 	private openInternalLink(href: string): void {
@@ -2427,6 +2456,16 @@ export class NotorChatView extends ItemView {
 				.setIcon("download")
 				.onClick(() => {
 					this.onExportConversation?.(entry.filename);
+				});
+		});
+
+		menu.addItem((item) => {
+			item.setTitle("Copy conversation link")
+				.setIcon("link")
+				.onClick(async () => {
+					const uri = `obsidian://notor?action=open-conversation&id=${encodeURIComponent(entry.id)}`;
+					await navigator.clipboard.writeText(uri);
+					new Notice("Conversation link copied to clipboard");
 				});
 		});
 

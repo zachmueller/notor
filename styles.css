@@ -659,7 +659,8 @@
 	text-align: right;
 }
 
-.notor-settings-link {
+.notor-settings-link,
+.notor-conversation-link {
 	cursor: pointer;
 	color: var(--link-color);
 	text-decoration-line: underline;
