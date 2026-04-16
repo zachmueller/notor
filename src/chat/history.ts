@@ -571,13 +571,8 @@ export class HistoryManager {
 			}
 		}
 
-		// Sort: favorites first, then by most recent activity (newest first)
-		entries.sort((a, b) => {
-			const aFav = a.is_favorite ? 1 : 0;
-			const bFav = b.is_favorite ? 1 : 0;
-			if (aFav !== bFav) return bFav - aFav;
-			return b.updated_at.localeCompare(a.updated_at);
-		});
+		// Sort by most recent activity (newest first)
+		entries.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 
 		return entries;
 	}
@@ -683,13 +678,8 @@ export class HistoryManager {
 			}
 		}
 
-		// Sort: favorites first, then by most recent activity (newest first)
-		entries.sort((a, b) => {
-			const aFav = a.is_favorite ? 1 : 0;
-			const bFav = b.is_favorite ? 1 : 0;
-			if (aFav !== bFav) return bFav - aFav;
-			return b.updated_at.localeCompare(a.updated_at);
-		});
+		// Sort by most recent activity (newest first)
+		entries.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 
 		return entries;
 	}
