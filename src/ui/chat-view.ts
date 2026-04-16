@@ -19,7 +19,6 @@ import {
 import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
 import { buildPersonaPicker } from "./persona-picker";
-import { openPersonaPickerModal } from "./persona-picker-modal";
 import { logger } from "../utils/logger";
 import { groupModels, formatVariantLabel, buildOptionValue, type ModelGroup } from "../providers/model-grouping";
 import {
@@ -413,6 +412,19 @@ export class NotorChatView extends ItemView {
 		this.getCurrentConversationPersonaName = callback;
 	}
 
+	/**
+	 * Apply a persona switch to this specific panel: update the chip label
+	 * and fire the per-panel callback (which propagates to the orchestrator,
+	 * JSONL header, and ToolDispatcher).
+	 *
+	 * Used by the chip context menu, settings popover picker, and the
+	 * command-palette "Switch persona" command.
+	 */
+	applyPersonaSwitch(persona: Persona | null): void {
+		this.updatePersonaLabel(persona);
+		this.onPersonaChange?.(persona);
+	}
+
 	setOnListCheckpoints(callback: () => Promise<Checkpoint[]>): void {
 		this.onListCheckpoints = callback;
 	}
@@ -646,21 +658,10 @@ export class NotorChatView extends ItemView {
 				if (modeToggle?.nextSibling) {
 					toolbar.insertBefore(this.personaLabelEl, modeToggle.nextSibling);
 				}
-				// Click to open persona switcher modal
-				this.personaLabelEl.addEventListener("click", () => {
+				// Click to open persona context menu
+				this.personaLabelEl.addEventListener("click", (evt) => {
 					if (!this.personaManager) return;
-					void openPersonaPickerModal(
-						this.app,
-						this.personaManager,
-						(selected) => {
-							if (!this.personaManager) return;
-							if (selected) {
-								void this.personaManager.activatePersona(selected.name);
-							} else {
-								this.personaManager.deactivatePersona();
-							}
-						},
-					);
+					this.showPersonaContextMenu(evt);
 				});
 			} else {
 				return;
@@ -689,6 +690,58 @@ export class NotorChatView extends ItemView {
 			this.personaLabelEl.style.background = "";
 			this.personaLabelEl.style.borderColor = "";
 		}
+	}
+
+	/**
+	 * Show an Obsidian context menu for switching the active persona.
+	 *
+	 * Discovers available personas, builds a menu with "None (deactivate)"
+	 * at the top followed by alphabetically sorted personas, and applies
+	 * the selection to this specific panel via {@link applyPersonaSwitch}.
+	 */
+	private showPersonaContextMenu(evt: MouseEvent): void {
+		if (!this.personaManager) return;
+		const pm = this.personaManager;
+
+		pm.getDiscoveredPersonas()
+			.then((personas) => {
+				const menu = new Menu();
+
+				// "None (deactivate)" at the top
+				menu.addItem((item) => {
+					item.setTitle("None (deactivate)")
+						.setIcon("x-circle")
+						.onClick(() => {
+							pm.deactivatePersona();
+							this.applyPersonaSwitch(null);
+						});
+				});
+
+				// Alphabetically sorted personas
+				const sorted = [...personas].sort((a, b) => a.name.localeCompare(b.name));
+				for (const p of sorted) {
+					menu.addItem((item) => {
+						const label = p.chip_emoji ? `${p.chip_emoji} ${p.name}` : p.name;
+						item.setTitle(label)
+							.setIcon("user")
+							.onClick(() => {
+								void pm.activatePersona(p.name).then((ok) => {
+									if (ok) {
+										this.applyPersonaSwitch(p);
+									} else {
+										new Notice(`Failed to activate persona '${p.name}'`);
+									}
+								});
+							});
+					});
+				}
+
+				menu.showAtMouseEvent(evt);
+			})
+			.catch((e) => {
+				log.error("Failed to discover personas for context menu", { error: String(e) });
+				new Notice("Failed to load personas");
+			});
 	}
 
 	/**
@@ -2859,8 +2912,7 @@ export class NotorChatView extends ItemView {
 				this.personaManager,
 				this.getCurrentConversationPersonaName?.() ?? null,
 				(persona) => {
-					this.updatePersonaLabel(persona);
-					this.onPersonaChange?.(persona);
+					this.applyPersonaSwitch(persona);
 				},
 			);
 		}

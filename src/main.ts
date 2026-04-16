@@ -88,6 +88,7 @@ import { VaultRuleManager } from "./rules/vault-rules";
 
 // Personas
 import { PersonaManager } from "./personas/persona-manager";
+import { openPersonaPickerModal } from "./ui/persona-picker-modal";
 
 // Sub-agents
 import { SubAgentManager } from "./sub-agents/manager";
@@ -646,6 +647,36 @@ export default class NotorPlugin extends Plugin {
 					log.error("Extension reload failed", { error: String(e) });
 					new Notice(`Extension reload failed: ${e instanceof Error ? e.message : String(e)}`);
 				});
+			},
+		});
+
+		// Switch persona for the active chat panel via fuzzy search modal.
+		// Uses checkCallback so the command only appears in the palette
+		// when a Notor chat panel is the active view.
+		this.addCommand({
+			id: "switch-persona",
+			name: "Switch persona",
+			checkCallback: (checking: boolean) => {
+				const activeView = this.app.workspace.getActiveViewOfType(NotorChatView);
+				if (!activeView) return false;
+				if (checking) return true;
+
+				const personaManager = this.getPersonaManager();
+				void openPersonaPickerModal(this.app, personaManager, (selected) => {
+					if (selected) {
+						void personaManager.activatePersona(selected.name).then((ok) => {
+							if (ok) {
+								activeView.applyPersonaSwitch(selected);
+							} else {
+								new Notice(`Failed to activate persona '${selected.name}'`);
+							}
+						});
+					} else {
+						personaManager.deactivatePersona();
+						activeView.applyPersonaSwitch(null);
+					}
+				});
+				return true;
 			},
 		});
 
