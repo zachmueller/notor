@@ -95,8 +95,9 @@ function renderPersonaSelect(
 	// Persona options, sorted alphabetically
 	const sorted = [...personas].sort((a, b) => a.name.localeCompare(b.name));
 	for (const p of sorted) {
+		const label = p.chip_emoji ? `${p.chip_emoji} ${p.name}` : p.name;
 		const opt = select.createEl("option", {
-			text: p.name,
+			text: label,
 			attr: { value: p.name },
 		});
 		if (currentPersonaName && currentPersonaName === p.name) {

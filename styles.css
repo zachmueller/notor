@@ -2124,6 +2124,12 @@
 	white-space: nowrap;
 	user-select: none;
 	flex-shrink: 0;
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+
+.notor-persona-label:hover {
+	background: rgba(var(--color-accent-rgb, 68, 130, 255), 0.2);
 }
 
 /* ==========================================================================

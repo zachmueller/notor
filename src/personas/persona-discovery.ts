@@ -158,6 +158,8 @@ async function parsePersona(
 	const preferredProvider = parseStringOrNull(frontmatter?.["notor-preferred-provider"]);
 	const preferredModel = parseStringOrNull(frontmatter?.["notor-preferred-model"]);
 	const preferredPreset = parseStringOrNull(frontmatter?.["notor-preferred-preset"]);
+	const chipColor = parseStringOrNull(frontmatter?.["notor-persona-chip-color"]);
+	const chipEmoji = parseStringOrNull(frontmatter?.["notor-persona-chip-emoji"]);
 
 	// Extract body content (after frontmatter)
 	const promptContent = stripFrontmatter(rawContent);
@@ -171,6 +173,8 @@ async function parsePersona(
 		preferred_provider: preferredProvider,
 		preferred_model: preferredModel,
 		preferred_preset: preferredPreset,
+		chip_color: chipColor,
+		chip_emoji: chipEmoji,
 	};
 }
 

@@ -9,16 +9,18 @@
  * @see specs/04b-tool-toggle/spec.md — FR-87
  */
 
-import { Notice, Setting, normalizePath } from "obsidian";
+import { Notice, Setting, TFile, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
 import { discoverPersonas } from "../../personas/persona-discovery";
-import { promptForName, ensureDirectory } from "./shared";
+import { promptForCreation, ensureDirectory, type CreationField } from "./shared";
 import { logger } from "../../utils/logger";
 
 const log = logger("PersonasSection");
 
-const SKELETON_CONTENT = `---
-notor-persona-prompt-mode: replace
+/** Build skeleton system-prompt.md content with the chosen prompt mode. */
+function buildSkeletonContent(promptMode: string): string {
+	return `---
+notor-persona-prompt-mode: ${promptMode}
 # notor-persona-preferred-provider: anthropic
 # notor-persona-preferred-model: claude-sonnet-4-20250514
 ---
@@ -33,6 +35,7 @@ notor-persona-prompt-mode: replace
 #   enabled: false
 </notor_tool_config>
 `;
+}
 
 /** Render the "Personas" settings section. */
 export function renderPersonasSection(
@@ -55,8 +58,22 @@ export function renderPersonasSection(
 		)
 		.addButton((btn) =>
 			btn.setButtonText("Create").onClick(async () => {
-				const name = await promptForName(containerEl, "Persona name (e.g. researcher)");
-				if (!name) return;
+				const fields: CreationField[] = [
+					{ type: "text", key: "name", placeholder: "Persona name (e.g. researcher)" },
+					{
+						type: "select",
+						key: "prompt_mode",
+						options: [
+							{ value: "append", label: "Append (extend global prompt)" },
+							{ value: "replace", label: "Replace (override global prompt)" },
+						],
+					},
+				];
+				const values = await promptForCreation(containerEl, fields);
+				if (!values) return;
+
+				const name = values.name;
+				const promptMode = values.prompt_mode || "append";
 
 				const dir = normalizePath(
 					`${ctx.settings.notor_dir}/personas/${name}`
@@ -72,10 +89,10 @@ export function renderPersonasSection(
 				try {
 					// Ensure directory exists
 					await ensureDirectory(ctx, dir);
-					await ctx.app.vault.create(filePath, SKELETON_CONTENT);
+					await ctx.app.vault.create(filePath, buildSkeletonContent(promptMode));
 					new Notice(`Persona "${name}" created.`);
-					// Re-render to show the new persona in the list
-					ctx.redisplay();
+					// Allow metadata cache to index the new file before re-discovery
+					setTimeout(() => ctx.redisplay(), 250);
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
 					log.error("Failed to create persona", { name, error: msg });
@@ -106,13 +123,33 @@ export function renderPersonasSection(
 			for (const persona of personas) {
 				new Setting(listContainer)
 					.setName(persona.name)
+					.addColorPicker((cp) =>
+						cp
+							.setValue(persona.chip_color ?? "#4482ff")
+							.onChange(async (value) => {
+								await updatePersonaFrontmatter(
+									ctx, persona.system_prompt_path, "notor-persona-chip-color", value
+								);
+							})
+					)
+					.addText((text) =>
+						text
+							.setPlaceholder("🎭")
+							.setValue(persona.chip_emoji ?? "")
+							.onChange(async (value) => {
+								await updatePersonaFrontmatter(
+									ctx, persona.system_prompt_path, "notor-persona-chip-emoji", value
+								);
+							})
+					)
 					.addButton((btn) =>
 						btn
 							.setButtonText("Open system prompt")
 							.onClick(() => {
 								void ctx.app.workspace.openLinkText(
 									persona.system_prompt_path,
-									""
+									"",
+									true
 								);
 							})
 					);
@@ -127,5 +164,28 @@ export function renderPersonasSection(
 				cls: "setting-item-description",
 			});
 		});
+}
+
+/**
+ * Write a single frontmatter key to a persona's system-prompt.md file.
+ *
+ * Uses Obsidian's `processFrontMatter` so the rest of the file is untouched.
+ * Deletes the key when `value` is falsy/empty.
+ */
+async function updatePersonaFrontmatter(
+	ctx: SettingsContext,
+	systemPromptPath: string,
+	key: string,
+	value: string,
+): Promise<void> {
+	const file = ctx.app.vault.getAbstractFileByPath(systemPromptPath);
+	if (!file || !(file instanceof TFile)) return;
+	await ctx.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+		if (value) {
+			fm[key] = value;
+		} else {
+			delete fm[key];
+		}
+	});
 }
 

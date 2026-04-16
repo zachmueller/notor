@@ -389,6 +389,10 @@ export interface Persona {
 	 * @see specs/ZZ-misc/model-presets-design.md — Section 3.4
 	 */
 	preferred_preset: string | null;
+	/** Custom hex colour for the persona chip (null = use accent default). Parsed from `notor-persona-chip-color`. */
+	chip_color: string | null;
+	/** Custom emoji for the persona chip (null = default 🎭). Parsed from `notor-persona-chip-emoji`. */
+	chip_emoji: string | null;
 }
 
 // ---------------------------------------------------------------------------

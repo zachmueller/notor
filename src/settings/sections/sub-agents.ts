@@ -120,7 +120,7 @@ export function renderSubAgentsSection(
 					await ctx.app.vault.create(filePath, SKELETON_CONTENT);
 					new Notice(`Sub-agent "${name}" created.`);
 					// Open the new file for immediate editing
-					await ctx.app.workspace.openLinkText(filePath, "");
+					await ctx.app.workspace.openLinkText(filePath, "", true);
 					ctx.redisplay();
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
@@ -223,7 +223,7 @@ function renderProfileEntry(
 							profile.name,
 						);
 					}
-					await ctx.app.workspace.openLinkText(pathToOpen, "");
+					await ctx.app.workspace.openLinkText(pathToOpen, "", true);
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
 					log.error("Failed to open sub-agent profile", {

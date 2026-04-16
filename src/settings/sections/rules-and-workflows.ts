@@ -194,7 +194,7 @@ function renderRulesSubsection(
 			.setName(displayName)
 			.addButton((btn) =>
 				btn.setButtonText("Open").onClick(() => {
-					void ctx.app.workspace.openLinkText(file.path, "");
+					void ctx.app.workspace.openLinkText(file.path, "", true);
 				})
 			);
 	}
@@ -296,7 +296,8 @@ function renderWorkflowsSubsection(
 				btn.setButtonText("Open").onClick(() => {
 					void ctx.app.workspace.openLinkText(
 						workflow.file_path,
-						""
+						"",
+						true
 					);
 				})
 			);

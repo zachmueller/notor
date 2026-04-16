@@ -19,6 +19,7 @@ import {
 import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
 import { buildPersonaPicker } from "./persona-picker";
+import { openPersonaPickerModal } from "./persona-picker-modal";
 import { logger } from "../utils/logger";
 import { groupModels, formatVariantLabel, buildOptionValue, type ModelGroup } from "../providers/model-grouping";
 import {
@@ -645,17 +646,48 @@ export class NotorChatView extends ItemView {
 				if (modeToggle?.nextSibling) {
 					toolbar.insertBefore(this.personaLabelEl, modeToggle.nextSibling);
 				}
+				// Click to open persona switcher modal
+				this.personaLabelEl.addEventListener("click", () => {
+					if (!this.personaManager) return;
+					void openPersonaPickerModal(
+						this.app,
+						this.personaManager,
+						(selected) => {
+							if (!this.personaManager) return;
+							if (selected) {
+								void this.personaManager.activatePersona(selected.name);
+							} else {
+								this.personaManager.deactivatePersona();
+							}
+						},
+					);
+				});
 			} else {
 				return;
 			}
 		}
 
 		if (persona) {
-			this.personaLabelEl.textContent = `🎭 ${persona.name}`;
+			const emoji = persona.chip_emoji ?? "🎭";
+			this.personaLabelEl.textContent = `${emoji} ${persona.name}`;
 			this.personaLabelEl.removeClass("notor-hidden");
+
+			// Apply custom chip colour or reset to CSS defaults
+			if (persona.chip_color) {
+				this.personaLabelEl.style.color = persona.chip_color;
+				this.personaLabelEl.style.background = `${persona.chip_color}20`;
+				this.personaLabelEl.style.borderColor = `${persona.chip_color}40`;
+			} else {
+				this.personaLabelEl.style.color = "";
+				this.personaLabelEl.style.background = "";
+				this.personaLabelEl.style.borderColor = "";
+			}
 		} else {
 			this.personaLabelEl.textContent = "";
 			this.personaLabelEl.addClass("notor-hidden");
+			this.personaLabelEl.style.color = "";
+			this.personaLabelEl.style.background = "";
+			this.personaLabelEl.style.borderColor = "";
 		}
 	}
 
