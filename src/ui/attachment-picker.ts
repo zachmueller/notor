@@ -901,25 +901,59 @@ export function createAttachmentButton(
 	setIcon(btn, "paperclip");
 
 	let menuEl: HTMLElement | null = null;
+	let outsideClickHandler: ((evt: MouseEvent) => void) | null = null;
+
+	const closeMenu = () => {
+		if (menuEl) {
+			menuEl.remove();
+			menuEl = null;
+		}
+		if (outsideClickHandler) {
+			activeDocument.removeEventListener("click", outsideClickHandler);
+			outsideClickHandler = null;
+		}
+	};
+
+	const positionMenu = () => {
+		if (!menuEl) return;
+		const btnRect = btn.getBoundingClientRect();
+		const vw = activeWindow.innerWidth;
+		const vh = activeWindow.innerHeight;
+		const menuWidth = 180; // matches CSS min-width
+		let left = btnRect.left;
+
+		// Horizontal bounds
+		if (left + menuWidth > vw - 8) left = vw - menuWidth - 8;
+		if (left < 8) left = 8;
+
+		// Vertical: prefer above button; fall back to below if insufficient space
+		const menuHeight = menuEl.offsetHeight || 80;
+		if (btnRect.top - menuHeight - 4 < 8) {
+			menuEl.style.top = `${btnRect.bottom + 4}px`;
+			menuEl.style.bottom = "auto";
+		} else {
+			menuEl.style.bottom = `${vh - btnRect.top + 4}px`;
+			menuEl.style.top = "auto";
+		}
+		menuEl.style.left = `${left}px`;
+	};
 
 	btn.addEventListener("click", (e) => {
 		e.stopPropagation();
 
 		// Toggle menu
 		if (menuEl) {
-			menuEl.remove();
-			menuEl = null;
+			closeMenu();
 			return;
 		}
 
-		menuEl = containerEl.createDiv({ cls: "notor-attach-menu" });
+		menuEl = activeDocument.body.createDiv({ cls: "notor-attach-menu" });
 
 		// Vault note option
 		const vaultOption = menuEl.createDiv({ cls: "notor-attach-menu-item" });
 		vaultOption.textContent = "Attach vault note";
 		vaultOption.addEventListener("click", () => {
-			menuEl?.remove();
-			menuEl = null;
+			closeMenu();
 			// Focus the input and insert `[[` to trigger the suggest
 			inputEl.focus();
 			const currentText = inputEl.textContent ?? "";
@@ -940,8 +974,7 @@ export function createAttachmentButton(
 			const externalOption = menuEl.createDiv({ cls: "notor-attach-menu-item" });
 			externalOption.textContent = "Attach external file";
 			externalOption.addEventListener("click", () => {
-				menuEl?.remove();
-				menuEl = null;
+				closeMenu();
 				openExternalFileDialog(
 					app,
 					onAttachmentAdded,
@@ -952,16 +985,21 @@ export function createAttachmentButton(
 			});
 		}
 
+		// Position the menu relative to the button with viewport boundary detection
+		positionMenu();
+
 		// Close menu on click outside
-		const closeHandler = (evt: MouseEvent) => {
+		outsideClickHandler = (evt: MouseEvent) => {
 			if (menuEl && !menuEl.contains(evt.target as Node) && evt.target !== btn) {
-				menuEl.remove();
-				menuEl = null;
-				document.removeEventListener("click", closeHandler);
+				closeMenu();
 			}
 		};
 		// Defer so the current click doesn't immediately close the menu
-		setTimeout(() => document.addEventListener("click", closeHandler), 0);
+		setTimeout(() => {
+			if (outsideClickHandler) {
+				activeDocument.addEventListener("click", outsideClickHandler);
+			}
+		}, 0);
 	});
 
 	return btn;

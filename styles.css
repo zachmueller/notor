@@ -1788,17 +1788,14 @@
 /* Attachment menu dropdown */
 
 .notor-attach-menu {
-	position: absolute;
-	bottom: 100%;
-	left: 0;
-	z-index: var(--layer-popover);
+	position: fixed;
+	z-index: var(--layer-popover, 100);
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	box-shadow: var(--shadow-s);
 	padding: 4px 0;
 	min-width: 180px;
-	margin-bottom: 4px;
 }
 
 .notor-attach-menu-item {

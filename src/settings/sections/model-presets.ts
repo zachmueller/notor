@@ -161,7 +161,7 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 				: "";
 
 			if (cached.length > 0) {
-				renderModelDropdown(modelRow, cached, currentValue, preset, i, ctx);
+				renderModelDropdown(modelRow, cached, currentValue, preset, i, ctx, providerType, registry);
 			} else {
 				// Show a loading indicator and fetch models
 				modelRow.setDesc("Loading models...");
@@ -169,7 +169,7 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 					.getModels(providerType)
 					.then((models) => {
 						modelRow.setDesc("");
-						renderModelDropdown(modelRow, models, currentValue, preset, i, ctx);
+						renderModelDropdown(modelRow, models, currentValue, preset, i, ctx, providerType, registry);
 					})
 					.catch((e) => {
 						log.error("Failed to fetch models for preset", { provider: providerType, error: String(e) });
@@ -185,6 +185,18 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 									await ctx.saveSettings();
 								});
 						});
+						modelRow.addExtraButton((btn) =>
+							btn.setIcon("refresh-cw").setTooltip("Retry loading models").onClick(async () => {
+								btn.setDisabled(true);
+								try {
+									await registry.refreshModels(providerType);
+								} catch (e) {
+									log.error("Failed to refresh models", { provider: providerType, error: String(e) });
+									new Notice("Failed to refresh model list.");
+								}
+								ctx.redisplay();
+							}),
+						);
 					});
 			}
 		}
@@ -239,6 +251,8 @@ function renderModelDropdown(
 	preset: ModelPreset,
 	_index: number,
 	ctx: SettingsContext,
+	providerType: LLMProviderType,
+	registry: ReturnType<SettingsContext["plugin"]["getProviderRegistry"]>,
 ): void {
 	setting.addDropdown((dropdown) => {
 		dropdown.addOption("", "(select model)");
@@ -287,6 +301,19 @@ function renderModelDropdown(
 			ctx.redisplay();
 		});
 	});
+
+	setting.addExtraButton((btn) =>
+		btn.setIcon("refresh-cw").setTooltip("Refresh model list").onClick(async () => {
+			btn.setDisabled(true);
+			try {
+				await registry.refreshModels(providerType);
+			} catch (e) {
+				log.error("Failed to refresh models", { provider: providerType, error: String(e) });
+				new Notice("Failed to refresh model list.");
+			}
+			ctx.redisplay();
+		}),
+	);
 }
 
 /** Generate a unique preset name like "preset-1", "preset-2", etc. */
