@@ -76,6 +76,16 @@ export interface ConversationListEntry {
 	preset_name?: string;
 }
 
+/** Generate the JSONL filename for a conversation from its created_at + id. */
+export function conversationFilename(conversation: { created_at: string; id: string }): string {
+	const ts = conversation.created_at
+		.replace(/[-:]/g, "")
+		.replace("T", "_")
+		.replace(/\.\d+Z$/, "Z")
+		.replace("Z", "");
+	return `${ts}_${conversation.id}.jsonl`;
+}
+
 /**
  * Manages JSONL-based conversation persistence.
  *
@@ -779,13 +789,7 @@ export class HistoryManager {
 
 	/** Generate the filename for a conversation JSONL file. */
 	private getFilename(conversation: Conversation): string {
-		// Use created_at timestamp (compact format) + ID
-		const ts = conversation.created_at
-			.replace(/[-:]/g, "")
-			.replace("T", "_")
-			.replace(/\.\d+Z$/, "Z")
-			.replace("Z", "");
-		return `${ts}_${conversation.id}.jsonl`;
+		return conversationFilename(conversation);
 	}
 
 	/** Get the full vault-relative path for a history file. */

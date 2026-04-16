@@ -57,6 +57,14 @@ const log = logger("ChatView");
 /** View type identifier for Obsidian's view registry. */
 export const CHAT_VIEW_TYPE = "notor-chat-view";
 
+/** Metadata about the active conversation, used by the header title context menu and inline edit. */
+export interface ActiveConversationMeta {
+	id: string;
+	title: string;
+	filename: string;
+	is_favorite: boolean;
+}
+
 /**
  * Extract the `<attachments>…</attachments>` XML block from a message string.
  *
@@ -163,6 +171,10 @@ export class NotorChatView extends ItemView {
 	// Active conversation tracking
 	private activeConversationId: string | null = null;
 
+	// Header conversation title (displayed between "Notor" and action icons)
+	private headerTitleEl?: HTMLSpanElement;
+	private headerTitleInputEl?: HTMLInputElement;
+
 	/**
 	 * Whether a conversation has been loaded into this view.
 	 *
@@ -251,6 +263,12 @@ export class NotorChatView extends ItemView {
 	// Rename callback
 	private onRenameConversation?: (filename: string, currentTitle: string) => void;
 
+	// Direct rename callback (bypasses RenameModal for inline header edit)
+	private onDirectRename?: (filename: string, newTitle: string) => Promise<void>;
+
+	// Active conversation metadata (for header context menu and inline edit)
+	private getActiveConversationMeta?: () => ActiveConversationMeta | null;
+
 	// Favorites filter state
 	private favFilterActive = false;
 	private favFilterBtnEl?: HTMLElement;
@@ -321,6 +339,14 @@ export class NotorChatView extends ItemView {
 
 	setOnRenameConversation(callback: (filename: string, currentTitle: string) => void): void {
 		this.onRenameConversation = callback;
+	}
+
+	setOnDirectRename(callback: (filename: string, newTitle: string) => Promise<void>): void {
+		this.onDirectRename = callback;
+	}
+
+	setGetActiveConversationMeta(callback: () => ActiveConversationMeta | null): void {
+		this.getActiveConversationMeta = callback;
 	}
 
 	isFavFilterActive(): boolean {
@@ -882,12 +908,12 @@ export class NotorChatView extends ItemView {
 	 * Null all callback properties to release GC references.
 	 *
 	 * Called from `onClose()` after orchestrator cleanup. Covers all
-	 * 23 `setOn*` + 6 `setGet*` callback slots.
+	 * 24 `setOn*` + 8 `setGet*` callback slots.
 	 *
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Amendment A6
 	 */
 	clearCallbacks(): void {
-		// setOn* callbacks (23)
+		// setOn* callbacks (24)
 		this.onSendMessage = undefined;
 		this.onStopResponse = undefined;
 		this.onNewConversation = undefined;
@@ -913,8 +939,9 @@ export class NotorChatView extends ItemView {
 		this.onOpenSettingsGroup = undefined;
 		this.onSendWorkflow = undefined;
 		this.onPersonaChange = undefined;
+		this.onDirectRename = undefined;
 
-		// setGet* callbacks (7)
+		// setGet* callbacks (8)
 		this.getAvailableProviders = undefined;
 		this.getAvailableModels = undefined;
 		this.getCurrentProvider = undefined;
@@ -922,6 +949,7 @@ export class NotorChatView extends ItemView {
 		this.getWorkflowsCallback = undefined;
 		this.getActiveSessions = undefined;
 		this.getCurrentConversationPersonaName = undefined;
+		this.getActiveConversationMeta = undefined;
 
 		// Close cleanup callback (A7.2)
 		this.onCloseCleanup = undefined;
@@ -985,6 +1013,19 @@ export class NotorChatView extends ItemView {
 
 		const titleArea = this.headerEl.createDiv({ cls: "notor-chat-header-title" });
 		titleArea.createSpan({ text: "Notor", cls: "notor-chat-title" });
+
+		// Active conversation title (between "Notor" and action icons)
+		this.headerTitleEl = titleArea.createSpan({
+			cls: "notor-header-conversation-title notor-hidden",
+		});
+		this.headerTitleEl.addEventListener("dblclick", (e) => {
+			e.preventDefault();
+			this.startHeaderTitleEdit();
+		});
+		this.headerTitleEl.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
+			this.showHeaderTitleContextMenu(e);
+		});
 
 		const actions = this.headerEl.createDiv({ cls: "notor-chat-header-actions" });
 
@@ -2502,6 +2543,107 @@ export class NotorChatView extends ItemView {
 			}
 			return;
 		}
+	}
+
+	/**
+	 * Update the conversation title displayed in the header bar.
+	 * Shows the element when a title is set; hides it for null/empty.
+	 * Guards against stale updates by checking conversationId.
+	 */
+	updateHeaderTitle(conversationId: string, title: string | null): void {
+		if (!this.headerTitleEl) return;
+		if (conversationId !== this.activeConversationId) return;
+
+		if (title) {
+			this.headerTitleEl.textContent = title;
+			this.headerTitleEl.removeClass("notor-hidden");
+		} else {
+			this.headerTitleEl.textContent = "";
+			this.headerTitleEl.addClass("notor-hidden");
+		}
+	}
+
+	/**
+	 * Show context menu for the active conversation title in the header.
+	 * Reuses the same menu as the conversation list context menu.
+	 */
+	private showHeaderTitleContextMenu(evt: MouseEvent): void {
+		const meta = this.getActiveConversationMeta?.();
+		if (!meta) return;
+
+		const entry: ConversationListEntry = {
+			id: meta.id,
+			title: meta.title,
+			filename: meta.filename,
+			is_favorite: meta.is_favorite,
+			updated_at: "",
+			created_at: "",
+			provider_id: "",
+			model_id: "",
+		};
+
+		this.showConversationContextMenu(evt, entry);
+	}
+
+	/**
+	 * Start inline editing of the header conversation title.
+	 * Replaces the title span with an input field. Enter saves, Esc/blur cancels.
+	 */
+	private startHeaderTitleEdit(): void {
+		const meta = this.getActiveConversationMeta?.();
+		if (!meta || !this.headerTitleEl) return;
+
+		// If already editing, no-op
+		if (this.headerTitleInputEl) return;
+
+		const currentTitle = meta.title ?? "Untitled";
+
+		// Hide the title span
+		this.headerTitleEl.addClass("notor-hidden");
+
+		// Create input element as sibling, inserted after the title span
+		const input = document.createElement("input");
+		input.type = "text";
+		input.value = currentTitle;
+		input.className = "notor-header-title-input";
+		this.headerTitleEl.parentElement!.insertBefore(input, this.headerTitleEl.nextSibling);
+		this.headerTitleInputEl = input;
+
+		input.select();
+		input.focus();
+
+		const commit = () => {
+			const newTitle = input.value.trim();
+			cleanup();
+			if (newTitle && newTitle !== currentTitle) {
+				void this.onDirectRename?.(meta.filename, newTitle);
+			}
+		};
+
+		const cancel = () => {
+			cleanup();
+		};
+
+		const cleanup = () => {
+			input.removeEventListener("blur", onBlur);
+			input.remove();
+			this.headerTitleInputEl = undefined;
+			this.headerTitleEl!.removeClass("notor-hidden");
+		};
+
+		const onBlur = () => cancel();
+
+		input.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				commit();
+			} else if (e.key === "Escape") {
+				e.preventDefault();
+				cancel();
+			}
+		});
+
+		input.addEventListener("blur", onBlur);
 	}
 
 	/**

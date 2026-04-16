@@ -44,6 +44,48 @@
 	font-size: var(--font-ui-medium);
 }
 
+/* Active conversation title in header — between "Notor" and action icons */
+.notor-header-conversation-title {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 200px;
+	cursor: default;
+	padding: 2px 6px;
+	border-radius: var(--radius-s);
+}
+
+.notor-header-conversation-title:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.notor-chat-header-title .notor-header-conversation-title::before {
+	content: "\2014";
+	margin-right: 6px;
+	color: var(--text-faint);
+}
+
+/* Inline title edit input */
+.notor-header-title-input {
+	font-size: var(--font-ui-small);
+	background: var(--background-modifier-form-field);
+	border: 1px solid var(--background-modifier-border-focus);
+	border-radius: var(--radius-s);
+	padding: 2px 6px;
+	color: var(--text-normal);
+	outline: none;
+	max-width: 200px;
+	width: 160px;
+}
+
+.notor-header-title-input:focus {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
 .notor-chat-header-actions {
 	display: flex;
 	align-items: center;

@@ -74,7 +74,7 @@ import { NoteOpener } from "./tools/note-opener";
 
 // Chat
 import { ToolDispatcher } from "./chat/dispatcher";
-import { HistoryManager } from "./chat/history";
+import { HistoryManager, conversationFilename } from "./chat/history";
 import { SystemPromptBuilder } from "./chat/system-prompt";
 import { ChatOrchestrator, type SessionGuard } from "./chat/orchestrator";
 import { StaleContentTracker } from "./chat/stale-tracker";
@@ -2168,6 +2168,7 @@ export default class NotorPlugin extends Plugin {
 		const conv = orchestrator.getConversationManager().getActiveConversation();
 		if (conv) {
 			view.setActiveConversationId(conv.id);
+			view.updateHeaderTitle(conv.id, conv.title ?? null);
 
 			// Ensure persona label is set after DOM is built. This covers
 			// all load paths including new conversations opened in stacked
@@ -2524,6 +2525,8 @@ export default class NotorPlugin extends Plugin {
 			const result = await orchestrator.switchToConversationById(conversationId);
 			if (result) {
 				view.setActiveConversationId(conversationId);
+				const conv = orchestrator.getConversationManager().getActiveConversation();
+				view.updateHeaderTitle(conversationId, conv?.title ?? null);
 			}
 			return result;
 		});
@@ -2630,6 +2633,7 @@ export default class NotorPlugin extends Plugin {
 				const conv = orchestrator.getConversationManager().getActiveConversation();
 				if (conv) {
 					view.setActiveConversationId(conv.id);
+					view.updateHeaderTitle(conv.id, conv.title ?? null);
 				}
 			}).catch((e) => {
 				log.error("Failed to create new conversation", { error: String(e) });
@@ -2653,6 +2657,7 @@ export default class NotorPlugin extends Plugin {
 				const conv = orchestrator.getConversationManager().getActiveConversation();
 				if (conv) {
 					view.setActiveConversationId(conv.id);
+					view.updateHeaderTitle(conv.id, conv.title ?? null);
 				}
 				// Clear stale tracker and vault rule accessed notes when switching
 				this.getStaleTracker().clear?.();
@@ -2670,6 +2675,7 @@ export default class NotorPlugin extends Plugin {
 			await orchestrator.switchConversation(result.filename);
 
 			view.setActiveConversationId(result.conversation.id);
+			view.updateHeaderTitle(result.conversation.id, result.conversation.title ?? null);
 			this.getStaleTracker().clear?.();
 			this.getVaultRuleManager().clearAccessedNotes();
 
@@ -2701,7 +2707,13 @@ export default class NotorPlugin extends Plugin {
 
 		// Toggle favorite
 		view.setOnToggleFavorite(async (filename: string) => {
-			await historyManager.toggleFavorite(filename);
+			const newValue = await historyManager.toggleFavorite(filename);
+			// Sync in-memory state so getActiveConversationMeta returns fresh is_favorite
+			const convManager = orchestrator.getConversationManager();
+			const activeConv = convManager.getActiveConversation();
+			if (activeConv && filename.includes(activeConv.id)) {
+				convManager.setFavorite(newValue);
+			}
 			const entries = await historyManager.listConversations();
 			view.renderConversationList(
 				view.isFavFilterActive() ? entries.filter((e) => e.is_favorite) : entries
@@ -2729,6 +2741,33 @@ export default class NotorPlugin extends Plugin {
 					}
 				},
 			).open();
+		});
+
+		// Direct rename (for inline header title editing — bypasses RenameModal)
+		view.setOnDirectRename(async (filename: string, newTitle: string) => {
+			const { conversation } = await historyManager.loadConversation(filename);
+			conversation.title = newTitle;
+			await historyManager.updateConversationHeader(conversation);
+
+			const convManager = orchestrator.getConversationManager();
+			const activeConv = convManager.getActiveConversation();
+			if (activeConv && activeConv.id === conversation.id) {
+				convManager.setTitle(newTitle);
+			} else {
+				view.updateConversationTitleInList(conversation.id, newTitle);
+			}
+		});
+
+		// Active conversation metadata (for header context menu and inline edit)
+		view.setGetActiveConversationMeta(() => {
+			const conv = orchestrator.getConversationManager().getActiveConversation();
+			if (!conv) return null;
+			return {
+				id: conv.id,
+				title: conv.title ?? "Untitled",
+				filename: conversationFilename(conv),
+				is_favorite: !!conv.is_favorite,
+			};
 		});
 
 		// Open conversation in a new tab — the factory creates a fresh
@@ -2765,12 +2804,14 @@ export default class NotorPlugin extends Plugin {
 						const conv = convManager.getActiveConversation();
 						if (conv) {
 							view.setActiveConversationId(conv.id);
+							view.updateHeaderTitle(conv.id, conv.title ?? null);
 						}
 					} else if (entries.length === 0) {
 						await orchestrator.newConversation();
 						const conv = convManager.getActiveConversation();
 						if (conv) {
 							view.setActiveConversationId(conv.id);
+							view.updateHeaderTitle(conv.id, conv.title ?? null);
 						}
 					}
 				},

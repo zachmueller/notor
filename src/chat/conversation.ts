@@ -371,6 +371,7 @@ export class ConversationManager {
 		) {
 			const titleText = getTextContent(params.content);
 			this.activeConversation.title = this.generateTitle(titleText || "Image conversation");
+			this.onTitleChanged?.(this.activeConversation.id, this.activeConversation.title);
 		}
 
 		log.debug("Added message", {
