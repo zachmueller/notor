@@ -56,7 +56,8 @@ Standalone bug fix + new method. Ships independently, unblocks everything else. 
   - Add `setOnMessageUpdated(callback)` setter following the pattern of `setOnMessageAdded` and `setOnConversationChanged`
 
 - [ ] **1.4 — Add `addMessageToConversation()` for non-active conversation emission**
-  - New method on `ConversationManager` (or `HistoryManager`): `addMessageToConversation(conversationId: string, params: AddMessageParams): Promise<Message | null>`
+  - New method on `HistoryManager`: `addMessageToConversation(conversationId: string, params: AddMessageParams): Promise<Message | null>`
+  - `HistoryManager` already has all required methods (`listConversations()`, `loadConversation(filename)`, `appendMessage()`). The ID-to-filename resolution pattern is already used in `runtime-context.ts:341-345`.
   - **Note:** `HistoryManager.loadConversation(filename)` takes a JSONL **filename** (`{timestamp}_{id}.jsonl`), not a conversation ID. Implementation must resolve ID → filename first:
     1. Call `listConversations()` to find the entry with matching `id` → get its filename
     2. Call `loadConversation(filename)` to get the `Conversation` object
@@ -66,7 +67,7 @@ Standalone bug fix + new method. Ships independently, unblocks everything else. 
   - Does NOT require `activeConversation` — operates independently
   - Returns `null` if the conversation doesn't exist
   - Used by `chatBlocks.emit()` when targeting a non-active conversation (e.g., detached sub-agent `onComplete`)
-  - If the target conversation IS the active conversation, delegate to regular `addMessage()` instead (so the view updates live)
+  - **Note:** The active-vs-non-active check belongs in `chatBlocks.emit()` (Task 9.1), not here. This method always operates via JSONL persistence.
 
 - [ ] **1.5 — Verify no regressions**
   - Search all `addMessage(` call sites — confirm they still compile with the new type
@@ -153,6 +154,7 @@ The core message shape. After this phase, extension blocks can be emitted (manua
     - If both are `string`: produce a single `{ type: "text", text: a + "\n\n" + b }` wrapped in an array (or concatenate strings directly)
     - If either is `ContentBlock[]`: normalize both to `ContentBlock[]` (wrap bare `string` in `{ type: "text", text }`), then concatenate the arrays
   - Addresses both extension-block adjacency AND a pre-existing hook-injection alternation bug (Bedrock's strict alternation requirement)
+  - **Note on merged content:** After coalescing, extension_block wire text (`<notor-ext>` tagged) may appear in the same `ChatMessage` as user text. This is by design — LLMs handle inline XML tags in user messages correctly. The extension block text typically precedes the user's text within the merged message, providing context before the user's question.
 
 - [ ] **3.6 — Handle `extension_block` in compaction input assembly**
   - In [`src/context/compaction.ts:236-269`](../../src/context/compaction.ts#L236-L269):
@@ -333,7 +335,7 @@ Enable blocking automations that emit blocks visible to the LLM on the first tur
   - Await blocking automations sequentially with per-automation timeout
   - On timeout: detach (continue in background), update loading block to timed-out indicator
   - Non-blocking automations: fire-and-forget as today
-  - Need to pass `ConversationManager` (or an `emit` callback) into the function for loading block emission
+  - Add `emitLoadingBlock?: (kind: string) => Message` callback parameter to the function signature. The orchestrator wires this to `ConversationManager.addMessage()` at the call site — keeps `hook-events.ts` decoupled from the conversation system
 
 - [ ] **8.4 — `await` the dispatch in orchestrator + verify session snapshot**
   - In [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts) at ~line 756 (call spans lines 756-763):
@@ -344,11 +346,11 @@ Enable blocking automations that emit blocks visible to the LLM on the first tur
 - [ ] **8.5 — Loading → real block replacement**
   - Loading blocks are in-memory only (not persisted to JSONL — see Task 8.3, `transient: true`)
   - When blocking automation calls `chatBlocks.emit(kind, data)` (same kind as loading block):
-    1. Find the loading message by stored message ID
-    2. **Remove** the loading message from `this.messages[]` (it was transient — never persisted)
-    3. Call `addMessage()` for the real block — this persists to JSONL and pushes to the in-memory array
+    1. Find the loading message by stored message ID in `this.messages[]`
+    2. **Mutate in place:** overwrite `content` with the real `custom_block` payload, set `loading: false` on the block
+    3. Fire `onMessageAdded` callback — this persists the now-real message to JSONL (the message was transient before, so this is its first persistence)
     4. Fire `onMessageUpdated` callback to trigger re-render at the loading block's DOM position in chat view (Phase 6.4)
-  - **Why remove-then-add:** Using `updateMessage()` followed by `addMessage()` would leave TWO messages in the array (the patched loading block + the newly persisted real block), creating duplicate rows during the live session. Remove-then-add ensures exactly one message exists.
+  - **Why mutate in place:** The previous remove-then-add approach broke chronological ordering — `addMessage()` always appends to the end of `this.messages[]` via `push()`, so if messages arrived during async automation execution, the real block would land after them. In-place mutation preserves the message's position in the array.
   - If plugin reloads mid-automation: loading block is gone (never persisted), automation does not re-fire — acceptable behavior
 
 ---
@@ -369,9 +371,10 @@ The side-effect emission API for automations and tools. This is the sole block-e
     - Resolve conversation: `opts.conversationId` → explicit target; else `context.conversationId` from automation context; else `null`
     - Validate kind against `ChatBlockRegistry` — if unregistered, log warning but still emit with fallback rendering
     - Validate `data`: must be JSON-serializable, reject if `JSON.stringify(data).length > 102400` (100KB) with error log
-    - Compute `estimated_wire_tokens` from `toLLMText` output length (via registry)
+    - Compute `estimated_wire_tokens`: if kind is registered and `toLLMText` exists, compute from `toLLMText` output length. If kind is **unregistered** (no registry entry), compute `estimated_wire_tokens = estimateTokenCount(fallback_text ?? "")`. If `fallback_text` is also absent, set `estimated_wire_tokens = 0`.
+    - **LLM visibility warning:** After resolving `toLLMText` and `fallback_text`, if both are absent/null, log warning: `"Block kind '{kind}' will not be visible to the LLM — no toLLMText or fallback_text."` This does not block emission (decorative/UI-only blocks are valid), but surfaces the issue to extension authors during development.
     - **Active conversation path:** Call `ConversationManager.addMessage({ role: "extension_block", content: [custom_block], source_extension, exclude_from_compaction })` — message persists and renders live
-    - **Non-active conversation path:** Call `addMessageToConversation(conversationId, params)` (from Task 1.4) — message persists to JSONL but does not live-render; appears on next conversation reload
+    - **Non-active conversation path:** Call `HistoryManager.addMessageToConversation(conversationId, params)` (from Task 1.4) — message persists to JSONL but does not live-render; appears on next conversation reload
     - Return the created `Message`, or `null` if no conversation found
   - Set `chatBlocks` to `null` when no conversation is available (background vault events)
 
@@ -512,9 +515,9 @@ Comprehensive testing across all phases.
   - `addMessage()` without `transient` → `onMessageAdded` fires normally
   - `updateMessage` with valid ID → patches content in-memory, fires callback, no JSONL write
   - `updateMessage` with invalid ID → returns null, no callback
-  - Loading → real transition: loading block removed from array, real block added via `addMessage()`, re-render triggered
-  - `addMessageToConversation` with valid conversation ID → resolves filename via `listConversations()`, message persisted to JSONL
-  - `addMessageToConversation` with invalid conversation ID → returns null
+  - Loading → real transition: loading block mutated in place (content overwritten, `loading` flipped to false), `onMessageAdded` fires (first persistence), `onMessageUpdated` fires (re-render), message position in array preserved
+  - `HistoryManager.addMessageToConversation` with valid conversation ID → resolves filename via `listConversations()`, message persisted to JSONL
+  - `HistoryManager.addMessageToConversation` with invalid conversation ID → returns null
 
 - [ ] **13.7 — Unit tests: Rate limit**
   - 11 emits in 60 seconds → 10 succeed, 11th returns null with warning
