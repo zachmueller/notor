@@ -9,7 +9,7 @@
 
 ## 1. Motivation
 
-Notor's extension system (`src/extensions/`) lets users author tools and automations as Markdown files. Today these extensions can be invoked by the LLM (tools), observe LLM lifecycle events (automations), and return a string from `pre_send` automations that renders as a collapsible `<details>` block. However, they **cannot**:
+Notor's extension system (`src/extensions/`) lets users author tools and automations as Markdown files. Today these extensions can be invoked by the LLM (tools), observe LLM lifecycle events (automations), and return stdout text from `pre_send` automations that the chat view currently renders inside a collapsible `<details>` element. However, they **cannot**:
 
 1. Publish a **first-class, structured, persistently-rendered block** as its own chat row — with collapsible cards, clickable links, per-row actions, and custom body content.
 2. Emit blocks from **any context** — today only `pre_send` reaches the UI. Tools emit inline text only. Automations outside `pre_send` (`after_completion`, `on_schedule`, vault events) are fully silent.
@@ -78,7 +78,7 @@ exclude_from_compaction?: boolean;      // Denormalized from ChatBlockDefinition
 - Rendered as a dedicated row between surrounding messages.
 - **Provider-wire translation:** configurable per block kind via `toLLMText`, resolved through a new `getWireText(content, registry)` function. When all blocks resolve to `null` (no `fallback_text`), the entire message is **dropped from wire** — zero LLM tokens. When non-null, emitted as `role: "user"` with tagged `toLLMText` output (e.g., `<notor-ext source="memory-search">…</notor-ext>`). When the registry has no definition for a `kind` (extension disabled/removed), falls back to `fallback_text ?? ""`; the message is only dropped when both the registry lookup AND `fallback_text` produce empty/null output.
 - **Registry injection:** The `ChatBlockRegistry` is set once at plugin init via a module-scoped `setChatBlockRegistry()` setter in `message-pipeline.ts`. The `toChatMessages()` signature does not change — it reads the registry from module state.
-- **Consecutive-role coalescing:** A **new Phase 4** pass in `toChatMessages()`, operating on the Phase 3 output array (`coalesced`), merges consecutive same-role messages. This is a separate post-processing loop — do NOT modify the existing Phase 3 tool-coalescing while-loop (lines 296-346). Addresses extension-block adjacency and a pre-existing hook-injection alternation bug (Bedrock's strict alternation requirement).
+- **Consecutive-role coalescing:** A **new Phase 4** pass in `toChatMessages()`, operating on the Phase 3 output array (`coalesced`), merges consecutive same-role messages. This is a separate post-processing loop — do NOT modify the existing Phase 3 tool-coalescing while-loop (lines 296-346). Addresses extension-block adjacency and a pre-existing hook-injection alternation bug (Bedrock's strict alternation requirement). **Important:** `ChatMessage.content` is `string | ContentBlock[]`. When merging, normalize both sides to `ContentBlock[]` (wrap bare `string` in `{ type: "text", text }`), then concatenate the arrays. If both are strings, produce a single `{ type: "text", text: a + "\n\n" + b }` block for compactness.
 
 **Why a new role:** Transcript/UI clarity (distinct from user/assistant), fits existing role-dispatch pattern in view-router, and the role is Notor-internal — providers never see it (translated at the pipeline boundary).
 
@@ -185,7 +185,7 @@ Adds `"block"` to `ExtensionType` union and `UserBlockDefinition` interface to [
 **Solution:** `notor-blocking: true` frontmatter opt-in. Only meaningful for `on_conversation_start`.
 
 - Blocking automations are awaited before the turn proceeds, subject to configurable timeout (`notor-blocking-timeout`, default 10s).
-- If `notor-blocking-emit-kind` is set, a preliminary loading `extension_block` is emitted before execution (rendered via `renderLoading` or default spinner).
+- If `notor-blocking-emit-kind` is set, a preliminary loading `extension_block` is emitted before execution via `addMessage({ ..., transient: true })` — the `transient` flag skips the `onMessageAdded` callback, preventing JSONL persistence while still rendering in the view. Rendered via `renderLoading` or default spinner.
 - On timeout, the automation is detached (continues in background); the turn proceeds without the block in LLM context.
 - Non-blocking automations remain fire-and-forget.
 - Orchestrator changes from bare `dispatchOnConversationStart(...)` to `await dispatchOnConversationStart(...)`. This requires: (1) changing the function signature from `void` to `async ... Promise<void>`, (2) restructuring the internal fire-and-forget IIFE — blocking automations awaited directly in the function body, non-blocking automations remain fire-and-forget, (3) adding per-automation timeout logic. The session snapshot (created after the dispatch in the orchestrator) must be verified to include messages emitted by blocking automations.
@@ -206,7 +206,7 @@ chatBlocks: {
 } | null;
 ```
 
-Wraps message creation with `role: "extension_block"` and bookkeeping. For the active conversation, uses `ConversationManager.addMessage`. For explicit `conversationId` targeting a non-active conversation (e.g., detached sub-agent `onComplete`), uses a dedicated `addMessageToConversation(conversationId, params)` method that appends directly to the conversation's JSONL without requiring it to be "active." Returns `null` when no conversation can be resolved.
+Wraps message creation with `role: "extension_block"` and bookkeeping. For the active conversation, uses `ConversationManager.addMessage`. For explicit `conversationId` targeting a non-active conversation (e.g., detached sub-agent `onComplete`), uses a dedicated `addMessageToConversation(conversationId, params)` method that resolves the ID to a JSONL filename via `listConversations()`, loads the `Conversation` object via `loadConversation(filename)`, and appends via `appendMessage()` — without requiring the conversation to be "active." This involves a directory scan, acceptable for this non-hot-path. Returns `null` when no conversation can be resolved.
 
 **LLM visibility constraint:** Blocks emitted during **blocking** automations (`pre_send`, blocking `on_conversation_start`) land before the session snapshot → included in LLM context. Blocks from **non-blocking** automations land after → visible on subsequent turns only.
 
@@ -254,8 +254,8 @@ Wraps `SubAgentRunner`. Detached sub-agents create their own `AbortController` l
 | `src/ui/tool-call-ui.ts` | Refactor to use collapsible helper |
 | `src/chat/view-router.ts` | Dispatch `extension_block` role |
 | `src/chat/message-pipeline.ts` | Translate `extension_block` → `user`-role wire text via new `getWireText()` function; add `setChatBlockRegistry()` module-scoped setter; add consecutive-role coalescing pass |
-| `src/chat/conversation.ts` | Add `source_extension` + `exclude_from_compaction` fields to `addMessage()` params and body; add `updateMessage()` (in-memory only, no JSONL persistence) + `onMessageUpdated` callback; add `addMessageToConversation(conversationId, params)` for non-active conversation emission |
-| `src/chat/compaction-manager.ts` | Filter `exclude_from_compaction` messages; fix re-append loops to spread all fields |
+| `src/chat/conversation.ts` | Add `source_extension` + `exclude_from_compaction` + `transient` fields to `addMessage()` params and body; add `updateMessage()` (in-memory only, no JSONL persistence) + `onMessageUpdated` callback; add `addMessageToConversation(conversationId, params)` for non-active conversation emission |
+| `src/chat/compaction-manager.ts` | Preserve `exclude_from_compaction` messages across compaction (re-append between summary and pending); fix re-append loops to spread all fields |
 | `src/chat/orchestrator.ts` | Emit `extension_block` from tool `content_blocks`; `await dispatchOnConversationStart()` |
 | `src/extensions/types.ts` | Add `"block"` to `ExtensionType`; `UserBlockDefinition`; blocking fields on automation def |
 | `src/extensions/parser.ts` | Add `case "block"` dispatch; parse `blocks:` YAML; parse `notor-blocking` frontmatter |

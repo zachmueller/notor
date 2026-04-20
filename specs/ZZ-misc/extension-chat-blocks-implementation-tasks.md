@@ -9,14 +9,16 @@ Source planning doc: [extension-chat-blocks-plan.md](../../private/extension-cha
 
 Standalone bug fix + new method. Ships independently, unblocks everything else. The compaction re-append loops at [`compaction-manager.ts:106-112`](../../src/chat/compaction-manager.ts#L106-L112) and [`:205-211`](../../src/chat/compaction-manager.ts#L205-L211) currently list only `role`, `content`, `tool_call`, `tool_result` — silently dropping `is_hook_injection`, `is_workflow_message`, and (soon) `source_extension`, `exclude_from_compaction`.
 
-- [ ] **1.1 — Add `source_extension` + `exclude_from_compaction` to `addMessage()` in `conversation.ts`**
+- [ ] **1.1 — Add `source_extension` + `exclude_from_compaction` + `transient` to `addMessage()` in `conversation.ts`**
   - Current signature at [`conversation.ts:306-320`](../../src/chat/conversation.ts#L306-L320) lists fields explicitly in a params object
-  - Add two new optional fields to the params type:
+  - Add three new optional fields to the params type:
     - `source_extension?: string | null`
     - `exclude_from_compaction?: boolean`
+    - `transient?: boolean`
   - Add corresponding lines in the function body (message construction at [`conversation.ts:325-342`](../../src/chat/conversation.ts#L325-L342)):
     - `source_extension: params.source_extension ?? null`
     - `exclude_from_compaction: params.exclude_from_compaction ?? false`
+  - When `params.transient === true`, skip firing `this.onMessageAdded?.(message)` at [`conversation.ts:383`](../../src/chat/conversation.ts#L383). This prevents JSONL persistence while still adding the message to the in-memory array. Used for loading block placeholders.
   - Do NOT widen the type to `Omit<Partial<Message>>` — keep the explicit params object for type safety and clarity about defaults
   - Verify all existing callers still compile (search for `addMessage(` across the codebase)
 
@@ -55,7 +57,12 @@ Standalone bug fix + new method. Ships independently, unblocks everything else. 
 
 - [ ] **1.4 — Add `addMessageToConversation()` for non-active conversation emission**
   - New method on `ConversationManager` (or `HistoryManager`): `addMessageToConversation(conversationId: string, params: AddMessageParams): Promise<Message | null>`
-  - Loads the conversation's JSONL via `HistoryManager`, appends the new message, persists
+  - **Note:** `HistoryManager.loadConversation(filename)` takes a JSONL **filename** (`{timestamp}_{id}.jsonl`), not a conversation ID. Implementation must resolve ID → filename first:
+    1. Call `listConversations()` to find the entry with matching `id` → get its filename
+    2. Call `loadConversation(filename)` to get the `Conversation` object
+    3. Construct the `Message` from params
+    4. Call `appendMessage(conversation, message)` to persist
+  - This involves a directory scan — acceptable for this non-hot-path (detached sub-agent `onComplete` only)
   - Does NOT require `activeConversation` — operates independently
   - Returns `null` if the conversation doesn't exist
   - Used by `chatBlocks.emit()` when targeting a non-active conversation (e.g., detached sub-agent `onComplete`)
@@ -141,7 +148,10 @@ The core message shape. After this phase, extension blocks can be emitted (manua
 - [ ] **3.5 — Add Phase 4 consecutive-same-role coalescing pass**
   - Create a **separate** post-processing loop after Phase 3's tool-coalescing while-loop (which ends at line 346). Do NOT modify the Phase 3 while-loop (lines 296-346) — it handles `tool_call`/`tool_result` coalescing only.
   - Operates on the `coalesced` array (output of Phase 3) and produces a `final` array, returned instead of `coalesced` (currently returned at line 356)
-  - Iterate `ChatMessage[]`: when `messages[i].role === messages[i-1].role` and neither carries `tool_calls`/`tool_results`, merge `messages[i].content` into `messages[i-1].content` separated by `\n\n`
+  - Iterate `ChatMessage[]`: when `messages[i].role === messages[i-1].role` and neither carries `tool_calls`/`tool_results`, merge content
+  - **Important:** `ChatMessage.content` is `string | ContentBlock[]` ([provider.ts:26](../../src/providers/provider.ts#L26)). When merging:
+    - If both are `string`: produce a single `{ type: "text", text: a + "\n\n" + b }` wrapped in an array (or concatenate strings directly)
+    - If either is `ContentBlock[]`: normalize both to `ContentBlock[]` (wrap bare `string` in `{ type: "text", text }`), then concatenate the arrays
   - Addresses both extension-block adjacency AND a pre-existing hook-injection alternation bug (Bedrock's strict alternation requirement)
 
 - [ ] **3.6 — Handle `extension_block` in compaction input assembly**
@@ -162,7 +172,10 @@ The core message shape. After this phase, extension blocks can be emitted (manua
 - [ ] **3.9 — Handle `extension_block` in remaining dispatch sites**
   - [`conversation.ts:368`](../../src/chat/conversation.ts#L368): no code change needed — title generation already checks `params.role === "user"`, so `extension_block` is inherently excluded
   - [`runtime-context.ts:352`](../../src/extensions/runtime-context.ts#L352): the `loadConversation` filter already checks `m.role === "user" || m.role === "assistant"` — `extension_block` is excluded. Decide if this is correct or if extensions should see their own prior emissions.
-  - [`compaction-manager.ts`](../../src/chat/compaction-manager.ts): filter out messages where `exclude_from_compaction === true` from the completed-messages set before compaction. Note: this applies to the compaction INPUT only — pending messages are always re-appended regardless of this flag.
+  - [`compaction-manager.ts`](../../src/chat/compaction-manager.ts): handle `exclude_from_compaction` messages during compaction:
+    1. **Separate** `exclude_from_compaction === true` messages from the completed-messages set before building the summarizer input (they should NOT be seen by the summarizer)
+    2. **Re-append** these excluded messages between the summary message and the pending messages — this ensures they survive compaction cycles (e.g., memory-recalled blocks at conversation start are not silently dropped)
+    3. Without this preservation, excluded messages would be neither summarized (excluded from input) nor pending (too old) — they would vanish entirely after compaction
 
 - [ ] **3.10 — Smoke test with hand-emitted block**
   - Temporarily add a test pathway (e.g., a debug command) that calls `addMessage({ role: "extension_block", content: [{ type: "custom_block", kind: "test", data: { message: "hello" }, fallback_text: "Test block" }], source_extension: "test" })`
@@ -315,7 +328,7 @@ Enable blocking automations that emit blocks visible to the LLM on the first tur
     3. Add per-automation timeout logic
   - Partition automations by `automation.blocking === true`
   - For each blocking automation with `blockingEmitKind`:
-    - Emit preliminary loading `extension_block` message (in-memory only, NOT persisted to JSONL): `role: "extension_block"`, `custom_block` with `kind: blockingEmitKind`, `data: {}`, `loading: true`
+    - Emit preliminary loading `extension_block` message via `addMessage({ ..., transient: true })` (the `transient` flag from Task 1.1 skips `onMessageAdded`, preventing JSONL persistence while still adding to the in-memory array and rendering in the view): `role: "extension_block"`, `custom_block` with `kind: blockingEmitKind`, `data: {}`, `loading: true`
     - Store the loading message ID for later replacement
   - Await blocking automations sequentially with per-automation timeout
   - On timeout: detach (continue in background), update loading block to timed-out indicator
@@ -329,12 +342,13 @@ Enable blocking automations that emit blocks visible to the LLM on the first tur
   - **Verification sub-task:** Trace the code path and confirm: blocking automations emit `extension_block` via `addMessage()` on the display `ConversationManager` → session snapshot (created at ~lines 770-771) reads from the display manager's message list → snapshot includes the newly-emitted messages → LLM sees them in its context on the first turn
 
 - [ ] **8.5 — Loading → real block replacement**
-  - Loading blocks are in-memory only (not persisted to JSONL — see Task 8.3)
+  - Loading blocks are in-memory only (not persisted to JSONL — see Task 8.3, `transient: true`)
   - When blocking automation calls `chatBlocks.emit(kind, data)` (same kind as loading block):
-    - Find the loading message by stored message ID
-    - Call `ConversationManager.updateMessage(loadingMessageId, { content: updatedContentArray })` — replacing the entire `content` array with updated `custom_block` entries where `loading` is removed/false and `data` contains the real payload
-    - `onMessageUpdated` callback triggers re-render in chat view (Phase 6.4)
-  - The real block (with final data) IS persisted to JSONL via the normal `addMessage()` path inside `chatBlocks.emit()`
+    1. Find the loading message by stored message ID
+    2. **Remove** the loading message from `this.messages[]` (it was transient — never persisted)
+    3. Call `addMessage()` for the real block — this persists to JSONL and pushes to the in-memory array
+    4. Fire `onMessageUpdated` callback to trigger re-render at the loading block's DOM position in chat view (Phase 6.4)
+  - **Why remove-then-add:** Using `updateMessage()` followed by `addMessage()` would leave TWO messages in the array (the patched loading block + the newly persisted real block), creating duplicate rows during the live session. Remove-then-add ensures exactly one message exists.
   - If plugin reloads mid-automation: loading block is gone (never persisted), automation does not re-fire — acceptable behavior
 
 ---
@@ -484,18 +498,22 @@ Comprehensive testing across all phases.
   - Coalescing: hook injection + user message → also merged (pre-existing case)
   - Coalescing: two consecutive extension_blocks → merged
   - Coalescing: merged user + extension_block text preserves `<notor-ext>` tags and user content as separate `\n\n`-delimited sections
+  - Coalescing: user message with `ContentBlock[]` content (e.g., image) + extension_block with string content → normalized to `ContentBlock[]` array
 
 - [ ] **13.5 — Unit tests: Compaction**
   - Block with `excludeFromCompaction: true` → skipped from compaction input
+  - Block with `excludeFromCompaction: true` → preserved verbatim after compaction (re-appended between summary and pending messages)
   - Block without flag → compacted normally
   - Re-appended messages preserve `source_extension`, `exclude_from_compaction`, `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`
 
 - [ ] **13.6 — Unit tests: `addMessage()` fields + `updateMessage()` + `addMessageToConversation()`**
   - `addMessage()` with `source_extension` and `exclude_from_compaction` → message has those fields set
+  - `addMessage()` with `transient: true` → message added to in-memory array, `onMessageAdded` NOT fired (no JSONL persistence)
+  - `addMessage()` without `transient` → `onMessageAdded` fires normally
   - `updateMessage` with valid ID → patches content in-memory, fires callback, no JSONL write
   - `updateMessage` with invalid ID → returns null, no callback
-  - Loading → real transition: `loading: true` cleared, data replaced, re-render triggered
-  - `addMessageToConversation` with valid conversation ID → message persisted to JSONL
+  - Loading → real transition: loading block removed from array, real block added via `addMessage()`, re-render triggered
+  - `addMessageToConversation` with valid conversation ID → resolves filename via `listConversations()`, message persisted to JSONL
   - `addMessageToConversation` with invalid conversation ID → returns null
 
 - [ ] **13.7 — Unit tests: Rate limit**
