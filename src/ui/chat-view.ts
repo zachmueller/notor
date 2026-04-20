@@ -51,6 +51,7 @@ import type { ConversationSession } from "../chat/conversation-session";
 import type { Workflow } from "../types";
 import { McpStatusIndicator } from "./mcp-status-indicator";
 import { getTextContent } from "../media/types";
+import { renderCollapsibleCard } from "./chat-blocks/collapsible-card";
 
 const log = logger("ChatView");
 
@@ -2222,18 +2223,10 @@ export class NotorChatView extends ItemView {
 		statusEl.textContent = toolCall.status;
 
 		// Collapsible parameters
-		const paramsToggle = toolEl.createDiv({ cls: "notor-tool-call-toggle" });
-		paramsToggle.textContent = "▶ parameters";
-		const paramsEl = toolEl.createDiv({ cls: "notor-tool-call-params notor-hidden" });
+		const { body: paramsEl } = renderCollapsibleCard(toolEl, { headerText: "parameters" });
+		paramsEl.addClass("notor-tool-call-params");
 		const pre = paramsEl.createEl("pre");
 		pre.createEl("code", { text: JSON.stringify(toolCall.parameters, null, 2) });
-
-		paramsToggle.addEventListener("click", () => {
-			paramsEl.toggleClass("notor-hidden", !paramsEl.hasClass("notor-hidden"));
-			paramsToggle.textContent = paramsEl.hasClass("notor-hidden")
-				? "▶ parameters"
-				: "▼ parameters";
-		});
 
 		this.lastToolCallEl = toolEl;
 		if (message.id) {
@@ -2274,18 +2267,10 @@ export class NotorChatView extends ItemView {
 				: JSON.stringify(toolResult.result, null, 2);
 
 			if (resultStr.length > 100) {
-				const toggle = resultEl.createDiv({ cls: "notor-tool-call-toggle" });
-				toggle.textContent = "▶ full result";
-				const fullEl = resultEl.createDiv({ cls: "notor-tool-result-full notor-hidden" });
+				const { body: fullEl } = renderCollapsibleCard(resultEl, { headerText: "full result" });
+				fullEl.addClass("notor-tool-result-full");
 				const pre = fullEl.createEl("pre");
 				pre.createEl("code", { text: resultStr });
-
-				toggle.addEventListener("click", () => {
-					fullEl.toggleClass("notor-hidden", !fullEl.hasClass("notor-hidden"));
-					toggle.textContent = fullEl.hasClass("notor-hidden")
-						? "▶ full result"
-						: "▼ full result";
-				});
 			}
 		}
 

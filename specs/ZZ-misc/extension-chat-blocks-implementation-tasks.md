@@ -189,19 +189,19 @@ The core message shape. After this phase, extension blocks can be emitted (manua
 
 DRY up the duplicated toggle pattern. Small scope, high payoff — every block-kind renderer will use this.
 
-- [ ] **4.1 — Create `renderCollapsibleCard` helper**
+- [x] **4.1 — Create `renderCollapsibleCard` helper**
   - Create [`src/ui/chat-blocks/collapsible-card.ts`](../../src/ui/chat-blocks/collapsible-card.ts)
   - Signature: `renderCollapsibleCard(container, opts: { headerText, icon?, defaultExpanded?, rootClass? }) → { root, header, body }`
   - Reuse existing CSS primitives: `.notor-tool-call-toggle`, `.notor-hidden`
   - Toggle behavior: click header → toggle `.notor-hidden` on body, swap `▶`/`▼` chevron
   - Returns `header` (for callers to append badges/buttons) and `body` (for content)
 
-- [ ] **4.2 — Refactor `tool-call-ui.ts` to use helper (both toggles)**
+- [x] **4.2 — Refactor `tool-call-ui.ts` to use helper (both toggles)**
   - [`tool-call-ui.ts:66-77`](../../src/ui/tool-call-ui.ts#L66-L77): replace the parameters toggle in `renderToolCallCard` with `renderCollapsibleCard()`
   - [`tool-call-ui.ts:127-144`](../../src/ui/tool-call-ui.ts#L127-L144): replace the result toggle in `renderToolResultSummary` with `renderCollapsibleCard()`
   - Verify: tool call cards expand/collapse identically, chevron animation unchanged
 
-- [ ] **4.3 — Refactor `chat-view.ts` to use helper (both toggles)**
+- [x] **4.3 — Refactor `chat-view.ts` to use helper (both toggles)**
   - [`chat-view.ts:2225-2236`](../../src/ui/chat-view.ts#L2225-L2236): replace the toggle in `renderToolCall` with `renderCollapsibleCard()`
   - [`chat-view.ts:2277-2289`](../../src/ui/chat-view.ts#L2277-L2289): replace the toggle in `renderToolResult` with `renderCollapsibleCard()`
   - Verify: tool result cards expand/collapse identically

@@ -13,6 +13,7 @@
 
 import type { ToolCall, ToolResult } from "../types";
 import { isMcpTool, parseMcpToolName } from "../mcp/mcp-tool-adapter";
+import { renderCollapsibleCard } from "./chat-blocks/collapsible-card";
 
 /**
  * Format a tool name for human-readable display.
@@ -63,18 +64,10 @@ export function renderToolCallCard(
 	// Collapsible parameters section (collapsed by default)
 	const hasParams = Object.keys(toolCall.parameters).length > 0;
 	if (hasParams) {
-		const paramsToggle = toolEl.createDiv({ cls: "notor-tool-call-toggle" });
-		paramsToggle.textContent = "▶ parameters";
-
-		const paramsEl = toolEl.createDiv({ cls: "notor-tool-call-params notor-hidden" });
-		const pre = paramsEl.createEl("pre");
+		const { body } = renderCollapsibleCard(toolEl, { headerText: "parameters" });
+		body.addClass("notor-tool-call-params");
+		const pre = body.createEl("pre");
 		pre.createEl("code", { text: JSON.stringify(toolCall.parameters, null, 2) });
-
-		paramsToggle.addEventListener("click", () => {
-			const isHidden = paramsEl.hasClass("notor-hidden");
-			paramsEl.toggleClass("notor-hidden", !isHidden);
-			paramsToggle.textContent = isHidden ? "▼ parameters" : "▶ parameters";
-		});
 	}
 
 	return toolEl;
@@ -126,21 +119,13 @@ export function renderToolResultSummary(
 
 		// Collapsible full result for longer outputs
 		if (resultStr.length > 120) {
-			const toggle = resultEl.createDiv({ cls: "notor-tool-call-toggle" });
-			toggle.textContent = "▶ full result";
-
-			const fullEl = resultEl.createDiv({ cls: "notor-tool-result-full notor-hidden" });
-			const pre = fullEl.createEl("pre");
+			const { body } = renderCollapsibleCard(resultEl, { headerText: "full result" });
+			body.addClass("notor-tool-result-full");
+			const pre = body.createEl("pre");
 			pre.createEl("code", {
 				text: typeof toolResult.result === "string"
 					? toolResult.result
 					: JSON.stringify(toolResult.result, null, 2),
-			});
-
-			toggle.addEventListener("click", () => {
-				const isHidden = fullEl.hasClass("notor-hidden");
-				fullEl.toggleClass("notor-hidden", !isHidden);
-				toggle.textContent = isHidden ? "▼ full result" : "▶ full result";
 			});
 		}
 	} else {
