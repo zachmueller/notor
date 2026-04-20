@@ -367,7 +367,7 @@ Enable blocking automations that emit blocks visible to the LLM on the first tur
 
 The side-effect emission API for automations and tools. This is the sole block-emission path for pre_send automations.
 
-- [ ] **9.1 — Implement `chatBlocks.emit` on `ExtensionUtils`**
+- [x] **9.1 — Implement `chatBlocks.emit` on `ExtensionUtils`**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts):
   - Add `chatBlocks` property to `ExtensionUtils`:
     ```
@@ -386,13 +386,13 @@ The side-effect emission API for automations and tools. This is the sole block-e
     - Return the created `Message`, or `null` if no conversation found
   - Set `chatBlocks` to `null` when no conversation is available (background vault events)
 
-- [ ] **9.2 — Wire `chatBlocks` into automation execution contexts**
+- [x] **9.2 — Wire `chatBlocks` into automation execution contexts**
   - Ensure `chatBlocks` is available in all automation triggers: `pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`, `on_conversation_start`, `on_schedule`, vault events
   - For vault events with no active conversation: `chatBlocks` is `null`
   - For `pre_send` (blocking): blocks land before session snapshot → LLM sees them
   - For `after_completion` (non-blocking): blocks land after snapshot → visible on subsequent turns
 
-- [ ] **9.3 — Document LLM visibility constraint**
+- [x] **9.3 — Document LLM visibility constraint**
   - Add inline code comment at the emission site explaining: blocking automations → current-turn visibility; non-blocking → next-turn only
   - This is by design, not a bug
 

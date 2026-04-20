@@ -85,7 +85,7 @@ export class UserToolAdapter implements Tool {
 			const { values: shared } = this.manager.getResolvedSharedSettings();
 
 			// 4. Build injected context objects
-			const utils: ExtensionUtils = buildUtils(this.plugin);
+			const utils: ExtensionUtils = buildUtils(this.plugin, undefined, this.definition.name);
 			// Merge per-invocation options
 			if (options?.abortSignal) {
 				utils.abortSignal = options.abortSignal;
@@ -662,7 +662,7 @@ export class ExtensionManager {
 
 		// Build runtime context — pass conversationId so utils.conversationApi can bind
 		const conversationId = typeof context.conversationId === "string" ? context.conversationId : undefined;
-		const utils = buildUtils(this.plugin, conversationId);
+		const utils = buildUtils(this.plugin, conversationId, extensionName);
 		const libs = this.getCachedLibs();
 		const obsidian = this.getCachedObsidianExports();
 

@@ -27,6 +27,8 @@ import { getTextContent, type ContentBlock, type ImageMediaType } from "../media
 import { resolveImageForDocx } from "../tools/docx-image-utils";
 import type { DocxImageData } from "../tools/docx-image-utils";
 import { graftIntoTemplate } from "../tools/docx-template-graft";
+import { estimateTokenCount } from "../utils/tokens";
+import type { Message } from "../types";
 import {
 	parseCommentsXml,
 	parseCommentsExtendedXml,
@@ -166,6 +168,23 @@ export interface ExtensionUtils {
 		loadConversation: (conversationId: string) => Promise<ChatHistoryConversation | null>;
 		listRecent: (limit?: number) => Promise<ChatHistorySummary[]>;
 	} | null;
+	/**
+	 * API for emitting extension blocks into the chat transcript.
+	 *
+	 * Null when no conversation is available (background vault events).
+	 *
+	 * LLM visibility: blocks emitted during blocking automations (pre_send,
+	 * blocking on_conversation_start) land before the session snapshot and are
+	 * visible to the LLM on the current turn. Blocks from non-blocking automations
+	 * land after the snapshot and are only visible on subsequent turns.
+	 */
+	chatBlocks: {
+		emit: (
+			kind: string,
+			data: Record<string, unknown>,
+			opts?: { fallbackText?: string; conversationId?: string },
+		) => Promise<Message | null>;
+	} | null;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */
@@ -179,11 +198,13 @@ export interface ExtensionUtils {
  * @param conversationId - Optional conversation ID. When provided, `conversationApi`
  *   is bound to the correct conversation via ID lookup. When omitted, `conversationApi`
  *   is null.
+ * @param sourceExtensionName - Name of the extension for use as `source_extension`
+ *   on emitted chat blocks. When omitted, `chatBlocks` is null.
  *
  * Note: `abortSignal` and `onProgress` are NOT included — they're per-call only.
  * `UserToolAdapter.execute()` merges them into the returned object per-invocation.
  */
-export function buildUtils(plugin: NotorPlugin, conversationId?: string): ExtensionUtils {
+export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceExtensionName?: string): ExtensionUtils {
 	const vaultRootPath = (plugin.app.vault.adapter as { basePath?: string }).basePath ?? "";
 
 	return {
@@ -401,6 +422,101 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string): Extens
 				},
 				isFavorite: () => convManager.getActiveConversation()?.is_favorite ?? false,
 				setFavorite: (favorite: boolean) => { convManager.setFavorite(favorite); },
+			};
+		})(),
+
+		chatBlocks: (() => {
+			const cbLog = logger("ext:chatBlocks");
+
+			// sourceExtensionName is required for block attribution
+			if (!sourceExtensionName) return null;
+
+			return {
+				emit: async (
+					kind: string,
+					data: Record<string, unknown>,
+					opts?: { fallbackText?: string; conversationId?: string },
+				): Promise<Message | null> => {
+					// Validate data is JSON-serializable and within size limit
+					let serialized: string;
+					try {
+						serialized = JSON.stringify(data);
+					} catch {
+						cbLog.error("chatBlocks.emit: data is not JSON-serializable", { kind, extension: sourceExtensionName });
+						return null;
+					}
+					if (serialized.length > 102400) {
+						cbLog.error("chatBlocks.emit: data exceeds 100KB size limit", { kind, extension: sourceExtensionName, size: serialized.length });
+						return null;
+					}
+
+					// Resolve target conversation ID
+					const targetConversationId = opts?.conversationId ?? conversationId;
+
+					// Compute estimated_wire_tokens via registry
+					const registry = plugin.getChatBlockRegistry();
+					const def = registry.get(kind);
+					let estimated_wire_tokens: number;
+					if (def?.toLLMText) {
+						const wireText = def.toLLMText(data);
+						estimated_wire_tokens = wireText != null ? estimateTokenCount(wireText) : 0;
+					} else if (opts?.fallbackText != null) {
+						estimated_wire_tokens = estimateTokenCount(opts.fallbackText);
+					} else {
+						estimated_wire_tokens = 0;
+					}
+
+					// Warn if block will not be visible to the LLM
+					if (!def?.toLLMText && (opts?.fallbackText == null || opts.fallbackText === "")) {
+						cbLog.warn(`Block kind '${kind}' will not be visible to the LLM — no toLLMText or fallback_text.`);
+					}
+
+					// Warn if kind is unregistered (still emits with fallback rendering)
+					if (!def) {
+						cbLog.warn(`chatBlocks.emit: kind '${kind}' is not registered in ChatBlockRegistry — will render with fallback`, { extension: sourceExtensionName });
+					}
+
+					const exclude_from_compaction = def?.excludeFromCompaction ?? false;
+
+					const messageParams = {
+						role: "extension_block" as const,
+						content: [{
+							type: "custom_block" as const,
+							kind,
+							data,
+							fallback_text: opts?.fallbackText,
+							estimated_wire_tokens,
+						}],
+						source_extension: sourceExtensionName,
+						exclude_from_compaction,
+					};
+
+					// Active conversation path: live render + persist
+					const orchestrator = plugin.getActiveOrchestrator?.();
+					const convManager = orchestrator?.getConversationManager();
+					const activeConv = convManager?.getActiveConversation();
+
+					if (activeConv && activeConv.id === targetConversationId) {
+						const message = convManager!.addMessage(messageParams);
+						cbLog.debug("chatBlocks.emit: emitted to active conversation", { kind, conversationId: targetConversationId });
+						return message;
+					}
+
+					// Non-active conversation path: persist to JSONL only
+					if (targetConversationId) {
+						const hm = plugin.getHistoryManager();
+						const message = await hm.addMessageToConversation(targetConversationId, messageParams);
+						if (message) {
+							cbLog.debug("chatBlocks.emit: emitted to non-active conversation", { kind, conversationId: targetConversationId });
+						} else {
+							cbLog.warn("chatBlocks.emit: conversation not found", { kind, conversationId: targetConversationId });
+						}
+						return message;
+					}
+
+					cbLog.warn("chatBlocks.emit: no conversation available", { kind, extension: sourceExtensionName });
+					return null;
+				},
 			};
 		})(),
 	};
