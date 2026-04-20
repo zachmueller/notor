@@ -223,7 +223,7 @@ Register the four memory sub-agent profiles following the existing pattern in [`
 
 ## Phase 4 — Built-in Tool Scaffold (`capture_memory`)
 
-- [ ] **4.1 — Add `capture_memory` tool scaffold**
+- [x] **4.1 — Add `capture_memory` tool scaffold**
   - **Prerequisite:** Add `featureGroup?: string` to the `BuiltinToolScaffold` interface in [`builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts) (currently has `name`, `description`, `mode`, `scaffoldContent` only). Without this, `notor-feature-group: memory` won't propagate through the tool injection frontmatter dict at [`manager.ts:235-240`](../../src/extensions/manager.ts#L235-L240). (The dict propagation itself is handled by Task 2.5a(iii).)
   - **Also extend the `scaffold()` helper** (~line 36-67) to accept an optional `featureGroup` param and emit `notor-feature-group: {value}` in the scaffoldContent frontmatter when present. This keeps `capture_memory` consistent with all other tools that use the helper.
   - In [`src/extensions/builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts):
@@ -237,7 +237,7 @@ Register the four memory sub-agent profiles following the existing pattern in [`
   - Code fence implements: dedup check → `resolveConcept` → return result text
   - Add to `BUILTIN_TOOL_SCAFFOLDS` Map (~line 2692-2717)
 
-- [ ] **4.2 — Verify `capture_memory` tool registration**
+- [x] **4.2 — Verify `capture_memory` tool registration**
   - Tool appears in `ExtensionManager.getTools()` when `memory_enabled` is true
   - Tool is hidden when `memory_enabled` is false (via `notor-feature-group` check)
   - Parameters are correctly parsed from YAML schema
