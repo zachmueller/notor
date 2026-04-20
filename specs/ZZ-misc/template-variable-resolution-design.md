@@ -50,20 +50,20 @@ The registry is extensible — future variables can be added without changing th
 
 ### 2.3 Resolution Pass — Where It Runs
 
-Resolution must happen **after** file read but **before** any downstream parsing (frontmatter stripping, tool-config extraction, code-fence compilation, system-prompt assembly). The following table identifies the exact insertion points in the current codebase:
+Resolution must happen **after** file read and frontmatter stripping, but **before** any downstream parsing (tool-config extraction, code-fence compilation, system-prompt assembly, include-note resolution). The following table identifies the exact insertion points in the current codebase:
 
 | Content Type | File | Function | Insertion Point |
 |---|---|---|---|
 | User tool/automation scaffolds | `src/extensions/discovery.ts` | `parseOneExtensionFile` | After `vault.cachedRead()` (~line 212), before `parseExtensionFile()` call |
 | Built-in tool/automation scaffolds | `src/extensions/manager.ts` | `reload` | Wrap `scaffold.scaffoldContent` (~line 232) before `parseExtensionFile()` call |
-| Sub-agent profiles (vault) | `src/sub-agents/discovery.ts` | `parseProfile` | After `vault.cachedRead()` (~line 142), before `stripFrontmatter()` |
-| Sub-agent profiles (built-in) | `src/sub-agents/discovery.ts` | `buildProfileFromBuiltin` | Wrap `systemPromptContent` (~line 237) before `stripFrontmatter()` |
-| Personas | `src/personas/persona-discovery.ts` | `parsePersona` | After `vault.cachedRead()` (~line 130), before `stripFrontmatter()` |
-| Vault rules | `src/rules/vault-rules.ts` | `loadRuleFile` | After file read (~line 298), before content is stored |
-| Custom base prompt | `src/chat/system-prompt.ts` | `getBasePrompt` | After `vault.adapter.read()` (~line 343), before `stripFrontmatter()` |
-| Workflow body | `src/workflows/workflow-executor.ts` | `readWorkflowBody` | After `vault.read()` (~line 61), before `getFrontMatterInfo()` |
+| Sub-agent profiles (vault) | `src/sub-agents/discovery.ts` | `parseProfile` | After `stripFrontmatter()` (~line 182), before `extractToolConfigs()` |
+| Sub-agent profiles (built-in) | `src/sub-agents/discovery.ts` | `buildProfileFromBuiltin` | After `stripFrontmatter()` (~line 237), before `extractToolConfigs()` |
+| Personas | `src/personas/persona-discovery.ts` | `parsePersona` | After `stripFrontmatter()` (~line 165), before content is returned |
+| Vault rules | `src/rules/vault-rules.ts` | `loadRuleFile` | After `parseFrontmatterAndBody()` (~line 301), before `content: parsed.body` is stored |
+| Custom base prompt | `src/chat/system-prompt.ts` | `getBasePrompt` | After `stripFrontmatter()` (~line 344), before `resolveIncludeNotesIfAvailable()` |
+| Workflow body | `src/workflows/workflow-executor.ts` | `readWorkflowBody` | After frontmatter slice (~line 69), before returning body |
 
-At each point, the raw Markdown string is passed through `registry.resolve(content)` before any further processing.
+At each point, the body content string is passed through `registry.resolve(content)` before any further processing.
 
 ### 2.4 Resolution Semantics
 
@@ -99,11 +99,11 @@ Some content types (`vault-rules.ts`, `system-prompt.ts`, `workflow-executor.ts`
 |------|--------|
 | `src/extensions/discovery.ts` | Call `registry.resolve()` on raw content before `parseExtensionFile()` |
 | `src/extensions/manager.ts` | Call `registry.resolve()` on `scaffold.scaffoldContent` for built-in scaffolds; pass registry to sub-agent and persona managers |
-| `src/sub-agents/discovery.ts` | Call `registry.resolve()` on raw content before `stripFrontmatter()` (both vault and built-in paths) |
-| `src/personas/persona-discovery.ts` | Call `registry.resolve()` on raw content before `stripFrontmatter()` |
-| `src/rules/vault-rules.ts` | Call `registry.resolve()` on rule content after file read |
-| `src/chat/system-prompt.ts` | Call `registry.resolve()` on custom base prompt content after `vault.adapter.read()` |
-| `src/workflows/workflow-executor.ts` | Call `registry.resolve()` on `rawContent` after `vault.read()` |
+| `src/sub-agents/discovery.ts` | Call `registry.resolve()` on body content after `stripFrontmatter()`, before `extractToolConfigs()` (both vault and built-in paths) |
+| `src/personas/persona-discovery.ts` | Call `registry.resolve()` on body content after `stripFrontmatter()` |
+| `src/rules/vault-rules.ts` | Call `registry.resolve()` on `parsed.body` after `parseFrontmatterAndBody()` |
+| `src/chat/system-prompt.ts` | Call `registry.resolve()` on stripped content after `stripFrontmatter()`, before `resolveIncludeNotesIfAvailable()` |
+| `src/workflows/workflow-executor.ts` | Call `registry.resolve()` on body after frontmatter slice, before returning |
 | `src/main.ts` | Instantiate `TemplateVariableRegistry`, register built-in variables, wire into discovery/manager pipelines |
 
 ### 3.3 Registry Lifecycle
@@ -134,7 +134,7 @@ Some content types (`vault-rules.ts`, `system-prompt.ts`, `workflow-executor.ts`
 
 1. **Should `<include_note>` content be re-resolved?** Current answer: no — only the outer scaffold is resolved. This prevents action-at-a-distance where a general note changes behavior when included into a scaffold. If this proves too restrictive (e.g., a user wants a shared template fragment with variables), it can be revisited.
 
-2. **Should frontmatter values be resolved?** Current answer: yes — the resolution pass runs on the full raw Markdown before frontmatter is stripped, so frontmatter values containing template variables will be resolved. This is intentional: a future variable like `{notor_dir}` in a frontmatter field (e.g., a path setting) should work. **Caveat:** For user extension files, `parseOneExtensionFile` obtains frontmatter from Obsidian's metadata cache (not from the content string), so template variables in metadata-cache-sourced frontmatter values will not be resolved. This is acceptable because path-bearing values (`allowed_paths`, etc.) live in `<notor_tool_config>` blocks within the body content, which is resolved. Built-in scaffolds construct frontmatter programmatically and are unaffected.
+2. **Should frontmatter values be resolved?** Current answer: no. The resolution pass runs on body content after frontmatter is stripped. Frontmatter values are parsed separately — from Obsidian's metadata cache for user files, or via `extractFrontmatterField()` regex for built-ins — before the resolution point. This is acceptable because path-bearing values (`allowed_paths`, etc.) live in `<notor_tool_config>` blocks within the body content, which is resolved. If a future need arises to resolve template variables in frontmatter fields, individual field values can be resolved explicitly at their extraction site.
 
 3. **Should we warn on unresolved variables?** Not initially. Since unknown variables pass through silently, a typo like `{noter_dir}` would silently produce a broken path. A future lint/validation pass could flag `{...}` patterns in `allowed_paths` that don't match any registered variable, but this is not needed for the initial implementation.
 
