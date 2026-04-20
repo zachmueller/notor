@@ -18,33 +18,33 @@ Extends the sub-agent system to support `preferred_preset` and `iteration_cap` f
   - Both default to `null` (existing profiles unaffected)
 
 - [ ] **0.2 — Parse `notor-preferred-preset` and `notor-iteration-cap` in `parseProfile()`**
-  - In [`src/sub-agents/discovery.ts`](../../src/sub-agents/discovery.ts) `parseProfile()` (lines 131-215):
-  - After existing `preferredModel` parsing (~line 179), add:
+  - In [`src/sub-agents/discovery.ts`](../../src/sub-agents/discovery.ts) `parseProfile()` (lines 135-221):
+  - After existing `preferredModel` parsing (~line 184), add:
     - `const preferredPreset = parseStringOrNull(frontmatter?.["notor-preferred-preset"]);`
     - `const iterationCap = parseNumberOrNull(frontmatter?.["notor-iteration-cap"]);`
-  - Add both to the returned `SubAgentProfile` object (~line 204-214)
+  - Add both to the returned `SubAgentProfile` object (~lines 210-220)
   - Add `parseNumberOrNull` helper if not already present (parse frontmatter number fields, return `null` if missing/invalid)
 
 - [ ] **0.3 — Parse `notor-preferred-preset` and `notor-iteration-cap` in `buildProfileFromBuiltin()`**
-  - In [`src/sub-agents/discovery.ts`](../../src/sub-agents/discovery.ts) `buildProfileFromBuiltin()` (lines 227-261):
-  - After `extractFrontmatterField` calls for `notor-preferred-provider` and `notor-preferred-model` (~lines 256-257):
+  - In [`src/sub-agents/discovery.ts`](../../src/sub-agents/discovery.ts) `buildProfileFromBuiltin()` (lines 233-269):
+  - After `extractFrontmatterField` calls for `notor-preferred-provider` and `notor-preferred-model` (~lines 264-265):
     - `preferred_preset: extractFrontmatterField(systemPromptContent, "notor-preferred-preset"),`
     - `iteration_cap: extractFrontmatterNumberField(systemPromptContent, "notor-iteration-cap"),`
   - Add `extractFrontmatterNumberField` helper (regex-based extraction of numeric fields from raw frontmatter)
 
 - [ ] **0.4 — Add preset resolution to `use_subagent` tool**
-  - In [`src/tools/use-subagent.ts`](../../src/tools/use-subagent.ts) (provider/model resolution at lines 220-242):
+  - In [`src/tools/use-subagent.ts`](../../src/tools/use-subagent.ts) (provider/model resolution at lines 220-250):
   - Before the existing `if (profile.preferred_provider)` block (~line 224):
     - If `profile.preferred_preset` is set, call `resolvePreset(profile.preferred_preset, this.settings.model_presets)`
     - If resolved: use the preset's provider and model, skipping the `preferred_provider`/`preferred_model` fallback
     - If resolution fails (preset not found): log warning, fall through to existing provider/model logic
   - Reference: persona preset resolution at [`persona-manager.ts:289-324`](../../src/personas/persona-manager.ts#L289-L324)
-  - At line 346: if `profile.iteration_cap` is set, use it instead of `this.settings.sub_agent_iteration_cap`
+  - At line 346: use three-level fallback chain: `profile.iteration_cap ?? this.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP`
 
 - [ ] **0.5 — Add preset resolution to `runSubAgent` extension API**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (provider/model resolution at lines 496-514):
   - Same pattern as 0.4: check `profile.preferred_preset` first, resolve via `resolvePreset()`, fall back to `preferred_provider`/`preferred_model`
-  - At line 590: if `profile.iteration_cap` is set, use `profile.iteration_cap` as fallback before `SUB_AGENT_ITERATION_CAP` (i.e., `opts.iterationCap ?? profile.iteration_cap ?? SUB_AGENT_ITERATION_CAP`)
+  - At line 590: use three-level fallback chain: `opts.iterationCap ?? profile.iteration_cap ?? SUB_AGENT_ITERATION_CAP`
 
 - [ ] **0.6 — Unit tests for sub-agent preset resolution**
   - Existing sub-agent profiles (`search-vault`, `search-web`, `notor-help`) continue to work unchanged (null preset, null iteration_cap)
@@ -156,14 +156,15 @@ Wire the library into the extension runtime so scaffolds can call `utils.memory.
 Moved from Phase 8 (was Task 8.4). Must be in place before Phases 3-6 register memory scaffolds, so the `notor-feature-group: memory` frontmatter on those scaffolds is actually parsed and gated by `memory_enabled`.
 
 - [ ] **2.5a — Implement `notor-feature-group` enablement in `ExtensionManager`**
-  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts):
-  - During scaffold parsing, extract `notor-feature-group` from frontmatter
-  - In `executeAutomation()` (~line 617): before the existing `automation_enabled` check, add a feature-group gate:
-    - If `automation.featureGroup` is set and the corresponding master toggle is false → skip execution
-  - In tool registration: similarly gate tool visibility on feature-group master toggle
+  - **Gate at registration time during `reload()`, NOT at execution time.** Scaffolds whose feature group is disabled should be excluded from compilation and registration entirely — disabled tools don't appear in the LLM's tool list, disabled block kinds don't register in `ChatBlockRegistry`, and disabled automations aren't in the compiled map.
+  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `reload()` (~line 215):
+    - After tool discovery/injection (line ~257), filter `discovered.tools` to exclude tools whose `featureGroup` maps to a disabled toggle
+    - After automation discovery/injection (line ~314), filter `discovered.automations` to exclude automations whose `featureGroup` maps to a disabled toggle
+    - After block discovery/injection (before block compilation at line ~340), filter `discovered.blocks` to exclude blocks whose `featureGroup` maps to a disabled toggle
+  - No runtime gate needed in `executeAutomation()` (~line 620) since disabled automations won't be in the compiled map
   - Initial mapping: `"memory"` → `memory_enabled`. Pattern is extensible for future feature groups.
-  - Add `featureGroup?: string` to `UserToolDefinition` and `UserAutomationDefinition` in [`src/extensions/types.ts`](../../src/extensions/types.ts)
-  - Add `notor-feature-group` parsing to [`src/extensions/parser.ts`](../../src/extensions/parser.ts)
+  - Add `featureGroup?: string` to `UserToolDefinition`, `UserAutomationDefinition`, **and `UserBlockDefinition`** in [`src/extensions/types.ts`](../../src/extensions/types.ts)
+  - Add `notor-feature-group` parsing to [`src/extensions/parser.ts`](../../src/extensions/parser.ts) for all extension types (tool, automation, block)
 
 ---
 
@@ -238,12 +239,25 @@ Register the four memory sub-agent profiles following the existing pattern in [`
 
 ## Phase 5 — Built-in Automation Scaffolds
 
+**Prerequisite:** The `BuiltinAutomationScaffold` interface at [`builtin-automation-scaffolds.ts:17-31`](../../src/extensions/builtin-automation-scaffolds.ts#L17-L31) must be extended with optional fields: `blocking?: boolean`, `blockingEmitKind?: string`, `blockingTimeout?: number`, `featureGroup?: string`. These are needed because the scaffold injection loop at [`manager.ts:288-293`](../../src/extensions/manager.ts#L288-L293) manually constructs a frontmatter dict from interface fields — without these fields in the interface, blocking and feature-group behavior would silently fail.
+
+The injection code at `manager.ts:289` must also be updated to include these new fields in the manually-constructed frontmatter dict (e.g., `"notor-blocking": scaffold.blocking`, `"notor-blocking-emit-kind": scaffold.blockingEmitKind`, `"notor-blocking-timeout": scaffold.blockingTimeout`, `"notor-feature-group": scaffold.featureGroup`).
+
+- [ ] **5.0 — Extend `BuiltinAutomationScaffold` interface and injection code**
+  - In [`src/extensions/builtin-automation-scaffolds.ts`](../../src/extensions/builtin-automation-scaffolds.ts) (interface at lines 17-31):
+    - Add `blocking?: boolean`, `blockingEmitKind?: string`, `blockingTimeout?: number`, `featureGroup?: string`
+  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) (scaffold injection at ~line 289):
+    - Add the new fields to the manually-constructed frontmatter dict, conditional on their presence (e.g., `if (scaffold.blocking) frontmatter["notor-blocking"] = scaffold.blocking;`)
+  - Verify: existing `title-generation` scaffold is unaffected (all new fields are optional and absent)
+
 - [ ] **5.1 — Add `memory-search` automation scaffold**
-  - In [`src/extensions/builtin-automation-scaffolds.ts`](../../src/extensions/builtin-automation-scaffolds.ts) (~line 36-95):
+  - In [`src/extensions/builtin-automation-scaffolds.ts`](../../src/extensions/builtin-automation-scaffolds.ts) (~line 36):
   - Add entry to `BUILTIN_AUTOMATION_SCAFFOLDS` Map:
     - `name: "memory-search"`
     - `displayName: "Memory Search (auto-inject)"`
     - `trigger: "on_conversation_start"`
+    - `blocking: true`, `blockingEmitKind: "memory_recalled"`, `blockingTimeout: 10000`
+    - `featureGroup: "memory"`
     - `scaffoldContent`: full Markdown with frontmatter including `notor-blocking: true`, `notor-blocking-emit-kind: memory_recalled`, `notor-blocking-timeout: 10`, `notor-feature-group: memory`
     - YAML settings: `search_profile` (string, default `memory-search`), `max_matches` (number, default 8)
     - Code fence: **cold-start guard** — before spawning the search sub-agent, list `.md` files in `{notor_dir}/memory/` (excluding dotfiles); if count is zero, emit no block and return early. Otherwise: loads conversation via `chatHistory.loadFull`, spawns sub-agent, parses results, reads note bodies, emits `memory_recalled` block (as specified in design spec §7b)
@@ -318,9 +332,14 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
       - `render(container, data, ctx)`: collapsible card with clickable links + action badges
       - `toLLMText(data)`: returns `null` (zero LLM tokens)
 
-- [ ] **6.4 — Integrate `BUILTIN_BLOCK_SCAFFOLDS` into `ExtensionManager`**
-  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts):
-  - During `reload()` (~line 206), inject built-in block scaffolds following the same pattern as built-in tool scaffolds (~lines 220-246) and automation scaffolds (~lines 269-302)
+- [ ] **6.4 — Integrate `BUILTIN_BLOCK_SCAFFOLDS` into `ExtensionManager`** (absorbs former task 9.1)
+  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `reload()` (~line 215):
+  - Add a built-in block scaffold injection loop **between** the automation compilation (line ~314) and the block cleanup/compilation (line ~332). Follow the same pattern as the tool scaffold loop (lines 230-257) and automation scaffold loop (lines 281-314):
+    - Iterate `BUILTIN_BLOCK_SCAFFOLDS`
+    - Skip if a vault block file with the same `kind` was already discovered in `discovered.blocks`
+    - Construct frontmatter from scaffold metadata (`notor-type: block`, `notor-block-kind`, `notor-display-name`, `notor-icon`, `notor-exclude-from-compaction`, `notor-feature-group`)
+    - Resolve template variables in scaffold content
+    - Parse via `parseExtensionFile`, mark `isScaffold: true`, push to `discovered.blocks`
   - User vault overrides take precedence (same mechanism: check if user file exists before injecting built-in)
 
 ---
@@ -329,7 +348,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 - [ ] **7.1 — Add `buildMemoryConventionSection()` to `system-prompt.ts`**
   - In [`src/chat/system-prompt.ts`](../../src/chat/system-prompt.ts):
-  - Add a private method following the section builder pattern (~lines 412-498):
+  - Add a private method following the section builder pattern (~lines 331+):
     ```typescript
     private buildMemoryConventionSection(): string {
       return `## Memory context
@@ -339,13 +358,14 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
     ```
 
 - [ ] **7.2 — Inject memory convention section conditionally**
-  - In the `assemble()` method (~lines 209-328):
-  - After the auto-context section (~lines 305-307), conditionally append:
+  - In the `assemble()` method (~lines 211-329):
+  - **Before** the auto-context section (~line 307), conditionally insert:
     ```typescript
     if (this.settings.memory_enabled) {
-      sections.push(this.buildMemoryConventionSection());
+      parts.push(this.buildMemoryConventionSection());
     }
     ```
+  - Placed before auto-context (not after) so it survives truncation — auto-context is the most variable section and is truncated first under token-budget pressure
   - Only emitted when `memory_enabled` is true — zero overhead when memory is off
 
 ---
@@ -376,13 +396,12 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 - [ ] **8.4 — (Moved to Phase 2.5 — see below Phase 2)**
 
-- [ ] **8.5 — Implement auto-approval propagation on `memory_enabled` toggle**
-  - When `memory_enabled` flips **on**:
-    - Set `capture_memory` to `enabled: true` and `auto_approve: true` in the user's tool-config / `auto_approve` settings
-    - Reference: existing auto-approve defaults at [`defaults.ts:51-73`](../../src/settings/defaults.ts#L51-L73), merger logic at [`merger.ts:109`](../../src/tool-config/merger.ts#L109)
-  - When `memory_enabled` flips **off**:
-    - Set `capture_memory` to `enabled: false` (makes auto-approve moot)
-  - User can independently override `auto_approve` for `capture_memory` after toggle — the toggle sets defaults, not locks
+- [ ] **8.5 — Implement auto-approval for `capture_memory`**
+  - Add `capture_memory: true` to `DEFAULT_AUTO_APPROVE` in [`defaults.ts:51-73`](../../src/settings/defaults.ts#L51-L73)
+  - The normal default mechanism handles first-time enablement; users who override it keep their override with no toggle-time side effects
+  - When `memory_enabled` flips **on**: set `capture_memory` to `enabled: true` (auto-approve handled by defaults)
+  - When `memory_enabled` flips **off**: set `capture_memory` to `enabled: false`
+  - No toggle-time `auto_approve` mutation needed — simplifies the toggle handler
 
 - [ ] **8.6 — Implement preset validation on enable**
   - When `memory_enabled` flips on:
@@ -400,18 +419,15 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 ## Phase 9 — Wiring & Integration
 
-- [ ] **9.1 — Wire block scaffold discovery into `ExtensionManager.reload()`**
-  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `reload()` (~line 206):
-  - After injecting built-in tool scaffolds and automation scaffolds, inject built-in block scaffolds from `BUILTIN_BLOCK_SCAFFOLDS`
-  - Follow the same user-override-takes-precedence pattern (~line 243)
+- [ ] ~~**9.1**~~ — Merged into task 6.4 (built-in block scaffold integration).
 
 - [ ] **9.2 — Wire `utils.memory` into automation execution**
-  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `executeAutomation()` (~line 617):
-  - The `buildUtils()` call at ~line 665 already provides the full utils object — `utils.memory` is automatically available once Phase 2 wiring is done
+  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `executeAutomation()` (~line 620):
+  - The `buildUtils()` call at ~line 668 already provides the full utils object — `utils.memory` is automatically available once Phase 2 wiring is done
   - Verify: `memory-search`, `memory-capture`, `memory-dream` automations can access `utils.memory.*`, `utils.chatBlocks.*`, `utils.runSubAgent`, `utils.chatHistory.loadFull()`
 
 - [ ] **9.3 — Wire `utils.memory` into tool execution**
-  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `UserToolAdapter` (~line 45-152):
+  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `UserToolAdapter`:
   - Same as automations — `buildUtils()` provides the full utils object
   - Verify: `capture_memory` tool can access `utils.memory.*`
 
@@ -457,18 +473,19 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
   - Empty matches → `toLLMText` returns `null` → zero wire tokens
 
 - [ ] **10.5 — Unit tests: Settings**
-  - `memory_enabled: true` propagates `capture_memory` → `enabled: true` + `auto_approve: true`
+  - `memory_enabled: true` propagates `capture_memory` → `enabled: true`
   - `memory_enabled: false` propagates `capture_memory` → `enabled: false`
-  - User override of `auto_approve` persists
-  - Re-toggling `memory_enabled` off then on resets `auto_approve` to `true`
+  - `DEFAULT_AUTO_APPROVE` includes `capture_memory: true`
+  - User override of `auto_approve` to `false` persists across toggles (no toggle-time mutation)
   - Preset validation: missing preset → toggle stays `false` + Notice
   - Preset validation on load: `memory_enabled: true` with missing preset → disabled + Notice
 
 - [ ] **10.6 — Unit tests: Feature group gating**
-  - Automation with `notor-feature-group: memory` + `memory_enabled: false` → skipped
-  - Same automation with `memory_enabled: true` → executes
-  - Tool with `notor-feature-group: memory` + `memory_enabled: false` → hidden from tool list
-  - Individual `automation_enabled` override still works independently of feature group
+  - `reload()` with `notor-feature-group: memory` + `memory_enabled: false` → tool not in compiled map, block kind not in registry, automation not in compiled map
+  - `reload()` with `memory_enabled: true` → all memory scaffolds compiled and registered normally
+  - Tool with `notor-feature-group: memory` + `memory_enabled: false` → not in tool registry (hidden from LLM tool list)
+  - Block kind with `notor-feature-group: memory` + `memory_enabled: false` → not registered in `ChatBlockRegistry`
+  - Individual `automation_enabled` override still works independently of feature group (for scaffolds whose feature group is enabled)
 
 - [ ] **10.7 — E2E tests: Memory search**
   - Seed `{notor_dir}/memory/` with diverse notes → send chat message → `memory-search` fires → sub-agent returns matches → `extension_block` with `kind: "memory_recalled"` appended to conversation
