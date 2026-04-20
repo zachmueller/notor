@@ -285,33 +285,35 @@ Render `extension_block` messages as dedicated rows in the chat panel.
 
 Allow user-authored block kinds in vault scaffolds and built-in block scaffolds.
 
-- [ ] **7.1 — Add `"block"` to `ExtensionType` and define `UserBlockDefinition`**
+- [x] **7.1 — Add `"block"` to `ExtensionType` and define `UserBlockDefinition`**
   - In [`src/extensions/types.ts`](../../src/extensions/types.ts):
   - Extend `ExtensionType`: `"tool" | "automation" | "settings" | "block"`
   - Add `UserBlockDefinition` interface: `filePath`, `kind`, `displayName`, `icon?`, `rendererExport`, `toLLMTextExport?`, `excludeFromCompaction?`, `rawCode`, `compiledFn`, `isScaffold?`
   - Add `BlockKindDeclaration` interface for `blocks:` YAML on tools/automations: `kind`, `displayName`, `icon?`, `rendererExport`, `toLLMTextExport?`, `excludeFromCompaction?`
   - Add optional `blocks?: BlockKindDeclaration[]` to `UserToolDefinition` and `UserAutomationDefinition`
+  - Add `blockCount` to `ExtensionReloadResult`
 
-- [ ] **7.2 — Add `case "block"` to parser dispatch**
+- [x] **7.2 — Add `case "block"` to parser dispatch**
   - In [`src/extensions/parser.ts`](../../src/extensions/parser.ts) at the switch (~line 122-129):
   - Add `case "block": return parseBlockFile(frontmatter, codeFence, filePath);`
-  - Implement `parseBlockFile()`: parse frontmatter fields `notor-block-kind`, `notor-display-name`, `notor-icon`, `notor-exclude-from-compaction`, and code fence (renderer + toLLMText exports). No `params` or `settings` YAML section
-  - Also parse `blocks:` YAML section on tool/automation scaffolds (add to `parseToolFile` and `parseAutomationFile`)
+  - Implement `parseBlockFile()`: parse frontmatter fields `notor-block-kind`, `notor-display-name`, `notor-icon`, `notor-exclude-from-compaction`, `notor-renderer-export`, `notor-to-llm-text-export`, and code fence. No `params` or `settings` YAML section
+  - Add `parseBlockKindDeclarations()` helper to parse `blocks:` YAML section on tool/automation scaffolds (added to `parseToolFile` and `parseAutomationFile`)
 
-- [ ] **7.3 — Update discovery to scan `{notor_dir}/blocks/`**
+- [x] **7.3 — Update discovery to scan `{notor_dir}/blocks/`**
   - In [`src/extensions/discovery.ts`](../../src/extensions/discovery.ts):
   - Add `blocks: UserBlockDefinition[]` to `DiscoveryResult` interface
   - Add scan of `{notor_dir}/blocks/` directory for `.md` files, following the same pattern as `tools/` and `automations/` scans
   - Type-check: files must parse as `notor-type: block`; log and skip unexpected types
 
-- [ ] **7.4 — Update manager to compile/register block kinds**
+- [x] **7.4 — Update manager to compile/register block kinds**
   - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts):
+  - Add `compileBlockModule()` to [`src/extensions/compiler.ts`](../../src/extensions/compiler.ts): strips types, compiles code into an AsyncFunction with `exports` param, executes synchronously to populate named exports
   - On extension (re)compile:
-    - For `notor-type: block` scaffolds: compile code fence, extract named exports (renderer, toLLMText), register with `ChatBlockRegistry`
-    - For tool/automation scaffolds with `blocks:` YAML: pull named exports from compiled module, register
-  - On extension unload/reload: unregister from `ChatBlockRegistry`
-  - Duplicate kind detection: log error, keep first registration
-  - Follow the existing `UserToolAdapter` compilation pattern at [`manager.ts:45-158`](../../src/extensions/manager.ts#L45-L158)
+    - For `notor-type: block` scaffolds: compile via `compileBlockModule()`, extract named exports (renderer, toLLMText), register with `ChatBlockRegistry`
+    - For tool/automation scaffolds with `blocks:` YAML: compile module separately via `registerInlineBlockKinds()`, pull named exports, register
+  - On extension unload/reload: unregister from `ChatBlockRegistry` (via `registeredBlockKinds` set)
+  - Duplicate kind detection: delegated to `ChatBlockRegistry.register()` (logs error, keeps first)
+  - `destroy()` also cleans up registered block kinds
 
 ---
 

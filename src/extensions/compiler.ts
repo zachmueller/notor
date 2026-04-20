@@ -68,6 +68,47 @@ export function compileAutomationFunction(strippedCode: string): CompiledExtensi
 }
 
 // ---------------------------------------------------------------------------
+// Block module compilation
+// ---------------------------------------------------------------------------
+
+/**
+ * Compile a block extension code fence into a module-like object by executing
+ * it with an `exports` object injected, then returning that object.
+ *
+ * Block code fences export named functions (e.g. `exports.render = ...` or
+ * `const render = ...; exports.render = render;`). The compiled async function
+ * receives `exports` as its only argument and is immediately invoked.
+ *
+ * @param rawCode - Raw TypeScript/JavaScript code from the extension code fence
+ * @returns The populated exports object on success, or a descriptive error string
+ */
+export function compileBlockModule(
+	rawCode: string,
+): { exports: Record<string, unknown> } | { error: string } {
+	let strippedCode: string;
+	try {
+		strippedCode = stripTypes(rawCode);
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		return { error: message };
+	}
+
+	try {
+		const fn = new AsyncFunction("exports", strippedCode);
+		const exports: Record<string, unknown> = {};
+		// Execute synchronously — block modules should not contain top-level await
+		const result = fn(exports) as Promise<unknown>;
+		// If the function returned a promise (due to async wrapper), swallow it;
+		// exports will have been populated synchronously before any awaits.
+		result.catch(() => { /* ignore top-level async errors in block module init */ });
+		return { exports };
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		return { error: `Compilation failed: ${message}` };
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Full compilation pipeline
 // ---------------------------------------------------------------------------
 

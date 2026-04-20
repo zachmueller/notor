@@ -14,7 +14,7 @@ import type { ToolPathParam } from "../tool-config/types";
 // ---------------------------------------------------------------------------
 
 /** Discriminator for extension type parsed from frontmatter `notor-type`. */
-export type ExtensionType = "tool" | "automation" | "settings";
+export type ExtensionType = "tool" | "automation" | "settings" | "block";
 
 // ---------------------------------------------------------------------------
 // Param schema
@@ -105,6 +105,8 @@ export interface UserToolDefinition {
 	compiledFn: CompiledExtensionFn | null;
 	/** True when this tool was loaded from a built-in scaffold (no vault file). */
 	isScaffold?: boolean;
+	/** Block kind declarations from the `blocks:` YAML section (optional). */
+	blocks?: BlockKindDeclaration[];
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +160,8 @@ export interface UserAutomationDefinition {
 	 * @see specs/ZZ-misc/model-presets-design.md — Section 12.1
 	 */
 	isScaffold?: boolean;
+	/** Block kind declarations from the `blocks:` YAML section (optional). */
+	blocks?: BlockKindDeclaration[];
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +174,60 @@ export interface SharedSettingsDefinition {
 	filePath: string;
 	/** Parsed settings schema from YAML fence `settings` block. */
 	settingsSchema: SettingsFieldSchema[];
+}
+
+// ---------------------------------------------------------------------------
+// Block kind declarations (attached to tools/automations or standalone)
+// ---------------------------------------------------------------------------
+
+/**
+ * A block kind declared in the `blocks:` YAML section of a tool or automation scaffold.
+ *
+ * The code fence of the parent extension must export the named render and
+ * (optionally) toLLMText functions.
+ */
+export interface BlockKindDeclaration {
+	/** Globally unique block kind identifier (e.g. `memory_recalled`). */
+	kind: string;
+	/** Human-readable display name (e.g. "Memories Recalled"). */
+	displayName: string;
+	/** Emoji or Lucide icon name. */
+	icon?: string;
+	/** Named export in the code fence that provides the render function. */
+	rendererExport: string;
+	/** Named export in the code fence that provides the toLLMText function (optional). */
+	toLLMTextExport?: string;
+	/** Whether to exclude this block from compaction input. Default false. */
+	excludeFromCompaction?: boolean;
+}
+
+/**
+ * Parsed representation of a `notor-type: block` standalone block-kind extension.
+ *
+ * Discovered from `{notor_dir}/blocks/`. Registers one block kind with
+ * `ChatBlockRegistry` independently of any tool or automation.
+ */
+export interface UserBlockDefinition {
+	/** Source vault-relative file path. */
+	filePath: string;
+	/** Globally unique block kind identifier from frontmatter `notor-block-kind`. */
+	kind: string;
+	/** Human-readable display name from frontmatter `notor-display-name`. */
+	displayName: string;
+	/** Emoji or Lucide icon name from frontmatter `notor-icon`. */
+	icon?: string;
+	/** Whether to exclude blocks of this kind from compaction. From `notor-exclude-from-compaction`. */
+	excludeFromCompaction?: boolean;
+	/** Named export in the code fence that provides the render function. */
+	rendererExport: string;
+	/** Named export in the code fence that provides the toLLMText function (optional). */
+	toLLMTextExport?: string;
+	/** Raw TypeScript/JavaScript code from code fence. */
+	rawCode: string;
+	/** Compiled async function (null until compilation succeeds). */
+	compiledFn: CompiledExtensionFn | null;
+	/** True when this block was loaded from a built-in scaffold. */
+	isScaffold?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +248,8 @@ export interface ExtensionReloadResult {
 	toolCount: number;
 	/** Number of user automations successfully compiled. */
 	automationCount: number;
+	/** Number of block kinds compiled and registered with ChatBlockRegistry. */
+	blockCount: number;
 	/** Names of built-in tools that were overridden by user tools. */
 	builtinOverrides: string[];
 	/** Errors encountered during discovery, parsing, or compilation. */

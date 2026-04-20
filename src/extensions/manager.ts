@@ -11,22 +11,25 @@ import type { Tool, ToolExecuteOptions, JSONSchema } from "../tools/tool";
 import type { ToolResult } from "../types";
 import type {
 	AutomationTrigger,
+	BlockKindDeclaration,
 	CompiledExtensionFn,
 	ExtensionError,
 	ExtensionReloadResult,
 	SharedSettingsDefinition,
 	UserAutomationDefinition,
+	UserBlockDefinition,
 	UserToolDefinition,
 } from "./types";
 import { discoverExtensions } from "./discovery";
 import { parseExtensionFile } from "./parser";
-import { compileExtension } from "./compiler";
+import { compileExtension, compileBlockModule } from "./compiler";
 import { paramSchemaToJsonSchema } from "./param-schema";
 import { resolveSettings, resolveSharedSettings } from "./settings-schema";
 import { buildUtils, buildLibs, buildObsidianExports } from "./runtime-context";
 import type { ExtensionUtils, ExtensionLibs, ExtensionObsidianExports } from "./runtime-context";
 import { TOOL_PATH_PARAMS } from "../tool-config/path-enforcer";
 import { BUILTIN_TOOL_SCAFFOLDS, BUILTIN_SHARED_SETTINGS_SCHEMA } from "./builtin-tool-scaffolds";
+import type { ChatBlockDefinition } from "../ui/chat-blocks/registry";
 import { BUILTIN_AUTOMATION_SCAFFOLDS } from "./builtin-automation-scaffolds";
 import { logger } from "../utils/logger";
 
@@ -174,6 +177,9 @@ export class ExtensionManager {
 	/** Compiled user automations keyed by file path. */
 	private automations = new Map<string, UserAutomationDefinition>();
 
+	/** Compiled standalone block extensions keyed by kind. */
+	private blocks = new Map<string, UserBlockDefinition>();
+
 	/** Shared settings definition from `notor/settings.md`. */
 	private sharedSettings: SharedSettingsDefinition | null = null;
 
@@ -185,6 +191,9 @@ export class ExtensionManager {
 
 	/** Tool names registered by this manager (for cleanup on reload). */
 	private registeredToolNames = new Set<string>();
+
+	/** Block kinds registered with ChatBlockRegistry by this manager (for cleanup on reload). */
+	private registeredBlockKinds = new Set<string>();
 
 	constructor(
 		private readonly plugin: NotorPlugin,
@@ -317,6 +326,56 @@ export class ExtensionManager {
 			compiledAutomations.set(automation.filePath, automation);
 		}
 
+		// 3b. Unregister previous block kinds
+		const chatBlockRegistry = this.plugin.getChatBlockRegistry();
+		for (const kind of this.registeredBlockKinds) {
+			chatBlockRegistry.unregister(kind);
+		}
+		this.registeredBlockKinds.clear();
+
+		// 3c. Compile and register standalone block extensions (notor-type: block)
+		const compiledBlocks = new Map<string, UserBlockDefinition>();
+		for (const block of discovered.blocks) {
+			const result = compileBlockModule(block.rawCode);
+			if ("error" in result) {
+				const msg = `Block extension '${block.kind}' failed to compile: ${result.error}`;
+				new Notice(msg);
+				log.error(msg, { file: block.filePath });
+				errors.push({ filePath: block.filePath, message: result.error });
+				continue;
+			}
+			const moduleExports = result.exports;
+			const renderFn = moduleExports[block.rendererExport];
+			if (typeof renderFn !== "function") {
+				const msg = `Block extension '${block.kind}': export '${block.rendererExport}' is not a function`;
+				new Notice(msg);
+				log.error(msg, { file: block.filePath });
+				errors.push({ filePath: block.filePath, message: msg });
+				continue;
+			}
+			const def: ChatBlockDefinition = {
+				kind: block.kind,
+				displayName: block.displayName,
+				icon: block.icon,
+				excludeFromCompaction: block.excludeFromCompaction,
+				render: renderFn as ChatBlockDefinition["render"],
+			};
+			if (block.toLLMTextExport) {
+				const toLLMFn = moduleExports[block.toLLMTextExport];
+				if (typeof toLLMFn === "function") {
+					def.toLLMText = toLLMFn as ChatBlockDefinition["toLLMText"];
+				} else {
+					log.warn(`Block extension '${block.kind}': toLLMTextExport '${block.toLLMTextExport}' is not a function — ignoring`, { file: block.filePath });
+				}
+			}
+			chatBlockRegistry.register(def);
+			this.registeredBlockKinds.add(block.kind);
+			compiledBlocks.set(block.kind, block);
+		}
+
+		// 3d. Register block kinds declared in tools/automations (blocks: YAML section)
+		this.registerInlineBlockKinds(compiledTools, compiledAutomations, chatBlockRegistry, errors);
+
 		// 4. Shared settings — vault file wins; fall back to built-in scaffold (D-8)
 		if (discovered.sharedSettings) {
 			this.sharedSettings = discovered.sharedSettings;
@@ -376,20 +435,98 @@ export class ExtensionManager {
 		// 8. Update internal maps
 		this.tools = compiledTools;
 		this.automations = compiledAutomations;
+		this.blocks = compiledBlocks;
 
 		// 9. Report
 		const toolCount = compiledTools.size;
 		const automationCount = compiledAutomations.size;
+		const blockCount = this.registeredBlockKinds.size;
 
 		if (builtinOverrides.length > 0) {
 			new Notice(`User extensions override built-ins: ${builtinOverrides.join(", ")}`);
 		}
 
-		const summary = `Extensions reloaded: ${toolCount} tool${toolCount !== 1 ? "s" : ""}, ${automationCount} automation${automationCount !== 1 ? "s" : ""}` +
+		const summary = `Extensions reloaded: ${toolCount} tool${toolCount !== 1 ? "s" : ""}, ${automationCount} automation${automationCount !== 1 ? "s" : ""}, ${blockCount} block kind${blockCount !== 1 ? "s" : ""}` +
 			(errors.length > 0 ? ` (${errors.length} error${errors.length !== 1 ? "s" : ""})` : "");
 		log.info(summary);
 
-		return { toolCount, automationCount, builtinOverrides, errors };
+		return { toolCount, automationCount, blockCount, builtinOverrides, errors };
+	}
+
+	// -----------------------------------------------------------------------
+	// Block kind helpers
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Register block kinds declared inline in tool/automation `blocks:` YAML sections.
+	 *
+	 * Called during reload after tools and automations are compiled. For each
+	 * compiled extension with a `blocks:` declaration, extract the named render
+	 * and toLLMText exports from its compiled module and register them with
+	 * `ChatBlockRegistry`.
+	 */
+	private registerInlineBlockKinds(
+		compiledTools: Map<string, UserToolDefinition>,
+		compiledAutomations: Map<string, UserAutomationDefinition>,
+		registry: import("../ui/chat-blocks/registry").ChatBlockRegistry,
+		errors: ExtensionError[],
+	): void {
+		const sources: Array<{ filePath: string; rawCode: string; blocks: BlockKindDeclaration[] }> = [];
+
+		for (const tool of compiledTools.values()) {
+			if (tool.blocks && tool.blocks.length > 0) {
+				sources.push({ filePath: tool.filePath, rawCode: tool.rawCode, blocks: tool.blocks });
+			}
+		}
+		for (const automation of compiledAutomations.values()) {
+			if (automation.blocks && automation.blocks.length > 0) {
+				sources.push({ filePath: automation.filePath, rawCode: automation.rawCode, blocks: automation.blocks });
+			}
+		}
+
+		for (const source of sources) {
+			const result = compileBlockModule(source.rawCode);
+			if ("error" in result) {
+				const msg = `Failed to compile block module from '${source.filePath}': ${result.error}`;
+				log.error(msg, { file: source.filePath });
+				errors.push({ filePath: source.filePath, message: msg });
+				continue;
+			}
+			const moduleExports = result.exports;
+
+			for (const decl of source.blocks) {
+				if (registry.has(decl.kind)) {
+					// Already registered (e.g., from a standalone block extension)
+					log.warn(`Block kind '${decl.kind}' already registered — skipping duplicate from '${source.filePath}'`);
+					continue;
+				}
+				const renderFn = moduleExports[decl.rendererExport];
+				if (typeof renderFn !== "function") {
+					const msg = `Block kind '${decl.kind}': export '${decl.rendererExport}' is not a function in '${source.filePath}'`;
+					new Notice(msg);
+					log.error(msg, { file: source.filePath });
+					errors.push({ filePath: source.filePath, message: msg });
+					continue;
+				}
+				const def: ChatBlockDefinition = {
+					kind: decl.kind,
+					displayName: decl.displayName,
+					icon: decl.icon,
+					excludeFromCompaction: decl.excludeFromCompaction,
+					render: renderFn as ChatBlockDefinition["render"],
+				};
+				if (decl.toLLMTextExport) {
+					const toLLMFn = moduleExports[decl.toLLMTextExport];
+					if (typeof toLLMFn === "function") {
+						def.toLLMText = toLLMFn as ChatBlockDefinition["toLLMText"];
+					} else {
+						log.warn(`Block kind '${decl.kind}': toLLMTextExport '${decl.toLLMTextExport}' is not a function — ignoring`, { file: source.filePath });
+					}
+				}
+				registry.register(def);
+				this.registeredBlockKinds.add(decl.kind);
+			}
+		}
 	}
 
 	// -----------------------------------------------------------------------
@@ -737,7 +874,7 @@ export class ExtensionManager {
 	// Cleanup
 	// -----------------------------------------------------------------------
 
-	/** Destroy and clean up all registered user tools. */
+	/** Destroy and clean up all registered user tools and block kinds. */
 	destroy(): void {
 		const registry = this.plugin.getToolRegistry();
 		for (const name of this.registeredToolNames) {
@@ -745,8 +882,16 @@ export class ExtensionManager {
 			delete TOOL_PATH_PARAMS[name];
 		}
 		this.registeredToolNames.clear();
+
+		const chatBlockRegistry = this.plugin.getChatBlockRegistry();
+		for (const kind of this.registeredBlockKinds) {
+			chatBlockRegistry.unregister(kind);
+		}
+		this.registeredBlockKinds.clear();
+
 		this.tools.clear();
 		this.automations.clear();
+		this.blocks.clear();
 		this.sharedSettings = null;
 		this.cachedLibsInstance = null;
 		this.cachedObsidianInstance = null;

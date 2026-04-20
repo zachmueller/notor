@@ -7,11 +7,13 @@
 
 import type {
 	AutomationTrigger,
+	BlockKindDeclaration,
 	ExtensionError,
 	ParamSchema,
 	SettingsFieldSchema,
 	SharedSettingsDefinition,
 	UserAutomationDefinition,
+	UserBlockDefinition,
 	UserToolDefinition,
 } from "./types";
 import { parseSettingsSchema } from "./settings-schema";
@@ -74,6 +76,7 @@ export function extractCodeFence(content: string): { code: string; lang: string 
 export type ParseResult =
 	| UserToolDefinition
 	| UserAutomationDefinition
+	| UserBlockDefinition
 	| SharedSettingsDefinition
 	| ExtensionError;
 
@@ -97,8 +100,8 @@ export function parseExtensionFile(
 	if (!notorType) {
 		return { filePath, message: "Missing required frontmatter field 'notor-type'" };
 	}
-	if (notorType !== "tool" && notorType !== "automation" && notorType !== "settings") {
-		return { filePath, message: `Invalid 'notor-type': '${String(notorType)}'. Must be 'tool', 'automation', or 'settings'` };
+	if (notorType !== "tool" && notorType !== "automation" && notorType !== "settings" && notorType !== "block") {
+		return { filePath, message: `Invalid 'notor-type': '${String(notorType)}'. Must be 'tool', 'automation', 'settings', or 'block'` };
 	}
 
 	// -- Extract YAML fence --
@@ -126,6 +129,8 @@ export function parseExtensionFile(
 			return parseAutomationFile(frontmatter, yamlFenceData, codeFence, filePath);
 		case "settings":
 			return parseSettingsFile(yamlFenceData, filePath);
+		case "block":
+			return parseBlockFile(frontmatter, codeFence, filePath);
 	}
 }
 
@@ -181,6 +186,10 @@ function parseToolFile(
 		settingsSchema = result.schemas;
 	}
 
+	// Parse blocks from YAML fence (optional)
+	const blocks = parseBlockKindDeclarations(yamlFenceData, filePath);
+	if (typeof blocks === "object" && "message" in blocks) return blocks;
+
 	return {
 		filePath,
 		name,
@@ -189,6 +198,7 @@ function parseToolFile(
 		params,
 		pathParams,
 		settingsSchema,
+		blocks: blocks.length > 0 ? blocks : undefined,
 		rawCode: codeFence.code,
 		compiledFn: null,
 	};
@@ -250,6 +260,10 @@ function parseAutomationFile(
 		settingsSchema = result.schemas;
 	}
 
+	// Parse blocks from YAML fence (optional)
+	const blocks = parseBlockKindDeclarations(yamlFenceData, filePath);
+	if (typeof blocks === "object" && "message" in blocks) return blocks;
+
 	return {
 		filePath,
 		displayName,
@@ -258,9 +272,111 @@ function parseAutomationFile(
 		toolFilter,
 		order,
 		settingsSchema,
+		blocks: blocks.length > 0 ? blocks : undefined,
 		rawCode: codeFence.code,
 		compiledFn: null,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Block parsing
+// ---------------------------------------------------------------------------
+
+function parseBlockFile(
+	frontmatter: Record<string, unknown>,
+	codeFence: { code: string; lang: string } | null,
+	filePath: string,
+): UserBlockDefinition | ExtensionError {
+	const kind = frontmatter["notor-block-kind"];
+	if (!kind || typeof kind !== "string") {
+		return { filePath, message: "Missing or invalid required frontmatter field 'notor-block-kind' (must be a string)" };
+	}
+
+	const displayName = frontmatter["notor-display-name"];
+	if (!displayName || typeof displayName !== "string") {
+		return { filePath, message: "Missing or invalid required frontmatter field 'notor-display-name' (must be a string)" };
+	}
+
+	const icon = typeof frontmatter["notor-icon"] === "string" ? frontmatter["notor-icon"] : undefined;
+	const excludeFromCompaction = frontmatter["notor-exclude-from-compaction"] === true ? true : undefined;
+
+	const rendererExport = frontmatter["notor-renderer-export"];
+	if (!rendererExport || typeof rendererExport !== "string") {
+		return { filePath, message: "Missing or invalid required frontmatter field 'notor-renderer-export' (must be a string naming the render function export)" };
+	}
+
+	const toLLMTextExport = typeof frontmatter["notor-to-llm-text-export"] === "string"
+		? frontmatter["notor-to-llm-text-export"]
+		: undefined;
+
+	// Code fence is required for block extensions
+	if (!codeFence) {
+		return { filePath, message: "Missing required code fence (```ts, ```typescript, ```js, or ```javascript)" };
+	}
+
+	return {
+		filePath,
+		kind,
+		displayName,
+		icon,
+		excludeFromCompaction,
+		rendererExport,
+		toLLMTextExport,
+		rawCode: codeFence.code,
+		compiledFn: null,
+	};
+}
+
+/**
+ * Parse `blocks:` section from YAML fence data (for tools and automations).
+ *
+ * Returns an array of BlockKindDeclaration, or an ExtensionError if a
+ * declaration is malformed. Returns an empty array if no `blocks:` section.
+ */
+function parseBlockKindDeclarations(
+	yamlFenceData: Record<string, unknown> | null,
+	filePath: string,
+): BlockKindDeclaration[] | ExtensionError {
+	const rawBlocks = yamlFenceData?.blocks;
+	if (!rawBlocks) return [];
+	if (!Array.isArray(rawBlocks)) {
+		return { filePath, message: "'blocks' in YAML fence must be an array" };
+	}
+
+	const declarations: BlockKindDeclaration[] = [];
+	for (let i = 0; i < rawBlocks.length; i++) {
+		const entry = rawBlocks[i] as Record<string, unknown>;
+		if (!entry || typeof entry !== "object") {
+			return { filePath, message: `'blocks[${i}]' must be an object` };
+		}
+
+		const kind = entry["kind"];
+		if (!kind || typeof kind !== "string") {
+			return { filePath, message: `'blocks[${i}].kind' must be a non-empty string` };
+		}
+
+		const displayName = entry["display_name"] ?? entry["displayName"];
+		if (!displayName || typeof displayName !== "string") {
+			return { filePath, message: `'blocks[${i}].display_name' must be a non-empty string` };
+		}
+
+		const rendererExport = entry["renderer_export"] ?? entry["rendererExport"];
+		if (!rendererExport || typeof rendererExport !== "string") {
+			return { filePath, message: `'blocks[${i}].renderer_export' must be a non-empty string` };
+		}
+
+		const icon = typeof entry["icon"] === "string" ? entry["icon"] : undefined;
+		const toLLMTextExport = typeof (entry["to_llm_text_export"] ?? entry["toLLMTextExport"]) === "string"
+			? String(entry["to_llm_text_export"] ?? entry["toLLMTextExport"])
+			: undefined;
+		const excludeFromCompaction = entry["exclude_from_compaction"] === true
+			? true
+			: undefined;
+
+		declarations.push({ kind, displayName, icon, rendererExport, toLLMTextExport, excludeFromCompaction });
+	}
+
+	return declarations;
 }
 
 // ---------------------------------------------------------------------------

@@ -651,7 +651,8 @@ export default class NotorPlugin extends Plugin {
 				this.getExtensionManager().reload(false).then((result) => {
 					const summary =
 						`Extensions reloaded: ${result.toolCount} tool${result.toolCount !== 1 ? "s" : ""}, ` +
-						`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}` +
+						`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}, ` +
+						`${result.blockCount} block kind${result.blockCount !== 1 ? "s" : ""}` +
 						(result.errors.length > 0 ? ` (${result.errors.length} error${result.errors.length !== 1 ? "s" : ""})` : "");
 					new Notice(summary);
 				}).catch((e) => {
@@ -2399,7 +2400,8 @@ export default class NotorPlugin extends Plugin {
 					this.getExtensionManager().reload(false).then((result) => {
 						const summary =
 							`Extensions reloaded: ${result.toolCount} tool${result.toolCount !== 1 ? "s" : ""}, ` +
-							`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}` +
+							`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}, ` +
+							`${result.blockCount} block kind${result.blockCount !== 1 ? "s" : ""}` +
 							(result.errors.length > 0 ? ` (${result.errors.length} error${result.errors.length !== 1 ? "s" : ""})` : "");
 						new Notice(summary);
 

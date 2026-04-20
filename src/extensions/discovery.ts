@@ -14,6 +14,7 @@ import type {
 	ExtensionError,
 	SharedSettingsDefinition,
 	UserAutomationDefinition,
+	UserBlockDefinition,
 	UserToolDefinition,
 } from "./types";
 import { parseExtensionFile, type ParseResult } from "./parser";
@@ -41,6 +42,7 @@ function isFile(file: TAbstractFile): file is TFile {
 export interface DiscoveryResult {
 	tools: UserToolDefinition[];
 	automations: UserAutomationDefinition[];
+	blocks: UserBlockDefinition[];
 	sharedSettings: SharedSettingsDefinition | null;
 	errors: ExtensionError[];
 }
@@ -66,6 +68,7 @@ export async function discoverExtensions(
 	const baseDir = notorDir.replace(/\/$/, "");
 	const tools: UserToolDefinition[] = [];
 	const automations: UserAutomationDefinition[] = [];
+	const blocks: UserBlockDefinition[] = [];
 	const errors: ExtensionError[] = [];
 	let sharedSettings: SharedSettingsDefinition | null = null;
 
@@ -104,6 +107,23 @@ export async function discoverExtensions(
 		}
 	}
 
+	// -- Scan blocks directory --
+	const blocksDir = `${baseDir}/blocks`;
+	const blockFiles = collectMarkdownFiles(vault, blocksDir);
+	for (const file of blockFiles) {
+		const result = await parseOneExtensionFile(vault, metadataCache, file, parseYAML);
+		if ("message" in result) {
+			log.warn("Extension parse error, skipping file", { file: file.path, error: result.message });
+			errors.push(result);
+		} else if ("kind" in result && "rendererExport" in result) {
+			// UserBlockDefinition
+			blocks.push(result as UserBlockDefinition);
+		} else {
+			log.warn("File in blocks/ directory is not a block extension, skipping", { file: file.path });
+			errors.push({ filePath: file.path, message: "File in blocks/ directory has notor-type other than 'block'" });
+		}
+	}
+
 	// -- Check for shared settings file --
 	const settingsPath = `${baseDir}/settings.md`;
 	const settingsFile = vault.getAbstractFileByPath(settingsPath);
@@ -134,11 +154,12 @@ export async function discoverExtensions(
 		extensionsDir: baseDir,
 		tools: tools.length,
 		automations: automations.length,
+		blocks: blocks.length,
 		hasSharedSettings: sharedSettings !== null,
 		errors: errors.length,
 	});
 
-	return { tools, automations, sharedSettings, errors };
+	return { tools, automations, blocks, sharedSettings, errors };
 }
 
 // ---------------------------------------------------------------------------
