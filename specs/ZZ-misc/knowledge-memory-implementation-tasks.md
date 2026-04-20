@@ -44,7 +44,7 @@ Extends the sub-agent system to support `preferred_preset` and `iteration_cap` f
 - [ ] **0.5 — Add preset resolution to `runSubAgent` extension API**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (provider/model resolution at lines 496-514):
   - Same pattern as 0.4: check `profile.preferred_preset` first, resolve via `resolvePreset()`, fall back to `preferred_provider`/`preferred_model`
-  - At line 590: use four-level fallback chain: `opts.iterationCap ?? profile.iteration_cap ?? plugin.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP` (note: `runSubAgent` is a closure over `plugin`, not a class method — use `plugin.settings` not `this.settings`)
+  - At line 590: fix the iteration cap fallback chain. **Current code is `opts.iterationCap ?? SUB_AGENT_ITERATION_CAP` (2 levels) — this is a pre-existing bug** that skips the user's global `sub_agent_iteration_cap` setting (which the internal `UseSubagentTool` at `use-subagent.ts:346` does respect). Fix to the full four-level chain: `opts.iterationCap ?? profile.iteration_cap ?? plugin.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP` (note: `runSubAgent` is a closure over `plugin`, not a class method — use `plugin.settings` not `this.settings`)
 
 - [ ] **0.6 — Unit tests for sub-agent preset resolution**
   - Existing sub-agent profiles (`search-vault`, `search-web`, `notor-help`) continue to work unchanged (null preset, null iteration_cap)
@@ -52,7 +52,8 @@ Extends the sub-agent system to support `preferred_preset` and `iteration_cap` f
   - Profile with `notor-preferred-preset: nonexistent` falls through to `preferred_provider`/`preferred_model`
   - Profile with both `preferred_preset` and `preferred_provider`/`preferred_model` — preset takes precedence
   - Profile with `notor-iteration-cap: 6` — sub-agent runner receives cap of 6
-  - Profile with no iteration cap — falls back to global default (20)
+  - Profile with no iteration cap — falls back to global `sub_agent_iteration_cap` setting, then to `SUB_AGENT_ITERATION_CAP` constant (default 20)
+  - **`runSubAgent` extension API** (`runtime-context.ts`): verify the full four-level fallback chain (`opts.iterationCap ?? profile.iteration_cap ?? plugin.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP`). Pre-existing bug: the current code at line 590 skips `plugin.settings.sub_agent_iteration_cap` — this task fixes it.
 
 ---
 
@@ -141,8 +142,9 @@ Wire the library into the extension runtime so scaffolds can call `utils.memory.
 - [ ] **2.4 — Add `chatHistory.loadFull()` to `ExtensionUtils`**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (chatHistory property at ~lines 178-182):
   - Add `loadFull: (conversationId: string) => Promise<Message[] | null>` — returns raw `Message[]` (all roles, all fields including `is_hook_injection`, `ContentBlock[]` content preserved)
+  - **Context:** The existing `chatHistory.loadConversation()` returns `ChatHistoryConversation` — a simplified format that filters to user/assistant roles only and calls `getTextContent()`, stripping `ContentBlock[]` to plain strings and excluding extension_block/tool_call/tool_result messages. Memory automations need the raw `Message[]` format to extract full conversation context including tool use and multi-part content.
   - When conversation has an active session (matching `conversationId`): reads from the live `ConversationManager.getMessages()` instead of persisted JSONL
-  - Falls back to `HistoryManager.loadConversation()` for inactive conversations
+  - Falls back to `HistoryManager.loadConversation()` for inactive conversations (note: `HistoryManager.loadConversation(filename)` takes a JSONL **filename**, not a conversation ID — must resolve ID → filename via `listConversations()` first, same pattern as `addMessageToConversation()` at [`history.ts:222-249`](../../src/chat/history.ts#L222-L249))
   - Returns `null` if conversation not found
   - Requires reference to both active `ConversationManager` and `HistoryManager` in `buildUtils()` closure
 
@@ -166,7 +168,7 @@ Moved from Phase 8 (was Task 8.4). Must be in place before Phases 3-6 register m
     - **(iii)** Propagate `featureGroup` in the **tool** scaffold injection frontmatter dict at [`manager.ts:235-240`](../../src/extensions/manager.ts#L235-L240) — add `"notor-feature-group": scaffold.featureGroup` (conditional on presence). Requires adding `featureGroup?: string` to the `BuiltinToolScaffold` interface in [`builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts)
     - **(iv)** Propagate `featureGroup` in the **automation** scaffold injection frontmatter dict at [`manager.ts:289-293`](../../src/extensions/manager.ts#L289-L293) — add `"notor-feature-group": scaffold.featureGroup` (conditional on presence). Uses the `featureGroup` field added to `BuiltinAutomationScaffold` in Task 5.0
     - **(v)** Propagate `featureGroup` in the **new block** scaffold injection frontmatter dict (Task 6.4) — add `"notor-feature-group": scaffold.featureGroup` (conditional on presence). Uses the `featureGroup` field added to `BuiltinBlockScaffold` in Task 6.1
-    - **(vi)** Add feature-group filtering logic to `reload()` in [`manager.ts`](../../src/extensions/manager.ts) (~line 215): after tool discovery/injection (line ~257) filter `discovered.tools`, after automation discovery/injection (line ~314) filter `discovered.automations`, after block discovery/injection (before block compilation at line ~340) filter `discovered.blocks` — each excluding entries whose `featureGroup` maps to a disabled toggle
+    - **(vi)** Add feature-group filtering logic to `reload()` in [`manager.ts`](../../src/extensions/manager.ts) (~line 215): after tool discovery/injection (line ~257) filter `discovered.tools`, after automation discovery/injection (line ~314) filter `discovered.automations`, after block scaffold injection (before block cleanup at line 332) filter `discovered.blocks` — each excluding entries whose `featureGroup` maps to a disabled toggle
 
 ---
 
@@ -340,12 +342,13 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 - [ ] **6.4 — Integrate `BUILTIN_BLOCK_SCAFFOLDS` into `ExtensionManager`** (absorbs former task 9.1)
   - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `reload()` (~line 215):
-  - Add a built-in block scaffold injection loop **between** the automation compilation (line ~314) and the block cleanup/compilation (line ~332). Follow the same pattern as the tool scaffold loop (lines 230-257) and automation scaffold loop (lines 281-314):
+  - Add a built-in block scaffold injection loop **between** the end of automation compilation (line 330) and the block cleanup step `// 3b. Unregister previous block kinds` (line 332). Follow the same pattern as the tool scaffold loop (lines 230-257) and automation scaffold loop (lines 281-314):
     - Iterate `BUILTIN_BLOCK_SCAFFOLDS`
-    - Skip if a vault block file with the same `kind` was already discovered in `discovered.blocks`
+    - **Collision detection by `kind`** (not by name or file path): skip if `discovered.blocks.some(b => b.kind === scaffold.kind)`. Blocks are keyed by `kind` since that's their primary identity, unlike tools (keyed by `name`) or automations (keyed by vault `filePath`).
     - Construct frontmatter from scaffold metadata (`notor-type: block`, `notor-block-kind`, `notor-display-name`, `notor-icon`, `notor-exclude-from-compaction`, `notor-feature-group`)
     - Resolve template variables in scaffold content
     - Parse via `parseExtensionFile`, mark `isScaffold: true`, push to `discovered.blocks`
+  - Injected scaffolds will be compiled by the existing block compilation loop at lines 339-377 (`// 3c. Compile and register standalone block extensions`)
   - User vault overrides take precedence (same mechanism: check if user file exists before injecting built-in)
 
 ---

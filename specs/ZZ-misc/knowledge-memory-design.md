@@ -182,7 +182,9 @@ memory: {
 
 **New methods to add to `ExtensionUtils`:**
 - `readNote: (path: string) => Promise<string>` — thin wrapper around `resolveNote` + `vault.read`.
-- `chatHistory.loadFull(conversationId)` — returns raw `Message[]` from the live `ConversationManager` when an active session exists, falls back to persisted JSONL. (Not part of the Extension Chat Blocks prerequisite — introduced by this spec.)
+- `chatHistory.loadFull(conversationId)` — returns raw `Message[]` (all roles, all fields including `is_hook_injection`, `ContentBlock[]` content preserved). When conversation has an active session (matching `conversationId`): reads from the live `ConversationManager.getMessages()` instead of persisted JSONL. Falls back to `HistoryManager.loadConversation()` for inactive conversations. Returns `null` if conversation not found. (Not part of the Extension Chat Blocks prerequisite — introduced by this spec.)
+
+**Note:** The existing `chatHistory.loadConversation()` (from Chat Blocks) returns `ChatHistoryConversation` — a simplified format that filters to user/assistant roles only and calls `getTextContent()` (strips `ContentBlock[]` to plain strings, excludes extension blocks and tool messages). Memory automations need the raw `Message[]` format to extract full conversation context including tool use and multi-part content. `loadFull()` is a public extension on the `chatHistory` API, available to both built-in and user-authored extensions.
 
 **Files to create:**
 - `src/memory/note-format.ts` — `serializeNote`, `parseNote`, `slugifyTitle`, `computeFingerprint`, `assertMemoryPath`
