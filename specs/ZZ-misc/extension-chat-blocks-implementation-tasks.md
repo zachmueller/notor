@@ -9,7 +9,7 @@ Source planning doc: [extension-chat-blocks-plan.md](../../private/extension-cha
 
 Standalone bug fix + new method. Ships independently, unblocks everything else. The compaction re-append loops at [`compaction-manager.ts:106-112`](../../src/chat/compaction-manager.ts#L106-L112) and [`:205-211`](../../src/chat/compaction-manager.ts#L205-L211) currently list only `role`, `content`, `tool_call`, `tool_result` — silently dropping `is_hook_injection`, `is_workflow_message`, and (soon) `source_extension`, `exclude_from_compaction`.
 
-- [ ] **1.1 — Add `source_extension` + `exclude_from_compaction` + `transient` to `addMessage()` in `conversation.ts`**
+- [x] **1.1 — Add `source_extension` + `exclude_from_compaction` + `transient` to `addMessage()` in `conversation.ts`**
   - Current signature at [`conversation.ts:306-320`](../../src/chat/conversation.ts#L306-L320) lists fields explicitly in a params object
   - Add three new optional fields to the params type:
     - `source_extension?: string | null`
@@ -22,7 +22,7 @@ Standalone bug fix + new method. Ships independently, unblocks everything else. 
   - Do NOT widen the type to `Omit<Partial<Message>>` — keep the explicit params object for type safety and clarity about defaults
   - Verify all existing callers still compile (search for `addMessage(` across the codebase)
 
-- [ ] **1.2 — Fix compaction re-append loops to spread all message fields**
+- [x] **1.2 — Fix compaction re-append loops to spread all message fields**
   - [`compaction-manager.ts:106-113`](../../src/chat/compaction-manager.ts#L106-L113) and [`compaction-manager.ts:205-212`](../../src/chat/compaction-manager.ts#L205-L212) currently only spread `role`, `content`, `tool_call`, `tool_result`
   - Fields currently dropped: `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`, `source_extension`, `exclude_from_compaction`, `input_tokens`, `output_tokens`, `cost_estimate`
   - Dropping `input_tokens`/`output_tokens`/`cost_estimate` is intentional (avoids inflating totals on re-append). Dropping the rest is a bug.
@@ -46,7 +46,7 @@ Standalone bug fix + new method. Ships independently, unblocks everything else. 
     ```
   - This preserves `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`, `source_extension`, `exclude_from_compaction`
 
-- [ ] **1.3 — Add `updateMessage()` method to `ConversationManager`**
+- [x] **1.3 — Add `updateMessage()` method to `ConversationManager`**
   - Signature: `updateMessage(messageId: string, patch: Partial<Pick<Message, 'content' | 'exclude_from_compaction'>>): Message | null`
   - **In-memory only — no JSONL persistence.** Used for transient state transitions (loading → real block). The final real block is persisted separately via `addMessage()` or `chatBlocks.emit()`.
   - Find message by `id` in `this.messages` array
@@ -55,7 +55,7 @@ Standalone bug fix + new method. Ships independently, unblocks everything else. 
   - Return updated message, or `null` if not found
   - Add `setOnMessageUpdated(callback)` setter following the pattern of `setOnMessageAdded` and `setOnConversationChanged`
 
-- [ ] **1.4 — Add `addMessageToConversation()` for non-active conversation emission**
+- [x] **1.4 — Add `addMessageToConversation()` for non-active conversation emission**
   - New method on `HistoryManager`: `addMessageToConversation(conversationId: string, params: AddMessageParams): Promise<Message | null>`
   - `HistoryManager` already has all required methods (`listConversations()`, `loadConversation(filename)`, `appendMessage()`). The ID-to-filename resolution pattern is already used in `runtime-context.ts:341-345`.
   - **Note:** `HistoryManager.loadConversation(filename)` takes a JSONL **filename** (`{timestamp}_{id}.jsonl`), not a conversation ID. Implementation must resolve ID → filename first:
@@ -69,7 +69,7 @@ Standalone bug fix + new method. Ships independently, unblocks everything else. 
   - Used by `chatBlocks.emit()` when targeting a non-active conversation (e.g., detached sub-agent `onComplete`)
   - **Note:** The active-vs-non-active check belongs in `chatBlocks.emit()` (Task 9.1), not here. This method always operates via JSONL persistence.
 
-- [ ] **1.5 — Verify no regressions**
+- [x] **1.5 — Verify no regressions**
   - Search all `addMessage(` call sites — confirm they still compile with the new type
   - Confirm compaction flow: trigger compaction → re-appended messages preserve `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`
 

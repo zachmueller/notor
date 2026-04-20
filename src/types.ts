@@ -158,6 +158,19 @@ export interface Message {
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-001
 	 */
 	is_workflow_message?: boolean;
+	/**
+	 * Extension name that produced this message (`role === "extension_block"` only).
+	 *
+	 * @see specs/ZZ-misc/extension-chat-blocks-design.md
+	 */
+	source_extension?: string | null;
+	/**
+	 * When true, this block is excluded from compaction summarizer input.
+	 * The message still survives compaction (re-appended between summary and pending).
+	 *
+	 * @see specs/ZZ-misc/extension-chat-blocks-design.md
+	 */
+	exclude_from_compaction?: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -39,6 +39,9 @@ export class ConversationManager {
 	/** Callback invoked when a message is added (for persistence, UI updates). */
 	private onMessageAdded?: (message: Message) => void | Promise<void>;
 
+	/** Callback invoked when a message is updated in-memory (for UI re-render, no JSONL write). */
+	private onMessageUpdated?: (message: Message) => void | Promise<void>;
+
 	/** Callback invoked when the conversation metadata changes. */
 	private onConversationChanged?: (conversation: Conversation) => void | Promise<void>;
 
@@ -56,6 +59,11 @@ export class ConversationManager {
 	/** Register a callback for when a message is added. */
 	setOnMessageAdded(callback: (message: Message) => void | Promise<void>): void {
 		this.onMessageAdded = callback;
+	}
+
+	/** Register a callback for when a message is updated in-memory (no JSONL write). */
+	setOnMessageUpdated(callback: (message: Message) => void | Promise<void>): void {
+		this.onMessageUpdated = callback;
 	}
 
 	/** Register a callback for when conversation metadata changes. */
@@ -317,6 +325,15 @@ export class ConversationManager {
 		is_hook_injection?: boolean;
 		/** Whether this is the opening workflow message (E-013). */
 		is_workflow_message?: boolean;
+		/** Extension name that produced this message (extension_block role only). */
+		source_extension?: string | null;
+		/** When true, block is excluded from compaction summarizer input. */
+		exclude_from_compaction?: boolean;
+		/**
+		 * When true, skip firing onMessageAdded — message is added to the in-memory
+		 * array but NOT persisted to JSONL. Used for transient loading placeholders.
+		 */
+		transient?: boolean;
 	}): Message {
 		if (!this.activeConversation) {
 			throw new Error("No active conversation. Create or load one first.");
@@ -339,6 +356,8 @@ export class ConversationManager {
 			hook_injections: params.hook_injections ?? null,
 			is_hook_injection: params.is_hook_injection,
 			is_workflow_message: params.is_workflow_message,
+			source_extension: params.source_extension ?? null,
+			exclude_from_compaction: params.exclude_from_compaction ?? false,
 		};
 
 		this.messages.push(message);
@@ -380,7 +399,9 @@ export class ConversationManager {
 			conversationId: this.activeConversation.id,
 		});
 
-		void this.onMessageAdded?.(message);
+		if (!params.transient) {
+			void this.onMessageAdded?.(message);
+		}
 		void this.onConversationChanged?.(this.activeConversation);
 
 		return message;
@@ -408,6 +429,25 @@ export class ConversationManager {
 	 */
 	getMessageById(id: string): Message | undefined {
 		return this.messages.find((m) => m.id === id);
+	}
+
+	/**
+	 * Update a message in-memory by ID.
+	 *
+	 * In-memory only — no JSONL persistence. Used for transient state transitions
+	 * (e.g. loading → real block). The caller is responsible for persisting the
+	 * final state via addMessage() or onMessageAdded if needed.
+	 *
+	 * Fires onMessageUpdated to trigger UI re-render. Returns the updated message,
+	 * or null if not found.
+	 */
+	updateMessage(messageId: string, patch: Partial<Pick<Message, 'content' | 'exclude_from_compaction'>>): Message | null {
+		const message = this.messages.find((m) => m.id === messageId);
+		if (!message) return null;
+
+		Object.assign(message, patch);
+		void this.onMessageUpdated?.(message);
+		return message;
 	}
 
 	/**

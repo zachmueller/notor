@@ -109,6 +109,13 @@ export class CompactionManager {
 						content: pending.content,
 						tool_call: pending.tool_call ?? undefined,
 						tool_result: pending.tool_result ?? undefined,
+						is_hook_injection: pending.is_hook_injection,
+						is_workflow_message: pending.is_workflow_message,
+						hook_injections: pending.hook_injections ?? undefined,
+						attachments: pending.attachments ?? undefined,
+						auto_context: pending.auto_context ?? undefined,
+						source_extension: pending.source_extension ?? undefined,
+						exclude_from_compaction: pending.exclude_from_compaction,
 					});
 				}
 
@@ -208,6 +215,13 @@ export class CompactionManager {
 						content: pending.content,
 						tool_call: pending.tool_call ?? undefined,
 						tool_result: pending.tool_result ?? undefined,
+						is_hook_injection: pending.is_hook_injection,
+						is_workflow_message: pending.is_workflow_message,
+						hook_injections: pending.hook_injections ?? undefined,
+						attachments: pending.attachments ?? undefined,
+						auto_context: pending.auto_context ?? undefined,
+						source_extension: pending.source_extension ?? undefined,
+						exclude_from_compaction: pending.exclude_from_compaction,
 					});
 				}
 

@@ -211,6 +211,44 @@ export class HistoryManager {
 	}
 
 	/**
+	 * Append a message to a conversation by ID, without requiring it to be active.
+	 *
+	 * Resolves the conversation ID to a JSONL filename via listConversations(),
+	 * loads the conversation header, then appends the message. Involves a directory
+	 * scan — acceptable for non-hot-path use (e.g. detached sub-agent onComplete).
+	 *
+	 * Returns the created Message, or null if the conversation doesn't exist.
+	 */
+	async addMessageToConversation(
+		conversationId: string,
+		params: {
+			role: Message["role"];
+			content: Message["content"];
+			source_extension?: string | null;
+			exclude_from_compaction?: boolean;
+		}
+	): Promise<Message | null> {
+		const entries = await this.listConversations();
+		const match = entries.find((e) => e.id === conversationId);
+		if (!match) return null;
+
+		const { conversation } = await this.loadConversation(match.filename);
+
+		const message: Message = {
+			id: crypto.randomUUID(),
+			conversation_id: conversationId,
+			role: params.role,
+			content: params.content,
+			timestamp: new Date().toISOString(),
+			source_extension: params.source_extension ?? null,
+			exclude_from_compaction: params.exclude_from_compaction ?? false,
+		};
+
+		await this.appendMessage(conversation, message);
+		return message;
+	}
+
+	/**
 	 * Update the conversation header in the JSONL file.
 	 *
 	 * Rewrites the first line with updated metadata (e.g., title, token counts).
