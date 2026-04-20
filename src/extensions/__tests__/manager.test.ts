@@ -16,7 +16,7 @@ vi.mock("../../utils/logger", () => ({
 	logger: () => mockLog,
 }));
 
-// Mock obsidian Notice
+// Mock obsidian Notice + normalizePath
 const mockNoticeInstances: Array<{ message: string }> = [];
 vi.mock("obsidian", () => ({
 	Notice: class {
@@ -24,6 +24,7 @@ vi.mock("obsidian", () => ({
 			mockNoticeInstances.push({ message });
 		}
 	},
+	normalizePath: (path: string) => path,
 }));
 
 // Mock TOOL_PATH_PARAMS — mutable object
@@ -46,8 +47,10 @@ vi.mock("../parser", () => ({
 
 // Mock compiler
 const mockCompileExtension = vi.fn();
+const mockCompileBlockModule = vi.fn().mockReturnValue({ exports: {} });
 vi.mock("../compiler", () => ({
 	compileExtension: (...args: unknown[]) => mockCompileExtension(...args),
+	compileBlockModule: (...args: unknown[]) => mockCompileBlockModule(...args),
 }));
 
 // Mock param-schema
@@ -126,6 +129,11 @@ function _createMockPlugin(overrides?: Record<string, unknown>) {
 		getToolDispatcher: () => ({
 			registerTool: vi.fn((tool: { name: string }) => { dispatcherTools.set(tool.name, tool); }),
 			unregisterTool: vi.fn((name: string) => { dispatcherTools.delete(name); }),
+		}),
+		getChatBlockRegistry: () => ({
+			register: vi.fn(),
+			unregister: vi.fn(),
+			has: vi.fn().mockReturnValue(false),
 		}),
 		_registeredTools: registeredTools,
 		_dispatcherTools: dispatcherTools,
@@ -208,6 +216,7 @@ describe("ExtensionManager.reload", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [tool],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -231,6 +240,7 @@ describe("ExtensionManager.reload", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [],
 			automations: [automation],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -251,6 +261,7 @@ describe("ExtensionManager.reload", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [badTool, goodTool],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -283,6 +294,7 @@ describe("ExtensionManager.reload", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [tool],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -302,6 +314,7 @@ describe("ExtensionManager.reload", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [tool1],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -319,6 +332,7 @@ describe("ExtensionManager.reload", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [tool2],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -338,6 +352,7 @@ describe("ExtensionManager.reload", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [tool],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -358,6 +373,7 @@ describe("ExtensionManager.reload", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [tool],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -377,6 +393,7 @@ describe("ExtensionManager.reload", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [tool],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -418,6 +435,7 @@ describe("Scaffold injection", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -440,6 +458,7 @@ describe("Scaffold injection", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -467,6 +486,7 @@ describe("Scaffold injection", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [vaultTool],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -494,6 +514,7 @@ describe("Scaffold injection", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -533,6 +554,7 @@ describe("Scaffold injection", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -601,6 +623,7 @@ describe("UserToolAdapter.execute", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [toolDef],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -693,6 +716,7 @@ describe("getAutomationsForTrigger", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [],
 			automations: [auto1, auto2],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -713,6 +737,7 @@ describe("getAutomationsForTrigger", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [],
 			automations: [auto],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -740,6 +765,7 @@ describe("getAutomationsForToolEvent", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [],
 			automations: [auto],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -762,6 +788,7 @@ describe("getAutomationsForToolEvent", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [],
 			automations: [auto],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -788,6 +815,7 @@ describe("automation ordering", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [],
 			automations: [auto1, auto2, auto3],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
@@ -816,6 +844,7 @@ describe("ExtensionManager.destroy", () => {
 		mockDiscoverExtensions.mockResolvedValue({
 			tools: [tool],
 			automations: [],
+			blocks: [],
 			sharedSettings: null,
 			errors: [],
 		});
