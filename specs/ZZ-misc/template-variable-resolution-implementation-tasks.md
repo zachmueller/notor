@@ -127,7 +127,7 @@ Insert `registry.resolve()` calls at each content-loading site identified in des
 
 ## Phase 4 — Unit Tests
 
-- [ ] **4.1 — Create `src/template-vars/registry.test.ts`**
+- [x] **4.1 — Create `src/template-vars/registry.test.ts`**
   - **Basic resolution:** `resolve("{notor_dir}/memory")` returns `"notor/memory"` when `notor_dir` resolver returns `"notor"`
   - **Multiple variables in one string:** `resolve("{notor_dir}/{vault_name}")` resolves both
   - **Unknown variables pass through:** `resolve("{unknown}/foo")` returns `"{unknown}/foo"` unchanged
@@ -139,17 +139,18 @@ Insert `registry.resolve()` calls at each content-loading site identified in des
   - **`list()`** returns registered variable names
   - **Registration:** registering the same name twice overwrites the previous resolver
 
-- [ ] **4.2 — Create `src/template-vars/builtin-vars.test.ts`**
+- [x] **4.2 — Create `src/template-vars/builtin-vars.test.ts`**
   - **`notor_dir` resolver:** strips trailing slash from settings value (`"notor/"` → `"notor"`)
   - **`notor_dir` resolver with no trailing slash:** passes through unchanged (`"notor"` → `"notor"`)
   - **`vault_name` resolver:** returns vault name from callback
   - **Live settings:** changing the settings object between `resolve()` calls produces updated values (not stale cached values)
   - **Both variables registered:** after `registerBuiltinVars()`, `registry.list()` contains both `"notor_dir"` and `"vault_name"`
 
-- [ ] **4.3 — Integration test: tool-config resolution**
+- [x] **4.3 — Integration test: tool-config resolution**
   - Scaffold content containing `allowed_paths: ["{notor_dir}/memory"]` in a `<notor_tool_config>` block
   - After `registry.resolve()` + `extractToolConfigs()`, the resulting `ParsedToolConfig` has `allowed_paths: ["notor/memory"]`
   - Verifies the end-to-end pipeline from design spec §2.5: template vars resolve before tool-config extraction, so the YAML parser sees concrete paths
+  - Implemented as E2E test: `e2e/scripts/template-var-resolution-test.ts` — also covers persona prompt resolution, vault_name resolution, unknown variable passthrough, and live settings propagation
 
 ---
 
