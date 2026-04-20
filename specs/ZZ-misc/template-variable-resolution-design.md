@@ -43,7 +43,7 @@ interface TemplateVariableRegistry {
 
 | Variable | Resolves to | Example |
 |----------|-------------|---------|
-| `{notor_dir}` | User's configured Notor directory, vault-relative | `Notor` |
+| `{notor_dir}` | User's configured Notor directory, vault-relative | `notor` |
 | `{vault_name}` | Obsidian vault name | `My Vault` |
 
 The registry is extensible — future variables can be added without changing the resolution infrastructure. Each variable's resolver is a synchronous function that reads from settings or the Obsidian app context.
@@ -76,7 +76,7 @@ At each point, the raw Markdown string is passed through `registry.resolve(conte
 
 The tool-config extraction in `src/sub-agents/discovery.ts` calls `extractToolConfigs()` on the scaffold body to parse `<notor_tool_config>` YAML blocks and produce `ParsedToolConfig[]` entries with concrete `allowed_paths` / `blocked_paths` arrays. These arrays flow into the path enforcer at dispatch time.
 
-Because template variable resolution runs *before* `extractToolConfigs()`, the YAML parser sees concrete paths (e.g., `allowed_paths: ["Notor/memory"]`) rather than raw placeholders. No changes to the tool-config parser or path enforcer are needed.
+Because template variable resolution runs *before* `extractToolConfigs()`, the YAML parser sees concrete paths (e.g., `allowed_paths: ["notor/memory"]`) rather than raw placeholders. No changes to the tool-config parser or path enforcer are needed.
 
 ### 2.6 Interaction with `<include_note>` Resolution
 
@@ -118,11 +118,11 @@ Some content types (`vault-rules.ts`, `system-prompt.ts`, `workflow-executor.ts`
 
 | Area | Test |
 |------|------|
-| Registry | Unit: `resolve("{notor_dir}/memory")` returns `"Notor/memory"` with default settings |
+| Registry | Unit: `resolve("{notor_dir}/memory")` returns `"notor/memory"` with default settings |
 | Registry | Unit: unknown variables pass through unchanged — `resolve("{unknown}/foo")` returns `"{unknown}/foo"` |
 | Registry | Unit: idempotency — `resolve(resolve(input))` === `resolve(input)` |
 | Registry | Unit: multiple variables in one string — `resolve("{notor_dir}/{vault_name}")` resolves both |
-| Tool-config integration | Unit: scaffold with `allowed_paths: ["{notor_dir}/memory"]` produces `ParsedToolConfig` with `allowed_paths: ["Notor/memory"]` after resolution + extraction |
+| Tool-config integration | Unit: scaffold with `allowed_paths: ["{notor_dir}/memory"]` produces `ParsedToolConfig` with `allowed_paths: ["notor/memory"]` after resolution + extraction |
 | Sub-agent profile | E2E: load a built-in sub-agent profile containing `{notor_dir}` in its system prompt; verify the assembled system prompt sent to the LLM contains the concrete path |
 | Persona | E2E: create a persona with `{notor_dir}` in its prompt content; verify the system prompt builder sees the resolved value |
 | Settings change | E2E: change `notor_dir` in settings; reload extensions; verify newly loaded scaffolds resolve to the updated path |
@@ -134,7 +134,7 @@ Some content types (`vault-rules.ts`, `system-prompt.ts`, `workflow-executor.ts`
 
 1. **Should `<include_note>` content be re-resolved?** Current answer: no — only the outer scaffold is resolved. This prevents action-at-a-distance where a general note changes behavior when included into a scaffold. If this proves too restrictive (e.g., a user wants a shared template fragment with variables), it can be revisited.
 
-2. **Should frontmatter values be resolved?** Current answer: yes — the resolution pass runs on the full raw Markdown before frontmatter is stripped, so frontmatter values containing template variables will be resolved. This is intentional: a future variable like `{notor_dir}` in a frontmatter field (e.g., a path setting) should work.
+2. **Should frontmatter values be resolved?** Current answer: yes — the resolution pass runs on the full raw Markdown before frontmatter is stripped, so frontmatter values containing template variables will be resolved. This is intentional: a future variable like `{notor_dir}` in a frontmatter field (e.g., a path setting) should work. **Caveat:** For user extension files, `parseOneExtensionFile` obtains frontmatter from Obsidian's metadata cache (not from the content string), so template variables in metadata-cache-sourced frontmatter values will not be resolved. This is acceptable because path-bearing values (`allowed_paths`, etc.) live in `<notor_tool_config>` blocks within the body content, which is resolved. Built-in scaffolds construct frontmatter programmatically and are unaffected.
 
 3. **Should we warn on unresolved variables?** Not initially. Since unknown variables pass through silently, a typo like `{noter_dir}` would silently produce a broken path. A future lint/validation pass could flag `{...}` patterns in `allowed_paths` that don't match any registered variable, but this is not needed for the initial implementation.
 

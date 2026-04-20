@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Date:** 2026-04-19
-**Prerequisites:** [Extension Chat Blocks](extension-chat-blocks-design.md), Template Variable Resolution in Scaffolds
+**Prerequisites:** [Extension Chat Blocks](extension-chat-blocks-design.md), Template Variable Resolution in Scaffolds, Sub-Agent Preset and Iteration Cap Resolution
 **Source:** [knowledge-memory-integration-plan.md](../../private/knowledge-memory-integration-plan.md) (detailed planning doc)
 
 ---
@@ -59,6 +59,18 @@ See [extension-chat-blocks-design.md](extension-chat-blocks-design.md). The memo
 ### Prerequisite 2: Template Variable Resolution in Scaffolds
 
 All four memory sub-agent profiles embed `{notor_dir}/memory/` in their system prompts and `<notor_tool_config>` blocks. A general-purpose template variable resolution pass must substitute `{notor_dir}` to the user's configured Notor directory (vault-relative) before these reach the LLM, tool-config parser, or path enforcer.
+
+### Prerequisite 3: Sub-Agent Preset and Iteration Cap Resolution
+
+Memory sub-agent profiles specify `notor-preferred-preset` (e.g., `tiny` for search/capture, `large` for Dream) and `notor-iteration-cap` (per-profile iteration limits) in their frontmatter. The sub-agent system currently supports only `preferred_provider` and `preferred_model` — it has no preset resolution and does not parse per-profile iteration caps.
+
+This prerequisite extends the sub-agent infrastructure to support both fields, mirroring the existing persona preset pattern (`src/personas/persona-manager.ts:289-324`):
+
+1. **`SubAgentProfile`** (`src/sub-agents/types.ts`): add `preferred_preset: string | null` and `iteration_cap: number | null` fields.
+2. **Discovery** (`src/sub-agents/discovery.ts`): parse `notor-preferred-preset` and `notor-iteration-cap` from frontmatter in both `parseProfile()` and `buildProfileFromBuiltin()`.
+3. **Execution** (`src/tools/use-subagent.ts`, `src/extensions/runtime-context.ts`): when `preferred_preset` is set, resolve it via `resolvePreset()` to obtain provider + model before the existing provider/model fallback chain. When `iteration_cap` is set, use it as the cap instead of the global default.
+
+Without this, all memory sub-agents would silently inherit the parent conversation's provider/model (defeating cost optimization) and the global iteration cap of 20 (wasting tokens on simple search tasks).
 
 ---
 
@@ -278,7 +290,7 @@ All per-pipeline knobs (model presets, iteration caps, cron, `note_max_chars`, `
 
 ### Feature Group Enablement
 
-Built-in memory scaffolds set `notor-feature-group: memory` in their frontmatter. The extension manager treats this as a group-enablement check gated on `memory_enabled`. When `memory_enabled` is false, all memory scaffolds are disabled.
+Built-in memory scaffolds set `notor-feature-group: memory` in their frontmatter. The extension manager will treat this as a group-enablement check gated on `memory_enabled` (new infrastructure — see implementation tasks Phase 2.5). When `memory_enabled` is false, all memory scaffolds are disabled.
 
 ### Auto-Approval Propagation
 
@@ -382,10 +394,11 @@ When `memory_enabled` flips on, validate that each memory scaffold's configured 
 
 ## 12. Relationship to Prerequisites
 
-This spec adds **zero new extension infrastructure**. All infrastructure lives in the two prerequisites:
+This spec adds **zero new extension infrastructure** beyond feature-group gating (§9). All other infrastructure lives in the three prerequisites:
 
 - **Extension Chat Blocks** — `custom_block`, `extension_block` role, `ChatBlockRegistry`, `notor-type: block`, `notor-blocking`, `chatBlocks.emit`, `runSubAgent`, `addMessage()` expansion, `updateMessage()`, consecutive-role coalescing.
 - **Template Variable Resolution** — `{notor_dir}` substitution in scaffolds before content reaches the LLM, tool-config parser, or path enforcer.
+- **Sub-Agent Preset and Iteration Cap Resolution** — `preferred_preset` and `iteration_cap` support in `SubAgentProfile`, discovery, and execution paths (mirroring the existing persona preset pattern).
 
 ---
 

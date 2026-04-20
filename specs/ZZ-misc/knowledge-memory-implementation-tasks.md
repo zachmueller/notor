@@ -3,7 +3,56 @@
 Companion to: [knowledge-memory-design.md](knowledge-memory-design.md)
 Source planning doc: [knowledge-memory-integration-plan.md](../../private/knowledge-memory-integration-plan.md)
 
-**Prerequisites:** All phases in [extension-chat-blocks-implementation-tasks.md](extension-chat-blocks-implementation-tasks.md) must be complete before starting Phase 1 below. Template Variable Resolution in Scaffolds must also be complete (separate spec).
+**Prerequisites:** All phases in [extension-chat-blocks-implementation-tasks.md](extension-chat-blocks-implementation-tasks.md) must be complete before starting Phase 1 below. Template Variable Resolution in Scaffolds must also be complete (separate spec). Sub-Agent Preset and Iteration Cap Resolution (Phase 0 below) must be complete before Phase 3.
+
+---
+
+## Phase 0 — Sub-Agent Preset and Iteration Cap Resolution (Prerequisite)
+
+Extends the sub-agent system to support `preferred_preset` and `iteration_cap` frontmatter fields. Mirrors the existing persona preset pattern. Must be complete before Phase 3 (memory sub-agent profiles depend on `notor-preferred-preset`).
+
+- [ ] **0.1 — Add `preferred_preset` and `iteration_cap` to `SubAgentProfile`**
+  - In [`src/sub-agents/types.ts`](../../src/sub-agents/types.ts) (interface at lines 23-42):
+  - Add `preferred_preset: string | null` — parsed from `notor-preferred-preset` frontmatter
+  - Add `iteration_cap: number | null` — parsed from `notor-iteration-cap` frontmatter
+  - Both default to `null` (existing profiles unaffected)
+
+- [ ] **0.2 — Parse `notor-preferred-preset` and `notor-iteration-cap` in `parseProfile()`**
+  - In [`src/sub-agents/discovery.ts`](../../src/sub-agents/discovery.ts) `parseProfile()` (lines 131-215):
+  - After existing `preferredModel` parsing (~line 179), add:
+    - `const preferredPreset = parseStringOrNull(frontmatter?.["notor-preferred-preset"]);`
+    - `const iterationCap = parseNumberOrNull(frontmatter?.["notor-iteration-cap"]);`
+  - Add both to the returned `SubAgentProfile` object (~line 204-214)
+  - Add `parseNumberOrNull` helper if not already present (parse frontmatter number fields, return `null` if missing/invalid)
+
+- [ ] **0.3 — Parse `notor-preferred-preset` and `notor-iteration-cap` in `buildProfileFromBuiltin()`**
+  - In [`src/sub-agents/discovery.ts`](../../src/sub-agents/discovery.ts) `buildProfileFromBuiltin()` (lines 227-261):
+  - After `extractFrontmatterField` calls for `notor-preferred-provider` and `notor-preferred-model` (~lines 256-257):
+    - `preferred_preset: extractFrontmatterField(systemPromptContent, "notor-preferred-preset"),`
+    - `iteration_cap: extractFrontmatterNumberField(systemPromptContent, "notor-iteration-cap"),`
+  - Add `extractFrontmatterNumberField` helper (regex-based extraction of numeric fields from raw frontmatter)
+
+- [ ] **0.4 — Add preset resolution to `use_subagent` tool**
+  - In [`src/tools/use-subagent.ts`](../../src/tools/use-subagent.ts) (provider/model resolution at lines 220-242):
+  - Before the existing `if (profile.preferred_provider)` block (~line 224):
+    - If `profile.preferred_preset` is set, call `resolvePreset(profile.preferred_preset, this.settings.model_presets)`
+    - If resolved: use the preset's provider and model, skipping the `preferred_provider`/`preferred_model` fallback
+    - If resolution fails (preset not found): log warning, fall through to existing provider/model logic
+  - Reference: persona preset resolution at [`persona-manager.ts:289-324`](../../src/personas/persona-manager.ts#L289-L324)
+  - At line 346: if `profile.iteration_cap` is set, use it instead of `this.settings.sub_agent_iteration_cap`
+
+- [ ] **0.5 — Add preset resolution to `runSubAgent` extension API**
+  - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (provider/model resolution at lines 496-514):
+  - Same pattern as 0.4: check `profile.preferred_preset` first, resolve via `resolvePreset()`, fall back to `preferred_provider`/`preferred_model`
+  - At line 590: if `profile.iteration_cap` is set, use `profile.iteration_cap` as fallback before `SUB_AGENT_ITERATION_CAP` (i.e., `opts.iterationCap ?? profile.iteration_cap ?? SUB_AGENT_ITERATION_CAP`)
+
+- [ ] **0.6 — Unit tests for sub-agent preset resolution**
+  - Existing sub-agent profiles (`search-vault`, `search-web`, `notor-help`) continue to work unchanged (null preset, null iteration_cap)
+  - Profile with `notor-preferred-preset: tiny` resolves to the tiny preset's provider + model
+  - Profile with `notor-preferred-preset: nonexistent` falls through to `preferred_provider`/`preferred_model`
+  - Profile with both `preferred_preset` and `preferred_provider`/`preferred_model` — preset takes precedence
+  - Profile with `notor-iteration-cap: 6` — sub-agent runner receives cap of 6
+  - Profile with no iteration cap — falls back to global default (20)
 
 ---
 
@@ -119,6 +168,8 @@ Moved from Phase 8 (was Task 8.4). Must be in place before Phases 3-6 register m
 ---
 
 ## Phase 3 — Built-in Sub-Agent Profile Scaffolds
+
+**Depends on:** Phase 0 (sub-agent preset + iteration cap resolution) must be complete — memory profiles use `notor-preferred-preset` and `notor-iteration-cap` frontmatter.
 
 Register the four memory sub-agent profiles following the existing pattern in [`src/sub-agents/builtin-profiles.ts`](../../src/sub-agents/builtin-profiles.ts).
 
