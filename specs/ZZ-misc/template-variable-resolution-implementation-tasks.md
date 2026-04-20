@@ -64,7 +64,7 @@ Instantiate the registry in the plugin and make it accessible to all content-pro
 
 Insert `registry.resolve()` calls at each content-loading site identified in design spec §2.3. Each insertion follows the same pattern: after file read (and after frontmatter stripping where applicable), before any downstream parsing (`parseExtensionFile`, `extractToolConfigs`, `resolveIncludeNotes`, code-fence compilation).
 
-- [ ] **3.1 — User tool/automation scaffolds: `src/extensions/discovery.ts`**
+- [x] **3.1 — User tool/automation scaffolds: `src/extensions/discovery.ts`**
   - In `parseOneExtensionFile` (~line 227-253):
   - After `const content = await vault.cachedRead(file);` (~line 233)
   - Before `return parseExtensionFile(content, ...)` (~line 252)
@@ -72,50 +72,50 @@ Insert `registry.resolve()` calls at each content-loading site identified in des
   - The function currently receives `vault`, `metadataCache`, `file`, `parseYAML` — add `registry: TemplateVariableRegistry` parameter
   - Update the call site in `ExtensionManager.reload()` to pass the registry
 
-- [ ] **3.2 — Built-in tool scaffolds: `src/extensions/manager.ts`**
+- [x] **3.2 — Built-in tool scaffolds: `src/extensions/manager.ts`**
   - In `reload()`, tool scaffold processing (~lines 228-255):
   - Before `parseExtensionFile(scaffold.scaffoldContent, ...)` (~line 240)
   - Apply: `const resolvedContent = this.plugin.getTemplateRegistry().resolve(scaffold.scaffoldContent);` and pass `resolvedContent`
 
-- [ ] **3.3 — Built-in automation scaffolds: `src/extensions/manager.ts`**
+- [x] **3.3 — Built-in automation scaffolds: `src/extensions/manager.ts`**
   - In `reload()`, automation scaffold processing (~lines 278-311):
   - Before `parseExtensionFile(scaffold.scaffoldContent, ...)` (~line 292)
   - Same pattern as 3.2: resolve before parsing
 
-- [ ] **3.4 — Sub-agent profiles (vault): `src/sub-agents/discovery.ts`**
+- [x] **3.4 — Sub-agent profiles (vault): `src/sub-agents/discovery.ts`**
   - In `parseProfile` (~lines 131-215):
   - After `const contentAfterFrontmatter = stripFrontmatter(rawContent);` (~line 182)
   - Before `extractToolConfigs()` (~line 185)
   - Apply: `const resolved = registry.resolve(contentAfterFrontmatter);` and use `resolved` in downstream calls
   - This is critical for memory sub-agent profiles: `{notor_dir}` in `<notor_tool_config>` `allowed_paths` must resolve before the tool-config parser sees the YAML
 
-- [ ] **3.5 — Sub-agent profiles (built-in): `src/sub-agents/discovery.ts`**
+- [x] **3.5 — Sub-agent profiles (built-in): `src/sub-agents/discovery.ts`**
   - In `buildProfileFromBuiltin` (~lines 227-261):
   - After `const contentAfterFrontmatter = stripFrontmatter(systemPromptContent);` (~line 237)
   - Before `extractToolConfigs()` (~line 239)
   - Same pattern as 3.4
 
-- [ ] **3.6 — Personas: `src/personas/persona-discovery.ts`**
+- [x] **3.6 — Personas: `src/personas/persona-discovery.ts`**
   - In `parsePersona` (~lines 120-179):
   - After `const promptContent = stripFrontmatter(rawContent);` (~line 165)
   - Before `promptContent` is stored in the returned `Persona` object (~line 167)
   - Apply: resolve `promptContent` before it's returned
 
-- [ ] **3.7 — Vault rules: `src/rules/vault-rules.ts`**
+- [x] **3.7 — Vault rules: `src/rules/vault-rules.ts`**
   - In `loadRuleFile` (~lines 298-335):
   - After `const parsed = this.parseFrontmatterAndBody(raw);` (~line 301)
   - Before `content: parsed.body` is stored in the `VaultRule` object (~line 305)
   - Apply: `const resolvedBody = this.templateRegistry.resolve(parsed.body);` and use `resolvedBody` as the rule content
   - Note: `resolveIncludeNotes()` runs later in `getActiveRuleContent()` (~line 222) — template vars resolve first (at load time), include_notes resolve at assembly time
 
-- [ ] **3.8 — Custom base prompt: `src/chat/system-prompt.ts`**
+- [x] **3.8 — Custom base prompt: `src/chat/system-prompt.ts`**
   - In `getBasePrompt` (~lines 337-365):
   - After `const stripped = this.stripFrontmatter(content);` (~line 344)
   - Before `resolveIncludeNotesIfAvailable()` (~line 349)
   - Apply: resolve `stripped` before passing to include_note resolution
   - This enables `<include_note>{notor_dir}/templates/base.md</include_note>` in custom base prompts (design spec §2.6)
 
-- [ ] **3.9 — Workflow body: `src/workflows/workflow-executor.ts`**
+- [x] **3.9 — Workflow body: `src/workflows/workflow-executor.ts`**
   - In `readWorkflowBody` (~lines 58-70):
   - After `rawContent.slice(fmInfo.contentStart)` (~line 69)
   - Before returning the body

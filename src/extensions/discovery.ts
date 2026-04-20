@@ -19,6 +19,7 @@ import type {
 } from "./types";
 import { parseExtensionFile, type ParseResult } from "./parser";
 import { logger } from "../utils/logger";
+import type { TemplateVariableRegistry } from "../template-vars";
 
 const log = logger("ExtensionDiscovery");
 
@@ -58,12 +59,14 @@ export interface DiscoveryResult {
  * @param metadataCache - Obsidian MetadataCache for frontmatter access
  * @param notorDir - Vault-relative path to the Notor directory (e.g. `"notor/"`)
  * @param parseYAML - YAML parser function (Obsidian's `parseYaml`)
+ * @param templateRegistry - Optional registry for template variable resolution
  */
 export async function discoverExtensions(
 	vault: Vault,
 	metadataCache: MetadataCache,
 	notorDir: string,
 	parseYAML: (yaml: string) => unknown,
+	templateRegistry?: TemplateVariableRegistry,
 ): Promise<DiscoveryResult> {
 	const baseDir = notorDir.replace(/\/$/, "");
 	const tools: UserToolDefinition[] = [];
@@ -76,7 +79,7 @@ export async function discoverExtensions(
 	const toolsDir = `${baseDir}/tools`;
 	const toolFiles = collectMarkdownFiles(vault, toolsDir);
 	for (const file of toolFiles) {
-		const result = await parseOneExtensionFile(vault, metadataCache, file, parseYAML);
+		const result = await parseOneExtensionFile(vault, metadataCache, file, parseYAML, templateRegistry);
 		if ("message" in result) {
 			log.warn("Extension parse error, skipping file", { file: file.path, error: result.message });
 			errors.push(result);
@@ -94,7 +97,7 @@ export async function discoverExtensions(
 	const automationsDir = `${baseDir}/automations`;
 	const automationFiles = collectMarkdownFiles(vault, automationsDir);
 	for (const file of automationFiles) {
-		const result = await parseOneExtensionFile(vault, metadataCache, file, parseYAML);
+		const result = await parseOneExtensionFile(vault, metadataCache, file, parseYAML, templateRegistry);
 		if ("message" in result) {
 			log.warn("Extension parse error, skipping file", { file: file.path, error: result.message });
 			errors.push(result);
@@ -111,7 +114,7 @@ export async function discoverExtensions(
 	const blocksDir = `${baseDir}/blocks`;
 	const blockFiles = collectMarkdownFiles(vault, blocksDir);
 	for (const file of blockFiles) {
-		const result = await parseOneExtensionFile(vault, metadataCache, file, parseYAML);
+		const result = await parseOneExtensionFile(vault, metadataCache, file, parseYAML, templateRegistry);
 		if ("message" in result) {
 			log.warn("Extension parse error, skipping file", { file: file.path, error: result.message });
 			errors.push(result);
@@ -229,8 +232,10 @@ async function parseOneExtensionFile(
 	metadataCache: MetadataCache,
 	file: TFile,
 	parseYAML: (yaml: string) => unknown,
+	templateRegistry?: TemplateVariableRegistry,
 ): Promise<ParseResult> {
-	const content = await vault.cachedRead(file);
+	const rawContent = await vault.cachedRead(file);
+	const content = templateRegistry ? templateRegistry.resolve(rawContent) : rawContent;
 
 	// Get frontmatter from metadata cache
 	const fileCache = metadataCache.getFileCache(file);

@@ -302,9 +302,10 @@ export class VaultRuleManager {
 			const raw = await this.app.vault.adapter.read(filePath);
 			const parsed = this.parseFrontmatterAndBody(raw);
 
+			const resolvedBody = this.templateRegistry ? this.templateRegistry.resolve(parsed.body) : parsed.body;
 			const rule: VaultRule = {
 				file_path: filePath,
-				content: parsed.body,
+				content: resolvedBody,
 				always_include: parsed.frontmatter["notor-always-include"] === true,
 				directory_include:
 					typeof parsed.frontmatter["notor-directory-include"] === "string"

@@ -16,6 +16,7 @@ import type { MetadataCache, TFile, TFolder, Vault } from "obsidian";
 import { TAbstractFile } from "obsidian";
 import type { Persona, PersonaPromptMode } from "../types";
 import { logger } from "../utils/logger";
+import type { TemplateVariableRegistry } from "../template-vars";
 
 const log = logger("PersonaDiscovery");
 
@@ -34,12 +35,14 @@ const SYSTEM_PROMPT_FILENAME = "system-prompt.md";
  * @param vault - Obsidian Vault instance
  * @param metadataCache - Obsidian MetadataCache for frontmatter access
  * @param notorDir - Vault-relative path to the Notor directory (e.g. `"notor/"`)
+ * @param templateRegistry - Optional registry for template variable resolution
  * @returns Array of discovered and parsed Persona objects
  */
 export async function discoverPersonas(
 	vault: Vault,
 	metadataCache: MetadataCache,
-	notorDir: string
+	notorDir: string,
+	templateRegistry?: TemplateVariableRegistry,
 ): Promise<Persona[]> {
 	const personasRootPath = getPersonasRootPath(notorDir);
 	const personasRoot = vault.getAbstractFileByPath(personasRootPath);
@@ -62,7 +65,7 @@ export async function discoverPersonas(
 		if (!isFolder(child)) continue;
 
 		const subdir = child;
-		const persona = await loadPersonaFromDirectory(vault, metadataCache, subdir);
+		const persona = await loadPersonaFromDirectory(vault, metadataCache, subdir, templateRegistry);
 		if (persona) {
 			personas.push(persona);
 		}
@@ -85,7 +88,8 @@ export async function discoverPersonas(
 async function loadPersonaFromDirectory(
 	vault: Vault,
 	metadataCache: MetadataCache,
-	subdir: TFolder
+	subdir: TFolder,
+	templateRegistry?: TemplateVariableRegistry,
 ): Promise<Persona | null> {
 	const promptPath = `${subdir.path}/${SYSTEM_PROMPT_FILENAME}`;
 	const promptFile = vault.getAbstractFileByPath(promptPath);
@@ -98,7 +102,7 @@ async function loadPersonaFromDirectory(
 	const tFile = promptFile;
 
 	try {
-		return await parsePersona(vault, metadataCache, subdir, tFile);
+		return await parsePersona(vault, metadataCache, subdir, tFile, templateRegistry);
 	} catch (e) {
 		log.warn("Failed to parse persona, skipping", {
 			directory: subdir.path,
@@ -121,7 +125,8 @@ async function parsePersona(
 	vault: Vault,
 	metadataCache: MetadataCache,
 	subdir: TFolder,
-	promptFile: TFile
+	promptFile: TFile,
+	templateRegistry?: TemplateVariableRegistry,
 ): Promise<Persona | null> {
 	const name = subdir.name;
 	const directoryPath = subdir.path.endsWith("/") ? subdir.path : `${subdir.path}/`;
@@ -161,8 +166,9 @@ async function parsePersona(
 	const chipColor = parseStringOrNull(frontmatter?.["notor-persona-chip-color"]);
 	const chipEmoji = parseStringOrNull(frontmatter?.["notor-persona-chip-emoji"]);
 
-	// Extract body content (after frontmatter)
-	const promptContent = stripFrontmatter(rawContent);
+	// Extract body content (after frontmatter), then resolve template variables
+	const strippedContent = stripFrontmatter(rawContent);
+	const promptContent = templateRegistry ? templateRegistry.resolve(strippedContent) : strippedContent;
 
 	return {
 		name,

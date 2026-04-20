@@ -48,6 +48,7 @@ import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { logger } from "../utils/logger";
 import { estimateTokenCount } from "../utils/tokens";
 import type { ChatBlockRegistry } from "../ui/chat-blocks/registry";
+import type { TemplateVariableRegistry } from "../template-vars";
 
 const log = logger("ChatOrchestrator");
 
@@ -178,7 +179,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 		private settings: NotorSettings,
 		private readonly sessionGuard: SessionGuard,
 		view?: NotorChatView,
-		private readonly vaultRuleManager?: VaultRuleManager
+		private readonly vaultRuleManager?: VaultRuleManager,
+		private readonly templateRegistry?: TemplateVariableRegistry,
 	) {
 		this.conversationManager = new ConversationManager(settings.mode);
 		this.contextManager = new ContextManager();
@@ -296,6 +298,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			getActiveModelId: () => this.activeModelId,
 			getActiveUseExtendedContext: () => this.activeUseExtendedContext,
 			getVaultRootPath: () => this.getVaultRootPath(),
+			getTemplateRegistry: () => this.templateRegistry,
 			getSessionContext: () => this,
 			runResponseLoop: (mode, session) => this.responseLoop(mode, session),
 			setWorkflowPersonaRevert: (prev) => this.setWorkflowPersonaRevert(prev),

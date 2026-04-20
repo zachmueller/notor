@@ -16,6 +16,7 @@ import type { SubAgentProfile } from "./types";
 import { BUILTIN_SUBAGENT_PROFILES } from "./builtin-profiles";
 import { extractToolConfigs } from "../tool-config/parser";
 import { logger } from "../utils/logger";
+import type { TemplateVariableRegistry } from "../template-vars";
 
 const log = logger("SubAgentDiscovery");
 
@@ -40,6 +41,7 @@ const SYSTEM_PROMPT_FILENAME = "system-prompt.md";
  * @param notorDir - Vault-relative path to the Notor directory (e.g. `"notor/"`)
  * @param knownToolNames - Registered tool names for tool config validation (optional)
  * @param parseYAML - YAML parser function (pass `parseYaml` from obsidian)
+ * @param templateRegistry - Optional registry for template variable resolution
  * @returns Array of discovered and parsed SubAgentProfile objects
  */
 export async function discoverSubAgentProfiles(
@@ -48,6 +50,7 @@ export async function discoverSubAgentProfiles(
 	notorDir: string,
 	knownToolNames?: string[],
 	parseYAML?: (yaml: string) => unknown,
+	templateRegistry?: TemplateVariableRegistry,
 ): Promise<SubAgentProfile[]> {
 	const rootPath = getSubAgentsRootPath(notorDir);
 	const root = vault.getAbstractFileByPath(rootPath);
@@ -61,7 +64,7 @@ export async function discoverSubAgentProfiles(
 			if (!isFolder(child)) continue;
 
 			const profile = await loadProfileFromDirectory(
-				vault, metadataCache, child, knownToolNames, parseYAML,
+				vault, metadataCache, child, knownToolNames, parseYAML, templateRegistry,
 			);
 			if (profile) {
 				profiles.push(profile);
@@ -76,7 +79,7 @@ export async function discoverSubAgentProfiles(
 	for (const [name, builtin] of BUILTIN_SUBAGENT_PROFILES) {
 		if (discoveredNames.has(name)) continue;
 
-		const profile = buildProfileFromBuiltin(name, builtin.systemPromptContent, rootPath, knownToolNames, parseYAML);
+		const profile = buildProfileFromBuiltin(name, builtin.systemPromptContent, rootPath, knownToolNames, parseYAML, templateRegistry);
 		profiles.push(profile);
 	}
 
@@ -106,6 +109,7 @@ async function loadProfileFromDirectory(
 	subdir: TFolder,
 	knownToolNames?: string[],
 	parseYAML?: (yaml: string) => unknown,
+	templateRegistry?: TemplateVariableRegistry,
 ): Promise<SubAgentProfile | null> {
 	const promptPath = `${subdir.path}/${SYSTEM_PROMPT_FILENAME}`;
 	const promptFile = vault.getAbstractFileByPath(promptPath);
@@ -115,7 +119,7 @@ async function loadProfileFromDirectory(
 	}
 
 	try {
-		return await parseProfile(vault, metadataCache, subdir, promptFile, knownToolNames, parseYAML);
+		return await parseProfile(vault, metadataCache, subdir, promptFile, knownToolNames, parseYAML, templateRegistry);
 	} catch (e) {
 		log.warn("Failed to parse sub-agent profile, skipping", {
 			directory: subdir.path,
@@ -135,6 +139,7 @@ async function parseProfile(
 	promptFile: TFile,
 	knownToolNames?: string[],
 	parseYAML?: (yaml: string) => unknown,
+	templateRegistry?: TemplateVariableRegistry,
 ): Promise<SubAgentProfile | null> {
 	const name = subdir.name;
 	const directoryPath = subdir.path.endsWith("/") ? subdir.path : `${subdir.path}/`;
@@ -178,8 +183,9 @@ async function parseProfile(
 	const preferredProvider = parseStringOrNull(frontmatter?.["notor-preferred-provider"]);
 	const preferredModel = parseStringOrNull(frontmatter?.["notor-preferred-model"]);
 
-	// Strip frontmatter from content
-	const contentAfterFrontmatter = stripFrontmatter(rawContent);
+	// Strip frontmatter from content, then resolve template variables
+	const strippedBody = stripFrontmatter(rawContent);
+	const contentAfterFrontmatter = templateRegistry ? templateRegistry.resolve(strippedBody) : strippedBody;
 
 	// Extract and strip tool config blocks
 	const { strippedContent, configs, errors } = extractToolConfigs(
@@ -230,11 +236,13 @@ function buildProfileFromBuiltin(
 	rootPath: string,
 	knownToolNames?: string[],
 	parseYAML?: (yaml: string) => unknown,
+	templateRegistry?: TemplateVariableRegistry,
 ): SubAgentProfile {
 	const directoryPath = `${rootPath}/${name}/`;
 	const systemPromptPath = `${rootPath}/${name}/${SYSTEM_PROMPT_FILENAME}`;
 
-	const contentAfterFrontmatter = stripFrontmatter(systemPromptContent);
+	const strippedBody = stripFrontmatter(systemPromptContent);
+	const contentAfterFrontmatter = templateRegistry ? templateRegistry.resolve(strippedBody) : strippedBody;
 
 	const { strippedContent, configs } = extractToolConfigs(
 		contentAfterFrontmatter,

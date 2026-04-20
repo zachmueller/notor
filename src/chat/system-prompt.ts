@@ -346,10 +346,13 @@ export class SystemPromptBuilder {
 				const stripped = this.stripFrontmatter(content);
 				if (stripped.trim()) {
 					log.debug("Using custom system prompt", { path: customPath });
+					const withVarsResolved = this.templateRegistry
+						? this.templateRegistry.resolve(stripped.trim())
+						: stripped.trim();
 					// D-010: Resolve <include_note> tags in the custom system prompt.
 					// Uses only inlineContent (attached mode ignored in system_prompt context).
 					const resolved = await this.resolveIncludeNotesIfAvailable(
-						stripped.trim(),
+						withVarsResolved,
 						customPath,
 						"system_prompt"
 					);

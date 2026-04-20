@@ -1320,6 +1320,7 @@ export default class NotorPlugin extends Plugin {
 				// Uses lazy accessor so it returns [] until extensions are discovered.
 				getExtensionAutomations: (trigger) => this.getExtensionManager().getAutomationsForTrigger(trigger),
 				executeExtensionAutomation: (automation, context) => this.getExtensionManager().executeAutomation(automation, context),
+				templateRegistry: this.getTemplateRegistry(),
 			};
 		};
 
@@ -2039,7 +2040,8 @@ export default class NotorPlugin extends Plugin {
 			this.settings,
 			this._sessionGuard,
 			undefined, // view wired later via wireView()
-			vaultRuleManager
+			vaultRuleManager,
+			this.getTemplateRegistry(),
 		);
 
 		// Wire shared managers

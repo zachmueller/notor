@@ -31,6 +31,7 @@ import { resolveIncludeNotes, stripNoteFrontmatter } from "../include-note/resol
 import { extractToolConfigs } from "../tool-config/parser";
 import { assembleUserMessage } from "../context/message-assembler";
 import { logger } from "../utils/logger";
+import type { TemplateVariableRegistry } from "../template-vars";
 
 const log = logger("WorkflowExecutor");
 
@@ -55,7 +56,7 @@ const log = logger("WorkflowExecutor");
  *
  * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-002
  */
-export async function readWorkflowBody(file: TFile, vault: Vault): Promise<string> {
+export async function readWorkflowBody(file: TFile, vault: Vault, templateRegistry?: TemplateVariableRegistry): Promise<string> {
 	let rawContent: string;
 	try {
 		rawContent = await vault.read(file);
@@ -66,7 +67,8 @@ export async function readWorkflowBody(file: TFile, vault: Vault): Promise<strin
 	}
 
 	const fmInfo = getFrontMatterInfo(rawContent);
-	return rawContent.slice(fmInfo.contentStart);
+	const body = rawContent.slice(fmInfo.contentStart);
+	return templateRegistry ? templateRegistry.resolve(body) : body;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +261,8 @@ function escapeXmlAttr(value: string): string {
 export async function assembleWorkflowPrompt(
 	request: WorkflowExecutionRequest,
 	vault: Vault,
-	metadataCache: MetadataCache
+	metadataCache: MetadataCache,
+	templateRegistry?: TemplateVariableRegistry,
 ): Promise<WorkflowAssemblyResult | null> {
 	const { workflow, supplementaryText, triggerContext } = request;
 
@@ -278,8 +281,8 @@ export async function assembleWorkflowPrompt(
 		has_trigger_context: triggerContext !== null,
 	});
 
-	// Step 1: Read body (frontmatter stripped)
-	const body = await readWorkflowBody(workflowFile, vault);
+	// Step 1: Read body (frontmatter stripped, template variables resolved)
+	const body = await readWorkflowBody(workflowFile, vault, templateRegistry);
 
 	// Step 2: Resolve <include_note> tags
 	const includeResult = await resolveWorkflowIncludes(

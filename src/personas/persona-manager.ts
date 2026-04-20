@@ -110,7 +110,7 @@ export class PersonaManager {
 	 * latest persona list.
 	 */
 	async getDiscoveredPersonas(): Promise<Persona[]> {
-		return discoverPersonas(this.vault, this.metadataCache, this.settings.notor_dir);
+		return discoverPersonas(this.vault, this.metadataCache, this.settings.notor_dir, this.templateRegistry);
 	}
 
 	/**

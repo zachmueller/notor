@@ -32,6 +32,7 @@ import { executeVaultEventHook } from "./vault-event-hook-engine";
 import type { VaultEventHookContext } from "./vault-event-hook-engine";
 import { assembleWorkflowPrompt, switchWorkflowPersona } from "../workflows/workflow-executor";
 import { logger } from "../utils/logger";
+import type { TemplateVariableRegistry } from "../template-vars";
 
 const log = logger("VaultEventDispatcher");
 
@@ -67,6 +68,8 @@ export interface DispatcherDeps {
 	getExtensionAutomations?: (trigger: AutomationTrigger) => UserAutomationDefinition[];
 	/** EXT-014: Executor for user-defined automations (encapsulates runtime context building). */
 	executeExtensionAutomation?: (automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>;
+	/** Template variable registry for resolving {notor_dir} etc. in workflow bodies. */
+	templateRegistry?: TemplateVariableRegistry;
 }
 
 // ---------------------------------------------------------------------------
@@ -392,7 +395,8 @@ export async function executeRunWorkflowAction(
 				triggerContext,
 			},
 			deps.vault,
-			deps.metadataCache
+			deps.metadataCache,
+			deps.templateRegistry,
 		);
 	} catch (e) {
 		const errMsg = e instanceof Error ? e.message : String(e);

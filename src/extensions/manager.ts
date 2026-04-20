@@ -222,6 +222,7 @@ export class ExtensionManager {
 			this.plugin.app.metadataCache,
 			this.plugin.settings.notor_dir,
 			this.parseYAML,
+			this.plugin.getTemplateRegistry(),
 		);
 		errors.push(...discovered.errors);
 
@@ -237,8 +238,9 @@ export class ExtensionManager {
 				"notor-description": scaffold.description,
 				"notor-mode": scaffold.mode,
 			};
+			const resolvedToolContent = this.plugin.getTemplateRegistry().resolve(scaffold.scaffoldContent);
 			const parsed = parseExtensionFile(
-				scaffold.scaffoldContent,
+				resolvedToolContent,
 				frontmatter,
 				`(built-in scaffold: ${name})`,
 				this.parseYAML,
@@ -289,8 +291,9 @@ export class ExtensionManager {
 				"notor-trigger": scaffold.trigger,
 				"notor-display-name": scaffold.displayName,
 			};
+			const resolvedAutomationContent = this.plugin.getTemplateRegistry().resolve(scaffold.scaffoldContent);
 			const parsed = parseExtensionFile(
-				scaffold.scaffoldContent,
+				resolvedAutomationContent,
 				frontmatter,
 				`(built-in scaffold: ${name})`,
 				this.parseYAML,

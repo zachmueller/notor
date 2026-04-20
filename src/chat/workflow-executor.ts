@@ -30,6 +30,7 @@ import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-overrid
 import type { VaultRuleManager } from "../rules/vault-rules";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import type { ToolSessionContext } from "../tools/tool";
+import type { TemplateVariableRegistry } from "../template-vars";
 import type { SessionManager } from "./session-manager";
 import type { ConfigResolver } from "./config-resolver";
 import type { HookDispatcher } from "./hook-dispatcher";
@@ -87,6 +88,7 @@ export interface WorkflowExecutorDeps {
 
 	// Utility getters
 	getVaultRootPath(): string | undefined;
+	getTemplateRegistry(): TemplateVariableRegistry | undefined;
 	getSessionContext(): ToolSessionContext;
 
 	// Orchestrator method bridges
@@ -170,7 +172,8 @@ export class WorkflowExecutor {
 					triggerContext: null, // manual execution — no trigger context
 				},
 				this.deps.app.vault,
-				this.deps.app.metadataCache
+				this.deps.app.metadataCache,
+				this.deps.getTemplateRegistry(),
 			);
 		} catch (e) {
 			const errMsg = e instanceof Error ? e.message : String(e);
@@ -403,7 +406,8 @@ export class WorkflowExecutor {
 					triggerContext: triggerContext ?? null,
 				},
 				this.deps.app.vault,
-				this.deps.app.metadataCache
+				this.deps.app.metadataCache,
+				this.deps.getTemplateRegistry(),
 			);
 		} catch (e) {
 			const errMsg = e instanceof Error ? e.message : String(e);

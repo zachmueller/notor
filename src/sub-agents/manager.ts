@@ -55,6 +55,7 @@ export class SubAgentManager {
 			this.settings.notor_dir,
 			knownToolNames,
 			this.parseYAML,
+			this.templateRegistry,
 		);
 	}
 
