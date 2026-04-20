@@ -212,26 +212,27 @@ DRY up the duplicated toggle pattern. Small scope, high payoff — every block-k
 
 Make block kinds pluggable. After this phase, block kinds can be registered and resolved at render time.
 
-- [ ] **5.1 — Create `ChatBlockRegistry` class**
+- [x] **5.1 — Create `ChatBlockRegistry` class**
   - Create [`src/ui/chat-blocks/registry.ts`](../../src/ui/chat-blocks/registry.ts)
   - Implement `register(def)`: store by `kind`, log error on duplicate (keep first)
   - Implement `get(kind)`: return definition or undefined
   - Implement `has(kind)`, `list()`
   - Implement `unregister(kind)` for extension reload cleanup
 
-- [ ] **5.2 — Define `ChatBlockDefinition` interface**
+- [x] **5.2 — Define `ChatBlockDefinition` interface**
   - Fields: `kind`, `displayName`, `icon?`, `render`, `toLLMText?`, `excludeFromCompaction?`, `renderLoading?`
   - Generic type parameter `<TData>` for typed `data` payloads
 
-- [ ] **5.3 — Define `ChatBlockRenderContext` interface**
+- [x] **5.3 — Define `ChatBlockRenderContext` interface**
   - Fields: `message`, `app`, `openInternalLink`, `collapsibleCard` (from Phase 4 helper)
 
-- [ ] **5.4 — Instantiate registry in `main.ts`**
+- [x] **5.4 — Instantiate registry in `main.ts`**
   - Create `ChatBlockRegistry` instance during plugin `onload()`
   - Call `setChatBlockRegistry(registry)` on the message-pipeline module (module-scoped setter from Task 3.4)
   - Wire into: view router (for rendering), orchestrator (for emission-time `estimated_wire_tokens` calculation)
+  - Added `getChatBlockRegistry()` public getter (with lazy-init fallback for tests)
 
-- [ ] **5.5 — Verify registry wiring in `toChatMessages()`**
+- [x] **5.5 — Verify registry wiring in `toChatMessages()`**
   - After Task 5.4 calls `setChatBlockRegistry()`, the `extension_block` case from Phase 3.4 automatically uses the real registry via `getWireText()`
   - Verify: `toLLMText` from registered definitions is now called; when `toLLMText` is undefined or kind is unregistered, falls back to `fallback_text ?? ""`
 

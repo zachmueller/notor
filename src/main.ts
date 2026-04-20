@@ -115,6 +115,10 @@ import { TavilyProvider } from "./web-search/providers/tavily";
 import { BraveSearchProvider } from "./web-search/providers/brave";
 import { SerpApiProvider } from "./web-search/providers/serpapi";
 
+// Chat blocks
+import { ChatBlockRegistry } from "./ui/chat-blocks/registry";
+import { setChatBlockRegistry } from "./chat/message-pipeline";
+
 // UI
 import { NotorChatView, CHAT_VIEW_TYPE } from "./ui/chat-view";
 import { EffectiveConfigInspectorView, INSPECTOR_VIEW_TYPE } from "./ui/effective-config-inspector";
@@ -196,6 +200,7 @@ export default class NotorPlugin extends Plugin {
 	private _personaManager?: PersonaManager;
 	private _subAgentManager?: SubAgentManager;
 	private _extensionManager?: ExtensionManager;
+	private _chatBlockRegistry?: ChatBlockRegistry;
 	private _settingTab?: NotorSettingTab;
 
 	// -----------------------------------------------------------------------
@@ -322,6 +327,12 @@ export default class NotorPlugin extends Plugin {
 		// 2. Register the settings tab
 		this._settingTab = new NotorSettingTab(this.app, this);
 		this.addSettingTab(this._settingTab);
+
+		// 2b. Instantiate ChatBlockRegistry and wire into the message pipeline.
+		// Must happen before any view or orchestrator creation so that
+		// toChatMessages() has the registry available for extension_block translation.
+		this._chatBlockRegistry = new ChatBlockRegistry();
+		setChatBlockRegistry(this._chatBlockRegistry);
 
 		// 3. Register the chat panel view type (A1.8).
 		// Every panel gets its own orchestrator via createOrchestrator().
@@ -1891,6 +1902,17 @@ export default class NotorPlugin extends Plugin {
 			this._extensionManager = new ExtensionManager(this, parseYaml);
 		}
 		return this._extensionManager;
+	}
+
+	/** Chat block registry — maps block kinds to render/wire definitions. */
+	getChatBlockRegistry(): ChatBlockRegistry {
+		if (!this._chatBlockRegistry) {
+			// Fallback: registry is normally created in onload(), but if accessed
+			// before that (e.g., in tests), create it lazily.
+			this._chatBlockRegistry = new ChatBlockRegistry();
+			setChatBlockRegistry(this._chatBlockRegistry);
+		}
+		return this._chatBlockRegistry;
 	}
 
 	/** Per-lane FIFO serialization queue for rate-limiting async operations. */
