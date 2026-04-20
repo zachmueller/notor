@@ -538,36 +538,42 @@ Comprehensive testing across all phases.
   - After window slides → emits succeed again
   - Extracted `checkRateLimit` to [`src/extensions/rate-limiter.ts`](../../src/extensions/rate-limiter.ts); tests in [`src/extensions/rate-limiter.test.ts`](../../src/extensions/rate-limiter.test.ts)
 
-- [ ] **13.8 — E2E tests: Block rendering**
+- [x] **13.8 — E2E tests: Block rendering**
   - Author a minimal block extension in vault; emit from `pre_send`; confirm it renders as its own row
   - Collapsible works; header shows `source_extension`
   - Reload conversation → block persists and re-renders
   - Unregister kind → fallback text placeholder, no crash
+  - Tests in [`e2e/scripts/extension-chat-blocks-test.ts`](../../e2e/scripts/extension-chat-blocks-test.ts) (Tests 1–5, 9–10)
 
-- [ ] **13.9 — E2E tests: Render ≠ wire**
+- [x] **13.9 — E2E tests: Render ≠ wire**
   - Block kind with `render` showing links and `toLLMText` returning full bodies
   - UI shows only links; wire payload contains full bodies
+  - Tests in [`e2e/scripts/extension-chat-blocks-automation-test.ts`](../../e2e/scripts/extension-chat-blocks-automation-test.ts) (Test 1)
 
-- [ ] **13.10 — E2E tests: Blocking automation**
+- [x] **13.10 — E2E tests: Blocking automation**
   - `notor-blocking: true` + `on_conversation_start` → emitted block in LLM context on first turn
   - Non-blocking automation's emitted block NOT in first-turn context
   - Loading block → real block transition (spinner → content)
   - Timeout: slow automation → turn proceeds → block eventually replaced
+  - Tests in [`e2e/scripts/extension-chat-blocks-automation-test.ts`](../../e2e/scripts/extension-chat-blocks-automation-test.ts) (Tests 2–3)
 
-- [ ] **13.11 — E2E tests: Detached sub-agent**
+- [x] **13.11 — E2E tests: Detached sub-agent**
   - `after_completion` spawns detached sub-agent → `onComplete` fires later → block emitted
   - Stop button while detached agent running → aborted via linked signal
   - Navigate away → block persists in JSONL, appears on conversation reload
   - Plugin unload → all active agents aborted
+  - Tests in [`e2e/scripts/extension-chat-blocks-automation-test.ts`](../../e2e/scripts/extension-chat-blocks-automation-test.ts) (Tests 4–5)
 
-- [ ] **13.12 — E2E tests: Export**
+- [x] **13.12 — E2E tests: Export**
   - Emit extension_block → markdown export includes fallback_text with source label
   - HTML export same
+  - Tests in [`e2e/scripts/extension-chat-blocks-test.ts`](../../e2e/scripts/extension-chat-blocks-test.ts) (Test 8)
 
-- [ ] **13.13 — Visual verification**
+- [x] **13.13 — Visual verification**
   - Collapsible helper refactor: tool-call cards expand/collapse identically to before
   - Extension block rows visually distinct from tool calls
   - Loading spinner renders and transitions cleanly
+  - Tests in [`e2e/scripts/extension-chat-blocks-test.ts`](../../e2e/scripts/extension-chat-blocks-test.ts) (Tests 4, 6, 7)
 
 - [ ] **13.14 — Move design doc to `done/`**
   - After full verification: `mv specs/ZZ-misc/extension-chat-blocks-design.md specs/ZZ-misc/done/`
