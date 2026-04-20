@@ -190,9 +190,7 @@ export class ContextManager {
 		for (let i = 0; i < messages.length; i++) {
 			const m = messages[i];
 			if (!m || m.truncated || m.role === "system") continue;
-			// Phase 3 (Task 3.7): also break on "extension_block" — blocks before
-			// the first user message must not be silently truncated.
-			if (m.role === "user") break; // first non-system is user — good
+			if (m.role === "user" || m.role === "extension_block") break;
 			// Leading non-user non-system message: mark truncated
 			m.truncated = true;
 			tokensToRemove -= (tokenCounts[i] ?? 0); // track for logging

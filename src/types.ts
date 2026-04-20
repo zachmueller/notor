@@ -108,7 +108,7 @@ export type ConversationMode = "plan" | "act";
 // ---------------------------------------------------------------------------
 
 /** Role of a message within a conversation. */
-export type MessageRole = "system" | "user" | "assistant" | "tool_call" | "tool_result";
+export type MessageRole = "system" | "user" | "assistant" | "tool_call" | "tool_result" | "extension_block";
 
 /** A single message within a conversation. */
 export interface Message {

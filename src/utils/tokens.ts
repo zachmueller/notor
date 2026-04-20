@@ -91,8 +91,15 @@ export function estimateContentTokens(content: string | ContentBlock[], provider
 			case "document":
 				total += estimateDocumentTokens(block.page_count);
 				break;
-			// custom_block: Phase 3 (Task 3.2) will add a real case using estimated_wire_tokens / fallback_text.
-			// Until then, silently contributes 0 — acceptable for pre-Phase-3 development.
+			case "custom_block":
+				if (block.estimated_wire_tokens != null) {
+					total += block.estimated_wire_tokens;
+				} else if (block.fallback_text != null) {
+					total += estimateTokenCount(block.fallback_text);
+				} else {
+					total += estimateTokenCount(JSON.stringify(block.data));
+				}
+				break;
 		}
 	}
 	return total;

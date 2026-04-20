@@ -14,6 +14,7 @@
 import type { Message } from "../types";
 import { assertUnreachable } from "../utils/assert-unreachable";
 import type { ChatMessage, StreamChunk } from "../providers/provider";
+import type { ContentBlock } from "../media/types";
 import { getModelMetadata } from "../providers/model-metadata";
 import { parseStreamEvents } from "./stream-utils";
 import type { ToolCallInfo } from "./tool-orchestration";
@@ -22,6 +23,54 @@ import type { NotorSettings, ModelPricing } from "../settings";
 import { logger } from "../utils/logger";
 
 const log = logger("MessagePipeline");
+
+// ---------------------------------------------------------------------------
+// ChatBlockRegistry stub — wired at plugin init via setChatBlockRegistry()
+// ---------------------------------------------------------------------------
+
+interface ChatBlockRegistryLike {
+	get(kind: string): { toLLMText?: (data: Record<string, unknown>) => string | null } | undefined;
+}
+
+let moduleRegistry: ChatBlockRegistryLike | undefined;
+
+/** Called once at plugin init to wire in the real ChatBlockRegistry. */
+export function setChatBlockRegistry(registry: ChatBlockRegistryLike): void {
+	moduleRegistry = registry;
+}
+
+/**
+ * Resolve custom_block entries to wire text.
+ *
+ * Calls toLLMText from the registry when available; falls back to
+ * fallback_text. Returns null when all blocks produce empty output
+ * (message should be dropped from wire entirely).
+ */
+export function getWireText(
+	content: string | ContentBlock[],
+	registry?: ChatBlockRegistryLike,
+): string | null {
+	if (typeof content === "string") {
+		return content || null;
+	}
+	const parts: string[] = [];
+	for (const block of content) {
+		if (block.type !== "custom_block") {
+			continue;
+		}
+		const def = registry?.get(block.kind);
+		let text: string | null = null;
+		if (def?.toLLMText) {
+			text = def.toLLMText(block.data);
+		} else {
+			text = block.fallback_text ?? null;
+		}
+		if (text != null && text !== "") {
+			parts.push(text);
+		}
+	}
+	return parts.length > 0 ? parts.join("\n\n") : null;
+}
 
 /** Result type for stream processing. */
 export type StreamResult =
@@ -212,6 +261,19 @@ export function toChatMessages(messages: Message[], systemPrompt: string): ChatM
 				}
 				break;
 
+			case "extension_block": {
+				const wireText = getWireText(msg.content, moduleRegistry);
+				if (wireText != null) {
+					const source = msg.source_extension ?? "";
+					const tagged = source
+						? `<notor-ext source="${source}">${wireText}</notor-ext>`
+						: `<notor-ext>${wireText}</notor-ext>`;
+					chatMessages.push({ role: "user", content: tagged });
+				}
+				// null → drop entirely (zero wire tokens)
+				break;
+			}
+
 			default:
 				assertUnreachable(msg.role);
 		}
@@ -349,15 +411,43 @@ export function toChatMessages(messages: Message[], systemPrompt: string): ChatM
 		j++;
 	}
 
+	// Phase 4: Consecutive same-role coalescing pass.
+	// Merges adjacent messages with the same role (no tool_calls/tool_results).
+	// Addresses extension_block adjacency AND the pre-existing hook-injection
+	// alternation bug (Bedrock's strict alternation requirement).
+	const final: ChatMessage[] = [];
+	for (const msg of coalesced) {
+		const prev = final[final.length - 1];
+		if (
+			prev &&
+			prev.role === msg.role &&
+			!prev.tool_calls &&
+			!prev.tool_results &&
+			!msg.tool_calls &&
+			!msg.tool_results
+		) {
+			// Normalize both sides to ContentBlock[] and concatenate
+			const aContent = typeof prev.content === "string"
+				? [{ type: "text" as const, text: prev.content }]
+				: prev.content;
+			const bContent = typeof msg.content === "string"
+				? [{ type: "text" as const, text: msg.content }]
+				: msg.content;
+			prev.content = [...aContent, ...bContent];
+		} else {
+			final.push({ ...msg });
+		}
+	}
+
 	log.info("ChatMessages built for provider", {
-		totalCount: coalesced.length,
-		firstRole: coalesced[0]?.role ?? "none",
-		secondRole: coalesced[1]?.role ?? "none",
-		lastRole: coalesced[coalesced.length - 1]?.role ?? "none",
-		roles: coalesced.map((m) => m.role),
+		totalCount: final.length,
+		firstRole: final[0]?.role ?? "none",
+		secondRole: final[1]?.role ?? "none",
+		lastRole: final[final.length - 1]?.role ?? "none",
+		roles: final.map((m) => m.role),
 	});
 
-	return coalesced;
+	return final;
 }
 
 /**

@@ -390,6 +390,8 @@ function renderMessage(msg: Message, subAgentConversations?: SubAgentConversatio
 			return renderToolCallHtml(msg);
 		case "tool_result":
 			return renderToolResultHtml(msg, subAgentConversations);
+		case "extension_block":
+			return renderExtensionBlockHtml(msg);
 		default:
 			assertUnreachable(msg.role);
 	}
@@ -546,6 +548,22 @@ ${subAgentDetail}
     </div>`;
 }
 
+function renderExtensionBlockHtml(msg: Message): string {
+	const ts = formatTimestamp(msg.timestamp);
+	const source = msg.source_extension ? escapeHtml(msg.source_extension) : "";
+	const label = source ? `Extension: ${source}` : "Extension block";
+	const parts: string[] = [];
+	if (Array.isArray(msg.content)) {
+		for (const block of msg.content as ContentBlock[]) {
+			if (block.type === "custom_block" && block.fallback_text) {
+				parts.push(`<div class="message-content">${escapeHtml(block.fallback_text).replace(/\n/g, "<br>")}</div>`);
+			}
+		}
+	}
+	const body = parts.join("\n") || `<em>No content</em>`;
+	return messageBlock("extension-block", label, ts, body);
+}
+
 /**
  * Render an expandable `<details>` section containing the full sub-agent
  * conversation, formatted in the same style as the parent messages.
@@ -612,6 +630,9 @@ function renderSubAgentMessage(msg: Message): string | null {
 			const icon = tr.success ? "✓" : "✗";
 			return `<div class="sub-agent-msg sub-agent-tool-result"><span class="${iconClass}">${icon}</span> <strong>${displayName}</strong>: ${preview}</div>`;
 		}
+		case "extension_block":
+			// Sub-agents don't emit extension_block messages, but handle gracefully
+			return null;
 		default:
 			assertUnreachable(msg.role);
 	}

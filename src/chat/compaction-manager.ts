@@ -57,12 +57,18 @@ export class CompactionManager {
 		}
 
 		const pendingMessages = extractPendingMessages(messages);
-		const completedMessages = messages.slice(0, messages.length - pendingMessages.length);
+		const allCompleted = messages.slice(0, messages.length - pendingMessages.length);
+
+		// Messages with exclude_from_compaction are not seen by the summarizer
+		// but must survive the cycle — re-appended between summary and pending.
+		const excludedMessages = allCompleted.filter((m) => m.exclude_from_compaction);
+		const completedMessages = allCompleted.filter((m) => !m.exclude_from_compaction);
 
 		log.info("Compaction message split", {
 			totalMessages: messages.length,
 			pendingCount: pendingMessages.length,
 			completedCount: completedMessages.length,
+			excludedCount: excludedMessages.length,
 			firstPendingRole: pendingMessages[0]?.role ?? "none",
 			firstCompletedRole: completedMessages[0]?.role ?? "none",
 			lastCompletedRole: completedMessages[completedMessages.length - 1]?.role ?? "none",
@@ -98,6 +104,24 @@ export class CompactionManager {
 			if (result.success && result.newMessages && result.record) {
 				// Replace conversation messages with compacted context
 				convManager.replaceMessages(result.newMessages);
+
+				// Re-append excluded messages between summary and pending so they
+				// survive compaction cycles (e.g., memory-recalled blocks at start).
+				for (const excluded of excludedMessages) {
+					convManager.addMessage({
+						role: excluded.role,
+						content: excluded.content,
+						tool_call: excluded.tool_call ?? undefined,
+						tool_result: excluded.tool_result ?? undefined,
+						is_hook_injection: excluded.is_hook_injection,
+						is_workflow_message: excluded.is_workflow_message,
+						hook_injections: excluded.hook_injections ?? undefined,
+						attachments: excluded.attachments ?? undefined,
+						auto_context: excluded.auto_context ?? undefined,
+						source_extension: excluded.source_extension ?? undefined,
+						exclude_from_compaction: excluded.exclude_from_compaction,
+					});
+				}
 
 				// Re-append pending messages so the conversation ends with a user
 				// turn. Without this, providers like Bedrock reject the next call
@@ -184,7 +208,9 @@ export class CompactionManager {
 		const useExtendedContext = this.getActiveUseExtendedContext();
 
 		const pendingMessages = extractPendingMessages(messages);
-		const completedMessages = messages.slice(0, messages.length - pendingMessages.length);
+		const allCompleted = messages.slice(0, messages.length - pendingMessages.length);
+		const excludedMessages = allCompleted.filter((m) => m.exclude_from_compaction);
+		const completedMessages = allCompleted.filter((m) => !m.exclude_from_compaction);
 
 		// Show compacting indicator
 		const messagesContainer = this.getView()?.getMessagesContainer?.();
@@ -207,6 +233,23 @@ export class CompactionManager {
 
 			if (result.success && result.newMessages && result.record) {
 				convManager.replaceMessages(result.newMessages);
+
+				// Re-append excluded messages between summary and pending.
+				for (const excluded of excludedMessages) {
+					convManager.addMessage({
+						role: excluded.role,
+						content: excluded.content,
+						tool_call: excluded.tool_call ?? undefined,
+						tool_result: excluded.tool_result ?? undefined,
+						is_hook_injection: excluded.is_hook_injection,
+						is_workflow_message: excluded.is_workflow_message,
+						hook_injections: excluded.hook_injections ?? undefined,
+						attachments: excluded.attachments ?? undefined,
+						auto_context: excluded.auto_context ?? undefined,
+						source_extension: excluded.source_extension ?? undefined,
+						exclude_from_compaction: excluded.exclude_from_compaction,
+					});
+				}
 
 				// Re-append any pending messages so the conversation ends on a user turn.
 				for (const pending of pendingMessages) {

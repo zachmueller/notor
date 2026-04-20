@@ -120,22 +120,22 @@ Standalone hardening. Add `assertUnreachable` (or `satisfies never`) guards to a
 
 The core message shape. After this phase, extension blocks can be emitted (manually for testing) and will persist, render (via fallback), and translate to the wire correctly.
 
-- [ ] **3.1 — Add `custom_block` to `ContentBlock` union**
+- [x] **3.1 — Add `custom_block` to `ContentBlock` union**
   - In [`src/media/types.ts`](../../src/media/types.ts): add the `custom_block` variant with fields: `type`, `kind`, `data`, `fallback_text?`, `estimated_wire_tokens?`, `loading?`
   - `getTextContent()` requires NO changes — the existing `.filter(block.type === "text")` pattern already silently excludes unknown block types, returning `""` for arrays with only custom blocks
 
-- [ ] **3.2 — Add `custom_block` case to `estimateContentTokens()`**
+- [x] **3.2 — Add `custom_block` case to `estimateContentTokens()`**
   - In [`src/utils/tokens.ts`](../../src/utils/tokens.ts): add `case "custom_block":`
   - Use `estimated_wire_tokens` when present (set at emission time from `toLLMText` output)
   - Fall back to `estimateTokenCount(fallback_text)`, then `estimateTokenCount(JSON.stringify(data))` as last resort
   - Blocks with `toLLMText → null` should set `estimated_wire_tokens: 0` at emission → counted as zero wire cost
 
-- [ ] **3.3 — Add `"extension_block"` to `MessageRole` union**
+- [x] **3.3 — Add `"extension_block"` to `MessageRole` union**
   - In [`src/types.ts`](../../src/types.ts): extend the `MessageRole` union type
   - Add `source_extension?: string | null` to `Message` interface
   - Add `exclude_from_compaction?: boolean` to `Message` interface
 
-- [ ] **3.4 — Handle `extension_block` in `toChatMessages()` + create `getWireText()`**
+- [x] **3.4 — Handle `extension_block` in `toChatMessages()` + create `getWireText()`**
   - **Create `getWireText(content, registry?)` function** in `message-pipeline.ts`: resolves `custom_block` entries to their wire text via `registry.get(kind)?.toLLMText?.(data)`, falling back to `fallback_text ?? ""` when the registry has no definition for a kind. Returns combined text or `null` when all blocks produce empty output.
   - **Registry injection:** Add `setChatBlockRegistry(registry)` module-scoped setter in `message-pipeline.ts`. Called once at plugin init (Task 5.4). `toChatMessages()` signature does NOT change — reads registry from module state.
   - In [`src/chat/message-pipeline.ts`](../../src/chat/message-pipeline.ts) at the role switch (~line 140):
@@ -146,7 +146,7 @@ The core message shape. After this phase, extension blocks can be emitted (manua
     - Otherwise emit as `role: "user"` `ChatMessage` with the tagged text
   - **Phase 5 stub note:** Until Phase 5.5 wires in the real registry, `getWireText()` will have `registry = undefined` and will use `fallback_text` for all custom blocks. This is correct initial behavior.
 
-- [ ] **3.5 — Add Phase 4 consecutive-same-role coalescing pass**
+- [x] **3.5 — Add Phase 4 consecutive-same-role coalescing pass**
   - Create a **separate** post-processing loop after Phase 3's tool-coalescing while-loop (which ends at line 346). Do NOT modify the Phase 3 while-loop (lines 296-346) — it handles `tool_call`/`tool_result` coalescing only.
   - Operates on the `coalesced` array (output of Phase 3) and produces a `final` array, returned instead of `coalesced` (currently returned at line 356)
   - Iterate `ChatMessage[]`: when `messages[i].role === messages[i-1].role` and neither carries `tool_calls`/`tool_results`, merge content
@@ -156,22 +156,22 @@ The core message shape. After this phase, extension blocks can be emitted (manua
   - Addresses both extension-block adjacency AND a pre-existing hook-injection alternation bug (Bedrock's strict alternation requirement)
   - **Note on merged content:** After coalescing, extension_block wire text (`<notor-ext>` tagged) may appear in the same `ChatMessage` as user text. This is by design — LLMs handle inline XML tags in user messages correctly. The extension block text typically precedes the user's text within the merged message, providing context before the user's question.
 
-- [ ] **3.6 — Handle `extension_block` in compaction input assembly**
+- [x] **3.6 — Handle `extension_block` in compaction input assembly**
   - In [`src/context/compaction.ts:236-269`](../../src/context/compaction.ts#L236-L269):
   - If `msg.exclude_from_compaction === true` → skip entirely (not seen by the summarizer)
   - Otherwise extract text via `getTextContent()` and include as user-role in compaction input
   - **Note:** `exclude_from_compaction` controls what the summarizer SEES, not what survives compaction. Pending messages (after last assistant) are always re-appended regardless of this flag.
 
-- [ ] **3.7 — Handle `extension_block` in truncation walk-forward**
+- [x] **3.7 — Handle `extension_block` in truncation walk-forward**
   - In [`src/chat/context.ts:190-198`](../../src/chat/context.ts#L190-L198):
   - Add `extension_block` to the break condition at line 193: change `if (m.role === "user") break;` to `if (m.role === "user" || m.role === "extension_block") break;`
   - This prevents blocking `on_conversation_start` blocks from being silently truncated when they appear before the first user message
 
-- [ ] **3.8 — Handle `extension_block` in exporters**
+- [x] **3.8 — Handle `extension_block` in exporters**
   - [`markdown-exporter.ts`](../../src/export/markdown-exporter.ts): add case rendering source label + fallback text in Obsidian callout format
   - [`html-exporter.ts`](../../src/export/html-exporter.ts): add case at both `:381` and `:578` switches
 
-- [ ] **3.9 — Handle `extension_block` in remaining dispatch sites**
+- [x] **3.9 — Handle `extension_block` in remaining dispatch sites**
   - [`conversation.ts:368`](../../src/chat/conversation.ts#L368): no code change needed — title generation already checks `params.role === "user"`, so `extension_block` is inherently excluded
   - [`runtime-context.ts:352`](../../src/extensions/runtime-context.ts#L352): the `loadConversation` filter already checks `m.role === "user" || m.role === "assistant"` — `extension_block` is excluded. Decide if this is correct or if extensions should see their own prior emissions.
   - [`compaction-manager.ts`](../../src/chat/compaction-manager.ts): handle `exclude_from_compaction` messages during compaction:

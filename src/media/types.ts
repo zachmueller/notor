@@ -18,6 +18,19 @@ export type ContentBlock =
 			media_type: "application/pdf";
 			data: string;
 			page_count?: number;
+	  }
+	| {
+			type: "custom_block";
+			/** Registered block kind → resolved to renderer via ChatBlockRegistry. */
+			kind: string;
+			/** Block-specific structured payload, opaque to core. */
+			data: Record<string, unknown>;
+			/** Rendered when renderer unavailable; wire fallback text. */
+			fallback_text?: string;
+			/** Pre-computed from toLLMText output length; avoids registry lookups in estimation. */
+			estimated_wire_tokens?: number;
+			/** True during blocking automation placeholder phase. */
+			loading?: boolean;
 	  };
 
 /**

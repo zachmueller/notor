@@ -93,6 +93,9 @@ function mapToBedrockBlock(block: MediaContentBlock): ContentBlock {
 					source: { bytes: Buffer.from(block.data, "base64") },
 				},
 			} as ContentBlock;
+		case "custom_block":
+			// custom_block is translated to wire text before reaching providers
+			return { text: block.fallback_text ?? "" } as ContentBlock;
 	}
 }
 

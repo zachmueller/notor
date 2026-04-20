@@ -127,6 +127,9 @@ function toOpenAIMessages(
 							case "document":
 								// Phase 3: PDF support — safety-net placeholder for non-native providers
 								return { type: "text", text: "[PDF document — not supported by this provider]" };
+							case "custom_block":
+								// custom_block is translated to wire text before reaching providers
+								return { type: "text", text: block.fallback_text ?? "" };
 						}
 					}),
 				});

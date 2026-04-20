@@ -19,12 +19,12 @@ describe("MessageRole exhaustiveness guard", () => {
 			"assistant",
 			"tool_call",
 			"tool_result",
+			"extension_block",
 		];
 
 		// Compile-time: the array element type must be assignable to MessageRole.
 		// If you remove a role from the union, TypeScript will flag stale entries above.
 		// Runtime: if the count here drifts from the union, the test fails as a reminder.
-		// Phase 3 (Task 3.3) adds "extension_block" — update count to 6 and add the entry above.
-		expect(knownRoles.length).toBe(5);
+		expect(knownRoles.length).toBe(6);
 	});
 });

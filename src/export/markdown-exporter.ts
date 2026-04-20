@@ -83,6 +83,8 @@ function renderMessage(msg: Message): string | null {
 			return renderToolCall(msg);
 		case "tool_result":
 			return renderToolResult(msg);
+		case "extension_block":
+			return renderExtensionBlock(msg);
 		default:
 			assertUnreachable(msg.role);
 	}
@@ -184,6 +186,20 @@ function renderToolResult(msg: Message): string {
 	}
 
 	return wrapCallout(calloutType, `${icon} Result: ${displayName}`, body, true);
+}
+
+function renderExtensionBlock(msg: Message): string | null {
+	const source = msg.source_extension ? ` · ${msg.source_extension}` : "";
+	const parts: string[] = [];
+	if (Array.isArray(msg.content)) {
+		for (const block of msg.content) {
+			if (block.type === "custom_block" && block.fallback_text) {
+				parts.push(block.fallback_text);
+			}
+		}
+	}
+	const body = parts.join("\n\n") || "*No content*";
+	return wrapCallout("info", `Extension block${source}`, body, true);
 }
 
 /**

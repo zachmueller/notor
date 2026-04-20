@@ -266,8 +266,13 @@ export async function performCompaction(
 				role: "user",
 				content: `[Tool result: ${msg.tool_result.tool_name} → ${msg.tool_result.success ? "success" : "error"}: ${resultStr.substring(0, 2000)}]`,
 			});
+		} else if (msg.role === "extension_block") {
+			if (msg.exclude_from_compaction) continue;
+			const text = getTextContent(msg.content);
+			if (text.trim()) {
+				chatMessages.push({ role: "user", content: text });
+			}
 		}
-		// extension_block: handled in Phase 3 (Task 3.6) — excluded or included based on exclude_from_compaction
 	}
 
 	// Add the summarization instruction as the final user message

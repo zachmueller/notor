@@ -72,10 +72,11 @@ export class ViewRouter {
 			case "system":
 				// system messages are not rendered
 				break;
-			default: {
-				// Phase 3 (Task 6.1) adds "extension_block" here.
+			case "extension_block":
+				// Phase 6.1: this.view?.renderExtensionBlock(message)
+				break;
+			default:
 				assertUnreachable(message.role);
-			}
 		}
 	}
 }
