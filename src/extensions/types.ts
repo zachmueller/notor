@@ -107,6 +107,8 @@ export interface UserToolDefinition {
 	isScaffold?: boolean;
 	/** Block kind declarations from the `blocks:` YAML section (optional). */
 	blocks?: BlockKindDeclaration[];
+	/** Feature group for gating (e.g. `"memory"` → gated by `memory_enabled`). */
+	featureGroup?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +179,8 @@ export interface UserAutomationDefinition {
 	 * On timeout, the automation is detached and the turn proceeds without the block.
 	 */
 	blockingTimeout?: number;
+	/** Feature group for gating (e.g. `"memory"` → gated by `memory_enabled`). */
+	featureGroup?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +247,8 @@ export interface UserBlockDefinition {
 	compiledFn: CompiledExtensionFn | null;
 	/** True when this block was loaded from a built-in scaffold. */
 	isScaffold?: boolean;
+	/** Feature group for gating (e.g. `"memory"` → gated by `memory_enabled`). */
+	featureGroup?: string;
 }
 
 // ---------------------------------------------------------------------------

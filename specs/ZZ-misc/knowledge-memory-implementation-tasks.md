@@ -158,7 +158,7 @@ Wire the library into the extension runtime so scaffolds can call `utils.memory.
 
 Moved from Phase 8 (was Task 8.4). Must be in place before Phases 3-6 register memory scaffolds, so the `notor-feature-group: memory` frontmatter on those scaffolds is actually parsed and gated by `memory_enabled`.
 
-- [ ] **2.5a — Implement `notor-feature-group` enablement in `ExtensionManager`**
+- [x] **2.5a — Implement `notor-feature-group` enablement in `ExtensionManager`**
   - **Gate at registration time during `reload()`, NOT at execution time.** Scaffolds whose feature group is disabled should be excluded from compilation and registration entirely — disabled tools don't appear in the LLM's tool list, disabled block kinds don't register in `ChatBlockRegistry`, and disabled automations aren't in the compiled map.
   - No runtime gate needed in `executeAutomation()` (~line 620) since disabled automations won't be in the compiled map
   - Initial mapping: `"memory"` → `memory_enabled`. Pattern is extensible for future feature groups.

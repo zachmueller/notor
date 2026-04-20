@@ -28,6 +28,16 @@ export interface BuiltinAutomationScaffold {
 	scaffoldContent: string;
 	/** Optional settings schema for per-automation settings (rendered in gear modal). */
 	settingsSchema?: SettingsFieldSchema[];
+	/** When true, awaited before the first LLM turn proceeds. */
+	blocking?: boolean;
+	/** Block kind to emit as a loading placeholder (only when `blocking` is true). */
+	blockingEmitKind?: string;
+	/** Timeout in milliseconds for blocking execution. */
+	blockingTimeout?: number;
+	/** Feature group for gating (e.g. `"memory"` → gated by `memory_enabled`). */
+	featureGroup?: string;
+	/** Cron expression for `on_schedule` trigger. */
+	schedule?: string;
 }
 
 /**

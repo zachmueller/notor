@@ -190,6 +190,10 @@ function parseToolFile(
 	const blocks = parseBlockKindDeclarations(yamlFenceData, filePath);
 	if (typeof blocks === "object" && "message" in blocks) return blocks;
 
+	const featureGroup = typeof frontmatter["notor-feature-group"] === "string"
+		? frontmatter["notor-feature-group"]
+		: undefined;
+
 	return {
 		filePath,
 		name,
@@ -199,6 +203,7 @@ function parseToolFile(
 		pathParams,
 		settingsSchema,
 		blocks: blocks.length > 0 ? blocks : undefined,
+		featureGroup,
 		rawCode: codeFence.code,
 		compiledFn: null,
 	};
@@ -274,6 +279,10 @@ function parseAutomationFile(
 	const blockingTimeout =
 		typeof rawBlockingTimeout === "number" ? rawBlockingTimeout : undefined;
 
+	const featureGroup = typeof frontmatter["notor-feature-group"] === "string"
+		? frontmatter["notor-feature-group"]
+		: undefined;
+
 	return {
 		filePath,
 		displayName,
@@ -286,6 +295,7 @@ function parseAutomationFile(
 		blocking: blocking || undefined,
 		blockingEmitKind,
 		blockingTimeout,
+		featureGroup,
 		rawCode: codeFence.code,
 		compiledFn: null,
 	};
@@ -327,6 +337,10 @@ function parseBlockFile(
 		return { filePath, message: "Missing required code fence (```ts, ```typescript, ```js, or ```javascript)" };
 	}
 
+	const featureGroup = typeof frontmatter["notor-feature-group"] === "string"
+		? frontmatter["notor-feature-group"]
+		: undefined;
+
 	return {
 		filePath,
 		kind,
@@ -335,6 +349,7 @@ function parseBlockFile(
 		excludeFromCompaction,
 		rendererExport,
 		toLLMTextExport,
+		featureGroup,
 		rawCode: codeFence.code,
 		compiledFn: null,
 	};

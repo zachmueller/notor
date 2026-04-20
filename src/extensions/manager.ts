@@ -201,6 +201,30 @@ export class ExtensionManager {
 	) {}
 
 	// -----------------------------------------------------------------------
+	// Feature group gating
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Feature-group → settings-toggle mapping.
+	 * Extensible: add new entries as new feature groups are introduced.
+	 */
+	private static readonly FEATURE_GROUP_TOGGLES: Record<string, string> = {
+		memory: "memory_enabled",
+	};
+
+	/**
+	 * Returns true if the given feature group is enabled (or if no group is set).
+	 * Used to gate extension registration at reload time.
+	 */
+	private isFeatureGroupEnabled(featureGroup?: string): boolean {
+		if (!featureGroup) return true;
+		const settingKey = ExtensionManager.FEATURE_GROUP_TOGGLES[featureGroup];
+		if (!settingKey) return true;
+		const settingsAny = this.plugin.settings as unknown as Record<string, unknown>;
+		return settingsAny[settingKey] === true;
+	}
+
+	// -----------------------------------------------------------------------
 	// Reload
 	// -----------------------------------------------------------------------
 
@@ -238,6 +262,7 @@ export class ExtensionManager {
 				"notor-description": scaffold.description,
 				"notor-mode": scaffold.mode,
 			};
+			if (scaffold.featureGroup) frontmatter["notor-feature-group"] = scaffold.featureGroup;
 			const resolvedToolContent = this.plugin.getTemplateRegistry().resolve(scaffold.scaffoldContent);
 			const parsed = parseExtensionFile(
 				resolvedToolContent,
@@ -255,6 +280,9 @@ export class ExtensionManager {
 				discovered.tools.push(toolDef);
 			}
 		}
+
+		// 1c. Filter tools by feature group
+		discovered.tools = discovered.tools.filter(t => this.isFeatureGroupEnabled(t.featureGroup));
 
 		// 2. Compile tools
 		const compiledTools = new Map<string, UserToolDefinition>();
@@ -291,6 +319,11 @@ export class ExtensionManager {
 				"notor-trigger": scaffold.trigger,
 				"notor-display-name": scaffold.displayName,
 			};
+			if (scaffold.blocking) frontmatter["notor-blocking"] = scaffold.blocking;
+			if (scaffold.blockingEmitKind) frontmatter["notor-blocking-emit-kind"] = scaffold.blockingEmitKind;
+			if (scaffold.blockingTimeout) frontmatter["notor-blocking-timeout"] = scaffold.blockingTimeout;
+			if (scaffold.featureGroup) frontmatter["notor-feature-group"] = scaffold.featureGroup;
+			if (scaffold.schedule) frontmatter["notor-schedule"] = scaffold.schedule;
 			const resolvedAutomationContent = this.plugin.getTemplateRegistry().resolve(scaffold.scaffoldContent);
 			const parsed = parseExtensionFile(
 				resolvedAutomationContent,
@@ -313,6 +346,9 @@ export class ExtensionManager {
 			}
 		}
 
+		// 2c. Filter automations by feature group
+		discovered.automations = discovered.automations.filter(a => this.isFeatureGroupEnabled(a.featureGroup));
+
 		// 3. Compile automations
 		const compiledAutomations = new Map<string, UserAutomationDefinition>();
 		for (const automation of discovered.automations) {
@@ -328,6 +364,9 @@ export class ExtensionManager {
 			automation.compiledFn = result.fn;
 			compiledAutomations.set(automation.filePath, automation);
 		}
+
+		// 3a. Filter blocks by feature group
+		discovered.blocks = discovered.blocks.filter(b => this.isFeatureGroupEnabled(b.featureGroup));
 
 		// 3b. Unregister previous block kinds
 		const chatBlockRegistry = this.plugin.getChatBlockRegistry();

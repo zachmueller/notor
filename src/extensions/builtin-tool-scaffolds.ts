@@ -27,6 +27,8 @@ export interface BuiltinToolScaffold {
 	 * YAML params fence, and TS code fence.
 	 */
 	scaffoldContent: string;
+	/** Feature group for gating (e.g. `"memory"` → gated by `memory_enabled`). */
+	featureGroup?: string;
 }
 
 // ---------------------------------------------------------------------------
