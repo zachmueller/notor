@@ -321,16 +321,16 @@ Allow user-authored block kinds in vault scaffolds and built-in block scaffolds.
 
 Enable blocking automations that emit blocks visible to the LLM on the first turn.
 
-- [ ] **8.1 — Add blocking fields to automation definition**
+- [x] **8.1 — Add blocking fields to automation definition**
   - In [`src/extensions/types.ts`](../../src/extensions/types.ts): add to `UserAutomationDefinition`:
     - `blocking?: boolean`
     - `blockingEmitKind?: string`
     - `blockingTimeout?: number`
 
-- [ ] **8.2 — Parse `notor-blocking` frontmatter**
+- [x] **8.2 — Parse `notor-blocking` frontmatter**
   - In [`src/extensions/parser.ts`](../../src/extensions/parser.ts): parse `notor-blocking` (boolean), `notor-blocking-emit-kind` (string), `notor-blocking-timeout` (number, default 10000ms) for automation files
 
-- [ ] **8.3 — Partition `dispatchOnConversationStart()` into blocking/non-blocking**
+- [x] **8.3 — Partition `dispatchOnConversationStart()` into blocking/non-blocking**
   - In [`src/hooks/hook-events.ts`](../../src/hooks/hook-events.ts) at [`dispatchOnConversationStart()`](../../src/hooks/hook-events.ts#L823-L866):
   - **Full async conversion required:** The function is currently synchronous (returns `void`) with async work inside a fire-and-forget IIFE. Changes needed:
     1. Change function signature to `async`, return type from `void` to `Promise<void>`
@@ -345,13 +345,13 @@ Enable blocking automations that emit blocks visible to the LLM on the first tur
   - Non-blocking automations: fire-and-forget as today
   - Add `emitLoadingBlock?: (kind: string) => Message` callback parameter to the function signature. The orchestrator wires this to `ConversationManager.addMessage()` at the call site — keeps `hook-events.ts` decoupled from the conversation system
 
-- [ ] **8.4 — `await` the dispatch in orchestrator + verify session snapshot**
+- [x] **8.4 — `await` the dispatch in orchestrator + verify session snapshot**
   - In [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts) at ~line 756 (call spans lines 756-763):
   - Change from bare `dispatchOnConversationStart(...)` to `await dispatchOnConversationStart(...)`
   - Safe because the function only blocks when there are blocking automations; otherwise the returned promise resolves immediately
   - **Verification sub-task:** Trace the code path and confirm: blocking automations emit `extension_block` via `addMessage()` on the display `ConversationManager` → session snapshot (created at ~lines 770-771) reads from the display manager's message list → snapshot includes the newly-emitted messages → LLM sees them in its context on the first turn
 
-- [ ] **8.5 — Loading → real block replacement**
+- [x] **8.5 — Loading → real block replacement**
   - Loading blocks are in-memory only (not persisted to JSONL — see Task 8.3, `transient: true`)
   - When blocking automation calls `chatBlocks.emit(kind, data)` (same kind as loading block):
     1. Find the loading message by stored message ID in `this.messages[]`

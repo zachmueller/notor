@@ -810,20 +810,30 @@ export interface ConversationStartContext {
 }
 
 /**
- * Dispatch all `on_conversation_start` automations non-blocking.
+ * Dispatch all `on_conversation_start` automations.
  *
  * Fires once per conversation after the first user message is submitted,
  * before the LLM call.
+ *
+ * Blocking automations (notor-blocking: true) are awaited sequentially before
+ * the function resolves, subject to per-automation timeout. Non-blocking
+ * automations are fired-and-forgotten as before.
  *
  * NOTE: Unlike other dispatchers, this handles only extension automations —
  * no shell hooks and no workflow-scoped override support. This is intentional:
  * `on_conversation_start` has no corresponding shell hook trigger, and workflow
  * overrides are not applicable to conversation-level events.
  */
-export function dispatchOnConversationStart(
+export async function dispatchOnConversationStart(
 	context: ConversationStartContext,
 	extensionAutomations?: LifecycleAutomationAccessors,
-): void {
+	opts?: {
+		/** Called before each blocking automation runs if it has a blockingEmitKind. */
+		emitLoadingBlock?: (kind: string) => { id: string };
+		/** Called when a blocking automation completes to signal the loading block is done. */
+		resolveLoadingBlock?: (messageId: string) => void;
+	},
+): Promise<void> {
 	const automations = extensionAutomations?.getForTrigger("on_conversation_start") ?? [];
 	if (automations.length === 0) {
 		log.debug("on_conversation_start: no automations registered, skipping", {
@@ -836,21 +846,62 @@ export function dispatchOnConversationStart(
 		count: automations.length,
 	});
 
-	void (async () => {
-		const automationCtx: Record<string, unknown> = {
-			hookEvent: "on_conversation_start",
-			timestamp: context.timestamp,
-			conversationId: context.conversationId,
-			firstMessage: context.firstMessage,
-		};
-		for (const automation of automations) {
+	const automationCtx: Record<string, unknown> = {
+		hookEvent: "on_conversation_start",
+		timestamp: context.timestamp,
+		conversationId: context.conversationId,
+		firstMessage: context.firstMessage,
+	};
+
+	const blockingAutomations = automations.filter((a) => a.blocking === true);
+	const nonBlockingAutomations = automations.filter((a) => !a.blocking);
+
+	// --- Blocking automations: awaited sequentially ---
+	for (const automation of blockingAutomations) {
+		const displayName = automation.displayName ?? automation.filePath;
+		const timeoutMs = automation.blockingTimeout ?? 10000;
+
+		let loadingMessageId: string | undefined;
+		if (automation.blockingEmitKind && opts?.emitLoadingBlock) {
 			try {
-				await extensionAutomations!.execute(automation, automationCtx);
+				const msg = opts.emitLoadingBlock(automation.blockingEmitKind);
+				loadingMessageId = msg.id;
 			} catch (e) {
-				const displayName = automation.displayName ?? automation.filePath;
+				log.error("Failed to emit loading block for blocking automation", {
+					automation: displayName,
+					kind: automation.blockingEmitKind,
+					error: String(e),
+				});
+			}
+		}
+
+		let timedOut = false;
+		try {
+			await Promise.race([
+				extensionAutomations!.execute(automation, automationCtx),
+				new Promise<never>((_, reject) =>
+					setTimeout(() => reject(new Error("timeout")), timeoutMs)
+				),
+			]);
+		} catch (e) {
+			const isTimeout = e instanceof Error && e.message === "timeout";
+			if (isTimeout) {
+				timedOut = true;
+				log.warn("Blocking on_conversation_start automation timed out — detaching", {
+					automation: displayName,
+					timeoutMs,
+				});
+				// Detach: let the automation continue in background without awaiting
+				void extensionAutomations!.execute(automation, automationCtx).catch((e2) => {
+					log.error("Detached blocking automation failed", {
+						automation: displayName,
+						error: String(e2),
+					});
+				});
+			} else {
 				const message = e instanceof Error ? e.message : String(e);
 				new Notice(`Automation error in ${displayName}: ${message}`);
-				log.error("User automation execution failed", {
+				log.error("Blocking on_conversation_start automation failed", {
 					automation: displayName,
 					trigger: "on_conversation_start",
 					error: String(e),
@@ -859,8 +910,44 @@ export function dispatchOnConversationStart(
 			}
 		}
 
-		log.info("on_conversation_start automations complete", {
-			count: automations.length,
-		});
-	})();
+		if (loadingMessageId && !timedOut && opts?.resolveLoadingBlock) {
+			try {
+				opts.resolveLoadingBlock(loadingMessageId);
+			} catch (e) {
+				log.error("Failed to resolve loading block after blocking automation", {
+					automation: displayName,
+					error: String(e),
+				});
+			}
+		}
+	}
+
+	// --- Non-blocking automations: fire-and-forget ---
+	if (nonBlockingAutomations.length > 0) {
+		void (async () => {
+			for (const automation of nonBlockingAutomations) {
+				try {
+					await extensionAutomations!.execute(automation, automationCtx);
+				} catch (e) {
+					const displayName = automation.displayName ?? automation.filePath;
+					const message = e instanceof Error ? e.message : String(e);
+					new Notice(`Automation error in ${displayName}: ${message}`);
+					log.error("User automation execution failed", {
+						automation: displayName,
+						trigger: "on_conversation_start",
+						error: String(e),
+						stack: e instanceof Error ? e.stack : undefined,
+					});
+				}
+			}
+			log.info("on_conversation_start non-blocking automations complete", {
+				count: nonBlockingAutomations.length,
+			});
+		})();
+	}
+
+	log.info("on_conversation_start dispatch complete", {
+		blocking: blockingAutomations.length,
+		nonBlocking: nonBlockingAutomations.length,
+	});
 }

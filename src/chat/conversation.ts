@@ -451,6 +451,43 @@ export class ConversationManager {
 	}
 
 	/**
+	 * Promote a transient (loading) message to a real persisted message.
+	 *
+	 * Overwrites the message's content in-place (preserving array position),
+	 * fires onMessageAdded for first-time JSONL persistence, then fires
+	 * onMessageUpdated to trigger a UI re-render at the existing DOM position.
+	 *
+	 * Used by chatBlocks.emit() when replacing a loading placeholder with real data.
+	 * Returns the updated message, or null if not found.
+	 */
+	promoteTransientMessage(
+		messageId: string,
+		newContent: Message["content"],
+		extraPatch?: Partial<Pick<Message, "exclude_from_compaction">>,
+	): Message | null {
+		const message = this.messages.find((m) => m.id === messageId);
+		if (!message) return null;
+
+		message.content = newContent;
+		if (extraPatch) Object.assign(message, extraPatch);
+
+		// Clear the loading flag on any custom_block entries
+		if (Array.isArray(message.content)) {
+			for (const block of message.content) {
+				if (block.type === "custom_block") {
+					block.loading = false;
+				}
+			}
+		}
+
+		// First-time persistence (was transient before)
+		void this.onMessageAdded?.(message);
+		// Re-render at existing DOM position
+		void this.onMessageUpdated?.(message);
+		return message;
+	}
+
+	/**
 	 * Replace all messages with a new set (used by compaction).
 	 *
 	 * This replaces the in-memory message array without triggering

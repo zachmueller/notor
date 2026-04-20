@@ -264,6 +264,16 @@ function parseAutomationFile(
 	const blocks = parseBlockKindDeclarations(yamlFenceData, filePath);
 	if (typeof blocks === "object" && "message" in blocks) return blocks;
 
+	// Parse blocking fields (only meaningful for on_conversation_start)
+	const blocking = frontmatter["notor-blocking"] === true;
+	const blockingEmitKind =
+		typeof frontmatter["notor-blocking-emit-kind"] === "string"
+			? frontmatter["notor-blocking-emit-kind"]
+			: undefined;
+	const rawBlockingTimeout = frontmatter["notor-blocking-timeout"];
+	const blockingTimeout =
+		typeof rawBlockingTimeout === "number" ? rawBlockingTimeout : undefined;
+
 	return {
 		filePath,
 		displayName,
@@ -273,6 +283,9 @@ function parseAutomationFile(
 		order,
 		settingsSchema,
 		blocks: blocks.length > 0 ? blocks : undefined,
+		blocking: blocking || undefined,
+		blockingEmitKind,
+		blockingTimeout,
 		rawCode: codeFence.code,
 		compiledFn: null,
 	};

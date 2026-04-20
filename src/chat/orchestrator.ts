@@ -746,7 +746,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 		this.view?.renderUserMessage(userMessage);
 
-		// Fire on_conversation_start trigger for the first user message (non-blocking).
+		// Fire on_conversation_start trigger for the first user message.
+		// Blocking automations are awaited here so their emitted blocks land in the
+		// session snapshot below. Non-blocking automations remain fire-and-forget.
 		// Detect "first": only non-hook user messages exist, and this is the first one.
 		{
 			const allMessages = this.conversationManager.getMessages();
@@ -759,13 +761,30 @@ export class ChatOrchestrator implements ToolSessionContext {
 				hasAccessors: !!this.extensionLifecycleAccessors,
 			});
 			if (userMessages.length === 1) {
-				dispatchOnConversationStart(
+				await dispatchOnConversationStart(
 					{
 						conversationId: conv.id,
 						firstMessage: content,
 						timestamp: new Date().toISOString(),
 					},
 					this.extensionLifecycleAccessors,
+					{
+						emitLoadingBlock: (kind) => {
+							return this.conversationManager.addMessage({
+								role: "extension_block",
+								content: [{ type: "custom_block", kind, data: {}, loading: true }],
+								source_extension: null,
+								exclude_from_compaction: true,
+								transient: true,
+							});
+						},
+						resolveLoadingBlock: (messageId) => {
+							// The loading block will be replaced via chatBlocks.emit() in the
+							// automation code (Task 8.5). This callback is a no-op signal that
+							// the automation completed normally (not timed out).
+							log.debug("on_conversation_start blocking automation resolved", { messageId });
+						},
+					},
 				);
 			}
 		}

@@ -162,6 +162,21 @@ export interface UserAutomationDefinition {
 	isScaffold?: boolean;
 	/** Block kind declarations from the `blocks:` YAML section (optional). */
 	blocks?: BlockKindDeclaration[];
+	/**
+	 * When true, this automation is awaited before the first LLM turn proceeds.
+	 * Only meaningful for `on_conversation_start` automations.
+	 */
+	blocking?: boolean;
+	/**
+	 * Block kind to emit as a loading placeholder before this automation runs.
+	 * Must be a registered block kind. Only used when `blocking === true`.
+	 */
+	blockingEmitKind?: string;
+	/**
+	 * Timeout in milliseconds for blocking execution. Defaults to 10000ms.
+	 * On timeout, the automation is detached and the turn proceeds without the block.
+	 */
+	blockingTimeout?: number;
 }
 
 // ---------------------------------------------------------------------------
