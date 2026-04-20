@@ -2342,9 +2342,15 @@ export class NotorChatView extends ItemView {
 						}
 					}
 				} else {
-					const { body } = renderCollapsibleCard(blockEl, {
-						headerText: `Unregistered block kind: ${b.kind}`,
-					});
+					// Show "disabled extension" placeholder when the source extension is
+					// explicitly disabled in settings; otherwise generic unregistered warning.
+					const sourceExt = message.source_extension;
+					const isExplicitlyDisabled = sourceExt != null &&
+						this.plugin.settings.tool_enabled[sourceExt] === false;
+					const headerText = isExplicitlyDisabled
+						? `[disabled extension: ${sourceExt}]`
+						: `Unregistered block kind: ${b.kind}`;
+					const { body } = renderCollapsibleCard(blockEl, { headerText });
 					if (b.fallback_text) {
 						body.createEl("p", { text: b.fallback_text, cls: "notor-extension-block-fallback" });
 					}

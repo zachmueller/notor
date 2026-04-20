@@ -61,6 +61,31 @@ import * as xmldom from "@xmldom/xmldom";
 import { Cron } from "croner";
 
 // ---------------------------------------------------------------------------
+// Extension block rate limiter (Phase 12)
+// ---------------------------------------------------------------------------
+
+/** Per-conversation emission timestamps for sliding-window rate limiting. */
+const emitTimestamps: Map<string, number[]> = new Map();
+
+/**
+ * Check whether emission is allowed for the given conversation under the
+ * configured rate limit. Prunes expired entries from the sliding window.
+ * Returns true when the emit should proceed, false when over limit.
+ */
+function checkRateLimit(conversationId: string, maxEmits: number, windowMs: number): boolean {
+	const now = Date.now();
+	const cutoff = now - windowMs;
+	const timestamps = (emitTimestamps.get(conversationId) ?? []).filter(t => t > cutoff);
+	if (timestamps.length >= maxEmits) {
+		emitTimestamps.set(conversationId, timestamps);
+		return false;
+	}
+	timestamps.push(now);
+	emitTimestamps.set(conversationId, timestamps);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // Utils builder
 // ---------------------------------------------------------------------------
 
@@ -673,8 +698,31 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 						return null;
 					}
 
+					// Gate: disabled extension cannot emit
+					// Tools are disabled via tool_enabled[name]; automations never execute when disabled
+					if (plugin.settings.tool_enabled[sourceExtensionName] === false) {
+						cbLog.warn("chatBlocks.emit: extension is disabled — no-op", { kind, extension: sourceExtensionName });
+						return null;
+					}
+
 					// Resolve target conversation ID
 					const targetConversationId = opts?.conversationId ?? conversationId;
+
+					// Rate limit: sliding window per conversation
+					if (targetConversationId) {
+						const maxEmits = plugin.settings.extension_block_max_emits_per_window;
+						const windowMs = plugin.settings.extension_block_rate_window_seconds * 1000;
+						if (!checkRateLimit(targetConversationId, maxEmits, windowMs)) {
+							cbLog.warn("chatBlocks.emit: rate limit exceeded", {
+								kind,
+								extension: sourceExtensionName,
+								conversationId: targetConversationId,
+								limit: maxEmits,
+								windowSeconds: plugin.settings.extension_block_rate_window_seconds,
+							});
+							return null;
+						}
+					}
 
 					// Compute estimated_wire_tokens via registry
 					const registry = plugin.getChatBlockRegistry();

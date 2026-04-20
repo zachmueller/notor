@@ -466,18 +466,18 @@ Enable extensions to run sub-agents for background data gathering.
 
 Safety controls for block emission.
 
-- [ ] **12.1 — Add rate-limit settings**
+- [x] **12.1 — Add rate-limit settings**
   - In [`src/settings/types.ts`](../../src/settings/types.ts):
   - Add `extension_block_max_emits_per_window: number` (default 10)
   - Add `extension_block_rate_window_seconds: number` (default 60)
 
-- [ ] **12.2 — Implement time-based sliding window rate limiter**
+- [x] **12.2 — Implement time-based sliding window rate limiter**
   - Per-conversation emission tracker (e.g., `Map<conversationId, number[]>` of timestamps)
   - On each `emit()` call: check count within the sliding window
   - If over limit: log warning, return `null`
   - Window slides automatically — after `rate_window_seconds`, old entries expire
 
-- [ ] **12.3 — Implement emission gate for disabled extensions**
+- [x] **12.3 — Implement emission gate for disabled extensions**
   - When the emitting extension is disabled (per existing enable semantics at [`manager.ts:495`](../../src/extensions/manager.ts#L495)):
     - Existing blocks in transcript render as `[disabled extension: {name}]` placeholders
     - New `emit()` calls no-op and return `null`

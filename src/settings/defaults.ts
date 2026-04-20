@@ -190,6 +190,10 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	// Settings UI state
 	settings_collapsed_sections: {},
 
+	// Phase 12: Extension block rate limiting
+	extension_block_max_emits_per_window: 10,
+	extension_block_rate_window_seconds: 60,
+
 	// Developer escape hatch
 	log_level: "error",
 

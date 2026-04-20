@@ -402,4 +402,14 @@ export interface NotorSettings {
 	 * Groups not present in this record use their hardcoded defaults.
 	 */
 	settings_collapsed_sections: Record<string, boolean>;
+
+	// -------------------------------------------------------------------
+	// Phase 12: Extension block rate limiting
+	// -------------------------------------------------------------------
+
+	/** Maximum extension block emissions per rate window per conversation (default 10). */
+	extension_block_max_emits_per_window: number;
+
+	/** Rate window duration in seconds (default 60). */
+	extension_block_rate_window_seconds: number;
 }
