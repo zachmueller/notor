@@ -29,6 +29,12 @@ import type { DocxImageData } from "../tools/docx-image-utils";
 import { graftIntoTemplate } from "../tools/docx-template-graft";
 import { estimateTokenCount } from "../utils/tokens";
 import type { Message } from "../types";
+import type { SubAgentResult } from "../chat/sub-agent-runner";
+import { SubAgentRunner } from "../chat/sub-agent-runner";
+import { ToolDispatcher } from "../chat/dispatcher";
+import { intersectToolConfig } from "../tool-config/merger";
+import { SUB_AGENT_PREAMBLE } from "../sub-agents/preamble";
+import { SUB_AGENT_ITERATION_CAP, SUB_AGENT_TOKEN_LIMIT } from "../sub-agents/constants";
 import {
 	parseCommentsXml,
 	parseCommentsExtendedXml,
@@ -185,6 +191,32 @@ export interface ExtensionUtils {
 			opts?: { fallbackText?: string; conversationId?: string },
 		) => Promise<Message | null>;
 	} | null;
+	/**
+	 * Spawn a sub-agent from extension code.
+	 *
+	 * Resolves the named profile, builds a restricted tool dispatcher (matching
+	 * the active orchestrator's effective config), and runs an isolated
+	 * `SubAgentRunner` conversation loop.
+	 *
+	 * When `detached: true`, the sub-agent runs in the background; the
+	 * `onComplete` callback is invoked when it finishes, and the returned
+	 * Promise resolves to `null` immediately. When `detached: false` (default),
+	 * the returned Promise resolves to the `SubAgentResult` when complete.
+	 *
+	 * Depth guard: max depth 1. Sub-agents cannot spawn further sub-agents
+	 * via this API.
+	 *
+	 * Returns `null` when the profile cannot be resolved, no active orchestrator
+	 * is available, or the depth guard fires.
+	 */
+	runSubAgent: (opts: {
+		profileName: string;
+		task: string;
+		detached?: boolean;
+		onComplete?: (result: SubAgentResult) => Promise<void> | void;
+		iterationCap?: number;
+		timeout?: number;
+	}) => Promise<SubAgentResult | null>;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */
@@ -422,6 +454,197 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				},
 				isFavorite: () => convManager.getActiveConversation()?.is_favorite ?? false,
 				setFavorite: (favorite: boolean) => { convManager.setFavorite(favorite); },
+			};
+		})(),
+
+		runSubAgent: (() => {
+			const rsaLog = logger("ext:runSubAgent");
+			let depth = 0;
+
+			return async (opts: {
+				profileName: string;
+				task: string;
+				detached?: boolean;
+				onComplete?: (result: SubAgentResult) => Promise<void> | void;
+				iterationCap?: number;
+				timeout?: number;
+			}): Promise<SubAgentResult | null> => {
+				// Depth guard: sub-agents spawned from extensions cannot spawn further sub-agents
+				if (depth >= 1) {
+					rsaLog.warn("runSubAgent depth limit exceeded (max 1)");
+					return null;
+				}
+
+				// Resolve profile
+				const subAgentManager = plugin.getSubAgentManager();
+				const toolRegistry = plugin.getToolRegistry();
+				const profile = await subAgentManager.getProfile(
+					opts.profileName,
+					toolRegistry.getNames(),
+				);
+				if (!profile) {
+					rsaLog.warn("runSubAgent: profile not found", { profileName: opts.profileName });
+					return null;
+				}
+
+				// Resolve provider and model
+				const providerRegistry = plugin.getProviderRegistry();
+				const providerType = profile.preferred_provider
+					? profile.preferred_provider as import("../types").LLMProviderType
+					: providerRegistry.getActiveType();
+				let provider;
+				try {
+					provider = providerRegistry.getProvider(providerType);
+				} catch {
+					rsaLog.warn("runSubAgent: provider not configured", { provider: providerType, profile: opts.profileName });
+					return null;
+				}
+
+				const providerConfig = providerRegistry.getConfig(providerType);
+				const model = profile.preferred_model ?? providerConfig?.model_id ?? "";
+				if (!model) {
+					rsaLog.warn("runSubAgent: no model resolved", { profile: opts.profileName });
+					return null;
+				}
+
+				// Build sub-agent tool dispatcher: intersect active orchestrator's effective
+				// config with the profile's tool configs.
+				const orchestrator = plugin.getActiveOrchestrator?.();
+				const parentEffectiveConfig = orchestrator?.getEffectiveToolConfig() ?? (() => {
+					// Build permissive default when no orchestrator (background context)
+					const tools: import("../tool-config/types").EffectiveToolConfig["tools"] = {};
+					for (const name of toolRegistry.getNames()) {
+						tools[name] = {
+							enabled: true,
+							auto_approve: plugin.settings.auto_approve[name] ?? false,
+							allowed_paths: [],
+							blocked_paths: [],
+						};
+					}
+					return { tools };
+				})();
+
+				const mergedSubAgentConfig: import("../tool-config/types").ParsedToolConfig = {
+					source: "subagent",
+					sourceFile: profile.system_prompt_path,
+					documentPosition: 0,
+					tools: {},
+				};
+				for (const config of profile.tool_configs) {
+					Object.assign(mergedSubAgentConfig.tools, config.tools);
+				}
+
+				const toolModes: Record<string, "read" | "write"> = {};
+				for (const tool of toolRegistry.getAll()) {
+					toolModes[tool.name] = tool.mode;
+				}
+				const intersectedConfig = intersectToolConfig(parentEffectiveConfig, mergedSubAgentConfig, toolModes);
+
+				const enabledToolNames = Object.entries(intersectedConfig.tools)
+					.filter(([, entry]) => entry.enabled)
+					.map(([name]) => name);
+
+				const subDispatcher = new ToolDispatcher();
+				for (const name of enabledToolNames) {
+					const tool = toolRegistry.get(name);
+					if (tool) subDispatcher.registerTool(tool);
+				}
+				subDispatcher.setEffectiveToolConfig(intersectedConfig);
+				subDispatcher.setSettings(plugin.settings);
+				if (plugin.vaultRootPath) {
+					subDispatcher.setVaultRootPath(plugin.vaultRootPath);
+				}
+
+				const toolDefinitions: import("../providers/provider").ToolDefinition[] = enabledToolNames
+					.map(name => toolRegistry.get(name))
+					.filter((t): t is NonNullable<typeof t> => t !== undefined)
+					.map(t => ({
+						name: t.name,
+						description: t.description,
+						input_schema: t.input_schema as import("../providers/provider").ToolDefinition["input_schema"],
+					}));
+
+				const systemPrompt = SUB_AGENT_PREAMBLE + "\n" + profile.prompt_content;
+
+				// Standalone abort controller — aborted on timeout or plugin unload
+				const controller = new AbortController();
+
+				// Timeout handling
+				const timeoutMs = opts.timeout ?? 60000;
+				let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+				const runAndCleanup = async (): Promise<SubAgentResult> => {
+					const runner = new SubAgentRunner({
+						provider,
+						model,
+						systemPrompt,
+						toolDefinitions,
+						dispatcher: subDispatcher,
+						parentAbortSignal: controller.signal,
+						iterationCap: opts.iterationCap ?? SUB_AGENT_ITERATION_CAP,
+						tokenLimit: SUB_AGENT_TOKEN_LIMIT,
+						mode: "act",
+					});
+
+					depth++;
+					timeoutHandle = setTimeout(() => {
+						rsaLog.warn("runSubAgent: timeout reached", { profile: opts.profileName, timeoutMs });
+						controller.abort();
+					}, timeoutMs);
+
+					try {
+						return await runner.run(opts.task);
+					} finally {
+						depth--;
+						if (timeoutHandle !== null) {
+							clearTimeout(timeoutHandle);
+							timeoutHandle = null;
+						}
+					}
+				};
+
+				if (opts.detached) {
+					// Register controller so plugin unload can abort it
+					plugin.registerDetachedSubAgent(controller);
+
+					// Fire and forget — invoke onComplete when done
+					(async () => {
+						try {
+							const result = await runAndCleanup();
+							rsaLog.debug("runSubAgent detached: complete", { profile: opts.profileName });
+							if (opts.onComplete) {
+								try {
+									await opts.onComplete(result);
+								} catch (e) {
+									rsaLog.error("runSubAgent detached: onComplete threw", { profile: opts.profileName, error: String(e) });
+								}
+							}
+						} catch (e) {
+							rsaLog.error("runSubAgent detached: runner threw", { profile: opts.profileName, error: String(e) });
+						} finally {
+							plugin.unregisterDetachedSubAgent(controller);
+						}
+					})();
+
+					return null;
+				}
+
+				// Synchronous (blocking) path — return result directly
+				try {
+					const result = await runAndCleanup();
+					rsaLog.debug("runSubAgent: complete", { profile: opts.profileName, stopReason: result.stopReason });
+					if (opts.onComplete) {
+						try {
+							await opts.onComplete(result);
+						} catch (e) {
+							rsaLog.error("runSubAgent: onComplete threw", { profile: opts.profileName, error: String(e) });
+						}
+					}
+					return result;
+				} catch (e) {
+					rsaLog.error("runSubAgent: runner threw", { profile: opts.profileName, error: String(e) });
+					return null;
+				}
 			};
 		})(),
 

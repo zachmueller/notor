@@ -424,7 +424,7 @@ When a tool's `ToolResult.content_blocks` contains a `custom_block`, the orchest
 
 Enable extensions to run sub-agents for background data gathering.
 
-- [ ] **11.1 — Add `runSubAgent` to `ExtensionUtils`**
+- [x] **11.1 — Add `runSubAgent` to `ExtensionUtils`**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts):
   - Signature:
     ```
@@ -441,7 +441,7 @@ Enable extensions to run sub-agents for background data gathering.
   - Resolves profile via `SubAgentManager` ([`sub-agents/manager.ts`](../../src/sub-agents/manager.ts))
   - Depth guard: max depth 1 (sub-agents spawned from extensions cannot spawn sub-agents)
 
-- [ ] **11.2 — Implement detached sub-agent lifecycle**
+- [x] **11.2 — Implement detached sub-agent lifecycle**
   - **Abort signal ownership:** Detached sub-agents create their own `AbortController`, linked to parent's signal (parent abort cascades to child, but child cleanup doesn't wait for parent)
   - **Active agent registry:** Plugin-level `Set<AbortController>` for running detached agents
     - Checked during `plugin.onunload()` — abort all active agents
@@ -449,12 +449,12 @@ Enable extensions to run sub-agents for background data gathering.
   - **`onComplete` error boundary:** Framework wraps every `onComplete` invocation in try-catch. On error: log with profile name, conversation ID, stack trace. Never re-throw. Registry cleanup in enclosing `finally` (not dependent on `onComplete` succeeding)
   - **Timeout:** Configurable per invocation (default 60s). `setTimeout` calls `controller.abort()`. Existing abort handling in `SubAgentRunner` takes care of the rest
 
-- [ ] **11.3 — Result delivery to inactive conversations**
+- [x] **11.3 — Result delivery to inactive conversations**
   - `onComplete` calls `utils.chatBlocks.emit` with explicit `conversationId`
   - If conversation view is no longer active: `chatBlocks.emit` uses `addMessageToConversation()` (Task 1.4) — message persists in JSONL but view doesn't live-update
   - Block appears on next conversation reload — acceptable expected behavior
 
-- [ ] **11.4 — Verify integration**
+- [x] **11.4 — Verify integration**
   - `addMessageToConversation()` works for non-active conversations (via explicit `conversationId`)
   - If the target IS the active conversation, `chatBlocks.emit` uses regular `addMessage()` (live rendering)
   - Depth guard does not block recursive resolver calls from within sub-agents

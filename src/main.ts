@@ -203,6 +203,25 @@ export default class NotorPlugin extends Plugin {
 	private _chatBlockRegistry?: ChatBlockRegistry;
 	private _settingTab?: NotorSettingTab;
 
+	/**
+	 * Active detached sub-agent registry.
+	 *
+	 * Tracks `AbortController`s for sub-agents spawned from extension code
+	 * via `utils.runSubAgent({ detached: true })`. On plugin unload, all
+	 * registered controllers are aborted so background sub-agents stop cleanly.
+	 */
+	private _detachedSubAgents = new Set<AbortController>();
+
+	/** Register a detached sub-agent controller so it is cleaned up on unload. */
+	registerDetachedSubAgent(controller: AbortController): void {
+		this._detachedSubAgents.add(controller);
+	}
+
+	/** Unregister a detached sub-agent controller (called in the finally block after completion). */
+	unregisterDetachedSubAgent(controller: AbortController): void {
+		this._detachedSubAgents.delete(controller);
+	}
+
 	// -----------------------------------------------------------------------
 	// Phase 4.1: MCP (ARCH-005)
 	// -----------------------------------------------------------------------
@@ -926,6 +945,13 @@ export default class NotorPlugin extends Plugin {
 		// Destroy TaskLaneQueue — rejects all pending waiters
 		this._taskLaneQueue?.destroy();
 		log.info("TaskLaneQueue destroyed");
+
+		// Abort all active detached sub-agents spawned via utils.runSubAgent({ detached: true })
+		for (const controller of this._detachedSubAgents) {
+			controller.abort();
+		}
+		this._detachedSubAgents.clear();
+		log.info("Detached sub-agents aborted");
 
 		// EXT-017: Destroy extension manager (unregisters tools + path params)
 		this._extensionManager?.destroy();
