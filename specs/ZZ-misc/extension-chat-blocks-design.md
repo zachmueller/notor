@@ -51,7 +51,7 @@ Add a fourth union member to `ContentBlock`:
   }
 ```
 
-**`getTextContent()` unchanged:** The existing implementation filters to `type === "text"` blocks — `custom_block` entries are silently excluded, returning `""` for arrays with only custom blocks. This is the correct behavior: search, title generation, and history display should not see fallback text. A separate `getWireText(content, registry)` function (introduced in §4) handles wire translation with `toLLMText` and `fallback_text` resolution.
+**`getTextContent()` unchanged:** The existing implementation filters to `type === "text"` blocks — `custom_block` entries are silently excluded, returning `""` for arrays with only custom blocks. This is the correct behavior: search, title generation, and history display should not see fallback text. A separate `getWireText(content, registry)` function (introduced in §4) handles wire translation with `toLLMText` and `fallback_text` resolution. Note: while `getTextContent()` needs no code change, adding `custom_block` to the `ContentBlock` union triggers exhaustiveness failures at other `ContentBlock.type` dispatch sites — see Task 2.4 in the implementation tasks.
 
 **Design decision:** Extend `ContentBlock` union rather than a parallel field — keeps the message content model unified (one array, one type) and flows through the existing content pipeline without special cases.
 
@@ -78,7 +78,7 @@ exclude_from_compaction?: boolean;      // Denormalized from ChatBlockDefinition
 - Rendered as a dedicated row between surrounding messages.
 - **Provider-wire translation:** configurable per block kind via `toLLMText`, resolved through a new `getWireText(content, registry)` function. When all blocks resolve to `null` (no `fallback_text`), the entire message is **dropped from wire** — zero LLM tokens. When non-null, emitted as `role: "user"` with tagged `toLLMText` output (e.g., `<notor-ext source="memory-search">…</notor-ext>`). When the registry has no definition for a `kind` (extension disabled/removed), falls back to `fallback_text ?? ""`; the message is only dropped when both the registry lookup AND `fallback_text` produce empty/null output.
 - **Registry injection:** The `ChatBlockRegistry` is set once at plugin init via a module-scoped `setChatBlockRegistry()` setter in `message-pipeline.ts`. The `toChatMessages()` signature does not change — it reads the registry from module state.
-- **Consecutive-role coalescing:** A **new** general pass added to the end of `toChatMessages()` merges consecutive same-role messages (after the existing tool-call coalescing phase). Addresses extension-block adjacency and a pre-existing hook-injection alternation bug (Bedrock's strict alternation requirement).
+- **Consecutive-role coalescing:** A **new Phase 4** pass in `toChatMessages()`, operating on the Phase 3 output array (`coalesced`), merges consecutive same-role messages. This is a separate post-processing loop — do NOT modify the existing Phase 3 tool-coalescing while-loop (lines 296-346). Addresses extension-block adjacency and a pre-existing hook-injection alternation bug (Bedrock's strict alternation requirement).
 
 **Why a new role:** Transcript/UI clarity (distinct from user/assistant), fits existing role-dispatch pattern in view-router, and the role is Notor-internal — providers never see it (translated at the pipeline boundary).
 
@@ -116,6 +116,7 @@ export interface ChatBlockRenderContext {
 
 export class ChatBlockRegistry {
   register(def: ChatBlockDefinition): void;
+  unregister(kind: string): void;
   get(kind: string): ChatBlockDefinition | undefined;
   has(kind: string): boolean;
   list(): ChatBlockDefinition[];
@@ -265,7 +266,7 @@ Wraps `SubAgentRunner`. Detached sub-agents create their own `AbortController` l
 | `src/utils/tokens.ts` | Add `custom_block` case to `estimateContentTokens()` |
 | `src/settings/types.ts` | Add rate-limit settings |
 | `src/context/compaction.ts` | Handle `extension_block` in compaction input assembly |
-| `src/chat/context.ts` | Treat `extension_block` like `user` in truncation walk-forward |
+| `src/chat/context.ts` | Add `m.role === "extension_block"` to the break condition at line 193: `if (m.role === "user" \|\| m.role === "extension_block") break;` |
 | `src/export/markdown-exporter.ts` | Add `extension_block` case |
 | `src/export/html-exporter.ts` | Add `extension_block` case |
 | `src/main.ts` | Instantiate `ChatBlockRegistry`; wire into view and pipeline |

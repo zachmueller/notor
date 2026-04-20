@@ -24,10 +24,23 @@ Standalone bug fix + new method. Ships independently, unblocks everything else. 
   - [`compaction-manager.ts:106-113`](../../src/chat/compaction-manager.ts#L106-L113) and [`compaction-manager.ts:205-212`](../../src/chat/compaction-manager.ts#L205-L212) currently only spread `role`, `content`, `tool_call`, `tool_result`
   - Fields currently dropped: `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`, `source_extension`, `exclude_from_compaction`, `input_tokens`, `output_tokens`, `cost_estimate`
   - Dropping `input_tokens`/`output_tokens`/`cost_estimate` is intentional (avoids inflating totals on re-append). Dropping the rest is a bug.
-  - Fix: destructure out system-managed fields and intentionally-dropped fields, spread the rest:
-    ```
-    const { id, conversation_id, timestamp, input_tokens, output_tokens, cost_estimate, ...rest } = pending;
-    convManager.addMessage(rest);
+  - Fix: explicitly list all fields to preserve in the `addMessage()` call (cannot destructure-spread a `Message` into the explicit params type — `truncated` and other system fields would cause a type error):
+    ```typescript
+    for (const pending of pendingMessages) {
+        convManager.addMessage({
+            role: pending.role,
+            content: pending.content,
+            tool_call: pending.tool_call ?? undefined,
+            tool_result: pending.tool_result ?? undefined,
+            is_hook_injection: pending.is_hook_injection,
+            is_workflow_message: pending.is_workflow_message,
+            hook_injections: pending.hook_injections ?? undefined,
+            attachments: pending.attachments ?? undefined,
+            auto_context: pending.auto_context ?? undefined,
+            source_extension: pending.source_extension ?? undefined,
+            exclude_from_compaction: pending.exclude_from_compaction,
+        });
+    }
     ```
   - This preserves `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`, `source_extension`, `exclude_from_compaction`
 
@@ -65,7 +78,7 @@ Standalone hardening. Add `assertUnreachable` (or `satisfies never`) guards to a
 - [ ] **2.2 — Audit and guard all role-dispatch sites**
   - Sites needing explicit `extension_block` case or default guard (per the plan's audit):
     - [ ] [`message-pipeline.ts:140`](../../src/chat/message-pipeline.ts#L140) — `toChatMessages()` switch (no default)
-    - [ ] [`view-router.ts:53`](../../src/chat/view-router.ts#L53) — `renderMessage()` switch (no default)
+    - [ ] [`view-router.ts:54`](../../src/chat/view-router.ts#L54) — `renderMessage()` switch (no default)
     - [ ] [`compaction.ts:237-269`](../../src/context/compaction.ts#L237-L269) — compaction input if/else-if chain (no else)
     - [ ] [`context.ts:190-198`](../../src/chat/context.ts#L190-L198) — truncation walk-forward
     - [ ] [`markdown-exporter.ts:74`](../../src/export/markdown-exporter.ts#L74) — switch with `default: null`
@@ -73,16 +86,16 @@ Standalone hardening. Add `assertUnreachable` (or `satisfies never`) guards to a
     - [ ] [`html-exporter.ts:578`](../../src/export/html-exporter.ts#L578) — sub-agent message switch
     - [ ] [`conversation.ts:368`](../../src/chat/conversation.ts#L368) — title generation `role === "user"` check
     - [ ] [`runtime-context.ts:352`](../../src/extensions/runtime-context.ts#L352) — recent-turns filter
-    - [ ] [`message-pipeline.ts:368`](../../src/chat/message-pipeline.ts#L368) — `extractPendingMessages()` backward search
   - Sites verified safe (document as comments or no-op cases):
     - Provider adapters (`anthropic-provider.ts:70`, `bedrock-provider.ts:106`, `openai-provider.ts:57`, `local-provider.ts:82`) — never see `extension_block` (translated in pipeline)
-    - `compaction.ts:76` — token estimation fallback path, safe for any role
-    - `context.ts:79` — same
-    - `message-pipeline.ts:231-246` — tool call coalescing, only walks `tool_call`/`tool_result`
-    - `message-pipeline.ts:300-331` — tool call repair, only inspects `tool_call`/`tool_result`/`assistant`
+    - `compaction.ts:84` — token estimation fallback path, safe for any role
+    - `context.ts:84` — same
+    - `message-pipeline.ts:291-342` — tool call coalescing, only walks `tool_call`/`tool_result`
+    - `message-pipeline.ts:225-289` — tool call repair, only inspects `tool_call`/`tool_result`/`assistant`
+    - `message-pipeline.ts:369` — `extractPendingMessages()` backward search — only checks for `assistant` role boundary; all other roles implicitly included in the pending slice via `messages.slice(i + 1)`
     - `history.ts:490`, `:547`, `:645` — correctly skips/includes based on explicit role checks
-    - `conversation.ts:201-204` — fork auto-pairing, `tool_call`/`tool_result` only
-    - `orchestrator.ts:748` — `on_conversation_start` trigger, explicit `user` check
+    - `conversation.ts:199-206` — fork auto-pairing, `tool_call`/`tool_result` only
+    - `orchestrator.ts:755` — `on_conversation_start` trigger, explicit `user` check
     - `orchestrator.ts:975`, `workflow-executor.ts:649` — system message existence check
 
 - [ ] **2.3 — Add `MessageRole` member count assertion test**
@@ -125,9 +138,9 @@ The core message shape. After this phase, extension blocks can be emitted (manua
     - Otherwise emit as `role: "user"` `ChatMessage` with the tagged text
   - **Phase 5 stub note:** Until Phase 5.5 wires in the real registry, `getWireText()` will have `registry = undefined` and will use `fallback_text` for all custom blocks. This is correct initial behavior.
 
-- [ ] **3.5 — Add NEW general consecutive-same-role coalescing pass**
-  - After the existing tool-call coalescing (ends at ~line 346 in the pipeline), add a **new** final pass before the function returns:
-  - Operates on the `coalesced` array and produces the final output
+- [ ] **3.5 — Add Phase 4 consecutive-same-role coalescing pass**
+  - Create a **separate** post-processing loop after Phase 3's tool-coalescing while-loop (which ends at line 346). Do NOT modify the Phase 3 while-loop (lines 296-346) — it handles `tool_call`/`tool_result` coalescing only.
+  - Operates on the `coalesced` array (output of Phase 3) and produces a `final` array, returned instead of `coalesced` (currently returned at line 356)
   - Iterate `ChatMessage[]`: when `messages[i].role === messages[i-1].role` and neither carries `tool_calls`/`tool_results`, merge `messages[i].content` into `messages[i-1].content` separated by `\n\n`
   - Addresses both extension-block adjacency AND a pre-existing hook-injection alternation bug (Bedrock's strict alternation requirement)
 
@@ -139,7 +152,8 @@ The core message shape. After this phase, extension blocks can be emitted (manua
 
 - [ ] **3.7 — Handle `extension_block` in truncation walk-forward**
   - In [`src/chat/context.ts:190-198`](../../src/chat/context.ts#L190-L198):
-  - Treat `extension_block` like `user` (it resolves to user on the wire) — don't orphan it as "non-user non-system"
+  - Add `extension_block` to the break condition at line 193: change `if (m.role === "user") break;` to `if (m.role === "user" || m.role === "extension_block") break;`
+  - This prevents blocking `on_conversation_start` blocks from being silently truncated when they appear before the first user message
 
 - [ ] **3.8 — Handle `extension_block` in exporters**
   - [`markdown-exporter.ts`](../../src/export/markdown-exporter.ts): add case rendering source label + fallback text in Obsidian callout format
@@ -309,10 +323,10 @@ Enable blocking automations that emit blocks visible to the LLM on the first tur
   - Need to pass `ConversationManager` (or an `emit` callback) into the function for loading block emission
 
 - [ ] **8.4 — `await` the dispatch in orchestrator + verify session snapshot**
-  - In [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts) at ~line 756:
+  - In [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts) at ~line 756 (call spans lines 756-763):
   - Change from bare `dispatchOnConversationStart(...)` to `await dispatchOnConversationStart(...)`
   - Safe because the function only blocks when there are blocking automations; otherwise the returned promise resolves immediately
-  - **Verification sub-task:** Trace the code path and confirm: blocking automations emit `extension_block` via `addMessage()` on the display `ConversationManager` → session snapshot (created at ~line 767+) reads from the display manager's message list → snapshot includes the newly-emitted messages → LLM sees them in its context on the first turn
+  - **Verification sub-task:** Trace the code path and confirm: blocking automations emit `extension_block` via `addMessage()` on the display `ConversationManager` → session snapshot (created at ~lines 770-771) reads from the display manager's message list → snapshot includes the newly-emitted messages → LLM sees them in its context on the first turn
 
 - [ ] **8.5 — Loading → real block replacement**
   - Loading blocks are in-memory only (not persisted to JSONL — see Task 8.3)
@@ -367,6 +381,7 @@ When a tool's `ToolResult.content_blocks` contains a `custom_block`, the orchest
   - In [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts), after tool results are added to conversation:
   - Check each `ToolResult.content_blocks` for entries where `type === "custom_block"`
   - **Validate each custom_block:** (a) check `kind` is registered — if not, log warning, proceed with fallback rendering, (b) verify `JSON.stringify(data)` succeeds (JSON-serializable), (c) reject if `JSON.stringify(data).length > 102400` with error log
+  - **Compute `estimated_wire_tokens`** at emission time via `registry.get(kind)?.toLLMText?.(data)` output length, matching the logic in `chatBlocks.emit()` (Task 9.1). Blocks with `toLLMText → null` get `estimated_wire_tokens: 0`.
   - If valid blocks found, collect them into a new `extension_block` message
 
 - [ ] **10.2 — Emit `extension_block` after tool_result group**
@@ -449,7 +464,8 @@ Safety controls for block emission.
 Comprehensive testing across all phases.
 
 - [ ] **13.1 — Unit tests: ContentBlock**
-  - `getTextContent` returns `fallback_text` for `custom_block`
+  - `getTextContent` returns `""` (empty string) for an array containing only `custom_block` entries
+  - `getTextContent` returns only `text` block content when array contains both `custom_block` and `text` blocks
   - JSON round-trip preserves the `custom_block` variant
 
 - [ ] **13.2 — Unit tests: Token estimation**
