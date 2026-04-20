@@ -72,4 +72,52 @@ describe("getTextContent", () => {
 		];
 		expect(getTextContent(blocks)).toBe("hello\nworld");
 	});
+
+	// 13.1 — custom_block filtering
+	it("returns empty string for array containing only custom_block entries", () => {
+		const blocks: ContentBlock[] = [
+			{ type: "custom_block", kind: "memory_recalled", data: { notes: ["a", "b"] } },
+			{ type: "custom_block", kind: "other_block", data: {} },
+		];
+		expect(getTextContent(blocks)).toBe("");
+	});
+
+	it("returns only text block content when array contains both custom_block and text blocks", () => {
+		const blocks: ContentBlock[] = [
+			{ type: "custom_block", kind: "memory_recalled", data: { text: "ignored" } },
+			{ type: "text", text: "visible text" },
+			{ type: "custom_block", kind: "other", data: {} },
+		];
+		expect(getTextContent(blocks)).toBe("visible text");
+	});
+});
+
+describe("custom_block JSON round-trip", () => {
+	it("preserves all fields through JSON serialization", () => {
+		const block: ContentBlock = {
+			type: "custom_block",
+			kind: "test_kind",
+			data: { key: "value", nested: { n: 42 } },
+			fallback_text: "fallback",
+			estimated_wire_tokens: 15,
+			loading: true,
+		};
+		const roundTripped = JSON.parse(JSON.stringify(block)) as ContentBlock;
+		expect(roundTripped).toEqual(block);
+	});
+
+	it("optional fields are absent when not set", () => {
+		const block: ContentBlock = {
+			type: "custom_block",
+			kind: "minimal",
+			data: {},
+		};
+		const roundTripped = JSON.parse(JSON.stringify(block)) as ContentBlock;
+		expect(roundTripped.type).toBe("custom_block");
+		if (roundTripped.type === "custom_block") {
+			expect(roundTripped.fallback_text).toBeUndefined();
+			expect(roundTripped.estimated_wire_tokens).toBeUndefined();
+			expect(roundTripped.loading).toBeUndefined();
+		}
+	});
 });

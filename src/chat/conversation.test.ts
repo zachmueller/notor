@@ -536,3 +536,133 @@ describe("ConversationManager.addTokens()", () => {
 		expect(conv.total_output_tokens).toBe(1220); // 1200 from addTokens + 20 from message
 	});
 });
+
+// ---------------------------------------------------------------------------
+// addMessage() — extension block fields — 13.6
+// ---------------------------------------------------------------------------
+
+describe("ConversationManager.addMessage() — extension block fields", () => {
+	let mgr: ConversationManager;
+
+	beforeEach(() => {
+		mgr = createManager();
+		mgr.createConversation("openai", "gpt-4", "act");
+	});
+
+	it("sets source_extension and exclude_from_compaction from params", () => {
+		const msg = mgr.addMessage({
+			role: "extension_block",
+			content: [{ type: "custom_block", kind: "test", data: {} }],
+			source_extension: "memory-ext",
+			exclude_from_compaction: true,
+		});
+		expect(msg.source_extension).toBe("memory-ext");
+		expect(msg.exclude_from_compaction).toBe(true);
+	});
+
+	it("defaults source_extension to null and exclude_from_compaction to false", () => {
+		const msg = mgr.addMessage({ role: "user", content: "Hello" });
+		expect(msg.source_extension).toBeNull();
+		expect(msg.exclude_from_compaction).toBe(false);
+	});
+
+	it("transient: true skips onMessageAdded (no JSONL persistence), but message is in-memory", () => {
+		const onAdded = vi.fn();
+		mgr.setOnMessageAdded(onAdded);
+
+		const msg = mgr.addMessage({
+			role: "extension_block",
+			content: [{ type: "custom_block", kind: "loading_block", data: {}, loading: true }],
+			transient: true,
+		});
+
+		expect(onAdded).not.toHaveBeenCalled();
+		// Message IS in the in-memory array
+		const found = mgr.getMessages().find((m) => m.id === msg.id);
+		expect(found).toBeDefined();
+	});
+
+	it("without transient, onMessageAdded fires normally", () => {
+		const onAdded = vi.fn();
+		mgr.setOnMessageAdded(onAdded);
+
+		mgr.addMessage({ role: "user", content: "Hello" });
+		expect(onAdded).toHaveBeenCalledTimes(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// updateMessage() — 13.6
+// ---------------------------------------------------------------------------
+
+describe("ConversationManager.updateMessage()", () => {
+	let mgr: ConversationManager;
+
+	beforeEach(() => {
+		mgr = createManager();
+		mgr.createConversation("openai", "gpt-4", "act");
+	});
+
+	it("patches content in-memory and fires onMessageUpdated", () => {
+		const onUpdated = vi.fn();
+		mgr.setOnMessageUpdated(onUpdated);
+
+		const msg = mgr.addMessage({
+			role: "extension_block",
+			content: [{ type: "custom_block", kind: "test", data: {}, loading: true }],
+			transient: true,
+		});
+
+		const newContent = [{ type: "custom_block" as const, kind: "test", data: { result: "done" }, loading: false }];
+		const updated = mgr.updateMessage(msg.id, { content: newContent });
+
+		expect(updated).not.toBeNull();
+		expect(updated!.content).toEqual(newContent);
+		expect(onUpdated).toHaveBeenCalledWith(updated);
+	});
+
+	it("does not write to JSONL (onMessageAdded not fired)", () => {
+		const onAdded = vi.fn();
+		mgr.setOnMessageAdded(onAdded);
+
+		const msg = mgr.addMessage({ role: "user", content: "Hello", transient: true });
+		onAdded.mockClear();
+
+		mgr.updateMessage(msg.id, { content: "Updated" });
+		expect(onAdded).not.toHaveBeenCalled();
+	});
+
+	it("returns null for unknown message ID", () => {
+		const result = mgr.updateMessage("nonexistent-id", { content: "x" });
+		expect(result).toBeNull();
+	});
+
+	it("onMessageUpdated not called when ID not found", () => {
+		const onUpdated = vi.fn();
+		mgr.setOnMessageUpdated(onUpdated);
+
+		mgr.updateMessage("bad-id", { content: "x" });
+		expect(onUpdated).not.toHaveBeenCalled();
+	});
+
+	it("loading → real block transition preserves position in messages array", () => {
+		// Add a loading block first, then another message, then update the loading block
+		const loadingMsg = mgr.addMessage({
+			role: "extension_block",
+			content: [{ type: "custom_block", kind: "test", data: {}, loading: true }],
+			transient: true,
+		});
+		const afterMsg = mgr.addMessage({ role: "user", content: "After" });
+
+		const realContent = [{ type: "custom_block" as const, kind: "test", data: { done: true }, loading: false }];
+		mgr.updateMessage(loadingMsg.id, { content: realContent });
+
+		const messages = mgr.getMessages();
+		const loadingIdx = messages.findIndex((m) => m.id === loadingMsg.id);
+		const afterIdx = messages.findIndex((m) => m.id === afterMsg.id);
+		// Loading block must still be BEFORE the message that was added after it
+		expect(loadingIdx).toBeLessThan(afterIdx);
+		// Content was updated in place
+		expect(messages[loadingIdx]!.content).toEqual(realContent);
+	});
+});

@@ -488,21 +488,24 @@ Safety controls for block emission.
 
 Comprehensive testing across all phases.
 
-- [ ] **13.1 — Unit tests: ContentBlock**
+- [x] **13.1 — Unit tests: ContentBlock**
   - `getTextContent` returns `""` (empty string) for an array containing only `custom_block` entries
   - `getTextContent` returns only `text` block content when array contains both `custom_block` and `text` blocks
   - JSON round-trip preserves the `custom_block` variant
+  - Tests in [`src/media/types.test.ts`](../../src/media/types.test.ts)
 
-- [ ] **13.2 — Unit tests: Token estimation**
+- [x] **13.2 — Unit tests: Token estimation**
   - `custom_block` with `estimated_wire_tokens: 0` → returns 0
   - With `estimated_wire_tokens: 150` → returns 150
   - Without `estimated_wire_tokens` but with `fallback_text` → estimate from fallback
   - Without either → `JSON.stringify(data)` estimate
+  - Tests in [`src/utils/tokens.test.ts`](../../src/utils/tokens.test.ts)
 
-- [ ] **13.3 — Unit tests: Registry**
+- [x] **13.3 — Unit tests: Registry**
   - Register/get/list; duplicate kind logs and keeps first; unregister on extension reload
+  - Tests in [`src/ui/chat-blocks/registry.test.ts`](../../src/ui/chat-blocks/registry.test.ts)
 
-- [ ] **13.4 — Unit tests: Wire translation**
+- [x] **13.4 — Unit tests: Wire translation**
   - `toChatMessages()` with `extension_block` → `user`-role `ChatMessage` with tagged `toLLMText` output
   - All blocks null + no fallback → entire message dropped (zero tokens)
   - Coalescing: extension_block + user message → single merged user message on wire
@@ -510,14 +513,16 @@ Comprehensive testing across all phases.
   - Coalescing: two consecutive extension_blocks → merged
   - Coalescing: merged user + extension_block text preserves `<notor-ext>` tags and user content as separate `\n\n`-delimited sections
   - Coalescing: user message with `ContentBlock[]` content (e.g., image) + extension_block with string content → normalized to `ContentBlock[]` array
+  - Tests in [`src/chat/message-pipeline.test.ts`](../../src/chat/message-pipeline.test.ts)
 
-- [ ] **13.5 — Unit tests: Compaction**
+- [x] **13.5 — Unit tests: Compaction**
   - Block with `excludeFromCompaction: true` → skipped from compaction input
   - Block with `excludeFromCompaction: true` → preserved verbatim after compaction (re-appended between summary and pending messages)
   - Block without flag → compacted normally
   - Re-appended messages preserve `source_extension`, `exclude_from_compaction`, `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`
+  - Tests in [`src/chat/compaction.test.ts`](../../src/chat/compaction.test.ts)
 
-- [ ] **13.6 — Unit tests: `addMessage()` fields + `updateMessage()` + `addMessageToConversation()`**
+- [x] **13.6 — Unit tests: `addMessage()` fields + `updateMessage()` + `addMessageToConversation()`**
   - `addMessage()` with `source_extension` and `exclude_from_compaction` → message has those fields set
   - `addMessage()` with `transient: true` → message added to in-memory array, `onMessageAdded` NOT fired (no JSONL persistence)
   - `addMessage()` without `transient` → `onMessageAdded` fires normally
@@ -526,10 +531,12 @@ Comprehensive testing across all phases.
   - Loading → real transition: loading block mutated in place (content overwritten, `loading` flipped to false), `onMessageAdded` fires (first persistence), `onMessageUpdated` fires (re-render), message position in array preserved
   - `HistoryManager.addMessageToConversation` with valid conversation ID → resolves filename via `listConversations()`, message persisted to JSONL
   - `HistoryManager.addMessageToConversation` with invalid conversation ID → returns null
+  - Tests in [`src/chat/conversation.test.ts`](../../src/chat/conversation.test.ts) (addMessage/updateMessage); addMessageToConversation requires vault integration — deferred to E2E
 
-- [ ] **13.7 — Unit tests: Rate limit**
+- [x] **13.7 — Unit tests: Rate limit**
   - 11 emits in 60 seconds → 10 succeed, 11th returns null with warning
   - After window slides → emits succeed again
+  - Extracted `checkRateLimit` to [`src/extensions/rate-limiter.ts`](../../src/extensions/rate-limiter.ts); tests in [`src/extensions/rate-limiter.test.ts`](../../src/extensions/rate-limiter.test.ts)
 
 - [ ] **13.8 — E2E tests: Block rendering**
   - Author a minimal block extension in vault; emit from `pre_send`; confirm it renders as its own row
