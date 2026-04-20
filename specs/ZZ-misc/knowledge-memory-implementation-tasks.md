@@ -180,7 +180,7 @@ Register the four memory sub-agent profiles following the existing pattern in [`
 
 **Note:** Memory sub-agent profiles express `notor-preferred-preset` and `notor-iteration-cap` as YAML frontmatter keys within the `systemPromptContent` Markdown string. No changes to the `BuiltinSubAgentDefinition` TypeScript interface are needed — `buildProfileFromBuiltin()` (extended in Task 0.3) handles extraction from the raw frontmatter and maps them onto the `SubAgentProfile` output type.
 
-- [ ] **3.1 — Add `memory-search` profile to `BUILTIN_SUBAGENT_PROFILES`**
+- [x] **3.1 — Add `memory-search` profile to `BUILTIN_SUBAGENT_PROFILES`**
   - In [`src/sub-agents/builtin-profiles.ts`](../../src/sub-agents/builtin-profiles.ts) (~line 196-201):
   - Define `MEMORY_SEARCH: BuiltinSubAgentDefinition` with:
     - `name: "memory-search"`
@@ -189,7 +189,7 @@ Register the four memory sub-agent profiles following the existing pattern in [`
     - Frontmatter in system prompt: `notor-description`, `notor-preferred-preset: tiny`, `notor-iteration-cap: 6`
   - Add to the `BUILTIN_SUBAGENT_PROFILES` Map
 
-- [ ] **3.2 — Add `memory-resolver` profile to `BUILTIN_SUBAGENT_PROFILES`**
+- [x] **3.2 — Add `memory-resolver` profile to `BUILTIN_SUBAGENT_PROFILES`**
   - Define `MEMORY_RESOLVER: BuiltinSubAgentDefinition` with:
     - `name: "memory-resolver"`
     - System prompt from design spec §7h
@@ -197,7 +197,7 @@ Register the four memory sub-agent profiles following the existing pattern in [`
     - Frontmatter: `notor-preferred-preset: tiny`, `notor-iteration-cap: 6`
   - Add to the Map
 
-- [ ] **3.3 — Add `memory-capture` profile to `BUILTIN_SUBAGENT_PROFILES`**
+- [x] **3.3 — Add `memory-capture` profile to `BUILTIN_SUBAGENT_PROFILES`**
   - Define `MEMORY_CAPTURE: BuiltinSubAgentDefinition` with:
     - `name: "memory-capture"`
     - System prompt from design spec §7i
@@ -205,7 +205,7 @@ Register the four memory sub-agent profiles following the existing pattern in [`
     - Frontmatter: `notor-preferred-preset: tiny`, `notor-iteration-cap: 5`
   - Add to the Map
 
-- [ ] **3.4 — Add `memory-dream` profile to `BUILTIN_SUBAGENT_PROFILES`**
+- [x] **3.4 — Add `memory-dream` profile to `BUILTIN_SUBAGENT_PROFILES`**
   - Define `MEMORY_DREAM: BuiltinSubAgentDefinition` with:
     - `name: "memory-dream"`
     - System prompt from design spec §7j (adapted from nanobot's dream_phase1.md)
@@ -213,7 +213,7 @@ Register the four memory sub-agent profiles following the existing pattern in [`
     - Frontmatter: `notor-preferred-preset: large`, `notor-iteration-cap: 16`
   - Add to the Map
 
-- [ ] **3.5 — Verify profile loading and tool scoping**
+- [x] **3.5 — Verify profile loading and tool scoping**
   - Each profile loads without error via `SubAgentManager.discoverProfiles()`
   - `memory-search` and `memory-resolver` cannot read outside `{notor_dir}/memory/` (path enforcer at [`path-enforcer.ts:44-73`](../../src/tool-config/path-enforcer.ts#L44-L73) blocks attempts)
   - `memory-capture` and `memory-dream` have broader tool access but still vault-scoped

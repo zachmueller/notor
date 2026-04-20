@@ -496,21 +496,165 @@ search_vault:
 		});
 
 		it("built-in profiles parse preferred_preset and iteration_cap from raw frontmatter", async () => {
-			// Verify the buildProfileFromBuiltin path handles extractFrontmatterNumberField.
-			// Built-in profiles with these fields should parse correctly even without metadata cache.
 			const files = new Map<string, MockFolder | MockFile>();
 			const vault = buildMockVault(files);
 			const cache = buildMockMetadataCache(files);
 
 			const profiles = await discoverSubAgentProfiles(vault, cache, NOTOR_DIR, KNOWN_TOOLS, parseYAML);
 
-			// Existing built-in profiles shouldn't have preset/iteration_cap
-			for (const profile of profiles) {
-				if (profile.is_builtin) {
-					expect(profile.preferred_preset).toBeNull();
-					expect(profile.iteration_cap).toBeNull();
+			// Non-memory built-in profiles shouldn't have preset/iteration_cap
+			const nonMemoryBuiltins = profiles.filter(
+				p => p.is_builtin && !p.name.startsWith("memory-"),
+			);
+			for (const profile of nonMemoryBuiltins) {
+				expect(profile.preferred_preset).toBeNull();
+				expect(profile.iteration_cap).toBeNull();
+			}
+
+			// Memory built-in profiles should have preset and iteration_cap
+			const memorySearch = profiles.find(p => p.name === "memory-search");
+			expect(memorySearch).toBeDefined();
+			expect(memorySearch!.preferred_preset).toBe("tiny");
+			expect(memorySearch!.iteration_cap).toBe(6);
+
+			const memoryResolver = profiles.find(p => p.name === "memory-resolver");
+			expect(memoryResolver).toBeDefined();
+			expect(memoryResolver!.preferred_preset).toBe("tiny");
+			expect(memoryResolver!.iteration_cap).toBe(6);
+
+			const memoryCapture = profiles.find(p => p.name === "memory-capture");
+			expect(memoryCapture).toBeDefined();
+			expect(memoryCapture!.preferred_preset).toBe("tiny");
+			expect(memoryCapture!.iteration_cap).toBe(5);
+
+			const memoryDream = profiles.find(p => p.name === "memory-dream");
+			expect(memoryDream).toBeDefined();
+			expect(memoryDream!.preferred_preset).toBe("large");
+			expect(memoryDream!.iteration_cap).toBe(16);
+		});
+
+		it("memory-search profile loads with correct tool scoping", async () => {
+			const files = new Map<string, MockFolder | MockFile>();
+			const vault = buildMockVault(files);
+			const cache = buildMockMetadataCache(files);
+
+			const profiles = await discoverSubAgentProfiles(vault, cache, NOTOR_DIR, KNOWN_TOOLS, parseYAML);
+			const profile = profiles.find(p => p.name === "memory-search");
+
+			expect(profile).toBeDefined();
+			expect(profile!.is_builtin).toBe(true);
+			expect(profile!.tool_configs).toHaveLength(1);
+			const tools = profile!.tool_configs[0]!.tools;
+			expect(tools.read_note).toBeDefined();
+			expect(tools.search_vault).toBeDefined();
+			expect(tools.read_note!.allowed_paths).toEqual(["{notor_dir}/memory"]);
+			expect(tools.search_vault!.allowed_paths).toEqual(["{notor_dir}/memory"]);
+			// Should not have broader vault tools
+			expect(tools.list_vault).toBeUndefined();
+			expect(tools.get_backlinks).toBeUndefined();
+		});
+
+		it("memory-resolver profile loads with correct tool scoping", async () => {
+			const files = new Map<string, MockFolder | MockFile>();
+			const vault = buildMockVault(files);
+			const cache = buildMockMetadataCache(files);
+
+			const profiles = await discoverSubAgentProfiles(vault, cache, NOTOR_DIR, KNOWN_TOOLS, parseYAML);
+			const profile = profiles.find(p => p.name === "memory-resolver");
+
+			expect(profile).toBeDefined();
+			expect(profile!.is_builtin).toBe(true);
+			expect(profile!.tool_configs).toHaveLength(1);
+			const tools = profile!.tool_configs[0]!.tools;
+			expect(tools.read_note).toBeDefined();
+			expect(tools.search_vault).toBeDefined();
+			expect(tools.read_note!.allowed_paths).toEqual(["{notor_dir}/memory"]);
+			expect(tools.search_vault!.allowed_paths).toEqual(["{notor_dir}/memory"]);
+			expect(tools.list_vault).toBeUndefined();
+			expect(tools.get_backlinks).toBeUndefined();
+		});
+
+		it("memory-capture profile loads with broader tool access", async () => {
+			const files = new Map<string, MockFolder | MockFile>();
+			const vault = buildMockVault(files);
+			const cache = buildMockMetadataCache(files);
+
+			const profiles = await discoverSubAgentProfiles(vault, cache, NOTOR_DIR, KNOWN_TOOLS, parseYAML);
+			const profile = profiles.find(p => p.name === "memory-capture");
+
+			expect(profile).toBeDefined();
+			expect(profile!.is_builtin).toBe(true);
+			expect(profile!.tool_configs).toHaveLength(1);
+			const tools = profile!.tool_configs[0]!.tools;
+			expect(tools.read_note).toEqual({ enabled: true });
+			expect(tools.search_vault).toEqual({ enabled: true });
+			expect(tools.list_vault).toEqual({ enabled: true });
+			expect(tools.read_frontmatter).toEqual({ enabled: true });
+			expect(tools.get_backlinks).toEqual({ enabled: true });
+			expect(tools.get_outlinks).toEqual({ enabled: true });
+		});
+
+		it("memory-dream profile loads with broader tool access and large preset", async () => {
+			const files = new Map<string, MockFolder | MockFile>();
+			const vault = buildMockVault(files);
+			const cache = buildMockMetadataCache(files);
+
+			const profiles = await discoverSubAgentProfiles(vault, cache, NOTOR_DIR, KNOWN_TOOLS, parseYAML);
+			const profile = profiles.find(p => p.name === "memory-dream");
+
+			expect(profile).toBeDefined();
+			expect(profile!.is_builtin).toBe(true);
+			expect(profile!.preferred_preset).toBe("large");
+			expect(profile!.iteration_cap).toBe(16);
+			expect(profile!.tool_configs).toHaveLength(1);
+			const tools = profile!.tool_configs[0]!.tools;
+			expect(tools.read_note).toEqual({ enabled: true });
+			expect(tools.search_vault).toEqual({ enabled: true });
+			expect(tools.list_vault).toEqual({ enabled: true });
+			expect(tools.read_frontmatter).toEqual({ enabled: true });
+			expect(tools.get_backlinks).toEqual({ enabled: true });
+			expect(tools.get_outlinks).toEqual({ enabled: true });
+		});
+
+		it("memory-search and memory-resolver have path-restricted tool configs", async () => {
+			const files = new Map<string, MockFolder | MockFile>();
+			const vault = buildMockVault(files);
+			const cache = buildMockMetadataCache(files);
+
+			const profiles = await discoverSubAgentProfiles(vault, cache, NOTOR_DIR, KNOWN_TOOLS, parseYAML);
+
+			for (const name of ["memory-search", "memory-resolver"]) {
+				const profile = profiles.find(p => p.name === name);
+				expect(profile).toBeDefined();
+				const tools = profile!.tool_configs[0]!.tools;
+				for (const toolName of Object.keys(tools)) {
+					const config = tools[toolName]!;
+					if (config.allowed_paths) {
+						expect(config.allowed_paths).toEqual(["{notor_dir}/memory"]);
+					}
 				}
 			}
+		});
+
+		it("{notor_dir} placeholders in memory profiles are resolved by template registry", async () => {
+			const files = new Map<string, MockFolder | MockFile>();
+			const vault = buildMockVault(files);
+			const cache = buildMockMetadataCache(files);
+
+			const mockRegistry = {
+				resolve: (content: string) => content.replace(/\{notor_dir\}/g, "my-vault/notor"),
+			} as import("../template-vars").TemplateVariableRegistry;
+
+			const profiles = await discoverSubAgentProfiles(vault, cache, NOTOR_DIR, KNOWN_TOOLS, parseYAML, mockRegistry);
+
+			const memSearch = profiles.find(p => p.name === "memory-search");
+			expect(memSearch).toBeDefined();
+			expect(memSearch!.prompt_content).toContain("my-vault/notor/memory/");
+			expect(memSearch!.prompt_content).not.toContain("{notor_dir}");
+			// Tool configs are extracted after template resolution
+			const tools = memSearch!.tool_configs[0]!.tools;
+			expect(tools.read_note!.allowed_paths).toEqual(["my-vault/notor/memory"]);
+			expect(tools.search_vault!.allowed_paths).toEqual(["my-vault/notor/memory"]);
 		});
 
 		it("built-in profiles have descriptions", async () => {
