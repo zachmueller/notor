@@ -68,6 +68,27 @@ import { Cron } from "croner";
 import { checkRateLimit } from "./rate-limiter";
 
 // ---------------------------------------------------------------------------
+// Memory library imports (Phase 1)
+// ---------------------------------------------------------------------------
+
+import type { MemoryNote } from "../memory/note-format";
+import {
+	serializeNote,
+	parseNote,
+	slugifyTitle,
+	computeFingerprint,
+	assertMemoryPath,
+} from "../memory/note-format";
+import {
+	readDedupCache,
+	writeDedupEntry,
+	readDreamCursor,
+	advanceDreamCursor,
+} from "../memory/dedup-cache";
+import { resolveConcept } from "../memory/concept-resolver";
+import type { ResolveConceptResult } from "../memory/concept-resolver";
+
+// ---------------------------------------------------------------------------
 // Utils builder
 // ---------------------------------------------------------------------------
 
@@ -180,6 +201,16 @@ export interface ExtensionUtils {
 		search: (query: string) => Promise<ChatHistorySummary[]>;
 		loadConversation: (conversationId: string) => Promise<ChatHistoryConversation | null>;
 		listRecent: (limit?: number) => Promise<ChatHistorySummary[]>;
+		/**
+		 * Load the raw `Message[]` for a conversation — all roles, all fields
+		 * (including `is_hook_injection`, `ContentBlock[]` content, tool calls,
+		 * extension blocks).
+		 *
+		 * When the conversation has an active live session, reads from the
+		 * in-memory `ConversationManager`. Falls back to persisted JSONL for
+		 * inactive conversations. Returns `null` if not found.
+		 */
+		loadFull: (conversationId: string) => Promise<Message[] | null>;
 	} | null;
 	/**
 	 * API for emitting extension blocks into the chat transcript.
@@ -224,6 +255,42 @@ export interface ExtensionUtils {
 		iterationCap?: number;
 		timeout?: number;
 	}) => Promise<SubAgentResult | null>;
+	/**
+	 * Resolve a subdirectory path under the user's `notor_dir`.
+	 *
+	 * Returns `${settings.notor_dir}/${subdir}` (vault-relative).
+	 */
+	resolveNotorPath: (subdir: string) => string;
+	/**
+	 * Read the raw Markdown content of a vault note by path.
+	 *
+	 * Resolves the path via `resolveNote()` and reads via `vault.read()`.
+	 * Throws if the file is not found.
+	 */
+	readNote: (path: string) => Promise<string>;
+	/**
+	 * Memory subsystem facade. Null when `memory_enabled` is false.
+	 *
+	 * Exposes deterministic library functions (note format, dedup, dream cursor)
+	 * and the concept resolver (which spawns a sub-agent).
+	 */
+	memory: {
+		resolveConcept: (args: {
+			insight: string;
+			memoryDir: string;
+			resolverProfile: string;
+		}) => Promise<ResolveConceptResult>;
+		fingerprintAndDedup: (content: string, windowHours: number) => Promise<{ fingerprint: string; isDuplicate: boolean }>;
+		serializeNote: (args: { title: string; body: string; sources: string[]; createdAt: string }) => string;
+		parseNote: (markdown: string) => MemoryNote;
+		slugifyTitle: (title: string) => string;
+		assertMemoryPath: (vaultRelativePath: string, memoryDir: string) => void;
+		readDedupCache: (windowHours: number) => Promise<Record<string, string>>;
+		writeDedupEntry: (fingerprint: string, timestamp: string) => Promise<void>;
+		readDreamCursor: () => Promise<string | null>;
+		advanceDreamCursor: (timestamp: string) => Promise<void>;
+		hasMemoryNotes: () => Promise<boolean>;
+	} | null;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */
@@ -246,7 +313,7 @@ export interface ExtensionUtils {
 export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceExtensionName?: string): ExtensionUtils {
 	const vaultRootPath = (plugin.app.vault.adapter as { basePath?: string }).basePath ?? "";
 
-	return {
+	const utils: ExtensionUtils = {
 		resolveNote: (path: string) =>
 			resolveNote(path, plugin.app.vault, plugin.app.metadataCache),
 
@@ -423,6 +490,22 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				listRecent: async (limit = 20) => {
 					const entries = await hm.listConversations();
 					return entries.slice(0, limit).map(toSummary);
+				},
+				loadFull: async (conversationId: string): Promise<Message[] | null> => {
+					// Live session: read from in-memory ConversationManager
+					const orchestrator = plugin.getActiveOrchestrator?.();
+					const convManager = orchestrator?.getConversationManager();
+					const activeConv = convManager?.getActiveConversation();
+					if (activeConv && activeConv.id === conversationId) {
+						return convManager!.getMessages();
+					}
+
+					// Inactive: resolve ID → filename, then load from JSONL
+					const entries = await hm.listConversations();
+					const match = entries.find(e => e.id === conversationId);
+					if (!match) return null;
+					const { messages } = await hm.loadConversation(match.filename);
+					return messages;
 				},
 			};
 		})(),
@@ -673,6 +756,17 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 			};
 		})(),
 
+		resolveNotorPath: (subdir: string) =>
+			normalizePath(`${plugin.settings.notor_dir}/${subdir}`),
+
+		readNote: async (path: string) => {
+			const file = resolveNote(path, plugin.app.vault, plugin.app.metadataCache);
+			if (!file) {
+				throw new Error(`Note not found: ${path}`);
+			}
+			return plugin.app.vault.read(file);
+		},
+
 		chatBlocks: (() => {
 			const cbLog = logger("ext:chatBlocks");
 
@@ -790,7 +884,70 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				},
 			};
 		})(),
+
+		memory: null,
 	};
+
+	// Wire memory facade after the main object is constructed so that
+	// resolveConcept can reference utils.runSubAgent without recursion.
+	// memory_enabled and memory_folder are added by Phase 8 (settings).
+	// Access via unknown cast to avoid compile errors before the fields exist on NotorSettings.
+	const settingsAny = plugin.settings as unknown as Record<string, unknown>;
+	if (settingsAny.memory_enabled) {
+		const memoryFolder = (settingsAny.memory_folder as string) ?? "memory";
+		const memoryDir = normalizePath(`${plugin.settings.notor_dir}/${memoryFolder}`);
+		const dedupCachePath = `${memoryDir}/.dedup-cache.json`;
+		const dreamCursorPath = `${memoryDir}/.dream-cursor.json`;
+
+		utils.memory = {
+			resolveConcept: (args: {
+				insight: string;
+				memoryDir: string;
+				resolverProfile: string;
+			}) => resolveConcept({
+				insight: args.insight,
+				memoryDir: args.memoryDir,
+				resolverProfile: args.resolverProfile,
+				app: plugin.app,
+				runSubAgent: utils.runSubAgent,
+				vault: plugin.app.vault,
+			}),
+
+			fingerprintAndDedup: async (content: string, windowHours: number) => {
+				const fingerprint = computeFingerprint(content);
+				const cache = await readDedupCache(plugin.app, dedupCachePath, windowHours);
+				const isDuplicate = fingerprint in cache;
+				if (!isDuplicate) {
+					await writeDedupEntry(plugin.app, dedupCachePath, fingerprint, new Date().toISOString());
+				}
+				return { fingerprint, isDuplicate };
+			},
+
+			serializeNote,
+			parseNote,
+			slugifyTitle,
+			assertMemoryPath,
+
+			readDedupCache: (windowHours: number) =>
+				readDedupCache(plugin.app, dedupCachePath, windowHours),
+			writeDedupEntry: (fingerprint: string, timestamp: string) =>
+				writeDedupEntry(plugin.app, dedupCachePath, fingerprint, timestamp),
+			readDreamCursor: () =>
+				readDreamCursor(plugin.app, dreamCursorPath),
+			advanceDreamCursor: (timestamp: string) =>
+				advanceDreamCursor(plugin.app, dreamCursorPath, timestamp),
+
+			hasMemoryNotes: async () => {
+				const folder = plugin.app.vault.getAbstractFileByPath(memoryDir);
+				if (!folder || !(folder instanceof TFolder)) return false;
+				return folder.children.some(
+					(f) => f instanceof TFileClass && f.extension === "md" && !f.name.startsWith("."),
+				);
+			},
+		};
+	}
+
+	return utils;
 }
 
 // ---------------------------------------------------------------------------

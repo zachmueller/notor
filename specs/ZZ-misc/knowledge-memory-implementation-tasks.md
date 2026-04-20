@@ -118,17 +118,17 @@ The deterministic, non-LLM library modules. No extension wiring yet — pure Typ
 
 Wire the library into the extension runtime so scaffolds can call `utils.memory.*`.
 
-- [ ] **2.1 — Add `resolveNotorPath` to `ExtensionUtils`**
+- [x] **2.1 — Add `resolveNotorPath` to `ExtensionUtils`**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (interface at ~line 95):
   - Add `resolveNotorPath: (subdir: string) => string` — returns `${settings.notor_dir}/${subdir}` (vault-relative)
   - Wire in `buildUtils()` (~line 245): closure over `settings.notor_dir`
 
-- [ ] **2.2 — Add `readNote` to `ExtensionUtils`**
+- [x] **2.2 — Add `readNote` to `ExtensionUtils`**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts):
   - Add `readNote: (path: string) => Promise<string>` — resolves via `resolveNote(path)`, reads via `vault.read()`, returns string content
   - Throws if file not found (callers handle errors)
 
-- [ ] **2.3 — Add `memory` namespace to `ExtensionUtils`**
+- [x] **2.3 — Add `memory` namespace to `ExtensionUtils`**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts):
   - Add `memory` property with full interface from design spec §6
   - Set to `null` when `memory_enabled` is false or memory library is unavailable
@@ -139,7 +139,7 @@ Wire the library into the extension runtime so scaffolds can call `utils.memory.
   - `readDedupCache`, `writeDedupEntry`, `readDreamCursor`, `advanceDreamCursor` delegate to `src/memory/dedup-cache.ts` with resolved paths
   - `hasMemoryNotes` lists `.md` files in the memory directory (excluding dotfiles via name prefix check), returns `true` if count > 0. Uses `app.vault.getAbstractFileByPath()` to resolve the memory directory, then inspects its `children` for `.md` files. Used by the `memory-search` automation cold-start guard (Task 5.1)
 
-- [ ] **2.4 — Add `chatHistory.loadFull()` to `ExtensionUtils`**
+- [x] **2.4 — Add `chatHistory.loadFull()` to `ExtensionUtils`**
   - **Why this is needed:** The existing `chatHistory.loadConversation()` returns `ChatHistoryConversation` — whose `messages` field is `Array<{ role: string; content: string; timestamp: string }>` ([`runtime-context.ts:90`](../../src/extensions/runtime-context.ts#L90)). This is a simplified shape: roles are plain strings (not the `MessageRole` union), content is a flat string (not `ContentBlock[]`), and metadata fields like `is_hook_injection`, tool calls, and extension blocks are stripped. Memory automations require the raw `Message[]` format to extract full conversation context including tool use, multi-part content, and extension blocks.
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (chatHistory property at ~lines 178-182):
   - Add `loadFull: (conversationId: string) => Promise<Message[] | null>` — returns raw `Message[]` (all roles, all fields including `is_hook_injection`, `ContentBlock[]` content preserved)
@@ -148,7 +148,7 @@ Wire the library into the extension runtime so scaffolds can call `utils.memory.
   - Returns `null` if conversation not found
   - Requires reference to both active `ConversationManager` and `HistoryManager` in `buildUtils()` closure
 
-- [ ] **2.5 — Verify `utils.memory` is null-safe when memory is disabled**
+- [x] **2.5 — Verify `utils.memory` is null-safe when memory is disabled**
   - All scaffolds that access `utils.memory` must check for `null` before calling methods
   - Built-in scaffolds include `if (!utils.memory) return;` guard at the top of their code fences
 
