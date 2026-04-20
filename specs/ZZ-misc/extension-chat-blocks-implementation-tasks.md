@@ -9,28 +9,46 @@ Source planning doc: [extension-chat-blocks-plan.md](../../private/extension-cha
 
 Standalone bug fix + new method. Ships independently, unblocks everything else. The compaction re-append loops at [`compaction-manager.ts:106-112`](../../src/chat/compaction-manager.ts#L106-L112) and [`:205-211`](../../src/chat/compaction-manager.ts#L205-L211) currently list only `role`, `content`, `tool_call`, `tool_result` — silently dropping `is_hook_injection`, `is_workflow_message`, and (soon) `source_extension`, `exclude_from_compaction`.
 
-- [ ] **1.1 — Expand `addMessage()` parameter type in `conversation.ts`**
+- [ ] **1.1 — Add `source_extension` + `exclude_from_compaction` to `addMessage()` in `conversation.ts`**
   - Current signature at [`conversation.ts:306-320`](../../src/chat/conversation.ts#L306-L320) lists fields explicitly in a params object
-  - Change to: `Omit<Partial<Message>, 'id' | 'conversation_id' | 'timestamp'> & { role: MessageRole; content: string | ContentBlock[] }`
-  - The `Omit` prevents callers from setting system-managed fields (`id`, `conversation_id`, `timestamp` are always assigned internally)
-  - The function body already assigns defaults for missing fields — only the parameter type changes
+  - Add two new optional fields to the params type:
+    - `source_extension?: string | null`
+    - `exclude_from_compaction?: boolean`
+  - Add corresponding lines in the function body (message construction at [`conversation.ts:325-342`](../../src/chat/conversation.ts#L325-L342)):
+    - `source_extension: params.source_extension ?? null`
+    - `exclude_from_compaction: params.exclude_from_compaction ?? false`
+  - Do NOT widen the type to `Omit<Partial<Message>>` — keep the explicit params object for type safety and clarity about defaults
   - Verify all existing callers still compile (search for `addMessage(` across the codebase)
 
 - [ ] **1.2 — Fix compaction re-append loops to spread all message fields**
-  - [`compaction-manager.ts:106-112`](../../src/chat/compaction-manager.ts#L106-L112) — change from `{ role: pending.role, content: pending.content, tool_call: ..., tool_result: ... }` to `{ ...pending }` (the expanded `addMessage()` type now accepts this)
-  - [`compaction-manager.ts:205-211`](../../src/chat/compaction-manager.ts#L205-L211) — same change
-  - The spread will include `id`, `conversation_id`, `timestamp` from the original message, but `addMessage()` overwrites these internally — no conflict
-  - Actually: the `Omit` type will reject `id`/`conversation_id`/`timestamp` from the spread. Use a destructuring pattern: `const { id, conversation_id, timestamp, ...rest } = pending; convManager.addMessage(rest);`
+  - [`compaction-manager.ts:106-113`](../../src/chat/compaction-manager.ts#L106-L113) and [`compaction-manager.ts:205-212`](../../src/chat/compaction-manager.ts#L205-L212) currently only spread `role`, `content`, `tool_call`, `tool_result`
+  - Fields currently dropped: `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`, `source_extension`, `exclude_from_compaction`, `input_tokens`, `output_tokens`, `cost_estimate`
+  - Dropping `input_tokens`/`output_tokens`/`cost_estimate` is intentional (avoids inflating totals on re-append). Dropping the rest is a bug.
+  - Fix: destructure out system-managed fields and intentionally-dropped fields, spread the rest:
+    ```
+    const { id, conversation_id, timestamp, input_tokens, output_tokens, cost_estimate, ...rest } = pending;
+    convManager.addMessage(rest);
+    ```
+  - This preserves `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`, `source_extension`, `exclude_from_compaction`
 
 - [ ] **1.3 — Add `updateMessage()` method to `ConversationManager`**
   - Signature: `updateMessage(messageId: string, patch: Partial<Pick<Message, 'content' | 'exclude_from_compaction'>>): Message | null`
+  - **In-memory only — no JSONL persistence.** Used for transient state transitions (loading → real block). The final real block is persisted separately via `addMessage()` or `chatBlocks.emit()`.
   - Find message by `id` in `this.messages` array
   - Apply patch via `Object.assign()`
-  - Fire new `onMessageUpdated` callback (add alongside existing `onMessageAdded` at [`conversation.ts:369`](../../src/chat/conversation.ts#L369))
+  - Fire new `onMessageUpdated` callback (add alongside existing `onMessageAdded` — setter at [`conversation.ts:57-59`](../../src/chat/conversation.ts#L57-L59), invocation site at [`conversation.ts:383`](../../src/chat/conversation.ts#L383))
   - Return updated message, or `null` if not found
   - Add `setOnMessageUpdated(callback)` setter following the pattern of `setOnMessageAdded` and `setOnConversationChanged`
 
-- [ ] **1.4 — Verify no regressions**
+- [ ] **1.4 — Add `addMessageToConversation()` for non-active conversation emission**
+  - New method on `ConversationManager` (or `HistoryManager`): `addMessageToConversation(conversationId: string, params: AddMessageParams): Promise<Message | null>`
+  - Loads the conversation's JSONL via `HistoryManager`, appends the new message, persists
+  - Does NOT require `activeConversation` — operates independently
+  - Returns `null` if the conversation doesn't exist
+  - Used by `chatBlocks.emit()` when targeting a non-active conversation (e.g., detached sub-agent `onComplete`)
+  - If the target conversation IS the active conversation, delegate to regular `addMessage()` instead (so the view updates live)
+
+- [ ] **1.5 — Verify no regressions**
   - Search all `addMessage(` call sites — confirm they still compile with the new type
   - Confirm compaction flow: trigger compaction → re-appended messages preserve `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`
 
@@ -49,7 +67,7 @@ Standalone hardening. Add `assertUnreachable` (or `satisfies never`) guards to a
     - [ ] [`message-pipeline.ts:140`](../../src/chat/message-pipeline.ts#L140) — `toChatMessages()` switch (no default)
     - [ ] [`view-router.ts:53`](../../src/chat/view-router.ts#L53) — `renderMessage()` switch (no default)
     - [ ] [`compaction.ts:237-269`](../../src/context/compaction.ts#L237-L269) — compaction input if/else-if chain (no else)
-    - [ ] [`context.ts:190-193`](../../src/chat/context.ts#L190-L193) — truncation walk-forward
+    - [ ] [`context.ts:190-198`](../../src/chat/context.ts#L190-L198) — truncation walk-forward
     - [ ] [`markdown-exporter.ts:74`](../../src/export/markdown-exporter.ts#L74) — switch with `default: null`
     - [ ] [`html-exporter.ts:381`](../../src/export/html-exporter.ts#L381) — switch with `default: null`
     - [ ] [`html-exporter.ts:578`](../../src/export/html-exporter.ts#L578) — sub-agent message switch
@@ -72,7 +90,7 @@ Standalone hardening. Add `assertUnreachable` (or `satisfies never`) guards to a
 
 - [ ] **2.4 — Audit ContentBlock type-dispatch sites**
   - [ ] [`tokens.ts:84-94`](../../src/utils/tokens.ts#L84-L94) — `estimateContentTokens()` switch (no default) — add default case
-  - [ ] [`media/types.ts:40`](../../src/media/types.ts#L40) — `getTextContent()` — already planned for Phase 3
+  - [ ] [`media/types.ts:35-43`](../../src/media/types.ts#L35-L43) — `getTextContent()` — no change needed (custom_blocks silently excluded by existing `.filter()`); verify that `image` and `document` blocks continue to return `""` as expected
   - [ ] [`html-exporter.ts:443-451`](../../src/export/html-exporter.ts#L443-L451) — inline media rendering — add comment noting user messages won't contain custom blocks
 
 ---
@@ -83,7 +101,7 @@ The core message shape. After this phase, extension blocks can be emitted (manua
 
 - [ ] **3.1 — Add `custom_block` to `ContentBlock` union**
   - In [`src/media/types.ts`](../../src/media/types.ts): add the `custom_block` variant with fields: `type`, `kind`, `data`, `fallback_text?`, `estimated_wire_tokens?`, `loading?`
-  - Update `getTextContent()`: add a branch for `custom_block` → return `fallback_text ?? ""`
+  - `getTextContent()` requires NO changes — the existing `.filter(block.type === "text")` pattern already silently excludes unknown block types, returning `""` for arrays with only custom blocks
 
 - [ ] **3.2 — Add `custom_block` case to `estimateContentTokens()`**
   - In [`src/utils/tokens.ts`](../../src/utils/tokens.ts): add `case "custom_block":`
@@ -96,27 +114,31 @@ The core message shape. After this phase, extension blocks can be emitted (manua
   - Add `source_extension?: string | null` to `Message` interface
   - Add `exclude_from_compaction?: boolean` to `Message` interface
 
-- [ ] **3.4 — Handle `extension_block` in `toChatMessages()`**
+- [ ] **3.4 — Handle `extension_block` in `toChatMessages()` + create `getWireText()`**
+  - **Create `getWireText(content, registry?)` function** in `message-pipeline.ts`: resolves `custom_block` entries to their wire text via `registry.get(kind)?.toLLMText?.(data)`, falling back to `fallback_text ?? ""` when the registry has no definition for a kind. Returns combined text or `null` when all blocks produce empty output.
+  - **Registry injection:** Add `setChatBlockRegistry(registry)` module-scoped setter in `message-pipeline.ts`. Called once at plugin init (Task 5.4). `toChatMessages()` signature does NOT change — reads registry from module state.
   - In [`src/chat/message-pipeline.ts`](../../src/chat/message-pipeline.ts) at the role switch (~line 140):
   - Add `case "extension_block":` that:
-    - Iterates `custom_block` entries in `msg.content`, calls `registry.toLLMText(data)` for each
+    - Calls `getWireText(msg.content, moduleRegistry)` for the message
     - Wraps non-null results in `<notor-ext source="{source_extension}">…</notor-ext>` tags
-    - When all blocks resolve to `null` with no `fallback_text` → skip the message entirely (zero tokens)
+    - When result is `null` (all blocks empty) → skip the message entirely (zero tokens)
     - Otherwise emit as `role: "user"` `ChatMessage` with the tagged text
-  - The registry reference needs to be passed into `toChatMessages()` (add parameter or inject via closure)
+  - **Phase 5 stub note:** Until Phase 5.5 wires in the real registry, `getWireText()` will have `registry = undefined` and will use `fallback_text` for all custom blocks. This is correct initial behavior.
 
-- [ ] **3.5 — Add general consecutive-same-role coalescing pass**
-  - After the existing tool-call coalescing (Phase 3 in the pipeline), add a final pass:
+- [ ] **3.5 — Add NEW general consecutive-same-role coalescing pass**
+  - After the existing tool-call coalescing (ends at ~line 346 in the pipeline), add a **new** final pass before the function returns:
+  - Operates on the `coalesced` array and produces the final output
   - Iterate `ChatMessage[]`: when `messages[i].role === messages[i-1].role` and neither carries `tool_calls`/`tool_results`, merge `messages[i].content` into `messages[i-1].content` separated by `\n\n`
-  - Fixes both extension-block adjacency AND the pre-existing hook-injection alternation bug (Bedrock's strict alternation requirement at [`bedrock-provider.ts:73`](../../src/providers/bedrock-provider.ts#L73))
+  - Addresses both extension-block adjacency AND a pre-existing hook-injection alternation bug (Bedrock's strict alternation requirement)
 
 - [ ] **3.6 — Handle `extension_block` in compaction input assembly**
-  - In [`src/context/compaction.ts:237-269`](../../src/context/compaction.ts#L237-L269):
-  - If `msg.exclude_from_compaction === true` → skip entirely
+  - In [`src/context/compaction.ts:236-269`](../../src/context/compaction.ts#L236-L269):
+  - If `msg.exclude_from_compaction === true` → skip entirely (not seen by the summarizer)
   - Otherwise extract text via `getTextContent()` and include as user-role in compaction input
+  - **Note:** `exclude_from_compaction` controls what the summarizer SEES, not what survives compaction. Pending messages (after last assistant) are always re-appended regardless of this flag.
 
 - [ ] **3.7 — Handle `extension_block` in truncation walk-forward**
-  - In [`src/chat/context.ts:190-193`](../../src/chat/context.ts#L190-L193):
+  - In [`src/chat/context.ts:190-198`](../../src/chat/context.ts#L190-L198):
   - Treat `extension_block` like `user` (it resolves to user on the wire) — don't orphan it as "non-user non-system"
 
 - [ ] **3.8 — Handle `extension_block` in exporters**
@@ -124,9 +146,9 @@ The core message shape. After this phase, extension blocks can be emitted (manua
   - [`html-exporter.ts`](../../src/export/html-exporter.ts): add case at both `:381` and `:578` switches
 
 - [ ] **3.9 — Handle `extension_block` in remaining dispatch sites**
-  - [`conversation.ts:368`](../../src/chat/conversation.ts#L368): exclude `extension_block` from title generation (like `is_hook_injection`)
-  - [`runtime-context.ts:352`](../../src/extensions/runtime-context.ts#L352): include `extension_block` in recent-turns context if relevant (or exclude — decide based on whether extensions benefit from seeing their own prior emissions)
-  - [`compaction-manager.ts`](../../src/chat/compaction-manager.ts): filter out messages where `exclude_from_compaction === true` from the completed-messages set before compaction
+  - [`conversation.ts:368`](../../src/chat/conversation.ts#L368): no code change needed — title generation already checks `params.role === "user"`, so `extension_block` is inherently excluded
+  - [`runtime-context.ts:352`](../../src/extensions/runtime-context.ts#L352): the `loadConversation` filter already checks `m.role === "user" || m.role === "assistant"` — `extension_block` is excluded. Decide if this is correct or if extensions should see their own prior emissions.
+  - [`compaction-manager.ts`](../../src/chat/compaction-manager.ts): filter out messages where `exclude_from_compaction === true` from the completed-messages set before compaction. Note: this applies to the compaction INPUT only — pending messages are always re-appended regardless of this flag.
 
 - [ ] **3.10 — Smoke test with hand-emitted block**
   - Temporarily add a test pathway (e.g., a debug command) that calls `addMessage({ role: "extension_block", content: [{ type: "custom_block", kind: "test", data: { message: "hello" }, fallback_text: "Test block" }], source_extension: "test" })`
@@ -145,12 +167,14 @@ DRY up the duplicated toggle pattern. Small scope, high payoff — every block-k
   - Toggle behavior: click header → toggle `.notor-hidden` on body, swap `▶`/`▼` chevron
   - Returns `header` (for callers to append badges/buttons) and `body` (for content)
 
-- [ ] **4.2 — Refactor `tool-call-ui.ts` to use helper**
-  - [`tool-call-ui.ts:44-81`](../../src/ui/tool-call-ui.ts#L44-L81): replace the manual toggle creation with `renderCollapsibleCard()`
+- [ ] **4.2 — Refactor `tool-call-ui.ts` to use helper (both toggles)**
+  - [`tool-call-ui.ts:66-77`](../../src/ui/tool-call-ui.ts#L66-L77): replace the parameters toggle in `renderToolCallCard` with `renderCollapsibleCard()`
+  - [`tool-call-ui.ts:127-144`](../../src/ui/tool-call-ui.ts#L127-L144): replace the result toggle in `renderToolResultSummary` with `renderCollapsibleCard()`
   - Verify: tool call cards expand/collapse identically, chevron animation unchanged
 
-- [ ] **4.3 — Refactor `chat-view.ts` tool result rendering to use helper**
-  - [`chat-view.ts:2208-2244`](../../src/ui/chat-view.ts#L2208-L2244): replace with `renderCollapsibleCard()`
+- [ ] **4.3 — Refactor `chat-view.ts` to use helper (both toggles)**
+  - [`chat-view.ts:2225-2236`](../../src/ui/chat-view.ts#L2225-L2236): replace the toggle in `renderToolCall` with `renderCollapsibleCard()`
+  - [`chat-view.ts:2277-2289`](../../src/ui/chat-view.ts#L2277-L2289): replace the toggle in `renderToolResult` with `renderCollapsibleCard()`
   - Verify: tool result cards expand/collapse identically
 
 ---
@@ -175,11 +199,12 @@ Make block kinds pluggable. After this phase, block kinds can be registered and 
 
 - [ ] **5.4 — Instantiate registry in `main.ts`**
   - Create `ChatBlockRegistry` instance during plugin `onload()`
-  - Wire into: view router (for rendering), message pipeline (for `toLLMText` resolution), orchestrator (for emission-time `estimated_wire_tokens` calculation)
+  - Call `setChatBlockRegistry(registry)` on the message-pipeline module (module-scoped setter from Task 3.4)
+  - Wire into: view router (for rendering), orchestrator (for emission-time `estimated_wire_tokens` calculation)
 
-- [ ] **5.5 — Wire registry into `toChatMessages()` for `toLLMText` resolution**
-  - Update the `extension_block` case from Phase 3.4 to use registry's `toLLMText` instead of a placeholder
-  - When `toLLMText` is undefined on the definition, fall back to `fallback_text ?? ""`
+- [ ] **5.5 — Verify registry wiring in `toChatMessages()`**
+  - After Task 5.4 calls `setChatBlockRegistry()`, the `extension_block` case from Phase 3.4 automatically uses the real registry via `getWireText()`
+  - Verify: `toLLMText` from registered definitions is now called; when `toLLMText` is undefined or kind is unregistered, falls back to `fallback_text ?? ""`
 
 ---
 
@@ -251,7 +276,7 @@ Allow user-authored block kinds in vault scaffolds and built-in block scaffolds.
     - For tool/automation scaffolds with `blocks:` YAML: pull named exports from compiled module, register
   - On extension unload/reload: unregister from `ChatBlockRegistry`
   - Duplicate kind detection: log error, keep first registration
-  - Follow the existing `UserToolAdapter` compilation pattern at [`manager.ts:45-152`](../../src/extensions/manager.ts#L45-L152)
+  - Follow the existing `UserToolAdapter` compilation pattern at [`manager.ts:45-158`](../../src/extensions/manager.ts#L45-L158)
 
 ---
 
@@ -270,26 +295,33 @@ Enable blocking automations that emit blocks visible to the LLM on the first tur
 
 - [ ] **8.3 — Partition `dispatchOnConversationStart()` into blocking/non-blocking**
   - In [`src/hooks/hook-events.ts`](../../src/hooks/hook-events.ts) at [`dispatchOnConversationStart()`](../../src/hooks/hook-events.ts#L823-L866):
+  - **Full async conversion required:** The function is currently synchronous (returns `void`) with async work inside a fire-and-forget IIFE. Changes needed:
+    1. Change function signature to `async`, return type from `void` to `Promise<void>`
+    2. Restructure internal IIFE: blocking automations awaited directly in the function body, non-blocking automations remain in a fire-and-forget IIFE
+    3. Add per-automation timeout logic
   - Partition automations by `automation.blocking === true`
   - For each blocking automation with `blockingEmitKind`:
-    - Emit preliminary loading `extension_block` message: `role: "extension_block"`, `custom_block` with `kind: blockingEmitKind`, `data: {}`, `loading: true`
+    - Emit preliminary loading `extension_block` message (in-memory only, NOT persisted to JSONL): `role: "extension_block"`, `custom_block` with `kind: blockingEmitKind`, `data: {}`, `loading: true`
     - Store the loading message ID for later replacement
   - Await blocking automations sequentially with per-automation timeout
   - On timeout: detach (continue in background), update loading block to timed-out indicator
   - Non-blocking automations: fire-and-forget as today
-  - Change return type from `void` to `Promise<void>`
   - Need to pass `ConversationManager` (or an `emit` callback) into the function for loading block emission
 
-- [ ] **8.4 — `await` the dispatch in orchestrator**
+- [ ] **8.4 — `await` the dispatch in orchestrator + verify session snapshot**
   - In [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts) at ~line 756:
   - Change from bare `dispatchOnConversationStart(...)` to `await dispatchOnConversationStart(...)`
   - Safe because the function only blocks when there are blocking automations; otherwise the returned promise resolves immediately
+  - **Verification sub-task:** Trace the code path and confirm: blocking automations emit `extension_block` via `addMessage()` on the display `ConversationManager` → session snapshot (created at ~line 767+) reads from the display manager's message list → snapshot includes the newly-emitted messages → LLM sees them in its context on the first turn
 
 - [ ] **8.5 — Loading → real block replacement**
+  - Loading blocks are in-memory only (not persisted to JSONL — see Task 8.3)
   - When blocking automation calls `chatBlocks.emit(kind, data)` (same kind as loading block):
-  - Find the loading message by stored message ID
-  - Call `ConversationManager.updateMessage(loadingMessageId, { content: updatedBlocks })` — replacing `data`, clearing `loading` flag
-  - `onMessageUpdated` callback triggers re-render in chat view (Phase 6.4)
+    - Find the loading message by stored message ID
+    - Call `ConversationManager.updateMessage(loadingMessageId, { content: updatedContentArray })` — replacing the entire `content` array with updated `custom_block` entries where `loading` is removed/false and `data` contains the real payload
+    - `onMessageUpdated` callback triggers re-render in chat view (Phase 6.4)
+  - The real block (with final data) IS persisted to JSONL via the normal `addMessage()` path inside `chatBlocks.emit()`
+  - If plugin reloads mid-automation: loading block is gone (never persisted), automation does not re-fire — acceptable behavior
 
 ---
 
@@ -307,10 +339,11 @@ The side-effect emission API for automations and tools. This is the sole block-e
     ```
   - Implementation:
     - Resolve conversation: `opts.conversationId` → explicit target; else `context.conversationId` from automation context; else `null`
-    - Validate kind against `ChatBlockRegistry` — if unregistered, log warning, fall back to text-only block
+    - Validate kind against `ChatBlockRegistry` — if unregistered, log warning but still emit with fallback rendering
+    - Validate `data`: must be JSON-serializable, reject if `JSON.stringify(data).length > 102400` (100KB) with error log
     - Compute `estimated_wire_tokens` from `toLLMText` output length (via registry)
-    - Call `ConversationManager.addMessage({ role: "extension_block", content: [custom_block], source_extension })` — use the display `ConversationManager` (not the session snapshot) so the message persists and renders
-    - Set `exclude_from_compaction` on the message based on block kind's `ChatBlockDefinition.excludeFromCompaction`
+    - **Active conversation path:** Call `ConversationManager.addMessage({ role: "extension_block", content: [custom_block], source_extension, exclude_from_compaction })` — message persists and renders live
+    - **Non-active conversation path:** Call `addMessageToConversation(conversationId, params)` (from Task 1.4) — message persists to JSONL but does not live-render; appears on next conversation reload
     - Return the created `Message`, or `null` if no conversation found
   - Set `chatBlocks` to `null` when no conversation is available (background vault events)
 
@@ -330,10 +363,11 @@ The side-effect emission API for automations and tools. This is the sole block-e
 
 When a tool's `ToolResult.content_blocks` contains a `custom_block`, the orchestrator emits an `extension_block` message.
 
-- [ ] **10.1 — Detect `custom_block` in tool results**
+- [ ] **10.1 — Detect `custom_block` in tool results + validate**
   - In [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts), after tool results are added to conversation:
   - Check each `ToolResult.content_blocks` for entries where `type === "custom_block"`
-  - If found, collect them into a new `extension_block` message
+  - **Validate each custom_block:** (a) check `kind` is registered — if not, log warning, proceed with fallback rendering, (b) verify `JSON.stringify(data)` succeeds (JSON-serializable), (c) reject if `JSON.stringify(data).length > 102400` with error log
+  - If valid blocks found, collect them into a new `extension_block` message
 
 - [ ] **10.2 — Emit `extension_block` after tool_result group**
   - Emit the `extension_block` message **after the entire tool_result group** in the current batch (after all tool results are added), but **before the next LLM call**
@@ -377,11 +411,12 @@ Enable extensions to run sub-agents for background data gathering.
 
 - [ ] **11.3 — Result delivery to inactive conversations**
   - `onComplete` calls `utils.chatBlocks.emit` with explicit `conversationId`
-  - If conversation view is no longer active: message persists in JSONL but view doesn't live-update
+  - If conversation view is no longer active: `chatBlocks.emit` uses `addMessageToConversation()` (Task 1.4) — message persists in JSONL but view doesn't live-update
   - Block appears on next conversation reload — acceptable expected behavior
 
 - [ ] **11.4 — Verify integration**
-  - `addMessage()` works on non-active conversations (via explicit `conversationId`)
+  - `addMessageToConversation()` works for non-active conversations (via explicit `conversationId`)
+  - If the target IS the active conversation, `chatBlocks.emit` uses regular `addMessage()` (live rendering)
   - Depth guard does not block recursive resolver calls from within sub-agents
   - Detached agent closure cleanup: no leaked registry entries after completion/abort/error/timeout
 
@@ -432,17 +467,20 @@ Comprehensive testing across all phases.
   - Coalescing: extension_block + user message → single merged user message on wire
   - Coalescing: hook injection + user message → also merged (pre-existing case)
   - Coalescing: two consecutive extension_blocks → merged
+  - Coalescing: merged user + extension_block text preserves `<notor-ext>` tags and user content as separate `\n\n`-delimited sections
 
 - [ ] **13.5 — Unit tests: Compaction**
   - Block with `excludeFromCompaction: true` → skipped from compaction input
   - Block without flag → compacted normally
-  - Re-appended messages preserve `source_extension`, `exclude_from_compaction`
+  - Re-appended messages preserve `source_extension`, `exclude_from_compaction`, `is_hook_injection`, `is_workflow_message`, `hook_injections`, `attachments`, `auto_context`
 
-- [ ] **13.6 — Unit tests: `addMessage()` expansion + `updateMessage()`**
-  - `addMessage({ ...existingMessage })` preserves all fields
-  - `updateMessage` with valid ID → patches content, fires callback
+- [ ] **13.6 — Unit tests: `addMessage()` fields + `updateMessage()` + `addMessageToConversation()`**
+  - `addMessage()` with `source_extension` and `exclude_from_compaction` → message has those fields set
+  - `updateMessage` with valid ID → patches content in-memory, fires callback, no JSONL write
   - `updateMessage` with invalid ID → returns null, no callback
-  - Loading → real transition: `loading: true` cleared, data replaced
+  - Loading → real transition: `loading: true` cleared, data replaced, re-render triggered
+  - `addMessageToConversation` with valid conversation ID → message persisted to JSONL
+  - `addMessageToConversation` with invalid conversation ID → returns null
 
 - [ ] **13.7 — Unit tests: Rate limit**
   - 11 emits in 60 seconds → 10 succeed, 11th returns null with warning
