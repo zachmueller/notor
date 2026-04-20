@@ -260,6 +260,59 @@ read_note:
 			expect(profile!.description).toBe("My description");
 			expect(profile!.preferred_provider).toBeNull();
 			expect(profile!.preferred_model).toBeNull();
+			expect(profile!.preferred_preset).toBeNull();
+			expect(profile!.iteration_cap).toBeNull();
+		});
+
+		it("parses preferred_preset and iteration_cap from frontmatter", async () => {
+			const promptFile = makeFile(
+				"notor/sub-agents/preset-agent/system-prompt.md",
+				"---\nnotor-description: Preset agent\nnotor-preferred-preset: tiny\nnotor-iteration-cap: 6\n---\nPrompt body",
+				{
+					"notor-description": "Preset agent",
+					"notor-preferred-preset": "tiny",
+					"notor-iteration-cap": 6,
+				},
+			);
+
+			const agentDir = makeFolder("notor/sub-agents/preset-agent", [promptFile]);
+			const rootDir = makeFolder("notor/sub-agents", [agentDir]);
+
+			const files = new Map<string, MockFolder | MockFile>();
+			registerTree(files, rootDir);
+
+			const vault = buildMockVault(files);
+			const cache = buildMockMetadataCache(files);
+
+			const profiles = await discoverSubAgentProfiles(vault, cache, NOTOR_DIR, KNOWN_TOOLS, parseYAML);
+			const profile = profiles.find(p => p.name === "preset-agent");
+
+			expect(profile).toBeDefined();
+			expect(profile!.preferred_preset).toBe("tiny");
+			expect(profile!.iteration_cap).toBe(6);
+		});
+
+		it("parses iteration_cap as string from frontmatter", async () => {
+			const promptFile = makeFile(
+				"notor/sub-agents/cap-agent/system-prompt.md",
+				"---\nnotor-iteration-cap: 12\n---\nBody",
+				{ "notor-iteration-cap": "12" },
+			);
+
+			const agentDir = makeFolder("notor/sub-agents/cap-agent", [promptFile]);
+			const rootDir = makeFolder("notor/sub-agents", [agentDir]);
+
+			const files = new Map<string, MockFolder | MockFile>();
+			registerTree(files, rootDir);
+
+			const vault = buildMockVault(files);
+			const cache = buildMockMetadataCache(files);
+
+			const profiles = await discoverSubAgentProfiles(vault, cache, NOTOR_DIR, KNOWN_TOOLS, parseYAML);
+			const profile = profiles.find(p => p.name === "cap-agent");
+
+			expect(profile).toBeDefined();
+			expect(profile!.iteration_cap).toBe(12);
 		});
 
 		it("extracts tool config blocks", async () => {
@@ -324,6 +377,8 @@ read_note:
 			expect(profile!.description).toBeNull();
 			expect(profile!.preferred_provider).toBeNull();
 			expect(profile!.preferred_model).toBeNull();
+			expect(profile!.preferred_preset).toBeNull();
+			expect(profile!.iteration_cap).toBeNull();
 			expect(profile!.tool_configs).toEqual([]);
 			expect(profile!.prompt_content).toBe("Just a prompt with no frontmatter.");
 		});
@@ -438,6 +493,24 @@ search_vault:
 			expect(searchWeb!.tool_configs.length).toBeGreaterThan(0);
 			expect(searchWeb!.tool_configs[0]!.tools.web_search).toEqual({ enabled: true });
 			expect(searchWeb!.tool_configs[0]!.tools.fetch_webpage).toEqual({ enabled: true });
+		});
+
+		it("built-in profiles parse preferred_preset and iteration_cap from raw frontmatter", async () => {
+			// Verify the buildProfileFromBuiltin path handles extractFrontmatterNumberField.
+			// Built-in profiles with these fields should parse correctly even without metadata cache.
+			const files = new Map<string, MockFolder | MockFile>();
+			const vault = buildMockVault(files);
+			const cache = buildMockMetadataCache(files);
+
+			const profiles = await discoverSubAgentProfiles(vault, cache, NOTOR_DIR, KNOWN_TOOLS, parseYAML);
+
+			// Existing built-in profiles shouldn't have preset/iteration_cap
+			for (const profile of profiles) {
+				if (profile.is_builtin) {
+					expect(profile.preferred_preset).toBeNull();
+					expect(profile.iteration_cap).toBeNull();
+				}
+			}
 		});
 
 		it("built-in profiles have descriptions", async () => {

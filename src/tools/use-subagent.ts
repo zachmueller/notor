@@ -36,6 +36,7 @@ import {
 	generateSubAgentFilename,
 	chatMessagesToMessages,
 } from "../chat/sub-agent-history";
+import { resolvePreset } from "../presets/preset-resolver";
 import { logger } from "../utils/logger";
 
 const log = logger("UseSubagentTool");
@@ -217,11 +218,35 @@ export class UseSubagentTool implements Tool {
 		task: string,
 		options?: ToolExecuteOptions,
 	): Promise<ToolResult> {
-		// Step 4: Resolve provider and model
+		// Step 4: Resolve provider and model (preset takes precedence)
 		let provider;
 		let providerType: LLMProviderType;
+		let model: string;
 
-		if (profile.preferred_provider) {
+		const resolvedPreset = profile.preferred_preset
+			? resolvePreset(profile.preferred_preset, this.settings.model_presets)
+			: null;
+
+		if (resolvedPreset) {
+			providerType = resolvedPreset.providerType;
+			try {
+				provider = this.providerRegistry.getProvider(providerType);
+			} catch {
+				return {
+					tool_name: USE_SUBAGENT_TOOL_NAME,
+					success: false,
+					result: "",
+					error: `Provider '${providerType}' (from preset '${profile.preferred_preset}') is not configured for sub-agent '${profile.name}'.`,
+				};
+			}
+			model = resolvedPreset.modelId;
+		} else if (profile.preferred_provider) {
+			if (profile.preferred_preset) {
+				log.warn("Preset not found, falling back to preferred_provider/preferred_model", {
+					profile: profile.name,
+					preset: profile.preferred_preset,
+				});
+			}
 			providerType = profile.preferred_provider as LLMProviderType;
 			try {
 				provider = this.providerRegistry.getProvider(providerType);
@@ -233,13 +258,14 @@ export class UseSubagentTool implements Tool {
 					error: `Provider '${providerType}' is not configured for sub-agent '${profile.name}'.`,
 				};
 			}
+			const providerConfig = this.providerRegistry.getConfig(providerType);
+			model = profile.preferred_model ?? providerConfig?.model_id ?? "";
 		} else {
 			providerType = this.providerRegistry.getActiveType();
 			provider = this.providerRegistry.getActiveProvider();
+			const providerConfig = this.providerRegistry.getConfig(providerType);
+			model = profile.preferred_model ?? providerConfig?.model_id ?? "";
 		}
-
-		const providerConfig = this.providerRegistry.getConfig(providerType);
-		const model = profile.preferred_model ?? providerConfig?.model_id ?? "";
 		if (!model) {
 			return {
 				tool_name: USE_SUBAGENT_TOOL_NAME,
@@ -343,7 +369,7 @@ export class UseSubagentTool implements Tool {
 			toolDefinitions: toolDefs,
 			dispatcher: subDispatcher,
 			parentAbortSignal: parentSignal,
-			iterationCap: this.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP,
+			iterationCap: profile.iteration_cap ?? this.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP,
 			tokenLimit: this.settings.sub_agent_token_limit ?? SUB_AGENT_TOKEN_LIMIT,
 			mode,
 			onProgress: options?.onProgress,

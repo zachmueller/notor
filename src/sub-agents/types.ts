@@ -35,6 +35,10 @@ export interface SubAgentProfile {
 	preferred_provider: string | null;
 	/** Override model identifier (null = use parent's model). */
 	preferred_model: string | null;
+	/** Override model preset name (null = no preset). Takes precedence over preferred_provider/preferred_model when resolved. */
+	preferred_preset: string | null;
+	/** Per-profile iteration cap (null = use global setting or constant). */
+	iteration_cap: number | null;
 	/** Parsed tool config blocks from the profile's system prompt. */
 	tool_configs: ParsedToolConfig[];
 	/** Whether this profile is a built-in shipped with the plugin. */

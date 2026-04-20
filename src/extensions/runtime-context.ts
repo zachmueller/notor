@@ -35,6 +35,7 @@ import { ToolDispatcher } from "../chat/dispatcher";
 import { intersectToolConfig } from "../tool-config/merger";
 import { SUB_AGENT_PREAMBLE } from "../sub-agents/preamble";
 import { SUB_AGENT_ITERATION_CAP, SUB_AGENT_TOKEN_LIMIT } from "../sub-agents/constants";
+import { resolvePreset } from "../presets/preset-resolver";
 import {
 	parseCommentsXml,
 	parseCommentsExtendedXml,
@@ -493,21 +494,39 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 					return null;
 				}
 
-				// Resolve provider and model
+				// Resolve provider and model (preset takes precedence)
 				const providerRegistry = plugin.getProviderRegistry();
-				const providerType = profile.preferred_provider
-					? profile.preferred_provider as import("../types").LLMProviderType
-					: providerRegistry.getActiveType();
+				let providerType: import("../types").LLMProviderType;
+				let model: string;
 				let provider;
+
+				const resolvedPreset = profile.preferred_preset
+					? resolvePreset(profile.preferred_preset, plugin.settings.model_presets)
+					: null;
+
+				if (resolvedPreset) {
+					providerType = resolvedPreset.providerType;
+					model = resolvedPreset.modelId;
+				} else {
+					if (profile.preferred_preset) {
+						rsaLog.warn("runSubAgent: preset not found, falling back", {
+							profile: opts.profileName,
+							preset: profile.preferred_preset,
+						});
+					}
+					providerType = profile.preferred_provider
+						? profile.preferred_provider as import("../types").LLMProviderType
+						: providerRegistry.getActiveType();
+					const providerConfig = providerRegistry.getConfig(providerType);
+					model = profile.preferred_model ?? providerConfig?.model_id ?? "";
+				}
+
 				try {
 					provider = providerRegistry.getProvider(providerType);
 				} catch {
 					rsaLog.warn("runSubAgent: provider not configured", { provider: providerType, profile: opts.profileName });
 					return null;
 				}
-
-				const providerConfig = providerRegistry.getConfig(providerType);
-				const model = profile.preferred_model ?? providerConfig?.model_id ?? "";
 				if (!model) {
 					rsaLog.warn("runSubAgent: no model resolved", { profile: opts.profileName });
 					return null;
@@ -587,7 +606,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 						toolDefinitions,
 						dispatcher: subDispatcher,
 						parentAbortSignal: controller.signal,
-						iterationCap: opts.iterationCap ?? SUB_AGENT_ITERATION_CAP,
+						iterationCap: opts.iterationCap ?? profile.iteration_cap ?? plugin.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP,
 						tokenLimit: SUB_AGENT_TOKEN_LIMIT,
 						mode: "act",
 					});

@@ -54,6 +54,8 @@ function makeProfile(overrides: Partial<SubAgentProfile> = {}): SubAgentProfile 
 		description: "Search the vault for notes",
 		preferred_provider: null,
 		preferred_model: null,
+		preferred_preset: null,
+		iteration_cap: null,
 		tool_configs: [{
 			source: "subagent",
 			sourceFile: "notor/sub-agents/search-vault/system-prompt.md",
@@ -141,6 +143,10 @@ function makeSettings(overrides: Partial<NotorSettings> = {}): NotorSettings {
 		sub_agent_concurrency_cap: 3,
 		sub_agent_visibility: {},
 		sub_agent_auto_approve_reads: true,
+		model_presets: [
+			{ name: "tiny", provider_type: "anthropic", model_id: "claude-haiku-3", use_extended_context: false },
+			{ name: "large", provider_type: "anthropic", model_id: "claude-opus-4", use_extended_context: true },
+		],
 		...overrides,
 	} as unknown as NotorSettings;
 }
@@ -438,6 +444,93 @@ describe("UseSubagentTool", () => {
 			expect(toolNames).toContain("search_vault");
 			expect(toolNames).not.toContain("write_note");
 			expect(toolNames).not.toContain("read_note");
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// Preset resolution (Phase 0)
+	// -----------------------------------------------------------------------
+
+	describe("preset resolution", () => {
+		it("profile with preferred_preset resolves to preset's provider + model", async () => {
+			const profile = makeProfile({ preferred_preset: "tiny" });
+			const providerRegistry = makeMockProviderRegistry();
+			const tool = createTool({
+				manager: makeMockSubAgentManager([profile]),
+				providerRegistry,
+			});
+
+			await tool.execute({ profile: "search-vault", task: "Search" });
+
+			const ctorCall = (SubAgentRunner as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+			expect(ctorCall.model).toBe("claude-haiku-3");
+			expect(providerRegistry.getProvider).toHaveBeenCalledWith("anthropic");
+		});
+
+		it("profile with nonexistent preset falls through to preferred_provider/preferred_model", async () => {
+			const profile = makeProfile({
+				preferred_preset: "nonexistent",
+				preferred_provider: "anthropic",
+				preferred_model: "claude-sonnet-fallback",
+			});
+			const tool = createTool({ manager: makeMockSubAgentManager([profile]) });
+
+			await tool.execute({ profile: "search-vault", task: "Search" });
+
+			const ctorCall = (SubAgentRunner as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+			expect(ctorCall.model).toBe("claude-sonnet-fallback");
+		});
+
+		it("preset takes precedence over preferred_provider/preferred_model", async () => {
+			const profile = makeProfile({
+				preferred_preset: "tiny",
+				preferred_provider: "openai",
+				preferred_model: "gpt-4",
+			});
+			const tool = createTool({ manager: makeMockSubAgentManager([profile]) });
+
+			await tool.execute({ profile: "search-vault", task: "Search" });
+
+			const ctorCall = (SubAgentRunner as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+			expect(ctorCall.model).toBe("claude-haiku-3");
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// Iteration cap (Phase 0)
+	// -----------------------------------------------------------------------
+
+	describe("iteration cap", () => {
+		it("profile with iteration_cap uses profile cap", async () => {
+			const profile = makeProfile({ iteration_cap: 6 });
+			const tool = createTool({ manager: makeMockSubAgentManager([profile]) });
+
+			await tool.execute({ profile: "search-vault", task: "Search" });
+
+			const ctorCall = (SubAgentRunner as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+			expect(ctorCall.iterationCap).toBe(6);
+		});
+
+		it("profile without iteration_cap falls back to global setting", async () => {
+			const settings = makeSettings({ sub_agent_iteration_cap: 10 } as Partial<NotorSettings>);
+			const tool = createTool({ settings });
+
+			await tool.execute({ profile: "search-vault", task: "Search" });
+
+			const ctorCall = (SubAgentRunner as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+			expect(ctorCall.iterationCap).toBe(10);
+		});
+
+		it("profile without iteration_cap and no global setting falls back to constant", async () => {
+			const settings = makeSettings();
+			// Remove sub_agent_iteration_cap from settings to test constant fallback
+			delete (settings as unknown as Record<string, unknown>)["sub_agent_iteration_cap"];
+			const tool = createTool({ settings });
+
+			await tool.execute({ profile: "search-vault", task: "Search" });
+
+			const ctorCall = (SubAgentRunner as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+			expect(ctorCall.iterationCap).toBe(20); // SUB_AGENT_ITERATION_CAP constant
 		});
 	});
 });

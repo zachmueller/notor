@@ -182,6 +182,8 @@ async function parseProfile(
 	const description = parseStringOrNull(frontmatter?.["notor-description"]);
 	const preferredProvider = parseStringOrNull(frontmatter?.["notor-preferred-provider"]);
 	const preferredModel = parseStringOrNull(frontmatter?.["notor-preferred-model"]);
+	const preferredPreset = parseStringOrNull(frontmatter?.["notor-preferred-preset"]);
+	const iterationCap = parseNumberOrNull(frontmatter?.["notor-iteration-cap"]);
 
 	// Strip frontmatter from content, then resolve template variables
 	const strippedBody = stripFrontmatter(rawContent);
@@ -215,6 +217,8 @@ async function parseProfile(
 		description,
 		preferred_provider: preferredProvider,
 		preferred_model: preferredModel,
+		preferred_preset: preferredPreset,
+		iteration_cap: iterationCap,
 		tool_configs: configs,
 		is_builtin: isBuiltin,
 	};
@@ -263,6 +267,8 @@ function buildProfileFromBuiltin(
 		description,
 		preferred_provider: extractFrontmatterField(systemPromptContent, "notor-preferred-provider"),
 		preferred_model: extractFrontmatterField(systemPromptContent, "notor-preferred-model"),
+		preferred_preset: extractFrontmatterField(systemPromptContent, "notor-preferred-preset"),
+		iteration_cap: extractFrontmatterNumberField(systemPromptContent, "notor-iteration-cap"),
 		tool_configs: configs,
 		is_builtin: true,
 	};
@@ -301,6 +307,19 @@ function extractFrontmatterField(content: string, fieldName: string): string | n
 	return value.length > 0 ? value : null;
 }
 
+/**
+ * Extract a numeric field value from YAML frontmatter in raw content.
+ *
+ * Uses `extractFrontmatterField` then parses as a number.
+ * Returns `null` if the field is missing, empty, or non-numeric.
+ */
+function extractFrontmatterNumberField(content: string, fieldName: string): number | null {
+	const raw = extractFrontmatterField(content, fieldName);
+	if (raw === null) return null;
+	const num = Number(raw);
+	return isNaN(num) ? null : num;
+}
+
 // ---------------------------------------------------------------------------
 // Frontmatter parsing helpers
 // ---------------------------------------------------------------------------
@@ -314,6 +333,20 @@ function parseStringOrNull(value: unknown): string | null {
 	if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return null;
 	const str = String(value).trim();
 	return str.length > 0 ? str : null;
+}
+
+/**
+ * Parse a frontmatter value as a number or null.
+ * Returns null for undefined, null, non-numeric, or NaN values.
+ */
+function parseNumberOrNull(value: unknown): number | null {
+	if (value === undefined || value === null) return null;
+	if (typeof value === "number" && !isNaN(value)) return value;
+	if (typeof value === "string") {
+		const num = Number(value.trim());
+		if (!isNaN(num) && value.trim().length > 0) return num;
+	}
+	return null;
 }
 
 // ---------------------------------------------------------------------------
