@@ -165,7 +165,8 @@ async function waitForExtensionBlock(page: any, timeoutMs = 15_000): Promise<boo
 async function reloadExtensions(page: any): Promise<void> {
 	await page.evaluate(async () => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-		await plugin?.reloadExtensions?.();
+		if (!plugin?.getExtensionManager) return;
+		await plugin.getExtensionManager().reload(false);
 	});
 	await page.waitForTimeout(2_000);
 }
@@ -325,14 +326,50 @@ async function testBlockingAutomation(ctx: TestContext): Promise<void> {
 
 	await ensureCleanState(page);
 	await newConversation(page);
-	await page.waitForTimeout(3_000);
 
-	// The blocking automation should have fired during on_conversation_start
-	// Check if an extension_block row appeared (without needing to send a message)
-	const blockVisible = await waitForExtensionBlock(page, 10_000);
+	// NOTE: on_conversation_start fires when the first user message is SENT,
+	// not when a conversation is opened. Send a message to trigger it.
+	await setMode(page, "Plan");
+	const responded = await sendMessage(page, "Say only: hello");
+	if (!responded) {
+		ctx.fail("LLM responds for blocking automation test", "No response received");
+		return;
+	}
+	ctx.pass("LLM responds for blocking automation test", "Got a response");
+
+	// After response, the conversation should contain an extension_block from the
+	// blocking automation. It appears before the first assistant message (proving
+	// the block was in the LLM context on the first turn).
+	await page.waitForTimeout(2_000);
+
+	const blockVisible = await waitForExtensionBlock(page, 8_000);
 
 	if (blockVisible) {
-		ctx.pass("Blocking automation block appears in chat", "extension_block rendered before first user message sent");
+		ctx.pass("Blocking automation block appears in chat", "extension_block rendered in conversation");
+
+		// Verify the block appears before the assistant message in the conversation
+		const orderOk = await page.evaluate(() => {
+			const messages = Array.from(document.querySelectorAll(".notor-message"));
+			const extBlockIdx = messages.findIndex((m) => m.classList.contains("notor-extension-block"));
+			const assistantIdx = messages.findIndex((m) => m.classList.contains("notor-message-assistant"));
+			if (extBlockIdx === -1) return { found: false };
+			if (assistantIdx === -1) return { found: true, beforeAssistant: null };
+			return { found: true, beforeAssistant: extBlockIdx < assistantIdx, extBlockIdx, assistantIdx };
+		});
+
+		if (orderOk.found && orderOk.beforeAssistant !== false) {
+			ctx.pass(
+				"Blocking block appears before assistant message",
+				orderOk.beforeAssistant === true
+					? `Block at index ${orderOk.extBlockIdx}, assistant at ${orderOk.assistantIdx}`
+					: "Block found (no assistant message visible yet — acceptable)",
+			);
+		} else if (orderOk.found && orderOk.beforeAssistant === false) {
+			ctx.fail(
+				"Blocking block appears before assistant message",
+				`Block at index ${orderOk.extBlockIdx}, assistant at ${orderOk.assistantIdx} — block came AFTER assistant`,
+			);
+		}
 
 		// Check memory content rendered
 		const memoriesVisible = await page.evaluate(() => {
@@ -345,14 +382,14 @@ async function testBlockingAutomation(ctx: TestContext): Promise<void> {
 			ctx.fail("Blocking block content rendered", "No .e2e-memories-list children found");
 		}
 	} else {
-		// Check if the blocking automation was even discovered
 		const automationLogs = ctx.collector.getStructuredLogs().filter((e) =>
-			e.message?.includes("memory_recalled_e2e") || e.message?.includes("blocking")
+			(e.data as any)?.kind === "memory_recalled_e2e" ||
+			e.message?.includes("on_conversation_start"),
 		);
 		const shot = await ctx.screenshot("02-no-blocking-block");
 		ctx.fail(
 			"Blocking automation block appears in chat",
-			`No .notor-extension-block found after 10s. Automation logs: ${automationLogs.length}`,
+			`No .notor-extension-block found after response. on_conversation_start logs: ${automationLogs.length}`,
 			shot,
 		);
 	}
@@ -557,6 +594,15 @@ async function testPluginUnloadAbortsAgents(ctx: TestContext): Promise<void> {
 async function tests(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
 	await page.waitForTimeout(5_000);
+
+	// tsx/esbuild injects __name() for function name tracking in object literals.
+	// The serialized evaluate() strings contain this call, but it's not defined
+	// in the Obsidian browser context. Define a no-op polyfill.
+	await page.evaluate(() => {
+		if (typeof (window as any).__name === "undefined") {
+			(window as any).__name = (fn: Function, _name: string) => fn;
+		}
+	});
 
 	// Reload extensions to pick up any scaffolds
 	await reloadExtensions(page);

@@ -679,9 +679,9 @@ async function testMarkdownExport(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "Plugin not found" };
 		try {
-			// Try to access the markdown exporter
-			const exporter = plugin.getMarkdownExporter?.() ?? plugin._markdownExporter;
-			if (!exporter) return { error: "Markdown exporter not accessible" };
+			// getMarkdownExporter() returns the exportToMarkdown function directly
+			const exportFn = plugin.getMarkdownExporter?.();
+			if (!exportFn) return { error: "Markdown exporter not accessible" };
 
 			const orchestrator = plugin.getActiveOrchestrator();
 			const convManager = orchestrator?.getConversationManager();
@@ -689,7 +689,7 @@ async function testMarkdownExport(ctx: TestContext): Promise<void> {
 			const conv = convManager?.getActiveConversation();
 			if (!conv) return { error: "No active conversation" };
 
-			const markdown = exporter.export(conv, messages);
+			const markdown = exportFn(conv, messages);
 			return { markdown };
 		} catch (e: any) {
 			return { error: e.message ?? String(e) };
@@ -833,6 +833,15 @@ async function testNoUnexpectedErrors(ctx: TestContext): Promise<void> {
 async function tests(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
 	await page.waitForTimeout(5_000);
+
+	// tsx/esbuild injects __name() for function name tracking in object literals.
+	// The serialized evaluate() strings contain this call, but it's not defined
+	// in the Obsidian browser context. Define a no-op polyfill.
+	await page.evaluate(() => {
+		if (typeof (window as any).__name === "undefined") {
+			(window as any).__name = (fn: Function, _name: string) => fn;
+		}
+	});
 
 	await testRegisteredKindRendering(ctx);
 	await testSourceExtensionLabel(ctx);

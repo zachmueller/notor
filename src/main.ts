@@ -1942,6 +1942,11 @@ export default class NotorPlugin extends Plugin {
 		return this._chatBlockRegistry;
 	}
 
+	/** Markdown exporter — exposed for E2E testing. */
+	getMarkdownExporter(): typeof import("./export/markdown-exporter").exportToMarkdown {
+		return exportToMarkdown;
+	}
+
 	/** Per-lane FIFO serialization queue for rate-limiting async operations. */
 	getTaskLaneQueue(): TaskLaneQueue {
 		if (!this._taskLaneQueue) {

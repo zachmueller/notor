@@ -209,11 +209,16 @@ export class ChatOrchestrator implements ToolSessionContext {
 		this.activeModelId = initProviderConfig?.model_id ?? "";
 		this.activeUseExtendedContext = initProviderConfig?.use_extended_context ?? false;
 
-		// Wire conversation manager to history persistence
+		// Wire conversation manager to history persistence + live render for direct emits
 		this.conversationManager.setOnMessageAdded(async (message: Message) => {
 			const conv = this.conversationManager.getActiveConversation();
 			if (conv) {
 				await this.historyManager.appendMessage(conv, message);
+			}
+			// Live-render extension_blocks emitted directly to the display manager
+			// (e.g. via chatBlocks.emit on the active conversation)
+			if (message.role === "extension_block") {
+				this.viewRouter.renderMessage(message);
 			}
 		});
 
