@@ -176,6 +176,7 @@ memory: {
   writeDedupEntry: (fingerprint: string, timestamp: string) => Promise<void>;
   readDreamCursor: () => Promise<string | null>;
   advanceDreamCursor: (timestamp: string) => Promise<void>;
+  hasMemoryNotes: () => Promise<boolean>;
 } | null;
 ```
 
@@ -207,7 +208,7 @@ Calls `utils.memory.fingerprintAndDedup` then `utils.memory.resolveConcept`. Ret
 **Register in** [`src/extensions/builtin-automation-scaffolds.ts`](../../src/extensions/builtin-automation-scaffolds.ts).
 
 - **Trigger:** `on_conversation_start` with `notor-blocking: true`.
-- **Cold-start guard:** Before spawning the search sub-agent, list `.md` files in `{notor_dir}/memory/` (excluding dotfiles). If count is zero, skip the sub-agent entirely and emit no block — avoids sub-agent LLM cost and a noisy "No memories recalled" indicator on every conversation until capture populates the first note. Search begins firing normally after that.
+- **Cold-start guard:** Before spawning the search sub-agent, call `utils.memory.hasMemoryNotes()` to check whether any `.md` files exist in `{notor_dir}/memory/` (excluding dotfiles). If none exist, skip the sub-agent entirely and emit no block — avoids sub-agent LLM cost and a noisy "No memories recalled" indicator on every conversation until capture populates the first note. Search begins firing normally after that.
 - Spawns `memory-search` sub-agent (`detached: false` — must block until search returns).
 - Loads conversation via `utils.chatHistory.loadFull` to get latest user message + recent context.
 - On success, reads matched note bodies via `utils.readNote` + `utils.memory.parseNote`.

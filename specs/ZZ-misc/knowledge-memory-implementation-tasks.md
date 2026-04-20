@@ -44,7 +44,7 @@ Extends the sub-agent system to support `preferred_preset` and `iteration_cap` f
 - [ ] **0.5 — Add preset resolution to `runSubAgent` extension API**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (provider/model resolution at lines 496-514):
   - Same pattern as 0.4: check `profile.preferred_preset` first, resolve via `resolvePreset()`, fall back to `preferred_provider`/`preferred_model`
-  - At line 590: use three-level fallback chain: `opts.iterationCap ?? profile.iteration_cap ?? SUB_AGENT_ITERATION_CAP`
+  - At line 590: use four-level fallback chain: `opts.iterationCap ?? profile.iteration_cap ?? plugin.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP` (note: `runSubAgent` is a closure over `plugin`, not a class method — use `plugin.settings` not `this.settings`)
 
 - [ ] **0.6 — Unit tests for sub-agent preset resolution**
   - Existing sub-agent profiles (`search-vault`, `search-web`, `notor-help`) continue to work unchanged (null preset, null iteration_cap)
@@ -136,6 +136,7 @@ Wire the library into the extension runtime so scaffolds can call `utils.memory.
   - `fingerprintAndDedup` calls `computeFingerprint` + `readDedupCache` + `writeDedupEntry`
   - `serializeNote`, `parseNote`, `slugifyTitle`, `assertMemoryPath` delegate directly to `src/memory/note-format.ts`
   - `readDedupCache`, `writeDedupEntry`, `readDreamCursor`, `advanceDreamCursor` delegate to `src/memory/dedup-cache.ts` with resolved paths
+  - `hasMemoryNotes` lists `.md` files in the memory directory (excluding dotfiles via name prefix check), returns `true` if count > 0. Uses `app.vault.getAbstractFileByPath()` to resolve the memory directory, then inspects its `children` for `.md` files. Used by the `memory-search` automation cold-start guard (Task 5.1)
 
 - [ ] **2.4 — Add `chatHistory.loadFull()` to `ExtensionUtils`**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (chatHistory property at ~lines 178-182):
@@ -157,14 +158,15 @@ Moved from Phase 8 (was Task 8.4). Must be in place before Phases 3-6 register m
 
 - [ ] **2.5a — Implement `notor-feature-group` enablement in `ExtensionManager`**
   - **Gate at registration time during `reload()`, NOT at execution time.** Scaffolds whose feature group is disabled should be excluded from compilation and registration entirely — disabled tools don't appear in the LLM's tool list, disabled block kinds don't register in `ChatBlockRegistry`, and disabled automations aren't in the compiled map.
-  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `reload()` (~line 215):
-    - After tool discovery/injection (line ~257), filter `discovered.tools` to exclude tools whose `featureGroup` maps to a disabled toggle
-    - After automation discovery/injection (line ~314), filter `discovered.automations` to exclude automations whose `featureGroup` maps to a disabled toggle
-    - After block discovery/injection (before block compilation at line ~340), filter `discovered.blocks` to exclude blocks whose `featureGroup` maps to a disabled toggle
   - No runtime gate needed in `executeAutomation()` (~line 620) since disabled automations won't be in the compiled map
   - Initial mapping: `"memory"` → `memory_enabled`. Pattern is extensible for future feature groups.
-  - Add `featureGroup?: string` to `UserToolDefinition`, `UserAutomationDefinition`, **and `UserBlockDefinition`** in [`src/extensions/types.ts`](../../src/extensions/types.ts)
-  - Add `notor-feature-group` parsing to [`src/extensions/parser.ts`](../../src/extensions/parser.ts) for all extension types (tool, automation, block)
+  - Sub-tasks:
+    - **(i)** Add `featureGroup?: string` to `UserToolDefinition`, `UserAutomationDefinition`, **and `UserBlockDefinition`** in [`src/extensions/types.ts`](../../src/extensions/types.ts)
+    - **(ii)** Parse `notor-feature-group` from frontmatter in [`src/extensions/parser.ts`](../../src/extensions/parser.ts) for all three extension types (tool, automation, block) — add to `parseToolFile()`, `parseAutomationFile()`, and `parseBlockFile()`
+    - **(iii)** Propagate `featureGroup` in the **tool** scaffold injection frontmatter dict at [`manager.ts:235-240`](../../src/extensions/manager.ts#L235-L240) — add `"notor-feature-group": scaffold.featureGroup` (conditional on presence). Requires adding `featureGroup?: string` to the `BuiltinToolScaffold` interface in [`builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts)
+    - **(iv)** Propagate `featureGroup` in the **automation** scaffold injection frontmatter dict at [`manager.ts:289-293`](../../src/extensions/manager.ts#L289-L293) — add `"notor-feature-group": scaffold.featureGroup` (conditional on presence). Uses the `featureGroup` field added to `BuiltinAutomationScaffold` in Task 5.0
+    - **(v)** Propagate `featureGroup` in the **new block** scaffold injection frontmatter dict (Task 6.4) — add `"notor-feature-group": scaffold.featureGroup` (conditional on presence). Uses the `featureGroup` field added to `BuiltinBlockScaffold` in Task 6.1
+    - **(vi)** Add feature-group filtering logic to `reload()` in [`manager.ts`](../../src/extensions/manager.ts) (~line 215): after tool discovery/injection (line ~257) filter `discovered.tools`, after automation discovery/injection (line ~314) filter `discovered.automations`, after block discovery/injection (before block compilation at line ~340) filter `discovered.blocks` — each excluding entries whose `featureGroup` maps to a disabled toggle
 
 ---
 
@@ -218,14 +220,16 @@ Register the four memory sub-agent profiles following the existing pattern in [`
 ## Phase 4 — Built-in Tool Scaffold (`capture_memory`)
 
 - [ ] **4.1 — Add `capture_memory` tool scaffold**
+  - **Prerequisite:** Add `featureGroup?: string` to the `BuiltinToolScaffold` interface in [`builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts) (currently has `name`, `description`, `mode`, `scaffoldContent` only). Without this, `notor-feature-group: memory` won't propagate through the tool injection frontmatter dict at [`manager.ts:235-240`](../../src/extensions/manager.ts#L235-L240). (The dict propagation itself is handled by Task 2.5a(iii).)
   - In [`src/extensions/builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts):
   - Define `CAPTURE_MEMORY` using the `scaffold()` helper (~line 36-67):
     - `name: "capture_memory"`
     - `description: "Save an insight into long-term memory as an Evergreen note"`
     - `mode: "write"`
+    - `featureGroup: "memory"`
     - YAML params: `content` (string, required)
     - YAML settings: `resolver_profile` (string, default `memory-resolver`), `dedup_window_hours` (number, default 24)
-    - Add `notor-feature-group: memory` to frontmatter
+    - Add `notor-feature-group: memory` to frontmatter (for vault override path)
   - Code fence implements: dedup check → `resolveConcept` → return result text
   - Add to `BUILTIN_TOOL_SCAFFOLDS` Map (~line 2692-2717)
 
@@ -248,6 +252,7 @@ The injection code at `manager.ts:289` must also be updated to include these new
     - Add `blocking?: boolean`, `blockingEmitKind?: string`, `blockingTimeout?: number`, `featureGroup?: string`
   - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) (scaffold injection at ~line 289):
     - Add the new fields to the manually-constructed frontmatter dict, conditional on their presence (e.g., `if (scaffold.blocking) frontmatter["notor-blocking"] = scaffold.blocking;`)
+  - **Dual frontmatter source note:** `parseExtensionFile()` takes the frontmatter dict as a parameter — it does NOT re-parse frontmatter from the `scaffoldContent` Markdown. The manually-constructed dict is the load-bearing path for in-memory built-in scaffolds. The `scaffoldContent`'s own YAML frontmatter is only used when a user creates a vault override file (where Obsidian's metadata cache provides the frontmatter). Both sources must include blocking and feature-group fields for the full override chain to work.
   - Verify: existing `title-generation` scaffold is unaffected (all new fields are optional and absent)
 
 - [ ] **5.1 — Add `memory-search` automation scaffold**
@@ -260,7 +265,7 @@ The injection code at `manager.ts:289` must also be updated to include these new
     - `featureGroup: "memory"`
     - `scaffoldContent`: full Markdown with frontmatter including `notor-blocking: true`, `notor-blocking-emit-kind: memory_recalled`, `notor-blocking-timeout: 10`, `notor-feature-group: memory`
     - YAML settings: `search_profile` (string, default `memory-search`), `max_matches` (number, default 8)
-    - Code fence: **cold-start guard** — before spawning the search sub-agent, list `.md` files in `{notor_dir}/memory/` (excluding dotfiles); if count is zero, emit no block and return early. Otherwise: loads conversation via `chatHistory.loadFull`, spawns sub-agent, parses results, reads note bodies, emits `memory_recalled` block (as specified in design spec §7b)
+    - Code fence: **cold-start guard** — before spawning the search sub-agent, call `utils.memory.hasMemoryNotes()` to check whether any `.md` files exist in the memory directory; if none exist, emit no block and return early. Otherwise: loads conversation via `chatHistory.loadFull`, spawns sub-agent, parses results, reads note bodies, emits `memory_recalled` block (as specified in design spec §7b)
 
 - [ ] **5.2 — Add `memory-capture` automation scaffold**
   - Add entry to `BUILTIN_AUTOMATION_SCAFFOLDS` Map:
@@ -310,6 +315,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
       displayName: string;
       icon?: string;
       excludeFromCompaction?: boolean;
+      featureGroup?: string;
       scaffoldContent: string;
     }
     ```
@@ -358,7 +364,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
     ```
 
 - [ ] **7.2 — Inject memory convention section conditionally**
-  - In the `assemble()` method (~lines 211-329):
+  - In the `assemble()` method (~lines 211-330):
   - **Before** the auto-context section (~line 307), conditionally insert:
     ```typescript
     if (this.settings.memory_enabled) {
