@@ -140,9 +140,9 @@ Wire the library into the extension runtime so scaffolds can call `utils.memory.
   - `hasMemoryNotes` lists `.md` files in the memory directory (excluding dotfiles via name prefix check), returns `true` if count > 0. Uses `app.vault.getAbstractFileByPath()` to resolve the memory directory, then inspects its `children` for `.md` files. Used by the `memory-search` automation cold-start guard (Task 5.1)
 
 - [ ] **2.4 — Add `chatHistory.loadFull()` to `ExtensionUtils`**
+  - **Why this is needed:** The existing `chatHistory.loadConversation()` returns `ChatHistoryConversation` — whose `messages` field is `Array<{ role: string; content: string; timestamp: string }>` ([`runtime-context.ts:90`](../../src/extensions/runtime-context.ts#L90)). This is a simplified shape: roles are plain strings (not the `MessageRole` union), content is a flat string (not `ContentBlock[]`), and metadata fields like `is_hook_injection`, tool calls, and extension blocks are stripped. Memory automations require the raw `Message[]` format to extract full conversation context including tool use, multi-part content, and extension blocks.
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (chatHistory property at ~lines 178-182):
   - Add `loadFull: (conversationId: string) => Promise<Message[] | null>` — returns raw `Message[]` (all roles, all fields including `is_hook_injection`, `ContentBlock[]` content preserved)
-  - **Context:** The existing `chatHistory.loadConversation()` returns `ChatHistoryConversation` — a simplified format that filters to user/assistant roles only and calls `getTextContent()`, stripping `ContentBlock[]` to plain strings and excluding extension_block/tool_call/tool_result messages. Memory automations need the raw `Message[]` format to extract full conversation context including tool use and multi-part content.
   - When conversation has an active session (matching `conversationId`): reads from the live `ConversationManager.getMessages()` instead of persisted JSONL
   - Falls back to `HistoryManager.loadConversation()` for inactive conversations (note: `HistoryManager.loadConversation(filename)` takes a JSONL **filename**, not a conversation ID — must resolve ID → filename via `listConversations()` first, same pattern as `addMessageToConversation()` at [`history.ts:222-249`](../../src/chat/history.ts#L222-L249))
   - Returns `null` if conversation not found
@@ -165,9 +165,9 @@ Moved from Phase 8 (was Task 8.4). Must be in place before Phases 3-6 register m
   - Sub-tasks:
     - **(i)** Add `featureGroup?: string` to `UserToolDefinition`, `UserAutomationDefinition`, **and `UserBlockDefinition`** in [`src/extensions/types.ts`](../../src/extensions/types.ts)
     - **(ii)** Parse `notor-feature-group` from frontmatter in [`src/extensions/parser.ts`](../../src/extensions/parser.ts) for all three extension types (tool, automation, block) — add to `parseToolFile()`, `parseAutomationFile()`, and `parseBlockFile()`
-    - **(iii)** Propagate `featureGroup` in the **tool** scaffold injection frontmatter dict at [`manager.ts:235-240`](../../src/extensions/manager.ts#L235-L240) — add `"notor-feature-group": scaffold.featureGroup` (conditional on presence). Requires adding `featureGroup?: string` to the `BuiltinToolScaffold` interface in [`builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts)
-    - **(iv)** Propagate `featureGroup` in the **automation** scaffold injection frontmatter dict at [`manager.ts:289-293`](../../src/extensions/manager.ts#L289-L293) — add `"notor-feature-group": scaffold.featureGroup` (conditional on presence). Uses the `featureGroup` field added to `BuiltinAutomationScaffold` in Task 5.0
-    - **(v)** Propagate `featureGroup` in the **new block** scaffold injection frontmatter dict (Task 6.4) — add `"notor-feature-group": scaffold.featureGroup` (conditional on presence). Uses the `featureGroup` field added to `BuiltinBlockScaffold` in Task 6.1
+    - **(iii)** Propagate `featureGroup` in the **tool** scaffold injection frontmatter dict at [`manager.ts:235-240`](../../src/extensions/manager.ts#L235-L240). Requires adding `featureGroup?: string` to the `BuiltinToolScaffold` interface in [`builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts). **Use conditional inclusion** to avoid injecting `undefined`: `if (scaffold.featureGroup) frontmatter["notor-feature-group"] = scaffold.featureGroup;`
+    - **(iv)** Propagate `featureGroup` in the **automation** scaffold injection frontmatter dict at [`manager.ts:289-293`](../../src/extensions/manager.ts#L289-L293). Uses the `featureGroup` field added to `BuiltinAutomationScaffold` in Task 5.0. **Same conditional pattern:** `if (scaffold.featureGroup) frontmatter["notor-feature-group"] = scaffold.featureGroup;`
+    - **(v)** Propagate `featureGroup` in the **new block** scaffold injection frontmatter dict (Task 6.4). Uses the `featureGroup` field added to `BuiltinBlockScaffold` in Task 6.1. **Same conditional pattern:** `if (scaffold.featureGroup) frontmatter["notor-feature-group"] = scaffold.featureGroup;`
     - **(vi)** Add feature-group filtering logic to `reload()` in [`manager.ts`](../../src/extensions/manager.ts) (~line 215): after tool discovery/injection (line ~257) filter `discovered.tools`, after automation discovery/injection (line ~314) filter `discovered.automations`, after block scaffold injection (before block cleanup at line 332) filter `discovered.blocks` — each excluding entries whose `featureGroup` maps to a disabled toggle
 
 ---
@@ -177,6 +177,8 @@ Moved from Phase 8 (was Task 8.4). Must be in place before Phases 3-6 register m
 **Depends on:** Phase 0 (sub-agent preset + iteration cap resolution) must be complete — memory profiles use `notor-preferred-preset` and `notor-iteration-cap` frontmatter.
 
 Register the four memory sub-agent profiles following the existing pattern in [`src/sub-agents/builtin-profiles.ts`](../../src/sub-agents/builtin-profiles.ts).
+
+**Note:** Memory sub-agent profiles express `notor-preferred-preset` and `notor-iteration-cap` as YAML frontmatter keys within the `systemPromptContent` Markdown string. No changes to the `BuiltinSubAgentDefinition` TypeScript interface are needed — `buildProfileFromBuiltin()` (extended in Task 0.3) handles extraction from the raw frontmatter and maps them onto the `SubAgentProfile` output type.
 
 - [ ] **3.1 — Add `memory-search` profile to `BUILTIN_SUBAGENT_PROFILES`**
   - In [`src/sub-agents/builtin-profiles.ts`](../../src/sub-agents/builtin-profiles.ts) (~line 196-201):
@@ -247,14 +249,17 @@ Register the four memory sub-agent profiles following the existing pattern in [`
 
 **Prerequisite:** The `BuiltinAutomationScaffold` interface at [`builtin-automation-scaffolds.ts:17-31`](../../src/extensions/builtin-automation-scaffolds.ts#L17-L31) must be extended with optional fields: `blocking?: boolean`, `blockingEmitKind?: string`, `blockingTimeout?: number`, `featureGroup?: string`. These are needed because the scaffold injection loop at [`manager.ts:288-293`](../../src/extensions/manager.ts#L288-L293) manually constructs a frontmatter dict from interface fields — without these fields in the interface, blocking and feature-group behavior would silently fail.
 
-The injection code at `manager.ts:289` must also be updated to include these new fields in the manually-constructed frontmatter dict (e.g., `"notor-blocking": scaffold.blocking`, `"notor-blocking-emit-kind": scaffold.blockingEmitKind`, `"notor-blocking-timeout": scaffold.blockingTimeout`, `"notor-feature-group": scaffold.featureGroup`).
+The injection code at `manager.ts:289` must also be updated to include these new fields in the manually-constructed frontmatter dict (e.g., `if (scaffold.blocking) frontmatter["notor-blocking"] = scaffold.blocking;`).
 
-- [ ] **5.0 — Extend `BuiltinAutomationScaffold` interface and injection code**
+**Note:** The `UserAutomationDefinition` type (blocking fields at [`types.ts:168-179`](../../src/extensions/types.ts#L168-L179)) and the parser extraction (`notor-blocking`, `notor-blocking-emit-kind`, `notor-blocking-timeout` at [`parser.ts:267-275`](../../src/extensions/parser.ts#L267-L275)) are already complete from the Chat Blocks implementation (Phase 8). Task 5.0 below covers only the remaining gap: the scaffold interface and manager dict propagation.
+
+- [ ] **5.0 — Propagate blocking and feature-group fields through automation scaffold injection path**
+  - **Scope note:** `UserAutomationDefinition` and `parseAutomationFile()` already handle blocking fields (Chat Blocks Phase 8). This task adds them to the scaffold interface and manager injection dict only.
   - In [`src/extensions/builtin-automation-scaffolds.ts`](../../src/extensions/builtin-automation-scaffolds.ts) (interface at lines 17-31):
     - Add `blocking?: boolean`, `blockingEmitKind?: string`, `blockingTimeout?: number`, `featureGroup?: string`
   - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) (scaffold injection at ~line 289):
-    - Add the new fields to the manually-constructed frontmatter dict, conditional on their presence (e.g., `if (scaffold.blocking) frontmatter["notor-blocking"] = scaffold.blocking;`)
-  - **Dual frontmatter source note:** `parseExtensionFile()` takes the frontmatter dict as a parameter — it does NOT re-parse frontmatter from the `scaffoldContent` Markdown. The manually-constructed dict is the load-bearing path for in-memory built-in scaffolds. The `scaffoldContent`'s own YAML frontmatter is only used when a user creates a vault override file (where Obsidian's metadata cache provides the frontmatter). Both sources must include blocking and feature-group fields for the full override chain to work.
+    - Add the new fields to the manually-constructed frontmatter dict, **conditional on their presence** to avoid injecting `undefined` values: `if (scaffold.blocking) frontmatter["notor-blocking"] = scaffold.blocking;` (same pattern for each field)
+  - **Dual frontmatter source invariant:** `parseExtensionFile()` takes the frontmatter dict as a parameter — it does NOT re-parse frontmatter from the `scaffoldContent` Markdown. The manually-constructed dict is the load-bearing path for in-memory built-in scaffolds. The `scaffoldContent`'s own YAML frontmatter is only used when a user creates a vault override file (where Obsidian's metadata cache provides the frontmatter). **Every functional frontmatter field MUST be propagated through both paths** — the scaffold interface → manager dict (in-memory) AND the scaffoldContent YAML (vault override). Missing either side creates a silent behavioral gap where the field works in one context but not the other.
   - Verify: existing `title-generation` scaffold is unaffected (all new fields are optional and absent)
 
 - [ ] **5.1 — Add `memory-search` automation scaffold**
@@ -342,14 +347,15 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 - [ ] **6.4 — Integrate `BUILTIN_BLOCK_SCAFFOLDS` into `ExtensionManager`** (absorbs former task 9.1)
   - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `reload()` (~line 215):
-  - Add a built-in block scaffold injection loop **between** the end of automation compilation (line 330) and the block cleanup step `// 3b. Unregister previous block kinds` (line 332). Follow the same pattern as the tool scaffold loop (lines 230-257) and automation scaffold loop (lines 281-314):
+  - Add a built-in block scaffold injection loop that pushes into `discovered.blocks` **before** the block cleanup step `// 3b. Unregister previous block kinds` (line 332). This mirrors the tool scaffold loop (lines 230-257) and automation scaffold loop (lines 281-314), which inject into `discovered.tools` / `discovered.automations` before their respective compilation loops.
+  - **Ordering rationale:** The unregister sweep at line 332-337 clears ALL previously registered block kinds from `this.registeredBlockKinds`. Injected scaffolds must be in `discovered.blocks` BEFORE this sweep so they are compiled and re-registered by the existing block compilation loop at lines 340-377 (`// 3c. Compile and register standalone block extensions`). Injecting AFTER the sweep would work but injecting before is consistent with the tool/automation pattern and ensures feature-group filtering (Task 2.5a(vi)) can operate on the complete `discovered.blocks` list.
+  - Steps:
     - Iterate `BUILTIN_BLOCK_SCAFFOLDS`
     - **Collision detection by `kind`** (not by name or file path): skip if `discovered.blocks.some(b => b.kind === scaffold.kind)`. Blocks are keyed by `kind` since that's their primary identity, unlike tools (keyed by `name`) or automations (keyed by vault `filePath`).
-    - Construct frontmatter from scaffold metadata (`notor-type: block`, `notor-block-kind`, `notor-display-name`, `notor-icon`, `notor-exclude-from-compaction`, `notor-feature-group`)
+    - Construct frontmatter from scaffold metadata (`notor-type: block`, `notor-block-kind`, `notor-display-name`, `notor-icon`, `notor-exclude-from-compaction`). **Use conditional inclusion for optional fields:** `if (scaffold.featureGroup) frontmatter["notor-feature-group"] = scaffold.featureGroup;`
     - Resolve template variables in scaffold content
     - Parse via `parseExtensionFile`, mark `isScaffold: true`, push to `discovered.blocks`
-  - Injected scaffolds will be compiled by the existing block compilation loop at lines 339-377 (`// 3c. Compile and register standalone block extensions`)
-  - User vault overrides take precedence (same mechanism: check if user file exists before injecting built-in)
+  - User vault overrides take precedence (same mechanism: collision detection by `kind` skips injection when a user-authored block with the same kind was already discovered)
 
 ---
 
