@@ -7,6 +7,7 @@
  */
 
 import type { Conversation, Message, ToolCall, ToolResult } from "../types";
+import { assertUnreachable } from "../utils/assert-unreachable";
 import { formatToolDisplayName } from "../ui/tool-call-ui";
 import { USE_SUBAGENT_TOOL_NAME } from "../sub-agents/constants";
 import { marked } from "marked";
@@ -390,7 +391,7 @@ function renderMessage(msg: Message, subAgentConversations?: SubAgentConversatio
 		case "tool_result":
 			return renderToolResultHtml(msg, subAgentConversations);
 		default:
-			return null;
+			assertUnreachable(msg.role);
 	}
 }
 
@@ -438,7 +439,8 @@ function renderUserMessage(msg: Message): string {
 		parts.push(`<div class="message-content">${escapeHtml(content.trim()).replace(/\n/g, "<br>")}</div>`);
 	}
 
-	// Render inline media blocks (images and PDF placeholders)
+	// Render inline media blocks (images and PDF placeholders).
+	// custom_block entries won't appear in user messages — they only appear in extension_block messages.
 	if (Array.isArray(msg.content)) {
 		for (const block of msg.content as ContentBlock[]) {
 			if (block.type === "image") {
@@ -611,7 +613,7 @@ function renderSubAgentMessage(msg: Message): string | null {
 			return `<div class="sub-agent-msg sub-agent-tool-result"><span class="${iconClass}">${icon}</span> <strong>${displayName}</strong>: ${preview}</div>`;
 		}
 		default:
-			return null;
+			assertUnreachable(msg.role);
 	}
 }
 

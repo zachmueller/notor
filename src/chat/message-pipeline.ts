@@ -12,6 +12,7 @@
  */
 
 import type { Message } from "../types";
+import { assertUnreachable } from "../utils/assert-unreachable";
 import type { ChatMessage, StreamChunk } from "../providers/provider";
 import { getModelMetadata } from "../providers/model-metadata";
 import { parseStreamEvents } from "./stream-utils";
@@ -210,6 +211,9 @@ export function toChatMessages(messages: Message[], systemPrompt: string): ChatM
 					});
 				}
 				break;
+
+			default:
+				assertUnreachable(msg.role);
 		}
 	}
 

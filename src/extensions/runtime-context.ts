@@ -348,6 +348,8 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string): Extens
 						title: conversation.title,
 						created_at: conversation.created_at,
 						updated_at: conversation.updated_at,
+						// extension_block messages are intentionally excluded — extensions see
+						// only user/assistant turns in their conversation history context.
 						messages: messages
 							.filter(m => m.role === "user" || m.role === "assistant")
 							.map(m => ({

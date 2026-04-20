@@ -7,6 +7,7 @@
  */
 
 import type { Conversation, Message, ToolCall, ToolResult } from "../types";
+import { assertUnreachable } from "../utils/assert-unreachable";
 import { formatToolDisplayName } from "../ui/tool-call-ui";
 import { getTextContent } from "../media/types";
 
@@ -83,7 +84,7 @@ function renderMessage(msg: Message): string | null {
 		case "tool_result":
 			return renderToolResult(msg);
 		default:
-			return null;
+			assertUnreachable(msg.role);
 	}
 }
 

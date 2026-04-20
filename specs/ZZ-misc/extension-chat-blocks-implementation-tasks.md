@@ -79,21 +79,21 @@ Standalone bug fix + new method. Ships independently, unblocks everything else. 
 
 Standalone hardening. Add `assertUnreachable` (or `satisfies never`) guards to all role-dispatch switch statements so the compiler flags future role additions.
 
-- [ ] **2.1 — Create `assertUnreachable` utility**
+- [x] **2.1 — Create `assertUnreachable` utility**
   - Add to `src/utils/` (or inline where TypeScript's `never` type suffices)
   - Signature: `function assertUnreachable(x: never): never { throw new Error("Unreachable: " + x); }`
 
-- [ ] **2.2 — Audit and guard all role-dispatch sites**
+- [x] **2.2 — Audit and guard all role-dispatch sites**
   - Sites needing explicit `extension_block` case or default guard (per the plan's audit):
-    - [ ] [`message-pipeline.ts:140`](../../src/chat/message-pipeline.ts#L140) — `toChatMessages()` switch (no default)
-    - [ ] [`view-router.ts:54`](../../src/chat/view-router.ts#L54) — `renderMessage()` switch (no default)
-    - [ ] [`compaction.ts:237-269`](../../src/context/compaction.ts#L237-L269) — compaction input if/else-if chain (no else)
-    - [ ] [`context.ts:190-198`](../../src/chat/context.ts#L190-L198) — truncation walk-forward
-    - [ ] [`markdown-exporter.ts:74`](../../src/export/markdown-exporter.ts#L74) — switch with `default: null`
-    - [ ] [`html-exporter.ts:381`](../../src/export/html-exporter.ts#L381) — switch with `default: null`
-    - [ ] [`html-exporter.ts:578`](../../src/export/html-exporter.ts#L578) — sub-agent message switch
-    - [ ] [`conversation.ts:368`](../../src/chat/conversation.ts#L368) — title generation `role === "user"` check
-    - [ ] [`runtime-context.ts:352`](../../src/extensions/runtime-context.ts#L352) — recent-turns filter
+    - [x] [`message-pipeline.ts:140`](../../src/chat/message-pipeline.ts#L140) — `toChatMessages()` switch (no default) → added `assertUnreachable` default
+    - [x] [`view-router.ts:54`](../../src/chat/view-router.ts#L54) — `renderMessage()` switch (no default) → added explicit `case "system"` + `assertUnreachable` default
+    - [x] [`compaction.ts:237-269`](../../src/context/compaction.ts#L237-L269) — compaction input if/else-if chain (no else) → added trailing comment; Phase 3.6 implements `extension_block` handling
+    - [x] [`context.ts:190-198`](../../src/chat/context.ts#L190-L198) — truncation walk-forward → added comment marking Phase 3.7 TODO
+    - [x] [`markdown-exporter.ts:74`](../../src/export/markdown-exporter.ts#L74) — switch with `default: null` → replaced with `assertUnreachable`
+    - [x] [`html-exporter.ts:381`](../../src/export/html-exporter.ts#L381) — switch with `default: null` → replaced with `assertUnreachable`
+    - [x] [`html-exporter.ts:578`](../../src/export/html-exporter.ts#L578) — sub-agent message switch → replaced `default: null` with `assertUnreachable`
+    - [x] [`conversation.ts:368`](../../src/chat/conversation.ts#L368) — title generation `role === "user"` check → no change needed; `extension_block` inherently excluded
+    - [x] [`runtime-context.ts:352`](../../src/extensions/runtime-context.ts#L352) — recent-turns filter → added comment confirming `extension_block` intentionally excluded
   - Sites verified safe (document as comments or no-op cases):
     - Provider adapters (`anthropic-provider.ts:70`, `bedrock-provider.ts:106`, `openai-provider.ts:57`, `local-provider.ts:82`) — never see `extension_block` (translated in pipeline)
     - `compaction.ts:84` — token estimation fallback path, safe for any role
@@ -106,13 +106,13 @@ Standalone hardening. Add `assertUnreachable` (or `satisfies never`) guards to a
     - `orchestrator.ts:755` — `on_conversation_start` trigger, explicit `user` check
     - `orchestrator.ts:975`, `workflow-executor.ts:649` — system message existence check
 
-- [ ] **2.3 — Add `MessageRole` member count assertion test**
+- [x] **2.3 — Add `MessageRole` member count assertion test**
   - If the union gains a member, the test breaks until all dispatch sites are updated
 
-- [ ] **2.4 — Audit ContentBlock type-dispatch sites**
-  - [ ] [`tokens.ts:84-94`](../../src/utils/tokens.ts#L84-L94) — `estimateContentTokens()` switch (no default) — add default case
-  - [ ] [`media/types.ts:35-43`](../../src/media/types.ts#L35-L43) — `getTextContent()` — no change needed (custom_blocks silently excluded by existing `.filter()`); verify that `image` and `document` blocks continue to return `""` as expected
-  - [ ] [`html-exporter.ts:443-451`](../../src/export/html-exporter.ts#L443-L451) — inline media rendering — add comment noting user messages won't contain custom blocks
+- [x] **2.4 — Audit ContentBlock type-dispatch sites**
+  - [x] [`tokens.ts:84-94`](../../src/utils/tokens.ts#L84-L94) — `estimateContentTokens()` switch (no default) — added comment; Phase 3.2 adds the real `custom_block` case
+  - [x] [`media/types.ts:35-43`](../../src/media/types.ts#L35-L43) — `getTextContent()` — no change needed (custom_blocks silently excluded by existing `.filter()`); verified that `image` and `document` blocks continue to return `""` as expected
+  - [x] [`html-exporter.ts:443-451`](../../src/export/html-exporter.ts#L443-L451) — inline media rendering — added comment noting user messages won't contain custom blocks
 
 ---
 

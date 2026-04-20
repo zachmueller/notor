@@ -8,6 +8,7 @@
  */
 
 import type { Message } from "../types";
+import { assertUnreachable } from "../utils/assert-unreachable";
 import type { ConversationSession } from "./conversation-session";
 import type { NotorChatView } from "../ui/chat-view";
 
@@ -68,7 +69,13 @@ export class ViewRouter {
 			case "tool_result":
 				this.view?.renderToolResult(message);
 				break;
-			// system messages are not rendered
+			case "system":
+				// system messages are not rendered
+				break;
+			default: {
+				// Phase 3 (Task 6.1) adds "extension_block" here.
+				assertUnreachable(message.role);
+			}
 		}
 	}
 }

@@ -267,6 +267,7 @@ export async function performCompaction(
 				content: `[Tool result: ${msg.tool_result.tool_name} → ${msg.tool_result.success ? "success" : "error"}: ${resultStr.substring(0, 2000)}]`,
 			});
 		}
+		// extension_block: handled in Phase 3 (Task 3.6) — excluded or included based on exclude_from_compaction
 	}
 
 	// Add the summarization instruction as the final user message
