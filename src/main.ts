@@ -1995,6 +1995,7 @@ export default class NotorPlugin extends Plugin {
 		orchestrator.setWorkflowHookOverrideManager(
 			this.getWorkflowHookOverrideManager()
 		);
+		orchestrator.setChatBlockRegistry(this.getChatBlockRegistry());
 
 		// Wire extension automation accessors
 		const mgr = this.getExtensionManager();

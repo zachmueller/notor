@@ -46,6 +46,8 @@ import type { ApprovalCallback } from "./dispatcher";
 import type { ToolSessionContext } from "../tools/tool";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { logger } from "../utils/logger";
+import { estimateTokenCount } from "../utils/tokens";
+import type { ChatBlockRegistry } from "../ui/chat-blocks/registry";
 
 const log = logger("ChatOrchestrator");
 
@@ -121,6 +123,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Amendment A1
 	 */
 	private checkpointManager?: CheckpointManager;
+
+	/** Chat block registry — injected from main.ts for Phase 10 tool content_block bridging. */
+	private chatBlockRegistry?: ChatBlockRegistry;
 
 	/**
 	 * Per-orchestrator active provider type.
@@ -415,6 +420,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	setCheckpointManager(manager: CheckpointManager): void {
 		this.checkpointManager = manager;
+	}
+
+	/** Inject the ChatBlockRegistry for Phase 10 tool content_block → extension_block bridging. */
+	setChatBlockRegistry(registry: ChatBlockRegistry): void {
+		this.chatBlockRegistry = registry;
 	}
 
 	/**
@@ -1245,6 +1255,85 @@ export class ChatOrchestrator implements ToolSessionContext {
 								convAfterToolResult.total_output_tokens,
 								convAfterToolResult.estimated_cost
 							);
+						}
+					}
+
+					// --- Phase 10: emit extension_block for tool content_blocks ---
+					// Collect custom_blocks from all tool results in this batch,
+					// then emit a single extension_block message after the entire
+					// tool_result group (preserving tool_call/tool_result coalescing).
+					const customBlocksForBatch: Array<{
+						block: import("../media/types").ContentBlock & { type: "custom_block" };
+						toolName: string;
+					}> = [];
+					for (const toolResult of toolResults) {
+						if (toolResult.content_blocks?.length) {
+							for (const block of toolResult.content_blocks) {
+								if (block.type === "custom_block") {
+									// Validate JSON-serializability
+									try {
+										const serialized = JSON.stringify(block.data);
+										if (serialized.length > 102400) {
+											log.error(
+												`Phase 10: custom_block data exceeds 100KB size limit — skipping`,
+												{ kind: block.kind, tool: toolResult.tool_name, size: serialized.length },
+											);
+											continue;
+										}
+									} catch {
+										log.error(
+											`Phase 10: custom_block data is not JSON-serializable — skipping`,
+											{ kind: block.kind, tool: toolResult.tool_name },
+										);
+										continue;
+									}
+
+									const registry = this.chatBlockRegistry;
+									const def = registry?.get(block.kind);
+									if (!def) {
+										log.warn(
+											`Phase 10: block kind '${block.kind}' is not registered — will render with fallback`,
+											{ tool: toolResult.tool_name },
+										);
+									}
+
+									// Compute estimated_wire_tokens if not already set
+									let blockWithTokens = block;
+									if (block.estimated_wire_tokens === undefined) {
+										let estimated_wire_tokens: number;
+										if (def?.toLLMText) {
+											const wireText = def.toLLMText(block.data);
+											estimated_wire_tokens = wireText != null ? estimateTokenCount(wireText) : 0;
+										} else if (block.fallback_text != null) {
+											estimated_wire_tokens = estimateTokenCount(block.fallback_text);
+										} else {
+											estimated_wire_tokens = 0;
+										}
+										blockWithTokens = { ...block, estimated_wire_tokens };
+									}
+
+									customBlocksForBatch.push({ block: blockWithTokens, toolName: toolResult.tool_name });
+								}
+							}
+						}
+					}
+
+					if (customBlocksForBatch.length > 0) {
+						// Group by source tool name for attribution
+						const blocksByTool = new Map<string, typeof customBlocksForBatch>();
+						for (const entry of customBlocksForBatch) {
+							const existing = blocksByTool.get(entry.toolName) ?? [];
+							existing.push(entry);
+							blocksByTool.set(entry.toolName, existing);
+						}
+
+						for (const [toolName, entries] of blocksByTool) {
+							convManager.addMessage({
+								role: "extension_block",
+								content: entries.map((e) => e.block),
+								source_extension: toolName,
+								exclude_from_compaction: false,
+							});
 						}
 					}
 

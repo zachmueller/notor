@@ -402,19 +402,19 @@ The side-effect emission API for automations and tools. This is the sole block-e
 
 When a tool's `ToolResult.content_blocks` contains a `custom_block`, the orchestrator emits an `extension_block` message.
 
-- [ ] **10.1 — Detect `custom_block` in tool results + validate**
+- [x] **10.1 — Detect `custom_block` in tool results + validate**
   - In [`src/chat/orchestrator.ts`](../../src/chat/orchestrator.ts), after tool results are added to conversation:
   - Check each `ToolResult.content_blocks` for entries where `type === "custom_block"`
   - **Validate each custom_block:** (a) check `kind` is registered — if not, log warning, proceed with fallback rendering, (b) verify `JSON.stringify(data)` succeeds (JSON-serializable), (c) reject if `JSON.stringify(data).length > 102400` with error log
   - **Compute `estimated_wire_tokens`** at emission time via `registry.get(kind)?.toLLMText?.(data)` output length, matching the logic in `chatBlocks.emit()` (Task 9.1). Blocks with `toLLMText → null` get `estimated_wire_tokens: 0`.
   - If valid blocks found, collect them into a new `extension_block` message
 
-- [ ] **10.2 — Emit `extension_block` after tool_result group**
+- [x] **10.2 — Emit `extension_block` after tool_result group**
   - Emit the `extension_block` message **after the entire tool_result group** in the current batch (after all tool results are added), but **before the next LLM call**
   - This preserves tool_call/tool_result coalescing that providers require
   - Set `source_extension` to the tool name
 
-- [ ] **10.3 — Tool's textual result stays inline**
+- [x] **10.3 — Tool's textual result stays inline**
   - The tool-result bubble continues to render the text/media content blocks as before
   - The `extension_block` row is an additional rendering, not a replacement
 
