@@ -242,11 +242,11 @@ Make block kinds pluggable. After this phase, block kinds can be registered and 
 
 Render `extension_block` messages as dedicated rows in the chat panel.
 
-- [ ] **6.1 — Add `extension_block` case to `view-router.ts`**
+- [x] **6.1 — Add `extension_block` case to `view-router.ts`**
   - In [`view-router.ts`](../../src/chat/view-router.ts) `renderMessage()` switch:
   - `case "extension_block": this.view?.renderExtensionBlock(message); break;`
 
-- [ ] **6.2 — Implement `renderExtensionBlock()` in `chat-view.ts`**
+- [x] **6.2 — Implement `renderExtensionBlock()` in `chat-view.ts`**
   - Create row container with class `.notor-extension-block` (styled like `.notor-tool-call`)
   - Optional source header showing `source_extension` with icon
   - Iterate `message.content`:
@@ -256,19 +256,21 @@ Render `extension_block` messages as dedicated rows in the chat panel.
       - If `loading === true` and `def.renderLoading` exists: call `def.renderLoading(container, ctx)` instead
       - If `loading === true` and no `renderLoading`: show default spinner with `displayName`
       - If not found: render `fallback_text` in a collapsible with "Unregistered block kind: {kind}" warning
-    - For `text` blocks: render as plain markdown (above/below custom block)
+    - For `text` blocks: render as plain text (above/below custom block)
+  - Shared `populateExtensionBlockEl()` private helper used by both `renderExtensionBlock()` and `reRenderExtensionBlock()`
 
-- [ ] **6.3 — Add minimal CSS for `.notor-extension-block`**
+- [x] **6.3 — Add minimal CSS for `.notor-extension-block`**
   - In [`styles.css`](../../styles.css): add `.notor-extension-block` styling
   - Reuse tool-call card CSS patterns (margin, border, padding)
   - Add subtle visual distinction (e.g., left-border accent color) to differentiate from tool calls
 
-- [ ] **6.4 — Handle message update re-render**
+- [x] **6.4 — Handle message update re-render**
   - Wire `onMessageUpdated` callback (from Phase 1.3) to the chat view
   - When an `extension_block` message is updated (loading → real), re-render the row:
     - Find the existing DOM element for the message
     - Clear its contents
     - Re-invoke `renderExtensionBlock()` with the updated message
+  - Wired in `orchestrator.ts` via `conversationManager.setOnMessageUpdated()`
 
 - [ ] **6.5 — Verify reload persistence**
   - Emit a block, reload the plugin, reopen the conversation → block re-renders from persisted `data`

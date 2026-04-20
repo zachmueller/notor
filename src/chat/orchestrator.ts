@@ -212,6 +212,12 @@ export class ChatOrchestrator implements ToolSessionContext {
 			}
 		});
 
+		this.conversationManager.setOnMessageUpdated((message) => {
+			if (message.role === "extension_block") {
+				this.view?.reRenderExtensionBlock(message);
+			}
+		});
+
 		this.conversationManager.setOnConversationChanged(async (conv) => {
 			await this.historyManager.updateConversationHeader(conv);
 		});

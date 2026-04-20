@@ -50,7 +50,7 @@ import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tra
 import type { ConversationSession } from "../chat/conversation-session";
 import type { Workflow } from "../types";
 import { McpStatusIndicator } from "./mcp-status-indicator";
-import { getTextContent } from "../media/types";
+import { getTextContent, type ContentBlock } from "../media/types";
 import { renderCollapsibleCard } from "./chat-blocks/collapsible-card";
 
 const log = logger("ChatView");
@@ -2275,6 +2275,89 @@ export class NotorChatView extends ItemView {
 		}
 
 		this.scrollToBottom();
+	}
+
+	/**
+	 * Render an extension_block message as a dedicated row in the message list.
+	 */
+	renderExtensionBlock(message: Message): void {
+		const rowEl = this.messageListEl.createDiv({ cls: "notor-extension-block" });
+		rowEl.dataset.messageId = message.id;
+		this.populateExtensionBlockEl(rowEl, message);
+		this.scrollToBottom();
+	}
+
+	/**
+	 * Re-render an extension_block message in place (loading → real).
+	 * Finds the existing DOM element by message ID, clears it, and re-renders.
+	 */
+	reRenderExtensionBlock(message: Message): void {
+		const existing = this.messageListEl.querySelector(`[data-message-id="${message.id}"]`) as HTMLElement | null;
+		if (!existing || !existing.classList.contains("notor-extension-block")) return;
+		existing.empty();
+		this.populateExtensionBlockEl(existing, message);
+	}
+
+	private populateExtensionBlockEl(el: HTMLElement, message: Message): void {
+		const blocks = Array.isArray(message.content) ? message.content : [];
+
+		if (message.source_extension) {
+			el.createDiv({ cls: "notor-extension-block-source", text: message.source_extension });
+		}
+
+		const registry = this.plugin.getChatBlockRegistry();
+		const ctx = {
+			message,
+			app: this.app,
+			openInternalLink: (linkText: string) => this.openInternalLink(linkText),
+			collapsibleCard: renderCollapsibleCard,
+		};
+
+		for (const block of blocks) {
+			const b = block as ContentBlock;
+			if (b.type === "text") {
+				el.createDiv({ cls: "notor-extension-block-text", text: b.text });
+			} else if (b.type === "custom_block") {
+				const def = registry.get(b.kind);
+				const blockEl = el.createDiv({ cls: "notor-extension-block-content" });
+
+				if (def) {
+					if (b.loading && def.renderLoading) {
+						try {
+							def.renderLoading(blockEl, ctx);
+						} catch (e) {
+							log.error("renderLoading threw", { kind: b.kind, error: String(e) });
+							blockEl.empty();
+							this.renderExtensionBlockError(blockEl, b.kind, b.data, e);
+						}
+					} else if (b.loading) {
+						blockEl.createDiv({ cls: "notor-extension-block-loading", text: `Loading ${def.displayName}…` });
+					} else {
+						try {
+							def.render(blockEl, b.data, ctx);
+						} catch (e) {
+							log.error("Block render error", { kind: b.kind, error: String(e) });
+							blockEl.empty();
+							this.renderExtensionBlockError(blockEl, b.kind, b.data, e);
+						}
+					}
+				} else {
+					const { body } = renderCollapsibleCard(blockEl, {
+						headerText: `Unregistered block kind: ${b.kind}`,
+					});
+					if (b.fallback_text) {
+						body.createEl("p", { text: b.fallback_text, cls: "notor-extension-block-fallback" });
+					}
+				}
+			}
+		}
+	}
+
+	private renderExtensionBlockError(container: HTMLElement, kind: string, data: Record<string, unknown>, _error: unknown): void {
+		const errorEl = container.createDiv({ cls: "notor-extension-block-error" });
+		errorEl.createDiv({ cls: "notor-extension-block-error-header", text: `Block render error: ${kind}` });
+		const pre = errorEl.createEl("pre");
+		pre.createEl("code", { text: JSON.stringify(data, null, 2) });
 	}
 
 	/**
