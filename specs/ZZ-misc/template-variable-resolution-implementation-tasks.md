@@ -9,7 +9,7 @@ First downstream consumer: [knowledge-memory-design.md](knowledge-memory-design.
 
 The registry class and built-in variable resolvers. No wiring into content pipelines yet — pure TypeScript with unit tests.
 
-- [ ] **1.1 — Create `src/template-vars/registry.ts`**
+- [x] **1.1 — Create `src/template-vars/registry.ts`**
   - Implement `TemplateVariableRegistry` class with three methods:
     - `register(name: string, resolver: () => string): void` — stores name → resolver in an internal `Map<string, () => string>`
     - `resolve(input: string): string` — single-pass substitution: for each registered variable, replace all occurrences of `{name}` with `resolver()` in the input string. Unknown `{...}` patterns pass through untouched
@@ -21,7 +21,7 @@ The registry class and built-in variable resolvers. No wiring into content pipel
     - No escaping mechanism in v1
   - Export the class as the default export
 
-- [ ] **1.2 — Create `src/template-vars/builtin-vars.ts`**
+- [x] **1.2 — Create `src/template-vars/builtin-vars.ts`**
   - Implement `registerBuiltinVars(registry: TemplateVariableRegistry, getSettings: () => NotorSettings, getVaultName: () => string): void`
   - Register two variables:
     - `notor_dir` — resolver calls `getSettings().notor_dir` and strips any trailing slash (so `"notor/"` → `"notor"`, consistent with how paths are joined downstream)
@@ -29,7 +29,7 @@ The registry class and built-in variable resolvers. No wiring into content pipel
   - Resolvers read from live objects (not snapshots) — when `notor_dir` changes in settings, the next `resolve()` call picks up the new value automatically
   - Export the registration function
 
-- [ ] **1.3 — Create `src/template-vars/index.ts`**
+- [x] **1.3 — Create `src/template-vars/index.ts`**
   - Re-export `TemplateVariableRegistry` from `registry.ts` and `registerBuiltinVars` from `builtin-vars.ts`
   - Single import point for consumers: `import { TemplateVariableRegistry, registerBuiltinVars } from "@/template-vars"`
 
