@@ -272,9 +272,12 @@ Render `extension_block` messages as dedicated rows in the chat panel.
     - Re-invoke `renderExtensionBlock()` with the updated message
   - Wired in `orchestrator.ts` via `conversationManager.setOnMessageUpdated()`
 
-- [ ] **6.5 — Verify reload persistence**
-  - Emit a block, reload the plugin, reopen the conversation → block re-renders from persisted `data`
-  - Unregister the block kind, reopen → renders fallback-text placeholder, no crash
+- [x] **6.5 — Verify reload persistence**
+  - E2E script: [`e2e/scripts/extension-block-reload-test.ts`](../../e2e/scripts/extension-block-reload-test.ts) — 14/14 passing
+  - Test 1: block renders as `.notor-extension-block` row with source label and fallback text
+  - Test 2: JSONL on disk contains extension_block with `source_extension` and `exclude_from_compaction` preserved
+  - Test 3: switch away and back → block re-renders from persisted `data`
+  - Test 4: unregistered kind with no `fallback_text` renders without crash, no ChatView errors
 
 ---
 
