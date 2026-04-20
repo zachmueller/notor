@@ -61,7 +61,7 @@ Extends the sub-agent system to support `preferred_preset` and `iteration_cap` f
 
 The deterministic, non-LLM library modules. No extension wiring yet — pure TypeScript with unit tests.
 
-- [ ] **1.1 — Create `src/memory/note-format.ts`**
+- [x] **1.1 — Create `src/memory/note-format.ts`**
   - Implement `serializeNote({ title, body, sources, createdAt }): string` — produces frontmatter (`notor-type: memory`, `notor-created-at`, `notor-updated-at`, `notor-sources`) + body
   - Implement `parseNote(markdown: string): MemoryNote` — extracts frontmatter fields + body from a Markdown string. `MemoryNote` interface: `{ title: string; body: string; createdAt: string; updatedAt: string; sources: string[] }`
   - Implement `slugifyTitle(title: string): string` — kebab-case slug from title (lowercase, replace non-alphanumeric with hyphens, collapse consecutive hyphens, trim leading/trailing hyphens). Handle unicode gracefully (transliterate or preserve)
@@ -73,14 +73,14 @@ The deterministic, non-LLM library modules. No extension wiring yet — pure Typ
     - Dotfiles within memory dir are allowed (`.dedup-cache.json`, `.dream-cursor.json`)
   - Export `MemoryNote` interface
 
-- [ ] **1.2 — Create `src/memory/dedup-cache.ts`**
+- [x] **1.2 — Create `src/memory/dedup-cache.ts`**
   - Implement `readDedupCache(app: App, cachePath: string, windowHours: number): Promise<Record<string, string>>` — reads `.dedup-cache.json`, lazily prunes entries older than `windowHours`, returns fingerprint-to-timestamp map. Returns empty object if file doesn't exist
   - Implement `writeDedupEntry(app: App, cachePath: string, fingerprint: string, timestamp: string): Promise<void>` — reads existing cache, adds entry, writes back using atomic pattern (write to `.tmp` then rename)
   - Implement `readDreamCursor(app: App, cursorPath: string): Promise<string | null>` — reads `.dream-cursor.json`, returns `last_run` ISO-8601 timestamp or `null` if file doesn't exist
   - Implement `advanceDreamCursor(app: App, cursorPath: string, timestamp: string): Promise<void>` — writes `{ "last_run": timestamp }` using atomic write pattern
   - All file I/O via Obsidian's `Vault` API (not Node `fs`)
 
-- [ ] **1.3 — Create `src/memory/concept-resolver.ts`**
+- [x] **1.3 — Create `src/memory/concept-resolver.ts`**
   - Implement `resolveConcept(args: { insight: string; memoryDir: string; resolverProfile: string; app: App; runSubAgent: ExtensionUtils['runSubAgent']; vault: Vault; assertMemoryPath: typeof assertMemoryPath }): Promise<{ action: "created" | "updated" | "skipped"; path?: string }>`
   - Flow:
     1. Spawn `memory-resolver` sub-agent via `runSubAgent({ profileName: resolverProfile, task: insight, detached: false })`
@@ -91,19 +91,19 @@ The deterministic, non-LLM library modules. No extension wiring yet — pure Typ
   - No overflow check — oversized notes written as-is (deferred to Dream)
   - All file writes pass through `assertMemoryPath` before touching disk
 
-- [ ] **1.4 — Unit tests for `note-format.ts`**
+- [x] **1.4 — Unit tests for `note-format.ts`**
   - `serializeNote` / `parseNote` round-trip preserves all fields
   - `slugifyTitle` edge cases: unicode, long titles, titles with special characters, collision suffixes
   - `computeFingerprint` determinism: same input always produces same hash; whitespace normalization
   - `assertMemoryPath` accepts paths under memory dir (including dotfiles); rejects paths outside, path traversal attempts, absolute paths
 
-- [ ] **1.5 — Unit tests for `dedup-cache.ts`**
+- [x] **1.5 — Unit tests for `dedup-cache.ts`**
   - `writeDedupEntry` + `readDedupCache` round-trip
   - Lazy pruning removes entries older than dedup window
   - `readDreamCursor` returns `null` when no file exists
   - `advanceDreamCursor` creates/overwrites cursor file
 
-- [ ] **1.6 — Unit tests for `concept-resolver.ts`**
+- [x] **1.6 — Unit tests for `concept-resolver.ts`**
   - Happy path `create`: mocked sub-agent returns create directive → file written with correct frontmatter + slug
   - Happy path `update`: mocked sub-agent returns update directive → existing file body overwritten, `notor-updated-at` bumped
   - Malformed sub-agent JSON → returns `{ action: "skipped" }`
