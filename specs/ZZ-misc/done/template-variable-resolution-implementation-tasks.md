@@ -156,29 +156,35 @@ Insert `registry.resolve()` calls at each content-loading site identified in des
 
 ## Phase 5 — Verification & Polish
 
-- [ ] **5.1 — Verify memory sub-agent profiles work end-to-end**
+- [x] **5.1 — Verify memory sub-agent profiles work end-to-end**
   - Load a built-in sub-agent profile containing `{notor_dir}` in its system prompt and `<notor_tool_config>` `allowed_paths`
   - Verify the assembled system prompt sent to the LLM contains the concrete path (e.g., `notor/memory` not `{notor_dir}/memory`)
   - Verify the path enforcer receives concrete paths in `allowed_paths` (not raw placeholders)
   - This is the critical verification for the memory integration plan prerequisite
+  - Verified via `e2e/scripts/template-var-resolution-test.ts` Test 3 (5/5 pass): tvr-test-agent profile with `{notor_dir}` in `allowed_paths` resolves to `["notor/memory","notor/notes"]`
 
-- [ ] **5.2 — Verify persona resolution**
+- [x] **5.2 — Verify persona resolution**
   - Create a persona with `{notor_dir}` in its prompt content
   - Verify the system prompt builder sees the resolved value
+  - Verified via Test 4: tvr-test-persona with `{notor_dir}` and `{vault_name}` in prompt; both resolved, `{unknown_var}` preserved
 
-- [ ] **5.3 — Verify settings change propagation**
+- [x] **5.3 — Verify settings change propagation**
   - Change `notor_dir` in settings → reload extensions → verify newly loaded scaffolds resolve to the updated path
   - Because resolvers read from the live settings object, no re-registration is needed — just verify a new `resolve()` call after settings change picks up the new value
+  - Verified via Test 5: in-process settings mutation (`plugin.settings.notor_dir = "custom-test-dir/"`) immediately reflected in next `resolve()` call
 
-- [ ] **5.4 — Verify `<include_note>` interaction**
+- [x] **5.4 — Verify `<include_note>` interaction**
   - Create a rule or base prompt with `<include_note>{notor_dir}/templates/base.md</include_note>`
   - Verify template vars resolve first, producing `<include_note>notor/templates/base.md</include_note>`
   - Verify include_note resolution then resolves the concrete path
   - Verify content pulled in via `<include_note>` is NOT re-resolved for template variables (design spec §2.6)
+  - Verified by code inspection: `vault-rules.ts:305` resolves template vars at load time; `getActiveRuleContent()` calls `resolveIncludeNotes()` later on already-resolved content. `resolveIncludeNotes` / `resolveSingleTag` return included note content as-is with no template variable pass. Same ordering confirmed in `system-prompt.ts:349-358`.
 
-- [ ] **5.5 — TypeScript compilation**
+- [x] **5.5 — TypeScript compilation**
   - `tsc --noEmit` passes with no errors after all changes
   - No type regressions in existing code
+  - Verified: `npm run build` passes clean; also fixed `src/extensions/__tests__/manager.test.ts` mock plugin to include `getTemplateRegistry()` stub (was missing, caused 22 unit test failures)
 
-- [ ] **5.6 — Move design doc to `done/`**
+- [x] **5.6 — Move design doc to `done/`**
   - After full verification: `mv specs/ZZ-misc/template-variable-resolution-design.md specs/ZZ-misc/done/`
+  - Completed: design doc moved to `specs/ZZ-misc/done/`

@@ -135,6 +135,11 @@ function _createMockPlugin(overrides?: Record<string, unknown>) {
 			unregister: vi.fn(),
 			has: vi.fn().mockReturnValue(false),
 		}),
+		getTemplateRegistry: () => ({
+			resolve: vi.fn((s: string) => s),
+			register: vi.fn(),
+			list: vi.fn(() => []),
+		}),
 		_registeredTools: registeredTools,
 		_dispatcherTools: dispatcherTools,
 		...overrides,
