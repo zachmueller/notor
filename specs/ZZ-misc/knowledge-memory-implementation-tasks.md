@@ -38,7 +38,7 @@ Extends the sub-agent system to support `preferred_preset` and `iteration_cap` f
     - If `profile.preferred_preset` is set, call `resolvePreset(profile.preferred_preset, this.settings.model_presets)`
     - If resolved: use the preset's provider and model, skipping the `preferred_provider`/`preferred_model` fallback
     - If resolution fails (preset not found): log warning, fall through to existing provider/model logic
-  - Reference: persona preset resolution at [`persona-manager.ts:289-324`](../../src/personas/persona-manager.ts#L289-L324)
+  - Reference: persona preset resolution at [`persona-manager.ts:289-326`](../../src/personas/persona-manager.ts#L289-L326)
   - At line 346: use three-level fallback chain: `profile.iteration_cap ?? this.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP`
 
 - [ ] **0.5 — Add preset resolution to `runSubAgent` extension API**
@@ -225,15 +225,15 @@ Register the four memory sub-agent profiles following the existing pattern in [`
 
 - [ ] **4.1 — Add `capture_memory` tool scaffold**
   - **Prerequisite:** Add `featureGroup?: string` to the `BuiltinToolScaffold` interface in [`builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts) (currently has `name`, `description`, `mode`, `scaffoldContent` only). Without this, `notor-feature-group: memory` won't propagate through the tool injection frontmatter dict at [`manager.ts:235-240`](../../src/extensions/manager.ts#L235-L240). (The dict propagation itself is handled by Task 2.5a(iii).)
+  - **Also extend the `scaffold()` helper** (~line 36-67) to accept an optional `featureGroup` param and emit `notor-feature-group: {value}` in the scaffoldContent frontmatter when present. This keeps `capture_memory` consistent with all other tools that use the helper.
   - In [`src/extensions/builtin-tool-scaffolds.ts`](../../src/extensions/builtin-tool-scaffolds.ts):
-  - Define `CAPTURE_MEMORY` using the `scaffold()` helper (~line 36-67):
+  - Define `CAPTURE_MEMORY` using the extended `scaffold()` helper:
     - `name: "capture_memory"`
     - `description: "Save an insight into long-term memory as an Evergreen note"`
     - `mode: "write"`
     - `featureGroup: "memory"`
     - YAML params: `content` (string, required)
     - YAML settings: `resolver_profile` (string, default `memory-resolver`), `dedup_window_hours` (number, default 24)
-    - Add `notor-feature-group: memory` to frontmatter (for vault override path)
   - Code fence implements: dedup check → `resolveConcept` → return result text
   - Add to `BUILTIN_TOOL_SCAFFOLDS` Map (~line 2692-2717)
 
@@ -253,12 +253,13 @@ The injection code at `manager.ts:289` must also be updated to include these new
 
 **Note:** The `UserAutomationDefinition` type (blocking fields at [`types.ts:168-179`](../../src/extensions/types.ts#L168-L179)) and the parser extraction (`notor-blocking`, `notor-blocking-emit-kind`, `notor-blocking-timeout` at [`parser.ts:267-275`](../../src/extensions/parser.ts#L267-L275)) are already complete from the Chat Blocks implementation (Phase 8). Task 5.0 below covers only the remaining gap: the scaffold interface and manager dict propagation.
 
-- [ ] **5.0 — Propagate blocking and feature-group fields through automation scaffold injection path**
+- [ ] **5.0 — Propagate blocking, feature-group, and schedule fields through automation scaffold injection path**
   - **Scope note:** `UserAutomationDefinition` and `parseAutomationFile()` already handle blocking fields (Chat Blocks Phase 8). This task adds them to the scaffold interface and manager injection dict only.
   - In [`src/extensions/builtin-automation-scaffolds.ts`](../../src/extensions/builtin-automation-scaffolds.ts) (interface at lines 17-31):
-    - Add `blocking?: boolean`, `blockingEmitKind?: string`, `blockingTimeout?: number`, `featureGroup?: string`
+    - Add `blocking?: boolean`, `blockingEmitKind?: string`, `blockingTimeout?: number`, `featureGroup?: string`, `schedule?: string`
   - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) (scaffold injection at ~line 289):
-    - Add the new fields to the manually-constructed frontmatter dict, **conditional on their presence** to avoid injecting `undefined` values: `if (scaffold.blocking) frontmatter["notor-blocking"] = scaffold.blocking;` (same pattern for each field)
+    - Add the new fields to the manually-constructed frontmatter dict, **conditional on their presence** to avoid injecting `undefined` values: `if (scaffold.blocking) frontmatter["notor-blocking"] = scaffold.blocking;` (same pattern for each field, including `if (scaffold.schedule) frontmatter["notor-schedule"] = scaffold.schedule;`)
+  - **Why `schedule` is needed:** The parser at [`parser.ts:234-236`](../../src/extensions/parser.ts#L234-L236) rejects any `on_schedule` automation without `notor-schedule` frontmatter. The `memory-dream` scaffold (Task 5.3) uses `trigger: "on_schedule"` — without `schedule` on the interface and `notor-schedule` in the dict, the Dream scaffold would be silently rejected at parse time.
   - **Dual frontmatter source invariant:** `parseExtensionFile()` takes the frontmatter dict as a parameter — it does NOT re-parse frontmatter from the `scaffoldContent` Markdown. The manually-constructed dict is the load-bearing path for in-memory built-in scaffolds. The `scaffoldContent`'s own YAML frontmatter is only used when a user creates a vault override file (where Obsidian's metadata cache provides the frontmatter). **Every functional frontmatter field MUST be propagated through both paths** — the scaffold interface → manager dict (in-memory) AND the scaffoldContent YAML (vault override). Missing either side creates a silent behavioral gap where the field works in one context but not the other.
   - Verify: existing `title-generation` scaffold is unaffected (all new fields are optional and absent)
 
@@ -273,6 +274,7 @@ The injection code at `manager.ts:289` must also be updated to include these new
     - `scaffoldContent`: full Markdown with frontmatter including `notor-blocking: true`, `notor-blocking-emit-kind: memory_recalled`, `notor-blocking-timeout: 10`, `notor-feature-group: memory`
     - YAML settings: `search_profile` (string, default `memory-search`), `max_matches` (number, default 8)
     - Code fence: **cold-start guard** — before spawning the search sub-agent, call `utils.memory.hasMemoryNotes()` to check whether any `.md` files exist in the memory directory; if none exist, emit no block and return early. Otherwise: loads conversation via `chatHistory.loadFull`, spawns sub-agent, parses results, reads note bodies, emits `memory_recalled` block (as specified in design spec §7b)
+    - **Loading→real transition note:** The scaffold code only needs to call `utils.chatBlocks.emit("memory_recalled", data)`. The blocking automation framework automatically matches the loading placeholder (via `blockingEmitKind: "memory_recalled"`) and promotes it via `ConversationManager.promoteTransientMessage()` ([`conversation.ts:463-488`](../../src/chat/conversation.ts#L463-L488)). No custom loading→real transition logic is needed in the scaffold code.
 
 - [ ] **5.2 — Add `memory-capture` automation scaffold**
   - Add entry to `BUILTIN_AUTOMATION_SCAFFOLDS` Map:
@@ -323,9 +325,16 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
       icon?: string;
       excludeFromCompaction?: boolean;
       featureGroup?: string;
+      /** Named export in scaffoldContent code fence that provides the render function. */
+      rendererExport: string;
+      /** Named export that provides the toLLMText function (optional). */
+      toLLMTextExport?: string;
+      /** Named export that provides the renderLoading function (optional). */
+      renderLoadingExport?: string;
       scaffoldContent: string;
     }
     ```
+  - **Why export fields are needed:** The block scaffold injection loop (Task 6.4) constructs a frontmatter dict that `parseBlockFile` consumes. `parseBlockFile` expects `notor-renderer-export` and `notor-to-llm-text-export` in frontmatter. Without these fields on the interface, the frontmatter dict can't propagate them, and the parsed `UserBlockDefinition` would have no export names to resolve.
   - Export `BUILTIN_BLOCK_SCAFFOLDS: ReadonlyMap<string, BuiltinBlockScaffold>`
 
 - [ ] **6.2 — Add `memory_recalled` block-kind scaffold**
@@ -352,7 +361,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
   - Steps:
     - Iterate `BUILTIN_BLOCK_SCAFFOLDS`
     - **Collision detection by `kind`** (not by name or file path): skip if `discovered.blocks.some(b => b.kind === scaffold.kind)`. Blocks are keyed by `kind` since that's their primary identity, unlike tools (keyed by `name`) or automations (keyed by vault `filePath`).
-    - Construct frontmatter from scaffold metadata (`notor-type: block`, `notor-block-kind`, `notor-display-name`, `notor-icon`, `notor-exclude-from-compaction`). **Use conditional inclusion for optional fields:** `if (scaffold.featureGroup) frontmatter["notor-feature-group"] = scaffold.featureGroup;`
+    - Construct frontmatter from scaffold metadata (`notor-type: block`, `notor-block-kind`, `notor-display-name`, `notor-icon`, `notor-exclude-from-compaction`, `notor-renderer-export`, `notor-to-llm-text-export`, `notor-render-loading-export`). **Use conditional inclusion for optional fields:** `if (scaffold.featureGroup) frontmatter["notor-feature-group"] = scaffold.featureGroup;` (same pattern for `toLLMTextExport`, `renderLoadingExport`, `excludeFromCompaction`, `icon`)
     - Resolve template variables in scaffold content
     - Parse via `parseExtensionFile`, mark `isScaffold: true`, push to `discovered.blocks`
   - User vault overrides take precedence (same mechanism: collision detection by `kind` skips injection when a user-authored block with the same kind was already discovered)

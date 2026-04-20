@@ -315,6 +315,12 @@ Allow user-authored block kinds in vault scaffolds and built-in block scaffolds.
   - Duplicate kind detection: delegated to `ChatBlockRegistry.register()` (logs error, keeps first)
   - `destroy()` also cleans up registered block kinds
 
+- [ ] **7.5 — Add `renderLoadingExport` support to block registration pipeline**
+  - **Gap:** `ChatBlockDefinition.renderLoading` exists at [`registry.ts:28`](../../src/ui/chat-blocks/registry.ts#L28) and is consumed by [`chat-view.ts:2325`](../../src/ui/chat-view.ts#L2325), but the block registration loop at [`manager.ts:359-377`](../../src/extensions/manager.ts#L359-L377) never extracts it from module exports. Without this, any block scaffold that exports a `renderLoading` function (e.g., the memory `memory_recalled` block) would silently fall through to the default spinner.
+  - In [`src/extensions/types.ts`](../../src/extensions/types.ts): add `renderLoadingExport?: string` to `UserBlockDefinition` (after `toLLMTextExport`)
+  - In [`src/extensions/parser.ts`](../../src/extensions/parser.ts): parse `notor-render-loading-export` from frontmatter in `parseBlockFile()`
+  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) block registration loop (~line 366): extract `renderLoading` from module exports using `block.renderLoadingExport`, attach to the `ChatBlockDefinition` before calling `chatBlockRegistry.register(def)`
+
 ---
 
 ## Phase 8 — `notor-blocking` Opt-In for `on_conversation_start`
