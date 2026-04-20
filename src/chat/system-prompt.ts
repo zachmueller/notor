@@ -20,6 +20,7 @@ import { estimateTokenCount } from "../utils/tokens";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt";
 import { resolveIncludeNotes } from "../include-note/resolver";
 import { logger } from "../utils/logger";
+import type { TemplateVariableRegistry } from "../template-vars";
 
 const log = logger("SystemPromptBuilder");
 
@@ -59,7 +60,8 @@ export class SystemPromptBuilder {
 	constructor(
 		private readonly vault: Vault,
 		private notorDir: string,
-		private readonly metadataCache?: MetadataCache
+		private readonly metadataCache?: MetadataCache,
+		private readonly templateRegistry?: TemplateVariableRegistry,
 	) {}
 
 	/**

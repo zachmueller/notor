@@ -20,6 +20,7 @@ import type { ProviderRegistry } from "../providers/index";
 import { resolvePreset } from "../presets/preset-resolver";
 import { discoverPersonas } from "./persona-discovery";
 import { logger } from "../utils/logger";
+import type { TemplateVariableRegistry } from "../template-vars";
 
 const log = logger("PersonaManager");
 
@@ -56,7 +57,8 @@ export class PersonaManager {
 		private readonly metadataCache: MetadataCache,
 		private settings: NotorSettings,
 		private readonly providerRegistry: ProviderRegistry,
-		private readonly saveData: () => Promise<void>
+		private readonly saveData: () => Promise<void>,
+		private readonly templateRegistry?: TemplateVariableRegistry,
 	) {}
 
 	// -----------------------------------------------------------------------

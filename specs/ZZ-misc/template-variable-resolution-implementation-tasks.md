@@ -39,19 +39,19 @@ The registry class and built-in variable resolvers. No wiring into content pipel
 
 Instantiate the registry in the plugin and make it accessible to all content-processing code paths.
 
-- [ ] **2.1 — Instantiate registry in `src/main.ts`**
+- [x] **2.1 — Instantiate registry in `src/main.ts`**
   - Add a private `_templateRegistry?: TemplateVariableRegistry` field to the plugin class
   - Add a lazy `getTemplateRegistry(): TemplateVariableRegistry` accessor (following the existing pattern for `getExtensionManager()` at ~line 1927, `getVaultRuleManager()` at ~line 1883, etc.):
     1. If `_templateRegistry` exists, return it
     2. Otherwise: create a new `TemplateVariableRegistry`, call `registerBuiltinVars(registry, () => this.settings, () => this.app.vault.getName())`, cache and return
   - No explicit teardown needed — the registry is garbage-collected with the plugin
 
-- [ ] **2.2 — Pass registry to `ExtensionManager`**
+- [x] **2.2 — Pass registry to `ExtensionManager`**
   - `ExtensionManager` already receives the full plugin instance (constructor at [`manager.ts:198-201`](../../src/extensions/manager.ts#L198-L201): `private readonly plugin: NotorPlugin`)
   - Access via `this.plugin.getTemplateRegistry()` — no constructor change needed
   - Verify by reading the `reload()` method (~line 215) to confirm plugin access is available at the call sites
 
-- [ ] **2.3 — Pass registry to managers that don't hold a plugin reference**
+- [x] **2.3 — Pass registry to managers that don't hold a plugin reference**
   - **`SubAgentManager`** ([`sub-agents/manager.ts:29-35`](../../src/sub-agents/manager.ts#L29-L35)): receives `vault`, `metadataCache`, `settings`, `saveData`, `parseYAML` — add `templateRegistry?: TemplateVariableRegistry` parameter. Update instantiation in `main.ts` (~lines 1914-1920)
   - **`PersonaManager`** ([`personas/persona-manager.ts:54-60`](../../src/personas/persona-manager.ts#L54-L60)): receives `vault`, `metadataCache`, `settings`, `providerRegistry`, `saveData` — add `templateRegistry?: TemplateVariableRegistry` parameter. Update instantiation in `main.ts` (~lines 1900-1907)
   - **`SystemPromptBuilder`** ([`chat/system-prompt.ts:59-63`](../../src/chat/system-prompt.ts#L59-L63)): receives `vault`, `notorDir`, `metadataCache` — add `templateRegistry?: TemplateVariableRegistry` parameter. Update instantiation in `main.ts` (~lines 1873-1877)

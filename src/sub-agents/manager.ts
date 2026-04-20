@@ -15,6 +15,7 @@ import type { NotorSettings } from "../settings/types";
 import { discoverSubAgentProfiles, getSubAgentsRootPath } from "./discovery";
 import { BUILTIN_SUBAGENT_PROFILES } from "./builtin-profiles";
 import { logger } from "../utils/logger";
+import type { TemplateVariableRegistry } from "../template-vars";
 
 const log = logger("SubAgentManager");
 
@@ -32,6 +33,7 @@ export class SubAgentManager {
 		private settings: NotorSettings,
 		private readonly saveData: () => Promise<void>,
 		private readonly parseYAML?: (yaml: string) => unknown,
+		private readonly templateRegistry?: TemplateVariableRegistry,
 	) {}
 
 	// -----------------------------------------------------------------------

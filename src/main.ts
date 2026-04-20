@@ -119,6 +119,9 @@ import { SerpApiProvider } from "./web-search/providers/serpapi";
 import { ChatBlockRegistry } from "./ui/chat-blocks/registry";
 import { setChatBlockRegistry } from "./chat/message-pipeline";
 
+// Template variables
+import { TemplateVariableRegistry, registerBuiltinVars } from "./template-vars";
+
 // UI
 import { NotorChatView, CHAT_VIEW_TYPE } from "./ui/chat-view";
 import { EffectiveConfigInspectorView, INSPECTOR_VIEW_TYPE } from "./ui/effective-config-inspector";
@@ -151,6 +154,7 @@ export default class NotorPlugin extends Plugin {
 	private _sharedCheckpointManager?: CheckpointManager;
 	private _systemPromptBuilder?: SystemPromptBuilder;
 	private _vaultRuleManager?: VaultRuleManager;
+	private _templateRegistry?: TemplateVariableRegistry;
 	/**
 	 * Unified orchestrator registry — maps leaf ID to its orchestrator.
 	 *
@@ -1873,7 +1877,8 @@ export default class NotorPlugin extends Plugin {
 			this._systemPromptBuilder = new SystemPromptBuilder(
 				this.app.vault,
 				this.settings.notor_dir,
-				this.app.metadataCache
+				this.app.metadataCache,
+				this.getTemplateRegistry(),
 			);
 		}
 		return this._systemPromptBuilder;
@@ -1884,7 +1889,8 @@ export default class NotorPlugin extends Plugin {
 		if (!this._vaultRuleManager) {
 			this._vaultRuleManager = new VaultRuleManager(
 				this.app,
-				this.settings.notor_dir
+				this.settings.notor_dir,
+				this.getTemplateRegistry(),
 			);
 		}
 		return this._vaultRuleManager;
@@ -1903,7 +1909,8 @@ export default class NotorPlugin extends Plugin {
 				this.app.metadataCache,
 				this.settings,
 				this.getProviderRegistry(),
-				async () => this.saveData(this.settings)
+				async () => this.saveData(this.settings),
+				this.getTemplateRegistry(),
 			);
 		}
 		return this._personaManager;
@@ -1918,6 +1925,7 @@ export default class NotorPlugin extends Plugin {
 				this.settings,
 				async () => this.saveData(this.settings),
 				parseYaml,
+				this.getTemplateRegistry(),
 			);
 		}
 		return this._subAgentManager;
@@ -1929,6 +1937,19 @@ export default class NotorPlugin extends Plugin {
 			this._extensionManager = new ExtensionManager(this, parseYaml);
 		}
 		return this._extensionManager;
+	}
+
+	/** Template variable registry — resolves {notor_dir}, {vault_name} etc. in scaffold content. */
+	getTemplateRegistry(): TemplateVariableRegistry {
+		if (!this._templateRegistry) {
+			this._templateRegistry = new TemplateVariableRegistry();
+			registerBuiltinVars(
+				this._templateRegistry,
+				() => this.settings,
+				() => this.app.vault.getName(),
+			);
+		}
+		return this._templateRegistry;
 	}
 
 	/** Chat block registry — maps block kinds to render/wire definitions. */

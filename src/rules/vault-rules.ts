@@ -21,6 +21,7 @@ import { TAbstractFile } from "obsidian";
 import type { VaultRule } from "../types";
 import { resolveIncludeNotes } from "../include-note/resolver";
 import { logger } from "../utils/logger";
+import type { TemplateVariableRegistry } from "../template-vars";
 
 const log = logger("VaultRuleManager");
 
@@ -49,7 +50,8 @@ export class VaultRuleManager {
 
 	constructor(
 		private readonly app: App,
-		private notorDir: string
+		private notorDir: string,
+		private readonly templateRegistry?: TemplateVariableRegistry,
 	) {}
 
 	// -----------------------------------------------------------------------
