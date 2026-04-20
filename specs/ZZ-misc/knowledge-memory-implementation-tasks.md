@@ -69,9 +69,9 @@ The deterministic, non-LLM library modules. No extension wiring yet — pure Typ
 Wire the library into the extension runtime so scaffolds can call `utils.memory.*`.
 
 - [ ] **2.1 — Add `resolveNotorPath` to `ExtensionUtils`**
-  - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (interface at ~line 81):
+  - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (interface at ~line 95):
   - Add `resolveNotorPath: (subdir: string) => string` — returns `${settings.notor_dir}/${subdir}` (vault-relative)
-  - Wire in `buildUtils()` (~line 186): closure over `settings.notor_dir`
+  - Wire in `buildUtils()` (~line 245): closure over `settings.notor_dir`
 
 - [ ] **2.2 — Add `readNote` to `ExtensionUtils`**
   - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts):
@@ -89,7 +89,7 @@ Wire the library into the extension runtime so scaffolds can call `utils.memory.
   - `readDedupCache`, `writeDedupEntry`, `readDreamCursor`, `advanceDreamCursor` delegate to `src/memory/dedup-cache.ts` with resolved paths
 
 - [ ] **2.4 — Add `chatHistory.loadFull()` to `ExtensionUtils`**
-  - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (chatHistory property at ~line 146-168):
+  - In [`src/extensions/runtime-context.ts`](../../src/extensions/runtime-context.ts) (chatHistory property at ~lines 178-182):
   - Add `loadFull: (conversationId: string) => Promise<Message[] | null>` — returns raw `Message[]` (all roles, all fields including `is_hook_injection`, `ContentBlock[]` content preserved)
   - When conversation has an active session (matching `conversationId`): reads from the live `ConversationManager.getMessages()` instead of persisted JSONL
   - Falls back to `HistoryManager.loadConversation()` for inactive conversations
@@ -99,6 +99,22 @@ Wire the library into the extension runtime so scaffolds can call `utils.memory.
 - [ ] **2.5 — Verify `utils.memory` is null-safe when memory is disabled**
   - All scaffolds that access `utils.memory` must check for `null` before calling methods
   - Built-in scaffolds include `if (!utils.memory) return;` guard at the top of their code fences
+
+---
+
+## Phase 2.5 — Feature Group Gating Infrastructure
+
+Moved from Phase 8 (was Task 8.4). Must be in place before Phases 3-6 register memory scaffolds, so the `notor-feature-group: memory` frontmatter on those scaffolds is actually parsed and gated by `memory_enabled`.
+
+- [ ] **2.5a — Implement `notor-feature-group` enablement in `ExtensionManager`**
+  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts):
+  - During scaffold parsing, extract `notor-feature-group` from frontmatter
+  - In `executeAutomation()` (~line 617): before the existing `automation_enabled` check, add a feature-group gate:
+    - If `automation.featureGroup` is set and the corresponding master toggle is false → skip execution
+  - In tool registration: similarly gate tool visibility on feature-group master toggle
+  - Initial mapping: `"memory"` → `memory_enabled`. Pattern is extensible for future feature groups.
+  - Add `featureGroup?: string` to `UserToolDefinition` and `UserAutomationDefinition` in [`src/extensions/types.ts`](../../src/extensions/types.ts)
+  - Add `notor-feature-group` parsing to [`src/extensions/parser.ts`](../../src/extensions/parser.ts)
 
 ---
 
@@ -179,7 +195,7 @@ Register the four memory sub-agent profiles following the existing pattern in [`
     - `trigger: "on_conversation_start"`
     - `scaffoldContent`: full Markdown with frontmatter including `notor-blocking: true`, `notor-blocking-emit-kind: memory_recalled`, `notor-blocking-timeout: 10`, `notor-feature-group: memory`
     - YAML settings: `search_profile` (string, default `memory-search`), `max_matches` (number, default 8)
-    - Code fence: loads conversation via `chatHistory.loadFull`, spawns sub-agent, parses results, reads note bodies, emits `memory_recalled` block (as specified in design spec §7b)
+    - Code fence: **cold-start guard** — before spawning the search sub-agent, list `.md` files in `{notor_dir}/memory/` (excluding dotfiles); if count is zero, emit no block and return early. Otherwise: loads conversation via `chatHistory.loadFull`, spawns sub-agent, parses results, reads note bodies, emits `memory_recalled` block (as specified in design spec §7b)
 
 - [ ] **5.2 — Add `memory-capture` automation scaffold**
   - Add entry to `BUILTIN_AUTOMATION_SCAFFOLDS` Map:
@@ -262,7 +278,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 - [ ] **7.1 — Add `buildMemoryConventionSection()` to `system-prompt.ts`**
   - In [`src/chat/system-prompt.ts`](../../src/chat/system-prompt.ts):
-  - Add a private method following the section builder pattern (~lines 470-498):
+  - Add a private method following the section builder pattern (~lines 412-498):
     ```typescript
     private buildMemoryConventionSection(): string {
       return `## Memory context
@@ -272,8 +288,8 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
     ```
 
 - [ ] **7.2 — Inject memory convention section conditionally**
-  - In the `assemble()` method (~line 260-307):
-  - After the auto-context section (~line 304-306), conditionally append:
+  - In the `assemble()` method (~lines 209-328):
+  - After the auto-context section (~lines 305-307), conditionally append:
     ```typescript
     if (this.settings.memory_enabled) {
       sections.push(this.buildMemoryConventionSection());
@@ -286,7 +302,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 ## Phase 8 — Settings, Master Toggle, and Auto-Approval
 
 - [ ] **8.1 — Add memory settings to `NotorSettings`**
-  - In [`src/settings/types.ts`](../../src/settings/types.ts) (after the existing settings groups, ~line 343):
+  - In [`src/settings/types.ts`](../../src/settings/types.ts) (after the existing settings groups, ~line 415):
     ```typescript
     // Memory/Knowledge Base settings
     memory_enabled: boolean;
@@ -294,7 +310,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
     ```
 
 - [ ] **8.2 — Add memory defaults**
-  - In [`src/settings/defaults.ts`](../../src/settings/defaults.ts) in `createDefaultSettings()` (~line 184):
+  - In [`src/settings/defaults.ts`](../../src/settings/defaults.ts) in `createDefaultSettings()` (~lines 111-212):
     ```typescript
     memory_enabled: false,
     memory_folder: "memory",
@@ -307,13 +323,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
   - Link to individual scaffold settings for per-pipeline knobs
   - Follow the pattern of existing settings sections
 
-- [ ] **8.4 — Implement `notor-feature-group` enablement in `ExtensionManager`**
-  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts):
-  - During scaffold parsing, extract `notor-feature-group` from frontmatter
-  - In `executeAutomation()` (~line 488-503): before the existing `automation_enabled` check, add a feature-group gate:
-    - If `automation.featureGroup` is set and the corresponding master toggle is false → skip execution
-  - In tool registration: similarly gate tool visibility on feature-group master toggle
-  - Initial mapping: `"memory"` → `memory_enabled`. Pattern is extensible for future feature groups.
+- [ ] **8.4 — (Moved to Phase 2.5 — see below Phase 2)**
 
 - [ ] **8.5 — Implement auto-approval propagation on `memory_enabled` toggle**
   - When `memory_enabled` flips **on**:
@@ -345,8 +355,8 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
   - Follow the same user-override-takes-precedence pattern (~line 243)
 
 - [ ] **9.2 — Wire `utils.memory` into automation execution**
-  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `executeAutomation()` (~line 480-541):
-  - The `buildUtils()` call at ~line 520 already provides the full utils object — `utils.memory` is automatically available once Phase 2 wiring is done
+  - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `executeAutomation()` (~line 617):
+  - The `buildUtils()` call at ~line 665 already provides the full utils object — `utils.memory` is automatically available once Phase 2 wiring is done
   - Verify: `memory-search`, `memory-capture`, `memory-dream` automations can access `utils.memory.*`, `utils.chatBlocks.*`, `utils.runSubAgent`, `utils.chatHistory.loadFull()`
 
 - [ ] **9.3 — Wire `utils.memory` into tool execution**

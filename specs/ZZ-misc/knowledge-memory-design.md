@@ -53,7 +53,8 @@ See [extension-chat-blocks-design.md](extension-chat-blocks-design.md). The memo
 - The **render ≠ wire** design contract on `ChatBlockDefinition` — memory uses this to show only links in the UI while sending full bodies to the LLM.
 - `ChatBlockDefinition.excludeFromCompaction` — `memory_captured` sets this to `true`.
 - `ConversationManager.addMessage()` signature expansion and `updateMessage()`.
-- `chatHistory.loadFull(conversationId)` — returns raw `Message[]` from the live `ConversationManager` or JSONL fallback.
+
+**Note:** `chatHistory.loadFull(conversationId)` is NOT part of this prerequisite — it was designed alongside Extension Chat Blocks but deferred. It is introduced by this spec in §6 below.
 
 ### Prerequisite 2: Template Variable Resolution in Scaffolds
 
@@ -166,9 +167,9 @@ memory: {
 } | null;
 ```
 
-**Also add:**
+**New methods to add to `ExtensionUtils`:**
 - `readNote: (path: string) => Promise<string>` — thin wrapper around `resolveNote` + `vault.read`.
-- `chatHistory.loadFull(conversationId)` — returns raw `Message[]` from the live `ConversationManager` when an active session exists, falls back to persisted JSONL.
+- `chatHistory.loadFull(conversationId)` — returns raw `Message[]` from the live `ConversationManager` when an active session exists, falls back to persisted JSONL. (Not part of the Extension Chat Blocks prerequisite — introduced by this spec.)
 
 **Files to create:**
 - `src/memory/note-format.ts` — `serializeNote`, `parseNote`, `slugifyTitle`, `computeFingerprint`, `assertMemoryPath`
@@ -194,6 +195,7 @@ Calls `utils.memory.fingerprintAndDedup` then `utils.memory.resolveConcept`. Ret
 **Register in** [`src/extensions/builtin-automation-scaffolds.ts`](../../src/extensions/builtin-automation-scaffolds.ts).
 
 - **Trigger:** `on_conversation_start` with `notor-blocking: true`.
+- **Cold-start guard:** Before spawning the search sub-agent, list `.md` files in `{notor_dir}/memory/` (excluding dotfiles). If count is zero, skip the sub-agent entirely and emit no block — avoids sub-agent LLM cost and a noisy "No memories recalled" indicator on every conversation until capture populates the first note. Search begins firing normally after that.
 - Spawns `memory-search` sub-agent (`detached: false` — must block until search returns).
 - Loads conversation via `utils.chatHistory.loadFull` to get latest user message + recent context.
 - On success, reads matched note bodies via `utils.readNote` + `utils.memory.parseNote`.
