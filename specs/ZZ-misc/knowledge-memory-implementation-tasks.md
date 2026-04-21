@@ -253,7 +253,7 @@ The injection code at `manager.ts:289` must also be updated to include these new
 
 **Note:** The `UserAutomationDefinition` type (blocking fields at [`types.ts:168-179`](../../src/extensions/types.ts#L168-L179)) and the parser extraction (`notor-blocking`, `notor-blocking-emit-kind`, `notor-blocking-timeout` at [`parser.ts:267-275`](../../src/extensions/parser.ts#L267-L275)) are already complete from the Chat Blocks implementation (Phase 8). Task 5.0 below covers only the remaining gap: the scaffold interface and manager dict propagation.
 
-- [ ] **5.0 — Propagate blocking, feature-group, and schedule fields through automation scaffold injection path**
+- [x] **5.0 — Propagate blocking, feature-group, and schedule fields through automation scaffold injection path**
   - **Scope note:** `UserAutomationDefinition` and `parseAutomationFile()` already handle blocking fields (Chat Blocks Phase 8). This task adds them to the scaffold interface and manager injection dict only.
   - In [`src/extensions/builtin-automation-scaffolds.ts`](../../src/extensions/builtin-automation-scaffolds.ts) (interface at lines 17-31):
     - Add `blocking?: boolean`, `blockingEmitKind?: string`, `blockingTimeout?: number`, `featureGroup?: string`, `schedule?: string`
@@ -263,7 +263,7 @@ The injection code at `manager.ts:289` must also be updated to include these new
   - **Dual frontmatter source invariant:** `parseExtensionFile()` takes the frontmatter dict as a parameter — it does NOT re-parse frontmatter from the `scaffoldContent` Markdown. The manually-constructed dict is the load-bearing path for in-memory built-in scaffolds. The `scaffoldContent`'s own YAML frontmatter is only used when a user creates a vault override file (where Obsidian's metadata cache provides the frontmatter). **Every functional frontmatter field MUST be propagated through both paths** — the scaffold interface → manager dict (in-memory) AND the scaffoldContent YAML (vault override). Missing either side creates a silent behavioral gap where the field works in one context but not the other.
   - Verify: existing `title-generation` scaffold is unaffected (all new fields are optional and absent)
 
-- [ ] **5.1 — Add `memory-search` automation scaffold**
+- [x] **5.1 — Add `memory-search` automation scaffold**
   - In [`src/extensions/builtin-automation-scaffolds.ts`](../../src/extensions/builtin-automation-scaffolds.ts) (~line 36):
   - Add entry to `BUILTIN_AUTOMATION_SCAFFOLDS` Map:
     - `name: "memory-search"`
@@ -276,7 +276,7 @@ The injection code at `manager.ts:289` must also be updated to include these new
     - Code fence: **cold-start guard** — before spawning the search sub-agent, call `utils.memory.hasMemoryNotes()` to check whether any `.md` files exist in the memory directory; if none exist, emit no block and return early. Otherwise: loads conversation via `chatHistory.loadFull`, spawns sub-agent, parses results, reads note bodies, emits `memory_recalled` block (as specified in design spec §7b)
     - **Loading→real transition note:** The scaffold code only needs to call `utils.chatBlocks.emit("memory_recalled", data)`. The blocking automation framework automatically matches the loading placeholder (via `blockingEmitKind: "memory_recalled"`) and promotes it via `ConversationManager.promoteTransientMessage()` ([`conversation.ts:463-488`](../../src/chat/conversation.ts#L463-L488)). No custom loading→real transition logic is needed in the scaffold code.
 
-- [ ] **5.2 — Add `memory-capture` automation scaffold**
+- [x] **5.2 — Add `memory-capture` automation scaffold**
   - Add entry to `BUILTIN_AUTOMATION_SCAFFOLDS` Map:
     - `name: "memory-capture"`
     - `displayName: "Memory Capture (auto)"`
@@ -285,7 +285,7 @@ The injection code at `manager.ts:289` must also be updated to include these new
     - YAML settings: `capture_profile` (string, default `memory-capture`), `resolver_profile` (string, default `memory-resolver`), `dedup_window_hours` (number, default 24)
     - Code fence: loads conversation via `chatHistory.loadFull`, spawns detached sub-agent, `onComplete` processes insights through dedup + resolver, emits `memory_captured` block (as specified in design spec §7c)
 
-- [ ] **5.3 — Add `memory-dream` automation scaffold**
+- [x] **5.3 — Add `memory-dream` automation scaffold**
   - Add entry to `BUILTIN_AUTOMATION_SCAFFOLDS` Map:
     - `name: "memory-dream"`
     - `displayName: "Memory Dream"`
@@ -295,13 +295,13 @@ The injection code at `manager.ts:289` must also be updated to include these new
     - YAML settings: `dream_profile` (string, default `memory-dream`), `resolver_profile` (string, default `memory-resolver`), `max_tokens_per_batch` (number, default 30000), `note_max_chars` (number, default 4000), `split_depth` (number, default 2), `initial_lookback_days` (number, default 7)
     - Code fence: implements the full Dream pipeline — cursor gate, conversation loading + chunking, per-chunk sub-agent spawn, directive parsing + apply via `resolveConcept`, overflow handling (split-or-compact follow-up), progressive cursor advance (as specified in design spec §7d)
 
-- [ ] **5.4 — Implement split-or-compact logic in Dream scaffold**
+- [x] **5.4 — Implement split-or-compact logic in Dream scaffold**
   - After applying each directive, check if resulting note body exceeds `note_max_chars`
   - If overflow: send follow-up turn to the Dream sub-agent conversation with the split-or-compact prompt from design spec §4b
   - Parse response: `split` (route each child through fresh `resolveConcept` for collision detection; update or delete original) or `compact` (overwrite original with tightened body)
   - Recursion guardrail: if a child note itself exceeds cap, flag for next Dream run (do not cascade within current run)
 
-- [ ] **5.5 — Verify automation scaffolds load and execute**
+- [x] **5.5 — Verify automation scaffolds load and execute**
   - `memory-search` fires on first user message in a new conversation
   - `memory-capture` fires after LLM response completes
   - `memory-dream` fires on its cron schedule
