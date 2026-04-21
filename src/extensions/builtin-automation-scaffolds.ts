@@ -225,15 +225,14 @@ if (!result || !result.text) {
   return;
 }
 
-// Parse sub-agent JSON response
-let parsed: { matches?: Array<{ path: string; reason: string }> };
-try {
-  parsed = JSON.parse(result.text);
-} catch {
+// Parse sub-agent JSON response (may be wrapped in explanatory text)
+const extracted = utils.memory.extractJSON(result.text);
+if (!extracted || typeof extracted !== "object") {
   log.warn("Failed to parse memory-search response as JSON", { text: result.text.substring(0, 200) });
   await utils.chatBlocks.emit("memory_recalled", { matches: [] });
   return;
 }
+const parsed = extracted as { matches?: Array<{ path: string; reason: string }> };
 
 const rawMatches = parsed.matches ?? [];
 if (rawMatches.length === 0) {
@@ -386,13 +385,12 @@ await utils.runSubAgent({
       return;
     }
 
-    let parsed: { insights?: Array<{ content: string; evidence_paths?: string[] }> };
-    try {
-      parsed = JSON.parse(result.text);
-    } catch {
+    const extractedCapture = utils.memory.extractJSON(result.text);
+    if (!extractedCapture || typeof extractedCapture !== "object") {
       log.warn("Failed to parse capture response as JSON", { text: result.text.substring(0, 200) });
       return;
     }
+    const parsed = extractedCapture as { insights?: Array<{ content: string; evidence_paths?: string[] }> };
 
     const insights = parsed.insights ?? [];
     if (insights.length === 0) {
@@ -674,14 +672,13 @@ for (const conversation of qualifying) {
       target_path?: string;
       reason?: string;
     }>;
-    try {
-      directives = JSON.parse(result.text);
-      if (!Array.isArray(directives)) {
-        log.warn("Dream response is not an array", { text: result.text.substring(0, 200) });
-        continue;
-      }
-    } catch {
-      log.warn("Failed to parse dream response as JSON", { text: result.text.substring(0, 200) });
+    const extractedDream = utils.memory.extractJSON(result.text);
+    if (Array.isArray(extractedDream)) {
+      directives = extractedDream;
+    } else if (extractedDream && typeof extractedDream === "object" && Array.isArray((extractedDream as any).directives)) {
+      directives = (extractedDream as any).directives;
+    } else {
+      log.warn("Failed to parse dream response as JSON array", { text: result.text.substring(0, 200) });
       continue;
     }
 
@@ -822,10 +819,8 @@ async function handleOverflow(
 
   if (!overflowResult || !overflowResult.text) return;
 
-  let decision: any;
-  try {
-    decision = JSON.parse(overflowResult.text);
-  } catch {
+  const decision = utils.memory.extractJSON(overflowResult.text) as any;
+  if (!decision || typeof decision !== "object") {
     log.warn("Failed to parse overflow decision", { text: overflowResult.text.substring(0, 200) });
     return;
   }

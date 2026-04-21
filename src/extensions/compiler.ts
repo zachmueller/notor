@@ -41,6 +41,25 @@ export function stripTypes(code: string): string {
 	}
 }
 
+/**
+ * Strip TypeScript types AND convert ES module exports to CJS-style assignments.
+ *
+ * Block code fences use `export function render(...)` syntax. The `"imports"`
+ * transform converts these to `exports.render = function render(...)`, which
+ * populates the `exports` object injected by `compileBlockModule`.
+ */
+function stripTypesForBlock(code: string): string {
+	try {
+		const result = transform(code, {
+			transforms: ["typescript", "imports"],
+		});
+		return result.code;
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		throw new Error(`TypeScript+imports transform failed: ${message}`);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // AsyncFunction compilation
 // ---------------------------------------------------------------------------
@@ -75,9 +94,9 @@ export function compileAutomationFunction(strippedCode: string): CompiledExtensi
  * Compile a block extension code fence into a module-like object by executing
  * it with an `exports` object injected, then returning that object.
  *
- * Block code fences export named functions (e.g. `exports.render = ...` or
- * `const render = ...; exports.render = render;`). The compiled async function
- * receives `exports` as its only argument and is immediately invoked.
+ * Block code fences use ES module `export function` syntax. Sucrase's
+ * `"imports"` transform converts these to CJS-style `exports.X = ...`
+ * assignments, which populate the `exports` object passed as a parameter.
  *
  * @param rawCode - Raw TypeScript/JavaScript code from the extension code fence
  * @returns The populated exports object on success, or a descriptive error string
@@ -87,7 +106,7 @@ export function compileBlockModule(
 ): { exports: Record<string, unknown> } | { error: string } {
 	let strippedCode: string;
 	try {
-		strippedCode = stripTypes(rawCode);
+		strippedCode = stripTypesForBlock(rawCode);
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
 		return { error: message };

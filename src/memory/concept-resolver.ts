@@ -5,6 +5,7 @@ import {
 	parseNote,
 	slugifyTitle,
 	assertMemoryPath,
+	extractJSON,
 } from "./note-format";
 
 export interface ResolveConceptArgs {
@@ -44,12 +45,11 @@ export async function resolveConcept(
 		return { action: "skipped" };
 	}
 
-	let directive: ResolverDirective;
-	try {
-		directive = JSON.parse(result.text) as ResolverDirective;
-	} catch {
+	const extracted = extractJSON(result.text);
+	if (!extracted || typeof extracted !== "object") {
 		return { action: "skipped" };
 	}
+	const directive = extracted as ResolverDirective;
 
 	if (!directive || !directive.action || !directive.merged_body) {
 		return { action: "skipped" };
@@ -76,7 +76,7 @@ export async function resolveConcept(
 			createdAt: now,
 		});
 
-		await vault.create(filePath, content);
+		await app.vault.adapter.write(filePath, content);
 		return { action: "created", path: filePath };
 	}
 

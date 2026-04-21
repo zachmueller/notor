@@ -116,6 +116,41 @@ function normalizVaultPath(p: string): string {
 	return segments.join("/");
 }
 
+/**
+ * Extract a JSON object from an LLM response that may contain surrounding text.
+ * Tries `JSON.parse` on the full text first, then looks for a ```json code block,
+ * then falls back to finding the first `{...}` balanced brace pair.
+ */
+export function extractJSON(text: string): unknown | null {
+	const trimmed = text.trim();
+	try {
+		return JSON.parse(trimmed);
+	} catch { /* not pure JSON */ }
+
+	const codeBlockMatch = trimmed.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/);
+	if (codeBlockMatch) {
+		try {
+			return JSON.parse(codeBlockMatch[1]!.trim());
+		} catch { /* invalid JSON in code block */ }
+	}
+
+	const firstBrace = trimmed.indexOf("{");
+	if (firstBrace >= 0) {
+		let depth = 0;
+		for (let i = firstBrace; i < trimmed.length; i++) {
+			if (trimmed[i] === "{") depth++;
+			else if (trimmed[i] === "}") depth--;
+			if (depth === 0) {
+				try {
+					return JSON.parse(trimmed.slice(firstBrace, i + 1));
+				} catch { break; }
+			}
+		}
+	}
+
+	return null;
+}
+
 function extractField(frontmatter: string, key: string): string | null {
 	const re = new RegExp(`^${key}:\\s*(.+)$`, "m");
 	const m = frontmatter.match(re);

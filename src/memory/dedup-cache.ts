@@ -58,10 +58,7 @@ export async function writeDedupEntry(
 	}
 
 	cache[fingerprint] = timestamp;
-
-	const tmpPath = cachePath + ".tmp";
-	await app.vault.adapter.write(tmpPath, JSON.stringify(cache));
-	await app.vault.adapter.rename(tmpPath, cachePath);
+	await app.vault.adapter.write(cachePath, JSON.stringify(cache));
 }
 
 export async function readDreamCursor(
@@ -86,7 +83,5 @@ export async function advanceDreamCursor(
 	timestamp: string,
 ): Promise<void> {
 	const data: DreamCursor = { last_run: timestamp };
-	const tmpPath = cursorPath + ".tmp";
-	await app.vault.adapter.write(tmpPath, JSON.stringify(data));
-	await app.vault.adapter.rename(tmpPath, cursorPath);
+	await app.vault.adapter.write(cursorPath, JSON.stringify(data));
 }

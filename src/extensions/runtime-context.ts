@@ -78,6 +78,7 @@ import {
 	slugifyTitle,
 	computeFingerprint,
 	assertMemoryPath,
+	extractJSON,
 } from "../memory/note-format";
 import {
 	readDedupCache,
@@ -290,6 +291,7 @@ export interface ExtensionUtils {
 		readDreamCursor: () => Promise<string | null>;
 		advanceDreamCursor: (timestamp: string) => Promise<void>;
 		hasMemoryNotes: () => Promise<boolean>;
+		extractJSON: (text: string) => unknown | null;
 	} | null;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
@@ -941,6 +943,8 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 					(f) => f instanceof TFileClass && f.extension === "md" && !f.name.startsWith("."),
 				);
 			},
+
+			extractJSON,
 		};
 	}
 
