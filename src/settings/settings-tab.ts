@@ -34,6 +34,7 @@ import { renderSubAgentsSection } from "./sections/sub-agents";
 import { renderRulesAndWorkflowsSection } from "./sections/rules-and-workflows";
 import { renderSharedSettingsSection, renderReloadExtensionsButton } from "./sections/tool-shared-settings";
 import { renderMemorySection } from "./sections/memory";
+import { renderSystemPromptSection } from "./sections/system-prompt";
 import { renderUserAutomationsSection } from "./sections/user-automations";
 import { renderModelPresetsSection } from "./sections/model-presets";
 import { createSettingsGroup, snapshotDetailsState, restoreDetailsState } from "./helpers";
@@ -173,6 +174,7 @@ export class NotorSettingTab extends PluginSettingTab {
 
 		// --- Conversation (expanded by default) ---
 		const conversationGroup = createSettingsGroup(containerEl, "Conversation", true, persisted, onToggle);
+		renderSystemPromptSection(conversationGroup, ctx);
 		renderAutoContextSection(conversationGroup, ctx);
 		renderCompactionSection(conversationGroup, ctx);
 		renderFileAttachmentsSection(conversationGroup, ctx);

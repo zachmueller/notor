@@ -28,6 +28,18 @@ const log = logger("SystemPromptBuilder");
 const MAX_SYSTEM_PROMPT_TOKENS = 8000;
 
 /**
+ * Dynamic section markers that users can place in custom system prompts
+ * to control where assembly-time content appears inline.
+ */
+const DYNAMIC_SECTION_MARKERS = [
+	"available_tools",
+	"mode_instructions",
+	"vault_rules",
+	"auto_context",
+	"memory_convention",
+] as const;
+
+/**
  * Result of the extraction phase (phase 1 of the two-phase builder).
  *
  * Contains tool configs extracted from persona and rule sources.
@@ -96,11 +108,18 @@ export class SystemPromptBuilder {
 		// --- Persona extraction ---
 		if (persona && persona.prompt_content.trim()) {
 			// Resolve <include_note> tags first
-			const resolvedPersonaContent = await this.resolveIncludeNotesIfAvailable(
+			let resolvedPersonaContent = await this.resolveIncludeNotesIfAvailable(
 				persona.prompt_content,
 				persona.system_prompt_path,
 				"system_prompt"
 			);
+
+			// Second-pass static var resolution: resolve {notor_dir}, {vault_name}
+			// etc. that appear inside included notes. Idempotent — already-resolved
+			// text in the parent is unchanged.
+			if (this.templateRegistry) {
+				resolvedPersonaContent = this.templateRegistry.resolve(resolvedPersonaContent);
+			}
 
 			// Extract <notor_tool_config> blocks
 			const personaResult = extractToolConfigs(
@@ -138,11 +157,16 @@ export class SystemPromptBuilder {
 
 				try {
 					// Resolve <include_note> tags per-rule
-					const resolvedRuleContent = await this.resolveIncludeNotesIfAvailable(
+					let resolvedRuleContent = await this.resolveIncludeNotesIfAvailable(
 						trimmed,
 						rule.file_path,
 						"vault_rule"
 					);
+
+					// Second-pass static var resolution for included content
+					if (this.templateRegistry) {
+						resolvedRuleContent = this.templateRegistry.resolve(resolvedRuleContent);
+					}
 
 					// Extract <notor_tool_config> blocks
 					const ruleResult = extractToolConfigs(
@@ -225,6 +249,39 @@ export class SystemPromptBuilder {
 		const useCache = this.cachedStrippedPersonaContent !== null
 			|| this.cachedStrippedRuleContents !== null;
 
+		// --- Pre-compute all dynamic section strings ---
+		const toolSection = toolDefinitions.length > 0
+			? this.buildToolDefinitionsSection(toolDefinitions)
+			: "";
+		const modeSection = this.buildModeSection(mode);
+
+		let rulesSection = "";
+		if (useCache && this.cachedStrippedRuleContents !== null) {
+			const ruleContent = this.cachedStrippedRuleContents
+				.filter((c) => c.trim().length > 0)
+				.join("\n\n---\n\n");
+			if (ruleContent.trim()) {
+				rulesSection = this.buildRulesSection(ruleContent);
+			}
+		} else if (vaultRuleContent && vaultRuleContent.trim()) {
+			rulesSection = this.buildRulesSection(vaultRuleContent);
+		}
+
+		const memorySection = memoryEnabled
+			? this.buildMemoryConventionSection()
+			: "";
+		const autoContextSection = autoContextBlock && autoContextBlock.trim()
+			? this.buildAutoContextSection(autoContextBlock)
+			: "";
+
+		const dynamicSections = new Map<string, string>([
+			["available_tools", toolSection],
+			["mode_instructions", modeSection],
+			["vault_rules", rulesSection],
+			["auto_context", autoContextSection],
+			["memory_convention", memorySection],
+		]);
+
 		// 1. Base system prompt — depends on persona prompt_mode
 		if (persona && persona.prompt_mode === "replace") {
 			// Replace mode: persona prompt replaces the global system prompt
@@ -240,11 +297,21 @@ export class SystemPromptBuilder {
 						persona.system_prompt_path,
 						"system_prompt"
 					);
+					// Second-pass static var resolution for included content
+					if (this.templateRegistry) {
+						personaContent = this.templateRegistry.resolve(personaContent);
+					}
 					// Safety: strip any <notor_tool_config> blocks (legacy fallback path).
 					personaContent = extractToolConfigs(personaContent, "persona", persona.system_prompt_path).strippedContent;
 				}
 				if (personaContent.trim()) {
-					parts.push(personaContent);
+					// Detect dynamic markers and resolve them inline
+					const markers = this.detectMarkers(personaContent);
+					const resolved = this.resolveDynamicVars(personaContent, dynamicSections);
+					parts.push(resolved);
+
+					// Append only sections whose markers were NOT present
+					this.appendUnusedSections(parts, dynamicSections, markers);
 				}
 			}
 			log.debug("Using persona prompt in replace mode", {
@@ -252,8 +319,25 @@ export class SystemPromptBuilder {
 				hasContent: !!persona.prompt_content.trim(),
 			});
 		} else {
-			// No persona, or append mode: start with global system prompt
-			const basePrompt = await this.getBasePrompt();
+			// No persona, or append mode: start with global system prompt.
+			// Use getRawBasePrompt() to detect dynamic markers before resolution.
+			const { raw, customPath } = await this.getRawBasePrompt();
+
+			const markers = this.detectMarkers(raw);
+
+			// Resolve static vars → <include_note> → static vars again → dynamic vars
+			const withStaticVars = this.templateRegistry
+				? this.templateRegistry.resolve(raw)
+				: raw;
+			const withIncludes = await this.resolveIncludeNotesIfAvailable(
+				withStaticVars,
+				customPath ?? this.getCustomPromptPath(),
+				"system_prompt"
+			);
+			const withSecondPass = this.templateRegistry
+				? this.templateRegistry.resolve(withIncludes)
+				: withIncludes;
+			const basePrompt = this.resolveDynamicVars(withSecondPass, dynamicSections);
 			parts.push(basePrompt);
 
 			// Append persona prompt as a labeled section (if persona active
@@ -269,6 +353,10 @@ export class SystemPromptBuilder {
 						persona.system_prompt_path,
 						"system_prompt"
 					);
+					// Second-pass static var resolution for included content
+					if (this.templateRegistry) {
+						personaContent = this.templateRegistry.resolve(personaContent);
+					}
 					// Safety: strip any <notor_tool_config> blocks (legacy fallback path).
 					personaContent = extractToolConfigs(personaContent, "persona", persona.system_prompt_path).strippedContent;
 				}
@@ -279,39 +367,9 @@ export class SystemPromptBuilder {
 					}));
 				}
 			}
-		}
 
-		// 2. Tool definitions section
-		if (toolDefinitions.length > 0) {
-			const toolSection = this.buildToolDefinitionsSection(toolDefinitions);
-			parts.push(toolSection);
-		}
-
-		// 3. Mode-aware instructions
-		parts.push(this.buildModeSection(mode));
-
-		// 4. Vault-level rules (always applied regardless of persona prompt_mode)
-		// Use cached stripped rule contents if available (two-phase path),
-		// otherwise fall back to the legacy vaultRuleContent parameter.
-		if (useCache && this.cachedStrippedRuleContents !== null) {
-			const ruleContent = this.cachedStrippedRuleContents
-				.filter((c) => c.trim().length > 0)
-				.join("\n\n---\n\n");
-			if (ruleContent.trim()) {
-				parts.push(this.buildRulesSection(ruleContent));
-			}
-		} else if (vaultRuleContent && vaultRuleContent.trim()) {
-			parts.push(this.buildRulesSection(vaultRuleContent));
-		}
-
-		// 5. Memory convention (only when memory subsystem is enabled)
-		if (memoryEnabled) {
-			parts.push(this.buildMemoryConventionSection());
-		}
-
-		// 6. Workspace context (auto-context — rebuilt before each LLM call)
-		if (autoContextBlock && autoContextBlock.trim()) {
-			parts.push(this.buildAutoContextSection(autoContextBlock));
+			// Append only sections whose markers were NOT in the base prompt
+			this.appendUnusedSections(parts, dynamicSections, markers);
 		}
 
 		let assembled = parts.join("\n\n");
@@ -341,8 +399,37 @@ export class SystemPromptBuilder {
 	 * Resolution order:
 	 * 1. If `{notor_dir}/prompts/core-system-prompt.md` exists, use its body
 	 * 2. Otherwise, use the built-in DEFAULT_SYSTEM_PROMPT
+	 *
+	 * Resolves static template vars and `<include_note>` tags.
+	 * For assembly-time dynamic var support, use `getRawBasePrompt()` + manual resolution.
 	 */
 	async getBasePrompt(): Promise<string> {
+		const { raw, customPath } = await this.getRawBasePrompt();
+
+		const withVarsResolved = this.templateRegistry
+			? this.templateRegistry.resolve(raw)
+			: raw;
+
+		const withIncludes = await this.resolveIncludeNotesIfAvailable(
+			withVarsResolved,
+			customPath ?? this.getCustomPromptPath(),
+			"system_prompt"
+		);
+
+		// Second-pass static var resolution for vars inside included notes
+		return this.templateRegistry
+			? this.templateRegistry.resolve(withIncludes)
+			: withIncludes;
+	}
+
+	/**
+	 * Get the raw base prompt text before any template resolution.
+	 *
+	 * Returns the frontmatter-stripped content from the custom file,
+	 * or the built-in default. The `customPath` is non-null when
+	 * a custom file was read (needed for `<include_note>` resolution).
+	 */
+	private async getRawBasePrompt(): Promise<{ raw: string; customPath: string | null }> {
 		const customPath = this.getCustomPromptPath();
 
 		try {
@@ -352,17 +439,7 @@ export class SystemPromptBuilder {
 				const stripped = this.stripFrontmatter(content);
 				if (stripped.trim()) {
 					log.debug("Using custom system prompt", { path: customPath });
-					const withVarsResolved = this.templateRegistry
-						? this.templateRegistry.resolve(stripped.trim())
-						: stripped.trim();
-					// D-010: Resolve <include_note> tags in the custom system prompt.
-					// Uses only inlineContent (attached mode ignored in system_prompt context).
-					const resolved = await this.resolveIncludeNotesIfAvailable(
-						withVarsResolved,
-						customPath,
-						"system_prompt"
-					);
-					return resolved;
+					return { raw: stripped.trim(), customPath };
 				}
 			}
 		} catch (e) {
@@ -372,7 +449,7 @@ export class SystemPromptBuilder {
 			});
 		}
 
-		return DEFAULT_SYSTEM_PROMPT;
+		return { raw: DEFAULT_SYSTEM_PROMPT, customPath: null };
 	}
 
 	/**
@@ -394,6 +471,25 @@ export class SystemPromptBuilder {
 		const content = `---
 description: Custom system prompt for Notor AI assistant
 ---
+
+<!--
+Template variables — these are replaced automatically when the prompt is assembled:
+
+  Static (resolved at load time):
+    {notor_dir}    — Your Notor directory name (e.g. "notor")
+    {vault_name}   — Your vault name
+
+  Dynamic (resolved at assembly time — use these to control where sections appear):
+    {available_tools}    — Formatted list of all available tools and their parameters
+    {mode_instructions}  — Plan/Act mode instructions
+    {vault_rules}        — Content from matched vault rules
+    {auto_context}       — Workspace context (open notes, vault structure, OS)
+    {memory_convention}  — Memory guidance (when memory is enabled)
+
+  If a dynamic variable is NOT present in this file, its section is appended
+  automatically at the end (same as the default behavior). Include a variable
+  inline to control exactly where that section appears in the prompt.
+-->
 
 ${DEFAULT_SYSTEM_PROMPT}
 `;
@@ -517,6 +613,57 @@ Messages wrapped in \`<notor-memory>…</notor-memory>\` are recalled Evergreen 
 		return `## Workspace context
 
 ${autoContextBlock}`;
+	}
+
+	// -----------------------------------------------------------------------
+	// Dynamic section marker helpers
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Detect which dynamic section markers are present in text.
+	 * Scans for `{available_tools}`, `{mode_instructions}`, etc.
+	 */
+	private detectMarkers(text: string): Set<string> {
+		const found = new Set<string>();
+		for (const name of DYNAMIC_SECTION_MARKERS) {
+			if (text.includes(`{${name}}`)) {
+				found.add(name);
+			}
+		}
+		return found;
+	}
+
+	/**
+	 * Replace dynamic section markers with their pre-computed content.
+	 * Only operates on known marker names — unknown `{...}` patterns pass through.
+	 */
+	private resolveDynamicVars(text: string, sections: Map<string, string>): string {
+		let result = text;
+		for (const name of DYNAMIC_SECTION_MARKERS) {
+			const value = sections.get(name);
+			if (value !== undefined) {
+				result = result.split(`{${name}}`).join(value);
+			}
+		}
+		return result;
+	}
+
+	/**
+	 * Append dynamic sections that were NOT consumed inline via markers.
+	 * Only appends sections with non-empty content.
+	 */
+	private appendUnusedSections(
+		parts: string[],
+		sections: Map<string, string>,
+		usedMarkers: Set<string>,
+	): void {
+		for (const name of DYNAMIC_SECTION_MARKERS) {
+			if (usedMarkers.has(name)) continue;
+			const content = sections.get(name);
+			if (content && content.trim()) {
+				parts.push(content);
+			}
+		}
 	}
 
 	// -----------------------------------------------------------------------
