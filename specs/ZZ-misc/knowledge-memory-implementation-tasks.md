@@ -314,7 +314,7 @@ The injection code at `manager.ts:289` must also be updated to include these new
 
 Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + manager integration).
 
-- [ ] **6.1 — Create `src/extensions/builtin-block-scaffolds.ts`**
+- [x] **6.1 — Create `src/extensions/builtin-block-scaffolds.ts`**
   - New file, parallel to `builtin-tool-scaffolds.ts` and `builtin-automation-scaffolds.ts`
   - Define `BuiltinBlockScaffold` interface:
     ```typescript
@@ -337,7 +337,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
   - **Why export fields are needed:** The block scaffold injection loop (Task 6.4) constructs a frontmatter dict that `parseBlockFile` consumes. `parseBlockFile` expects `notor-renderer-export` and `notor-to-llm-text-export` in frontmatter. Without these fields on the interface, the frontmatter dict can't propagate them, and the parsed `UserBlockDefinition` would have no export names to resolve.
   - Export `BUILTIN_BLOCK_SCAFFOLDS: ReadonlyMap<string, BuiltinBlockScaffold>`
 
-- [ ] **6.2 — Add `memory_recalled` block-kind scaffold**
+- [x] **6.2 — Add `memory_recalled` block-kind scaffold**
   - Define `MEMORY_RECALLED: BuiltinBlockScaffold`:
     - `kind: "memory_recalled"`, `displayName: "Memories Recalled"`, `icon: "🧠"`
     - `scaffoldContent`: full Markdown with frontmatter (`notor-type: block`, `notor-block-kind: memory_recalled`, `notor-display-name: Memories Recalled`, `notor-icon: 🧠`, `notor-feature-group: memory`)
@@ -346,7 +346,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
       - `render(container, data, ctx)`: empty state → muted "No memories recalled" div; non-empty → collapsible card with clickable note links + reason text
       - `toLLMText(data)`: empty → `null`; non-empty → `<notor-memory>...</notor-memory>` tagged payload with full note bodies from `data.matches[].payload`
 
-- [ ] **6.3 — Add `memory_captured` block-kind scaffold**
+- [x] **6.3 — Add `memory_captured` block-kind scaffold**
   - Define `MEMORY_CAPTURED: BuiltinBlockScaffold`:
     - `kind: "memory_captured"`, `displayName: "Memories Captured"`, `icon: "💾"`, `excludeFromCompaction: true`
     - `scaffoldContent`: frontmatter includes `notor-exclude-from-compaction: true`, `notor-feature-group: memory`
@@ -354,7 +354,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
       - `render(container, data, ctx)`: collapsible card with clickable links + action badges
       - `toLLMText(data)`: returns `null` (zero LLM tokens)
 
-- [ ] **6.4 — Integrate `BUILTIN_BLOCK_SCAFFOLDS` into `ExtensionManager`** (absorbs former task 9.1)
+- [x] **6.4 — Integrate `BUILTIN_BLOCK_SCAFFOLDS` into `ExtensionManager`** (absorbs former task 9.1)
   - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `reload()` (~line 215):
   - Add a built-in block scaffold injection loop that pushes into `discovered.blocks` **before** the block cleanup step `// 3b. Unregister previous block kinds` (line 332). This mirrors the tool scaffold loop (lines 230-257) and automation scaffold loop (lines 281-314), which inject into `discovered.tools` / `discovered.automations` before their respective compilation loops.
   - **Ordering rationale:** The unregister sweep at line 332-337 clears ALL previously registered block kinds from `this.registeredBlockKinds`. Injected scaffolds must be in `discovered.blocks` BEFORE this sweep so they are compiled and re-registered by the existing block compilation loop at lines 340-377 (`// 3c. Compile and register standalone block extensions`). Injecting AFTER the sweep would work but injecting before is consistent with the tool/automation pattern and ensures feature-group filtering (Task 2.5a(vi)) can operate on the complete `discovered.blocks` list.

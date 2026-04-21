@@ -31,6 +31,7 @@ import { TOOL_PATH_PARAMS } from "../tool-config/path-enforcer";
 import { BUILTIN_TOOL_SCAFFOLDS, BUILTIN_SHARED_SETTINGS_SCHEMA } from "./builtin-tool-scaffolds";
 import type { ChatBlockDefinition } from "../ui/chat-blocks/registry";
 import { BUILTIN_AUTOMATION_SCAFFOLDS } from "./builtin-automation-scaffolds";
+import { BUILTIN_BLOCK_SCAFFOLDS } from "./builtin-block-scaffolds";
 import { logger } from "../utils/logger";
 
 const log = logger("ExtensionManager");
@@ -365,6 +366,39 @@ export class ExtensionManager {
 			compiledAutomations.set(automation.filePath, automation);
 		}
 
+		// 3a-pre. Inject scaffold fallbacks for missing built-in blocks
+		for (const [kind, scaffold] of BUILTIN_BLOCK_SCAFFOLDS) {
+			if (discovered.blocks.some(b => b.kind === kind)) continue;
+
+			const frontmatter: Record<string, unknown> = {
+				"notor-type": "block",
+				"notor-block-kind": scaffold.kind,
+				"notor-display-name": scaffold.displayName,
+				"notor-renderer-export": scaffold.rendererExport,
+			};
+			if (scaffold.icon) frontmatter["notor-icon"] = scaffold.icon;
+			if (scaffold.excludeFromCompaction) frontmatter["notor-exclude-from-compaction"] = scaffold.excludeFromCompaction;
+			if (scaffold.featureGroup) frontmatter["notor-feature-group"] = scaffold.featureGroup;
+			if (scaffold.toLLMTextExport) frontmatter["notor-to-llm-text-export"] = scaffold.toLLMTextExport;
+			if (scaffold.renderLoadingExport) frontmatter["notor-render-loading-export"] = scaffold.renderLoadingExport;
+			const resolvedBlockContent = this.plugin.getTemplateRegistry().resolve(scaffold.scaffoldContent);
+			const parsed = parseExtensionFile(
+				resolvedBlockContent,
+				frontmatter,
+				`(built-in scaffold: ${kind})`,
+				this.parseYAML,
+			);
+			if ("message" in parsed) {
+				errors.push({ filePath: `(built-in scaffold: ${kind})`, message: parsed.message });
+				continue;
+			}
+			if ("kind" in parsed && "rendererExport" in parsed) {
+				const blockDef = parsed as UserBlockDefinition;
+				blockDef.isScaffold = true;
+				discovered.blocks.push(blockDef);
+			}
+		}
+
 		// 3a. Filter blocks by feature group
 		discovered.blocks = discovered.blocks.filter(b => this.isFeatureGroupEnabled(b.featureGroup));
 
@@ -408,6 +442,14 @@ export class ExtensionManager {
 					def.toLLMText = toLLMFn as ChatBlockDefinition["toLLMText"];
 				} else {
 					log.warn(`Block extension '${block.kind}': toLLMTextExport '${block.toLLMTextExport}' is not a function — ignoring`, { file: block.filePath });
+				}
+			}
+			if (block.renderLoadingExport) {
+				const loadingFn = moduleExports[block.renderLoadingExport];
+				if (typeof loadingFn === "function") {
+					def.renderLoading = loadingFn as ChatBlockDefinition["renderLoading"];
+				} else {
+					log.warn(`Block extension '${block.kind}': renderLoadingExport '${block.renderLoadingExport}' is not a function — ignoring`, { file: block.filePath });
 				}
 			}
 			chatBlockRegistry.register(def);

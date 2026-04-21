@@ -332,6 +332,10 @@ function parseBlockFile(
 		? frontmatter["notor-to-llm-text-export"]
 		: undefined;
 
+	const renderLoadingExport = typeof frontmatter["notor-render-loading-export"] === "string"
+		? frontmatter["notor-render-loading-export"]
+		: undefined;
+
 	// Code fence is required for block extensions
 	if (!codeFence) {
 		return { filePath, message: "Missing required code fence (```ts, ```typescript, ```js, or ```javascript)" };
@@ -349,6 +353,7 @@ function parseBlockFile(
 		excludeFromCompaction,
 		rendererExport,
 		toLLMTextExport,
+		renderLoadingExport,
 		featureGroup,
 		rawCode: codeFence.code,
 		compiledFn: null,

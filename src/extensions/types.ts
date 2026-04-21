@@ -241,6 +241,8 @@ export interface UserBlockDefinition {
 	rendererExport: string;
 	/** Named export in the code fence that provides the toLLMText function (optional). */
 	toLLMTextExport?: string;
+	/** Named export in the code fence that provides the renderLoading function (optional). */
+	renderLoadingExport?: string;
 	/** Raw TypeScript/JavaScript code from code fence. */
 	rawCode: string;
 	/** Compiled async function (null until compilation succeeds). */
