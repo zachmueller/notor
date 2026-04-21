@@ -74,8 +74,8 @@ export class McpRegisteredTool implements Tool {
 	/** The discovered tool from the MCP server. */
 	private discoveredTool: McpDiscoveredTool;
 
-	/** Server configuration for classification/auto-approve lookups. */
-	private serverConfig: McpServerConfig;
+	/** Callback returning the live server config (avoids stale references after loadSettings). */
+	private getServerConfigFn: () => McpServerConfig;
 
 	/** McpHub reference for callTool delegation. */
 	private mcpHub: McpHub;
@@ -86,13 +86,13 @@ export class McpRegisteredTool implements Tool {
 	constructor(
 		serverName: string,
 		discoveredTool: McpDiscoveredTool,
-		serverConfig: McpServerConfig,
+		getServerConfigFn: () => McpServerConfig,
 		mcpHub: McpHub,
 		getModeCallback: () => "plan" | "act"
 	) {
 		this.serverName = serverName;
 		this.discoveredTool = discoveredTool;
-		this.serverConfig = serverConfig;
+		this.getServerConfigFn = getServerConfigFn;
 		this.mcpHub = mcpHub;
 		this.getModeCallback = getModeCallback;
 	}
@@ -138,7 +138,7 @@ export class McpRegisteredTool implements Tool {
 	get mode(): "read" | "write" {
 		// 1. Check user override
 		const rawToolName = this.discoveredTool.name;
-		const userOverride = this.serverConfig.toolClassifications?.[rawToolName];
+		const userOverride = this.getServerConfigFn().toolClassifications?.[rawToolName];
 		if (userOverride) {
 			return userOverride;
 		}
@@ -178,7 +178,7 @@ export class McpRegisteredTool implements Tool {
 	 * @see specs/04-mcp/tasks.md — FEAT-002
 	 */
 	getServerConfig(): McpServerConfig {
-		return this.serverConfig;
+		return this.getServerConfigFn();
 	}
 
 	/**

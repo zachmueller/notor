@@ -101,6 +101,7 @@ import { isExtensionFile, isExtensionPath } from "./extensions/watcher";
 
 // MCP
 import { McpHub } from "./mcp/mcp-hub";
+import type { McpServerConfig } from "./mcp/mcp-types";
 import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
 import { showMcpMissingAnnotationsNotice } from "./tool-config/notices";
 
@@ -1484,11 +1485,14 @@ export default class NotorPlugin extends Plugin {
 					}
 				};
 
+				const getServerConfigFn = (): McpServerConfig =>
+					this.settings.mcp_servers?.[serverName] ?? connection.config;
+
 				for (const discoveredTool of connection.tools) {
 					const registeredTool = new McpRegisteredTool(
 						serverName,
 						discoveredTool,
-						connection.config,
+						getServerConfigFn,
 						mcpHub,
 						getModeCallback
 					);
