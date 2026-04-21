@@ -1005,7 +1005,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					undefined, // vaultRuleContent — now handled via cached stripped content
 					autoContext ?? undefined,
 					session.pinnedPersona,
-					!!(this.settings as unknown as Record<string, unknown>).memory_enabled,
+					this.settings.memory_enabled,
 				);
 
 				// Emit assembled system prompt as a structured log so E2E tests

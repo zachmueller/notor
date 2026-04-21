@@ -890,11 +890,8 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 
 	// Wire memory facade after the main object is constructed so that
 	// resolveConcept can reference utils.runSubAgent without recursion.
-	// memory_enabled and memory_folder are added by Phase 8 (settings).
-	// Access via unknown cast to avoid compile errors before the fields exist on NotorSettings.
-	const settingsAny = plugin.settings as unknown as Record<string, unknown>;
-	if (settingsAny.memory_enabled) {
-		const memoryFolder = (settingsAny.memory_folder as string) ?? "memory";
+	if (plugin.settings.memory_enabled) {
+		const memoryFolder = plugin.settings.memory_folder ?? "memory";
 		const memoryDir = normalizePath(`${plugin.settings.notor_dir}/${memoryFolder}`);
 		const dedupCachePath = `${memoryDir}/.dedup-cache.json`;
 		const dreamCursorPath = `${memoryDir}/.dream-cursor.json`;

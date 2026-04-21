@@ -396,7 +396,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 ## Phase 8 — Settings, Master Toggle, and Auto-Approval
 
-- [ ] **8.1 — Add memory settings to `NotorSettings`**
+- [x] **8.1 — Add memory settings to `NotorSettings`**
   - In [`src/settings/types.ts`](../../src/settings/types.ts) (after the existing settings groups, ~line 415):
     ```typescript
     // Memory/Knowledge Base settings
@@ -404,14 +404,14 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
     memory_folder: string;
     ```
 
-- [ ] **8.2 — Add memory defaults**
+- [x] **8.2 — Add memory defaults**
   - In [`src/settings/defaults.ts`](../../src/settings/defaults.ts) in `createDefaultSettings()` (~lines 111-212):
     ```typescript
     memory_enabled: false,
     memory_folder: "memory",
     ```
 
-- [ ] **8.3 — Create settings UI section**
+- [x] **8.3 — Create settings UI section**
   - Create `src/settings/sections/memory.ts`:
   - Master toggle: `memory_enabled` (boolean switch)
   - Folder path: `memory_folder` (text input, vault-relative under `notor_dir`)
@@ -420,21 +420,21 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 - [ ] **8.4 — (Moved to Phase 2.5 — see below Phase 2)**
 
-- [ ] **8.5 — Implement auto-approval for `capture_memory`**
+- [x] **8.5 — Implement auto-approval for `capture_memory`**
   - Add `capture_memory: true` to `DEFAULT_AUTO_APPROVE` in [`defaults.ts:51-73`](../../src/settings/defaults.ts#L51-L73)
   - The normal default mechanism handles first-time enablement; users who override it keep their override with no toggle-time side effects
   - When `memory_enabled` flips **on**: set `capture_memory` to `enabled: true` (auto-approve handled by defaults)
   - When `memory_enabled` flips **off**: set `capture_memory` to `enabled: false`
   - No toggle-time `auto_approve` mutation needed — simplifies the toggle handler
 
-- [ ] **8.6 — Implement preset validation on enable**
+- [x] **8.6 — Implement preset validation on enable**
   - When `memory_enabled` flips on:
     1. For each memory scaffold, resolve its *actually configured* model preset (from settingsSchema default or user override)
     2. Validate that each preset exists in the user's provider config
     3. If any missing: refuse to enable (`memory_enabled` stays `false`), show long-lived `Notice` naming missing presets + scaffolds with link to Presets settings tab
   - Same validation on plugin load if `memory_enabled` is already `true` — disable feature group + show Notice if presets are gone
 
-- [ ] **8.7 — Ensure `{notor_dir}/memory/` directory exists on enable**
+- [x] **8.7 — Ensure `{notor_dir}/memory/` directory exists on enable**
   - When `memory_enabled` flips on:
   - Check if `{notor_dir}/memory/` exists; if not, create it via `vault.createFolder()`
   - Use resolved `memory_folder` setting (default: `memory` under `notor_dir`)

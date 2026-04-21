@@ -33,6 +33,7 @@ import { renderPersonasSection } from "./sections/personas";
 import { renderSubAgentsSection } from "./sections/sub-agents";
 import { renderRulesAndWorkflowsSection } from "./sections/rules-and-workflows";
 import { renderSharedSettingsSection, renderReloadExtensionsButton } from "./sections/tool-shared-settings";
+import { renderMemorySection } from "./sections/memory";
 import { renderUserAutomationsSection } from "./sections/user-automations";
 import { renderModelPresetsSection } from "./sections/model-presets";
 import { createSettingsGroup, snapshotDetailsState, restoreDetailsState } from "./helpers";
@@ -183,6 +184,10 @@ export class NotorSettingTab extends PluginSettingTab {
 		// --- Sub-agents (collapsed by default) ---
 		const subAgentsGroup = createSettingsGroup(containerEl, "Sub-agents", false, persisted, onToggle);
 		renderSubAgentsSection(subAgentsGroup, ctx);
+
+		// --- Memory (collapsed by default) ---
+		const memoryGroup = createSettingsGroup(containerEl, "Memory", false, persisted, onToggle);
+		renderMemorySection(memoryGroup, ctx);
 
 		// --- Rules and workflows (collapsed by default) ---
 		const rulesWorkflowsGroup = createSettingsGroup(containerEl, "Rules and workflows", false, persisted, onToggle);

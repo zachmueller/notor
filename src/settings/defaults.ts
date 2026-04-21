@@ -70,6 +70,7 @@ export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	replace_in_file: false,
 	extract_docx_comments: false,
 	use_subagent: false,
+	capture_memory: true,
 };
 
 /** Default empty hook configuration. */
@@ -189,6 +190,10 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 
 	// Settings UI state
 	settings_collapsed_sections: {},
+
+	// Knowledge Memory
+	memory_enabled: false,
+	memory_folder: "memory",
 
 	// Phase 12: Extension block rate limiting
 	extension_block_max_emits_per_window: 10,

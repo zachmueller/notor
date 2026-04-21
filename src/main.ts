@@ -889,6 +889,9 @@ export default class NotorPlugin extends Plugin {
 
 				// EXT-024: Register file watchers after initial discovery
 				this.registerExtensionVaultWatcher();
+
+				// Validate memory presets on load — disable feature if required presets are missing.
+				this.validateMemoryPresetsOnLoad();
 			}).catch((e) => {
 				log.warn("Initial extension discovery failed", { error: String(e) });
 			});
@@ -2479,6 +2482,36 @@ export default class NotorPlugin extends Plugin {
 
 			this._extensionStaleNotice = notice;
 		}, 1000);
+	}
+
+	/**
+	 * Validate that required model presets are configured when `memory_enabled`
+	 * is true at startup. If any preset is missing, disable the memory feature
+	 * and show a long-lived Notice.
+	 */
+	private validateMemoryPresetsOnLoad(): void {
+		if (!this.settings.memory_enabled) return;
+
+		const missing: { preset: string; usedBy: string }[] = [];
+		const checks = [
+			{ preset: "tiny", usedBy: "memory-search, memory-resolver, memory-capture" },
+			{ preset: "large", usedBy: "memory-dream" },
+		];
+		for (const check of checks) {
+			if (!resolvePreset(check.preset, this.settings.model_presets)) {
+				missing.push(check);
+			}
+		}
+
+		if (missing.length > 0) {
+			this.settings.memory_enabled = false;
+			this.saveSettings();
+			const lines = missing.map((m) => `• Preset "${m.preset}" (used by ${m.usedBy})`);
+			new Notice(
+				`Memory disabled — required model presets are not configured:\n${lines.join("\n")}\n\nConfigure them in Settings → Models, then re-enable memory.`,
+				10000,
+			);
+		}
 	}
 
 	/**

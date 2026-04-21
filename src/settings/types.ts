@@ -404,6 +404,16 @@ export interface NotorSettings {
 	settings_collapsed_sections: Record<string, boolean>;
 
 	// -------------------------------------------------------------------
+	// Knowledge Memory
+	// -------------------------------------------------------------------
+
+	/** Master toggle for the memory subsystem. When false, all memory scaffolds are excluded from compilation. */
+	memory_enabled: boolean;
+
+	/** Subfolder under `notor_dir` for Evergreen concept notes (default: "memory"). */
+	memory_folder: string;
+
+	// -------------------------------------------------------------------
 	// Phase 12: Extension block rate limiting
 	// -------------------------------------------------------------------
 
