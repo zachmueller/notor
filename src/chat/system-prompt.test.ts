@@ -11,11 +11,10 @@ vi.mock("../utils/logger", () => ({
 
 vi.mock("obsidian", () => ({
 	parseYaml: vi.fn((yaml: string) => {
-		// Minimal YAML parser stub for tool config extraction
 		const result: Record<string, unknown> = {};
 		for (const line of yaml.split("\n")) {
 			const match = line.match(/^\s*(\w+):\s*(.+)/);
-			if (match) result[match[1]] = match[2];
+			if (match && match[1] && match[2]) result[match[1]] = match[2];
 		}
 		return result;
 	}),
@@ -24,7 +23,7 @@ vi.mock("obsidian", () => ({
 vi.mock("../include-note/resolver", () => ({
 	resolveIncludeNotes: vi.fn(async (text: string) => ({
 		inlineContent: text,
-		attachedContent: "",
+		attachments: [],
 	})),
 }));
 
@@ -33,6 +32,7 @@ import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt";
 import { TemplateVariableRegistry } from "../template-vars";
 import { resolveIncludeNotes } from "../include-note/resolver";
 import type { ToolDefinition } from "../providers/provider";
+import type { Persona, PersonaPromptMode } from "../types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,6 +61,19 @@ function createRegistry(): TemplateVariableRegistry {
 	registry.register("notor_dir", () => "notor");
 	registry.register("vault_name", () => "test-vault");
 	return registry;
+}
+
+function createPersona(overrides: Partial<Persona> & { name: string; prompt_content: string; prompt_mode: PersonaPromptMode }): Persona {
+	return {
+		directory_path: `notor/personas/${overrides.name}`,
+		system_prompt_path: `notor/personas/${overrides.name}/system-prompt.md`,
+		preferred_provider: null,
+		preferred_model: null,
+		preferred_preset: null,
+		chip_color: null,
+		chip_emoji: null,
+		...overrides,
+	};
 }
 
 const SAMPLE_TOOLS: ToolDefinition[] = [
@@ -279,7 +292,7 @@ description: Custom prompt
 		// Mock include_note to return content with {vault_name}
 		vi.mocked(resolveIncludeNotes).mockResolvedValueOnce({
 			inlineContent: "Included content for {vault_name}.",
-			attachedContent: "",
+			attachments: [],
 		});
 
 		const builder = new SystemPromptBuilder(vault, "notor", createMockMetadataCache(), createRegistry());
@@ -301,13 +314,11 @@ describe("SystemPromptBuilder.assemble() — replace-mode persona", () => {
 		const vault = createMockVault();
 		const builder = new SystemPromptBuilder(vault, "notor", createMockMetadataCache(), createRegistry());
 
-		const persona = {
+		const persona = createPersona({
 			name: "custom",
-			directory_path: "notor/personas/custom",
-			system_prompt_path: "notor/personas/custom/system-prompt.md",
 			prompt_content: "You are a custom assistant.\n\n{available_tools}\n\nBe helpful.",
-			prompt_mode: "replace" as const,
-		};
+			prompt_mode: "replace",
+		});
 
 		const result = await builder.assemble("act", SAMPLE_TOOLS, undefined, "<auto-context/>", persona);
 
@@ -324,13 +335,11 @@ describe("SystemPromptBuilder.assemble() — replace-mode persona", () => {
 		const vault = createMockVault();
 		const builder = new SystemPromptBuilder(vault, "notor", createMockMetadataCache(), createRegistry());
 
-		const persona = {
+		const persona = createPersona({
 			name: "custom",
-			directory_path: "notor/personas/custom",
-			system_prompt_path: "notor/personas/custom/system-prompt.md",
 			prompt_content: "You are a custom assistant.",
-			prompt_mode: "replace" as const,
-		};
+			prompt_mode: "replace",
+		});
 
 		const result = await builder.assemble("act", SAMPLE_TOOLS, undefined, undefined, persona);
 
