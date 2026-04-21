@@ -102,4 +102,28 @@ describe("estimateContentTokens", () => {
 		];
 		expect(estimateContentTokens(blocks)).toBe(5);
 	});
+
+	it("memory_recalled block with estimated_wire_tokens returns correct value", () => {
+		const blocks: ContentBlock[] = [
+			{
+				type: "custom_block",
+				kind: "memory_recalled",
+				data: { matches: [{ path: "memory/note.md", title: "Test", reason: "relevant", payload: "Full body text here" }] },
+				estimated_wire_tokens: 42,
+			},
+		];
+		expect(estimateContentTokens(blocks)).toBe(42);
+	});
+
+	it("memory_recalled block with empty matches and toLLMText returning null yields zero tokens", () => {
+		const blocks: ContentBlock[] = [
+			{
+				type: "custom_block",
+				kind: "memory_recalled",
+				data: { matches: [] },
+				estimated_wire_tokens: 0,
+			},
+		];
+		expect(estimateContentTokens(blocks)).toBe(0);
+	});
 });

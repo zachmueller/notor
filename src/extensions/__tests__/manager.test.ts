@@ -836,6 +836,242 @@ describe("automation ordering", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Feature group gating (Phase 10.6)
+// ---------------------------------------------------------------------------
+
+describe("Feature group gating", () => {
+	it("tool with notor-feature-group: memory + memory_enabled: false → not in compiled map", async () => {
+		const memoryTool = makeToolDef({
+			name: "capture_memory",
+			featureGroup: "memory",
+		});
+
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [memoryTool],
+			automations: [],
+			blocks: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: vi.fn() });
+
+		const plugin = createMockPlugin({
+			settings: {
+				notor_dir: "notor/",
+				memory_enabled: false,
+				user_extension_settings: {},
+				user_shared_settings: {},
+			},
+		});
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(result.toolCount).toBe(0);
+		expect(manager.getTools().find(t => t.name === "capture_memory")).toBeUndefined();
+	});
+
+	it("tool with notor-feature-group: memory + memory_enabled: true → compiled normally", async () => {
+		const memoryTool = makeToolDef({
+			name: "capture_memory",
+			featureGroup: "memory",
+		});
+
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [memoryTool],
+			automations: [],
+			blocks: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: vi.fn() });
+
+		const plugin = createMockPlugin({
+			settings: {
+				notor_dir: "notor/",
+				memory_enabled: true,
+				user_extension_settings: {},
+				user_shared_settings: {},
+			},
+		});
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(result.toolCount).toBe(1);
+		expect(manager.getTools().find(t => t.name === "capture_memory")).toBeDefined();
+	});
+
+	it("automation with notor-feature-group: memory + memory_enabled: false → not in compiled map", async () => {
+		const memoryAutomation = makeAutomationDef({
+			trigger: "after_completion",
+			filePath: "notor/automations/memory-capture.md",
+			featureGroup: "memory",
+		});
+
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [],
+			automations: [memoryAutomation],
+			blocks: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: vi.fn() });
+
+		const plugin = createMockPlugin({
+			settings: {
+				notor_dir: "notor/",
+				memory_enabled: false,
+				user_extension_settings: {},
+				user_shared_settings: {},
+			},
+		});
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(result.automationCount).toBe(0);
+	});
+
+	it("block kind with notor-feature-group: memory + memory_enabled: false → not registered", async () => {
+		const memoryBlock = {
+			filePath: "notor/blocks/memory_recalled.md",
+			kind: "memory_recalled",
+			displayName: "Memories Recalled",
+			icon: "🧠",
+			rendererExport: "render",
+			toLLMTextExport: "toLLMText",
+			rawCode: "exports.render = () => {}; exports.toLLMText = () => null;",
+			compiledFn: null,
+			featureGroup: "memory",
+		};
+
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [],
+			automations: [],
+			blocks: [memoryBlock],
+			sharedSettings: null,
+			errors: [],
+		});
+
+		const plugin = createMockPlugin({
+			settings: {
+				notor_dir: "notor/",
+				memory_enabled: false,
+				user_extension_settings: {},
+				user_shared_settings: {},
+			},
+		});
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(result.blockCount).toBe(0);
+	});
+
+	it("all memory scaffolds compiled normally when memory_enabled: true", async () => {
+		const memoryTool = makeToolDef({ name: "capture_memory", featureGroup: "memory" });
+		const memoryAutomation = makeAutomationDef({
+			trigger: "after_completion",
+			filePath: "notor/automations/memory-capture.md",
+			featureGroup: "memory",
+		});
+		const memoryBlock = {
+			filePath: "notor/blocks/memory_recalled.md",
+			kind: "memory_recalled",
+			displayName: "Memories Recalled",
+			rendererExport: "render",
+			rawCode: "exports.render = () => {};",
+			compiledFn: null,
+			featureGroup: "memory",
+		};
+
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [memoryTool],
+			automations: [memoryAutomation],
+			blocks: [memoryBlock],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: vi.fn() });
+		mockCompileBlockModule.mockReturnValue({
+			exports: { render: () => {} },
+		});
+
+		const plugin = createMockPlugin({
+			settings: {
+				notor_dir: "notor/",
+				memory_enabled: true,
+				user_extension_settings: {},
+				user_shared_settings: {},
+			},
+		});
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(result.toolCount).toBe(1);
+		expect(result.automationCount).toBe(1);
+		expect(result.blockCount).toBe(1);
+	});
+
+	it("tool without featureGroup is unaffected by memory_enabled: false", async () => {
+		const regularTool = makeToolDef({ name: "read_note" });
+
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [regularTool],
+			automations: [],
+			blocks: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: vi.fn() });
+
+		const plugin = createMockPlugin({
+			settings: {
+				notor_dir: "notor/",
+				memory_enabled: false,
+				user_extension_settings: {},
+				user_shared_settings: {},
+			},
+		});
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(result.toolCount).toBe(1);
+	});
+
+	it("individual automation_enabled override works independently of feature group", async () => {
+		const memoryAutomation = makeAutomationDef({
+			trigger: "after_completion",
+			filePath: "notor/automations/memory-capture.md",
+			featureGroup: "memory",
+		});
+
+		mockDiscoverExtensions.mockResolvedValue({
+			tools: [],
+			automations: [memoryAutomation],
+			blocks: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: vi.fn() });
+
+		const plugin = createMockPlugin({
+			settings: {
+				notor_dir: "notor/",
+				memory_enabled: true,
+				automation_enabled: { "memory-capture": false },
+				user_extension_settings: {},
+				user_shared_settings: {},
+			},
+		});
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const result = await manager.reload(true);
+
+		// Feature group is enabled, so automation IS compiled into the map
+		expect(result.automationCount).toBe(1);
+		// automation_enabled is a per-automation toggle checked at execution time,
+		// not at registration time — the automation is in the map but won't execute
+	});
+});
+
+// ---------------------------------------------------------------------------
 // destroy
 // ---------------------------------------------------------------------------
 

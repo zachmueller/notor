@@ -97,6 +97,34 @@ describe("readDedupCache / writeDedupEntry", () => {
 			cachePath,
 		);
 	});
+
+	it("cache stays bounded after many writes (pruning discards old entries)", async () => {
+		const old = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+		for (let i = 0; i < 50; i++) {
+			await writeDedupEntry(app, cachePath, `old_${i}`, old);
+		}
+		const recent = new Date().toISOString();
+		await writeDedupEntry(app, cachePath, "recent_one", recent);
+
+		const cache = await readDedupCache(app, cachePath, 24);
+		expect(Object.keys(cache)).toHaveLength(1);
+		expect(cache["recent_one"]).toBe(recent);
+	});
+
+	it("concurrent writes do not corrupt data (atomic pattern)", async () => {
+		const ts1 = new Date().toISOString();
+		const ts2 = new Date().toISOString();
+
+		await Promise.all([
+			writeDedupEntry(app, cachePath, "alpha", ts1),
+			writeDedupEntry(app, cachePath, "beta", ts2),
+		]);
+
+		const raw = files.get(cachePath);
+		expect(() => JSON.parse(raw!)).not.toThrow();
+		const parsed = JSON.parse(raw!) as Record<string, string>;
+		expect(typeof parsed).toBe("object");
+	});
 });
 
 describe("readDreamCursor / advanceDreamCursor", () => {

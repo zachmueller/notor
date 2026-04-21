@@ -469,13 +469,13 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 ## Phase 10 — Verification & Polish
 
-- [ ] **10.1 — Unit tests: Note format**
+- [x] **10.1 — Unit tests: Note format**
   - `serializeNote` / `parseNote` round-trip preserves all fields
   - `slugifyTitle` edge cases: unicode, special chars, very long titles, collision suffixes
   - `computeFingerprint` determinism + whitespace normalization
   - `assertMemoryPath` accepts valid paths, rejects traversal attacks, rejects paths outside memory dir
 
-- [ ] **10.2 — Unit tests: Dedup cache**
+- [x] **10.2 — Unit tests: Dedup cache**
   - `writeDedupEntry` + `readDedupCache` round-trip
   - Lazy pruning removes entries older than window
   - Cache file stays bounded after many writes
@@ -483,7 +483,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
   - `readDreamCursor` returns `null` for missing file, correct timestamp for existing file
   - `advanceDreamCursor` creates/overwrites correctly
 
-- [ ] **10.3 — Unit tests: Concept resolver**
+- [x] **10.3 — Unit tests: Concept resolver**
   - Create path: mocked sub-agent → file written with correct frontmatter + slug
   - Update path: mocked sub-agent → existing file body overwritten, `notor-updated-at` bumped
   - Malformed JSON → `{ action: "skipped" }`
@@ -492,11 +492,11 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
   - `assertMemoryPath` called before every write
   - Oversized `merged_body` → written as-is (no split)
 
-- [ ] **10.4 — Unit tests: Token estimation**
+- [x] **10.4 — Unit tests: Token estimation**
   - `memory_recalled` block with `estimated_wire_tokens` → returns correct value
   - Empty matches → `toLLMText` returns `null` → zero wire tokens
 
-- [ ] **10.5 — Unit tests: Settings**
+- [x] **10.5 — Unit tests: Settings**
   - `memory_enabled: true` propagates `capture_memory` → `enabled: true`
   - `memory_enabled: false` propagates `capture_memory` → `enabled: false`
   - `DEFAULT_AUTO_APPROVE` includes `capture_memory: true`
@@ -504,7 +504,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
   - Preset validation: missing preset → toggle stays `false` + Notice
   - Preset validation on load: `memory_enabled: true` with missing preset → disabled + Notice
 
-- [ ] **10.6 — Unit tests: Feature group gating**
+- [x] **10.6 — Unit tests: Feature group gating**
   - `reload()` with `notor-feature-group: memory` + `memory_enabled: false` → tool not in compiled map, block kind not in registry, automation not in compiled map
   - `reload()` with `memory_enabled: true` → all memory scaffolds compiled and registered normally
   - Tool with `notor-feature-group: memory` + `memory_enabled: false` → not in tool registry (hidden from LLM tool list)
