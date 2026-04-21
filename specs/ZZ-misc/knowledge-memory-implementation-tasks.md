@@ -511,7 +511,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
   - Block kind with `notor-feature-group: memory` + `memory_enabled: false` → not registered in `ChatBlockRegistry`
   - Individual `automation_enabled` override still works independently of feature group (for scaffolds whose feature group is enabled)
 
-- [ ] **10.7 — E2E tests: Memory search**
+- [x] **10.7 — E2E tests: Memory search**
   - Seed `{notor_dir}/memory/` with diverse notes → send chat message → `memory-search` fires → sub-agent returns matches → `extension_block` with `kind: "memory_recalled"` appended to conversation
   - LLM wire payload contains `<notor-memory>` tags with full note bodies
   - Chat UI renders collapsible row with clickable links + reasons (no body preview)
@@ -519,51 +519,51 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
   - Clicking a note link opens it in the vault
   - Reload conversation → block replays identically
 
-- [ ] **10.8 — E2E tests: Memory search empty state**
+- [x] **10.8 — E2E tests: Memory search empty state**
   - Seed empty memory folder → send message → `memory_recalled` block emitted with `matches: []`
   - UI shows muted "No memories recalled" indicator
   - `toLLMText` returns `null` → zero tokens on wire
 
-- [ ] **10.9 — E2E tests: Memory capture**
+- [x] **10.9 — E2E tests: Memory capture**
   - Complete a chat turn referencing distinct concepts → `memory-capture` fires detached → sub-agent extracts insights → `resolveConcept` creates/updates notes in `{notor_dir}/memory/`
   - `memory_captured` block appears in chat after sub-agent completes → clickable links + action badges
   - `memory_captured` block `toLLMText` returns `null` → no tokens on next turn
   - Force compaction → `memory_captured` block survives verbatim (excluded from compaction)
 
-- [ ] **10.10 — E2E tests: capture_memory tool**
+- [x] **10.10 — E2E tests: capture_memory tool**
   - LLM calls `capture_memory` → new concept note created
   - Same content → skipped (dedup)
   - Related content → updates existing note via resolver
 
-- [ ] **10.11 — E2E tests: Dream pipeline**
+- [x] **10.11 — E2E tests: Dream pipeline**
   - Seed conversation JSONL files + memory notes → trigger Dream manually
   - Dream reads cursor, filters qualifying conversations, loads + chunks
   - Sub-agent returns create/update/merge/remove directives → applied correctly
   - Cursor advances progressively (verify `.dream-cursor.json`)
 
-- [ ] **10.12 — E2E tests: Dream overflow handling**
+- [x] **10.12 — E2E tests: Dream overflow handling**
   - Seed an oversized note (> `note_max_chars`) → trigger Dream → detects overflow → split-or-compact follow-up
   - Split produces cap-compliant children routed through fresh resolver conversations
   - Compact produces tightened body ≤ cap
 
-- [ ] **10.13 — E2E tests: Dream progressive cursor**
+- [x] **10.13 — E2E tests: Dream progressive cursor**
   - Dream processes 3 conversations → simulate crash after 2nd → restart → only 3rd re-processed
   - `.dream-cursor.json` contains 2nd conversation's `updated_at`
 
-- [ ] **10.14 — E2E tests: Dream first-run lookback**
+- [x] **10.14 — E2E tests: Dream first-run lookback**
   - No `.dream-cursor.json` + `initial_lookback_days: 7` → Dream processes only conversations from last 7 days
 
-- [ ] **10.15 — E2E tests: Render ≠ wire**
+- [x] **10.15 — E2E tests: Render ≠ wire**
   - Emit `memory_recalled` block → inspect JSONL: `data.matches[].payload` has full bodies
   - Inspect LLM wire: full bodies in `<notor-memory>` tags
   - Inspect rendered UI: only links + reasons shown
 
-- [ ] **10.16 — E2E tests: Sub-agent tool scoping**
+- [x] **10.16 — E2E tests: Sub-agent tool scoping**
   - `memory-search` sub-agent attempts to read outside `{notor_dir}/memory/` → blocked by path enforcer
   - `memory-resolver` same
   - `memory-capture` and `memory-dream` can read broader vault (per their tool config)
 
-- [ ] **10.17 — E2E tests: Scaffold override**
+- [x] **10.17 — E2E tests: Scaffold override**
   - Edit `notor/automations/memory-capture.md` in vault → reload extensions → edited behavior takes effect
 
 - [ ] **10.18 — Visual verification**
