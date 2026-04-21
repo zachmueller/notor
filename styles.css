@@ -37,6 +37,9 @@
 	display: flex;
 	align-items: center;
 	gap: 6px;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
 }
 
 .notor-chat-title {
@@ -51,7 +54,8 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	max-width: 200px;
+	flex: 1;
+	min-width: 0;
 	cursor: default;
 	padding: 2px 6px;
 	border-radius: var(--radius-s);
@@ -77,8 +81,8 @@
 	padding: 2px 6px;
 	color: var(--text-normal);
 	outline: none;
-	max-width: 200px;
-	width: 160px;
+	flex: 1;
+	min-width: 0;
 }
 
 .notor-header-title-input:focus {
@@ -86,10 +90,33 @@
 	box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
+/* Favorite star in header (next to conversation title) */
+.notor-header-favorite-icon {
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	color: var(--text-warning);
+	cursor: pointer;
+}
+
+.notor-header-favorite-icon svg {
+	width: 12px;
+	height: 12px;
+	fill: currentColor;
+}
+
+.notor-header-favorite-icon:hover {
+	opacity: 0.7;
+}
+
 .notor-chat-header-actions {
 	display: flex;
 	align-items: center;
 	gap: 2px;
+	flex-shrink: 0;
 }
 
 .notor-chat-header-btn {
@@ -2309,6 +2336,18 @@
 
 .notor-persona-label:hover {
 	background: rgba(var(--color-accent-rgb, 68, 130, 255), 0.2);
+}
+
+.notor-persona-label.notor-persona-label--default {
+	color: var(--text-muted);
+	background: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border);
+	opacity: 0.8;
+}
+
+.notor-persona-label.notor-persona-label--default:hover {
+	opacity: 1;
+	color: var(--text-normal);
 }
 
 /* ==========================================================================

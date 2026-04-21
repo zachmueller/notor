@@ -175,6 +175,7 @@ export class NotorChatView extends ItemView {
 	// Header conversation title (displayed between "Notor" and action icons)
 	private headerTitleEl?: HTMLSpanElement;
 	private headerTitleInputEl?: HTMLInputElement;
+	private headerFavoriteEl?: HTMLSpanElement;
 
 	/**
 	 * Whether a conversation has been loaded into this view.
@@ -678,7 +679,7 @@ export class NotorChatView extends ItemView {
 			const toolbar = this.inputToolbarEl ?? this.inputAreaEl;
 			if (toolbar) {
 				this.personaLabelEl = toolbar.createDiv({
-					cls: "notor-persona-label notor-hidden",
+					cls: "notor-persona-label",
 				});
 				// Place after the mode toggle (second child of toolbar)
 				const modeToggle = toolbar.querySelector(".notor-mode-toggle");
@@ -699,6 +700,7 @@ export class NotorChatView extends ItemView {
 			const emoji = persona.chip_emoji ?? "🎭";
 			this.personaLabelEl.textContent = `${emoji} ${persona.name}`;
 			this.personaLabelEl.removeClass("notor-hidden");
+			this.personaLabelEl.removeClass("notor-persona-label--default");
 
 			// Apply custom chip colour or reset to CSS defaults
 			if (persona.chip_color) {
@@ -711,8 +713,8 @@ export class NotorChatView extends ItemView {
 				this.personaLabelEl.style.borderColor = "";
 			}
 		} else {
-			this.personaLabelEl.textContent = "";
-			this.personaLabelEl.addClass("notor-hidden");
+			this.personaLabelEl.textContent = "🎭 Default";
+			this.personaLabelEl.addClass("notor-persona-label--default");
 			this.personaLabelEl.style.color = "";
 			this.personaLabelEl.style.background = "";
 			this.personaLabelEl.style.borderColor = "";
@@ -1026,6 +1028,17 @@ export class NotorChatView extends ItemView {
 		this.headerTitleEl.addEventListener("contextmenu", (e) => {
 			e.preventDefault();
 			this.showHeaderTitleContextMenu(e);
+		});
+
+		this.headerFavoriteEl = titleArea.createSpan({
+			cls: "notor-header-favorite-icon notor-hidden",
+			attr: { "aria-label": "Favorite" },
+		});
+		setIcon(this.headerFavoriteEl, "star");
+		this.headerFavoriteEl.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const meta = this.getActiveConversationMeta?.();
+			if (meta) this.onToggleFavorite?.(meta.filename);
 		});
 
 		const actions = this.headerEl.createDiv({ cls: "notor-chat-header-actions" });
@@ -2634,6 +2647,17 @@ export class NotorChatView extends ItemView {
 		} else {
 			this.headerTitleEl.textContent = "";
 			this.headerTitleEl.addClass("notor-hidden");
+		}
+	}
+
+	updateHeaderFavorite(conversationId: string, isFavorite: boolean): void {
+		if (!this.headerFavoriteEl) return;
+		if (conversationId !== this.activeConversationId) return;
+
+		if (isFavorite) {
+			this.headerFavoriteEl.removeClass("notor-hidden");
+		} else {
+			this.headerFavoriteEl.addClass("notor-hidden");
 		}
 	}
 

@@ -482,7 +482,7 @@ class WorkflowPickerModal extends FuzzySuggestModal<Workflow> {
 	) {
 		super(app);
 		this.setPlaceholder(placeholder ?? "Select a workflow to run\u2026");
-		this.emptyMessage = emptyMessage ?? `No workflows found in ${this.notorDir}/workflows/`;
+		this.emptyMessage = emptyMessage ?? `No workflows found in ${this.notorDir.replace(/\/$/, "")}/workflows/`;
 	}
 
 	getItems(): Workflow[] {
@@ -585,7 +585,7 @@ export function showActiveNoteWorkflowPicker(
 	}
 
 	if (workflows.length === 0) {
-		new Notice(`No active-note workflows found in ${notorDir}/workflows/`);
+		new Notice(`No active-note workflows found in ${notorDir.replace(/\/$/, "")}/workflows/`);
 		return;
 	}
 
@@ -597,7 +597,7 @@ export function showActiveNoteWorkflowPicker(
 		onSelect,
 		notorDir,
 		"Select an active-note workflow\u2026",
-		`No active-note workflows found in ${notorDir}/workflows/`,
+		`No active-note workflows found in ${notorDir.replace(/\/$/, "")}/workflows/`,
 	);
 	modal.open();
 }
