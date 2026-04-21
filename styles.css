@@ -905,6 +905,77 @@
 }
 
 /* ==========================================================================
+   Memory Blocks
+   ========================================================================== */
+
+/* Loading state for memory search */
+.notor-memory-recalled-loading {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	padding: 4px 8px;
+	animation: notor-progress-fade 1.4s ease-in-out infinite alternate;
+}
+
+/* Empty state when no memories matched */
+.notor-memory-recalled-empty {
+	color: var(--text-muted);
+	font-size: 0.85em;
+	padding: 4px 8px;
+}
+
+/* Individual memory match row */
+.notor-memory-match {
+	padding: 3px 0;
+	font-size: var(--font-ui-small);
+	line-height: 1.4;
+}
+
+/* Clickable note link (shared by recalled and captured blocks) */
+.notor-memory-link {
+	color: var(--text-accent);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.notor-memory-link:hover {
+	text-decoration: underline;
+}
+
+/* Reason text after each recalled note link */
+.notor-memory-reason {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+/* Capture result row */
+.notor-memory-capture-result {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 0;
+	font-size: var(--font-ui-small);
+	line-height: 1.4;
+}
+
+/* Action badge ("created" / "updated") */
+.notor-memory-badge {
+	font-size: var(--font-ui-smaller);
+	padding: 1px 6px;
+	border-radius: var(--radius-s);
+	font-weight: var(--font-medium);
+}
+
+.notor-memory-badge--created {
+	background: var(--color-green);
+	color: var(--text-on-accent);
+}
+
+.notor-memory-badge--updated {
+	background: var(--color-blue);
+	color: var(--text-on-accent);
+}
+
+/* ==========================================================================
    Approval UI
    ========================================================================== */
 

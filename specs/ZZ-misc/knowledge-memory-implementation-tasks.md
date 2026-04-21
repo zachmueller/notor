@@ -443,19 +443,19 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 ## Phase 9 — Wiring & Integration
 
-- [ ] ~~**9.1**~~ — Merged into task 6.4 (built-in block scaffold integration).
+- [x] ~~**9.1**~~ — Merged into task 6.4 (built-in block scaffold integration).
 
-- [ ] **9.2 — Wire `utils.memory` into automation execution**
+- [x] **9.2 — Wire `utils.memory` into automation execution**
   - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `executeAutomation()` (~line 620):
   - The `buildUtils()` call at ~line 668 already provides the full utils object — `utils.memory` is automatically available once Phase 2 wiring is done
   - Verify: `memory-search`, `memory-capture`, `memory-dream` automations can access `utils.memory.*`, `utils.chatBlocks.*`, `utils.runSubAgent`, `utils.chatHistory.loadFull()`
 
-- [ ] **9.3 — Wire `utils.memory` into tool execution**
+- [x] **9.3 — Wire `utils.memory` into tool execution**
   - In [`src/extensions/manager.ts`](../../src/extensions/manager.ts) `UserToolAdapter`:
   - Same as automations — `buildUtils()` provides the full utils object
   - Verify: `capture_memory` tool can access `utils.memory.*`
 
-- [ ] **9.4 — Add CSS for memory block styling**
+- [x] **9.4 — Add CSS for memory block styling**
   - In [`styles.css`](../../styles.css):
   - `.notor-memory-recalled-loading` — spinner/loading text styling
   - `.notor-memory-recalled-empty` — muted text div (`color: var(--text-muted); font-size: 0.85em; padding: 4px 8px;`)
