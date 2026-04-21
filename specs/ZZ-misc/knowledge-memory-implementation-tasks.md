@@ -370,7 +370,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
 
 ## Phase 7 — System Prompt Convention Section
 
-- [ ] **7.1 — Add `buildMemoryConventionSection()` to `system-prompt.ts`**
+- [x] **7.1 — Add `buildMemoryConventionSection()` to `system-prompt.ts`**
   - In [`src/chat/system-prompt.ts`](../../src/chat/system-prompt.ts):
   - Add a private method following the section builder pattern (~lines 331+):
     ```typescript
@@ -381,7 +381,7 @@ Depends on: Extension Chat Blocks Phase 7 (`notor-type: block` extension type + 
     }
     ```
 
-- [ ] **7.2 — Inject memory convention section conditionally**
+- [x] **7.2 — Inject memory convention section conditionally**
   - In the `assemble()` method (~lines 211-330):
   - **Before** the auto-context section (~line 307), conditionally insert:
     ```typescript

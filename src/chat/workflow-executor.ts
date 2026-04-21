@@ -645,7 +645,8 @@ export class WorkflowExecutor {
 				toolDefinitions,
 				undefined, // vaultRuleContent — now handled via cached stripped content
 				autoContext ?? undefined,
-				session.pinnedPersona
+				session.pinnedPersona,
+				!!(this.deps.getSettings() as unknown as Record<string, unknown>).memory_enabled,
 			);
 
 			// 2. Assemble messages
