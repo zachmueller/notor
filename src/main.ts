@@ -876,6 +876,14 @@ export default class NotorPlugin extends Plugin {
 					}
 				}
 
+				// Populate sub-agent profile cache now that all extension tools are registered.
+				const useSubagentTool = this.getToolRegistry().get(USE_SUBAGENT_TOOL_NAME);
+				if (useSubagentTool && useSubagentTool instanceof UseSubagentTool) {
+					useSubagentTool.refreshVisibleProfiles().catch((e) =>
+						log.warn("Failed to load initial sub-agent profiles", { error: String(e) })
+					);
+				}
+
 				// Re-evaluate vault event listeners to pick up automation triggers
 				if (this._vaultEventListenerManager) {
 					this._vaultEventListenerManager.evaluateListeners();
@@ -1828,10 +1836,6 @@ export default class NotorPlugin extends Plugin {
 				useSubagentTool.setVaultRootPath(this.vaultRootPath);
 			}
 			this._toolRegistry.register(useSubagentTool);
-			// Fire-and-forget initial profile cache population
-			useSubagentTool.refreshVisibleProfiles().catch((e) =>
-				log.warn("Failed to load initial sub-agent profiles", { error: String(e) })
-			);
 
 			log.debug("Tool registry initialized", {
 				tools: this._toolRegistry.getNames(),
