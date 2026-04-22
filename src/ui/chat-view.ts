@@ -2383,7 +2383,10 @@ export class NotorChatView extends ItemView {
 	 * Render an inline approval prompt for a tool call.
 	 * Returns a promise that resolves with the user's decision.
 	 */
-	renderApprovalPrompt(toolCallEl: HTMLElement): Promise<"approved" | "rejected"> {
+	renderApprovalPrompt(toolCallEl: HTMLElement, autoApproved = false): Promise<"approved" | "rejected"> {
+		if (autoApproved) {
+			return Promise.resolve("approved");
+		}
 		return new Promise((resolve) => {
 			const approvalEl = toolCallEl.createDiv({ cls: "notor-approval-prompt" });
 			approvalEl.createSpan({ text: "Approve this action?", cls: "notor-approval-text" });
@@ -2433,7 +2436,7 @@ export class NotorChatView extends ItemView {
 		const notePath = parameters["path"] as string | undefined;
 
 		if (!notePath) {
-			return this.renderApprovalPrompt(toolCallEl);
+			return this.renderApprovalPrompt(toolCallEl, autoApproved);
 		}
 
 		if (toolName === "write_note") {
@@ -2476,11 +2479,11 @@ export class NotorChatView extends ItemView {
 				}
 			} catch {
 				// Fall back to plain prompt if file unreadable
-				return this.renderApprovalPrompt(toolCallEl);
+				return this.renderApprovalPrompt(toolCallEl, autoApproved);
 			}
 
 			if (!noteContent) {
-				return this.renderApprovalPrompt(toolCallEl);
+				return this.renderApprovalPrompt(toolCallEl, autoApproved);
 			}
 
 			// Render the diff. Scroll once to show the action buttons; after that the
@@ -2508,7 +2511,7 @@ export class NotorChatView extends ItemView {
 		}
 
 		// Other tools: use the plain approval prompt
-		return this.renderApprovalPrompt(toolCallEl);
+		return this.renderApprovalPrompt(toolCallEl, autoApproved);
 	}
 
 	/**
