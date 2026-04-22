@@ -27,6 +27,10 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `replace_in_file` | Make targeted SEARCH/REPLACE edits in a text file (desktop only) | Act only |
 | `extract_docx_comments` | Extract review comments from a `.docx` file and write them as a structured note (desktop only) | Act only |
 | `use_subagent` | Spawn a focused [sub-agent](sub-agents.md) child conversation for a specific task | Plan & Act |
+| `sleep` | Pause execution for a specified duration (useful in workflows and automations) | Plan & Act |
+| `search_chat_history` | Search past Notor conversations by keyword and return matching conversation metadata | Plan & Act |
+| `read_chat_history` | Read the full message history of a past conversation by ID | Plan & Act |
+| `capture_memory` | Save an insight to long-term [memory](memory.md) as an Evergreen note | Act only |
 
 ### User-defined tools
 
@@ -98,6 +102,61 @@ Use the **Copy tool config YAML** button in **Settings → Notor → Tools** to 
 ### Debugging effective configuration
 
 Open the command palette and run **Notor: Open tool config inspector** to see the effective tool configuration for the current conversation. This view shows the merged result of all active config layers (global, rule, persona, workflow) and is useful for diagnosing unexpected tool availability or approval behavior.
+
+## Memory capture
+
+The `capture_memory` tool lets the AI save a specific piece of knowledge to long-term memory when you explicitly ask it to remember something. It is part of the [knowledge memory](memory.md) feature and is only available when memory is enabled.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `content` | Yes | The insight or piece of knowledge to save. |
+
+- Routes through the same dedup and concept resolver pipeline as automatic memory capture.
+- Write tool — available in Act mode only. Auto-approved by default.
+- Only available when memory is enabled in **Settings → Notor → Memory**.
+
+## Sleep
+
+The `sleep` tool pauses execution for a specified duration. Useful in workflows and automations that need to wait between steps (e.g., polling an external service).
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `duration` | Yes | Duration to sleep in seconds. Supports fractional values for sub-second waits. |
+| `reason` | No | Description of why the sleep is needed (shown in progress UI). |
+
+- Configurable maximum duration (default: 300 seconds). Requests exceeding the cap are clamped.
+- Cancellable — clicking **Stop** in the chat panel interrupts the sleep immediately.
+- Available in Plan and Act modes.
+
+## Chat history
+
+Two read-only tools let the AI search and read past Notor conversations.
+
+### `search_chat_history`
+
+Search past conversations by keyword. Returns matching conversation metadata with IDs that can be used with `read_chat_history`.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `query` | Yes | Search text to match against conversation messages. |
+
+### `read_chat_history`
+
+Read the full message history of a past conversation by its ID. Use `search_chat_history` first to find the conversation ID.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `conversation_id` | Yes | The UUID of the conversation to read. |
+
+Both tools are read-only — available in Plan and Act modes.
 
 ## Moving notes
 

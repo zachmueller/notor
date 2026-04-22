@@ -17,7 +17,7 @@ Notor gives you a full AI chat panel inside Obsidian with the ability to read, s
 
 ### Vault tools
 
-- **[19 built-in tools](docs/vault-tools.md)** — read, write, search, and move notes; manage frontmatter and tags; follow backlinks and outlinks; search the web and fetch pages; run shell commands; read and write filesystem files and Word documents (`.docx`)
+- **[24 built-in tools](docs/vault-tools.md)** — read, write, search, and move notes; manage frontmatter and tags; follow backlinks and outlinks; search the web and fetch pages; run shell commands; read and write filesystem files and Word documents (`.docx`)
 - **[Safety-first approval model](docs/safety.md)** — Plan/Act mode toggle, diff previews with per-hunk accept/reject, approval gates for write operations, and automatic checkpoints for rollback
 - **[Sub-agents](docs/sub-agents.md)** — the AI can spawn focused child conversations for vault search, web research, or custom tasks with isolated context and default-deny tool access
 
@@ -28,6 +28,11 @@ Notor gives you a full AI chat panel inside Obsidian with the ability to read, s
 - **[Rules](docs/rules.md)** — vault-level instruction files that inject context automatically based on note directory or tag
 - **[Hooks](docs/hooks.md)** — shell commands or workflows that fire at conversation lifecycle events (pre-send, on-tool-call, after-completion) and vault events (note open/save/create, tag changes, cron schedules)
 - **[`<include_note>` tag](docs/include-note.md)** — dynamically inject vault note content into workflow bodies, system prompts, and rule files
+- **[System prompt customization](docs/system-prompt.md)** — export and customize the base system prompt with template variables and dynamic section markers
+
+### Knowledge memory
+
+- **[Persistent memory](docs/memory.md)** — Notor automatically recalls relevant context at conversation start, captures durable insights after each turn, and consolidates memories on a schedule. Memory notes are stored as standard vault notes — fully visible, searchable, and editable.
 
 ### Extensibility
 
@@ -116,11 +121,14 @@ src/
   shell/               # Shell executor, shell resolver, output buffer (shared by execute_command and hooks)
   mcp/                 # MCP server hub, tool adapter, and type definitions
   sub-agents/          # Sub-agent profile discovery, manager, built-in profiles, preamble, semaphore
-  extensions/          # User-defined tool and automation runtime: discovery, parsing, compilation, settings
+  extensions/          # User-defined tool, automation, and chat block runtime: discovery, parsing,
+                       #   compilation, settings, built-in scaffolds
+  memory/              # Evergreen memory note format, dedup cache, concept resolver
   settings/            # Settings interface, defaults, tab UI, per-section UI components
-  ui/                  # Chat panel, diff view, approval UI, tool call display, attachment chips,
-                       #   compaction markers, persona picker, workflow activity indicator,
-                       #   workflow slash-command suggest
+  template-vars/       # Template variable registry and built-in variable definitions
+  ui/                  # Chat panel, chat blocks, diff view, approval UI, tool call display,
+                       #   attachment chips, compaction markers, persona picker,
+                       #   workflow activity indicator, workflow slash-command suggest
   utils/               # Logging, token utilities, secret helpers, shared path-validation
 specs/                 # Detailed specifications for each development phase
 design/                # Architecture, UX, tool design, and roadmap documents

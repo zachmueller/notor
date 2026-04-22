@@ -163,6 +163,16 @@ The built-in profiles (`search-vault`, `search-web`, `notor-help`) are enabled b
 
 > Sub-agents use default-deny tool access. A sub-agent can only use tools that are both enabled in its profile AND enabled in the parent conversation. See [sub-agents.md](sub-agents.md#tool-access) for details.
 
+## Set up knowledge memory
+
+Knowledge memory lets the AI build persistent context across conversations — recalling relevant notes at the start of each conversation and capturing new insights automatically. See [memory.md](memory.md) for the full reference.
+
+1. Configure the **tiny** and **large** model presets in **Settings → Notor → Models** (both are required)
+2. Open **Settings → Notor → Memory** and toggle **Enable memory**
+3. Start a conversation — the AI automatically searches for relevant memories and captures new insights after each turn
+
+> Memory requires the `tiny` and `large` presets because the memory sub-agents use different model tiers: lightweight models for search and capture, and a capable model for the Dream consolidation pipeline.
+
 ## Create your first extension
 
 Extensions let you add custom tools and automations as Markdown files in your vault — no external processes or MCP servers required. See [extensions.md](extensions.md) for the full reference.

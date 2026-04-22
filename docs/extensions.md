@@ -4,10 +4,11 @@ Extensions let you create custom tools and automations as Markdown files in your
 
 ## Overview
 
-There are three extension types:
+There are four extension types:
 
 - **Tools** (`notor/tools/*.md`) — invoked by the AI via tool calls, return a result to the conversation.
 - **Automations** (`notor/automations/*.md`) — fire at LLM lifecycle events or vault events, run as side effects.
+- **Chat blocks** (`notor/blocks/*.md`) — define custom content rendered persistently in the conversation stream. See [Defining a chat block](#defining-a-chat-block).
 - **Shared settings** (`notor/settings.md`) — declares global settings accessible to all tools and automations.
 
 ## File format
@@ -134,6 +135,10 @@ return { success: true, result: content };
 | `notor-tools` | no | Array of tool names to filter on (`on_tool_call`/`on_tool_result` only). If omitted, fires for all tools. Supports MCP tool names using `server__tool` naming. |
 | `notor-display-name` | no | Human-readable label for settings UI and logging. |
 | `notor-automation-order` | no | Numeric execution priority. Lower values fire first. Default: `0`. Ties broken alphabetically by filename. |
+| `notor-blocking` | no | If `true`, the automation is awaited before the first LLM turn proceeds. Only meaningful for `on_conversation_start`. |
+| `notor-blocking-emit-kind` | no | Block kind to emit as a loading placeholder while a blocking automation runs (e.g., `memory_recalled`). Requires `notor-blocking: true`. |
+| `notor-blocking-timeout` | no | Timeout in seconds for blocking execution. Default: `10`. |
+| `notor-feature-group` | no | Feature group name for group-level gating (e.g., `memory`). When the feature group's toggle is disabled, the automation does not run. |
 
 **Trigger values:**
 
@@ -182,7 +187,10 @@ Automation code receives a `context` object with event-specific data.
 
 ### Return semantics
 
-All automations are fire-and-forget — they execute asynchronously without blocking the pipeline. The only exception is `pre_send`: it is inherently blocking, and a returned string is injected into the conversation as additional context.
+All automations are fire-and-forget — they execute asynchronously without blocking the pipeline. There are two exceptions:
+
+- **`pre_send`** — inherently blocking. A returned string is injected into the conversation as additional context.
+- **`on_conversation_start` with `notor-blocking: true`** — awaited before the first LLM turn. The automation can emit a chat block (via `notor-blocking-emit-kind`) that is visible to the LLM on its first response. If the automation exceeds `notor-blocking-timeout`, it is cancelled and the conversation proceeds without its result.
 
 ### Example
 
@@ -219,6 +227,86 @@ await app.fileManager.processFrontMatter(file, (fm: any) => {
   fm.tags = fm.tags || [];
   if (!fm.tags.includes(settings.tag_name)) fm.tags.push(settings.tag_name);
 });
+```
+````
+
+---
+
+## Defining a chat block
+
+Chat blocks are a fourth extension type that define custom, persistently-rendered content in the conversation stream. Each block kind has a renderer (for the UI) and an optional wire-format function (for what the LLM sees). Blocks are typically emitted by automations via `utils.chatBlocks.emit()`.
+
+### Frontmatter
+
+| Property | Required | Description |
+|---|---|---|
+| `notor-type` | yes | Must be `block`. |
+| `notor-block-kind` | yes | Unique block kind identifier (e.g., `memory_recalled`). |
+| `notor-display-name` | no | Human-readable label for settings UI and block headers. |
+| `notor-icon` | no | Emoji or icon for the block header (e.g., `"🧠"`). |
+| `notor-renderer-export` | yes | Named export in the code fence that provides the `render(container, data, ctx)` function. |
+| `notor-to-llm-text-export` | no | Named export that provides `toLLMText(data)`. Returns `string | null`. If null or omitted, the block is invisible to the LLM (zero tokens). |
+| `notor-render-loading-export` | no | Named export that provides `renderLoading(container, ctx)` — shown while a blocking automation is in progress. |
+| `notor-exclude-from-compaction` | no | If `true`, blocks of this kind survive context compaction (not summarized away). |
+| `notor-feature-group` | no | Feature group for gating (e.g., `memory`). |
+
+### Render vs. wire pattern
+
+Blocks use a **render != wire** design: the `render` function controls what the user sees in the chat UI (clickable links, collapsible cards, badges), while `toLLMText` controls what the LLM receives (compact text, XML tags, or nothing). This separation lets you build rich interactive UI without inflating the LLM's context window.
+
+If `toLLMText` returns `null`, the block consumes zero LLM tokens — useful for purely informational displays like capture notifications.
+
+### Render context
+
+The `ctx` object passed to `render` and `renderLoading` includes:
+
+| Field | Description |
+|---|---|
+| `ctx.message` | The `Message` object containing this block |
+| `ctx.app` | Obsidian `App` instance |
+| `ctx.openInternalLink(path)` | Open a vault note by path in the editor |
+| `ctx.collapsibleCard(container, opts)` | Create a collapsible card UI element with header, icon, and toggle body |
+
+### Example
+
+````markdown
+---
+notor-type: block
+notor-block-kind: my_custom_block
+notor-display-name: Custom Block
+notor-renderer-export: render
+notor-to-llm-text-export: toLLMText
+---
+
+# My Custom Block
+
+Renders a list of items with clickable links.
+
+```ts
+export function render(container: HTMLElement, data: any, ctx: any): void {
+  const items: Array<{ path: string; label: string }> = data?.items ?? [];
+  if (items.length === 0) return;
+
+  const card = ctx.collapsibleCard(container, {
+    headerText: `Items (${items.length})`,
+    defaultExpanded: false,
+  });
+
+  for (const item of items) {
+    const row = card.body.createDiv();
+    const link = row.createEl("a", { text: item.label });
+    link.addEventListener("click", (e: MouseEvent) => {
+      e.preventDefault();
+      ctx.openInternalLink(item.path);
+    });
+  }
+}
+
+export function toLLMText(data: any): string | null {
+  const items: Array<{ path: string; label: string }> = data?.items ?? [];
+  if (items.length === 0) return null;
+  return items.map(i => `- ${i.label}`).join("\n");
+}
 ```
 ````
 
@@ -314,6 +402,12 @@ All extension code executes with these variables in scope:
 | `utils.executeShellCommand(cmd, opts?)` | Run a shell command. |
 | `utils.pathEnforcer.enforcePathConstraints(toolName, params, entry)` | Apply path enforcement rules. |
 | `utils.pathEnforcer.isPathWithin(target, base)` | Check if a path is within a base directory. |
+| `utils.readNote(path)` | Read the raw Markdown content of a vault note by vault-relative path. Returns `string`. |
+| `utils.resolveNotorPath(subdir)` | Resolve a subdirectory under the user's Notor dir. Returns a vault-relative path (e.g., `notor/memory`). |
+| `utils.memory` | Memory subsystem facade — exposes note format, dedup, dream cursor, and concept resolver. `null` when memory is disabled. See [memory.md](memory.md). |
+| `utils.chatBlocks` | API for emitting extension blocks into the conversation. Method: `emit(kind, data, opts?)`. `null` when no conversation is available. |
+| `utils.chatHistory` | API for searching and reading past conversations. Methods: `search(query)`, `loadFull(id)`. `null` when history is unavailable. |
+| `utils.runSubAgent(opts)` | Spawn a sub-agent from extension code. Supports detached (background) and synchronous modes. |
 | `utils.abortSignal` | `AbortSignal` for the current tool call (tools only, not automations). |
 
 ### Bundled libraries
@@ -365,6 +459,7 @@ In-flight tool calls continue using the version compiled at dispatch time; reloa
 | **`<notor_tool_config>`** | User tools can be toggled and configured by name in persona, workflow, and rule YAML blocks. See [per-context tool configuration](vault-tools.md#per-context-tool-configuration). |
 | **Tool config inspector** | User tools appear alongside built-in and MCP tools. |
 | **Built-in override** | If a user tool's name matches a built-in, the user tool replaces it. Delete the file and reload to restore the built-in. |
+| **Feature groups** | Extensions with `notor-feature-group` in their frontmatter are enabled/disabled as a group by the corresponding feature toggle (e.g., `memory` group → `memory_enabled` toggle in Settings). |
 
 ---
 

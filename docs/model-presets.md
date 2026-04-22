@@ -56,6 +56,10 @@ If a conversation was created with a preset that has since been reconfigured (di
 
 Personas can specify a preferred preset via `notor-preferred-preset` in their frontmatter. When the persona is active, the preset's provider and model are used automatically. See [personas.md](personas.md) for details and resolution priority.
 
+## Memory preset requirements
+
+The [knowledge memory](memory.md) feature requires the **tiny** and **large** presets to be configured. Memory sub-agents use `tiny` for search, capture, and concept resolution tasks (lightweight, fast operations), and `large` for the Dream consolidation pipeline (complex cross-session analysis). Enabling memory validates these presets and shows an error if either is missing.
+
 ## Title generation
 
 Notor includes a built-in **Title Generation** automation that uses an LLM call to auto-generate a short descriptive title for new conversations.

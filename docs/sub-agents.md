@@ -13,13 +13,19 @@ When the AI determines that a task benefits from a focused investigation, it inv
 
 ## Built-in profiles
 
-Notor ships with three ready-to-use sub-agent profiles:
+Notor ships with seven ready-to-use sub-agent profiles:
 
-| Profile | Description | Tools |
-|---------|-------------|-------|
-| `search-vault` | Search the vault for notes, content, and connections | `search_vault`, `read_note`, `read_frontmatter`, `list_vault`, `get_backlinks`, `get_outlinks` |
-| `search-web` | Search the web for information, documentation, and references | `web_search`, `fetch_webpage` |
-| `notor-help` | Answer questions about Notor features and configuration by looking up official docs | `web_search`, `fetch_webpage` |
+| Profile | Description | Tools | Preset |
+|---------|-------------|-------|--------|
+| `search-vault` | Search the vault for notes, content, and connections | `search_vault`, `read_note`, `read_frontmatter`, `list_vault`, `get_backlinks`, `get_outlinks` | Parent's preset |
+| `search-web` | Search the web for information, documentation, and references | `web_search`, `fetch_webpage` | Parent's preset |
+| `notor-help` | Answer questions about Notor features and configuration by looking up official docs | `web_search`, `fetch_webpage` | Parent's preset |
+| `memory-search` | Search memory notes for context relevant to the current conversation | `read_note`, `search_vault` (scoped to memory folder) | `tiny` |
+| `memory-resolver` | Decide whether to create a new note or update an existing one for a given insight | `read_note`, `search_vault` (scoped to memory folder) | `tiny` |
+| `memory-capture` | Extract durable insights from a conversation turn | `read_note`, `search_vault`, `list_vault`, `read_frontmatter`, `get_backlinks`, `get_outlinks` | `tiny` |
+| `memory-dream` | Consolidate and refine memory notes across sessions | `read_note`, `search_vault`, `list_vault`, `read_frontmatter`, `get_backlinks`, `get_outlinks` | `large` |
+
+The four `memory-*` profiles are part of the [knowledge memory](memory.md) feature and are only active when memory is enabled.
 
 Built-in profiles appear in **Settings → Notor → Sub-agents** with a "Built-in" badge. You can customize them by clicking the Open button — Notor creates a vault file from the default on first click, preserving your edits afterward. A "Reset to default" action is available if you want to restore the original.
 
@@ -51,8 +57,10 @@ Create `notor/sub-agents/{agent-name}/system-prompt.md`:
 ```markdown
 ---
 notor-description: Summarize meeting notes and extract action items.
+notor-preferred-preset: small
 # notor-preferred-provider: anthropic
 # notor-preferred-model: claude-sonnet-4-20250514
+# notor-iteration-cap: 15
 ---
 
 You are a meeting notes assistant. Given a meeting note or set of notes,
@@ -79,8 +87,10 @@ read_frontmatter:
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `notor-description` | string | _(none)_ | Short description of what the sub-agent does. Shown to the AI so it knows when to use this profile. Strongly encouraged. |
+| `notor-preferred-preset` | string | _(none)_ | Named model preset to use (e.g., `tiny`, `small`, `large`). Takes precedence over `notor-preferred-provider`/`notor-preferred-model`. See [model-presets.md](model-presets.md). |
 | `notor-preferred-provider` | string | Parent's provider | LLM provider override (e.g., `anthropic`, `openai`, `bedrock`, `local`) |
 | `notor-preferred-model` | string | Parent's model | Model ID override |
+| `notor-iteration-cap` | number | `10` | Maximum number of turns before the sub-agent is forced to stop. Overrides the global default (configurable in advanced settings). |
 
 ### Tool access
 
@@ -123,6 +133,8 @@ While a sub-agent is running, the chat panel shows a spinner with status updates
 
 ## Provider and model
 
-Sub-agents can use a different provider or model than the parent conversation by setting `notor-preferred-provider` and `notor-preferred-model` in their profile frontmatter. If not specified, they inherit the parent's provider and model.
+Sub-agents can use a different provider or model than the parent conversation. The recommended approach is `notor-preferred-preset`, which resolves to a provider and model via the named preset system. Alternatively, use `notor-preferred-provider` and `notor-preferred-model` for direct control. If not specified, they inherit the parent's provider and model.
+
+Preset resolution takes precedence: if `notor-preferred-preset` is set and the preset is configured, its provider and model are used regardless of `notor-preferred-provider`/`notor-preferred-model`. If the preset is not configured, resolution falls through to the legacy provider/model fields.
 
 If the specified provider is not configured, the sub-agent fails with a clear error rather than silently falling back.
