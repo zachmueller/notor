@@ -1836,28 +1836,38 @@ const { Document, Packer, Paragraph, TextRun, ImageRun, HeadingLevel,
 // --- Inline token renderer ---
 
 type InlineChild = any;
+interface InlineStyle { bold?: boolean; italics?: boolean; strike?: boolean }
 
-function renderInline(tokens: any[]): InlineChild[] {
+function renderInline(tokens: any[], style: InlineStyle = {}): InlineChild[] {
   const result: InlineChild[] = [];
   for (const token of tokens) {
     switch (token.type) {
       case "text":
-        result.push(new TextRun({ text: token.text }));
+        result.push(new TextRun({ text: token.text, ...style }));
         break;
       case "strong":
-        result.push(new TextRun({ text: token.text, bold: true }));
+        result.push(...renderInline(token.tokens ?? [], { ...style, bold: true }));
         break;
       case "em":
-        result.push(new TextRun({ text: token.text, italics: true }));
+        result.push(...renderInline(token.tokens ?? [], { ...style, italics: true }));
+        break;
+      case "del":
+        result.push(...renderInline(token.tokens ?? [], { ...style, strike: true }));
         break;
       case "codespan":
-        result.push(new TextRun({ text: token.text, style: "Verbatim Char", font: { name: "Courier New" } }));
+        result.push(new TextRun({ text: token.text, ...style, font: { name: "Courier New" } }));
         break;
       case "link":
-        result.push(new ExternalHyperlink({ link: token.href, children: [new TextRun({ text: token.text })] }));
+        result.push(new ExternalHyperlink({
+          link: token.href,
+          children: renderInline(token.tokens ?? [{ type: "text", text: token.text }], style),
+        }));
+        break;
+      case "image":
+        result.push(new TextRun({ text: \`[Image: \${token.href}]\`, ...style }));
         break;
       default:
-        result.push(new TextRun({ text: token.raw ?? "" }));
+        result.push(new TextRun({ text: token.raw ?? "", ...style }));
     }
   }
   return result;
@@ -1908,14 +1918,17 @@ function scaleImageDimensions(width: number, height: number): { width: number; h
 
 // --- Block token renderer ---
 
-function buildDocxChildren(tokens: any[], resolvedImages: Map<string, any>): any[] {
+interface BlockContext { listLevel: number; indentLeft: number }
+
+function buildDocxChildren(tokens: any[], resolvedImages: Map<string, any>, ctx: BlockContext = { listLevel: 0, indentLeft: 0 }): any[] {
   const result: any[] = [];
+  const indent = ctx.indentLeft > 0 ? { indent: { left: ctx.indentLeft } } : {};
 
   for (const token of tokens) {
     switch (token.type) {
       case "heading": {
         const level = HeadingLevel[\`HEADING_\${token.depth}\` as keyof typeof HeadingLevel];
-        result.push(new Paragraph({ heading: level, children: renderInline(token.tokens ?? []) }));
+        result.push(new Paragraph({ heading: level, ...indent, children: renderInline(token.tokens ?? []) }));
         break;
       }
       case "paragraph": {
@@ -1928,6 +1941,7 @@ function buildDocxChildren(tokens: any[], resolvedImages: Map<string, any>): any
           if (imageData) {
             const scaled = scaleImageDimensions(imageData.width, imageData.height);
             result.push(new Paragraph({
+              ...indent,
               children: [new ImageRun({
                 type: imageData.type,
                 data: imageData.buffer,
@@ -1936,40 +1950,54 @@ function buildDocxChildren(tokens: any[], resolvedImages: Map<string, any>): any
               })],
             }));
           } else {
-            result.push(new Paragraph({ children: [new TextRun({ text: \`[Image: \${firstToken.href}]\` })] }));
+            result.push(new Paragraph({ ...indent, children: [new TextRun({ text: \`[Image: \${firstToken.href}]\` })] }));
           }
           break;
         }
 
-        result.push(new Paragraph({ children: renderInline(pTokens) }));
+        result.push(new Paragraph({ ...indent, children: renderInline(pTokens) }));
         break;
       }
       case "code": {
-        result.push(new Paragraph({
-          style: "Source Code",
-          children: [new TextRun({ text: token.text, font: { name: "Courier New" } })],
-        }));
+        const lines = (token.text as string).split("\\n");
+        for (const line of lines) {
+          result.push(new Paragraph({
+            style: "Source Code",
+            ...indent,
+            children: [new TextRun({ text: line, font: { name: "Courier New" } })],
+          }));
+        }
         break;
       }
       case "hr": {
         result.push(new Paragraph({
+          ...indent,
           border: { bottom: { style: BorderStyle.SINGLE, size: 6, space: 1, color: "auto" } },
         }));
         break;
       }
       case "blockquote": {
-        result.push(new Paragraph({ indent: { left: 720 }, children: renderInline(token.tokens ?? []) }));
+        result.push(...buildDocxChildren(token.tokens ?? [], resolvedImages, {
+          ...ctx,
+          indentLeft: ctx.indentLeft + 720,
+        }));
         break;
       }
       case "list": {
         for (const item of token.items) {
+          const inlineTokens = (item.tokens ?? []).filter((t: any) => t.type !== "list");
+          const nestedLists = (item.tokens ?? []).filter((t: any) => t.type === "list");
           if (token.ordered) {
             result.push(new Paragraph({
-              numbering: { reference: "default-numbering", level: 0 },
-              children: renderInline(item.tokens ?? []),
+              numbering: { reference: "default-numbering", level: ctx.listLevel },
+              ...indent,
+              children: renderInline(inlineTokens),
             }));
           } else {
-            result.push(new Paragraph({ bullet: { level: 0 }, children: renderInline(item.tokens ?? []) }));
+            result.push(new Paragraph({ bullet: { level: ctx.listLevel }, ...indent, children: renderInline(inlineTokens) }));
+          }
+          for (const nested of nestedLists) {
+            result.push(...buildDocxChildren([nested], resolvedImages, { ...ctx, listLevel: ctx.listLevel + 1 }));
           }
         }
         break;
