@@ -6,6 +6,15 @@ interface DreamCursor {
 	last_run: string;
 }
 
+async function ensureDir(app: App, filePath: string): Promise<void> {
+	const dir = filePath.substring(0, filePath.lastIndexOf("/"));
+	if (!dir) return;
+	const exists = await app.vault.adapter.exists(dir);
+	if (!exists) {
+		await app.vault.adapter.mkdir(dir);
+	}
+}
+
 export async function readDedupCache(
 	app: App,
 	cachePath: string,
@@ -59,6 +68,7 @@ export async function writeDedupEntry(
 
 	cache[fingerprint] = timestamp;
 	const tmp = cachePath + ".tmp";
+	await ensureDir(app, tmp);
 	await app.vault.adapter.write(tmp, JSON.stringify(cache));
 	if (await app.vault.adapter.exists(cachePath)) {
 		await app.vault.adapter.remove(cachePath);
@@ -89,6 +99,7 @@ export async function advanceDreamCursor(
 ): Promise<void> {
 	const data: DreamCursor = { last_run: timestamp };
 	const tmp = cursorPath + ".tmp";
+	await ensureDir(app, tmp);
 	await app.vault.adapter.write(tmp, JSON.stringify(data));
 	if (await app.vault.adapter.exists(cursorPath)) {
 		await app.vault.adapter.remove(cursorPath);

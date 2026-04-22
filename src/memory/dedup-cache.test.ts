@@ -30,6 +30,7 @@ function buildMockApp(files: Map<string, string> = new Map()) {
 				remove: vi.fn(async (path: string) => {
 					files.delete(path);
 				}),
+				mkdir: vi.fn(async () => {}),
 			},
 		},
 	} as unknown as import("obsidian").App;
@@ -115,6 +116,13 @@ describe("readDedupCache / writeDedupEntry", () => {
 		expect(cache["recent_one"]).toBe(recent);
 	});
 
+	it("creates parent directory if missing before writing", async () => {
+		const ts = new Date().toISOString();
+		await writeDedupEntry(app, cachePath, "test", ts);
+
+		expect(app.vault.adapter.mkdir).toHaveBeenCalledWith("notor/memory");
+	});
+
 	it("sequential writes do not corrupt data (atomic pattern)", async () => {
 		const ts1 = new Date().toISOString();
 		const ts2 = new Date().toISOString();
@@ -166,6 +174,12 @@ describe("readDreamCursor / advanceDreamCursor", () => {
 
 		const cursor = await readDreamCursor(app, cursorPath);
 		expect(cursor).toBeNull();
+	});
+
+	it("creates parent directory if missing before writing", async () => {
+		await advanceDreamCursor(app, cursorPath, "2026-04-18T12:00:00.000Z");
+
+		expect(app.vault.adapter.mkdir).toHaveBeenCalledWith("notor/memory");
 	});
 
 	it("uses atomic write pattern", async () => {
