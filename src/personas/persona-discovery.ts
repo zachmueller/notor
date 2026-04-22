@@ -15,6 +15,7 @@
 import type { MetadataCache, TFile, TFolder, Vault } from "obsidian";
 import { TAbstractFile } from "obsidian";
 import type { Persona, PersonaPromptMode } from "../types";
+import { BUILTIN_PERSONA_PROFILES } from "./builtin-personas";
 import { logger } from "../utils/logger";
 import type { TemplateVariableRegistry } from "../template-vars";
 
@@ -47,33 +48,37 @@ export async function discoverPersonas(
 	const personasRootPath = getPersonasRootPath(notorDir);
 	const personasRoot = vault.getAbstractFileByPath(personasRootPath);
 
+	const personas: Persona[] = [];
+
 	if (!personasRoot) {
 		log.debug("Personas directory does not exist", { path: personasRootPath });
-		return [];
-	}
-
-	// Verify it's a folder
-	if (!isFolder(personasRoot)) {
+	} else if (!isFolder(personasRoot)) {
 		log.warn("Personas path exists but is not a directory", { path: personasRootPath });
-		return [];
+	} else {
+		for (const child of personasRoot.children) {
+			if (!isFolder(child)) continue;
+
+			const persona = await loadPersonaFromDirectory(vault, metadataCache, child, templateRegistry);
+			if (persona) {
+				personas.push(persona);
+			}
+		}
 	}
 
-	const personas: Persona[] = [];
-	const folder = personasRoot;
+	// Add built-in personas that don't have vault files
+	const discoveredNames = new Set(personas.map((p) => p.name));
+	for (const [name, builtin] of BUILTIN_PERSONA_PROFILES) {
+		if (discoveredNames.has(name)) continue;
 
-	for (const child of folder.children) {
-		if (!isFolder(child)) continue;
-
-		const subdir = child;
-		const persona = await loadPersonaFromDirectory(vault, metadataCache, subdir, templateRegistry);
-		if (persona) {
-			personas.push(persona);
-		}
+		const persona = buildPersonaFromBuiltin(name, builtin.systemPromptContent, personasRootPath, templateRegistry);
+		personas.push(persona);
 	}
 
 	log.info("Persona discovery complete", {
 		personasDir: personasRootPath,
 		found: personas.length,
+		fromVault: discoveredNames.size,
+		fromBuiltin: personas.length - discoveredNames.size,
 	});
 
 	return personas;
@@ -256,6 +261,81 @@ function stripFrontmatter(content: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Internal: build from built-in constant
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a Persona from a built-in constant (no vault file exists).
+ *
+ * The persona gets synthetic paths pointing to where the vault file would
+ * be created if the user clicks "Open" in settings.
+ */
+function buildPersonaFromBuiltin(
+	name: string,
+	systemPromptContent: string,
+	rootPath: string,
+	templateRegistry?: TemplateVariableRegistry,
+): Persona {
+	const directoryPath = `${rootPath}/${name}/`;
+	const systemPromptPath = `${rootPath}/${name}/${SYSTEM_PROMPT_FILENAME}`;
+
+	const strippedBody = stripFrontmatter(systemPromptContent);
+	const promptContent = templateRegistry ? templateRegistry.resolve(strippedBody) : strippedBody;
+
+	return {
+		name,
+		directory_path: directoryPath,
+		system_prompt_path: systemPromptPath,
+		prompt_content: promptContent,
+		prompt_mode: extractPromptMode(systemPromptContent),
+		preferred_provider: extractFrontmatterField(systemPromptContent, "notor-preferred-provider"),
+		preferred_model: extractFrontmatterField(systemPromptContent, "notor-preferred-model"),
+		preferred_preset: extractFrontmatterField(systemPromptContent, "notor-preferred-preset"),
+		chip_color: extractFrontmatterField(systemPromptContent, "notor-persona-chip-color"),
+		chip_emoji: extractFrontmatterField(systemPromptContent, "notor-persona-chip-emoji"),
+	};
+}
+
+/**
+ * Extract a string field value from YAML frontmatter in raw content.
+ *
+ * Simple regex-based extraction for use with built-in constants
+ * where the metadata cache is not available.
+ */
+function extractFrontmatterField(content: string, fieldName: string): string | null {
+	const trimmed = content.trimStart();
+	if (!trimmed.startsWith("---")) return null;
+
+	const afterOpener = trimmed.indexOf("\n", 3);
+	if (afterOpener === -1) return null;
+
+	const closerIdx = trimmed.indexOf("\n---", afterOpener);
+	if (closerIdx === -1) return null;
+
+	const frontmatterBody = trimmed.substring(afterOpener + 1, closerIdx);
+
+	const regex = new RegExp(`^${fieldName}:\\s*(.+)$`, "m");
+	const match = regex.exec(frontmatterBody);
+	if (!match) return null;
+
+	let value = match[1]!.trim();
+	if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+		value = value.slice(1, -1);
+	}
+
+	return value.length > 0 ? value : null;
+}
+
+/**
+ * Extract prompt mode from built-in constant frontmatter.
+ */
+function extractPromptMode(content: string): PersonaPromptMode {
+	const raw = extractFrontmatterField(content, "notor-persona-prompt-mode");
+	if (raw === "append" || raw === "replace") return raw;
+	return "append";
+}
+
+// ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------
 
@@ -280,6 +360,6 @@ function isFile(file: TAbstractFile): file is TFile {
 /**
  * Get the vault-relative path to the personas root directory.
  */
-function getPersonasRootPath(notorDir: string): string {
+export function getPersonasRootPath(notorDir: string): string {
 	return `${notorDir.replace(/\/$/, "")}/personas`;
 }

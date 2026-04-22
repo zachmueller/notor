@@ -71,6 +71,8 @@ export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	extract_docx_comments: false,
 	use_subagent: false,
 	capture_memory: true,
+	read_notor_settings: false,
+	edit_notor_settings: false,
 };
 
 /** Default empty hook configuration. */

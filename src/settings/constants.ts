@@ -150,6 +150,16 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Read the full message history of a past conversation.",
 		isWrite: false,
 	},
+	read_notor_settings: {
+		name: "Read Notor settings",
+		desc: "Read the current Notor plugin settings as JSON.",
+		isWrite: false,
+	},
+	edit_notor_settings: {
+		name: "Edit Notor settings",
+		desc: "Change a single Notor plugin setting by key path.",
+		isWrite: true,
+	},
 };
 
 // ---------------------------------------------------------------------------
@@ -160,4 +170,6 @@ export const TOOLS_DEFAULT_DISABLED: ReadonlySet<string> = new Set([
 	"sleep",
 	"search_chat_history",
 	"read_chat_history",
+	"read_notor_settings",
+	"edit_notor_settings",
 ]);

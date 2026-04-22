@@ -12,13 +12,14 @@
  * @see specs/03-workflows-personas/tasks/group-a-tasks.md — A-005, A-007, A-008
  */
 
-import { Notice } from "obsidian";
+import { Notice, TFile, normalizePath } from "obsidian";
 import type { MetadataCache, Vault } from "obsidian";
 import type { Persona, LLMProviderType } from "../types";
 import type { NotorSettings } from "../settings";
 import type { ProviderRegistry } from "../providers/index";
 import { resolvePreset } from "../presets/preset-resolver";
-import { discoverPersonas } from "./persona-discovery";
+import { discoverPersonas, getPersonasRootPath } from "./persona-discovery";
+import { BUILTIN_PERSONA_PROFILES, BUILTIN_PERSONA_NAMES } from "./builtin-personas";
 import { logger } from "../utils/logger";
 import type { TemplateVariableRegistry } from "../template-vars";
 
@@ -267,6 +268,81 @@ export class PersonaManager {
 	}
 
 	// -----------------------------------------------------------------------
+	// Built-in persona management
+	// -----------------------------------------------------------------------
+
+	/** Name of the system prompt file inside each persona directory. */
+	private static readonly SYSTEM_PROMPT_FILENAME = "system-prompt.md";
+
+	/**
+	 * Check if a persona name corresponds to a built-in persona.
+	 */
+	isBuiltinPersona(name: string): boolean {
+		return BUILTIN_PERSONA_NAMES.has(name);
+	}
+
+	/**
+	 * Ensure a built-in persona has a vault file. Creates the directory
+	 * and `system-prompt.md` from the built-in constant if they don't exist.
+	 *
+	 * Called on first "Open" click in Settings.
+	 *
+	 * @param name - Built-in persona name (e.g., `"notor-help"`)
+	 * @returns Vault-relative path to the created/existing system-prompt.md
+	 * @throws Error if the name is not a built-in persona
+	 */
+	async ensureBuiltinPersonaVaultFile(name: string): Promise<string> {
+		const builtin = BUILTIN_PERSONA_PROFILES.get(name);
+		if (!builtin) {
+			throw new Error(`"${name}" is not a built-in persona.`);
+		}
+
+		const rootPath = getPersonasRootPath(this.settings.notor_dir);
+		const dirPath = normalizePath(`${rootPath}/${name}`);
+		const filePath = normalizePath(`${dirPath}/${PersonaManager.SYSTEM_PROMPT_FILENAME}`);
+
+		if (this.vault.getAbstractFileByPath(filePath)) {
+			return filePath;
+		}
+
+		await this.ensureDirectory(dirPath);
+		await this.vault.create(filePath, builtin.systemPromptContent);
+		log.info("Created vault file for built-in persona", { name, path: filePath });
+
+		return filePath;
+	}
+
+	/**
+	 * Reset a built-in persona's vault file to the default content.
+	 *
+	 * Overwrites the existing vault file with the built-in constant.
+	 * If the vault file doesn't exist, creates it.
+	 *
+	 * @param name - Built-in persona name
+	 * @throws Error if the name is not a built-in persona
+	 */
+	async resetBuiltinPersonaToDefault(name: string): Promise<void> {
+		const builtin = BUILTIN_PERSONA_PROFILES.get(name);
+		if (!builtin) {
+			throw new Error(`"${name}" is not a built-in persona.`);
+		}
+
+		const rootPath = getPersonasRootPath(this.settings.notor_dir);
+		const dirPath = normalizePath(`${rootPath}/${name}`);
+		const filePath = normalizePath(`${dirPath}/${PersonaManager.SYSTEM_PROMPT_FILENAME}`);
+
+		const existing = this.vault.getAbstractFileByPath(filePath);
+		if (existing && existing instanceof TFile) {
+			await this.vault.modify(existing, builtin.systemPromptContent);
+			log.info("Reset built-in persona to default", { name, path: filePath });
+		} else {
+			await this.ensureDirectory(dirPath);
+			await this.vault.create(filePath, builtin.systemPromptContent);
+			log.info("Created vault file for built-in persona (reset)", { name, path: filePath });
+		}
+	}
+
+	// -----------------------------------------------------------------------
 	// Settings reference update
 	// -----------------------------------------------------------------------
 
@@ -393,6 +469,22 @@ export class PersonaManager {
 						availableModels: cachedModels.map((m) => m.id),
 					});
 				}
+			}
+		}
+	}
+
+	/**
+	 * Ensure a directory path exists, creating intermediate directories
+	 * as needed.
+	 */
+	private async ensureDirectory(dirPath: string): Promise<void> {
+		const parts = dirPath.split("/");
+		let current = "";
+		for (const part of parts) {
+			current = current ? `${current}/${part}` : part;
+			const normalized = normalizePath(current);
+			if (!this.vault.getAbstractFileByPath(normalized)) {
+				await this.vault.createFolder(normalized);
 			}
 		}
 	}

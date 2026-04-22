@@ -293,11 +293,46 @@ export interface ExtensionUtils {
 		hasMemoryNotes: () => Promise<boolean>;
 		extractJSON: (text: string) => unknown | null;
 	} | null;
+	/**
+	 * Read the current Notor plugin settings as a sanitized JSON object.
+	 *
+	 * Returns a deep clone with sensitive fields redacted (MCP env values)
+	 * and transient data stripped (model caches).
+	 */
+	readPluginSettings: () => Record<string, unknown>;
+	/**
+	 * Edit a single Notor plugin setting by dot-separated key path.
+	 *
+	 * Validates the path exists, checks type compatibility, applies the
+	 * change, and calls saveSettings() to persist and propagate.
+	 */
+	editPluginSetting: (keyPath: string, value: unknown) => Promise<{
+		success: boolean;
+		oldValue?: unknown;
+		newValue?: unknown;
+		error?: string;
+	}>;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */
 	onProgress?: (status: string) => void;
 }
+
+/**
+ * Resolve a dot-separated key path against a settings-like object
+ * and return the available keys at that level (for error messages).
+ */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
+function getAvailableKeys(root: any, pathParts: string[]): string {
+	let target = root;
+	for (const part of pathParts) {
+		const index = /^\d+$/.test(part) ? Number(part) : part;
+		target = target?.[index];
+		if (target === undefined || target === null || typeof target !== "object") return "";
+	}
+	return Object.keys(target).slice(0, 30).join(", ");
+}
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
 
 /**
  * Build the `utils` object for extensions.
@@ -884,6 +919,129 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 					cbLog.warn("chatBlocks.emit: no conversation available", { kind, extension: sourceExtensionName });
 					return null;
 				},
+			};
+		})(),
+
+		readPluginSettings: () => {
+			const clone = JSON.parse(JSON.stringify(plugin.settings)) as Record<string, unknown>;
+
+			// Redact MCP server env values (could contain secrets)
+			const mcpServers = clone.mcp_servers as Record<string, Record<string, unknown>> | undefined;
+			if (mcpServers && typeof mcpServers === "object") {
+				for (const server of Object.values(mcpServers)) {
+					if (Array.isArray(server.env)) {
+						for (const entry of server.env as Array<Record<string, unknown>>) {
+							if (entry && typeof entry === "object") {
+								entry.value = "[REDACTED]";
+							}
+						}
+					}
+					if (Array.isArray(server.headers)) {
+						for (const header of server.headers as Array<Record<string, unknown>>) {
+							if (header && typeof header === "object" && header.sensitive) {
+								header.value = "[REDACTED]";
+							}
+						}
+					}
+				}
+			}
+
+			// Strip transient model caches (large, not user-facing)
+			const providers = clone.providers as Array<Record<string, unknown>> | undefined;
+			if (Array.isArray(providers)) {
+				for (const p of providers) {
+					delete p.model_cache;
+					delete p.model_cache_timestamp;
+				}
+			}
+
+			return clone;
+		},
+
+		editPluginSetting: (() => {
+			const editLog = logger("ext:editPluginSetting");
+
+			const BLOCKED_PATTERNS = [
+				/^mcp_servers\.[^.]+\.env/,
+				/^mcp_servers\.[^.]+\.headers/,
+				/^providers\.\d+\.model_cache/,
+				/^providers\.\d+\.model_cache_timestamp/,
+			];
+
+			return async (keyPath: string, value: unknown): Promise<{
+				success: boolean;
+				oldValue?: unknown;
+				newValue?: unknown;
+				error?: string;
+			}> => {
+				// Validate against denylist
+				for (const pattern of BLOCKED_PATTERNS) {
+					if (pattern.test(keyPath)) {
+						return { success: false, error: `Path "${keyPath}" is blocked for security reasons.` };
+					}
+				}
+
+				// Dynamic key-path traversal requires runtime-typed access
+				/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
+
+				// Resolve the key path
+				const parts = keyPath.split(".");
+				let target: any = plugin.settings;
+				for (let i = 0; i < parts.length - 1; i++) {
+					const key = parts[i]!;
+					const index = /^\d+$/.test(key) ? Number(key) : key;
+					target = target?.[index];
+					if (target === undefined || target === null || typeof target !== "object") {
+						const availableKeys = getAvailableKeys(plugin.settings, parts.slice(0, i));
+						return {
+							success: false,
+							error: `Invalid path: "${keyPath}" — "${parts.slice(0, i + 1).join(".")}" does not exist.${availableKeys ? ` Available keys at "${parts.slice(0, i).join(".") || "(root)"}": ${availableKeys}` : ""}`,
+						};
+					}
+				}
+
+				const lastKey = parts[parts.length - 1]!;
+				const finalIndex = /^\d+$/.test(lastKey) ? Number(lastKey) : lastKey;
+
+				if (!(finalIndex in target)) {
+					const parentPath = parts.slice(0, -1).join(".");
+					const availableKeys = Object.keys(target).slice(0, 30).join(", ");
+					return {
+						success: false,
+						error: `Key "${lastKey}" does not exist at "${parentPath || "(root)"}". Available keys: ${availableKeys}`,
+					};
+				}
+
+				const oldValue = target[finalIndex];
+
+				// Type compatibility check
+				if (oldValue !== null && oldValue !== undefined && value !== null && value !== undefined) {
+					const oldType = Array.isArray(oldValue) ? "array" : typeof oldValue;
+					const newType = Array.isArray(value) ? "array" : typeof value;
+					if (oldType !== newType) {
+						return {
+							success: false,
+							error: `Type mismatch: "${keyPath}" is ${oldType} but got ${newType}.`,
+						};
+					}
+				}
+
+				// Apply the change
+				target[finalIndex] = value;
+
+				// Persist and propagate
+				try {
+					await plugin.saveSettings();
+					editLog.info("Setting edited", { keyPath, oldValue, newValue: value });
+					return { success: true, oldValue, newValue: value };
+				} catch (e) {
+					// Revert on save failure
+					target[finalIndex] = oldValue;
+					/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
+					const msg = e instanceof Error ? e.message : String(e);
+					editLog.error("Failed to save settings after edit", { keyPath, error: msg });
+					return { success: false, error: `Failed to save: ${msg}` };
+				}
 			};
 		})(),
 
