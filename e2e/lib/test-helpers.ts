@@ -85,7 +85,8 @@ export async function waitForSelector(
 
 /**
  * Wait for any pending LLM response to finish.
- * Polls until the contenteditable input is re-enabled or timeout.
+ * Polls until the send button is visible (stop button hidden), which indicates
+ * setRespondingState(false) has been called.
  */
 export async function waitForResponse(
 	page: Page,
@@ -96,14 +97,17 @@ export async function waitForResponse(
 	while (Date.now() - start < timeoutMs) {
 		await page.waitForTimeout(pollMs);
 
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
+		const responseComplete = await page.evaluate(() => {
+			const sendBtn = document.querySelector(".notor-send-btn");
+			const stopBtn = document.querySelector(".notor-stop-btn");
+			const sendVisible = sendBtn && !sendBtn.classList.contains("notor-hidden");
+			const stopHidden = !stopBtn || stopBtn.classList.contains("notor-hidden");
+			return sendVisible && stopHidden;
 		});
 
-		if (inputEnabled) return true;
+		if (responseComplete) return true;
 
-		const lastMsg = await page.$(".notor-message-assistant:last-child");
+		const lastMsg = await page.$(".notor-message-assistant:last-child .notor-message-content");
 		if (lastMsg) {
 			const partial = await lastMsg.textContent();
 			const elapsed = Math.round((Date.now() - start) / 1000);
@@ -201,11 +205,14 @@ export async function sendMessageWithApprovalHandling(
 			}
 		}
 
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
+		const responseComplete = await page.evaluate(() => {
+			const sendBtn = document.querySelector(".notor-send-btn");
+			const stopBtn = document.querySelector(".notor-stop-btn");
+			const sendVisible = sendBtn && !sendBtn.classList.contains("notor-hidden");
+			const stopHidden = !stopBtn || stopBtn.classList.contains("notor-hidden");
+			return sendVisible && stopHidden;
 		});
-		if (inputEnabled) {
+		if (responseComplete) {
 			return { responded: true, approved };
 		}
 	}
@@ -214,9 +221,10 @@ export async function sendMessageWithApprovalHandling(
 
 /**
  * Get the text of the most recent assistant message.
+ * Targets the inner .notor-message-content to exclude fork button and token annotation.
  */
 export async function getLastAssistantMessage(page: Page): Promise<string> {
-	const msgs = await page.$$(".notor-message-assistant");
+	const msgs = await page.$$(".notor-message-assistant .notor-message-content");
 	if (msgs.length === 0) return "";
 	const last = msgs[msgs.length - 1];
 	return (await last!.textContent()) ?? "";
@@ -317,14 +325,14 @@ export async function selectPersona(page: Page, personaName: string | null): Pro
  * plugin's AbortController. Waits up to 20 seconds for the input to re-enable.
  */
 export async function ensureCleanState(page: Page): Promise<void> {
-	const inputDisabled = await page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		return el?.getAttribute("contenteditable") !== "true";
+	const isResponding = await page.evaluate(() => {
+		const stopBtn = document.querySelector(".notor-stop-btn");
+		return stopBtn && !stopBtn.classList.contains("notor-hidden");
 	});
 
-	if (!inputDisabled) return;
+	if (!isResponding) return;
 
-	console.log("  ⚠ Input is disabled — aborting in-progress response...");
+	console.log("  ⚠ Response in progress — aborting...");
 
 	// Try clicking the stop button
 	const stopBtn = await page.$(".notor-stop-btn:not(.notor-hidden)");
@@ -347,19 +355,19 @@ export async function ensureCleanState(page: Page): Promise<void> {
 		console.log("  Aborted via orchestrator fallback");
 	}
 
-	// Wait for input to become editable
+	// Wait for send button to become visible (response fully complete)
 	for (let i = 0; i < 20; i++) {
 		await page.waitForTimeout(1_000);
 		const ready = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el?.getAttribute("contenteditable") === "true";
+			const sendBtn = document.querySelector(".notor-send-btn");
+			return sendBtn && !sendBtn.classList.contains("notor-hidden");
 		});
 		if (ready) {
-			console.log(`  Input re-enabled after ${i + 1}s`);
+			console.log(`  Response state cleared after ${i + 1}s`);
 			return;
 		}
 	}
-	console.log("  ⚠ Input still disabled after 20s wait");
+	console.log("  ⚠ Still in responding state after 20s wait");
 }
 
 // ---------------------------------------------------------------------------

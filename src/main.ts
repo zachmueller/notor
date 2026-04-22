@@ -2090,6 +2090,7 @@ export default class NotorPlugin extends Plugin {
 			this.getCheckpointStorage()
 		);
 		orchestrator.setCheckpointManager(checkpointManager);
+		orchestrator.setSharedCheckpointManager(() => this._sharedCheckpointManager);
 
 		log.info("Orchestrator created via unified factory");
 		return orchestrator;
@@ -3202,7 +3203,7 @@ export default class NotorPlugin extends Plugin {
 		// Wire approval callback for this panel's orchestrator (Phase 4, Step 4e).
 		// Each orchestrator gets its own approval callback bound to the correct
 		// panel's view. Replaces the former ToolDispatcher.setApprovalCallback().
-		orchestrator.setApprovalCallback(async (toolCall, abortSignal?, messageId?) => {
+		orchestrator.setApprovalCallback(async (toolCall, abortSignal?, messageId?, autoApproved?) => {
 			// Look up the specific tool call element by message ID, falling back to
 			// the last rendered element for backward compatibility (e.g. sub-agent dispatchers).
 			const toolCallEl = messageId
@@ -3219,7 +3220,8 @@ export default class NotorPlugin extends Plugin {
 			const approvalPromise = view.renderDiffApprovalPrompt(
 				toolCallEl,
 				toolCall.tool_name,
-				toolCall.parameters ?? {}
+				toolCall.parameters ?? {},
+				autoApproved
 			);
 
 			// If no abort signal, just await the approval normally

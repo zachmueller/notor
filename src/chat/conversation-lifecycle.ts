@@ -48,6 +48,7 @@ export class ConversationLifecycleManager {
 		private readonly setActiveUseExtendedContext: (useExtended: boolean) => void,
 		private readonly getActivePresetName: () => string | null,
 		private readonly setActivePresetName: (name: string | null) => void,
+		private readonly getSharedCheckpointManager?: () => CheckpointManager | undefined,
 	) {}
 
 	/**
@@ -109,8 +110,9 @@ export class ConversationLifecycleManager {
 			view?.updatePersonaLabel(null);
 		}
 
-		// Scope checkpoint manager to the new conversation (A1.6b)
+		// Scope checkpoint managers to the new conversation (A1.6b)
 		this.getCheckpointManager()?.setConversationId(conversation.id);
+		this.getSharedCheckpointManager?.()?.setConversationId(conversation.id);
 
 		log.info("New conversation started", { id: conversation.id });
 	}
@@ -230,6 +232,7 @@ export class ConversationLifecycleManager {
 			}
 
 			this.getCheckpointManager()?.setConversationId(conversation.id);
+			this.getSharedCheckpointManager?.()?.setConversationId(conversation.id);
 			log.info("Switched to conversation", { id: conversation.id });
 		} catch (e) {
 			log.error("Failed to switch conversation", { filename, error: String(e) });
@@ -308,6 +311,7 @@ export class ConversationLifecycleManager {
 
 		this.configResolver.updateDisplayConfig(activeSession.effectiveConfig, activeSession.parsedConfigs);
 		this.getCheckpointManager()?.setConversationId(conversation.id);
+		this.getSharedCheckpointManager?.()?.setConversationId(conversation.id);
 
 		log.info("Switched to active session conversation (sync-back)", { id: conversation.id });
 	}

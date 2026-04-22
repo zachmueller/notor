@@ -44,16 +44,19 @@ import {
 // Local helpers (abort-specific — not in shared module)
 // ---------------------------------------------------------------------------
 
-/** Wait until the contenteditable input is re-enabled (response/abort complete). */
+/** Wait until the send button is visible (response/abort fully complete). */
 async function waitForInputEnabled(page: Page, timeoutMs = RESPONSE_TIMEOUT_MS): Promise<boolean> {
 	const start = Date.now();
 	while (Date.now() - start < timeoutMs) {
 		await page.waitForTimeout(POLL_INTERVAL_MS);
-		const enabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
+		const ready = await page.evaluate(() => {
+			const sendBtn = document.querySelector(".notor-send-btn");
+			const stopBtn = document.querySelector(".notor-stop-btn");
+			const sendVisible = sendBtn && !sendBtn.classList.contains("notor-hidden");
+			const stopHidden = !stopBtn || stopBtn.classList.contains("notor-hidden");
+			return sendVisible && stopHidden;
 		});
-		if (enabled) return true;
+		if (ready) return true;
 	}
 	return false;
 }
@@ -146,24 +149,15 @@ async function testStopButtonAborts(ctx: TestContext): Promise<void> {
 
 	await stopBtn.click();
 	console.log("    → Clicked stop button");
-	await page.waitForTimeout(1_000);
+
+	const abortComplete = await waitForInputEnabled(page, 15_000);
 
 	const shot2 = await ctx.screenshot("01b-after-stop");
 
-	const inputEnabled = await page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		return el !== null && el.getAttribute("contenteditable") === "true";
-	});
-
-	if (inputEnabled) {
-		ctx.pass("stop button — input re-enabled after abort", "Textarea re-enabled after stop click", shot2);
+	if (abortComplete) {
+		ctx.pass("stop button — input re-enabled after abort", "Send button visible after abort", shot2);
 	} else {
-		const laterEnabled = await waitForInputEnabled(page, 10_000);
-		if (laterEnabled) {
-			ctx.pass("stop button — input re-enabled (delayed)", "Textarea re-enabled within 10s of stop click", shot2);
-		} else {
-			ctx.fail("stop button — input re-enabled after abort", "Textarea still disabled 10s after stop click", shot2);
-		}
+		ctx.fail("stop button — input re-enabled after abort", "Send button not visible 15s after stop click", shot2);
 	}
 
 	const stopHidden = await page.evaluate(() => {
@@ -394,9 +388,9 @@ async function testActiveProviderDisplayed(ctx: TestContext, expectedProvider: s
 		return;
 	}
 
-	const providerSelect = await page.$(".notor-settings-popover .notor-settings-select");
+	const providerSelect = await page.$(".notor-custom-model-section .notor-settings-select");
 	if (!providerSelect) {
-		ctx.fail("settings — provider select found", "Provider select not found in popover");
+		ctx.fail("settings — provider select found", "Provider select not found in custom model section");
 		await settingsBtn.click();
 		return;
 	}
@@ -523,13 +517,13 @@ async function tests(ctx: TestContext): Promise<void> {
 			await settingsBtn.click();
 			await page.waitForTimeout(600);
 
-			const providerSelect = await page.$(".notor-settings-popover .notor-settings-select");
+			const providerSelect = await page.$(".notor-custom-model-section .notor-settings-select");
 			if (providerSelect) {
 				await providerSelect.selectOption({ value: "local" });
 				await page.waitForTimeout(500);
 				ctx.pass("error test setup — switched to local provider via UI", "Provider set to local for error tests");
 			} else {
-				ctx.pass("error test setup — cannot switch provider via UI", "No provider select found; error tests will use current provider");
+				ctx.pass("error test setup — cannot switch provider via UI", "No provider select found in custom model section; error tests will use current provider");
 			}
 
 			await settingsBtn.click();

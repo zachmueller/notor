@@ -63,7 +63,7 @@ export interface DispatchableTool {
 }
 
 /** Callback for requesting user approval of a tool call. */
-export type ApprovalCallback = (toolCall: ToolCall, abortSignal?: AbortSignal, messageId?: string) => Promise<"approved" | "rejected">;
+export type ApprovalCallback = (toolCall: ToolCall, abortSignal?: AbortSignal, messageId?: string, autoApproved?: boolean) => Promise<"approved" | "rejected">;
 
 /** Events emitted by the dispatcher for UI updates. */
 export interface DispatcherEvents {
@@ -366,6 +366,8 @@ export class ToolDispatcher {
 						return result;
 					}
 				}
+			} else if (perCallApprovalCallback) {
+				void perCallApprovalCallback(toolCall, abortSignal, messageId, true);
 			}
 
 			// Mark as approved
@@ -463,13 +465,14 @@ export class ToolDispatcher {
 				}
 			}
 
+			const approvalCb = perCallApprovalCallback ?? this.approvalCallback;
+
 			if (!isAutoApproved) {
 				// Request user approval.
 				// Legacy path: falls back to instance-level callback (used by sub-agent
 				// dispatchers which set approval via setApprovalCallback on their own
 				// ToolDispatcher instance). The shared plugin-level dispatcher passes
 				// per-call approval from sessions.
-				const approvalCb = perCallApprovalCallback ?? this.approvalCallback;
 				if (!approvalCb) {
 					log.warn("No approval callback set, auto-approving", { toolName });
 				} else {
@@ -503,6 +506,10 @@ export class ToolDispatcher {
 						return result;
 					}
 				}
+			} else if (approvalCb) {
+				// Auto-approved: render collapsed diff for after-the-fact review.
+				// The callback resolves immediately when autoApproved=true.
+				void approvalCb(toolCall, abortSignal, messageId, true);
 			}
 
 			// Mark as approved

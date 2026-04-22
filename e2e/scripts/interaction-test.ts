@@ -350,12 +350,12 @@ async function tests(ctx: TestContext) {
 				const shot = await ctx.screenshot("15-settings-popover");
 				ctx.pass("Settings popover opens", "Found .notor-settings-popover", shot);
 
-				const providerSelect = await page.$(".notor-settings-popover .notor-settings-select");
+				const providerSelect = await page.$(".notor-custom-model-section .notor-settings-select");
 				if (providerSelect) {
-					const options = await page.$$(".notor-settings-popover .notor-settings-select option");
+					const options = await page.$$(".notor-custom-model-section .notor-settings-select option");
 					ctx.pass("Provider selector populated", `Found ${options.length} provider option(s)`);
 				} else {
-					ctx.fail("Provider selector populated", "No provider select found in popover");
+					ctx.fail("Provider selector populated", "No provider select found in custom model section");
 				}
 
 				const checkpointSection = await page.$(".notor-checkpoints-section");

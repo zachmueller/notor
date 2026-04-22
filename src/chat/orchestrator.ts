@@ -124,6 +124,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Amendment A1
 	 */
 	private checkpointManager?: CheckpointManager;
+	private sharedCheckpointManagerGetter?: () => CheckpointManager | undefined;
 
 	/** Chat block registry — injected from main.ts for Phase 10 tool content_block bridging. */
 	private chatBlockRegistry?: ChatBlockRegistry;
@@ -277,6 +278,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			(useExtended) => { this.activeUseExtendedContext = useExtended; },
 			() => this.activePresetName,
 			(name) => { this.activePresetName = name; },
+			() => this.sharedCheckpointManagerGetter?.(),
 		);
 		this.workflowExecutor = new WorkflowExecutor({
 			app: this.app,
@@ -428,6 +430,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	setCheckpointManager(manager: CheckpointManager): void {
 		this.checkpointManager = manager;
+	}
+
+	setSharedCheckpointManager(getter: () => CheckpointManager | undefined): void {
+		this.sharedCheckpointManagerGetter = getter;
 	}
 
 	/** Inject the ChatBlockRegistry for Phase 10 tool content_block → extension_block bridging. */

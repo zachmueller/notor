@@ -2427,7 +2427,8 @@ export class NotorChatView extends ItemView {
 	async renderDiffApprovalPrompt(
 		toolCallEl: HTMLElement,
 		toolName: string,
-		parameters: Record<string, unknown>
+		parameters: Record<string, unknown>,
+		autoApproved = false
 	): Promise<"approved" | "rejected"> {
 		const notePath = parameters["path"] as string | undefined;
 
@@ -2456,7 +2457,7 @@ export class NotorChatView extends ItemView {
 				notePath,
 				beforeContent,
 				afterContent,
-				/*autoApproved=*/ false
+				autoApproved
 			);
 			this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
 			const decision = await decisionPromise;
@@ -2489,7 +2490,7 @@ export class NotorChatView extends ItemView {
 				notePath,
 				noteContent,
 				changeBlocks,
-				/*autoApproved=*/ false
+				autoApproved
 			);
 			this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
 			const decision = await decisionPromise;

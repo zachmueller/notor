@@ -102,8 +102,8 @@ async function tests(ctx: TestContext) {
 			if (!popover) {
 				ctx.fail("Active provider is Bedrock", "Settings popover not found");
 			} else {
-				// Check provider dropdown — should have Bedrock selected
-				const providerSelect = await page.$(".notor-settings-popover .notor-settings-select");
+				// Check provider dropdown — inside .notor-custom-model-section (not the preset dropdown)
+				const providerSelect = await page.$(".notor-custom-model-section .notor-settings-select");
 				if (providerSelect) {
 					const selectedValue = await providerSelect.evaluate(
 						(el: HTMLSelectElement) => el.value
@@ -347,48 +347,26 @@ async function tests(ctx: TestContext) {
 				// ── Test 9: Second message in same conversation ──────────
 				console.log("\nTest 9: Follow-up message in same conversation");
 				{
-					const textInput2 = await page.$(".notor-text-input");
-					if (textInput2) {
-						// contenteditable div — clear and type instead of fill()
-						await textInput2.click();
-						await page.evaluate(() => {
-							const el = document.querySelector(".notor-text-input");
-							if (el) el.textContent = "";
-						});
-						await page.keyboard.type("What is 2 + 2?");
-						await page.keyboard.press("Enter");
-						await page.waitForTimeout(500);
+					const responded2 = await sendMessage(page, "What is 2 + 2?");
 
-						// Wait for second response (up to 30s)
-						const start2 = Date.now();
-						while (Date.now() - start2 < 30_000) {
-							await page.waitForTimeout(1000);
-							const inputEnabled2 = await page.evaluate(() => {
-								const el = document.querySelector(".notor-text-input");
-								return el && el.getAttribute("contenteditable") === "true";
-							});
-							if (inputEnabled2) break;
-						}
+					const allMsgs = await page.$$(".notor-message-user");
+					const allResponses = await page.$$(".notor-message-assistant");
+					const shot = await ctx.screenshot("09-follow-up");
 
-						const allMsgs = await page.$$(".notor-message-user");
-						const allResponses = await page.$$(".notor-message-assistant");
-						const shot = await ctx.screenshot("09-follow-up");
-
-						if (allMsgs.length >= 2 && allResponses.length >= 2) {
-							ctx.pass("Follow-up message", `${allMsgs.length} user messages, ${allResponses.length} responses in conversation`, shot);
-						} else if (allMsgs.length >= 2) {
-							const latestError = await page.$(".notor-chat-error");
-							if (latestError) {
-								const errText = await latestError.textContent();
-								ctx.fail("Follow-up message", `Error on second message: "${errText?.trim()}"`, shot);
-							} else {
-								ctx.pass("Follow-up message (partial)", `${allMsgs.length} user messages, ${allResponses.length} responses`, shot);
-							}
+					if (allMsgs.length >= 2 && allResponses.length >= 2) {
+						ctx.pass("Follow-up message", `${allMsgs.length} user messages, ${allResponses.length} responses in conversation`, shot);
+					} else if (!responded2) {
+						ctx.fail("Follow-up message", `Second message timed out. ${allMsgs.length} user msgs, ${allResponses.length} responses`, shot);
+					} else if (allMsgs.length >= 2) {
+						const latestError = await page.$(".notor-chat-error");
+						if (latestError) {
+							const errText = await latestError.textContent();
+							ctx.fail("Follow-up message", `Error on second message: "${errText?.trim()}"`, shot);
 						} else {
-							ctx.fail("Follow-up message", `Only ${allMsgs.length} user messages found`, shot);
+							ctx.pass("Follow-up message (partial)", `${allMsgs.length} user messages, ${allResponses.length} responses`, shot);
 						}
 					} else {
-						ctx.fail("Follow-up message", "Textarea not found for second message");
+						ctx.fail("Follow-up message", `Only ${allMsgs.length} user messages found`, shot);
 					}
 				}
 			}
