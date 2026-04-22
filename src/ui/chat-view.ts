@@ -52,6 +52,7 @@ import type { Workflow } from "../types";
 import { McpStatusIndicator } from "./mcp-status-indicator";
 import { getTextContent, type ContentBlock } from "../media/types";
 import { renderCollapsibleCard } from "./chat-blocks/collapsible-card";
+import { FindInMessages } from "./find-in-messages";
 
 const log = logger("ChatView");
 
@@ -168,6 +169,9 @@ export class NotorChatView extends ItemView {
 
 	// MCP status indicator (INT-005)
 	private mcpStatusIndicator?: McpStatusIndicator;
+
+	// Find-in-messages search bar
+	private findInMessages?: FindInMessages;
 
 	// Active conversation tracking
 	private activeConversationId: string | null = null;
@@ -451,6 +455,10 @@ export class NotorChatView extends ItemView {
 	applyPersonaSwitch(persona: Persona | null): void {
 		this.updatePersonaLabel(persona);
 		this.onPersonaChange?.(persona);
+	}
+
+	openFindBar(): void {
+		this.findInMessages?.open();
 	}
 
 	setOnListCheckpoints(callback: () => Promise<Checkpoint[]>): void {
@@ -865,6 +873,18 @@ export class NotorChatView extends ItemView {
 		this.buildMessageList(container);
 		this.buildInputArea(container);
 
+		this.findInMessages = new FindInMessages(container, this.messageListEl, {
+			onClose: () => {},
+			setAutoScroll: (v: boolean) => { this.autoScroll = v; },
+		});
+		container.addEventListener("keydown", (e) => {
+			if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+				e.preventDefault();
+				e.stopPropagation();
+				this.findInMessages?.open();
+			}
+		}, true);
+
 		// H-002: Render workflow activity indicator in header (if tracker is already wired)
 		this.initActivityIndicator();
 
@@ -898,6 +918,9 @@ export class NotorChatView extends ItemView {
 		// INT-005: Clean up MCP status indicator
 		this.mcpStatusIndicator?.destroy();
 		this.mcpStatusIndicator = undefined;
+
+		this.findInMessages?.destroy();
+		this.findInMessages = undefined;
 
 		// A3.8: Release all callback references to prevent GC leaks.
 		// Called AFTER onCloseCleanup (Amendment R2-8 ordering) so the
@@ -2839,6 +2862,7 @@ export class NotorChatView extends ItemView {
 	 * Clear all messages from the display.
 	 */
 	clearMessages(): void {
+		this.findInMessages?.close();
 		this.messageListEl.empty();
 		this.tokenFooterEl.addClass("notor-hidden");
 		this.toolCallElMap.clear();

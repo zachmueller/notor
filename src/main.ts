@@ -716,6 +716,18 @@ export default class NotorPlugin extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "find-in-messages",
+			name: "Find in messages",
+			checkCallback: (checking: boolean) => {
+				const activeView = this.app.workspace.getActiveViewOfType(NotorChatView);
+				if (!activeView) return false;
+				if (checking) return true;
+				activeView.openFindBar();
+				return true;
+			},
+		});
+
 		// 5. Register active-leaf-change listener so the auto-context module
 		// can track the last-focused markdown note even when the chat panel
 		// (or another non-markdown view) has focus at send time (ACI-005).

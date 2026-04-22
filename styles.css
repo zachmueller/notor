@@ -3388,3 +3388,80 @@
 	font-size: var(--font-ui-small);
 	padding: 8px 0;
 }
+
+/* ==========================================================================
+   Find in Messages (Cmd+F / Ctrl+F search bar)
+   ========================================================================== */
+
+.notor-find-bar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 6px 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	flex-shrink: 0;
+}
+
+.notor-find-input {
+	flex: 1;
+	min-width: 0;
+	padding: 4px 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	box-sizing: border-box;
+}
+
+.notor-find-input:focus {
+	border-color: var(--interactive-accent);
+	outline: none;
+}
+
+.notor-find-input::placeholder {
+	color: var(--text-faint);
+}
+
+.notor-find-count {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	white-space: nowrap;
+	min-width: 60px;
+	text-align: center;
+}
+
+.notor-find-nav-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border: none;
+	border-radius: var(--radius-s);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.notor-find-nav-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.notor-find-nav-btn svg {
+	width: 14px;
+	height: 14px;
+}
+
+.notor-find-highlight {
+	background: var(--text-highlight-bg);
+	border-radius: 2px;
+}
+
+.notor-find-highlight-current {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-radius: 2px;
+}
