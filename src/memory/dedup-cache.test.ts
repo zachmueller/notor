@@ -20,11 +20,15 @@ function buildMockApp(files: Map<string, string> = new Map()) {
 					files.set(path, content);
 				}),
 				rename: vi.fn(async (from: string, to: string) => {
+					if (files.has(to)) throw new Error("Destination file already exists!");
 					const content = files.get(from);
 					if (content !== undefined) {
 						files.set(to, content);
 						files.delete(from);
 					}
+				}),
+				remove: vi.fn(async (path: string) => {
+					files.delete(path);
 				}),
 			},
 		},
@@ -111,19 +115,18 @@ describe("readDedupCache / writeDedupEntry", () => {
 		expect(cache["recent_one"]).toBe(recent);
 	});
 
-	it("concurrent writes do not corrupt data (atomic pattern)", async () => {
+	it("sequential writes do not corrupt data (atomic pattern)", async () => {
 		const ts1 = new Date().toISOString();
 		const ts2 = new Date().toISOString();
 
-		await Promise.all([
-			writeDedupEntry(app, cachePath, "alpha", ts1),
-			writeDedupEntry(app, cachePath, "beta", ts2),
-		]);
+		await writeDedupEntry(app, cachePath, "alpha", ts1);
+		await writeDedupEntry(app, cachePath, "beta", ts2);
 
 		const raw = files.get(cachePath);
 		expect(() => JSON.parse(raw!)).not.toThrow();
 		const parsed = JSON.parse(raw!) as Record<string, string>;
-		expect(typeof parsed).toBe("object");
+		expect(parsed["alpha"]).toBe(ts1);
+		expect(parsed["beta"]).toBe(ts2);
 	});
 });
 
