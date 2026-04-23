@@ -222,6 +222,12 @@ export class NotorChatView extends ItemView {
 	_unregisterSessionsChanged?: () => void;
 
 	/**
+	 * Unregister function for the PersonaManager persona-changed listener.
+	 * Ensures file-watcher-triggered refreshes update this panel's persona chip.
+	 */
+	_unregisterPersonaChanged?: () => void;
+
+	/**
 	 * Async cleanup callback invoked on panel close.
 	 *
 	 * Set by `wireView()` in `main.ts`. Aborts in-flight loads, detaches the

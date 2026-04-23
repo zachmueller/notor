@@ -98,6 +98,7 @@ import { UseSubagentTool } from "./tools/use-subagent";
 import { ExtensionManager } from "./extensions/manager";
 import type { AutomationTrigger } from "./extensions/types";
 import { isExtensionFile, isExtensionPath } from "./extensions/watcher";
+import { isPersonaFile, isPersonaPath } from "./personas/watcher";
 
 // MCP
 import { McpHub } from "./mcp/mcp-hub";
@@ -276,6 +277,12 @@ export default class NotorPlugin extends Plugin {
 
 	/** Reference to the "stale extensions" Notice for duplicate suppression (EXT-024). */
 	private _extensionStaleNotice: Notice | null = null;
+
+	/** Debounce timer for persona file change Notice. */
+	private _personaChangeTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Reference to the "stale personas" Notice for duplicate suppression. */
+	private _personaStaleNotice: Notice | null = null;
 
 	// -----------------------------------------------------------------------
 	// Group F: Vault event hook components (F-023)
@@ -911,6 +918,9 @@ export default class NotorPlugin extends Plugin {
 				// EXT-024: Register file watchers after initial discovery
 				this.registerExtensionVaultWatcher();
 
+				// Register persona file watchers for auto-refresh
+				this.registerPersonaVaultWatcher();
+
 				// Validate memory presets on load — disable feature if required presets are missing.
 				this.validateMemoryPresetsOnLoad();
 			}).catch((e) => {
@@ -992,6 +1002,14 @@ export default class NotorPlugin extends Plugin {
 		}
 		this._extensionStaleNotice?.hide();
 		this._extensionStaleNotice = null;
+
+		// Clear persona watcher timer and stale Notice
+		if (this._personaChangeTimer !== null) {
+			clearTimeout(this._personaChangeTimer);
+			this._personaChangeTimer = null;
+		}
+		this._personaStaleNotice?.hide();
+		this._personaStaleNotice = null;
 
 		// All DOM elements, intervals, and event listeners registered via
 		// this.register* / this.registerEvent / this.registerDomEvent are
@@ -2580,6 +2598,105 @@ export default class NotorPlugin extends Plugin {
 		);
 	}
 
+	/**
+	 * Schedule a debounced Notice when persona files change on disk.
+	 *
+	 * Mirrors the extension change notice pattern: 1000ms debounce,
+	 * deduplication, right-click to reload on desktop.
+	 */
+	private schedulePersonaChangeNotice(): void {
+		if (this._personaChangeTimer !== null) {
+			clearTimeout(this._personaChangeTimer);
+		}
+		this._personaChangeTimer = setTimeout(() => {
+			this._personaChangeTimer = null;
+
+			if (this._personaStaleNotice) return;
+
+			const NOTICE_DURATION_MS = 10_000;
+			const notice = new Notice(
+				"Persona files changed." + (Platform.isDesktop ? "\n(right-click to reload)" : ""),
+				NOTICE_DURATION_MS,
+			);
+
+			setTimeout(() => {
+				if (this._personaStaleNotice === notice) {
+					this._personaStaleNotice = null;
+				}
+			}, NOTICE_DURATION_MS);
+
+			notice.noticeEl.addEventListener("click", () => {
+				this._personaStaleNotice = null;
+			});
+
+			if (Platform.isDesktop) {
+				notice.noticeEl.oncontextmenu = (e) => {
+					e.preventDefault();
+					notice.hide();
+					this._personaStaleNotice = null;
+					this.getPersonaManager().refreshActivePersona().then((result) => {
+						switch (result.status) {
+							case "refreshed":
+								new Notice(`Persona "${result.persona.name}" reloaded.`);
+								break;
+							case "deactivated":
+								new Notice(`Persona "${result.previousName}" was removed; deactivated.`);
+								break;
+							case "no-active-persona":
+								new Notice("Persona files reloaded.");
+								break;
+						}
+					}).catch((err) => {
+						log.error("Persona refresh from Notice failed", { error: String(err) });
+						new Notice(`Persona refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+					});
+				};
+			}
+
+			this._personaStaleNotice = notice;
+		}, 1000);
+	}
+
+	/**
+	 * Register vault and metadata-cache event listeners that show a
+	 * "reload persona" Notice when persona files change.
+	 *
+	 * Follows the same pattern as `registerExtensionVaultWatcher()`.
+	 */
+	private registerPersonaVaultWatcher(): void {
+		this.registerEvent(
+			this.app.vault.on("create", (f) => {
+				if (isPersonaFile(f, this.settings.notor_dir)) {
+					this.schedulePersonaChangeNotice();
+				}
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("delete", (f) => {
+				if (isPersonaFile(f, this.settings.notor_dir)) {
+					this.schedulePersonaChangeNotice();
+				}
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("rename", (f, oldPath) => {
+				if (
+					isPersonaFile(f, this.settings.notor_dir) ||
+					isPersonaPath(oldPath, this.settings.notor_dir)
+				) {
+					this.schedulePersonaChangeNotice();
+				}
+			})
+		);
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (f) => {
+				if (isPersonaFile(f, this.settings.notor_dir)) {
+					this.schedulePersonaChangeNotice();
+				}
+			})
+		);
+	}
+
 	// -----------------------------------------------------------------------
 	// View wiring
 	// -----------------------------------------------------------------------
@@ -2622,8 +2739,9 @@ export default class NotorPlugin extends Plugin {
 			// 3. Detach view — renders become no-ops via existing this.view?. guards
 			orchestrator.setView(undefined);
 
-			// 4. Clean up session-change listener
+			// 4. Clean up session-change and persona-changed listeners
 			view._unregisterSessionsChanged?.();
+			view._unregisterPersonaChanged?.();
 
 			// 5. Remove from registry
 			this._orchestrators.delete(leafId);
@@ -2669,6 +2787,12 @@ export default class NotorPlugin extends Plugin {
 		// Wire persona manager to view (A-013: picker + label)
 		const personaManager = this.getPersonaManager();
 		view.setPersonaManager(personaManager);
+
+		// Wire persona-changed callback so file-watcher refresh updates the chip label.
+		view._unregisterPersonaChanged?.();
+		view._unregisterPersonaChanged = personaManager.setOnPersonaChanged((persona) => {
+			view.updatePersonaLabel(persona);
+		});
 
 		// Per-conversation persona scoping: the picker reads the current
 		// conversation's persona and updates only this panel's conversation.

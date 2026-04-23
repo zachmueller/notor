@@ -225,6 +225,40 @@ export class PersonaManager {
 		}
 	}
 
+	/**
+	 * Refresh the active persona from disk without switching provider/model.
+	 *
+	 * Re-discovers personas and updates the in-memory cache. If the active
+	 * persona was deleted, deactivates it. Fires `personaChangedCallbacks`
+	 * so UI labels update automatically.
+	 *
+	 * Called by the persona file watcher when persona files change on disk.
+	 */
+	async refreshActivePersona(): Promise<
+		| { status: "refreshed"; persona: Persona }
+		| { status: "deactivated"; previousName: string }
+		| { status: "no-active-persona" }
+	> {
+		if (!this.activePersona) {
+			return { status: "no-active-persona" };
+		}
+
+		const currentName = this.activePersona.name;
+		const personas = await this.getDiscoveredPersonas();
+		const updated = personas.find((p) => p.name === currentName);
+
+		if (updated) {
+			this.activePersona = updated;
+			for (const cb of this.personaChangedCallbacks) cb(updated);
+			log.info("Active persona refreshed from disk", { name: currentName });
+			return { status: "refreshed", persona: updated };
+		}
+
+		log.warn("Active persona no longer found on disk, deactivating", { name: currentName });
+		this.deactivatePersona();
+		return { status: "deactivated", previousName: currentName };
+	}
+
 	// -----------------------------------------------------------------------
 	// Workflow persona save/restore (Group E integration point)
 	// -----------------------------------------------------------------------
