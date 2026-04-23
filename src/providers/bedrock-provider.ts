@@ -14,7 +14,8 @@
  *
  * Required IAM permissions:
  * - bedrock:InvokeModelWithResponseStream (for sendMessage)
- * - bedrock:ListInferenceProfiles (for listModels)
+ * - bedrock:ListInferenceProfiles (for listModels — system-defined profiles)
+ * - bedrock:ListFoundationModels (optional — adds marketplace models like Qwen, Mistral)
  *
  * @see specs/01-mvp/contracts/llm-provider.md — AWS Bedrock mapping
  * @see design/research/llm-model-list-apis.md — Section 3a (ListInferenceProfiles)
@@ -34,6 +35,7 @@ import { getSecret, SECRET_IDS } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import type { ContentBlock as MediaContentBlock } from "../media/types";
 import { getModelExtendedContext } from "./model-metadata";
+import { parseProfileId } from "./model-grouping";
 import { logger } from "../utils/logger";
 
 // AWS SDK imports — these are bundled by esbuild
@@ -52,7 +54,9 @@ import type {
 } from "@aws-sdk/client-bedrock-runtime";
 import {
 	BedrockClient,
+	ListFoundationModelsCommand,
 	ListInferenceProfilesCommand,
+	type ListFoundationModelsResponse,
 	type ListInferenceProfilesCommandOutput,
 } from "@aws-sdk/client-bedrock";
 import { fromIni } from "@aws-sdk/credential-providers";
@@ -632,12 +636,41 @@ export class BedrockProvider implements LLMProvider {
 		}
 	}
 
+	/**
+	 * Fetch all foundation models accessible via on-demand TEXT inference.
+	 * Used as a supplementary query alongside ListInferenceProfiles to surface
+	 * marketplace models (Qwen, Mistral, AI21, etc.) that have no system-defined
+	 * inference profile. Failures are swallowed so inference profiles still work
+	 * if the IAM role lacks bedrock:ListFoundationModels.
+	 */
+	private async fetchFoundationModels(): Promise<ListFoundationModelsResponse> {
+		const client = this.getBedrockClient();
+		try {
+			return await client.send(
+				new ListFoundationModelsCommand({
+					byOutputModality: "TEXT",
+					byInferenceType: "ON_DEMAND",
+				})
+			) as unknown as ListFoundationModelsResponse;
+		} catch (e: unknown) {
+			log.warn(
+				"ListFoundationModels failed (supplementary query, continuing with inference profiles only):",
+				e instanceof Error ? e.message : String(e)
+			);
+			return { modelSummaries: [] };
+		}
+	}
+
 	async listModels(): Promise<ModelInfo[]> {
 		/** Profile ID patterns for known non-chat providers to exclude. */
 		const NON_CHAT_ID_PATTERNS = [
-			/^[^.]+\.stability\./,   // Stable Diffusion image models
-			/^[^.]+\.twelvelabs\./,  // Video/multimodal embedding models
-			/^[^.]+\.cohere\.embed/, // Embedding-only models
+			/^[^.]+\.stability\./,    // Stable Diffusion image models
+			/^[^.]+\.twelvelabs\./,   // Video/multimodal embedding models
+			/^[^.]+\.cohere\.embed/,  // Embedding-only models
+			/^amazon\.titan-embed/,   // Amazon Titan embedding models
+			/^stability\./,           // Foundation model form of Stability models
+			/^twelvelabs\./,          // Foundation model form
+			/^cohere\.embed/,         // Foundation model form
 		];
 
 		const allProfiles: ModelInfo[] = [];
@@ -672,6 +705,41 @@ export class BedrockProvider implements LLMProvider {
 
 			nextToken = response.nextToken ?? undefined;
 		} while (nextToken);
+
+		// Supplement with foundation models that have no system-defined inference
+		// profile (e.g. Qwen, Mistral, AI21, Writer, Jamba, Cohere Chat).
+		const foundationResponse = await this.fetchFoundationModels();
+
+		// Build a set of bare model IDs already covered by inference profiles
+		// so we don't add duplicates (inference profile IDs include a geo prefix).
+		const coveredBaseKeys = new Set(
+			allProfiles.map((p) => {
+				const { baseKey } = parseProfileId(p.id);
+				return baseKey;
+			})
+		);
+
+		for (const model of foundationResponse.modelSummaries ?? []) {
+			const modelId = model.modelId ?? "";
+			if (!modelId) continue;
+			if (model.modelLifecycle?.status === "LEGACY") continue;
+			if (NON_CHAT_ID_PATTERNS.some((p) => p.test(modelId))) continue;
+			if (coveredBaseKeys.has(modelId)) continue;
+
+			const providerRaw = modelId.split(".")[0];
+			const providerSegment = providerRaw
+				? providerRaw.charAt(0).toUpperCase() + providerRaw.slice(1)
+				: "Bedrock";
+
+			allProfiles.push({
+				id: modelId,
+				display_name: model.modelName ?? modelId,
+				context_window: null,
+				input_price_per_1k: null,
+				output_price_per_1k: null,
+				provider: providerSegment,
+			});
+		}
 
 		return allProfiles;
 	}

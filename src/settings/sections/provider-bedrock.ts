@@ -24,7 +24,9 @@ export function renderBedrockProviderSection(
 			"Required IAM permissions: bedrock:InvokeModelWithResponseStream " +
 			"(for sending messages) and bedrock:ListInferenceProfiles " +
 			"(for listing available models). " +
-			"bedrock:ListFoundationModels is no longer needed.",
+			"bedrock:ListFoundationModels is optional — if granted, Notor also " +
+			"lists marketplace models (Qwen, Mistral, AI21, etc.) that have no " +
+			"cross-region inference profile.",
 		cls: "setting-item-description",
 	});
 
