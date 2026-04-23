@@ -389,8 +389,10 @@
 	overflow: hidden;
 }
 
+/* Collapse Obsidian's per-item margin/radius so items merge into one block */
 .notor-preset-row > .setting-item {
-	background: var(--background-secondary);
+	margin-bottom: 0;
+	border-radius: 0;
 	border-top: none;
 }
 
