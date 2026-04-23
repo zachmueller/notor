@@ -18,8 +18,9 @@ export function renderOpenAIProviderSection(
 	new Setting(containerEl).setHeading().setName("OpenAI");
 
 	const provider = getProvider(ctx.settings, "openai");
+	const groupEl = containerEl.createDiv({ cls: "notor-provider-group" });
 
-	new Setting(containerEl)
+	new Setting(groupEl)
 		.setName("API key")
 		.setDesc("Your OpenAI API key.")
 		.addComponent(
@@ -31,7 +32,7 @@ export function renderOpenAIProviderSection(
 					})
 		);
 
-	new Setting(containerEl)
+	new Setting(groupEl)
 		.setName("Custom endpoint URL")
 		.setDesc(
 			"Override the default OpenAI API base URL. Leave blank to use the default. " +
@@ -53,5 +54,5 @@ export function renderOpenAIProviderSection(
 				})
 		);
 
-	renderConnectionTestButton(containerEl, "openai", ctx);
+	renderConnectionTestButton(groupEl, "openai", ctx);
 }

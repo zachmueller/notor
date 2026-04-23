@@ -16,7 +16,9 @@ export function renderAnthropicProviderSection(
 ): void {
 	new Setting(containerEl).setHeading().setName("Anthropic");
 
-	new Setting(containerEl)
+	const groupEl = containerEl.createDiv({ cls: "notor-provider-group" });
+
+	new Setting(groupEl)
 		.setName("API key")
 		.setDesc("Your Anthropic API key.")
 		.addComponent(
@@ -28,5 +30,5 @@ export function renderAnthropicProviderSection(
 					})
 		);
 
-	renderConnectionTestButton(containerEl, "anthropic", ctx);
+	renderConnectionTestButton(groupEl, "anthropic", ctx);
 }

@@ -367,6 +367,28 @@
 	border-top: 1px solid var(--background-modifier-border);
 }
 
+/* Provider settings — unified card per provider (same pattern as preset rows) */
+.notor-provider-group {
+	border-radius: var(--radius-m);
+	overflow: hidden;
+	margin-bottom: var(--size-4-2);
+}
+
+.notor-provider-group > .setting-item {
+	margin-bottom: 0;
+	border-radius: 0;
+	border-top: none;
+}
+
+.notor-provider-group > p {
+	background: var(--setting-items-background);
+	margin: 0;
+	padding: var(--size-4-4);
+	padding-bottom: 0;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
 /* Preset list — spaced card rows */
 .notor-preset-list {
 	display: flex;

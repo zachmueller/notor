@@ -18,8 +18,10 @@ export function renderBedrockProviderSection(
 ): void {
 	new Setting(containerEl).setHeading().setName("AWS Bedrock");
 
+	const groupEl = containerEl.createDiv({ cls: "notor-provider-group" });
+
 	// IAM policy note
-	containerEl.createEl("p", {
+	groupEl.createEl("p", {
 		text:
 			"Required IAM permissions: bedrock:InvokeModelWithResponseStream " +
 			"(for sending messages) and bedrock:ListInferenceProfiles " +
@@ -33,7 +35,7 @@ export function renderBedrockProviderSection(
 	const getBedrockProvider = () => getProvider(ctx.settings, "bedrock");
 
 	// Region dropdown
-	new Setting(containerEl)
+	new Setting(groupEl)
 		.setName("AWS region")
 		.setDesc("The AWS region where your Bedrock models are available.")
 		.addDropdown((dropdown) => {
@@ -51,7 +53,7 @@ export function renderBedrockProviderSection(
 		});
 
 	// Auth method toggle
-	new Setting(containerEl)
+	new Setting(groupEl)
 		.setName("Authentication method")
 		.setDesc(
 			"How to authenticate with AWS: 'AWS profile' uses the standard credential chain; " +
@@ -76,7 +78,7 @@ export function renderBedrockProviderSection(
 
 	if (authMethod === "profile") {
 		// Profile name text field
-		new Setting(containerEl)
+		new Setting(groupEl)
 			.setName("AWS profile name")
 			.setDesc(
 				"The AWS named profile to use. Leave blank to use the 'default' profile."
@@ -94,7 +96,7 @@ export function renderBedrockProviderSection(
 			);
 	} else {
 		// Access key ID
-		new Setting(containerEl)
+		new Setting(groupEl)
 			.setName("Access key ID")
 			.setDesc("Your AWS access key ID.")
 			.addComponent(
@@ -107,7 +109,7 @@ export function renderBedrockProviderSection(
 			);
 
 		// Secret access key
-		new Setting(containerEl)
+		new Setting(groupEl)
 			.setName("Secret access key")
 			.setDesc("Your AWS secret access key.")
 			.addComponent(
@@ -120,5 +122,5 @@ export function renderBedrockProviderSection(
 			);
 	}
 
-	renderConnectionTestButton(containerEl, "bedrock", ctx);
+	renderConnectionTestButton(groupEl, "bedrock", ctx);
 }

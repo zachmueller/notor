@@ -18,8 +18,9 @@ export function renderLocalProviderSection(
 	new Setting(containerEl).setHeading().setName("Local (OpenAI-compatible)");
 
 	const provider = getProvider(ctx.settings, "local");
+	const groupEl = containerEl.createDiv({ cls: "notor-provider-group" });
 
-	new Setting(containerEl)
+	new Setting(groupEl)
 		.setName("Endpoint URL")
 		.setDesc(
 			"Base URL of the local OpenAI-compatible API server (e.g. Ollama, LM Studio)."
@@ -36,7 +37,7 @@ export function renderLocalProviderSection(
 				})
 		);
 
-	new Setting(containerEl)
+	new Setting(groupEl)
 		.setName("API key")
 		.setDesc(
 			"Optional API key for local servers that require authentication."
@@ -51,5 +52,5 @@ export function renderLocalProviderSection(
 					})
 		);
 
-	renderConnectionTestButton(containerEl, "local", ctx);
+	renderConnectionTestButton(groupEl, "local", ctx);
 }
