@@ -367,13 +367,6 @@
 	border-top: 1px solid var(--background-modifier-border);
 }
 
-/* Divider between "Default preset" selector and preset card list */
-.notor-preset-section-divider {
-	margin: 4px 18px 0;
-	border: none;
-	border-top: 1px solid var(--background-modifier-border);
-}
-
 /* Preset list — spaced card rows */
 .notor-preset-list {
 	display: flex;
@@ -384,7 +377,6 @@
 
 /* Each preset is a single unified card — no internal dividers */
 .notor-preset-row {
-	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	overflow: hidden;
 }

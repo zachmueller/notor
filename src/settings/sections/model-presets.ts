@@ -61,7 +61,6 @@ export function renderModelPresetsSection(
 		});
 
 	// --- Preset rows ---
-	containerEl.createEl("hr", { cls: "notor-preset-section-divider" });
 	const listContainer = containerEl.createDiv({ cls: "notor-preset-list" });
 	renderPresetRows(listContainer, ctx);
 
