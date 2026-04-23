@@ -46,20 +46,26 @@ export class WorkflowActivityIndicator {
 	private onNavigateToConversation: NavigateToConversationCallback | null = null;
 	/** Optional accessor for active foreground conversation sessions (Phase 3). */
 	private readonly getActiveSessions?: () => ConversationSession[];
+	/** Optional accessor for the conversation ID currently shown in THIS panel. */
+	private readonly getCurrentConversationId?: () => string | null;
 
 	/**
-	 * @param containerEl - The chat panel header element to render into.
-	 * @param tracker - The workflow activity tracker providing state data.
-	 * @param getActiveSessions - Optional accessor for active foreground conversation sessions.
+	 * @param containerEl              - The chat panel header element to render into.
+	 * @param tracker                  - The workflow activity tracker providing state data.
+	 * @param getActiveSessions        - Optional accessor for active foreground conversation sessions.
+	 * @param getCurrentConversationId - Optional accessor for the conversation ID currently open in
+	 *                                   this panel, forwarded to the dropdown for entry highlighting.
 	 */
 	constructor(
 		containerEl: HTMLElement,
 		tracker: WorkflowActivityTracker,
 		getActiveSessions?: () => ConversationSession[],
+		getCurrentConversationId?: () => string | null,
 	) {
 		this.containerEl = containerEl;
 		this.tracker = tracker;
 		this.getActiveSessions = getActiveSessions;
+		this.getCurrentConversationId = getCurrentConversationId;
 	}
 
 	// -----------------------------------------------------------------------
@@ -83,7 +89,7 @@ export class WorkflowActivityIndicator {
 		this.indicatorEl = createDiv({
 			cls: "notor-workflow-activity-indicator",
 			attr: {
-				"aria-label": "Workflow activity",
+				"aria-label": "Activity",
 				role: "button",
 				tabindex: "0",
 			},
@@ -125,6 +131,7 @@ export class WorkflowActivityIndicator {
 				this.onNavigateToConversation?.(conversationId);
 			},
 			this.getActiveSessions,
+			this.getCurrentConversationId,
 		);
 
 		// Register the onChange callback for reactive updates

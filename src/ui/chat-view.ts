@@ -167,6 +167,8 @@ export class NotorChatView extends ItemView {
 	private workflowActivityIndicator?: WorkflowActivityIndicator;
 	/** Accessor for active foreground conversation sessions (Phase 3). */
 	private getActiveSessions?: () => ConversationSession[];
+	/** Accessor returning the conversation ID currently displayed in THIS panel. */
+	private getCurrentConversationId?: () => string | null;
 
 	// MCP status indicator (INT-005)
 	private mcpStatusIndicator?: McpStatusIndicator;
@@ -221,6 +223,12 @@ export class NotorChatView extends ItemView {
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Phase A3.5
 	 */
 	_unregisterSessionsChanged?: () => void;
+
+	/**
+	 * Removes this panel's `updateActivityIndicator` callback from the global
+	 * set in `main.ts`. Called on close and on re-wire to prevent accumulation.
+	 */
+	_removeActivityCallback?: () => void;
 
 	/**
 	 * Unregister function for the PersonaManager persona-changed listener.
@@ -320,6 +328,10 @@ export class NotorChatView extends ItemView {
 
 	setActiveConversationId(id: string | null): void {
 		this.activeConversationId = id;
+	}
+
+	getActiveConversationId(): string | null {
+		return this.activeConversationId;
 	}
 
 	setOnSendMessage(callback: (content: string, attachments?: Attachment[]) => Promise<void>): void {
@@ -575,6 +587,20 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Set the accessor for the conversation ID currently displayed in THIS panel.
+	 *
+	 * Passed to the activity indicator and forwarded to the dropdown so the
+	 * entry matching this panel's open conversation is subtly highlighted.
+	 */
+	setGetCurrentConversationId(getter: () => string | null): void {
+		this.getCurrentConversationId = getter;
+
+		if (this.headerEl && this.workflowActivityTracker) {
+			this.initActivityIndicator();
+		}
+	}
+
+	/**
 	 * Trigger an update of the activity indicator (badge + animation).
 	 *
 	 * Called when the orchestrator's session set changes so the indicator
@@ -603,6 +629,7 @@ export class NotorChatView extends ItemView {
 			this.headerEl,
 			this.workflowActivityTracker,
 			this.getActiveSessions,
+			this.getCurrentConversationId,
 		);
 
 		// Wire the conversation navigation callback (H-005)
@@ -974,13 +1001,14 @@ export class NotorChatView extends ItemView {
 		this.onPersonaChange = undefined;
 		this.onDirectRename = undefined;
 
-		// setGet* callbacks (8)
+		// setGet* callbacks (9)
 		this.getAvailableProviders = undefined;
 		this.getAvailableModels = undefined;
 		this.getCurrentProvider = undefined;
 		this.getCurrentModel = undefined;
 		this.getWorkflowsCallback = undefined;
 		this.getActiveSessions = undefined;
+		this.getCurrentConversationId = undefined;
 		this.getCurrentConversationPersonaName = undefined;
 		this.getActiveConversationMeta = undefined;
 

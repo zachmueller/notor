@@ -77,6 +77,7 @@ import { ToolDispatcher } from "./chat/dispatcher";
 import { HistoryManager, conversationFilename } from "./chat/history";
 import { SystemPromptBuilder } from "./chat/system-prompt";
 import { ChatOrchestrator, type SessionGuard } from "./chat/orchestrator";
+import type { ConversationSession } from "./chat/conversation-session";
 import { StaleContentTracker } from "./chat/stale-tracker";
 
 // Checkpoints
@@ -176,6 +177,14 @@ export default class NotorPlugin extends Plugin {
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.3
 	 */
 	private _activeConversationSessions = new Set<string>();
+
+	/**
+	 * Global set of `updateActivityIndicator` callbacks — one per open chat panel.
+	 *
+	 * When any orchestrator's session set changes, every panel's indicator is
+	 * refreshed so all panels see the full global session pool.
+	 */
+	private _activityIndicatorCallbacks = new Set<() => void>();
 
 	/**
 	 * Session guard implementation backed by `_activeConversationSessions`.
@@ -2702,6 +2711,21 @@ export default class NotorPlugin extends Plugin {
 	// -----------------------------------------------------------------------
 
 	/**
+	 * Return the union of active sessions from all open chat panels.
+	 *
+	 * Used as the global `getActiveSessions` getter so every panel's activity
+	 * indicator badge and dropdown reflect sessions across all panels, not just
+	 * the one they belong to.
+	 */
+	private _getAllActiveSessions(): ConversationSession[] {
+		const result: ConversationSession[] = [];
+		for (const orch of this._orchestrators.values()) {
+			result.push(...orch.getActiveSessions());
+		}
+		return result;
+	}
+
+	/**
 	 * Wire a newly created chat view to the orchestrator.
 	 *
 	 * Called when the view is registered and every time the view is opened
@@ -2727,6 +2751,10 @@ export default class NotorPlugin extends Plugin {
 		// session guard unregister) completes before DOM teardown.
 		// @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 7.2
 		const leafId = view.leaf.id;
+
+		// Declare before setOnCloseCleanup so the close closure can reference it.
+		const updateThisView = () => view.updateActivityIndicator();
+
 		view.setOnCloseCleanup(async () => {
 			// 1. Abort any in-flight loadConversation() — must be first.
 			//    Without this, a concurrent load can continue after orchestrator
@@ -2739,9 +2767,10 @@ export default class NotorPlugin extends Plugin {
 			// 3. Detach view — renders become no-ops via existing this.view?. guards
 			orchestrator.setView(undefined);
 
-			// 4. Clean up session-change and persona-changed listeners
+			// 4. Clean up session-change, persona-changed, and global activity listeners
 			view._unregisterSessionsChanged?.();
 			view._unregisterPersonaChanged?.();
+			view._removeActivityCallback?.();
 
 			// 5. Remove from registry
 			this._orchestrators.delete(leafId);
@@ -2758,16 +2787,28 @@ export default class NotorPlugin extends Plugin {
 			view.setWorkflowActivityTracker(this._workflowActivityTracker);
 		}
 
-		// Phase 3: Wire active session accessor so the activity indicator
-		// includes detached foreground conversations in badge count + dropdown.
-		view.setGetActiveSessions(() => orchestrator.getActiveSessions());
+		// Wire global session accessor so every panel's indicator shows sessions
+		// from ALL open chat panels, not just its own orchestrator.
+		view.setGetActiveSessions(() => this._getAllActiveSessions());
+
+		// Wire the current conversation ID getter for dropdown entry highlighting.
+		view.setGetCurrentConversationId(() => view.getActiveConversationId());
+
+		// Register this panel's indicator updater in the global set so that a
+		// session change in any panel triggers every panel's indicator to refresh.
+		// Guard against stale closures from a previous wireView call.
+		view._removeActivityCallback?.();
+		this._activityIndicatorCallbacks.add(updateThisView);
+		view._removeActivityCallback = () => this._activityIndicatorCallbacks.delete(updateThisView);
 
 		// A3.5: Clean up previous session-change listener before registering
 		// a new one to prevent listener accumulation across wireView calls.
+		// The handler fires ALL panels' indicators (not just this one) so that
+		// a session starting in Panel A immediately updates Panel B's badge too.
 		view._unregisterSessionsChanged?.();
-		view._unregisterSessionsChanged = orchestrator.onSessionsChanged(
-			() => view.updateActivityIndicator()
-		);
+		view._unregisterSessionsChanged = orchestrator.onSessionsChanged(() => {
+			for (const cb of this._activityIndicatorCallbacks) cb();
+		});
 
 		// H-005: Wire conversation-by-ID switching for the activity dropdown.
 		// When a user clicks a workflow entry in the dropdown, it calls

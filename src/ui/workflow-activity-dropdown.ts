@@ -54,21 +54,27 @@ export class WorkflowActivityDropdown {
 
 	/** Optional accessor for active foreground conversation sessions (Phase 3). */
 	private readonly getActiveSessions?: () => ConversationSession[];
+	/** Optional accessor for the conversation ID currently shown in THIS panel. */
+	private readonly getCurrentConversationId?: () => string | null;
 
 	/**
-	 * @param tracker           - The workflow activity tracker providing execution data.
-	 * @param onNavigate        - Callback invoked when the user clicks an entry to navigate
-	 *                            to that workflow's conversation.
-	 * @param getActiveSessions - Optional accessor for active foreground conversation sessions.
+	 * @param tracker                   - The workflow activity tracker providing execution data.
+	 * @param onNavigate                - Callback invoked when the user clicks an entry to navigate
+	 *                                    to that workflow's conversation.
+	 * @param getActiveSessions         - Optional accessor for active foreground conversation sessions.
+	 * @param getCurrentConversationId  - Optional accessor for the conversation ID currently open in
+	 *                                    this panel, used to highlight the matching dropdown entry.
 	 */
 	constructor(
 		tracker: WorkflowActivityTracker,
 		onNavigate: NavigateToConversationCallback,
 		getActiveSessions?: () => ConversationSession[],
+		getCurrentConversationId?: () => string | null,
 	) {
 		this.tracker = tracker;
 		this.onNavigate = onNavigate;
 		this.getActiveSessions = getActiveSessions;
+		this.getCurrentConversationId = getCurrentConversationId;
 	}
 
 	// -----------------------------------------------------------------------
@@ -301,6 +307,10 @@ export class WorkflowActivityDropdown {
 		const entryEl = container.createDiv({
 			cls: "notor-workflow-activity-entry",
 		});
+
+		if (this.getCurrentConversationId?.() === session.conversationId) {
+			entryEl.addClass("is-current");
+		}
 
 		// Top row: conversation title + status badge
 		const topRow = entryEl.createDiv({ cls: "notor-workflow-activity-entry-top" });

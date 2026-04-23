@@ -3208,6 +3208,17 @@
 	background: var(--background-modifier-hover);
 }
 
+/* Session entry belonging to the conversation currently open in this panel */
+.notor-workflow-activity-entry.is-current {
+	background: rgba(var(--color-accent-rgb, 68, 130, 255), 0.06);
+	border-left: 2px solid var(--color-accent);
+	padding-left: 10px;
+}
+
+.notor-workflow-activity-entry.is-current:hover {
+	background: rgba(var(--color-accent-rgb, 68, 130, 255), 0.12);
+}
+
 /* Entry top row — workflow name + status badge */
 .notor-workflow-activity-entry-top {
 	display: flex;
