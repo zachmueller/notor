@@ -3318,8 +3318,8 @@
 	opacity: 0.8;
 }
 
-/* Hover fork button — absolutely positioned in message/tool elements */
-.notor-fork-btn {
+/* Hover copy button — absolutely positioned in message/tool elements */
+.notor-copy-btn {
 	position: absolute;
 	top: 4px;
 	right: 4px;
@@ -3330,13 +3330,13 @@
 	transition: opacity 150ms ease;
 }
 
-.notor-message:hover > .notor-fork-btn,
-.notor-tool-call:hover > .notor-fork-btn,
-.notor-tool-result:hover > .notor-fork-btn {
+.notor-message:hover > .notor-copy-btn,
+.notor-tool-call:hover > .notor-copy-btn,
+.notor-tool-result:hover > .notor-copy-btn {
 	opacity: 0.4;
 }
 
-.notor-fork-btn:hover {
+.notor-copy-btn:hover {
 	opacity: 0.8;
 	background: var(--background-modifier-hover);
 }

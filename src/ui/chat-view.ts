@@ -118,6 +118,7 @@ export class NotorChatView extends ItemView {
 	private lastToolCallEl: HTMLElement | null = null;
 	/** Map of message IDs to their rendered tool call elements, for targeted approval. */
 	private toolCallElMap = new Map<string, HTMLElement>();
+	private renderedMessages = new Map<string, Message>();
 	/** Whether to auto-scroll to the bottom on new content. Set to false when the user scrolls up. */
 	private autoScroll = true;
 
@@ -1246,30 +1247,80 @@ export class NotorChatView extends ItemView {
 			this.autoScroll = distanceFromBottom <= 50;
 		});
 
-		// Context menu for forking conversations (event delegation)
+		// Context menu for messages and panel background
 		this.messageListEl.addEventListener("contextmenu", (evt: MouseEvent) => {
 			const target = (evt.target as HTMLElement).closest("[data-message-id]") as HTMLElement | null;
-			if (!target) return;
-			const messageId = target.dataset.messageId;
-			if (!messageId) return;
-
+			const messageId = target?.dataset.messageId ?? null;
+			const selectedText = window.getSelection()?.toString().trim() ?? "";
 			const menu = new Menu();
-			menu.addItem((item) => {
-				item.setTitle("Fork here")
-					.setIcon("git-branch-plus")
-					.onClick(() => {
-						this.onForkConversation?.(messageId);
+			let hasItems = false;
+
+			if (messageId) {
+				const message = this.renderedMessages.get(messageId);
+				if (message) {
+					menu.addItem((item) => {
+						item.setTitle("Copy message contents")
+							.setIcon("clipboard-copy")
+							.onClick(() => {
+								void navigator.clipboard.writeText(getTextContent(message.content)).then(() => {
+									new Notice("Copied");
+								});
+							});
 					});
-			});
-			menu.addItem((item) => {
-				item.setTitle("/btw")
-					.setIcon("message-square-plus")
-					.onClick(() => {
-						this.onForkToNewPanel?.(messageId);
-					});
-			});
-			menu.showAtMouseEvent(evt);
-			evt.preventDefault();
+					hasItems = true;
+				}
+			}
+
+			if (selectedText) {
+				menu.addItem((item) => {
+					item.setTitle("Copy selected text")
+						.setIcon("text-cursor")
+						.onClick(() => {
+							void navigator.clipboard.writeText(selectedText).then(() => {
+								new Notice("Copied");
+							});
+						});
+				});
+				hasItems = true;
+			}
+
+			if (messageId) {
+				menu.addSeparator();
+				menu.addItem((item) => {
+					item.setTitle("Fork here")
+						.setIcon("git-branch-plus")
+						.onClick(() => {
+							this.onForkConversation?.(messageId);
+						});
+				});
+				menu.addItem((item) => {
+					item.setTitle("/btw")
+						.setIcon("message-square-plus")
+						.onClick(() => {
+							this.onForkToNewPanel?.(messageId);
+						});
+				});
+				hasItems = true;
+			}
+
+			if (this.activeConversationId) {
+				menu.addSeparator();
+				menu.addItem((item) => {
+					item.setTitle("Copy conversation ID")
+						.setIcon("hash")
+						.onClick(() => {
+							void navigator.clipboard.writeText(this.activeConversationId!).then(() => {
+								new Notice("Conversation ID copied");
+							});
+						});
+				});
+				hasItems = true;
+			}
+
+			if (hasItems) {
+				menu.showAtMouseEvent(evt);
+				evt.preventDefault();
+			}
 		});
 
 		// Loading indicator
@@ -1872,21 +1923,22 @@ export class NotorChatView extends ItemView {
 		this.modeToggleEl.addClass(mode === "plan" ? "notor-mode-plan" : "notor-mode-act");
 	}
 
-	/**
-	 * Append a hover fork button to a message element.
-	 * The button reads `data-message-id` from the element and invokes
-	 * the fork callback when clicked.
-	 */
-	appendForkButton(msgEl: HTMLElement): void {
-		const btn = msgEl.createDiv({ cls: "notor-fork-btn" });
-		setIcon(btn, "git-branch-plus");
-		btn.ariaLabel = "Fork conversation from here";
+	appendForkButton(msgEl: HTMLElement, message?: Message): void {
+		if (message) {
+			this.renderedMessages.set(message.id, message);
+		}
+		const btn = msgEl.createDiv({ cls: "notor-copy-btn" });
+		setIcon(btn, "copy");
+		btn.ariaLabel = "Copy message contents";
 		btn.addEventListener("click", (e) => {
 			e.stopPropagation();
 			const messageId = msgEl.dataset.messageId;
-			if (messageId) {
-				this.onForkConversation?.(messageId);
-			}
+			if (!messageId) return;
+			const msg = this.renderedMessages.get(messageId);
+			if (!msg) return;
+			void navigator.clipboard.writeText(getTextContent(msg.content)).then(() => {
+				new Notice("Copied");
+			});
 		});
 	}
 
@@ -1912,7 +1964,7 @@ export class NotorChatView extends ItemView {
 
 		const msgEl = this.messageListEl.createDiv({ cls: "notor-message notor-message-user" });
 		msgEl.dataset.messageId = message.id;
-		this.appendForkButton(msgEl);
+		this.appendForkButton(msgEl, message);
 		const contentEl = msgEl.createDiv({ cls: "notor-message-content" });
 
 		// Extract <attachments> block (if any) and render as collapsed <details>
@@ -2043,7 +2095,7 @@ export class NotorChatView extends ItemView {
 	 */
 	async finalizeAssistantMessage(contentEl: HTMLElement, message: Message): Promise<void> {
 		contentEl.parentElement!.dataset.messageId = message.id;
-		this.appendForkButton(contentEl.parentElement!);
+		this.appendForkButton(contentEl.parentElement!, message);
 		contentEl.empty();
 		const assistantText = typeof message.content === "string"
 			? message.content
@@ -2287,7 +2339,7 @@ export class NotorChatView extends ItemView {
 
 		const resultEl = this.messageListEl.createDiv({ cls: "notor-tool-result" });
 		resultEl.dataset.messageId = message.id;
-		this.appendForkButton(resultEl);
+		this.appendForkButton(resultEl, message);
 
 		// Summary line
 		const summaryEl = resultEl.createDiv({ cls: "notor-tool-result-summary" });
@@ -2828,6 +2880,15 @@ export class NotorChatView extends ItemView {
 		});
 
 		menu.addItem((item) => {
+			item.setTitle("Copy conversation ID")
+				.setIcon("hash")
+				.onClick(async () => {
+					await navigator.clipboard.writeText(entry.id);
+					new Notice("Conversation ID copied");
+				});
+		});
+
+		menu.addItem((item) => {
 			item.setTitle("Delete conversation")
 				.setIcon("trash-2")
 				.onClick(() => {
@@ -2872,6 +2933,7 @@ export class NotorChatView extends ItemView {
 		this.messageListEl.empty();
 		this.tokenFooterEl.addClass("notor-hidden");
 		this.toolCallElMap.clear();
+		this.renderedMessages.clear();
 		this.lastToolCallEl = null;
 	}
 

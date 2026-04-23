@@ -1221,7 +1221,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 							// Set message ID after dispatch completes so only
 							// finished tool calls are forkable (not pending ones)
 							entry.el.dataset.messageId = entry.message.id;
-							this.getViewForSession(session)?.appendForkButton(entry.el);
+							this.getViewForSession(session)?.appendForkButton(entry.el, entry.message);
 						}
 
 						toolResults.push(batchResult.result);
