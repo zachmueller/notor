@@ -214,14 +214,15 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 		// Wire conversation manager to history persistence + live render for direct emits
 		this.conversationManager.setOnMessageAdded(async (message: Message) => {
+			// Render before async disk I/O so extension blocks appear in DOM order,
+			// before the LLM response, rather than after the JSONL write resolves.
+			// Guard against double-render for transient blocks already shown by emitLoadingBlock.
+			if (message.role === "extension_block" && !this.view?.hasMessageElement(message.id)) {
+				this.viewRouter.renderMessage(message);
+			}
 			const conv = this.conversationManager.getActiveConversation();
 			if (conv) {
 				await this.historyManager.appendMessage(conv, message);
-			}
-			// Live-render extension_blocks emitted directly to the display manager
-			// (e.g. via chatBlocks.emit on the active conversation)
-			if (message.role === "extension_block") {
-				this.viewRouter.renderMessage(message);
 			}
 		});
 
@@ -785,6 +786,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 				hasAccessors: !!this.extensionLifecycleAccessors,
 			});
 			if (userMessages.length === 1) {
+				// Show the responding state immediately so the user sees feedback while
+				// blocking automations (e.g. memory-search) run before the LLM call.
+				this.view?.setRespondingState(true);
 				await dispatchOnConversationStart(
 					{
 						conversationId: conv.id,
@@ -794,13 +798,16 @@ export class ChatOrchestrator implements ToolSessionContext {
 					this.extensionLifecycleAccessors,
 					{
 						emitLoadingBlock: (kind) => {
-							return this.conversationManager.addMessage({
+							const msg = this.conversationManager.addMessage({
 								role: "extension_block",
 								content: [{ type: "custom_block", kind, data: {}, loading: true }],
 								source_extension: null,
 								exclude_from_compaction: true,
 								transient: true,
 							});
+							// Render the loading placeholder immediately into the chat thread.
+							this.viewRouter.renderMessage(msg);
+							return msg;
 						},
 						resolveLoadingBlock: (messageId) => {
 							// The loading block will be replaced via chatBlocks.emit() in the

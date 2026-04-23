@@ -2409,6 +2409,10 @@ export class NotorChatView extends ItemView {
 		this.scrollToBottom();
 	}
 
+	hasMessageElement(messageId: string): boolean {
+		return !!this.messageListEl.querySelector(`[data-message-id="${messageId}"]`);
+	}
+
 	/**
 	 * Re-render an extension_block message in place (loading → real).
 	 * Finds the existing DOM element by message ID, clears it, and re-renders.

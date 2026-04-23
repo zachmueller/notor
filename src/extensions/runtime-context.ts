@@ -899,6 +899,25 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 					const activeConv = convManager?.getActiveConversation();
 
 					if (activeConv && activeConv.id === targetConversationId) {
+						// If a transient loading placeholder of this kind exists, promote it
+						// in-place so the final block occupies the same position in the message
+						// array (and JSONL) as the placeholder — keeping correct ordering.
+						const transient = convManager!.getMessages().find((m) =>
+							m.role === "extension_block" &&
+							Array.isArray(m.content) &&
+							m.content.some(
+								(b) => b.type === "custom_block" && (b as { kind: string; loading?: boolean }).kind === kind && (b as { loading?: boolean }).loading === true,
+							),
+						);
+						if (transient) {
+							const promoted = convManager!.promoteTransientMessage(transient.id, messageParams.content, {
+								exclude_from_compaction: messageParams.exclude_from_compaction,
+							});
+							if (promoted) {
+								cbLog.debug("chatBlocks.emit: promoted transient block", { kind, conversationId: targetConversationId });
+								return promoted;
+							}
+						}
 						const message = convManager!.addMessage(messageParams);
 						cbLog.debug("chatBlocks.emit: emitted to active conversation", { kind, conversationId: targetConversationId });
 						return message;
