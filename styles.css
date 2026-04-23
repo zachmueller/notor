@@ -367,6 +367,40 @@
 	border-top: 1px solid var(--background-modifier-border);
 }
 
+/* Divider between "Default preset" selector and preset card list */
+.notor-preset-section-divider {
+	margin: 4px 18px 0;
+	border: none;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Preset list — spaced card rows */
+.notor-preset-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 4px 0 8px;
+}
+
+/* Each preset is a bordered card */
+.notor-preset-row {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	overflow: hidden;
+}
+
+/* Name row — card header: no top border (card provides it), secondary bg */
+.notor-preset-row > .setting-item:first-child {
+	border-top: none;
+	background: var(--background-secondary);
+}
+
+/* Controls row — card footer: secondary bg with top border */
+.notor-preset-row > .setting-item.notor-preset-controls {
+	background: var(--background-secondary);
+	border-top: 1px solid var(--background-modifier-border);
+}
+
 .notor-tool-mcp-server-header {
 	display: flex;
 	align-items: center;
