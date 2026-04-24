@@ -27,6 +27,7 @@ import { paramSchemaToJsonSchema } from "./param-schema";
 import { resolveSettings, resolveSharedSettings } from "./settings-schema";
 import { buildUtils, buildLibs, buildObsidianExports } from "./runtime-context";
 import type { ExtensionUtils, ExtensionLibs, ExtensionObsidianExports } from "./runtime-context";
+import { NoteOpener } from "../tools/note-opener";
 import { TOOL_PATH_PARAMS } from "../tool-config/path-enforcer";
 import { BUILTIN_TOOL_SCAFFOLDS, BUILTIN_SHARED_SETTINGS_SCHEMA } from "./builtin-tool-scaffolds";
 import type { ChatBlockDefinition } from "../ui/chat-blocks/registry";
@@ -93,6 +94,9 @@ export class UserToolAdapter implements Tool {
 			}
 			if (options?.onProgress) {
 				utils.onProgress = options.onProgress;
+			}
+			if (options?.silentNoteOpener) {
+				utils.noteOpener = new NoteOpener(this.plugin.app, false, false);
 			}
 
 			const libs = this.manager.getCachedLibs();

@@ -112,6 +112,9 @@ export class ToolDispatcher {
 	/** Event handlers for UI updates. */
 	private events: DispatcherEvents = {};
 
+	/** When true, tools execute with note-opener side effects suppressed. */
+	private silentMode = false;
+
 	// -----------------------------------------------------------------------
 	// Configuration
 	// -----------------------------------------------------------------------
@@ -168,6 +171,11 @@ export class ToolDispatcher {
 	/** Set event handlers for UI updates. */
 	setEvents(events: DispatcherEvents): void {
 		this.events = events;
+	}
+
+	/** Suppress editor-open side effects on all tools dispatched through this instance. */
+	setSilentMode(silent: boolean): void {
+		this.silentMode = silent;
 	}
 
 	/**
@@ -550,7 +558,7 @@ export class ToolDispatcher {
 		//    the background but its result is discarded.
 		const startTime = Date.now();
 		try {
-			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext };
+			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext, silentNoteOpener: this.silentMode || undefined };
 			const executePromise = tool.execute(parameters, executeOptions);
 
 			let result: ToolResult;

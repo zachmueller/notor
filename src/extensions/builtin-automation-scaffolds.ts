@@ -217,6 +217,7 @@ const result = await utils.runSubAgent({
   profileName: searchProfile,
   task,
   detached: false,
+  silent: true,
 });
 
 if (!result || !result.text) {
@@ -379,6 +380,7 @@ await utils.runSubAgent({
   profileName: captureProfile,
   task,
   detached: true,
+  silent: true,
   onComplete: async (result) => {
     if (!result || !result.text) {
       log.debug("Capture sub-agent returned no result");
@@ -414,6 +416,7 @@ await utils.runSubAgent({
           insight: insight.content,
           memoryDir,
           resolverProfile,
+          silent: true,
         });
 
         results.push({
@@ -654,6 +657,7 @@ for (const conversation of qualifying) {
       profileName: dreamProfile,
       task,
       detached: false,
+      silent: true,
     });
 
     if (!result || !result.text) {
@@ -690,6 +694,7 @@ for (const conversation of qualifying) {
             insight: directive.title + "\\n\\n" + directive.body,
             memoryDir,
             resolverProfile,
+            silent: true,
           });
 
           // Check overflow after apply
@@ -815,6 +820,7 @@ async function handleOverflow(
     profileName: dreamProfile,
     task: overflowTask,
     detached: false,
+    silent: true,
   });
 
   if (!overflowResult || !overflowResult.text) return;
@@ -834,6 +840,7 @@ async function handleOverflow(
           insight: child.title + "\\n\\n" + child.body,
           memoryDir,
           resolverProfile,
+          silent: true,
         });
         // Recurse on children that may still be oversized
         if (childResult.path && childResult.action !== "skipped") {

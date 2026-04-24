@@ -252,6 +252,8 @@ export interface ExtensionUtils {
 		profileName: string;
 		task: string;
 		detached?: boolean;
+		/** Suppress editor-open side effects for all tool calls within the sub-agent. */
+		silent?: boolean;
 		onComplete?: (result: SubAgentResult) => Promise<void> | void;
 		iterationCap?: number;
 		timeout?: number;
@@ -280,6 +282,7 @@ export interface ExtensionUtils {
 			insight: string;
 			memoryDir: string;
 			resolverProfile: string;
+			silent?: boolean;
 		}) => Promise<ResolveConceptResult>;
 		fingerprintAndDedup: (content: string, windowHours: number) => Promise<{ fingerprint: string; isDuplicate: boolean }>;
 		serializeNote: (args: { title: string; body: string; sources: string[]; createdAt: string }) => string;
@@ -592,6 +595,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				profileName: string;
 				task: string;
 				detached?: boolean;
+				silent?: boolean;
 				onComplete?: (result: SubAgentResult) => Promise<void> | void;
 				iterationCap?: number;
 				timeout?: number;
@@ -698,6 +702,9 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				subDispatcher.setSettings(plugin.settings);
 				if (plugin.vaultRootPath) {
 					subDispatcher.setVaultRootPath(plugin.vaultRootPath);
+				}
+				if (opts.silent) {
+					subDispatcher.setSilentMode(true);
 				}
 
 				const toolDefinitions: import("../providers/provider").ToolDefinition[] = enabledToolNames
@@ -1080,6 +1087,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				insight: string;
 				memoryDir: string;
 				resolverProfile: string;
+				silent?: boolean;
 			}) => resolveConcept({
 				insight: args.insight,
 				memoryDir: args.memoryDir,
@@ -1087,6 +1095,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				app: plugin.app,
 				runSubAgent: utils.runSubAgent,
 				vault: plugin.app.vault,
+				silent: args.silent,
 			}),
 
 			fingerprintAndDedup: async (content: string, windowHours: number) => {

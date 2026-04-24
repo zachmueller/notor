@@ -46,6 +46,8 @@ export interface ToolExecuteOptions {
 	abortSignal?: AbortSignal;
 	/** Session-scoped context — tools use this to read the dispatching orchestrator's state. */
 	sessionContext?: ToolSessionContext;
+	/** Suppress editor-open side effects (e.g. noteOpener) — used by background/silent sub-agents. */
+	silentNoteOpener?: boolean;
 }
 
 /**

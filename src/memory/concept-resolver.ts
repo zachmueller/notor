@@ -15,6 +15,8 @@ export interface ResolveConceptArgs {
 	app: App;
 	runSubAgent: ExtensionUtils["runSubAgent"];
 	vault: Vault;
+	/** Suppress editor-open side effects within the resolver sub-agent. */
+	silent?: boolean;
 }
 
 export interface ResolveConceptResult {
@@ -39,6 +41,7 @@ export async function resolveConcept(
 		profileName: resolverProfile,
 		task: insight,
 		detached: false,
+		silent: args.silent,
 	});
 
 	if (!result) {
