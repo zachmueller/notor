@@ -160,6 +160,11 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Change a single Notor plugin setting by key path.",
 		isWrite: true,
 	},
+	capture_memory: {
+		name: "Capture memory",
+		desc: "Save an insight into long-term memory as an Evergreen note.",
+		isWrite: true,
+	},
 };
 
 // ---------------------------------------------------------------------------
