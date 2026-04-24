@@ -100,6 +100,12 @@ export interface NotorSettings {
 	/** Set opened notes as the active tab and give them editor focus. */
 	focus_notes_on_access: boolean;
 
+	/** Maximum number of lines the chat input auto-resizes to before capping. */
+	chat_input_max_lines: number;
+
+	/** Maximum height of the chat input as a percentage of the window height (0–100). */
+	chat_input_max_height_pct: number;
+
 	/** Chat history storage path (vault-relative). */
 	history_path: string;
 

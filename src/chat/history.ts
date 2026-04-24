@@ -279,6 +279,16 @@ export class HistoryManager {
 	}
 
 	/**
+	 * Persist an unsent draft text into the conversation's JSONL header.
+	 *
+	 * Pass null to clear a previously saved draft.
+	 */
+	async saveDraft(conversation: Conversation, text: string | null): Promise<void> {
+		conversation.draft_text = text || null;
+		await this.updateConversationHeader(conversation);
+	}
+
+	/**
 	 * Toggle the `is_favorite` flag on a conversation's JSONL header.
 	 *
 	 * Returns the new value of `is_favorite` after toggling.

@@ -280,6 +280,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			() => this.activePresetName,
 			(name) => { this.activePresetName = name; },
 			() => this.sharedCheckpointManagerGetter?.(),
+			(filename) => this.switchConversation(filename),
 		);
 		this.workflowExecutor = new WorkflowExecutor({
 			app: this.app,

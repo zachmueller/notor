@@ -57,4 +57,38 @@ export function renderGeneralSection(
 					await ctx.saveSettings();
 				})
 		);
+
+	new Setting(containerEl)
+		.setName("Chat input max lines")
+		.setDesc(
+			"Maximum number of lines the chat input box auto-expands to before capping. " +
+				"Drag the resize handle above the input to override per-session."
+		)
+		.addSlider((slider) =>
+			slider
+				.setLimits(1, 20, 1)
+				.setValue(ctx.settings.chat_input_max_lines)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					ctx.settings.chat_input_max_lines = value;
+					await ctx.saveSettings();
+				})
+		);
+
+	new Setting(containerEl)
+		.setName("Chat input max height")
+		.setDesc(
+			"Maximum height of the chat input box as a percentage of the window height. " +
+				"The actual cap is whichever is larger: this percentage or the max-lines height."
+		)
+		.addSlider((slider) =>
+			slider
+				.setLimits(5, 80, 5)
+				.setValue(ctx.settings.chat_input_max_height_pct)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					ctx.settings.chat_input_max_height_pct = value;
+					await ctx.saveSettings();
+				})
+		);
 }

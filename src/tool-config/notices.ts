@@ -40,6 +40,31 @@ export function showToolConfigError(
 }
 
 /**
+ * Show a Notice informing the user that their unsent draft was saved in the
+ * conversation they just navigated away from.
+ *
+ * On desktop, right-clicking the Notice switches back to that conversation
+ * via the provided callback.
+ *
+ * @param conversationTitle - Display title of the conversation (may be undefined for untitled).
+ * @param onSwitchBack      - Called when the user right-clicks to return to the conversation.
+ */
+export function showDraftSavedNotice(
+	conversationTitle: string | undefined,
+	onSwitchBack: () => void,
+): void {
+	const label = conversationTitle || "previous conversation";
+	const message = `Draft saved in "${label}".` +
+		(Platform.isDesktop ? "\n(right-click to switch back)" : "");
+	const notice = new Notice(message, 6000);
+	if (Platform.isDesktop) {
+		notice.messageEl.oncontextmenu = () => {
+			onSwitchBack();
+		};
+	}
+}
+
+/**
  * Show a Notice when an MCP server's tools lack readOnlyHint annotations.
  *
  * Warns the user that tools without classification hints default to "write"

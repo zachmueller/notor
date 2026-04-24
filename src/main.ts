@@ -1043,6 +1043,22 @@ export default class NotorPlugin extends Plugin {
 		// this.register* / this.registerEvent / this.registerDomEvent are
 		// automatically cleaned up by Obsidian when the plugin unloads.
 
+		// Best-effort draft persistence: stash any unsent input text so it can
+		// be restored when the user returns to the same conversation on next load.
+		const activeOrch = this.getActiveOrchestrator();
+		if (activeOrch) {
+			const currentConv = activeOrch.getConversationManager().getActiveConversation();
+			const view = activeOrch.getView();
+			const draftText = view?.getInputText()?.trim() ?? "";
+			if (currentConv && draftText) {
+				void this.loadData().then((rawData) => {
+					const data = (rawData ?? {}) as Record<string, unknown>;
+					data.pending_draft = { conversationId: currentConv.id, text: draftText };
+					return this.saveData(data);
+				});
+			}
+		}
+
 		log.info("Plugin unloaded");
 	}
 
@@ -2309,12 +2325,43 @@ export default class NotorPlugin extends Plugin {
 				if (signal.aborted) return;
 				this.syncViewAfterLoad(view, orchestrator);
 			}
+			// Recover any draft saved at quit time
+			void this.applyPendingDraft(orchestrator, view);
 		} catch (e) {
 			if (signal.aborted) return;
 			log.error("Failed to load conversation", { error: String(e) });
 			view.isConversationLoaded = false; // allow retry
 			new Notice("Failed to load conversation — please try reopening the panel.");
 		}
+	}
+
+	/**
+	 * If a `pending_draft` was saved at quit time, write it into the matching
+	 * conversation's JSONL header and restore it to the input box.
+	 *
+	 * The `pending_draft` key is removed from plugin data after recovery so it
+	 * doesn't interfere with subsequent loads.
+	 */
+	private async applyPendingDraft(
+		orchestrator: ChatOrchestrator,
+		view: NotorChatView,
+	): Promise<void> {
+		const rawData = (await this.loadData()) as Record<string, unknown> | null;
+		if (!rawData?.pending_draft) return;
+
+		const { conversationId, text } = rawData.pending_draft as { conversationId: string; text: string };
+		const currentConv = orchestrator.getConversationManager().getActiveConversation();
+		if (!currentConv || currentConv.id !== conversationId || !text?.trim()) {
+			delete rawData.pending_draft;
+			void this.saveData(rawData);
+			return;
+		}
+
+		await this.getHistoryManager().saveDraft(currentConv, text);
+		view.setInputText(text);
+
+		delete rawData.pending_draft;
+		void this.saveData(rawData);
 	}
 
 	/**

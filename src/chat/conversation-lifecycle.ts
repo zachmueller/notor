@@ -15,6 +15,7 @@ import { buildOptionValue } from "../providers/model-grouping";
 import { isPresetStale } from "../presets/preset-resolver";
 import type { ConversationManager } from "./conversation";
 import type { HistoryManager } from "./history";
+import { conversationFilename } from "./history";
 import type { ConversationSession } from "./conversation-session";
 import type { ViewRouter } from "./view-router";
 import type { SessionManager } from "./session-manager";
@@ -24,6 +25,7 @@ import type { NotorSettings } from "../settings";
 import type { PersonaManager } from "../personas/persona-manager";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { revertWorkflowPersona } from "../workflows/workflow-executor";
+import { showDraftSavedNotice } from "../tool-config/notices";
 import { logger } from "../utils/logger";
 
 const log = logger("ConversationLifecycle");
@@ -49,6 +51,7 @@ export class ConversationLifecycleManager {
 		private readonly getActivePresetName: () => string | null,
 		private readonly setActivePresetName: (name: string | null) => void,
 		private readonly getSharedCheckpointManager?: () => CheckpointManager | undefined,
+		private readonly onSwitchConversation?: (filename: string) => Promise<void>,
 	) {}
 
 	/**
@@ -56,6 +59,29 @@ export class ConversationLifecycleManager {
 	 */
 	setWorkflowPersonaRevert(previousPersona: string | null | undefined): void {
 		this.workflowPreviousPersona = previousPersona;
+	}
+
+	/**
+	 * If the input box has unsent text, save it as a draft on the current
+	 * conversation header, clear the input, and show a Notice with a
+	 * right-click handler to switch back.
+	 */
+	private async maybeSaveDraft(
+		convManager: ConversationManager,
+		view: NotorChatView | undefined,
+	): Promise<void> {
+		const currentConversation = convManager.getActiveConversation();
+		const draftText = view?.getInputText()?.trim() ?? "";
+		if (!currentConversation || !draftText) return;
+
+		await this.historyManager.saveDraft(currentConversation, draftText);
+		view?.setInputText("");
+
+		const filename = conversationFilename(currentConversation);
+		const onSwitchBack = this.onSwitchConversation
+			? () => void this.onSwitchConversation!(filename)
+			: () => {};
+		showDraftSavedNotice(currentConversation.title, onSwitchBack);
 	}
 
 	/**
@@ -73,6 +99,10 @@ export class ConversationLifecycleManager {
 		const providerType = this.getActiveProviderType();
 		const modelId = this.getActiveModelId();
 		const view = this.viewRouter.getView();
+
+		// Save any unsent draft from the current conversation before leaving
+		await this.maybeSaveDraft(convManager, view);
+		if (signal?.aborted) return;
 
 		const currentMode = convManager.hasActiveConversation()
 			? convManager.getMode()
@@ -162,6 +192,10 @@ export class ConversationLifecycleManager {
 		await this.maybeRevertWorkflowPersona();
 		if (signal?.aborted) return;
 
+		// Save any unsent draft from the current conversation before leaving
+		await this.maybeSaveDraft(convManager, view);
+		if (signal?.aborted) return;
+
 		view?.setRespondingState(false);
 
 		try {
@@ -233,6 +267,12 @@ export class ConversationLifecycleManager {
 
 			this.getCheckpointManager()?.setConversationId(conversation.id);
 			this.getSharedCheckpointManager?.()?.setConversationId(conversation.id);
+
+			// Restore any saved draft into the input box
+			if (conversation.draft_text && view) {
+				view.setInputText(conversation.draft_text);
+			}
+
 			log.info("Switched to conversation", { id: conversation.id });
 		} catch (e) {
 			log.error("Failed to switch conversation", { filename, error: String(e) });
