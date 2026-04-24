@@ -72,7 +72,8 @@ export function renderWriteNoteDiffPreview(
 	notePath: string,
 	beforeContent: string,
 	afterContent: string,
-	autoApproved: boolean
+	autoApproved: boolean,
+	onReady?: () => void
 ): Promise<DiffDecision> {
 	const diffResult = computeWriteNoteDiff(notePath, beforeContent, afterContent);
 
@@ -146,9 +147,9 @@ export function renderWriteNoteDiffPreview(
 				text: "Reject",
 			});
 
-			// Scroll the action buttons into view so Playwright can click them.
+			// Defer scroll until buttons are painted so callers can snap to bottom.
 			requestAnimationFrame(() => {
-				actionsEl.scrollIntoView({ behavior: "instant", block: "nearest" });
+				onReady?.();
 			});
 
 			acceptBtn.addEventListener("click", () => {
@@ -187,7 +188,8 @@ export function renderReplaceInNoteDiffPreview(
 	notePath: string,
 	noteContent: string,
 	changeBlocks: ChangeBlock[],
-	autoApproved: boolean
+	autoApproved: boolean,
+	onReady?: () => void
 ): Promise<DiffDecision> {
 	const diffResult = computeReplaceInNoteDiff(notePath, noteContent, changeBlocks);
 
@@ -315,9 +317,9 @@ export function renderReplaceInNoteDiffPreview(
 			});
 		}
 
-		// Scroll the action buttons into view so Playwright can click them.
+		// Defer scroll until buttons are painted so callers can snap to bottom.
 		requestAnimationFrame(() => {
-			actionsEl.scrollIntoView({ behavior: "instant", block: "nearest" });
+			onReady?.();
 		});
 
 		/** Resolve with the current blockAccepted state. */

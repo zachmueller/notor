@@ -2506,6 +2506,7 @@ export class NotorChatView extends ItemView {
 			approvalEl.createSpan({ text: "Approve this action?", cls: "notor-approval-text" });
 
 			const btnContainer = approvalEl.createDiv({ cls: "notor-approval-buttons" });
+			this.scrollToBottom();
 
 			const approveBtn = btnContainer.createEl("button", {
 				cls: "notor-approve-btn",
@@ -2574,9 +2575,10 @@ export class NotorChatView extends ItemView {
 				notePath,
 				beforeContent,
 				afterContent,
-				autoApproved
+				autoApproved,
+				() => this.scrollToBottom()
 			);
-			this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
+			this.scrollToBottom();
 			const decision = await decisionPromise;
 			return decision.accepted ? "approved" : "rejected";
 		}
@@ -2607,9 +2609,10 @@ export class NotorChatView extends ItemView {
 				notePath,
 				noteContent,
 				changeBlocks,
-				autoApproved
+				autoApproved,
+				() => this.scrollToBottom()
 			);
-			this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
+			this.scrollToBottom();
 			const decision = await decisionPromise;
 			if (!decision.accepted) return "rejected";
 
