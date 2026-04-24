@@ -9,6 +9,8 @@ import {
 	assertPendingMemoryPath,
 	parsePendingNote,
 	extractJSON,
+	patchFrontmatterField,
+	extractMemoryWikilinks,
 } from "./note-format";
 
 export interface ResolveConceptArgs {
@@ -101,7 +103,7 @@ export async function resolveConcept(
 				body: directive.merged_body,
 				sources: ["chat"],
 				createdAt: now,
-				updatedAt: now,
+				memoryUpdatedAt: now,
 				approvalState: "pending",
 				originalAction: "create",
 			});
@@ -129,6 +131,7 @@ export async function resolveConcept(
 		});
 
 		await app.vault.adapter.write(filePath, content);
+		await updateLinkedToTimestamps(app, vault, directive.merged_body, memoryDir, now);
 		return { action: "created", path: filePath };
 	}
 
@@ -173,7 +176,7 @@ export async function resolveConcept(
 				body: directive.merged_body,
 				sources: updatedSources,
 				createdAt: liveNote.createdAt || now,
-				updatedAt: now,
+				memoryUpdatedAt: now,
 				approvalState: "pending",
 				originalAction: "update",
 				targetPath: targetWikiPath,
@@ -206,10 +209,36 @@ export async function resolveConcept(
 		});
 
 		await vault.modify(file as import("obsidian").TFile, updated);
+		await updateLinkedToTimestamps(app, vault, directive.merged_body, memoryDir, now);
 		return { action: "updated", path: directive.path };
 	}
 
 	return { action: "skipped" };
+}
+
+/**
+ * For each memory note linked from `body`, patches `notor-last-linked-to-at`
+ * on the target note. Skips targets that don't exist or fail to read/write.
+ */
+export async function updateLinkedToTimestamps(
+	app: App,
+	vault: Vault,
+	body: string,
+	memoryDir: string,
+	now: string,
+): Promise<void> {
+	const linkedPaths = extractMemoryWikilinks(body, memoryDir);
+	for (const linkedPath of linkedPaths) {
+		try {
+			const file = app.vault.getFileByPath(linkedPath);
+			if (!file) continue;
+			const content = await vault.read(file);
+			const patched = patchFrontmatterField(content, "notor-last-linked-to-at", now);
+			await vault.modify(file, patched);
+		} catch {
+			// best-effort; don't propagate failures
+		}
+	}
 }
 
 /** Returns true if the file at `filePath` is a pending memory note. */

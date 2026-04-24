@@ -303,6 +303,13 @@ await utils.chatBlocks.emit("memory_recalled", { matches: enrichedMatches });
 					min: 1,
 					max: 168,
 				},
+				{
+					key: "evaluator_profile",
+					name: "Evaluator profile",
+					type: "string",
+					description: "Sub-agent profile used to evaluate which recalled memories were useful.",
+					default: "memory-evaluator",
+				},
 			],
 			scaffoldContent:
 `---
@@ -334,6 +341,11 @@ settings:
     default: 24
     min: 1
     max: 168
+  evaluator_profile:
+    name: "Evaluator profile"
+    type: string
+    description: "Sub-agent profile used to evaluate which recalled memories were useful."
+    default: "memory-evaluator"
 \`\`\`
 
 \`\`\`ts
@@ -349,6 +361,7 @@ if (!conversationId) return;
 const captureProfile = (settings as Record<string, unknown>).capture_profile as string ?? "memory-capture";
 const resolverProfile = (settings as Record<string, unknown>).resolver_profile as string ?? "memory-resolver";
 const windowHours = (settings as Record<string, unknown>).dedup_window_hours as number ?? 24;
+const evaluatorProfile = (settings as Record<string, unknown>).evaluator_profile as string ?? "memory-evaluator";
 const memoryDir = utils.resolveNotorPath("memory");
 const approvalMode = utils.memoryApprovalMode ?? "auto";
 const pendingMode = approvalMode === "bulk" || approvalMode === "bulk_and_inline";
@@ -498,6 +511,66 @@ await utils.runSubAgent({
       }
 
       log.debug("Memory capture complete", { count: actionable.length, pendingMode });
+    }
+
+    // Usefulness evaluation: determine which recalled memories were actually
+    // drawn upon in this conversation and stamp notor-last-useful-at on them.
+    const recalledMatches: Array<{ path: string; title: string }> = messages
+      .filter((m: any) => m.role === "extension_block")
+      .flatMap((m: any) => {
+        if (!Array.isArray(m.content)) return [];
+        return m.content
+          .filter((b: any) => b.type === "custom_block" && b.kind === "memory_recalled")
+          .flatMap((b: any) => (b.data?.matches ?? []) as Array<{ path: string; title: string }>);
+      });
+
+    if (recalledMatches.length > 0) {
+      const evalTask = [
+        "Below is a conversation transcript followed by a list of memory notes that were recalled and injected at the start of the conversation.",
+        "Identify which memory notes were clearly drawn upon, referenced, or confirmed by the conversation.",
+        "Be conservative: only include a memory if it was visibly used, not merely tangentially related.",
+        "",
+        "<transcript>",
+        transcript,
+        "</transcript>",
+        "",
+        "<recalled-memories>",
+        recalledMatches.map((m: any) => "- path: " + m.path + "\\n  title: " + m.title).join("\\n"),
+        "</recalled-memories>",
+        "",
+        'Return JSON: { "useful_paths": ["path1", "path2"] }',
+      ].join("\\n");
+
+      try {
+        const evalResult = await utils.runSubAgent({
+          profileName: evaluatorProfile,
+          task: evalTask,
+          detached: false,
+          silent: true,
+        });
+
+        if (evalResult?.text) {
+          const evalParsed = utils.memory.extractJSON(evalResult.text) as { useful_paths?: string[] } | null;
+          const usefulPaths = evalParsed?.useful_paths ?? [];
+          const evalNow = new Date().toISOString();
+
+          for (const usefulPath of usefulPaths) {
+            try {
+              const file = utils.vault.getFileByPath(usefulPath);
+              if (!file) continue;
+              const content = await utils.vault.read(file);
+              const patched = utils.memory.patchFrontmatterField(content, "notor-last-useful-at", evalNow);
+              await utils.vault.modify(file, patched);
+            } catch (e) {
+              log.warn("Failed to stamp notor-last-useful-at", { path: usefulPath, error: String(e) });
+            }
+          }
+
+          log.debug("Usefulness evaluation complete", { useful: usefulPaths.length, recalled: recalledMatches.length });
+        }
+      } catch (e) {
+        log.warn("Usefulness evaluation failed", { error: String(e) });
+      }
     }
   },
 });

@@ -79,6 +79,8 @@ import {
 	computeFingerprint,
 	assertMemoryPath,
 	extractJSON,
+	patchFrontmatterField,
+	extractMemoryWikilinks,
 } from "../memory/note-format";
 import {
 	readDedupCache,
@@ -298,6 +300,8 @@ export interface ExtensionUtils {
 		advanceDreamCursor: (timestamp: string) => Promise<void>;
 		hasMemoryNotes: () => Promise<boolean>;
 		extractJSON: (text: string) => unknown | null;
+		patchFrontmatterField: (content: string, key: string, value: string) => string;
+		extractMemoryWikilinks: (body: string, memoryDir: string) => string[];
 		/** Manager for pending (unapproved) memory notes. */
 		pendingMemoryManager: PendingMemoryManager;
 	} | null;
@@ -1156,6 +1160,8 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 			},
 
 			extractJSON,
+			patchFrontmatterField,
+			extractMemoryWikilinks,
 
 			pendingMemoryManager: pendingManager,
 		};

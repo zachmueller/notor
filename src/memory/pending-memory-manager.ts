@@ -6,6 +6,7 @@ import {
 	assertPendingMemoryPath,
 	type PendingMemoryNote,
 } from "./note-format";
+import { updateLinkedToTimestamps } from "./concept-resolver";
 
 export class PendingMemoryManager {
 	constructor(
@@ -78,6 +79,7 @@ export class PendingMemoryManager {
 				createdAt: pending.createdAt || now,
 			});
 			await this.app.vault.adapter.write(livePath, liveContent);
+			await updateLinkedToTimestamps(this.app, this.vault, pending.body, this.memoryDir, now);
 		} else {
 			// Update: write merged body back to the live note.
 			const targetPath = pending.targetPath;
@@ -97,6 +99,7 @@ export class PendingMemoryManager {
 				createdAt: parsed.createdAt || now,
 			});
 			await this.vault.modify(liveFile, updated);
+			await updateLinkedToTimestamps(this.app, this.vault, pending.body, this.memoryDir, now);
 		}
 
 		await this.app.vault.adapter.remove(pendingPath);
