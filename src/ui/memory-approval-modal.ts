@@ -172,12 +172,12 @@ export class MemoryApprovalModal extends Modal {
 			const tbody = table.createEl("tbody");
 
 			for (const line of diffResult.lines) {
-				const tr = tbody.createEl("tr", { cls: `notor-diff-line notor-diff-${line.type}` });
-				const markerTd = tr.createEl("td", { cls: "notor-diff-marker" });
+				const tr = tbody.createEl("tr", { cls: `notor-diff-line notor-diff-line-${line.type}` });
+				const markerTd = tr.createEl("td", { cls: "notor-diff-line-gutter" });
 				markerTd.textContent =
 					line.type === "added" ? "+" : line.type === "deleted" ? "−" : " ";
-				const contentTd = tr.createEl("td", { cls: "notor-diff-content" });
-				contentTd.textContent = line.content;
+				const contentTd = tr.createEl("td", { cls: "notor-diff-line-content" });
+				contentTd.createEl("code", { text: line.content });
 			}
 		});
 	}
