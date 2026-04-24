@@ -286,16 +286,16 @@ export default class NotorPlugin extends Plugin {
 	/** Debounce timer for vault-triggered workflow rescans. */
 	private _workflowRescanTimer: ReturnType<typeof setTimeout> | null = null;
 
-	/** Debounce timer for extension file change Notice (EXT-024). */
+	/** Debounce timer for extension file change auto-reload (EXT-024). */
 	private _extensionChangeTimer: ReturnType<typeof setTimeout> | null = null;
 
-	/** Reference to the "stale extensions" Notice for duplicate suppression (EXT-024). */
+	/** Reference to the most recent extension error Notice (for cleanup on unload). */
 	private _extensionStaleNotice: Notice | null = null;
 
-	/** Debounce timer for persona file change Notice. */
+	/** Debounce timer for persona file change auto-reload. */
 	private _personaChangeTimer: ReturnType<typeof setTimeout> | null = null;
 
-	/** Reference to the "stale personas" Notice for duplicate suppression. */
+	/** Reference to the most recent persona error Notice (for cleanup on unload). */
 	private _personaStaleNotice: Notice | null = null;
 
 	// -----------------------------------------------------------------------
@@ -2547,72 +2547,60 @@ export default class NotorPlugin extends Plugin {
 	/**
 	 * Debounced handler for extension file changes.
 	 *
-	 * Shows a persistent Notice prompting the user to reload extensions.
-	 * Uses 1000ms debounce (longer than the 300ms workflow watcher) since
-	 * this only shows a Notice rather than auto-reloading.
+	 * Automatically reloads extensions after a 1000ms debounce. On success
+	 * with no errors, nothing is shown. On compile/parse errors, shows a
+	 * persistent Notice per error with right-click to open the affected note.
+	 * The previous working compiled state is preserved for errored extensions
+	 * (handled inside ExtensionManager.reload).
 	 *
 	 * @see specs/05-user-tools/tasks.md — EXT-024
 	 */
-	private scheduleExtensionChangeNotice(): void {
+	private scheduleExtensionAutoReload(): void {
 		if (this._extensionChangeTimer !== null) {
 			clearTimeout(this._extensionChangeTimer);
 		}
 		this._extensionChangeTimer = setTimeout(() => {
 			this._extensionChangeTimer = null;
 
-			// Suppress duplicate Notice — if one is already showing, skip
-			if (this._extensionStaleNotice) return;
-
-			const NOTICE_DURATION_MS = 10_000;
-			const notice = new Notice(
-				"Extension files changed." + (Platform.isDesktop ? "\n(right-click to reload)" : ""),
-				NOTICE_DURATION_MS,
-			);
-
-			// Clear stale reference when the notice auto-dismisses
-			setTimeout(() => {
-				if (this._extensionStaleNotice === notice) {
-					this._extensionStaleNotice = null;
+			this.getExtensionManager().reload(false).then((result) => {
+				// Re-evaluate listeners to pick up any new automation triggers
+				if (this._vaultEventListenerManager) {
+					this._vaultEventListenerManager.evaluateListeners();
 				}
-			}, NOTICE_DURATION_MS);
+				if (this._vaultEventScheduler) {
+					const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
+						(h) => h.enabled
+					);
+					this._vaultEventScheduler.syncJobs(enabledScheduleHooks);
+				}
 
-			// Left-click: clear reference (Obsidian's default dismisses the Notice)
-			notice.noticeEl.addEventListener("click", () => {
-				this._extensionStaleNotice = null;
-			});
-
-			// Right-click: trigger reload (desktop only)
-			if (Platform.isDesktop) {
-				notice.noticeEl.oncontextmenu = (e) => {
-					e.preventDefault();
-					notice.hide();
-					this._extensionStaleNotice = null;
-					this.getExtensionManager().reload(false).then((result) => {
-						const summary =
-							`Extensions reloaded: ${result.toolCount} tool${result.toolCount !== 1 ? "s" : ""}, ` +
-							`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}, ` +
-							`${result.blockCount} block kind${result.blockCount !== 1 ? "s" : ""}` +
-							(result.errors.length > 0 ? ` (${result.errors.length} error${result.errors.length !== 1 ? "s" : ""})` : "");
-						new Notice(summary);
-
-						// Re-evaluate listeners to pick up any new automation triggers
-						if (this._vaultEventListenerManager) {
-							this._vaultEventListenerManager.evaluateListeners();
-						}
-						if (this._vaultEventScheduler) {
-							const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
-								(h) => h.enabled
-							);
-							this._vaultEventScheduler.syncJobs(enabledScheduleHooks);
-						}
-					}).catch((err) => {
-						log.error("Extension reload from Notice failed", { error: String(err) });
-						new Notice(`Extension reload failed: ${err instanceof Error ? err.message : String(err)}`);
+				// Show a persistent error Notice for each failed user extension
+				const userErrors = result.errors.filter(e => !e.filePath.startsWith("(built-in"));
+				for (const error of userErrors) {
+					const filename = error.filePath.split("/").pop() ?? error.filePath;
+					const NOTICE_DURATION_MS = 0; // persistent until dismissed
+					const notice = new Notice(
+						`Extension error in "${filename}": ${error.message}` +
+							(Platform.isDesktop ? "\n(right-click to open note)" : ""),
+						NOTICE_DURATION_MS,
+					);
+					this._extensionStaleNotice = notice;
+					if (Platform.isDesktop) {
+						notice.noticeEl.oncontextmenu = (e) => {
+							e.preventDefault();
+							notice.hide();
+							if (this._extensionStaleNotice === notice) this._extensionStaleNotice = null;
+							void this.app.workspace.openLinkText(error.filePath, "", true);
+						};
+					}
+					notice.noticeEl.addEventListener("click", () => {
+						if (this._extensionStaleNotice === notice) this._extensionStaleNotice = null;
 					});
-				};
-			}
-
-			this._extensionStaleNotice = notice;
+				}
+			}).catch((err) => {
+				log.error("Extension auto-reload failed", { error: String(err) });
+				new Notice(`Extension reload failed: ${err instanceof Error ? err.message : String(err)}`);
+			});
 		}, 1000);
 	}
 
@@ -2660,14 +2648,14 @@ export default class NotorPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on("create", (f) => {
 				if (isExtensionFile(f, this.settings.notor_dir)) {
-					this.scheduleExtensionChangeNotice();
+					this.scheduleExtensionAutoReload();
 				}
 			})
 		);
 		this.registerEvent(
 			this.app.vault.on("delete", (f) => {
 				if (isExtensionFile(f, this.settings.notor_dir)) {
-					this.scheduleExtensionChangeNotice();
+					this.scheduleExtensionAutoReload();
 				}
 			})
 		);
@@ -2677,75 +2665,71 @@ export default class NotorPlugin extends Plugin {
 					isExtensionFile(f, this.settings.notor_dir) ||
 					isExtensionPath(oldPath, this.settings.notor_dir)
 				) {
-					this.scheduleExtensionChangeNotice();
+					this.scheduleExtensionAutoReload();
 				}
 			})
 		);
 		this.registerEvent(
 			this.app.metadataCache.on("changed", (f) => {
 				if (isExtensionFile(f, this.settings.notor_dir)) {
-					this.scheduleExtensionChangeNotice();
+					this.scheduleExtensionAutoReload();
 				}
 			})
 		);
 	}
 
 	/**
-	 * Schedule a debounced Notice when persona files change on disk.
+	 * Debounced handler for persona file changes.
 	 *
-	 * Mirrors the extension change notice pattern: 1000ms debounce,
-	 * deduplication, right-click to reload on desktop.
+	 * Automatically refreshes the active persona after a 1000ms debounce. On
+	 * success, a brief Notice is shown. If the persona's file fails to parse,
+	 * shows a persistent error Notice with right-click to open the affected note
+	 * while keeping the old persona state active.
 	 */
-	private schedulePersonaChangeNotice(): void {
+	private schedulePersonaAutoReload(): void {
 		if (this._personaChangeTimer !== null) {
 			clearTimeout(this._personaChangeTimer);
 		}
 		this._personaChangeTimer = setTimeout(() => {
 			this._personaChangeTimer = null;
 
-			if (this._personaStaleNotice) return;
-
-			const NOTICE_DURATION_MS = 10_000;
-			const notice = new Notice(
-				"Persona files changed." + (Platform.isDesktop ? "\n(right-click to reload)" : ""),
-				NOTICE_DURATION_MS,
-			);
-
-			setTimeout(() => {
-				if (this._personaStaleNotice === notice) {
-					this._personaStaleNotice = null;
-				}
-			}, NOTICE_DURATION_MS);
-
-			notice.noticeEl.addEventListener("click", () => {
-				this._personaStaleNotice = null;
-			});
-
-			if (Platform.isDesktop) {
-				notice.noticeEl.oncontextmenu = (e) => {
-					e.preventDefault();
-					notice.hide();
-					this._personaStaleNotice = null;
-					this.getPersonaManager().refreshActivePersona().then((result) => {
-						switch (result.status) {
-							case "refreshed":
-								new Notice(`Persona "${result.persona.name}" reloaded.`);
-								break;
-							case "deactivated":
-								new Notice(`Persona "${result.previousName}" was removed; deactivated.`);
-								break;
-							case "no-active-persona":
-								new Notice("Persona files reloaded.");
-								break;
+			this.getPersonaManager().refreshActivePersona().then((result) => {
+				switch (result.status) {
+					case "refreshed":
+						new Notice(`Persona "${result.persona.name}" reloaded.`);
+						break;
+					case "deactivated":
+						new Notice(`Persona "${result.previousName}" was removed; deactivated.`);
+						break;
+					case "no-active-persona":
+						// No active persona — nothing to report
+						break;
+					case "error": {
+						const filename = result.filePath.split("/").pop() ?? result.filePath;
+						const notice = new Notice(
+							`Persona error in "${filename}": ${result.message}` +
+								(Platform.isDesktop ? "\n(right-click to open note)" : ""),
+							0,
+						);
+						this._personaStaleNotice = notice;
+						if (Platform.isDesktop) {
+							notice.noticeEl.oncontextmenu = (e) => {
+								e.preventDefault();
+								notice.hide();
+								if (this._personaStaleNotice === notice) this._personaStaleNotice = null;
+								void this.app.workspace.openLinkText(result.filePath, "", true);
+							};
 						}
-					}).catch((err) => {
-						log.error("Persona refresh from Notice failed", { error: String(err) });
-						new Notice(`Persona refresh failed: ${err instanceof Error ? err.message : String(err)}`);
-					});
-				};
-			}
-
-			this._personaStaleNotice = notice;
+						notice.noticeEl.addEventListener("click", () => {
+							if (this._personaStaleNotice === notice) this._personaStaleNotice = null;
+						});
+						break;
+					}
+				}
+			}).catch((err) => {
+				log.error("Persona auto-reload failed", { error: String(err) });
+				new Notice(`Persona refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+			});
 		}, 1000);
 	}
 
@@ -2759,14 +2743,14 @@ export default class NotorPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on("create", (f) => {
 				if (isPersonaFile(f, this.settings.notor_dir)) {
-					this.schedulePersonaChangeNotice();
+					this.schedulePersonaAutoReload();
 				}
 			})
 		);
 		this.registerEvent(
 			this.app.vault.on("delete", (f) => {
 				if (isPersonaFile(f, this.settings.notor_dir)) {
-					this.schedulePersonaChangeNotice();
+					this.schedulePersonaAutoReload();
 				}
 			})
 		);
@@ -2776,14 +2760,14 @@ export default class NotorPlugin extends Plugin {
 					isPersonaFile(f, this.settings.notor_dir) ||
 					isPersonaPath(oldPath, this.settings.notor_dir)
 				) {
-					this.schedulePersonaChangeNotice();
+					this.schedulePersonaAutoReload();
 				}
 			})
 		);
 		this.registerEvent(
 			this.app.metadataCache.on("changed", (f) => {
 				if (isPersonaFile(f, this.settings.notor_dir)) {
-					this.schedulePersonaChangeNotice();
+					this.schedulePersonaAutoReload();
 				}
 			})
 		);
