@@ -61,34 +61,38 @@ export function renderGeneralSection(
 	new Setting(containerEl)
 		.setName("Chat input max lines")
 		.setDesc(
-			"Maximum number of lines the chat input box auto-expands to before capping. " +
+			"Maximum number of lines (1–20) the chat input box auto-expands to before capping. " +
 				"Drag the resize handle above the input to override per-session."
 		)
-		.addSlider((slider) =>
-			slider
-				.setLimits(1, 20, 1)
-				.setValue(ctx.settings.chat_input_max_lines)
-				.setDynamicTooltip()
+		.addText((text) =>
+			text
+				.setPlaceholder("3")
+				.setValue(String(ctx.settings.chat_input_max_lines))
 				.onChange(async (value) => {
-					ctx.settings.chat_input_max_lines = value;
-					await ctx.saveSettings();
+					const parsed = parseInt(value, 10);
+					if (!isNaN(parsed) && parsed >= 1 && parsed <= 20) {
+						ctx.settings.chat_input_max_lines = parsed;
+						await ctx.saveSettings();
+					}
 				})
 		);
 
 	new Setting(containerEl)
 		.setName("Chat input max height")
 		.setDesc(
-			"Maximum height of the chat input box as a percentage of the window height. " +
+			"Maximum height (5–80) of the chat input box as a percentage of the window height. " +
 				"The actual cap is whichever is larger: this percentage or the max-lines height."
 		)
-		.addSlider((slider) =>
-			slider
-				.setLimits(5, 80, 5)
-				.setValue(ctx.settings.chat_input_max_height_pct)
-				.setDynamicTooltip()
+		.addText((text) =>
+			text
+				.setPlaceholder("10")
+				.setValue(String(ctx.settings.chat_input_max_height_pct))
 				.onChange(async (value) => {
-					ctx.settings.chat_input_max_height_pct = value;
-					await ctx.saveSettings();
+					const parsed = parseInt(value, 10);
+					if (!isNaN(parsed) && parsed >= 5 && parsed <= 80) {
+						ctx.settings.chat_input_max_height_pct = parsed;
+						await ctx.saveSettings();
+					}
 				})
 		);
 }
