@@ -121,17 +121,22 @@ async function invokeCaptureMemoryTool(
 		live: listMdFiles(MEMORY_DIR),
 	};
 
-	// Call the tool directly via the plugin extension manager rather than through LLM.
+	// Call the tool directly via the plugin tool registry rather than through LLM.
+	// getToolRegistry().get() returns a UserToolAdapter which has an execute() method,
+	// unlike getExtensionManager().getTools() which returns raw UserToolDefinition objects.
 	const toolResult = await page.evaluate(async (insight: string) => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "Plugin not found" };
-		const extMgr = plugin.getExtensionManager();
-		const tools = extMgr.getTools();
-		const tool = tools.find((t: any) => t.name === "capture_memory");
-		if (!tool) return { error: "capture_memory not found" };
+		const registry = plugin.getToolRegistry?.();
+		if (!registry) return { error: "getToolRegistry() not found on plugin" };
+		const tool = registry.get("capture_memory");
+		if (!tool) return { error: "capture_memory not found in registry" };
 		try {
-			const result = await tool.execute({ content: insight }, {});
-			return { result: String(result) };
+			const toolResult = await tool.execute({ content: insight }, {});
+			const resultText = typeof toolResult.result === "string"
+				? toolResult.result
+				: JSON.stringify(toolResult.result);
+			return { result: toolResult.success ? resultText : `error: ${toolResult.error ?? resultText}` };
 		} catch (e) {
 			return { error: String(e) };
 		}
