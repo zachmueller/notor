@@ -266,6 +266,19 @@ for (const match of rawMatches.slice(0, maxMatches)) {
   }
 }
 
+// Patch notor-last-recalled-at on every matched note (best-effort)
+const recalledNow = new Date().toISOString();
+for (const match of enrichedMatches) {
+  try {
+    const file = utils.vault.getFileByPath(match.path);
+    if (!file) continue;
+    const patched = utils.memory.patchFrontmatterField(match.payload, "notor-last-recalled-at", recalledNow);
+    await utils.vault.modify(file, patched);
+  } catch {
+    // best-effort; don't block recall on timestamp failure
+  }
+}
+
 log.debug("Memory search complete", { matchCount: enrichedMatches.length });
 await utils.chatBlocks.emit("memory_recalled", { matches: enrichedMatches });
 \`\`\`

@@ -7,6 +7,7 @@ export interface MemoryNote {
 	memoryUpdatedAt: string;
 	lastLinkedToAt?: string;
 	lastUsefulAt?: string;
+	lastRecalledAt?: string;
 	sources: string[];
 }
 
@@ -55,6 +56,7 @@ export function parseNote(markdown: string): MemoryNote {
 	const memoryUpdatedAt = extractField(frontmatter, "notor-memory-updated-at") ?? "";
 	const lastLinkedToAt = extractField(frontmatter, "notor-last-linked-to-at") ?? undefined;
 	const lastUsefulAt = extractField(frontmatter, "notor-last-useful-at") ?? undefined;
+	const lastRecalledAt = extractField(frontmatter, "notor-last-recalled-at") ?? undefined;
 	const sources = extractArrayField(frontmatter, "notor-sources");
 
 	const titleMatch = rest.match(/^#\s+(.+)$/m);
@@ -65,7 +67,7 @@ export function parseNote(markdown: string): MemoryNote {
 		: 0;
 	const body = rest.slice(bodyStart).trim();
 
-	return { title, body, createdAt, memoryUpdatedAt, lastLinkedToAt, lastUsefulAt, sources };
+	return { title, body, createdAt, memoryUpdatedAt, lastLinkedToAt, lastUsefulAt, lastRecalledAt, sources };
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +143,7 @@ export function parsePendingNote(markdown: string): PendingMemoryNote {
 }
 
 // ---------------------------------------------------------------------------
-// Frontmatter patching (for notor-last-linked-to-at / notor-last-useful-at)
+// Frontmatter patching (for notor-last-linked-to-at / notor-last-useful-at / notor-last-recalled-at)
 // ---------------------------------------------------------------------------
 
 /**
