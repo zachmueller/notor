@@ -196,6 +196,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	// Knowledge Memory
 	memory_enabled: false,
 	memory_folder: "memory",
+	memory_approval_mode: "auto",
 
 	// Phase 12: Extension block rate limiting
 	extension_block_max_emits_per_window: 10,

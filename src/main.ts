@@ -122,6 +122,10 @@ import { SerpApiProvider } from "./web-search/providers/serpapi";
 import { ChatBlockRegistry } from "./ui/chat-blocks/registry";
 import { setChatBlockRegistry } from "./chat/message-pipeline";
 
+// Memory approval
+import { PendingMemoryManager } from "./memory/pending-memory-manager";
+import { MemoryApprovalModal } from "./ui/memory-approval-modal";
+
 // Template variables
 import { TemplateVariableRegistry, registerBuiltinVars } from "./template-vars";
 
@@ -214,6 +218,7 @@ export default class NotorPlugin extends Plugin {
 	private _staleTracker?: StaleContentTracker;
 	private _personaManager?: PersonaManager;
 	private _subAgentManager?: SubAgentManager;
+	private _pendingMemoryManager?: PendingMemoryManager;
 	private _extensionManager?: ExtensionManager;
 	private _chatBlockRegistry?: ChatBlockRegistry;
 	private _settingTab?: NotorSettingTab;
@@ -740,6 +745,20 @@ export default class NotorPlugin extends Plugin {
 				if (!activeView) return false;
 				if (checking) return true;
 				activeView.openFindBar();
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "open-memory-approval",
+			name: "Open memory approval panel",
+			checkCallback: (checking: boolean) => {
+				if (!this.settings.memory_enabled) return false;
+				if (this.settings.memory_approval_mode === "auto") return false;
+				if (checking) return true;
+				const manager = this.getPendingMemoryManager();
+				if (!manager) return false;
+				new MemoryApprovalModal(this.app, manager).open();
 				return true;
 			},
 		});
@@ -1965,6 +1984,23 @@ export default class NotorPlugin extends Plugin {
 			);
 		}
 		return this._personaManager;
+	}
+
+	/** Pending memory manager — returns null when memory is disabled. */
+	getPendingMemoryManager(): PendingMemoryManager | null {
+		if (!this.settings.memory_enabled) return null;
+		if (!this._pendingMemoryManager) {
+			const memoryFolder = this.settings.memory_folder ?? "memory";
+			const memoryDir = normalizePath(`${this.settings.notor_dir}/${memoryFolder}`);
+			const pendingDir = normalizePath(`${this.settings.notor_dir}/pending-memories`);
+			this._pendingMemoryManager = new PendingMemoryManager(
+				this.app,
+				this.app.vault,
+				pendingDir,
+				memoryDir,
+			);
+		}
+		return this._pendingMemoryManager;
 	}
 
 	/** Sub-agent profile manager (Phase 3). */

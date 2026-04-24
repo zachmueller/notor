@@ -64,6 +64,100 @@ export function parseNote(markdown: string): MemoryNote {
 	return { title, body, createdAt, updatedAt, sources };
 }
 
+// ---------------------------------------------------------------------------
+// Pending memory notes
+// ---------------------------------------------------------------------------
+
+export interface PendingMemoryNote extends MemoryNote {
+	approvalState: "pending";
+	/** Whether this note will create a new memory or update an existing one. */
+	originalAction: "create" | "update";
+	/**
+	 * Vault-relative path of the live memory note being updated (updates only).
+	 * Stored as an Obsidian wikilink (e.g. `[[notor/memory/slug]]`) so vault
+	 * renames propagate automatically via Obsidian's link-update machinery.
+	 */
+	targetPath?: string;
+}
+
+export function serializePendingNote(note: PendingMemoryNote): string {
+	const now = new Date().toISOString();
+	const sourcesYaml =
+		note.sources.length > 0 ? `[${note.sources.join(", ")}]` : "[]";
+	const lines = [
+		"---",
+		"notor-type: pending-memory",
+		`notor-created-at: ${note.createdAt}`,
+		`notor-updated-at: ${now}`,
+		`notor-sources: ${sourcesYaml}`,
+		"notor-approval-state: pending",
+		`notor-original-action: ${note.originalAction}`,
+	];
+	if (note.targetPath) {
+		lines.push(`notor-target-path: "[[${note.targetPath}]]"`);
+	}
+	lines.push("---", "", `# ${note.title}`, "", note.body, "");
+	return lines.join("\n");
+}
+
+export function parsePendingNote(markdown: string): PendingMemoryNote {
+	const fmMatch = markdown.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+	if (!fmMatch) {
+		return {
+			title: "",
+			body: markdown.trim(),
+			createdAt: "",
+			updatedAt: "",
+			sources: [],
+			approvalState: "pending",
+			originalAction: "create",
+		};
+	}
+
+	const frontmatter = fmMatch[1]!;
+	const rest = fmMatch[2]!;
+
+	const createdAt = extractField(frontmatter, "notor-created-at") ?? "";
+	const updatedAt = extractField(frontmatter, "notor-updated-at") ?? "";
+	const sources = extractArrayField(frontmatter, "notor-sources");
+	const originalAction =
+		(extractField(frontmatter, "notor-original-action") as "create" | "update") ?? "create";
+	const rawTargetPath = extractField(frontmatter, "notor-target-path");
+	// Strip the wikilink delimiters: "[[notor/memory/slug]]" → "notor/memory/slug"
+	const targetPath = rawTargetPath
+		? rawTargetPath.replace(/^\s*"\s*\[\[/, "").replace(/\]\]\s*"\s*$/, "").trim() || undefined
+		: undefined;
+
+	const titleMatch = rest.match(/^#\s+(.+)$/m);
+	const title = titleMatch ? titleMatch[1]!.trim() : "";
+	const bodyStart = titleMatch ? rest.indexOf(titleMatch[0]) + titleMatch[0].length : 0;
+	const body = rest.slice(bodyStart).trim();
+
+	return { title, body, createdAt, updatedAt, sources, approvalState: "pending", originalAction, targetPath };
+}
+
+export function assertPendingMemoryPath(
+	vaultRelativePath: string,
+	pendingDir: string,
+): void {
+	if (!vaultRelativePath || !pendingDir) {
+		throw new Error(`Invalid pending memory path: path and pendingDir must be non-empty`);
+	}
+	if (vaultRelativePath.startsWith("/")) {
+		throw new Error(`Absolute paths are not allowed: ${vaultRelativePath}`);
+	}
+	const normalizedTarget = normalizVaultPath(vaultRelativePath);
+	const normalizedPendingDir = normalizVaultPath(pendingDir);
+	if (
+		normalizedTarget !== normalizedPendingDir &&
+		!normalizedTarget.startsWith(normalizedPendingDir + "/")
+	) {
+		throw new Error(
+			`Path "${vaultRelativePath}" is outside pending memory directory "${pendingDir}"`,
+		);
+	}
+}
+
 export function slugifyTitle(title: string): string {
 	return title
 		.toLowerCase()

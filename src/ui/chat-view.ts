@@ -2437,6 +2437,7 @@ export class NotorChatView extends ItemView {
 			app: this.app,
 			openInternalLink: (linkText: string) => this.openInternalLink(linkText),
 			collapsibleCard: renderCollapsibleCard,
+			pendingMemoryManager: this.plugin.getPendingMemoryManager(),
 		};
 
 		for (const block of blocks) {

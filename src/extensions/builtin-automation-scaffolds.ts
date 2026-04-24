@@ -180,6 +180,9 @@ if (!conversationId) return;
 
 const searchProfile = (settings as Record<string, unknown>).search_profile as string ?? "memory-search";
 const maxMatches = (settings as Record<string, unknown>).max_matches as number ?? 8;
+const approvalMode = utils.memoryApprovalMode ?? "auto";
+const pendingMode = approvalMode === "bulk" || approvalMode === "bulk_and_inline";
+const pendingMemoryDir = pendingMode ? utils.resolveNotorPath("pending-memories") : "";
 
 // Load conversation to get the user's first message + recent context
 const messages = await utils.chatHistory.loadFull(conversationId);
@@ -201,6 +204,10 @@ const contentText = typeof lastUserMsg.content === "string"
 
 if (!contentText.trim()) return;
 
+const pendingDirHint = pendingMode
+  ? "\\n\\nAlso search for pending (not-yet-approved) memory notes in: " + pendingMemoryDir
+  : "";
+
 const task = [
   "Search for memory notes relevant to this conversation turn.",
   "",
@@ -208,7 +215,7 @@ const task = [
   contentText.substring(0, 2000),
   "</user_message>",
   "",
-  "max_matches: " + maxMatches,
+  "max_matches: " + maxMatches + pendingDirHint,
 ].join("\\n");
 
 log.debug("Spawning memory-search sub-agent", { searchProfile, maxMatches });
@@ -343,6 +350,9 @@ const captureProfile = (settings as Record<string, unknown>).capture_profile as 
 const resolverProfile = (settings as Record<string, unknown>).resolver_profile as string ?? "memory-resolver";
 const windowHours = (settings as Record<string, unknown>).dedup_window_hours as number ?? 24;
 const memoryDir = utils.resolveNotorPath("memory");
+const approvalMode = utils.memoryApprovalMode ?? "auto";
+const pendingMode = approvalMode === "bulk" || approvalMode === "bulk_and_inline";
+const pendingMemoryDir = pendingMode ? utils.resolveNotorPath("pending-memories") : "";
 
 // Load full conversation for context
 const messages = await utils.chatHistory.loadFull(conversationId);
@@ -374,7 +384,7 @@ const task = [
   "</transcript>",
 ].join("\\n");
 
-log.debug("Spawning memory-capture sub-agent (detached)", { captureProfile });
+log.debug("Spawning memory-capture sub-agent (detached)", { captureProfile, approvalMode });
 
 await utils.runSubAgent({
   profileName: captureProfile,
@@ -400,7 +410,11 @@ await utils.runSubAgent({
       return;
     }
 
-    const results: Array<{ action: string; path?: string; insight: string }> = [];
+    if (pendingMode) {
+      await utils.memory!.pendingMemoryManager.ensurePendingDir();
+    }
+
+    const results: Array<{ action: string; path?: string; insight: string; pending?: boolean }> = [];
 
     for (const insight of insights) {
       if (!insight.content?.trim()) continue;
@@ -417,12 +431,15 @@ await utils.runSubAgent({
           memoryDir,
           resolverProfile,
           silent: true,
+          pendingMode,
+          pendingMemoryDir: pendingMode ? pendingMemoryDir : undefined,
         });
 
         results.push({
           action: resolveResult.action,
           path: resolveResult.path,
           insight: insight.content.substring(0, 120),
+          pending: pendingMode,
         });
       } catch (e) {
         log.error("Failed to resolve insight", { error: String(e), content: insight.content.substring(0, 80) });
@@ -435,7 +452,52 @@ await utils.runSubAgent({
         results: actionable,
         conversationId,
       });
-      log.debug("Memory capture complete", { count: actionable.length });
+
+      // Emit per-memory inline approval blocks when bulk_and_inline mode is active.
+      if (approvalMode === "bulk_and_inline") {
+        for (const r of actionable) {
+          if (!r.path) continue;
+          try {
+            const pendingContent = await utils.memory!.pendingMemoryManager.getLiveNoteContent
+              ? null // placeholder — actual data assembled below
+              : null;
+            // Read the pending note to get its body for the inline block.
+            const pendingNote = await (async () => {
+              try {
+                const raw = await utils.vault.adapter.read(r.path!);
+                return utils.memory!.parseNote(raw);
+              } catch { return null; }
+            })();
+            if (!pendingNote) continue;
+
+            // For updates, also read the current live note body.
+            const isUpdate = r.action === "updated";
+            let currentBody: string | undefined;
+            if (isUpdate) {
+              const targetPath = (pendingNote as any).targetPath as string | undefined;
+              if (targetPath) {
+                const liveRaw = await utils.memory!.pendingMemoryManager.getLiveNoteContent(targetPath);
+                if (liveRaw) {
+                  currentBody = utils.memory!.parseNote(liveRaw).body;
+                }
+              }
+            }
+
+            await utils.chatBlocks.emit("memory_pending_approval", {
+              pendingPath: r.path,
+              title: pendingNote.title,
+              action: r.action,
+              targetPath: (pendingNote as any).targetPath,
+              proposedBody: pendingNote.body,
+              currentBody,
+            });
+          } catch (e) {
+            log.warn("Failed to emit inline approval block", { error: String(e) });
+          }
+        }
+      }
+
+      log.debug("Memory capture complete", { count: actionable.length, pendingMode });
     }
   },
 });

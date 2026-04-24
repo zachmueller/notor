@@ -41,6 +41,15 @@ vi.mock("obsidian", () => ({
 			cb(text);
 			return this;
 		}
+		addDropdown(cb: (dd: { addOption: () => unknown; setValue: () => unknown; onChange: () => unknown }) => void) {
+			const dd = {
+				addOption() { return dd; },
+				setValue() { return dd; },
+				onChange() { return dd; },
+			};
+			cb(dd);
+			return this;
+		}
 	},
 	Notice: class {
 		constructor(message: string) {

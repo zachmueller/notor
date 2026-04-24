@@ -413,6 +413,14 @@ export interface NotorSettings {
 	/** Subfolder under `notor_dir` for Evergreen concept notes (default: "memory"). */
 	memory_folder: string;
 
+	/**
+	 * Controls when captured memory notes are committed to the vault.
+	 * - "auto": write immediately (default, existing behaviour).
+	 * - "bulk": queue in `pending-memories/`; user approves via the bulk panel.
+	 * - "bulk_and_inline": same as bulk, plus per-memory approval blocks appear in the conversation thread.
+	 */
+	memory_approval_mode: "auto" | "bulk" | "bulk_and_inline";
+
 	// -------------------------------------------------------------------
 	// Phase 12: Extension block rate limiting
 	// -------------------------------------------------------------------
