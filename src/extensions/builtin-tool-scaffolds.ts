@@ -2749,6 +2749,9 @@ if (content.length === 0) {
 const windowHours = (settings.dedup_window_hours as number) ?? 24;
 const resolverProfile = (settings.resolver_profile as string) ?? "memory-resolver";
 const memoryDir = utils.resolveNotorPath("memory");
+const approvalMode = utils.memoryApprovalMode ?? "auto";
+const pendingMode = approvalMode === "bulk" || approvalMode === "bulk_and_inline";
+const pendingMemoryDir = pendingMode ? utils.resolveNotorPath("pending-memories") : "";
 
 log.debug("Checking dedup", { windowHours });
 const { isDuplicate } = await utils.memory.fingerprintAndDedup(content, windowHours);
@@ -2757,15 +2760,26 @@ if (isDuplicate) {
   return "Skipped — this insight was already captured recently.";
 }
 
-log.debug("Resolving concept", { resolverProfile, memoryDir });
+if (pendingMode) {
+  await utils.memory.pendingMemoryManager.ensurePendingDir();
+}
+
+log.debug("Resolving concept", { resolverProfile, memoryDir, pendingMode });
 const result = await utils.memory.resolveConcept({
   insight: content,
   memoryDir,
   resolverProfile,
+  pendingMode,
+  pendingMemoryDir: pendingMode ? pendingMemoryDir : undefined,
 });
 
 if (result.action === "skipped") {
   return "The insight could not be resolved into a memory note. It may be too vague or the resolver could not determine how to file it.";
+}
+
+if (pendingMode) {
+  const verb = result.action === "created" ? "Queued new" : "Queued update to";
+  return \`\${verb} memory note (pending approval): \${result.path}\`;
 }
 
 const verb = result.action === "created" ? "Created" : "Updated";

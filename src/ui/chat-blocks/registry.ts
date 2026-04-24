@@ -7,6 +7,7 @@
 import type { Message } from "../../types";
 import type { App } from "obsidian";
 import type { CollapsibleCard, CollapsibleCardOpts } from "./collapsible-card";
+import type { PendingMemoryManager } from "../../memory/pending-memory-manager";
 import { logger } from "../../utils/logger";
 
 const log = logger("ChatBlockRegistry");
@@ -16,6 +17,8 @@ export interface ChatBlockRenderContext {
 	app: App;
 	openInternalLink: (linkText: string) => void;
 	collapsibleCard: (container: HTMLElement, opts: CollapsibleCardOpts) => CollapsibleCard;
+	/** Available when the memory subsystem is enabled; null otherwise. */
+	pendingMemoryManager: PendingMemoryManager | null;
 }
 
 export interface ChatBlockDefinition<TData extends Record<string, unknown> = Record<string, unknown>> {

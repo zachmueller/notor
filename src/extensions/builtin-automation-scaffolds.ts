@@ -180,6 +180,9 @@ if (!conversationId) return;
 
 const searchProfile = (settings as Record<string, unknown>).search_profile as string ?? "memory-search";
 const maxMatches = (settings as Record<string, unknown>).max_matches as number ?? 8;
+const approvalMode = utils.memoryApprovalMode ?? "auto";
+const pendingMode = approvalMode === "bulk" || approvalMode === "bulk_and_inline";
+const pendingMemoryDir = pendingMode ? utils.resolveNotorPath("pending-memories") : "";
 
 // Load conversation to get the user's first message + recent context
 const messages = await utils.chatHistory.loadFull(conversationId);
@@ -201,6 +204,10 @@ const contentText = typeof lastUserMsg.content === "string"
 
 if (!contentText.trim()) return;
 
+const pendingDirHint = pendingMode
+  ? "\\n\\nAlso search for pending (not-yet-approved) memory notes in: " + pendingMemoryDir
+  : "";
+
 const task = [
   "Search for memory notes relevant to this conversation turn.",
   "",
@@ -208,7 +215,7 @@ const task = [
   contentText.substring(0, 2000),
   "</user_message>",
   "",
-  "max_matches: " + maxMatches,
+  "max_matches: " + maxMatches + pendingDirHint,
 ].join("\\n");
 
 log.debug("Spawning memory-search sub-agent", { searchProfile, maxMatches });
@@ -259,6 +266,19 @@ for (const match of rawMatches.slice(0, maxMatches)) {
   }
 }
 
+// Patch notor-last-recalled-at on every matched note (best-effort)
+const recalledNow = new Date().toISOString();
+for (const match of enrichedMatches) {
+  try {
+    const file = utils.vault.getFileByPath(match.path);
+    if (!file) continue;
+    const patched = utils.memory.patchFrontmatterField(match.payload, "notor-last-recalled-at", recalledNow);
+    await utils.vault.modify(file, patched);
+  } catch {
+    // best-effort; don't block recall on timestamp failure
+  }
+}
+
 log.debug("Memory search complete", { matchCount: enrichedMatches.length });
 await utils.chatBlocks.emit("memory_recalled", { matches: enrichedMatches });
 \`\`\`
@@ -296,6 +316,13 @@ await utils.chatBlocks.emit("memory_recalled", { matches: enrichedMatches });
 					min: 1,
 					max: 168,
 				},
+				{
+					key: "evaluator_profile",
+					name: "Evaluator profile",
+					type: "string",
+					description: "Sub-agent profile used to evaluate which recalled memories were useful.",
+					default: "memory-evaluator",
+				},
 			],
 			scaffoldContent:
 `---
@@ -327,6 +354,11 @@ settings:
     default: 24
     min: 1
     max: 168
+  evaluator_profile:
+    name: "Evaluator profile"
+    type: string
+    description: "Sub-agent profile used to evaluate which recalled memories were useful."
+    default: "memory-evaluator"
 \`\`\`
 
 \`\`\`ts
@@ -342,7 +374,11 @@ if (!conversationId) return;
 const captureProfile = (settings as Record<string, unknown>).capture_profile as string ?? "memory-capture";
 const resolverProfile = (settings as Record<string, unknown>).resolver_profile as string ?? "memory-resolver";
 const windowHours = (settings as Record<string, unknown>).dedup_window_hours as number ?? 24;
+const evaluatorProfile = (settings as Record<string, unknown>).evaluator_profile as string ?? "memory-evaluator";
 const memoryDir = utils.resolveNotorPath("memory");
+const approvalMode = utils.memoryApprovalMode ?? "auto";
+const pendingMode = approvalMode === "bulk" || approvalMode === "bulk_and_inline";
+const pendingMemoryDir = pendingMode ? utils.resolveNotorPath("pending-memories") : "";
 
 // Load full conversation for context
 const messages = await utils.chatHistory.loadFull(conversationId);
@@ -374,7 +410,7 @@ const task = [
   "</transcript>",
 ].join("\\n");
 
-log.debug("Spawning memory-capture sub-agent (detached)", { captureProfile });
+log.debug("Spawning memory-capture sub-agent (detached)", { captureProfile, approvalMode });
 
 await utils.runSubAgent({
   profileName: captureProfile,
@@ -400,7 +436,11 @@ await utils.runSubAgent({
       return;
     }
 
-    const results: Array<{ action: string; path?: string; insight: string }> = [];
+    if (pendingMode) {
+      await utils.memory!.pendingMemoryManager.ensurePendingDir();
+    }
+
+    const results: Array<{ action: string; path?: string; insight: string; pending?: boolean }> = [];
 
     for (const insight of insights) {
       if (!insight.content?.trim()) continue;
@@ -417,12 +457,15 @@ await utils.runSubAgent({
           memoryDir,
           resolverProfile,
           silent: true,
+          pendingMode,
+          pendingMemoryDir: pendingMode ? pendingMemoryDir : undefined,
         });
 
         results.push({
           action: resolveResult.action,
           path: resolveResult.path,
           insight: insight.content.substring(0, 120),
+          pending: pendingMode,
         });
       } catch (e) {
         log.error("Failed to resolve insight", { error: String(e), content: insight.content.substring(0, 80) });
@@ -435,7 +478,112 @@ await utils.runSubAgent({
         results: actionable,
         conversationId,
       });
-      log.debug("Memory capture complete", { count: actionable.length });
+
+      // Emit per-memory inline approval blocks when bulk_and_inline mode is active.
+      if (approvalMode === "bulk_and_inline") {
+        for (const r of actionable) {
+          if (!r.path) continue;
+          try {
+            const pendingContent = await utils.memory!.pendingMemoryManager.getLiveNoteContent
+              ? null // placeholder — actual data assembled below
+              : null;
+            // Read the pending note to get its body for the inline block.
+            const pendingNote = await (async () => {
+              try {
+                const raw = await utils.vault.adapter.read(r.path!);
+                return utils.memory!.parseNote(raw);
+              } catch { return null; }
+            })();
+            if (!pendingNote) continue;
+
+            // For updates, also read the current live note body.
+            const isUpdate = r.action === "updated";
+            let currentBody: string | undefined;
+            if (isUpdate) {
+              const targetPath = (pendingNote as any).targetPath as string | undefined;
+              if (targetPath) {
+                const liveRaw = await utils.memory!.pendingMemoryManager.getLiveNoteContent(targetPath);
+                if (liveRaw) {
+                  currentBody = utils.memory!.parseNote(liveRaw).body;
+                }
+              }
+            }
+
+            await utils.chatBlocks.emit("memory_pending_approval", {
+              pendingPath: r.path,
+              title: pendingNote.title,
+              action: r.action,
+              targetPath: (pendingNote as any).targetPath,
+              proposedBody: pendingNote.body,
+              currentBody,
+            });
+          } catch (e) {
+            log.warn("Failed to emit inline approval block", { error: String(e) });
+          }
+        }
+      }
+
+      log.debug("Memory capture complete", { count: actionable.length, pendingMode });
+    }
+
+    // Usefulness evaluation: determine which recalled memories were actually
+    // drawn upon in this conversation and stamp notor-last-useful-at on them.
+    const recalledMatches: Array<{ path: string; title: string }> = messages
+      .filter((m: any) => m.role === "extension_block")
+      .flatMap((m: any) => {
+        if (!Array.isArray(m.content)) return [];
+        return m.content
+          .filter((b: any) => b.type === "custom_block" && b.kind === "memory_recalled")
+          .flatMap((b: any) => (b.data?.matches ?? []) as Array<{ path: string; title: string }>);
+      });
+
+    if (recalledMatches.length > 0) {
+      const evalTask = [
+        "Below is a conversation transcript followed by a list of memory notes that were recalled and injected at the start of the conversation.",
+        "Identify which memory notes were clearly drawn upon, referenced, or confirmed by the conversation.",
+        "Be conservative: only include a memory if it was visibly used, not merely tangentially related.",
+        "",
+        "<transcript>",
+        transcript,
+        "</transcript>",
+        "",
+        "<recalled-memories>",
+        recalledMatches.map((m: any) => "- path: " + m.path + "\\n  title: " + m.title).join("\\n"),
+        "</recalled-memories>",
+        "",
+        'Return JSON: { "useful_paths": ["path1", "path2"] }',
+      ].join("\\n");
+
+      try {
+        const evalResult = await utils.runSubAgent({
+          profileName: evaluatorProfile,
+          task: evalTask,
+          detached: false,
+          silent: true,
+        });
+
+        if (evalResult?.text) {
+          const evalParsed = utils.memory.extractJSON(evalResult.text) as { useful_paths?: string[] } | null;
+          const usefulPaths = evalParsed?.useful_paths ?? [];
+          const evalNow = new Date().toISOString();
+
+          for (const usefulPath of usefulPaths) {
+            try {
+              const file = utils.vault.getFileByPath(usefulPath);
+              if (!file) continue;
+              const content = await utils.vault.read(file);
+              const patched = utils.memory.patchFrontmatterField(content, "notor-last-useful-at", evalNow);
+              await utils.vault.modify(file, patched);
+            } catch (e) {
+              log.warn("Failed to stamp notor-last-useful-at", { path: usefulPath, error: String(e) });
+            }
+          }
+
+          log.debug("Usefulness evaluation complete", { useful: usefulPaths.length, recalled: recalledMatches.length });
+        }
+      } catch (e) {
+        log.warn("Usefulness evaluation failed", { error: String(e) });
+      }
     }
   },
 });

@@ -100,6 +100,12 @@ export interface NotorSettings {
 	/** Set opened notes as the active tab and give them editor focus. */
 	focus_notes_on_access: boolean;
 
+	/** Maximum number of lines the chat input auto-resizes to before capping. */
+	chat_input_max_lines: number;
+
+	/** Maximum height of the chat input as a percentage of the window height (0–100). */
+	chat_input_max_height_pct: number;
+
 	/** Chat history storage path (vault-relative). */
 	history_path: string;
 
@@ -412,6 +418,14 @@ export interface NotorSettings {
 
 	/** Subfolder under `notor_dir` for Evergreen concept notes (default: "memory"). */
 	memory_folder: string;
+
+	/**
+	 * Controls when captured memory notes are committed to the vault.
+	 * - "auto": write immediately (default, existing behaviour).
+	 * - "bulk": queue in `pending-memories/`; user approves via the bulk panel.
+	 * - "bulk_and_inline": same as bulk, plus per-memory approval blocks appear in the conversation thread.
+	 */
+	memory_approval_mode: "auto" | "bulk" | "bulk_and_inline";
 
 	// -------------------------------------------------------------------
 	// Phase 12: Extension block rate limiting

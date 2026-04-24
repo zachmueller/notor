@@ -79,6 +79,8 @@ import {
 	computeFingerprint,
 	assertMemoryPath,
 	extractJSON,
+	patchFrontmatterField,
+	extractMemoryWikilinks,
 } from "../memory/note-format";
 import {
 	readDedupCache,
@@ -88,6 +90,7 @@ import {
 } from "../memory/dedup-cache";
 import { resolveConcept } from "../memory/concept-resolver";
 import type { ResolveConceptResult } from "../memory/concept-resolver";
+import { PendingMemoryManager } from "../memory/pending-memory-manager";
 
 // ---------------------------------------------------------------------------
 // Utils builder
@@ -283,6 +286,8 @@ export interface ExtensionUtils {
 			memoryDir: string;
 			resolverProfile: string;
 			silent?: boolean;
+			pendingMode?: boolean;
+			pendingMemoryDir?: string;
 		}) => Promise<ResolveConceptResult>;
 		fingerprintAndDedup: (content: string, windowHours: number) => Promise<{ fingerprint: string; isDuplicate: boolean }>;
 		serializeNote: (args: { title: string; body: string; sources: string[]; createdAt: string }) => string;
@@ -295,7 +300,16 @@ export interface ExtensionUtils {
 		advanceDreamCursor: (timestamp: string) => Promise<void>;
 		hasMemoryNotes: () => Promise<boolean>;
 		extractJSON: (text: string) => unknown | null;
+		patchFrontmatterField: (content: string, key: string, value: string) => string;
+		extractMemoryWikilinks: (body: string, memoryDir: string) => string[];
+		/** Manager for pending (unapproved) memory notes. */
+		pendingMemoryManager: PendingMemoryManager;
 	} | null;
+	/**
+	 * Current memory approval mode from plugin settings.
+	 * "auto" | "bulk" | "bulk_and_inline". Null when memory is disabled.
+	 */
+	memoryApprovalMode: string | null;
 	/**
 	 * Read the current Notor plugin settings as a sanitized JSON object.
 	 *
@@ -1072,6 +1086,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 		})(),
 
 		memory: null,
+		memoryApprovalMode: null,
 	};
 
 	// Wire memory facade after the main object is constructed so that
@@ -1079,8 +1094,18 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 	if (plugin.settings.memory_enabled) {
 		const memoryFolder = plugin.settings.memory_folder ?? "memory";
 		const memoryDir = normalizePath(`${plugin.settings.notor_dir}/${memoryFolder}`);
+		const pendingMemoryDir = normalizePath(`${plugin.settings.notor_dir}/pending-memories`);
 		const dedupCachePath = `${memoryDir}/.dedup-cache.json`;
 		const dreamCursorPath = `${memoryDir}/.dream-cursor.json`;
+
+		const pendingManager = new PendingMemoryManager(
+			plugin.app,
+			plugin.app.vault,
+			pendingMemoryDir,
+			memoryDir,
+		);
+
+		utils.memoryApprovalMode = plugin.settings.memory_approval_mode ?? "auto";
 
 		utils.memory = {
 			resolveConcept: (args: {
@@ -1088,6 +1113,8 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				memoryDir: string;
 				resolverProfile: string;
 				silent?: boolean;
+				pendingMode?: boolean;
+				pendingMemoryDir?: string;
 			}) => resolveConcept({
 				insight: args.insight,
 				memoryDir: args.memoryDir,
@@ -1096,6 +1123,8 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				runSubAgent: utils.runSubAgent,
 				vault: plugin.app.vault,
 				silent: args.silent,
+				pendingMode: args.pendingMode,
+				pendingMemoryDir: args.pendingMemoryDir,
 			}),
 
 			fingerprintAndDedup: async (content: string, windowHours: number) => {
@@ -1131,6 +1160,10 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 			},
 
 			extractJSON,
+			patchFrontmatterField,
+			extractMemoryWikilinks,
+
+			pendingMemoryManager: pendingManager,
 		};
 	}
 

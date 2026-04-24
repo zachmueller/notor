@@ -245,6 +245,11 @@ export class ExtensionManager {
 		const errors: ExtensionError[] = [];
 		const builtinOverrides: string[] = [];
 
+		// Snapshot current working state so errored extensions can fall back to it
+		const prevTools = new Map(this.tools);
+		const prevAutomations = new Map(this.automations);
+		const prevBlocks = new Map(this.blocks);
+
 		// 1. Discover all extensions
 		const discovered = await discoverExtensions(
 			this.plugin.app.vault,
@@ -300,7 +305,6 @@ export class ExtensionManager {
 					log.error(msg, { file: tool.filePath, error: result.error });
 				} else {
 					const msg = `Extension '${tool.name}' failed to compile: ${result.error}`;
-					new Notice(msg);
 					log.error(msg, { file: tool.filePath });
 				}
 				errors.push({ filePath: tool.filePath, message: result.error });
@@ -361,7 +365,6 @@ export class ExtensionManager {
 			if ("error" in result) {
 				const displayName = automation.displayName ?? automation.filePath;
 				const msg = `Extension '${displayName}' failed to compile: ${result.error}`;
-				new Notice(msg);
 				log.error(msg, { file: automation.filePath });
 				errors.push({ filePath: automation.filePath, message: result.error });
 				continue;
@@ -419,7 +422,6 @@ export class ExtensionManager {
 			const result = compileBlockModule(block.rawCode);
 			if ("error" in result) {
 				const msg = `Block extension '${block.kind}' failed to compile: ${result.error}`;
-				new Notice(msg);
 				log.error(msg, { file: block.filePath });
 				errors.push({ filePath: block.filePath, message: result.error });
 				continue;
@@ -428,7 +430,6 @@ export class ExtensionManager {
 			const renderFn = moduleExports[block.rendererExport];
 			if (typeof renderFn !== "function") {
 				const msg = `Block extension '${block.kind}': export '${block.rendererExport}' is not a function`;
-				new Notice(msg);
 				log.error(msg, { file: block.filePath });
 				errors.push({ filePath: block.filePath, message: msg });
 				continue;
@@ -463,6 +464,52 @@ export class ExtensionManager {
 
 		// 3d. Register block kinds declared in tools/automations (blocks: YAML section)
 		this.registerInlineBlockKinds(compiledTools, compiledAutomations, chatBlockRegistry, errors);
+
+		// 3e. For user-authored extensions that failed, restore the previous working
+		// compiled definition so the old logic stays active until the user fixes the error.
+		for (const error of errors) {
+			if (error.filePath.startsWith("(built-in")) continue;
+			// Tool: keyed by name — find which prev tool had this filePath
+			for (const [name, prev] of prevTools) {
+				if (prev.filePath === error.filePath && prev.compiledFn && !compiledTools.has(name)) {
+					compiledTools.set(name, prev);
+					break;
+				}
+			}
+			// Automation: keyed by filePath directly
+			if (prevAutomations.has(error.filePath) && !compiledAutomations.has(error.filePath)) {
+				const prev = prevAutomations.get(error.filePath)!;
+				if (prev.compiledFn) compiledAutomations.set(error.filePath, prev);
+			}
+			// Block: keyed by kind — find which prev block had this filePath, re-compile from rawCode
+			for (const [kind, prev] of prevBlocks) {
+				if (prev.filePath === error.filePath && !compiledBlocks.has(kind)) {
+					const recompiled = compileBlockModule(prev.rawCode);
+					if ("error" in recompiled) break;
+					const renderFn = recompiled.exports[prev.rendererExport];
+					if (typeof renderFn !== "function") break;
+					const def: ChatBlockDefinition = {
+						kind: prev.kind,
+						displayName: prev.displayName,
+						icon: prev.icon,
+						excludeFromCompaction: prev.excludeFromCompaction,
+						render: renderFn as ChatBlockDefinition["render"],
+					};
+					if (prev.toLLMTextExport) {
+						const toLLMFn = recompiled.exports[prev.toLLMTextExport];
+						if (typeof toLLMFn === "function") def.toLLMText = toLLMFn as ChatBlockDefinition["toLLMText"];
+					}
+					if (prev.renderLoadingExport) {
+						const loadingFn = recompiled.exports[prev.renderLoadingExport];
+						if (typeof loadingFn === "function") def.renderLoading = loadingFn as ChatBlockDefinition["renderLoading"];
+					}
+					chatBlockRegistry.register(def);
+					this.registeredBlockKinds.add(kind);
+					compiledBlocks.set(kind, prev);
+					break;
+				}
+			}
+		}
 
 		// 4. Shared settings — vault file wins; fall back to built-in scaffold (D-8)
 		if (discovered.sharedSettings) {
@@ -591,7 +638,6 @@ export class ExtensionManager {
 				const renderFn = moduleExports[decl.rendererExport];
 				if (typeof renderFn !== "function") {
 					const msg = `Block kind '${decl.kind}': export '${decl.rendererExport}' is not a function in '${source.filePath}'`;
-					new Notice(msg);
 					log.error(msg, { file: source.filePath });
 					errors.push({ filePath: source.filePath, message: msg });
 					continue;

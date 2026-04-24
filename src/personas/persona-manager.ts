@@ -232,19 +232,26 @@ export class PersonaManager {
 	 * persona was deleted, deactivates it. Fires `personaChangedCallbacks`
 	 * so UI labels update automatically.
 	 *
+	 * If the active persona's file fails to parse, the old state is preserved
+	 * and an error result is returned so the caller can surface a Notice.
+	 *
 	 * Called by the persona file watcher when persona files change on disk.
 	 */
 	async refreshActivePersona(): Promise<
 		| { status: "refreshed"; persona: Persona }
 		| { status: "deactivated"; previousName: string }
 		| { status: "no-active-persona" }
+		| { status: "error"; filePath: string; message: string }
 	> {
 		if (!this.activePersona) {
 			return { status: "no-active-persona" };
 		}
 
 		const currentName = this.activePersona.name;
-		const personas = await this.getDiscoveredPersonas();
+		const errors: Array<{ filePath: string; message: string }> = [];
+		const personas = await discoverPersonas(
+			this.vault, this.metadataCache, this.settings.notor_dir, this.templateRegistry, errors,
+		);
 		const updated = personas.find((p) => p.name === currentName);
 
 		if (updated) {
@@ -252,6 +259,17 @@ export class PersonaManager {
 			for (const cb of this.personaChangedCallbacks) cb(updated);
 			log.info("Active persona refreshed from disk", { name: currentName });
 			return { status: "refreshed", persona: updated };
+		}
+
+		// If the active persona failed to parse (vs. simply being deleted), preserve
+		// the current state and surface the error rather than deactivating.
+		if (errors.length > 0) {
+			const activePersonaDir = this.activePersona.directory_path;
+			const activeError = errors.find(e => e.filePath.startsWith(activePersonaDir));
+			if (activeError) {
+				log.warn("Active persona failed to parse — keeping previous state", { name: currentName, error: activeError.message });
+				return { status: "error", filePath: activeError.filePath, message: activeError.message };
+			}
 		}
 
 		log.warn("Active persona no longer found on disk, deactivating", { name: currentName });

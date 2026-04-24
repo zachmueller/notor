@@ -4,7 +4,10 @@ export interface MemoryNote {
 	title: string;
 	body: string;
 	createdAt: string;
-	updatedAt: string;
+	memoryUpdatedAt: string;
+	lastLinkedToAt?: string;
+	lastUsefulAt?: string;
+	lastRecalledAt?: string;
 	sources: string[];
 }
 
@@ -23,7 +26,7 @@ export function serializeNote(args: {
 		"---",
 		"notor-type: memory",
 		`notor-created-at: ${args.createdAt}`,
-		`notor-updated-at: ${now}`,
+		`notor-memory-updated-at: ${now}`,
 		`notor-sources: ${sourcesYaml}`,
 		"---",
 		"",
@@ -41,7 +44,7 @@ export function parseNote(markdown: string): MemoryNote {
 			title: "",
 			body: markdown.trim(),
 			createdAt: "",
-			updatedAt: "",
+			memoryUpdatedAt: "",
 			sources: [],
 		};
 	}
@@ -50,7 +53,10 @@ export function parseNote(markdown: string): MemoryNote {
 	const rest = fmMatch[2]!;
 
 	const createdAt = extractField(frontmatter, "notor-created-at") ?? "";
-	const updatedAt = extractField(frontmatter, "notor-updated-at") ?? "";
+	const memoryUpdatedAt = extractField(frontmatter, "notor-memory-updated-at") ?? "";
+	const lastLinkedToAt = extractField(frontmatter, "notor-last-linked-to-at") ?? undefined;
+	const lastUsefulAt = extractField(frontmatter, "notor-last-useful-at") ?? undefined;
+	const lastRecalledAt = extractField(frontmatter, "notor-last-recalled-at") ?? undefined;
 	const sources = extractArrayField(frontmatter, "notor-sources");
 
 	const titleMatch = rest.match(/^#\s+(.+)$/m);
@@ -61,14 +67,175 @@ export function parseNote(markdown: string): MemoryNote {
 		: 0;
 	const body = rest.slice(bodyStart).trim();
 
-	return { title, body, createdAt, updatedAt, sources };
+	return { title, body, createdAt, memoryUpdatedAt, lastLinkedToAt, lastUsefulAt, lastRecalledAt, sources };
+}
+
+// ---------------------------------------------------------------------------
+// Pending memory notes
+// ---------------------------------------------------------------------------
+
+export interface PendingMemoryNote extends MemoryNote {
+	approvalState: "pending";
+	/** Whether this note will create a new memory or update an existing one. */
+	originalAction: "create" | "update";
+	/**
+	 * Vault-relative path of the live memory note being updated (updates only).
+	 * Stored as an Obsidian wikilink (e.g. `[[notor/memory/slug]]`) so vault
+	 * renames propagate automatically via Obsidian's link-update machinery.
+	 */
+	targetPath?: string;
+}
+
+export function serializePendingNote(note: PendingMemoryNote): string {
+	const now = new Date().toISOString();
+	const sourcesYaml =
+		note.sources.length > 0 ? `[${note.sources.join(", ")}]` : "[]";
+	const lines = [
+		"---",
+		"notor-type: pending-memory",
+		`notor-created-at: ${note.createdAt}`,
+		`notor-memory-updated-at: ${now}`,
+		`notor-sources: ${sourcesYaml}`,
+		"notor-approval-state: pending",
+		`notor-original-action: ${note.originalAction}`,
+	];
+	if (note.targetPath) {
+		lines.push(`notor-target-path: "[[${note.targetPath}]]"`);
+	}
+	lines.push("---", "", `# ${note.title}`, "", note.body, "");
+	return lines.join("\n");
+}
+
+export function parsePendingNote(markdown: string): PendingMemoryNote {
+	const fmMatch = markdown.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+	if (!fmMatch) {
+		return {
+			title: "",
+			body: markdown.trim(),
+			createdAt: "",
+			memoryUpdatedAt: "",
+			sources: [],
+			approvalState: "pending",
+			originalAction: "create",
+		};
+	}
+
+	const frontmatter = fmMatch[1]!;
+	const rest = fmMatch[2]!;
+
+	const createdAt = extractField(frontmatter, "notor-created-at") ?? "";
+	const memoryUpdatedAt = extractField(frontmatter, "notor-memory-updated-at") ?? "";
+	const sources = extractArrayField(frontmatter, "notor-sources");
+	const originalAction =
+		(extractField(frontmatter, "notor-original-action") as "create" | "update") ?? "create";
+	const rawTargetPath = extractField(frontmatter, "notor-target-path");
+	// Strip the wikilink delimiters: "[[notor/memory/slug]]" → "notor/memory/slug"
+	const targetPath = rawTargetPath
+		? rawTargetPath.replace(/^\s*"\s*\[\[/, "").replace(/\]\]\s*"\s*$/, "").trim() || undefined
+		: undefined;
+
+	const titleMatch = rest.match(/^#\s+(.+)$/m);
+	const title = titleMatch ? titleMatch[1]!.trim() : "";
+	const bodyStart = titleMatch ? rest.indexOf(titleMatch[0]) + titleMatch[0].length : 0;
+	const body = rest.slice(bodyStart).trim();
+
+	return { title, body, createdAt, memoryUpdatedAt, sources, approvalState: "pending", originalAction, targetPath };
+}
+
+// ---------------------------------------------------------------------------
+// Frontmatter patching (for notor-last-linked-to-at / notor-last-useful-at / notor-last-recalled-at)
+// ---------------------------------------------------------------------------
+
+/**
+ * Patches a single frontmatter field in a memory note's raw markdown without
+ * re-serializing the whole note (which would bump notor-memory-updated-at).
+ * If the key already exists, its value is replaced in-place.
+ * If the key is absent, it is inserted after the last `notor-*` line in the
+ * frontmatter block.
+ */
+export function patchFrontmatterField(content: string, key: string, value: string): string {
+	const fmMatch = content.match(/^(---\n)([\s\S]*?)(\n---\n?)/);
+	if (!fmMatch) return content;
+
+	const prefix = fmMatch[1]!;      // "---\n"
+	const fm = fmMatch[2]!;          // frontmatter body
+	const suffix = fmMatch[3]!;      // "\n---\n?"
+	const afterFm = content.slice(prefix.length + fm.length + suffix.length);
+
+	// Replace existing key
+	const keyRe = new RegExp(`^(${key}:\\s*)(.+)$`, "m");
+	if (keyRe.test(fm)) {
+		const patched = fm.replace(keyRe, `$1${value}`);
+		return prefix + patched + suffix + afterFm;
+	}
+
+	// Insert after the last notor-* line
+	const lines = fm.split("\n");
+	let lastNotorIdx = -1;
+	for (let i = lines.length - 1; i >= 0; i--) {
+		if (lines[i]!.startsWith("notor-")) {
+			lastNotorIdx = i;
+			break;
+		}
+	}
+	const insertAt = lastNotorIdx >= 0 ? lastNotorIdx + 1 : lines.length;
+	lines.splice(insertAt, 0, `${key}: ${value}`);
+	return prefix + lines.join("\n") + suffix + afterFm;
+}
+
+// ---------------------------------------------------------------------------
+// Wikilink extraction (for notor-last-linked-to-at)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts vault-relative paths of memory notes linked from `body`.
+ * Only returns paths that start with `memoryDir + "/"`.
+ * Strips Obsidian aliases (`[[path|alias]]` → `path`) and ensures `.md` extension.
+ */
+export function extractMemoryWikilinks(body: string, memoryDir: string): string[] {
+	const prefix = memoryDir.endsWith("/") ? memoryDir : memoryDir + "/";
+	const results: string[] = [];
+	const re = /\[\[([^\]]+)\]\]/g;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(body)) !== null) {
+		const inner = m[1]!;
+		// Strip alias
+		const pathPart = inner.includes("|") ? inner.slice(0, inner.indexOf("|")) : inner;
+		const normalized = normalizVaultPath(pathPart.trim());
+		if (!normalized.startsWith(prefix)) continue;
+		const withExt = normalized.endsWith(".md") ? normalized : normalized + ".md";
+		if (!results.includes(withExt)) results.push(withExt);
+	}
+	return results;
+}
+
+export function assertPendingMemoryPath(
+	vaultRelativePath: string,
+	pendingDir: string,
+): void {
+	if (!vaultRelativePath || !pendingDir) {
+		throw new Error(`Invalid pending memory path: path and pendingDir must be non-empty`);
+	}
+	if (vaultRelativePath.startsWith("/")) {
+		throw new Error(`Absolute paths are not allowed: ${vaultRelativePath}`);
+	}
+	const normalizedTarget = normalizVaultPath(vaultRelativePath);
+	const normalizedPendingDir = normalizVaultPath(pendingDir);
+	if (
+		normalizedTarget !== normalizedPendingDir &&
+		!normalizedTarget.startsWith(normalizedPendingDir + "/")
+	) {
+		throw new Error(
+			`Path "${vaultRelativePath}" is outside pending memory directory "${pendingDir}"`,
+		);
+	}
 }
 
 export function slugifyTitle(title: string): string {
 	return title
 		.toLowerCase()
 		.normalize("NFD")
-		.replace(/[\u0300-\u036f]/g, "")
+		.replace(/[̀-ͯ]/g, "")
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/-{2,}/g, "-")
 		.replace(/^-|-$/g, "")

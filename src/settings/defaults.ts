@@ -123,6 +123,8 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	mode: "plan",
 	open_notes_on_access: true,
 	focus_notes_on_access: false,
+	chat_input_max_lines: 3,
+	chat_input_max_height_pct: 10,
 	history_path: `${configDir}/plugins/notor/history/`,
 	history_max_size_mb: 500,
 	history_max_age_days: 90,
@@ -196,6 +198,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	// Knowledge Memory
 	memory_enabled: false,
 	memory_folder: "memory",
+	memory_approval_mode: "auto",
 
 	// Phase 12: Extension block rate limiting
 	extension_block_max_emits_per_window: 10,

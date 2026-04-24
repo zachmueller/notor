@@ -361,6 +361,31 @@ get_outlinks:
 };
 
 // ---------------------------------------------------------------------------
+// Built-in profile: memory-evaluator
+// ---------------------------------------------------------------------------
+
+const MEMORY_EVALUATOR: BuiltinSubAgentDefinition = {
+	name: "memory-evaluator",
+	description: "Evaluate which recalled memory notes were actually useful in the conversation.",
+	systemPromptContent: `---
+notor-description: Evaluate which recalled memory notes were actually useful in the conversation.
+notor-preferred-preset: tiny
+notor-iteration-cap: 2
+---
+
+You will receive a conversation transcript and a list of memory notes that were recalled and injected as context at the start of the conversation. Your job is to decide which of those recalled memories were visibly drawn upon by the conversation.
+
+A memory counts as **useful** only if it was clearly referenced, applied, confirmed, or built upon by the conversation content. It does NOT count as useful if it was merely topically adjacent or could have been relevant but wasn't actually used.
+
+Be conservative. When in doubt, leave a memory out of the useful list.
+
+Return ONLY JSON — no markdown, no explanation: \`{ "useful_paths": ["vault/relative/path.md", ...] }\`
+
+If no memories were clearly used, return \`{ "useful_paths": [] }\`.
+`,
+};
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -381,6 +406,7 @@ export const BUILTIN_SUBAGENT_PROFILES: ReadonlyMap<string, BuiltinSubAgentDefin
 		[MEMORY_RESOLVER.name, MEMORY_RESOLVER],
 		[MEMORY_CAPTURE.name, MEMORY_CAPTURE],
 		[MEMORY_DREAM.name, MEMORY_DREAM],
+		[MEMORY_EVALUATOR.name, MEMORY_EVALUATOR],
 	]);
 
 /**

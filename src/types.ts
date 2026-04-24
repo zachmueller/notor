@@ -98,6 +98,12 @@ export interface Conversation {
 	 * @see specs/ZZ-misc/model-presets-design.md — Section 3.3
 	 */
 	preset_name?: string | null;
+	/**
+	 * Unsent input text saved when the user navigated away from this conversation
+	 * mid-composition. Restored to the input box when the user returns.
+	 * null/undefined means no draft is saved.
+	 */
+	draft_text?: string | null;
 }
 
 /** Plan/Act mode. */

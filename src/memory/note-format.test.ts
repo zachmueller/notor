@@ -5,6 +5,8 @@ import {
 	slugifyTitle,
 	computeFingerprint,
 	assertMemoryPath,
+	patchFrontmatterField,
+	extractMemoryWikilinks,
 } from "./note-format";
 
 describe("serializeNote / parseNote round-trip", () => {
@@ -23,7 +25,7 @@ describe("serializeNote / parseNote round-trip", () => {
 		expect(parsed.body).toBe(input.body);
 		expect(parsed.sources).toEqual(input.sources);
 		expect(parsed.createdAt).toBe(input.createdAt);
-		expect(parsed.updatedAt).toBeTruthy();
+		expect(parsed.memoryUpdatedAt).toBeTruthy();
 	});
 
 	it("handles empty sources array", () => {
@@ -190,5 +192,82 @@ describe("assertMemoryPath", () => {
 		expect(() => assertMemoryPath("notor/memory-archive/note.md", "notor/memory")).toThrow(
 			/outside memory directory/,
 		);
+	});
+});
+
+describe("patchFrontmatterField", () => {
+	const baseNote = [
+		"---",
+		"notor-type: memory",
+		"notor-created-at: 2026-04-18T12:00:00.000Z",
+		"notor-memory-updated-at: 2026-04-18T12:00:00.000Z",
+		"notor-sources: [chat]",
+		"---",
+		"",
+		"# My Note",
+		"",
+		"Body text.",
+		"",
+	].join("\n");
+
+	it("replaces an existing key in-place without touching other fields", () => {
+		const patched = patchFrontmatterField(baseNote, "notor-memory-updated-at", "2026-04-20T00:00:00.000Z");
+		expect(patched).toContain("notor-memory-updated-at: 2026-04-20T00:00:00.000Z");
+		expect(patched).toContain("notor-created-at: 2026-04-18T12:00:00.000Z");
+		expect(patched).toContain("Body text.");
+	});
+
+	it("inserts a new key after the last notor-* line when absent", () => {
+		const patched = patchFrontmatterField(baseNote, "notor-last-linked-to-at", "2026-04-20T00:00:00.000Z");
+		expect(patched).toContain("notor-last-linked-to-at: 2026-04-20T00:00:00.000Z");
+		expect(patched).toContain("notor-memory-updated-at: 2026-04-18T12:00:00.000Z");
+		expect(patched).toContain("Body text.");
+		// The new key should be inside the frontmatter block (before the closing ---)
+		const fmEnd = patched.indexOf("\n---\n", 4);
+		const keyPos = patched.indexOf("notor-last-linked-to-at");
+		expect(keyPos).toBeGreaterThan(0);
+		expect(keyPos).toBeLessThan(fmEnd);
+	});
+
+	it("returns content unchanged when no frontmatter block is found", () => {
+		const plain = "# Just a heading\n\nBody.";
+		expect(patchFrontmatterField(plain, "notor-last-useful-at", "2026-04-20T00:00:00.000Z")).toBe(plain);
+	});
+});
+
+describe("extractMemoryWikilinks", () => {
+	const memoryDir = "notor/memory";
+
+	it("extracts links to memory notes", () => {
+		const body = "See also [[notor/memory/concept-a]] and [[notor/memory/concept-b]].";
+		expect(extractMemoryWikilinks(body, memoryDir)).toEqual([
+			"notor/memory/concept-a.md",
+			"notor/memory/concept-b.md",
+		]);
+	});
+
+	it("strips aliases from wikilinks", () => {
+		const body = "See [[notor/memory/concept-a|Concept A]].";
+		expect(extractMemoryWikilinks(body, memoryDir)).toEqual(["notor/memory/concept-a.md"]);
+	});
+
+	it("ignores links outside the memory directory", () => {
+		const body = "See [[notor/notes/some-note]] and [[notor/memory/concept-a]].";
+		expect(extractMemoryWikilinks(body, memoryDir)).toEqual(["notor/memory/concept-a.md"]);
+	});
+
+	it("deduplicates repeated links", () => {
+		const body = "[[notor/memory/concept-a]] again [[notor/memory/concept-a]].";
+		expect(extractMemoryWikilinks(body, memoryDir)).toEqual(["notor/memory/concept-a.md"]);
+	});
+
+	it("appends .md extension when missing", () => {
+		const body = "[[notor/memory/concept-a]]";
+		const results = extractMemoryWikilinks(body, memoryDir);
+		expect(results[0]).toMatch(/\.md$/);
+	});
+
+	it("returns empty array when body has no wikilinks", () => {
+		expect(extractMemoryWikilinks("No links here.", memoryDir)).toEqual([]);
 	});
 });

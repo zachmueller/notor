@@ -44,6 +44,7 @@ export async function discoverPersonas(
 	metadataCache: MetadataCache,
 	notorDir: string,
 	templateRegistry?: TemplateVariableRegistry,
+	errors?: Array<{ filePath: string; message: string }>,
 ): Promise<Persona[]> {
 	const personasRootPath = getPersonasRootPath(notorDir);
 	const personasRoot = vault.getAbstractFileByPath(personasRootPath);
@@ -58,9 +59,11 @@ export async function discoverPersonas(
 		for (const child of personasRoot.children) {
 			if (!isFolder(child)) continue;
 
-			const persona = await loadPersonaFromDirectory(vault, metadataCache, child, templateRegistry);
-			if (persona) {
-				personas.push(persona);
+			const result = await loadPersonaFromDirectory(vault, metadataCache, child, templateRegistry);
+			if (result.persona) {
+				personas.push(result.persona);
+			} else if (result.error && errors) {
+				errors.push(result.error);
 			}
 		}
 	}
@@ -87,33 +90,35 @@ export async function discoverPersonas(
 /**
  * Load a single persona from a subdirectory under the personas root.
  *
- * Returns null if the directory does not contain a `system-prompt.md`
- * file or if parsing fails.
+ * Returns `{ persona }` on success, `{ error }` if parsing fails,
+ * or `{}` if the directory has no system-prompt.md (silently ignored).
  */
 async function loadPersonaFromDirectory(
 	vault: Vault,
 	metadataCache: MetadataCache,
 	subdir: TFolder,
 	templateRegistry?: TemplateVariableRegistry,
-): Promise<Persona | null> {
+): Promise<{ persona?: Persona; error?: { filePath: string; message: string } }> {
 	const promptPath = `${subdir.path}/${SYSTEM_PROMPT_FILENAME}`;
 	const promptFile = vault.getAbstractFileByPath(promptPath);
 
 	if (!promptFile || !isFile(promptFile)) {
 		// Silently ignore — subdirectory without system-prompt.md
-		return null;
+		return {};
 	}
 
 	const tFile = promptFile;
 
 	try {
-		return await parsePersona(vault, metadataCache, subdir, tFile, templateRegistry);
+		const persona = await parsePersona(vault, metadataCache, subdir, tFile, templateRegistry);
+		if (persona) return { persona };
+		return { error: { filePath: tFile.path, message: "Persona frontmatter is malformed or missing required fields" } };
 	} catch (e) {
 		log.warn("Failed to parse persona, skipping", {
 			directory: subdir.path,
 			error: String(e),
 		});
-		return null;
+		return { error: { filePath: tFile.path, message: e instanceof Error ? e.message : String(e) } };
 	}
 }
 

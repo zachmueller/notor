@@ -1099,6 +1099,163 @@
 }
 
 /* ==========================================================================
+   Memory Approval — inline block (memory_pending_approval)
+   ========================================================================== */
+
+.notor-memory-approval {
+	padding: 8px 0;
+}
+
+.notor-memory-approval-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.notor-memory-approval-title {
+	font-weight: var(--font-medium);
+	font-size: var(--font-ui-small);
+}
+
+.notor-memory-approval-open {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-accent);
+	cursor: pointer;
+	margin-left: auto;
+}
+
+.notor-memory-approval-body {
+	margin-bottom: 8px;
+}
+
+.notor-memory-approval-diff {
+	display: flex;
+	gap: 8px;
+}
+
+.notor-memory-approval-diff-before,
+.notor-memory-approval-diff-after {
+	flex: 1;
+	min-width: 0;
+}
+
+.notor-memory-approval-diff-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-bottom: 4px;
+	font-weight: var(--font-medium);
+}
+
+.notor-memory-approval-diff-content {
+	font-size: var(--font-ui-smaller);
+	background: var(--background-secondary);
+	padding: 6px 8px;
+	border-radius: var(--radius-s);
+	white-space: pre-wrap;
+	word-break: break-word;
+	margin: 0;
+	max-height: 200px;
+	overflow-y: auto;
+}
+
+.notor-memory-approval-diff-content--proposed {
+	background: color-mix(in srgb, var(--color-green) 10%, var(--background-secondary));
+}
+
+.notor-memory-approval-actions {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.notor-memory-approval-accepted {
+	font-size: var(--font-ui-smaller);
+	color: var(--color-green);
+	font-weight: var(--font-medium);
+}
+
+.notor-memory-approval-rejected {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+/* ==========================================================================
+   Memory Approval — bulk modal (MemoryApprovalModal)
+   ========================================================================== */
+
+.notor-memory-approval-modal .modal-content {
+	max-height: 80vh;
+	overflow-y: auto;
+}
+
+.notor-memory-approval-global-bar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 16px;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.notor-memory-approval-count {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	flex: 1;
+}
+
+.notor-memory-approval-empty {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.notor-memory-approval-list {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.notor-memory-approval-card {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: 12px;
+	background: var(--background-secondary);
+}
+
+.notor-memory-approval-card--done {
+	opacity: 0.5;
+}
+
+.notor-memory-approval-card-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+
+.notor-memory-approval-card-body {
+	margin-bottom: 10px;
+}
+
+.notor-memory-approval-card-actions {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.notor-memory-approval-preview {
+	font-size: var(--font-ui-smaller);
+	background: var(--background-primary);
+	padding: 8px;
+	border-radius: var(--radius-s);
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 200px;
+	overflow-y: auto;
+	margin: 0;
+}
+
+/* ==========================================================================
    Loading Indicator
    ========================================================================== */
 

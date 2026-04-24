@@ -1377,7 +1377,9 @@ export class NotorChatView extends ItemView {
 		this.textInputEl.setCssProps({ '--notor-input-height': 'auto' });
 		const lineHeight = parseFloat(getComputedStyle(this.textInputEl).lineHeight) || 20;
 		const padding = 12 + 2; // 6px top + 6px bottom padding + 2px border
-		const threeLines = (lineHeight * 3) + padding;
+
+		const maxLines = this.plugin.settings.chat_input_max_lines;
+		const linesH = (lineHeight * maxLines) + padding;
 
 		if (this.userDragHeight !== null) {
 			// User has manually set the height — use it as minimum, but still
@@ -1390,8 +1392,8 @@ export class NotorChatView extends ItemView {
 			return;
 		}
 
-		const tenPercent = window.innerHeight * 0.1;
-		const maxH = Math.max(tenPercent, threeLines);
+		const pctH = window.innerHeight * (this.plugin.settings.chat_input_max_height_pct / 100);
+		const maxH = Math.max(pctH, linesH);
 		const newHeight = Math.min(this.textInputEl.scrollHeight, maxH);
 		this.textInputEl.setCssProps({
 			'--notor-input-height': newHeight + 'px',
@@ -1411,7 +1413,7 @@ export class NotorChatView extends ItemView {
 			const startHeight = this.textInputEl.getBoundingClientRect().height;
 			const lineHeight = parseFloat(getComputedStyle(this.textInputEl).lineHeight) || 20;
 			const padding = 12 + 2;
-			const minHeight = (lineHeight * 3) + padding;
+			const minHeight = (lineHeight * this.plugin.settings.chat_input_max_lines) + padding;
 
 			const onPointerMove = (moveEvent: PointerEvent) => {
 				// Handle is above the input: dragging up (negative deltaY) increases height
@@ -1465,6 +1467,11 @@ export class NotorChatView extends ItemView {
 		});
 
 		// Auto-resize contenteditable div
+		this.textInputEl.addEventListener("paste", () => {
+			// paste fires before clipboard content is committed to the DOM;
+			// defer one tick so scrollHeight reflects the pasted content.
+			setTimeout(() => this.recalcInputHeight(), 0);
+		});
 		this.textInputEl.addEventListener("input", () => {
 			this.recalcInputHeight();
 
@@ -1913,9 +1920,15 @@ export class NotorChatView extends ItemView {
 	 * Set whether the AI is currently responding.
 	 * Controls send/stop button visibility and input state.
 	 */
-	/** Pre-fill the input box with text (used by /btw auto-send in new panels). */
+	/** Pre-fill the input box with text (used by /btw auto-send and draft restore). */
 	setInputText(text: string): void {
 		this.textInputEl.textContent = text;
+		this.recalcInputHeight();
+	}
+
+	/** Return the current raw text content of the input box. */
+	getInputText(): string {
+		return this.textInputEl.textContent ?? "";
 	}
 
 	/** Programmatically trigger a send (used after setInputText for /btw auto-send). */
@@ -2437,6 +2450,7 @@ export class NotorChatView extends ItemView {
 			app: this.app,
 			openInternalLink: (linkText: string) => this.openInternalLink(linkText),
 			collapsibleCard: renderCollapsibleCard,
+			pendingMemoryManager: this.plugin.getPendingMemoryManager(),
 		};
 
 		for (const block of blocks) {
@@ -2505,6 +2519,7 @@ export class NotorChatView extends ItemView {
 			approvalEl.createSpan({ text: "Approve this action?", cls: "notor-approval-text" });
 
 			const btnContainer = approvalEl.createDiv({ cls: "notor-approval-buttons" });
+			this.scrollToBottom();
 
 			const approveBtn = btnContainer.createEl("button", {
 				cls: "notor-approve-btn",
@@ -2573,9 +2588,10 @@ export class NotorChatView extends ItemView {
 				notePath,
 				beforeContent,
 				afterContent,
-				autoApproved
+				autoApproved,
+				() => this.scrollToBottom()
 			);
-			this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
+			this.scrollToBottom();
 			const decision = await decisionPromise;
 			return decision.accepted ? "approved" : "rejected";
 		}
@@ -2606,9 +2622,10 @@ export class NotorChatView extends ItemView {
 				notePath,
 				noteContent,
 				changeBlocks,
-				autoApproved
+				autoApproved,
+				() => this.scrollToBottom()
 			);
-			this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
+			this.scrollToBottom();
 			const decision = await decisionPromise;
 			if (!decision.accepted) return "rejected";
 

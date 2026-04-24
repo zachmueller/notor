@@ -88,6 +88,27 @@ export function renderMemorySection(
 					await ctx.saveSettings();
 				}),
 		);
+
+	if (ctx.settings.memory_enabled) {
+		new Setting(containerEl)
+			.setName("Memory approval")
+			.setDesc(
+				"Auto-approve writes memory notes immediately. " +
+					"Bulk approval queues proposed memories for review in the approval panel (open via command palette). " +
+					"Bulk and in-conversation also shows approve/reject controls inline in the conversation thread after each turn.",
+			)
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("auto", "Auto-approve")
+					.addOption("bulk", "Bulk approval only")
+					.addOption("bulk_and_inline", "Bulk and in-conversation")
+					.setValue(ctx.settings.memory_approval_mode ?? "auto")
+					.onChange(async (value) => {
+						ctx.settings.memory_approval_mode = value as "auto" | "bulk" | "bulk_and_inline";
+						await ctx.saveSettings();
+					}),
+			);
+	}
 }
 
 function validatePresets(ctx: SettingsContext): { preset: string; usedBy: string }[] {

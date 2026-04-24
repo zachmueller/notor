@@ -285,10 +285,10 @@ function renderBuiltinTools(containerEl: HTMLElement, ctx: SettingsContext, grou
 	const toolDefs = new Map(manager.getTools().map((t) => [t.name, t]));
 
 	const readTools = Object.entries(TOOL_DISPLAY_NAMES).filter(
-		([, meta]) => !meta.isWrite
+		([id, meta]) => !meta.isWrite && toolDefs.has(id)
 	);
 	const writeTools = Object.entries(TOOL_DISPLAY_NAMES).filter(
-		([, meta]) => meta.isWrite
+		([id, meta]) => meta.isWrite && toolDefs.has(id)
 	);
 
 	// Read-only tools
