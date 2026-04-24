@@ -383,7 +383,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 			resolveAndValidatePath(
 				path,
 				vaultRootPath,
-				allowedPaths ?? plugin.settings.read_file_allowed_paths,
+				allowedPaths ?? (plugin.settings.user_shared_settings?.["read_file_allowed_paths"] as string[] | undefined) ?? [],
 			),
 
 		executeShellCommand: (cmd: string, opts?: ShellExecuteOptions) =>
@@ -430,7 +430,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 		},
 
 		resolveImageForDocx: (href: string, allowedPaths?: string[]) =>
-			resolveImageForDocx(href, vaultRootPath, allowedPaths ?? plugin.settings.read_file_allowed_paths),
+			resolveImageForDocx(href, vaultRootPath, allowedPaths ?? (plugin.settings.user_shared_settings?.["read_file_allowed_paths"] as string[] | undefined) ?? []),
 
 		graftDocxIntoTemplate: graftIntoTemplate,
 
