@@ -13,6 +13,7 @@ import { Notice, SecretComponent, Setting } from "obsidian";
 import type { SettingsContext } from "./context";
 import type { SettingsFieldSchema } from "../../extensions/types";
 import { slugifySecretId } from "../../extensions/settings-schema";
+import { getSecret } from "../../utils/secrets";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,6 +85,14 @@ export function renderField(
 	field: SettingsFieldSchema,
 	target: FieldTarget,
 ): void {
+	// Hide field when its required secret is absent
+	if (field.requiresSecret) {
+		const secretId = target.kind === "shared"
+			? slugifySecretId("notor-shared", field.requiresSecret)
+			: slugifySecretId("notor-ext", target.extensionName, field.requiresSecret);
+		if (!getSecret(ctx.app, secretId)) return;
+	}
+
 	// Secret string field -> SecretComponent
 	if (field.type === "string" && field.secret) {
 		const secretId = target.kind === "shared"
@@ -110,6 +119,13 @@ export function renderField(
 				.filter((p) => p.provider_type !== null && p.model_id !== null)
 				.map((p) => p.name);
 			field = { ...field, options: presetNames };
+		} else if (field.optionsSource === "web_search_configured_providers") {
+			const configured: string[] = ["duckduckgo"];
+			for (const provider of ["tavily", "brave", "serpapi"] as const) {
+				const secretId = slugifySecretId("notor-ext", "web_search", `web_search_${provider}_api_key`);
+				if (getSecret(ctx.app, secretId)) configured.push(provider);
+			}
+			field = { ...field, options: configured };
 		}
 	}
 

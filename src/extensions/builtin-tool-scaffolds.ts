@@ -1256,7 +1256,7 @@ settings:
     type: "string[]"
     description: "Order in which search providers are tried. First entry is highest priority."
     default: ["duckduckgo", "tavily", "brave", "serpapi"]
-    options: ["duckduckgo", "tavily", "brave", "serpapi"]
+    optionsSource: "web_search_configured_providers"
   web_search_max_fallback_providers:
     name: "Max providers to try"
     type: number
@@ -1278,6 +1278,7 @@ settings:
     name: "Tavily — Enabled"
     type: boolean
     default: false
+    requiresSecret: web_search_tavily_api_key
   web_search_tavily_api_key:
     name: "Tavily — API Key"
     type: string
@@ -1288,10 +1289,12 @@ settings:
     default: 0
     min: 0
     max: 10000
+    requiresSecret: web_search_tavily_api_key
   web_search_brave_enabled:
     name: "Brave Search — Enabled"
     type: boolean
     default: false
+    requiresSecret: web_search_brave_api_key
   web_search_brave_api_key:
     name: "Brave Search — API Key"
     type: string
@@ -1302,10 +1305,12 @@ settings:
     default: 0
     min: 0
     max: 10000
+    requiresSecret: web_search_brave_api_key
   web_search_serpapi_enabled:
     name: "SerpApi — Enabled"
     type: boolean
     default: false
+    requiresSecret: web_search_serpapi_api_key
   web_search_serpapi_api_key:
     name: "SerpApi — API Key"
     type: string
@@ -1315,7 +1320,8 @@ settings:
     type: number
     default: 0
     min: 0
-    max: 10000`,
+    max: 10000
+    requiresSecret: web_search_serpapi_api_key`,
 	`const log = utils.logger("web_search");
 
 const query = params.query as string;
