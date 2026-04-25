@@ -30,15 +30,19 @@ export type FieldTarget =
 
 /**
  * Render a list of settings fields using the appropriate UI component for each type.
+ *
+ * @param onSecretChange - Called when any secret field changes. Use to re-render
+ *   the container so fields gated by `requiresSecret` update immediately.
  */
 export function renderFieldList(
 	containerEl: HTMLElement,
 	ctx: SettingsContext,
 	schemas: SettingsFieldSchema[],
 	target: FieldTarget,
+	onSecretChange?: () => void,
 ): void {
 	for (const field of schemas) {
-		renderField(containerEl, ctx, field, target);
+		renderField(containerEl, ctx, field, target, onSecretChange);
 	}
 }
 
@@ -84,6 +88,7 @@ export function renderField(
 	ctx: SettingsContext,
 	field: SettingsFieldSchema,
 	target: FieldTarget,
+	onSecretChange?: () => void,
 ): void {
 	// Hide field when its required secret is absent
 	if (field.requiresSecret) {
@@ -107,6 +112,7 @@ export function renderField(
 					.setValue(secretId)
 					.onChange((_value) => {
 						// SecretComponent writes directly to SecretStorage.
+						onSecretChange?.();
 					}),
 		);
 		return;

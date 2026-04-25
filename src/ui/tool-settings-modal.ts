@@ -105,7 +105,7 @@ export class ToolSettingsModal extends Modal {
 				kind: "extension",
 				extensionName: this.toolName,
 			};
-			renderFieldList(contentEl, this.ctx, toolDef.settingsSchema, target);
+			renderFieldList(contentEl, this.ctx, toolDef.settingsSchema, target, () => this.renderContent());
 
 			new Setting(contentEl).addButton((btn) =>
 				btn

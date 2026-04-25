@@ -376,7 +376,38 @@ async function testWithTavilyKey(ctx: TestContext): Promise<void> {
 		ctx.fail("With Tavily key: open modal", "Could not open web_search modal", shot);
 		return;
 	}
-	await page.waitForTimeout(1_000);
+	await page.waitForTimeout(2_000);
+
+	// Diagnostic: inspect the live schema fields — requiresSecret presence and computed secret ID
+	const schemaDiag = await page.evaluate((tavilySecretKey: string) => {
+		const app = (window as any).app;
+		const plugin = app?.plugins?.plugins?.["notor"];
+		const allTools: any[] = plugin?.getExtensionManager?.()?.getTools?.() ?? [];
+		let wsTool: any = null;
+		for (let i = 0; i < allTools.length; i++) { if (allTools[i].name === "web_search") { wsTool = allTools[i]; break; } }
+		const schema: any[] = wsTool?.settingsSchema ?? [];
+		let tavilyEnabledField: any = null;
+		let provPriorityField: any = null;
+		for (let i = 0; i < schema.length; i++) {
+			if (schema[i].key === "web_search_tavily_enabled") tavilyEnabledField = schema[i];
+			if (schema[i].key === "web_search_provider_priority") provPriorityField = schema[i];
+		}
+		const reqSec: string | undefined = tavilyEnabledField?.requiresSecret;
+		const rawId = reqSec ? ("notor-ext-web_search-" + reqSec) : null;
+		const computedId = rawId ? rawId.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "") : null;
+		const secretViaComputedId = computedId ? (app.secretStorage?.getSecret(computedId) ?? null) : null;
+		const allStoredIds: string[] = app.secretStorage?.listSecrets?.() ?? [];
+		return {
+			tavilyEnabled_requiresSecret: reqSec ?? null,
+			provPriority_optionsSource: provPriorityField?.optionsSource ?? null,
+			computedId,
+			expectedId: tavilySecretKey,
+			idsMatch: computedId === tavilySecretKey,
+			secretViaComputedId,
+			allStoredIds,
+		};
+	}, TAVILY_SECRET_KEY);
+	console.log(`  Schema diag: ${JSON.stringify(schemaDiag)}`);
 
 	const snap = await getModalSnapshot(page);
 	const shot = await ctx.screenshot("03-with-tavily-key");
