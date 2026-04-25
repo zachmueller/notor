@@ -70,6 +70,8 @@ export interface SettingsFieldSchema {
 	options?: string[];
 	/** Dynamic options source key. When set, `options` is populated at render time (e.g. "model_presets"). */
 	optionsSource?: string;
+	/** If set, this field is only shown when the named secret key has a non-empty value. */
+	requiresSecret?: string;
 }
 
 // ---------------------------------------------------------------------------

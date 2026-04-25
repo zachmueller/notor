@@ -105,6 +105,14 @@ export function parseSettingsSchema(
 			schema.options = value.options as string[];
 		}
 
+		if (typeof value.optionsSource === "string") {
+			schema.optionsSource = value.optionsSource;
+		}
+
+		if (typeof value.requiresSecret === "string") {
+			schema.requiresSecret = value.requiresSecret;
+		}
+
 		schemas.push(schema);
 	}
 

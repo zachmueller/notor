@@ -175,21 +175,55 @@ Return a string for success, or throw an Error for failure.
 
 ### Key \`utils\` methods
 
+**Notes:**
 - \`utils.resolveNote(path)\` — resolve a vault note path to a \`TFile\` (or \`null\`)
-- \`utils.staleTracker\` — record reads/writes for stale content checking
-- \`utils.noteOpener\` — open notes in the editor
-- \`utils.logger(name)\` — create a scoped logger
-- \`utils.resolveAndValidatePath(path)\` — resolve and validate filesystem paths
-- \`utils.executeShellCommand(cmd, opts)\` — run shell commands
-- \`utils.pathEnforcer\` — enforce allowed/blocked path constraints
-- \`utils.isDomainBlocked(url, denylist)\` — check domain denylist
-- \`utils.llmCall(presetName, messages)\` — make an LLM call using a model preset
-- \`utils.runSubAgent({ profileName, task })\` — spawn a sub-agent
+- \`utils.readNote(path)\` — read a vault note's raw Markdown content (throws if not found)
 - \`utils.resolveNotorPath(subdir)\` — resolve a path under the notor directory
-- \`utils.readNote(path)\` — read a vault note's content
-- \`utils.ensureDirectoryExists(filePath)\` — create intermediate directories
-- \`utils.webSearch.search(query, numResults, timeoutMs)\` — web search
-- \`utils.queue.enqueue(lane, fn)\` — per-lane FIFO serialization queue
+- \`utils.ensureDirectoryExists(filePath)\` — create intermediate vault directories for a file path
+- \`utils.noteOpener.openNote(path)\` — open a note in the editor
+
+**Stale-content tracking** (use in write tools to detect concurrent edits):
+- \`utils.staleTracker.recordRead(path, content)\` — call after reading a note
+- \`utils.staleTracker.check(path, currentContent)\` — call before writing; returns \`{ isStale: boolean; error: string | null }\`
+- \`utils.staleTracker.updateAfterWrite(path, newContent)\` — call after a successful write
+- \`utils.staleTracker.invalidate(path)\` — remove tracking for a path
+- \`utils.staleTracker.hasBeenRead(path)\` — returns boolean
+
+**Checkpoints** (creates a user-restorable backup before destructive writes):
+- \`utils.checkpointManager.createCheckpoint(path, toolName, metadata?)\` — call before modifying a file
+
+**Paths & shell:**
+- \`utils.resolveAndValidatePath(path)\` — returns \`{ valid: true; resolvedPath: string }\` or \`{ valid: false; error: string }\`; always check \`.valid\` before using \`.resolvedPath\`
+- \`utils.executeShellCommand(cmd, opts)\` — run a shell command
+- \`utils.isDomainBlocked(url, denylist)\` — check domain denylist
+- \`utils.pathEnforcer\` — enforces path constraints automatically at dispatch; rarely needed in tool code
+
+**LLM & agents:**
+- \`utils.llmCall(presetName, messages)\` — make an LLM call using a named model preset; returns \`string | null\` (null if preset is unconfigured or call fails); max recursion depth 1
+- \`utils.runSubAgent({ profileName, task, detached?, silent?, onComplete?, iterationCap?, timeout? })\` — spawn a sub-agent; \`detached: true\` runs in background and resolves immediately (calls \`onComplete\` when done); \`silent\` suppresses editor side effects; max depth 1
+
+**Web & queue:**
+- \`utils.webSearch.search(query, numResults, timeoutMs, signal?)\` — web search; pass \`utils.abortSignal\` as \`signal\` to support cancellation
+- \`utils.queue.enqueue(lane, fn, delayMs?)\` — per-lane FIFO serialization queue
+- \`utils.queue.pending(lane)\` — returns count of pending items in a lane
+
+**Logging:**
+- \`utils.logger(name)\` — create a scoped logger; returns an object with \`debug()\`, \`info()\`, \`warn()\`, \`error()\` methods
+
+**Per-invocation (injected by the runtime):**
+- \`utils.abortSignal\` — \`AbortSignal\` for the current tool call; pass to cancellable operations
+- \`utils.onProgress(status)\` — emit a progress status string for long-running tools
+
+**Plugin settings:**
+- \`utils.readPluginSettings()\` — read current Notor plugin settings as a sanitized JSON object
+- \`utils.editPluginSetting(keyPath, value)\` — update a setting by dot-separated key; returns \`{ success, oldValue, newValue, error }\`
+
+**Advanced (nullable — check before use):**
+- \`utils.conversationApi\` — read/set conversation title and favorite status (\`null\` if no active conversation)
+- \`utils.chatHistory\` — search and load past conversations (\`null\` if unavailable)
+- \`utils.chatBlocks\` — emit custom blocks into the chat transcript (\`null\` if unavailable)
+- \`utils.memory\` — memory subsystem (\`null\` when \`memory_enabled\` is false)
+- \`utils.detectMediaFormat(buffer)\`, \`utils.processImage(...)\`, \`utils.processPdf(...)\` — media processing for LLM consumption
 
 ### Common patterns
 
@@ -202,14 +236,16 @@ utils.staleTracker.recordRead(file.path, content);
 return content;
 \`\`\`
 
-**Write tool with stale checking:**
+**Write tool with stale checking and checkpoint:**
 \`\`\`typescript
 const file = utils.resolveNote(params.path);
 if (!file) throw new Error(\`Note not found: \${params.path}\`);
 const current = await app.vault.read(file);
-utils.staleTracker.checkStale(file.path, current);
+const staleResult = utils.staleTracker.check(file.path, current);
+if (staleResult.isStale) throw new Error(staleResult.error!);
+await utils.checkpointManager.createCheckpoint(file.path, "my_tool");
 await app.vault.modify(file, params.new_content);
-utils.staleTracker.recordWrite(file.path, params.new_content);
+utils.staleTracker.updateAfterWrite(file.path, params.new_content);
 return \`Updated \${file.path}\`;
 \`\`\`
 

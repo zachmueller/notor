@@ -37,6 +37,7 @@ import {
 	readExternalFile,
 	isDuplicate,
 } from "../context/attachment";
+import mammoth from "mammoth";
 import { detectMediaFormat } from "../media/format-detector";
 import { processImage } from "../media/image-processor";
 import { processPdf } from "../media/pdf-processor";
@@ -602,6 +603,9 @@ export const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp
 /** PDF file extension for routing detection. */
 export const PDF_EXTENSIONS = new Set([".pdf"]);
 
+/** DOCX file extension for routing detection. */
+export const DOCX_EXTENSIONS = new Set([".docx"]);
+
 /**
  * Read an external binary (image) file, process it, and return base64 + metadata.
  *
@@ -686,6 +690,19 @@ export async function readExternalPdfFile(
 	};
 }
 
+/**
+ * Read an external .docx file and return its content as plain text via mammoth.
+ *
+ * Throws on read or conversion failure so the caller can surface a Notice.
+ */
+export async function readExternalDocxFile(absolutePath: string): Promise<string> {
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	const fs = require("fs") as typeof import("fs");
+	const buffer = Buffer.from(fs.readFileSync(absolutePath));
+	const { value } = await mammoth.extractRawText({ buffer });
+	return value;
+}
+
 export function openExternalFileDialog(
 	app: App,
 	onAttachmentAdded: OnAttachmentAdded,
@@ -701,9 +718,7 @@ export function openExternalFileDialog(
 	const input = document.createElement("input");
 	input.type = "file";
 	input.multiple = true;
-	// Common text + image extensions as a convenience hint (not a security boundary)
-	input.accept =
-		".md,.txt,.json,.csv,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.py,.sh,.bash,.zsh,.r,.sql,.env,.cfg,.ini,.conf,.log,.diff,.patch,.rst,.tex,.bib,.properties,.gradle,.pom,.sbt,.png,.jpg,.jpeg,.gif,.webp,.pdf";
+	input.accept = "*";
 
 	input.addEventListener("change", () => {
 		const files = Array.from(input.files ?? []);
@@ -712,9 +727,10 @@ export function openExternalFileDialog(
 		type PendingFile = { absolutePath: string; name: string; content: string; fileSizeBytes: number };
 		const pendingConfirmation: PendingFile[] = [];
 
-		// Collect image and PDF files for async processing
+		// Collect image, PDF, and DOCX files for async processing
 		const imageFiles: Array<{ absolutePath: string; name: string }> = [];
 		const pdfFiles: Array<{ absolutePath: string; name: string }> = [];
+		const docxFiles: Array<{ absolutePath: string; name: string }> = [];
 
 		for (const file of files) {
 			const absolutePath = getAbsoluteFilePath(file);
@@ -739,6 +755,12 @@ export function openExternalFileDialog(
 			// Route PDF files to binary processing path
 			if (PDF_EXTENSIONS.has(ext)) {
 				pdfFiles.push({ absolutePath, name: file.name });
+				continue;
+			}
+
+			// Route DOCX files to text extraction path
+			if (DOCX_EXTENSIONS.has(ext)) {
+				docxFiles.push({ absolutePath, name: file.name });
 				continue;
 			}
 
@@ -819,6 +841,27 @@ export function openExternalFileDialog(
 					} catch (e) {
 						const msg = e instanceof Error ? e.message : String(e);
 						new Notice(`Failed to process PDF ${pdfFile.name}: ${msg}`);
+					}
+				}
+			})();
+		}
+
+		// Process DOCX files asynchronously (extract raw text via mammoth)
+		if (docxFiles.length > 0) {
+			void (async () => {
+				for (const docxFile of docxFiles) {
+					try {
+						const content = await readExternalDocxFile(docxFile.absolutePath);
+						const attachment = createExternalFileAttachment(
+							docxFile.absolutePath,
+							docxFile.name,
+							content,
+						);
+						onAttachmentAdded(attachment);
+						log.debug("External DOCX attached", { name: docxFile.name });
+					} catch (e) {
+						const msg = e instanceof Error ? e.message : String(e);
+						new Notice(`Failed to process DOCX ${docxFile.name}: ${msg}`);
 					}
 				}
 			})();

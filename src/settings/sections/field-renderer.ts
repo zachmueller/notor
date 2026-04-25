@@ -13,6 +13,7 @@ import { Notice, SecretComponent, Setting } from "obsidian";
 import type { SettingsContext } from "./context";
 import type { SettingsFieldSchema } from "../../extensions/types";
 import { slugifySecretId } from "../../extensions/settings-schema";
+import { getSecret } from "../../utils/secrets";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,15 +30,19 @@ export type FieldTarget =
 
 /**
  * Render a list of settings fields using the appropriate UI component for each type.
+ *
+ * @param onSecretChange - Called when any secret field changes. Use to re-render
+ *   the container so fields gated by `requiresSecret` update immediately.
  */
 export function renderFieldList(
 	containerEl: HTMLElement,
 	ctx: SettingsContext,
 	schemas: SettingsFieldSchema[],
 	target: FieldTarget,
+	onSecretChange?: () => void,
 ): void {
 	for (const field of schemas) {
-		renderField(containerEl, ctx, field, target);
+		renderField(containerEl, ctx, field, target, onSecretChange);
 	}
 }
 
@@ -83,7 +88,17 @@ export function renderField(
 	ctx: SettingsContext,
 	field: SettingsFieldSchema,
 	target: FieldTarget,
+	onSecretChange?: () => void,
 ): void {
+	// Hide field when its required secret is absent
+	if (field.requiresSecret) {
+		const secretId = target.kind === "shared"
+			? slugifySecretId("notor-shared", field.requiresSecret)
+			: slugifySecretId("notor-ext", target.extensionName, field.requiresSecret);
+		const secretValue = getSecret(ctx.app, secretId);
+		if (!secretValue) return;
+	}
+
 	// Secret string field -> SecretComponent
 	if (field.type === "string" && field.secret) {
 		const secretId = target.kind === "shared"
@@ -98,6 +113,7 @@ export function renderField(
 					.setValue(secretId)
 					.onChange((_value) => {
 						// SecretComponent writes directly to SecretStorage.
+						onSecretChange?.();
 					}),
 		);
 		return;
@@ -110,6 +126,13 @@ export function renderField(
 				.filter((p) => p.provider_type !== null && p.model_id !== null)
 				.map((p) => p.name);
 			field = { ...field, options: presetNames };
+		} else if (field.optionsSource === "web_search_configured_providers") {
+			const configured: string[] = ["duckduckgo"];
+			for (const provider of ["tavily", "brave", "serpapi"] as const) {
+				const secretId = slugifySecretId("notor-ext", "web_search", `web_search_${provider}_api_key`);
+				if (getSecret(ctx.app, secretId)) configured.push(provider);
+			}
+			field = { ...field, options: configured };
 		}
 	}
 
@@ -187,11 +210,21 @@ export function renderField(
 	// string[] -> dynamic list with add/remove/reorder
 	if (field.type === "string[]") {
 		const persisted = getPersistedValue(ctx, field, target);
-		const currentList: string[] = Array.isArray(persisted)
+		let currentList: string[] = Array.isArray(persisted)
 			? (persisted as string[])
 			: Array.isArray(field.default)
 				? [...(field.default as string[])]
 				: [];
+
+		// When options are constrained, drop any existing entries that are no longer valid.
+		// This handles the case where an API key is removed after a provider was added to the list.
+		if (field.options && field.options.length > 0) {
+			const filtered = currentList.filter((item) => field.options!.includes(item));
+			if (filtered.length !== currentList.length) {
+				currentList = filtered;
+				void saveFieldValue(ctx, field, target, currentList);
+			}
+		}
 
 		const setting = new Setting(containerEl).setName(field.name);
 		if (field.description) setting.setDesc(field.description);
