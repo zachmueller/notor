@@ -30,7 +30,7 @@
 
 import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { buildDefaultSettings, waitForSelector } from "../lib/test-helpers";
+import { buildDefaultSettings } from "../lib/test-helpers";
 import { slugifySecretId } from "../../src/extensions/settings-schema";
 
 // ---------------------------------------------------------------------------
@@ -116,11 +116,13 @@ async function getModalSnapshot(page: Page): Promise<{
 	return page.evaluate(() => {
 		// Find the ToolSettingsModal specifically — it has an h2 with "web_search" as text.
 		// The Obsidian settings panel is also a .modal, so we must be specific.
+		// Use the LAST match to handle cases where a prior modal wasn't closed (stale).
 		const allModals = Array.from(document.querySelectorAll(".modal-container .modal, .modal"));
-		const modal = allModals.find((m) => {
+		const wsModals = allModals.filter((m) => {
 			const h2 = m.querySelector("h2");
 			return h2?.textContent?.trim() === "web_search";
 		});
+		const modal = wsModals[wsModals.length - 1] ?? null;
 		if (!modal) return null;
 		const content = modal.querySelector(".modal-content") ?? modal;
 
@@ -161,7 +163,9 @@ async function getModalSnapshot(page: Page): Promise<{
 /** Close the open modal via its Done button. */
 async function closeModal(page: Page): Promise<void> {
 	await page.evaluate(() => {
-		const modal = document.querySelector(".modal-container .modal");
+		// Find specifically the ToolSettingsModal (has h2 "web_search"), not the settings panel.
+		const allModals = Array.from(document.querySelectorAll(".modal-container .modal, .modal"));
+		const modal = allModals.find(m => m.querySelector("h2")?.textContent?.trim() === "web_search");
 		if (!modal) return;
 		const buttons = Array.from(modal.querySelectorAll("button"));
 		const done = buttons.find((b) => b.textContent?.trim() === "Done");
@@ -376,7 +380,21 @@ async function testWithTavilyKey(ctx: TestContext): Promise<void> {
 		ctx.fail("With Tavily key: open modal", "Could not open web_search modal", shot);
 		return;
 	}
-	await page.waitForTimeout(2_000);
+	// Poll until Tavily rows appear (modal re-renders after SecretStorage cache flush, ~1-5s)
+	// or bail after 8s. Use the last web_search modal to avoid stale instances.
+	const deadline = Date.now() + 8_000;
+	while (Date.now() < deadline) {
+		const tavilyVisible = await page.evaluate(() => {
+			const allModals = Array.from(document.querySelectorAll(".modal-container .modal, .modal"));
+			const wsModals = allModals.filter(m => m.querySelector("h2")?.textContent?.trim() === "web_search");
+			const modal = wsModals[wsModals.length - 1] ?? null;
+			if (!modal) return false;
+			return Array.from(modal.querySelectorAll(".setting-item-name"))
+				.some(n => n.textContent?.trim() === "Tavily — Enabled");
+		});
+		if (tavilyVisible) break;
+		await page.waitForTimeout(200);
+	}
 
 	// Diagnostic: inspect the live schema fields — requiresSecret presence and computed secret ID
 	const schemaDiag = await page.evaluate((tavilySecretKey: string) => {

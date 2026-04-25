@@ -95,7 +95,8 @@ export function renderField(
 		const secretId = target.kind === "shared"
 			? slugifySecretId("notor-shared", field.requiresSecret)
 			: slugifySecretId("notor-ext", target.extensionName, field.requiresSecret);
-		if (!getSecret(ctx.app, secretId)) return;
+		const secretValue = getSecret(ctx.app, secretId);
+		if (!secretValue) return;
 	}
 
 	// Secret string field -> SecretComponent

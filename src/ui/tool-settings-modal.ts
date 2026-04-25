@@ -26,6 +26,13 @@ export class ToolSettingsModal extends Modal {
 
 	onOpen(): void {
 		this.renderContent();
+		// Obsidian's SecretStorage populates its in-memory cache asynchronously from the OS
+		// Keychain. Schedule follow-up renders to catch the flush once it lands (~1-5s).
+		for (const delay of [100, 500, 1500]) {
+			setTimeout(() => {
+				if (this.containerEl.isConnected) this.renderContent();
+			}, delay);
+		}
 	}
 
 	onClose(): void {
@@ -127,7 +134,7 @@ export class ToolSettingsModal extends Modal {
 			);
 			note.descEl.appendText(" ");
 			const linkEl = note.descEl.createEl("a", {
-				text: "Edit shared settings \u2192",
+				text: "Edit shared settings →",
 				href: "#",
 			});
 			linkEl.addEventListener("click", (e) => {
