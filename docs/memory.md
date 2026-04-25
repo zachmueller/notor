@@ -55,9 +55,14 @@ Notes are stored in `{notor_dir}/memory/` (configurable) with YAML frontmatter:
 | Field | Description |
 |-------|-------------|
 | `notor-type` | Always `memory` |
-| `notor-created-at` | ISO 8601 creation timestamp |
-| `notor-updated-at` | ISO 8601 last-update timestamp |
+| `notor-created-at` | ISO 8601 timestamp of when the note was first created |
+| `notor-memory-updated-at` | ISO 8601 timestamp of the last time the note body was updated |
+| `notor-last-recalled-at` | ISO 8601 timestamp of the last time this note was surfaced in a conversation |
+| `notor-last-useful-at` | ISO 8601 timestamp of the last time this note was acted on or deemed relevant |
+| `notor-last-linked-to-at` | ISO 8601 timestamp of the last time this note was referenced via wikilinks from another memory note |
 | `notor-sources` | Array of provenance tags (e.g., `[chat]`, `[chat, dream]`) |
+
+The last three timestamp fields (`notor-last-recalled-at`, `notor-last-useful-at`, `notor-last-linked-to-at`) are updated in-place without bumping `notor-memory-updated-at`, so the body-update timestamp stays accurate.
 
 The body starts with an H1 title followed by the note content. Filenames are kebab-case slugs derived from the title (e.g., `user-prefers-explicit-error-handling.md`).
 

@@ -440,11 +440,13 @@ All extension code executes with these variables in scope:
 
 ## Reloading extensions
 
-Extensions are automatically loaded on plugin startup. After editing extension files, reload manually:
+Extensions are automatically loaded on plugin startup. After editing extension files, you can reload in three ways:
 
-- **Settings UI** — click the "Reload extensions" button in **Settings -> Notor -> Extensions**.
+- **Settings UI** — click the "Reload extensions" button in **Settings → Notor → Extensions**.
 - **Command palette** — run **Notor: Reload user extensions**.
-- **File watcher** — when extension files change, a persistent Notice appears. Click it to reload.
+- **File watcher (automatic)** — when you save, create, rename, or delete an extension file, a reload is triggered automatically. A clickable Notice confirms completion (or reports an error if a file fails to compile).
+
+**Error handling on reload:** If an extension fails to parse or compile, a persistent error Notice appears with the filename and error message. Extensions that compiled successfully in the previous reload remain active — failed extensions do not disable working ones. Fix the parse error and save to trigger an automatic retry.
 
 In-flight tool calls continue using the version compiled at dispatch time; reloaded versions apply to subsequent calls.
 

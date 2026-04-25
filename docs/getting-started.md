@@ -82,6 +82,9 @@ All Notor commands are accessible via the Obsidian command palette (Ctrl/Cmd+P):
 | **Notor: Reload user extensions** | Re-discovers and recompiles all user-defined tools and automations |
 | **Notor: Launch active note workflow** | Opens a picker filtered to workflows with `notor-active-note-prompt`, runs against the active note |
 | **Notor: Open secondary chat panel** | Opens an additional chat panel in a new tab |
+| **Notor: Find in messages** | Opens the find bar in the chat panel to search across message content |
+
+> You can assign custom hotkeys to any Notor command in **Settings → Hotkeys**.
 
 ## Create your first persona
 

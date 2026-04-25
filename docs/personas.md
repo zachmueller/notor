@@ -36,6 +36,15 @@ Always cite the specific vault notes you reference.
 
 Access the persona picker from the gear icon in the chat panel header. Selecting a persona immediately updates the active system prompt and model preferences for subsequent messages. The active persona name is shown as a badge near the chat input area.
 
+## Built-in personas
+
+Notor ships with two built-in personas that appear in the persona picker with a "Built-in" badge. Unlike user-defined personas (which live as vault files), built-in personas are bundled with the plugin. You can open them from **Settings → Notor → Personas** and customize them by clicking **Open** — this creates an editable vault file from the default. Click **Reset to default** to restore the original.
+
+| Persona | Chip | Purpose |
+|---------|------|---------|
+| `notor-help` | ⚙️ | Notor configuration assistant. Reads and edits plugin settings via `read_notor_settings` / `edit_notor_settings` with your approval, and delegates documentation lookups to the `notor-help` sub-agent. Use this persona when you want conversational help configuring the plugin. |
+| `tool-creator` | 🔧 | Guides creation of custom tools and automations. Specialized for writing extension Markdown files with correct frontmatter, parameter schemas, and TypeScript logic. |
+
 ## Per-persona auto-approve overrides
 
 Configure per-tool approval behavior per persona in **Settings → Notor → Persona auto-approve**. Each tool offers three states:
@@ -52,3 +61,4 @@ For more fine-grained control, personas also support `<notor_tool_config>` block
 
 - Personas are regular Obsidian notes — fully visible in the file explorer, searchable, and editable.
 - The plugin rescans the personas directory when Settings is opened or the persona picker is activated; no plugin reload is needed when personas are created or deleted.
+- **Auto-refresh on file change** — when you save or modify a persona file, the active persona is automatically reloaded. If a parse error occurs, the previous persona state remains active and a persistent error Notice is shown.

@@ -10,14 +10,14 @@ Notor gives you a full AI chat panel inside Obsidian with the ability to read, s
 
 ### Chat and context
 
-- **Side-panel AI chat** with streaming responses, conversation history, [model presets](docs/model-presets.md) for quick switching between providers/models, [conversation forking and favorites](docs/export-import.md), and [export/import](docs/export-import.md) to HTML or Markdown
-- **[Attach notes and files](docs/context.md)** directly to messages — vault notes (with section-level references like `[[Note#Section]]`), external files, images, and PDFs. Ambient workspace context (open notes, vault structure, OS) is injected automatically.
+- **Side-panel AI chat** with streaming responses, conversation history, [model presets](docs/model-presets.md) for quick switching between providers/models, [conversation forking and favorites](docs/export-import.md), [export/import](docs/export-import.md) to HTML or Markdown, find-in-messages search (via command palette), and per-message copy and context menu actions
+- **[Attach notes and files](docs/context.md)** directly to messages — vault notes (with section-level references like `[[Note#Section]]`), external files (including `.docx`), images, and PDFs. Ambient workspace context (open notes, vault structure, OS) is injected automatically.
 - **Auto-compaction** — automatic context summarization when conversations approach the model's context window limit
 - **Multiple LLM providers** — local OpenAI-compatible endpoints (Ollama, LM Studio), Anthropic, OpenAI, and AWS Bedrock
 
 ### Vault tools
 
-- **[24 built-in tools](docs/vault-tools.md)** — read, write, search, and move notes; manage frontmatter and tags; follow backlinks and outlinks; search the web and fetch pages; run shell commands; read and write filesystem files and Word documents (`.docx`)
+- **[25 built-in tools](docs/vault-tools.md)** — read, write, search, and move notes; manage frontmatter and tags; follow backlinks and outlinks; search the web (DuckDuckGo by default; Tavily, Brave, SerpAPI with API keys) and fetch pages; run shell commands; read, write, and import filesystem files and Word documents (`.docx`)
 - **[Safety-first approval model](docs/safety.md)** — Plan/Act mode toggle, diff previews with per-hunk accept/reject, approval gates for write operations, and automatic checkpoints for rollback
 - **[Sub-agents](docs/sub-agents.md)** — the AI can spawn focused child conversations for vault search, web research, or custom tasks with isolated context and default-deny tool access
 

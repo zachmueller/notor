@@ -17,11 +17,12 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `manage_tags` | Add or remove tags via the frontmatter `tags` property | Act only |
 | `get_backlinks` | List all notes that link TO a given note | Plan & Act |
 | `get_outlinks` | List all notes that a given note links TO (resolved and unresolved) | Plan & Act |
-| `web_search` | Search the web via DuckDuckGo and return titles, URLs, and snippets | Plan & Act |
+| `web_search` | Search the web (DuckDuckGo by default; Tavily, Brave Search, and SerpAPI with API keys) and return titles, URLs, and snippets | Plan & Act |
 | `fetch_webpage` | Fetch a URL and return its content as Markdown | Plan & Act |
 | `execute_command` | Run a shell command and return its output | Act only |
 | `read_file` | Read a text file from the filesystem (desktop only) | Plan & Act |
 | `read_docx` | Read a `.docx` file and return its content as Markdown (desktop only) | Plan & Act |
+| `import_docx` | Parse a `.docx` file and save its content as a Markdown note in the vault, extracting embedded images as vault attachments (desktop only) | Act only |
 | `write_docx` | Convert Markdown to a `.docx` file on the filesystem (desktop only) | Act only |
 | `write_file` | Write text content to a file on the filesystem (desktop only) | Act only |
 | `replace_in_file` | Make targeted SEARCH/REPLACE edits in a text file (desktop only) | Act only |
@@ -158,6 +159,32 @@ Read the full message history of a past conversation by its ID. Use `search_chat
 
 Both tools are read-only — available in Plan and Act modes.
 
+## Settings tools
+
+Two built-in tools let the AI read and modify Notor plugin settings. They are primarily used with the `notor-help` built-in persona, which can guide you through configuring the plugin via conversation.
+
+### `read_notor_settings`
+
+Returns the current Notor plugin settings as a JSON object. No parameters.
+
+- Read-only tool — available in Plan and Act modes.
+- Auto-approve default: off.
+
+### `edit_notor_settings`
+
+Changes a single Notor plugin setting by key path.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `key_path` | Yes | Dot-separated path into the settings object (e.g. `compaction_threshold`, `auto_approve.write_note`, `providers.0.model_id`). |
+| `value` | Yes | The new value as a JSON literal (e.g. `0.9`, `true`, `"hello"`). Parsed as JSON; falls back to a raw string if parsing fails. |
+
+- One setting per call — enforces per-change approval.
+- Write tool — available in Act mode only; requires explicit approval unless auto-approved.
+- Auto-approve default: off.
+
 ## Moving notes
 
 The `move_note` tool moves and/or renames a note within the vault. Obsidian automatically updates all internal wikilinks and markdown links that point to the moved file.
@@ -225,12 +252,21 @@ The `fetch_webpage` tool lets the AI retrieve external content:
 
 ## Web search
 
-The `web_search` tool lets the AI search the web via DuckDuckGo and return structured results:
+The `web_search` tool supports multiple search providers. DuckDuckGo is the default and requires no API key. Tavily, Brave Search, and SerpAPI can be enabled by entering their API keys in the tool's settings (**Settings → Notor → Tools → web_search**).
+
+| Provider | API key required | Notes |
+|----------|-----------------|-------|
+| DuckDuckGo | No | Default; always available |
+| Tavily | Yes | Enter key in tool settings to enable |
+| Brave Search | Yes | Enter key in tool settings to enable |
+| SerpAPI | Yes | Enter key in tool settings to enable |
+
+Provider-specific settings (API key, enabled toggle, request delay) are hidden in the Settings UI until an API key is configured — they appear automatically once you enter a key.
 
 - Returns a numbered markdown list with titles, clickable URLs, and text snippets.
 - Results are snippets only — use `fetch_webpage` on a result URL to retrieve full page content.
 - The domain denylist (configured in **Settings → Notor**) applies to search result URLs; blocked domains are filtered out before results are returned.
-- Configurable timeout (default: 10 seconds) and result count (default: 5, maximum: 10) in **Settings → Notor**.
+- Configurable timeout (default: 10 seconds) and result count (default: 5, maximum: 10) in the tool's settings.
 - Read-only tool — available in Plan and Act modes. Auto-approved by default.
 
 **Parameters:**
@@ -289,6 +325,24 @@ Reads a `.docx` file from the filesystem and returns its content converted to Ma
 - Rejects files whose extension is not `.docx`.
 - Read-only tool — available in Plan and Act modes.
 - Auto-approve default: off.
+
+### `import_docx`
+
+Parses a `.docx` file from the filesystem and saves its content as a Markdown vault note. Embedded images are extracted and saved as vault attachments using Obsidian's configured attachment folder. Supported image formats: PNG, JPEG, GIF, WebP. Unsupported formats become inline placeholders (`[Unsupported image format: FORMAT]`).
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `path` | Yes | Path to the `.docx` file. Vault-relative or absolute. Must be within the vault or an allowed path. |
+| `note_path` | Yes | Vault-relative path for the output note (e.g. `Inbox/My Doc`). The `.md` extension is added automatically if omitted. |
+
+- If the output note does not exist, it is created.
+- If the output note already exists, a checkpoint is created before overwriting and the note content is replaced.
+- The resulting note is opened in the editor after the operation.
+- Write tool — available in Act mode only; requires explicit approval unless auto-approved.
+- Auto-approve default: off.
+- Desktop only.
 
 ### `write_docx`
 

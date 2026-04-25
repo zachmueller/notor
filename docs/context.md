@@ -5,7 +5,7 @@
 You can provide the AI with specific content directly — no `read_note` tool call required:
 
 - **Vault note attachment** — click the attachment button or type `[[` in the chat input to open the file picker with fuzzy autocomplete. Supports section-level references (`[[Note#Section]]`) that include only the content of that heading.
-- **External file attachment** — attach text files from outside your vault via the OS-native file dialog.
+- **External file attachment** — attach files from outside your vault via the OS-native file dialog. Text files are attached as plain text. `.docx` files are converted to plain text automatically. Images and PDFs are processed through the same pipeline as vault attachments (see [Image and PDF processing](#image-and-pdf-processing) below).
 - **Attachment chips** — attached items appear as labeled chips in the input area before sending. Each chip can be individually removed. Attachments are deduplicated silently.
 - **Graceful failures** — if an attached note is deleted or renamed after the chip is added, the message still sends without that attachment and an inline warning is shown.
 - Attachment contents are embedded in the message context sent to the LLM but are not rendered in full in the chat thread (chips only).
@@ -25,6 +25,28 @@ When images or PDFs are attached to messages, Notor processes them before sendin
 ## Searching chat history
 
 The conversation history panel supports text search across past conversations. Searches match against conversation titles, message previews, and full message content. Matching is case-insensitive, and results are ordered by most recent activity.
+
+## Find in messages
+
+Run **Notor: Find in messages** from the command palette (or assign a custom hotkey in **Settings → Hotkeys**) to open the find bar at the top of the message list.
+
+- **Search** — case-insensitive. Matches are highlighted in message content, tool call names, tool result summaries, and extension block text.
+- **Navigate** — **Enter** for next match, **Shift+Enter** for previous match, or click the arrow buttons. Match position is shown as `N / total`.
+- **Close** — **Escape** or the × button clears highlights and dismisses the bar.
+
+## Copy affordances and message context menu
+
+Each message has a floating **copy button** (clipboard icon) that appears on hover. Clicking it copies the full message content as plain text.
+
+Right-clicking on the message list opens a context menu:
+
+| Action | Description |
+|--------|-------------|
+| Copy message contents | Copies the full content of the hovered message |
+| Copy selected text | Copies the currently selected text (only shown when text is selected) |
+| Fork here | Creates a new conversation branching from the hovered message |
+| /btw | Forks to a new panel using the `/btw` slash command |
+| Copy conversation ID | Copies the current conversation's UUID |
 
 ## Ambient workspace context (auto-context)
 
