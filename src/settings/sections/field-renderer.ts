@@ -203,11 +203,21 @@ export function renderField(
 	// string[] -> dynamic list with add/remove/reorder
 	if (field.type === "string[]") {
 		const persisted = getPersistedValue(ctx, field, target);
-		const currentList: string[] = Array.isArray(persisted)
+		let currentList: string[] = Array.isArray(persisted)
 			? (persisted as string[])
 			: Array.isArray(field.default)
 				? [...(field.default as string[])]
 				: [];
+
+		// When options are constrained, drop any existing entries that are no longer valid.
+		// This handles the case where an API key is removed after a provider was added to the list.
+		if (field.options && field.options.length > 0) {
+			const filtered = currentList.filter((item) => field.options!.includes(item));
+			if (filtered.length !== currentList.length) {
+				currentList = filtered;
+				void saveFieldValue(ctx, field, target, currentList);
+			}
+		}
 
 		const setting = new Setting(containerEl).setName(field.name);
 		if (field.description) setting.setDesc(field.description);
