@@ -685,7 +685,7 @@ export async function readExternalPdfFile(
 	let nativeResult;
 	try {
 		nativeResult = await processPdf(Buffer.from(rawBytes), {
-			providerId: "anthropic",
+			providerType: "anthropic",
 		});
 	} catch {
 		nativeResult = { contentBlocks: [], textSummary: "" };
@@ -704,7 +704,7 @@ export async function readExternalPdfFile(
 		await pdf.cleanup();
 
 		const textResult = await processPdf(Buffer.from(rawBytes), {
-			providerId: "local",
+			providerType: "local",
 		});
 		const textBlock = textResult.contentBlocks.find((b) => b.type === "text");
 		extractedText = textBlock && textBlock.type === "text" ? textBlock.text : undefined;

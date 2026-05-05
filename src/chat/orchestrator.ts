@@ -701,7 +701,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 				const resolved = await resolveAttachment(this.app, att, {
 					maxDimension: this.settings.image_max_dimension,
 					compressionQuality: this.settings.image_compression_quality,
-				}, this.settings.active_provider);
+				}, this.providerRegistry.getActiveType());
 				resolvedAttachments.push(resolved);
 
 				// Surface inline warnings for failed resolutions

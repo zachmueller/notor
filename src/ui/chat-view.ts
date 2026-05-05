@@ -3407,7 +3407,7 @@ export class NotorChatView extends ItemView {
 
 		const providerSelect = container.createEl("select", { cls: "notor-settings-select" });
 		const providers = this.getAvailableProviders?.() ?? [];
-		const currentProvider = this.displayedProviderId ?? this.getCurrentProvider?.() ?? "local";
+		const currentProvider = this.displayedProviderId ?? this.getCurrentProvider?.() ?? this.plugin.settings.active_provider;
 
 		for (const p of providers) {
 			const opt = providerSelect.createEl("option", {

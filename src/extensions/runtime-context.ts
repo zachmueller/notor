@@ -409,7 +409,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 		processPdf: (buffer: Buffer, options: { pages?: string; maxTextChars?: number; preferNative?: boolean }) =>
 			processPdf(buffer, {
 				...options,
-				providerId: plugin.settings.active_provider,
+				providerType: plugin.getProviderRegistry().getActiveType(),
 				maxNativeSizeBytes: plugin.settings.pdf_native_max_size_mb * 1024 * 1024,
 			}),
 

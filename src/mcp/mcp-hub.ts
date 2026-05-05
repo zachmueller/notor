@@ -592,7 +592,9 @@ export class McpHub {
 		const contentBlocks: ContentBlock[] = [];
 		let omittedResources = 0;
 
-		const capabilities = getMediaCapabilities(this.settings?.active_provider ?? "local");
+		const activeId = this.settings?.active_provider ?? "local";
+		const providerType = this.settings?.providers.find((p) => p.id === activeId)?.type ?? "local";
+		const capabilities = getMediaCapabilities(providerType);
 
 		const content = result.content ?? [];
 		for (const item of content) {

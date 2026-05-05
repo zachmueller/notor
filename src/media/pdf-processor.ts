@@ -138,8 +138,8 @@ function cleanText(raw: string): string {
 export interface PdfProcessorOptions {
 	/** Page range string (e.g., "1-5", "3"). Forces text extraction path. */
 	pages?: string;
-	/** Provider ID — determines native vs text extraction path. */
-	providerId: string;
+	/** Provider type — determines native vs text extraction path. */
+	providerType: string;
 	/** Maximum characters for text extraction (default: 400000). */
 	maxTextChars?: number;
 	/** Whether to prefer native PDF blocks when the provider supports them (default: true). */
@@ -158,7 +158,7 @@ export async function processPdf(
 	buffer: Buffer,
 	options: PdfProcessorOptions,
 ): Promise<{ contentBlocks: ContentBlock[]; textSummary: string }> {
-	const capabilities = getMediaCapabilities(options.providerId);
+	const capabilities = getMediaCapabilities(options.providerType);
 	const maxTextChars = options.maxTextChars ?? 400000;
 	const preferNative = options.preferNative ?? true;
 

@@ -14,7 +14,7 @@
 
 import { Notice, TFile, normalizePath } from "obsidian";
 import type { MetadataCache, Vault } from "obsidian";
-import type { Persona, LLMProviderType } from "../types";
+import type { Persona } from "../types";
 import type { NotorSettings } from "../settings";
 import type { ProviderRegistry } from "../providers/index";
 import { resolvePreset } from "../presets/preset-resolver";
@@ -456,20 +456,19 @@ export class PersonaManager {
 		// --- Provider switch (legacy fallback) ---
 		if (persona.preferred_provider) {
 			try {
-				// Verify the provider is configured
-				const config = this.providerRegistry.getConfig(
-					persona.preferred_provider as LLMProviderType
-				);
+				// Try as instance ID first, then resolve as type for backward compat
+				let config = this.providerRegistry.getConfig(persona.preferred_provider);
+				if (!config) {
+					const resolvedId = this.providerRegistry.resolveTypeToId(persona.preferred_provider);
+					if (resolvedId) config = this.providerRegistry.getConfig(resolvedId);
+				}
 				if (config) {
-					this.providerRegistry.switchProvider(
-						persona.preferred_provider as LLMProviderType
-					);
+					this.providerRegistry.switchProvider(config.id);
 					log.info("Switched provider for persona", {
 						persona: persona.name,
-						provider: persona.preferred_provider,
+						provider: config.id,
 					});
 				} else {
-					// Provider not configured — fall back with notice (A-008)
 					new Notice(
 						`Provider '${persona.preferred_provider}' not available; using default.`
 					);
@@ -479,7 +478,6 @@ export class PersonaManager {
 					});
 				}
 			} catch (e) {
-				// Provider switch failed — fall back with notice (A-008)
 				new Notice(
 					`Provider '${persona.preferred_provider}' not available; using default.`
 				);
@@ -493,12 +491,12 @@ export class PersonaManager {
 
 		// --- Model switch ---
 		if (persona.preferred_model) {
-			const activeType = this.providerRegistry.getActiveType();
-			const config = this.providerRegistry.getConfig(activeType);
+			const activeId = this.providerRegistry.getActiveId();
+			const config = this.providerRegistry.getConfig(activeId);
 
 			if (config) {
 				// Check if the model is available in the cached model list
-				const cachedModels = this.providerRegistry.getCachedModels(activeType);
+				const cachedModels = this.providerRegistry.getCachedModels(activeId);
 				const modelAvailable =
 					cachedModels.length === 0 || // No cache yet — optimistically set it
 					cachedModels.some((m) => m.id === persona.preferred_model);
@@ -549,10 +547,10 @@ export class PersonaManager {
 	 */
 	private revertProviderModel(): void {
 		// Revert provider to global default
+		const globalProviderId = this.settings.active_provider;
 		try {
-			const globalProvider = this.settings.active_provider as LLMProviderType;
-			this.providerRegistry.switchProvider(globalProvider);
-			log.debug("Reverted provider to global default", { provider: globalProvider });
+			this.providerRegistry.switchProvider(globalProviderId);
+			log.debug("Reverted provider to global default", { provider: globalProviderId });
 		} catch (e) {
 			log.warn("Failed to revert provider to global default", {
 				error: String(e),
@@ -560,12 +558,11 @@ export class PersonaManager {
 		}
 
 		// Revert model and use_extended_context to global defaults (from the provider's stored config)
-		const globalProvider = this.settings.active_provider as LLMProviderType;
 		const providerSettings = this.settings.providers.find(
-			(p) => p.type === globalProvider
+			(p) => p.id === globalProviderId
 		);
 		if (providerSettings?.model_id) {
-			const currentConfig = this.providerRegistry.getConfig(globalProvider);
+			const currentConfig = this.providerRegistry.getConfig(globalProviderId);
 			if (currentConfig) {
 				const reverted = {
 					...currentConfig,

@@ -112,7 +112,7 @@ describe("processPdf", () => {
 
 			const buffer = Buffer.from("%PDF-1.4 mock data");
 			const result = await processPdf(buffer, {
-				providerId: "openai",
+				providerType: "openai",
 			});
 
 			expect(result.contentBlocks).toHaveLength(1);
@@ -134,7 +134,7 @@ describe("processPdf", () => {
 			const buffer = Buffer.from("%PDF-1.4 mock data");
 			const result = await processPdf(buffer, {
 				pages: "2-4",
-				providerId: "anthropic", // native provider, but page range forces text extraction
+				providerType: "anthropic", // native provider, but page range forces text extraction
 			});
 
 			expect(result.contentBlocks).toHaveLength(1);
@@ -156,7 +156,7 @@ describe("processPdf", () => {
 			const buffer = Buffer.from("%PDF-1.4 mock data");
 			const result = await processPdf(buffer, {
 				pages: "1-100",
-				providerId: "openai",
+				providerType: "openai",
 			});
 
 			expect(result.contentBlocks).toHaveLength(1);
@@ -176,7 +176,7 @@ describe("processPdf", () => {
 
 			const buffer = Buffer.from("%PDF-1.4 mock data");
 			const result = await processPdf(buffer, {
-				providerId: "openai",
+				providerType: "openai",
 				maxTextChars: 2000,
 			});
 
@@ -193,7 +193,7 @@ describe("processPdf", () => {
 
 			const buffer = Buffer.from("%PDF-1.4 mock data");
 			const result = await processPdf(buffer, {
-				providerId: "openai",
+				providerType: "openai",
 			});
 
 			expect(result.contentBlocks).toHaveLength(1);
@@ -209,7 +209,7 @@ describe("processPdf", () => {
 
 			const buffer = Buffer.from("%PDF-1.4 mock data");
 			const result = await processPdf(buffer, {
-				providerId: "anthropic", // native-capable provider
+				providerType: "anthropic", // native-capable provider
 				preferNative: false,
 			});
 
@@ -226,7 +226,7 @@ describe("processPdf", () => {
 
 			const buffer = Buffer.from("%PDF-1.4 small test content");
 			const result = await processPdf(buffer, {
-				providerId: "anthropic",
+				providerType: "anthropic",
 			});
 
 			expect(result.contentBlocks).toHaveLength(1);
@@ -245,7 +245,7 @@ describe("processPdf", () => {
 
 			const buffer = Buffer.from("%PDF-1.4 bedrock test");
 			const result = await processPdf(buffer, {
-				providerId: "bedrock",
+				providerType: "bedrock",
 			});
 
 			expect(result.contentBlocks).toHaveLength(1);
@@ -258,7 +258,7 @@ describe("processPdf", () => {
 			largeBuffer.write("%PDF-1.4");
 
 			await expect(
-				processPdf(largeBuffer, { providerId: "bedrock" }),
+				processPdf(largeBuffer, { providerType: "bedrock" }),
 			).rejects.toThrow("too large for native document block");
 		});
 
@@ -268,7 +268,7 @@ describe("processPdf", () => {
 
 			const buffer = Buffer.from("%PDF-1.4 openai test");
 			const result = await processPdf(buffer, {
-				providerId: "openai",
+				providerType: "openai",
 			});
 
 			expect(result.contentBlocks[0]!.type).toBe("text");
@@ -280,7 +280,7 @@ describe("processPdf", () => {
 
 			const buffer = Buffer.from("%PDF-1.4 local test");
 			const result = await processPdf(buffer, {
-				providerId: "local",
+				providerType: "local",
 			});
 
 			expect(result.contentBlocks[0]!.type).toBe("text");
@@ -291,7 +291,7 @@ describe("processPdf", () => {
 		it("throws on invalid page range", async () => {
 			const buffer = Buffer.from("%PDF-1.4 test");
 			await expect(
-				processPdf(buffer, { pages: "1-3,5-7", providerId: "openai" }),
+				processPdf(buffer, { pages: "1-3,5-7", providerType: "openai" }),
 			).rejects.toThrow("Comma-separated");
 		});
 
@@ -300,7 +300,7 @@ describe("processPdf", () => {
 
 			const buffer = Buffer.from("not a pdf");
 			await expect(
-				processPdf(buffer, { providerId: "openai" }),
+				processPdf(buffer, { providerType: "openai" }),
 			).rejects.toThrow("Invalid PDF structure");
 		});
 	});
