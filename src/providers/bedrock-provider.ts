@@ -93,7 +93,7 @@ function mapToBedrockBlock(block: MediaContentBlock): ContentBlock {
 			return {
 				document: {
 					format: "pdf" as const,
-					name: "document.pdf",
+					name: block.name ?? "document.pdf",
 					source: { bytes: Buffer.from(block.data, "base64") },
 				},
 			} as ContentBlock;

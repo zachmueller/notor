@@ -732,13 +732,19 @@ export function buildAttachmentsBlock(attachments: Attachment[]): { text: string
 
 			case "external_file":
 				tags.push(
-					`  <external-file name="${escapeXmlAttr(att.display_name)}">\n${att.content ?? ""}\n  </external-file>`
+					`  <external-file name="${escapeXmlAttr(att.display_name)}" source="${escapeXmlAttr(att.path)}">\n${att.content ?? ""}\n  </external-file>`
 				);
 				break;
 
 			case "vault_image":
 			case "external_image":
 				if (att.binary_content && att.media_type) {
+					if (att.type === "external_image") {
+						contentBlocks.push({
+							type: "text",
+							text: `<attached-file name="${escapeXmlAttr(att.display_name)}" source="${escapeXmlAttr(att.path)}" />`,
+						});
+					}
 					contentBlocks.push({
 						type: "image",
 						media_type: att.media_type as ImageMediaType,
@@ -752,17 +758,23 @@ export function buildAttachmentsBlock(attachments: Attachment[]): { text: string
 			case "vault_pdf":
 			case "external_pdf":
 				if (att.binary_content && att.media_type === "application/pdf") {
-					// Native document block path
+					if (att.type === "external_pdf") {
+						contentBlocks.push({
+							type: "text",
+							text: `<attached-file name="${escapeXmlAttr(att.display_name)}" source="${escapeXmlAttr(att.path)}" />`,
+						});
+					}
 					contentBlocks.push({
 						type: "document",
 						media_type: "application/pdf",
 						data: att.binary_content,
 						page_count: att.content_length ?? undefined,
+						name: att.display_name,
 					});
 				} else if (att.content) {
-					// Text extraction path — include extracted text as XML tag
+					const sourceAttr = att.type === "external_pdf" ? ` source="${escapeXmlAttr(att.path)}"` : "";
 					tags.push(
-						`  <pdf-document name="${escapeXmlAttr(att.display_name)}">\n${att.content}\n  </pdf-document>`
+						`  <pdf-document name="${escapeXmlAttr(att.display_name)}"${sourceAttr}>\n${att.content}\n  </pdf-document>`
 					);
 				}
 				break;

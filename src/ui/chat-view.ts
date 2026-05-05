@@ -1771,7 +1771,7 @@ export class NotorChatView extends ItemView {
 				} else if (PDF_EXTENSIONS.has(ext)) {
 					void (async () => {
 						try {
-							const result = await readExternalPdfFile(absolutePath, settings);
+							const result = await readExternalPdfFile(absolutePath);
 							if (!result) {
 								new Notice(`Failed to process PDF: ${file.name}`);
 								return;

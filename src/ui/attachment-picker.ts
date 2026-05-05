@@ -654,7 +654,6 @@ export async function readExternalBinaryFile(
  */
 export async function readExternalPdfFile(
 	absolutePath: string,
-	settings: NotorSettings,
 	maxSizeMb = 50,
 ): Promise<{ base64: string; pageCount?: number } | null> {
 	// eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -708,7 +707,7 @@ export function openExternalFileDialog(
 	onAttachmentAdded: OnAttachmentAdded,
 	existingAttachments: () => Attachment[],
 	thresholdMb: number,
-	settings?: NotorSettings,
+	settings: NotorSettings,
 ): void {
 	if (!Platform.isDesktopApp) {
 		new Notice("External file attachment is only available on desktop");
@@ -821,11 +820,11 @@ export function openExternalFileDialog(
 		}
 
 		// Process PDF files asynchronously
-		if (pdfFiles.length > 0 && settings) {
+		if (pdfFiles.length > 0) {
 			void (async () => {
 				for (const pdfFile of pdfFiles) {
 					try {
-						const result = await readExternalPdfFile(pdfFile.absolutePath, settings);
+						const result = await readExternalPdfFile(pdfFile.absolutePath);
 						if (!result) {
 							new Notice(`Failed to process PDF: ${pdfFile.name}`);
 							continue;
@@ -935,7 +934,7 @@ export function createAttachmentButton(
 	onAttachmentAdded: OnAttachmentAdded,
 	existingAttachments: () => Attachment[],
 	thresholdMb: number,
-	settings?: NotorSettings,
+	settings: NotorSettings,
 ): HTMLButtonElement {
 	const btn = containerEl.createEl("button", {
 		cls: "notor-attach-btn clickable-icon",

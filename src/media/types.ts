@@ -18,6 +18,7 @@ export type ContentBlock =
 			media_type: "application/pdf";
 			data: string;
 			page_count?: number;
+			name?: string;
 	  }
 	| {
 			type: "custom_block";

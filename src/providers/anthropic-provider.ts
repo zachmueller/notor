@@ -50,7 +50,7 @@ function mapToAnthropicBlock(block: MediaContentBlock): Record<string, unknown> 
 		case "image":
 			return { type: "image", source: { type: "base64", media_type: block.media_type, data: block.data } };
 		case "document":
-			return { type: "document", source: { type: "base64", media_type: "application/pdf", data: block.data } };
+			return { type: "document", title: block.name, source: { type: "base64", media_type: "application/pdf", data: block.data } };
 		case "custom_block":
 			// custom_block is translated to wire text before reaching providers
 			return { type: "text", text: block.fallback_text ?? "" };
