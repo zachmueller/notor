@@ -664,23 +664,31 @@ export async function readExternalPdfFile(
 		return null;
 	}
 
-	const buffer = Buffer.from(fs.readFileSync(absolutePath));
+	const rawBytes = fs.readFileSync(absolutePath);
+	const buffer = Buffer.from(rawBytes);
 	const format = detectMediaFormat(buffer);
 	if (format !== "pdf") {
 		return null;
 	}
 
 	// Get native document block for providers that support it
-	const nativeResult = await processPdf(buffer, {
+	const nativeResult = await processPdf(Buffer.from(rawBytes), {
 		providerType: "anthropic",
 	});
 
-	// Also extract text so it's always available in the message context
-	const textResult = await processPdf(buffer, {
-		providerType: "local", // Forces text extraction path
-	});
-	const textBlock = textResult.contentBlocks.find((b) => b.type === "text");
-	const extractedText = textBlock && textBlock.type === "text" ? textBlock.text : undefined;
+	// Also extract text so it's always available in the message context.
+	// Use a fresh buffer copy since getDocumentProxy may transfer the underlying ArrayBuffer.
+	// Wrapped in try-catch so text extraction failure doesn't block the attachment.
+	let extractedText: string | undefined;
+	try {
+		const textResult = await processPdf(Buffer.from(rawBytes), {
+			providerType: "local",
+		});
+		const textBlock = textResult.contentBlocks.find((b) => b.type === "text");
+		extractedText = textBlock && textBlock.type === "text" ? textBlock.text : undefined;
+	} catch {
+		// Text extraction failed — attachment still works via native document block
+	}
 
 	const docBlock = nativeResult.contentBlocks.find((b) => b.type === "document");
 	if (docBlock && docBlock.type === "document") {
