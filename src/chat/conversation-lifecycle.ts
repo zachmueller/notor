@@ -12,7 +12,7 @@
 import { Notice } from "obsidian";
 import type { Conversation, Message } from "../types";
 import { buildOptionValue } from "../providers/model-grouping";
-import { isPresetStale } from "../presets/preset-resolver";
+import { resolveConversationModel } from "../presets/preset-resolver";
 import type { ConversationManager } from "./conversation";
 import type { HistoryManager } from "./history";
 import { conversationFilename } from "./history";
@@ -50,6 +50,7 @@ export class ConversationLifecycleManager {
 		private readonly setActiveUseExtendedContext: (useExtended: boolean) => void,
 		private readonly getActivePresetName: () => string | null,
 		private readonly setActivePresetName: (name: string | null) => void,
+		private readonly isProviderAccessible: (providerId: string) => boolean,
 		private readonly getSharedCheckpointManager?: () => CheckpointManager | undefined,
 		private readonly onSwitchConversation?: (filename: string) => Promise<void>,
 	) {}
@@ -232,37 +233,45 @@ export class ConversationLifecycleManager {
 				view?.updatePersonaLabel(this.getPersonaManager()?.getActivePersona() ?? null);
 			}
 
-			// Display-restore preset (or provider/model for legacy conversations)
-			if (conversation.preset_name) {
-				const stale = isPresetStale(
-					conversation.preset_name,
-					conversation.provider_id,
-					conversation.model_id,
-					this.getSettings().model_presets,
-				);
-				view?.updatePresetDisplay(stale ? null : conversation.preset_name);
-			} else {
-				// Legacy conversation or Custom — show as Custom with provider/model overrides
-				view?.updatePresetDisplay(null);
-				if (conversation.provider_id) {
-					view?.updateProviderDisplay(conversation.provider_id);
-				}
-				if (conversation.model_id) {
+			// Resolve model configuration via preset-first fallback chain
+			const resolution = resolveConversationModel(
+				conversation,
+				this.getSettings().model_presets,
+				this.getSettings().default_preset,
+				this.isProviderAccessible,
+			);
+
+			if (resolution) {
+				view?.updatePresetDisplay(resolution.presetName);
+				if (resolution.presetName === null) {
+					view?.updateProviderDisplay(resolution.providerId);
 					view?.updateModelDisplay(
-						buildOptionValue(conversation.model_id, conversation.use_extended_context ?? false)
+						buildOptionValue(resolution.modelId, resolution.useExtendedContext)
 					);
 				}
-			}
 
-			// Sync per-orchestrator state so subsequent actions (new conversation,
-			// getCurrentModel callback) reflect the loaded conversation's model.
-			this.setActivePresetName(conversation.preset_name ?? null);
-			if (conversation.provider_id) {
-				this.setActiveProviderId(conversation.provider_id);
-			}
-			if (conversation.model_id) {
-				this.setActiveModelId(conversation.model_id);
-				this.setActiveUseExtendedContext(conversation.use_extended_context ?? false);
+				this.setActivePresetName(resolution.presetName);
+				this.setActiveProviderId(resolution.providerId);
+				this.setActiveModelId(resolution.modelId);
+				this.setActiveUseExtendedContext(resolution.useExtendedContext);
+
+				// Update in-memory conversation so handleUserMessage() pins correctly
+				if (resolution.source !== "stored") {
+					conversation.provider_id = resolution.providerId;
+					conversation.model_id = resolution.modelId;
+					conversation.use_extended_context = resolution.useExtendedContext;
+					if (resolution.source === "default") {
+						conversation.preset_name = resolution.presetName;
+					}
+					this.historyManager.updateConversationHeader(conversation);
+				}
+
+				if (resolution.source === "default") {
+					new Notice(`Preset "${conversation.preset_name}" unavailable. Using default preset.`);
+				}
+			} else {
+				view?.updatePresetDisplay(null);
+				this.setActivePresetName(null);
 			}
 
 			this.getCheckpointManager()?.setConversationId(conversation.id);
@@ -320,33 +329,31 @@ export class ConversationLifecycleManager {
 
 		// Display-restore from session's pinned state
 		view?.updatePersonaLabel(activeSession.pinnedPersona);
-		// Preset-aware display restore
-		this.setActivePresetName(sessionConv.preset_name ?? null);
-		if (sessionConv.preset_name) {
-			const stale = isPresetStale(
-				sessionConv.preset_name,
-				sessionConv.provider_id,
-				sessionConv.model_id,
-				this.getSettings().model_presets,
-			);
-			view?.updatePresetDisplay(stale ? null : sessionConv.preset_name);
-		} else {
-			view?.updatePresetDisplay(null);
-			if (sessionConv.provider_id) {
-				view?.updateProviderDisplay(sessionConv.provider_id);
-			}
-			if (sessionConv.model_id) {
+
+		// Resolve model configuration via preset-first fallback chain
+		const resolution = resolveConversationModel(
+			sessionConv,
+			this.getSettings().model_presets,
+			this.getSettings().default_preset,
+			this.isProviderAccessible,
+		);
+
+		if (resolution) {
+			view?.updatePresetDisplay(resolution.presetName);
+			if (resolution.presetName === null) {
+				view?.updateProviderDisplay(resolution.providerId);
 				view?.updateModelDisplay(
-					buildOptionValue(sessionConv.model_id, activeSession.useExtendedContext)
+					buildOptionValue(resolution.modelId, resolution.useExtendedContext)
 				);
 			}
-		}
-		if (sessionConv.provider_id) {
-			this.setActiveProviderId(sessionConv.provider_id);
-		}
-		if (sessionConv.model_id) {
-			this.setActiveModelId(sessionConv.model_id);
-			this.setActiveUseExtendedContext(activeSession.useExtendedContext);
+
+			this.setActivePresetName(resolution.presetName);
+			this.setActiveProviderId(resolution.providerId);
+			this.setActiveModelId(resolution.modelId);
+			this.setActiveUseExtendedContext(resolution.useExtendedContext);
+		} else {
+			view?.updatePresetDisplay(null);
+			this.setActivePresetName(null);
 		}
 
 		this.configResolver.updateDisplayConfig(activeSession.effectiveConfig, activeSession.parsedConfigs);

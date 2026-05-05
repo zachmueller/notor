@@ -279,6 +279,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			(useExtended) => { this.activeUseExtendedContext = useExtended; },
 			() => this.activePresetName,
 			(name) => { this.activePresetName = name; },
+			(providerId) => !!this.providerRegistry.getConfig(providerId) || !!this.providerRegistry.resolveTypeToId(providerId),
 			() => this.sharedCheckpointManagerGetter?.(),
 			(filename) => this.switchConversation(filename),
 		);
