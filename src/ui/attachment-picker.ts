@@ -655,7 +655,7 @@ export async function readExternalBinaryFile(
 export async function readExternalPdfFile(
 	absolutePath: string,
 	maxSizeMb = 50,
-): Promise<{ base64: string; pageCount?: number } | null> {
+): Promise<{ base64: string; pageCount?: number; extractedText?: string } | null> {
 	// eslint-disable-next-line @typescript-eslint/no-require-imports
 	const fs = require("fs") as typeof import("fs");
 
@@ -670,22 +670,30 @@ export async function readExternalPdfFile(
 		return null;
 	}
 
-	const result = await processPdf(buffer, {
-		providerType: "anthropic", // Use native path for pre-processing; provider routing happens at send time
+	// Get native document block for providers that support it
+	const nativeResult = await processPdf(buffer, {
+		providerType: "anthropic",
 	});
 
-	// Extract the document block for native path
-	const docBlock = result.contentBlocks.find((b) => b.type === "document");
+	// Also extract text so it's always available in the message context
+	const textResult = await processPdf(buffer, {
+		providerType: "local", // Forces text extraction path
+	});
+	const textBlock = textResult.contentBlocks.find((b) => b.type === "text");
+	const extractedText = textBlock && textBlock.type === "text" ? textBlock.text : undefined;
+
+	const docBlock = nativeResult.contentBlocks.find((b) => b.type === "document");
 	if (docBlock && docBlock.type === "document") {
 		return {
 			base64: docBlock.data,
 			pageCount: docBlock.page_count,
+			extractedText,
 		};
 	}
 
-	// Fallback: base64 encode raw buffer
 	return {
 		base64: buffer.toString("base64"),
+		extractedText,
 	};
 }
 
@@ -834,6 +842,7 @@ export function openExternalFileDialog(
 							pdfFile.name,
 							result.base64,
 							result.pageCount,
+							result.extractedText,
 						);
 						onAttachmentAdded(attachment);
 						log.debug("External PDF attached", { name: pdfFile.name });

@@ -282,6 +282,7 @@ export function createExternalPdfAttachment(
 	filename: string,
 	base64: string,
 	pageCount?: number,
+	extractedText?: string,
 ): Attachment {
 	return {
 		id: generateUUID(),
@@ -289,7 +290,7 @@ export function createExternalPdfAttachment(
 		path: absolutePath,
 		section: null,
 		display_name: filename,
-		content: pageCount != null ? String(pageCount) : null,
+		content: extractedText ?? null,
 		content_length: pageCount ?? null,
 		binary_content: base64,
 		media_type: "application/pdf",
@@ -757,13 +758,14 @@ export function buildAttachmentsBlock(attachments: Attachment[]): { text: string
 
 			case "vault_pdf":
 			case "external_pdf":
-				if (att.binary_content && att.media_type === "application/pdf") {
-					if (att.type === "external_pdf") {
-						contentBlocks.push({
-							type: "text",
-							text: `<attached-file name="${escapeXmlAttr(att.display_name)}" source="${escapeXmlAttr(att.path)}" />`,
-						});
-					}
+				if (att.type === "external_pdf" && att.content) {
+					// External PDFs: include extracted text so AI has full content without tool calls
+					const sourceAttr = ` source="${escapeXmlAttr(att.path)}"`;
+					tags.push(
+						`  <pdf-document name="${escapeXmlAttr(att.display_name)}"${sourceAttr}>\n${att.content}\n  </pdf-document>`
+					);
+				} else if (att.binary_content && att.media_type === "application/pdf") {
+					// Vault PDFs or external PDFs without extracted text: use native document block
 					contentBlocks.push({
 						type: "document",
 						media_type: "application/pdf",
