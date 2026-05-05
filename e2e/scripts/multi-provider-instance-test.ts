@@ -162,14 +162,35 @@ async function testProviderPickerShowsInstances(ctx: TestContext): Promise<void>
 	await gearBtn.click();
 	await page.waitForTimeout(500);
 
-	// Look for provider select in the settings popover
+	// The first select is the preset picker. Select "Custom…" to reveal provider select.
+	const customSelected = await page.evaluate(() => {
+		const popover = document.querySelector(".notor-settings-popover");
+		if (!popover) return false;
+		const presetSelect = popover.querySelector("select.notor-settings-select") as HTMLSelectElement;
+		if (!presetSelect) return false;
+		presetSelect.value = "__custom";
+		presetSelect.dispatchEvent(new Event("change", { bubbles: true }));
+		return true;
+	});
+
+	if (!customSelected) {
+		const shot = await ctx.screenshot("04-no-preset-select");
+		ctx.fail("Provider picker — preset select found", "Could not find or interact with preset select", shot);
+		return;
+	}
+
+	await page.waitForTimeout(500);
+
+	// Now the provider select should be visible (second <select> in the popover)
 	const providerOptions = await page.evaluate(() => {
 		const popover = document.querySelector(".notor-settings-popover");
 		if (!popover) return null;
-		const select = popover.querySelector("select.notor-settings-select");
-		if (!select) return null;
+		const selects = popover.querySelectorAll("select.notor-settings-select");
+		// The provider select is the second one (after the preset select)
+		const providerSelect = selects[1] as HTMLSelectElement | undefined;
+		if (!providerSelect) return null;
 		const options: { value: string; text: string }[] = [];
-		select.querySelectorAll("option").forEach((opt: HTMLOptionElement) => {
+		providerSelect.querySelectorAll("option").forEach((opt: HTMLOptionElement) => {
 			options.push({ value: opt.value, text: opt.textContent ?? "" });
 		});
 		return options;
@@ -178,7 +199,7 @@ async function testProviderPickerShowsInstances(ctx: TestContext): Promise<void>
 	const shot = await ctx.screenshot("04-provider-picker");
 
 	if (!providerOptions) {
-		ctx.fail("Provider picker — popover with select found", "Could not find settings popover or provider select", shot);
+		ctx.fail("Provider picker — provider select found after Custom", "Could not find provider select in popover", shot);
 		return;
 	}
 
