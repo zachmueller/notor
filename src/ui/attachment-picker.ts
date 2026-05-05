@@ -682,9 +682,14 @@ export async function readExternalPdfFile(
 	}
 
 	// Get native document block for providers that support it
-	const nativeResult = await processPdf(Buffer.from(rawBytes), {
-		providerType: "anthropic",
-	});
+	let nativeResult;
+	try {
+		nativeResult = await processPdf(Buffer.from(rawBytes), {
+			providerType: "anthropic",
+		});
+	} catch {
+		nativeResult = { contentBlocks: [], textSummary: "" };
+	}
 
 	// Also extract text so it's always available in the message context.
 	// Use a fresh buffer copy since getDocumentProxy may transfer the underlying ArrayBuffer.
@@ -712,7 +717,7 @@ export async function readExternalPdfFile(
 	try {
 		extractedImages = await extractPdfImages(Buffer.from(rawBytes), pageCount);
 	} catch {
-		// Image extraction failed — non-fatal, text content still available
+		// Page rendering failed — non-fatal, text content still available
 	}
 
 	const docBlock = nativeResult.contentBlocks.find((b) => b.type === "document");
@@ -733,18 +738,26 @@ export async function readExternalPdfFile(
 	};
 }
 
+/** Minimum base64 size (bytes) for a rendered page to be considered visual. */
+const PAGE_IMAGE_MIN_BYTES = 30_000;
+
 /**
- * Extract images from PDF pages using unpdf's extractImages API.
- * Converts raw pixel data to PNG/JPEG base64 via Canvas API.
+ * Render PDF pages as images, keeping only pages with meaningful visual content.
+ *
+ * Renders each page via renderPageAsImage (DOM Canvas in Electron), then filters
+ * out text-only pages by checking the rendered size: pages that compress to under
+ * PAGE_IMAGE_MIN_BYTES are likely pure text (PNG compresses text-on-white very well)
+ * and are already captured by the text extraction, so we skip them.
+ *
  * Stops when cumulative base64 size exceeds PDF_IMAGE_BUDGET_BYTES.
  */
 async function extractPdfImages(
 	pdfBuffer: Buffer,
 	totalPages?: number,
 ): Promise<ExtractedPdfImage[]> {
-	const { extractImages, getDocumentProxy } = await import("unpdf");
+	const { renderPageAsImage, getDocumentProxy } = await import("unpdf");
 	const uint8 = new Uint8Array(pdfBuffer);
-	const pdf = await getDocumentProxy(uint8, { isEvalSupported: false });
+	const pdf = await getDocumentProxy(uint8);
 	const numPages = totalPages ?? pdf.numPages;
 
 	const images: ExtractedPdfImage[] = [];
@@ -753,94 +766,41 @@ async function extractPdfImages(
 	for (let pageNum = 1; pageNum <= numPages; pageNum++) {
 		if (cumulativeBytes >= PDF_IMAGE_BUDGET_BYTES) break;
 
-		let pageImages;
 		try {
-			pageImages = await extractImages(pdf, pageNum);
-		} catch {
-			continue;
-		}
+			const dataUrl = await renderPageAsImage(pdf, pageNum, {
+				scale: 1.5,
+				toDataURL: true,
+			}) as string;
 
-		for (const img of pageImages) {
-			if (cumulativeBytes >= PDF_IMAGE_BUDGET_BYTES) break;
-			if (img.width < 50 || img.height < 50) continue; // Skip tiny images (icons, spacers)
+			if (!dataUrl || dataUrl === "data:,") continue;
 
-			const encoded = rawPixelsToBase64(img.data, img.width, img.height, img.channels);
-			if (!encoded) continue;
+			const commaIdx = dataUrl.indexOf(",");
+			const base64 = dataUrl.slice(commaIdx + 1);
 
-			cumulativeBytes += encoded.data.length;
+			// Skip text-only pages: small PNGs indicate no meaningful visual content
+			if (base64.length < PAGE_IMAGE_MIN_BYTES) continue;
+
+			const page = await pdf.getPage(pageNum);
+			const viewport = page.getViewport({ scale: 1.5 });
+			const width = Math.round(viewport.width);
+			const height = Math.round(viewport.height);
+
+			cumulativeBytes += base64.length;
 			if (cumulativeBytes > PDF_IMAGE_BUDGET_BYTES) break;
 
-			images.push(encoded);
+			images.push({
+				data: base64,
+				media_type: "image/png",
+				width,
+				height,
+			});
+		} catch {
+			continue;
 		}
 	}
 
 	await pdf.cleanup();
 	return images;
-}
-
-/**
- * Convert raw pixel data (Uint8ClampedArray) to a base64-encoded PNG/JPEG
- * using the Electron Canvas API.
- */
-function rawPixelsToBase64(
-	pixels: Uint8ClampedArray,
-	width: number,
-	height: number,
-	channels: 1 | 3 | 4,
-): ExtractedPdfImage | null {
-	try {
-		const canvas = document.createElement("canvas");
-		canvas.width = width;
-		canvas.height = height;
-		const ctx = canvas.getContext("2d");
-		if (!ctx) return null;
-
-		// Convert to RGBA if needed
-		let rgba: Uint8ClampedArray;
-		if (channels === 4) {
-			rgba = pixels;
-		} else if (channels === 3) {
-			rgba = new Uint8ClampedArray(width * height * 4);
-			for (let i = 0, j = 0; i < pixels.length; i += 3, j += 4) {
-				rgba[j] = pixels[i]!;
-				rgba[j + 1] = pixels[i + 1]!;
-				rgba[j + 2] = pixels[i + 2]!;
-				rgba[j + 3] = 255;
-			}
-		} else {
-			// Grayscale
-			rgba = new Uint8ClampedArray(width * height * 4);
-			for (let i = 0, j = 0; i < pixels.length; i++, j += 4) {
-				rgba[j] = pixels[i]!;
-				rgba[j + 1] = pixels[i]!;
-				rgba[j + 2] = pixels[i]!;
-				rgba[j + 3] = 255;
-			}
-		}
-
-		const imageData = new ImageData(new Uint8ClampedArray(rgba.buffer) as unknown as Uint8ClampedArray<ArrayBuffer>, width, height);
-		ctx.putImageData(imageData, 0, 0);
-
-		// Use JPEG for photos (large images), PNG for smaller/diagrams
-		const useJpeg = width * height > 500_000;
-		const mimeType = useJpeg ? "image/jpeg" : "image/png";
-		const quality = useJpeg ? 0.75 : undefined;
-
-		const dataUrl = canvas.toDataURL(mimeType, quality);
-		if (!dataUrl || dataUrl === "data:,") return null;
-
-		const commaIdx = dataUrl.indexOf(",");
-		const base64 = dataUrl.slice(commaIdx + 1);
-
-		return {
-			data: base64,
-			media_type: useJpeg ? "image/jpeg" : "image/png",
-			width,
-			height,
-		};
-	} catch {
-		return null;
-	}
 }
 
 /**
