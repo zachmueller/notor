@@ -16,13 +16,14 @@ import { logger } from "../../utils/logger";
 
 const log = logger("ModelPresetsSection");
 
-/** Provider labels keyed by provider ID. */
-const PROVIDER_LABELS: Record<string, string> = {
-	local: "Local (OpenAI-compatible)",
-	anthropic: "Anthropic",
-	openai: "OpenAI",
-	bedrock: "AWS Bedrock",
-};
+/** Build a display-name lookup from the current provider configs. */
+function buildProviderLabels(ctx: SettingsContext): Record<string, string> {
+	const labels: Record<string, string> = {};
+	for (const p of ctx.settings.providers) {
+		labels[p.id] = p.display_name;
+	}
+	return labels;
+}
 
 /** Render the "Models" settings section. */
 export function renderModelPresetsSection(
@@ -87,7 +88,7 @@ export function renderModelPresetsSection(
 function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void {
 	const presets = ctx.settings.model_presets;
 	const registry = ctx.plugin.getProviderRegistry();
-	const enabledTypes = registry.getConfiguredTypes();
+	const providerLabels = buildProviderLabels(ctx);
 
 	for (let i = 0; i < presets.length; i++) {
 		const preset = presets[i]!;
@@ -98,7 +99,7 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 			.setName(`Preset: ${preset.name}`)
 			.setDesc(
 				preset.provider_id && preset.model_id
-					? `${PROVIDER_LABELS[preset.provider_id] ?? preset.provider_id} \u00B7 ${preset.model_id}${preset.use_extended_context ? " \u00B7 1M" : ""}`
+					? `${providerLabels[preset.provider_id] ?? preset.provider_id} \u00B7 ${preset.model_id}${preset.use_extended_context ? " \u00B7 1M" : ""}`
 					: "(not configured)",
 			);
 
@@ -129,8 +130,8 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 
 		providerRow.addDropdown((dropdown) => {
 			dropdown.addOption("", "(not configured)");
-			for (const type of enabledTypes) {
-				dropdown.addOption(type, PROVIDER_LABELS[type] ?? type);
+			for (const provider of ctx.settings.providers) {
+				dropdown.addOption(provider.id, provider.display_name);
 			}
 			dropdown.setValue(preset.provider_id ?? "");
 			dropdown.onChange(async (value) => {

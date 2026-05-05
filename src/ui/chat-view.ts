@@ -3323,12 +3323,10 @@ export class NotorChatView extends ItemView {
 		presetSection.createDiv({ cls: "notor-settings-label", text: "Model Preset" });
 
 		const presets = this.getAvailablePresets?.() ?? [];
-		const PROVIDER_LABELS: Record<string, string> = {
-			local: "Local",
-			anthropic: "Anthropic",
-			openai: "OpenAI",
-			bedrock: "Bedrock",
-		};
+		const providerLabels: Record<string, string> = {};
+		for (const p of this.plugin.settings.providers) {
+			providerLabels[p.id] = p.display_name;
+		}
 
 		// Determine current selection
 		const currentPreset = this.displayedPresetName !== undefined
@@ -3341,7 +3339,7 @@ export class NotorChatView extends ItemView {
 		for (const p of presets) {
 			const isConfigured = p.provider_id !== null && p.model_id !== null;
 			const detail = isConfigured
-				? `${PROVIDER_LABELS[p.provider_id!] ?? p.provider_id} \u00B7 ${p.model_id}${p.use_extended_context ? " \u00B7 1M" : ""}`
+				? `${providerLabels[p.provider_id!] ?? p.provider_id} \u00B7 ${p.model_id}${p.use_extended_context ? " \u00B7 1M" : ""}`
 				: "(not configured)";
 			const opt = presetSelect.createEl("option", {
 				text: `${p.name}  \u2014  ${detail}`,
