@@ -4,6 +4,7 @@
 
 import { Setting, Notice } from "obsidian";
 import type { LLMProviderConfig, LLMProviderType } from "../../types";
+import { ConfirmModal } from "../../ui/confirm-modal";
 import { clearProviderSecrets } from "../../utils/secrets";
 import { generateProviderId, updateProvider } from "../helpers";
 import type { SettingsContext } from "./context";
@@ -79,27 +80,46 @@ export function renderDeleteProviderButton(
 		.setName("Remove this provider")
 		.setDesc(`Permanently remove "${config.display_name}" and its stored credentials.`)
 		.addButton((button) => {
-			button
-				.setButtonText("Delete")
-				.setWarning()
-				.onClick(async () => {
-					const idx = ctx.settings.providers.findIndex((p) => p.id === config.id);
-					if (idx < 0) return;
+			button.setButtonText("Delete").setWarning();
 
-					// Clear secrets
-					clearProviderSecrets(ctx.app, config.id, config.type);
+			if (ctx.settings.providers.length <= 1) {
+				button.setDisabled(true);
+				button.setTooltip("Cannot delete the only remaining provider");
+				return;
+			}
 
-					// Remove from settings
-					ctx.settings.providers.splice(idx, 1);
+			button.onClick(() => {
+				new ConfirmModal(
+					ctx.app,
+					"Remove provider",
+					`Remove "${config.display_name}" and its stored credentials? ` +
+						`Any model presets using this provider will be reset.`,
+					async () => {
+						const idx = ctx.settings.providers.findIndex((p) => p.id === config.id);
+						if (idx < 0) return;
 
-					// If this was the active provider, switch to the first remaining
-					if (ctx.settings.active_provider === config.id) {
-						ctx.settings.active_provider = ctx.settings.providers[0]?.id ?? "local";
-					}
+						clearProviderSecrets(ctx.app, config.id, config.type);
+						ctx.settings.providers.splice(idx, 1);
 
-					await ctx.saveSettings();
-					new Notice(`Provider "${config.display_name}" removed.`);
-					ctx.redisplay();
-				});
+						if (ctx.settings.active_provider === config.id) {
+							ctx.settings.active_provider = ctx.settings.providers[0]?.id ?? "";
+						}
+
+						for (const preset of ctx.settings.model_presets) {
+							if (preset.provider_id === config.id) {
+								preset.provider_id = null;
+								preset.model_id = null;
+								preset.use_extended_context = false;
+							}
+						}
+
+						await ctx.saveSettings();
+						new Notice(`Provider "${config.display_name}" removed.`);
+						ctx.redisplay();
+					},
+					"Delete",
+					true
+				).open();
+			});
 		});
 }

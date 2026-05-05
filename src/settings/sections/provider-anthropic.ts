@@ -38,18 +38,17 @@ export function renderAnthropicProviderSection(
 
 	renderConnectionTestButton(groupEl, provider.id, ctx);
 
-	if (provider.id !== provider.type) {
-		new Setting(groupEl)
-			.setName("Display name")
-			.addText((text) =>
-				text
-					.setValue(provider.display_name)
-					.onChange(async (value) => {
-						provider.display_name = value.trim() || provider.display_name;
-						updateProvider(ctx.settings, provider);
-						await ctx.saveSettings();
-					})
-			);
-		renderDeleteProviderButton(groupEl, provider, ctx);
-	}
+	new Setting(groupEl)
+		.setName("Display name")
+		.addText((text) => {
+			text
+				.setValue(provider.display_name)
+				.onChange(async (value) => {
+					provider.display_name = value.trim() || provider.display_name;
+					updateProvider(ctx.settings, provider);
+					await ctx.saveSettings();
+				});
+			text.inputEl.addEventListener("blur", () => ctx.redisplay());
+		});
+	renderDeleteProviderButton(groupEl, provider, ctx);
 }
