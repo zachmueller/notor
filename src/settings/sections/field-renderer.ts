@@ -123,7 +123,7 @@ export function renderField(
 	if (field.optionsSource && !field.options?.length) {
 		if (field.optionsSource === "model_presets") {
 			const presetNames = ctx.settings.model_presets
-				.filter((p) => p.provider_type !== null && p.model_id !== null)
+				.filter((p) => p.provider_id !== null && p.model_id !== null)
 				.map((p) => p.name);
 			field = { ...field, options: presetNames };
 		} else if (field.optionsSource === "web_search_configured_providers") {

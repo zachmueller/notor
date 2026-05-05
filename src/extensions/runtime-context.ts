@@ -409,7 +409,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 		processPdf: (buffer: Buffer, options: { pages?: string; maxTextChars?: number; preferNative?: boolean }) =>
 			processPdf(buffer, {
 				...options,
-				providerType: plugin.settings.active_provider,
+				providerId: plugin.settings.active_provider,
 				maxNativeSizeBytes: plugin.settings.pdf_native_max_size_mb * 1024 * 1024,
 			}),
 
@@ -474,7 +474,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 
 				depth++;
 				try {
-					const provider = plugin.getProviderRegistry().getProvider(resolved.providerType);
+					const provider = plugin.getProviderRegistry().getProvider(resolved.providerId);
 					const stream = provider.sendMessage(
 						messages.map((m) => ({
 							role: m.role as "user" | "assistant" | "system",
@@ -634,7 +634,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 
 				// Resolve provider and model (preset takes precedence)
 				const providerRegistry = plugin.getProviderRegistry();
-				let providerType: import("../types").LLMProviderType;
+				let providerId: string;
 				let model: string;
 				let provider;
 
@@ -643,7 +643,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 					: null;
 
 				if (resolvedPreset) {
-					providerType = resolvedPreset.providerType;
+					providerId = resolvedPreset.providerId;
 					model = resolvedPreset.modelId;
 				} else {
 					if (profile.preferred_preset) {
@@ -652,17 +652,17 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 							preset: profile.preferred_preset,
 						});
 					}
-					providerType = profile.preferred_provider
-						? profile.preferred_provider as import("../types").LLMProviderType
+					providerId = profile.preferred_provider
+						? profile.preferred_provider
 						: providerRegistry.getActiveType();
-					const providerConfig = providerRegistry.getConfig(providerType);
+					const providerConfig = providerRegistry.getConfig(providerId);
 					model = profile.preferred_model ?? providerConfig?.model_id ?? "";
 				}
 
 				try {
-					provider = providerRegistry.getProvider(providerType);
+					provider = providerRegistry.getProvider(providerId);
 				} catch {
-					rsaLog.warn("runSubAgent: provider not configured", { provider: providerType, profile: opts.profileName });
+					rsaLog.warn("runSubAgent: provider not configured", { provider: providerId, profile: opts.profileName });
 					return null;
 				}
 				if (!model) {

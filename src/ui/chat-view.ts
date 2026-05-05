@@ -3358,9 +3358,9 @@ export class NotorChatView extends ItemView {
 
 		// Render preset options
 		for (const p of presets) {
-			const isConfigured = p.provider_type !== null && p.model_id !== null;
+			const isConfigured = p.provider_id !== null && p.model_id !== null;
 			const detail = isConfigured
-				? `${PROVIDER_LABELS[p.provider_type!] ?? p.provider_type} \u00B7 ${p.model_id}${p.use_extended_context ? " \u00B7 1M" : ""}`
+				? `${PROVIDER_LABELS[p.provider_id!] ?? p.provider_id} \u00B7 ${p.model_id}${p.use_extended_context ? " \u00B7 1M" : ""}`
 				: "(not configured)";
 			const opt = presetSelect.createEl("option", {
 				text: `${p.name}  \u2014  ${detail}`,

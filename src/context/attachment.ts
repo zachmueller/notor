@@ -442,7 +442,7 @@ export async function resolveAttachment(
 			}
 
 			const result = await processPdf(buffer, {
-				providerType: providerType ?? "local",
+				providerId: providerType ?? "local",
 			});
 
 			// For native document blocks, store the base64 data

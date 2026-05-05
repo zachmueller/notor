@@ -10,13 +10,13 @@
 
 import { Notice, Setting } from "obsidian";
 import type { SettingsContext } from "./context";
-import type { LLMProviderType, ModelPreset } from "../../types";
+import type { ModelPreset } from "../../types";
 import { groupModels, parseOptionValue, buildOptionValue } from "../../providers/model-grouping";
 import { logger } from "../../utils/logger";
 
 const log = logger("ModelPresetsSection");
 
-/** Provider labels keyed by LLMProviderType. */
+/** Provider labels keyed by provider ID. */
 const PROVIDER_LABELS: Record<string, string> = {
 	local: "Local (OpenAI-compatible)",
 	anthropic: "Anthropic",
@@ -40,7 +40,7 @@ export function renderModelPresetsSection(
 	const presets = ctx.settings.model_presets;
 
 	// --- Default preset selector ---
-	const configuredPresets = presets.filter((p) => p.provider_type !== null && p.model_id !== null);
+	const configuredPresets = presets.filter((p) => p.provider_id !== null && p.model_id !== null);
 	new Setting(containerEl)
 		.setName("Default preset")
 		.setDesc("The preset used for new conversations.")
@@ -73,7 +73,7 @@ export function renderModelPresetsSection(
 				const name = generateUniqueName(presets);
 				presets.push({
 					name,
-					provider_type: null,
+					provider_id: null,
 					model_id: null,
 					use_extended_context: false,
 				});
@@ -97,8 +97,8 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 		const nameRow = new Setting(rowEl)
 			.setName(`Preset: ${preset.name}`)
 			.setDesc(
-				preset.provider_type && preset.model_id
-					? `${PROVIDER_LABELS[preset.provider_type] ?? preset.provider_type} \u00B7 ${preset.model_id}${preset.use_extended_context ? " \u00B7 1M" : ""}`
+				preset.provider_id && preset.model_id
+					? `${PROVIDER_LABELS[preset.provider_id] ?? preset.provider_id} \u00B7 ${preset.model_id}${preset.use_extended_context ? " \u00B7 1M" : ""}`
 					: "(not configured)",
 			);
 
@@ -132,14 +132,14 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 			for (const type of enabledTypes) {
 				dropdown.addOption(type, PROVIDER_LABELS[type] ?? type);
 			}
-			dropdown.setValue(preset.provider_type ?? "");
+			dropdown.setValue(preset.provider_id ?? "");
 			dropdown.onChange(async (value) => {
 				if (value === "") {
-					preset.provider_type = null;
+					preset.provider_id = null;
 					preset.model_id = null;
 					preset.use_extended_context = false;
 				} else {
-					preset.provider_type = value as LLMProviderType;
+					preset.provider_id = value;
 					// Reset model when provider changes
 					preset.model_id = null;
 					preset.use_extended_context = false;
@@ -150,29 +150,29 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 		});
 
 		// --- Model dropdown (only if provider is selected) ---
-		if (preset.provider_type) {
+		if (preset.provider_id) {
 			const modelRow = new Setting(rowEl).setName("Model");
-			const providerType = preset.provider_type;
+			const providerId = preset.provider_id;
 
 			// Try cached models first, trigger background fetch if needed
-			const cached = registry.getCachedModels(providerType);
+			const cached = registry.getCachedModels(providerId);
 			const currentValue = preset.model_id
 				? buildOptionValue(preset.model_id, preset.use_extended_context)
 				: "";
 
 			if (cached.length > 0) {
-				renderModelDropdown(modelRow, cached, currentValue, preset, i, ctx, providerType, registry);
+				renderModelDropdown(modelRow, cached, currentValue, preset, i, ctx, providerId, registry);
 			} else {
 				// Show a loading indicator and fetch models
 				modelRow.setDesc("Loading models...");
 				registry
-					.getModels(providerType)
+					.getModels(providerId)
 					.then((models) => {
 						modelRow.setDesc("");
-						renderModelDropdown(modelRow, models, currentValue, preset, i, ctx, providerType, registry);
+						renderModelDropdown(modelRow, models, currentValue, preset, i, ctx, providerId, registry);
 					})
 					.catch((e) => {
-						log.error("Failed to fetch models for preset", { provider: providerType, error: String(e) });
+						log.error("Failed to fetch models for preset", { provider: providerId, error: String(e) });
 						modelRow.setDesc("Failed to load models.");
 						// Fallback: text input
 						modelRow.addText((text) => {
@@ -189,9 +189,9 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 							btn.setIcon("refresh-cw").setTooltip("Retry loading models").onClick(async () => {
 								btn.setDisabled(true);
 								try {
-									await registry.refreshModels(providerType);
+									await registry.refreshModels(providerId);
 								} catch (e) {
-									log.error("Failed to refresh models", { provider: providerType, error: String(e) });
+									log.error("Failed to refresh models", { provider: providerId, error: String(e) });
 									new Notice("Failed to refresh model list.");
 								}
 								ctx.redisplay();
@@ -251,7 +251,7 @@ function renderModelDropdown(
 	preset: ModelPreset,
 	_index: number,
 	ctx: SettingsContext,
-	providerType: LLMProviderType,
+	providerId: string,
 	registry: ReturnType<SettingsContext["plugin"]["getProviderRegistry"]>,
 ): void {
 	setting.addDropdown((dropdown) => {
@@ -306,9 +306,9 @@ function renderModelDropdown(
 		btn.setIcon("refresh-cw").setTooltip("Refresh model list").onClick(async () => {
 			btn.setDisabled(true);
 			try {
-				await registry.refreshModels(providerType);
+				await registry.refreshModels(providerId);
 			} catch (e) {
-				log.error("Failed to refresh models", { provider: providerType, error: String(e) });
+				log.error("Failed to refresh models", { provider: providerId, error: String(e) });
 				new Notice("Failed to refresh model list.");
 			}
 			ctx.redisplay();

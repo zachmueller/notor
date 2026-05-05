@@ -422,9 +422,9 @@ export class PersonaManager {
 			const resolved = resolvePreset(persona.preferred_preset, this.settings.model_presets);
 			if (resolved) {
 				try {
-					const config = this.providerRegistry.getConfig(resolved.providerType);
+					const config = this.providerRegistry.getConfig(resolved.providerId);
 					if (config) {
-						this.providerRegistry.switchProvider(resolved.providerType);
+						this.providerRegistry.switchProvider(resolved.providerId);
 						const updated = {
 							...config,
 							model_id: resolved.modelId,
@@ -434,7 +434,7 @@ export class PersonaManager {
 						log.info("Applied preset override for persona", {
 							persona: persona.name,
 							preset: persona.preferred_preset,
-							provider: resolved.providerType,
+							provider: resolved.providerId,
 							model: resolved.modelId,
 						});
 						return; // Preset fully applied — skip legacy provider/model overrides

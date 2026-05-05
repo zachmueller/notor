@@ -20,7 +20,7 @@ import type { NotorSettings } from "../settings/types";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { ParsedToolConfig } from "../tool-config/types";
 import type { ApprovalCallback } from "../chat/dispatcher";
-import type { Conversation, LLMProviderType } from "../types";
+import type { Conversation } from "../types";
 import type { HistoryManager } from "../chat/history";
 import { ToolDispatcher } from "../chat/dispatcher";
 import { SubAgentRunner } from "../chat/sub-agent-runner";
@@ -220,7 +220,7 @@ export class UseSubagentTool implements Tool {
 	): Promise<ToolResult> {
 		// Step 4: Resolve provider and model (preset takes precedence)
 		let provider;
-		let providerType: LLMProviderType;
+		let providerId: string;
 		let model: string;
 
 		const resolvedPreset = profile.preferred_preset
@@ -228,15 +228,15 @@ export class UseSubagentTool implements Tool {
 			: null;
 
 		if (resolvedPreset) {
-			providerType = resolvedPreset.providerType;
+			providerId = resolvedPreset.providerId;
 			try {
-				provider = this.providerRegistry.getProvider(providerType);
+				provider = this.providerRegistry.getProvider(providerId);
 			} catch {
 				return {
 					tool_name: USE_SUBAGENT_TOOL_NAME,
 					success: false,
 					result: "",
-					error: `Provider '${providerType}' (from preset '${profile.preferred_preset}') is not configured for sub-agent '${profile.name}'.`,
+					error: `Provider '${providerId}' (from preset '${profile.preferred_preset}') is not configured for sub-agent '${profile.name}'.`,
 				};
 			}
 			model = resolvedPreset.modelId;
@@ -247,23 +247,23 @@ export class UseSubagentTool implements Tool {
 					preset: profile.preferred_preset,
 				});
 			}
-			providerType = profile.preferred_provider as LLMProviderType;
+			providerId = profile.preferred_provider;
 			try {
-				provider = this.providerRegistry.getProvider(providerType);
+				provider = this.providerRegistry.getProvider(providerId);
 			} catch {
 				return {
 					tool_name: USE_SUBAGENT_TOOL_NAME,
 					success: false,
 					result: "",
-					error: `Provider '${providerType}' is not configured for sub-agent '${profile.name}'.`,
+					error: `Provider '${providerId}' is not configured for sub-agent '${profile.name}'.`,
 				};
 			}
-			const providerConfig = this.providerRegistry.getConfig(providerType);
+			const providerConfig = this.providerRegistry.getConfig(providerId);
 			model = profile.preferred_model ?? providerConfig?.model_id ?? "";
 		} else {
-			providerType = this.providerRegistry.getActiveType();
+			providerId = this.providerRegistry.getActiveType();
 			provider = this.providerRegistry.getActiveProvider();
-			const providerConfig = this.providerRegistry.getConfig(providerType);
+			const providerConfig = this.providerRegistry.getConfig(providerId);
 			model = profile.preferred_model ?? providerConfig?.model_id ?? "";
 		}
 		if (!model) {
@@ -412,7 +412,7 @@ export class UseSubagentTool implements Tool {
 						id: subAgentConversationId,
 						parent_conversation_id: parentConversation.id,
 						sub_agent_name: profile.name,
-						provider_id: providerType,
+						provider_id: providerId,
 						model_id: model,
 						total_input_tokens: result.tokenUsage.input,
 						total_output_tokens: result.tokenUsage.output,
