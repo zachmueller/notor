@@ -109,7 +109,7 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	toggleInstances = [];
 	mockNoticeMessages.length = 0;
-	mockResolvePreset.mockReturnValue({ presetName: "tiny", providerType: "local", modelId: "test" });
+	mockResolvePreset.mockReturnValue({ presetName: "tiny", providerId: "local", modelId: "test" });
 });
 
 // ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ describe("memory settings — preset validation", () => {
 	});
 
 	it("preset validation passes when both tiny and large presets exist", async () => {
-		mockResolvePreset.mockReturnValue({ presetName: "test", providerType: "local", modelId: "m" });
+		mockResolvePreset.mockReturnValue({ presetName: "test", providerId: "local", modelId: "m" });
 
 		const ctx = createCtx({ memory_enabled: false });
 		const container = createMockContainer();
@@ -205,7 +205,7 @@ describe("memory settings — preset validation", () => {
 
 	it("Notice names the missing preset and scaffolds that use it", async () => {
 		mockResolvePreset.mockImplementation((name: string) => {
-			if (name === "tiny") return { presetName: "tiny", providerType: "local", modelId: "m" };
+			if (name === "tiny") return { presetName: "tiny", providerId: "local", modelId: "m" };
 			return null; // large is missing
 		});
 

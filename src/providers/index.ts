@@ -4,6 +4,10 @@
  * Manages provider creation, retrieval, and switching. Providers are
  * initialized lazily (not at plugin load time) to keep startup fast.
  *
+ * Instances are keyed by unique provider ID (not type), enabling multiple
+ * instances of the same provider type (e.g., two local servers, multiple
+ * Bedrock accounts). Factories remain keyed by type.
+ *
  * Model list caching (PROV-007) is integrated here with 5-minute TTL
  * and stale-while-revalidate strategy.
  */
@@ -41,34 +45,34 @@ export type ProviderFactory = (
  * Registry that manages LLM provider instances.
  *
  * - Registers provider factories per type (local, anthropic, openai, bedrock)
- * - Creates provider instances lazily on first access
- * - Caches model lists per provider with 5-minute TTL
- * - Tracks the active provider for the plugin
+ * - Creates provider instances lazily on first access (keyed by instance ID)
+ * - Caches model lists per instance with 5-minute TTL
+ * - Tracks the active provider instance for the plugin
  */
 export class ProviderRegistry {
 	/** Factory functions keyed by provider type. */
 	private factories = new Map<LLMProviderType, ProviderFactory>();
 
-	/** Lazily-created provider instances keyed by provider type. */
-	private instances = new Map<LLMProviderType, LLMProvider>();
+	/** Lazily-created provider instances keyed by instance ID. */
+	private instances = new Map<string, LLMProvider>();
 
-	/** Provider configurations keyed by provider type. */
-	private configs = new Map<LLMProviderType, LLMProviderConfig>();
+	/** Provider configurations keyed by instance ID. */
+	private configs = new Map<string, LLMProviderConfig>();
 
-	/** Model list caches keyed by provider type. */
-	private modelCaches = new Map<LLMProviderType, ModelListCache>();
+	/** Model list caches keyed by instance ID. */
+	private modelCaches = new Map<string, ModelListCache>();
 
-	/** The currently active provider type. */
-	private activeType: LLMProviderType;
+	/** The currently active provider instance ID. */
+	private activeId: string;
 
 	constructor(
 		private readonly app: App,
 		configs: LLMProviderConfig[],
-		activeProvider: LLMProviderType
+		activeProvider: string
 	) {
-		this.activeType = activeProvider;
+		this.activeId = activeProvider;
 		for (const config of configs) {
-			this.configs.set(config.type, config);
+			this.configs.set(config.id, config);
 		}
 	}
 
@@ -92,42 +96,40 @@ export class ProviderRegistry {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Get the provider instance for a given type.
+	 * Get the provider instance by ID.
 	 *
 	 * Creates the instance lazily on first access using the registered
-	 * factory and stored configuration.
+	 * factory for the config's type.
 	 *
 	 * @throws ProviderError if no factory is registered or no config exists
 	 */
-	getProvider(type: LLMProviderType): LLMProvider {
-		// Return cached instance if available
-		const existing = this.instances.get(type);
+	getProvider(id: string): LLMProvider {
+		const existing = this.instances.get(id);
 		if (existing) {
 			return existing;
 		}
 
-		// Create new instance
-		const factory = this.factories.get(type);
-		if (!factory) {
-			throw new ProviderError(
-				`No provider factory registered for type: ${type}`,
-				type,
-				"UNKNOWN"
-			);
-		}
-
-		const config = this.configs.get(type);
+		const config = this.configs.get(id);
 		if (!config) {
 			throw new ProviderError(
-				`No configuration found for provider type: ${type}`,
-				type,
+				`No configuration found for provider: ${id}`,
+				id,
 				"UNKNOWN"
 			);
 		}
 
-		log.info("Creating provider instance", { type });
+		const factory = this.factories.get(config.type);
+		if (!factory) {
+			throw new ProviderError(
+				`No provider factory registered for type: ${config.type}`,
+				config.type,
+				"UNKNOWN"
+			);
+		}
+
+		log.info("Creating provider instance", { id, type: config.type });
 		const instance = factory(config, this.app);
-		this.instances.set(type, instance);
+		this.instances.set(id, instance);
 		return instance;
 	}
 
@@ -135,14 +137,22 @@ export class ProviderRegistry {
 	 * Get the currently active provider instance.
 	 */
 	getActiveProvider(): LLMProvider {
-		return this.getProvider(this.activeType);
+		return this.getProvider(this.activeId);
+	}
+
+	/**
+	 * Get the currently active provider instance ID.
+	 */
+	getActiveId(): string {
+		return this.activeId;
 	}
 
 	/**
 	 * Get the currently active provider type.
 	 */
 	getActiveType(): LLMProviderType {
-		return this.activeType;
+		const config = this.configs.get(this.activeId);
+		return config?.type ?? "local";
 	}
 
 	// -----------------------------------------------------------------------
@@ -150,21 +160,21 @@ export class ProviderRegistry {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Switch the active provider type.
+	 * Switch the active provider by instance ID.
 	 *
 	 * Does NOT eagerly create the new provider instance — it will be
 	 * created lazily on next access.
 	 */
-	switchProvider(type: LLMProviderType): void {
-		if (!this.configs.has(type)) {
+	switchProvider(id: string): void {
+		if (!this.configs.has(id)) {
 			throw new ProviderError(
-				`No configuration found for provider type: ${type}`,
-				type,
+				`No configuration found for provider: ${id}`,
+				id,
 				"UNKNOWN"
 			);
 		}
-		log.info("Switching active provider", { from: this.activeType, to: type });
-		this.activeType = type;
+		log.info("Switching active provider", { from: this.activeId, to: id });
+		this.activeId = id;
 	}
 
 	// -----------------------------------------------------------------------
@@ -172,34 +182,43 @@ export class ProviderRegistry {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Update the configuration for a provider type.
+	 * Update the configuration for a provider instance.
 	 *
 	 * Destroys any cached instance so the next access creates a fresh
 	 * one with the new configuration. Also clears the model list cache.
 	 */
 	updateConfig(config: LLMProviderConfig): void {
-		this.configs.set(config.type, config);
-		// Invalidate cached instance and model list
-		this.instances.delete(config.type);
-		this.modelCaches.delete(config.type);
-		log.debug("Updated provider config", { type: config.type });
+		this.configs.set(config.id, config);
+		this.instances.delete(config.id);
+		this.modelCaches.delete(config.id);
+		log.debug("Updated provider config", { id: config.id, type: config.type });
 	}
 
 	/**
-	 * Reset cached credentials for a provider.
+	 * Remove a provider instance from the registry entirely.
+	 */
+	removeProvider(id: string): void {
+		this.instances.delete(id);
+		this.configs.delete(id);
+		this.modelCaches.delete(id);
+		log.info("Removed provider", { id });
+	}
+
+	/**
+	 * Reset cached credentials for a provider instance.
 	 *
 	 * Calls `resetCredentials()` on the cached instance (if it implements it),
 	 * then destroys the cached instance and model list so the next access
 	 * creates a fresh provider with new credentials.
 	 */
-	resetProviderCredentials(type: LLMProviderType): void {
-		const instance = this.instances.get(type);
+	resetProviderCredentials(id: string): void {
+		const instance = this.instances.get(id);
 		if (instance?.resetCredentials) {
 			instance.resetCredentials();
 		}
-		this.instances.delete(type);
-		this.modelCaches.delete(type);
-		log.info("Reset provider credentials", { type });
+		this.instances.delete(id);
+		this.modelCaches.delete(id);
+		log.info("Reset provider credentials", { id });
 	}
 
 	// -----------------------------------------------------------------------
@@ -214,49 +233,46 @@ export class ProviderRegistry {
 	 * - Stale cache (>= 5 min): return stale data, refresh in background
 	 * - No cache: fetch and return
 	 *
-	 * @param type - Provider type to get models for (defaults to active)
+	 * @param id - Provider instance ID (defaults to active)
 	 * @param forceRefresh - Skip cache and fetch fresh data
 	 */
 	async getModels(
-		type?: LLMProviderType,
+		id?: string,
 		forceRefresh = false
 	): Promise<ModelInfo[]> {
-		const providerType = type ?? this.activeType;
-		const cache = this.modelCaches.get(providerType);
+		const providerId = id ?? this.activeId;
+		const cache = this.modelCaches.get(providerId);
 		const now = Date.now();
 
-		// Return fresh cache immediately
 		if (!forceRefresh && cache && now - cache.fetchedAt < CACHE_TTL_MS) {
 			return cache.models;
 		}
 
-		// Stale cache: return stale data and refresh in background
 		if (!forceRefresh && cache) {
 			log.debug("Returning stale model cache, refreshing in background", {
-				type: providerType,
+				id: providerId,
 			});
-			this.refreshModelsInBackground(providerType);
+			this.refreshModelsInBackground(providerId);
 			return cache.models;
 		}
 
-		// No cache or force refresh: fetch synchronously
-		return this.fetchAndCacheModels(providerType);
+		return this.fetchAndCacheModels(providerId);
 	}
 
 	/**
 	 * Explicitly refresh the model list for a provider.
 	 * Clears cache and fetches fresh data.
 	 */
-	async refreshModels(type?: LLMProviderType): Promise<ModelInfo[]> {
-		return this.getModels(type, true);
+	async refreshModels(id?: string): Promise<ModelInfo[]> {
+		return this.getModels(id, true);
 	}
 
 	/**
 	 * Clear model cache for a specific provider or all providers.
 	 */
-	clearModelCache(type?: LLMProviderType): void {
-		if (type) {
-			this.modelCaches.delete(type);
+	clearModelCache(id?: string): void {
+		if (id) {
+			this.modelCaches.delete(id);
 		} else {
 			this.modelCaches.clear();
 		}
@@ -265,53 +281,47 @@ export class ProviderRegistry {
 	/**
 	 * Return the currently cached model list for a provider synchronously.
 	 * Returns an empty array if no cache is available yet.
-	 *
-	 * Useful for populating UI synchronously without triggering async fetches.
 	 */
-	getCachedModels(type?: LLMProviderType): ModelInfo[] {
-		const providerType = type ?? this.activeType;
-		return this.modelCaches.get(providerType)?.models ?? [];
+	getCachedModels(id?: string): ModelInfo[] {
+		const providerId = id ?? this.activeId;
+		return this.modelCaches.get(providerId)?.models ?? [];
 	}
 
 	// -----------------------------------------------------------------------
 	// Internal helpers
 	// -----------------------------------------------------------------------
 
-	private async fetchAndCacheModels(
-		type: LLMProviderType
-	): Promise<ModelInfo[]> {
+	private async fetchAndCacheModels(id: string): Promise<ModelInfo[]> {
 		try {
-			const provider = this.getProvider(type);
+			const provider = this.getProvider(id);
 			const raw = await provider.listModels();
 			const models = raw.map(enrichModelInfo);
-			this.modelCaches.set(type, {
+			this.modelCaches.set(id, {
 				models,
 				fetchedAt: Date.now(),
 			});
 			log.info("Fetched and cached model list", {
-				type,
+				id,
 				count: models.length,
 			});
 			return models;
 		} catch (e) {
-			// If we have stale cache, return it on fetch failure
-			const staleCache = this.modelCaches.get(type);
+			const staleCache = this.modelCaches.get(id);
 			if (staleCache) {
 				log.warn("Model fetch failed, returning stale cache", {
-					type,
+					id,
 					error: String(e),
 				});
 				return staleCache.models;
 			}
-			// No cache at all — re-throw
 			throw e;
 		}
 	}
 
-	private refreshModelsInBackground(type: LLMProviderType): void {
-		this.fetchAndCacheModels(type).catch((e) => {
+	private refreshModelsInBackground(id: string): void {
+		this.fetchAndCacheModels(id).catch((e) => {
 			log.warn("Background model refresh failed", {
-				type,
+				id,
 				error: String(e),
 			});
 		});
@@ -322,23 +332,56 @@ export class ProviderRegistry {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * List all registered provider types.
+	 * List all registered provider types (factory-registered).
 	 */
 	getRegisteredTypes(): LLMProviderType[] {
 		return Array.from(this.factories.keys());
 	}
 
 	/**
-	 * List all configured provider types.
+	 * List all unique configured provider types.
 	 */
 	getConfiguredTypes(): LLMProviderType[] {
+		const types = new Set<LLMProviderType>();
+		for (const config of this.configs.values()) {
+			types.add(config.type);
+		}
+		return Array.from(types);
+	}
+
+	/**
+	 * List all configured provider instance IDs.
+	 */
+	getConfiguredIds(): string[] {
 		return Array.from(this.configs.keys());
 	}
 
 	/**
-	 * Get the configuration for a provider type.
+	 * Get all configurations for a given provider type.
 	 */
-	getConfig(type: LLMProviderType): LLMProviderConfig | undefined {
-		return this.configs.get(type);
+	getConfigsForType(type: LLMProviderType): LLMProviderConfig[] {
+		const result: LLMProviderConfig[] = [];
+		for (const config of this.configs.values()) {
+			if (config.type === type) result.push(config);
+		}
+		return result;
+	}
+
+	/**
+	 * Get the configuration for a provider by instance ID.
+	 */
+	getConfig(id: string): LLMProviderConfig | undefined {
+		return this.configs.get(id);
+	}
+
+	/**
+	 * Resolve a provider type to the first configured instance ID of that type.
+	 * Used for backward compatibility when conversation headers store a bare type.
+	 */
+	resolveTypeToId(type: string): string | null {
+		for (const config of this.configs.values()) {
+			if (config.type === type) return config.id;
+		}
+		return null;
 	}
 }

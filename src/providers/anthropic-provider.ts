@@ -20,7 +20,7 @@ import type {
 } from "./provider";
 import { ProviderError } from "./provider";
 import type { ContentBlock as MediaContentBlock } from "../media/types";
-import { getSecret, SECRET_IDS } from "../utils/secrets";
+import { getSecret, secretIdForApiKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import { logger } from "../utils/logger";
 
@@ -178,15 +178,17 @@ function toAnthropicTools(
  */
 export class AnthropicProvider implements LLMProvider {
 	private readonly endpoint: string;
+	private readonly instanceId: string;
 	private readonly app: App;
 
 	constructor(config: LLMProviderConfig, app: App) {
 		this.endpoint = (config.endpoint || DEFAULT_ENDPOINT).replace(/\/+$/, "");
+		this.instanceId = config.id;
 		this.app = app;
 	}
 
 	private getApiKey(): string {
-		const key = getSecret(this.app, SECRET_IDS.ANTHROPIC_API_KEY);
+		const key = getSecret(this.app, secretIdForApiKey(this.instanceId));
 		if (!key) {
 			throw new ProviderError(
 				"Anthropic API key not configured. Add your API key in Settings → Notor.",

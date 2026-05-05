@@ -12,7 +12,6 @@ import { Notice } from "obsidian";
 import type { App } from "obsidian";
 import type {
 	ConversationMode,
-	LLMProviderType,
 	Workflow,
 	WorkflowExecution,
 	WorkflowExecutionRequest,
@@ -82,7 +81,7 @@ export interface WorkflowExecutorDeps {
 	getVaultRuleManager(): VaultRuleManager | undefined;
 	getPanelApprovalCallback(): ApprovalCallback | undefined;
 	getConversationManager(): ConversationManager;
-	getActiveProviderType(): LLMProviderType;
+	getActiveProviderId(): string;
 	getActiveModelId(): string;
 	getActiveUseExtendedContext(): boolean;
 
@@ -201,8 +200,8 @@ export class WorkflowExecutor {
 		// handled persona switching above before creating the new conversation.)
 		// Use per-orchestrator provider/model (Phase 4, Step 4b).
 		const conversationManager = this.deps.getConversationManager();
-		const providerType = this.deps.getActiveProviderType();
-		const providerConfig = this.deps.providerRegistry.getConfig(providerType);
+		const providerId = this.deps.getActiveProviderId();
+		const providerConfig = this.deps.providerRegistry.getConfig(providerId);
 		const modelId = this.deps.getActiveModelId();
 		const currentMode = conversationManager.hasActiveConversation()
 			? conversationManager.getMode()
@@ -212,7 +211,7 @@ export class WorkflowExecutor {
 		const activePersonaName = personaManager?.getActivePersona()?.name ?? null;
 
 		const conversation = conversationManager.createConversation(
-			providerType,
+			providerId,
 			modelId,
 			currentMode,
 			{
@@ -296,7 +295,7 @@ export class WorkflowExecutor {
 			abortController: new AbortController(),
 			title: conversation.title ?? `Workflow: ${workflow.display_name}`,
 			pinnedPersona,
-			providerType,
+			providerId,
 			modelId,
 			useExtendedContext,
 			workflowAssembly: assemblyResult,
@@ -439,8 +438,8 @@ export class WorkflowExecutor {
 		// Step 2: Create a background conversation (does NOT switch the user's
 		// active conversation — we operate on a separate ConversationManager instance
 		// scoped to this background execution).
-		const providerType = this.deps.providerRegistry.getActiveType();
-		const providerConfig = this.deps.providerRegistry.getConfig(providerType);
+		const providerId = this.deps.providerRegistry.getActiveId();
+		const providerConfig = this.deps.providerRegistry.getConfig(providerId);
 		const modelId = providerConfig?.model_id ?? "";
 		const mode = this.deps.getSettings().mode;
 
@@ -464,7 +463,7 @@ export class WorkflowExecutor {
 		});
 
 		const bgConversation = bgConversationManager.createConversation(
-			providerType,
+			providerId,
 			modelId,
 			mode,
 			{
@@ -595,8 +594,8 @@ export class WorkflowExecutor {
 
 		// Snapshot provider/model/persona for session isolation
 		const pinnedPersona = this.deps.getPersonaManager()?.getActivePersona() ?? null;
-		const providerType = this.deps.providerRegistry.getActiveType();
-		const providerConfig = this.deps.providerRegistry.getConfig(providerType);
+		const providerId = this.deps.providerRegistry.getActiveId();
+		const providerConfig = this.deps.providerRegistry.getConfig(providerId);
 		const modelId = providerConfig?.model_id ?? "";
 		const useExtendedContext = providerConfig?.use_extended_context ?? false;
 
@@ -615,7 +614,7 @@ export class WorkflowExecutor {
 			abortController: new AbortController(),
 			title: bgConv.title ?? `Workflow: ${execution.id}`,
 			pinnedPersona,
-			providerType,
+			providerId,
 			modelId,
 			useExtendedContext,
 			workflowAssembly,
@@ -674,7 +673,7 @@ export class WorkflowExecutor {
 
 			// 5. Send to LLM
 			const abortController = new AbortController();
-			const provider = this.deps.providerRegistry.getProvider(session.providerType);
+			const provider = this.deps.providerRegistry.getProvider(session.providerId);
 			const stream = provider.sendMessage(chatMessages, toolDefinitions, {
 				model: session.modelId,
 				abort_signal: abortController.signal,

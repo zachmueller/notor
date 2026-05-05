@@ -89,7 +89,7 @@ export class CompactionManager {
 
 		try {
 			const provider = session
-				? this.providerRegistry.getProvider(session.providerType)
+				? this.providerRegistry.getProvider(session.providerId)
 				: this.providerRegistry.getActiveProvider();
 			const result = await performCompaction(
 				completedMessages,

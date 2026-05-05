@@ -17,7 +17,6 @@
 
 import type { App } from "obsidian";
 import type { NotorSettings } from "../settings";
-import type { LLMProviderType } from "../types";
 import { ProviderRegistry } from "./index";
 import { LocalProvider } from "./local-provider";
 import { AnthropicProvider } from "./anthropic-provider";
@@ -36,7 +35,7 @@ export function buildProviderRegistry(
 	const registry = new ProviderRegistry(
 		app,
 		settings.providers,
-		settings.active_provider as LLMProviderType
+		settings.active_provider
 	);
 
 	// Local (OpenAI-compatible)

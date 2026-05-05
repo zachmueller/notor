@@ -1090,6 +1090,9 @@ export default class NotorPlugin extends Plugin {
 
 		// One-time migration: move title_generation_* into generic automation settings.
 		await this.migrateAutomationSettings();
+
+		// One-time migration: assign instance IDs to providers for multi-instance support.
+		await this.migrateProviderInstances();
 	}
 
 	/**
@@ -1262,12 +1265,12 @@ export default class NotorPlugin extends Plugin {
 		this.settings.user_extension_settings["Title Generation"]["preset"] = "small";
 
 		// Auto-configure the "medium" preset from the current active provider+model
-		const activeType = this.settings.active_provider;
-		const activeConfig = this.settings.providers.find((p) => p.type === activeType);
-		if (activeType && activeConfig?.model_id) {
+		const activeId = this.settings.active_provider;
+		const activeConfig = this.settings.providers.find((p) => p.id === activeId || p.type === activeId);
+		if (activeId && activeConfig?.model_id) {
 			const medium = this.settings.model_presets.find((p) => p.name === "medium");
 			if (medium) {
-				medium.provider_type = activeConfig.type;
+				medium.provider_id = activeConfig.id;
 				medium.model_id = activeConfig.model_id;
 				medium.use_extended_context = activeConfig.use_extended_context ?? false;
 			}
@@ -1305,6 +1308,36 @@ export default class NotorPlugin extends Plugin {
 		const raw = this.settings as unknown as Record<string, unknown>;
 		delete raw.title_generation_enabled;
 		delete raw.title_generation_preset;
+
+		await this.saveSettings();
+	}
+
+	/**
+	 * Migrate providers to multi-instance format by assigning unique IDs.
+	 *
+	 * Detection: first provider in array lacks an `id` field.
+	 * Action: assign `id = type` for each existing provider (preserves
+	 * secret keys and conversation header references). Also migrates
+	 * ModelPreset.provider_type → provider_id.
+	 */
+	private async migrateProviderInstances(): Promise<void> {
+		const firstProvider = this.settings.providers[0];
+		if (!firstProvider || firstProvider.id) return;
+
+		for (const provider of this.settings.providers) {
+			if (!provider.id) {
+				provider.id = provider.type;
+			}
+		}
+
+		// Migrate model presets from provider_type to provider_id
+		for (const preset of this.settings.model_presets ?? []) {
+			const raw = preset as unknown as Record<string, unknown>;
+			if (raw.provider_type && !preset.provider_id) {
+				preset.provider_id = raw.provider_type as string;
+			}
+			delete raw.provider_type;
+		}
 
 		await this.saveSettings();
 	}
@@ -1662,7 +1695,7 @@ export default class NotorPlugin extends Plugin {
 				this._providerRegistry.updateConfig(config);
 			}
 			this._providerRegistry.switchProvider(
-				this.settings.active_provider as LLMProviderType
+				this.settings.active_provider
 			);
 		}
 
@@ -1765,7 +1798,7 @@ export default class NotorPlugin extends Plugin {
 			this._providerRegistry = new ProviderRegistry(
 				this.app,
 				this.settings.providers,
-				this.settings.active_provider as LLMProviderType
+				this.settings.active_provider
 			);
 
 			// Register HTTP-based providers (always available)
@@ -1809,13 +1842,10 @@ export default class NotorPlugin extends Plugin {
 				return new BedrockProvider(config, app);
 			});
 			// Clear any cached instance so it re-creates with the real factory
-			registry.updateConfig(
-				this.settings.providers.find((p) => p.type === "bedrock") ?? {
-					type: "bedrock",
-					enabled: false,
-					display_name: "AWS Bedrock",
-				}
-			);
+			const bedrockConfig = this.settings.providers.find((p) => p.type === "bedrock");
+			if (bedrockConfig) {
+				registry.updateConfig(bedrockConfig);
+			}
 			log.debug("Bedrock provider registered");
 		} catch (e) {
 			log.warn("Failed to register Bedrock provider", { error: String(e) });
@@ -3280,14 +3310,14 @@ export default class NotorPlugin extends Plugin {
 			// Update per-orchestrator model (Phase 4, Step 4b)
 			orchestrator!.setActiveModel(modelId, isExtendedContext);
 
-			const activeType = orchestrator!.getActiveProviderType();
-			const config = providerRegistry.getConfig(activeType);
+			const activeId = orchestrator!.getActiveProviderId();
+			const config = providerRegistry.getConfig(activeId);
 			if (config) {
 				const updated = { ...config, model_id: modelId, use_extended_context: isExtendedContext };
 				providerRegistry.updateConfig(updated);
 				// Update settings
 				const idx = this.settings.providers.findIndex(
-					(p) => p.type === activeType
+					(p) => p.id === activeId
 				);
 				if (idx >= 0) {
 					this.settings.providers[idx] = updated;
@@ -3314,37 +3344,35 @@ export default class NotorPlugin extends Plugin {
 			return providerRegistry.refreshModels();
 		});
 
-		// Available providers
+		// Available providers — returns all configured instances
 		view.setGetAvailableProviders(() => {
-			const providerLabels: Record<string, string> = {
-				local: "Local (OpenAI-compatible)",
-				anthropic: "Anthropic",
-				openai: "OpenAI",
-				bedrock: "AWS Bedrock",
-			};
-			return providerRegistry.getConfiguredTypes().map((type) => ({
-				type,
-				displayName: providerLabels[type] ?? type,
-			}));
+			return providerRegistry.getConfiguredIds().map((id) => {
+				const config = providerRegistry.getConfig(id)!;
+				return {
+					id: config.id,
+					type: config.type,
+					displayName: config.display_name,
+				};
+			});
 		});
 
 		// Available models
 		view.setGetAvailableModels(() => {
-			const activeType = orchestrator!.getActiveProviderType();
+			const activeId = orchestrator!.getActiveProviderId();
 			// Return cached models synchronously (stale-while-revalidate).
 			// The cache is populated when refreshModels() is called (e.g. via
 			// the refresh button in the settings popover). If no cache exists yet,
 			// fall back to the single configured model_id so the UI always shows
 			// something useful.
 			try {
-				const cached = providerRegistry.getCachedModels(activeType);
+				const cached = providerRegistry.getCachedModels(activeId);
 				if (cached.length > 0) {
 					return cached;
 				}
 				// Trigger a background fetch so the next popover open will have data
-				providerRegistry.getModels(activeType).catch(() => {});
+				providerRegistry.getModels(activeId).catch(() => {});
 				// Fall back to configured model_id
-				const config = providerRegistry.getConfig(activeType);
+				const config = providerRegistry.getConfig(activeId);
 				if (config?.model_id) {
 					return [{ id: config.model_id, display_name: config.model_id }];
 				}
@@ -3356,7 +3384,7 @@ export default class NotorPlugin extends Plugin {
 
 		// Current provider — reads from per-orchestrator state (Phase 4, Step 4b)
 		view.setGetCurrentProvider(() => {
-			return orchestrator!.getActiveProviderType();
+			return orchestrator!.getActiveProviderId();
 		});
 
 		// Current model — reads from per-orchestrator state (Phase 4, Step 4b)
@@ -3368,7 +3396,7 @@ export default class NotorPlugin extends Plugin {
 		});
 
 		// Preset change — resolves preset to concrete provider+model, updates state.
-		view.setOnPresetChange((presetName, providerType, modelId, useExtendedContext) => {
+		view.setOnPresetChange((presetName, providerId, modelId, useExtendedContext) => {
 			if (presetName !== null) {
 				// Resolve preset to concrete values
 				const resolved = resolvePreset(presetName, this.settings.model_presets);
@@ -3376,23 +3404,23 @@ export default class NotorPlugin extends Plugin {
 					log.warn("Preset not configured", { presetName });
 					return;
 				}
-				providerType = resolved.providerType;
+				providerId = resolved.providerId;
 				modelId = resolved.modelId;
 				useExtendedContext = resolved.useExtendedContext;
 			}
 
-			if (providerType) {
-				orchestrator!.setActiveProvider(providerType);
-				providerRegistry.switchProvider(providerType);
-				this.settings.active_provider = providerType;
+			if (providerId) {
+				orchestrator!.setActiveProvider(providerId);
+				providerRegistry.switchProvider(providerId);
+				this.settings.active_provider = providerId;
 			}
 			if (modelId !== undefined) {
 				orchestrator!.setActiveModel(modelId, useExtendedContext ?? false);
-				const config = providerRegistry.getConfig(orchestrator!.getActiveProviderType());
+				const config = providerRegistry.getConfig(orchestrator!.getActiveProviderId());
 				if (config) {
 					const updated = { ...config, model_id: modelId, use_extended_context: useExtendedContext ?? false };
 					providerRegistry.updateConfig(updated);
-					const idx = this.settings.providers.findIndex((p) => p.type === config.type);
+					const idx = this.settings.providers.findIndex((p) => p.id === config.id);
 					if (idx >= 0) {
 						this.settings.providers[idx] = updated;
 					}
@@ -3409,7 +3437,7 @@ export default class NotorPlugin extends Plugin {
 			const conv = orchestrator!.getDisplayedConversation();
 			if (conv) {
 				conv.preset_name = presetName;
-				if (providerType) conv.provider_id = providerType;
+				if (providerId) conv.provider_id = providerId;
 				if (modelId) {
 					conv.model_id = modelId;
 					conv.use_extended_context = useExtendedContext ?? false;

@@ -281,6 +281,8 @@ export type AWSAuthMethod = "profile" | "keys";
 
 /** Configuration for a single LLM provider connection. */
 export interface LLMProviderConfig {
+	/** Unique instance identifier (immutable after creation). */
+	id: string;
 	/** Provider type. */
 	type: LLMProviderType;
 	/** Whether this provider is configured and available. */
@@ -337,8 +339,8 @@ export interface ModelInfo {
 export interface ModelPreset {
 	/** User-visible name — unique key (e.g., "tiny", "small", "medium", "large", or custom). */
 	name: string;
-	/** Provider type this preset maps to (null = not yet configured by user). */
-	provider_type: LLMProviderType | null;
+	/** Provider instance ID this preset maps to (null = not yet configured by user). */
+	provider_id: string | null;
 	/** Model ID this preset maps to (null = not yet configured by user). */
 	model_id: string | null;
 	/** Whether to use extended context (1M) for this model. */

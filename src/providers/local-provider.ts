@@ -22,8 +22,7 @@ import type {
 } from "./provider";
 import { ProviderError } from "./provider";
 import { parseSSEStream } from "./sse";
-import { getSecret } from "../utils/secrets";
-import { SECRET_IDS } from "../utils/secrets";
+import { getSecret, secretIdForApiKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import { logger } from "../utils/logger";
 
@@ -177,13 +176,13 @@ function toOpenAITools(
  */
 export class LocalProvider implements LLMProvider {
 	private readonly endpoint: string;
+	private readonly instanceId: string;
 	private readonly app: App;
-	private readonly apiKeyId: string | undefined;
 
 	constructor(config: LLMProviderConfig, app: App) {
 		this.endpoint = (config.endpoint || "").replace(/\/+$/, "");
+		this.instanceId = config.id;
 		this.app = app;
-		this.apiKeyId = undefined; // Local providers typically don't need auth
 	}
 
 	/**
@@ -211,7 +210,7 @@ export class LocalProvider implements LLMProvider {
 		};
 
 		// Optional API key for local servers that require auth
-		const apiKey = getSecret(this.app, SECRET_IDS.LOCAL_API_KEY);
+		const apiKey = getSecret(this.app, secretIdForApiKey(this.instanceId));
 		if (apiKey) {
 			headers["Authorization"] = `Bearer ${apiKey}`;
 		}
@@ -376,7 +375,7 @@ export class LocalProvider implements LLMProvider {
 		const url = `${this.endpoint}/models`;
 		const headers: Record<string, string> = {};
 
-		const apiKey = getSecret(this.app, SECRET_IDS.LOCAL_API_KEY);
+		const apiKey = getSecret(this.app, secretIdForApiKey(this.instanceId));
 		if (apiKey) {
 			headers["Authorization"] = `Bearer ${apiKey}`;
 		}
@@ -430,7 +429,7 @@ export class LocalProvider implements LLMProvider {
 		const url = `${this.endpoint}/models`;
 		const headers: Record<string, string> = {};
 
-		const apiKey = getSecret(this.app, SECRET_IDS.LOCAL_API_KEY);
+		const apiKey = getSecret(this.app, secretIdForApiKey(this.instanceId));
 		if (apiKey) {
 			headers["Authorization"] = `Bearer ${apiKey}`;
 		}

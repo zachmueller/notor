@@ -22,6 +22,10 @@ const log = logger("Secrets");
  * Well-known secret IDs used by Notor.
  *
  * All IDs follow the convention: notor-{provider}-{credential-type}
+ *
+ * @deprecated Use the dynamic `secretIdFor*` functions instead. These
+ * constants remain for backward compatibility with migrated provider
+ * instances whose IDs match the type string.
  */
 export const SECRET_IDS = {
 	OPENAI_API_KEY: "notor-openai-api-key",
@@ -30,6 +34,34 @@ export const SECRET_IDS = {
 	BEDROCK_ACCESS_KEY_ID: "notor-bedrock-access-key-id",
 	BEDROCK_SECRET_ACCESS_KEY: "notor-bedrock-secret-access-key",
 } as const;
+
+// ---------------------------------------------------------------------------
+// Dynamic secret ID builders (multi-instance support)
+// ---------------------------------------------------------------------------
+
+/** Build the API key secret ID for a provider instance. */
+export function secretIdForApiKey(instanceId: string): string {
+	return `notor-${instanceId}-api-key`;
+}
+
+/** Build the AWS access key ID secret for a Bedrock provider instance. */
+export function secretIdForAccessKeyId(instanceId: string): string {
+	return `notor-${instanceId}-access-key-id`;
+}
+
+/** Build the AWS secret access key secret for a Bedrock provider instance. */
+export function secretIdForSecretAccessKey(instanceId: string): string {
+	return `notor-${instanceId}-secret-access-key`;
+}
+
+/** Clear all secrets associated with a provider instance. */
+export function clearProviderSecrets(app: App, instanceId: string, type: string): void {
+	clearSecret(app, secretIdForApiKey(instanceId));
+	if (type === "bedrock") {
+		clearSecret(app, secretIdForAccessKeyId(instanceId));
+		clearSecret(app, secretIdForSecretAccessKey(instanceId));
+	}
+}
 
 /**
  * Retrieve a secret by ID from Obsidian's SecretStorage.

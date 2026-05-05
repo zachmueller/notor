@@ -31,7 +31,7 @@ import type {
 	ToolDefinition,
 } from "./provider";
 import { ProviderError } from "./provider";
-import { getSecret, SECRET_IDS } from "../utils/secrets";
+import { getSecret, secretIdForAccessKeyId, secretIdForSecretAccessKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import type { ContentBlock as MediaContentBlock } from "../media/types";
 import { getModelExtendedContext } from "./model-metadata";
@@ -224,6 +224,7 @@ export class BedrockProvider implements LLMProvider {
 	private readonly region: string;
 	private readonly profile: string | undefined;
 	private readonly authMethod: "profile" | "keys";
+	private readonly instanceId: string;
 	private readonly app: App;
 	private runtimeClient: BedrockRuntimeClient | null = null;
 	private bedrockClient: BedrockClient | null = null;
@@ -232,6 +233,7 @@ export class BedrockProvider implements LLMProvider {
 		this.region = config.region || DEFAULT_REGION;
 		this.profile = config.aws_profile || undefined;
 		this.authMethod = config.aws_auth_method || "profile";
+		this.instanceId = config.id;
 		this.app = app;
 	}
 
@@ -258,11 +260,11 @@ export class BedrockProvider implements LLMProvider {
 		if (this.authMethod === "keys") {
 			const accessKeyId = getSecret(
 				this.app,
-				SECRET_IDS.BEDROCK_ACCESS_KEY_ID
+				secretIdForAccessKeyId(this.instanceId)
 			);
 			const secretAccessKey = getSecret(
 				this.app,
-				SECRET_IDS.BEDROCK_SECRET_ACCESS_KEY
+				secretIdForSecretAccessKey(this.instanceId)
 			);
 			if (!accessKeyId || !secretAccessKey) {
 				throw new ProviderError(

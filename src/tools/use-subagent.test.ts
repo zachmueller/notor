@@ -144,8 +144,8 @@ function makeSettings(overrides: Partial<NotorSettings> = {}): NotorSettings {
 		sub_agent_visibility: {},
 		sub_agent_auto_approve_reads: true,
 		model_presets: [
-			{ name: "tiny", provider_type: "anthropic", model_id: "claude-haiku-3", use_extended_context: false },
-			{ name: "large", provider_type: "anthropic", model_id: "claude-opus-4", use_extended_context: true },
+			{ name: "tiny", provider_id: "anthropic", model_id: "claude-haiku-3", use_extended_context: false },
+			{ name: "large", provider_id: "anthropic", model_id: "claude-opus-4", use_extended_context: true },
 		],
 		...overrides,
 	} as unknown as NotorSettings;

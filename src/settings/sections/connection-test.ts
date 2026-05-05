@@ -24,15 +24,16 @@ const log = logger("ConnectionTest");
  */
 export function renderConnectionTestButton(
 	containerEl: HTMLElement,
-	providerType: string,
+	providerId: string,
 	ctx: SettingsContext
 ): void {
 	const setting = new Setting(containerEl)
 		.setName("Test connection")
 		.setDesc("Verify that the provider is reachable and credentials are valid.");
 
-	if (providerType === "bedrock") {
-		void renderBedrockConnectionTestButton(containerEl, setting, ctx);
+	const providerConfig = getProvider(ctx.settings, providerId);
+	if (providerConfig.type === "bedrock") {
+		void renderBedrockConnectionTestButton(containerEl, setting, ctx, providerConfig);
 		return;
 	}
 
@@ -61,9 +62,7 @@ export function renderConnectionTestButton(
 					ctx.app,
 					ctx.settings
 				);
-				const provider = registry.getProvider(
-					providerType as import("../../types").LLMProviderType
-				);
+				const provider = registry.getProvider(providerId);
 				await provider.validateConnection();
 
 				statusEl.textContent = "✓ connection successful";
@@ -73,7 +72,7 @@ export function renderConnectionTestButton(
 				const message =
 					e instanceof Error ? e.message : String(e);
 				log.error("Test connection failed", {
-					provider: providerType,
+					provider: providerId,
 					error: e instanceof Error ? { message: e.message, stack: e.stack } : String(e),
 				});
 				statusEl.textContent = `✗ ${message}`;
@@ -98,7 +97,8 @@ export function renderConnectionTestButton(
 function renderBedrockConnectionTestButton(
 	containerEl: HTMLElement,
 	setting: import("obsidian").Setting,
-	ctx: SettingsContext
+	ctx: SettingsContext,
+	providerConfig: import("../../types").LLMProviderConfig
 ): void {
 	let statusEl: HTMLElement | null = null;
 
@@ -124,10 +124,9 @@ function renderBedrockConnectionTestButton(
 					const { fromIni } = await import(
 						"@aws-sdk/credential-providers"
 					);
-					const { getSecret } = await import("../../utils/secrets");
-					const { SECRET_IDS } = await import("../../utils/secrets");
+					const { getSecret, secretIdForAccessKeyId, secretIdForSecretAccessKey } = await import("../../utils/secrets");
 
-					const bedrockConfig = getProvider(ctx.settings, "bedrock");
+					const bedrockConfig = providerConfig;
 					const authMethod =
 						bedrockConfig.aws_auth_method ?? "profile";
 					const region = bedrockConfig.region ?? "us-east-1";
@@ -139,11 +138,11 @@ function renderBedrockConnectionTestButton(
 					if (authMethod === "keys") {
 						const accessKeyId = getSecret(
 							ctx.app,
-							SECRET_IDS.BEDROCK_ACCESS_KEY_ID
+							secretIdForAccessKeyId(bedrockConfig.id)
 						);
 						const secretAccessKey = getSecret(
 							ctx.app,
-							SECRET_IDS.BEDROCK_SECRET_ACCESS_KEY
+							secretIdForSecretAccessKey(bedrockConfig.id)
 						);
 						if (!accessKeyId || !secretAccessKey) {
 							throw new Error(

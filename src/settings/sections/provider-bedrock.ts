@@ -5,18 +5,23 @@
  */
 
 import { SecretComponent, Setting } from "obsidian";
-import { SECRET_IDS } from "../../utils/secrets";
+import { secretIdForAccessKeyId, secretIdForSecretAccessKey } from "../../utils/secrets";
+import type { LLMProviderConfig } from "../../types";
 import { AWS_REGIONS } from "../constants";
-import { getProvider, updateProvider } from "../helpers";
+import { updateProvider } from "../helpers";
 import { renderConnectionTestButton } from "./connection-test";
+import { renderDeleteProviderButton } from "./provider-add";
 import type { SettingsContext } from "./context";
 
-/** Render the "AWS Bedrock" provider settings. */
+/** Render the "AWS Bedrock" provider settings for a given instance. */
 export function renderBedrockProviderSection(
 	containerEl: HTMLElement,
-	ctx: SettingsContext
+	ctx: SettingsContext,
+	config?: LLMProviderConfig
 ): void {
-	new Setting(containerEl).setHeading().setName("AWS Bedrock");
+	const provider = config ?? ctx.settings.providers.find((p) => p.type === "bedrock")!;
+
+	new Setting(containerEl).setHeading().setName(provider.display_name);
 
 	const groupEl = containerEl.createDiv({ cls: "notor-provider-group" });
 
@@ -32,8 +37,6 @@ export function renderBedrockProviderSection(
 		cls: "setting-item-description",
 	});
 
-	const getBedrockProvider = () => getProvider(ctx.settings, "bedrock");
-
 	// Region dropdown
 	new Setting(groupEl)
 		.setName("AWS region")
@@ -42,12 +45,11 @@ export function renderBedrockProviderSection(
 			for (const { value, label } of AWS_REGIONS) {
 				dropdown.addOption(value, label);
 			}
-			const current = getBedrockProvider().region ?? "us-east-1";
+			const current = provider.region ?? "us-east-1";
 			dropdown.setValue(current);
 			dropdown.onChange(async (value) => {
-				const updated = { ...getBedrockProvider() };
-				updated.region = value;
-				updateProvider(ctx.settings, updated);
+				provider.region = value;
+				updateProvider(ctx.settings, provider);
 				await ctx.saveSettings();
 			});
 		});
@@ -62,19 +64,17 @@ export function renderBedrockProviderSection(
 		.addDropdown((dropdown) => {
 			dropdown.addOption("profile", "AWS profile");
 			dropdown.addOption("keys", "Access keys");
-			const method = getBedrockProvider().aws_auth_method ?? "profile";
+			const method = provider.aws_auth_method ?? "profile";
 			dropdown.setValue(method);
 			dropdown.onChange(async (value: string) => {
-				const updated = { ...getBedrockProvider() };
-				updated.aws_auth_method = value as "profile" | "keys";
-				updateProvider(ctx.settings, updated);
+				provider.aws_auth_method = value as "profile" | "keys";
+				updateProvider(ctx.settings, provider);
 				await ctx.saveSettings();
-				// Re-render to show/hide the relevant credential fields
 				ctx.redisplay();
 			});
 		});
 
-	const authMethod = getBedrockProvider().aws_auth_method ?? "profile";
+	const authMethod = provider.aws_auth_method ?? "profile";
 
 	if (authMethod === "profile") {
 		// Profile name text field
@@ -86,11 +86,10 @@ export function renderBedrockProviderSection(
 			.addText((text) =>
 				text
 					.setPlaceholder("Default")
-					.setValue(getBedrockProvider().aws_profile ?? "default")
+					.setValue(provider.aws_profile ?? "default")
 					.onChange(async (value) => {
-						const updated = { ...getBedrockProvider() };
-						updated.aws_profile = value.trim() || "default";
-						updateProvider(ctx.settings, updated);
+						provider.aws_profile = value.trim() || "default";
+						updateProvider(ctx.settings, provider);
 						await ctx.saveSettings();
 					})
 			);
@@ -102,7 +101,7 @@ export function renderBedrockProviderSection(
 			.addComponent(
 				(el) =>
 					new SecretComponent(ctx.app, el)
-						.setValue(SECRET_IDS.BEDROCK_ACCESS_KEY_ID)
+						.setValue(secretIdForAccessKeyId(provider.id))
 						.onChange((_value) => {
 							// SecretComponent writes directly to SecretStorage.
 						})
@@ -115,12 +114,27 @@ export function renderBedrockProviderSection(
 			.addComponent(
 				(el) =>
 					new SecretComponent(ctx.app, el)
-						.setValue(SECRET_IDS.BEDROCK_SECRET_ACCESS_KEY)
+						.setValue(secretIdForSecretAccessKey(provider.id))
 						.onChange((_value) => {
 							// SecretComponent writes directly to SecretStorage.
 						})
 			);
 	}
 
-	renderConnectionTestButton(groupEl, "bedrock", ctx);
+	renderConnectionTestButton(groupEl, provider.id, ctx);
+
+	if (provider.id !== provider.type) {
+		new Setting(groupEl)
+			.setName("Display name")
+			.addText((text) =>
+				text
+					.setValue(provider.display_name)
+					.onChange(async (value) => {
+						provider.display_name = value.trim() || provider.display_name;
+						updateProvider(ctx.settings, provider);
+						await ctx.saveSettings();
+					})
+			);
+		renderDeleteProviderButton(groupEl, provider, ctx);
+	}
 }

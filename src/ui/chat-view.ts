@@ -10,7 +10,7 @@
 
 import { ItemView, MarkdownRenderer, Menu, Modal, Notice, setIcon, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
-import type { ConversationMode, Message, LLMProviderType, ModelInfo, ModelPreset, Checkpoint, Persona } from "../types";
+import type { ConversationMode, Message, ModelInfo, ModelPreset, Checkpoint, Persona } from "../types";
 import type { Attachment } from "../context/attachment";
 import {
 	createVaultNoteAttachment,
@@ -154,7 +154,7 @@ export class NotorChatView extends ItemView {
 	 *
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1f
 	 */
-	private displayedProviderId: LLMProviderType | null = null;
+	private displayedProviderId: string | null = null;
 	private displayedModelValue: string | null = null;
 	/** Display-only preset name override (set during conversation switch). */
 	private displayedPresetName: string | null | undefined = undefined;
@@ -266,14 +266,14 @@ export class NotorChatView extends ItemView {
 	private onSearchConversations?: (query: string) => Promise<ConversationListEntry[]>;
 	private onModeToggle?: (mode: ConversationMode) => void;
 	private onSettingsOpen?: () => void;
-	private onProviderChange?: (providerId: LLMProviderType) => void;
+	private onProviderChange?: (providerId: string) => void;
 	private onModelChange?: (modelId: string) => void;
 	private onRefreshModels?: () => Promise<ModelInfo[]>;
-	private getAvailableProviders?: () => { type: LLMProviderType; displayName: string }[];
+	private getAvailableProviders?: () => { id: string; type: string; displayName: string }[];
 	private getAvailableModels?: () => ModelInfo[];
-	private getCurrentProvider?: () => LLMProviderType;
+	private getCurrentProvider?: () => string;
 	private getCurrentModel?: () => string;
-	private onPresetChange?: (presetName: string | null, providerType?: LLMProviderType, modelId?: string, useExtendedContext?: boolean) => void;
+	private onPresetChange?: (presetName: string | null, providerId?: string, modelId?: string, useExtendedContext?: boolean) => void;
 	private getAvailablePresets?: () => ModelPreset[];
 	private getCurrentPreset?: () => string | null;
 
@@ -418,7 +418,7 @@ export class NotorChatView extends ItemView {
 		this.onSettingsOpen = callback;
 	}
 
-	setOnProviderChange(callback: (providerId: LLMProviderType) => void): void {
+	setOnProviderChange(callback: (providerId: string) => void): void {
 		this.onProviderChange = callback;
 	}
 
@@ -430,7 +430,7 @@ export class NotorChatView extends ItemView {
 		this.onRefreshModels = callback;
 	}
 
-	setGetAvailableProviders(callback: () => { type: LLMProviderType; displayName: string }[]): void {
+	setGetAvailableProviders(callback: () => { id: string; type: string; displayName: string }[]): void {
 		this.getAvailableProviders = callback;
 	}
 
@@ -438,7 +438,7 @@ export class NotorChatView extends ItemView {
 		this.getAvailableModels = callback;
 	}
 
-	setGetCurrentProvider(callback: () => LLMProviderType): void {
+	setGetCurrentProvider(callback: () => string): void {
 		this.getCurrentProvider = callback;
 	}
 
@@ -446,7 +446,7 @@ export class NotorChatView extends ItemView {
 		this.getCurrentModel = callback;
 	}
 
-	setOnPresetChange(callback: (presetName: string | null, providerType?: LLMProviderType, modelId?: string, useExtendedContext?: boolean) => void): void {
+	setOnPresetChange(callback: (presetName: string | null, providerId?: string, modelId?: string, useExtendedContext?: boolean) => void): void {
 		this.onPresetChange = callback;
 	}
 
@@ -828,7 +828,7 @@ export class NotorChatView extends ItemView {
 	 *
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1f
 	 */
-	updateProviderDisplay(providerId: LLMProviderType): void {
+	updateProviderDisplay(providerId: string): void {
 		this.displayedProviderId = providerId;
 		// If the popover is currently open, close and reopen to reflect the change
 		if (this.settingsPopoverEl) {
@@ -3433,9 +3433,9 @@ export class NotorChatView extends ItemView {
 		for (const p of providers) {
 			const opt = providerSelect.createEl("option", {
 				text: p.displayName,
-				attr: { value: p.type },
+				attr: { value: p.id },
 			});
-			if (p.type === currentProvider) {
+			if (p.id === currentProvider) {
 				opt.selected = true;
 			}
 		}
@@ -3443,7 +3443,7 @@ export class NotorChatView extends ItemView {
 		providerSelect.addEventListener("change", () => {
 			this.displayedProviderId = null;
 			this.displayedModelValue = null;
-			this.onProviderChange?.(providerSelect.value as LLMProviderType);
+			this.onProviderChange?.(providerSelect.value);
 			this.refreshModelSelect();
 		});
 

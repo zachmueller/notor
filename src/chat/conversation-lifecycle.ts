@@ -10,7 +10,7 @@
  */
 
 import { Notice } from "obsidian";
-import type { Conversation, LLMProviderType, Message } from "../types";
+import type { Conversation, Message } from "../types";
 import { buildOptionValue } from "../providers/model-grouping";
 import { isPresetStale } from "../presets/preset-resolver";
 import type { ConversationManager } from "./conversation";
@@ -42,10 +42,10 @@ export class ConversationLifecycleManager {
 		private readonly configResolver: ConfigResolver,
 		private readonly getPersonaManager: () => PersonaManager | undefined,
 		private readonly getCheckpointManager: () => CheckpointManager | undefined,
-		private readonly getActiveProviderType: () => LLMProviderType,
+		private readonly getActiveProviderId: () => string,
 		private readonly getActiveModelId: () => string,
 		private readonly getActiveUseExtendedContext: () => boolean,
-		private readonly setActiveProviderType: (type: LLMProviderType) => void,
+		private readonly setActiveProviderId: (id: string) => void,
 		private readonly setActiveModelId: (modelId: string) => void,
 		private readonly setActiveUseExtendedContext: (useExtended: boolean) => void,
 		private readonly getActivePresetName: () => string | null,
@@ -96,7 +96,7 @@ export class ConversationLifecycleManager {
 
 		const convManager = this.getConversationManager();
 		const settings = this.getSettings();
-		const providerType = this.getActiveProviderType();
+		const providerId = this.getActiveProviderId();
 		const modelId = this.getActiveModelId();
 		const view = this.viewRouter.getView();
 
@@ -111,7 +111,7 @@ export class ConversationLifecycleManager {
 		const presetName = this.getActivePresetName();
 		const useExtendedContext = this.getActiveUseExtendedContext();
 		const conversation = convManager.createConversation(
-			providerType,
+			providerId,
 			modelId,
 			currentMode,
 			{
@@ -154,7 +154,7 @@ export class ConversationLifecycleManager {
 		forkAtMessageId: string,
 	): Promise<{ filename: string; conversation: Conversation } | null> {
 		const convManager = this.getConversationManager();
-		const providerType = this.getActiveProviderType();
+		const providerId = this.getActiveProviderId();
 		const modelId = this.getActiveModelId();
 		const currentMode =
 			convManager.getActiveConversation()?.mode ??
@@ -162,7 +162,7 @@ export class ConversationLifecycleManager {
 
 		const forkData = convManager.prepareFork(
 			forkAtMessageId,
-			providerType,
+			providerId,
 			modelId,
 			currentMode,
 		);
@@ -245,7 +245,7 @@ export class ConversationLifecycleManager {
 				// Legacy conversation or Custom — show as Custom with provider/model overrides
 				view?.updatePresetDisplay(null);
 				if (conversation.provider_id) {
-					view?.updateProviderDisplay(conversation.provider_id as LLMProviderType);
+					view?.updateProviderDisplay(conversation.provider_id);
 				}
 				if (conversation.model_id) {
 					view?.updateModelDisplay(
@@ -258,7 +258,7 @@ export class ConversationLifecycleManager {
 			// getCurrentModel callback) reflect the loaded conversation's model.
 			this.setActivePresetName(conversation.preset_name ?? null);
 			if (conversation.provider_id) {
-				this.setActiveProviderType(conversation.provider_id as LLMProviderType);
+				this.setActiveProviderId(conversation.provider_id);
 			}
 			if (conversation.model_id) {
 				this.setActiveModelId(conversation.model_id);
@@ -333,7 +333,7 @@ export class ConversationLifecycleManager {
 		} else {
 			view?.updatePresetDisplay(null);
 			if (sessionConv.provider_id) {
-				view?.updateProviderDisplay(sessionConv.provider_id as LLMProviderType);
+				view?.updateProviderDisplay(sessionConv.provider_id);
 			}
 			if (sessionConv.model_id) {
 				view?.updateModelDisplay(
@@ -342,7 +342,7 @@ export class ConversationLifecycleManager {
 			}
 		}
 		if (sessionConv.provider_id) {
-			this.setActiveProviderType(sessionConv.provider_id as LLMProviderType);
+			this.setActiveProviderId(sessionConv.provider_id);
 		}
 		if (sessionConv.model_id) {
 			this.setActiveModelId(sessionConv.model_id);

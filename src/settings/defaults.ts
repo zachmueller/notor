@@ -18,24 +18,28 @@ import type { HookConfig, NotorSettings } from "./types";
 /** Default provider configurations. */
 export const DEFAULT_PROVIDERS: LLMProviderConfig[] = [
 	{
+		id: "local",
 		type: "local",
 		enabled: true,
 		display_name: "Local (OpenAI-compatible)",
 		endpoint: "",
 	},
 	{
+		id: "anthropic",
 		type: "anthropic",
 		enabled: false,
 		display_name: "Anthropic",
 		endpoint: "https://api.anthropic.com",
 	},
 	{
+		id: "openai",
 		type: "openai",
 		enabled: false,
 		display_name: "OpenAI",
 		endpoint: "https://api.openai.com",
 	},
 	{
+		id: "bedrock",
 		type: "bedrock",
 		enabled: false,
 		display_name: "AWS Bedrock",
@@ -85,10 +89,10 @@ export const DEFAULT_HOOKS: HookConfig = {
 
 /** Default model presets (all unconfigured — user must assign provider+model). */
 export const DEFAULT_MODEL_PRESETS: ModelPreset[] = [
-	{ name: "tiny", provider_type: null, model_id: null, use_extended_context: false },
-	{ name: "small", provider_type: null, model_id: null, use_extended_context: false },
-	{ name: "medium", provider_type: null, model_id: null, use_extended_context: false },
-	{ name: "large", provider_type: null, model_id: null, use_extended_context: false },
+	{ name: "tiny", provider_id: null, model_id: null, use_extended_context: false },
+	{ name: "small", provider_id: null, model_id: null, use_extended_context: false },
+	{ name: "medium", provider_id: null, model_id: null, use_extended_context: false },
+	{ name: "large", provider_id: null, model_id: null, use_extended_context: false },
 ];
 
 /** Default empty vault event hook configuration. */

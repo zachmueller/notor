@@ -9,7 +9,7 @@
  */
 
 import { type App, Notice } from "obsidian";
-import type { Conversation, ConversationMode, Message, Persona, ToolResult, WorkflowExecution, ExecutionChain, LLMProviderType } from "../types";
+import type { Conversation, ConversationMode, Message, Persona, ToolResult, WorkflowExecution, ExecutionChain } from "../types";
 import type { ChatMessage, ToolDefinition, StreamChunk, SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
@@ -130,16 +130,16 @@ export class ChatOrchestrator implements ToolSessionContext {
 	private chatBlockRegistry?: ChatBlockRegistry;
 
 	/**
-	 * Per-orchestrator active provider type.
+	 * Per-orchestrator active provider instance ID.
 	 *
 	 * Each orchestrator (and thus each panel in multi-panel mode) tracks
-	 * its own active provider. Initialized from `ProviderRegistry.getActiveType()`
+	 * its own active provider. Initialized from `ProviderRegistry.getActiveId()`
 	 * at construction time. Picker changes update this field, NOT the global
-	 * `ProviderRegistry.activeType`.
+	 * registry active ID.
 	 *
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
 	 */
-	private activeProviderType: LLMProviderType;
+	private activeProviderId: string;
 
 	/**
 	 * Per-orchestrator active model ID.
@@ -206,9 +206,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 		);
 
 		// Initialize per-orchestrator provider/model from current global state
-		const initProviderType = this.providerRegistry.getActiveType();
-		const initProviderConfig = this.providerRegistry.getConfig(initProviderType);
-		this.activeProviderType = initProviderType;
+		const initProviderId = this.providerRegistry.getActiveId();
+		const initProviderConfig = this.providerRegistry.getConfig(initProviderId);
+		this.activeProviderId = initProviderId;
 		this.activeModelId = initProviderConfig?.model_id ?? "";
 		this.activeUseExtendedContext = initProviderConfig?.use_extended_context ?? false;
 
@@ -271,10 +271,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 			this.configResolver,
 			() => this.personaManager,
 			() => this.checkpointManager,
-			() => this.activeProviderType,
+			() => this.activeProviderId,
 			() => this.activeModelId,
 			() => this.activeUseExtendedContext,
-			(type) => { this.activeProviderType = type; },
+			(id) => { this.activeProviderId = id; },
 			(modelId) => { this.activeModelId = modelId; },
 			(useExtended) => { this.activeUseExtendedContext = useExtended; },
 			() => this.activePresetName,
@@ -298,7 +298,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			getVaultRuleManager: () => this.vaultRuleManager,
 			getPanelApprovalCallback: () => this.panelApprovalCallback,
 			getConversationManager: () => this.conversationManager,
-			getActiveProviderType: () => this.activeProviderType,
+			getActiveProviderId: () => this.activeProviderId,
 			getActiveModelId: () => this.activeModelId,
 			getActiveUseExtendedContext: () => this.activeUseExtendedContext,
 			getVaultRootPath: () => this.getVaultRootPath(),
@@ -851,16 +851,21 @@ export class ChatOrchestrator implements ToolSessionContext {
 		// conversations or if the stored provider is no longer configured.
 		const pinnedPersona = this.personaManager?.getActivePersona() ?? null;
 
-		const headerProviderType = snapshotConv.provider_id as LLMProviderType | undefined;
-		const headerProviderConfig = headerProviderType
-			? this.providerRegistry.getConfig(headerProviderType)
+		const headerProviderId = snapshotConv.provider_id as string | undefined;
+		let headerProviderConfig = headerProviderId
+			? this.providerRegistry.getConfig(headerProviderId)
 			: null;
-		// Fall back to per-orchestrator provider (not global registry) for new
-		// conversations or when the header's provider is no longer configured.
-		const providerType = headerProviderConfig
-			? headerProviderType!
-			: this.activeProviderType;
-		const providerConfig = headerProviderConfig ?? this.providerRegistry.getConfig(providerType);
+		// Backward compat: if the header stores a bare type, resolve to first instance
+		if (!headerProviderConfig && headerProviderId) {
+			const resolvedId = this.providerRegistry.resolveTypeToId(headerProviderId);
+			if (resolvedId) headerProviderConfig = this.providerRegistry.getConfig(resolvedId);
+		}
+		// Fall back to per-orchestrator provider for new conversations or
+		// when the header's provider is no longer configured.
+		const providerId = headerProviderConfig
+			? headerProviderConfig.id
+			: this.activeProviderId;
+		const providerConfig = headerProviderConfig ?? this.providerRegistry.getConfig(providerId);
 
 		// Use the header's model_id if the header's provider is still configured,
 		// otherwise fall back to per-orchestrator model.
@@ -886,7 +891,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			abortController: new AbortController(),
 			title: snapshotConv.title ?? "Untitled",
 			pinnedPersona,
-			providerType,
+			providerId,
 			modelId,
 			useExtendedContext,
 			workflowAssembly: null,
@@ -904,11 +909,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 		const sessionConv = sessionConvManager.getActiveConversation()!;
 		const headerDirty =
 			sessionConv.persona_name !== (pinnedPersona?.name ?? null) ||
-			sessionConv.provider_id !== providerType ||
+			sessionConv.provider_id !== providerId ||
 			sessionConv.model_id !== modelId;
 		if (headerDirty) {
 			sessionConv.persona_name = pinnedPersona?.name ?? null;
-			sessionConv.provider_id = providerType;
+			sessionConv.provider_id = providerId;
 			sessionConv.model_id = modelId;
 			await this.historyManager.updateConversationHeader(sessionConv);
 		}
@@ -1066,7 +1071,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 				// present even if the abort fires before any text_delta chunks arrive.
 				const eagerContentEl = view?.createAssistantMessagePlaceholder();
 
-				const provider = this.providerRegistry.getProvider(session.providerType);
+				const provider = this.providerRegistry.getProvider(session.providerId);
 				const options: SendMessageOptions = {
 					model: session.modelId,
 					abort_signal: abortController.signal,
@@ -1497,12 +1502,12 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 
 	/**
-	 * Get the per-orchestrator active provider type.
+	 * Get the per-orchestrator active provider instance ID.
 	 *
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
 	 */
-	getActiveProviderType(): LLMProviderType {
-		return this.activeProviderType;
+	getActiveProviderId(): string {
+		return this.activeProviderId;
 	}
 
 	/**
@@ -1513,9 +1518,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 *
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
 	 */
-	setActiveProvider(providerType: LLMProviderType): void {
-		this.activeProviderType = providerType;
-		const config = this.providerRegistry.getConfig(providerType);
+	setActiveProvider(providerId: string): void {
+		this.activeProviderId = providerId;
+		const config = this.providerRegistry.getConfig(providerId);
 		this.activeModelId = config?.model_id ?? "";
 		this.activeUseExtendedContext = config?.use_extended_context ?? false;
 	}

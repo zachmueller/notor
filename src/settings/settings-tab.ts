@@ -17,6 +17,7 @@ import { renderLocalProviderSection } from "./sections/provider-local";
 import { renderAnthropicProviderSection } from "./sections/provider-anthropic";
 import { renderOpenAIProviderSection } from "./sections/provider-openai";
 import { renderBedrockProviderSection } from "./sections/provider-bedrock";
+import { renderAddProviderButton } from "./sections/provider-add";
 import { renderAutoContextSection } from "./sections/auto-context";
 import { renderHooksSection } from "./sections/hooks";
 import { renderVaultEventHooksSection } from "./sections/vault-event-hooks";
@@ -163,10 +164,23 @@ export class NotorSettingTab extends PluginSettingTab {
 
 		// --- Providers (expanded by default) ---
 		const providerGroup = createSettingsGroup(containerEl, "Providers", true, persisted, onToggle);
-		renderLocalProviderSection(providerGroup, ctx);
-		renderAnthropicProviderSection(providerGroup, ctx);
-		renderOpenAIProviderSection(providerGroup, ctx);
-		renderBedrockProviderSection(providerGroup, ctx);
+		for (const config of ctx.settings.providers) {
+			switch (config.type) {
+				case "local":
+					renderLocalProviderSection(providerGroup, ctx, config);
+					break;
+				case "anthropic":
+					renderAnthropicProviderSection(providerGroup, ctx, config);
+					break;
+				case "openai":
+					renderOpenAIProviderSection(providerGroup, ctx, config);
+					break;
+				case "bedrock":
+					renderBedrockProviderSection(providerGroup, ctx, config);
+					break;
+			}
+		}
+		renderAddProviderButton(providerGroup, ctx);
 
 		// --- Models (expanded by default) ---
 		const modelsGroup = createSettingsGroup(containerEl, "Models", true, persisted, onToggle);

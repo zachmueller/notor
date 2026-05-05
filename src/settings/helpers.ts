@@ -13,25 +13,43 @@ import type { NotorSettings } from "./types";
 // Provider config helpers
 // ---------------------------------------------------------------------------
 
-/** Look up a provider configuration by type, returning a stub if not found. */
-export function getProvider(settings: NotorSettings, type: string): LLMProviderConfig {
+/** Look up a provider configuration by instance ID, falling back to type match. */
+export function getProvider(settings: NotorSettings, id: string): LLMProviderConfig {
 	return (
-		settings.providers.find((p) => p.type === type) ?? {
-			type: type as LLMProviderConfig["type"],
+		settings.providers.find((p) => p.id === id) ??
+		settings.providers.find((p) => p.type === id) ?? {
+			id,
+			type: id as LLMProviderConfig["type"],
 			enabled: false,
-			display_name: type,
+			display_name: id,
 		}
 	);
 }
 
-/** Update or append a provider configuration in the settings array. */
+/** Look up a provider configuration by instance ID (returns undefined if not found). */
+export function getProviderById(settings: NotorSettings, id: string): LLMProviderConfig | undefined {
+	return settings.providers.find((p) => p.id === id);
+}
+
+/** Get all provider instances of a given type. */
+export function getProvidersByType(settings: NotorSettings, type: string): LLMProviderConfig[] {
+	return settings.providers.filter((p) => p.type === type);
+}
+
+/** Update or append a provider configuration in the settings array (matched by ID). */
 export function updateProvider(settings: NotorSettings, updated: LLMProviderConfig): void {
-	const idx = settings.providers.findIndex((p) => p.type === updated.type);
+	const idx = settings.providers.findIndex((p) => p.id === updated.id);
 	if (idx >= 0) {
 		settings.providers[idx] = updated;
 	} else {
 		settings.providers.push(updated);
 	}
+}
+
+/** Generate a unique provider instance ID. */
+export function generateProviderId(type: string): string {
+	const suffix = Math.random().toString(16).slice(2, 6);
+	return `${type}-${suffix}`;
 }
 
 // ---------------------------------------------------------------------------

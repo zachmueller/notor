@@ -5,19 +5,23 @@
  */
 
 import { SecretComponent, Setting } from "obsidian";
-import { SECRET_IDS } from "../../utils/secrets";
-import { getProvider, updateProvider } from "../helpers";
+import { secretIdForApiKey } from "../../utils/secrets";
+import type { LLMProviderConfig } from "../../types";
+import { updateProvider } from "../helpers";
 import { renderConnectionTestButton } from "./connection-test";
+import { renderDeleteProviderButton } from "./provider-add";
 import type { SettingsContext } from "./context";
 
-/** Render the "Local (OpenAI-compatible)" provider settings. */
+/** Render the "Local (OpenAI-compatible)" provider settings for a given instance. */
 export function renderLocalProviderSection(
 	containerEl: HTMLElement,
-	ctx: SettingsContext
+	ctx: SettingsContext,
+	config?: LLMProviderConfig
 ): void {
-	new Setting(containerEl).setHeading().setName("Local (OpenAI-compatible)");
+	const provider = config ?? ctx.settings.providers.find((p) => p.type === "local")!;
 
-	const provider = getProvider(ctx.settings, "local");
+	new Setting(containerEl).setHeading().setName(provider.display_name);
+
 	const groupEl = containerEl.createDiv({ cls: "notor-provider-group" });
 
 	new Setting(groupEl)
@@ -30,9 +34,8 @@ export function renderLocalProviderSection(
 				.setPlaceholder("http://localhost:11434/v1")
 				.setValue(provider.endpoint ?? "")
 				.onChange(async (value) => {
-					const updated = { ...getProvider(ctx.settings, "local") };
-					updated.endpoint = value.trim();
-					updateProvider(ctx.settings, updated);
+					provider.endpoint = value.trim();
+					updateProvider(ctx.settings, provider);
 					await ctx.saveSettings();
 				})
 		);
@@ -45,12 +48,27 @@ export function renderLocalProviderSection(
 		.addComponent(
 			(el) =>
 				new SecretComponent(ctx.app, el)
-					.setValue(SECRET_IDS.LOCAL_API_KEY)
+					.setValue(secretIdForApiKey(provider.id))
 					.onChange((_value) => {
-						// SecretComponent writes directly to SecretStorage;
-						// no additional save needed.
+						// SecretComponent writes directly to SecretStorage.
 					})
 		);
 
-	renderConnectionTestButton(groupEl, "local", ctx);
+	renderConnectionTestButton(groupEl, provider.id, ctx);
+
+	// Only show display name editor and delete for non-default instances
+	if (provider.id !== provider.type) {
+		new Setting(groupEl)
+			.setName("Display name")
+			.addText((text) =>
+				text
+					.setValue(provider.display_name)
+					.onChange(async (value) => {
+						provider.display_name = value.trim() || provider.display_name;
+						updateProvider(ctx.settings, provider);
+						await ctx.saveSettings();
+					})
+			);
+		renderDeleteProviderButton(groupEl, provider, ctx);
+	}
 }

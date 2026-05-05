@@ -10,7 +10,6 @@
 
 import type { ConversationManager } from "./conversation";
 import type { Persona, WorkflowAssemblyResult } from "../types";
-import type { LLMProviderType } from "../types";
 import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
 import type { ToolPolicyContext } from "./tool-policy";
 import type { ApprovalCallback } from "./dispatcher";
@@ -29,7 +28,7 @@ export interface ConversationSessionOptions {
 	abortController: AbortController;
 	title: string;
 	pinnedPersona: Persona | null;
-	providerType: LLMProviderType;
+	providerId: string;
 	modelId: string;
 	useExtendedContext: boolean;
 	workflowAssembly?: WorkflowAssemblyResult | null;
@@ -51,7 +50,7 @@ export class ConversationSession {
 
 	/** Snapshotted at session creation — immutable for the session's lifetime. */
 	readonly pinnedPersona: Persona | null;
-	readonly providerType: LLMProviderType;
+	readonly providerId: string;
 	readonly modelId: string;
 	readonly useExtendedContext: boolean;
 	readonly workflowAssembly: WorkflowAssemblyResult | null;
@@ -72,7 +71,7 @@ export class ConversationSession {
 		this.title = opts.title;
 		this.startedAt = Date.now();
 		this.pinnedPersona = opts.pinnedPersona;
-		this.providerType = opts.providerType;
+		this.providerId = opts.providerId;
 		this.modelId = opts.modelId;
 		this.useExtendedContext = opts.useExtendedContext;
 		this.workflowAssembly = opts.workflowAssembly ?? null;

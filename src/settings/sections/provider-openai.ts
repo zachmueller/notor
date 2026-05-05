@@ -5,19 +5,23 @@
  */
 
 import { SecretComponent, Setting } from "obsidian";
-import { SECRET_IDS } from "../../utils/secrets";
-import { getProvider, updateProvider } from "../helpers";
+import { secretIdForApiKey } from "../../utils/secrets";
+import type { LLMProviderConfig } from "../../types";
+import { updateProvider } from "../helpers";
 import { renderConnectionTestButton } from "./connection-test";
+import { renderDeleteProviderButton } from "./provider-add";
 import type { SettingsContext } from "./context";
 
-/** Render the "OpenAI" provider settings. */
+/** Render the "OpenAI" provider settings for a given instance. */
 export function renderOpenAIProviderSection(
 	containerEl: HTMLElement,
-	ctx: SettingsContext
+	ctx: SettingsContext,
+	config?: LLMProviderConfig
 ): void {
-	new Setting(containerEl).setHeading().setName("OpenAI");
+	const provider = config ?? ctx.settings.providers.find((p) => p.type === "openai")!;
 
-	const provider = getProvider(ctx.settings, "openai");
+	new Setting(containerEl).setHeading().setName(provider.display_name);
+
 	const groupEl = containerEl.createDiv({ cls: "notor-provider-group" });
 
 	new Setting(groupEl)
@@ -26,7 +30,7 @@ export function renderOpenAIProviderSection(
 		.addComponent(
 			(el) =>
 				new SecretComponent(ctx.app, el)
-					.setValue(SECRET_IDS.OPENAI_API_KEY)
+					.setValue(secretIdForApiKey(provider.id))
 					.onChange((_value) => {
 						// SecretComponent writes directly to SecretStorage.
 					})
@@ -47,12 +51,26 @@ export function renderOpenAIProviderSection(
 						: ""
 				)
 				.onChange(async (value) => {
-					const updated = { ...getProvider(ctx.settings, "openai") };
-					updated.endpoint = value.trim() || "https://api.openai.com";
-					updateProvider(ctx.settings, updated);
+					provider.endpoint = value.trim() || "https://api.openai.com";
+					updateProvider(ctx.settings, provider);
 					await ctx.saveSettings();
 				})
 		);
 
-	renderConnectionTestButton(groupEl, "openai", ctx);
+	renderConnectionTestButton(groupEl, provider.id, ctx);
+
+	if (provider.id !== provider.type) {
+		new Setting(groupEl)
+			.setName("Display name")
+			.addText((text) =>
+				text
+					.setValue(provider.display_name)
+					.onChange(async (value) => {
+						provider.display_name = value.trim() || provider.display_name;
+						updateProvider(ctx.settings, provider);
+						await ctx.saveSettings();
+					})
+			);
+		renderDeleteProviderButton(groupEl, provider, ctx);
+	}
 }
