@@ -53,6 +53,7 @@ import { McpStatusIndicator } from "./mcp-status-indicator";
 import { getTextContent, type ContentBlock } from "../media/types";
 import { renderCollapsibleCard } from "./chat-blocks/collapsible-card";
 import { FindInMessages } from "./find-in-messages";
+import { marked } from "marked";
 
 const log = logger("ChatView");
 
@@ -116,6 +117,8 @@ export class NotorChatView extends ItemView {
 	private abortController: AbortController | null = null;
 	private showConversationList = false;
 	private lastToolCallEl: HTMLElement | null = null;
+	private streamRenderTimer: ReturnType<typeof setTimeout> | null = null;
+	private pendingStreamRender: { contentEl: HTMLElement; raw: string } | null = null;
 	/** Map of message IDs to their rendered tool call elements, for targeted approval. */
 	private toolCallElMap = new Map<string, HTMLElement>();
 	private renderedMessages = new Map<string, Message>();
@@ -2119,15 +2122,28 @@ export class NotorChatView extends ItemView {
 
 	/**
 	 * Append a text chunk to a streaming assistant message.
+	 * Renders markdown incrementally via throttled marked.parse().
 	 */
 	appendStreamChunk(contentEl: HTMLElement, text: string): void {
-		// For streaming, we accumulate text and re-render markdown periodically
 		const existing = contentEl.getAttribute("data-raw") ?? "";
 		const updated = existing + text;
 		contentEl.setAttribute("data-raw", updated);
 
-		// Simple streaming: render as text, final render as markdown
-		contentEl.textContent = updated;
+		this.pendingStreamRender = { contentEl, raw: updated };
+		if (!this.streamRenderTimer) {
+			this.renderStreamMarkdown(contentEl, updated);
+			this.streamRenderTimer = setTimeout(() => {
+				this.streamRenderTimer = null;
+				if (this.pendingStreamRender) {
+					this.renderStreamMarkdown(this.pendingStreamRender.contentEl, this.pendingStreamRender.raw);
+					this.pendingStreamRender = null;
+				}
+			}, 100);
+		}
+	}
+
+	private renderStreamMarkdown(contentEl: HTMLElement, raw: string): void {
+		contentEl.innerHTML = marked.parse(raw, { async: false }) as string;
 		this.scrollToBottom();
 	}
 
@@ -2135,6 +2151,11 @@ export class NotorChatView extends ItemView {
 	 * Finalize a streaming assistant message with full markdown rendering.
 	 */
 	async finalizeAssistantMessage(contentEl: HTMLElement, message: Message): Promise<void> {
+		if (this.streamRenderTimer) {
+			clearTimeout(this.streamRenderTimer);
+			this.streamRenderTimer = null;
+			this.pendingStreamRender = null;
+		}
 		contentEl.parentElement!.dataset.messageId = message.id;
 		this.appendForkButton(contentEl.parentElement!, message);
 		contentEl.empty();
