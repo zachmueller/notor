@@ -119,7 +119,7 @@ async function importAndOpenConversation(
 			const filename = await hm.importConversation(
 				{
 					id: convId, title: o.title, created_at: now, updated_at: now,
-					provider_type: "bedrock", model_id: "test-model", mode: "act",
+					provider_id: "bedrock", model_id: "test-model", mode: "act",
 					total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0,
 					is_background: false,
 				},
@@ -401,7 +401,7 @@ async function testBlockReloadPersistence(ctx: TestContext): Promise<void> {
 			const convId = crypto.randomUUID();
 			const conversation = {
 				id: convId, title: "Reload Persistence Test", created_at: now, updated_at: now,
-				provider_type: "bedrock", model_id: "test-model", mode: "act",
+				provider_id: "bedrock", model_id: "test-model", mode: "act",
 				total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false,
 			};
 			const messages = [
@@ -417,7 +417,7 @@ async function testBlockReloadPersistence(ctx: TestContext): Promise<void> {
 			// Create a second temp conversation and switch to it
 			const convId2 = crypto.randomUUID();
 			const filename2 = await hm.importConversation(
-				{ id: convId2, title: "Temp", created_at: now, updated_at: now, provider_type: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
+				{ id: convId2, title: "Temp", created_at: now, updated_at: now, provider_id: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
 				[{ id: crypto.randomUUID(), conversation_id: convId2, role: "user", content: "temp", created_at: now, input_tokens: 0, output_tokens: 0, estimated_cost: 0 }],
 			);
 
@@ -468,7 +468,7 @@ async function testToolCallCollapsibleRegression(ctx: TestContext): Promise<void
 			const callId = "call_e2e_test_1";
 
 			const filename = await hm.importConversation(
-				{ id: convId, title: "Tool Call Regression Test", created_at: now, updated_at: now, provider_type: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
+				{ id: convId, title: "Tool Call Regression Test", created_at: now, updated_at: now, provider_id: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
 				[
 					{ id: crypto.randomUUID(), conversation_id: convId, role: "user", content: "Use a tool", created_at: now, input_tokens: 0, output_tokens: 0, estimated_cost: 0 },
 					{
@@ -552,7 +552,7 @@ async function testVisualDistinction(ctx: TestContext): Promise<void> {
 			const callId = "call_visual_test";
 
 			const filename = await hm.importConversation(
-				{ id: convId, title: "Visual Distinction Test", created_at: now, updated_at: now, provider_type: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
+				{ id: convId, title: "Visual Distinction Test", created_at: now, updated_at: now, provider_id: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
 				[
 					{ id: crypto.randomUUID(), conversation_id: convId, role: "user", content: "test", created_at: now, input_tokens: 0, output_tokens: 0, estimated_cost: 0 },
 					{
@@ -648,7 +648,7 @@ async function testMarkdownExport(ctx: TestContext): Promise<void> {
 			const convId = crypto.randomUUID();
 
 			const filename = await hm.importConversation(
-				{ id: convId, title: "Export Test Conversation", created_at: now, updated_at: now, provider_type: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
+				{ id: convId, title: "Export Test Conversation", created_at: now, updated_at: now, provider_id: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
 				[
 					{ id: crypto.randomUUID(), conversation_id: convId, role: "user", content: "User question for export", created_at: now, input_tokens: 0, output_tokens: 0, estimated_cost: 0 },
 					{
@@ -743,7 +743,7 @@ async function testChatBlocksEmitPersistence(ctx: TestContext): Promise<void> {
 
 			// Create and activate a conversation first
 			const filename = await hm.importConversation(
-				{ id: convId, title: "chatBlocks Emit Test", created_at: now, updated_at: now, provider_type: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
+				{ id: convId, title: "chatBlocks Emit Test", created_at: now, updated_at: now, provider_id: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
 				[{ id: crypto.randomUUID(), conversation_id: convId, role: "user", content: "Test emit", created_at: now, input_tokens: 0, output_tokens: 0, estimated_cost: 0 }],
 			);
 			await orchestrator.switchConversation(filename);

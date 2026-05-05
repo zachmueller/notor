@@ -97,12 +97,14 @@ function buildVaultEventSettings(overrides: Record<string, unknown> = {}): Recor
 	return buildDefaultSettings({
 		providers: [
 			{
+				id: "local",
 				type: "local",
 				enabled: false,
 				display_name: "Local",
 				endpoint: "http://localhost:11434/v1",
 			},
 			{
+				id: "bedrock",
 				type: "bedrock",
 				enabled: true,
 				display_name: "AWS Bedrock",

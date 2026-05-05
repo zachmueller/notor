@@ -218,7 +218,7 @@ async function testRenderNotEqualWire(ctx: TestContext): Promise<void> {
 			const now = new Date().toISOString();
 			const convId = crypto.randomUUID();
 			const filename = await hm.importConversation(
-				{ id: convId, title: "Render Not Wire Test", created_at: now, updated_at: now, provider_type: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
+				{ id: convId, title: "Render Not Wire Test", created_at: now, updated_at: now, provider_id: "bedrock", model_id: "test-model", mode: "act", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: 0, is_background: false },
 				[{ id: crypto.randomUUID(), conversation_id: convId, role: "user", content: "test", created_at: now, input_tokens: 0, output_tokens: 0, estimated_cost: 0 }],
 			);
 			await orchestrator.switchConversation(filename);

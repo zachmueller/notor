@@ -37,7 +37,7 @@ const MANUAL_APPROVE_TOOL = "write_resource";
 
 const settings = buildDefaultSettings({
 	active_provider: "local",
-	providers: [{ type: "local", enabled: true, display_name: "Local (OpenAI-compatible)", endpoint: "http://localhost:11434/v1" }],
+	providers: [{ id: "local", type: "local", enabled: true, display_name: "Local (OpenAI-compatible)", endpoint: "http://localhost:11434/v1" }],
 	auto_approve: { read_note: true, search_vault: false, list_vault: true, read_frontmatter: false, fetch_webpage: false, write_note: false, replace_in_note: false, update_frontmatter: false, manage_tags: false, execute_command: false },
 	open_notes_on_access: false,
 	mcp_servers: {},

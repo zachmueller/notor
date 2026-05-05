@@ -1387,25 +1387,25 @@ const settings = buildDefaultSettings({
 	model_presets: [
 		{
 			name: "tiny",
-			provider_type: "bedrock",
+			provider_id: "bedrock",
 			model_id: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
 			use_extended_context: false,
 		},
 		{
 			name: "small",
-			provider_type: "bedrock",
+			provider_id: "bedrock",
 			model_id: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
 			use_extended_context: false,
 		},
 		{
 			name: "medium",
-			provider_type: "bedrock",
+			provider_id: "bedrock",
 			model_id: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
 			use_extended_context: false,
 		},
 		{
 			name: "large",
-			provider_type: "bedrock",
+			provider_id: "bedrock",
 			model_id: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
 			use_extended_context: false,
 		},

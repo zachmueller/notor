@@ -384,9 +384,9 @@ export function buildDefaultSettings(overrides?: Record<string, unknown>): Recor
 		notor_dir: "notor/",
 		active_provider: "bedrock",
 		providers: [
-			{ type: "local", enabled: false, display_name: "Local", endpoint: "http://localhost:11434/v1" },
+			{ id: "local", type: "local", enabled: false, display_name: "Local", endpoint: "http://localhost:11434/v1" },
 			{
-				type: "bedrock", enabled: true, display_name: "AWS Bedrock",
+				id: "bedrock", type: "bedrock", enabled: true, display_name: "AWS Bedrock",
 				aws_auth_method: "profile", aws_profile: "default",
 				region: "us-east-1", model_id: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
 			},

@@ -39,24 +39,28 @@ import {
 const settings = buildDefaultSettings({
 	providers: [
 		{
+			id: "local",
 			type: "local",
 			enabled: false,
 			display_name: "Local (OpenAI-compatible)",
 			endpoint: "http://localhost:11434/v1",
 		},
 		{
+			id: "anthropic",
 			type: "anthropic",
 			enabled: false,
 			display_name: "Anthropic",
 			endpoint: "https://api.anthropic.com",
 		},
 		{
+			id: "openai",
 			type: "openai",
 			enabled: false,
 			display_name: "OpenAI",
 			endpoint: "https://api.openai.com",
 		},
 		{
+			id: "bedrock",
 			type: "bedrock",
 			enabled: true,
 			display_name: "AWS Bedrock",

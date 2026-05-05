@@ -298,15 +298,15 @@ const settings = buildDefaultSettings({
 	automation_enabled: { "title-generation": true },
 	// Configure model presets — "small" must point to a real model
 	model_presets: [
-		{ name: "tiny", provider_type: null, model_id: null, use_extended_context: false },
+		{ name: "tiny", provider_id: null, model_id: null, use_extended_context: false },
 		{
 			name: "small",
-			provider_type: "bedrock",
+			provider_id: "bedrock",
 			model_id: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
 			use_extended_context: false,
 		},
-		{ name: "medium", provider_type: null, model_id: null, use_extended_context: false },
-		{ name: "large", provider_type: null, model_id: null, use_extended_context: false },
+		{ name: "medium", provider_id: null, model_id: null, use_extended_context: false },
+		{ name: "large", provider_id: null, model_id: null, use_extended_context: false },
 	],
 	default_preset: "medium",
 	// Store preset in per-extension settings under the displayName key

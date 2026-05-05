@@ -720,6 +720,7 @@ const settings = buildDefaultSettings({
 	active_provider: "local",
 	providers: [
 		{
+			id: "local",
 			type: "local",
 			enabled: true,
 			display_name: "Local (OpenAI-compatible)",

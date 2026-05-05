@@ -101,8 +101,8 @@ function getConcurrencyLogs(collector: LogCollector): LogEntry[] {
 function activitySettings(extra: Record<string, unknown> = {}): Record<string, unknown> {
 	return buildDefaultSettings({
 		providers: [
-			{ type: "local", enabled: false, display_name: "Local", endpoint: "http://localhost:11434/v1" },
-			{ type: "bedrock", enabled: true, display_name: "AWS Bedrock", aws_auth_method: "profile", aws_profile: "default", region: "us-east-1", model_id: "us.amazon.nova-lite-v1:0" },
+			{ id: "local", type: "local", enabled: false, display_name: "Local", endpoint: "http://localhost:11434/v1" },
+			{ id: "bedrock", type: "bedrock", enabled: true, display_name: "AWS Bedrock", aws_auth_method: "profile", aws_profile: "default", region: "us-east-1", model_id: "us.amazon.nova-lite-v1:0" },
 		],
 		auto_approve: {
 			read_note: true, search_vault: true, list_vault: true, read_frontmatter: true,
