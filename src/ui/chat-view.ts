@@ -1782,6 +1782,7 @@ export class NotorChatView extends ItemView {
 								result.base64,
 								result.pageCount,
 								result.extractedText,
+								result.extractedImages,
 							);
 							this.addAttachment(att);
 						} catch (err) {

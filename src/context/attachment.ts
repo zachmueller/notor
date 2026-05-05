@@ -62,6 +62,8 @@ export interface Attachment {
 	width: number | null;
 	/** Image height in pixels after processing (null for non-image attachments). */
 	height: number | null;
+	/** Extracted images from PDF pages (base64-encoded, for external_pdf type). */
+	extracted_images: Array<{ data: string; media_type: ImageMediaType; width: number; height: number }> | null;
 	/** Resolution lifecycle status. */
 	status: AttachmentStatus;
 	/** Error description if resolution failed. */
@@ -111,6 +113,7 @@ export function createVaultNoteAttachment(path: string): Attachment {
 		media_type: null,
 		width: null,
 		height: null,
+		extracted_images: null,
 		status: "pending",
 		error_message: null,
 	};
@@ -140,6 +143,7 @@ export function createVaultNoteSectionAttachment(
 		media_type: null,
 		width: null,
 		height: null,
+		extracted_images: null,
 		status: "pending",
 		error_message: null,
 	};
@@ -173,6 +177,7 @@ export function createExternalFileAttachment(
 		media_type: null,
 		width: null,
 		height: null,
+		extracted_images: null,
 		status: "resolved",
 		error_message: null,
 	};
@@ -200,6 +205,7 @@ export function createVaultImageAttachment(path: string): Attachment {
 		media_type: null,
 		width: null,
 		height: null,
+		extracted_images: null,
 		status: "pending",
 		error_message: null,
 	};
@@ -236,6 +242,7 @@ export function createExternalBinaryAttachment(
 		media_type: mediaType,
 		width: width ?? null,
 		height: height ?? null,
+		extracted_images: null,
 		status: "resolved",
 		error_message: null,
 	};
@@ -263,6 +270,7 @@ export function createVaultPdfAttachment(path: string): Attachment {
 		media_type: null,
 		width: null,
 		height: null,
+		extracted_images: null,
 		status: "pending",
 		error_message: null,
 	};
@@ -283,6 +291,7 @@ export function createExternalPdfAttachment(
 	base64: string,
 	pageCount?: number,
 	extractedText?: string,
+	extractedImages?: Array<{ data: string; media_type: ImageMediaType; width: number; height: number }>,
 ): Attachment {
 	return {
 		id: generateUUID(),
@@ -296,6 +305,7 @@ export function createExternalPdfAttachment(
 		media_type: "application/pdf",
 		width: null,
 		height: null,
+		extracted_images: extractedImages ?? null,
 		status: "resolved",
 		error_message: null,
 	};
@@ -764,6 +774,18 @@ export function buildAttachmentsBlock(attachments: Attachment[]): { text: string
 					tags.push(
 						`  <pdf-document name="${escapeXmlAttr(att.display_name)}"${sourceAttr}>\n${att.content}\n  </pdf-document>`
 					);
+					// Include extracted images as content blocks
+					if (att.extracted_images && att.extracted_images.length > 0) {
+						for (const img of att.extracted_images) {
+							contentBlocks.push({
+								type: "image",
+								media_type: img.media_type,
+								data: img.data,
+								width: img.width,
+								height: img.height,
+							});
+						}
+					}
 				} else if (att.binary_content && att.media_type === "application/pdf") {
 					// Vault PDFs or external PDFs without extracted text: use native document block
 					contentBlocks.push({
