@@ -18,7 +18,6 @@ import {
 } from "../context/attachment";
 import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
-import { buildPersonaPicker } from "./persona-picker";
 import { logger } from "../utils/logger";
 import { groupModels, formatVariantLabel, buildOptionValue, type ModelGroup } from "../providers/model-grouping";
 import {
@@ -163,7 +162,6 @@ export class NotorChatView extends ItemView {
 	private personaManager?: PersonaManager;
 	private personaLabelEl?: HTMLElement;
 	private onPersonaChange?: (persona: Persona | null) => void;
-	private getCurrentConversationPersonaName?: () => string | null;
 
 	// Workflow activity indicator state (H-002, H-003)
 	private workflowActivityTracker?: WorkflowActivityTracker;
@@ -462,9 +460,6 @@ export class NotorChatView extends ItemView {
 		this.onPersonaChange = callback;
 	}
 
-	setGetCurrentConversationPersonaName(callback: () => string | null): void {
-		this.getCurrentConversationPersonaName = callback;
-	}
 
 	/**
 	 * Apply a persona switch to this specific panel: update the chip label
@@ -1012,7 +1007,6 @@ export class NotorChatView extends ItemView {
 		this.getWorkflowsCallback = undefined;
 		this.getActiveSessions = undefined;
 		this.getCurrentConversationId = undefined;
-		this.getCurrentConversationPersonaName = undefined;
 		this.getActiveConversationMeta = undefined;
 
 		// Close cleanup callback (A7.2)
@@ -3311,19 +3305,6 @@ export class NotorChatView extends ItemView {
 		// Model preset selection
 		this.buildPresetSelect(this.settingsPopoverEl);
 
-		// Persona picker (A-009) — triggers rescan on each popover open
-		// Per-conversation scoping: picker reflects this panel's conversation
-		// persona, and selection updates only this panel (not all panels).
-		if (this.personaManager) {
-			buildPersonaPicker(
-				this.settingsPopoverEl,
-				this.personaManager,
-				this.getCurrentConversationPersonaName?.() ?? null,
-				(persona) => {
-					this.applyPersonaSwitch(persona);
-				},
-			);
-		}
 
 		// Checkpoints section
 		this.buildCheckpointsSection(this.settingsPopoverEl);

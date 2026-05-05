@@ -2932,11 +2932,6 @@ export default class NotorPlugin extends Plugin {
 			view.updatePersonaLabel(persona);
 		});
 
-		// Per-conversation persona scoping: the picker reads the current
-		// conversation's persona and updates only this panel's conversation.
-		view.setGetCurrentConversationPersonaName(() => {
-			return orchestrator.getDisplayedConversation()?.persona_name ?? null;
-		});
 
 		view.setOnPersonaChange((persona) => {
 			const conv = orchestrator.getDisplayedConversation();
