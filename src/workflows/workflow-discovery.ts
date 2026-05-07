@@ -20,8 +20,8 @@
  * @see specs/03-workflows-personas/spec.md — FR-41 (workflow discovery)
  */
 
-import type { MetadataCache, TFile, TFolder, Vault } from "obsidian";
-import { TAbstractFile } from "obsidian";
+import type { MetadataCache, TFile, Vault } from "obsidian";
+import { TAbstractFile, TFolder } from "obsidian";
 import type {
 	Workflow,
 	WorkflowTrigger,
@@ -75,7 +75,22 @@ export function discoverWorkflows(
 	notorDir: string
 ): Workflow[] {
 	const workflowsRootPath = getWorkflowsRootPath(notorDir);
-	const workflowsRoot = vault.getAbstractFileByPath(workflowsRootPath);
+	let workflowsRoot = vault.getAbstractFileByPath(workflowsRootPath);
+
+	if (!workflowsRoot) {
+		const parentPath = notorDir.replace(/\/$/, "");
+		const parent = vault.getAbstractFileByPath(parentPath);
+		if (parent instanceof TFolder) {
+			const match = parent.children.find(
+				(c) =>
+					c instanceof TFolder &&
+					c.name.toLowerCase() === "workflows"
+			);
+			if (match) {
+				workflowsRoot = match;
+			}
+		}
+	}
 
 	if (!workflowsRoot) {
 		log.debug("Workflows directory does not exist", { path: workflowsRootPath });
@@ -89,6 +104,7 @@ export function discoverWorkflows(
 		return [];
 	}
 
+	const actualRootPath = workflowsRoot.path;
 	const workflows: Workflow[] = [];
 	const markdownFiles = collectMarkdownFiles(workflowsRoot);
 
@@ -97,7 +113,7 @@ export function discoverWorkflows(
 			const workflow = parseWorkflowFile(
 				metadataCache,
 				file,
-				workflowsRootPath
+				actualRootPath
 			);
 			if (workflow) {
 				workflows.push(workflow);
@@ -111,7 +127,7 @@ export function discoverWorkflows(
 	}
 
 	log.info("Workflow discovery complete", {
-		workflowsDir: workflowsRootPath,
+		workflowsDir: actualRootPath,
 		found: workflows.length,
 	});
 

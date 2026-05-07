@@ -33,9 +33,9 @@ and then `createFolder(normalized)`. On macOS (case-insensitive by default), if 
 folder exists with different casing (e.g., `Workflows` vs `workflows`), the lookup
 returns null but `createFolder` throws "Folder already exists".
 
-- [ ] **1.1a** Add `TFolder` to the value import from `"obsidian"` (line 7: `import { normalizePath } from "obsidian"` → `import { normalizePath, TFolder } from "obsidian"`)
+- [x] **1.1a** Add `TFolder` to the value import from `"obsidian"` (line 7: `import { normalizePath } from "obsidian"` → `import { normalizePath, TFolder } from "obsidian"`)
 
-- [ ] **1.1b** Rewrite the `ensureDirectory` function body:
+- [x] **1.1b** Rewrite the `ensureDirectory` function body:
   1. Keep the `parts.split("/")` iteration and `normalizePath()` call
   2. If `getAbstractFileByPath(normalized)` returns non-null:
      - If NOT `instanceof TFolder` → throw `Error("Cannot create directory \"${normalized}\": a file with that name already exists")`
@@ -73,9 +73,9 @@ returns null but `createFolder` throws "Folder already exists".
 `workflowsRootPath` is `"<notorDir>/workflows"` (lowercase). If the user's folder is
 `"Workflows"` (capital W), the lookup fails and returns an empty array.
 
-- [ ] **1.2a** Move `TFolder` from the type-only import to the value import (line 2 has `import type { MetadataCache, TFile, TFolder, Vault } from "obsidian";` — this is type-only and cannot be used with `instanceof`). Move it to line 3: `import { TAbstractFile, TFolder } from "obsidian";` and remove it from line 2.
+- [x] **1.2a** Move `TFolder` from the type-only import to the value import (line 2 has `import type { MetadataCache, TFile, TFolder, Vault } from "obsidian";` — this is type-only and cannot be used with `instanceof`). Move it to line 3: `import { TAbstractFile, TFolder } from "obsidian";` and remove it from line 2.
 
-- [ ] **1.2b** After the initial `vault.getAbstractFileByPath(workflowsRootPath)` call (line 78), add case-insensitive fallback:
+- [x] **1.2b** After the initial `vault.getAbstractFileByPath(workflowsRootPath)` call (line 78), add case-insensitive fallback:
   ```
   if workflowsRoot is null:
     parentPath = notorDir.replace(/\/$/, "")
@@ -85,7 +85,7 @@ returns null but `createFolder` throws "Folder already exists".
       if match: workflowsRoot = match
   ```
 
-- [ ] **1.2c** Ensure the rest of the function uses `workflowsRoot.path` (the actual discovered path) rather than `workflowsRootPath` (the constructed lowercase path) for relative path derivation in `parseWorkflowFile`. Currently line 366 uses `workflowsRootPath` for display name computation — this should use the actual root path from the resolved folder.
+- [x] **1.2c** Ensure the rest of the function uses `workflowsRoot.path` (the actual discovered path) rather than `workflowsRootPath` (the constructed lowercase path) for relative path derivation in `parseWorkflowFile`. Currently line 366 uses `workflowsRootPath` for display name computation — this should use the actual root path from the resolved folder.
 
 ---
 

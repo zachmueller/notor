@@ -4,7 +4,7 @@
  * Extracted from personas.ts to be reused by rules-and-workflows.ts.
  */
 
-import { normalizePath } from "obsidian";
+import { normalizePath, TFolder } from "obsidian";
 import type { SettingsContext } from "./context";
 
 /**
@@ -182,8 +182,34 @@ export async function ensureDirectory(
 	for (const part of parts) {
 		current = current ? `${current}/${part}` : part;
 		const normalized = normalizePath(current);
-		if (!ctx.app.vault.getAbstractFileByPath(normalized)) {
+		const existing = ctx.app.vault.getAbstractFileByPath(normalized);
+		if (existing) {
+			if (!(existing instanceof TFolder)) {
+				throw new Error(
+					`Cannot create directory "${normalized}": a file with that name already exists`
+				);
+			}
+			continue;
+		}
+		try {
 			await ctx.app.vault.createFolder(normalized);
+		} catch (e) {
+			const parentPath = normalized.includes("/")
+				? normalized.substring(0, normalized.lastIndexOf("/"))
+				: "";
+			const folderName = normalized.substring(normalized.lastIndexOf("/") + 1);
+			const parent = parentPath
+				? ctx.app.vault.getAbstractFileByPath(parentPath)
+				: ctx.app.vault.getRoot();
+			if (parent instanceof TFolder) {
+				const match = parent.children.find(
+					(c) =>
+						c instanceof TFolder &&
+						c.name.toLowerCase() === folderName.toLowerCase()
+				);
+				if (match) continue;
+			}
+			throw e;
 		}
 	}
 }
