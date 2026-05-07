@@ -73,6 +73,8 @@ export interface DispatcherDeps {
 	templateRegistry?: TemplateVariableRegistry;
 	/** Per-hook debounce delay manager (Phase 5). */
 	hookDelayManager?: HookDelayManager;
+	/** Factory to create a headless orchestrator for background workflow execution. */
+	createHeadlessOrchestrator?: () => ChatOrchestrator;
 }
 
 // ---------------------------------------------------------------------------
@@ -526,14 +528,23 @@ async function _executeWorkflowSubmission(
 		workflowName: workflow.display_name,
 	});
 
-	// Null guard: skip execution if no orchestrator (no active panel)
-	if (!deps.orchestrator) {
-		log.warn("Skipping background workflow — no active orchestrator", {
+	// Resolve orchestrator: prefer active panel, fall back to headless factory
+	let orchestrator = deps.orchestrator;
+	let isHeadless = false;
+	if (!orchestrator) {
+		if (!deps.createHeadlessOrchestrator) {
+			log.warn("Skipping background workflow — no orchestrator available", {
+				workflowName: workflow.display_name,
+			});
+			new Notice(`Workflow '${workflow.display_name}' skipped: unable to create execution context.`);
+			return;
+		}
+		orchestrator = deps.createHeadlessOrchestrator();
+		isHeadless = true;
+		log.info("Created headless orchestrator for background workflow", {
 			workflowName: workflow.display_name,
 		});
-		return;
 	}
-	const orchestrator = deps.orchestrator;
 
 	// Submit to the concurrency manager — run function is the background pipeline
 	deps.concurrencyManager.submit(execution, async () => {
@@ -560,6 +571,10 @@ async function _executeWorkflowSubmission(
 			// if it throws before that, notify the concurrency manager here.
 			deps.concurrencyManager.onComplete(executionId, "errored", errMsg);
 			new Notice(`Workflow '${workflow.display_name}' failed: ${errMsg}`);
+		} finally {
+			if (isHeadless) {
+				await orchestrator.destroy();
+			}
 		}
 	});
 }

@@ -1450,6 +1450,7 @@ export default class NotorPlugin extends Plugin {
 				executeExtensionAutomation: (automation, context) => this.getExtensionManager().executeAutomation(automation, context),
 				templateRegistry: this.getTemplateRegistry(),
 				hookDelayManager,
+				createHeadlessOrchestrator: () => this.createHeadlessOrchestrator(),
 			};
 		};
 
@@ -2225,6 +2226,15 @@ export default class NotorPlugin extends Plugin {
 
 		log.info("Orchestrator created via unified factory");
 		return orchestrator;
+	}
+
+	/**
+	 * Create a headless orchestrator for background workflow execution.
+	 * Reuses createOrchestrator() which already passes undefined for view —
+	 * skipping wireView() gives a fully functional headless orchestrator.
+	 */
+	createHeadlessOrchestrator(): ChatOrchestrator {
+		return this.createOrchestrator();
 	}
 
 	/**

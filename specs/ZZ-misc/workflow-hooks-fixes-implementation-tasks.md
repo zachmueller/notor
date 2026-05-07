@@ -764,7 +764,7 @@ a per-execution headless orchestrator.
 
 **File:** `src/main.ts` — plugin class
 
-- [ ] **6.1a** Add a thin wrapper method that reuses the existing `createOrchestrator()`:
+- [x] **6.1a** Add a thin wrapper method that reuses the existing `createOrchestrator()`:
   ```typescript
   /**
    * Create a headless orchestrator for background workflow execution.
@@ -787,7 +787,7 @@ a per-execution headless orchestrator.
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `DispatcherDeps` interface (near line 60)
 
-- [ ] **6.2a** Add to the interface:
+- [x] **6.2a** Add to the interface:
   ```typescript
   /** Factory to create a headless orchestrator for background workflow execution. */
   createHeadlessOrchestrator?: () => ChatOrchestrator;
@@ -797,7 +797,7 @@ a per-execution headless orchestrator.
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 463–470)
 
-- [ ] **6.3a** Replace the null guard:
+- [x] **6.3a** Replace the null guard:
   ```typescript
   // Before:
   if (!deps.orchestrator) {
@@ -827,7 +827,7 @@ a per-execution headless orchestrator.
 
 **File:** `src/main.ts` — `getDispatcherDeps()` closure (line 1427)
 
-- [ ] **6.4a** Add to the returned deps object:
+- [x] **6.4a** Add to the returned deps object:
   ```typescript
   createHeadlessOrchestrator: () => this.createHeadlessOrchestrator(),
   ```
@@ -842,7 +842,7 @@ Each headless orchestrator is spawned per-execution and is self-contained. After
 async run function), the headless orchestrator must be explicitly destroyed to abort
 any lingering session state and flush JSONL writes.
 
-- [ ] **6.5a** In `executeRunWorkflowAction()`, wrap the `concurrencyManager.submit()` callback
+- [x] **6.5a** In `executeRunWorkflowAction()`, wrap the `concurrencyManager.submit()` callback
   with a `finally` block that destroys headless orchestrators:
   ```typescript
   deps.concurrencyManager.submit(execution, async () => {
