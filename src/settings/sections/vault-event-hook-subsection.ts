@@ -8,7 +8,7 @@
  * @see specs/03a-settings-refactor/tasks.md — S-003, S-007
  */
 
-import { Notice, Setting, TextComponent } from "obsidian";
+import { Notice, Setting, TFile, TextComponent } from "obsidian";
 import type { VaultEventHookType } from "../../types";
 import {
 	addVaultEventHook,
@@ -16,6 +16,8 @@ import {
 	reorderVaultEventHooks,
 	toggleVaultEventHook,
 } from "../../hooks/vault-event-hook-config";
+import { vaultEventTypeToWorkflowTrigger } from "../../hooks/vault-event-listener-manager";
+import { injectWorkflowFrontmatter } from "../../workflows/workflow-frontmatter";
 import { validateCronExpressionBasic } from "../helpers";
 import type { SettingsContext } from "./context";
 
@@ -275,6 +277,23 @@ export function renderVaultEventHookSubsection(
 			}
 
 			try {
+				if (newActionType === "run_workflow") {
+					const abstractFile = ctx.app.vault.getAbstractFileByPath(newCommandOrPath);
+					if (abstractFile instanceof TFile) {
+						const cache = ctx.app.metadataCache.getFileCache(abstractFile);
+						const fm = cache?.frontmatter;
+						const isValid = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";
+						if (!isValid) {
+							const trigger = vaultEventTypeToWorkflowTrigger(event)
+								?? (event === "on_schedule" ? "scheduled" : "manual");
+							const result = await injectWorkflowFrontmatter(ctx.app, abstractFile, trigger, "plan");
+							if (result.injected) {
+								new Notice(`Added workflow headers to "${abstractFile.name}" (${result.fieldsAdded.join(", ")})`);
+							}
+						}
+					}
+				}
+
 				addVaultEventHook(
 					ctx.settings.vault_event_hooks,
 					event,

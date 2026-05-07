@@ -882,7 +882,7 @@ Automatically inject required frontmatter into workflow files when:
 
 **New file:** `src/workflows/workflow-frontmatter.ts`
 
-- [ ] **7.1a** Create the file with the following exports:
+- [x] **7.1a** Create the file with the following exports:
 
   ```typescript
   import { TFile, type App } from "obsidian";
@@ -935,10 +935,10 @@ Automatically inject required frontmatter into workflow files when:
 The function `vaultEventTypeToWorkflowTrigger()` already provides this mapping.
 It returns `null` for `"on_schedule"` (handled by a separate scheduler).
 
-- [ ] **7.2a** Add `export` keyword to `vaultEventTypeToWorkflowTrigger` in `vault-event-listener-manager.ts`
+- [x] **7.2a** Add `export` keyword to `vaultEventTypeToWorkflowTrigger` in `vault-event-listener-manager.ts`
   (line 403 — currently a module-private function, not exported).
 
-- [ ] **7.2b** At usage sites, apply the fallback for `on_schedule`:
+- [x] **7.2b** At usage sites, apply the fallback for `on_schedule`:
   ```typescript
   import { vaultEventTypeToWorkflowTrigger } from "../hooks/vault-event-listener-manager";
 
@@ -949,9 +949,9 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
 
 **File:** `src/settings/sections/vault-event-hook-subsection.ts` (lines 236–271, the "Add" button click handler)
 
-- [ ] **7.3a** Import `TFile` from `"obsidian"`, `injectWorkflowFrontmatter` from `"../../workflows/workflow-frontmatter"`, and `vaultEventTypeToWorkflowTrigger` from `"../../hooks/vault-event-listener-manager"`
+- [x] **7.3a** Import `TFile` from `"obsidian"`, `injectWorkflowFrontmatter` from `"../../workflows/workflow-frontmatter"`, and `vaultEventTypeToWorkflowTrigger` from `"../../hooks/vault-event-listener-manager"`
 
-- [ ] **7.3b** After the validation checks (line 238 `if (!newCommandOrPath)...`) and before `addVaultEventHook()` call (line 259), add:
+- [x] **7.3b** After the validation checks (line 238 `if (!newCommandOrPath)...`) and before `addVaultEventHook()` call (line 259), add:
   ```typescript
   if (newActionType === "run_workflow") {
       const abstractFile = ctx.app.vault.getAbstractFileByPath(newCommandOrPath);
@@ -976,10 +976,10 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 354–362)
 
-- [ ] **7.4a** Import `injectWorkflowFrontmatter` from `"../workflows/workflow-frontmatter"` and
+- [x] **7.4a** Import `injectWorkflowFrontmatter` from `"../workflows/workflow-frontmatter"` and
   `vaultEventTypeToWorkflowTrigger` from `"./vault-event-listener-manager"`
 
-- [ ] **7.4b** Replace the current validation failure handling:
+- [x] **7.4b** Replace the current validation failure handling:
   ```typescript
   // After the updated validation from 2.3a:
   const isValidWorkflow = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";

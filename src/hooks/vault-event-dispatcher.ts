@@ -30,7 +30,9 @@ import type { PersonaManager } from "../personas/persona-manager";
 import { ExecutionChainTracker } from "./execution-chain";
 import { executeVaultEventHook } from "./vault-event-hook-engine";
 import type { VaultEventHookContext } from "./vault-event-hook-engine";
+import { vaultEventTypeToWorkflowTrigger } from "./vault-event-listener-manager";
 import { assembleWorkflowPrompt, switchWorkflowPersona } from "../workflows/workflow-executor";
+import { injectWorkflowFrontmatter } from "../workflows/workflow-frontmatter";
 import { logger } from "../utils/logger";
 import type { TemplateVariableRegistry } from "../template-vars";
 import type { HookDelayManager } from "./hook-delay-manager";
@@ -368,19 +370,34 @@ export async function executeRunWorkflowAction(
 	// by reading its frontmatter via metadataCache.
 	const workflowFile = abstractFile;
 	const cache = deps.metadataCache.getFileCache(workflowFile);
-	const fm = cache?.frontmatter;
+	let fm = cache?.frontmatter;
 
-	// Validate it's a Notor workflow note
+	// Validate it's a Notor workflow note — attempt auto-repair if missing
 	const isValidWorkflow = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";
 	if (!isValidWorkflow) {
-		log.warn("File is not a Notor workflow note (missing notor-type: workflow)", {
-			workflowPath,
-		});
-		new Notice(`'${workflowPath}' is not a valid workflow (missing notor-type: workflow).`);
-		return;
+		log.warn("Workflow missing identification, attempting auto-repair", { workflowPath });
+		const trigger = vaultEventTypeToWorkflowTrigger(context.hookEvent as import("../types").VaultEventHookType)
+			?? (context.hookEvent === "on_schedule" ? "scheduled" : "manual");
+		const result = await injectWorkflowFrontmatter(deps.app, workflowFile, trigger);
+		if (!result.injected) {
+			log.warn("Auto-repair failed", { workflowPath });
+			new Notice(`'${workflowPath}' is not a valid workflow and auto-repair failed.`);
+			return;
+		}
+		new Notice(`Auto-repaired workflow headers in '${workflowFile.name}'.`);
+		const newCache = deps.metadataCache.getFileCache(workflowFile);
+		fm = newCache?.frontmatter;
+		if (!fm) {
+			new Notice(`'${workflowPath}' metadata unavailable after repair.`);
+			return;
+		}
 	}
 
 	// Build a minimal Workflow object from frontmatter
+	if (!fm) {
+		new Notice(`'${workflowPath}' has no frontmatter.`);
+		return;
+	}
 	const workflow: import("../types").Workflow = {
 		file_path: workflowFile.path,
 		file_name: workflowFile.name,

@@ -400,7 +400,7 @@ export class VaultEventListenerManager {
  * Returns `null` for `on_schedule` — scheduled workflows use the `"scheduled"`
  * trigger value but are managed by `VaultEventScheduler`, not this manager.
  */
-function vaultEventTypeToWorkflowTrigger(
+export function vaultEventTypeToWorkflowTrigger(
 	event: VaultEventHookType
 ): string | null {
 	switch (event) {
