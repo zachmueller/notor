@@ -259,7 +259,8 @@ function renderWorkflowsSubsection(
 						buildWorkflowSkeleton(trigger, schedule)
 					);
 					new Notice(`Workflow "${result["name"]}" created.`);
-					ctx.redisplay();
+					// Allow metadata cache to index the new file before re-discovery
+					setTimeout(() => ctx.redisplay(), 250);
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
 					log.error("Failed to create workflow", {
