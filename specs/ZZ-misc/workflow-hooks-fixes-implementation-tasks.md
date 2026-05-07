@@ -1026,29 +1026,29 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
 
 ### 8.2 Manual testing checklist
 
-- [ ] **8.2a** Custom notor_dir with capital-W `Workflows/` folder:
+- [x] **8.2a** Custom notor_dir with capital-W `Workflows/` folder:
   - Set `notor_dir` to `"Agent Files/Notor/"` in General settings
   - Ensure `Agent Files/Notor/Workflows/` exists in the vault
   - Click "Create new workflow" → should succeed without error
   - Existing workflows in the folder should appear in the list
 
-- [ ] **8.2b** Workflow frontmatter auto-injection:
+- [x] **8.2b** Workflow frontmatter auto-injection:
   - Create a plain `.md` file (no frontmatter) in the vault
   - Go to Automation settings, add a `run_workflow` hook pointing to that file
   - Verify the file now has `notor-type: workflow`, `notor-trigger`, and `notor-conversation-mode` in its frontmatter
 
-- [ ] **8.2c** Per-workflow mode:
+- [x] **8.2c** Per-workflow mode:
   - Add `notor-conversation-mode: act` to a workflow's frontmatter
   - Set global mode to "Plan"
   - Trigger the workflow → should execute in Act mode
   - Check conversation history file header for `mode: "act"`
 
-- [ ] **8.2d** Per-workflow model preset:
+- [x] **8.2d** Per-workflow model preset:
   - Create a model preset named "fast" in settings
   - Add `notor-model-preset: fast` to a workflow's frontmatter
   - Trigger the workflow → should use the "fast" preset's provider/model
 
-- [ ] **8.2e** Per-hook delay (debounce):
+- [x] **8.2e** Per-hook delay (debounce):
   - Add `notor-hook-delay: 3000` to a workflow's frontmatter
   - Trigger the hook (e.g., save the note) → should NOT execute immediately
   - Save rapidly 3 times within 3 seconds → should execute exactly once, ~3s after the last save
@@ -1057,16 +1057,16 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
     → verify the 2000ms hook-level setting takes precedence over the 5000ms workflow-level default
   - Verify `on_schedule` hooks ignore delay entirely (always fire immediately)
 
-- [ ] **8.2f** Headless execution (no panel):
+- [x] **8.2f** Headless execution (no panel):
   - Close all Notor chat panels
   - Trigger a hook (e.g., Cmd+S with an `on_manual_save` hook)
   - Verify workflow executes successfully (check chat history folder for new conversation file)
 
-- [ ] **8.2g** `notor-type` backward compatibility:
+- [x] **8.2g** `notor-type` backward compatibility:
   - Existing workflows with `notor-workflow: true` should still be discovered and executable
   - New workflows created via UI should have `notor-type: workflow` (not `notor-workflow: true`)
 
-- [ ] **8.2h** Scheduled execution:
+- [x] **8.2h** Scheduled execution:
   - Configure an `on_schedule` hook with `0 * * * *` (every hour on the minute)
   - OR a workflow with `notor-trigger: scheduled` and `notor-schedule: "* * * * *"` (every minute for testing)
   - Close all panels, wait for fire → should execute via headless orchestrator
