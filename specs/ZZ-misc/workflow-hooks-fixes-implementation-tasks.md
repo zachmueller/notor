@@ -1016,7 +1016,7 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
 
 ### 8.1 TypeScript compilation
 
-- [ ] **8.1a** Run `npx tsc --noEmit` to verify all type changes compile cleanly. Key things to check:
+- [x] **8.1a** Run `npx tsc --noEmit` to verify all type changes compile cleanly. Key things to check:
   - `Workflow` interface now has `mode`, `model_preset`, and `hook_delay` fields — every place that constructs a `Workflow` object must include them
   - `VaultEventHook` interface now has `delay_ms` field — every place that constructs a `VaultEventHook` must include it (check `addVaultEventHook` and any test fixtures)
   - Places that construct `Workflow` objects:
