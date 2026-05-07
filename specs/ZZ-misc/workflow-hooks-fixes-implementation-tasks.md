@@ -40,13 +40,26 @@ returns null but `createFolder` throws "Folder already exists".
      - If it IS a `TFolder` → `continue` (folder exists, exact match)
   3. If `getAbstractFileByPath` returns null:
      - Attempt `await ctx.app.vault.createFolder(normalized)` inside try-catch
-     - In the catch block:
-       - Compute parent path: `normalized.substring(0, normalized.lastIndexOf("/"))` (or root if no slash)
-       - Compute target folder name: `normalized.substring(normalized.lastIndexOf("/") + 1)`
-       - Get parent via `getAbstractFileByPath(parentPath)` or `vault.getRoot()`
-       - Scan `parent.children` for a child where `child instanceof TFolder && child.name.toLowerCase() === folderName.toLowerCase()`
-       - If found → `continue` (case-variant exists, safe to proceed)
-       - If not found → throw a descriptive error
+     - In the catch block: scan parent's children for a case-insensitive match; if found → `continue`, otherwise re-throw
+     ```typescript
+     try {
+         await ctx.app.vault.createFolder(normalized);
+     } catch (e) {
+         const parentPath = normalized.includes("/")
+             ? normalized.substring(0, normalized.lastIndexOf("/")) : "";
+         const folderName = normalized.substring(normalized.lastIndexOf("/") + 1);
+         const parent = parentPath
+             ? ctx.app.vault.getAbstractFileByPath(parentPath)
+             : ctx.app.vault.getRoot();
+         if (parent instanceof TFolder) {
+             const match = parent.children.find(
+                 c => c instanceof TFolder && c.name.toLowerCase() === folderName.toLowerCase()
+             );
+             if (match) continue;
+         }
+         throw e;
+     }
+     ```
 
 ---
 
@@ -162,7 +175,7 @@ the global Plan/Act mode setting.
 
 ### 3.1 Add `mode` field to `Workflow` interface
 
-**File:** `src/types.ts` (line 532, after `persona_name`)
+**File:** `src/types.ts` (line 532, after `persona_name` and before `hooks`)
 
 - [ ] **3.1a** Add the field:
   ```typescript
@@ -181,7 +194,7 @@ the global Plan/Act mode setting.
       (rawMode === "plan" || rawMode === "act") ? rawMode : null;
   ```
 
-- [ ] **3.2b** Add `mode` to the returned object (line 390–401, alongside other fields):
+- [ ] **3.2b** Add `mode` to the returned object (line 390–401), placed after `persona_name` and before `hooks`:
   ```typescript
   return {
       file_path: file.path,
@@ -198,7 +211,7 @@ the global Plan/Act mode setting.
   };
   ```
 
-- [ ] **3.2c** Add `ConversationMode` to the import from `"../types"` (line 4–8)
+- [ ] **3.2c** Add `ConversationMode` to the import from `"../types"` (lines 25–28)
 
 ### 3.3 Use workflow mode in foreground execution
 
@@ -255,7 +268,7 @@ model preset to use for execution.
 
 ### 4.1 Add `model_preset` field to `Workflow` interface
 
-**File:** `src/types.ts` (after the `mode` field added in 3.1)
+**File:** `src/types.ts` (after the `mode` field added in 3.1, before `hooks`)
 
 - [ ] **4.1a** Add:
   ```typescript
@@ -324,17 +337,18 @@ model preset to use for execution.
   }
   ```
 
-- [ ] **4.4b** Thread `useExtendedContext` to downstream consumers:
+- [ ] **4.4b** Thread resolved provider/model/context to `_backgroundResponseLoop`:
 
-  The resolved `useExtendedContext` must be passed explicitly because downstream code
-  currently re-reads from `providerConfig` which won't exist when using a preset.
+  The loop currently re-reads `providerId`, `modelId`, and `useExtendedContext` from
+  the provider registry at lines 597–600. When using a preset, the registry won't
+  reflect the correct values. Thread all three as explicit parameters.
 
   1. Pass to `createConversation()` metadata (line 475):
      ```typescript
      use_extended_context: useExtendedContext,  // was: providerConfig?.use_extended_context ?? false
      ```
 
-  2. Add `useExtendedContext` as a parameter to `_backgroundResponseLoop()`:
+  2. Add all three as parameters to `_backgroundResponseLoop()`:
      ```typescript
      // Add to method signature:
      private async _backgroundResponseLoop(
@@ -344,23 +358,27 @@ model preset to use for execution.
          execution: WorkflowExecution,
          concurrencyManager: WorkflowConcurrencyManager,
          chain: ExecutionChain,
-         useExtendedContext: boolean,  // NEW
+         providerId: string,            // NEW
+         modelId: string,               // NEW
+         useExtendedContext: boolean,    // NEW
      ): Promise<void>
      ```
 
-  3. Inside `_backgroundResponseLoop`, use the parameter instead of re-reading (line 600):
+  3. Inside `_backgroundResponseLoop`, DELETE the re-reads at lines 597–600:
      ```typescript
-     // Before:
+     // REMOVE these lines — use the parameters directly:
+     const providerId = this.deps.providerRegistry.getActiveId();
+     const providerConfig = this.deps.providerRegistry.getConfig(providerId);
+     const modelId = providerConfig?.model_id ?? "";
      const useExtendedContext = providerConfig?.use_extended_context ?? false;
-     // After: use the parameter directly (remove this line)
      ```
 
-  4. Pass it at the call site (line ~512):
+  4. Pass all three at the call site (line ~512):
      ```typescript
      await this._backgroundResponseLoop(
          bgConversationManager, assemblyResult, mode,
          execution, concurrencyManager, chain,
-         useExtendedContext,  // NEW
+         providerId, modelId, useExtendedContext,
      );
      ```
 
@@ -500,6 +518,11 @@ The `WorkflowConcurrencyManager` has a default limit of 3 concurrent executions
 (line 74 of `src/workflows/workflow-concurrency.ts`), which bounds the number of
 simultaneous headless orchestrators. Queued items wait until a slot opens.
 
+**SessionGuard safety:** The shared `_sessionGuard` instance (a `Set<string>` of
+active conversation IDs) is safe to pass to headless orchestrators. Background
+workflows always create unique new conversation IDs, so no collision with panel
+conversations is possible. JS is single-threaded, so `Set` operations are atomic.
+
 ---
 
 ## Phase 6 — Auto-Inject Workflow Frontmatter
@@ -567,8 +590,8 @@ Automatically inject required frontmatter into workflow files when:
 The function `vaultEventTypeToWorkflowTrigger()` already provides this mapping.
 It returns `null` for `"on_schedule"` (handled by a separate scheduler).
 
-- [ ] **6.2a** Export `vaultEventTypeToWorkflowTrigger` from `vault-event-listener-manager.ts`
-  if not already exported.
+- [ ] **6.2a** Add `export` keyword to `vaultEventTypeToWorkflowTrigger` in `vault-event-listener-manager.ts`
+  (line 403 — currently a module-private function, not exported).
 
 - [ ] **6.2b** At usage sites, apply the fallback for `on_schedule`:
   ```typescript
