@@ -58,7 +58,7 @@ returns null but `createFolder` throws "Folder already exists".
 `workflowsRootPath` is `"<notorDir>/workflows"` (lowercase). If the user's folder is
 `"Workflows"` (capital W), the lookup fails and returns an empty array.
 
-- [ ] **1.2a** Add `TFolder` to the import from `"obsidian"` (line 2, alongside existing `Vault`, `MetadataCache`, `TFile` imports)
+- [x] **1.2a** ~~Add `TFolder` to the import from `"obsidian"`~~ — **SKIP**: `TFolder` is already imported at line 2 (`import type { MetadataCache, TFile, TFolder, Vault } from "obsidian";`)
 
 - [ ] **1.2b** After the initial `vault.getAbstractFileByPath(workflowsRootPath)` call (line 78), add case-insensitive fallback:
   ```
@@ -324,6 +324,46 @@ model preset to use for execution.
   }
   ```
 
+- [ ] **4.4b** Thread `useExtendedContext` to downstream consumers:
+
+  The resolved `useExtendedContext` must be passed explicitly because downstream code
+  currently re-reads from `providerConfig` which won't exist when using a preset.
+
+  1. Pass to `createConversation()` metadata (line 475):
+     ```typescript
+     use_extended_context: useExtendedContext,  // was: providerConfig?.use_extended_context ?? false
+     ```
+
+  2. Add `useExtendedContext` as a parameter to `_backgroundResponseLoop()`:
+     ```typescript
+     // Add to method signature:
+     private async _backgroundResponseLoop(
+         bgConversationManager: ConversationManager,
+         assemblyResult: WorkflowAssemblyResult,
+         mode: ConversationMode,
+         execution: WorkflowExecution,
+         concurrencyManager: WorkflowConcurrencyManager,
+         chain: ExecutionChain,
+         useExtendedContext: boolean,  // NEW
+     ): Promise<void>
+     ```
+
+  3. Inside `_backgroundResponseLoop`, use the parameter instead of re-reading (line 600):
+     ```typescript
+     // Before:
+     const useExtendedContext = providerConfig?.use_extended_context ?? false;
+     // After: use the parameter directly (remove this line)
+     ```
+
+  4. Pass it at the call site (line ~512):
+     ```typescript
+     await this._backgroundResponseLoop(
+         bgConversationManager, assemblyResult, mode,
+         execution, concurrencyManager, chain,
+         useExtendedContext,  // NEW
+     );
+     ```
+
 ### 4.5 Same resolution in foreground execution
 
 **File:** `src/chat/workflow-executor.ts` — `executeWorkflow()` (lines 202–205)
@@ -335,6 +375,10 @@ model preset to use for execution.
   const modelId = this.deps.getActiveModelId();
   ```
   Should resolve from `workflow.model_preset` first, falling back to the active provider.
+
+- [ ] **4.5b** Use the resolved `useExtendedContext` at both downstream sites:
+  - Line 223: `use_extended_context: useExtendedContext,` (in `createConversation` metadata)
+  - Line 284: use the resolved variable instead of `providerConfig?.use_extended_context ?? false`
 
 ---
 
@@ -354,10 +398,11 @@ a per-execution headless orchestrator.
   ```typescript
   /**
    * Create a headless orchestrator for background workflow execution.
-   * Does not require any open chat panel. Uses the specified preset
-   * or falls back to the global default preset for provider/model.
+   * Does not require any open chat panel. Provides full parity with
+   * panel-based orchestrators (minus the view).
    */
-  createHeadlessOrchestrator(presetName?: string | null): ChatOrchestrator {
+  createHeadlessOrchestrator(): ChatOrchestrator {
+      // VaultRuleManager is a constructor param (no setter exists)
       const orchestrator = new ChatOrchestrator(
           this.app,
           this.getProviderRegistry(),
@@ -367,37 +412,32 @@ a per-execution headless orchestrator.
           this.settings,
           this._sessionGuard,
           undefined, // no view — headless
-          this._vaultRuleManager,
+          this.getVaultRuleManager(),
           this.getTemplateRegistry(),
       );
 
-      // Wire tool definitions callback (same as panel-based orchestrators)
+      // Full parity with createOrchestrator() post-construction wiring
       orchestrator.setGetToolDefinitions(
           (config) => this.getToolDispatcher().getToolDefinitions(config)
       );
-
-      // Wire persona manager if available
-      if (this._personaManager) {
-          orchestrator.setPersonaManager(this._personaManager);
-      }
-
-      // Wire workflow hook override manager
-      if (this._workflowHookOverrideManager) {
-          orchestrator.setWorkflowHookOverrideManager(this._workflowHookOverrideManager);
-      }
-
-      // Wire vault rule manager
-      if (this._vaultRuleManager) {
-          orchestrator.setVaultRuleManager(this._vaultRuleManager);
-      }
+      orchestrator.setPersonaManager(this.getPersonaManager());
+      orchestrator.setWorkflowHookOverrideManager(this.getWorkflowHookOverrideManager());
+      orchestrator.setChatBlockRegistry(this.getChatBlockRegistry());
+      orchestrator.setExtensionAccessors({
+          lifecycle: this.getExtensionLifecycleManager(),
+          toolEvent: this.getExtensionToolEventManager(),
+      });
+      orchestrator.setCheckpointManager(new CheckpointManager(this.app));
+      orchestrator.setSharedCheckpointManager(() => this._sharedCheckpointManager);
 
       return orchestrator;
   }
   ```
 
-  NOTE: Review other wiring done for panel-based orchestrators in `wireView()` /
-  `createOrchestratorForView()` (search for these in main.ts) and replicate the
-  subset needed for background execution (tool definitions, persona, rules, hooks).
+  NOTE: This mirrors `createOrchestrator()` (main.ts line 2159) with full post-construction
+  wiring. The only difference is `view` is `undefined`. Background workflows bypass
+  SessionGuard (they use WorkflowConcurrencyManager instead), so no lifecycle cleanup
+  is needed — the orchestrator is GC'd after the execution completes.
 
 ### 5.2 Add `createHeadlessOrchestrator` to `DispatcherDeps`
 
@@ -406,7 +446,7 @@ a per-execution headless orchestrator.
 - [ ] **5.2a** Add to the interface:
   ```typescript
   /** Factory to create a headless orchestrator for background workflow execution. */
-  createHeadlessOrchestrator?: (presetName?: string | null) => ChatOrchestrator;
+  createHeadlessOrchestrator?: () => ChatOrchestrator;
   ```
 
 ### 5.3 Use headless orchestrator in dispatcher
@@ -432,10 +472,9 @@ a per-execution headless orchestrator.
           new Notice(`Workflow '${workflow.display_name}' skipped: unable to create execution context.`);
           return;
       }
-      orchestrator = deps.createHeadlessOrchestrator(workflow.model_preset);
+      orchestrator = deps.createHeadlessOrchestrator();
       log.info("Created headless orchestrator for background workflow", {
           workflowName: workflow.display_name,
-          preset: workflow.model_preset ?? "default",
       });
   }
   ```
@@ -446,7 +485,7 @@ a per-execution headless orchestrator.
 
 - [ ] **5.4a** Add to the returned deps object:
   ```typescript
-  createHeadlessOrchestrator: (presetName) => this.createHeadlessOrchestrator(presetName),
+  createHeadlessOrchestrator: () => this.createHeadlessOrchestrator(),
   ```
 
 ### 5.5 Lifecycle considerations
@@ -487,61 +526,62 @@ Automatically inject required frontmatter into workflow files when:
 
   /**
    * Inject required workflow frontmatter fields into a file.
-   * Uses new `notor-type: workflow` style.
-   *
-   * If a frontmatter block exists, adds missing fields inline.
-   * If no frontmatter block exists, prepends a complete one.
-   *
-   * @param app     - Obsidian App instance
-   * @param file    - Target TFile
-   * @param trigger - Workflow trigger value (e.g., "on-manual-save", "scheduled")
-   * @param mode    - Conversation mode default (default: "plan")
+   * Uses `app.fileManager.processFrontMatter()` (same pattern as personas.ts:261).
+   * Adds missing fields only — does not overwrite existing values.
    */
   export async function injectWorkflowFrontmatter(
       app: App,
       file: TFile,
       trigger: string,
       mode: string = "plan"
-  ): Promise<FrontmatterInjectionResult> { ... }
+  ): Promise<FrontmatterInjectionResult> {
+      const fieldsAdded: string[] = [];
+
+      await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+          if (!fm["notor-type"] && fm["notor-workflow"] !== true) {
+              fm["notor-type"] = "workflow";
+              fieldsAdded.push("notor-type");
+          }
+          if (!fm["notor-trigger"]) {
+              fm["notor-trigger"] = trigger;
+              fieldsAdded.push("notor-trigger");
+          }
+          if (!fm["notor-conversation-mode"]) {
+              fm["notor-conversation-mode"] = mode;
+              fieldsAdded.push("notor-conversation-mode");
+          }
+      });
+
+      return { injected: fieldsAdded.length > 0, fieldsAdded };
+  }
   ```
 
-  Implementation:
-  1. Read file content via `app.vault.read(file)`
-  2. Check if content starts with `---\n` (has frontmatter)
-  3. If has frontmatter:
-     - Find end marker (`\n---` after the opening)
-     - Parse existing lines between markers
-     - Check which fields are present: `notor-type` / `notor-workflow`, `notor-trigger`, `notor-conversation-mode`
-     - Append missing fields before the closing `---`
-     - Write back via `app.vault.modify(file, newContent)`
-  4. If no frontmatter:
-     - Prepend complete block: `---\nnotor-type: workflow\nnotor-trigger: <trigger>\nnotor-conversation-mode: <mode>\n---\n\n`
-     - Write via `app.vault.modify(file, fm + originalContent)`
-  5. Return `{ injected: true/false, fieldsAdded: [...] }`
+  This uses Obsidian's built-in `processFrontMatter` which safely handles both
+  existing and missing frontmatter blocks, preserves formatting, and triggers
+  metadataCache updates automatically.
 
-### 6.2 Add event-to-trigger mapping constant
+### 6.2 Reuse existing event-to-trigger mapping
 
-**File:** `src/workflows/workflow-frontmatter.ts` (or a shared location)
+**File:** `src/hooks/vault-event-listener-manager.ts` (lines 403–423)
 
-- [ ] **6.2a** Export the mapping:
+The function `vaultEventTypeToWorkflowTrigger()` already provides this mapping.
+It returns `null` for `"on_schedule"` (handled by a separate scheduler).
+
+- [ ] **6.2a** Export `vaultEventTypeToWorkflowTrigger` from `vault-event-listener-manager.ts`
+  if not already exported.
+
+- [ ] **6.2b** At usage sites, apply the fallback for `on_schedule`:
   ```typescript
-  import type { VaultEventHookType } from "../types";
+  import { vaultEventTypeToWorkflowTrigger } from "../hooks/vault-event-listener-manager";
 
-  export const VAULT_EVENT_TO_TRIGGER: Record<VaultEventHookType, string> = {
-      on_note_open: "on-note-open",
-      on_note_create: "on-note-create",
-      on_save: "on-save",
-      on_manual_save: "on-manual-save",
-      on_tag_change: "on-tag-change",
-      on_schedule: "scheduled",
-  };
+  const trigger = vaultEventTypeToWorkflowTrigger(event) ?? (event === "on_schedule" ? "scheduled" : "manual");
   ```
 
 ### 6.3 Auto-inject at hook configuration time (settings UI)
 
 **File:** `src/settings/sections/vault-event-hook-subsection.ts` (lines 236–271, the "Add" button click handler)
 
-- [ ] **6.3a** Import `TFile` from `"obsidian"`, `injectWorkflowFrontmatter` and `VAULT_EVENT_TO_TRIGGER` from the new utility
+- [ ] **6.3a** Import `TFile` from `"obsidian"`, `injectWorkflowFrontmatter` from `"../../workflows/workflow-frontmatter"`, and `vaultEventTypeToWorkflowTrigger` from `"../../hooks/vault-event-listener-manager"`
 
 - [ ] **6.3b** After the validation checks (line 238 `if (!newCommandOrPath)...`) and before `addVaultEventHook()` call (line 259), add:
   ```typescript
@@ -552,7 +592,8 @@ Automatically inject required frontmatter into workflow files when:
           const fm = cache?.frontmatter;
           const isValid = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";
           if (!isValid) {
-              const trigger = VAULT_EVENT_TO_TRIGGER[event];
+              const trigger = vaultEventTypeToWorkflowTrigger(event)
+                  ?? (event === "on_schedule" ? "scheduled" : "manual");
               const result = await injectWorkflowFrontmatter(ctx.app, abstractFile, trigger, "plan");
               if (result.injected) {
                   new Notice(`Added workflow headers to "${abstractFile.name}" (${result.fieldsAdded.join(", ")})`);
@@ -567,7 +608,8 @@ Automatically inject required frontmatter into workflow files when:
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 354–362)
 
-- [ ] **6.4a** Import `injectWorkflowFrontmatter` and `VAULT_EVENT_TO_TRIGGER` from `"../workflows/workflow-frontmatter"`
+- [ ] **6.4a** Import `injectWorkflowFrontmatter` from `"../workflows/workflow-frontmatter"` and
+  `vaultEventTypeToWorkflowTrigger` from `"./vault-event-listener-manager"`
 
 - [ ] **6.4b** Replace the current validation failure handling:
   ```typescript
@@ -575,7 +617,8 @@ Automatically inject required frontmatter into workflow files when:
   const isValidWorkflow = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";
   if (!isValidWorkflow) {
       log.warn("Workflow missing identification, attempting auto-repair", { workflowPath });
-      const trigger = VAULT_EVENT_TO_TRIGGER[context.hookEvent as VaultEventHookType] ?? "manual";
+      const trigger = vaultEventTypeToWorkflowTrigger(context.hookEvent as VaultEventHookType)
+          ?? (context.hookEvent === "on_schedule" ? "scheduled" : "manual");
       const result = await injectWorkflowFrontmatter(deps.app, workflowFile, trigger);
       if (!result.injected) {
           log.warn("Auto-repair failed", { workflowPath });
@@ -583,8 +626,17 @@ Automatically inject required frontmatter into workflow files when:
           return;
       }
       new Notice(`Auto-repaired workflow headers in '${workflowFile.name}'.`);
-      // Wait for metadataCache to update asynchronously
-      await new Promise(resolve => setTimeout(resolve, 250));
+      // Wait for metadataCache to process the file change (event-based with timeout fallback)
+      await new Promise<void>((resolve) => {
+          const timeout = setTimeout(() => { off(); resolve(); }, 2000);
+          const off = deps.metadataCache.on("changed", (changedFile) => {
+              if (changedFile.path === workflowFile.path) {
+                  clearTimeout(timeout);
+                  off();
+                  resolve();
+              }
+          });
+      });
       // Re-read frontmatter
       const newCache = deps.metadataCache.getFileCache(workflowFile);
       fm = newCache?.frontmatter;
