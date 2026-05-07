@@ -246,6 +246,9 @@ the global Plan/Act mode setting.
   const mode = workflow.mode ?? this.deps.getSettings().mode;
   ```
 
+  NOTE: This change is subsumed by task 4.5a which replaces the same lines.
+  Implement once in Phase 4 — listed here for logical completeness.
+
 ### 3.5 Include mode in dispatcher's minimal Workflow object
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 365–378)
@@ -298,61 +301,92 @@ model preset to use for execution.
   model_preset: (fm["notor-model-preset"] as string | null | undefined)?.trim() ?? null,
   ```
 
-### 4.4 Resolve preset to provider/model in background execution
+### 4.4 Extract shared preset resolution helper
 
-**File:** `src/chat/workflow-executor.ts` — `executeBackgroundWorkflow()` (lines 441–443)
+**New helper** in `src/chat/workflow-executor.ts` (module-level or private method):
 
-- [ ] **4.4a** Replace the current provider/model resolution:
+- [ ] **4.4a** Create a `resolveWorkflowProviderConfig()` helper:
+  ```typescript
+  interface ResolvedProviderConfig {
+      providerId: string;
+      modelId: string;
+      useExtendedContext: boolean;
+  }
+
+  /**
+   * Resolve provider/model/context from a workflow's model_preset, falling back
+   * to the supplied defaults when no preset is configured or found.
+   */
+  function resolveWorkflowProviderConfig(
+      workflow: Workflow,
+      settings: NotorSettings,
+      providerRegistry: ProviderRegistry,
+      fallbackProviderId: string,
+      fallbackModelId: string,
+      fallbackExtendedContext: boolean,
+  ): ResolvedProviderConfig {
+      if (workflow.model_preset) {
+          const presets = settings.model_presets;
+          const preset = presets.find(p => p.name === workflow.model_preset);
+          if (preset?.provider_id && preset?.model_id) {
+              return {
+                  providerId: preset.provider_id,
+                  modelId: preset.model_id,
+                  useExtendedContext: preset.use_extended_context,
+              };
+          }
+          log.warn("Workflow model preset not found, using fallback", {
+              preset: workflow.model_preset,
+              workflowName: workflow.display_name,
+          });
+      }
+      return {
+          providerId: fallbackProviderId,
+          modelId: fallbackModelId,
+          useExtendedContext: fallbackExtendedContext,
+      };
+  }
+  ```
+
+### 4.5 Use helper in background execution
+
+**File:** `src/chat/workflow-executor.ts` — `executeBackgroundWorkflow()` (lines 441–444)
+
+- [ ] **4.5a** Replace the current provider/model/mode resolution (lines 441–444):
   ```typescript
   // Before:
   const providerId = this.deps.providerRegistry.getActiveId();
   const providerConfig = this.deps.providerRegistry.getConfig(providerId);
   const modelId = providerConfig?.model_id ?? "";
+  const mode = this.deps.getSettings().mode;
 
   // After:
-  let providerId: string;
-  let modelId: string;
-  let useExtendedContext: boolean;
-
-  if (workflow.model_preset) {
-      const presets = this.deps.getSettings().model_presets;
-      const preset = presets.find(p => p.name === workflow.model_preset);
-      if (preset?.provider_id && preset?.model_id) {
-          providerId = preset.provider_id;
-          modelId = preset.model_id;
-          useExtendedContext = preset.use_extended_context;
-      } else {
-          log.warn("Workflow model preset not found, using default", {
-              preset: workflow.model_preset,
-              workflowName: workflow.display_name,
-          });
-          const defaultPreset = presets.find(p => p.name === this.deps.getSettings().default_preset);
-          providerId = defaultPreset?.provider_id ?? this.deps.providerRegistry.getActiveId();
-          modelId = defaultPreset?.model_id ?? "";
-          useExtendedContext = defaultPreset?.use_extended_context ?? false;
-      }
-  } else {
-      providerId = this.deps.providerRegistry.getActiveId();
-      const providerConfig = this.deps.providerRegistry.getConfig(providerId);
-      modelId = providerConfig?.model_id ?? "";
-      useExtendedContext = providerConfig?.use_extended_context ?? false;
-  }
+  const mode = workflow.mode ?? this.deps.getSettings().mode;
+  const registryProviderId = this.deps.providerRegistry.getActiveId();
+  const registryConfig = this.deps.providerRegistry.getConfig(registryProviderId);
+  const { providerId, modelId, useExtendedContext } = resolveWorkflowProviderConfig(
+      workflow,
+      this.deps.getSettings(),
+      this.deps.providerRegistry,
+      registryProviderId,
+      registryConfig?.model_id ?? "",
+      registryConfig?.use_extended_context ?? false,
+  );
   ```
 
-- [ ] **4.4b** Thread resolved provider/model/context to `_backgroundResponseLoop`:
+- [ ] **4.5b** Thread resolved values to `_backgroundResponseLoop`:
 
-  The loop currently re-reads `providerId`, `modelId`, and `useExtendedContext` from
-  the provider registry at lines 597–600. When using a preset, the registry won't
-  reflect the correct values. Thread all three as explicit parameters.
+  The loop currently re-reads `providerId`, `modelId`, `useExtendedContext`, and
+  `pinnedPersona` from the provider registry at lines 596–600. When using a preset,
+  the registry won't reflect the correct values.
 
   1. Pass to `createConversation()` metadata (line 475):
      ```typescript
      use_extended_context: useExtendedContext,  // was: providerConfig?.use_extended_context ?? false
      ```
 
-  2. Add all three as parameters to `_backgroundResponseLoop()`:
+  2. Add all four as parameters to `_backgroundResponseLoop()`:
      ```typescript
-     // Add to method signature:
      private async _backgroundResponseLoop(
          bgConversationManager: ConversationManager,
          assemblyResult: WorkflowAssemblyResult,
@@ -363,40 +397,55 @@ model preset to use for execution.
          providerId: string,            // NEW
          modelId: string,               // NEW
          useExtendedContext: boolean,    // NEW
+         pinnedPersona: Persona | null,  // NEW — snapshotted at call site
      ): Promise<void>
      ```
 
-  3. Inside `_backgroundResponseLoop`, DELETE the re-reads at lines 597–600:
+  3. Inside `_backgroundResponseLoop`, DELETE the re-reads at lines 596–600:
      ```typescript
      // REMOVE these lines — use the parameters directly:
+     const pinnedPersona = this.deps.getPersonaManager()?.getActivePersona() ?? null;
      const providerId = this.deps.providerRegistry.getActiveId();
      const providerConfig = this.deps.providerRegistry.getConfig(providerId);
      const modelId = providerConfig?.model_id ?? "";
      const useExtendedContext = providerConfig?.use_extended_context ?? false;
      ```
 
-  4. Pass all three at the call site (line ~512):
+  4. Snapshot persona and pass all four at the call site (line ~512):
      ```typescript
+     const pinnedPersona = this.deps.getPersonaManager()?.getActivePersona() ?? null;
      await this._backgroundResponseLoop(
          bgConversationManager, assemblyResult, mode,
          execution, concurrencyManager, chain,
-         providerId, modelId, useExtendedContext,
+         providerId, modelId, useExtendedContext, pinnedPersona,
      );
      ```
 
-### 4.5 Same resolution in foreground execution
+### 4.6 Use helper in foreground execution
 
 **File:** `src/chat/workflow-executor.ts` — `executeWorkflow()` (lines 202–205)
 
-- [ ] **4.5a** Apply the same preset resolution pattern as 4.4a for the foreground path. Currently:
+- [ ] **4.6a** Apply the same preset resolution for the foreground path:
   ```typescript
+  // Before:
   const providerId = this.deps.getActiveProviderId();
   const providerConfig = this.deps.providerRegistry.getConfig(providerId);
   const modelId = this.deps.getActiveModelId();
-  ```
-  Should resolve from `workflow.model_preset` first, falling back to the active provider.
 
-- [ ] **4.5b** Use the resolved `useExtendedContext` at both downstream sites:
+  // After (foreground uses per-orchestrator accessors as fallback):
+  const fallbackProviderId = this.deps.getActiveProviderId();
+  const fallbackConfig = this.deps.providerRegistry.getConfig(fallbackProviderId);
+  const { providerId, modelId, useExtendedContext } = resolveWorkflowProviderConfig(
+      workflow,
+      this.deps.getSettings(),
+      this.deps.providerRegistry,
+      fallbackProviderId,
+      this.deps.getActiveModelId(),
+      fallbackConfig?.use_extended_context ?? false,
+  );
+  ```
+
+- [ ] **4.6b** Use the resolved `useExtendedContext` at both downstream sites:
   - Line 223: `use_extended_context: useExtendedContext,` (in `createConversation` metadata)
   - Line 284: use the resolved variable instead of `providerConfig?.use_extended_context ?? false`
 
@@ -567,37 +616,71 @@ existing behavior).
   hookDelayManager: HookDelayManager;
   ```
 
-- [ ] **5.8b** In `_executeOneHook()`, resolve the effective delay for the current hook:
-  ```typescript
-  // For VaultEventHook (settings-configured):
-  const effectiveDelay = hook.delay_ms;
+- [ ] **5.8b** In `_executeOneHook()`, resolve the effective delay and wrap only the
+  `executeRunWorkflowAction` call (not the entire hook logic). The delay wraps just
+  the workflow execution — shell commands (`execute_command`) are never delayed.
 
-  // For Workflow (trigger-based):
-  const effectiveDelay = hook.hook_delay ?? 0;
-  ```
-  For `run_workflow` action type on a `VaultEventHook`, the hook's `delay_ms` takes
-  precedence over the target workflow's `hook_delay` (hook-level overrides workflow-level).
-
-- [ ] **5.8c** Wrap the execution call with the delay manager when `effectiveDelay > 0`:
+  For the **workflow trigger path** (line 234, where `isWorkflowTrigger === true`):
   ```typescript
+  const effectiveDelay = (context.hookEvent === "on_schedule") ? 0 : (hook.hook_delay ?? 0);
+
   if (effectiveDelay > 0) {
-      const hookKey = _isWorkflow(hook) ? hook.file_path : hook.id;
       deps.hookDelayManager.schedule(
-          hookKey,
+          workflow.file_path,
           context.notePath ?? "",
           effectiveDelay,
-          () => { /* existing execution logic */ },
+          async () => {
+              // Re-check concurrency at execution time (not schedule time)
+              if (deps.concurrencyManager.isWorkflowRunning(workflow.file_path)) {
+                  log.warn("Workflow already running after delay; skipping", { name: workflow.display_name });
+                  return;
+              }
+              await executeRunWorkflowAction(workflow.file_path, context, chain, deps);
+          },
       );
-      return; // scheduled — don't execute synchronously
+      return;
   }
-  // effectiveDelay === 0 → execute immediately (existing behavior)
+
+  // effectiveDelay === 0 → existing behavior (immediate concurrency check + execute)
+  if (deps.concurrencyManager.isWorkflowRunning(workflow.file_path)) { ... }
+  await executeRunWorkflowAction(workflow.file_path, context, chain, deps);
   ```
 
-- [ ] **5.8d** For `on_schedule` event type, skip delay logic entirely (always execute immediately):
+  For the **VaultEventHook `run_workflow` path** (line 289):
   ```typescript
-  // At the top of _executeOneHook(), before delay resolution:
-  const skipDelay = context.hookEvent === "on_schedule";
+  const effectiveDelay = (context.hookEvent === "on_schedule") ? 0 : (vaultHook.delay_ms ?? 0);
+
+  if (effectiveDelay > 0) {
+      deps.hookDelayManager.schedule(
+          vaultHook.id,
+          context.notePath ?? "",
+          effectiveDelay,
+          async () => {
+              // Re-check concurrency at execution time
+              if (deps.concurrencyManager.isWorkflowRunning(workflowPath)) {
+                  log.warn("Workflow already running after delay; skipping", { workflowPath });
+                  return;
+              }
+              await executeRunWorkflowAction(workflowPath, context, chain, deps);
+          },
+      );
+      return;
+  }
+
+  // effectiveDelay === 0 → existing behavior
+  if (deps.concurrencyManager.isWorkflowRunning(workflowPath)) { ... }
+  await executeRunWorkflowAction(workflowPath, context, chain, deps);
   ```
+
+  For `run_workflow` action type on a `VaultEventHook`, the hook's `delay_ms` takes
+  precedence over the target workflow's `hook_delay` (hook-level overrides workflow-level).
+  The target workflow's `hook_delay` is NOT consulted here — it only applies when the
+  workflow is triggered directly via its own `notor-trigger` matching.
+
+- [ ] **5.8c** _(removed — merged into 5.8b above)_
+
+- [ ] **5.8d** `on_schedule` events skip delay entirely (handled by setting `effectiveDelay = 0`
+  when `context.hookEvent === "on_schedule"` in both paths above).
 
 ### 5.9 Wire `HookDelayManager` in main.ts
 
@@ -643,54 +726,28 @@ a per-execution headless orchestrator.
 
 ---
 
-### 6.1 Create headless orchestrator factory method
+### 6.1 Expose headless orchestrator factory
 
 **File:** `src/main.ts` — plugin class
 
-- [ ] **6.1a** Add a public method to the plugin class:
+- [ ] **6.1a** Add a thin wrapper method that reuses the existing `createOrchestrator()`:
   ```typescript
   /**
    * Create a headless orchestrator for background workflow execution.
-   * Does not require any open chat panel. Provides full parity with
-   * panel-based orchestrators (minus the view).
+   * Reuses createOrchestrator() (line 2159) which already passes undefined
+   * for view — the view is only wired later via wireView(). Skipping
+   * wireView() gives a fully functional headless orchestrator.
    */
   createHeadlessOrchestrator(): ChatOrchestrator {
-      // VaultRuleManager is a constructor param (no setter exists)
-      const orchestrator = new ChatOrchestrator(
-          this.app,
-          this.getProviderRegistry(),
-          this.getSystemPromptBuilder(),
-          this.getToolDispatcher(),
-          this.getHistoryManager(),
-          this.settings,
-          this._sessionGuard,
-          undefined, // no view — headless
-          this.getVaultRuleManager(),
-          this.getTemplateRegistry(),
-      );
-
-      // Full parity with createOrchestrator() post-construction wiring
-      orchestrator.setGetToolDefinitions(
-          (config) => this.getToolDispatcher().getToolDefinitions(config)
-      );
-      orchestrator.setPersonaManager(this.getPersonaManager());
-      orchestrator.setWorkflowHookOverrideManager(this.getWorkflowHookOverrideManager());
-      orchestrator.setChatBlockRegistry(this.getChatBlockRegistry());
-      orchestrator.setExtensionAccessors({
-          lifecycle: this.getExtensionLifecycleManager(),
-          toolEvent: this.getExtensionToolEventManager(),
-      });
-      orchestrator.setCheckpointManager(new CheckpointManager(this.app));
-      orchestrator.setSharedCheckpointManager(() => this._sharedCheckpointManager);
-
-      return orchestrator;
+      return this.createOrchestrator();
   }
   ```
 
-  NOTE: This mirrors `createOrchestrator()` (main.ts line 2159) with full post-construction
-  wiring. The only difference is `view` is `undefined`. Background workflows bypass
-  SessionGuard (they use WorkflowConcurrencyManager instead), so no lifecycle cleanup
-  is needed — the orchestrator is GC'd after the execution completes.
+  `createOrchestrator()` already has full post-construction wiring (tool definitions,
+  persona manager, extension accessors, checkpoint manager, etc.). No duplication needed.
+
+  Background workflows bypass SessionGuard (they use WorkflowConcurrencyManager instead),
+  so no lifecycle cleanup is needed — the orchestrator is GC'd after the execution completes.
 
 ### 6.2 Add `createHeadlessOrchestrator` to `DispatcherDeps`
 
@@ -734,12 +791,15 @@ a per-execution headless orchestrator.
 
 ### 6.4 Wire factory in main.ts
 
-**File:** `src/main.ts` — `getDispatcherDeps()` function (line ~1427)
+**File:** `src/main.ts` — `getDispatcherDeps()` closure (line 1427)
 
 - [ ] **6.4a** Add to the returned deps object:
   ```typescript
   createHeadlessOrchestrator: () => this.createHeadlessOrchestrator(),
   ```
+
+  NOTE: `getDispatcherDeps` is a closure (`const getDispatcherDeps = (): DispatcherDeps => { ... }`)
+  defined inside the plugin initialization flow, with `this` bound to the plugin instance.
 
 ### 6.5 Lifecycle considerations
 
@@ -884,16 +944,17 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
           return;
       }
       new Notice(`Auto-repaired workflow headers in '${workflowFile.name}'.`);
-      // Wait for metadataCache to process the file change (event-based with timeout fallback)
+      // Wait for metadataCache to process the file change (event-based with timeout fallback).
+      // Obsidian's .on() returns an EventRef; use app.vault.offref() to unregister.
       await new Promise<void>((resolve) => {
-          const timeout = setTimeout(() => { off(); resolve(); }, 2000);
-          const off = deps.metadataCache.on("changed", (changedFile) => {
+          const ref = deps.metadataCache.on("changed", (changedFile) => {
               if (changedFile.path === workflowFile.path) {
                   clearTimeout(timeout);
-                  off();
+                  deps.app.vault.offref(ref);
                   resolve();
               }
           });
+          const timeout = setTimeout(() => { deps.app.vault.offref(ref); resolve(); }, 2000);
       });
       // Re-read frontmatter
       const newCache = deps.metadataCache.getFileCache(workflowFile);
@@ -979,8 +1040,7 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
 1. Phase 1 (case-insensitive handling) — unblocks workflow discovery
 2. Phase 2 (`notor-type` migration) — foundational for Phase 7's injection
 3. Phase 3 (per-workflow mode) — adds `mode` field to `Workflow` type
-4. Phase 4 (per-workflow model preset) — adds `model_preset` field
-5. Phase 5 (per-hook delay/debounce) — adds `hook_delay` field + `HookDelayManager`
-6. Phase 6 (headless orchestrator) — removes panel dependency
-7. Phase 7 (auto-inject frontmatter) — uses all new fields
-8. Phase 8 (integration testing)
+4. Phase 4 (per-workflow model preset) — adds `model_preset` field + shared resolver helper
+5. Phase 5+6 (per-hook delay + headless orchestrator) — combined since both modify `DispatcherDeps` and dispatcher execution flow
+6. Phase 7 (auto-inject frontmatter) — uses all new fields
+7. Phase 8 (integration testing)
