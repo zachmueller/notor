@@ -10,7 +10,9 @@ per-workflow mode/preset configuration, and the `notor-type` frontmatter migrati
 - `src/chat/workflow-executor.ts` — foreground + background workflow execution
 - `src/settings/sections/rules-and-workflows.ts` — workflow skeleton + settings UI
 - `src/settings/sections/vault-event-hook-subsection.ts` — hook configuration UI
-- `src/types.ts` — `Workflow` interface, `ConversationMode`
+- `src/hooks/vault-event-debounce.ts` — existing global debounce (complementary to per-hook delay)
+- `src/hooks/hook-delay-manager.ts` — **NEW** per-hook debounce delay manager
+- `src/types.ts` — `Workflow` interface, `VaultEventHook` interface, `ConversationMode`
 - `src/main.ts` — plugin initialization, orchestrator creation, scheduler wiring
 
 ---
@@ -400,7 +402,240 @@ model preset to use for execution.
 
 ---
 
-## Phase 5 — Remove Orchestrator Dependency for Background Workflows
+## Phase 5 — Per-Hook Execution Delay (Debounce)
+
+Add a configurable delay (in milliseconds) between when a vault event fires and when
+the hook's automation actually executes. Operates as a debounce: rapid-fire events
+reset the timer so only the last event in a burst triggers execution. Combined with
+the existing `WorkflowConcurrencyManager` single-instance guard for deduplication.
+
+Delay is configurable at two levels:
+- **Per-workflow frontmatter** (`notor-hook-delay`): default delay for any trigger of this workflow
+- **Per-hook settings UI** (`delay_ms` field on `VaultEventHook`): overrides the workflow-level value
+
+Applies to all vault event hook types (on_note_open, on_note_create, on_save,
+on_manual_save, on_tag_change). Does NOT apply to on_schedule (cron timing is
+sufficient). Default value is `0` (no delay, immediate execution — preserves
+existing behavior).
+
+---
+
+### 5.1 Add `delay_ms` field to `VaultEventHook` interface
+
+**File:** `src/types.ts` (inside the `VaultEventHook` interface, after `schedule`)
+
+- [ ] **5.1a** Add the field:
+  ```typescript
+  /** Delay in ms before executing this hook after the event fires (0 = immediate). Acts as debounce. */
+  delay_ms: number;
+  ```
+
+### 5.2 Add `hook_delay` field to `Workflow` interface
+
+**File:** `src/types.ts` (inside the `Workflow` interface, after `model_preset` added in 4.1)
+
+- [ ] **5.2a** Add the field:
+  ```typescript
+  /** Per-workflow hook delay from `notor-hook-delay` in ms (null = no delay preference). */
+  hook_delay: number | null;
+  ```
+
+### 5.3 Parse `notor-hook-delay` in workflow discovery
+
+**File:** `src/workflows/workflow-discovery.ts` — `parseWorkflowFile()` (after model preset parsing)
+
+- [ ] **5.3a** Add parsing:
+  ```typescript
+  const rawHookDelay = frontmatter["notor-hook-delay"];
+  const hookDelay: number | null =
+      (typeof rawHookDelay === "number" && rawHookDelay >= 0) ? rawHookDelay : null;
+  ```
+
+- [ ] **5.3b** Include `hook_delay: hookDelay` in the returned object
+
+### 5.4 Include `hook_delay` in dispatcher's minimal Workflow object
+
+**File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 365–378)
+
+- [ ] **5.4a** Add to the constructed Workflow object:
+  ```typescript
+  hook_delay: (() => {
+      const raw = fm["notor-hook-delay"];
+      return (typeof raw === "number" && raw >= 0) ? raw : null;
+  })(),
+  ```
+
+### 5.5 Add delay_ms to hook configuration UI
+
+**File:** `src/settings/sections/vault-event-hook-subsection.ts`
+
+- [ ] **5.5a** In the "Add hook" form (after the label input, ~line 195), add a delay input field:
+  ```typescript
+  let newDelayMs = 0;
+  new Setting(addContainer)
+      .setName("Delay (ms)")
+      .setDesc("Debounce delay before execution. 0 = immediate.")
+      .addText((text) =>
+          text.setPlaceholder("0").onChange((value) => {
+              const parsed = parseInt(value, 10);
+              newDelayMs = (!isNaN(parsed) && parsed >= 0) ? parsed : 0;
+          })
+      );
+  ```
+
+- [ ] **5.5b** In the Add button handler, pass `delay_ms: newDelayMs` to `addVaultEventHook()`
+
+- [ ] **5.5c** In the existing hook list rendering (per-hook row), display the delay value
+  if non-zero (e.g., as a subtle `⏱ 2000ms` badge or tooltip)
+
+### 5.6 Update `addVaultEventHook` to accept `delay_ms`
+
+**File:** `src/hooks/vault-event-hook-config.ts` — `addVaultEventHook()`
+
+- [ ] **5.6a** Add `delay_ms` parameter (defaulting to `0`) and include it in the constructed
+  `VaultEventHook` object
+
+### 5.7 Create `HookDelayManager` class
+
+**New file:** `src/hooks/hook-delay-manager.ts`
+
+- [ ] **5.7a** Create the debounce manager:
+  ```typescript
+  /**
+   * Manages per-hook execution delays with debounce semantics.
+   * Each new event for the same hook+note pair resets the timer.
+   */
+  export class HookDelayManager {
+      /** Map key: `${hookId}::${notePath}` → pending timeout handle */
+      private pending = new Map<string, ReturnType<typeof setTimeout>>();
+
+      /**
+       * Schedule a hook execution with debounce.
+       * If called again for the same key before the delay elapses,
+       * the previous timer is cancelled and a new one starts.
+       */
+      schedule(
+          hookId: string,
+          notePath: string,
+          delayMs: number,
+          execute: () => void | Promise<void>,
+      ): void {
+          const key = `${hookId}::${notePath}`;
+
+          const existing = this.pending.get(key);
+          if (existing !== undefined) {
+              clearTimeout(existing);
+          }
+
+          const handle = setTimeout(() => {
+              this.pending.delete(key);
+              void execute();
+          }, delayMs);
+
+          this.pending.set(key, handle);
+      }
+
+      /** Cancel all pending delays (plugin unload). */
+      destroy(): void {
+          for (const handle of this.pending.values()) {
+              clearTimeout(handle);
+          }
+          this.pending.clear();
+      }
+
+      /** Number of pending delayed executions (for testing/debugging). */
+      get size(): number {
+          return this.pending.size;
+      }
+  }
+  ```
+
+  **Key design notes:**
+  - Key includes both `hookId` (or workflow path for trigger-based workflows) and `notePath`
+    so the same hook can have independent debounces for different notes
+  - For discovered workflows (no `id` field), use `workflow.file_path` as the hook identifier
+  - The existing `WorkflowConcurrencyManager.isWorkflowRunning()` check (deduplication)
+    is applied inside the `execute` callback, not in the delay manager — the concurrency
+    check must happen at execution time, not at schedule time
+
+### 5.8 Integrate `HookDelayManager` into dispatcher
+
+**File:** `src/hooks/vault-event-dispatcher.ts`
+
+- [ ] **5.8a** Add `hookDelayManager` to `DispatcherDeps` interface:
+  ```typescript
+  hookDelayManager: HookDelayManager;
+  ```
+
+- [ ] **5.8b** In `_executeOneHook()`, resolve the effective delay for the current hook:
+  ```typescript
+  // For VaultEventHook (settings-configured):
+  const effectiveDelay = hook.delay_ms;
+
+  // For Workflow (trigger-based):
+  const effectiveDelay = hook.hook_delay ?? 0;
+  ```
+  For `run_workflow` action type on a `VaultEventHook`, the hook's `delay_ms` takes
+  precedence over the target workflow's `hook_delay` (hook-level overrides workflow-level).
+
+- [ ] **5.8c** Wrap the execution call with the delay manager when `effectiveDelay > 0`:
+  ```typescript
+  if (effectiveDelay > 0) {
+      const hookKey = _isWorkflow(hook) ? hook.file_path : hook.id;
+      deps.hookDelayManager.schedule(
+          hookKey,
+          context.notePath ?? "",
+          effectiveDelay,
+          () => { /* existing execution logic */ },
+      );
+      return; // scheduled — don't execute synchronously
+  }
+  // effectiveDelay === 0 → execute immediately (existing behavior)
+  ```
+
+- [ ] **5.8d** For `on_schedule` event type, skip delay logic entirely (always execute immediately):
+  ```typescript
+  // At the top of _executeOneHook(), before delay resolution:
+  const skipDelay = context.hookEvent === "on_schedule";
+  ```
+
+### 5.9 Wire `HookDelayManager` in main.ts
+
+**File:** `src/main.ts`
+
+- [ ] **5.9a** Create and store a `HookDelayManager` instance during plugin load:
+  ```typescript
+  private _hookDelayManager: HookDelayManager;
+  // In onload():
+  this._hookDelayManager = new HookDelayManager();
+  ```
+
+- [ ] **5.9b** Call `this._hookDelayManager.destroy()` in plugin `onunload()`
+
+- [ ] **5.9c** Pass instance to dispatcher deps in `getDispatcherDeps()`:
+  ```typescript
+  hookDelayManager: this._hookDelayManager,
+  ```
+
+### 5.10 Interaction with existing debounce system
+
+The existing `VaultEventDebounce` class (`src/hooks/vault-event-debounce.ts`) operates at
+the **event handler level** — it suppresses repeated events for the same (eventType, notePath)
+pair within a global cooldown window. This prevents the handler from even collecting hooks.
+
+The new `HookDelayManager` operates at the **per-hook dispatch level** — after an event passes
+the global debounce and reaches dispatch. These two systems are complementary:
+
+1. Global debounce (`vault_event_debounce_seconds`) → coarse filter, prevents event flooding
+2. Per-hook delay (`delay_ms` / `notor-hook-delay`) → fine-grained per-hook debounce with
+   reset-on-repeat semantics
+
+They do NOT conflict. The global debounce fires first; events that pass it are then subject
+to per-hook delay if configured.
+
+---
+
+## Phase 6 — Remove Orchestrator Dependency for Background Workflows
 
 Currently, background workflows (hook-triggered + scheduled) silently fail if no
 Notor chat panel is open (`getActiveOrchestrator()` returns null). Refactor to spawn
@@ -408,11 +643,11 @@ a per-execution headless orchestrator.
 
 ---
 
-### 5.1 Create headless orchestrator factory method
+### 6.1 Create headless orchestrator factory method
 
 **File:** `src/main.ts` — plugin class
 
-- [ ] **5.1a** Add a public method to the plugin class:
+- [ ] **6.1a** Add a public method to the plugin class:
   ```typescript
   /**
    * Create a headless orchestrator for background workflow execution.
@@ -457,21 +692,21 @@ a per-execution headless orchestrator.
   SessionGuard (they use WorkflowConcurrencyManager instead), so no lifecycle cleanup
   is needed — the orchestrator is GC'd after the execution completes.
 
-### 5.2 Add `createHeadlessOrchestrator` to `DispatcherDeps`
+### 6.2 Add `createHeadlessOrchestrator` to `DispatcherDeps`
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `DispatcherDeps` interface (near line 60)
 
-- [ ] **5.2a** Add to the interface:
+- [ ] **6.2a** Add to the interface:
   ```typescript
   /** Factory to create a headless orchestrator for background workflow execution. */
   createHeadlessOrchestrator?: () => ChatOrchestrator;
   ```
 
-### 5.3 Use headless orchestrator in dispatcher
+### 6.3 Use headless orchestrator in dispatcher
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 463–470)
 
-- [ ] **5.3a** Replace the null guard:
+- [ ] **6.3a** Replace the null guard:
   ```typescript
   // Before:
   if (!deps.orchestrator) {
@@ -497,16 +732,16 @@ a per-execution headless orchestrator.
   }
   ```
 
-### 5.4 Wire factory in main.ts
+### 6.4 Wire factory in main.ts
 
 **File:** `src/main.ts` — `getDispatcherDeps()` function (line ~1427)
 
-- [ ] **5.4a** Add to the returned deps object:
+- [ ] **6.4a** Add to the returned deps object:
   ```typescript
   createHeadlessOrchestrator: () => this.createHeadlessOrchestrator(),
   ```
 
-### 5.5 Lifecycle considerations
+### 6.5 Lifecycle considerations
 
 Each headless orchestrator is spawned per-execution and is self-contained. After
 `executeBackgroundWorkflow` completes (inside `WorkflowConcurrencyManager.submit`'s
@@ -525,7 +760,7 @@ conversations is possible. JS is single-threaded, so `Set` operations are atomic
 
 ---
 
-## Phase 6 — Auto-Inject Workflow Frontmatter
+## Phase 7 — Auto-Inject Workflow Frontmatter
 
 Automatically inject required frontmatter into workflow files when:
 (a) configured as a hook target in settings UI, or
@@ -533,11 +768,11 @@ Automatically inject required frontmatter into workflow files when:
 
 ---
 
-### 6.1 Create frontmatter injection utility
+### 7.1 Create frontmatter injection utility
 
 **New file:** `src/workflows/workflow-frontmatter.ts`
 
-- [ ] **6.1a** Create the file with the following exports:
+- [ ] **7.1a** Create the file with the following exports:
 
   ```typescript
   import { TFile, type App } from "obsidian";
@@ -583,30 +818,30 @@ Automatically inject required frontmatter into workflow files when:
   existing and missing frontmatter blocks, preserves formatting, and triggers
   metadataCache updates automatically.
 
-### 6.2 Reuse existing event-to-trigger mapping
+### 7.2 Reuse existing event-to-trigger mapping
 
 **File:** `src/hooks/vault-event-listener-manager.ts` (lines 403–423)
 
 The function `vaultEventTypeToWorkflowTrigger()` already provides this mapping.
 It returns `null` for `"on_schedule"` (handled by a separate scheduler).
 
-- [ ] **6.2a** Add `export` keyword to `vaultEventTypeToWorkflowTrigger` in `vault-event-listener-manager.ts`
+- [ ] **7.2a** Add `export` keyword to `vaultEventTypeToWorkflowTrigger` in `vault-event-listener-manager.ts`
   (line 403 — currently a module-private function, not exported).
 
-- [ ] **6.2b** At usage sites, apply the fallback for `on_schedule`:
+- [ ] **7.2b** At usage sites, apply the fallback for `on_schedule`:
   ```typescript
   import { vaultEventTypeToWorkflowTrigger } from "../hooks/vault-event-listener-manager";
 
   const trigger = vaultEventTypeToWorkflowTrigger(event) ?? (event === "on_schedule" ? "scheduled" : "manual");
   ```
 
-### 6.3 Auto-inject at hook configuration time (settings UI)
+### 7.3 Auto-inject at hook configuration time (settings UI)
 
 **File:** `src/settings/sections/vault-event-hook-subsection.ts` (lines 236–271, the "Add" button click handler)
 
-- [ ] **6.3a** Import `TFile` from `"obsidian"`, `injectWorkflowFrontmatter` from `"../../workflows/workflow-frontmatter"`, and `vaultEventTypeToWorkflowTrigger` from `"../../hooks/vault-event-listener-manager"`
+- [ ] **7.3a** Import `TFile` from `"obsidian"`, `injectWorkflowFrontmatter` from `"../../workflows/workflow-frontmatter"`, and `vaultEventTypeToWorkflowTrigger` from `"../../hooks/vault-event-listener-manager"`
 
-- [ ] **6.3b** After the validation checks (line 238 `if (!newCommandOrPath)...`) and before `addVaultEventHook()` call (line 259), add:
+- [ ] **7.3b** After the validation checks (line 238 `if (!newCommandOrPath)...`) and before `addVaultEventHook()` call (line 259), add:
   ```typescript
   if (newActionType === "run_workflow") {
       const abstractFile = ctx.app.vault.getAbstractFileByPath(newCommandOrPath);
@@ -627,14 +862,14 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
   }
   ```
 
-### 6.4 Auto-repair at execution time (fallback)
+### 7.4 Auto-repair at execution time (fallback)
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 354–362)
 
-- [ ] **6.4a** Import `injectWorkflowFrontmatter` from `"../workflows/workflow-frontmatter"` and
+- [ ] **7.4a** Import `injectWorkflowFrontmatter` from `"../workflows/workflow-frontmatter"` and
   `vaultEventTypeToWorkflowTrigger` from `"./vault-event-listener-manager"`
 
-- [ ] **6.4b** Replace the current validation failure handling:
+- [ ] **7.4b** Replace the current validation failure handling:
   ```typescript
   // After the updated validation from 2.3a:
   const isValidWorkflow = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";
@@ -675,53 +910,63 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
 
 ---
 
-## Phase 7 — Integration & Testing
+## Phase 8 — Integration & Testing
 
 ---
 
-### 7.1 TypeScript compilation
+### 8.1 TypeScript compilation
 
-- [ ] **7.1a** Run `npx tsc --noEmit` to verify all type changes compile cleanly. Key things to check:
-  - `Workflow` interface now has `mode` and `model_preset` fields — every place that constructs a `Workflow` object must include them
+- [ ] **8.1a** Run `npx tsc --noEmit` to verify all type changes compile cleanly. Key things to check:
+  - `Workflow` interface now has `mode`, `model_preset`, and `hook_delay` fields — every place that constructs a `Workflow` object must include them
+  - `VaultEventHook` interface now has `delay_ms` field — every place that constructs a `VaultEventHook` must include it (check `addVaultEventHook` and any test fixtures)
   - Places that construct `Workflow` objects:
     - `src/workflows/workflow-discovery.ts` — `parseWorkflowFile()` return (line 390)
     - `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` minimal object (line 365)
     - Any test mocks or fixtures that create `Workflow` objects
 
-### 7.2 Manual testing checklist
+### 8.2 Manual testing checklist
 
-- [ ] **7.2a** Custom notor_dir with capital-W `Workflows/` folder:
+- [ ] **8.2a** Custom notor_dir with capital-W `Workflows/` folder:
   - Set `notor_dir` to `"Agent Files/Notor/"` in General settings
   - Ensure `Agent Files/Notor/Workflows/` exists in the vault
   - Click "Create new workflow" → should succeed without error
   - Existing workflows in the folder should appear in the list
 
-- [ ] **7.2b** Workflow frontmatter auto-injection:
+- [ ] **8.2b** Workflow frontmatter auto-injection:
   - Create a plain `.md` file (no frontmatter) in the vault
   - Go to Automation settings, add a `run_workflow` hook pointing to that file
   - Verify the file now has `notor-type: workflow`, `notor-trigger`, and `notor-conversation-mode` in its frontmatter
 
-- [ ] **7.2c** Per-workflow mode:
+- [ ] **8.2c** Per-workflow mode:
   - Add `notor-conversation-mode: act` to a workflow's frontmatter
   - Set global mode to "Plan"
   - Trigger the workflow → should execute in Act mode
   - Check conversation history file header for `mode: "act"`
 
-- [ ] **7.2d** Per-workflow model preset:
+- [ ] **8.2d** Per-workflow model preset:
   - Create a model preset named "fast" in settings
   - Add `notor-model-preset: fast` to a workflow's frontmatter
   - Trigger the workflow → should use the "fast" preset's provider/model
 
-- [ ] **7.2e** Headless execution (no panel):
+- [ ] **8.2e** Per-hook delay (debounce):
+  - Add `notor-hook-delay: 3000` to a workflow's frontmatter
+  - Trigger the hook (e.g., save the note) → should NOT execute immediately
+  - Save rapidly 3 times within 3 seconds → should execute exactly once, ~3s after the last save
+  - Remove the frontmatter field → verify hook fires immediately again (0 = no delay)
+  - Add a hook in settings UI with delay_ms = 2000 pointing to a workflow that has `notor-hook-delay: 5000`
+    → verify the 2000ms hook-level setting takes precedence over the 5000ms workflow-level default
+  - Verify `on_schedule` hooks ignore delay entirely (always fire immediately)
+
+- [ ] **8.2f** Headless execution (no panel):
   - Close all Notor chat panels
   - Trigger a hook (e.g., Cmd+S with an `on_manual_save` hook)
   - Verify workflow executes successfully (check chat history folder for new conversation file)
 
-- [ ] **7.2f** `notor-type` backward compatibility:
+- [ ] **8.2g** `notor-type` backward compatibility:
   - Existing workflows with `notor-workflow: true` should still be discovered and executable
   - New workflows created via UI should have `notor-type: workflow` (not `notor-workflow: true`)
 
-- [ ] **7.2g** Scheduled execution:
+- [ ] **8.2h** Scheduled execution:
   - Configure an `on_schedule` hook with `0 * * * *` (every hour on the minute)
   - OR a workflow with `notor-trigger: scheduled` and `notor-schedule: "* * * * *"` (every minute for testing)
   - Close all panels, wait for fire → should execute via headless orchestrator
@@ -732,9 +977,10 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
 ## Implementation Order
 
 1. Phase 1 (case-insensitive handling) — unblocks workflow discovery
-2. Phase 2 (`notor-type` migration) — foundational for Phase 6's injection
+2. Phase 2 (`notor-type` migration) — foundational for Phase 7's injection
 3. Phase 3 (per-workflow mode) — adds `mode` field to `Workflow` type
 4. Phase 4 (per-workflow model preset) — adds `model_preset` field
-5. Phase 5 (headless orchestrator) — removes panel dependency
-6. Phase 6 (auto-inject frontmatter) — uses all new fields
-7. Phase 7 (integration testing)
+5. Phase 5 (per-hook delay/debounce) — adds `hook_delay` field + `HookDelayManager`
+6. Phase 6 (headless orchestrator) — removes panel dependency
+7. Phase 7 (auto-inject frontmatter) — uses all new fields
+8. Phase 8 (integration testing)
