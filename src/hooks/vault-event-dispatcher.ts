@@ -353,11 +353,12 @@ export async function executeRunWorkflowAction(
 	const fm = cache?.frontmatter;
 
 	// Validate it's a Notor workflow note
-	if (!fm?.["notor-workflow"]) {
-		log.warn("File is not a Notor workflow note (missing notor-workflow: true)", {
+	const isValidWorkflow = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";
+	if (!isValidWorkflow) {
+		log.warn("File is not a Notor workflow note (missing notor-type: workflow)", {
 			workflowPath,
 		});
-		new Notice(`'${workflowPath}' is not a valid workflow (missing notor-workflow: true).`);
+		new Notice(`'${workflowPath}' is not a valid workflow (missing notor-type: workflow).`);
 		return;
 	}
 

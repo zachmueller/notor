@@ -100,7 +100,7 @@ Migrate workflow identification from `notor-workflow: true` to the more general
 
 **File:** `src/workflows/workflow-discovery.ts` — `parseWorkflowFile()` (lines 300–310)
 
-- [ ] **2.1a** Change the workflow identification check (line 308):
+- [x] **2.1a** Change the workflow identification check (line 308):
   ```typescript
   // Before:
   if (frontmatter["notor-workflow"] !== true) { return null; }
@@ -115,7 +115,7 @@ Migrate workflow identification from `notor-workflow: true` to the more general
 
 **File:** `src/workflows/workflow-discovery.ts` — `validateWorkflow()` (lines 138–199)
 
-- [ ] **2.2a** Update the `notor-workflow` validation block (lines 144–150) to accept either style:
+- [x] **2.2a** Update the `notor-workflow` validation block (lines 144–150) to accept either style:
   ```typescript
   const workflowFlag = frontmatter["notor-workflow"];
   const notorType = frontmatter["notor-type"];
@@ -130,7 +130,7 @@ Migrate workflow identification from `notor-workflow: true` to the more general
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 354–362)
 
-- [ ] **2.3a** Change line 356 validation:
+- [x] **2.3a** Change line 356 validation:
   ```typescript
   // Before:
   if (!fm?.["notor-workflow"]) { ... }
@@ -144,7 +144,7 @@ Migrate workflow identification from `notor-workflow: true` to the more general
 
 **File:** `src/settings/sections/rules-and-workflows.ts` — `buildWorkflowSkeleton()` (lines 65–80)
 
-- [ ] **2.4a** Replace `notor-workflow: true` with `notor-type: workflow` in the generated frontmatter:
+- [x] **2.4a** Replace `notor-workflow: true` with `notor-type: workflow` in the generated frontmatter:
   ```typescript
   function buildWorkflowSkeleton(trigger: string, schedule: string): string {
       const lines: string[] = ["---"];

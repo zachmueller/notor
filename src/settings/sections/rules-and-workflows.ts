@@ -64,17 +64,19 @@ const WORKFLOW_TRIGGER_OPTIONS: Array<{ value: string; label: string }> = [
 
 function buildWorkflowSkeleton(trigger: string, schedule: string): string {
 	const lines: string[] = ["---"];
-	lines.push("notor-workflow: true");
+	lines.push("notor-type: workflow");
 	lines.push(`notor-trigger: ${trigger}`);
+	lines.push("notor-conversation-mode: plan");
 	if (trigger === "scheduled") {
 		lines.push(`notor-schedule: "${schedule || "0 9 * * *"}"`);
 	} else {
 		lines.push('# notor-schedule: "0 9 * * *"');
 	}
 	lines.push("# notor-workflow-persona: researcher");
+	lines.push("# notor-model-preset: default");
 	lines.push("---");
 	lines.push("");
-	lines.push("<!-- Workflow instructions here. This is the prompt sent to the AI when the workflow runs. -->");
+	lines.push("<!-- Workflow instructions here. -->");
 	lines.push("");
 	return lines.join("\n");
 }

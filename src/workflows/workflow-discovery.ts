@@ -157,11 +157,12 @@ export function validateWorkflow(
 ): { valid: boolean; errors: string[] } {
 	const errors: string[] = [];
 
-	// Validate notor-workflow is true (boolean)
+	// Validate workflow identification (notor-type: workflow or legacy notor-workflow: true)
 	const workflowFlag = frontmatter["notor-workflow"];
-	if (workflowFlag !== true) {
+	const notorType = frontmatter["notor-type"];
+	if (workflowFlag !== true && notorType !== "workflow") {
 		errors.push(
-			`Workflow '${filePath}' has 'notor-workflow' set to '${String(workflowFlag)}' (expected boolean true)`
+			`Workflow '${filePath}' must have 'notor-type: workflow' or 'notor-workflow: true'`
 		);
 	}
 
@@ -320,8 +321,10 @@ function parseWorkflowFile(
 		return null;
 	}
 
-	// Check notor-workflow flag — must be boolean true
-	if (frontmatter["notor-workflow"] !== true) {
+	// Check workflow identification — either notor-type: workflow or legacy notor-workflow: true
+	const isWorkflow = frontmatter["notor-workflow"] === true
+		|| frontmatter["notor-type"] === "workflow";
+	if (!isWorkflow) {
 		return null;
 	}
 
