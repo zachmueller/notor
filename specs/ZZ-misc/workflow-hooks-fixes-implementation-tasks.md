@@ -305,8 +305,11 @@ model preset to use for execution.
 
 **New helper** in `src/chat/workflow-executor.ts` (module-level or private method):
 
-- [ ] **4.4a** Create a `resolveWorkflowProviderConfig()` helper:
+- [ ] **4.4a** Create a `resolveWorkflowProviderConfig()` helper that delegates to the
+  existing `resolvePreset()` from `src/presets/preset-resolver.ts`:
   ```typescript
+  import { resolvePreset } from "../presets/preset-resolver";
+
   interface ResolvedProviderConfig {
       providerId: string;
       modelId: string;
@@ -325,16 +328,15 @@ model preset to use for execution.
       fallbackExtendedContext: boolean,
   ): ResolvedProviderConfig {
       if (workflow.model_preset) {
-          const presets = settings.model_presets;
-          const preset = presets.find(p => p.name === workflow.model_preset);
-          if (preset?.provider_id && preset?.model_id) {
+          const resolved = resolvePreset(workflow.model_preset, settings.model_presets);
+          if (resolved) {
               return {
-                  providerId: preset.provider_id,
-                  modelId: preset.model_id,
-                  useExtendedContext: preset.use_extended_context,
+                  providerId: resolved.providerId,
+                  modelId: resolved.modelId,
+                  useExtendedContext: resolved.useExtendedContext,
               };
           }
-          log.warn("Workflow model preset not found, using fallback", {
+          log.warn("Workflow model preset not found or unconfigured, using fallback", {
               preset: workflow.model_preset,
               workflowName: workflow.display_name,
           });
@@ -617,80 +619,97 @@ existing behavior).
   hookDelayManager: HookDelayManager;
   ```
 
-- [ ] **5.8b** In `_executeOneHook()`, resolve the effective delay and wrap only the
-  `executeRunWorkflowAction` call (not the entire hook logic). The delay wraps just
-  the workflow execution — shell commands (`execute_command`) are never delayed.
+- [ ] **5.8b** Restructure `executeRunWorkflowAction()` into resolution + execution phases.
+  The delay wraps only the execution phase — shell commands (`execute_command`) are never delayed.
 
-  For the **workflow trigger path** (line 234, where `isWorkflowTrigger === true`):
+  **Updated function signature** — add optional delay params:
   ```typescript
-  const effectiveDelay = (context.hookEvent === "on_schedule") ? 0 : (workflow.hook_delay ?? 0);
+  export async function executeRunWorkflowAction(
+      workflowPath: string,
+      context: VaultEventHookContext,
+      chain: ExecutionChain | null,
+      deps: DispatcherDeps,
+      hookDelayMs?: number | null,
+      hookId?: string,
+  ): Promise<void>
+  ```
+
+  **Extract inner function** `_executeWorkflowSubmission` containing current lines 380–498
+  (TriggerContext build through concurrency submission + headless destroy):
+  ```typescript
+  async function _executeWorkflowSubmission(
+      workflow: Workflow,
+      workflowFile: TFile,
+      context: VaultEventHookContext,
+      chain: ExecutionChain | null,
+      deps: DispatcherDeps,
+  ): Promise<void> {
+      // Lines 380-498: TriggerContext build, prompt assembly, persona switching,
+      // chain extension, execution record, orchestrator guard, concurrency submit
+  }
+  ```
+
+  **Insert delay check** after workflow object construction (line 378), before calling
+  the extracted inner function:
+  ```typescript
+  // After workflow object is built (line 378):
+  const effectiveDelay = (context.hookEvent === "on_schedule")
+      ? 0
+      : (hookDelayMs ?? workflow.hook_delay ?? 0);
 
   if (effectiveDelay > 0) {
       deps.hookDelayManager.schedule(
-          workflow.file_path,
+          hookId ?? workflow.file_path,
           context.notePath ?? "",
           effectiveDelay,
           async () => {
               // Re-check concurrency at execution time (not schedule time)
               if (deps.concurrencyManager.isWorkflowRunning(workflow.file_path)) {
-                  log.warn("Workflow already running after delay; skipping", { name: workflow.display_name });
+                  log.warn("Workflow already running after delay; skipping", {
+                      workflowName: workflow.display_name,
+                  });
                   return;
               }
-              await executeRunWorkflowAction(workflow.file_path, context, chain, deps);
+              await _executeWorkflowSubmission(workflow, workflowFile, context, chain, deps);
           },
       );
       return;
   }
 
-  // effectiveDelay === 0 → existing behavior (immediate concurrency check + execute)
-  if (deps.concurrencyManager.isWorkflowRunning(workflow.file_path)) { ... }
-  await executeRunWorkflowAction(workflow.file_path, context, chain, deps);
+  // effectiveDelay === 0 → immediate execution
+  await _executeWorkflowSubmission(workflow, workflowFile, context, chain, deps);
   ```
 
-  For the **VaultEventHook `run_workflow` path** (line 289):
+  **Call sites in `_executeOneHook()`:**
 
-  `delay_ms` is nullable: `null` = inherit from target workflow's `hook_delay`,
-  `0` = explicitly immediate, `>0` = explicit override. The target workflow's `hook_delay`
-  is available after `executeRunWorkflowAction` constructs the workflow object, so the
-  effective delay resolution must happen INSIDE `executeRunWorkflowAction`, after the
-  workflow object is built (line 365–378). Add before the orchestrator null guard:
-
+  For the **workflow trigger path** (line 222-240), replace the existing concurrency
+  check + call with a single call passing `null` for hookDelayMs (uses workflow's own
+  `hook_delay` directly):
   ```typescript
-  // Resolve effective delay (null = inherit from workflow, 0 = immediate, >0 = override)
-  const effectiveDelay = (context.hookEvent === "on_schedule")
-      ? 0
-      : (vaultHook.delay_ms ?? workflow.hook_delay ?? 0);
-
-  if (effectiveDelay > 0) {
-      deps.hookDelayManager.schedule(
-          vaultHook.id,
-          context.notePath ?? "",
-          effectiveDelay,
-          async () => {
-              // Re-check concurrency at execution time
-              if (deps.concurrencyManager.isWorkflowRunning(workflowPath)) {
-                  log.warn("Workflow already running after delay; skipping", { workflowPath });
-                  return;
-              }
-              await executeRunWorkflowAction(workflowPath, context, chain, deps);
-          },
-      );
-      return;
-  }
-
-  // effectiveDelay === 0 → existing behavior
-  if (deps.concurrencyManager.isWorkflowRunning(workflowPath)) { ... }
-  await executeRunWorkflowAction(workflowPath, context, chain, deps);
+  // Replace lines 226-240:
+  await executeRunWorkflowAction(
+      workflow.file_path, context, chain, deps,
+      null,               // hookDelayMs — inherit from workflow.hook_delay
+      workflow.file_path, // hookId — use file path as debounce key
+  );
   ```
 
-  NOTE: For the VaultEventHook path, the delay resolution needs access to the target
-  workflow's `hook_delay`. Two approaches:
-  (a) Move the delay check inside `executeRunWorkflowAction` after the workflow object
-      is constructed (requires passing `vaultHook.delay_ms` into the function), or
-  (b) Read the target workflow's frontmatter in `_executeOneHook` before calling
-      `executeRunWorkflowAction` (duplicates the fm read).
-  Approach (a) is preferred — add an optional `hookDelayMs: number | null` parameter
-  to `executeRunWorkflowAction`.
+  For the **VaultEventHook `run_workflow` path** (line 271-289), replace the existing
+  concurrency check + call, passing the hook's delay_ms:
+  ```typescript
+  // Replace lines 282-289:
+  await executeRunWorkflowAction(
+      workflowPath, context, chain, deps,
+      vaultHook.delay_ms, // hookDelayMs — null=inherit, 0=immediate, >0=override
+      vaultHook.id,       // hookId — use hook ID as debounce key
+  );
+  ```
+
+  Effective delay resolution: `hookDelayMs ?? workflow.hook_delay ?? 0`
+  - Workflow trigger: `null ?? workflow.hook_delay ?? 0` → uses workflow's delay
+  - VaultEventHook (null): `null ?? workflow.hook_delay ?? 0` → inherits workflow's delay
+  - VaultEventHook (0): `0` → explicitly immediate
+  - VaultEventHook (2000): `2000` → explicit override
 
 - [ ] **5.8c** _(removed — merged into 5.8b above)_
 
@@ -975,19 +994,8 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
           return;
       }
       new Notice(`Auto-repaired workflow headers in '${workflowFile.name}'.`);
-      // Wait for metadataCache to process the file change (event-based with timeout fallback).
-      // Obsidian's .on() returns an EventRef; offref() must be called on the SAME object.
-      await new Promise<void>((resolve) => {
-          const ref = deps.metadataCache.on("changed", (changedFile) => {
-              if (changedFile.path === workflowFile.path) {
-                  clearTimeout(timeout);
-                  deps.metadataCache.offref(ref);
-                  resolve();
-              }
-          });
-          const timeout = setTimeout(() => { deps.metadataCache.offref(ref); resolve(); }, 2000);
-      });
-      // Re-read frontmatter
+      // processFrontMatter updates metadataCache synchronously before resolving
+      // (same pattern as personas.ts:261, builtin-tool-scaffolds.ts:807/889/1012)
       const newCache = deps.metadataCache.getFileCache(workflowFile);
       fm = newCache?.frontmatter;
       if (!fm) {
