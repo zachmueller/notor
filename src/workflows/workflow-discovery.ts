@@ -358,6 +358,9 @@ function parseWorkflowFile(
 	const mode: ConversationMode | null =
 		(rawMode === "plan" || rawMode === "act") ? rawMode : null;
 
+	// Parse per-workflow model preset override (Phase 4)
+	const modelPreset = parseStringOrNull(frontmatter["notor-model-preset"]);
+
 	// Parse and validate schedule (C-005)
 	let schedule: string | null = null;
 	if (trigger === "scheduled") {
@@ -421,6 +424,7 @@ function parseWorkflowFile(
 		schedule,
 		persona_name: personaName,
 		mode,
+		model_preset: modelPreset,
 		hooks,
 		active_note_prompt: activeNotePrompt,
 		body_content: "", // Deferred — read lazily at execution time (NFR-10)

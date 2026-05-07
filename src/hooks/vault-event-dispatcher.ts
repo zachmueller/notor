@@ -376,6 +376,7 @@ export async function executeRunWorkflowAction(
 		mode: (fm["notor-conversation-mode"] === "plan" || fm["notor-conversation-mode"] === "act")
 			? fm["notor-conversation-mode"] as ConversationMode
 			: null,
+		model_preset: (fm["notor-model-preset"] as string | null | undefined)?.trim() ?? null,
 		hooks: null, // Per-workflow hooks not needed here — handled by the execution pipeline
 		active_note_prompt: (fm["notor-active-note-prompt"] as string | null | undefined) ?? null,
 		body_content: "",

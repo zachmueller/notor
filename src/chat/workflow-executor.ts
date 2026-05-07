@@ -12,6 +12,7 @@ import { Notice } from "obsidian";
 import type { App } from "obsidian";
 import type {
 	ConversationMode,
+	Persona,
 	Workflow,
 	WorkflowExecution,
 	WorkflowExecutionRequest,
@@ -44,9 +45,48 @@ import {
 	switchWorkflowPersona,
 	assembleWorkflowPrompt,
 } from "../workflows/workflow-executor";
+import { resolvePreset } from "../presets/preset-resolver";
 import { logger } from "../utils/logger";
 
 const log = logger("WorkflowExecutor");
+
+// ---------------------------------------------------------------------------
+// Per-workflow preset resolution helper (Phase 4)
+// ---------------------------------------------------------------------------
+
+interface ResolvedProviderConfig {
+	providerId: string;
+	modelId: string;
+	useExtendedContext: boolean;
+}
+
+function resolveWorkflowProviderConfig(
+	workflow: Workflow,
+	settings: NotorSettings,
+	fallbackProviderId: string,
+	fallbackModelId: string,
+	fallbackExtendedContext: boolean,
+): ResolvedProviderConfig {
+	if (workflow.model_preset) {
+		const resolved = resolvePreset(workflow.model_preset, settings.model_presets);
+		if (resolved) {
+			return {
+				providerId: resolved.providerId,
+				modelId: resolved.modelId,
+				useExtendedContext: resolved.useExtendedContext,
+			};
+		}
+		log.warn("Workflow model preset not found or unconfigured, using fallback", {
+			preset: workflow.model_preset,
+			workflowName: workflow.display_name,
+		});
+	}
+	return {
+		providerId: fallbackProviderId,
+		modelId: fallbackModelId,
+		useExtendedContext: fallbackExtendedContext,
+	};
+}
 
 // ---------------------------------------------------------------------------
 // Dependencies interface
@@ -198,11 +238,16 @@ export class WorkflowExecutor {
 		// (This also calls maybeRevertWorkflowPersona for the *previous* conversation
 		// via the E-008 path — we intentionally skip that here because we already
 		// handled persona switching above before creating the new conversation.)
-		// Use per-orchestrator provider/model (Phase 4, Step 4b).
 		const conversationManager = this.deps.getConversationManager();
-		const providerId = this.deps.getActiveProviderId();
-		const providerConfig = this.deps.providerRegistry.getConfig(providerId);
-		const modelId = this.deps.getActiveModelId();
+		const fallbackProviderId = this.deps.getActiveProviderId();
+		const fallbackConfig = this.deps.providerRegistry.getConfig(fallbackProviderId);
+		const { providerId, modelId, useExtendedContext } = resolveWorkflowProviderConfig(
+			workflow,
+			this.deps.getSettings(),
+			fallbackProviderId,
+			this.deps.getActiveModelId(),
+			fallbackConfig?.use_extended_context ?? false,
+		);
 		const currentMode = workflow.mode
 			?? (conversationManager.hasActiveConversation()
 				? conversationManager.getMode()
@@ -221,7 +266,7 @@ export class WorkflowExecutor {
 				persona_name: activePersonaName,
 				is_background: false,
 				title: `Workflow: ${workflow.display_name}`,
-				use_extended_context: providerConfig?.use_extended_context ?? false,
+				use_extended_context: useExtendedContext,
 			}
 		);
 
@@ -282,7 +327,6 @@ export class WorkflowExecutor {
 		sessionConvManager.loadConversation(snapshotConv, snapshotMessages);
 
 		const pinnedPersona = personaManager?.getActivePersona() ?? null;
-		const useExtendedContext = providerConfig?.use_extended_context ?? false;
 
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
 			await this.deps.configResolver.resolveEffectiveConfig(undefined, assemblyResult, pinnedPersona);
@@ -439,10 +483,16 @@ export class WorkflowExecutor {
 		// Step 2: Create a background conversation (does NOT switch the user's
 		// active conversation — we operate on a separate ConversationManager instance
 		// scoped to this background execution).
-		const providerId = this.deps.providerRegistry.getActiveId();
-		const providerConfig = this.deps.providerRegistry.getConfig(providerId);
-		const modelId = providerConfig?.model_id ?? "";
 		const mode = workflow.mode ?? this.deps.getSettings().mode;
+		const registryProviderId = this.deps.providerRegistry.getActiveId();
+		const registryConfig = this.deps.providerRegistry.getConfig(registryProviderId);
+		const { providerId, modelId, useExtendedContext } = resolveWorkflowProviderConfig(
+			workflow,
+			this.deps.getSettings(),
+			registryProviderId,
+			registryConfig?.model_id ?? "",
+			registryConfig?.use_extended_context ?? false,
+		);
 
 		// Determine the active persona name after any switch
 		const activePersonaName = personaManager?.getActivePersona()?.name ?? null;
@@ -473,7 +523,7 @@ export class WorkflowExecutor {
 				persona_name: activePersonaName,
 				is_background: true,
 				title: `Workflow: ${workflow.display_name}`,
-				use_extended_context: providerConfig?.use_extended_context ?? false,
+				use_extended_context: useExtendedContext,
 			}
 		);
 
@@ -506,6 +556,7 @@ export class WorkflowExecutor {
 
 		// Step 5: Run the response loop (no view — background execution)
 		// We build a self-contained response loop using the background conversation manager.
+		const pinnedPersona = personaManager?.getActivePersona() ?? null;
 		let finalStatus: "completed" | "errored" | "stopped" = "completed";
 		let errorMessage: string | undefined;
 
@@ -516,7 +567,11 @@ export class WorkflowExecutor {
 				mode,
 				execution,
 				concurrencyManager,
-				chain
+				chain,
+				providerId,
+				modelId,
+				useExtendedContext,
+				pinnedPersona
 			);
 		} catch (e) {
 			const errMsg = e instanceof Error ? e.message : String(e);
@@ -574,13 +629,6 @@ export class WorkflowExecutor {
 	 *
 	 * Mirrors `responseLoop()` but operates on the provided background
 	 * `ConversationManager` and never renders to the view.
-	 *
-	 * @param bgConvManager      - Isolated conversation manager for this execution.
-	 * @param workflowAssembly  - Workflow assembly result with tool configs.
-	 * @param mode               - Conversation mode (plan/act).
-	 * @param execution          - Execution record for status tracking.
-	 * @param concurrencyManager - Concurrency manager for status updates.
-	 * @param chain              - Execution chain for loop prevention.
 	 */
 	private async _backgroundResponseLoop(
 		bgConvManager: ConversationManager,
@@ -588,17 +636,14 @@ export class WorkflowExecutor {
 		mode: ConversationMode,
 		execution: WorkflowExecution,
 		concurrencyManager: WorkflowConcurrencyManager,
-		_chain: ExecutionChain
+		_chain: ExecutionChain,
+		providerId: string,
+		modelId: string,
+		useExtendedContext: boolean,
+		pinnedPersona: Persona | null
 	): Promise<void> {
 		let continueLoop = true;
 		const vaultRootPath = this.deps.getVaultRootPath();
-
-		// Snapshot provider/model/persona for session isolation
-		const pinnedPersona = this.deps.getPersonaManager()?.getActivePersona() ?? null;
-		const providerId = this.deps.providerRegistry.getActiveId();
-		const providerConfig = this.deps.providerRegistry.getConfig(providerId);
-		const modelId = providerConfig?.model_id ?? "";
-		const useExtendedContext = providerConfig?.use_extended_context ?? false;
 
 		// Resolve initial effective config
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =

@@ -532,6 +532,8 @@ export interface Workflow {
 	persona_name: string | null;
 	/** Per-workflow conversation mode override from `notor-conversation-mode` (null = inherit). */
 	mode: ConversationMode | null;
+	/** Per-workflow model preset override from `notor-model-preset` (null = use active/default). */
+	model_preset: string | null;
 	/** Per-workflow LLM lifecycle hook overrides from `notor-hooks`. */
 	hooks: WorkflowHookConfig | null;
 	/** Template string from `notor-active-note-prompt` frontmatter (null if not set). Contains `{active_note}` placeholder. */

@@ -275,7 +275,7 @@ model preset to use for execution.
 
 **File:** `src/types.ts` (after the `mode` field added in 3.1, before `hooks`)
 
-- [ ] **4.1a** Add:
+- [x] **4.1a** Add:
   ```typescript
   /** Per-workflow model preset override from `notor-model-preset` (null = use active/default). */
   model_preset: string | null;
@@ -285,18 +285,18 @@ model preset to use for execution.
 
 **File:** `src/workflows/workflow-discovery.ts` — `parseWorkflowFile()` (after mode parsing)
 
-- [ ] **4.2a** Add:
+- [x] **4.2a** Add:
   ```typescript
   const modelPreset = parseStringOrNull(frontmatter["notor-model-preset"]);
   ```
 
-- [ ] **4.2b** Include `model_preset: modelPreset` in the returned object
+- [x] **4.2b** Include `model_preset: modelPreset` in the returned object
 
 ### 4.3 Include model_preset in dispatcher's minimal Workflow object
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 365–378)
 
-- [ ] **4.3a** Add to the constructed Workflow object:
+- [x] **4.3a** Add to the constructed Workflow object:
   ```typescript
   model_preset: (fm["notor-model-preset"] as string | null | undefined)?.trim() ?? null,
   ```
@@ -305,7 +305,7 @@ model preset to use for execution.
 
 **New helper** in `src/chat/workflow-executor.ts` (module-level or private method):
 
-- [ ] **4.4a** Create a `resolveWorkflowProviderConfig()` helper that delegates to the
+- [x] **4.4a** Create a `resolveWorkflowProviderConfig()` helper that delegates to the
   existing `resolvePreset()` from `src/presets/preset-resolver.ts`:
   ```typescript
   import { resolvePreset } from "../presets/preset-resolver";
@@ -353,7 +353,7 @@ model preset to use for execution.
 
 **File:** `src/chat/workflow-executor.ts` — `executeBackgroundWorkflow()` (lines 441–444)
 
-- [ ] **4.5a** Replace the current provider/model/mode resolution (lines 441–444):
+- [x] **4.5a** Replace the current provider/model/mode resolution (lines 441–444):
   ```typescript
   // Before:
   const providerId = this.deps.providerRegistry.getActiveId();
@@ -374,7 +374,7 @@ model preset to use for execution.
   );
   ```
 
-- [ ] **4.5b** Thread resolved values to `_backgroundResponseLoop`:
+- [x] **4.5b** Thread resolved values to `_backgroundResponseLoop`:
 
   The loop currently re-reads `providerId`, `modelId`, `useExtendedContext`, and
   `pinnedPersona` from the provider registry at lines 596–600. When using a preset,
@@ -425,7 +425,7 @@ model preset to use for execution.
 
 **File:** `src/chat/workflow-executor.ts` — `executeWorkflow()` (lines 202–205)
 
-- [ ] **4.6a** Apply the same preset resolution for the foreground path:
+- [x] **4.6a** Apply the same preset resolution for the foreground path:
   ```typescript
   // Before:
   const providerId = this.deps.getActiveProviderId();
@@ -444,7 +444,7 @@ model preset to use for execution.
   );
   ```
 
-- [ ] **4.6b** Use the resolved `useExtendedContext` at both downstream sites:
+- [x] **4.6b** Use the resolved `useExtendedContext` at both downstream sites:
   - Line 223: `use_extended_context: useExtendedContext,` (in `createConversation` metadata)
   - Line 284: use the resolved variable instead of `providerConfig?.use_extended_context ?? false`
 
