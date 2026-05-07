@@ -534,6 +534,8 @@ export interface Workflow {
 	mode: ConversationMode | null;
 	/** Per-workflow model preset override from `notor-model-preset` (null = use active/default). */
 	model_preset: string | null;
+	/** Per-workflow hook delay from `notor-hook-delay` in ms (null = no delay preference). */
+	hook_delay: number | null;
 	/** Per-workflow LLM lifecycle hook overrides from `notor-hooks`. */
 	hooks: WorkflowHookConfig | null;
 	/** Template string from `notor-active-note-prompt` frontmatter (null if not set). Contains `{active_note}` placeholder. */
@@ -655,6 +657,8 @@ export interface VaultEventHook {
 	enabled: boolean;
 	/** Cron expression (required when event is "on_schedule"). */
 	schedule: string | null;
+	/** Delay in ms before executing this hook after the event fires (null = inherit from workflow, 0 = immediate, >0 = override). Acts as debounce. */
+	delay_ms: number | null;
 }
 
 /**

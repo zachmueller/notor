@@ -472,7 +472,7 @@ existing behavior).
 
 **File:** `src/types.ts` (inside the `VaultEventHook` interface, after `schedule`)
 
-- [ ] **5.1a** Add the field:
+- [x] **5.1a** Add the field:
   ```typescript
   /** Delay in ms before executing this hook after the event fires (null = inherit from workflow, 0 = immediate, >0 = override). Acts as debounce. */
   delay_ms: number | null;
@@ -482,7 +482,7 @@ existing behavior).
 
 **File:** `src/types.ts` (inside the `Workflow` interface, after `model_preset` added in 4.1)
 
-- [ ] **5.2a** Add the field:
+- [x] **5.2a** Add the field:
   ```typescript
   /** Per-workflow hook delay from `notor-hook-delay` in ms (null = no delay preference). */
   hook_delay: number | null;
@@ -492,20 +492,20 @@ existing behavior).
 
 **File:** `src/workflows/workflow-discovery.ts` — `parseWorkflowFile()` (after model preset parsing)
 
-- [ ] **5.3a** Add parsing:
+- [x] **5.3a** Add parsing:
   ```typescript
   const rawHookDelay = frontmatter["notor-hook-delay"];
   const hookDelay: number | null =
       (typeof rawHookDelay === "number" && rawHookDelay >= 0) ? rawHookDelay : null;
   ```
 
-- [ ] **5.3b** Include `hook_delay: hookDelay` in the returned object
+- [x] **5.3b** Include `hook_delay: hookDelay` in the returned object
 
 ### 5.4 Include `hook_delay` in dispatcher's minimal Workflow object
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 365–378)
 
-- [ ] **5.4a** Add to the constructed Workflow object:
+- [x] **5.4a** Add to the constructed Workflow object:
   ```typescript
   hook_delay: (() => {
       const raw = fm["notor-hook-delay"];
@@ -517,7 +517,7 @@ existing behavior).
 
 **File:** `src/settings/sections/vault-event-hook-subsection.ts`
 
-- [ ] **5.5a** In the "Add hook" form (after the label input, ~line 195), add a delay input field:
+- [x] **5.5a** In the "Add hook" form (after the label input, ~line 195), add a delay input field:
   ```typescript
   let newDelayMs: number | null = null;
   new Setting(addContainer)
@@ -535,23 +535,23 @@ existing behavior).
       );
   ```
 
-- [ ] **5.5b** In the Add button handler, pass `delay_ms: newDelayMs` to `addVaultEventHook()`
+- [x] **5.5b** In the Add button handler, pass `delay_ms: newDelayMs` to `addVaultEventHook()`
 
-- [ ] **5.5c** In the existing hook list rendering (per-hook row), display the delay value
+- [x] **5.5c** In the existing hook list rendering (per-hook row), display the delay value
   if non-zero/non-null (e.g., as a subtle `⏱ 2000ms` badge or tooltip). Show nothing for `null` (inherit).
 
 ### 5.6 Update `addVaultEventHook` to accept `delay_ms`
 
 **File:** `src/hooks/vault-event-hook-config.ts` — `addVaultEventHook()`
 
-- [ ] **5.6a** Add `delay_ms` parameter (defaulting to `null`) and include it in the constructed
+- [x] **5.6a** Add `delay_ms` parameter (defaulting to `null`) and include it in the constructed
   `VaultEventHook` object
 
 ### 5.7 Create `HookDelayManager` class
 
 **New file:** `src/hooks/hook-delay-manager.ts`
 
-- [ ] **5.7a** Create the debounce manager:
+- [x] **5.7a** Create the debounce manager:
   ```typescript
   /**
    * Manages per-hook execution delays with debounce semantics.
@@ -614,12 +614,12 @@ existing behavior).
 
 **File:** `src/hooks/vault-event-dispatcher.ts`
 
-- [ ] **5.8a** Add `hookDelayManager` to `DispatcherDeps` interface:
+- [x] **5.8a** Add `hookDelayManager` to `DispatcherDeps` interface:
   ```typescript
   hookDelayManager: HookDelayManager;
   ```
 
-- [ ] **5.8b** Restructure `executeRunWorkflowAction()` into resolution + execution phases.
+- [x] **5.8b** Restructure `executeRunWorkflowAction()` into resolution + execution phases.
   The delay wraps only the execution phase — shell commands (`execute_command`) are never delayed.
 
   **Updated function signature** — add optional delay params:
@@ -711,25 +711,25 @@ existing behavior).
   - VaultEventHook (0): `0` → explicitly immediate
   - VaultEventHook (2000): `2000` → explicit override
 
-- [ ] **5.8c** _(removed — merged into 5.8b above)_
+- [x] **5.8c** _(removed — merged into 5.8b above)_
 
-- [ ] **5.8d** `on_schedule` events skip delay entirely (handled by setting `effectiveDelay = 0`
+- [x] **5.8d** `on_schedule` events skip delay entirely (handled by setting `effectiveDelay = 0`
   when `context.hookEvent === "on_schedule"` in both paths above).
 
 ### 5.9 Wire `HookDelayManager` in main.ts
 
 **File:** `src/main.ts`
 
-- [ ] **5.9a** Create and store a `HookDelayManager` instance during plugin load:
+- [x] **5.9a** Create and store a `HookDelayManager` instance during plugin load:
   ```typescript
   private _hookDelayManager: HookDelayManager;
   // In onload():
   this._hookDelayManager = new HookDelayManager();
   ```
 
-- [ ] **5.9b** Call `this._hookDelayManager.destroy()` in plugin `onunload()`
+- [x] **5.9b** Call `this._hookDelayManager.destroy()` in plugin `onunload()`
 
-- [ ] **5.9c** Pass instance to dispatcher deps in `getDispatcherDeps()`:
+- [x] **5.9c** Pass instance to dispatcher deps in `getDispatcherDeps()`:
   ```typescript
   hookDelayManager: this._hookDelayManager,
   ```

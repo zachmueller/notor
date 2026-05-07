@@ -33,6 +33,7 @@ import type { VaultEventHookContext } from "./vault-event-hook-engine";
 import { assembleWorkflowPrompt, switchWorkflowPersona } from "../workflows/workflow-executor";
 import { logger } from "../utils/logger";
 import type { TemplateVariableRegistry } from "../template-vars";
+import type { HookDelayManager } from "./hook-delay-manager";
 
 const log = logger("VaultEventDispatcher");
 
@@ -70,6 +71,8 @@ export interface DispatcherDeps {
 	executeExtensionAutomation?: (automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>;
 	/** Template variable registry for resolving {notor_dir} etc. in workflow bodies. */
 	templateRegistry?: TemplateVariableRegistry;
+	/** Per-hook debounce delay manager (Phase 5). */
+	hookDelayManager?: HookDelayManager;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,8 +226,11 @@ async function _executeOneHook(
 		// Raw workflow trigger — treat as run_workflow action
 		const workflow = hook;
 
-		// Single-instance guard
-		if (deps.concurrencyManager.isWorkflowRunning(workflow.file_path)) {
+		// Single-instance guard (skipped if delay > 0; re-checked at execution time)
+		const effectiveDelay = (context.hookEvent === "on_schedule")
+			? 0
+			: (workflow.hook_delay ?? 0);
+		if (effectiveDelay === 0 && deps.concurrencyManager.isWorkflowRunning(workflow.file_path)) {
 			const name = workflow.display_name;
 			log.warn("Workflow already running; skipping", { name });
 			new Notice(`Workflow '${name}' already running; skipped.`);
@@ -235,7 +241,9 @@ async function _executeOneHook(
 			workflow.file_path,
 			context,
 			chain,
-			deps
+			deps,
+			null,               // hookDelayMs — inherit from workflow.hook_delay
+			workflow.file_path, // hookId — use file path as debounce key
 		);
 		return;
 	}
@@ -279,14 +287,20 @@ async function _executeOneHook(
 			return;
 		}
 
-		// Single-instance guard
-		if (deps.concurrencyManager.isWorkflowRunning(workflowPath)) {
+		// Single-instance guard (skipped if delay > 0; re-checked at execution time)
+		const hookDelay = vaultHook.delay_ms;
+		const skipConcurrencyCheck = hookDelay != null && hookDelay > 0;
+		if (!skipConcurrencyCheck && deps.concurrencyManager.isWorkflowRunning(workflowPath)) {
 			log.warn("Workflow already running; skipping", { workflowPath });
 			new Notice(`Workflow '${workflowPath}' already running; skipped.`);
 			return;
 		}
 
-		await executeRunWorkflowAction(workflowPath, context, chain, deps);
+		await executeRunWorkflowAction(
+			workflowPath, context, chain, deps,
+			vaultHook.delay_ms, // hookDelayMs — null=inherit, 0=immediate, >0=override
+			vaultHook.id,       // hookId — use hook ID as debounce key
+		);
 	}
 }
 
@@ -331,7 +345,9 @@ export async function executeRunWorkflowAction(
 	workflowPath: string,
 	context: VaultEventHookContext,
 	chain: ExecutionChain | null,
-	deps: DispatcherDeps
+	deps: DispatcherDeps,
+	hookDelayMs?: number | null,
+	hookId?: string,
 ): Promise<void> {
 	log.info("Executing run_workflow action", {
 		workflowPath,
@@ -377,10 +393,55 @@ export async function executeRunWorkflowAction(
 			? fm["notor-conversation-mode"] as ConversationMode
 			: null,
 		model_preset: (fm["notor-model-preset"] as string | null | undefined)?.trim() ?? null,
+		hook_delay: (() => {
+			const raw = fm["notor-hook-delay"];
+			return (typeof raw === "number" && raw >= 0) ? raw : null;
+		})(),
 		hooks: null, // Per-workflow hooks not needed here — handled by the execution pipeline
 		active_note_prompt: (fm["notor-active-note-prompt"] as string | null | undefined) ?? null,
 		body_content: "",
 	};
+
+	// Phase 5: Compute effective delay — on_schedule events always skip delay
+	const effectiveDelay = (context.hookEvent === "on_schedule")
+		? 0
+		: (hookDelayMs ?? workflow.hook_delay ?? 0);
+
+	if (effectiveDelay > 0 && deps.hookDelayManager) {
+		deps.hookDelayManager.schedule(
+			hookId ?? workflow.file_path,
+			context.notePath ?? "",
+			effectiveDelay,
+			async () => {
+				// Re-check concurrency at execution time (not schedule time)
+				if (deps.concurrencyManager.isWorkflowRunning(workflow.file_path)) {
+					log.warn("Workflow already running after delay; skipping", {
+						workflowName: workflow.display_name,
+					});
+					return;
+				}
+				await _executeWorkflowSubmission(workflow, workflowFile, context, chain, deps);
+			},
+		);
+		return;
+	}
+
+	// effectiveDelay === 0 → immediate execution
+	await _executeWorkflowSubmission(workflow, workflowFile, context, chain, deps);
+}
+
+/**
+ * Inner execution logic: assembles prompt, switches persona, and submits
+ * the background workflow execution to the concurrency manager.
+ */
+async function _executeWorkflowSubmission(
+	workflow: import("../types").Workflow,
+	workflowFile: TFile,
+	context: VaultEventHookContext,
+	chain: ExecutionChain | null,
+	deps: DispatcherDeps,
+): Promise<void> {
+	const workflowPath = workflow.file_path;
 
 	// Build trigger context for prompt assembly
 	const triggerContext: TriggerContext = {

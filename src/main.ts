@@ -46,6 +46,7 @@ import { TagChangeSuppressionManager } from "./hooks/tag-change-detector";
 import { VaultEventDebounce } from "./hooks/vault-event-debounce";
 import { ExecutionChainTracker } from "./hooks/execution-chain";
 import { ManualSaveDetector } from "./hooks/manual-save-detector";
+import { HookDelayManager } from "./hooks/hook-delay-manager";
 import { VaultEventScheduler } from "./hooks/vault-event-scheduler";
 import { VaultEventListenerManager } from "./hooks/vault-event-listener-manager";
 import { WorkflowConcurrencyManager } from "./workflows/workflow-concurrency";
@@ -325,6 +326,9 @@ export default class NotorPlugin extends Plugin {
 
 	/** Concurrency manager for background workflow executions (F-020). */
 	private _workflowConcurrencyManager?: WorkflowConcurrencyManager;
+
+	/** Per-hook debounce delay manager (Phase 5). */
+	private _hookDelayManager?: HookDelayManager;
 
 	// -----------------------------------------------------------------------
 	// Group H: Workflow activity tracker (H-006)
@@ -992,6 +996,7 @@ export default class NotorPlugin extends Plugin {
 		this._vaultEventListenerManager?.destroy();
 		this._vaultEventScheduler?.destroy();
 		this._manualSaveDetector?.destroy();
+		this._hookDelayManager?.destroy();
 		this._tagSuppression?.destroy();
 		this._vaultEventDebounce?.destroy();
 		// this._executionChainTracker — stateless, nothing to destroy
@@ -1403,6 +1408,10 @@ export default class NotorPlugin extends Plugin {
 		);
 		this._workflowConcurrencyManager = workflowConcurrencyManager;
 
+		// Step 6a: Hook delay manager (Phase 5 per-hook debounce)
+		const hookDelayManager = new HookDelayManager();
+		this._hookDelayManager = hookDelayManager;
+
 		// Step 6b: Workflow activity tracker (H-006)
 		// Wraps the concurrency manager to provide UI-focused views and
 		// change notifications for the activity indicator. Wired as the
@@ -1440,6 +1449,7 @@ export default class NotorPlugin extends Plugin {
 				getExtensionAutomations: (trigger) => this.getExtensionManager().getAutomationsForTrigger(trigger),
 				executeExtensionAutomation: (automation, context) => this.getExtensionManager().executeAutomation(automation, context),
 				templateRegistry: this.getTemplateRegistry(),
+				hookDelayManager,
 			};
 		};
 

@@ -361,6 +361,11 @@ function parseWorkflowFile(
 	// Parse per-workflow model preset override (Phase 4)
 	const modelPreset = parseStringOrNull(frontmatter["notor-model-preset"]);
 
+	// Parse per-workflow hook delay (Phase 5)
+	const rawHookDelay = frontmatter["notor-hook-delay"];
+	const hookDelay: number | null =
+		(typeof rawHookDelay === "number" && rawHookDelay >= 0) ? rawHookDelay : null;
+
 	// Parse and validate schedule (C-005)
 	let schedule: string | null = null;
 	if (trigger === "scheduled") {
@@ -425,6 +430,7 @@ function parseWorkflowFile(
 		persona_name: personaName,
 		mode,
 		model_preset: modelPreset,
+		hook_delay: hookDelay,
 		hooks,
 		active_note_prompt: activeNotePrompt,
 		body_content: "", // Deferred — read lazily at execution time (NFR-10)

@@ -48,7 +48,8 @@ export function addVaultEventHook(
 	actionType: "execute_command" | "run_workflow",
 	commandOrPath: string,
 	label = "",
-	schedule: string | null = null
+	schedule: string | null = null,
+	delayMs: number | null = null
 ): VaultEventHook {
 	// Validate action type requirements
 	if (actionType === "execute_command" && !commandOrPath.trim()) {
@@ -78,6 +79,7 @@ export function addVaultEventHook(
 		label,
 		enabled: true,
 		schedule: event === "on_schedule" ? (schedule?.trim() ?? null) : null,
+		delay_ms: delayMs,
 	};
 
 	config[event].push(hook);

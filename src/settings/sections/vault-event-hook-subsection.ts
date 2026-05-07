@@ -82,8 +82,11 @@ export function renderVaultEventHookSubsection(
 			(hook.action_type ?? "execute_command") === "run_workflow" &&
 			!hook.workflow_path?.trim();
 
+		const delayBadge = hook.delay_ms != null && hook.delay_ms > 0
+			? ` ⏱${hook.delay_ms}ms`
+			: "";
 		const setting = new Setting(body)
-			.setName(hookName + (isInvalidWorkflow ? " ⚠️" : ""))
+			.setName(hookName + (isInvalidWorkflow ? " ⚠️" : "") + delayBadge)
 			.setDesc(hookDesc);
 
 		// Enabled toggle
@@ -152,6 +155,7 @@ export function renderVaultEventHookSubsection(
 	let newCommandOrPath = "";
 	let newLabel = "";
 	let newSchedule = "";
+	let newDelayMs: number | null = null;
 
 	// Action type selector
 	const actionTypeSetting = new Setting(body)
@@ -232,6 +236,21 @@ export function renderVaultEventHookSubsection(
 		});
 	}
 
+	// Delay input (Phase 5: per-hook debounce)
+	new Setting(body)
+		.setName("Delay (ms)")
+		.setDesc("Debounce delay before execution. Empty = inherit from workflow, 0 = immediate.")
+		.addText((text) =>
+			text.setPlaceholder("inherit").onChange((value) => {
+				if (value.trim() === "") {
+					newDelayMs = null;
+				} else {
+					const parsed = parseInt(value, 10);
+					newDelayMs = (!isNaN(parsed) && parsed >= 0) ? parsed : null;
+				}
+			})
+		);
+
 	// Add button
 	actionTypeSetting.addButton((btn) =>
 		btn.setButtonText("Add").onClick(async () => {
@@ -262,7 +281,8 @@ export function renderVaultEventHookSubsection(
 					newActionType,
 					newCommandOrPath,
 					newLabel,
-					hasSchedule ? newSchedule : null
+					hasSchedule ? newSchedule : null,
+					newDelayMs
 				);
 				await ctx.saveSettings();
 				ctx.redisplay();
