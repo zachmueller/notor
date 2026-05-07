@@ -179,7 +179,7 @@ the global Plan/Act mode setting.
 
 **File:** `src/types.ts` (line 532, after `persona_name` and before `hooks`)
 
-- [ ] **3.1a** Add the field:
+- [x] **3.1a** Add the field:
   ```typescript
   /** Per-workflow conversation mode override from `notor-conversation-mode` (null = inherit). */
   mode: ConversationMode | null;
@@ -189,14 +189,14 @@ the global Plan/Act mode setting.
 
 **File:** `src/workflows/workflow-discovery.ts` — `parseWorkflowFile()` (after line 334)
 
-- [ ] **3.2a** Add parsing after `activeNotePrompt` parsing:
+- [x] **3.2a** Add parsing after `activeNotePrompt` parsing:
   ```typescript
   const rawMode = frontmatter["notor-conversation-mode"];
   const mode: ConversationMode | null =
       (rawMode === "plan" || rawMode === "act") ? rawMode : null;
   ```
 
-- [ ] **3.2b** Add `mode` to the returned object (line 390–401), placed after `persona_name` and before `hooks`:
+- [x] **3.2b** Add `mode` to the returned object (line 390–401), placed after `persona_name` and before `hooks`:
   ```typescript
   return {
       file_path: file.path,
@@ -213,13 +213,13 @@ the global Plan/Act mode setting.
   };
   ```
 
-- [ ] **3.2c** Add `ConversationMode` to the import from `"../types"` (lines 25–28)
+- [x] **3.2c** Add `ConversationMode` to the import from `"../types"` (lines 25–28)
 
 ### 3.3 Use workflow mode in foreground execution
 
 **File:** `src/chat/workflow-executor.ts` — `executeWorkflow()` (lines 206–208)
 
-- [ ] **3.3a** Change mode determination:
+- [x] **3.3a** Change mode determination:
   ```typescript
   // Before:
   const currentMode = conversationManager.hasActiveConversation()
@@ -237,7 +237,7 @@ the global Plan/Act mode setting.
 
 **File:** `src/chat/workflow-executor.ts` — `executeBackgroundWorkflow()` (line 444)
 
-- [ ] **3.4a** Change:
+- [x] **3.4a** Change:
   ```typescript
   // Before:
   const mode = this.deps.getSettings().mode;
@@ -253,14 +253,14 @@ the global Plan/Act mode setting.
 
 **File:** `src/hooks/vault-event-dispatcher.ts` — `executeRunWorkflowAction()` (lines 365–378)
 
-- [ ] **3.5a** Add `mode` to the constructed Workflow object:
+- [x] **3.5a** Add `mode` to the constructed Workflow object:
   ```typescript
   mode: (fm["notor-conversation-mode"] === "plan" || fm["notor-conversation-mode"] === "act")
       ? fm["notor-conversation-mode"] as ConversationMode
       : null,
   ```
 
-- [ ] **3.5b** Add `ConversationMode` to the import from `"../types"` if not already present
+- [x] **3.5b** Add `ConversationMode` to the import from `"../types"` if not already present
 
 ---
 

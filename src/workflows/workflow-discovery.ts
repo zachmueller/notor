@@ -23,6 +23,7 @@
 import type { MetadataCache, TFile, Vault } from "obsidian";
 import { TAbstractFile, TFolder } from "obsidian";
 import type {
+	ConversationMode,
 	Workflow,
 	WorkflowTrigger,
 } from "../types";
@@ -352,6 +353,11 @@ function parseWorkflowFile(
 	const personaName = parseStringOrNull(frontmatter["notor-workflow-persona"]);
 	const activeNotePrompt = parseStringOrNull(frontmatter["notor-active-note-prompt"]);
 
+	// Parse per-workflow conversation mode override (Phase 3)
+	const rawMode = frontmatter["notor-conversation-mode"];
+	const mode: ConversationMode | null =
+		(rawMode === "plan" || rawMode === "act") ? rawMode : null;
+
 	// Parse and validate schedule (C-005)
 	let schedule: string | null = null;
 	if (trigger === "scheduled") {
@@ -414,6 +420,7 @@ function parseWorkflowFile(
 		trigger,
 		schedule,
 		persona_name: personaName,
+		mode,
 		hooks,
 		active_note_prompt: activeNotePrompt,
 		body_content: "", // Deferred — read lazily at execution time (NFR-10)

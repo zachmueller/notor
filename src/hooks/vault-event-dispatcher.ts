@@ -21,7 +21,7 @@
 
 import { Notice, Platform, TFile } from "obsidian";
 import type { App, Vault, MetadataCache } from "obsidian";
-import type { VaultEventHook, Workflow, ExecutionChain, TriggerContext, WorkflowExecution } from "../types";
+import type { ConversationMode, VaultEventHook, Workflow, ExecutionChain, TriggerContext, WorkflowExecution } from "../types";
 import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
 import type { NotorSettings } from "../settings";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
@@ -373,6 +373,9 @@ export async function executeRunWorkflowAction(
 			?? "manual",
 		schedule: (fm["notor-schedule"] as string | null | undefined) ?? null,
 		persona_name: (fm["notor-workflow-persona"] as string | null | undefined) ?? null,
+		mode: (fm["notor-conversation-mode"] === "plan" || fm["notor-conversation-mode"] === "act")
+			? fm["notor-conversation-mode"] as ConversationMode
+			: null,
 		hooks: null, // Per-workflow hooks not needed here — handled by the execution pipeline
 		active_note_prompt: (fm["notor-active-note-prompt"] as string | null | undefined) ?? null,
 		body_content: "",

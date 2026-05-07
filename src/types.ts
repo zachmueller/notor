@@ -530,6 +530,8 @@ export interface Workflow {
 	schedule: string | null;
 	/** Persona to activate from `notor-workflow-persona` (null = use current persona). */
 	persona_name: string | null;
+	/** Per-workflow conversation mode override from `notor-conversation-mode` (null = inherit). */
+	mode: ConversationMode | null;
 	/** Per-workflow LLM lifecycle hook overrides from `notor-hooks`. */
 	hooks: WorkflowHookConfig | null;
 	/** Template string from `notor-active-note-prompt` frontmatter (null if not set). Contains `{active_note}` placeholder. */

@@ -203,9 +203,10 @@ export class WorkflowExecutor {
 		const providerId = this.deps.getActiveProviderId();
 		const providerConfig = this.deps.providerRegistry.getConfig(providerId);
 		const modelId = this.deps.getActiveModelId();
-		const currentMode = conversationManager.hasActiveConversation()
-			? conversationManager.getMode()
-			: this.deps.getSettings().mode;
+		const currentMode = workflow.mode
+			?? (conversationManager.hasActiveConversation()
+				? conversationManager.getMode()
+				: this.deps.getSettings().mode);
 
 		// Determine the active persona name after any switch
 		const activePersonaName = personaManager?.getActivePersona()?.name ?? null;
@@ -441,7 +442,7 @@ export class WorkflowExecutor {
 		const providerId = this.deps.providerRegistry.getActiveId();
 		const providerConfig = this.deps.providerRegistry.getConfig(providerId);
 		const modelId = providerConfig?.model_id ?? "";
-		const mode = this.deps.getSettings().mode;
+		const mode = workflow.mode ?? this.deps.getSettings().mode;
 
 		// Determine the active persona name after any switch
 		const activePersonaName = personaManager?.getActivePersona()?.name ?? null;
