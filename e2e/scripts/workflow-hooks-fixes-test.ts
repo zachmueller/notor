@@ -222,9 +222,7 @@ async function testLegacyBackwardCompat(ctx: TestContext): Promise<void> {
 	const result = await page.evaluate(() => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "plugin not found" };
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		const legacy = workflows.find((w: any) => w.file_path?.includes("legacy-workflow"));
 		return {
 			totalWorkflows: workflows.length,
@@ -260,9 +258,7 @@ async function testModeOverrideParsing(ctx: TestContext): Promise<void> {
 	const result = await page.evaluate(() => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "plugin not found" };
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		const newStyle = workflows.find((w: any) => w.file_path?.includes("new-style-workflow"));
 		const modeOverride = workflows.find((w: any) => w.file_path?.includes("mode-override-workflow"));
 		const legacy = workflows.find((w: any) => w.file_path?.includes("legacy-workflow"));
@@ -300,9 +296,7 @@ async function testModelPresetParsing(ctx: TestContext): Promise<void> {
 	const result = await page.evaluate(() => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "plugin not found" };
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		const newStyle = workflows.find((w: any) => w.file_path?.includes("new-style-workflow"));
 		const presetWf = workflows.find((w: any) => w.file_path?.includes("preset-workflow"));
 		const legacy = workflows.find((w: any) => w.file_path?.includes("legacy-workflow"));
@@ -340,9 +334,7 @@ async function testHookDelayParsing(ctx: TestContext): Promise<void> {
 	const result = await page.evaluate(() => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "plugin not found" };
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		const newStyle = workflows.find((w: any) => w.file_path?.includes("new-style-workflow"));
 		const delayed = workflows.find((w: any) => w.file_path?.includes("delayed-workflow"));
 		const scheduled = workflows.find((w: any) => w.file_path?.includes("scheduled-workflow"));
@@ -391,9 +383,7 @@ async function testCaseInsensitiveDirectory(ctx: TestContext): Promise<void> {
 		if (!plugin) return { error: "plugin not found" };
 
 		// Check that the workflows root was resolved successfully
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		return {
 			workflowCount: workflows.length,
 			paths: workflows.slice(0, 5).map((w: any) => w.file_path),
@@ -507,24 +497,25 @@ async function testHookDelayDebounce(ctx: TestContext): Promise<void> {
 
 		// Test debounce: schedule 3 rapid executions for the same hook+note
 		let executionCount = 0;
-		const testHookId = "test-debounce-hook";
-		const testNotePath = "test/note.md";
+		const testHookId = "__e2e_debounce_test__";
+		const testNotePath = "__e2e_note__.md";
 
+		const sizeBefore = delayManager.size;
 		delayManager.schedule(testHookId, testNotePath, 300, () => { executionCount++; });
 		delayManager.schedule(testHookId, testNotePath, 300, () => { executionCount++; });
 		delayManager.schedule(testHookId, testNotePath, 300, () => { executionCount++; });
 
-		// Should have 1 pending (last one wins due to debounce)
-		const pendingAfterSchedule = delayManager.size;
+		// Should have added exactly 1 pending entry (last one wins due to debounce)
+		const pendingAdded = delayManager.size - sizeBefore;
 
 		// Wait for the delay to elapse
 		await new Promise((r) => setTimeout(r, 500));
 
-		const pendingAfterWait = delayManager.size;
+		const pendingAfterWait = delayManager.size - sizeBefore;
 		const finalCount = executionCount;
 
 		return {
-			pendingAfterSchedule,
+			pendingAdded,
 			pendingAfterWait,
 			executionCount: finalCount,
 		};
@@ -534,17 +525,17 @@ async function testHookDelayDebounce(ctx: TestContext): Promise<void> {
 
 	if (result.error) {
 		ctx.fail("Hook delay debounce", result.error, shot);
-	} else if (result.executionCount === 1 && result.pendingAfterSchedule === 1) {
+	} else if (result.executionCount === 1 && result.pendingAdded === 1) {
 		ctx.pass(
 			"Hook delay debounce",
-			`Debounce works: 3 rapid schedules → ${result.pendingAfterSchedule} pending → ` +
-				`${result.executionCount} execution after delay. Pending after wait: ${result.pendingAfterWait}`,
+			`Debounce works: 3 rapid schedules → ${result.pendingAdded} pending added → ` +
+				`${result.executionCount} execution after delay. Pending delta after wait: ${result.pendingAfterWait}`,
 			shot
 		);
 	} else {
 		ctx.fail(
 			"Hook delay debounce",
-			`Expected 1 pending and 1 execution. Got: pending=${result.pendingAfterSchedule}, ` +
+			`Expected 1 pending added and 1 execution. Got: pendingAdded=${result.pendingAdded}, ` +
 				`executions=${result.executionCount}, pendingAfterWait=${result.pendingAfterWait}`,
 			shot
 		);
@@ -615,9 +606,7 @@ async function testScheduleSkipsDelay(ctx: TestContext): Promise<void> {
 		if (!plugin) return { error: "plugin not found" };
 
 		// The scheduled-workflow has notor-hook-delay: 5000 but on_schedule should ignore it
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		const scheduled = workflows.find((w: any) => w.file_path?.includes("scheduled-workflow"));
 
 		if (!scheduled) return { error: "scheduled-workflow not found" };

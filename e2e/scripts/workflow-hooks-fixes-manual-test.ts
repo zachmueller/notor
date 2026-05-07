@@ -181,16 +181,10 @@ async function test82a_customNotorDir(ctx: TestContext): Promise<void> {
 		await plugin.saveSettings?.();
 
 		// Trigger workflow re-discovery
-		if (plugin._workflowDiscovery?.discoverWorkflows) {
-			await plugin._workflowDiscovery.discoverWorkflows();
-		} else if (plugin.discoverWorkflows) {
-			await plugin.discoverWorkflows();
-		}
+		plugin.rescanWorkflows?.();
 
 		// Check what was discovered
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		const customWorkflow = workflows.find(
 			(w: any) => w.file_path?.includes("custom-dir-workflow")
 		);
@@ -240,9 +234,7 @@ async function test82a_customNotorDir(ctx: TestContext): Promise<void> {
 		if (!plugin) return;
 		plugin.settings.notor_dir = "notor/";
 		await plugin.saveSettings?.();
-		if (plugin._workflowDiscovery?.discoverWorkflows) {
-			await plugin._workflowDiscovery.discoverWorkflows();
-		}
+		plugin.rescanWorkflows?.();
 	});
 	await page.waitForTimeout(2_000);
 }
@@ -338,9 +330,7 @@ async function test82c_perWorkflowMode(ctx: TestContext): Promise<void> {
 		const globalMode = plugin.settings?.mode;
 
 		// Get the workflow and check its mode
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		const actWorkflow = workflows.find(
 			(w: any) => w.file_path?.includes("act-mode-workflow")
 		);
@@ -384,9 +374,7 @@ async function test82d_perWorkflowPreset(ctx: TestContext): Promise<void> {
 		if (!plugin) return { error: "plugin not found" };
 
 		// Get the workflow with model_preset: "fast"
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		const presetWorkflow = workflows.find(
 			(w: any) => w.file_path?.includes("preset-workflow")
 		);
@@ -447,26 +435,28 @@ async function test82e_debounceRapidEvents(ctx: TestContext): Promise<void> {
 
 		// Simulate rapid-fire save events for the delayed-hook-workflow (2000ms delay)
 		let execCount = 0;
-		const hookId = "notor/workflows/delayed-hook-workflow.md";
-		const notePath = "test-note.md";
+		const hookId = "__e2e_debounce_rapid__";
+		const notePath = "__e2e_note__.md";
+
+		const sizeBefore = delayManager.size;
 
 		// Fire 5 rapid events (like saving the file 5 times quickly)
 		for (let i = 0; i < 5; i++) {
 			delayManager.schedule(hookId, notePath, 500, () => { execCount++; });
 		}
 
-		const pendingDuringBurst = delayManager.size;
+		const pendingAdded = delayManager.size - sizeBefore;
 
 		// Wait for the debounce to settle (500ms delay + buffer)
 		await new Promise((r) => setTimeout(r, 700));
 
 		const finalExecCount = execCount;
-		const pendingAfter = delayManager.size;
+		const pendingAfterDelta = delayManager.size - sizeBefore;
 
 		return {
-			pendingDuringBurst,
+			pendingAdded,
 			finalExecCount,
-			pendingAfter,
+			pendingAfterDelta,
 		};
 	});
 
@@ -474,17 +464,17 @@ async function test82e_debounceRapidEvents(ctx: TestContext): Promise<void> {
 
 	if (result.error) {
 		ctx.fail("8.2e Debounce rapid events", result.error, shot);
-	} else if (result.finalExecCount === 1 && result.pendingDuringBurst === 1) {
+	} else if (result.finalExecCount === 1 && result.pendingAdded === 1) {
 		ctx.pass(
 			"8.2e Debounce rapid events",
-			`5 rapid schedules → ${result.pendingDuringBurst} pending → ${result.finalExecCount} execution. ` +
+			`5 rapid schedules → ${result.pendingAdded} pending added → ${result.finalExecCount} execution. ` +
 				`Debounce correctly resets timer on each event, only last fires.`,
 			shot
 		);
 	} else {
 		ctx.fail(
 			"8.2e Debounce rapid events",
-			`Expected 1 pending + 1 execution. Got: pending=${result.pendingDuringBurst}, executions=${result.finalExecCount}`,
+			`Expected 1 pending added + 1 execution. Got: pendingAdded=${result.pendingAdded}, executions=${result.finalExecCount}`,
 			shot
 		);
 	}
@@ -589,9 +579,7 @@ async function test82e_scheduleSkipsDelay(ctx: TestContext): Promise<void> {
 		if (!plugin) return { error: "plugin not found" };
 
 		// Get the scheduled workflow
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		const scheduled = workflows.find(
 			(w: any) => w.file_path?.includes("scheduled-test-workflow")
 		);
@@ -698,9 +686,7 @@ async function test82g_backwardCompat(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "plugin not found" };
 
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 
 		const legacy = workflows.find(
 			(w: any) => w.file_path?.includes("legacy-compat-workflow")
@@ -803,9 +789,7 @@ async function test82h_scheduledHeadless(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "plugin not found" };
 
-		const workflows = plugin._workflowDiscovery?.getWorkflows?.()
-			?? plugin.getWorkflows?.()
-			?? [];
+		const workflows = plugin.getDiscoveredWorkflows?.() ?? [];
 		const scheduled = workflows.find(
 			(w: any) => w.file_path?.includes("scheduled-test-workflow")
 		);
