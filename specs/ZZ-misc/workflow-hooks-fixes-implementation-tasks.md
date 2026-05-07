@@ -33,7 +33,7 @@ and then `createFolder(normalized)`. On macOS (case-insensitive by default), if 
 folder exists with different casing (e.g., `Workflows` vs `workflows`), the lookup
 returns null but `createFolder` throws "Folder already exists".
 
-- [ ] **1.1a** Add `TFolder` to the import from `"obsidian"` (line 7, currently only imports `normalizePath`)
+- [ ] **1.1a** Add `TFolder` to the value import from `"obsidian"` (line 7: `import { normalizePath } from "obsidian"` → `import { normalizePath, TFolder } from "obsidian"`)
 
 - [ ] **1.1b** Rewrite the `ensureDirectory` function body:
   1. Keep the `parts.split("/")` iteration and `normalizePath()` call
@@ -73,7 +73,7 @@ returns null but `createFolder` throws "Folder already exists".
 `workflowsRootPath` is `"<notorDir>/workflows"` (lowercase). If the user's folder is
 `"Workflows"` (capital W), the lookup fails and returns an empty array.
 
-- [x] **1.2a** ~~Add `TFolder` to the import from `"obsidian"`~~ — **SKIP**: `TFolder` is already imported at line 2 (`import type { MetadataCache, TFile, TFolder, Vault } from "obsidian";`)
+- [ ] **1.2a** Move `TFolder` from the type-only import to the value import (line 2 has `import type { MetadataCache, TFile, TFolder, Vault } from "obsidian";` — this is type-only and cannot be used with `instanceof`). Move it to line 3: `import { TAbstractFile, TFolder } from "obsidian";` and remove it from line 2.
 
 - [ ] **1.2b** After the initial `vault.getAbstractFileByPath(workflowsRootPath)` call (line 78), add case-insensitive fallback:
   ```
@@ -320,7 +320,6 @@ model preset to use for execution.
   function resolveWorkflowProviderConfig(
       workflow: Workflow,
       settings: NotorSettings,
-      providerRegistry: ProviderRegistry,
       fallbackProviderId: string,
       fallbackModelId: string,
       fallbackExtendedContext: boolean,
@@ -367,7 +366,6 @@ model preset to use for execution.
   const { providerId, modelId, useExtendedContext } = resolveWorkflowProviderConfig(
       workflow,
       this.deps.getSettings(),
-      this.deps.providerRegistry,
       registryProviderId,
       registryConfig?.model_id ?? "",
       registryConfig?.use_extended_context ?? false,
@@ -438,7 +436,6 @@ model preset to use for execution.
   const { providerId, modelId, useExtendedContext } = resolveWorkflowProviderConfig(
       workflow,
       this.deps.getSettings(),
-      this.deps.providerRegistry,
       fallbackProviderId,
       this.deps.getActiveModelId(),
       fallbackConfig?.use_extended_context ?? false,
@@ -475,8 +472,8 @@ existing behavior).
 
 - [ ] **5.1a** Add the field:
   ```typescript
-  /** Delay in ms before executing this hook after the event fires (0 = immediate). Acts as debounce. */
-  delay_ms: number;
+  /** Delay in ms before executing this hook after the event fires (null = inherit from workflow, 0 = immediate, >0 = override). Acts as debounce. */
+  delay_ms: number | null;
   ```
 
 ### 5.2 Add `hook_delay` field to `Workflow` interface
@@ -520,14 +517,18 @@ existing behavior).
 
 - [ ] **5.5a** In the "Add hook" form (after the label input, ~line 195), add a delay input field:
   ```typescript
-  let newDelayMs = 0;
+  let newDelayMs: number | null = null;
   new Setting(addContainer)
       .setName("Delay (ms)")
-      .setDesc("Debounce delay before execution. 0 = immediate.")
+      .setDesc("Debounce delay before execution. Empty = inherit from workflow, 0 = immediate.")
       .addText((text) =>
-          text.setPlaceholder("0").onChange((value) => {
-              const parsed = parseInt(value, 10);
-              newDelayMs = (!isNaN(parsed) && parsed >= 0) ? parsed : 0;
+          text.setPlaceholder("inherit").onChange((value) => {
+              if (value.trim() === "") {
+                  newDelayMs = null;
+              } else {
+                  const parsed = parseInt(value, 10);
+                  newDelayMs = (!isNaN(parsed) && parsed >= 0) ? parsed : null;
+              }
           })
       );
   ```
@@ -535,13 +536,13 @@ existing behavior).
 - [ ] **5.5b** In the Add button handler, pass `delay_ms: newDelayMs` to `addVaultEventHook()`
 
 - [ ] **5.5c** In the existing hook list rendering (per-hook row), display the delay value
-  if non-zero (e.g., as a subtle `⏱ 2000ms` badge or tooltip)
+  if non-zero/non-null (e.g., as a subtle `⏱ 2000ms` badge or tooltip). Show nothing for `null` (inherit).
 
 ### 5.6 Update `addVaultEventHook` to accept `delay_ms`
 
 **File:** `src/hooks/vault-event-hook-config.ts` — `addVaultEventHook()`
 
-- [ ] **5.6a** Add `delay_ms` parameter (defaulting to `0`) and include it in the constructed
+- [ ] **5.6a** Add `delay_ms` parameter (defaulting to `null`) and include it in the constructed
   `VaultEventHook` object
 
 ### 5.7 Create `HookDelayManager` class
@@ -622,7 +623,7 @@ existing behavior).
 
   For the **workflow trigger path** (line 234, where `isWorkflowTrigger === true`):
   ```typescript
-  const effectiveDelay = (context.hookEvent === "on_schedule") ? 0 : (hook.hook_delay ?? 0);
+  const effectiveDelay = (context.hookEvent === "on_schedule") ? 0 : (workflow.hook_delay ?? 0);
 
   if (effectiveDelay > 0) {
       deps.hookDelayManager.schedule(
@@ -647,8 +648,18 @@ existing behavior).
   ```
 
   For the **VaultEventHook `run_workflow` path** (line 289):
+
+  `delay_ms` is nullable: `null` = inherit from target workflow's `hook_delay`,
+  `0` = explicitly immediate, `>0` = explicit override. The target workflow's `hook_delay`
+  is available after `executeRunWorkflowAction` constructs the workflow object, so the
+  effective delay resolution must happen INSIDE `executeRunWorkflowAction`, after the
+  workflow object is built (line 365–378). Add before the orchestrator null guard:
+
   ```typescript
-  const effectiveDelay = (context.hookEvent === "on_schedule") ? 0 : (vaultHook.delay_ms ?? 0);
+  // Resolve effective delay (null = inherit from workflow, 0 = immediate, >0 = override)
+  const effectiveDelay = (context.hookEvent === "on_schedule")
+      ? 0
+      : (vaultHook.delay_ms ?? workflow.hook_delay ?? 0);
 
   if (effectiveDelay > 0) {
       deps.hookDelayManager.schedule(
@@ -672,10 +683,14 @@ existing behavior).
   await executeRunWorkflowAction(workflowPath, context, chain, deps);
   ```
 
-  For `run_workflow` action type on a `VaultEventHook`, the hook's `delay_ms` takes
-  precedence over the target workflow's `hook_delay` (hook-level overrides workflow-level).
-  The target workflow's `hook_delay` is NOT consulted here — it only applies when the
-  workflow is triggered directly via its own `notor-trigger` matching.
+  NOTE: For the VaultEventHook path, the delay resolution needs access to the target
+  workflow's `hook_delay`. Two approaches:
+  (a) Move the delay check inside `executeRunWorkflowAction` after the workflow object
+      is constructed (requires passing `vaultHook.delay_ms` into the function), or
+  (b) Read the target workflow's frontmatter in `_executeOneHook` before calling
+      `executeRunWorkflowAction` (duplicates the fm read).
+  Approach (a) is preferred — add an optional `hookDelayMs: number | null` parameter
+  to `executeRunWorkflowAction`.
 
 - [ ] **5.8c** _(removed — merged into 5.8b above)_
 
@@ -805,9 +820,25 @@ a per-execution headless orchestrator.
 
 Each headless orchestrator is spawned per-execution and is self-contained. After
 `executeBackgroundWorkflow` completes (inside `WorkflowConcurrencyManager.submit`'s
-async run function), the orchestrator and its internal managers go out of scope and
-are garbage collected. No explicit destroy/cleanup is needed beyond what the
-concurrency manager already handles.
+async run function), the headless orchestrator must be explicitly destroyed to abort
+any lingering session state and flush JSONL writes.
+
+- [ ] **6.5a** In `executeRunWorkflowAction()`, wrap the `concurrencyManager.submit()` callback
+  with a `finally` block that destroys headless orchestrators:
+  ```typescript
+  deps.concurrencyManager.submit(execution, async () => {
+      try {
+          await orchestrator.executeBackgroundWorkflow(...);
+      } catch (e) {
+          // ... existing error handling ...
+      } finally {
+          // Only destroy orchestrators we created (headless), not the shared panel one
+          if (!deps.orchestrator) {
+              await orchestrator.destroy();
+          }
+      }
+  });
+  ```
 
 The `WorkflowConcurrencyManager` has a default limit of 3 concurrent executions
 (line 74 of `src/workflows/workflow-concurrency.ts`), which bounds the number of
@@ -945,16 +976,16 @@ It returns `null` for `"on_schedule"` (handled by a separate scheduler).
       }
       new Notice(`Auto-repaired workflow headers in '${workflowFile.name}'.`);
       // Wait for metadataCache to process the file change (event-based with timeout fallback).
-      // Obsidian's .on() returns an EventRef; use app.vault.offref() to unregister.
+      // Obsidian's .on() returns an EventRef; offref() must be called on the SAME object.
       await new Promise<void>((resolve) => {
           const ref = deps.metadataCache.on("changed", (changedFile) => {
               if (changedFile.path === workflowFile.path) {
                   clearTimeout(timeout);
-                  deps.app.vault.offref(ref);
+                  deps.metadataCache.offref(ref);
                   resolve();
               }
           });
-          const timeout = setTimeout(() => { deps.app.vault.offref(ref); resolve(); }, 2000);
+          const timeout = setTimeout(() => { deps.metadataCache.offref(ref); resolve(); }, 2000);
       });
       // Re-read frontmatter
       const newCache = deps.metadataCache.getFileCache(workflowFile);
