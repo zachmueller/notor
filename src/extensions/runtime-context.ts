@@ -329,6 +329,15 @@ export interface ExtensionUtils {
 		newValue?: unknown;
 		error?: string;
 	}>;
+	/** Show an Obsidian Notice popup. */
+	notify: (message: string, options?: {
+		/** Duration in milliseconds. 0 = persistent until dismissed. Default: 5000. */
+		duration?: number;
+		/** Callback invoked on left-click. Notice is auto-hidden after. */
+		onClick?: () => void;
+		/** Callback invoked on right-click (desktop only). Notice is auto-hidden after. */
+		onRightClick?: () => void;
+	}) => void;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */
@@ -1084,6 +1093,30 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				}
 			};
 		})(),
+
+		notify: (message: string, options?: {
+			duration?: number;
+			onClick?: () => void;
+			onRightClick?: () => void;
+		}) => {
+			const duration = options?.duration ?? 5000;
+			const notice = new Notice(message, duration);
+
+			if (options?.onClick) {
+				notice.noticeEl.addEventListener("click", () => {
+					notice.hide();
+					options.onClick!();
+				});
+			}
+
+			if (options?.onRightClick && Platform.isDesktop) {
+				notice.noticeEl.oncontextmenu = (e) => {
+					e.preventDefault();
+					notice.hide();
+					options.onRightClick!();
+				};
+			}
+		},
 
 		memory: null,
 		memoryApprovalMode: null,
