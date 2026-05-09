@@ -719,6 +719,20 @@ export class ChatOrchestrator implements ToolSessionContext {
 			attachmentContentBlocks = built.contentBlocks;
 		}
 
+		// Record vault attachment paths for rule trigger evaluation
+		if (this.vaultRuleManager && resolvedAttachments.length > 0) {
+			for (const att of resolvedAttachments) {
+				if (att.status === "resolved" && (
+					att.type === "vault_note" ||
+					att.type === "vault_note_section" ||
+					att.type === "vault_image" ||
+					att.type === "vault_pdf"
+				)) {
+					this.vaultRuleManager.recordNoteAccess(att.path);
+				}
+			}
+		}
+
 		// Phase 3 (HOOK-004): Dispatch pre-send hooks and capture stdout
 		let hookInjections: string[] | undefined;
 		{
