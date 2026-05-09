@@ -636,7 +636,7 @@ async function testScheduleSkipsDelay(ctx: TestContext): Promise<void> {
 	} else {
 		ctx.fail(
 			"Schedule skips delay",
-			`Expected hook_delay=5000 and trigger='scheduled'. Got: hook_delay=${result.hookDelay}, trigger=${result.trigger}`,
+			`Expected hook_delay=5000 and trigger='on-schedule'. Got: hook_delay=${result.hookDelay}, trigger=${result.trigger}`,
 			shot
 		);
 	}

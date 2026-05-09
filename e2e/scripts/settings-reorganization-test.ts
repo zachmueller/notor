@@ -471,7 +471,7 @@ async function testToolsSharedSettingsAndReload(ctx: TestContext): Promise<void>
 }
 
 async function testAutomationUserAutomations(ctx: TestContext): Promise<void> {
-	console.log("\nTest 4: Automation section — includes user automations");
+	console.log("\nTest 4: Automation section — grouped by trigger type with automations listed");
 	const { page } = ctx;
 
 	await expandGroup(page, "Automation");
@@ -480,11 +480,13 @@ async function testAutomationUserAutomations(ctx: TestContext): Promise<void> {
 	const headings = await getGroupHeadings(page, "Automation");
 	const shot = await ctx.screenshot("04-automation-user-automations");
 
-	const hasUserAutomations = headings.includes("User automations");
-	if (hasUserAutomations) {
-		ctx.pass("Automation — user automations heading", `Found "User automations" in Automation section`, shot);
+	// The unified Automation section groups items by trigger type.
+	// Our test automation has trigger "after_completion" → "After completion" group.
+	const hasAfterCompletion = headings.includes("After completion");
+	if (hasAfterCompletion) {
+		ctx.pass("Automation — trigger group heading", `Found "After completion" trigger group in Automation section`, shot);
 	} else {
-		ctx.fail("Automation — user automations heading", `"User automations" not found. Headings: [${headings.join(", ")}]`, shot);
+		ctx.fail("Automation — trigger group heading", `"After completion" not found. Headings: [${headings.join(", ")}]`, shot);
 	}
 
 	// Check that our test automation is listed

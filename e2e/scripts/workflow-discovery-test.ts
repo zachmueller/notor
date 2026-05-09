@@ -10,7 +10,7 @@
  *     display_name "daily/review"
  *  3. `auto-tag.md` discovered with trigger "on-save", no persona,
  *     display_name "auto-tag"
- *  4. `scheduled/weekly-review.md` discovered with trigger "scheduled",
+ *  4. `scheduled/weekly-review.md` discovered with trigger "on-schedule" (normalized from "scheduled"),
  *     schedule "0 9 * * 1", display_name "scheduled/weekly-review"
  *  5. `broken-no-trigger.md` excluded with warning (missing notor-trigger)
  *  6. `not-a-workflow.md` silently ignored (no notor-workflow frontmatter)
