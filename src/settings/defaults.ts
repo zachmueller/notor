@@ -124,6 +124,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	approval_timeout: 0,
 	tool_enabled: DEFAULT_TOOL_ENABLED,
 	automation_enabled: {},
+	workflow_enabled: {},
 	mode: "plan",
 	open_notes_on_access: true,
 	focus_notes_on_access: false,

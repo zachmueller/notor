@@ -112,7 +112,8 @@ export function handleNoteOpen(
 		settings.vault_event_hooks,
 		workflows,
 		eventType,
-		"on-note-open"
+		"on-note-open",
+		settings.workflow_enabled
 	);
 
 	if (hooks.length === 0) return;
@@ -172,7 +173,8 @@ export function handleNoteCreate(
 		settings.vault_event_hooks,
 		workflows,
 		eventType,
-		"on-note-create"
+		"on-note-create",
+		settings.workflow_enabled
 	);
 
 	if (hooks.length === 0) return;
@@ -229,7 +231,8 @@ export function handleModify(
 			settings.vault_event_hooks,
 			workflows,
 			onSaveEventType,
-			"on-save"
+			"on-save",
+			settings.workflow_enabled
 		);
 
 		if (onSaveHooks.length > 0) {
@@ -296,7 +299,8 @@ export function handleManualSave(
 		settings.vault_event_hooks,
 		workflows,
 		eventType,
-		"on-manual-save"
+		"on-manual-save",
+		settings.workflow_enabled
 	);
 
 	if (hooks.length === 0) return;
@@ -380,7 +384,8 @@ export function handleMetadataChanged(
 		settings.vault_event_hooks,
 		workflows,
 		eventType,
-		"on-tag-change"
+		"on-tag-change",
+		settings.workflow_enabled
 	);
 
 	if (hooks.length === 0) return;
@@ -418,16 +423,18 @@ function collectHooksAndWorkflows(
 	config: VaultEventHookConfig,
 	workflows: Workflow[],
 	eventType: keyof VaultEventHookConfig,
-	triggerValue: string
+	triggerValue: string,
+	workflowEnabled?: Record<string, boolean>
 ): Array<VaultEventHook | Workflow> {
 	// Settings hooks in order (enabled only)
 	const settingsHooks: VaultEventHook[] = config[eventType].filter(
 		(h) => h.enabled
 	);
 
-	// Workflow triggers alphabetically by file path
+	// Workflow triggers alphabetically by file path (respecting enabled state)
 	const workflowTriggers: Workflow[] = workflows
 		.filter((w) => w.trigger === triggerValue)
+		.filter((w) => workflowEnabled?.[w.file_path] !== false)
 		.sort((a, b) => a.file_path.localeCompare(b.file_path));
 
 	return [...settingsHooks, ...workflowTriggers];

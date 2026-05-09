@@ -175,16 +175,19 @@ export function validateWorkflow(
 		);
 	} else {
 		const triggerStr = typeof triggerValue === "string" ? triggerValue : JSON.stringify(triggerValue);
-		if (!(VALID_WORKFLOW_TRIGGERS as readonly string[]).includes(triggerStr)) {
+		if (
+			!(VALID_WORKFLOW_TRIGGERS as readonly string[]).includes(triggerStr) &&
+			triggerStr !== "scheduled"
+		) {
 			errors.push(
 				`Workflow '${filePath}' has unrecognized trigger '${triggerStr}'`
 			);
 		}
 	}
 
-	// Validate notor-schedule is present when trigger is "scheduled"
+	// Validate notor-schedule is present when trigger is "on-schedule" (or deprecated "scheduled")
 	const triggerStr = typeof triggerValue === "string" ? triggerValue : "";
-	if (triggerStr === "scheduled") {
+	if (triggerStr === "on-schedule" || triggerStr === "scheduled") {
 		const scheduleValue = frontmatter["notor-schedule"];
 		if (
 			scheduleValue === undefined ||
@@ -193,7 +196,7 @@ export function validateWorkflow(
 			scheduleValue.trim() === ""
 		) {
 			errors.push(
-				`Workflow '${filePath}' has trigger 'scheduled' but is missing 'notor-schedule'`
+				`Workflow '${filePath}' has trigger '${triggerStr}' but is missing 'notor-schedule'`
 			);
 		}
 	}
@@ -334,10 +337,11 @@ function parseWorkflowFile(
 
 	// Check for fatal errors (missing/invalid trigger)
 	const triggerValue = frontmatter["notor-trigger"];
+	const triggerRaw = String(triggerValue ?? "");
 	const hasTrigger =
 		triggerValue !== undefined &&
 		triggerValue !== null &&
-		(VALID_WORKFLOW_TRIGGERS as readonly string[]).includes(String(triggerValue));
+		((VALID_WORKFLOW_TRIGGERS as readonly string[]).includes(triggerRaw) || triggerRaw === "scheduled");
 
 	if (!hasTrigger) {
 		// Log all validation errors and exclude
@@ -347,7 +351,8 @@ function parseWorkflowFile(
 		return null;
 	}
 
-	const trigger = String(triggerValue) as WorkflowTrigger;
+	// Normalize deprecated "scheduled" alias → "on-schedule"
+	const trigger: WorkflowTrigger = triggerRaw === "scheduled" ? "on-schedule" : triggerRaw as WorkflowTrigger;
 
 	// Parse optional properties (C-003)
 	const personaName = parseStringOrNull(frontmatter["notor-workflow-persona"]);
@@ -368,7 +373,7 @@ function parseWorkflowFile(
 
 	// Parse and validate schedule (C-005)
 	let schedule: string | null = null;
-	if (trigger === "scheduled") {
+	if (trigger === "on-schedule") {
 		const rawSchedule = frontmatter["notor-schedule"];
 		if (
 			rawSchedule !== undefined &&

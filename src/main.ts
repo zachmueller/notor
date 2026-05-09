@@ -1524,6 +1524,7 @@ export default class NotorPlugin extends Plugin {
 			(trigger) => this.getExtensionManager().getAutomationsForTrigger(trigger),
 			(automation, context) => this.getExtensionManager().executeAutomation(automation, context),
 		);
+		vaultEventScheduler.setSettingsAccessor(() => this.settings);
 
 		// Register vault.on('delete') and vault.on('rename') for tag shadow cache maintenance (F-014)
 		this.registerEvent(
@@ -2081,6 +2082,11 @@ export default class NotorPlugin extends Plugin {
 			this._extensionManager = new ExtensionManager(this, parseYaml);
 		}
 		return this._extensionManager;
+	}
+
+	/** Vault event scheduler — provides cron job status for the settings UI. */
+	getVaultEventScheduler(): VaultEventScheduler | undefined {
+		return this._vaultEventScheduler;
 	}
 
 	/** Template variable registry — resolves {notor_dir}, {vault_name} etc. in scaffold content. */

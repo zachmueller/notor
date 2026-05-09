@@ -625,7 +625,7 @@ async function testScheduleSkipsDelay(ctx: TestContext): Promise<void> {
 
 	if (result.error) {
 		ctx.fail("Schedule skips delay", result.error, shot);
-	} else if (result.hookDelay === 5000 && result.trigger === "scheduled") {
+	} else if (result.hookDelay === 5000 && result.trigger === "on-schedule") {
 		ctx.pass(
 			"Schedule skips delay",
 			`scheduled-workflow has hook_delay=${result.hookDelay}ms and trigger='${result.trigger}'. ` +

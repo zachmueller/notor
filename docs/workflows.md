@@ -11,7 +11,8 @@ Workflow notes are stored under `notor/workflows/` and identified by `notor-work
 | Property | Values | Description |
 |---|---|---|
 | `notor-workflow` | `true` (required) | Marks this note as a workflow. |
-| `notor-trigger` | `manual` or a vault event type | How the workflow is triggered. See [Vault event hooks](hooks.md#vault-event-hooks) for event types. |
+| `notor-trigger` | `manual`, `on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`, or `on-schedule` | How the workflow is triggered. |
+| `notor-schedule` | cron expression string | Required when `notor-trigger` is `on-schedule`. Standard 5-field cron expression or shorthand (`@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`). |
 | `notor-workflow-persona` | `"{persona-name}"` | Automatically activates a persona when the workflow runs. Persists for the entire workflow conversation. |
 | `notor-hooks` | YAML mapping | Per-workflow hook overrides. Overrides global LLM lifecycle hooks for this workflow's duration. Non-overridden events continue using global hooks. |
 | `notor-active-note-prompt` | template string | Prompt template with a `{active_note}` placeholder. Marks this workflow as eligible for the **Launch active note workflow** command. See [Active note prompt templates](#active-note-prompt-templates) below. |
@@ -60,7 +61,24 @@ The `<workflow_instructions>` block injected into the conversation is rendered a
 
 ## Event-triggered workflows
 
-Set `notor-trigger` in the frontmatter to one of the vault event types (see [Vault event hooks](hooks.md#vault-event-hooks)) to run the workflow automatically in response to vault events. Event-triggered workflows run in the background without interrupting the current conversation.
+Set `notor-trigger` in the frontmatter to one of the vault event types (`on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`) to run the workflow automatically in response to vault events. Event-triggered workflows run in the background without interrupting the current conversation.
+
+## Scheduled workflows
+
+Set `notor-trigger: on-schedule` and provide a `notor-schedule` cron expression to run a workflow on a recurring schedule:
+
+```yaml
+---
+notor-workflow: true
+notor-trigger: on-schedule
+notor-schedule: "0 9 * * *"
+notor-conversation-mode: act
+---
+```
+
+Supported cron formats: standard 5-field expressions (`minute hour day-of-month month day-of-week`) and shorthands (`@daily`, `@weekly`, `@monthly`, `@yearly`, `@hourly`). Scheduling is in-process — missed executions while Obsidian is closed are skipped; no catch-up occurs.
+
+Scheduled workflows appear in **Settings → Notor → Automation** under the "Scheduled" group with a status indicator showing whether the cron job is active.
 
 ## Workflow activity indicator
 

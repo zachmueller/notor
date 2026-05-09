@@ -91,6 +91,9 @@ export interface NotorSettings {
 	/** Per-automation enabled/disabled state. Automations default to enabled when absent. */
 	automation_enabled: Record<string, boolean>;
 
+	/** Per-workflow enabled/disabled state. Workflows default to enabled when absent. */
+	workflow_enabled: Record<string, boolean>;
+
 	/** Current Plan/Act mode. */
 	mode: ConversationMode;
 

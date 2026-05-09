@@ -59,7 +59,7 @@ const WORKFLOW_TRIGGER_OPTIONS: Array<{ value: string; label: string }> = [
 	{ value: "on-save", label: "On save (auto or manual)" },
 	{ value: "on-manual-save", label: "On manual save (Cmd/Ctrl+S)" },
 	{ value: "on-tag-change", label: "On tag change" },
-	{ value: "scheduled", label: "Scheduled (cron)" },
+	{ value: "on-schedule", label: "Scheduled (cron)" },
 ];
 
 function buildWorkflowSkeleton(trigger: string, schedule: string): string {
@@ -67,7 +67,7 @@ function buildWorkflowSkeleton(trigger: string, schedule: string): string {
 	lines.push("notor-type: workflow");
 	lines.push(`notor-trigger: ${trigger}`);
 	lines.push("notor-conversation-mode: plan");
-	if (trigger === "scheduled") {
+	if (trigger === "on-schedule") {
 		lines.push(`notor-schedule: "${schedule || "0 9 * * *"}"`);
 	} else {
 		lines.push('# notor-schedule: "0 9 * * *"');
@@ -226,7 +226,7 @@ function renderWorkflowsSubsection(
 	const workflowFields: CreationField[] = [
 		{ type: "text", key: "name", placeholder: "Workflow name (e.g. daily-review)" },
 		{ type: "select", key: "trigger", options: WORKFLOW_TRIGGER_OPTIONS },
-		{ type: "text", key: "schedule", placeholder: "Cron expression (e.g. 0 9 * * *)", showWhen: { key: "trigger", value: "scheduled" } },
+		{ type: "text", key: "schedule", placeholder: "Cron expression (e.g. 0 9 * * *)", showWhen: { key: "trigger", value: "on-schedule" } },
 	];
 
 	new Setting(section)

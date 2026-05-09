@@ -433,7 +433,7 @@ export interface Persona {
  * - `"on-save"` — fired on any save (auto or manual).
  * - `"on-manual-save"` — fired on explicit Cmd/Ctrl+S save only.
  * - `"on-tag-change"` — fired when frontmatter tags change.
- * - `"scheduled"` — fired on a cron schedule.
+ * - `"on-schedule"` — fired on a cron schedule.
  *
  * @see specs/03-workflows-personas/data-model.md — Workflow entity
  */
@@ -444,7 +444,7 @@ export type WorkflowTrigger =
 	| "on-save"
 	| "on-manual-save"
 	| "on-tag-change"
-	| "scheduled";
+	| "on-schedule";
 
 /**
  * Constant array of all valid `WorkflowTrigger` values, used for
@@ -457,7 +457,7 @@ export const VALID_WORKFLOW_TRIGGERS: readonly WorkflowTrigger[] = [
 	"on-save",
 	"on-manual-save",
 	"on-tag-change",
-	"scheduled",
+	"on-schedule",
 ] as const;
 
 /**
@@ -526,7 +526,7 @@ export interface Workflow {
 	aliases: string[];
 	/** Trigger type from `notor-trigger` frontmatter. */
 	trigger: WorkflowTrigger;
-	/** Cron expression from `notor-schedule` (required when trigger is `"scheduled"`). */
+	/** Cron expression from `notor-schedule` (required when trigger is `"on-schedule"`). */
 	schedule: string | null;
 	/** Persona to activate from `notor-workflow-persona` (null = use current persona). */
 	persona_name: string | null;
@@ -762,7 +762,7 @@ export interface StaleContentEntry {
  * @see specs/03-workflows-personas/contracts/workflow-assembly.md — Step 5
  */
 export interface TriggerContext {
-	/** The event type that triggered the workflow (e.g. `"on-save"`, `"scheduled"`). */
+	/** The event type that triggered the workflow (e.g. `"on-save"`, `"on-schedule"`). */
 	event: string;
 	/** Vault-relative path of the note that caused the event (null for scheduled events). */
 	note_path: string | null;

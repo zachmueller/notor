@@ -18,6 +18,7 @@ import { Notice } from "obsidian";
 import type { VaultEventHook, Workflow } from "../types";
 import type { VaultEventHookContext } from "./vault-event-hook-engine";
 import type { ExecutionChain } from "../types";
+import type { NotorSettings } from "../settings/types";
 import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
 import { logger } from "../utils/logger";
 
@@ -71,6 +72,12 @@ export class VaultEventScheduler {
 	private getDiscoveredWorkflows: (() => Workflow[]) | null = null;
 
 	/**
+	 * Accessor for current plugin settings (for workflow_enabled filtering).
+	 * Set via `setSettingsAccessor()` during plugin initialization.
+	 */
+	private getSettings: (() => NotorSettings) | null = null;
+
+	/**
 	 * EXT-014: Accessor for user-defined automations with `on_schedule` trigger.
 	 * Set via `setExtensionAutomations()` during plugin initialization.
 	 */
@@ -120,6 +127,13 @@ export class VaultEventScheduler {
 		this.extensionAutomationExecutor = executeAutomation;
 	}
 
+	/**
+	 * Inject the settings accessor for workflow_enabled filtering.
+	 */
+	setSettingsAccessor(getSettings: () => NotorSettings): void {
+		this.getSettings = getSettings;
+	}
+
 	// ---------------------------------------------------------------------------
 	// Job synchronization
 	// ---------------------------------------------------------------------------
@@ -132,7 +146,7 @@ export class VaultEventScheduler {
 	 * - Leaves unchanged jobs running (identified by hook ID).
 	 *
 	 * Also reconciles scheduled workflow triggers (discovered workflows with
-	 * `notor-trigger: "scheduled"`). Each scheduled workflow gets its own
+	 * `notor-trigger: "on-schedule"`). Each scheduled workflow gets its own
 	 * cron job keyed by its file path + schedule string.
 	 *
 	 * @param hooks - Current list of enabled `on_schedule` hooks from settings.
@@ -159,10 +173,11 @@ export class VaultEventScheduler {
 			});
 		}
 
-		// Discovered workflow triggers with "scheduled" trigger
+		// Discovered workflow triggers with "on-schedule" trigger
 		if (this.getDiscoveredWorkflows) {
+			const workflowEnabled = this.getSettings?.()?.workflow_enabled;
 			const scheduledWorkflows = this.getDiscoveredWorkflows().filter(
-				(w) => w.trigger === "scheduled" && w.schedule
+				(w) => w.trigger === "on-schedule" && w.schedule && workflowEnabled?.[w.file_path] !== false
 			);
 			for (const workflow of scheduledWorkflows) {
 				// Key: file path (unique per workflow)
@@ -267,6 +282,14 @@ export class VaultEventScheduler {
 		} catch {
 			return null;
 		}
+	}
+
+	/**
+	 * Check whether a job with the given key is currently active.
+	 * Used by the settings UI to show active/inactive status indicators.
+	 */
+	isJobActive(key: string): boolean {
+		return this.jobs.has(key);
 	}
 
 	// ---------------------------------------------------------------------------
