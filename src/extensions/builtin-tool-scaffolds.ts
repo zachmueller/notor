@@ -1283,6 +1283,7 @@ settings:
     name: "Tavily — API Key"
     type: string
     secret: true
+    default: ""
   web_search_tavily_delay_ms:
     name: "Tavily — Delay (ms)"
     type: number
@@ -1299,6 +1300,7 @@ settings:
     name: "Brave Search — API Key"
     type: string
     secret: true
+    default: ""
   web_search_brave_delay_ms:
     name: "Brave Search — Delay (ms)"
     type: number
@@ -1315,6 +1317,7 @@ settings:
     name: "SerpApi — API Key"
     type: string
     secret: true
+    default: ""
   web_search_serpapi_delay_ms:
     name: "SerpApi — Delay (ms)"
     type: number
