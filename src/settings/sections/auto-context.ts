@@ -21,9 +21,9 @@ export function renderAutoContextSection(
 	});
 
 	new Setting(containerEl)
-		.setName("Include open note paths")
+		.setName("Include open file paths")
 		.setDesc(
-			"Include the vault-relative paths of all currently open notes so the AI knows your active workspace."
+			"Include the vault-relative paths of all currently open files (notes, PDFs, images, etc.) so the AI knows your active workspace."
 		)
 		.addToggle((toggle) =>
 			toggle

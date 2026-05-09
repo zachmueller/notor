@@ -3,7 +3,7 @@
  * included with every user message sent to the LLM.
  *
  * Sources:
- *   - Open note paths (FR-26)
+ *   - Open file paths (FR-26)
  *   - Vault structure — top-level folders (FR-27)
  *   - OS platform (FR-28)
  *
@@ -16,89 +16,104 @@
  */
 
 import type { App } from "obsidian";
-import { MarkdownView, TFolder } from "obsidian";
+import { TFolder } from "obsidian";
 import type { NotorSettings } from "../settings";
 
 // ---------------------------------------------------------------------------
-// Last-active markdown path cache
+// Last-active file path cache
 // ---------------------------------------------------------------------------
 
 /**
- * Vault-relative path of the most recently focused markdown leaf.
+ * Vault-relative path of the most recently focused file-backed leaf.
  *
- * Updated by `notifyMarkdownLeafActivated()` which is called from an
+ * Updated by `notifyFileLeafActivated()` which is called from an
  * `active-leaf-change` workspace event listener registered during plugin
  * load (see `main.ts`). The cache is intentionally NOT cleared when the
- * active leaf changes to a non-markdown view (e.g. the chat panel) — that
+ * active leaf changes to a non-file view (e.g. the chat panel) — that
  * is precisely the case we want to recover from when assembling auto-context.
  */
-let _lastActiveMarkdownPath: string | null = null;
+let _lastActiveFilePath: string | null = null;
 
 /**
- * Notify the auto-context module that a markdown leaf became active.
+ * Notify the auto-context module that a file-backed leaf became active.
  *
  * Should be called from a `registerEvent(app.workspace.on('active-leaf-change', …))`
  * handler in the plugin entry point so the cache stays current.
  *
- * @param path - Vault-relative path of the newly-active markdown file,
+ * @param path - Vault-relative path of the newly-active file,
  *               or `null` to reset the cache (e.g. on plugin unload).
  */
-export function notifyMarkdownLeafActivated(path: string | null): void {
-	_lastActiveMarkdownPath = path;
+export function notifyFileLeafActivated(path: string | null): void {
+	_lastActiveFilePath = path;
 }
 
 /**
- * Return the cached last-active markdown path.
+ * Return the cached last-active file path.
  *
- * Useful for command callbacks that need to resolve the active note
- * when the active view might not be a MarkdownView (e.g., when the
+ * Useful for command callbacks that need to resolve the active file
+ * when the active view might not be a file-backed view (e.g., when the
  * chat panel has focus).
  */
-export function getLastActiveMarkdownPath(): string | null {
-	return _lastActiveMarkdownPath;
+export function getLastActiveFilePath(): string | null {
+	return _lastActiveFilePath;
 }
 
 // ---------------------------------------------------------------------------
-// CTX-001: Open note paths collector
+// CTX-001: Open file paths collector
 // ---------------------------------------------------------------------------
 
+/** View types that are non-file-backed or internal — excluded from open-files list. */
+const EXCLUDED_VIEW_TYPES = new Set([
+	"empty",
+	"graph",
+	"localgraph",
+	"search",
+	"file-explorer",
+	"backlink",
+	"outgoing-link",
+	"tag",
+	"outline",
+	"notor-chat-view",
+]);
+
 /**
- * Collect vault-relative file paths of all currently open markdown notes,
- * with the active note annotated with ` (active)`.
+ * Collect vault-relative file paths of all currently open file-backed leaves
+ * (markdown, PDFs, images, canvas, etc.), with the active file annotated
+ * with ` (active)`.
  *
  * Uses `iterateAllLeaves()` to enumerate every leaf regardless of
  * activation state (Obsidian lazily initialises tab views, so
- * `getLeavesOfType("markdown")` may miss unvisited tabs). For each
- * leaf we check `leaf.view?.getState()?.file` as a fallback when the
- * view's `.file` property hasn't been populated yet.
+ * type-specific queries may miss unvisited tabs). For each leaf we check
+ * `leaf.view?.getState()?.file` as a fallback when the view's `.file`
+ * property hasn't been populated yet.
  *
- * Active note detection uses a two-stage approach to handle the common
- * case where the chat panel has focus (making the markdown view inactive):
- *   1. Try `getActiveViewOfType(MarkdownView)` — works when a markdown
- *      tab is currently focused.
- *   2. Fall back to `_lastActiveMarkdownPath` — the cached path set by
+ * Active file detection uses a two-stage approach to handle the common
+ * case where the chat panel has focus:
+ *   1. Try `app.workspace.getActiveFile()` — works when any file-backed
+ *      view is currently focused.
+ *   2. Fall back to `_lastActiveFilePath` — the cached path set by
  *      the `active-leaf-change` event listener. This correctly handles
- *      the case where the user switches from a markdown note to the chat
- *      panel, because the cache is not cleared on non-markdown leaf changes.
+ *      the case where the user switches to the chat panel, because the
+ *      cache is not cleared on non-file leaf changes.
  *
- * @returns Array of vault-relative file paths. The active markdown
- *          note (if any) has ` (active)` appended.
+ * @returns Array of vault-relative file paths. The active file (if any)
+ *          has ` (active)` appended.
  */
-export function collectOpenNotePaths(app: App): string[] {
+export function collectOpenFilePaths(app: App): string[] {
 	const seen = new Set<string>();
 	const paths: string[] = [];
 
-	// Stage 1: Try the currently-focused markdown view.
-	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-	let activePath: string | null = activeView?.file?.path ?? null;
+	// Stage 1: Try the currently-focused file view.
+	let activePath: string | null = app.workspace.getActiveFile()?.path ?? null;
 
-	// Collect all open markdown file paths first so we can use the set
-	// for the stage-2 fallback lookup below.
 	const openPaths = new Set<string>();
 
 	// iterateAllLeaves covers pinned tabs, split panes, stacked tabs,
 	// and — crucially — tabs whose views haven't been activated yet.
 	app.workspace.iterateAllLeaves((leaf) => {
+		const viewType = leaf.view?.getViewType?.();
+		if (viewType && EXCLUDED_VIEW_TYPES.has(viewType)) return;
+
 		// Try the view's file property first (populated for activated views).
 		let filePath: string | undefined =
 			(leaf.view as { file?: { path: string } }).file?.path;
@@ -112,19 +127,18 @@ export function collectOpenNotePaths(app: App): string[] {
 			}
 		}
 
-		// Only include markdown files (skip settings, graph, empty tabs, etc.)
-		if (filePath && filePath.endsWith(".md") && !seen.has(filePath)) {
+		if (filePath && !seen.has(filePath)) {
 			seen.add(filePath);
 			openPaths.add(filePath);
 			paths.push(filePath);
 		}
 	});
 
-	// Stage 2: If no markdown view is currently focused (e.g. the chat
-	// panel has focus), use the cached last-active markdown path.
+	// Stage 2: If no file view is currently focused (e.g. the chat panel
+	// has focus), use the cached last-active file path.
 	// Only use the cached path if the corresponding tab is still open.
-	if (!activePath && _lastActiveMarkdownPath && openPaths.has(_lastActiveMarkdownPath)) {
-		activePath = _lastActiveMarkdownPath;
+	if (!activePath && _lastActiveFilePath && openPaths.has(_lastActiveFilePath)) {
+		activePath = _lastActiveFilePath;
 	}
 
 	// Annotate the active path with " (active)" in the final list.
@@ -136,6 +150,9 @@ export function collectOpenNotePaths(app: App): string[] {
 
 	return paths;
 }
+
+/** @deprecated Use `collectOpenFilePaths` instead. */
+export const collectOpenNotePaths = collectOpenFilePaths;
 
 // ---------------------------------------------------------------------------
 // CTX-002: Vault structure collector
@@ -209,11 +226,11 @@ export function buildAutoContextBlock(
 ): string | null {
 	const tags: string[] = [];
 
-	// Open notes
+	// Open files
 	if (settings.auto_context_open_notes) {
-		const paths = collectOpenNotePaths(app);
+		const paths = collectOpenFilePaths(app);
 		const pathList = paths.length > 0 ? "\n" + paths.join("\n") + "\n  " : "";
-		tags.push(`  <open-notes>${pathList}</open-notes>`);
+		tags.push(`  <open-files>${pathList}</open-files>`);
 	}
 
 	// Vault structure — one folder per line, trailing `/`

@@ -1017,7 +1017,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 				}
 
 				// 1c. ACI-001: Build fresh auto-context before each LLM call
-				// so open-notes and vault structure reflect the latest state.
+				// so open-files and vault structure reflect the latest state.
 				const autoContext = buildAutoContextBlock(this.app, this.settings);
 				const systemPrompt = await this.systemPromptBuilder.assemble(
 					mode,

@@ -16,7 +16,7 @@
  *   2. Send a message → verify JSONL user message `auto_context` field is absent/null
  *   3. Send multiple messages → verify auto-context is NOT duplicated in user message history
  *   4. Intercept system prompt via structured log → verify it contains `<auto-context>` block
- *      with expected sections: `<open-notes>`, `<vault-structure>`, `<os>`
+ *      with expected sections: `<open-files>`, `<vault-structure>`, `<os>`
  *   5. Disable a source in settings → verify system prompt omits that source's tag
  *   6. All sources disabled → verify no `<auto-context>` block in system prompt
  *
@@ -39,7 +39,7 @@
  * ## ACI-TEST-003: Active note marker
  *
  * Validates the ` (active)` marker on the currently active note in the
- * `<open-notes>` block of the assembled system prompt (ACI-005).
+ * `<open-files>` block of the assembled system prompt (ACI-005).
  *
  * Scenarios:
  *   a. Open multiple notes → send message → verify exactly one note has ` (active)` suffix
@@ -209,7 +209,7 @@ const BASE_OVERRIDES: Record<string, unknown> = {
 	auto_context_vault_structure: true,
 	auto_context_os: true,
 	// Disable open_notes_on_access so LLM tool calls (read_note, etc.) don't
-	// open additional tabs that pollute the open-notes state between sub-tests.
+	// open additional tabs that pollute the open-files state between sub-tests.
 	open_notes_on_access: false,
 };
 
@@ -426,11 +426,11 @@ async function closeAllMarkdownTabs(page: Page): Promise<void> {
 }
 
 /**
- * Extract the `<open-notes>` section content from a system prompt string.
+ * Extract the `<open-files>` section content from a system prompt string.
  * Returns null if the tag is absent, or an array of trimmed non-empty lines.
  */
 function extractOpenNotes(systemPrompt: string): string[] | null {
-	const match = systemPrompt.match(/<open-notes>([\s\S]*?)<\/open-notes>/);
+	const match = systemPrompt.match(/<open-files>([\s\S]*?)<\/open-files>/);
 	if (!match) return null;
 	return match[1]!
 		.split("\n")
@@ -639,17 +639,17 @@ async function testSystemPromptContainsAutoContext(ctx: TestContext): Promise<vo
 		"<auto-context> block found in assembled system prompt",
 	);
 
-	// Check for open-notes section
-	if (systemPrompt.includes("<open-notes>")) {
+	// Check for open-files section
+	if (systemPrompt.includes("<open-files>")) {
 		ctx.pass(
-			"ACI-TEST-001-d: system prompt has <open-notes>",
-			"<open-notes> section present in system prompt auto-context",
+			"ACI-TEST-001-d: system prompt has <open-files>",
+			"<open-files> section present in system prompt auto-context",
 		);
 	} else {
 		// Open notes may be empty if no markdown tabs are open in test env
 		ctx.pass(
-			"ACI-TEST-001-d: system prompt has <open-notes>",
-			"<open-notes> section not found — may be expected if no markdown tabs are open in test env",
+			"ACI-TEST-001-d: system prompt has <open-files>",
+			"<open-files> section not found — may be expected if no markdown tabs are open in test env",
 		);
 	}
 
@@ -935,7 +935,7 @@ async function testAllSourcesDisabledNoAutoContextInSystemPrompt(ctx: TestContex
  * ACI-TEST-003-a: Exactly one note has ` (active)` suffix.
  *
  * Opens multiple notes, activates one of them, then sends a message.
- * Verifies that exactly one entry in `<open-notes>` ends with ` (active)`,
+ * Verifies that exactly one entry in `<open-files>` ends with ` (active)`,
  * and that all opened notes are present.
  */
 async function testExactlyOneNoteMarkedActive(ctx: TestContext): Promise<void> {
@@ -989,7 +989,7 @@ async function testExactlyOneNoteMarkedActive(ctx: TestContext): Promise<void> {
 	if (!openNotes) {
 		ctx.fail(
 			"ACI-TEST-003-a: exactly one note marked active",
-			"<open-notes> tag not found in system prompt",
+			"<open-files> tag not found in system prompt",
 			shot,
 		);
 		return;
@@ -1080,7 +1080,7 @@ async function testActiveMarkerMovesOnSwitch(ctx: TestContext): Promise<void> {
 	if (!openNotesAfterA) {
 		ctx.fail(
 			"ACI-TEST-003-b: active marker moves on switch",
-			"<open-notes> not found after first message",
+			"<open-files> not found after first message",
 		);
 		return;
 	}
@@ -1129,7 +1129,7 @@ async function testActiveMarkerMovesOnSwitch(ctx: TestContext): Promise<void> {
 	if (!openNotesAfterB) {
 		ctx.fail(
 			"ACI-TEST-003-b: active marker moves on switch",
-			"<open-notes> not found after second message",
+			"<open-files> not found after second message",
 			shot,
 		);
 		return;
@@ -1167,7 +1167,7 @@ async function testActiveMarkerMovesOnSwitch(ctx: TestContext): Promise<void> {
  * ACI-TEST-003-c: Active marker matches the foreground/focused leaf.
  *
  * Opens three notes, explicitly focuses one, and sends a message. Verifies
- * that the path in `<open-notes>` ending with ` (active)` exactly matches
+ * that the path in `<open-files>` ending with ` (active)` exactly matches
  * the note that was programmatically set as the active leaf.
  *
  * This is the "ground truth" test — it queries Obsidian's workspace API for
@@ -1248,7 +1248,7 @@ async function testActiveMarkerMatchesFocusedLeaf(ctx: TestContext): Promise<voi
 	if (!openNotes) {
 		ctx.fail(
 			"ACI-TEST-003-c: active marker matches focused leaf",
-			"<open-notes> tag not found in system prompt",
+			"<open-files> tag not found in system prompt",
 			shot,
 		);
 		return;
@@ -1260,7 +1260,7 @@ async function testActiveMarkerMatchesFocusedLeaf(ctx: TestContext): Promise<voi
 	if (activeLines.length === 0) {
 		ctx.fail(
 			"ACI-TEST-003-c: active marker matches focused leaf",
-			`No ` + "`(active)`" + ` marker found in open-notes. Open notes: ${openNotes.join(", ")}`,
+			`No ` + "`(active)`" + ` marker found in open-files. Open notes: ${openNotes.join(", ")}`,
 			shot,
 		);
 		return;
@@ -1309,7 +1309,7 @@ async function testActiveMarkerMatchesFocusedLeaf(ctx: TestContext): Promise<voi
  *
  * Opens 3 notes in new background tabs (never manually clicked), then sends
  * the very first message in a fresh conversation. Verifies that all three
- * paths appear in the `<open-notes>` block of the assembled system prompt.
+ * paths appear in the `<open-files>` block of the assembled system prompt.
  *
  * This directly validates the ACI-004 fix: `iterateAllLeaves()` must capture
  * tabs whose views have not been activated by the user.
@@ -1365,7 +1365,7 @@ async function testAllTabsDetectedOnFirstMessage(ctx: TestContext): Promise<void
 	if (!openNotes) {
 		ctx.fail(
 			"ACI-TEST-002-a: all tabs detected on first message",
-			"<open-notes> tag not found in system prompt",
+			"<open-files> tag not found in system prompt",
 			shot,
 		);
 		return;
@@ -1383,7 +1383,7 @@ async function testAllTabsDetectedOnFirstMessage(ctx: TestContext): Promise<void
 	if (missingNotes.length === 0) {
 		ctx.pass(
 			"ACI-TEST-002-a: all tabs detected on first message",
-			`All ${notesToOpen.length} opened notes detected in <open-notes>: ${openNotes.join(", ")}`,
+			`All ${notesToOpen.length} opened notes detected in <open-files>: ${openNotes.join(", ")}`,
 			shot,
 		);
 	} else {
@@ -1401,7 +1401,7 @@ async function testAllTabsDetectedOnFirstMessage(ctx: TestContext): Promise<void
  *
  * Opens the first note normally (active), then opens a second note in a
  * vertical split pane. Sends a message and verifies both notes appear in
- * the `<open-notes>` block.
+ * the `<open-files>` block.
  */
 async function testSplitPaneNotesDetected(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
@@ -1444,7 +1444,7 @@ async function testSplitPaneNotesDetected(ctx: TestContext): Promise<void> {
 	if (!openNotes) {
 		ctx.fail(
 			"ACI-TEST-002-b: split pane notes detected",
-			"<open-notes> tag not found in system prompt",
+			"<open-files> tag not found in system prompt",
 			shot,
 		);
 		return;
@@ -1458,13 +1458,13 @@ async function testSplitPaneNotesDetected(ctx: TestContext): Promise<void> {
 	if (missingNotes.length === 0) {
 		ctx.pass(
 			"ACI-TEST-002-b: split pane notes detected",
-			`Both notes (main pane + split) detected in <open-notes>: ${openNotes.join(", ")}`,
+			`Both notes (main pane + split) detected in <open-files>: ${openNotes.join(", ")}`,
 			shot,
 		);
 	} else {
 		ctx.fail(
 			"ACI-TEST-002-b: split pane notes detected",
-			`Missing from <open-notes>: ${missingNotes.join(", ")}. ` +
+			`Missing from <open-files>: ${missingNotes.join(", ")}. ` +
 				`Detected: ${openNotes.join(", ")}`,
 			shot,
 		);
@@ -1475,7 +1475,7 @@ async function testSplitPaneNotesDetected(ctx: TestContext): Promise<void> {
  * ACI-TEST-002-c: Switching active note without closing the first → both appear.
  *
  * Opens note A, then switches to note B (note A remains open but unfocused).
- * Sends a message and verifies both A and B appear in `<open-notes>`.
+ * Sends a message and verifies both A and B appear in `<open-files>`.
  */
 async function testSwitchActiveNoteShowsBoth(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
@@ -1518,7 +1518,7 @@ async function testSwitchActiveNoteShowsBoth(ctx: TestContext): Promise<void> {
 	if (!openNotes) {
 		ctx.fail(
 			"ACI-TEST-002-c: switch active note — both appear",
-			"<open-notes> tag not found in system prompt",
+			"<open-files> tag not found in system prompt",
 			shot,
 		);
 		return;
@@ -1550,7 +1550,7 @@ async function testSwitchActiveNoteShowsBoth(ctx: TestContext): Promise<void> {
  *
  * Opens two notes, sends a message to confirm both are detected, then closes
  * one tab. Sends a second message and verifies the closed note is gone from
- * `<open-notes>` while the remaining open note is still present.
+ * `<open-files>` while the remaining open note is still present.
  */
 async function testClosedTabNotDetected(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
@@ -1606,7 +1606,7 @@ async function testClosedTabNotDetected(ctx: TestContext): Promise<void> {
 	if (!openNotes) {
 		ctx.fail(
 			"ACI-TEST-002-d: closed tab not detected",
-			"<open-notes> tag not found in system prompt after closing tab",
+			"<open-files> tag not found in system prompt after closing tab",
 			shot,
 		);
 		return;
@@ -1644,7 +1644,7 @@ async function testClosedTabNotDetected(ctx: TestContext): Promise<void> {
  * ACI-TEST-002-e: Full vault-relative paths for notes from different folders.
  *
  * Opens notes from three different vault sub-folders and verifies that the
- * paths reported in `<open-notes>` are full vault-relative paths (e.g.
+ * paths reported in `<open-files>` are full vault-relative paths (e.g.
  * `Research/Climate.md`), not bare filenames (`Climate.md`).
  */
 async function testFullVaultRelativePathsReported(ctx: TestContext): Promise<void> {
@@ -1692,7 +1692,7 @@ async function testFullVaultRelativePathsReported(ctx: TestContext): Promise<voi
 	if (!openNotes) {
 		ctx.fail(
 			"ACI-TEST-002-e: full vault-relative paths reported",
-			"<open-notes> tag not found in system prompt",
+			"<open-files> tag not found in system prompt",
 			shot,
 		);
 		return;
@@ -1715,7 +1715,7 @@ async function testFullVaultRelativePathsReported(ctx: TestContext): Promise<voi
 					`"${expected}" reported as bare name "${bareName}" (missing folder prefix)`,
 				);
 			} else {
-				failures.push(`"${expected}" not found in open-notes at all`);
+				failures.push(`"${expected}" not found in open-files at all`);
 			}
 		}
 	}
@@ -2227,7 +2227,7 @@ async function tests(ctx: TestContext): Promise<void> {
 
 	// ── ACI-TEST-002 ────────────────────────────────────────────────────
 	console.log(
-		"\n[ACI-TEST-002] Restoring full settings and reloading for open-notes detection tests...",
+		"\n[ACI-TEST-002] Restoring full settings and reloading for open-files detection tests...",
 	);
 	const fullSettings = buildSettings();
 	fs.writeFileSync(PLUGIN_DATA_PATH, JSON.stringify(fullSettings, null, 2));

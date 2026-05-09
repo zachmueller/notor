@@ -13,7 +13,7 @@ import { MarkdownView } from "obsidian";
 import { createDefaultSettings, DEFAULT_MODEL_PRESETS, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
-import { notifyMarkdownLeafActivated, getLastActiveMarkdownPath } from "./context/auto-context";
+import { notifyFileLeafActivated, getLastActiveFilePath } from "./context/auto-context";
 
 // Workflows
 import { discoverWorkflows } from "./workflows/workflow-discovery";
@@ -519,11 +519,15 @@ export default class NotorPlugin extends Plugin {
 			name: "Launch active note workflow",
 			callback: () => {
 				try {
-					// Resolve active note path (two-stage: active view + cache fallback)
+					// Resolve active note path (two-stage: active view + cache fallback).
+					// Only markdown files are valid targets for note workflows.
 					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 					let activeFilePath = activeView?.file?.path ?? null;
 					if (!activeFilePath) {
-						activeFilePath = getLastActiveMarkdownPath();
+						const cached = getLastActiveFilePath();
+						if (cached?.endsWith(".md")) {
+							activeFilePath = cached;
+						}
 					}
 					if (!activeFilePath) {
 						new Notice("No active note found.");
@@ -768,17 +772,17 @@ export default class NotorPlugin extends Plugin {
 		});
 
 		// 5. Register active-leaf-change listener so the auto-context module
-		// can track the last-focused markdown note even when the chat panel
-		// (or another non-markdown view) has focus at send time (ACI-005).
+		// can track the last-focused file even when the chat panel (or another
+		// non-file view) has focus at send time (ACI-005).
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
-				const view = leaf?.view;
-				if (view instanceof MarkdownView && view.file?.path) {
-					notifyMarkdownLeafActivated(view.file.path);
+				const filePath = (leaf?.view as { file?: { path: string } })?.file?.path;
+				if (filePath) {
+					notifyFileLeafActivated(filePath);
 				}
-				// Intentionally NOT clearing the cache on non-markdown leaf
-				// changes — that lets us recover the last active note when the
-				// user switches to the chat panel (or any other non-markdown view).
+				// Intentionally NOT clearing the cache on non-file leaf changes —
+				// that lets us recover the last active file when the user switches
+				// to the chat panel (or any other non-file view).
 			})
 		);
 
@@ -983,8 +987,8 @@ export default class NotorPlugin extends Plugin {
 		}
 		this._orchestrators.clear();
 
-		// Clear the last-active markdown path cache on unload
-		notifyMarkdownLeafActivated(null);
+		// Clear the last-active file path cache on unload
+		notifyFileLeafActivated(null);
 
 		// Stop vault rule manager file watchers
 		this._vaultRuleManager?.stop();
