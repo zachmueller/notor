@@ -60,40 +60,80 @@ export function getCompactionPrompt(settings: NotorSettings): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Estimate cumulative tokens across all messages in a conversation.
+ * Estimate current context window consumption for a conversation.
  *
- * Counts content of all messages plus serialized tool call/result content.
+ * The LLM-reported `input_tokens` on each message is the full prompt size
+ * at that API turn (cumulative), NOT the incremental cost of that message.
+ * We use the most recent `input_tokens` as a baseline (it already includes
+ * all prior context), then content-estimate only messages added after it.
  *
  * @param messages - All messages in the active context window.
- * @returns Total estimated token count.
+ * @returns Estimated current context window token usage.
  */
 export function estimateConversationTokens(messages: Message[]): number {
-	let total = 0;
-	for (const msg of messages) {
-		// Prefer actual LLM-reported token counts over character estimation.
-		// ContextManager uses the same priority so both estimates stay in sync,
-		// preventing truncation from firing before compaction gets a chance to.
-		if (msg.role === "assistant" && msg.output_tokens) {
-			total += msg.output_tokens;
-		} else if (msg.input_tokens) {
-			total += msg.input_tokens;
-		} else {
-			total += estimateContentTokens(msg.content);
+	// Find the last message with LLM-reported input_tokens — this already
+	// represents the full prompt size at that point in the conversation.
+	let lastReportedInputTokens = 0;
+	let lastReportedIndex = -1;
 
-			// Include tool call parameters in estimation
-			if (msg.tool_call) {
-				total += estimateTokens(JSON.stringify(msg.tool_call.parameters));
-			}
-
-			// Include tool result content in estimation
-			if (msg.tool_result) {
-				const result = msg.tool_result.result;
-				total += estimateTokens(
-					typeof result === "string" ? result : JSON.stringify(result)
-				);
-			}
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg && msg.input_tokens) {
+			lastReportedInputTokens = msg.input_tokens;
+			lastReportedIndex = i;
+			break;
 		}
 	}
+
+	if (lastReportedIndex === -1) {
+		// No LLM data yet — fall back to character-based estimation for all
+		let total = 0;
+		for (const msg of messages) {
+			total += estimateSingleMessageTokens(msg);
+		}
+		return total;
+	}
+
+	// Baseline: full context at last LLM call
+	let total = lastReportedInputTokens;
+
+	// The assistant's output is also in the window for subsequent turns
+	const lastMsg = messages[lastReportedIndex]!;
+	if (lastMsg.output_tokens) {
+		total += lastMsg.output_tokens;
+	}
+
+	// Content-estimate any messages AFTER the last reported one
+	for (let i = lastReportedIndex + 1; i < messages.length; i++) {
+		const msg = messages[i];
+		if (msg) total += estimateSingleMessageTokens(msg);
+	}
+
+	return total;
+}
+
+/**
+ * Estimate tokens for a single message using content-based heuristics.
+ * Used when no LLM-reported cumulative token count is available.
+ */
+function estimateSingleMessageTokens(msg: Message): number {
+	if (msg.role === "assistant" && msg.output_tokens) {
+		return msg.output_tokens;
+	}
+
+	let total = estimateContentTokens(msg.content);
+
+	if (msg.tool_call) {
+		total += estimateTokens(JSON.stringify(msg.tool_call.parameters));
+	}
+
+	if (msg.tool_result) {
+		const result = msg.tool_result.result;
+		total += estimateTokens(
+			typeof result === "string" ? result : JSON.stringify(result)
+		);
+	}
+
 	return total;
 }
 

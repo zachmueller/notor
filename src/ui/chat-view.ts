@@ -2665,7 +2665,7 @@ export class NotorChatView extends ItemView {
 	 * Update the token/cost footer for the conversation.
 	 */
 	updateTokenFooter(
-		inputTokens: number,
+		contextTokens: number,
 		outputTokens: number,
 		estimatedCost: number | null
 	): void {
@@ -2673,7 +2673,7 @@ export class NotorChatView extends ItemView {
 		this.tokenFooterEl.removeClass("notor-hidden");
 
 		const parts: string[] = [
-			`Tokens: ↑${inputTokens.toLocaleString()} ↓${outputTokens.toLocaleString()}`,
+			`Context: ↑${contextTokens.toLocaleString()} ↓${outputTokens.toLocaleString()}`,
 		];
 
 		if (estimatedCost != null) {

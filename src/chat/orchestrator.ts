@@ -1108,7 +1108,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					const conv = convManager.getActiveConversation();
 					if (conv) {
 						this.getViewForSession(session)?.updateTokenFooter(
-							conv.total_input_tokens,
+							convManager.getCurrentContextUsage().contextTokens,
 							conv.total_output_tokens,
 							conv.estimated_cost
 						);
@@ -1135,7 +1135,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 						const convAfterToolTokens = convManager.getActiveConversation();
 						if (convAfterToolTokens) {
 							this.getViewForSession(session)?.updateTokenFooter(
-								convAfterToolTokens.total_input_tokens,
+								convManager.getCurrentContextUsage().contextTokens,
 								convAfterToolTokens.total_output_tokens,
 								convAfterToolTokens.estimated_cost
 							);
@@ -1280,7 +1280,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 						const convAfterToolResult = convManager.getActiveConversation();
 						if (convAfterToolResult) {
 							this.getViewForSession(session)?.updateTokenFooter(
-								convAfterToolResult.total_input_tokens,
+								convManager.getCurrentContextUsage().contextTokens,
 								convAfterToolResult.total_output_tokens,
 								convAfterToolResult.estimated_cost
 							);

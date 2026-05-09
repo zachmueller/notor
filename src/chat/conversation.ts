@@ -13,6 +13,7 @@ import type { Conversation, ConversationMode, Message, MessageRole, ToolCall, To
 import { logger } from "../utils/logger";
 import type { ContentBlock } from "../media/types";
 import { getTextContent } from "../media/types";
+import { estimateConversationTokens } from "../context/compaction";
 
 const log = logger("ConversationManager");
 
@@ -296,6 +297,19 @@ export class ConversationManager {
 	 */
 	hasActiveConversation(): boolean {
 		return this.activeConversation !== null;
+	}
+
+	/**
+	 * Get the estimated current context window usage.
+	 *
+	 * Unlike header totals (which accumulate for billing), this returns
+	 * the tokens currently counting toward the context window limit.
+	 */
+	getCurrentContextUsage(): { contextTokens: number } {
+		if (!this.activeConversation || this.messages.length === 0) {
+			return { contextTokens: 0 };
+		}
+		return { contextTokens: estimateConversationTokens(this.messages) };
 	}
 
 	// -----------------------------------------------------------------------

@@ -69,10 +69,11 @@ export class ContextManager {
 	}
 
 	/**
-	 * Estimate tokens for a single message.
+	 * Estimate tokens for a single message using content-based heuristics.
 	 *
-	 * Uses actual token counts from LLM responses when available,
-	 * falls back to character-based estimation.
+	 * NOTE: We do NOT use message.input_tokens here — it represents the full
+	 * prompt size at that API call (cumulative), not the incremental cost of
+	 * this single message. Using it would cause O(n²) inflation when summed.
 	 */
 	estimateMessageTokens(message: Message): number {
 		// For assistant messages, prefer actual output tokens if available
@@ -80,15 +81,8 @@ export class ContextManager {
 			return message.output_tokens;
 		}
 
-		// For messages with known input tokens (from LLM usage data)
-		if (message.input_tokens) {
-			return message.input_tokens;
-		}
-
-		// Fall back to estimation
 		let total = estimateContentTokens(message.content);
 
-		// Include tool call/result content in estimation
 		if (message.tool_call) {
 			total += estimateTokenCount(JSON.stringify(message.tool_call.parameters));
 		}

@@ -843,7 +843,7 @@ export class WorkflowExecutor {
 				const bgConvForFooter = bgConvManager.getActiveConversation();
 				if (bgConvForFooter) {
 					this.deps.viewRouter.getView()?.updateTokenFooter(
-						bgConvForFooter.total_input_tokens,
+						bgConvManager.getCurrentContextUsage().contextTokens,
 						bgConvForFooter.total_output_tokens,
 						bgConvForFooter.estimated_cost
 					);

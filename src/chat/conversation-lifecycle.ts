@@ -219,7 +219,7 @@ export class ConversationLifecycleManager {
 
 			view?.updateModeDisplay(conversation.mode);
 			view?.updateTokenFooter(
-				conversation.total_input_tokens,
+				convManager.getCurrentContextUsage().contextTokens,
 				conversation.total_output_tokens,
 				conversation.estimated_cost
 			);
@@ -310,7 +310,7 @@ export class ConversationLifecycleManager {
 
 		view?.updateModeDisplay(sessionConv.mode);
 		view?.updateTokenFooter(
-			sessionConv.total_input_tokens,
+			activeSession.conversationManager.getCurrentContextUsage().contextTokens,
 			sessionConv.total_output_tokens,
 			sessionConv.estimated_cost
 		);
