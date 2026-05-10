@@ -400,14 +400,14 @@ describe("SystemPromptBuilder.assemble() — Plan mode write-tool annotation", (
 		},
 	];
 
-	it("annotates write tools with disclaimer in Plan mode", async () => {
+	it("annotates write tools with [Act mode only] suffix in Plan mode", async () => {
 		const vault = createMockVault();
 		const builder = new SystemPromptBuilder(vault, "notor", undefined, createRegistry());
 
 		const result = await builder.assemble("plan", TOOLS_WITH_MODE);
 
-		expect(result).toContain("### write_note");
-		expect(result).toContain("This tool is unavailable in Plan mode");
+		expect(result).toContain("### write_note [Act mode only]");
+		expect(result).toContain("Tools marked **[Act mode only]**");
 	});
 
 	it("does NOT annotate read tools in Plan mode", async () => {
@@ -416,11 +416,8 @@ describe("SystemPromptBuilder.assemble() — Plan mode write-tool annotation", (
 
 		const result = await builder.assemble("plan", TOOLS_WITH_MODE);
 
-		const readSection = result.substring(
-			result.indexOf("### read_note"),
-			result.indexOf("### write_note"),
-		);
-		expect(readSection).not.toContain("unavailable in Plan mode");
+		expect(result).toContain("### read_note");
+		expect(result).not.toContain("### read_note [Act mode only]");
 	});
 
 	it("does NOT annotate write tools in Act mode", async () => {
@@ -429,6 +426,6 @@ describe("SystemPromptBuilder.assemble() — Plan mode write-tool annotation", (
 
 		const result = await builder.assemble("act", TOOLS_WITH_MODE);
 
-		expect(result).not.toContain("unavailable in Plan mode");
+		expect(result).not.toContain("[Act mode only]");
 	});
 });

@@ -524,13 +524,14 @@ ${DEFAULT_SYSTEM_PROMPT}
 	private buildToolDefinitionsSection(tools: ToolDefinition[], conversationMode: ConversationMode): string {
 		const lines: string[] = ["## Available tools", ""];
 
+		if (conversationMode === "plan") {
+			lines.push("Tools marked **[Act mode only]** are visible for planning but cannot be called until you switch to Act mode.", "");
+		}
+
 		for (const tool of tools) {
-			lines.push(`### ${tool.name}`);
+			const suffix = (conversationMode === "plan" && tool.mode === "write") ? " [Act mode only]" : "";
+			lines.push(`### ${tool.name}${suffix}`);
 			lines.push(tool.description);
-			if (conversationMode === "plan" && tool.mode === "write") {
-				lines.push("");
-				lines.push("> **Note:** This tool is unavailable in Plan mode. Switch to Act mode to use it.");
-			}
 			lines.push("");
 
 			// Parameter documentation
