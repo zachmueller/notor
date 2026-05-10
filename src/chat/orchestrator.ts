@@ -215,6 +215,14 @@ export class ChatOrchestrator implements ToolSessionContext {
 		this.activeModelId = initProviderConfig?.model_id ?? "";
 		this.activeUseExtendedContext = initProviderConfig?.use_extended_context ?? false;
 
+		// Initialize thinking level from default preset
+		const defaultPreset = this.settings.model_presets?.find(
+			(p) => p.name === this.settings.default_preset,
+		);
+		if (defaultPreset?.thinking_level) {
+			this.activeThinkingLevel = defaultPreset.thinking_level;
+		}
+
 		// Wire conversation manager to history persistence + live render for direct emits
 		this.conversationManager.setOnMessageAdded(async (message: Message) => {
 			// Render before async disk I/O so extension blocks appear in DOM order,

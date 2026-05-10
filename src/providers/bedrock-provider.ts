@@ -362,15 +362,22 @@ export class BedrockProvider implements LLMProvider {
 		if (isAnthropicModel && supportsThinking(options.model)) {
 			const thinkingConfig = resolveAnthropicThinking(options.thinking_level, options.model);
 			if (thinkingConfig) {
-				const existingBetas = (input.additionalModelRequestFields as Record<string, unknown>)?.anthropic_beta as string[] | undefined;
 				input.additionalModelRequestFields = {
 					...input.additionalModelRequestFields as Record<string, DocumentType>,
 					thinking: thinkingConfig,
-					anthropic_beta: [...(existingBetas ?? []), "interleaved-thinking-2025-05-14"],
 				};
 				// Temperature is incompatible with thinking
 				if (input.inferenceConfig) {
 					delete (input.inferenceConfig as Record<string, unknown>).temperature;
+				}
+				// maxTokens must be set and > budget_tokens for thinking to activate
+				const minMaxTokens = thinkingConfig.type === "enabled"
+					? Math.max(thinkingConfig.budget_tokens + 4096, 16384)
+					: 16384;
+				if (!input.inferenceConfig) input.inferenceConfig = {};
+				const currentMax = (input.inferenceConfig as Record<string, unknown>).maxTokens as number | undefined;
+				if (!currentMax || currentMax < minMaxTokens) {
+					(input.inferenceConfig as Record<string, unknown>).maxTokens = minMaxTokens;
 				}
 			}
 		}
@@ -513,6 +520,11 @@ export class BedrockProvider implements LLMProvider {
 					tool_name: start.toolUse.name ?? "",
 				};
 			}
+			// Thinking block start may carry initial content
+			const rawStart = start as Record<string, unknown> | undefined;
+			if (rawStart?.type === "thinking" && typeof rawStart.thinking === "string" && rawStart.thinking) {
+				yield { type: "thinking_delta", text: rawStart.thinking };
+			}
 		}
 
 		if (event.contentBlockDelta) {
@@ -529,9 +541,23 @@ export class BedrockProvider implements LLMProvider {
 			}
 			// Thinking delta from Anthropic-on-Bedrock
 			const rawDelta = delta as Record<string, unknown> | undefined;
-			const thinkingObj = rawDelta?.thinking as Record<string, unknown> | undefined;
-			if (thinkingObj && typeof thinkingObj.text === "string") {
-				yield { type: "thinking_delta", text: thinkingObj.text as string };
+			if (rawDelta) {
+				// Format 1: delta.type === "thinking_delta" with delta.thinking as string
+				if (rawDelta.type === "thinking_delta" && typeof rawDelta.thinking === "string") {
+					yield { type: "thinking_delta", text: rawDelta.thinking };
+				}
+				// Format 2: delta.thinking as a string (direct thinking content)
+				else if (typeof rawDelta.thinking === "string" && rawDelta.thinking) {
+					yield { type: "thinking_delta", text: rawDelta.thinking };
+				}
+				// Format 3: delta.thinking as an object with .text
+				else if (rawDelta.thinking && typeof (rawDelta.thinking as Record<string, unknown>).text === "string") {
+					yield { type: "thinking_delta", text: (rawDelta.thinking as Record<string, unknown>).text as string };
+				}
+				// Format 4: delta.reasoningContent.text (Bedrock native format)
+				else if (rawDelta.reasoningContent && typeof (rawDelta.reasoningContent as Record<string, unknown>).text === "string") {
+					yield { type: "thinking_delta", text: (rawDelta.reasoningContent as Record<string, unknown>).text as string };
+				}
 			}
 		}
 
