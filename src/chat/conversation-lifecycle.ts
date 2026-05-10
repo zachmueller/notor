@@ -48,6 +48,7 @@ export class ConversationLifecycleManager {
 		private readonly setActiveProviderId: (id: string) => void,
 		private readonly setActiveModelId: (modelId: string) => void,
 		private readonly setActiveUseExtendedContext: (useExtended: boolean) => void,
+		private readonly setActiveThinkingLevel: (level: string | null) => void,
 		private readonly getActivePresetName: () => string | null,
 		private readonly setActivePresetName: (name: string | null) => void,
 		private readonly isProviderAccessible: (providerId: string) => boolean,
@@ -256,6 +257,7 @@ export class ConversationLifecycleManager {
 				this.setActiveProviderId(resolution.providerId);
 				this.setActiveModelId(resolution.modelId);
 				this.setActiveUseExtendedContext(resolution.useExtendedContext);
+				this.setActiveThinkingLevel(resolution.thinkingLevel);
 
 				// Update in-memory conversation so handleUserMessage() pins correctly
 				if (resolution.source !== "stored") {
@@ -365,6 +367,7 @@ export class ConversationLifecycleManager {
 			this.setActiveProviderId(resolution.providerId);
 			this.setActiveModelId(resolution.modelId);
 			this.setActiveUseExtendedContext(resolution.useExtendedContext);
+			this.setActiveThinkingLevel(resolution.thinkingLevel);
 		} else {
 			view?.updatePresetDisplay(null);
 			this.setActivePresetName(null);

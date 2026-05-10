@@ -280,6 +280,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			(id) => { this.activeProviderId = id; },
 			(modelId) => { this.activeModelId = modelId; },
 			(useExtended) => { this.activeUseExtendedContext = useExtended; },
+			(level) => { this.activeThinkingLevel = level; },
 			() => this.activePresetName,
 			(name) => { this.activePresetName = name; },
 			(providerId) => !!this.providerRegistry.getConfig(providerId) || !!this.providerRegistry.resolveTypeToId(providerId),
@@ -1528,6 +1529,14 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	getActiveUseExtendedContext(): boolean {
 		return this.activeUseExtendedContext;
+	}
+
+	getActiveThinkingLevel(): string | null {
+		return this.activeThinkingLevel;
+	}
+
+	setActiveThinkingLevel(level: string | null): void {
+		this.activeThinkingLevel = level;
 	}
 
 	/**

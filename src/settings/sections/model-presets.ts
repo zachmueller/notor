@@ -206,7 +206,10 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 
 		// --- Thinking level control (only for models that support it) ---
 		if (preset.model_id && supportsThinking(preset.model_id)) {
-			new Setting(rowEl)
+			const isCustom = preset.thinking_level !== null
+				&& !["low", "medium", "high"].includes(preset.thinking_level);
+
+			const thinkingSetting = new Setting(rowEl)
 				.setName("Thinking")
 				.setDesc("Extended thinking / reasoning level")
 				.addDropdown((dropdown) => {
@@ -221,20 +224,20 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 					);
 					dropdown.onChange(async (value) => {
 						if (value === "" || value === "custom") {
-							preset.thinking_level = value === "" ? null : (preset.thinking_level ?? "4096");
+							preset.thinking_level = value === "" ? null
+								: (isCustom ? preset.thinking_level : "4096");
 						} else {
 							preset.thinking_level = value;
 						}
 						await ctx.saveSettings();
 						ctx.redisplay();
 					});
-				})
-				.addText((text) => {
-					const isCustom = preset.thinking_level !== null
-						&& !["low", "medium", "high"].includes(preset.thinking_level);
+				});
+
+			if (isCustom) {
+				thinkingSetting.addText((text) => {
 					text.setPlaceholder("budget_tokens")
-						.setValue(isCustom ? preset.thinking_level! : "")
-						.setDisabled(!isCustom);
+						.setValue(preset.thinking_level!);
 					text.inputEl.style.width = "80px";
 					text.onChange(async (value) => {
 						const asInt = parseInt(value, 10);
@@ -244,6 +247,7 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 						}
 					});
 				});
+			}
 		}
 
 		// --- Reorder + delete controls ---

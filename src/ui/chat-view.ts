@@ -20,6 +20,7 @@ import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
 import { logger } from "../utils/logger";
 import { groupModels, formatVariantLabel, buildOptionValue, type ModelGroup } from "../providers/model-grouping";
+import { supportsThinking } from "../providers/model-metadata";
 import {
 	renderWriteNoteDiffPreview,
 	renderReplaceInNoteDiffPreview,
@@ -277,6 +278,9 @@ export class NotorChatView extends ItemView {
 	private onPresetChange?: (presetName: string | null, providerId?: string, modelId?: string, useExtendedContext?: boolean) => void;
 	private getAvailablePresets?: () => ModelPreset[];
 	private getCurrentPreset?: () => string | null;
+	private getActiveModelId?: () => string;
+	private getActiveThinkingLevel?: () => string | null;
+	private onThinkingLevelChange?: (level: string | null) => void;
 
 	// Fork callbacks
 	private onForkConversation?: (messageId: string) => Promise<void>;
@@ -457,6 +461,18 @@ export class NotorChatView extends ItemView {
 
 	setGetCurrentPreset(callback: () => string | null): void {
 		this.getCurrentPreset = callback;
+	}
+
+	setGetActiveModelId(callback: () => string): void {
+		this.getActiveModelId = callback;
+	}
+
+	setGetActiveThinkingLevel(callback: () => string | null): void {
+		this.getActiveThinkingLevel = callback;
+	}
+
+	setOnThinkingLevelChange(callback: (level: string | null) => void): void {
+		this.onThinkingLevelChange = callback;
 	}
 
 	setOnPersonaChange(callback: (persona: Persona | null) => void): void {
@@ -3401,6 +3417,8 @@ export class NotorChatView extends ItemView {
 		// Model preset selection
 		this.buildPresetSelect(this.settingsPopoverEl);
 
+		// Thinking level (only if current model supports it)
+		this.buildThinkingLevelSection(this.settingsPopoverEl);
 
 		// Checkpoints section
 		this.buildCheckpointsSection(this.settingsPopoverEl);
@@ -3642,6 +3660,38 @@ export class NotorChatView extends ItemView {
 				}
 			}
 		}
+	}
+
+	private buildThinkingLevelSection(container: HTMLElement): void {
+		const modelId = this.getActiveModelId?.();
+		if (!modelId || !supportsThinking(modelId)) return;
+
+		const section = container.createDiv({ cls: "notor-settings-section notor-thinking-section" });
+		section.createDiv({ cls: "notor-settings-label", text: "Thinking" });
+
+		const select = section.createEl("select", { cls: "notor-settings-select" });
+		const options: [string, string][] = [
+			["", "Off"],
+			["low", "Low"],
+			["medium", "Medium"],
+			["high", "High"],
+		];
+
+		const currentLevel = this.getActiveThinkingLevel?.() ?? null;
+
+		for (const [value, label] of options) {
+			const opt = select.createEl("option", { text: label, attr: { value } });
+			if (value === "" && (currentLevel === null || !["low", "medium", "high"].includes(currentLevel))) {
+				opt.selected = true;
+			} else if (value === currentLevel) {
+				opt.selected = true;
+			}
+		}
+
+		select.addEventListener("change", () => {
+			const value = select.value;
+			this.onThinkingLevelChange?.(value === "" ? null : value);
+		});
 	}
 
 	private buildCheckpointsSection(container: HTMLElement): void {

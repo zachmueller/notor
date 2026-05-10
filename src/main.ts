@@ -3569,6 +3569,7 @@ export default class NotorPlugin extends Plugin {
 
 		// Preset change — resolves preset to concrete provider+model, updates state.
 		view.setOnPresetChange((presetName, providerId, modelId, useExtendedContext) => {
+			let thinkingLevel: string | null | undefined;
 			if (presetName !== null) {
 				// Resolve preset to concrete values
 				const resolved = resolvePreset(presetName, this.settings.model_presets);
@@ -3579,6 +3580,7 @@ export default class NotorPlugin extends Plugin {
 				providerId = resolved.providerId;
 				modelId = resolved.modelId;
 				useExtendedContext = resolved.useExtendedContext;
+				thinkingLevel = resolved.thinkingLevel;
 			}
 
 			if (providerId) {
@@ -3587,7 +3589,7 @@ export default class NotorPlugin extends Plugin {
 				this.settings.active_provider = providerId;
 			}
 			if (modelId !== undefined) {
-				orchestrator!.setActiveModel(modelId, useExtendedContext ?? false);
+				orchestrator!.setActiveModel(modelId, useExtendedContext ?? false, thinkingLevel);
 				const config = providerRegistry.getConfig(orchestrator!.getActiveProviderId());
 				if (config) {
 					const updated = { ...config, model_id: modelId, use_extended_context: useExtendedContext ?? false };
@@ -3628,6 +3630,17 @@ export default class NotorPlugin extends Plugin {
 		// Current preset — reads from per-orchestrator state
 		view.setGetCurrentPreset(() => {
 			return orchestrator!.getActivePresetName();
+		});
+
+		// Thinking level — reads/writes per-orchestrator state
+		view.setGetActiveModelId(() => {
+			return orchestrator!.getActiveModelId();
+		});
+		view.setGetActiveThinkingLevel(() => {
+			return orchestrator!.getActiveThinkingLevel();
+		});
+		view.setOnThinkingLevelChange((level) => {
+			orchestrator!.setActiveThinkingLevel(level);
 		});
 
 		// Checkpoint callbacks — use per-orchestrator checkpoint manager (A1.6c / A3)
