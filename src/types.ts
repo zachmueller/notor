@@ -345,6 +345,8 @@ export interface ModelPreset {
 	model_id: string | null;
 	/** Whether to use extended context (1M) for this model. */
 	use_extended_context: boolean;
+	/** Thinking/reasoning level for this preset (null = off/disabled). */
+	thinking_level: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -534,6 +536,8 @@ export interface Workflow {
 	mode: ConversationMode | null;
 	/** Per-workflow model preset override from `notor-model-preset` (null = use active/default). */
 	model_preset: string | null;
+	/** Per-workflow thinking level override from `notor-thinking-level` (null = use preset). */
+	thinking_level: string | null;
 	/** Per-workflow hook delay from `notor-hook-delay` in ms (null = no delay preference). */
 	hook_delay: number | null;
 	/** Per-workflow LLM lifecycle hook overrides from `notor-hooks`. */

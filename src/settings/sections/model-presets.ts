@@ -12,6 +12,7 @@ import { Notice, Setting } from "obsidian";
 import type { SettingsContext } from "./context";
 import type { ModelPreset } from "../../types";
 import { groupModels, parseOptionValue, buildOptionValue } from "../../providers/model-grouping";
+import { supportsThinking } from "../../providers/model-metadata";
 import { logger } from "../../utils/logger";
 
 const log = logger("ModelPresetsSection");
@@ -77,6 +78,7 @@ export function renderModelPresetsSection(
 					provider_id: null,
 					model_id: null,
 					use_extended_context: false,
+					thinking_level: null,
 				});
 				await ctx.saveSettings();
 				ctx.redisplay();
@@ -200,6 +202,48 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 						);
 					});
 			}
+		}
+
+		// --- Thinking level control (only for models that support it) ---
+		if (preset.model_id && supportsThinking(preset.model_id)) {
+			new Setting(rowEl)
+				.setName("Thinking")
+				.setDesc("Extended thinking / reasoning level")
+				.addDropdown((dropdown) => {
+					dropdown.addOption("", "Off");
+					dropdown.addOption("low", "Low");
+					dropdown.addOption("medium", "Medium");
+					dropdown.addOption("high", "High");
+					dropdown.addOption("custom", "Custom...");
+					dropdown.setValue(
+						preset.thinking_level === null ? ""
+							: (["low", "medium", "high"].includes(preset.thinking_level) ? preset.thinking_level : "custom"),
+					);
+					dropdown.onChange(async (value) => {
+						if (value === "" || value === "custom") {
+							preset.thinking_level = value === "" ? null : (preset.thinking_level ?? "4096");
+						} else {
+							preset.thinking_level = value;
+						}
+						await ctx.saveSettings();
+						ctx.redisplay();
+					});
+				})
+				.addText((text) => {
+					const isCustom = preset.thinking_level !== null
+						&& !["low", "medium", "high"].includes(preset.thinking_level);
+					text.setPlaceholder("budget_tokens")
+						.setValue(isCustom ? preset.thinking_level! : "")
+						.setDisabled(!isCustom);
+					text.inputEl.style.width = "80px";
+					text.onChange(async (value) => {
+						const asInt = parseInt(value, 10);
+						if (!isNaN(asInt) && asInt > 0) {
+							preset.thinking_level = String(asInt);
+							await ctx.saveSettings();
+						}
+					});
+				});
 		}
 
 		// --- Reorder + delete controls ---

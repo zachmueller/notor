@@ -105,6 +105,17 @@ export async function processStream(
 
 	for await (const event of parseStreamEvents(stream, abortController.signal)) {
 		switch (event.type) {
+			case "thinking_delta": {
+				const view = resolveView();
+				if (!contentEl) {
+					contentEl = view?.createAssistantMessagePlaceholder();
+				}
+				if (contentEl) {
+					view?.appendThinkingChunk(contentEl, event.delta);
+				}
+				break;
+			}
+
 			case "text_delta": {
 				// contentEl may already be set from the eager placeholder
 				const view = resolveView();

@@ -31,6 +31,7 @@ export interface ConversationSessionOptions {
 	providerId: string;
 	modelId: string;
 	useExtendedContext: boolean;
+	thinkingLevel: string | null;
 	workflowAssembly?: WorkflowAssemblyResult | null;
 	approvalCallback: ApprovalCallback;
 	initialConfig: EffectiveToolConfig;
@@ -53,6 +54,7 @@ export class ConversationSession {
 	readonly providerId: string;
 	readonly modelId: string;
 	readonly useExtendedContext: boolean;
+	readonly thinkingLevel: string | null;
 	readonly workflowAssembly: WorkflowAssemblyResult | null;
 
 	/** Per-session routing — bound to the correct panel's view. */
@@ -74,6 +76,7 @@ export class ConversationSession {
 		this.providerId = opts.providerId;
 		this.modelId = opts.modelId;
 		this.useExtendedContext = opts.useExtendedContext;
+		this.thinkingLevel = opts.thinkingLevel;
 		this.workflowAssembly = opts.workflowAssembly ?? null;
 		this.approvalCallback = opts.approvalCallback;
 		this.effectiveConfig = opts.initialConfig;

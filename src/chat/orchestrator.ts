@@ -159,6 +159,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	private activeUseExtendedContext: boolean;
 
+	/** Per-orchestrator thinking/reasoning level (null = off). */
+	private activeThinkingLevel: string | null = null;
+
 	/**
 	 * Per-orchestrator active preset name.
 	 *
@@ -909,6 +912,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			providerId,
 			modelId,
 			useExtendedContext,
+			thinkingLevel: this.activeThinkingLevel,
 			workflowAssembly: null,
 			approvalCallback,
 			initialConfig,
@@ -1091,6 +1095,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					model: session.modelId,
 					abort_signal: abortController.signal,
 					use_extended_context: session.useExtendedContext,
+					thinking_level: session.thinkingLevel,
 				};
 
 				const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
@@ -1545,9 +1550,12 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 *
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
 	 */
-	setActiveModel(modelId: string, useExtendedContext: boolean): void {
+	setActiveModel(modelId: string, useExtendedContext: boolean, thinkingLevel?: string | null): void {
 		this.activeModelId = modelId;
 		this.activeUseExtendedContext = useExtendedContext;
+		if (thinkingLevel !== undefined) {
+			this.activeThinkingLevel = thinkingLevel;
+		}
 	}
 
 	/** Get the per-orchestrator active preset name (null = Custom mode). */

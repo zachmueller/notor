@@ -2138,6 +2138,25 @@ export class NotorChatView extends ItemView {
 		}
 	}
 
+	appendThinkingChunk(contentEl: HTMLElement, text: string): void {
+		let detailsEl = contentEl.querySelector<HTMLElement>(".notor-thinking-block");
+		if (!detailsEl) {
+			detailsEl = contentEl.createEl("details", { cls: "notor-thinking-block" });
+			detailsEl.createEl("summary", { text: "Thinking" });
+			detailsEl.createEl("div", { cls: "notor-thinking-content" });
+			// Insert at start of content, before any text response
+			if (contentEl.firstChild && contentEl.firstChild !== detailsEl) {
+				contentEl.insertBefore(detailsEl, contentEl.firstChild);
+			}
+		}
+		const thinkingContent = detailsEl.querySelector<HTMLElement>(".notor-thinking-content")!;
+		const existing = thinkingContent.getAttribute("data-raw") ?? "";
+		const updated = existing + text;
+		thinkingContent.setAttribute("data-raw", updated);
+		thinkingContent.textContent = updated;
+		this.scrollToBottom();
+	}
+
 	private renderStreamMarkdown(contentEl: HTMLElement, raw: string): void {
 		contentEl.innerHTML = marked.parse(raw, { async: false }) as string;
 		this.scrollToBottom();

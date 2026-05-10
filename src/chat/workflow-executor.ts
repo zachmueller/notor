@@ -58,6 +58,7 @@ interface ResolvedProviderConfig {
 	providerId: string;
 	modelId: string;
 	useExtendedContext: boolean;
+	thinkingLevel: string | null;
 }
 
 function resolveWorkflowProviderConfig(
@@ -66,6 +67,7 @@ function resolveWorkflowProviderConfig(
 	fallbackProviderId: string,
 	fallbackModelId: string,
 	fallbackExtendedContext: boolean,
+	fallbackThinkingLevel: string | null,
 ): ResolvedProviderConfig {
 	if (workflow.model_preset) {
 		const resolved = resolvePreset(workflow.model_preset, settings.model_presets);
@@ -74,6 +76,7 @@ function resolveWorkflowProviderConfig(
 				providerId: resolved.providerId,
 				modelId: resolved.modelId,
 				useExtendedContext: resolved.useExtendedContext,
+				thinkingLevel: resolved.thinkingLevel,
 			};
 		}
 		log.warn("Workflow model preset not found or unconfigured, using fallback", {
@@ -85,6 +88,7 @@ function resolveWorkflowProviderConfig(
 		providerId: fallbackProviderId,
 		modelId: fallbackModelId,
 		useExtendedContext: fallbackExtendedContext,
+		thinkingLevel: fallbackThinkingLevel,
 	};
 }
 
@@ -241,12 +245,13 @@ export class WorkflowExecutor {
 		const conversationManager = this.deps.getConversationManager();
 		const fallbackProviderId = this.deps.getActiveProviderId();
 		const fallbackConfig = this.deps.providerRegistry.getConfig(fallbackProviderId);
-		const { providerId, modelId, useExtendedContext } = resolveWorkflowProviderConfig(
+		const { providerId, modelId, useExtendedContext, thinkingLevel } = resolveWorkflowProviderConfig(
 			workflow,
 			this.deps.getSettings(),
 			fallbackProviderId,
 			this.deps.getActiveModelId(),
 			fallbackConfig?.use_extended_context ?? false,
+			null,
 		);
 		const currentMode = workflow.mode
 			?? (conversationManager.hasActiveConversation()
@@ -343,6 +348,7 @@ export class WorkflowExecutor {
 			providerId,
 			modelId,
 			useExtendedContext,
+			thinkingLevel,
 			workflowAssembly: assemblyResult,
 			approvalCallback,
 			initialConfig,
@@ -486,12 +492,13 @@ export class WorkflowExecutor {
 		const mode = workflow.mode ?? this.deps.getSettings().mode;
 		const registryProviderId = this.deps.providerRegistry.getActiveId();
 		const registryConfig = this.deps.providerRegistry.getConfig(registryProviderId);
-		const { providerId, modelId, useExtendedContext } = resolveWorkflowProviderConfig(
+		const { providerId, modelId, useExtendedContext, thinkingLevel } = resolveWorkflowProviderConfig(
 			workflow,
 			this.deps.getSettings(),
 			registryProviderId,
 			registryConfig?.model_id ?? "",
 			registryConfig?.use_extended_context ?? false,
+			null,
 		);
 
 		// Determine the active persona name after any switch
@@ -571,6 +578,7 @@ export class WorkflowExecutor {
 				providerId,
 				modelId,
 				useExtendedContext,
+				thinkingLevel,
 				pinnedPersona
 			);
 		} catch (e) {
@@ -640,6 +648,7 @@ export class WorkflowExecutor {
 		providerId: string,
 		modelId: string,
 		useExtendedContext: boolean,
+		thinkingLevel: string | null,
 		pinnedPersona: Persona | null
 	): Promise<void> {
 		let continueLoop = true;
@@ -663,6 +672,7 @@ export class WorkflowExecutor {
 			providerId,
 			modelId,
 			useExtendedContext,
+			thinkingLevel,
 			workflowAssembly,
 			approvalCallback,
 			initialConfig,

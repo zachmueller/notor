@@ -55,6 +55,7 @@ function makeProfile(overrides: Partial<SubAgentProfile> = {}): SubAgentProfile 
 		preferred_provider: null,
 		preferred_model: null,
 		preferred_preset: null,
+		thinking_level: null,
 		iteration_cap: null,
 		tool_configs: [{
 			source: "subagent",

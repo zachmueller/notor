@@ -21,6 +21,7 @@ const log = logger("stream-utils");
 
 export type ParsedStreamEvent =
 	| { type: "text_delta"; text: string; delta: string }
+	| { type: "thinking_delta"; text: string; delta: string }
 	| { type: "tool_call"; id: string; name: string; parameters: Record<string, unknown> }
 	| { type: "message_end"; inputTokens: number; outputTokens: number }
 	| { type: "error"; message: string }
@@ -44,6 +45,7 @@ export async function* parseStreamEvents(
 	abortSignal: AbortSignal,
 ): AsyncIterable<ParsedStreamEvent> {
 	let textContent = "";
+	let thinkingContent = "";
 
 	// Per-tool-call accumulation state
 	let currentToolCallId = "";
@@ -61,6 +63,11 @@ export async function* parseStreamEvents(
 				case "text_delta":
 					textContent += chunk.text;
 					yield { type: "text_delta", text: textContent, delta: chunk.text };
+					break;
+
+				case "thinking_delta":
+					thinkingContent += chunk.text;
+					yield { type: "thinking_delta", text: thinkingContent, delta: chunk.text };
 					break;
 
 				case "tool_call_start":

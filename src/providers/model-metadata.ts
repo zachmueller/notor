@@ -627,3 +627,36 @@ export function getModelExtendedContext(modelId: string): ExtendedContext | unde
 export function getKnownModelIds(): string[] {
 	return Object.keys(MODEL_METADATA);
 }
+
+// ---------------------------------------------------------------------------
+// Thinking / reasoning support detection
+// ---------------------------------------------------------------------------
+
+const THINKING_PATTERNS = [
+	// Anthropic direct API — Claude 3.5 Sonnet, 3.7 Sonnet, Sonnet 4+, Opus 4+
+	/^claude-(opus|sonnet)-4/,
+	/^claude-3-7-sonnet/,
+	/^claude-3-5-sonnet/,
+	// Bedrock Anthropic inference profiles
+	/^(us|eu|apac|global)\.anthropic\.claude-(opus|sonnet)-4/,
+	/^(us|eu|apac|global)\.anthropic\.claude-3-7-sonnet/,
+	/^(us|eu|apac|global)\.anthropic\.claude-3-5-sonnet/,
+	// OpenAI o-series reasoning models
+	/^o[134]/,
+];
+
+const ADAPTIVE_THINKING_PATTERNS = [
+	// Only Opus 4.6+ and Sonnet 4.6+ support adaptive thinking
+	/^claude-opus-4-6/,
+	/^claude-sonnet-4-6/,
+	/^(us|eu|apac|global)\.anthropic\.claude-opus-4-6/,
+	/^(us|eu|apac|global)\.anthropic\.claude-sonnet-4-6/,
+];
+
+export function supportsThinking(modelId: string): boolean {
+	return THINKING_PATTERNS.some((pattern) => pattern.test(modelId));
+}
+
+export function supportsAdaptiveThinking(modelId: string): boolean {
+	return ADAPTIVE_THINKING_PATTERNS.some((pattern) => pattern.test(modelId));
+}

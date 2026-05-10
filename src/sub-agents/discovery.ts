@@ -184,6 +184,7 @@ async function parseProfile(
 	const preferredModel = parseStringOrNull(frontmatter?.["notor-preferred-model"]);
 	const preferredPreset = parseStringOrNull(frontmatter?.["notor-preferred-preset"]);
 	const iterationCap = parseNumberOrNull(frontmatter?.["notor-iteration-cap"]);
+	const thinkingLevel = parseStringOrNull(frontmatter?.["notor-thinking-level"]);
 
 	// Strip frontmatter from content, then resolve template variables
 	const strippedBody = stripFrontmatter(rawContent);
@@ -218,6 +219,7 @@ async function parseProfile(
 		preferred_provider: preferredProvider,
 		preferred_model: preferredModel,
 		preferred_preset: preferredPreset,
+		thinking_level: thinkingLevel,
 		iteration_cap: iterationCap,
 		tool_configs: configs,
 		is_builtin: isBuiltin,
@@ -268,6 +270,7 @@ function buildProfileFromBuiltin(
 		preferred_provider: extractFrontmatterField(systemPromptContent, "notor-preferred-provider"),
 		preferred_model: extractFrontmatterField(systemPromptContent, "notor-preferred-model"),
 		preferred_preset: extractFrontmatterField(systemPromptContent, "notor-preferred-preset"),
+		thinking_level: extractFrontmatterField(systemPromptContent, "notor-thinking-level"),
 		iteration_cap: extractFrontmatterNumberField(systemPromptContent, "notor-iteration-cap"),
 		tool_configs: configs,
 		is_builtin: true,

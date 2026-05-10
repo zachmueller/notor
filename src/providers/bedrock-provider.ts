@@ -34,8 +34,9 @@ import { ProviderError } from "./provider";
 import { getSecret, secretIdForAccessKeyId, secretIdForSecretAccessKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import type { ContentBlock as MediaContentBlock } from "../media/types";
-import { getModelExtendedContext } from "./model-metadata";
+import { getModelExtendedContext, supportsThinking } from "./model-metadata";
 import { parseProfileId } from "./model-grouping";
+import { resolveAnthropicThinking } from "./thinking-config";
 import { logger } from "../utils/logger";
 
 // AWS SDK imports — these are bundled by esbuild
@@ -356,6 +357,24 @@ export class BedrockProvider implements LLMProvider {
 			}
 		}
 
+		// Inject thinking config for Anthropic-on-Bedrock models
+		const isAnthropicModel = options.model.includes("anthropic");
+		if (isAnthropicModel && supportsThinking(options.model)) {
+			const thinkingConfig = resolveAnthropicThinking(options.thinking_level, options.model);
+			if (thinkingConfig) {
+				const existingBetas = (input.additionalModelRequestFields as Record<string, unknown>)?.anthropic_beta as string[] | undefined;
+				input.additionalModelRequestFields = {
+					...input.additionalModelRequestFields as Record<string, DocumentType>,
+					thinking: thinkingConfig,
+					anthropic_beta: [...(existingBetas ?? []), "interleaved-thinking-2025-05-14"],
+				};
+				// Temperature is incompatible with thinking
+				if (input.inferenceConfig) {
+					delete (input.inferenceConfig as Record<string, unknown>).temperature;
+				}
+			}
+		}
+
 		let response;
 		try {
 			response = await client.send(
@@ -507,6 +526,12 @@ export class BedrockProvider implements LLMProvider {
 					id: event.contentBlockDelta.contentBlockIndex?.toString() ?? "0",
 					partial_json: delta.toolUse.input ?? "",
 				};
+			}
+			// Thinking delta from Anthropic-on-Bedrock
+			const rawDelta = delta as Record<string, unknown> | undefined;
+			const thinkingObj = rawDelta?.thinking as Record<string, unknown> | undefined;
+			if (thinkingObj && typeof thinkingObj.text === "string") {
+				yield { type: "thinking_delta", text: thinkingObj.text as string };
 			}
 		}
 

@@ -13,6 +13,7 @@ export interface ResolvedPreset {
 	providerId: string;
 	modelId: string;
 	useExtendedContext: boolean;
+	thinkingLevel: string | null;
 }
 
 /**
@@ -29,6 +30,7 @@ export function resolvePreset(presetName: string, presets: ModelPreset[]): Resol
 		providerId: preset.provider_id,
 		modelId: preset.model_id,
 		useExtendedContext: preset.use_extended_context,
+		thinkingLevel: preset.thinking_level ?? null,
 	};
 }
 
@@ -39,6 +41,7 @@ export interface ConversationModelResolution {
 	providerId: string;
 	modelId: string;
 	useExtendedContext: boolean;
+	thinkingLevel: string | null;
 	/** Which fallback level produced this resolution. */
 	source: "preset" | "stored" | "default";
 }
@@ -67,6 +70,7 @@ export function resolveConversationModel(
 				providerId: resolved.providerId,
 				modelId: resolved.modelId,
 				useExtendedContext: resolved.useExtendedContext,
+				thinkingLevel: resolved.thinkingLevel,
 				source: "preset",
 			};
 		}
@@ -79,6 +83,7 @@ export function resolveConversationModel(
 			providerId: conversation.provider_id,
 			modelId: conversation.model_id,
 			useExtendedContext: conversation.use_extended_context ?? false,
+			thinkingLevel: null,
 			source: "stored",
 		};
 	}
@@ -91,6 +96,7 @@ export function resolveConversationModel(
 			providerId: defaultResolved.providerId,
 			modelId: defaultResolved.modelId,
 			useExtendedContext: defaultResolved.useExtendedContext,
+			thinkingLevel: defaultResolved.thinkingLevel,
 			source: "default",
 		};
 	}
@@ -103,6 +109,7 @@ export function resolveConversationModel(
 			providerId: anyPreset.providerId,
 			modelId: anyPreset.modelId,
 			useExtendedContext: anyPreset.useExtendedContext,
+			thinkingLevel: anyPreset.thinkingLevel,
 			source: "default",
 		};
 	}
@@ -122,6 +129,7 @@ export function findFirstConfiguredPreset(presets: ModelPreset[]): ResolvedPrese
 				providerId: preset.provider_id,
 				modelId: preset.model_id,
 				useExtendedContext: preset.use_extended_context,
+				thinkingLevel: preset.thinking_level ?? null,
 			};
 		}
 	}

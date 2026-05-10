@@ -23,13 +23,15 @@ import type { ContentBlock as MediaContentBlock } from "../media/types";
 import { getSecret, secretIdForApiKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import { logger } from "../utils/logger";
+import { resolveAnthropicThinking } from "./thinking-config";
+import { supportsThinking } from "./model-metadata";
 
 const log = logger("AnthropicProvider");
 
 /** Minimal shape of Anthropic SSE event data payloads (raw JSON, no SDK dependency). */
 interface AnthropicEventData {
-	content_block?: { type?: string; id?: string; name?: string };
-	delta?: { type?: string; text?: string; partial_json?: string };
+	content_block?: { type?: string; id?: string; name?: string; thinking?: string };
+	delta?: { type?: string; text?: string; partial_json?: string; thinking?: string };
 	index?: number;
 	usage?: { input_tokens?: number; output_tokens?: number };
 	message?: { usage?: { input_tokens?: number } };
@@ -210,12 +212,26 @@ export class AnthropicProvider implements LLMProvider {
 		const { system, messages: anthropicMessages } =
 			toAnthropicMessages(messages);
 
+		// Resolve thinking configuration
+		const thinkingConfig = supportsThinking(options.model)
+			? resolveAnthropicThinking(options.thinking_level, options.model)
+			: undefined;
+
+		const defaultMaxTokens = thinkingConfig ? 16384 : 4096;
+
 		const body: Record<string, unknown> = {
 			model: options.model,
 			messages: anthropicMessages,
-			max_tokens: options.max_tokens ?? 4096,
+			max_tokens: Math.max(options.max_tokens ?? defaultMaxTokens, thinkingConfig ? 16384 : 0),
 			stream: true,
 		};
+
+		if (thinkingConfig) {
+			body.thinking = thinkingConfig;
+			// Temperature is incompatible with thinking
+		} else if (options.temperature !== undefined) {
+			body.temperature = options.temperature;
+		}
 
 		if (system) {
 			body.system = system;
@@ -223,23 +239,30 @@ export class AnthropicProvider implements LLMProvider {
 		const anthropicTools = toAnthropicTools(tools);
 		if (anthropicTools) {
 			body.tools = anthropicTools;
-		}
-		if (options.temperature !== undefined) {
-			body.temperature = options.temperature;
+			// tool_choice "any" is incompatible with thinking
+			if (thinkingConfig && (body as Record<string, unknown>).tool_choice === "any") {
+				(body as Record<string, unknown>).tool_choice = "auto";
+			}
 		}
 		if (options.stop_sequences !== undefined) {
 			body.stop_sequences = options.stop_sequences;
+		}
+
+		// Build headers — add beta header when thinking is enabled
+		const headers: Record<string, string> = {
+			"Content-Type": "application/json",
+			"x-api-key": apiKey,
+			"anthropic-version": ANTHROPIC_VERSION,
+		};
+		if (thinkingConfig) {
+			headers["anthropic-beta"] = "interleaved-thinking-2025-05-14";
 		}
 
 		let response: Response;
 		try {
 			response = await fetch(url, {
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					"x-api-key": apiKey,
-					"anthropic-version": ANTHROPIC_VERSION,
-				},
+				headers,
 				body: JSON.stringify(body),
 				signal: options.abort_signal,
 			});
@@ -376,6 +399,8 @@ export class AnthropicProvider implements LLMProvider {
 						id: block.id ?? "",
 						tool_name: block.name ?? "",
 					};
+				} else if (block?.type === "thinking" && block.thinking) {
+					yield { type: "thinking_delta", text: block.thinking };
 				}
 				break;
 			}
@@ -384,6 +409,8 @@ export class AnthropicProvider implements LLMProvider {
 				const delta = data.delta;
 				if (delta?.type === "text_delta") {
 					yield { type: "text_delta", text: delta.text ?? "" };
+				} else if (delta?.type === "thinking_delta") {
+					yield { type: "thinking_delta", text: delta.thinking ?? "" };
 				} else if (delta?.type === "input_json_delta") {
 					yield {
 						type: "tool_call_delta",

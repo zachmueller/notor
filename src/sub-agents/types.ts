@@ -37,6 +37,8 @@ export interface SubAgentProfile {
 	preferred_model: string | null;
 	/** Override model preset name (null = no preset). Takes precedence over preferred_provider/preferred_model when resolved. */
 	preferred_preset: string | null;
+	/** Override thinking level (null = inherit from parent session). */
+	thinking_level: string | null;
 	/** Per-profile iteration cap (null = use global setting or constant). */
 	iteration_cap: number | null;
 	/** Parsed tool config blocks from the profile's system prompt. */

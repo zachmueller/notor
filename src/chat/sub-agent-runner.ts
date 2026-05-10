@@ -81,6 +81,8 @@ export interface SubAgentRunnerOptions {
 	tokenLimit?: number;
 	/** Inherited from parent conversation (Section 9.6). */
 	mode: ConversationMode;
+	/** Inherited thinking level from parent session (null = off). */
+	thinkingLevel?: string | null;
 	/** Optional progress callback (Section 9.5). */
 	onProgress?: (status: string) => void;
 }
@@ -98,6 +100,7 @@ export class SubAgentRunner {
 	private readonly iterationCap: number;
 	private readonly tokenLimit: number;
 	private readonly mode: ConversationMode;
+	private readonly thinkingLevel: string | null;
 	private readonly onProgress?: (status: string) => void;
 
 	/**
@@ -118,6 +121,7 @@ export class SubAgentRunner {
 		this.iterationCap = options.iterationCap ?? SUB_AGENT_ITERATION_CAP;
 		this.tokenLimit = options.tokenLimit ?? SUB_AGENT_TOKEN_LIMIT;
 		this.mode = options.mode;
+		this.thinkingLevel = options.thinkingLevel ?? null;
 		this.onProgress = options.onProgress;
 
 		// --- Abort propagation (Section 6.2 / Phase 4.3) ---
@@ -217,6 +221,7 @@ export class SubAgentRunner {
 				const sendOptions: SendMessageOptions = {
 					model: this.model,
 					abort_signal: this.abortController.signal,
+					thinking_level: this.thinkingLevel,
 				};
 
 				const stream = this.provider.sendMessage(
@@ -397,6 +402,7 @@ export class SubAgentRunner {
 		const sendOptions: SendMessageOptions = {
 			model: this.model,
 			abort_signal: this.abortController.signal,
+			thinking_level: this.thinkingLevel,
 		};
 
 		try {

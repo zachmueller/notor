@@ -25,6 +25,8 @@ import { parseSSEStream } from "./sse";
 import { getSecret, secretIdForApiKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import { logger } from "../utils/logger";
+import { resolveOpenAIReasoning } from "./thinking-config";
+import { supportsThinking } from "./model-metadata";
 
 const log = logger("OpenAIProvider");
 
@@ -205,6 +207,14 @@ export class OpenAIProvider implements LLMProvider {
 		}
 		if (options.stop_sequences !== undefined) {
 			body.stop = options.stop_sequences;
+		}
+
+		// Add reasoning_effort for o-series models
+		if (supportsThinking(options.model)) {
+			const reasoning = resolveOpenAIReasoning(options.thinking_level);
+			if (reasoning) {
+				body.reasoning_effort = reasoning;
+			}
 		}
 
 		let response: Response;

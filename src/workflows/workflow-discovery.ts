@@ -366,6 +366,9 @@ function parseWorkflowFile(
 	// Parse per-workflow model preset override (Phase 4)
 	const modelPreset = parseStringOrNull(frontmatter["notor-model-preset"]);
 
+	// Parse per-workflow thinking level override
+	const thinkingLevel = parseStringOrNull(frontmatter["notor-thinking-level"]);
+
 	// Parse per-workflow hook delay (Phase 5)
 	const rawHookDelay = frontmatter["notor-hook-delay"];
 	const hookDelay: number | null =
@@ -435,6 +438,7 @@ function parseWorkflowFile(
 		persona_name: personaName,
 		mode,
 		model_preset: modelPreset,
+		thinking_level: thinkingLevel,
 		hook_delay: hookDelay,
 		hooks,
 		active_note_prompt: activeNotePrompt,

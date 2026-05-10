@@ -412,6 +412,7 @@ export async function executeRunWorkflowAction(
 			? fm["notor-conversation-mode"] as ConversationMode
 			: null,
 		model_preset: (fm["notor-model-preset"] as string | null | undefined)?.trim() ?? null,
+		thinking_level: (fm["notor-thinking-level"] as string | null | undefined)?.trim() ?? null,
 		hook_delay: (() => {
 			const raw = fm["notor-hook-delay"];
 			return (typeof raw === "number" && raw >= 0) ? raw : null;

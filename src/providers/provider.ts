@@ -84,6 +84,8 @@ export interface SendMessageOptions {
 	abort_signal?: AbortSignal;
 	/** Whether to use the extended (1M) context window beta (Bedrock only). */
 	use_extended_context?: boolean;
+	/** Thinking/reasoning level: "off"|"low"|"medium"|"high" or integer string for direct budget_tokens. */
+	thinking_level?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +95,7 @@ export interface SendMessageOptions {
 /** Union type covering all streaming response chunk types. */
 export type StreamChunk =
 	| { type: "text_delta"; text: string }
+	| { type: "thinking_delta"; text: string }
 	| { type: "tool_call_start"; id: string; tool_name: string }
 	| { type: "tool_call_delta"; id: string; partial_json: string }
 	| { type: "tool_call_end"; id: string }
