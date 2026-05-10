@@ -1052,6 +1052,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					session.pinnedPersona,
 					this.settings.memory_enabled,
 					currentConv?.tasks,
+					this.settings.enable_popover_references,
 				);
 
 				// Emit assembled system prompt as a structured log so E2E tests

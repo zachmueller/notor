@@ -103,6 +103,9 @@ export interface NotorSettings {
 	/** Set opened notes as the active tab and give them editor focus. */
 	focus_notes_on_access: boolean;
 
+	/** Render <popover> tags in assistant messages as interactive superscript references. */
+	enable_popover_references: boolean;
+
 	/** Maximum number of lines the chat input auto-resizes to before capping. */
 	chat_input_max_lines: number;
 

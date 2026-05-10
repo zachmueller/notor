@@ -128,6 +128,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	mode: "plan",
 	open_notes_on_access: true,
 	focus_notes_on_access: false,
+	enable_popover_references: true,
 	chat_input_max_lines: 3,
 	chat_input_max_height_pct: 10,
 	history_path: `${configDir}/plugins/notor/history/`,

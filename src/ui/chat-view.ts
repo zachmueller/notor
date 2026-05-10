@@ -52,6 +52,7 @@ import { McpStatusIndicator } from "./mcp-status-indicator";
 import { getTextContent, type ContentBlock } from "../media/types";
 import { renderCollapsibleCard } from "./chat-blocks/collapsible-card";
 import { FindInMessages } from "./find-in-messages";
+import { extractPopoverTags, stripPopoverTags, injectPopoverElements } from "./popover-refs";
 import { marked } from "marked";
 
 const log = logger("ChatView");
@@ -2219,13 +2220,32 @@ export class NotorChatView extends ItemView {
 		const assistantText = typeof message.content === "string"
 			? message.content
 			: (() => { throw new Error("Expected string content for assistant message"); })();
+
+		let textForRender: string;
+		let popoverRefs: { index: number; note?: string; href?: string; title?: string; annotation: string }[] = [];
+		if (this.plugin.settings.enable_popover_references) {
+			const extracted = extractPopoverTags(assistantText);
+			textForRender = extracted.cleaned;
+			popoverRefs = extracted.refs;
+		} else {
+			textForRender = stripPopoverTags(assistantText);
+		}
+
 		await MarkdownRenderer.render(
 			this.app,
-			assistantText,
+			textForRender,
 			contentEl,
 			"",
 			this
 		);
+
+		if (popoverRefs.length > 0) {
+			injectPopoverElements(contentEl, popoverRefs, {
+				openNote: (path) => this.openInternalLink(path),
+				openUrl: (url) => window.open(url, "_blank"),
+			});
+		}
+
 		this.activateInternalLinks(contentEl);
 		this.activateSettingsLinks(contentEl);
 		this.activateConversationLinks(contentEl);

@@ -59,6 +59,21 @@ export function renderGeneralSection(
 		);
 
 	new Setting(containerEl)
+		.setName("Popover references")
+		.setDesc(
+			"Render <popover> tags in assistant messages as numbered superscript indicators. " +
+				"Hover to see the annotation; click to open the linked note or URL."
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(ctx.settings.enable_popover_references)
+				.onChange(async (value) => {
+					ctx.settings.enable_popover_references = value;
+					await ctx.saveSettings();
+				})
+		);
+
+	new Setting(containerEl)
 		.setName("Chat input max lines")
 		.setDesc(
 			"Maximum number of lines (1–20) the chat input box auto-expands to before capping. " +

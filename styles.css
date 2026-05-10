@@ -3257,6 +3257,57 @@
 }
 
 /* ==========================================================================
+   Popover References — inline superscript citations
+   ========================================================================== */
+
+.notor-popover-ref {
+	display: inline;
+	cursor: pointer;
+	color: var(--text-accent);
+	font-size: 0.75em;
+	vertical-align: super;
+	line-height: 0;
+	padding: 0 1px;
+	font-weight: var(--font-semibold);
+	text-decoration: none;
+}
+
+.notor-popover-ref:hover {
+	color: var(--text-accent-hover, var(--text-accent));
+	text-decoration: underline;
+}
+
+.notor-popover-tooltip {
+	position: fixed;
+	z-index: var(--layer-popover);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-s);
+	padding: 8px 12px;
+	min-width: 180px;
+	max-width: 320px;
+	pointer-events: none;
+}
+
+.notor-popover-tooltip-title {
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+	margin: 0 0 4px 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.notor-popover-tooltip-body {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	line-height: 1.4;
+	word-wrap: break-word;
+}
+
+/* ==========================================================================
    Workflow Activity Indicator (H-002, H-003)
    ========================================================================== */
 

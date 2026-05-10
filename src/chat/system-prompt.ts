@@ -38,6 +38,7 @@ const DYNAMIC_SECTION_MARKERS = [
 	"auto_context",
 	"memory_convention",
 	"tasks",
+	"popover_references",
 ] as const;
 
 /**
@@ -241,6 +242,7 @@ export class SystemPromptBuilder {
 		persona?: Persona | null,
 		memoryEnabled?: boolean,
 		tasks?: TaskItem[] | null,
+		popoverRefsEnabled?: boolean,
 	): Promise<string> {
 		const parts: string[] = [];
 
@@ -278,6 +280,10 @@ export class SystemPromptBuilder {
 
 		const tasksSection = this.buildTasksSection(tasks);
 
+		const popoverSection = popoverRefsEnabled
+			? this.buildPopoverReferenceSection()
+			: "";
+
 		const dynamicSections = new Map<string, string>([
 			["available_tools", toolSection],
 			["mode_instructions", modeSection],
@@ -285,6 +291,7 @@ export class SystemPromptBuilder {
 			["auto_context", autoContextSection],
 			["memory_convention", memorySection],
 			["tasks", tasksSection],
+			["popover_references", popoverSection],
 		]);
 
 		// 1. Base system prompt — depends on persona prompt_mode
@@ -638,6 +645,23 @@ ${autoContextBlock}`;
 		const done = tasks.filter((t) => t.status === "completed").length;
 		lines.push(`\nProgress: ${done}/${tasks.length} completed`);
 		return lines.join("\n");
+	}
+
+	private buildPopoverReferenceSection(): string {
+		return `## Popover references
+
+You can add supplementary references that render as superscript indicators with hover popovers. Use these for references that would interrupt reading flow — citations, source links, background context, tangential notes.
+
+Syntax:
+- \`<popover note="Note Name">Optional annotation text.</popover>\` — vault note reference
+- \`<popover href="https://example.com" title="Display Title">Optional annotation.</popover>\` — external URL
+
+Guidelines:
+- Continue using \`[[wikilinks]]\` inline for note references that flow naturally in prose
+- Use \`<popover>\` only when the reference is supplementary and would interrupt reading flow
+- Keep annotations concise (1–2 sentences)
+- Don't overuse — 0–5 per response is typical
+- The \`title\` attribute is optional; for vault notes it defaults to the note name`;
 	}
 
 	// -----------------------------------------------------------------------
