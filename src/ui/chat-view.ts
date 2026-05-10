@@ -109,6 +109,7 @@ export class NotorChatView extends ItemView {
 	private conversationListEl!: HTMLElement;
 	private conversationSearchInputEl!: HTMLInputElement;
 	private taskPanelEl!: HTMLElement;
+	private taskPanelCollapsed = false;
 	private loadingIndicatorEl!: HTMLElement;
 	private tokenFooterEl!: HTMLElement;
 	private attachmentChipContainerEl!: HTMLElement;
@@ -1281,9 +1282,12 @@ export class NotorChatView extends ItemView {
 		const completed = tasks.filter((t) => t.status === "completed").length;
 
 		const header = this.taskPanelEl.createDiv({ cls: "notor-task-panel-header" });
+		const chevron = header.createSpan({ text: "▶", cls: "notor-task-panel-chevron" });
+		if (!this.taskPanelCollapsed) chevron.addClass("notor-task-panel-chevron-open");
 		header.createSpan({ text: `Tasks (${completed}/${tasks.length} done)`, cls: "notor-task-panel-title" });
 
 		const body = this.taskPanelEl.createDiv({ cls: "notor-task-panel-body" });
+		if (this.taskPanelCollapsed) body.addClass("notor-hidden");
 		for (const task of tasks) {
 			const taskEl = body.createDiv({ cls: "notor-task-item" });
 			const icon = task.status === "completed" ? "☑"
@@ -1296,13 +1300,11 @@ export class NotorChatView extends ItemView {
 			taskEl.createSpan({ text: `${icon} ${task.content}` });
 		}
 
-		// Collapsible toggle
-		let collapsed = false;
 		header.addEventListener("click", () => {
-			collapsed = !collapsed;
-			body.toggleClass("notor-hidden", collapsed);
+			this.taskPanelCollapsed = !this.taskPanelCollapsed;
+			body.toggleClass("notor-hidden", this.taskPanelCollapsed);
+			chevron.toggleClass("notor-task-panel-chevron-open", !this.taskPanelCollapsed);
 		});
-		header.style.cursor = "pointer";
 	}
 
 	private buildMessageList(container: HTMLElement): void {
