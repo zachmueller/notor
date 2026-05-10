@@ -1,7 +1,6 @@
 # Orchestration: Multi-Step Flow Engine
 
 > Canonical design document for Notor's orchestration capability.
-> Supersedes the research docs in `design/research/ralph/` for all implementation decisions.
 >
 > **Status:** Design — not yet implemented
 > **Feature group:** `orchestration_enabled` (defaults to off)
@@ -50,9 +49,7 @@ Orchestrations are multi-step event loops with state, verification, and coordina
 They are launched separately from workflows (though individual steps may invoke
 workflows).
 
-**Design heritage:** Informed by research into the Ralph orchestrator
-(`design/research/ralph/`), adapted for Notor's vault-native, extension-based,
-persona-driven architecture.
+**Design heritage:** Informed by research into the Ralph orchestrator, adapted for Notor's vault-native, extension-based, persona-driven architecture.
 
 ---
 
@@ -1054,25 +1051,4 @@ src/orchestration/
   is independently inspectable), but the flow-level view (which step ran when, what events
   were exchanged) needs thoughtful UX.
 
----
 
-## Appendix: Migration from Research Docs
-
-The research docs in `design/research/ralph/` remain valuable as background reading
-but are **not authoritative** for implementation decisions. Key changes from those docs:
-
-| Research Doc Concept | This Design |
-|---------------------|-------------|
-| "Hat" terminology | "Step" — a discrete unit of work in a flow |
-| Hat notes with `notor-type: hat` | Step notes with `notor-type: orchestration-step` |
-| Hat notes reference personas OR define their own instructions | Steps always reference a persona for identity/access; step body = flow-specific instructions |
-| Orchestration presets as single vault notes | Flow directories with `definition.md` + step notes |
-| `notor-hat-*` frontmatter prefix | `notor-step-*` frontmatter prefix |
-| `HatSystemPromptBuilder` | `StepPromptBuilder` |
-| `HatTurnExecutor` | `StepTurnExecutor` |
-| `HatNoteParser` / `OrchestrationPresetParser` | `StepNoteParser` / `FlowDefinitionParser` |
-| `LOOP_COMPLETE` | `FLOW_COMPLETE` |
-| Backpressure evidence validation (payload parsing) | Verification steps (shell + tool, more explicit) |
-| Hats/ and presets/ directories under orchestrations/ | Each flow gets its own subdirectory with steps/ inside |
-| Single conversation for all hat turns | Per-step conversations with navigation metadata |
-| `featureGroup` not specified | `orchestration` feature group, gated like memory |
