@@ -7,6 +7,16 @@
 import type { ContentBlock } from "./media/types";
 
 // ---------------------------------------------------------------------------
+// Task tracking
+// ---------------------------------------------------------------------------
+
+/** A single task item in the AI's working task list. */
+export interface TaskItem {
+	content: string;
+	status: "pending" | "in_progress" | "completed";
+}
+
+// ---------------------------------------------------------------------------
 // Conversation
 // ---------------------------------------------------------------------------
 
@@ -104,6 +114,11 @@ export interface Conversation {
 	 * null/undefined means no draft is saved.
 	 */
 	draft_text?: string | null;
+	/**
+	 * Structured task list maintained by the AI via the update_tasks tool.
+	 * Persisted in the JSONL header. null/undefined = no tasks set.
+	 */
+	tasks?: TaskItem[] | null;
 }
 
 /** Plan/Act mode. */

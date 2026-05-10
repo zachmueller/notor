@@ -95,6 +95,7 @@ import { openPersonaPickerModal } from "./ui/persona-picker-modal";
 // Sub-agents
 import { SubAgentManager } from "./sub-agents/manager";
 import { UseSubagentTool } from "./tools/use-subagent";
+import { UpdateTasksTool } from "./tools/update-tasks";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
@@ -1956,6 +1957,10 @@ export default class NotorPlugin extends Plugin {
 				useSubagentTool.setVaultRootPath(this.vaultRootPath);
 			}
 			this._toolRegistry.register(useSubagentTool);
+
+			// Internal task tracking tool — always-on, hidden from settings
+			const updateTasksTool = new UpdateTasksTool();
+			this._toolRegistry.register(updateTasksTool);
 
 			log.debug("Tool registry initialized", {
 				tools: this._toolRegistry.getNames(),

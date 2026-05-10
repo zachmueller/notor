@@ -59,6 +59,7 @@ function resolveMcpAutoApprove(
 export interface DispatchableTool {
 	name: string;
 	mode: "read" | "write";
+	internal?: boolean;
 	execute(params: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult>;
 }
 
@@ -379,6 +380,10 @@ export class ToolDispatcher {
 			}
 
 			// Mark as approved
+			toolCall.status = "approved";
+			this.events.onToolCallStatusChanged?.(toolCall, messageId);
+		} else if (tool.internal) {
+			// Internal tools bypass all legacy checks
 			toolCall.status = "approved";
 			this.events.onToolCallStatusChanged?.(toolCall, messageId);
 		} else {

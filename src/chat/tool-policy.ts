@@ -106,6 +106,10 @@ export function evaluateToolPolicy(
 	tool: DispatchableTool,
 	ctx: ToolPolicyContext,
 ): PolicyDecision {
+	if (tool.internal) {
+		return { allowed: true, autoApproved: true };
+	}
+
 	// 1. Enabled check — block disabled tools (FR-83)
 	const toolEntry = ctx.effectiveConfig.tools[toolName];
 	if (toolEntry && !toolEntry.enabled) {

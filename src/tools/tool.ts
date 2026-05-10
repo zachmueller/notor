@@ -8,7 +8,7 @@
  * @see design/tools.md — tool classification table
  */
 
-import type { Conversation, ConversationMode, ToolResult } from "../types";
+import type { Conversation, ConversationMode, TaskItem, ToolResult } from "../types";
 import type { EffectiveToolConfig } from "../tool-config/types";
 
 // Re-export ToolResult for tool implementations
@@ -35,6 +35,7 @@ export type { ToolResult };
 export interface ToolSessionContext {
 	getEffectiveToolConfig(): EffectiveToolConfig | null;
 	getActiveConversation(): Conversation | null;
+	setConversationTasks?(tasks: TaskItem[] | null): void;
 }
 
 export interface ToolExecuteOptions {
@@ -100,6 +101,11 @@ export interface Tool {
 	 * - "write": Act mode only, blocked in Plan mode
 	 */
 	mode: "read" | "write";
+	/**
+	 * Internal tools are always included in definitions, always auto-approved,
+	 * and hidden from the settings UI. Cannot be disabled by users.
+	 */
+	internal?: boolean;
 	/**
 	 * Execute the tool with the given parameters.
 	 * @param params - Validated parameters from the LLM

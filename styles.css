@@ -3696,3 +3696,41 @@
 	color: var(--text-on-accent);
 	border-radius: 2px;
 }
+
+/* Task panel */
+.notor-task-panel {
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding: 8px 12px;
+	font-size: var(--font-ui-small);
+}
+
+.notor-task-panel-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 0;
+	user-select: none;
+}
+
+.notor-task-panel-title {
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.notor-task-panel-body {
+	padding: 4px 0;
+}
+
+.notor-task-item {
+	padding: 2px 0;
+	line-height: 1.4;
+}
+
+.notor-task-in-progress {
+	font-weight: 600;
+}
+
+.notor-task-completed {
+	opacity: 0.6;
+	text-decoration: line-through;
+}

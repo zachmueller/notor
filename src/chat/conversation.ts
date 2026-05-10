@@ -9,7 +9,7 @@
  * @see specs/01-mvp/spec.md — FR-4, FR-14, FR-19
  */
 
-import type { Conversation, ConversationMode, Message, MessageRole, ToolCall, ToolResult } from "../types";
+import type { Conversation, ConversationMode, Message, MessageRole, TaskItem, ToolCall, ToolResult } from "../types";
 import { logger } from "../utils/logger";
 import type { ContentBlock } from "../media/types";
 import { getTextContent } from "../media/types";
@@ -536,6 +536,13 @@ export class ConversationManager {
 			this.activeConversation.mode = mode;
 			void this.onConversationChanged?.(this.activeConversation);
 			log.info("Mode changed", { mode, conversationId: this.activeConversation.id });
+		}
+	}
+
+	setTasks(tasks: TaskItem[] | null): void {
+		if (this.activeConversation) {
+			this.activeConversation.tasks = tasks;
+			void this.onConversationChanged?.(this.activeConversation);
 		}
 	}
 

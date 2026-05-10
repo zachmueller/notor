@@ -10,7 +10,7 @@
 
 import { ItemView, MarkdownRenderer, Menu, Modal, Notice, setIcon, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
-import type { ConversationMode, Message, ModelInfo, ModelPreset, Checkpoint, Persona } from "../types";
+import type { ConversationMode, Message, ModelInfo, ModelPreset, Checkpoint, Persona, TaskItem } from "../types";
 import type { Attachment } from "../context/attachment";
 import {
 	createVaultNoteAttachment,
@@ -107,6 +107,7 @@ export class NotorChatView extends ItemView {
 	private modeToggleEl!: HTMLButtonElement;
 	private conversationListEl!: HTMLElement;
 	private conversationSearchInputEl!: HTMLInputElement;
+	private taskPanelEl!: HTMLElement;
 	private loadingIndicatorEl!: HTMLElement;
 	private tokenFooterEl!: HTMLElement;
 	private attachmentChipContainerEl!: HTMLElement;
@@ -902,6 +903,7 @@ export class NotorChatView extends ItemView {
 
 		this.buildHeader(container);
 		this.buildConversationList(container);
+		this.buildTaskPanel(container);
 		this.buildMessageList(container);
 		this.buildInputArea(container);
 
@@ -1260,6 +1262,46 @@ export class NotorChatView extends ItemView {
 		});
 
 		input.click();
+	}
+
+	private buildTaskPanel(container: HTMLElement): void {
+		this.taskPanelEl = container.createDiv({ cls: "notor-task-panel notor-hidden" });
+	}
+
+	renderTaskPanel(tasks?: TaskItem[] | null): void {
+		if (!tasks || tasks.length === 0) {
+			this.taskPanelEl?.addClass("notor-hidden");
+			return;
+		}
+
+		this.taskPanelEl?.removeClass("notor-hidden");
+		this.taskPanelEl?.empty();
+
+		const completed = tasks.filter((t) => t.status === "completed").length;
+
+		const header = this.taskPanelEl.createDiv({ cls: "notor-task-panel-header" });
+		header.createSpan({ text: `Tasks (${completed}/${tasks.length} done)`, cls: "notor-task-panel-title" });
+
+		const body = this.taskPanelEl.createDiv({ cls: "notor-task-panel-body" });
+		for (const task of tasks) {
+			const taskEl = body.createDiv({ cls: "notor-task-item" });
+			const icon = task.status === "completed" ? "☑"
+				: task.status === "in_progress" ? "⏳"
+				: "☐";
+			const cls = task.status === "completed" ? "notor-task-completed"
+				: task.status === "in_progress" ? "notor-task-in-progress"
+				: "";
+			if (cls) taskEl.addClass(cls);
+			taskEl.createSpan({ text: `${icon} ${task.content}` });
+		}
+
+		// Collapsible toggle
+		let collapsed = false;
+		header.addEventListener("click", () => {
+			collapsed = !collapsed;
+			body.toggleClass("notor-hidden", collapsed);
+		});
+		header.style.cursor = "pointer";
 	}
 
 	private buildMessageList(container: HTMLElement): void {

@@ -9,7 +9,7 @@
  */
 
 import { type App, Notice } from "obsidian";
-import type { Conversation, ConversationMode, Message, Persona, ToolResult, WorkflowExecution, ExecutionChain } from "../types";
+import type { Conversation, ConversationMode, Message, Persona, TaskItem, ToolResult, WorkflowExecution, ExecutionChain } from "../types";
 import type { ChatMessage, ToolDefinition, StreamChunk, SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
@@ -571,6 +571,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 		return this.conversationManager.getActiveConversation();
 	}
 
+	setConversationTasks(tasks: TaskItem[] | null): void {
+		this.conversationManager.setTasks(tasks);
+		this.view?.renderTaskPanel(tasks);
+	}
+
 	// -----------------------------------------------------------------------
 	// Lifecycle — teardown
 	// -----------------------------------------------------------------------
@@ -1037,6 +1042,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 				// 1c. ACI-001: Build fresh auto-context before each LLM call
 				// so open-files and vault structure reflect the latest state.
 				const autoContext = buildAutoContextBlock(this.app, this.settings);
+				const currentConv = convManager.getActiveConversation();
 				const systemPrompt = await this.systemPromptBuilder.assemble(
 					mode,
 					toolDefinitions,
@@ -1044,6 +1050,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					autoContext ?? undefined,
 					session.pinnedPersona,
 					this.settings.memory_enabled,
+					currentConv?.tasks,
 				);
 
 				// Emit assembled system prompt as a structured log so E2E tests

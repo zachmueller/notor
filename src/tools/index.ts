@@ -124,6 +124,7 @@ export class ToolRegistry {
 	getFilteredToolDefinitions(config: EffectiveToolConfig): ToolDefinition[] {
 		return Array.from(this.tools.values())
 			.filter((tool) => {
+				if (tool.internal) return true;
 				const entry = config.tools[tool.name];
 				// If tool not in config, include it (defensive fallback)
 				return entry === undefined || entry.enabled;

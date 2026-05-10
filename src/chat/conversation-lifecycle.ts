@@ -130,6 +130,7 @@ export class ConversationLifecycleManager {
 		view?.clearMessages();
 		view?.setRespondingState(false);
 		view?.updateModeDisplay(conversation.mode);
+		view?.renderTaskPanel(conversation.tasks);
 		view?.clearDisplayOverrides();
 
 		// Display persona label for the new conversation
@@ -218,6 +219,7 @@ export class ConversationLifecycleManager {
 			}
 
 			view?.updateModeDisplay(conversation.mode);
+			view?.renderTaskPanel(conversation.tasks);
 			view?.updateTokenFooter(
 				convManager.getCurrentContextUsage().contextTokens,
 				conversation.total_output_tokens,
@@ -309,6 +311,7 @@ export class ConversationLifecycleManager {
 		}
 
 		view?.updateModeDisplay(sessionConv.mode);
+		view?.renderTaskPanel(sessionConv.tasks);
 		view?.updateTokenFooter(
 			activeSession.conversationManager.getCurrentContextUsage().contextTokens,
 			sessionConv.total_output_tokens,

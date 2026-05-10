@@ -12,7 +12,7 @@
 
 import type { MetadataCache, Vault } from "obsidian";
 import { parseYaml } from "obsidian";
-import type { ConversationMode, Persona, VaultRule } from "../types";
+import type { ConversationMode, Persona, TaskItem, VaultRule } from "../types";
 import type { ToolDefinition } from "../providers/provider";
 import type { ParsedToolConfig } from "../tool-config/types";
 import { extractToolConfigs } from "../tool-config/parser";
@@ -37,6 +37,7 @@ const DYNAMIC_SECTION_MARKERS = [
 	"vault_rules",
 	"auto_context",
 	"memory_convention",
+	"tasks",
 ] as const;
 
 /**
@@ -238,7 +239,8 @@ export class SystemPromptBuilder {
 		vaultRuleContent?: string,
 		autoContextBlock?: string,
 		persona?: Persona | null,
-		memoryEnabled?: boolean
+		memoryEnabled?: boolean,
+		tasks?: TaskItem[] | null,
 	): Promise<string> {
 		const parts: string[] = [];
 
@@ -274,12 +276,15 @@ export class SystemPromptBuilder {
 			? this.buildAutoContextSection(autoContextBlock)
 			: "";
 
+		const tasksSection = this.buildTasksSection(tasks);
+
 		const dynamicSections = new Map<string, string>([
 			["available_tools", toolSection],
 			["mode_instructions", modeSection],
 			["vault_rules", rulesSection],
 			["auto_context", autoContextSection],
 			["memory_convention", memorySection],
+			["tasks", tasksSection],
 		]);
 
 		// 1. Base system prompt — depends on persona prompt_mode
@@ -613,6 +618,21 @@ Messages wrapped in \`<notor-memory>…</notor-memory>\` are recalled Evergreen 
 		return `## Workspace context
 
 ${autoContextBlock}`;
+	}
+
+	private buildTasksSection(tasks?: TaskItem[] | null): string {
+		if (!tasks || tasks.length === 0) return "";
+		const lines: string[] = ["## Current tasks"];
+		for (const task of tasks) {
+			const marker = task.status === "completed" ? "[x]"
+				: task.status === "in_progress" ? "[-]"
+				: "[ ]";
+			const suffix = task.status === "in_progress" ? " ← in progress" : "";
+			lines.push(`- ${marker} ${task.content}${suffix}`);
+		}
+		const done = tasks.filter((t) => t.status === "completed").length;
+		lines.push(`\nProgress: ${done}/${tasks.length} completed`);
+		return lines.join("\n");
 	}
 
 	// -----------------------------------------------------------------------
