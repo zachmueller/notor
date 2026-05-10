@@ -982,6 +982,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			// handleUserMessage() sets a non-null workflowAssembly — that field is
 			// only populated by executeWorkflow(). See executeWorkflow()'s finally
 			// block which handles the workflow case.
+			session.rejectAllPendingApprovals();
 			this.sessionManager.unregisterSession(session.conversationId);
 			this.getViewForSession(session)?.setRespondingState(false);
 		}

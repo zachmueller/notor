@@ -2621,6 +2621,19 @@ export class NotorChatView extends ItemView {
 		});
 	}
 
+	reRenderPendingApprovals(
+		pendingApprovals: Map<string, { toolName: string; parameters: Record<string, unknown> }>
+	): Map<string, Promise<"approved" | "rejected">> {
+		const results = new Map<string, Promise<"approved" | "rejected">>();
+		for (const [msgId, { toolName, parameters }] of pendingApprovals) {
+			const toolCallEl = this.getToolCallEl(msgId);
+			if (toolCallEl) {
+				results.set(msgId, this.renderDiffApprovalPrompt(toolCallEl, toolName, parameters, false));
+			}
+		}
+		return results;
+	}
+
 	/**
 	 * Render a diff-based approval prompt for write tool calls.
 	 *

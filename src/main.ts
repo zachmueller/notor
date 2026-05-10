@@ -3506,38 +3506,57 @@ export default class NotorPlugin extends Plugin {
 		// Each orchestrator gets its own approval callback bound to the correct
 		// panel's view. Replaces the former ToolDispatcher.setApprovalCallback().
 		orchestrator.setApprovalCallback(async (toolCall, abortSignal?, messageId?, autoApproved?) => {
-			// Look up the specific tool call element by message ID, falling back to
-			// the last rendered element for backward compatibility (e.g. sub-agent dispatchers).
-			const toolCallEl = messageId
-				? view.getToolCallEl(messageId) ?? view.getLastToolCallEl()
-				: view.getLastToolCallEl();
-			if (!toolCallEl) {
-				// Fallback: auto-approve if no UI element available
-				log.warn("No tool call element for approval prompt, auto-approving");
+			if (autoApproved) {
+				const toolCallEl = messageId
+					? view.getToolCallEl(messageId) ?? view.getLastToolCallEl()
+					: view.getLastToolCallEl();
+				if (toolCallEl) {
+					void view.renderDiffApprovalPrompt(toolCallEl, toolCall.tool_name, toolCall.parameters ?? {}, true);
+				}
 				return "approved";
 			}
 
-			// For write_note and replace_in_note, render a full diff preview.
-			// For all other tools, use the plain approve/reject prompt.
-			const approvalPromise = view.renderDiffApprovalPrompt(
-				toolCallEl,
-				toolCall.tool_name,
-				toolCall.parameters ?? {},
-				autoApproved
-			);
+			// Find the active session for this panel (one per panel at a time).
+			const session = orchestrator.getActiveSessions()[0];
 
-			// If no abort signal, just await the approval normally
-			if (!abortSignal) return approvalPromise;
+			const decision = await new Promise<"approved" | "rejected">((resolve) => {
+				// Store the resolver on the session so switch-back can re-wire it.
+				if (messageId && session) {
+					session.pendingApprovals.set(messageId, {
+						resolve,
+						toolCallId: toolCall.id ?? "",
+						messageId,
+						toolName: toolCall.tool_name,
+						parameters: toolCall.parameters ?? {},
+					});
+					session.setStatus("waiting_approval");
+				}
 
-			// Race the approval against the abort signal so that clicking Stop
-			// unblocks the pending approval promise instead of hanging forever.
-			return Promise.race([
-				approvalPromise,
-				new Promise<"rejected">((resolve) => {
+				// Render approval UI (no-ops if view is detached / element missing).
+				const toolCallEl = messageId
+					? view.getToolCallEl(messageId) ?? view.getLastToolCallEl()
+					: view.getLastToolCallEl();
+				if (toolCallEl) {
+					view.renderDiffApprovalPrompt(toolCallEl, toolCall.tool_name, toolCall.parameters ?? {}, false)
+						.then((result) => resolve(result));
+				}
+
+				// Wire abort signal so Stop button unblocks the pending approval.
+				if (abortSignal) {
 					if (abortSignal.aborted) { resolve("rejected"); return; }
 					abortSignal.addEventListener("abort", () => resolve("rejected"), { once: true });
-				}),
-			]);
+				}
+			});
+
+			// Cleanup: remove from map, revert status if no more pending approvals.
+			if (messageId && session) {
+				session.pendingApprovals.delete(messageId);
+				if (session.pendingApprovals.size === 0 && session.status === "waiting_approval") {
+					session.setStatus("running");
+				}
+			}
+
+			return decision;
 		});
 
 		// History loading removed — conversation loading is now the sole

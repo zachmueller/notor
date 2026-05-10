@@ -22,6 +22,14 @@ export type SessionStatus =
 	| "errored"
 	| "cancelled";
 
+export interface PendingApproval {
+	resolve: (decision: "approved" | "rejected") => void;
+	toolCallId: string;
+	messageId: string;
+	toolName: string;
+	parameters: Record<string, unknown>;
+}
+
 export interface ConversationSessionOptions {
 	conversationId: string;
 	conversationManager: ConversationManager;
@@ -63,6 +71,9 @@ export class ConversationSession {
 	/** The response loop promise — used by destroy() to await cleanup. */
 	responsePromise?: Promise<void>;
 
+	/** Pending approval resolvers — keyed by messageId. Survives view teardown. */
+	readonly pendingApprovals = new Map<string, PendingApproval>();
+
 	private _status: SessionStatus = "running";
 	onStatusChange?: (session: ConversationSession) => void;
 
@@ -90,6 +101,13 @@ export class ConversationSession {
 	setStatus(status: SessionStatus): void {
 		this._status = status;
 		this.onStatusChange?.(this);
+	}
+
+	rejectAllPendingApprovals(): void {
+		for (const pending of this.pendingApprovals.values()) {
+			pending.resolve("rejected");
+		}
+		this.pendingApprovals.clear();
 	}
 
 	/**

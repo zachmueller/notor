@@ -393,6 +393,7 @@ export class WorkflowExecutor {
 			if (session.workflowAssembly && whm) {
 				whm.deactivate(session.conversationId);
 			}
+			session.rejectAllPendingApprovals();
 			this.deps.sessionManager.unregisterSession(session.conversationId);
 			this.deps.viewRouter.getViewForSession(session)?.setRespondingState(false);
 		}

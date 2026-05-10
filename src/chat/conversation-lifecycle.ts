@@ -330,6 +330,17 @@ export class ConversationLifecycleManager {
 			}
 		};
 
+		// Re-render pending approval prompts (buttons were destroyed by clearMessages).
+		if (view && activeSession.pendingApprovals.size > 0) {
+			const approvalResults = view.reRenderPendingApprovals(activeSession.pendingApprovals);
+			for (const [msgId, promise] of approvalResults) {
+				const pending = activeSession.pendingApprovals.get(msgId);
+				if (pending) {
+					promise.then((decision) => pending.resolve(decision));
+				}
+			}
+		}
+
 		// Display-restore from session's pinned state
 		view?.updatePersonaLabel(activeSession.pinnedPersona);
 
