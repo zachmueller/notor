@@ -51,6 +51,13 @@ const RECONNECT_MAX_DELAY_MS = 60_000;
 const RECONNECT_BACKOFF_FACTOR = 2;
 const RECONNECT_MAX_CONSECUTIVE_FAILURES = 5;
 
+/** Stdio reconnect parameters (more conservative than HTTP). */
+const STDIO_RECONNECT_INITIAL_DELAY_MS = 2_000;
+const STDIO_RECONNECT_MAX_DELAY_MS = 120_000;
+const STDIO_RECONNECT_MAX_ATTEMPTS = 5;
+const STDIO_CRASH_LOOP_WINDOW_MS = 30_000;
+const STDIO_CRASH_LOOP_THRESHOLD = 3;
+
 /** Sleep-detection heartbeat interval (ms). */
 const SLEEP_HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -105,6 +112,9 @@ export class McpHub {
 	/** Per-server reconnect state (for HTTP transports). */
 	private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private reconnectAttempts = new Map<string, number>();
+
+	/** Per-server exit timestamps for stdio crash-loop detection. */
+	private stdioExitTimestamps = new Map<string, number[]>();
 
 	/** Last heartbeat timestamp for sleep/wake detection. */
 	private _lastHeartbeat: number = 0;
@@ -315,6 +325,7 @@ export class McpHub {
 			// 6. Set connected
 			this.setStatus(connection, "connected");
 			this.reconnectAttempts.delete(serverName);
+			this.stdioExitTimestamps.delete(serverName);
 
 			log.info("Server connected", {
 				serverName,
@@ -926,10 +937,28 @@ export class McpHub {
 		connection.transport = null;
 
 		if (connection.config.type === "stdio") {
-			// stdio: mark as disconnected, no auto-reconnect
 			this.setStatus(connection, "disconnected");
 			if (wasConnected) {
 				log.info("stdio server disconnected (process exited)", { serverName });
+
+				// Crash-loop detection: if too many exits in a short window, stop retrying
+				const timestamps = this.stdioExitTimestamps.get(serverName) ?? [];
+				timestamps.push(Date.now());
+				const cutoff = Date.now() - STDIO_CRASH_LOOP_WINDOW_MS;
+				const recent = timestamps.filter(t => t > cutoff);
+				this.stdioExitTimestamps.set(serverName, recent);
+
+				if (recent.length >= STDIO_CRASH_LOOP_THRESHOLD) {
+					log.warn("stdio server crash loop detected", {
+						serverName,
+						exitsInWindow: recent.length,
+					});
+					this.setStatus(connection, "error",
+						`Process exited ${recent.length} times in ${STDIO_CRASH_LOOP_WINDOW_MS / 1000}s — suspected crash loop.`
+					);
+				} else {
+					this.scheduleStdioReconnect(serverName);
+				}
 			}
 		} else {
 			// HTTP: auto-reconnect
@@ -990,6 +1019,63 @@ export class McpHub {
 							);
 						}
 					}
+				}
+			})();
+		}, delay);
+
+		this.reconnectTimers.set(serverName, timer);
+	}
+
+	/**
+	 * Schedule auto-reconnect for a stdio server with conservative backoff.
+	 */
+	private scheduleStdioReconnect(serverName: string): void {
+		const attempts = this.reconnectAttempts.get(serverName) ?? 0;
+
+		if (attempts >= STDIO_RECONNECT_MAX_ATTEMPTS) {
+			log.warn("stdio server max reconnect attempts reached", { serverName, attempts });
+			const connection = this.connections.get(serverName);
+			if (connection) {
+				this.setStatus(connection, "error",
+					`Process exited — failed to reconnect after ${attempts} attempts.`
+				);
+			}
+			return;
+		}
+
+		const delay = Math.min(
+			STDIO_RECONNECT_INITIAL_DELAY_MS * Math.pow(RECONNECT_BACKOFF_FACTOR, attempts),
+			STDIO_RECONNECT_MAX_DELAY_MS
+		);
+
+		log.debug("Scheduling stdio reconnect", { serverName, attempt: attempts + 1, delayMs: delay });
+
+		const timer = setTimeout(() => {
+			void (async () => {
+				this.reconnectTimers.delete(serverName);
+
+				const config = this.settings?.mcp_servers?.[serverName];
+				if (!config || config.disabled) {
+					log.debug("stdio reconnect cancelled — server disabled or removed", { serverName });
+					return;
+				}
+
+				const currentConnection = this.connections.get(serverName);
+				if (currentConnection?.status === "connected") {
+					log.debug("stdio reconnect cancelled — already connected", { serverName });
+					return;
+				}
+
+				this.reconnectAttempts.set(serverName, attempts + 1);
+
+				try {
+					await this.connectServer(serverName);
+				} catch (e) {
+					log.warn("stdio reconnect attempt failed", {
+						serverName,
+						attempt: attempts + 1,
+						error: String(e),
+					});
 				}
 			})();
 		}, delay);
@@ -1098,6 +1184,7 @@ export class McpHub {
 		);
 
 		this.connections.clear();
+		this.stdioExitTimestamps.clear();
 		this.statusCallbacks = [];
 		this.settings = null;
 		this.secretStorage = null;

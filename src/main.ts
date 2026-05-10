@@ -895,6 +895,12 @@ export default class NotorPlugin extends Plugin {
 		// Heavy init (tag shadow cache) is deferred to onLayoutReady.
 		this._initVaultEventHooks();
 
+		// 7b. Eagerly create ToolRegistry + ToolDispatcher so they exist
+		// before MCP servers fire onStatusChange("connected"). Without
+		// this, fast-connecting stdio servers silently drop their tools.
+		this.getToolRegistry();
+		this.getToolDispatcher();
+
 		// 8. Initialize MCP hub (ARCH-005).
 		// Async, non-blocking — plugin load completes without waiting for
 		// MCP server connections. Cleanup registered via this.register().
@@ -1628,7 +1634,13 @@ export default class NotorPlugin extends Plugin {
 		mcpHub.onStatusChange((serverName, status) => {
 			const toolRegistry = this._toolRegistry;
 			const toolDispatcher = this._toolDispatcher;
-			if (!toolRegistry || !toolDispatcher) return;
+			if (!toolRegistry || !toolDispatcher) {
+				log.warn("MCP onStatusChange fired but ToolRegistry/Dispatcher not initialized", {
+					serverName,
+					status,
+				});
+				return;
+			}
 
 			if (status === "connected") {
 				// Server connected + tools discovered → register MCP tools
@@ -1728,7 +1740,59 @@ export default class NotorPlugin extends Plugin {
 			(cb, ms) => this.registerInterval(window.setInterval(cb, ms))
 		);
 
+		// Catch-up: after a microtask yield, register tools for any servers
+		// that connected before the onStatusChange listener was fully wired.
+		queueMicrotask(() => this._syncMcpToolRegistrations());
+
 		log.info("McpHub initialized (connections launching in background)");
+	}
+
+	/**
+	 * Synchronize MCP tool registrations with current McpHub state.
+	 *
+	 * Iterates all connected servers and ensures their discovered tools
+	 * are present in ToolRegistry + ToolDispatcher. Idempotent.
+	 */
+	private _syncMcpToolRegistrations(): void {
+		const mcpHub = this._mcpHub;
+		const toolRegistry = this._toolRegistry;
+		const toolDispatcher = this._toolDispatcher;
+		if (!mcpHub || !toolRegistry || !toolDispatcher) return;
+
+		const allTools = mcpHub.getAllDiscoveredTools();
+		let registered = 0;
+
+		for (const { serverName, tool: discoveredTool } of allTools) {
+			const namespacedName = `${serverName}__${discoveredTool.name}`;
+			if (toolRegistry.has(namespacedName)) continue;
+
+			const getServerConfigFn = (): McpServerConfig =>
+				this.settings.mcp_servers?.[serverName] ?? mcpHub.getConnection(serverName)!.config;
+
+			const getModeCallback = (): "plan" | "act" => {
+				try {
+					const convManager = this.getActiveOrchestrator()?.getConversationManager();
+					return convManager?.getActiveConversation()?.mode ?? this.settings.mode;
+				} catch {
+					return this.settings.mode;
+				}
+			};
+
+			const registeredTool = new McpRegisteredTool(
+				serverName,
+				discoveredTool,
+				getServerConfigFn,
+				mcpHub,
+				getModeCallback
+			);
+			toolRegistry.register(registeredTool);
+			toolDispatcher.registerTool(registeredTool);
+			registered++;
+		}
+
+		if (registered > 0) {
+			log.info("MCP tool catch-up registration", { registered, total: allTools.length });
+		}
 	}
 
 	// -----------------------------------------------------------------------
