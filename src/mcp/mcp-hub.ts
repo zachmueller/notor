@@ -51,6 +51,15 @@ const RECONNECT_MAX_DELAY_MS = 60_000;
 const RECONNECT_BACKOFF_FACTOR = 2;
 const RECONNECT_MAX_CONSECUTIVE_FAILURES = 5;
 
+/** Sleep-detection heartbeat interval (ms). */
+const SLEEP_HEARTBEAT_INTERVAL_MS = 15_000;
+
+/** If the gap between ticks exceeds this, a sleep event likely occurred. */
+const SLEEP_DETECTION_THRESHOLD_MS = 60_000;
+
+/** Delay after sleep detection before starting reconnection (ms). */
+const SLEEP_RECONNECT_DELAY_MS = 2_000;
+
 /** Image MIME types that can be converted to ContentBlock. */
 const SUPPORTED_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
@@ -96,6 +105,9 @@ export class McpHub {
 	/** Per-server reconnect state (for HTTP transports). */
 	private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private reconnectAttempts = new Map<string, number>();
+
+	/** Last heartbeat timestamp for sleep/wake detection. */
+	private _lastHeartbeat: number = 0;
 
 	/**
 	 * Cached PATH from the user's login shell.
@@ -995,6 +1007,54 @@ export class McpHub {
 			this.reconnectTimers.delete(serverName);
 		}
 		this.reconnectAttempts.delete(serverName);
+	}
+
+	// -----------------------------------------------------------------------
+	// Sleep/wake detection
+	// -----------------------------------------------------------------------
+
+	startSleepDetection(
+		registerInterval: (callback: () => void, ms: number) => number
+	): void {
+		this._lastHeartbeat = Date.now();
+		registerInterval(() => this._heartbeatTick(), SLEEP_HEARTBEAT_INTERVAL_MS);
+	}
+
+	private _heartbeatTick(): void {
+		const now = Date.now();
+		const gap = now - this._lastHeartbeat;
+		this._lastHeartbeat = now;
+
+		if (gap > SLEEP_DETECTION_THRESHOLD_MS) {
+			log.info("System sleep/wake detected", { gapMs: gap });
+			setTimeout(() => this._reconnectAllAfterSleep(), SLEEP_RECONNECT_DELAY_MS);
+		}
+	}
+
+	private _reconnectAllAfterSleep(): void {
+		if (!this.settings) return;
+
+		const servers = this.settings.mcp_servers ?? {};
+		const eligible: string[] = [];
+
+		for (const [serverName, config] of Object.entries(servers)) {
+			if (config.disabled) continue;
+			const status = this.connections.get(serverName)?.status ?? "disconnected";
+			if (status === "disconnected" || status === "error") {
+				eligible.push(serverName);
+			}
+		}
+
+		if (eligible.length === 0) return;
+
+		log.info("Reconnecting MCP servers after sleep/wake", { servers: eligible });
+
+		for (const serverName of eligible) {
+			this.cancelReconnect(serverName);
+			this.connectServer(serverName).catch((e) => {
+				log.warn("Post-wake reconnect failed", { serverName, error: String(e) });
+			});
+		}
 	}
 
 	// -----------------------------------------------------------------------

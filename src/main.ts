@@ -1695,6 +1695,10 @@ export default class NotorPlugin extends Plugin {
 			log.error("McpHub initialization failed", { error: String(e) });
 		});
 
+		mcpHub.startSleepDetection(
+			(cb, ms) => this.registerInterval(window.setInterval(cb, ms))
+		);
+
 		log.info("McpHub initialized (connections launching in background)");
 	}
 
