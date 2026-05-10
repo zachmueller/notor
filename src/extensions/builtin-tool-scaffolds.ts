@@ -162,6 +162,14 @@ const SEARCH_VAULT = scaffold(
       - backlinks
       - modified
     default: "match_count"
+  modified_after:
+    type: string
+    description: "Only include files modified after this time. Accepts ISO 8601 (e.g. '2026-05-01T00:00:00Z') or relative duration (e.g. '7d', '24h', '2h30m')."
+    default: ""
+  modified_before:
+    type: string
+    description: "Only include files modified before this time. Accepts ISO 8601 or relative duration (e.g. '30d', '12h')."
+    default: ""
   limit:
     type: number
     description: "Maximum number of files to return."
@@ -178,6 +186,8 @@ const searchPath = ((params.path as string) ?? "").trim();
 const contextLines = Math.max(0, Math.min(10, Math.floor((params.context_lines as number) ?? 3)));
 const filePattern = ((params.file_pattern as string) ?? "*.md").trim();
 const sortBy = ((params.sort_by as string) ?? "match_count") as "match_count" | "backlinks" | "modified";
+const modifiedAfterRaw = ((params.modified_after as string) ?? "").trim();
+const modifiedBeforeRaw = ((params.modified_before as string) ?? "").trim();
 const limit = Math.max(1, Math.min(200, Math.floor((params.limit as number) ?? 20)));
 const offset = Math.max(0, Math.floor((params.offset as number) ?? 0));
 
@@ -193,9 +203,29 @@ try {
   throw new Error(\`Invalid search pattern: \${e instanceof Error ? e.message : String(e)}\`);
 }
 
-log.debug("Searching vault", { query, searchPath, contextLines, filePattern });
-
 // --- Helpers ---
+
+function parseTimeBound(value: string, now: number): number | null {
+  if (!value) return null;
+  const durationMatch = value.match(/^(\\d+d)?(\\d+h)?(\\d+m)?$/i);
+  if (durationMatch && value.length > 0 && (durationMatch[1] || durationMatch[2] || durationMatch[3])) {
+    const days = parseInt(durationMatch[1] ?? "0", 10) || 0;
+    const hours = parseInt(durationMatch[2] ?? "0", 10) || 0;
+    const minutes = parseInt(durationMatch[3] ?? "0", 10) || 0;
+    const totalMs = ((days * 24 + hours) * 60 + minutes) * 60 * 1000;
+    if (totalMs <= 0) return null;
+    return now - totalMs;
+  }
+  const parsed = Date.parse(value);
+  if (!isNaN(parsed)) return parsed;
+  throw new Error(\`Invalid time filter value: "\${value}". Expected ISO 8601 (e.g. '2026-05-01T00:00:00Z') or relative duration (e.g. '7d', '24h', '2h30m').\`);
+}
+
+const now = Date.now();
+const modifiedAfterMs = parseTimeBound(modifiedAfterRaw, now);
+const modifiedBeforeMs = parseTimeBound(modifiedBeforeRaw, now);
+
+log.debug("Searching vault", { query, searchPath, contextLines, filePattern, modifiedAfter: modifiedAfterRaw || undefined, modifiedBefore: modifiedBeforeRaw || undefined });
 
 function matchesGlob(filename: string, pattern: string): boolean {
   const regexStr = pattern
@@ -218,6 +248,8 @@ function getCandidateFiles(sp: string, fp: string): any[] {
     if (fp && fp !== "*") {
       if (!matchesGlob(file.name, fp)) return false;
     }
+    if (modifiedAfterMs !== null && file.stat.mtime < modifiedAfterMs) return false;
+    if (modifiedBeforeMs !== null && file.stat.mtime > modifiedBeforeMs) return false;
     return true;
   });
 }
@@ -354,7 +386,15 @@ const LIST_VAULT = scaffold(
     enum:
       - last_modified
       - alphabetical
-    default: "last_modified"`,
+    default: "last_modified"
+  modified_after:
+    type: string
+    description: "Only include files modified after this time. Accepts ISO 8601 (e.g. '2026-05-01T00:00:00Z') or relative duration (e.g. '7d', '24h', '2h30m')."
+    default: ""
+  modified_before:
+    type: string
+    description: "Only include files modified before this time. Accepts ISO 8601 or relative duration (e.g. '30d', '12h')."
+    default: ""`,
 	`const log = utils.logger("list_vault");
 
 const listPath = ((params.path as string) ?? "").trim();
@@ -362,8 +402,30 @@ const recursive = (params.recursive as boolean) ?? false;
 const limit = Math.max(1, Math.min(500, Math.floor((params.limit as number) ?? 50)));
 const offset = Math.max(0, Math.floor((params.offset as number) ?? 0));
 const sortBy = ((params.sort_by as string) ?? "last_modified") as "last_modified" | "alphabetical";
+const modifiedAfterRaw = ((params.modified_after as string) ?? "").trim();
+const modifiedBeforeRaw = ((params.modified_before as string) ?? "").trim();
 
-log.debug("Listing vault", { listPath, recursive, limit, offset, sortBy });
+function parseTimeBound(value: string, now: number): number | null {
+  if (!value) return null;
+  const durationMatch = value.match(/^(\\d+d)?(\\d+h)?(\\d+m)?$/i);
+  if (durationMatch && value.length > 0 && (durationMatch[1] || durationMatch[2] || durationMatch[3])) {
+    const days = parseInt(durationMatch[1] ?? "0", 10) || 0;
+    const hours = parseInt(durationMatch[2] ?? "0", 10) || 0;
+    const minutes = parseInt(durationMatch[3] ?? "0", 10) || 0;
+    const totalMs = ((days * 24 + hours) * 60 + minutes) * 60 * 1000;
+    if (totalMs <= 0) return null;
+    return now - totalMs;
+  }
+  const parsed = Date.parse(value);
+  if (!isNaN(parsed)) return parsed;
+  throw new Error(\`Invalid time filter value: "\${value}". Expected ISO 8601 (e.g. '2026-05-01T00:00:00Z') or relative duration (e.g. '7d', '24h', '2h30m').\`);
+}
+
+const now = Date.now();
+const modifiedAfterMs = parseTimeBound(modifiedAfterRaw, now);
+const modifiedBeforeMs = parseTimeBound(modifiedBeforeRaw, now);
+
+log.debug("Listing vault", { listPath, recursive, limit, offset, sortBy, modifiedAfter: modifiedAfterRaw || undefined, modifiedBefore: modifiedBeforeRaw || undefined });
 
 const IMAGE_EXTENSIONS = new Set([
   "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff", "tif", "ico", "avif",
@@ -438,10 +500,20 @@ function collectItems(targetPath: string, isRecursive: boolean): any[] {
   return items;
 }
 
-// Collect, sort, paginate
+// Collect, filter, sort, paginate
 const allItems = collectItems(listPath, recursive);
 
-const sorted = [...allItems].sort((a: any, b: any) => {
+const filteredItems = (modifiedAfterMs !== null || modifiedBeforeMs !== null)
+  ? allItems.filter((item: any) => {
+      if (!item.modified) return true;
+      const mtime = new Date(item.modified).getTime();
+      if (modifiedAfterMs !== null && mtime < modifiedAfterMs) return false;
+      if (modifiedBeforeMs !== null && mtime > modifiedBeforeMs) return false;
+      return true;
+    })
+  : allItems;
+
+const sorted = [...filteredItems].sort((a: any, b: any) => {
   if (sortBy === "alphabetical") {
     if (a.type === "folder" && b.type !== "folder") return -1;
     if (a.type !== "folder" && b.type === "folder") return 1;
