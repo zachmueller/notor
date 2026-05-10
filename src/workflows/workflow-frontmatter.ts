@@ -1,4 +1,7 @@
-import { TFile, type App } from "obsidian";
+import { TFile, TFolder, type App, type MetadataCache, type Vault, normalizePath } from "obsidian";
+import { logger } from "../utils/logger";
+
+const log = logger("workflow-auto-pickup");
 
 export interface FrontmatterInjectionResult {
 	injected: boolean;
@@ -33,4 +36,53 @@ export async function injectWorkflowFrontmatter(
 	});
 
 	return { injected: fieldsAdded.length > 0, fieldsAdded };
+}
+
+/**
+ * Scan workflows/ directory recursively for .md files missing workflow
+ * identification frontmatter, and inject defaults (manual trigger, plan mode).
+ * Returns vault-relative paths of files that were injected.
+ */
+export async function autoInjectUnidentifiedWorkflows(
+	app: App,
+	vault: Vault,
+	metadataCache: MetadataCache,
+	notorDir: string
+): Promise<string[]> {
+	const workflowsPath = normalizePath(`${notorDir}/workflows`);
+	const folder = vault.getAbstractFileByPath(workflowsPath);
+	if (!folder || !(folder instanceof TFolder)) return [];
+
+	const mdFiles = collectMarkdownFilesRecursive(folder);
+	const injectedPaths: string[] = [];
+
+	for (const file of mdFiles) {
+		const cache = metadataCache.getFileCache(file);
+		const fm = cache?.frontmatter;
+		const isIdentified = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";
+		if (isIdentified) continue;
+
+		const result = await injectWorkflowFrontmatter(app, file, "manual", "plan");
+		if (result.injected) {
+			log.info("Auto-injected workflow frontmatter", {
+				path: file.path,
+				fieldsAdded: result.fieldsAdded,
+			});
+			injectedPaths.push(file.path);
+		}
+	}
+
+	return injectedPaths;
+}
+
+function collectMarkdownFilesRecursive(folder: TFolder): TFile[] {
+	const files: TFile[] = [];
+	for (const child of folder.children) {
+		if (child instanceof TFolder) {
+			files.push(...collectMarkdownFilesRecursive(child));
+		} else if (child instanceof TFile && child.name.endsWith(".md")) {
+			files.push(child);
+		}
+	}
+	return files;
 }

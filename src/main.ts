@@ -17,6 +17,7 @@ import { notifyFileLeafActivated, getLastActiveFilePath } from "./context/auto-c
 
 // Workflows
 import { discoverWorkflows } from "./workflows/workflow-discovery";
+import { autoInjectUnidentifiedWorkflows, injectWorkflowFrontmatter } from "./workflows/workflow-frontmatter";
 import {
 	showWorkflowPicker,
 	showActiveNoteWorkflowPicker,
@@ -905,11 +906,39 @@ export default class NotorPlugin extends Plugin {
 		// workflows directory. This is a standard Obsidian pattern.
 		this.app.workspace.onLayoutReady(() => {
 			try {
-				this.rescanWorkflows();
 				this.registerWorkflowVaultWatcher();
 			} catch (e) {
-				log.warn("Initial workflow discovery failed", { error: String(e) });
+				log.warn("Workflow vault watcher registration failed", { error: String(e) });
 			}
+
+			// Auto-inject frontmatter into unidentified workflow files, then
+			// run initial discovery. processFrontMatter atomically updates the
+			// metadata cache, so rescanWorkflows() sees injected frontmatter
+			// immediately after the promise resolves.
+			autoInjectUnidentifiedWorkflows(
+				this.app,
+				this.app.vault,
+				this.app.metadataCache,
+				this.settings.notor_dir
+			).then((injectedPaths) => {
+				if (injectedPaths.length > 0) {
+					new Notice(
+						`Auto-identified ${injectedPaths.length} workflow${injectedPaths.length > 1 ? "s" : ""} in workflows/`
+					);
+				}
+				try {
+					this.rescanWorkflows();
+				} catch (e) {
+					log.warn("Post-injection workflow rescan failed", { error: String(e) });
+				}
+			}).catch((e) => {
+				log.warn("Auto-inject workflow frontmatter failed", { error: String(e) });
+				try {
+					this.rescanWorkflows();
+				} catch (e2) {
+					log.warn("Fallback initial workflow rescan failed", { error: String(e2) });
+				}
+			});
 
 			// EXT-017: Discover and compile user extensions (tools + automations).
 			// Scaffold defaults for all 20 built-in tools are injected here;
@@ -2587,7 +2616,8 @@ export default class NotorPlugin extends Plugin {
 	private registerWorkflowVaultWatcher(): void {
 		this.registerEvent(
 			this.app.vault.on("create", (f) => {
-				if (this.isWorkflowFile(f)) this.scheduleWorkflowRescan();
+				if (!this.isWorkflowFile(f)) return;
+				this.autoInjectIfNeeded(f as TFile);
 			})
 		);
 		this.registerEvent(
@@ -2597,7 +2627,12 @@ export default class NotorPlugin extends Plugin {
 		);
 		this.registerEvent(
 			this.app.vault.on("rename", (f, oldPath) => {
-				if (this.isWorkflowFile(f) || this.isWorkflowPath(oldPath)) {
+				if (!this.isWorkflowFile(f) && !this.isWorkflowPath(oldPath)) return;
+
+				// File renamed INTO workflows/ — may need injection
+				if (this.isWorkflowFile(f) && !this.isWorkflowPath(oldPath)) {
+					this.autoInjectIfNeeded(f as TFile);
+				} else {
 					this.scheduleWorkflowRescan();
 				}
 			})
@@ -2607,6 +2642,45 @@ export default class NotorPlugin extends Plugin {
 				if (this.isWorkflowFile(f)) this.scheduleWorkflowRescan();
 			})
 		);
+	}
+
+	/**
+	 * If a workflow file lacks identification frontmatter, inject it.
+	 * The injection triggers a metadataCache "changed" event which will
+	 * call scheduleWorkflowRescan() naturally.
+	 */
+	private autoInjectIfNeeded(file: TFile): void {
+		const cache = this.app.metadataCache.getFileCache(file);
+		const fm = cache?.frontmatter;
+		const isIdentified = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";
+
+		if (isIdentified) {
+			this.scheduleWorkflowRescan();
+			return;
+		}
+
+		// Cancel pending rescan — injection will trigger "changed" event
+		// which re-schedules the rescan with correct frontmatter in place.
+		if (this._workflowRescanTimer !== null) {
+			clearTimeout(this._workflowRescanTimer);
+			this._workflowRescanTimer = null;
+		}
+
+		injectWorkflowFrontmatter(this.app, file, "manual", "plan").then((result) => {
+			if (result.injected) {
+				log.info("Auto-injected workflow frontmatter", {
+					path: file.path,
+					fieldsAdded: result.fieldsAdded,
+				});
+			}
+			// "changed" event from processFrontMatter triggers scheduleWorkflowRescan()
+		}).catch((e) => {
+			log.warn("Failed to auto-inject workflow frontmatter", {
+				path: file.path,
+				error: String(e),
+			});
+			this.scheduleWorkflowRescan();
+		});
 	}
 
 	// -----------------------------------------------------------------------
