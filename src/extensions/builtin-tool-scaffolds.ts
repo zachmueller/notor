@@ -1490,7 +1490,17 @@ settings:
     description: "Maximum characters of command output returned. Longer output is truncated."
     default: 50000
     min: 1000
-    max: 500000`,
+    max: 500000
+  execute_command_allowed_command_patterns:
+    name: "Auto-Approve Command Patterns"
+    type: string[]
+    description: "Glob patterns for commands to auto-approve (e.g., 'git *', 'ls', 'npm test'). Matched commands skip the approval prompt."
+    default: []
+  execute_command_blocked_command_patterns:
+    name: "Never Auto-Approve Command Patterns"
+    type: string[]
+    description: "Glob patterns for commands that ALWAYS require approval, even when execute_command is fully auto-approved (e.g., 'rm *', 'sudo *')."
+    default: []`,
 	`const log = utils.logger("execute_command");
 
 if (!params.command || typeof params.command !== "string") {

@@ -55,8 +55,30 @@ export class ConfigResolver {
 		// Collect workflow tool configs from assembly parameter
 		const workflowToolConfigs = workflowAssembly?.toolConfigs ?? [];
 
-		// Collect all parsed configs
+		// Inject command patterns from scaffold extension settings (lowest precedence)
+		const commandPatternConfigs: ParsedToolConfig[] = [];
+		const extSettings = this.settings.user_extension_settings?.["execute_command"];
+		if (extSettings) {
+			const allowedPatterns = extSettings["execute_command_allowed_command_patterns"] as string[] | undefined;
+			const blockedPatterns = extSettings["execute_command_blocked_command_patterns"] as string[] | undefined;
+			if ((allowedPatterns && allowedPatterns.length > 0) || (blockedPatterns && blockedPatterns.length > 0)) {
+				commandPatternConfigs.push({
+					source: "rule",
+					sourceFile: "(global settings)",
+					documentPosition: -1,
+					tools: {
+						execute_command: {
+							...(allowedPatterns && allowedPatterns.length > 0 ? { allowed_command_patterns: allowedPatterns } : {}),
+							...(blockedPatterns && blockedPatterns.length > 0 ? { blocked_command_patterns: blockedPatterns } : {}),
+						},
+					},
+				});
+			}
+		}
+
+		// Collect all parsed configs (command pattern config at front = lowest precedence)
 		const allConfigs: ParsedToolConfig[] = [
+			...commandPatternConfigs,
 			...ruleToolConfigs,
 			...personaToolConfigs,
 			...workflowToolConfigs,

@@ -38,7 +38,10 @@ const TAG_REGEX = /^<notor_tool_config([^>]*)>([\s\S]*?)<\/notor_tool_config>/gm
 const VERSION_ATTR_REGEX = /version\s*=\s*"([^"]*)"/;
 
 /** Valid per-tool fields in a `<notor_tool_config>` block. */
-const VALID_FIELDS = new Set(["enabled", "auto_approve", "allowed_paths", "blocked_paths"]);
+const VALID_FIELDS = new Set([
+	"enabled", "auto_approve", "allowed_paths", "blocked_paths",
+	"allowed_command_patterns", "blocked_command_patterns",
+]);
 
 /** Regex to detect MCP server wildcard keys like `serverName__*`. */
 const MCP_WILDCARD_REGEX = /^(.+)__\*$/;
@@ -201,6 +204,24 @@ export function extractToolConfigs(
 						continue;
 					}
 					entry.blocked_paths = value;
+				} else if (field === "allowed_command_patterns") {
+					if (!isStringArray(value)) {
+						errors.push({
+							sourceFile,
+							detail: `Tool "${toolName}": "allowed_command_patterns" must be an array of strings. Skipping this field.`,
+						});
+						continue;
+					}
+					entry.allowed_command_patterns = value;
+				} else if (field === "blocked_command_patterns") {
+					if (!isStringArray(value)) {
+						errors.push({
+							sourceFile,
+							detail: `Tool "${toolName}": "blocked_command_patterns" must be an array of strings. Skipping this field.`,
+						});
+						continue;
+					}
+					entry.blocked_command_patterns = value;
 				}
 			}
 

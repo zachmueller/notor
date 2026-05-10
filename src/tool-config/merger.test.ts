@@ -402,6 +402,8 @@ describe("intersectToolConfig", () => {
 				auto_approve?: boolean;
 				allowed_paths?: string[];
 				blocked_paths?: string[];
+				allowed_command_patterns?: string[];
+				blocked_command_patterns?: string[];
 			}
 		>,
 	): EffectiveToolConfig {
@@ -412,6 +414,8 @@ describe("intersectToolConfig", () => {
 				auto_approve: entry.auto_approve ?? false,
 				allowed_paths: entry.allowed_paths ?? [],
 				blocked_paths: entry.blocked_paths ?? [],
+				allowed_command_patterns: entry.allowed_command_patterns ?? [],
+				blocked_command_patterns: entry.blocked_command_patterns ?? [],
 			};
 		}
 		return resolved;

@@ -58,6 +58,10 @@ export interface ToolConfigEntry {
 	allowed_paths?: string[];
 	/** Path prefixes explicitly forbidden; takes precedence over `allowed_paths`. */
 	blocked_paths?: string[];
+	/** Command patterns that are auto-approved when auto_approve is false (execute_command only). */
+	allowed_command_patterns?: string[];
+	/** Command patterns that are NEVER auto-approved even when auto_approve is true (execute_command only). */
+	blocked_command_patterns?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +94,10 @@ export interface ResolvedToolConfigEntry {
 	allowed_paths: string[];
 	/** Path prefixes explicitly forbidden; takes precedence over `allowed_paths`. */
 	blocked_paths: string[];
+	/** Command patterns that are auto-approved when auto_approve is false (execute_command only). */
+	allowed_command_patterns: string[];
+	/** Command patterns that are NEVER auto-approved even when auto_approve is true (execute_command only). */
+	blocked_command_patterns: string[];
 }
 
 // ---------------------------------------------------------------------------

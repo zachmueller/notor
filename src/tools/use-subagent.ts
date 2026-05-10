@@ -462,6 +462,8 @@ export class UseSubagentTool implements Tool {
 				auto_approve: this.settings.auto_approve[name] ?? false,
 				allowed_paths: [],
 				blocked_paths: [],
+				allowed_command_patterns: [],
+				blocked_command_patterns: [],
 			};
 		}
 		return { tools };

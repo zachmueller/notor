@@ -696,6 +696,8 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 							auto_approve: plugin.settings.auto_approve[name] ?? false,
 							allowed_paths: [],
 							blocked_paths: [],
+							allowed_command_patterns: [],
+							blocked_command_patterns: [],
 						};
 					}
 					return { tools };

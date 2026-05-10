@@ -155,9 +155,9 @@ function makeSettings(overrides: Partial<NotorSettings> = {}): NotorSettings {
 function makeParentConfig(): EffectiveToolConfig {
 	return {
 		tools: {
-			search_vault: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [] },
-			read_note: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [] },
-			write_note: { enabled: true, auto_approve: false, allowed_paths: [], blocked_paths: [] },
+			search_vault: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [] },
+			read_note: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [] },
+			write_note: { enabled: true, auto_approve: false, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [] },
 		},
 	};
 }
@@ -382,8 +382,8 @@ describe("UseSubagentTool", () => {
 		it("emits Notice for tools enabled in profile but disabled by parent", async () => {
 			const parentConfig: EffectiveToolConfig = {
 				tools: {
-					search_vault: { enabled: false, auto_approve: false, allowed_paths: [], blocked_paths: [] },
-					read_note: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [] },
+					search_vault: { enabled: false, auto_approve: false, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [] },
+					read_note: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [] },
 				},
 			};
 

@@ -17,6 +17,8 @@ function makeEntry(overrides: Partial<ResolvedToolConfigEntry> = {}): ResolvedTo
 		auto_approve: false,
 		allowed_paths: [],
 		blocked_paths: [],
+		allowed_command_patterns: [],
+		blocked_command_patterns: [],
 		...overrides,
 	};
 }

@@ -16,6 +16,7 @@ import { isDomainBlocked } from "../utils/domain-denylist";
 import { enforcePathConstraints } from "../tool-config/path-enforcer";
 import { resolveAutoApprove } from "../personas/auto-approve-resolver";
 import { isMcpTool, McpRegisteredTool } from "../mcp/mcp-tool-adapter";
+import { matchCommandPattern } from "../utils/command-pattern-matcher";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -159,6 +160,26 @@ export function evaluateToolPolicy(
 	// When effectiveConfig is active, use its merged auto_approve as unified source
 	const isAutoApproved = toolEntry?.auto_approve ?? false;
 
+	// 4b. Command pattern override for execute_command
+	let finalAutoApproved = isAutoApproved;
+	if (toolName === "execute_command" && toolEntry) {
+		const command = parameters["command"];
+		if (typeof command === "string") {
+			if (toolEntry.blocked_command_patterns.length > 0) {
+				const deny = matchCommandPattern(command, toolEntry.blocked_command_patterns);
+				if (deny.matched) {
+					finalAutoApproved = false;
+				} else if (!isAutoApproved && toolEntry.allowed_command_patterns.length > 0) {
+					const allow = matchCommandPattern(command, toolEntry.allowed_command_patterns);
+					if (allow.matched) finalAutoApproved = true;
+				}
+			} else if (!isAutoApproved && toolEntry.allowed_command_patterns.length > 0) {
+				const allow = matchCommandPattern(command, toolEntry.allowed_command_patterns);
+				if (allow.matched) finalAutoApproved = true;
+			}
+		}
+	}
+
 	// 5. Path enforcement — check allowed_paths/blocked_paths (FR-84)
 	if (toolEntry) {
 		const pathError = enforcePathConstraints(
@@ -178,6 +199,6 @@ export function evaluateToolPolicy(
 
 	return {
 		allowed: true,
-		autoApproved: isAutoApproved,
+		autoApproved: finalAutoApproved,
 	};
 }

@@ -109,6 +109,8 @@ export function mergeToolConfigs(
 			auto_approve: partial.auto_approve ?? (globalAutoApprove[toolName] ?? false),
 			allowed_paths: partial.allowed_paths ?? [],
 			blocked_paths: partial.blocked_paths ?? [],
+			allowed_command_patterns: partial.allowed_command_patterns ?? [],
+			blocked_command_patterns: partial.blocked_command_patterns ?? [],
 		};
 	}
 
@@ -156,6 +158,8 @@ export function intersectToolConfig(
 				auto_approve: false,
 				allowed_paths: [],
 				blocked_paths: [],
+				allowed_command_patterns: [],
+				blocked_command_patterns: [],
 			};
 			continue;
 		}
@@ -179,11 +183,22 @@ export function intersectToolConfig(
 		const mode = toolModes[toolName];
 		const autoApprove = mode === "read" ? true : parentEntry.auto_approve;
 
+		// allowed_command_patterns: sub-agent config replaces parent
+		const allowedCommandPatterns = subEntry.allowed_command_patterns ?? parentEntry.allowed_command_patterns;
+
+		// blocked_command_patterns: union (either block applies)
+		const blockedCommandPatterns = unionPaths(
+			parentEntry.blocked_command_patterns,
+			subEntry.blocked_command_patterns ?? [],
+		);
+
 		tools[toolName] = {
 			enabled,
 			auto_approve: autoApprove,
 			allowed_paths: allowedPaths,
 			blocked_paths: blockedPaths,
+			allowed_command_patterns: allowedCommandPatterns,
+			blocked_command_patterns: blockedCommandPatterns,
 		};
 	}
 
@@ -230,4 +245,6 @@ function applyEntry(
 	if (entry.auto_approve !== undefined) acc.auto_approve = entry.auto_approve;
 	if (entry.allowed_paths !== undefined) acc.allowed_paths = entry.allowed_paths;
 	if (entry.blocked_paths !== undefined) acc.blocked_paths = entry.blocked_paths;
+	if (entry.allowed_command_patterns !== undefined) acc.allowed_command_patterns = entry.allowed_command_patterns;
+	if (entry.blocked_command_patterns !== undefined) acc.blocked_command_patterns = entry.blocked_command_patterns;
 }

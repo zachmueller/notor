@@ -26,6 +26,7 @@
 		"@playwright/test": "^1.48.0",
 		"@types/jsdom": "^28.0.1",
 		"@types/node": "^20.11.0",
+		"@types/picomatch": "^4.0.3",
 		"@types/turndown": "^5.0.6",
 		"esbuild": "0.25.5",
 		"eslint-plugin-obsidianmd": "0.1.9",
@@ -51,10 +52,11 @@
 		"mammoth": "^1.12.0",
 		"marked": "^17.0.4",
 		"obsidian": "latest",
+		"picomatch": "^4.0.4",
 		"pizzip": "^3.2.0",
+		"sucrase": "^3.35.0",
 		"turndown": "^7.2.2",
 		"turndown-plugin-gfm": "^1.0.2",
-		"sucrase": "^3.35.0",
 		"unpdf": "^1.4.0"
 	}
 }
