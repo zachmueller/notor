@@ -718,16 +718,16 @@ try {
     for (let i = 0; i < params.changes.length; i++) {
       const block = params.changes[i];
       if (!block) continue;
-      const idx = modified.indexOf(block.search);
-      if (idx === -1) {
+      const match = utils.normalizedIndexOf(modified, block.search);
+      if (!match) {
         failedBlockIndex = i + 1;
         failedSearchText = block.search;
         throw new Error(\`Search block \${i + 1} did not match\`);
       }
       modified =
-        modified.slice(0, idx) +
+        modified.slice(0, match.index) +
         block.replace +
-        modified.slice(idx + block.search.length);
+        modified.slice(match.index + match.length);
     }
     return modified;
   });
@@ -2488,8 +2488,8 @@ let content = buf.toString("utf-8");
 for (let i = 0; i < params.changes.length; i++) {
   const block = params.changes[i];
   if (!block) continue;
-  const idx = content.indexOf(block.search);
-  if (idx === -1) {
+  const match = utils.normalizedIndexOf(content, block.search);
+  if (!match) {
     const preview = block.search.length > 80
       ? block.search.slice(0, 80) + "..."
       : block.search;
@@ -2498,7 +2498,7 @@ for (let i = 0; i < params.changes.length; i++) {
       \`No changes were applied. The search text was: "\${preview}"\`
     );
   }
-  content = content.slice(0, idx) + block.replace + content.slice(idx + block.search.length);
+  content = content.slice(0, match.index) + block.replace + content.slice(match.index + match.length);
 }
 
 // All blocks matched — write

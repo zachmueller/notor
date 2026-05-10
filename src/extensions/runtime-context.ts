@@ -28,6 +28,7 @@ import { resolveImageForDocx } from "../tools/docx-image-utils";
 import type { DocxImageData } from "../tools/docx-image-utils";
 import { graftIntoTemplate } from "../tools/docx-template-graft";
 import { estimateTokenCount } from "../utils/tokens";
+import { normalizedIndexOf } from "../utils/unicode-normalize";
 import type { Message } from "../types";
 import type { SubAgentResult } from "../chat/sub-agent-runner";
 import { SubAgentRunner } from "../chat/sub-agent-runner";
@@ -338,6 +339,8 @@ export interface ExtensionUtils {
 		/** Callback invoked on right-click (desktop only). Notice is auto-hidden after. */
 		onRightClick?: () => void;
 	}) => void;
+	/** Unicode-normalized indexOf for fuzzy SEARCH/REPLACE matching. */
+	normalizedIndexOf: (haystack: string, needle: string) => { index: number; length: number } | null;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */
@@ -410,6 +413,8 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 		},
 
 		isDomainBlocked,
+
+		normalizedIndexOf,
 
 		detectMediaFormat,
 

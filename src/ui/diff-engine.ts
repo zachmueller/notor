@@ -10,6 +10,8 @@
  * @see design/ux.md — diff preview and change approval
  */
 
+import { normalizedIndexOf } from "../utils/unicode-normalize";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -243,15 +245,15 @@ export function applyBlocks(
 			continue;
 		}
 
-		const idx = result.indexOf(block.search);
-		if (idx === -1) {
+		const match = normalizedIndexOf(result, block.search);
+		if (!match) {
 			// Block no longer matches (can happen when earlier blocks shift text).
 			// Skip silently — the caller is responsible for presenting warnings.
 			continue;
 		}
 
 		result =
-			result.slice(0, idx) + block.replace + result.slice(idx + block.search.length);
+			result.slice(0, match.index) + block.replace + result.slice(match.index + match.length);
 	}
 
 	return result;
