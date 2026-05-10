@@ -253,7 +253,7 @@ export class SystemPromptBuilder {
 
 		// --- Pre-compute all dynamic section strings ---
 		const toolSection = toolDefinitions.length > 0
-			? this.buildToolDefinitionsSection(toolDefinitions)
+			? this.buildToolDefinitionsSection(toolDefinitions, mode)
 			: "";
 		const modeSection = this.buildModeSection(mode);
 
@@ -521,12 +521,16 @@ ${DEFAULT_SYSTEM_PROMPT}
 	 * Build the tool definitions section from the tool registry.
 	 * This is the single source of truth for tool documentation in the prompt.
 	 */
-	private buildToolDefinitionsSection(tools: ToolDefinition[]): string {
+	private buildToolDefinitionsSection(tools: ToolDefinition[], conversationMode: ConversationMode): string {
 		const lines: string[] = ["## Available tools", ""];
 
 		for (const tool of tools) {
 			lines.push(`### ${tool.name}`);
 			lines.push(tool.description);
+			if (conversationMode === "plan" && tool.mode === "write") {
+				lines.push("");
+				lines.push("> **Note:** This tool is unavailable in Plan mode. Switch to Act mode to use it.");
+			}
 			lines.push("");
 
 			// Parameter documentation

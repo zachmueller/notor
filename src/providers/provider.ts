@@ -50,6 +50,7 @@ export interface ToolDefinition {
 	name: string;
 	description: string;
 	input_schema: JSONSchema;
+	mode?: "read" | "write";
 }
 
 /**

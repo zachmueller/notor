@@ -338,6 +338,7 @@ export class UseSubagentTool implements Tool {
 				name: t.name,
 				description: t.description,
 				input_schema: t.input_schema as unknown as ProviderToolDefinition["input_schema"],
+				mode: t.mode,
 			}));
 
 		const subDispatcher = new ToolDispatcher();

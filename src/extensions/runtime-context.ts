@@ -742,6 +742,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 						name: t.name,
 						description: t.description,
 						input_schema: t.input_schema as import("../providers/provider").ToolDefinition["input_schema"],
+						mode: t.mode,
 					}));
 
 				const systemPrompt = SUB_AGENT_PREAMBLE + "\n" + profile.prompt_content;

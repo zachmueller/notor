@@ -110,6 +110,7 @@ export class ToolRegistry {
 			name: tool.name,
 			description: tool.description,
 			input_schema: tool.input_schema,
+			mode: tool.mode,
 		}));
 	}
 
@@ -133,6 +134,7 @@ export class ToolRegistry {
 				name: tool.name,
 				description: tool.description,
 				input_schema: tool.input_schema,
+				mode: tool.mode,
 			}));
 	}
 

@@ -379,3 +379,56 @@ My vault is {vault_name} in {notor_dir}.`;
 		expect(result).toContain("My vault is test-vault in notor.");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Tests — Plan mode write-tool disclaimer
+// ---------------------------------------------------------------------------
+
+describe("SystemPromptBuilder.assemble() — Plan mode write-tool annotation", () => {
+	const TOOLS_WITH_MODE: ToolDefinition[] = [
+		{
+			name: "read_note",
+			description: "Read a note from the vault.",
+			input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+			mode: "read",
+		},
+		{
+			name: "write_note",
+			description: "Write a note to the vault.",
+			input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+			mode: "write",
+		},
+	];
+
+	it("annotates write tools with disclaimer in Plan mode", async () => {
+		const vault = createMockVault();
+		const builder = new SystemPromptBuilder(vault, "notor", undefined, createRegistry());
+
+		const result = await builder.assemble("plan", TOOLS_WITH_MODE);
+
+		expect(result).toContain("### write_note");
+		expect(result).toContain("This tool is unavailable in Plan mode");
+	});
+
+	it("does NOT annotate read tools in Plan mode", async () => {
+		const vault = createMockVault();
+		const builder = new SystemPromptBuilder(vault, "notor", undefined, createRegistry());
+
+		const result = await builder.assemble("plan", TOOLS_WITH_MODE);
+
+		const readSection = result.substring(
+			result.indexOf("### read_note"),
+			result.indexOf("### write_note"),
+		);
+		expect(readSection).not.toContain("unavailable in Plan mode");
+	});
+
+	it("does NOT annotate write tools in Act mode", async () => {
+		const vault = createMockVault();
+		const builder = new SystemPromptBuilder(vault, "notor", undefined, createRegistry());
+
+		const result = await builder.assemble("act", TOOLS_WITH_MODE);
+
+		expect(result).not.toContain("unavailable in Plan mode");
+	});
+});
