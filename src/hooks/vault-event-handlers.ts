@@ -185,6 +185,7 @@ export function handleNoteCreate(
 		notePath: file.path,
 		tagsAdded: null,
 		tagsRemoved: null,
+		triggerFile: file,
 	};
 
 	deps.dispatch(hooks, context, null);

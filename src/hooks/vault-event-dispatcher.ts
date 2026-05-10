@@ -440,7 +440,30 @@ export async function executeRunWorkflowAction(
 					});
 					return;
 				}
-				await _executeWorkflowSubmission(workflow, workflowFile, context, chain, deps);
+
+				// Re-resolve note path from the live TFile reference (may have
+				// been renamed during the delay, e.g. Untitled.md → actual name)
+				let resolvedContext = context;
+				if (context.triggerFile) {
+					const currentPath = context.triggerFile.path;
+					const stillExists = deps.vault.getAbstractFileByPath(currentPath);
+					if (!stillExists) {
+						log.warn("Trigger file no longer exists after delay; skipping", {
+							workflowName: workflow.display_name,
+							originalPath: context.notePath,
+						});
+						return;
+					}
+					if (currentPath !== context.notePath) {
+						log.info("Note renamed during hook delay; using current path", {
+							originalPath: context.notePath,
+							currentPath,
+						});
+						resolvedContext = { ...context, notePath: currentPath };
+					}
+				}
+
+				await _executeWorkflowSubmission(workflow, workflowFile, resolvedContext, chain, deps);
 			},
 		);
 		return;

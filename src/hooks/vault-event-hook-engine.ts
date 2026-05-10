@@ -43,6 +43,12 @@ export interface VaultEventHookContext {
 	tagsAdded: string[] | null;
 	/** Tags removed from the note (on_tag_change only; null otherwise). */
 	tagsRemoved: string[] | null;
+	/**
+	 * Live reference to the TFile that triggered the event. Obsidian mutates
+	 * TFile.path in place on rename, so re-reading after a hook delay yields
+	 * the current path. Null for on_schedule or events without a source file.
+	 */
+	triggerFile?: import("obsidian").TFile | null;
 }
 
 // ---------------------------------------------------------------------------
