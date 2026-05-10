@@ -1772,6 +1772,7 @@ const buf = await libs.fs.promises.readFile(resolvedPath);
 // Build image extraction handler
 const extractedImages: Array<{ index: number; vaultPath: string | null; alt: string }> = [];
 let imageIndex = 0;
+let duplicatesSkipped = 0;
 
 // Determine if the input path is vault-relative (for attachment folder resolution)
 const vaultFile = app.vault.getFileByPath(filePath);
@@ -1808,7 +1809,9 @@ const convertImage = libs.mammoth.images.imgElement(
 
       // Check if the file already exists at the resolved path
       const existing = app.vault.getFileByPath(targetPath);
-      if (!existing) {
+      if (existing) {
+        duplicatesSkipped++;
+      } else {
         const arrayBuf = imgBuffer.buffer.slice(
           imgBuffer.byteOffset,
           imgBuffer.byteOffset + imgBuffer.byteLength,
@@ -1875,11 +1878,15 @@ const markdown = td.turndown(html);
 
 const extractedCount = extractedImages.filter((i: any) => i.vaultPath !== null).length;
 const skippedCount = extractedImages.filter((i: any) => i.vaultPath === null).length;
+if (duplicatesSkipped > 0) {
+  new obsidian.Notice(\`Skipped \${duplicatesSkipped} duplicate image(s) — already in vault\`);
+}
 log.info("Read docx", {
   path: resolvedPath,
   bytes: buf.length,
   imagesExtracted: extractedCount,
   imagesSkipped: skippedCount,
+  duplicatesSkipped,
 });
 
 return markdown;`,
@@ -1933,6 +1940,7 @@ const buf = await libs.fs.promises.readFile(resolvedPath);
 
 const extractedImages: Array<{ index: number; vaultPath: string | null; alt: string }> = [];
 let imageIndex = 0;
+let duplicatesSkipped = 0;
 const vaultFile = app.vault.getFileByPath(filePath);
 const sourcePath: string | undefined = vaultFile ? vaultFile.path : undefined;
 const supportedImageTypes = new Set([
@@ -1958,7 +1966,9 @@ const convertImage = libs.mammoth.images.imgElement(
       const filename = \`\${hash}.\${ext}\`;
       const targetPath = await app.fileManager.getAvailablePathForAttachment(filename, sourcePath);
       const existing = app.vault.getFileByPath(targetPath);
-      if (!existing) {
+      if (existing) {
+        duplicatesSkipped++;
+      } else {
         const arrayBuf = imgBuffer.buffer.slice(imgBuffer.byteOffset, imgBuffer.byteOffset + imgBuffer.byteLength);
         await app.vault.createBinary(targetPath, arrayBuf);
       }
@@ -2014,6 +2024,9 @@ const existingFile = utils.resolveNote(notePath);
 
 const extractedCount = extractedImages.filter((i: any) => i.vaultPath !== null).length;
 const skippedCount = extractedImages.filter((i: any) => i.vaultPath === null).length;
+if (duplicatesSkipped > 0) {
+  new obsidian.Notice(\`Skipped \${duplicatesSkipped} duplicate image(s) — already in vault\`);
+}
 
 if (!existingFile) {
   await utils.ensureDirectoryExists(finalNotePath);
@@ -2024,9 +2037,10 @@ if (!existingFile) {
     chars: markdown.length,
     imagesExtracted: extractedCount,
     imagesSkipped: skippedCount,
+    duplicatesSkipped,
   });
   await utils.noteOpener.openNote(finalNotePath);
-  return \`Note created: \${finalNotePath} (\${markdown.length} characters, \${extractedCount} image(s) extracted)\`;
+  return \`Note created: \${finalNotePath} (\${markdown.length} characters, \${extractedCount} image(s) extracted, \${duplicatesSkipped} duplicate(s) skipped)\`;
 }
 
 try {
@@ -2041,9 +2055,10 @@ log.info("Imported docx over existing note", {
   chars: markdown.length,
   imagesExtracted: extractedCount,
   imagesSkipped: skippedCount,
+  duplicatesSkipped,
 });
 await utils.noteOpener.openNote(existingFile.path);
-return \`Note updated: \${existingFile.path} (\${markdown.length} characters, \${extractedCount} image(s) extracted)\`;`,
+return \`Note updated: \${existingFile.path} (\${markdown.length} characters, \${extractedCount} image(s) extracted, \${duplicatesSkipped} duplicate(s) skipped)\`;`,
 );
 
 const WRITE_DOCX = scaffold(
