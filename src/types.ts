@@ -149,6 +149,8 @@ export interface Message {
 	output_tokens?: number | null;
 	/** Estimated cost for this message (null if pricing unavailable). */
 	cost_estimate?: number | null;
+	/** Thinking/reasoning content from extended thinking (null if disabled). */
+	thinking?: string | null;
 	/** Tool call details (for tool_call role only). */
 	tool_call?: ToolCall | null;
 	/** Tool result details (for tool_result role only). */

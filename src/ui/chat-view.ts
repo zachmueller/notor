@@ -2235,6 +2235,15 @@ export class NotorChatView extends ItemView {
 		contentEl.parentElement!.dataset.messageId = message.id;
 		this.appendForkButton(contentEl.parentElement!, message);
 		contentEl.empty();
+
+		// Re-render thinking block if present
+		if (message.thinking) {
+			const detailsEl = contentEl.createEl("details", { cls: "notor-thinking-block" });
+			detailsEl.createEl("summary", { text: "Thinking" });
+			const thinkingDiv = detailsEl.createEl("div", { cls: "notor-thinking-content" });
+			thinkingDiv.textContent = message.thinking;
+		}
+
 		const assistantText = typeof message.content === "string"
 			? message.content
 			: (() => { throw new Error("Expected string content for assistant message"); })();

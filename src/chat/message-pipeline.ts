@@ -74,9 +74,9 @@ export function getWireText(
 
 /** Result type for stream processing. */
 export type StreamResult =
-	| { type: "text"; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "cancelled"; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "text"; text: string; thinking: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; thinking: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "cancelled"; text: string; thinking: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "error"; error: string; text: string; inputTokens: number; outputTokens: number };
 
 /**
@@ -93,6 +93,7 @@ export async function processStream(
 	viewResolver?: () => NotorChatView | undefined,
 ): Promise<StreamResult> {
 	let textContent = "";
+	let thinkingContent = "";
 	let inputTokens = 0;
 	let outputTokens = 0;
 	// Use the eagerly-created placeholder if provided; first text_delta
@@ -106,6 +107,7 @@ export async function processStream(
 	for await (const event of parseStreamEvents(stream, abortController.signal)) {
 		switch (event.type) {
 			case "thinking_delta": {
+				thinkingContent += event.delta;
 				const view = resolveView();
 				if (!contentEl) {
 					contentEl = view?.createAssistantMessagePlaceholder();
@@ -160,6 +162,7 @@ export async function processStream(
 				return {
 					type: "cancelled",
 					text: event.text,
+					thinking: thinkingContent,
 					inputTokens,
 					outputTokens,
 					contentEl,
@@ -173,6 +176,7 @@ export async function processStream(
 			type: "tool_calls",
 			calls: accumulatedToolCalls,
 			text: textContent,
+			thinking: thinkingContent,
 			inputTokens,
 			outputTokens,
 			contentEl,
@@ -182,6 +186,7 @@ export async function processStream(
 	return {
 		type: "text",
 		text: textContent,
+		thinking: thinkingContent,
 		inputTokens,
 		outputTokens,
 		contentEl,

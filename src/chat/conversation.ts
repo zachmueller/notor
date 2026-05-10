@@ -331,6 +331,7 @@ export class ConversationManager {
 		input_tokens?: number | null;
 		output_tokens?: number | null;
 		cost_estimate?: number | null;
+		thinking?: string | null;
 		tool_call?: ToolCall | null;
 		tool_result?: ToolResult | null;
 		auto_context?: string | null;
@@ -362,6 +363,7 @@ export class ConversationManager {
 			input_tokens: params.input_tokens ?? null,
 			output_tokens: params.output_tokens ?? null,
 			cost_estimate: params.cost_estimate ?? null,
+			thinking: params.thinking ?? null,
 			tool_call: params.tool_call ?? null,
 			tool_result: params.tool_result ?? null,
 			truncated: false,

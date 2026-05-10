@@ -1124,6 +1124,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					const assistantMessage = convManager.addMessage({
 						role: "assistant",
 						content: result.text,
+						thinking: result.thinking || null,
 						input_tokens: result.inputTokens,
 						output_tokens: result.outputTokens,
 						cost_estimate: calculateCost(result.inputTokens, result.outputTokens, session.modelId, this.settings),
@@ -1155,6 +1156,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 						convManager.addMessage({
 							role: "assistant",
 							content: result.text || "",
+							thinking: result.thinking || null,
 							input_tokens: result.inputTokens,
 							output_tokens: result.outputTokens,
 							cost_estimate: calculateCost(result.inputTokens, result.outputTokens, session.modelId, this.settings),
@@ -1414,6 +1416,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					const cancelledMsg = convManager.addMessage({
 						role: "assistant",
 						content: cancelledContent,
+						thinking: result.thinking || null,
 					});
 
 					const cancelView = this.getViewForSession(session);
