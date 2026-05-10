@@ -757,6 +757,16 @@
 	user-select: text;
 }
 
+.notor-thinking-block {
+	margin-bottom: 8px;
+}
+
+.notor-thinking-content {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	white-space: pre-wrap;
+}
+
 .notor-message-content p:first-child {
 	margin-top: 0;
 }

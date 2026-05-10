@@ -1161,7 +1161,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					// Track tokens from message_end (now correctly captured
 					// because processStream consumes the full stream).
 					if (result.inputTokens || result.outputTokens) {
-						convManager.addMessage({
+						const toolTurnMsg = convManager.addMessage({
 							role: "assistant",
 							content: result.text || "",
 							thinking: result.thinking || null,
@@ -1169,6 +1169,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 							output_tokens: result.outputTokens,
 							cost_estimate: calculateCost(result.inputTokens, result.outputTokens, session.modelId, this.settings),
 						});
+
+						// Finalize the streaming placeholder so thinking block persists
+						if (result.contentEl) {
+							await this.getViewForSession(session)?.finalizeAssistantMessage(result.contentEl, toolTurnMsg);
+						}
 
 						// Update token footer after tool-call turn tokens are recorded
 						const convAfterToolTokens = convManager.getActiveConversation();
