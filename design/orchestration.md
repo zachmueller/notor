@@ -5,7 +5,7 @@
 > **Status:** Design — not yet implemented
 > **Feature group:** `orchestration_enabled` (defaults to off)
 > **Source location:** `src/orchestration/` (new directory)
-> **Commit ref:** `fd99fea`
+> **Commit ref:** `8bfef16`
 
 ---
 
@@ -18,7 +18,7 @@
 5. [Event Engine](#event-engine)
 6. [Step Turn Execution](#step-turn-execution)
 7. [Prompt Construction](#prompt-construction)
-8. [Verification Steps](#verification-steps)
+8. [Programmatic Code Steps](#programmatic-code-steps)
 9. [Conversation Model](#conversation-model)
 10. [Session Workspace](#session-workspace)
 11. [Safety Mechanisms](#safety-mechanisms)
@@ -45,8 +45,8 @@ instructions. Steps communicate by publishing events; the engine routes events t
 next step based on trigger subscriptions.
 
 **What it is not:** A workflow. Workflows are single-turn prompt templates.
-Orchestrations are multi-step event loops with state, verification, and coordination.
-They are launched separately from workflows (though individual steps may invoke
+Orchestrations are multi-step event loops with state, coordination, and
+programmatic control steps. They are launched separately from workflows (though individual steps may invoke
 workflows).
 
 **Design heritage:** Informed by research into the Ralph orchestrator, adapted for Notor's vault-native, extension-based, persona-driven architecture.
@@ -64,7 +64,7 @@ workflows).
 | **Event** | A named signal with a payload, published by one step and routed to others |
 | **Session** | A single execution of a flow — runtime state, workspace notes, event log |
 | **Scratchpad** | Per-session shared workspace directory for cross-step state |
-| **Verification** | Shell commands or extension tool calls that validate step output before routing |
+| **Code step** | A step with `notor-step-mode: code` — executes TypeScript deterministically without LLM |
 
 **Removed terminology:** "Hat" (from the Ralph reference) is not used. Use "step" for
 the flow unit and "persona" for the identity/access profile.
@@ -100,13 +100,11 @@ OrchestrationRunner.start(flowDir, promptText)
 │    5. Execute via responseLoop() with step-specific tools     │
 │    6. Capture emit_event calls → topics + payloads            │
 │    7. If no emit_event: synthesize default_publishes          │
-│    8. Run verification steps (if configured)                  │
-│    9. On verification failure: substitute blocked event       │
-│   10. Safety checks (iteration, runtime, stale, thrashing)    │
+│    8. Safety checks (iteration, runtime, stale, thrashing)    │
 │                                                               │
 │  EventEngine.publish(event) → route to next step              │
 │                                                               │
-│  Repeat until FLOW_COMPLETE or safety limit fires             │
+│  Repeat until FLOW_COMPLETE / FLOW_CANCELLED or safety limit fires             │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
   │
@@ -123,10 +121,10 @@ OrchestrationRunner
   ├── OrchestrationEventEngine      (pub/sub with wildcard)
   │     └── FallbackCoordinator     ("*" wildcard subscriber)
   ├── StepPromptBuilder             (wraps instructions in scaffold)
-  ├── StepTurnExecutor              (creates session, runs responseLoop)
-  │     ├── PersonaManager          (activates step's persona)
-  │     ├── emit_event scaffold     (captures events)
-  │     └── VerificationRunner      (shell + tool validation)
+  ├── StepTurnExecutor              (creates session, runs responseLoop OR code)
+  │     ├── PersonaManager          (activates step's persona — conversation steps)
+  │     ├── emit_event scaffold     (captures events — conversation steps)
+  │     └── CodeStepExecutor        (compiles + runs TypeScript — code steps)
   ├── LoopSafetyGuards              (iteration/runtime/stale/thrashing)
   ├── OrchestrationSessionManager   (workspace, event log, recovery)
   └── UI: command palette + Notice system
@@ -250,13 +248,6 @@ notor-step-publishes:
 notor-step-default-publishes: tasks.ready
 notor-step-persona: planner-persona
 notor-step-model: null
-notor-step-verification:
-  - type: shell
-    command: "npm test"
-    on_fail: "Tests failed. Fix before proceeding."
-  - type: tool
-    tool_name: validate_plan
-    on_fail: "Plan validation failed."
 notor-step-mcp-servers: null
 ---
 
@@ -288,7 +279,7 @@ Write your decomposition to plan.md when complete.
 | `notor-step-default-publishes` | string | Event emitted if step doesn't call `emit_event` |
 | `notor-step-persona` | string \| null | Persona name for system prompt + tool config + model |
 | `notor-step-model` | string \| null | Optional model override (takes precedence over persona) |
-| `notor-step-verification` | array \| null | Verification steps (see [Verification Steps](#verification-steps)) |
+| `notor-step-mode` | `"conversation"` \| `"code"` | Execution mode. `conversation` (default) = LLM-powered. `code` = programmatic TypeScript execution. |
 | `notor-step-mcp-servers` | string[] \| null | MCP servers active for this step (null = inherit all) |
 
 **Note body:** The Markdown body is the step's custom instructions. These are injected
@@ -389,11 +380,13 @@ Each step turn is a full LLM conversation cycle:
 7.  After responseLoop() completes:
     - If emit_event was called: capture topic + payload
     - If emit_event was NOT called: synthesize step.default_publishes
-8.  Run verification steps (if configured for this step)
-    - On verification failure: substitute blocked event + failure context
-9.  Append turn.complete to session-log.jsonl
+8.  Append turn.complete to session-log.jsonl
+9.  Safety checks (iteration, runtime, stale, thrashing)
 10. Return the captured event for the engine to route
 ```
+
+Note: For code steps (`notor-step-mode: code`), steps 2-6 are replaced by
+TypeScript compilation and execution. See [Programmatic Code Steps](#programmatic-code-steps).
 
 ### Persona Activation per Step
 
@@ -440,8 +433,7 @@ Session tasks: {session.tasks_path}
 {step.body_content}
 
 ### 2. VERIFY
-You MUST run any required checks before reporting done.
-{step.verification_instructions — if configured}
+You MUST verify your work before reporting done.
 
 ### 3. REPORT
 You MUST call emit_event with one of: {step.publishes}
@@ -492,68 +484,254 @@ This means the final system prompt is:
 
 ---
 
-## Verification Steps
+## Programmatic Code Steps
 
-Verification steps run after a step declares completion (emits an event) but before
-the event is routed to the next step. They validate that the step's work meets quality
-criteria.
+Code steps are purely programmatic TypeScript steps that execute deterministically
+without creating any LLM conversation. They wholly replace the previous "Verification
+Steps" concept and are far more general-purpose.
 
-### Configuration (in step note frontmatter)
+### Design Principles
+
+1. **Same step note format** — Code steps live in `steps/` alongside conversation steps.
+   They use the same frontmatter schema but declare `notor-step-mode: code`.
+2. **No conversation created** — No LLM call, no JSONL file. Pure code execution.
+3. **Deterministic event emission** — The code's return value determines what event
+   fires next, enabling deterministic branching and routing.
+4. **Full runtime access** — Same as user-defined tools: full Obsidian API, Node.js,
+   plugin privileges. Plus an orchestration helper library for built-in tools, MCP
+   servers, and scratchpad.
+5. **Silent execution** — No UI feedback unless the code errors (error Notice) or
+   explicitly calls `utils.notify()`.
+
+### Code Step Note Format
 
 ```yaml
-notor-step-verification:
-  - type: shell
-    command: "npm test"
-    on_fail: "Tests failed. Fix the failing tests before proceeding."
-  - type: tool
-    tool_name: validate_implementation
-    params:
-      path: "src/"
-    on_fail: "Implementation validation failed."
+---
+notor-type: orchestration-step
+notor-step-name: "🔍 Pre-flight Check"
+notor-step-description: "Checks for new Slack messages before proceeding"
+notor-step-mode: code
+notor-step-triggers:
+  - flow.start
+notor-step-publishes:
+  - messages.found
+  - FLOW_CANCELLED
+notor-step-default-publishes: FLOW_CANCELLED
+notor-step-mcp-servers:
+  - slack
+---
+
+# Pre-flight Check
+
+Cancels the flow if there are no new unread Slack messages to process.
+
+```typescript
+// Access the incoming event
+const { topic, payload } = event;
+
+// Use MCP server to check for messages
+const result = await orchestration.callMcpTool("slack", "get_unread_messages", {
+  channel: payload.channel ?? "#general",
+});
+
+const messages = JSON.parse(result);
+
+if (messages.length === 0) {
+  // No messages — cancel the flow
+  return orchestration.emit("FLOW_CANCELLED", "No unread messages found.");
+}
+
+// Write message list to scratchpad for downstream steps
+await orchestration.scratchpad.write("messages.json", JSON.stringify(messages, null, 2));
+
+// Continue the flow with the message count
+return orchestration.emit("messages.found", JSON.stringify({
+  count: messages.length,
+  channel: payload.channel ?? "#general",
+}));
+```
 ```
 
-### Verification Types
+**Key differences from conversation steps:**
 
-**Shell command (`type: shell`):**
-- Executes the command via the existing `shell-executor.ts`
-- Exit code 0 = pass; non-zero = fail
-- stdout/stderr captured and included in failure context
+| Aspect | Conversation Step | Code Step |
+|--------|------------------|----------|
+| Execution | LLM conversation via `responseLoop()` | TypeScript function execution |
+| JSONL file | Created per turn | None |
+| Persona | Required (system prompt + tools) | Not used (no LLM call) |
+| Event emission | Via `emit_event` tool call | Via `return orchestration.emit()` |
+| Output | Natural language + tool use | Programmatic return value |
+| UI | Streams to conversation view | Silent (unless error or explicit Notice) |
+| Iteration cost | LLM tokens | Zero tokens |
 
-**Extension tool call (`type: tool`):**
-- Calls a user-defined or built-in tool by name
-- The tool returns a string result
-- If the result contains `FAIL` or `ERROR` (case-insensitive), or if the tool throws: fail
-- Optional `params` passed to the tool
-
-### On Failure
-
-When verification fails:
-1. The step's emitted event is **not routed**
-2. Instead, a `{step_name}.verification_failed` event is published
-3. This event re-triggers the same step with failure context in the payload:
-   ```
-   Verification failed for your previous work.
-   Failure reason: {on_fail message}
-   Output: {command stdout/stderr or tool result}
-   Please fix the issues and try again.
-   ```
-4. The step re-executes with full context of what went wrong
-5. Verification failure counts toward `max_iterations`
-
-### Verification in the Prompt Scaffold
-
-When a step has verification configured, section `### 2. VERIFY` in the prompt
-scaffold includes specific instructions:
+### Code Step Execution Flow
 
 ```
-### 2. VERIFY
-Before emitting your completion event, the following verification will run automatically:
-- Shell: `npm test` — tests must pass
-- Tool: `validate_implementation` — implementation must be valid
-
-If verification fails, you will be re-triggered with the failure details.
-Ensure your work passes these checks before emitting.
+StepTurnExecutor detects notor-step-mode: code
+  │
+  ├── Skip: persona activation, ConversationSession, prompt building
+  ├── Compile TypeScript via Sucrase (same pipeline as extensions)
+  ├── Inject runtime context: app, obsidian, utils, libs, event, orchestration
+  ├── Execute compiled function
+  │
+  ├── On success: capture returned emit topic + payload
+  ├── On error: fire {step_name}.code_error event with stack trace
+  │             Show error Notice
+  │
+  ├── Append turn.start + turn.complete to session-log.jsonl
+  │   (for crash recovery and audit trail)
+  │
+  └── Return captured event for engine to route
 ```
+
+### Runtime Context (Orchestration Helper)
+
+Code steps receive all standard extension context (`app`, `obsidian`, `utils`, `libs`)
+plus an `orchestration` helper object and an `event` object:
+
+```typescript
+/** Injected as `event` — the incoming trigger event. */
+interface CodeStepEvent {
+  topic: string;
+  payload: string;
+  source_step: string | null; // null for starting event
+}
+
+/** Injected as `orchestration` — orchestration-specific helper library. */
+interface OrchestrationHelper {
+  /** Emit an event to continue the flow. Must be returned from the code step. */
+  emit(topic: string, payload?: string): CodeStepResult;
+
+  /** Access the session scratchpad. */
+  scratchpad: {
+    read(filename: string): Promise<string | null>;
+    write(filename: string, content: string): Promise<void>;
+    list(): Promise<string[]>;
+    exists(filename: string): Promise<boolean>;
+  };
+
+  /** Call a built-in tool by name with params. */
+  callTool(toolName: string, params: Record<string, unknown>): Promise<string>;
+
+  /** Call a tool on a connected MCP server. */
+  callMcpTool(serverName: string, toolName: string, params: Record<string, unknown>): Promise<string>;
+
+  /** Read the orchestration task list. */
+  tasks: {
+    list(filter?: { status?: string }): Promise<OrchestrationTask[]>;
+    ensure(key: string, description: string): Promise<void>;
+    start(key: string): Promise<void>;
+    close(key: string): Promise<void>;
+  };
+
+  /** Get flow metadata. */
+  flow: {
+    name: string;
+    iteration: number;
+    sessionId: string;
+  };
+
+  /** Get recent event history. */
+  eventHistory(limit?: number): OrchestrationEvent[];
+}
+```
+
+### `FLOW_CANCELLED` Terminal Event
+
+A new terminal event alongside `FLOW_COMPLETE`. When emitted:
+
+- The orchestration loop terminates immediately
+- Session status is set to `cancelled` (not `completed` or `error`)
+- The session log records a `session.cancelled` entry with the payload as reason
+- No task completion enforcement (unlike `FLOW_COMPLETE`, open tasks are acceptable)
+
+Available from **both** code steps and conversation steps:
+
+```typescript
+// Code step:
+return orchestration.emit("FLOW_CANCELLED", "No work needed.");
+```
+
+```
+// Conversation step (via emit_event tool):
+emit_event(topic: "FLOW_CANCELLED", payload: "User requested abort.")
+```
+
+### Compilation and Execution
+
+Code steps are compiled via the same Sucrase pipeline used by user-defined extensions:
+
+1. Extract first `ts`/`typescript`/`js`/`javascript` code fence from the step note body
+2. Strip TypeScript types via `stripTypes()` (Sucrase `typescript` transform)
+3. Compile to `AsyncFunction` with injected context arguments:
+   `app`, `obsidian`, `utils`, `libs`, `event`, `orchestration`
+4. Execute with timeout guard (configurable, default 60s)
+5. Capture the returned `CodeStepResult` for event routing
+
+**Argument signature:**
+```typescript
+const CODE_STEP_ARG_NAMES = [
+  "app", "obsidian", "utils", "libs", "event", "orchestration"
+] as const;
+```
+
+### Use Cases
+
+| Use Case | How |
+|----------|-----|
+| Pre-flight checks | Check conditions, emit `FLOW_CANCELLED` if not met |
+| Data fetching | Pull data via MCP/tools, write to scratchpad, route to agent |
+| Build/test verification | Run `utils.executeShellCommand("npm test")`, route based on exit code |
+| Iterative task management | Maintain a list in scratchpad, pop next item, route to worker step |
+| External notifications | Call Slack/email MCP to notify team of progress |
+| Conditional routing | Inspect event payload, route to different steps based on content |
+| Aggregation | Collect results from scratchpad, synthesize, route to finalizer |
+
+### Replaces Verification Steps
+
+The old `notor-step-verification` frontmatter field is removed. To achieve
+verification behavior, wire a code step after the conversation step:
+
+```
+[Builder] --build.done--> [Verify Tests] --tests.passed--> [Reviewer]
+                                         --tests.failed--> [Builder]
+```
+
+The verify step:
+```yaml
+---
+notor-step-mode: code
+notor-step-triggers:
+  - build.done
+notor-step-publishes:
+  - tests.passed
+  - tests.failed
+---
+```
+
+```typescript
+const result = await utils.executeShellCommand("npm test", {
+  cwd: "/path/to/project",
+  timeout: 120000,
+});
+
+if (result.exitCode === 0) {
+  return orchestration.emit("tests.passed", result.stdout);
+} else {
+  return orchestration.emit("tests.failed", JSON.stringify({
+    exitCode: result.exitCode,
+    stderr: result.stderr,
+    stdout: result.stdout,
+  }));
+}
+```
+
+This is strictly more powerful than the old verification system:
+- Arbitrary logic (not just pass/fail)
+- Can route to different steps based on failure type
+- Can inspect and transform outputs
+- Can interact with external services
+- Full control over failure context payload
 
 ---
 
@@ -661,15 +839,13 @@ The most important session file for crash recovery. Written by the engine, not b
 {"type":"event.emitted","turn":1,"topic":"build.start","payload":"implement --verbose flag","ts":"..."}
 {"type":"turn.start","turn":2,"step":"planner","trigger_topic":"build.start","conversation_id":"...","ts":"..."}
 {"type":"turn.complete","turn":2,"step":"planner","emitted_topic":"tasks.ready","conversation_id":"...","ts":"..."}
-{"type":"verification.passed","turn":2,"step":"planner","ts":"..."}
 {"type":"event.emitted","turn":2,"topic":"tasks.ready","payload":"{...}","ts":"..."}
 ```
 
 **Write order (enforced):**
-1. `turn.start` → before `responseLoop()` begins
-2. `turn.complete` → after emit captured, before verification
-3. `verification.passed` / `verification.failed` → after verification runs
-4. `event.emitted` → before the event is routed (write-before-route)
+1. `turn.start` → before `responseLoop()` begins (or code execution for code steps)
+2. `turn.complete` → after emit captured
+3. `event.emitted` → before the event is routed (write-before-route)
 
 ### Session Recovery
 
@@ -888,10 +1064,10 @@ A new built-in persona (mirrors `notor-help` and `tool-creator`):
 The persona guides users through creating orchestration flows interactively:
 
 1. Discusses the flow concept with the user — what steps are needed, what events
-   connect them, what verification is required
+   connect them, what code steps might be useful for deterministic behavior
 2. Creates the flow directory and `definition.md`
-3. Creates step notes with appropriate frontmatter
-4. Suggests or creates personas for steps that need them
+3. Creates step notes with appropriate frontmatter (both conversation and code steps)
+4. Suggests or creates personas for conversation steps that need them
 5. Validates the flow topology (no orphaned events, all triggers have publishers)
 
 ### Tool Access
@@ -958,7 +1134,9 @@ src/orchestration/
   event-engine.ts             # OrchestrationEventEngine
   fallback-coordinator.ts     # FallbackCoordinator
   step-prompt-builder.ts      # StepPromptBuilder
-  step-turn-executor.ts       # StepTurnExecutor
+  step-turn-executor.ts       # StepTurnExecutor (dispatches to conversation or code path)
+  code-step-executor.ts       # CodeStepExecutor (TypeScript compilation + execution)
+  orchestration-helper.ts     # OrchestrationHelper runtime context for code steps
   runner.ts                   # OrchestrationRunner
   safety.ts                   # LoopSafetyGuards
   session-log.ts              # Session event log writer
@@ -979,16 +1157,19 @@ src/orchestration/
 | Conversation header orchestration metadata | Low |
 | Conversation navigation extensions | Medium |
 
-### Phase 3: Verification Steps
+### Phase 3: Programmatic Code Steps
 
-**Goal:** Configurable per-step verification (shell + tool).
+**Goal:** Deterministic TypeScript steps for verification, data fetching, routing, and flow control.
 
 | Component | Complexity |
-|-----------|-----------|
-| `VerificationRunner` | Medium |
-| Shell command verification | Low |
-| Extension tool verification | Medium |
-| Failure → re-trigger routing | Low-Medium |
+|-----------|------------|
+| `CodeStepExecutor` | Medium |
+| Code fence extraction + Sucrase compilation | Low (reuses extension pipeline) |
+| `OrchestrationHelper` runtime context | Medium |
+| `FLOW_CANCELLED` terminal event | Low |
+| Built-in tool + MCP tool call wrappers | Medium |
+| Scratchpad API for code steps | Low |
+| `orchestration-creator` persona guidelines for code steps | Low |
 
 ### Phase 4: Progress Notices + Conversation Jump-in
 
@@ -1034,8 +1215,9 @@ src/orchestration/
   role boundaries
 - **Conversation threading** — linking step conversations with navigation metadata adds
   complexity to the history system; need careful header schema design
-- **Verification runner** — shell + tool verification introduces failure modes that need
-  graceful handling (timeouts, partial failures, infinite re-trigger loops)
+- **Code step runtime context** — the `OrchestrationHelper` API surface must be
+  carefully designed; code steps have full plugin privileges and need guardrails
+  (timeout, error handling) to prevent runaway execution
 - **Task completion enforcement** — subtle edge cases when steps create tasks that other
   steps should close
 - **Session recovery** — replaying from the event log must produce idempotent results;
