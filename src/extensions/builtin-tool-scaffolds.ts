@@ -1293,7 +1293,7 @@ return content;`,
 
 const WEB_SEARCH = scaffold(
 	"web_search",
-	"Search the web and return results with titles, URLs, and snippets.",
+	"Search the web via DuckDuckGo and return results with titles, URLs, and snippets.",
 	"read",
 	`params:
   query:
@@ -1307,7 +1307,7 @@ settings:
   web_search_timeout:
     name: "Request Timeout"
     type: number
-    description: "Maximum time per provider in seconds to wait for search results before aborting. With max-fallback-providers set to N, worst-case total wait is this value × N."
+    description: "Maximum time in seconds to wait for search results before aborting."
     default: 10
     min: 1
     max: 120
@@ -1318,85 +1318,13 @@ settings:
     default: 5
     min: 1
     max: 10
-  web_search_round_robin:
-    name: "Round-robin across providers"
-    type: boolean
-    description: "Distribute search requests across all enabled providers instead of always using the highest-priority one."
-    default: false
-  web_search_provider_priority:
-    name: "Provider priority order"
-    type: "string[]"
-    description: "Order in which search providers are tried. First entry is highest priority."
-    default: ["duckduckgo", "tavily", "brave", "serpapi"]
-    optionsSource: "web_search_configured_providers"
-  web_search_max_fallback_providers:
-    name: "Max providers to try"
-    type: number
-    description: "Maximum number of search providers to try before giving up. Limits worst-case latency when multiple providers are configured."
-    default: 2
-    min: 1
-    max: 4
-  web_search_duckduckgo_enabled:
-    name: "DuckDuckGo — Enabled"
-    type: boolean
-    default: true
   web_search_duckduckgo_delay_ms:
-    name: "DuckDuckGo — Delay (ms)"
+    name: "Throttle Delay (ms)"
     type: number
+    description: "Minimum delay between DuckDuckGo requests to avoid rate-limiting."
     default: 1500
     min: 0
-    max: 10000
-  web_search_tavily_enabled:
-    name: "Tavily — Enabled"
-    type: boolean
-    default: false
-    requiresSecret: web_search_tavily_api_key
-  web_search_tavily_api_key:
-    name: "Tavily — API Key"
-    type: string
-    secret: true
-    default: ""
-  web_search_tavily_delay_ms:
-    name: "Tavily — Delay (ms)"
-    type: number
-    default: 0
-    min: 0
-    max: 10000
-    requiresSecret: web_search_tavily_api_key
-  web_search_brave_enabled:
-    name: "Brave Search — Enabled"
-    type: boolean
-    default: false
-    requiresSecret: web_search_brave_api_key
-  web_search_brave_api_key:
-    name: "Brave Search — API Key"
-    type: string
-    secret: true
-    default: ""
-  web_search_brave_delay_ms:
-    name: "Brave Search — Delay (ms)"
-    type: number
-    default: 0
-    min: 0
-    max: 10000
-    requiresSecret: web_search_brave_api_key
-  web_search_serpapi_enabled:
-    name: "SerpApi — Enabled"
-    type: boolean
-    default: false
-    requiresSecret: web_search_serpapi_api_key
-  web_search_serpapi_api_key:
-    name: "SerpApi — API Key"
-    type: string
-    secret: true
-    default: ""
-  web_search_serpapi_delay_ms:
-    name: "SerpApi — Delay (ms)"
-    type: number
-    default: 0
-    min: 0
-    max: 10000
-    requiresSecret: web_search_serpapi_api_key`,
+    max: 10000`,
 	`const log = utils.logger("web_search");
 
 const query = params.query as string;

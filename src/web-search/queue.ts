@@ -45,11 +45,8 @@ export class WebSearchQueue {
 	 * Execute a web search. The queue selects the provider based on
 	 * priority order, availability, and round-robin state.
 	 *
-	 * @param query      - Search query string.
-	 * @param numResults - Maximum number of results to return.
-	 * @param timeoutMs  - Per-provider timeout in milliseconds. Worst-case
-	 *                     total latency is `timeoutMs * maxFallbackProviders`.
-	 * @param signal     - Optional AbortSignal for cancellation.
+	 * Settings are read from the constructor-provided `getSettings` callback.
+	 * For caller-supplied config, use {@link searchWithConfig}.
 	 */
 	async search(
 		query: string,
@@ -57,8 +54,21 @@ export class WebSearchQueue {
 		timeoutMs: number,
 		signal?: AbortSignal,
 	): Promise<WebSearchApiResult> {
-		const settings = this.getSettings();
-		const config = this.buildConfig(settings);
+		const config = this.buildConfig(this.getSettings());
+		return this.searchWithConfig(query, numResults, timeoutMs, config, signal);
+	}
+
+	/**
+	 * Execute a web search with an explicit config (no settings lookup).
+	 * Useful for extension tools that manage their own provider settings.
+	 */
+	async searchWithConfig(
+		query: string,
+		numResults: number,
+		timeoutMs: number,
+		config: WebSearchResolvedConfig,
+		signal?: AbortSignal,
+	): Promise<WebSearchApiResult> {
 		const chain = this.resolveProviderChain(config, this.roundRobinIndex);
 		this.roundRobinIndex++;
 
@@ -96,7 +106,6 @@ export class WebSearchQueue {
 					delayMs,
 				);
 
-				// Log warnings if present (providers have no logger; we surface them)
 				if (result.warnings && result.warnings.length > 0) {
 					// Warnings are surfaced to the caller — the scaffold logs them
 				}

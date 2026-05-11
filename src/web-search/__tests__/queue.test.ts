@@ -433,6 +433,63 @@ describe("WebSearchQueue", () => {
 		});
 	});
 
+	// ── searchWithConfig() ────────────────────────────────────────
+
+	describe("searchWithConfig", () => {
+		it("uses provided config instead of getSettings()", async () => {
+			// Disable DDG in settings — but enable it in explicit config
+			settingsValues.web_search_duckduckgo_enabled = false;
+
+			const queue = new WebSearchQueue(getSettings, registry, laneQueue);
+
+			const config = queue.buildConfig({
+				web_search_duckduckgo_enabled: true,
+				web_search_duckduckgo_delay_ms: 0,
+				web_search_tavily_enabled: false,
+				web_search_brave_enabled: false,
+			});
+
+			const result = await queue.searchWithConfig("explicit", 5, 10000, config);
+			expect(result.provider).toBe("duckduckgo");
+			expect(result.results).toHaveLength(1);
+		});
+
+		it("does not call getSettings()", async () => {
+			const spy = vi.fn(() => settingsValues);
+			const queue = new WebSearchQueue(spy, registry, laneQueue);
+
+			const config = queue.buildConfig(settingsValues);
+			await queue.searchWithConfig("no-settings", 5, 10000, config);
+
+			expect(spy).not.toHaveBeenCalled();
+		});
+
+		it("supports fallback chain with explicit config", async () => {
+			ddg.searchFn.mockResolvedValue({ results: [], rateLimited: true });
+
+			const queue = new WebSearchQueue(getSettings, registry, laneQueue);
+			const config = queue.buildConfig(settingsValues);
+
+			const result = await queue.searchWithConfig("fallback", 5, 10000, config);
+			expect(result.provider).toBe("tavily");
+			expect(result.failures).toEqual([
+				{ provider: "duckduckgo", error: "Rate limited" },
+			]);
+		});
+
+		it("respects signal parameter", async () => {
+			const controller = new AbortController();
+			controller.abort();
+
+			const queue = new WebSearchQueue(getSettings, registry, laneQueue);
+			const config = queue.buildConfig(settingsValues);
+
+			const result = await queue.searchWithConfig("aborted", 5, 10000, config, controller.signal);
+			expect(result.failures[0].error).toBe("Aborted");
+			expect(ddg.searchFn).not.toHaveBeenCalled();
+		});
+	});
+
 	// ── Signal / abort handling ────────────────────────────────────
 
 	it("passes signal through to provider search", async () => {

@@ -126,13 +126,6 @@ export function renderField(
 				.filter((p) => p.provider_id !== null && p.model_id !== null)
 				.map((p) => p.name);
 			field = { ...field, options: presetNames };
-		} else if (field.optionsSource === "web_search_configured_providers") {
-			const configured: string[] = ["duckduckgo"];
-			for (const provider of ["tavily", "brave", "serpapi"] as const) {
-				const secretId = slugifySecretId("notor-ext", "web_search", `web_search_${provider}_api_key`);
-				if (getSecret(ctx.app, secretId)) configured.push(provider);
-			}
-			field = { ...field, options: configured };
 		}
 	}
 

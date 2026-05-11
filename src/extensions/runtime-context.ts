@@ -47,7 +47,7 @@ import {
 	extractExistingCommentIds,
 } from "../tools/docx-comment-parser";
 import type { RawComment, Comment } from "../tools/docx-comment-parser";
-import type { WebSearchApiResult } from "../web-search/queue";
+import type { WebSearchApiResult, WebSearchResolvedConfig } from "../web-search/queue";
 
 // Obsidian exports
 import { requestUrl, Notice, TFile as TFileClass, TFolder, getFrontMatterInfo, normalizePath, MarkdownView, Platform } from "obsidian";
@@ -170,6 +170,8 @@ export interface ExtensionUtils {
 	/** Multi-provider web search with fallback and round-robin. */
 	webSearch: {
 		search: (query: string, numResults: number, timeoutMs: number, signal?: AbortSignal) => Promise<WebSearchApiResult>;
+		searchWithConfig: (query: string, numResults: number, timeoutMs: number, config: WebSearchResolvedConfig, signal?: AbortSignal) => Promise<WebSearchApiResult>;
+		buildConfig: (settings: Record<string, unknown>) => WebSearchResolvedConfig;
 	};
 	/**
 	 * Make an LLM call using a named model preset.
@@ -469,6 +471,10 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 		webSearch: {
 			search: (query: string, numResults: number, timeoutMs: number, signal?: AbortSignal) =>
 				plugin.getWebSearchQueue().search(query, numResults, timeoutMs, signal),
+			searchWithConfig: (query: string, numResults: number, timeoutMs: number, config: WebSearchResolvedConfig, signal?: AbortSignal) =>
+				plugin.getWebSearchQueue().searchWithConfig(query, numResults, timeoutMs, config, signal),
+			buildConfig: (settings: Record<string, unknown>) =>
+				plugin.getWebSearchQueue().buildConfig(settings),
 		},
 
 		llmCall: (() => {

@@ -100,9 +100,13 @@ import { UpdateTasksTool } from "./tools/update-tasks";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
+import { slugifySecretId } from "./extensions/settings-schema";
 import type { AutomationTrigger } from "./extensions/types";
 import { isExtensionFile, isExtensionPath } from "./extensions/watcher";
 import { isPersonaFile, isPersonaPath } from "./personas/watcher";
+
+// Secrets
+import { getSecret, setSecret, clearSecret } from "./utils/secrets";
 
 // MCP
 import { McpHub } from "./mcp/mcp-hub";
@@ -1138,6 +1142,9 @@ export default class NotorPlugin extends Plugin {
 
 		// One-time migration: assign instance IDs to providers for multi-instance support.
 		await this.migrateProviderInstances();
+
+		// One-time migration: move multi-provider web search settings to extension tool.
+		await this.migrateWebSearchMultiProvider();
 	}
 
 	/**
@@ -1385,6 +1392,74 @@ export default class NotorPlugin extends Plugin {
 		}
 
 		await this.saveSettings();
+	}
+
+	/**
+	 * One-time migration: move multi-provider web search settings from the
+	 * built-in `web_search` extension into `multi_engine_web_search`.
+	 *
+	 * Detection: `web_search` settings contain a provider key like
+	 * `web_search_tavily_enabled` — this field no longer exists in the
+	 * simplified built-in scaffold.
+	 */
+	private async migrateWebSearchMultiProvider(): Promise<void> {
+		const wsSettings = this.settings.user_extension_settings["web_search"] as
+			| Record<string, string | number | boolean | string[]>
+			| undefined;
+
+		if (!wsSettings || wsSettings.web_search_tavily_enabled === undefined) return;
+
+		// Already migrated
+		if (this.settings.user_extension_settings["multi_engine_web_search"]) return;
+
+		const multiProviderKeys = [
+			"web_search_round_robin",
+			"web_search_provider_priority",
+			"web_search_max_fallback_providers",
+			"web_search_duckduckgo_enabled",
+			"web_search_duckduckgo_delay_ms",
+			"web_search_tavily_enabled",
+			"web_search_tavily_api_key",
+			"web_search_tavily_delay_ms",
+			"web_search_brave_enabled",
+			"web_search_brave_api_key",
+			"web_search_brave_delay_ms",
+			"web_search_serpapi_enabled",
+			"web_search_serpapi_api_key",
+			"web_search_serpapi_delay_ms",
+		];
+
+		const migrated: Record<string, string | number | boolean | string[]> = {};
+		for (const key of multiProviderKeys) {
+			if (key in wsSettings && wsSettings[key] !== undefined) {
+				migrated[key] = wsSettings[key]!;
+				delete wsSettings[key];
+			}
+		}
+
+		// Also remove the now-unnecessary duckduckgo_enabled from web_search
+		// (it's always-on in the simplified scaffold)
+		delete wsSettings["web_search_duckduckgo_enabled"];
+
+		this.settings.user_extension_settings["multi_engine_web_search"] = migrated;
+
+		// Migrate secrets (API keys)
+		const secretKeys = ["web_search_tavily_api_key", "web_search_brave_api_key", "web_search_serpapi_api_key"];
+		for (const key of secretKeys) {
+			const oldId = slugifySecretId("notor-ext", "web_search", key);
+			const newId = slugifySecretId("notor-ext", "multi_engine_web_search", key);
+			const value = getSecret(this.app, oldId);
+			if (value) {
+				setSecret(this.app, newId, value);
+				clearSecret(this.app, oldId);
+			}
+		}
+
+		await this.saveSettings();
+		new Notice(
+			"Multi-provider web search settings have been moved to the 'Multi-Engine Web Search' extension tool.",
+			8000,
+		);
 	}
 
 	// -----------------------------------------------------------------------
