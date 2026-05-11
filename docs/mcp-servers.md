@@ -69,7 +69,8 @@ stdio environment variables and HTTP headers (e.g., `Authorization`) can be indi
 
 - Servers connect asynchronously after plugin load without blocking startup.
 - Connection status per server: Connecting → Connected / Error.
-- stdio servers require a manual toggle off/on to reconnect after a crash.
+- **Sleep/wake recovery** — Notor detects system sleep (laptop lid close, etc.) via a heartbeat timer. If a gap exceeding 60 seconds is detected, disconnected or errored servers are automatically reconnected after a short stabilization delay.
+- stdio servers require a manual toggle off/on to reconnect after other crashes (non-sleep disconnections).
 - HTTP transport servers auto-reconnect with exponential backoff.
 - Cleanup (process termination, connection close) is registered via Obsidian's plugin lifecycle helpers.
 

@@ -17,7 +17,7 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `manage_tags` | Add or remove tags via the frontmatter `tags` property | Act only |
 | `get_backlinks` | List all notes that link TO a given note | Plan & Act |
 | `get_outlinks` | List all notes that a given note links TO (resolved and unresolved) | Plan & Act |
-| `web_search` | Search the web (DuckDuckGo by default; Tavily, Brave Search, and SerpAPI with API keys) and return titles, URLs, and snippets | Plan & Act |
+| `web_search` | Search the web via DuckDuckGo and return titles, URLs, and snippets | Plan & Act |
 | `fetch_webpage` | Fetch a URL and return its content as Markdown | Plan & Act |
 | `execute_command` | Run a shell command and return its output | Act only |
 | `read_file` | Read a text file from the filesystem (desktop only) | Plan & Act |
@@ -239,6 +239,21 @@ The `search_vault` tool supports an optional `sort_by` parameter to control resu
 
 Each result includes metadata fields: `match_count`, `backlink_count`, and `modified` (ISO 8601 timestamp).
 
+### Timestamp filtering
+
+Both `search_vault` and `list_vault` support `modified_after` and `modified_before` parameters to restrict results by modification time:
+
+| Parameter | Description |
+|-----------|-------------|
+| `modified_after` | Only include files modified after this time. |
+| `modified_before` | Only include files modified before this time. |
+
+Accepted formats:
+- **ISO 8601** — e.g., `2026-05-01T00:00:00Z`
+- **Relative duration** — e.g., `7d`, `24h`, `2h30m`
+
+Both parameters are optional and can be combined (e.g., files modified in the last week: `modified_after: "7d"`).
+
 ## Web fetching
 
 The `fetch_webpage` tool lets the AI retrieve external content:
@@ -252,16 +267,7 @@ The `fetch_webpage` tool lets the AI retrieve external content:
 
 ## Web search
 
-The `web_search` tool supports multiple search providers. DuckDuckGo is the default and requires no API key. Tavily, Brave Search, and SerpAPI can be enabled by entering their API keys in the tool's settings (**Settings → Notor → Tools → web_search**).
-
-| Provider | API key required | Notes |
-|----------|-----------------|-------|
-| DuckDuckGo | No | Default; always available |
-| Tavily | Yes | Enter key in tool settings to enable |
-| Brave Search | Yes | Enter key in tool settings to enable |
-| SerpAPI | Yes | Enter key in tool settings to enable |
-
-Provider-specific settings (API key, enabled toggle, request delay) are hidden in the Settings UI until an API key is configured — they appear automatically once you enter a key.
+The `web_search` tool searches the web via DuckDuckGo — no API key required.
 
 - Returns a numbered markdown list with titles, clickable URLs, and text snippets.
 - Results are snippets only — use `fetch_webpage` on a result URL to retrieve full page content.
@@ -276,6 +282,8 @@ Provider-specific settings (API key, enabled toggle, request delay) are hidden i
 | `query` | Yes | Search query string. |
 | `num_results` | No | Number of results to return. Default: 5. Maximum: 10. |
 
+For multi-engine search with Tavily, Brave Search, and SerpAPI support (with automatic fallback between providers), install the [multi-engine-web-search](extensions.md#community-extensions-gallery) community extension.
+
 ## Shell command execution
 
 The `execute_command` tool lets the AI run commands on your system:
@@ -286,6 +294,25 @@ The `execute_command` tool lets the AI run commands on your system:
 - Combined stdout and stderr are returned to the AI. Non-zero exit codes and timeouts are surfaced as structured errors.
 - Configurable per-command timeout (default: 30 seconds) and output cap (default: 50,000 characters).
 - Write tool — available in Act mode only by default; requires explicit approval unless auto-approved.
+
+### Command-pattern auto-approve
+
+You can configure glob patterns for commands that should be auto-approved (skipping the approval prompt) in **Settings → Notor → Tools → execute_command**:
+
+- **Auto-Approve Command Patterns** — e.g., `git *`, `ls`, `npm test`. Commands matching any pattern execute without approval.
+- **Never Auto-Approve Command Patterns** — e.g., `rm *`, `sudo *`. Commands matching these always require approval, even when `execute_command` is globally auto-approved.
+
+Blocked patterns take precedence over allowed patterns. Patterns use glob syntax (via picomatch).
+
+Command patterns can also be set via `<notor_tool_config>` blocks using `allowed_command_patterns` and `blocked_command_patterns` fields.
+
+## Task tracking
+
+The AI uses an internal `update_tasks` tool to maintain a structured task checklist during multi-step operations. Tasks appear in a collapsible panel below the chat input with status indicators (pending, in progress, completed).
+
+- Fully automatic — the AI creates, updates, and completes tasks without user intervention.
+- Not user-invokable; always auto-approved.
+- Available in both Plan and Act modes.
 
 ## Word & file tools
 
@@ -396,7 +423,7 @@ Writes text content to a file on the filesystem. Creates the file if it does not
 
 ### `replace_in_file`
 
-Makes targeted edits within a text file on the filesystem using SEARCH/REPLACE blocks — the filesystem counterpart to `replace_in_note`. Each search string must match exactly (character-for-character including whitespace). The operation is atomic: if any search block fails to match, no changes are applied.
+Makes targeted edits within a text file on the filesystem using SEARCH/REPLACE blocks — the filesystem counterpart to `replace_in_note`. The operation is atomic: if any search block fails to match, no changes are applied.
 
 **Parameters:**
 
@@ -412,6 +439,17 @@ Makes targeted edits within a text file on the filesystem using SEARCH/REPLACE b
 - Write tool — available in Act mode only; requires explicit approval unless auto-approved.
 - Auto-approve default: off.
 - Desktop only.
+
+### Fuzzy Unicode matching
+
+Both `replace_in_note` and `replace_in_file` use Unicode-normalized comparison when matching search strings. Typographic variants are treated as equivalent to their ASCII counterparts:
+
+- Curly quotes (`'` `'` `"` `"`) match straight quotes (`'` `"`)
+- Em-dashes (`—`), en-dashes (`–`) match hyphens (`-`)
+- Non-breaking spaces, thin spaces match regular spaces
+- Horizontal ellipsis (`…`) matches three dots (`...`)
+
+This makes it easier to match text pasted from word processors or web pages where invisible character substitutions are common.
 
 ### `extract_docx_comments`
 

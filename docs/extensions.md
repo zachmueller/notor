@@ -409,6 +409,7 @@ All extension code executes with these variables in scope:
 | `utils.chatHistory` | API for searching and reading past conversations. Methods: `search(query)`, `loadFull(id)`. `null` when history is unavailable. |
 | `utils.runSubAgent(opts)` | Spawn a sub-agent from extension code. Supports detached (background) and synchronous modes. |
 | `utils.abortSignal` | `AbortSignal` for the current tool call (tools only, not automations). |
+| `utils.notify(message, opts?)` | Display a toast notification. Options: `duration` (ms). |
 
 ### Bundled libraries
 
@@ -464,6 +465,29 @@ In-flight tool calls continue using the version compiled at dispatch time; reloa
 | **Feature groups** | Extensions with `notor-feature-group` in their frontmatter are enabled/disabled as a group by the corresponding feature toggle (e.g., `memory` group → `memory_enabled` toggle in Settings). |
 
 ---
+
+## Community extensions gallery
+
+Notor maintains a gallery of optional extensions in the `extensions/` directory of the repository. These are single `.md` files you copy into your vault — no plugin code changes required.
+
+**Currently available:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `read-rendered-note` | Tool | Read notes with Dataview queries evaluated and rendered as Markdown |
+| `multi-engine-web-search` | Tool | Multi-provider web search with automatic fallback (Tavily, Brave, SerpAPI, DuckDuckGo) |
+
+**Installation:**
+
+1. Browse the gallery and open the `.md` file to read what it does and requires.
+2. Copy the file into the matching directory in your vault:
+   - Tool extensions → `{vault}/notor/tools/`
+   - Automation extensions → `{vault}/notor/automations/`
+   - Block extensions → `{vault}/notor/blocks/`
+3. Reload extensions (Settings → Notor → Extensions → "Reload extensions", or command palette, or restart Obsidian).
+4. Verify the extension loaded in Settings → Notor → Extensions.
+
+Each community extension includes a `tested-notor-version` field in its frontmatter. This is informational only — the plugin does not enforce version checks at load time.
 
 ## Security
 

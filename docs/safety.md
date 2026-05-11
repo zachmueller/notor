@@ -6,7 +6,7 @@ Notor is designed to be safety-first: every write operation is visible, controll
 
 A visible **Plan / Act** toggle sits in the chat input area.
 
-- **Plan mode** (default for new users) restricts the AI to read-only tools. Write tools are blocked at the dispatch level — the AI simply cannot invoke them, even if it tries.
+- **Plan mode** (default for new users) restricts the AI to read-only tools. Write tools are blocked at the dispatch level — the AI simply cannot invoke them, even if it tries. In the system prompt, write tools are annotated with an `[Act mode only]` suffix so the AI understands which tools are unavailable.
 - **Act mode** enables write tools. Write operations still require approval by default (see below).
 
 Switching modes takes effect immediately for subsequent messages.

@@ -48,11 +48,15 @@ Right-clicking on the message list opens a context menu:
 | /btw | Forks to a new panel using the `/btw` slash command |
 | Copy conversation ID | Copies the current conversation's UUID |
 
+## Citation popovers
+
+When the AI produces inline superscript references (e.g., `[1]`, `[2]`), Notor renders them as clickable citation popovers. Hovering or clicking a superscript shows the referenced content in a tooltip. This is a display-only enhancement — it does not affect what the AI sends or receives.
+
 ## Ambient workspace context (auto-context)
 
 Every message automatically includes a snapshot of your current workspace state in the system prompt — no manual effort required:
 
-- **Open note paths** — the vault-relative paths of all notes currently open in any tab, including pinned tabs and split panes. The currently active note is marked `(active)`.
+- **Open file paths** — the vault-relative paths of all files currently open in any tab, including pinned tabs and split panes. This includes non-Markdown files (PDFs, images, canvas files, and other file-backed views). The currently active file is marked `(active)`.
 - **Vault structure** — top-level folder names at the vault root (no recursive listing, no individual file names).
 - **Operating system** — your OS platform (macOS, Windows, or Linux), so the AI generates platform-appropriate shell commands without asking.
 

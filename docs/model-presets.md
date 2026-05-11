@@ -48,6 +48,38 @@ Selecting a preset sets the provider and model for subsequent messages. The curr
 
 Select **Custom...** to bypass presets entirely and pick a provider and model directly. Custom selections are not saved as a preset — the conversation stores `preset_name: null` and falls back to the concrete provider and model.
 
+## Extended thinking
+
+Extended thinking lets supported models reason internally before producing a response, improving accuracy on complex tasks.
+
+### Configuration
+
+Thinking level is a per-preset setting. Open **Settings → Notor → Models**, select a preset, and choose a thinking level:
+
+| Level | Description |
+|-------|-------------|
+| Off | Thinking disabled (default) |
+| Low | Light reasoning (Anthropic: 1,024 token budget) |
+| Medium | Moderate reasoning (Anthropic: 4,096 token budget) |
+| High | Deep reasoning (Anthropic: 16,384 token budget) |
+| Custom | Enter a specific token budget |
+
+A **Thinking level** dropdown also appears in the chat panel's quick settings popover for models that support thinking, allowing per-conversation adjustment without changing the preset.
+
+### Provider behavior
+
+- **Anthropic** — maps to `budget_tokens`. Models that support adaptive thinking use it automatically when a named level is selected.
+- **OpenAI** — maps to `reasoning_effort` (low/medium/high) for o-series models.
+- **AWS Bedrock** — passes through as `additionalModelRequestFields` for Anthropic-on-Bedrock.
+
+Temperature is automatically disabled when thinking is active (Anthropic API requirement).
+
+### Display
+
+Thinking content is rendered in the chat panel as smaller, muted text below the main response. In [HTML exports](export-import.md), thinking appears as collapsible `<details>` sections.
+
+Sub-agents inherit the parent conversation's thinking level.
+
 ## Stale preset detection
 
 If a conversation was created with a preset that has since been reconfigured (different provider or model), Notor detects the mismatch. The dropdown falls back to **Custom** and shows a notice: *"Preset 'X' has changed since this conversation was created."* The original provider and model are preserved on the conversation.

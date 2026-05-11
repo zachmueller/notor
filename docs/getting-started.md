@@ -46,7 +46,7 @@ npm run dev
 1. Open **Settings → Notor**
 2. Choose a provider (defaults to local OpenAI-compatible at `http://localhost:11434/v1`)
 3. Enter credentials if required (stored securely via Obsidian's secrets manager)
-4. Configure model presets in **Settings → Notor → Models** — assign a provider and model to at least one preset (e.g., `medium`). See [model-presets.md](model-presets.md) for the full reference.
+4. Configure model presets in **Settings → Notor → Models** — assign a provider and model to at least one preset (e.g., `medium`). Optionally configure [extended thinking](model-presets.md#extended-thinking) levels for Claude or OpenAI o-series models. See [model-presets.md](model-presets.md) for the full reference.
 5. Open the Notor chat panel from the sidebar ribbon — your default preset is selected automatically. Start a conversation.
 
 You can control which tools are available and configure auto-approve in **Settings → Notor → Tools**. See [vault-tools.md](vault-tools.md#enabling-and-disabling-tools) for details.
@@ -110,7 +110,7 @@ Workflows are reusable instruction sets stored as vault notes that guide the AI 
 2. Add frontmatter and write the instructions:
    ```markdown
    ---
-   notor-workflow: true
+   notor-type: workflow
    notor-trigger: manual
    notor-workflow-persona: "my-persona"
    ---
@@ -179,6 +179,8 @@ Knowledge memory lets the AI build persistent context across conversations — r
 ## Create your first extension
 
 Extensions let you add custom tools and automations as Markdown files in your vault — no external processes or MCP servers required. See [extensions.md](extensions.md) for the full reference.
+
+Before writing your own, check the [community extensions gallery](extensions.md#community-extensions-gallery) — pre-built extensions for common tasks like Dataview rendering and multi-engine web search are available to copy directly into your vault.
 
 ### Quick tool example
 

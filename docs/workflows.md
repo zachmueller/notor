@@ -4,15 +4,20 @@ Workflows are reusable instruction sets stored as Obsidian notes that guide the 
 
 ## Defining a workflow
 
-Workflow notes are stored under `notor/workflows/` and identified by `notor-workflow: true` in their frontmatter. Workflow bodies are written as step-by-step instructions that shape *how the AI approaches a task* — not as conversational prompts.
+Workflow notes are stored under `notor/workflows/` and identified by `notor-type: workflow` in their frontmatter. Workflow bodies are written as step-by-step instructions that shape *how the AI approaches a task* — not as conversational prompts.
+
+> **Legacy support:** The older `notor-workflow: true` frontmatter property is still recognized. New workflows should use `notor-type: workflow`.
 
 **Frontmatter properties:**
 
 | Property | Values | Description |
 |---|---|---|
-| `notor-workflow` | `true` (required) | Marks this note as a workflow. |
+| `notor-type` | `workflow` (required) | Marks this note as a workflow. |
 | `notor-trigger` | `manual`, `on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`, or `on-schedule` | How the workflow is triggered. |
 | `notor-schedule` | cron expression string | Required when `notor-trigger` is `on-schedule`. Standard 5-field cron expression or shorthand (`@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`). |
+| `notor-conversation-mode` | `plan` or `act` | Overrides the global Plan/Act toggle for this workflow's execution. Event-triggered workflows typically use `act` so they can perform writes without manual approval. |
+| `notor-model-preset` | preset name string | Overrides the active model preset for this workflow. Useful for complex workflows that need a more capable model, or simple workflows that can use a lighter one. |
+| `notor-hook-delay` | number (milliseconds) | Execution delay with debounce semantics for event-triggered workflows. If the same event fires again within the delay window, the timer resets. |
 | `notor-workflow-persona` | `"{persona-name}"` | Automatically activates a persona when the workflow runs. Persists for the entire workflow conversation. |
 | `notor-hooks` | YAML mapping | Per-workflow hook overrides. Overrides global LLM lifecycle hooks for this workflow's duration. Non-overridden events continue using global hooks. |
 | `notor-active-note-prompt` | template string | Prompt template with a `{active_note}` placeholder. Marks this workflow as eligible for the **Launch active note workflow** command. See [Active note prompt templates](#active-note-prompt-templates) below. |
@@ -20,6 +25,18 @@ Workflow notes are stored under `notor/workflows/` and identified by `notor-work
 Subdirectories under `notor/workflows/` are supported. The plugin rescans workflows on plugin load and when the workflow list is opened.
 
 Workflows can also be created from **Settings → Notor → Rules & Workflows** using the **Create** button, which prompts for a name and trigger type and generates a skeleton file with the appropriate frontmatter.
+
+## Auto-discovery
+
+Any `.md` file placed in `notor/workflows/` (recursively) is automatically recognized as a workflow — no explicit frontmatter required. On startup, Notor injects the following defaults into files that lack workflow identification:
+
+- `notor-type: workflow`
+- `notor-trigger: manual`
+- `notor-conversation-mode: plan`
+
+A Notice is shown when unidentified workflows are auto-configured. Files created or renamed into the directory at runtime are also auto-injected.
+
+This means you can simply drop a Markdown file with instructions into the workflows folder and it becomes available immediately in the workflow picker.
 
 ## Running a workflow manually
 
@@ -35,7 +52,7 @@ This lets you invoke workflows with short abbreviations:
 
 ```yaml
 ---
-notor-workflow: true
+notor-type: workflow
 notor-trigger: manual
 aliases: [dr, review]
 ---
@@ -47,7 +64,7 @@ A workflow can declare a `notor-active-note-prompt` in its frontmatter — a tem
 
 ```yaml
 ---
-notor-workflow: true
+notor-type: workflow
 notor-trigger: manual
 notor-active-note-prompt: "Analyze the following note and suggest improvements:\n\n{active_note}"
 ---
@@ -61,7 +78,20 @@ The `<workflow_instructions>` block injected into the conversation is rendered a
 
 ## Event-triggered workflows
 
-Set `notor-trigger` in the frontmatter to one of the vault event types (`on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`) to run the workflow automatically in response to vault events. Event-triggered workflows run in the background without interrupting the current conversation.
+Set `notor-trigger` in the frontmatter to one of the vault event types (`on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`) to run the workflow automatically in response to vault events. Event-triggered workflows run in the background without interrupting the current conversation — they execute headlessly even when no chat panel is open.
+
+Set `notor-hook-delay` to defer execution after the triggering event. If the same event fires again for the same note within the delay window, the timer resets (debounce semantics). This is useful for `on-save` workflows that should wait for rapid successive saves to settle:
+
+```yaml
+---
+notor-type: workflow
+notor-trigger: on-save
+notor-hook-delay: 2000
+notor-conversation-mode: act
+---
+```
+
+Scheduled (`on-schedule`) workflows always fire immediately and ignore `notor-hook-delay`.
 
 ## Scheduled workflows
 
@@ -69,7 +99,7 @@ Set `notor-trigger: on-schedule` and provide a `notor-schedule` cron expression 
 
 ```yaml
 ---
-notor-workflow: true
+notor-type: workflow
 notor-trigger: on-schedule
 notor-schedule: "0 9 * * *"
 notor-conversation-mode: act

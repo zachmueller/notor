@@ -13,6 +13,7 @@ Produces a self-contained HTML document with embedded CSS — no external depend
 - **Readable layout** — messages, tool calls, tool results, and metadata are clearly formatted with collapsible `<details>` sections.
 - **Sub-agent conversations** — if the conversation used sub-agents, their full conversation histories are included as expandable sections within the parent conversation.
 - **Re-importable** — the HTML file embeds the full conversation data as JSONL in a hidden `<script>` block, allowing it to be imported back into Notor (see below).
+- **Thinking blocks** — if extended thinking was enabled, thinking content appears as collapsible `<details>` sections with muted styling, allowing reviewers to see the AI's reasoning process.
 - **Token and cost summary** — input/output token counts and estimated cost are displayed in the footer.
 
 ### Markdown
