@@ -344,6 +344,13 @@ details pre {
   margin: 0;
 }
 
+pre.thinking-content {
+  font-size: 0.85em;
+  opacity: 0.6;
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+
 /* ── Footer ─────────────────────────────────────────────── */
 
 .conversation-footer {
@@ -464,7 +471,12 @@ function renderAssistantMessage(msg: Message): string {
 		? msg.content
 		: (() => { throw new Error("Expected string content for assistant message"); })();
 	const htmlContent = marked.parse(assistantText, { async: false }) as string;
-	let body = `<div class="message-content">${htmlContent}</div>`;
+
+	let body = "";
+	if (msg.thinking) {
+		body += detailsBlock("Thinking", `<pre class="thinking-content">${escapeHtml(msg.thinking)}</pre>`);
+	}
+	body += `<div class="message-content">${htmlContent}</div>`;
 
 	if (msg.input_tokens || msg.output_tokens) {
 		body += `\n<div class="token-annotation">↑${msg.input_tokens ?? 0} · ↓${msg.output_tokens ?? 0}</div>`;
