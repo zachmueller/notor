@@ -551,7 +551,9 @@ search_vault:
 			expect(tools.search_vault!.allowed_paths).toEqual(["{notor_dir}/memory"]);
 			// Should not have broader vault tools
 			expect(tools.list_vault).toBeUndefined();
-			expect(tools.get_backlinks).toBeUndefined();
+			// Should have link tools scoped to memory dir
+			expect(tools.get_backlinks).toEqual({ allowed_paths: ["{notor_dir}/memory"] });
+			expect(tools.get_outlinks).toEqual({ allowed_paths: ["{notor_dir}/memory"] });
 		});
 
 		it("memory-resolver profile loads with correct tool scoping", async () => {
@@ -571,7 +573,9 @@ search_vault:
 			expect(tools.read_note!.allowed_paths).toEqual(["{notor_dir}/memory"]);
 			expect(tools.search_vault!.allowed_paths).toEqual(["{notor_dir}/memory"]);
 			expect(tools.list_vault).toBeUndefined();
-			expect(tools.get_backlinks).toBeUndefined();
+			// Should have link tools scoped to memory dir
+			expect(tools.get_backlinks).toEqual({ allowed_paths: ["{notor_dir}/memory"] });
+			expect(tools.get_outlinks).toEqual({ allowed_paths: ["{notor_dir}/memory"] });
 		});
 
 		it("memory-capture profile loads with broader tool access", async () => {
@@ -655,6 +659,8 @@ search_vault:
 			const tools = memSearch!.tool_configs[0]!.tools;
 			expect(tools.read_note!.allowed_paths).toEqual(["my-vault/notor/memory"]);
 			expect(tools.search_vault!.allowed_paths).toEqual(["my-vault/notor/memory"]);
+			expect(tools.get_backlinks!.allowed_paths).toEqual(["my-vault/notor/memory"]);
+			expect(tools.get_outlinks!.allowed_paths).toEqual(["my-vault/notor/memory"]);
 		});
 
 		it("built-in profiles have descriptions", async () => {

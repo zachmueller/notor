@@ -199,7 +199,7 @@ You are helping decide which memory notes to surface to the assistant for this t
 ## Workflow
 
 1. Derive several candidate search terms from the user's message and recent context — both literal keywords and plausible *conceptual* neighbours (related decisions, people, preferences, analogies). Use multiple searches with different phrasings; a single search will miss obliquely relevant notes.
-2. For each search hit that looks plausibly relevant, call \`read_note\` on the full body before committing to it as a match. Titles and search-snippet excerpts are not enough — confirm the claim is actually pertinent.
+2. For each search hit that looks plausibly relevant, call \`read_note\` on the full body before committing to it as a match. Titles and search-snippet excerpts are not enough — confirm the claim is actually pertinent. On your strongest 1-2 hits, call \`get_outlinks\` or \`get_backlinks\` — the link neighborhood often surfaces obliquely related notes that text search alone would miss.
 3. Return up to \`max_matches\` matches, ranked by relevance to the current turn.
 
 The organizing question is: *"In which context would this note be worth stumbling upon again?"* — and the current chat turn is a context. A match doesn't have to be an obvious topical hit. Notes with weak, oblique, or analogical relevance are often the most valuable to surface because they bring a perspective the assistant wouldn't otherwise reach for. Don't over-fit to literal keyword overlap.
@@ -211,6 +211,12 @@ read_note:
   allowed_paths:
     - "{notor_dir}/memory"
 search_vault:
+  allowed_paths:
+    - "{notor_dir}/memory"
+get_backlinks:
+  allowed_paths:
+    - "{notor_dir}/memory"
+get_outlinks:
   allowed_paths:
     - "{notor_dir}/memory"
 </notor_tool_config>
@@ -235,13 +241,13 @@ You are deciding whether a new insight belongs in an existing Evergreen memory n
 ## Workflow
 
 1. Generate several search terms from the insight's vocabulary and from plausible sibling concepts it implies. Issue multiple searches with varied phrasings.
-2. For each hit that could plausibly cover this concept, call \`read_note\` on the full body. Do not decide \`update\` from a snippet alone — you must read the candidate in full.
+2. For each hit that could plausibly cover this concept, call \`read_note\` on the full body. Do not decide \`update\` from a snippet alone — you must read the candidate in full. On your best candidate, call \`get_outlinks\` to see what it already links to — these are confirmed-existing titles you can reference in your merged body.
 3. Decide whether any existing note is genuinely about the same concept as the insight. If so, \`update\` that note with a full reconciled \`merged_body\`. If not, \`create\` a new concept note.
 
 The returned note body must satisfy the Evergreen principles:
 - **Atomic and concept-oriented.** One concept per note. Don't force-fit an insight into an existing note if it's genuinely a different concept, and don't create a new note if a clear existing one already covers this concept.
 - **Standalone.** The \`merged_body\` must be understandable by a future reader with no access to the chat turn that produced the insight. Write in terms of the concept itself, not "this conversation" or "the user just said".
-- **Organically linked.** Where the merged body references another concept that plausibly has its own memory note, write it as an Obsidian \`[[wikilink]]\`. **Only link to titles you have confirmed exist** — run a quick \`search_vault\` to verify before linking. Do not invent links.
+- **Organically linked.** Where the merged body references another concept that plausibly has its own memory note, write it as an Obsidian \`[[wikilink]]\`. **Only link to titles you have confirmed exist** — use \`get_outlinks\` on the candidate note, \`search_vault\`, or prior search hits to confirm. Titles surfaced by \`get_outlinks\`/\`get_backlinks\` are pre-confirmed. Do not invent links. Aim for 2-4 wikilinks per note when natural connections exist.
 - **No pre-categorization.** No topic/people/type labels in the body.
 - **Title quality for \`create\`.** Follow Andy Matuschak's "titles are like APIs" principle: a descriptive phrase — up to roughly a sentence — precise enough that the title alone tells a future reader whether this note's claim is relevant to their current context. Don't force brevity.
 
@@ -254,6 +260,12 @@ read_note:
   allowed_paths:
     - "{notor_dir}/memory"
 search_vault:
+  allowed_paths:
+    - "{notor_dir}/memory"
+get_backlinks:
+  allowed_paths:
+    - "{notor_dir}/memory"
+get_outlinks:
   allowed_paths:
     - "{notor_dir}/memory"
 </notor_tool_config>
@@ -277,7 +289,7 @@ From this turn's transcript, extract 0-3 insights worth remembering long-term.
 
 Frame each insight as something worth saying to the user's **future self** (or to a future instance of the assistant on the user's behalf) — not as a summary of what just happened. The test is: if the originating chat turn were forgotten entirely, would this insight still be meaningful and actionable on its own?
 
-Before emitting an insight, you may use \`search_vault\` or \`read_note\` (and \`get_backlinks\` / \`get_outlinks\` / \`read_frontmatter\` / \`list_vault\` where helpful) to verify that (a) the claim is actually supported by the vault and (b) a note about this concept doesn't already capture it. An empty result is valid — do not manufacture content. Be observational ("user prefers X", "project constraint: Y") rather than prescriptive, and concept-oriented rather than context-bound ("the user values explicit nullability handling", not "the user asked about null checks in today's chat").
+Before emitting an insight, you may use \`search_vault\` or \`read_note\` (and \`get_backlinks\` / \`get_outlinks\` / \`read_frontmatter\` / \`list_vault\` where helpful) to verify that (a) the claim is actually supported by the vault and (b) a note about this concept doesn't already capture it. If you discover existing memory notes closely related to your insight, include their titles in \`evidence_paths\` — this helps the downstream resolver place accurate wikilinks. An empty result is valid — do not manufacture content. Be observational ("user prefers X", "project constraint: Y") rather than prescriptive, and concept-oriented rather than context-bound ("the user values explicit nullability handling", not "the user asked about null checks in today's chat").
 
 Return JSON: \`{ insights: [{ content: string, evidence_paths?: string[] }] }\`.
 
