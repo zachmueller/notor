@@ -221,6 +221,9 @@ export default class NotorPlugin extends Plugin {
 	 */
 	private _lastFocusedChatLeafId?: string;
 
+	/** Conversation-scoped webview leaf cache (maps conversation UUID → WorkspaceLeaf). */
+	private _webviewLeafCache = new Map<string, WorkspaceLeaf>();
+
 	/** Guard to prevent multiple wireView() calls from re-registering the persona name change callback. */
 	private _noteOpener?: NoteOpener;
 	private _staleTracker?: StaleContentTracker;
@@ -2036,6 +2039,10 @@ export default class NotorPlugin extends Plugin {
 	}
 
 	/** Stale content tracker for write tool safety. */
+	getWebviewLeafCache(): Map<string, WorkspaceLeaf> {
+		return this._webviewLeafCache;
+	}
+
 	getStaleTracker(): StaleContentTracker {
 		if (!this._staleTracker) {
 			this._staleTracker = new StaleContentTracker();

@@ -343,6 +343,18 @@ export interface ExtensionUtils {
 	}) => void;
 	/** Unicode-normalized indexOf for fuzzy SEARCH/REPLACE matching. */
 	normalizedIndexOf: (haystack: string, needle: string) => { index: number; length: number } | null;
+	/**
+	 * Webview browser facade for interacting with Obsidian's Web Viewer.
+	 * Null when not on desktop (Electron required).
+	 */
+	webview: {
+		getConversationWebview: () => Promise<{ leaf: any; webviewEl: any } | null>;
+		getActiveWebview: () => { leaf: any; webviewEl: any } | null;
+		waitForReady: (webviewEl: any, revealLeaf?: boolean, leaf?: any) => Promise<void>;
+		getConversationId: () => string | null;
+		persistUrl: (conversationId: string, url: string) => Promise<void>;
+		readPersistedUrl: (conversationId: string) => Promise<string | null>;
+	} | null;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */
@@ -1139,9 +1151,125 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 			}
 		},
 
+		webview: null,
+
 		memory: null,
 		memoryApprovalMode: null,
 	};
+
+	// Wire webview facade — desktop only (Electron required for <webview> tag).
+	if (Platform.isDesktopApp) {
+		const WEB_VIEWER_VIEW_TYPE = "web-browser";
+		const WEBVIEW_PROP_CANDIDATES = ["webview", "webviewEl", "frame", "browser"];
+		const webviewLog = logger("ext:webview");
+		const leafCache = plugin.getWebviewLeafCache();
+
+		function findWebviewEl(leaf: any): any {
+			const view = leaf.view;
+			for (const prop of WEBVIEW_PROP_CANDIDATES) {
+				if (view?.[prop] && typeof view[prop].executeJavaScript === "function") {
+					return view[prop];
+				}
+			}
+			const el = leaf.containerEl?.querySelector?.("webview");
+			if (el && typeof el.executeJavaScript === "function") return el;
+			return null;
+		}
+
+		utils.webview = {
+			getConversationId: () => conversationId ?? null,
+
+			getActiveWebview: () => {
+				const leaves = plugin.app.workspace.getLeavesOfType(WEB_VIEWER_VIEW_TYPE);
+				const activeLeaf = plugin.app.workspace.activeLeaf;
+				const targetLeaf = leaves.find((l: any) => l === activeLeaf) ?? null;
+				if (!targetLeaf) return null;
+				const webviewEl = findWebviewEl(targetLeaf);
+				if (!webviewEl) return null;
+				return { leaf: targetLeaf, webviewEl };
+			},
+
+			getConversationWebview: async () => {
+				const convId = conversationId;
+				if (!convId) return null;
+
+				let leaf = leafCache.get(convId);
+				const allLeaves = plugin.app.workspace.getLeavesOfType(WEB_VIEWER_VIEW_TYPE);
+
+				if (leaf && !allLeaves.includes(leaf)) {
+					leafCache.delete(convId);
+					leaf = undefined;
+				}
+
+				if (!leaf) {
+					const persistedUrl = await utils.webview!.readPersistedUrl(convId);
+
+					leaf = plugin.app.workspace.getLeaf("split");
+					await leaf.setViewState({
+						type: WEB_VIEWER_VIEW_TYPE,
+						active: false,
+						state: persistedUrl ? { url: persistedUrl } : {},
+					});
+					leafCache.set(convId, leaf);
+
+					await new Promise(r => setTimeout(r, 200));
+				}
+
+				const webviewEl = findWebviewEl(leaf);
+				if (!webviewEl) {
+					webviewLog.warn("Could not find webview element on leaf");
+					return null;
+				}
+				return { leaf, webviewEl };
+			},
+
+			waitForReady: async (webviewEl: any, revealLeaf = false, leaf?: any) => {
+				if (revealLeaf && leaf) {
+					plugin.app.workspace.revealLeaf(leaf);
+				}
+
+				if (typeof webviewEl.isLoading === "function" && webviewEl.isLoading()) {
+					await Promise.race([
+						new Promise<void>(resolve => {
+							webviewEl.addEventListener("did-finish-load", () => resolve(), { once: true });
+						}),
+						new Promise<void>(resolve => setTimeout(resolve, 10000)),
+					]);
+				}
+
+				for (let i = 0; i < 3; i++) {
+					try {
+						const state = await webviewEl.executeJavaScript("document.readyState");
+						if (state === "complete") break;
+					} catch { /* ignore */ }
+					await new Promise(r => setTimeout(r, 500));
+				}
+
+				await new Promise(r => setTimeout(r, 300));
+			},
+
+			persistUrl: async (cId: string, url: string) => {
+				const sidecarPath = normalizePath(
+					`${plugin.settings.history_path}${cId}.webview.json`,
+				);
+				const data = JSON.stringify({ url, timestamp: new Date().toISOString() });
+				await plugin.app.vault.adapter.write(sidecarPath, data);
+			},
+
+			readPersistedUrl: async (cId: string) => {
+				const sidecarPath = normalizePath(
+					`${plugin.settings.history_path}${cId}.webview.json`,
+				);
+				try {
+					const raw = await plugin.app.vault.adapter.read(sidecarPath);
+					const parsed = JSON.parse(raw);
+					return typeof parsed.url === "string" ? parsed.url : null;
+				} catch {
+					return null;
+				}
+			},
+		};
+	}
 
 	// Wire memory facade after the main object is constructed so that
 	// resolveConcept can reference utils.runSubAgent without recursion.

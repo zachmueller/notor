@@ -165,6 +165,11 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Save an insight into long-term memory as an Evergreen note.",
 		isWrite: true,
 	},
+	webview: {
+		name: "Web viewer",
+		desc: "Browse the web via Obsidian's Web Viewer (navigate, read, click links). Desktop only.",
+		isWrite: true,
+	},
 };
 
 // ---------------------------------------------------------------------------
@@ -177,4 +182,5 @@ export const TOOLS_DEFAULT_DISABLED: ReadonlySet<string> = new Set([
 	"read_chat_history",
 	"read_notor_settings",
 	"edit_notor_settings",
+	"webview",
 ]);
