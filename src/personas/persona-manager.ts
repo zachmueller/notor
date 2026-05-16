@@ -33,25 +33,14 @@ export class PersonaManager {
 	/** Currently active persona (null = no persona, global defaults). */
 	private activePersona: Persona | null = null;
 
-	/** Saved persona name for workflow revert (see savePersonaState / restorePersonaState). */
-	private savedPersonaName: string | null = null;
-
 	/**
 	 * Callbacks fired when the active persona changes (for UI updates).
 	 *
-	 * Supports multiple listeners so each panel can update its own persona
-	 * label independently in multi-panel mode (Phase 4).
+	 * After per-panel persona isolation, these only fire from file-watcher
+	 * refresh and plugin startup restore — not from user-initiated panel
+	 * switches.
 	 */
 	private personaChangedCallbacks = new Set<(persona: Persona | null) => void>();
-
-	/**
-	 * Callback fired when the active persona name changes, specifically
-	 * for propagating the persona name to the ToolDispatcher so auto-approve
-	 * resolution stays in sync.
-	 *
-	 * @see specs/03-workflows-personas/tasks/group-b-tasks.md — B-007
-	 */
-	private onPersonaNameChanged: ((name: string | null) => void) | null = null;
 
 	constructor(
 		private readonly vault: Vault,
@@ -86,18 +75,6 @@ export class PersonaManager {
 		return () => { this.personaChangedCallbacks.delete(callback); };
 	}
 
-	/**
-	 * Register a callback that fires when the active persona name changes.
-	 *
-	 * Used by main.ts to propagate the persona name to the ToolDispatcher
-	 * so that per-persona auto-approve resolution stays in sync whenever
-	 * the user switches personas via the persona picker.
-	 *
-	 * @see specs/03-workflows-personas/tasks/group-b-tasks.md — B-007
-	 */
-	setOnPersonaNameChanged(callback: (name: string | null) => void): void {
-		this.onPersonaNameChanged = callback;
-	}
 
 	// -----------------------------------------------------------------------
 	// Discovery
@@ -168,11 +145,8 @@ export class PersonaManager {
 		// Switch provider/model if persona specifies overrides (A-007, A-008)
 		this.applyProviderModelOverrides(persona);
 
-		// Notify listeners (UI label, chat view model selector)
+		// Notify listeners (file-watcher refresh + plugin startup)
 		for (const cb of this.personaChangedCallbacks) cb(persona);
-
-		// Propagate persona name to dispatcher for auto-approve resolution (B-007)
-		this.onPersonaNameChanged?.(name);
 
 		return true;
 	}
@@ -200,9 +174,6 @@ export class PersonaManager {
 
 		// Notify listeners
 		for (const cb of this.personaChangedCallbacks) cb(null);
-
-		// Propagate null persona to dispatcher for auto-approve resolution (B-007)
-		this.onPersonaNameChanged?.(null);
 	}
 
 	/**
@@ -277,47 +248,6 @@ export class PersonaManager {
 		return { status: "deactivated", previousName: currentName };
 	}
 
-	// -----------------------------------------------------------------------
-	// Workflow persona save/restore (Group E integration point)
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Save the current persona state so it can be restored later.
-	 *
-	 * Called before a workflow switches the persona via
-	 * `notor-workflow-persona`. The saved name is used by
-	 * `restorePersonaState()` to revert after the workflow completes.
-	 */
-	savePersonaState(): void {
-		this.savedPersonaName = this.activePersona?.name ?? null;
-		log.debug("Persona state saved", { savedName: this.savedPersonaName });
-	}
-
-	/**
-	 * Restore the previously saved persona state.
-	 *
-	 * Called after a workflow completes to revert the persona switch.
-	 * If `savedPersonaName` is null, deactivates the persona (revert to
-	 * global defaults). If non-null, activates that persona.
-	 */
-	async restorePersonaState(): Promise<void> {
-		const nameToRestore = this.savedPersonaName;
-		this.savedPersonaName = null;
-
-		if (nameToRestore === null) {
-			this.deactivatePersona();
-		} else {
-			const success = await this.activatePersona(nameToRestore);
-			if (!success) {
-				log.warn("Could not restore saved persona, deactivating", {
-					name: nameToRestore,
-				});
-				this.deactivatePersona();
-			}
-		}
-
-		log.debug("Persona state restored", { restoredName: nameToRestore });
-	}
 
 	// -----------------------------------------------------------------------
 	// Built-in persona management

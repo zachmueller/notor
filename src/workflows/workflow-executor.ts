@@ -21,6 +21,7 @@
 import { App, FuzzySuggestModal, getFrontMatterInfo, Notice, parseYaml, TFile, type MetadataCache, type Vault } from "obsidian";
 import type {
 	IncludeNoteResolutionResult,
+	Persona,
 	TriggerContext,
 	Workflow,
 	WorkflowAssemblyResult,
@@ -383,19 +384,22 @@ export async function assembleWorkflowPrompt(
  */
 export async function switchWorkflowPersona(
 	personaName: string | null,
-	personaManager: PersonaManager
+	personaManager: PersonaManager,
+	setActivePersona?: (persona: Persona | null) => void,
 ): Promise<{ switched: boolean; previousPersona: string | null }> {
 	if (!personaName || personaName.trim().length === 0) {
 		return { switched: false, previousPersona: null };
 	}
 
-	// Save current state before switching
-	personaManager.savePersonaState();
 	const previousPersona = personaManager.getActivePersona()?.name ?? null;
+	const persona = await personaManager.getPersonaByName(personaName);
 
-	const activated = await personaManager.activatePersona(personaName);
-
-	if (activated) {
+	if (persona) {
+		if (setActivePersona) {
+			setActivePersona(persona);
+		} else {
+			await personaManager.activatePersona(personaName);
+		}
 		new Notice(`Persona '${personaName}' activated for workflow.`);
 		log.info("Workflow persona switched", {
 			personaName,
@@ -403,8 +407,6 @@ export async function switchWorkflowPersona(
 		});
 		return { switched: true, previousPersona };
 	} else {
-		// Persona not found — clear the saved state (nothing to revert)
-		// and proceed with current settings per spec.
 		new Notice(`Persona '${personaName}' not found; running with current settings.`);
 		log.warn("Workflow persona not found, continuing with current settings", {
 			personaName,
@@ -438,21 +440,34 @@ export async function switchWorkflowPersona(
  */
 export async function revertWorkflowPersona(
 	previousPersona: string | null,
-	personaManager: PersonaManager
+	personaManager: PersonaManager,
+	setActivePersona?: (persona: Persona | null) => void,
 ): Promise<void> {
 	if (previousPersona !== null) {
-		const restored = await personaManager.activatePersona(previousPersona);
-		if (!restored) {
-			// Persona was deleted while workflow was running — fall back to defaults
+		const persona = await personaManager.getPersonaByName(previousPersona);
+		if (!persona) {
 			log.warn("Previous persona no longer available after workflow, deactivating", {
 				previousPersona,
 			});
-			personaManager.deactivatePersona();
+			if (setActivePersona) {
+				setActivePersona(null);
+			} else {
+				personaManager.deactivatePersona();
+			}
 		} else {
+			if (setActivePersona) {
+				setActivePersona(persona);
+			} else {
+				await personaManager.activatePersona(previousPersona);
+			}
 			log.info("Workflow persona reverted", { previousPersona });
 		}
 	} else {
-		personaManager.deactivatePersona();
+		if (setActivePersona) {
+			setActivePersona(null);
+		} else {
+			personaManager.deactivatePersona();
+		}
 		log.info("Workflow persona reverted to global defaults");
 	}
 }

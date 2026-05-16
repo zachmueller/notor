@@ -135,6 +135,10 @@ export interface WorkflowExecutorDeps {
 	getTemplateRegistry(): TemplateVariableRegistry | undefined;
 	getSessionContext(): ToolSessionContext;
 
+	// Per-panel persona state
+	getActivePersona(): Persona | null;
+	setActivePersona(persona: Persona | null): void;
+
 	// Orchestrator method bridges
 	runResponseLoop(mode: ConversationMode, session: ConversationSession): Promise<void>;
 	setWorkflowPersonaRevert(prev: string | null | undefined): void;
@@ -195,7 +199,8 @@ export class WorkflowExecutor {
 			try {
 				personaSwitchResult = await switchWorkflowPersona(
 					workflow.persona_name,
-					personaManager
+					personaManager,
+					(p) => this.deps.setActivePersona(p),
 				);
 			} catch (e) {
 				log.error("Persona switch failed before workflow execution", {
@@ -225,7 +230,7 @@ export class WorkflowExecutor {
 			new Notice(`Workflow execution failed: ${errMsg}`);
 			// Revert persona if we switched it
 			if (personaSwitchResult.switched && personaManager) {
-				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager);
+				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager, (p) => this.deps.setActivePersona(p));
 			}
 			return;
 		}
@@ -234,7 +239,7 @@ export class WorkflowExecutor {
 		if (assemblyResult === null) {
 			// Revert persona if we switched it
 			if (personaSwitchResult.switched && personaManager) {
-				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager);
+				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager, (p) => this.deps.setActivePersona(p));
 			}
 			return;
 		}
@@ -332,7 +337,7 @@ export class WorkflowExecutor {
 
 		sessionConvManager.loadConversation(snapshotConv, snapshotMessages);
 
-		const pinnedPersona = personaManager?.getActivePersona() ?? null;
+		const pinnedPersona = this.deps.getActivePersona();
 
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
 			await this.deps.configResolver.resolveEffectiveConfig(undefined, assemblyResult, pinnedPersona);
@@ -471,7 +476,7 @@ export class WorkflowExecutor {
 			new Notice(`Workflow '${workflow.display_name}' failed: ${errMsg}`);
 			// Revert persona if we switched it
 			if (personaSwitchResult.switched && personaManager) {
-				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager);
+				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager, (p) => this.deps.setActivePersona(p));
 			}
 			return;
 		}
@@ -483,7 +488,7 @@ export class WorkflowExecutor {
 			});
 			concurrencyManager.onComplete(execution.id, "errored", "Workflow has no prompt content");
 			if (personaSwitchResult.switched && personaManager) {
-				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager);
+				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager, (p) => this.deps.setActivePersona(p));
 			}
 			return;
 		}
@@ -565,7 +570,7 @@ export class WorkflowExecutor {
 
 		// Step 5: Run the response loop (no view — background execution)
 		// We build a self-contained response loop using the background conversation manager.
-		const pinnedPersona = personaManager?.getActivePersona() ?? null;
+		const pinnedPersona = this.deps.getActivePersona();
 		let finalStatus: "completed" | "errored" | "stopped" = "completed";
 		let errorMessage: string | undefined;
 
@@ -618,7 +623,8 @@ export class WorkflowExecutor {
 				try {
 					await revertWorkflowPersona(
 						personaSwitchResult.previousPersona,
-						personaManager
+						personaManager,
+						(p) => this.deps.setActivePersona(p),
 					);
 				} catch (e) {
 					log.error("Failed to revert workflow persona after background execution", {

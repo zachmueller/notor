@@ -91,6 +91,7 @@ import { VaultRuleManager } from "./rules/vault-rules";
 
 // Personas
 import { PersonaManager } from "./personas/persona-manager";
+import { resolvePersonaOverrides } from "./personas/persona-overrides";
 import { openPersonaPickerModal } from "./ui/persona-picker-modal";
 
 // Sub-agents
@@ -221,7 +222,6 @@ export default class NotorPlugin extends Plugin {
 	private _lastFocusedChatLeafId?: string;
 
 	/** Guard to prevent multiple wireView() calls from re-registering the persona name change callback. */
-	private _personaNameChangeWired = false;
 	private _noteOpener?: NoteOpener;
 	private _staleTracker?: StaleContentTracker;
 	private _personaManager?: PersonaManager;
@@ -736,15 +736,8 @@ export default class NotorPlugin extends Plugin {
 				const personaManager = this.getPersonaManager();
 				void openPersonaPickerModal(this.app, personaManager, (selected) => {
 					if (selected) {
-						void personaManager.activatePersona(selected.name).then((ok) => {
-							if (ok) {
-								activeView.applyPersonaSwitch(selected);
-							} else {
-								new Notice(`Failed to activate persona '${selected.name}'`);
-							}
-						});
+						activeView.applyPersonaSwitch(selected);
 					} else {
-						personaManager.deactivatePersona();
 						activeView.applyPersonaSwitch(null);
 					}
 				});
@@ -3189,14 +3182,44 @@ export default class NotorPlugin extends Plugin {
 		const personaManager = this.getPersonaManager();
 		view.setPersonaManager(personaManager);
 
-		// Wire persona-changed callback so file-watcher refresh updates the chip label.
+		// Wire persona-changed callback — only responds to file-watcher refreshes
+		// relevant to this panel's active persona. Does not broadcast across panels.
 		view._unregisterPersonaChanged?.();
 		view._unregisterPersonaChanged = personaManager.setOnPersonaChanged((persona) => {
-			view.updatePersonaLabel(persona);
+			const panelPersonaName = orchestrator.getActivePersona()?.name ?? null;
+			if (persona && persona.name === panelPersonaName) {
+				view.updatePersonaLabel(persona);
+				orchestrator.setActivePersona(persona);
+			} else if (persona === null && panelPersonaName !== null) {
+				view.updatePersonaLabel(null);
+				orchestrator.setActivePersona(null);
+			}
 		});
 
 
 		view.setOnPersonaChange((persona) => {
+			// Update per-orchestrator persona state
+			orchestrator.setActivePersona(persona);
+
+			// Apply provider/model overrides per-panel
+			if (persona) {
+				const resolution = resolvePersonaOverrides(persona, this._providerRegistry!, this.settings.model_presets ?? []);
+				if (resolution) {
+					orchestrator.setActiveProvider(resolution.providerId);
+					orchestrator.setActiveModel(resolution.modelId, resolution.useExtendedContext, resolution.thinkingLevel);
+					view.updateProviderDisplay(resolution.providerId);
+					const modelValue = resolution.useExtendedContext
+						? `${resolution.modelId}::1m`
+						: resolution.modelId;
+					view.updateModelDisplay(modelValue);
+					if (resolution.presetName) {
+						orchestrator.setActivePresetName(resolution.presetName);
+						view.updatePresetDisplay(resolution.presetName);
+					}
+				}
+			}
+
+			// Update conversation header
 			const conv = orchestrator.getDisplayedConversation();
 			if (conv) {
 				conv.persona_name = persona?.name ?? null;
@@ -3204,22 +3227,15 @@ export default class NotorPlugin extends Plugin {
 					log.error("Failed to update conversation header on persona change", { error: String(e) });
 				});
 			}
-			// Sync ToolDispatcher to the persona of the panel that just changed
+
+			// Sync ToolDispatcher to this panel's persona
 			toolDispatcher.setActivePersonaName(persona?.name ?? null);
+
+			// Persist as default for new panels/conversations
+			this.settings.active_persona = persona?.name ?? "";
+			void this.saveData(this.settings);
 		});
 
-		// B-007: Wire persona name changes to the dispatcher so auto-approve
-		// resolution tracks the active persona in real time.
-		// Phase 4: This is a global callback (shared PersonaManager singleton).
-		// Only set once — guard against multiple wireView calls overwriting it.
-		// Only propagates to the ToolDispatcher (for workflow persona switches);
-		// per-panel conversation headers are updated by the per-panel callback above.
-		if (!this._personaNameChangeWired) {
-			this._personaNameChangeWired = true;
-			personaManager.setOnPersonaNameChanged((name) => {
-				toolDispatcher.setActivePersonaName(name);
-			});
-		}
 
 		// personaManager.restoreFromSettings() moved to onload() (A1.7 / Amendment R5).
 		// No longer called per-wireView — single global restore at plugin startup.

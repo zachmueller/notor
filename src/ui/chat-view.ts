@@ -800,7 +800,6 @@ export class NotorChatView extends ItemView {
 					item.setTitle("None (deactivate)")
 						.setIcon("x-circle")
 						.onClick(() => {
-							pm.deactivatePersona();
 							this.applyPersonaSwitch(null);
 						});
 				});
@@ -813,13 +812,7 @@ export class NotorChatView extends ItemView {
 						item.setTitle(label)
 							.setIcon("user")
 							.onClick(() => {
-								void pm.activatePersona(p.name).then((ok) => {
-									if (ok) {
-										this.applyPersonaSwitch(p);
-									} else {
-										new Notice(`Failed to activate persona '${p.name}'`);
-									}
-								});
+								this.applyPersonaSwitch(p);
 							});
 					});
 				}

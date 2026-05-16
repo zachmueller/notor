@@ -10,7 +10,7 @@
  */
 
 import { Notice } from "obsidian";
-import type { Conversation, Message } from "../types";
+import type { Conversation, Message, Persona } from "../types";
 import { buildOptionValue } from "../providers/model-grouping";
 import { resolveConversationModel } from "../presets/preset-resolver";
 import type { ConversationManager } from "./conversation";
@@ -52,6 +52,8 @@ export class ConversationLifecycleManager {
 		private readonly getActivePresetName: () => string | null,
 		private readonly setActivePresetName: (name: string | null) => void,
 		private readonly isProviderAccessible: (providerId: string) => boolean,
+		private readonly getActivePersona: () => Persona | null,
+		private readonly setActivePersona: (persona: Persona | null) => void,
 		private readonly getSharedCheckpointManager?: () => CheckpointManager | undefined,
 		private readonly onSwitchConversation?: (filename: string) => Promise<void>,
 	) {}
@@ -122,8 +124,8 @@ export class ConversationLifecycleManager {
 			},
 		);
 
-		// Capture active persona into header
-		conversation.persona_name = this.getPersonaManager()?.getActivePersona()?.name ?? null;
+		// Capture per-panel active persona into header
+		conversation.persona_name = this.getActivePersona()?.name ?? null;
 
 		await this.historyManager.createConversationFile(conversation);
 		if (signal?.aborted) return;
@@ -227,13 +229,15 @@ export class ConversationLifecycleManager {
 				conversation.estimated_cost
 			);
 
-			// Display-restore persona from conversation header
+			// Display-restore persona from conversation header and update per-panel state
 			if (conversation.persona_name) {
 				const persona = await this.getPersonaManager()?.getPersonaByName(conversation.persona_name) ?? null;
 				if (signal?.aborted) return;
 				view?.updatePersonaLabel(persona);
+				this.setActivePersona(persona);
 			} else {
-				view?.updatePersonaLabel(this.getPersonaManager()?.getActivePersona() ?? null);
+				view?.updatePersonaLabel(null);
+				this.setActivePersona(null);
 			}
 
 			// Resolve model configuration via preset-first fallback chain
@@ -345,6 +349,7 @@ export class ConversationLifecycleManager {
 
 		// Display-restore from session's pinned state
 		view?.updatePersonaLabel(activeSession.pinnedPersona);
+		this.setActivePersona(activeSession.pinnedPersona);
 
 		// Resolve model configuration via preset-first fallback chain
 		const resolution = resolveConversationModel(
@@ -419,7 +424,7 @@ export class ConversationLifecycleManager {
 		this.workflowPreviousPersona = undefined;
 
 		try {
-			await revertWorkflowPersona(previousPersona, personaManager);
+			await revertWorkflowPersona(previousPersona, personaManager, (p) => this.setActivePersona(p));
 		} catch (e) {
 			log.error("Failed to revert workflow persona", { error: String(e) });
 		}

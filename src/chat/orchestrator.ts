@@ -163,6 +163,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 	/** Per-orchestrator thinking/reasoning level (null = off). */
 	private activeThinkingLevel: string | null = null;
 
+	/** Per-orchestrator active persona (null = no persona). */
+	private activePersona: Persona | null = null;
+
 	/**
 	 * Per-orchestrator active preset name.
 	 *
@@ -293,6 +296,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 			() => this.activePresetName,
 			(name) => { this.activePresetName = name; },
 			(providerId) => !!this.providerRegistry.getConfig(providerId) || !!this.providerRegistry.resolveTypeToId(providerId),
+			() => this.activePersona,
+			(persona) => { this.activePersona = persona; },
 			() => this.sharedCheckpointManagerGetter?.(),
 			(filename) => this.switchConversation(filename),
 		);
@@ -315,6 +320,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 			getActiveProviderId: () => this.activeProviderId,
 			getActiveModelId: () => this.activeModelId,
 			getActiveUseExtendedContext: () => this.activeUseExtendedContext,
+			getActivePersona: () => this.activePersona,
+			setActivePersona: (persona) => { this.activePersona = persona; },
 			getVaultRootPath: () => this.getVaultRootPath(),
 			getTemplateRegistry: () => this.templateRegistry,
 			getSessionContext: () => this,
@@ -395,6 +402,16 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	setPersonaManager(manager: PersonaManager): void {
 		this.personaManager = manager;
+		// Initialize per-panel persona from global default
+		this.activePersona = manager.getActivePersona();
+	}
+
+	getActivePersona(): Persona | null {
+		return this.activePersona;
+	}
+
+	setActivePersona(persona: Persona | null): void {
+		this.activePersona = persona;
 	}
 
 	/**
@@ -882,7 +899,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 		// (restored conversation), so continuing an old conversation uses the same
 		// provider/model it was using before. Fall back to global state for new
 		// conversations or if the stored provider is no longer configured.
-		const pinnedPersona = this.personaManager?.getActivePersona() ?? null;
+		const pinnedPersona = this.activePersona;
 
 		const headerProviderId = snapshotConv.provider_id as string | undefined;
 		let headerProviderConfig = headerProviderId
