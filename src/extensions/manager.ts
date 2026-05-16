@@ -719,7 +719,7 @@ export class ExtensionManager {
 	 * If non-null, the tool name must be in the filter list.
 	 */
 	getAutomationsForToolEvent(
-		trigger: "on_tool_call" | "on_tool_result",
+		trigger: "on_tool_call" | "on_tool_result" | "on_approval_required",
 		toolName: string,
 	): UserAutomationDefinition[] {
 		const matching: UserAutomationDefinition[] = [];

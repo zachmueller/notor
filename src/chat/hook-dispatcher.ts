@@ -17,6 +17,7 @@ import {
 	dispatchOnToolCall,
 	dispatchOnToolResult,
 	dispatchAfterCompletion,
+	dispatchOnApprovalRequired,
 	type LifecycleAutomationAccessors,
 	type ToolEventAutomationAccessors,
 } from "../hooks/hook-events";
@@ -138,6 +139,35 @@ export class HookDispatcher {
 			vaultRootPath,
 			this.getWorkflowHookOverrideManager(),
 			this.getExtensionLifecycleAccessors(),
+		);
+	}
+
+	/**
+	 * Dispatch on_approval_required hooks (blocking, sequential, short-circuit).
+	 *
+	 * Returns "approved", "rejected", or "pass". Hooks are evaluated in order;
+	 * the first non-"pass" result wins.
+	 */
+	async dispatchApprovalRequiredHook(
+		conversationId: string,
+		toolName: string,
+		toolParams: Record<string, unknown>,
+		mode: string,
+	): Promise<"approved" | "rejected" | "pass"> {
+		const vaultRootPath = this.getVaultRootPath();
+		if (!vaultRootPath) return "pass";
+
+		return dispatchOnApprovalRequired(
+			{
+				conversationId,
+				timestamp: new Date().toISOString(),
+				toolName,
+				toolParams,
+				mode,
+			},
+			this.getSettings(),
+			vaultRootPath,
+			this.getExtensionToolEventAccessors(),
 		);
 	}
 }

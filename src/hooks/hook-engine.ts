@@ -39,6 +39,8 @@ export interface HookContext {
 	toolResult?: string;
 	/** Tool status: "success" or "error" (for on_tool_result). */
 	toolStatus?: string;
+	/** Conversation mode: "plan" or "act" (for on_approval_required). */
+	mode?: string;
 }
 
 /** Result of executing a single hook. */
@@ -100,6 +102,10 @@ export function buildHookEnv(
 
 	if (context.toolStatus !== undefined) {
 		env.NOTOR_TOOL_STATUS = context.toolStatus;
+	}
+
+	if (context.mode !== undefined) {
+		env.NOTOR_MODE = context.mode;
 	}
 
 	return env;

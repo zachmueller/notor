@@ -77,6 +77,10 @@ export function renderHooksSection(
 			title: "After completion hooks",
 			desc: "Run after the AI's full response turn completes. Fire-and-forget.",
 		},
+		on_approval_required: {
+			title: "On approval required hooks",
+			desc: "Run when a tool call needs approval. Stdout of 'approved' or 'rejected' resolves the approval programmatically; any other output defers to the user. Only execute_command hooks are supported.",
+		},
 	};
 
 	for (const [event, meta] of Object.entries(eventLabels)) {

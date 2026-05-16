@@ -1135,6 +1135,7 @@ export default class NotorPlugin extends Plugin {
 		// Deep-merge keyed records so new default entries survive
 		// when the saved object replaces defaults via Object.assign.
 		loaded.auto_approve = { ...defaults.auto_approve, ...loaded.auto_approve };
+		loaded.hooks = { ...defaults.hooks, ...loaded.hooks };
 
 		if (this.settings) {
 			// Mutate the existing object so all components that captured a reference

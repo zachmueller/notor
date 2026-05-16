@@ -54,7 +54,7 @@ export interface Hook {
 }
 
 /** Supported lifecycle hook event types. */
-export type HookEvent = "pre_send" | "on_tool_call" | "on_tool_result" | "after_completion";
+export type HookEvent = "pre_send" | "on_tool_call" | "on_tool_result" | "after_completion" | "on_approval_required";
 
 /** Ordered lists of hooks grouped by lifecycle event. */
 export interface HookConfig {
@@ -62,6 +62,7 @@ export interface HookConfig {
 	on_tool_call: Hook[];
 	on_tool_result: Hook[];
 	after_completion: Hook[];
+	on_approval_required: Hook[];
 }
 
 /** Notor plugin settings persisted via loadData/saveData. */

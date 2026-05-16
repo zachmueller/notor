@@ -130,6 +130,7 @@ export type AutomationTrigger =
 	| "on_tool_call"
 	| "on_tool_result"
 	| "after_completion"
+	| "on_approval_required"
 	| "on_conversation_start"
 	| "on_note_open"
 	| "on_note_create"

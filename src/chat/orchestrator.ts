@@ -1271,6 +1271,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 						})
 						: undefined;
 
+					const approvalHookFn = currentConv
+						? async (tn: string, params: Record<string, unknown>, m: string) =>
+							this.hookDispatcher.dispatchApprovalRequiredHook(currentConv.id, tn, params, m)
+						: undefined;
+
 					const batchResults = await executeToolBatches(
 						batches,
 						this.dispatcher,
@@ -1282,6 +1287,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 						policyCtx,
 						session.approvalCallback,
 						this, // sessionContext (A4.4e)
+						approvalHookFn,
 					);
 
 					// Map results back to entries for UI updates

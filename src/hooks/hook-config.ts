@@ -143,5 +143,5 @@ export function findHook(config: HookConfig, hookId: string): Hook | null {
  * @returns Ordered list of enabled hooks.
  */
 export function getEnabledHooks(config: HookConfig, event: HookEvent): Hook[] {
-	return config[event].filter((h) => h.enabled);
+	return (config[event] ?? []).filter((h) => h.enabled);
 }

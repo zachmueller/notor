@@ -85,6 +85,7 @@ export const DEFAULT_HOOKS: HookConfig = {
 	on_tool_call: [],
 	on_tool_result: [],
 	after_completion: [],
+	on_approval_required: [],
 };
 
 /** Default model presets (all unconfigured — user must assign provider+model). */

@@ -122,6 +122,7 @@ export async function executeToolBatches(
 	policyCtx?: ToolPolicyContext,
 	approvalCallback?: ApprovalCallback,
 	sessionContext?: ToolSessionContext,
+	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
 ): Promise<ToolCallResult[]> {
 	const allResults: ToolCallResult[] = [];
 
@@ -157,6 +158,7 @@ export async function executeToolBatches(
 				policyCtx,
 				approvalCallback,
 				sessionContext,
+				approvalHookDispatcher,
 			);
 			allResults.push(...results);
 		} else {
@@ -176,7 +178,7 @@ export async function executeToolBatches(
 					continue;
 				}
 
-				const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext);
+				const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext, approvalHookDispatcher);
 				allResults.push({ call, result });
 			}
 		}
@@ -202,6 +204,7 @@ async function runConcurrentBatch(
 	policyCtx?: ToolPolicyContext,
 	approvalCallback?: ApprovalCallback,
 	sessionContext?: ToolSessionContext,
+	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
 ): Promise<ToolCallResult[]> {
 	log.info("Running concurrent batch", { count: calls.length, cap: concurrencyCap });
 
@@ -243,7 +246,7 @@ async function runConcurrentBatch(
 					},
 				};
 			}
-			const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext);
+			const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext, approvalHookDispatcher);
 			return { call, result };
 		} finally {
 			release();
@@ -267,6 +270,7 @@ async function safeDispatch(
 	policyCtx?: ToolPolicyContext,
 	approvalCallback?: ApprovalCallback,
 	sessionContext?: ToolSessionContext,
+	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
 ): Promise<ToolResult> {
 	try {
 		const result = await dispatcher.dispatch(
@@ -279,6 +283,7 @@ async function safeDispatch(
 			policyCtx,
 			approvalCallback,
 			sessionContext,
+			approvalHookDispatcher,
 		);
 		result.tool_call_id = call.toolCallId;
 		return result;

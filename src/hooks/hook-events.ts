@@ -54,10 +54,10 @@ export interface LifecycleAutomationAccessors {
 
 /**
  * Accessor for user-defined automations matching a tool event trigger
- * (`on_tool_call` or `on_tool_result`).
+ * (`on_tool_call`, `on_tool_result`, or `on_approval_required`).
  */
 export interface ToolEventAutomationAccessors {
-	getForToolEvent: (trigger: "on_tool_call" | "on_tool_result", toolName: string) => UserAutomationDefinition[];
+	getForToolEvent: (trigger: "on_tool_call" | "on_tool_result" | "on_approval_required", toolName: string) => UserAutomationDefinition[];
 	execute: (automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -950,4 +950,126 @@ export async function dispatchOnConversationStart(
 		blocking: blockingAutomations.length,
 		nonBlocking: nonBlockingAutomations.length,
 	});
+}
+
+// ---------------------------------------------------------------------------
+// on_approval_required dispatch (blocking, sequential, short-circuit)
+// ---------------------------------------------------------------------------
+
+/** Context for on_approval_required dispatch. */
+export interface ApprovalRequiredContext {
+	conversationId: string;
+	timestamp: string;
+	toolName: string;
+	toolParams: Record<string, unknown>;
+	mode: string;
+}
+
+/**
+ * Dispatch `on_approval_required` hooks sequentially and return the first
+ * non-"pass" decision. Hooks that return "approved" or "rejected" on stdout
+ * short-circuit the sequence. All other outputs (empty, errors, timeouts)
+ * are treated as "pass".
+ *
+ * Only `execute_command` hooks are supported — `run_workflow` hooks are
+ * skipped since they are fire-and-forget and cannot return a decision.
+ *
+ * No workflow override support: this event is not overridable by workflows
+ * to prevent scoped workflows from self-approving their own tools.
+ */
+export async function dispatchOnApprovalRequired(
+	context: ApprovalRequiredContext,
+	settings: NotorSettings,
+	vaultRootPath: string,
+	extensionAutomations?: ToolEventAutomationAccessors,
+): Promise<"approved" | "rejected" | "pass"> {
+	const hooks = getEnabledHooks(settings.hooks, "on_approval_required");
+	const automations = extensionAutomations?.getForToolEvent("on_approval_required", context.toolName) ?? [];
+
+	if (hooks.length === 0 && automations.length === 0) return "pass";
+
+	log.info("Dispatching on_approval_required hooks", {
+		hooks: hooks.length,
+		automations: automations.length,
+		toolName: context.toolName,
+	});
+
+	const hookContext: HookContext = {
+		conversationId: context.conversationId,
+		hookEvent: "on_approval_required",
+		timestamp: context.timestamp,
+		toolName: context.toolName,
+		toolParams: JSON.stringify(context.toolParams),
+		mode: context.mode,
+	};
+
+	// Execute shell hooks sequentially; short-circuit on first decision
+	for (const hook of hooks) {
+		const actionType = hook.action_type ?? "execute_command";
+		if (actionType === "run_workflow") {
+			log.debug("Skipping run_workflow hook for on_approval_required", { hookId: hook.id });
+			continue;
+		}
+
+		const result = await executeHook(hook, hookContext, settings, vaultRootPath);
+		if (result.success && result.stdout) {
+			const decision = result.stdout.trim().toLowerCase();
+			if (decision === "approved") {
+				log.info("Hook approved tool call", { hookId: hook.id, toolName: context.toolName });
+				return "approved";
+			}
+			if (decision === "rejected") {
+				log.info("Hook rejected tool call", { hookId: hook.id, toolName: context.toolName });
+				return "rejected";
+			}
+		}
+	}
+
+	// Execute extension automations sequentially with same semantics
+	if (automations.length > 0 && extensionAutomations) {
+		const automationCtx: Record<string, unknown> = {
+			hookEvent: "on_approval_required",
+			timestamp: context.timestamp,
+			conversationId: context.conversationId,
+			toolName: context.toolName,
+			toolParams: context.toolParams,
+			mode: context.mode,
+		};
+
+		for (const automation of automations) {
+			try {
+				const result = await extensionAutomations.execute(automation, automationCtx);
+				if (typeof result === "string") {
+					const decision = result.trim().toLowerCase();
+					if (decision === "approved") {
+						log.info("Automation approved tool call", {
+							automation: automation.displayName ?? automation.filePath,
+							toolName: context.toolName,
+						});
+						return "approved";
+					}
+					if (decision === "rejected") {
+						log.info("Automation rejected tool call", {
+							automation: automation.displayName ?? automation.filePath,
+							toolName: context.toolName,
+						});
+						return "rejected";
+					}
+				}
+			} catch (e) {
+				const displayName = automation.displayName ?? automation.filePath;
+				const message = e instanceof Error ? e.message : String(e);
+				new Notice(`Approval automation error in ${displayName}: ${message}`);
+				log.error("Approval automation execution failed", {
+					automation: displayName,
+					trigger: "on_approval_required",
+					error: String(e),
+					stack: e instanceof Error ? e.stack : undefined,
+				});
+			}
+		}
+	}
+
+	log.info("All on_approval_required hooks returned pass", { toolName: context.toolName });
+	return "pass";
 }
