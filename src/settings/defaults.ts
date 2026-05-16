@@ -158,6 +158,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	execute_command_timeout: 30,
 	execute_command_max_output_chars: 50000,
 	output_spillover_enabled: true,
+	output_spillover_threshold: 50000,
 	execute_command_allowed_paths: [],
 	execute_command_shell: "",
 	execute_command_shell_args: [],

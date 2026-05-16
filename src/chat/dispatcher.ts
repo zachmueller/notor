@@ -612,7 +612,7 @@ export class ToolDispatcher {
 			// whose results exceed the output cap. Built-in tools (execute_command,
 			// fetch_webpage) handle spillover internally and return short results.
 			if (this.spiller && result.success && typeof result.result === "string") {
-				const threshold = (this.settings?.execute_command_max_output_chars ?? 50_000);
+				const threshold = (this.settings?.output_spillover_threshold ?? 50_000);
 				if (result.result.length > threshold) {
 					const truncated = result.result.substring(0, threshold);
 					try {

@@ -185,6 +185,9 @@ export interface NotorSettings {
 	/** When true, truncated tool output is written to a temp file for AI retrieval via read_file. */
 	output_spillover_enabled: boolean;
 
+	/** Character threshold at which tool output is spilled to a temp file (applies to all tools via the dispatcher). */
+	output_spillover_threshold: number;
+
 	/** Additional allowed working directory absolute paths. */
 	execute_command_allowed_paths: string[];
 
