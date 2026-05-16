@@ -24,6 +24,7 @@ import { supportsThinking } from "../providers/model-metadata";
 import {
 	renderWriteNoteDiffPreview,
 	renderReplaceInNoteDiffPreview,
+	type DiffRenderContext,
 } from "./diff-view";
 import {
 	VaultNoteSuggest,
@@ -2714,12 +2715,14 @@ export class NotorChatView extends ItemView {
 
 			// Render the diff. Scroll once to show the action buttons; after that the
 			// user is free to scroll up and read the full diff without being fought back.
+			const renderCtx: DiffRenderContext = { app: this.app, component: this, sourcePath: notePath };
 			const decisionPromise = renderWriteNoteDiffPreview(
 				this.messageListEl,
 				notePath,
 				beforeContent,
 				afterContent,
 				autoApproved,
+				renderCtx,
 				() => this.scrollToBottom()
 			);
 			this.scrollToBottom();
@@ -2748,12 +2751,14 @@ export class NotorChatView extends ItemView {
 
 			// Render the diff. Scroll once to show the action buttons; after that the
 			// user is free to scroll up and read the full diff without being fought back.
+			const replaceRenderCtx: DiffRenderContext = { app: this.app, component: this, sourcePath: notePath };
 			const decisionPromise = renderReplaceInNoteDiffPreview(
 				this.messageListEl,
 				notePath,
 				noteContent,
 				changeBlocks,
 				autoApproved,
+				replaceRenderCtx,
 				() => this.scrollToBottom()
 			);
 			this.scrollToBottom();

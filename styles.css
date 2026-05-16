@@ -1854,6 +1854,96 @@
 	overflow-x: auto;
 }
 
+/* Rendered markdown preview mode toggle and panels */
+
+.notor-diff-mode-toggle {
+	display: flex;
+	gap: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	overflow: hidden;
+	flex-shrink: 0;
+}
+
+.notor-diff-mode-btn {
+	padding: 2px 8px;
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	border: none;
+	background: var(--background-primary);
+	color: var(--text-muted);
+	transition: background 0.1s, color 0.1s;
+}
+
+.notor-diff-mode-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.notor-diff-mode-btn.notor-diff-mode-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.notor-diff-source-view {
+	overflow-x: auto;
+}
+
+.notor-diff-rendered-panels {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 1px;
+	background: var(--background-modifier-border);
+}
+
+.notor-diff-rendered-panel {
+	background: var(--background-primary);
+	padding: 8px 12px;
+	overflow-y: auto;
+	max-height: 400px;
+}
+
+.notor-diff-rendered-panel-label {
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold, 600);
+	color: var(--text-muted);
+	padding-bottom: 6px;
+	margin-bottom: 6px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.notor-diff-rendered-before {
+	background: rgba(var(--color-red-rgb, 220, 53, 69), 0.04);
+	border-left: 3px solid rgba(var(--color-red-rgb, 220, 53, 69), 0.4);
+}
+
+.notor-diff-rendered-before .notor-diff-rendered-panel-label {
+	color: var(--color-red);
+}
+
+.notor-diff-rendered-after {
+	background: rgba(var(--color-green-rgb, 68, 207, 110), 0.04);
+	border-left: 3px solid rgba(var(--color-green-rgb, 68, 207, 110), 0.4);
+}
+
+.notor-diff-rendered-after .notor-diff-rendered-panel-label {
+	color: var(--color-green);
+}
+
+.notor-diff-rendered-panel-content {
+	font-size: var(--font-text-size);
+	line-height: var(--line-height-normal, 1.5);
+}
+
+.notor-diff-rendered-deleted {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.notor-diff-rendered-block-body {
+	padding: 4px 0;
+}
+
 /* ==========================================================================
    Settings Tab — Connection Test Status (SET-001)
    ========================================================================== */

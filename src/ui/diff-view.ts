@@ -29,6 +29,8 @@ import {
 	type ChangeBlock,
 } from "./diff-engine";
 
+import { MarkdownRenderer, type App, type Component } from "obsidian";
+
 // ---------------------------------------------------------------------------
 // Public result types
 // ---------------------------------------------------------------------------
@@ -52,6 +54,13 @@ export interface DiffDecision {
 	acceptedBlockIndexes?: Set<number>;
 }
 
+/** Context needed to render Markdown previews. When absent the toggle is hidden. */
+export interface DiffRenderContext {
+	app: App;
+	component: Component;
+	sourcePath: string;
+}
+
 // ---------------------------------------------------------------------------
 // write_note diff preview
 // ---------------------------------------------------------------------------
@@ -65,6 +74,7 @@ export interface DiffDecision {
  * @param beforeContent - Current note content; empty string for new files.
  * @param afterContent  - The content the AI wants to write.
  * @param autoApproved  - If true, apply immediately and show collapsed diff.
+ * @param renderCtx     - Optional context for rendered markdown preview toggle.
  * @returns Promise resolving with the user's decision.
  */
 export function renderWriteNoteDiffPreview(
@@ -73,6 +83,7 @@ export function renderWriteNoteDiffPreview(
 	beforeContent: string,
 	afterContent: string,
 	autoApproved: boolean,
+	renderCtx?: DiffRenderContext,
 	onReady?: () => void
 ): Promise<DiffDecision> {
 	const diffResult = computeWriteNoteDiff(notePath, beforeContent, afterContent);
@@ -112,6 +123,11 @@ export function renderWriteNoteDiffPreview(
 			// Collapsed by default for auto-approved
 			bodyEl.addClass("notor-hidden");
 
+			// View mode toggle (rendered only when renderCtx is available)
+			if (renderCtx) {
+				renderViewModeToggle(headerEl, bodyEl, beforeContent, afterContent, renderCtx);
+			}
+
 			const collapseToggle = headerEl.createDiv({ cls: "notor-diff-toggle" });
 			collapseToggle.textContent = "▶ show diff";
 			collapseToggle.addEventListener("click", () => {
@@ -120,8 +136,14 @@ export function renderWriteNoteDiffPreview(
 				collapseToggle.textContent = isHidden ? "▼ hide diff" : "▶ show diff";
 			});
 
-			// Render the diff lines
-			renderFileDiffLines(bodyEl, diffResult.diff);
+			// Render the diff lines into source view container
+			const sourceViewEl = bodyEl.createDiv({ cls: "notor-diff-source-view" });
+			renderFileDiffLines(sourceViewEl, diffResult.diff);
+
+			// Rendered preview container (lazy, starts hidden)
+			if (renderCtx) {
+				bodyEl.createDiv({ cls: "notor-diff-rendered-view notor-hidden" });
+			}
 
 			// Auto-approve: applied immediately, show status
 			const statusEl = wrapperEl.createDiv({ cls: "notor-diff-status notor-diff-status-applied" });
@@ -129,8 +151,19 @@ export function renderWriteNoteDiffPreview(
 
 			resolve({ accepted: true, finalContent: afterContent });
 		} else {
-			// Expanded for manual approval
-			renderFileDiffLines(bodyEl, diffResult.diff);
+			// View mode toggle (rendered only when renderCtx is available)
+			if (renderCtx) {
+				renderViewModeToggle(headerEl, bodyEl, beforeContent, afterContent, renderCtx);
+			}
+
+			// Render the diff lines into source view container
+			const sourceViewEl = bodyEl.createDiv({ cls: "notor-diff-source-view" });
+			renderFileDiffLines(sourceViewEl, diffResult.diff);
+
+			// Rendered preview container (lazy, starts hidden)
+			if (renderCtx) {
+				bodyEl.createDiv({ cls: "notor-diff-rendered-view notor-hidden" });
+			}
 
 			// Bulk action buttons
 			const actionsEl = wrapperEl.createDiv({ cls: "notor-diff-actions" });
@@ -181,6 +214,7 @@ export function renderWriteNoteDiffPreview(
  * @param noteContent  - Current full note content.
  * @param changeBlocks - The SEARCH/REPLACE blocks to apply.
  * @param autoApproved - If true, apply immediately and show collapsed diff.
+ * @param renderCtx    - Optional context for rendered markdown preview toggle.
  * @returns Promise resolving with the user's decision.
  */
 export function renderReplaceInNoteDiffPreview(
@@ -189,6 +223,7 @@ export function renderReplaceInNoteDiffPreview(
 	noteContent: string,
 	changeBlocks: ChangeBlock[],
 	autoApproved: boolean,
+	renderCtx?: DiffRenderContext,
 	onReady?: () => void
 ): Promise<DiffDecision> {
 	const diffResult = computeReplaceInNoteDiff(notePath, noteContent, changeBlocks);
@@ -222,12 +257,23 @@ export function renderReplaceInNoteDiffPreview(
 		}
 
 		if (autoApproved) {
+			// View mode toggle for auto-approved
+			if (renderCtx) {
+				renderViewModeToggle(headerEl, null, noteContent, applyBlocks(noteContent, changeBlocks), renderCtx);
+			}
+
 			// Auto-approved: collapsed combined diff, no controls
 			const collapseToggle = headerEl.createDiv({ cls: "notor-diff-toggle" });
 			collapseToggle.textContent = "▶ show diff";
 
 			const bodyEl = wrapperEl.createDiv({ cls: "notor-diff-body notor-hidden" });
-			renderFileDiffLines(bodyEl, diffResult.combinedDiff);
+
+			const sourceViewEl = bodyEl.createDiv({ cls: "notor-diff-source-view" });
+			renderFileDiffLines(sourceViewEl, diffResult.combinedDiff);
+
+			if (renderCtx) {
+				bodyEl.createDiv({ cls: "notor-diff-rendered-view notor-hidden" });
+			}
 
 			collapseToggle.addEventListener("click", () => {
 				const isHidden = bodyEl.hasClass("notor-hidden");
@@ -246,6 +292,47 @@ export function renderReplaceInNoteDiffPreview(
 
 		// Manual approval: per-block controls
 		const blocksContainerEl = wrapperEl.createDiv({ cls: "notor-diff-blocks" });
+
+		// View mode toggle controls all blocks
+		let currentMode: "source" | "rendered" = "source";
+		if (renderCtx) {
+			const ctx = renderCtx;
+			const renderedBlockEls: HTMLElement[] = [];
+			let blocksRenderedOnce = false;
+
+			renderViewModeToggleRaw(headerEl, async (mode) => {
+				currentMode = mode;
+				const blockEls = blocksContainerEl.querySelectorAll(".notor-diff-block");
+				if (mode === "rendered") {
+					blockEls.forEach((el) => {
+						el.querySelector(".notor-diff-block-body")?.addClass("notor-hidden");
+						el.querySelector(".notor-diff-rendered-block-body")?.removeClass("notor-hidden");
+					});
+					if (!blocksRenderedOnce) {
+						blocksRenderedOnce = true;
+						for (let i = 0; i < renderedBlockEls.length; i++) {
+							const block = changeBlocks[i];
+							if (block) {
+								await renderBlockMarkdownPreview(
+									renderedBlockEls[i]!,
+									block.search,
+									block.replace,
+									ctx
+								);
+							}
+						}
+					}
+				} else {
+					blockEls.forEach((el) => {
+						el.querySelector(".notor-diff-block-body")?.removeClass("notor-hidden");
+						el.querySelector(".notor-diff-rendered-block-body")?.addClass("notor-hidden");
+					});
+				}
+			});
+
+			// Store rendered block containers as we create blocks below
+			(blocksContainerEl as any)._renderedBlockEls = renderedBlockEls;
+		}
 
 		// Track acceptance state per block (default: all accepted)
 		const blockAccepted = new Map<number, boolean>();
@@ -271,9 +358,18 @@ export function renderReplaceInNoteDiffPreview(
 				text: "✓ accept",
 			});
 
-			// Block diff lines
+			// Block diff lines (source view)
 			const blockBodyEl = blockEl.createDiv({ cls: "notor-diff-block-body" });
 			renderFileDiffLines(blockBodyEl, blockDiff.diff);
+
+			// Rendered preview container for this block (lazy)
+			if (renderCtx) {
+				const renderedBlockBody = blockEl.createDiv({
+					cls: "notor-diff-rendered-block-body notor-hidden",
+				});
+				const renderedBlockEls = (blocksContainerEl as any)._renderedBlockEls as HTMLElement[];
+				renderedBlockEls.push(renderedBlockBody);
+			}
 
 			// Wire up toggle
 			blockToggleBtn.addEventListener("click", () => {
@@ -370,6 +466,153 @@ export function renderReplaceInNoteDiffPreview(
 		// Apply: resolve with the current per-block acceptance state.
 		applyBtn?.addEventListener("click", resolveWithCurrentState);
 	});
+}
+
+// ---------------------------------------------------------------------------
+// Rendered markdown preview helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a "Source / Rendered" toggle in the header for write_note diffs.
+ * Handles lazy rendering of the markdown preview on first toggle.
+ */
+function renderViewModeToggle(
+	headerEl: HTMLElement,
+	bodyEl: HTMLElement | null,
+	beforeContent: string,
+	afterContent: string,
+	ctx: DiffRenderContext
+): void {
+	let renderedOnce = false;
+
+	renderViewModeToggleRaw(headerEl, async (mode) => {
+		const container = bodyEl ?? headerEl.closest(".notor-diff-preview")?.querySelector(".notor-diff-body") as HTMLElement | null;
+		if (!container) return;
+
+		const sourceView = container.querySelector(".notor-diff-source-view") as HTMLElement | null;
+		const renderedView = container.querySelector(".notor-diff-rendered-view") as HTMLElement | null;
+		if (!sourceView || !renderedView) return;
+
+		if (mode === "rendered") {
+			sourceView.addClass("notor-hidden");
+			renderedView.removeClass("notor-hidden");
+			if (!renderedOnce) {
+				renderedOnce = true;
+				await renderMarkdownPreview(renderedView, beforeContent, afterContent, ctx);
+			}
+		} else {
+			renderedView.addClass("notor-hidden");
+			sourceView.removeClass("notor-hidden");
+		}
+	});
+}
+
+/**
+ * Create the raw toggle button group UI and wire click handlers.
+ */
+function renderViewModeToggleRaw(
+	headerEl: HTMLElement,
+	onModeChange: (mode: "source" | "rendered") => void
+): void {
+	const toggleEl = headerEl.createDiv({ cls: "notor-diff-mode-toggle" });
+
+	const sourceBtn = toggleEl.createEl("button", {
+		cls: "notor-diff-mode-btn notor-diff-mode-active",
+		text: "Source",
+	});
+	sourceBtn.dataset.mode = "source";
+
+	const renderedBtn = toggleEl.createEl("button", {
+		cls: "notor-diff-mode-btn",
+		text: "Rendered",
+	});
+	renderedBtn.dataset.mode = "rendered";
+
+	const setActive = (activeBtn: HTMLElement) => {
+		sourceBtn.removeClass("notor-diff-mode-active");
+		renderedBtn.removeClass("notor-diff-mode-active");
+		activeBtn.addClass("notor-diff-mode-active");
+	};
+
+	sourceBtn.addEventListener("click", () => {
+		setActive(sourceBtn);
+		onModeChange("source");
+	});
+
+	renderedBtn.addEventListener("click", () => {
+		setActive(renderedBtn);
+		onModeChange("rendered");
+	});
+}
+
+/**
+ * Render side-by-side Markdown preview panels into the given container.
+ */
+async function renderMarkdownPreview(
+	container: HTMLElement,
+	beforeContent: string,
+	afterContent: string,
+	ctx: DiffRenderContext
+): Promise<void> {
+	const panelsEl = container.createDiv({ cls: "notor-diff-rendered-panels" });
+
+	const isNewFile = !beforeContent;
+	const isDeletion = !afterContent;
+
+	if (!isNewFile) {
+		const beforePanel = panelsEl.createDiv({ cls: "notor-diff-rendered-panel notor-diff-rendered-before" });
+		beforePanel.createDiv({ cls: "notor-diff-rendered-panel-label", text: "Before" });
+		const beforeContentEl = beforePanel.createDiv({ cls: "notor-diff-rendered-panel-content" });
+		await MarkdownRenderer.render(ctx.app, beforeContent, beforeContentEl, ctx.sourcePath, ctx.component);
+	}
+
+	if (!isDeletion) {
+		const afterPanel = panelsEl.createDiv({ cls: "notor-diff-rendered-panel notor-diff-rendered-after" });
+		afterPanel.createDiv({
+			cls: "notor-diff-rendered-panel-label",
+			text: isNewFile ? "New file" : "After",
+		});
+		const afterContentEl = afterPanel.createDiv({ cls: "notor-diff-rendered-panel-content" });
+		await MarkdownRenderer.render(ctx.app, afterContent, afterContentEl, ctx.sourcePath, ctx.component);
+	}
+
+	if (isDeletion) {
+		const deletedPanel = panelsEl.createDiv({ cls: "notor-diff-rendered-panel notor-diff-rendered-before" });
+		deletedPanel.createDiv({ cls: "notor-diff-rendered-panel-label", text: "Deleted" });
+		const deletedContentEl = deletedPanel.createDiv({ cls: "notor-diff-rendered-panel-content" });
+		await MarkdownRenderer.render(ctx.app, beforeContent, deletedContentEl, ctx.sourcePath, ctx.component);
+	}
+}
+
+/**
+ * Render side-by-side Markdown preview for a single replace_in_note block.
+ */
+async function renderBlockMarkdownPreview(
+	container: HTMLElement,
+	searchText: string,
+	replaceText: string,
+	ctx: DiffRenderContext
+): Promise<void> {
+	const panelsEl = container.createDiv({ cls: "notor-diff-rendered-panels" });
+
+	const isDeletion = !replaceText;
+
+	const beforePanel = panelsEl.createDiv({ cls: "notor-diff-rendered-panel notor-diff-rendered-before" });
+	beforePanel.createDiv({ cls: "notor-diff-rendered-panel-label", text: "Before" });
+	const beforeContentEl = beforePanel.createDiv({ cls: "notor-diff-rendered-panel-content" });
+	await MarkdownRenderer.render(ctx.app, searchText, beforeContentEl, ctx.sourcePath, ctx.component);
+
+	if (!isDeletion) {
+		const afterPanel = panelsEl.createDiv({ cls: "notor-diff-rendered-panel notor-diff-rendered-after" });
+		afterPanel.createDiv({ cls: "notor-diff-rendered-panel-label", text: "After" });
+		const afterContentEl = afterPanel.createDiv({ cls: "notor-diff-rendered-panel-content" });
+		await MarkdownRenderer.render(ctx.app, replaceText, afterContentEl, ctx.sourcePath, ctx.component);
+	} else {
+		const deletedPanel = panelsEl.createDiv({ cls: "notor-diff-rendered-panel notor-diff-rendered-after" });
+		deletedPanel.createDiv({ cls: "notor-diff-rendered-panel-label", text: "Deleted" });
+		const deletedContentEl = deletedPanel.createDiv({ cls: "notor-diff-rendered-panel-content notor-diff-rendered-deleted" });
+		deletedContentEl.textContent = "(block will be removed)";
+	}
 }
 
 // ---------------------------------------------------------------------------
