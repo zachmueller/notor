@@ -3122,6 +3122,9 @@ export class NotorChatView extends ItemView {
 		this.toolCallElMap.clear();
 		this.renderedMessages.clear();
 		this.lastToolCallEl = null;
+		this.taskPanelEl?.addClass("notor-hidden");
+		this.taskPanelEl?.empty();
+		this.taskPanelCollapsed = false;
 	}
 
 	/**
