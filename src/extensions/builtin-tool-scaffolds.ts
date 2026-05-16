@@ -1292,6 +1292,9 @@ const totalLength = content.length;
 if (totalLength > maxOutputChars) {
   const truncated = content.substring(0, maxOutputChars);
   log.info("Output truncated", { url, totalLength, maxOutputChars });
+  if (utils.tempOutputSpiller) {
+    return await utils.tempOutputSpiller.spillToFile("fetch_webpage", content, truncated, maxOutputChars);
+  }
   return truncated +
     \`\\n\\nNote: page was truncated at \${maxOutputChars.toLocaleString()} characters; total fetched length was \${totalLength.toLocaleString()} characters.\`;
 }
@@ -1476,11 +1479,19 @@ try {
     cwd: cwdResult.resolvedPath,
     timeoutSeconds: settings.execute_command_timeout as number,
     maxOutputChars: settings.execute_command_max_output_chars as number,
+    spiller: utils.tempOutputSpiller,
   });
 
   let output = result.stdout;
 
-  if (result.truncated) {
+  if (result.truncated && result.spillFilePath && result.totalOutputChars) {
+    output = utils.tempOutputSpiller!.formatSpilloverMessage(
+      result.stdout,
+      result.spillFilePath,
+      result.totalOutputChars,
+      settings.execute_command_max_output_chars as number,
+    );
+  } else if (result.truncated) {
     output +=
       \`\\n\\nNote: command output was truncated at \` +
       \`\${(settings.execute_command_max_output_chars as number).toLocaleString()} characters.\`;

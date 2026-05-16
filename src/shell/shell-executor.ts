@@ -15,6 +15,7 @@ import { Platform } from "obsidian";
 import type { NotorSettings } from "../settings";
 import { resolveShell } from "./shell-resolver";
 import { OutputBuffer } from "./output-buffer";
+import type { TempOutputSpiller } from "./temp-output-spiller";
 import { logger } from "../utils/logger";
 
 const log = logger("ShellExecutor");
@@ -33,6 +34,8 @@ export interface ShellExecuteOptions {
 	timeoutSeconds?: number;
 	/** Maximum output characters to capture (default: 50,000). */
 	maxOutputChars?: number;
+	/** When provided, overflow output is streamed to a temp file instead of being discarded. */
+	spiller?: TempOutputSpiller;
 }
 
 /** Result of a shell execution. */
@@ -45,6 +48,10 @@ export interface ShellExecuteResult {
 	timedOut: boolean;
 	/** Whether the output was truncated due to size cap. */
 	truncated: boolean;
+	/** Path to spillover file containing full output (set when spiller is active and truncation occurred). */
+	spillFilePath?: string;
+	/** Total output character count including overflow written to disk. */
+	totalOutputChars?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +97,10 @@ export async function executeShellCommand(
 		timeout: `${timeoutMs}ms`,
 	});
 
+	const incrementalSpiller = options.spiller
+		? options.spiller.createIncrementalSpiller("execute_command")
+		: undefined;
+
 	return new Promise<ShellExecuteResult>((resolve, reject) => {
 		let child: ChildProcess;
 
@@ -109,7 +120,7 @@ export async function executeShellCommand(
 			return;
 		}
 
-		const buffer = new OutputBuffer(maxChars);
+		const buffer = new OutputBuffer(maxChars, incrementalSpiller);
 		let timedOut = false;
 		let killTimer: ReturnType<typeof setTimeout> | null = null;
 		let graceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -154,21 +165,38 @@ export async function executeShellCommand(
 		child.on("close", (exitCode: number | null) => {
 			clearTimers();
 
-			const result: ShellExecuteResult = {
-				stdout: buffer.toString(),
-				exitCode: exitCode ?? (timedOut ? 124 : 1),
-				timedOut,
-				truncated: buffer.truncated,
-			};
+			buffer.finalizeSpillover().then((spillResult) => {
+				const result: ShellExecuteResult = {
+					stdout: buffer.toString(),
+					exitCode: exitCode ?? (timedOut ? 124 : 1),
+					timedOut,
+					truncated: buffer.truncated,
+				};
 
-			log.info("Shell command completed", {
-				exitCode: result.exitCode,
-				timedOut: result.timedOut,
-				truncated: result.truncated,
-				outputLength: result.stdout.length,
+				if (buffer.truncated && spillResult && spillResult.overflowChars > 0) {
+					result.spillFilePath = buffer.spillFilePath;
+					result.totalOutputChars = buffer.totalLength;
+				}
+
+				log.info("Shell command completed", {
+					exitCode: result.exitCode,
+					timedOut: result.timedOut,
+					truncated: result.truncated,
+					outputLength: result.stdout.length,
+					spillFilePath: result.spillFilePath,
+					totalOutputChars: result.totalOutputChars,
+				});
+
+				resolve(result);
+			}).catch(() => {
+				// Spillover finalization failed — return result without spillover metadata
+				resolve({
+					stdout: buffer.toString(),
+					exitCode: exitCode ?? (timedOut ? 124 : 1),
+					timedOut,
+					truncated: buffer.truncated,
+				});
 			});
-
-			resolve(result);
 		});
 
 		function clearTimers(): void {

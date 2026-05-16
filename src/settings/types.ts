@@ -182,6 +182,9 @@ export interface NotorSettings {
 	/** Maximum command output character count. */
 	execute_command_max_output_chars: number;
 
+	/** When true, truncated tool output is written to a temp file for AI retrieval via read_file. */
+	output_spillover_enabled: boolean;
+
 	/** Additional allowed working directory absolute paths. */
 	execute_command_allowed_paths: string[];
 

@@ -119,6 +119,9 @@ export class ToolDispatcher {
 	/** When true, tools execute with note-opener side effects suppressed. */
 	private silentMode = false;
 
+	/** Temp output spiller for dispatcher-level spillover of large tool results. */
+	private spiller?: import("../shell/temp-output-spiller").TempOutputSpiller;
+
 	// -----------------------------------------------------------------------
 	// Configuration
 	// -----------------------------------------------------------------------
@@ -185,6 +188,11 @@ export class ToolDispatcher {
 	/** Suppress editor-open side effects on all tools dispatched through this instance. */
 	setSilentMode(silent: boolean): void {
 		this.silentMode = silent;
+	}
+
+	/** Set the temp output spiller for dispatcher-level spillover of large results. */
+	setSpiller(spiller: import("../shell/temp-output-spiller").TempOutputSpiller | undefined): void {
+		this.spiller = spiller;
 	}
 
 	/**
@@ -599,6 +607,24 @@ export class ToolDispatcher {
 
 			const duration = Date.now() - startTime;
 			result.duration_ms = duration;
+
+			// Dispatcher-level spillover: catches MCP tools and extension tools
+			// whose results exceed the output cap. Built-in tools (execute_command,
+			// fetch_webpage) handle spillover internally and return short results.
+			if (this.spiller && result.success && typeof result.result === "string") {
+				const threshold = (this.settings?.execute_command_max_output_chars ?? 50_000);
+				if (result.result.length > threshold) {
+					const truncated = result.result.substring(0, threshold);
+					try {
+						result = {
+							...result,
+							result: await this.spiller.spillToFile(toolName, result.result, truncated, threshold),
+						};
+					} catch (e) {
+						log.warn("Dispatcher spillover failed", { toolName, error: String(e) });
+					}
+				}
+			}
 
 			toolCall.status = result.success ? "success" : "error";
 			this.events.onToolCallStatusChanged?.(toolCall, messageId);

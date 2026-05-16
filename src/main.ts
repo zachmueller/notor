@@ -232,6 +232,7 @@ export default class NotorPlugin extends Plugin {
 	private _pendingMemoryManager?: PendingMemoryManager;
 	private _extensionManager?: ExtensionManager;
 	private _chatBlockRegistry?: ChatBlockRegistry;
+	private _tempOutputSpiller?: import("./shell/temp-output-spiller").TempOutputSpiller;
 	private _settingTab?: NotorSettingTab;
 
 	/**
@@ -387,7 +388,17 @@ export default class NotorPlugin extends Plugin {
 		this._settingTab = new NotorSettingTab(this.app, this);
 		this.addSettingTab(this._settingTab);
 
-		// 2b. Instantiate ChatBlockRegistry and wire into the message pipeline.
+		// 2b. Initialize temp output spiller (desktop only, when enabled).
+		if (Platform.isDesktopApp && this.settings.output_spillover_enabled) {
+			const { TempOutputSpiller } = await import("./shell/temp-output-spiller");
+			this._tempOutputSpiller = new TempOutputSpiller();
+			await this._tempOutputSpiller.ensureSpillDir();
+			this._tempOutputSpiller.cleanupStale().catch((e) => {
+				log.warn("Stale spillover cleanup failed", { error: String(e) });
+			});
+		}
+
+		// 2c. Instantiate ChatBlockRegistry and wire into the message pipeline.
 		// Must happen before any view or orchestrator creation so that
 		// toChatMessages() has the registry available for extension_block translation.
 		this._chatBlockRegistry = new ChatBlockRegistry();
@@ -1064,6 +1075,11 @@ export default class NotorPlugin extends Plugin {
 		}
 		this._detachedSubAgents.clear();
 		log.info("Detached sub-agents aborted");
+
+		// Clean up spillover temp files
+		this._tempOutputSpiller?.cleanup().catch((e) => {
+			log.error("TempOutputSpiller cleanup failed", { error: String(e) });
+		});
 
 		// EXT-017: Destroy extension manager (unregisters tools + path params)
 		this._extensionManager?.destroy();
@@ -2050,6 +2066,11 @@ export default class NotorPlugin extends Plugin {
 		return this._staleTracker;
 	}
 
+	/** Temp output spiller for writing truncated tool output to disk. Null when disabled or on mobile. */
+	getTempOutputSpiller(): import("./shell/temp-output-spiller").TempOutputSpiller | undefined {
+		return this._tempOutputSpiller;
+	}
+
 	/** Note opener utility. */
 	getNoteOpener(): NoteOpener {
 		if (!this._noteOpener) {
@@ -2159,6 +2180,7 @@ export default class NotorPlugin extends Plugin {
 
 			this._toolDispatcher.setAutoApprove(this.settings.auto_approve);
 			this._toolDispatcher.setSettings(this.settings);
+			this._toolDispatcher.setSpiller(this._tempOutputSpiller);
 
 			this._toolDispatcher.setActivePersonaName(
 				this.settings.active_persona || null

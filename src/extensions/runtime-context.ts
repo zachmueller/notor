@@ -11,6 +11,7 @@ import type { StaleContentTracker } from "../chat/stale-tracker";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
 import type { NoteOpener } from "../tools/note-opener";
 import type { ShellExecuteOptions, ShellExecuteResult } from "../shell/shell-executor";
+import type { TempOutputSpiller } from "../shell/temp-output-spiller";
 import type { ResolvedToolConfigEntry } from "../tool-config/types";
 import type { TFile } from "obsidian";
 
@@ -130,6 +131,8 @@ export interface ExtensionUtils {
 		allowedPaths?: string[],
 	) => { valid: true; resolvedPath: string } | { valid: false; error: string };
 	executeShellCommand: (cmd: string, opts?: ShellExecuteOptions) => Promise<ShellExecuteResult>;
+	/** Temp output spiller for writing truncated output to disk. Undefined when disabled or on mobile. */
+	tempOutputSpiller?: TempOutputSpiller;
 	pathEnforcer: {
 		enforcePathConstraints: (
 			toolName: string,
@@ -405,15 +408,17 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 
 		logger: (name: string) => logger(`ext:${name}`),
 
-		resolveAndValidatePath: (path: string, allowedPaths?: string[]) =>
-			resolveAndValidatePath(
-				path,
-				vaultRootPath,
-				allowedPaths ?? (plugin.settings.user_shared_settings?.["read_file_allowed_paths"] as string[] | undefined) ?? [],
-			),
+		resolveAndValidatePath: (path: string, allowedPaths?: string[]) => {
+			const baseAllowed = allowedPaths ?? (plugin.settings.user_shared_settings?.["read_file_allowed_paths"] as string[] | undefined) ?? [];
+			const spillDir = plugin.getTempOutputSpiller()?.getSpillDir();
+			const effectiveAllowed = spillDir ? [...baseAllowed, spillDir] : baseAllowed;
+			return resolveAndValidatePath(path, vaultRootPath, effectiveAllowed);
+		},
 
 		executeShellCommand: (cmd: string, opts?: ShellExecuteOptions) =>
 			executeShellCommand(cmd, plugin.settings, opts),
+
+		tempOutputSpiller: plugin.getTempOutputSpiller(),
 
 		pathEnforcer: {
 			enforcePathConstraints: (
