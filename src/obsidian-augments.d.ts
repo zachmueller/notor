@@ -26,6 +26,16 @@ declare module "obsidian" {
 	interface App {
 		/** Secure secret storage (since Obsidian 1.11.4). */
 		secretStorage: SecretStorage;
+
+		/** Internal (non-community) plugins. Not in published types. */
+		internalPlugins: {
+			plugins: Record<string, { instance: unknown; enabled: boolean }>;
+		};
+	}
+
+	interface View {
+		/** Component children array. Not in published types. */
+		_children: any[];
 	}
 
 	/**
