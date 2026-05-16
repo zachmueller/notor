@@ -118,12 +118,17 @@ export class ConversationSession {
 	 * pinned because changing them mid-stream would produce incoherent
 	 * instructions or break conversation format.
 	 */
-	buildPolicyContext(settings: NotorSettings, vaultRootPath: string): ToolPolicyContext {
+	buildPolicyContext(
+		settings: NotorSettings,
+		vaultRootPath: string,
+		resolveVaultPath?: (path: string) => string | null,
+	): ToolPolicyContext {
 		return {
 			effectiveConfig: this.effectiveConfig,
 			mode: this.conversationManager.getActiveConversation()?.mode ?? "act",
 			domainDenylist: settings.domain_denylist,
 			vaultRootPath,
+			resolveVaultPath,
 		};
 	}
 }

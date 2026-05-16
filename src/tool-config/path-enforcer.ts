@@ -35,10 +35,11 @@ export const TOOL_PATH_PARAMS: Record<string, ToolPathParam[]> = {};
  * Check whether a tool call's path arguments satisfy the effective
  * `allowed_paths` / `blocked_paths` constraints.
  *
- * @param toolName      - The tool being called.
- * @param parameters    - The tool call parameters (from the LLM).
- * @param entry         - The resolved tool config entry for this tool.
- * @param vaultRootPath - Absolute path to the vault root directory.
+ * @param toolName         - The tool being called.
+ * @param parameters       - The tool call parameters (from the LLM).
+ * @param entry            - The resolved tool config entry for this tool.
+ * @param vaultRootPath    - Absolute path to the vault root directory.
+ * @param resolveVaultPath - Optional resolver for vault note paths. Returns canonical path or null.
  * @returns `null` if the call is allowed, or an error message string if blocked.
  */
 export function enforcePathConstraints(
@@ -46,6 +47,7 @@ export function enforcePathConstraints(
 	parameters: Record<string, unknown>,
 	entry: ResolvedToolConfigEntry,
 	vaultRootPath: string,
+	resolveVaultPath?: (path: string) => string | null,
 ): string | null {
 	// Tools not in the descriptor table (e.g., MCP tools) → exempt
 	const pathParams = TOOL_PATH_PARAMS[toolName];
@@ -63,7 +65,16 @@ export function enforcePathConstraints(
 		const pathValue = rawValue;
 		if (pathValue.trim() === "") continue;
 
-		const error = checkPath(pathValue, param.namespace, entry, vaultRootPath);
+		// Resolve note paths to canonical form before constraint check
+		let effectivePath = pathValue;
+		if (param.resolveAs === "note" && param.namespace === "vault" && resolveVaultPath) {
+			const resolved = resolveVaultPath(pathValue);
+			if (resolved !== null) {
+				effectivePath = resolved;
+			}
+		}
+
+		const error = checkPath(effectivePath, param.namespace, entry, vaultRootPath);
 		if (error) {
 			return `Tool "${toolName}" path constraint violation: ${error}`;
 		}

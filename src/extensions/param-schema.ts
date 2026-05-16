@@ -107,6 +107,7 @@ export function extractPathParams(toolName: string, params: ParamSchema): ToolPa
 			pathParams.push({
 				paramName: key,
 				namespace: param.path_namespace,
+				resolveAs: param.path_resolve_as,
 			});
 		}
 	}

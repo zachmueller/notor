@@ -47,6 +47,7 @@ import {
 } from "../workflows/workflow-executor";
 import { resolvePreset } from "../presets/preset-resolver";
 import { logger } from "../utils/logger";
+import { resolveNote } from "../utils/resolve-note";
 
 const log = logger("WorkflowExecutor");
 
@@ -798,7 +799,10 @@ export class WorkflowExecutor {
 
 				// Dispatch the tool with session-scoped policy context and approval
 				const policyCtx = vaultRootPath
-					? session.buildPolicyContext(this.deps.getSettings(), vaultRootPath)
+					? session.buildPolicyContext(this.deps.getSettings(), vaultRootPath, (path: string) => {
+						const file = resolveNote(path, this.deps.app.vault, this.deps.app.metadataCache);
+						return file?.path ?? null;
+					})
 					: undefined;
 				const toolResult = await this.deps.dispatcher.dispatch(
 					toolName,

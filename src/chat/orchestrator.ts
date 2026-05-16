@@ -46,6 +46,7 @@ import type { ApprovalCallback } from "./dispatcher";
 import type { ToolSessionContext } from "../tools/tool";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
 import { logger } from "../utils/logger";
+import { resolveNote } from "../utils/resolve-note";
 import { estimateTokenCount } from "../utils/tokens";
 import type { ChatBlockRegistry } from "../ui/chat-blocks/registry";
 import type { TemplateVariableRegistry } from "../template-vars";
@@ -1247,7 +1248,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 					// Build policy context and pass per-session approval callback
 					const policyCtx = vaultRootPath
-						? session.buildPolicyContext(this.settings, vaultRootPath)
+						? session.buildPolicyContext(this.settings, vaultRootPath, (path: string) => {
+							const file = resolveNote(path, this.app.vault, this.app.metadataCache);
+							return file?.path ?? null;
+						})
 						: undefined;
 
 					const batchResults = await executeToolBatches(

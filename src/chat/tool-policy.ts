@@ -31,6 +31,8 @@ export interface ToolPolicyContext {
 	mode: ConversationMode;
 	domainDenylist?: string[];
 	vaultRootPath: string;
+	/** Optional resolver for vault note paths (3-step resolution). Returns canonical path or null. */
+	resolveVaultPath?: (path: string) => string | null;
 }
 
 /**
@@ -187,6 +189,7 @@ export function evaluateToolPolicy(
 			parameters,
 			toolEntry,
 			ctx.vaultRootPath,
+			ctx.resolveVaultPath,
 		);
 		if (pathError) {
 			return {

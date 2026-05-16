@@ -408,7 +408,10 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				toolName: string,
 				params: Record<string, unknown>,
 				entry: ResolvedToolConfigEntry,
-			) => enforcePathConstraints(toolName, params, entry, vaultRootPath),
+			) => enforcePathConstraints(toolName, params, entry, vaultRootPath, (path: string) => {
+				const file = resolveNote(path, plugin.app.vault, plugin.app.metadataCache);
+				return file?.path ?? null;
+			}),
 
 			isPathWithin: (target: string, base: string) =>
 				isPathWithin(target, base),
@@ -739,6 +742,10 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				if (plugin.vaultRootPath) {
 					subDispatcher.setVaultRootPath(plugin.vaultRootPath);
 				}
+				subDispatcher.setResolveVaultPath((path: string) => {
+					const file = resolveNote(path, plugin.app.vault, plugin.app.metadataCache);
+					return file?.path ?? null;
+				});
 				if (opts.silent) {
 					subDispatcher.setSilentMode(true);
 				}

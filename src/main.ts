@@ -139,6 +139,7 @@ import { TemplateVariableRegistry, registerBuiltinVars } from "./template-vars";
 // UI
 import { NotorChatView, CHAT_VIEW_TYPE } from "./ui/chat-view";
 import { EffectiveConfigInspectorView, INSPECTOR_VIEW_TYPE } from "./ui/effective-config-inspector";
+import { resolveNote } from "./utils/resolve-note";
 
 const log = logger("Main");
 
@@ -2128,6 +2129,10 @@ export default class NotorPlugin extends Plugin {
 			if (this.vaultRootPath) {
 				useSubagentTool.setVaultRootPath(this.vaultRootPath);
 			}
+			useSubagentTool.setResolveVaultPath((path: string) => {
+				const file = resolveNote(path, this.app.vault, this.app.metadataCache);
+				return file?.path ?? null;
+			});
 			this._toolRegistry.register(useSubagentTool);
 
 			// Internal task tracking tool — always-on, hidden from settings
@@ -2163,6 +2168,12 @@ export default class NotorPlugin extends Plugin {
 			if (this.vaultRootPath) {
 				this._toolDispatcher.setVaultRootPath(this.vaultRootPath);
 			}
+
+			// Set vault path resolver for path constraint enforcement
+			this._toolDispatcher.setResolveVaultPath((path: string) => {
+				const file = resolveNote(path, this.app.vault, this.app.metadataCache);
+				return file?.path ?? null;
+			});
 		}
 		return this._toolDispatcher;
 	}

@@ -98,6 +98,9 @@ export class ToolDispatcher {
 	/** Vault root path for working directory validation. */
 	private vaultRootPath?: string;
 
+	/** Optional resolver for vault note paths (used by path enforcement). */
+	private resolveVaultPath?: (path: string) => string | null;
+
 	/**
 	 * Callback for requesting user approval.
 	 *
@@ -156,6 +159,11 @@ export class ToolDispatcher {
 	/** Set the vault root path for working directory validation. */
 	setVaultRootPath(path: string): void {
 		this.vaultRootPath = path;
+	}
+
+	/** Set the vault path resolver for path constraint enforcement. */
+	setResolveVaultPath(fn: (path: string) => string | null): void {
+		this.resolveVaultPath = fn;
 	}
 
 	/**
@@ -538,6 +546,7 @@ export class ToolDispatcher {
 						parameters,
 						toolEntry,
 						this.vaultRootPath ?? "",
+						this.resolveVaultPath,
 					);
 					if (pathError) {
 						toolCall.status = "error";

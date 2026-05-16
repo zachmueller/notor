@@ -65,6 +65,9 @@ export class UseSubagentTool implements Tool {
 	/** Vault root path for sub-agent dispatcher path enforcement. */
 	private vaultRootPath?: string;
 
+	/** Optional resolver for vault note paths (used by path enforcement). */
+	private resolveVaultPath?: (path: string) => string | null;
+
 	/** Parent's approval callback for the "bubble" pattern (Section 9.7). */
 	private parentApprovalCallback?: ApprovalCallback;
 
@@ -88,6 +91,10 @@ export class UseSubagentTool implements Tool {
 
 	setVaultRootPath(path: string): void {
 		this.vaultRootPath = path;
+	}
+
+	setResolveVaultPath(fn: (path: string) => string | null): void {
+		this.resolveVaultPath = fn;
 	}
 
 	setApprovalCallback(callback: ApprovalCallback): void {
@@ -350,6 +357,9 @@ export class UseSubagentTool implements Tool {
 		subDispatcher.setSettings(this.settings);
 		if (this.vaultRootPath) {
 			subDispatcher.setVaultRootPath(this.vaultRootPath);
+		}
+		if (this.resolveVaultPath) {
+			subDispatcher.setResolveVaultPath(this.resolveVaultPath);
 		}
 		if (this.parentApprovalCallback) {
 			subDispatcher.setApprovalCallback(this.parentApprovalCallback);

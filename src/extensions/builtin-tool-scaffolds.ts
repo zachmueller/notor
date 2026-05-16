@@ -84,6 +84,7 @@ const READ_NOTE = scaffold(
     type: string
     description: "Path to the note relative to vault root. The '.md' extension is optional."
     path_namespace: vault
+    path_resolve_as: note
   include_frontmatter:
     type: boolean
     description: "Whether to include YAML frontmatter in the returned content."
@@ -541,7 +542,8 @@ const READ_FRONTMATTER = scaffold(
   path:
     type: string
     description: "Path to the note relative to vault root."
-    path_namespace: vault`,
+    path_namespace: vault
+    path_resolve_as: note`,
 	`const log = utils.logger("read_frontmatter");
 
 if (!params.path || typeof params.path !== "string") {
@@ -572,7 +574,8 @@ const GET_BACKLINKS = scaffold(
   path:
     type: string
     description: "Path to the note relative to vault root."
-    path_namespace: vault`,
+    path_namespace: vault
+    path_resolve_as: note`,
 	`const log = utils.logger("get_backlinks");
 
 if (!params.path || typeof params.path !== "string") {
@@ -607,7 +610,8 @@ const GET_OUTLINKS = scaffold(
   path:
     type: string
     description: "Path to the note relative to vault root."
-    path_namespace: vault`,
+    path_namespace: vault
+    path_resolve_as: note`,
 	`const log = utils.logger("get_outlinks");
 
 if (!params.path || typeof params.path !== "string") {
@@ -646,6 +650,7 @@ const WRITE_NOTE = scaffold(
     type: string
     description: "Path to the note relative to vault root."
     path_namespace: vault
+    path_resolve_as: note
   content:
     type: string
     description: "Complete content to write to the note."`,
@@ -725,6 +730,7 @@ const REPLACE_IN_NOTE = scaffold(
     type: string
     description: "Path to the note relative to vault root."
     path_namespace: vault
+    path_resolve_as: note
   changes:
     type: "object[]"
     description: "Array of search/replace blocks to apply in sequence. Each block replaces only the first occurrence of the search text."
@@ -841,6 +847,7 @@ const UPDATE_FRONTMATTER = scaffold(
     type: string
     description: "Path to the note relative to vault root."
     path_namespace: vault
+    path_resolve_as: note
   set:
     type: object
     description: "Key-value pairs to add or update in the frontmatter."
@@ -908,6 +915,7 @@ const MANAGE_TAGS = scaffold(
     type: string
     description: "Path to the note relative to vault root."
     path_namespace: vault
+    path_resolve_as: note
   add:
     type: "string[]"
     description: "Tags to add to the note."
@@ -1015,6 +1023,7 @@ const MOVE_NOTE = scaffold(
     type: string
     description: "Current path of the note relative to vault root."
     path_namespace: vault
+    path_resolve_as: note
   new_path:
     type: string
     description: "New path for the note relative to vault root."

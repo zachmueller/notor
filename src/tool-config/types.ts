@@ -116,6 +116,8 @@ export interface ToolPathParam {
 	paramName: string;
 	/** Whether the path is vault-relative or an absolute filesystem path. */
 	namespace: PathNamespace;
+	/** If "note", resolve via resolveNote() before constraint checking. */
+	resolveAs?: "note";
 }
 
 // ---------------------------------------------------------------------------

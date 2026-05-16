@@ -41,6 +41,8 @@ export interface ParamSchema {
 		required_items?: string[];
 		/** If set, this param is a path and participates in path enforcement. */
 		path_namespace?: "vault" | "filesystem";
+		/** If "note", resolve via resolveNote() before constraint checking. */
+		path_resolve_as?: "note";
 	};
 }
 

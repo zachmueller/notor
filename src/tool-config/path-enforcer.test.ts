@@ -31,8 +31,9 @@ const VAULT_ROOT = "/Users/test/vault";
  */
 function seedPathParams(): void {
 	Object.assign(TOOL_PATH_PARAMS, {
-		read_note: [{ paramName: "path", namespace: "vault" as const }],
-		write_note: [{ paramName: "path", namespace: "vault" as const }],
+		read_note: [{ paramName: "path", namespace: "vault" as const, resolveAs: "note" as const }],
+		write_note: [{ paramName: "path", namespace: "vault" as const, resolveAs: "note" as const }],
+		search_vault: [{ paramName: "path", namespace: "vault" as const }],
 		read_file: [{ paramName: "path", namespace: "filesystem" as const }],
 		write_docx: [
 			{ paramName: "output_path", namespace: "filesystem" as const },
@@ -293,6 +294,78 @@ describe("enforcePathConstraints", () => {
 			const entry = makeEntry({ allowed_paths: ["notes/"] });
 			const result = enforcePathConstraints("read_note", { path: "  " }, entry, VAULT_ROOT);
 			expect(result).toBeNull();
+		});
+	});
+
+	describe("vault path resolution via resolveVaultPath callback", () => {
+		it("resolves bare name to canonical path and checks against allowed_paths", () => {
+			const entry = makeEntry({ allowed_paths: ["Research/"] });
+			const resolver = (path: string) =>
+				path === "Climate" ? "Research/Climate.md" : null;
+			const result = enforcePathConstraints(
+				"read_note", { path: "Climate" }, entry, VAULT_ROOT, resolver,
+			);
+			expect(result).toBeNull();
+		});
+
+		it("resolves bare name and correctly blocks via blocked_paths", () => {
+			const entry = makeEntry({ blocked_paths: ["Research/"] });
+			const resolver = (path: string) =>
+				path === "Climate" ? "Research/Climate.md" : null;
+			const result = enforcePathConstraints(
+				"read_note", { path: "Climate" }, entry, VAULT_ROOT, resolver,
+			);
+			expect(result).not.toBeNull();
+			expect(result).toContain("is blocked");
+		});
+
+		it("resolves path without .md extension", () => {
+			const entry = makeEntry({ allowed_paths: ["Research/"] });
+			const resolver = (path: string) =>
+				path === "Research/Climate" ? "Research/Climate.md" : null;
+			const result = enforcePathConstraints(
+				"read_note", { path: "Research/Climate" }, entry, VAULT_ROOT, resolver,
+			);
+			expect(result).toBeNull();
+		});
+
+		it("falls through to raw string matching when resolver returns null", () => {
+			const entry = makeEntry({ allowed_paths: ["notes/"] });
+			const resolver = () => null;
+			const result = enforcePathConstraints(
+				"read_note", { path: "nonexistent-note" }, entry, VAULT_ROOT, resolver,
+			);
+			expect(result).not.toBeNull();
+			expect(result).toContain("not within any allowed path");
+		});
+
+		it("uses raw string matching when no resolver is provided (backward compat)", () => {
+			const entry = makeEntry({ allowed_paths: ["Intake for Commonplace Notes.md"] });
+			const result = enforcePathConstraints(
+				"read_note", { path: "Intake for Commonplace Notes" }, entry, VAULT_ROOT,
+			);
+			// Without resolver, bare name doesn't match the .md suffix in allowed_paths
+			expect(result).not.toBeNull();
+		});
+
+		it("does not call resolver for directory tools without resolveAs", () => {
+			const entry = makeEntry({ allowed_paths: ["Projects/"] });
+			const resolver = vi.fn(() => "Projects/SomeNote.md");
+			const result = enforcePathConstraints(
+				"search_vault", { path: "Projects" }, entry, VAULT_ROOT, resolver,
+			);
+			expect(result).toBeNull();
+			expect(resolver).not.toHaveBeenCalled();
+		});
+
+		it("does not call resolver for filesystem-namespace params", () => {
+			const entry = makeEntry({ allowed_paths: ["/Users/test/vault"] });
+			const resolver = vi.fn(() => "some/path.md");
+			const result = enforcePathConstraints(
+				"read_file", { path: "/Users/test/vault/file.txt" }, entry, VAULT_ROOT, resolver,
+			);
+			expect(result).toBeNull();
+			expect(resolver).not.toHaveBeenCalled();
 		});
 	});
 });
