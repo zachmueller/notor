@@ -87,7 +87,8 @@ export class UserToolAdapter implements Tool {
 			const { values: shared } = this.manager.getResolvedSharedSettings();
 
 			// 4. Build injected context objects
-			const utils: ExtensionUtils = buildUtils(this.plugin, undefined, this.definition.name);
+			const conversationId = options?.sessionContext?.getActiveConversation()?.id;
+			const utils: ExtensionUtils = buildUtils(this.plugin, conversationId, this.definition.name);
 			// Merge per-invocation options
 			if (options?.abortSignal) {
 				utils.abortSignal = options.abortSignal;

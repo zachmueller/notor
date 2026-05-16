@@ -1159,10 +1159,19 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 
 	// Wire webview facade — desktop only (Electron required for <webview> tag).
 	if (Platform.isDesktopApp) {
-		const WEB_VIEWER_VIEW_TYPE = "web-browser";
+		const WEB_VIEWER_TYPE_CANDIDATES = ["web-viewer", "web-browser", "webviewer", "browser-view"];
 		const WEBVIEW_PROP_CANDIDATES = ["webview", "webviewEl", "frame", "browser"];
 		const webviewLog = logger("ext:webview");
 		const leafCache = plugin.getWebviewLeafCache();
+
+		function resolveWebViewerType(): string | null {
+			const registry = (plugin.app as any).viewRegistry?.viewByType;
+			if (!registry) return null;
+			for (const candidate of WEB_VIEWER_TYPE_CANDIDATES) {
+				if (candidate in registry) return candidate;
+			}
+			return null;
+		}
 
 		function findWebviewEl(leaf: any): any {
 			const view = leaf.view;
@@ -1180,7 +1189,9 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 			getConversationId: () => conversationId ?? null,
 
 			getActiveWebview: () => {
-				const leaves = plugin.app.workspace.getLeavesOfType(WEB_VIEWER_VIEW_TYPE);
+				const viewType = resolveWebViewerType();
+				if (!viewType) return null;
+				const leaves = plugin.app.workspace.getLeavesOfType(viewType);
 				const activeLeaf = plugin.app.workspace.activeLeaf;
 				const targetLeaf = leaves.find((l: any) => l === activeLeaf) ?? null;
 				if (!targetLeaf) return null;
@@ -1193,8 +1204,14 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				const convId = conversationId;
 				if (!convId) return null;
 
+				const viewType = resolveWebViewerType();
+				if (!viewType) {
+					webviewLog.warn("No Web Viewer view type found in registry");
+					return null;
+				}
+
 				let leaf = leafCache.get(convId);
-				const allLeaves = plugin.app.workspace.getLeavesOfType(WEB_VIEWER_VIEW_TYPE);
+				const allLeaves = plugin.app.workspace.getLeavesOfType(viewType);
 
 				if (leaf && !allLeaves.includes(leaf)) {
 					leafCache.delete(convId);
@@ -1204,22 +1221,43 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				if (!leaf) {
 					const persistedUrl = await utils.webview!.readPersistedUrl(convId);
 
-					leaf = plugin.app.workspace.getLeaf("split");
+					leaf = plugin.app.workspace.getLeaf("tab");
 					await leaf.setViewState({
-						type: WEB_VIEWER_VIEW_TYPE,
-						active: false,
+						type: viewType,
+						active: true,
 						state: persistedUrl ? { url: persistedUrl } : {},
 					});
 					leafCache.set(convId, leaf);
-
-					await new Promise(r => setTimeout(r, 200));
 				}
 
-				const webviewEl = findWebviewEl(leaf);
+				// Retry finding the webview element — the view may need time to mount
+				let webviewEl: any = null;
+				for (let attempt = 0; attempt < 10; attempt++) {
+					webviewEl = findWebviewEl(leaf);
+					if (webviewEl) break;
+					await new Promise(r => setTimeout(r, 300));
+				}
+
 				if (!webviewEl) {
-					webviewLog.warn("Could not find webview element on leaf");
+					webviewLog.warn("Could not find webview element on leaf after retries");
 					return null;
 				}
+
+				// Wait for dom-ready before returning — loadURL requires this
+				if (typeof webviewEl.getWebContentsId === "function") {
+					try {
+						webviewEl.getWebContentsId();
+					} catch {
+						// Not ready yet — wait for dom-ready event
+						await Promise.race([
+							new Promise<void>(resolve => {
+								webviewEl.addEventListener("dom-ready", () => resolve(), { once: true });
+							}),
+							new Promise<void>(resolve => setTimeout(resolve, 5000)),
+						]);
+					}
+				}
+
 				return { leaf, webviewEl };
 			},
 
