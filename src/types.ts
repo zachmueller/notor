@@ -767,6 +767,8 @@ export interface StaleContentEntry {
 	last_read_content: string;
 	/** When the content was last read (ISO 8601). */
 	last_read_timestamp: string;
+	/** MD5 hash of body content (after frontmatter). Computed lazily on first mismatch. */
+	body_hash?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -2444,6 +2444,7 @@ export default class NotorPlugin extends Plugin {
 		);
 		orchestrator.setCheckpointManager(checkpointManager);
 		orchestrator.setSharedCheckpointManager(() => this._sharedCheckpointManager);
+		orchestrator.setStaleTracker(() => this.getStaleTracker());
 
 		log.info("Orchestrator created via unified factory");
 		return orchestrator;

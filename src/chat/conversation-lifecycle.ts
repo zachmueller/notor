@@ -14,9 +14,10 @@ import type { Conversation, Message, Persona } from "../types";
 import { buildOptionValue } from "../providers/model-grouping";
 import { resolveConversationModel } from "../presets/preset-resolver";
 import type { ConversationManager } from "./conversation";
-import type { HistoryManager } from "./history";
+import { HistoryManager } from "./history";
 import { conversationFilename } from "./history";
 import type { ConversationSession } from "./conversation-session";
+import type { StaleContentTracker } from "./stale-tracker";
 import type { ViewRouter } from "./view-router";
 import type { SessionManager } from "./session-manager";
 import type { ConfigResolver } from "./config-resolver";
@@ -56,6 +57,7 @@ export class ConversationLifecycleManager {
 		private readonly setActivePersona: (persona: Persona | null) => void,
 		private readonly getSharedCheckpointManager?: () => CheckpointManager | undefined,
 		private readonly onSwitchConversation?: (filename: string) => Promise<void>,
+		private readonly getStaleTracker?: () => StaleContentTracker | undefined,
 	) {}
 
 	/**
@@ -63,6 +65,41 @@ export class ConversationLifecycleManager {
 	 */
 	setWorkflowPersonaRevert(previousPersona: string | null | undefined): void {
 		this.workflowPreviousPersona = previousPersona;
+	}
+
+	/**
+	 * Persist current stale tracker state to JSONL before leaving a conversation.
+	 */
+	private async persistStaleState(convManager: ConversationManager): Promise<void> {
+		const tracker = this.getStaleTracker?.();
+		if (!tracker) return;
+
+		const conversation = convManager.getActiveConversation();
+		if (!conversation) return;
+
+		const entries = tracker.serialize();
+		if (entries.length > 0) {
+			await this.historyManager.appendStaleState(conversation, entries);
+		}
+		tracker.clear();
+	}
+
+	/**
+	 * Restore stale tracker state from JSONL after loading a conversation.
+	 */
+	private async restoreStaleState(filename: string): Promise<void> {
+		const tracker = this.getStaleTracker?.();
+		if (!tracker) return;
+
+		try {
+			const rawContent = await this.historyManager.readRawFile(filename);
+			const entries = HistoryManager.extractStaleState(rawContent);
+			if (entries) {
+				tracker.restore(entries);
+			}
+		} catch {
+			// Non-fatal — stale state is best-effort
+		}
 	}
 
 	/**
@@ -197,6 +234,9 @@ export class ConversationLifecycleManager {
 		await this.maybeRevertWorkflowPersona();
 		if (signal?.aborted) return;
 
+		// Persist stale tracker state before leaving the current conversation
+		await this.persistStaleState(convManager);
+
 		// Save any unsent draft from the current conversation before leaving
 		await this.maybeSaveDraft(convManager, view);
 		if (signal?.aborted) return;
@@ -215,6 +255,9 @@ export class ConversationLifecycleManager {
 
 			// No active session — standard JSONL load path
 			convManager.loadConversation(conversation, historyMessages);
+
+			// Restore stale tracker state from JSONL (if persisted)
+			await this.restoreStaleState(filename);
 
 			view?.clearMessages();
 			for (const msg of historyMessages) {

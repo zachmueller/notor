@@ -8,3 +8,9 @@
 import { vi } from "vitest";
 
 export const requestUrl = vi.fn();
+
+export function getFrontMatterInfo(content: string): { exists: boolean; contentStart: number } {
+	const match = content.match(/^---\n[\s\S]*?\n---\n?/);
+	if (!match) return { exists: false, contentStart: 0 };
+	return { exists: true, contentStart: match[0].length };
+}

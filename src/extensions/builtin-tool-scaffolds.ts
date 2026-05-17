@@ -896,6 +896,12 @@ await app.fileManager.processFrontMatter(file, (frontmatter: any) => {
   }
 });
 
+// Update stale tracker so subsequent body-write tools don't false-positive
+try {
+  const updatedContent = await app.vault.read(file);
+  utils.staleTracker.updateAfterFrontmatterWrite(file.path, updatedContent);
+} catch { /* non-fatal */ }
+
 const setCount = set ? Object.keys(set).length : 0;
 const removeCount = remove ? remove.length : 0;
 const parts: string[] = [];
@@ -996,6 +1002,12 @@ await app.fileManager.processFrontMatter(file, (frontmatter: any) => {
     delete frontmatter["tags"];
   }
 });
+
+// Update stale tracker so subsequent body-write tools don't false-positive
+try {
+  const updatedContent = await app.vault.read(file);
+  utils.staleTracker.updateAfterFrontmatterWrite(file.path, updatedContent);
+} catch { /* non-fatal */ }
 
 const parts: string[] = [];
 if (actualAdded.length > 0) {

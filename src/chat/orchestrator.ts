@@ -45,6 +45,7 @@ import { ConversationSession } from "./conversation-session";
 import type { ApprovalCallback } from "./dispatcher";
 import type { ToolSessionContext } from "../tools/tool";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
+import type { StaleContentTracker } from "./stale-tracker";
 import { logger } from "../utils/logger";
 import { resolveNote } from "../utils/resolve-note";
 import { estimateTokenCount } from "../utils/tokens";
@@ -126,6 +127,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	private checkpointManager?: CheckpointManager;
 	private sharedCheckpointManagerGetter?: () => CheckpointManager | undefined;
+	private staleTrackerGetter?: () => StaleContentTracker;
 
 	/** Chat block registry — injected from main.ts for Phase 10 tool content_block bridging. */
 	private chatBlockRegistry?: ChatBlockRegistry;
@@ -300,6 +302,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			(persona) => { this.activePersona = persona; },
 			() => this.sharedCheckpointManagerGetter?.(),
 			(filename) => this.switchConversation(filename),
+			() => this.staleTrackerGetter?.(),
 		);
 		this.workflowExecutor = new WorkflowExecutor({
 			app: this.app,
@@ -467,6 +470,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 	setSharedCheckpointManager(getter: () => CheckpointManager | undefined): void {
 		this.sharedCheckpointManagerGetter = getter;
+	}
+
+	setStaleTracker(getter: () => StaleContentTracker): void {
+		this.staleTrackerGetter = getter;
 	}
 
 	/** Inject the ChatBlockRegistry for Phase 10 tool content_block → extension_block bridging. */

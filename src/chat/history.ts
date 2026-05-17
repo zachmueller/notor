@@ -211,6 +211,60 @@ export class HistoryManager {
 	}
 
 	/**
+	 * Append a stale state snapshot to the conversation's JSONL file.
+	 * Written as a `_type: "stale_state"` line, skipped by loadConversation().
+	 */
+	async appendStaleState(
+		conversation: Conversation,
+		entries: Array<{ note_path: string; body_hash: string; timestamp: string }>,
+	): Promise<void> {
+		if (entries.length === 0) return;
+
+		const filename = this.getFilename(conversation);
+		const filePath = this.getFilePath(filename);
+
+		const line = JSON.stringify({
+			_type: "stale_state",
+			entries,
+			written_at: new Date().toISOString(),
+		});
+
+		return this.enqueueWrite(filePath, async () => {
+			try {
+				const existing = await this.vault.adapter.read(filePath);
+				await this.vault.adapter.write(filePath, existing + line + "\n");
+			} catch {
+				log.warn("Failed to append stale state", {
+					conversationId: conversation.id,
+				});
+			}
+		});
+	}
+
+	/**
+	 * Extract the most recent stale_state entries from raw JSONL content.
+	 * Returns null if none exists (backward-compatible with older files).
+	 */
+	static extractStaleState(
+		rawContent: string,
+	): Array<{ note_path: string; body_hash: string; timestamp: string }> | null {
+		const lines = rawContent.split("\n");
+		for (let i = lines.length - 1; i >= 0; i--) {
+			const line = lines[i];
+			if (!line?.trim()) continue;
+			try {
+				const obj = JSON.parse(line);
+				if (obj._type === "stale_state") {
+					return obj.entries;
+				}
+			} catch {
+				// skip
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * Append a message to a conversation by ID, without requiring it to be active.
 	 *
 	 * Resolves the conversation ID to a JSONL filename via listConversations(),
@@ -432,6 +486,7 @@ export class HistoryManager {
 			if (!line) continue;
 			try {
 				const obj = JSON.parse(line);
+				if (obj._type && obj._type !== "message") continue;
 				const { _type: _msgType, ...messageData } = obj;
 				messages.push(messageData as Message);
 			} catch (e) {
@@ -449,6 +504,15 @@ export class HistoryManager {
 	// -----------------------------------------------------------------------
 	// Read operations
 	// -----------------------------------------------------------------------
+
+	/**
+	 * Read raw JSONL file content for a conversation filename.
+	 * Used by external callers that need to inspect non-message line types.
+	 */
+	async readRawFile(filename: string): Promise<string> {
+		const path = this.getFilePath(filename);
+		return this.vault.adapter.read(path);
+	}
 
 	/**
 	 * Load a conversation and all its messages from a JSONL file.
@@ -479,13 +543,14 @@ export class HistoryManager {
 		const { _type: _headerType, ...conversationData } = headerObj;
 		const conversation = conversationData as Conversation;
 
-		// Parse messages (remaining lines)
+		// Parse messages (remaining lines — skip non-message line types like stale_state)
 		const messages: Message[] = [];
 		for (let i = 1; i < lines.length; i++) {
 			const line = lines[i];
 			if (!line) continue;
 			try {
 				const obj = JSON.parse(line);
+				if (obj._type && obj._type !== "message") continue;
 				const { _type: _msgType, ...messageData } = obj;
 				messages.push(messageData as Message);
 			} catch (e) {
