@@ -60,6 +60,12 @@ Conversation history (JSONL files) and checkpoint snapshots are stored in your v
 
 If you edit a note directly in Obsidian while the AI has it queued for modification, Notor detects the conflict and fails the write. The AI is prompted to re-read the current content before retrying, preventing it from overwriting your changes with a stale version.
 
+### Frontmatter-aware detection
+
+The stale check uses a two-tier comparison: first an exact full-content match (fast path), then an MD5 body-hash fallback. This means frontmatter-only changes — such as those made by `update_frontmatter` or `manage_tags` — do not trigger false stale errors for subsequent body edits via `replace_in_note`. The AI can update metadata and body content in the same turn without needing to re-read between operations.
+
+Stale tracking state is persisted in the conversation's JSONL file and survives plugin reloads. When you resume a conversation, the tracker is restored so the AI can continue editing notes it previously read without re-reading them.
+
 ## Output spillover
 
 When a tool produces output exceeding the configured threshold (default: 50,000 characters), the excess is written to a temporary file and the truncated result includes a pointer to the spillover file path. This prevents excessively large tool results from overwhelming the LLM's context window.

@@ -266,12 +266,34 @@ Each line in a conversation JSONL file is a JSON object with the following struc
 
 ## Stale Content Check
 
-Before applying any write tool (`write_note`, `replace_in_note`, `update_frontmatter`, `manage_tags`), the plugin compares the note's current content against the content the AI last read via `read_note`. This requires tracking the last-read content per note path within a conversation.
+Before applying any write tool (`write_note`, `replace_in_note`), the plugin compares the note's current content against the content the AI last read via `read_note`. This requires tracking the last-read content per note path within a conversation.
 
 | Field | Type | Description |
 |---|---|---|
 | `note_path` | string | Vault-relative path |
 | `last_read_content` | string | Full content as returned by the last `read_note` call |
 | `last_read_timestamp` | string (ISO 8601) | When the content was last read |
+| `body_hash` | string? | MD5 hash of body content (after frontmatter). Computed lazily on first mismatch. |
 
-This data is held in memory per conversation (not persisted). If the note's current content differs from `last_read_content`, the write operation fails with a stale-content error and the AI is instructed to re-read the note.
+### Two-tier comparison
+
+The stale check uses a two-tier approach:
+
+1. **Fast path** — exact full-content string equality. If the content is identical, the note is fresh.
+2. **Body-hash fallback** — if full content differs, compute the MD5 hash of the body (everything after frontmatter). If body hashes match, the change was frontmatter-only and the note is considered fresh for body-writing tools.
+
+This prevents false-positive stale errors when `update_frontmatter` or `manage_tags` modify metadata before a subsequent `replace_in_note` call in the same conversation.
+
+### Frontmatter-aware tracker updates
+
+After `update_frontmatter` and `manage_tags` execute, the stale tracker updates its stored full content while preserving the body hash. This ensures the fast path passes on subsequent checks without requiring a re-read.
+
+### JSONL persistence
+
+Stale state is persisted as a `_type: "stale_state"` line in the conversation's JSONL file when switching away from a conversation. On conversation resume, the persisted body hashes are restored so the stale tracker can validate writes without requiring the AI to re-read all notes.
+
+| Line type field | Type | Description |
+|---|---|---|
+| `_type` | `"stale_state"` | Identifies the line type |
+| `entries` | array | Array of `{ note_path, body_hash, timestamp }` objects |
+| `written_at` | string (ISO 8601) | When the state was persisted |
