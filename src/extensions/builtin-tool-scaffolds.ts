@@ -3277,6 +3277,307 @@ return \`Setting updated: \${keyPath}\\n  Old: \${JSON.stringify(result.oldValue
 );
 
 // ---------------------------------------------------------------------------
+// list_templates
+// ---------------------------------------------------------------------------
+
+const LIST_TEMPLATES = scaffold(
+	"list_templates",
+	"List available templates from the configured template folder. Detects Templater prompt/suggester calls so the AI knows what answers to supply.",
+	"read",
+	`params:
+  detect_prompts:
+    type: boolean
+    description: "Scan templates for tp.system.prompt() and tp.system.suggester() calls and report their sequential order."
+    default: true`,
+	`const log = utils.logger("list_templates");
+
+const detectPrompts = params.detect_prompts !== false;
+
+// --- Detect template folder ---
+
+const templaterPlugin = app.plugins?.plugins?.["templater-obsidian"];
+const coreTemplates = app.internalPlugins?.getPluginById?.("templates");
+
+let templateFolder: string | null = null;
+let engine: "templater" | "core-templates" = "core-templates";
+
+if (templaterPlugin?.settings?.templates_folder) {
+  templateFolder = templaterPlugin.settings.templates_folder;
+  engine = "templater";
+} else if (coreTemplates?.instance?.options?.folder) {
+  templateFolder = coreTemplates.instance.options.folder;
+  engine = "core-templates";
+}
+
+if (!templateFolder) {
+  throw new Error(
+    "No template folder configured. " +
+    "Configure one in Templater settings (Settings → Templater → Template folder location) " +
+    "or core Templates settings (Settings → Templates → Template folder location)."
+  );
+}
+
+log.info("Listing templates", { engine, templateFolder });
+
+// --- List template files ---
+
+const normalizedFolder = templateFolder.replace(/\\/+$/, "");
+const allFiles = app.vault.getFiles();
+const templateFiles = allFiles.filter(
+  (f) => f.path.startsWith(normalizedFolder + "/") && f.extension === "md"
+);
+
+if (templateFiles.length === 0) {
+  return JSON.stringify({ engine, template_folder: templateFolder, templates: [] });
+}
+
+// --- Scan for prompts/suggestors ---
+
+const promptRegex = /tp\\.system\\.prompt\\(\\s*["'\`]([^"'\`]*)["'\`]/g;
+const suggesterRegex = /tp\\.system\\.suggester\\(\\s*\\[([^\\]]*)\\]/g;
+
+const templates = [];
+
+for (const file of templateFiles) {
+  const entry: any = {
+    name: file.basename,
+    path: file.path,
+  };
+
+  if (detectPrompts && engine === "templater") {
+    const content = await app.vault.read(file);
+    const prompts: any[] = [];
+    let idx = 0;
+
+    let match;
+    const lines = content.split("\\n");
+    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+      const line = lines[lineNum];
+
+      promptRegex.lastIndex = 0;
+      while ((match = promptRegex.exec(line)) !== null) {
+        prompts.push({ index: idx++, type: "prompt", label: match[1] || "" });
+      }
+
+      suggesterRegex.lastIndex = 0;
+      while ((match = suggesterRegex.exec(line)) !== null) {
+        const rawOptions = match[1];
+        const optionsPreview = rawOptions
+          .split(",")
+          .map((s) => s.trim().replace(/^["'\`]|["'\`]$/g, ""))
+          .filter(Boolean)
+          .slice(0, 5);
+        prompts.push({ index: idx++, type: "suggester", options_preview: optionsPreview });
+      }
+    }
+
+    if (prompts.length > 0) {
+      entry.prompts = prompts;
+    }
+  }
+
+  templates.push(entry);
+}
+
+return JSON.stringify({ engine, template_folder: templateFolder, templates }, null, 2);`,
+	"templates",
+);
+
+// ---------------------------------------------------------------------------
+// apply_template
+// ---------------------------------------------------------------------------
+
+const APPLY_TEMPLATE = scaffold(
+	"apply_template",
+	"Apply a template to create a new note. For Templater templates, automatically answers prompts and suggestors from ordered arrays.",
+	"write",
+	`params:
+  template_path:
+    type: string
+    description: "Path to the template file relative to vault root."
+    path_namespace: vault
+    path_resolve_as: note
+  output_folder:
+    type: string
+    description: "Target folder for the new note. If omitted, uses vault root or Templater's configured location."
+    default: ""
+  output_filename:
+    type: string
+    description: "Filename for the new note (without .md extension). If omitted, Templater decides or uses the template name."
+    default: ""
+  prompt_answers:
+    type: "string[]"
+    description: "Ordered array of answers for tp.system.prompt() calls. The Nth element answers the Nth prompt encountered during template execution."
+    default: []
+  suggester_answers:
+    type: "string[]"
+    description: "Ordered array of selected values for tp.system.suggester() calls. The Nth element selects the Nth suggester's choice. Match against display labels or raw values."
+    default: []
+settings:
+  templates_apply_timeout:
+    name: "Execution Timeout"
+    type: number
+    description: "Maximum seconds to wait for template execution before timing out."
+    default: 30
+    min: 5
+    max: 120`,
+	`const log = utils.logger("apply_template");
+
+// --- Resolve template file ---
+
+const templatePath = params.template_path as string;
+if (!templatePath) throw new Error("Missing required parameter: template_path");
+
+const templateFile = utils.resolveNote(templatePath);
+if (!templateFile) {
+  throw new Error(\`Template not found: \${templatePath}. Use list_templates to see available templates.\`);
+}
+
+// --- Detect engine ---
+
+const templaterPlugin = app.plugins?.plugins?.["templater-obsidian"];
+const hasTemplater = !!(templaterPlugin?.templater);
+
+const outputFolder = ((params.output_folder as string) || "").trim();
+const outputFilename = ((params.output_filename as string) || "").trim();
+const promptAnswers = [...((params.prompt_answers as string[]) || [])];
+const suggesterAnswers = [...((params.suggester_answers as string[]) || [])];
+const timeoutMs = ((settings.templates_apply_timeout as number) || 30) * 1000;
+
+log.info("Applying template", {
+  template: templateFile.path,
+  engine: hasTemplater ? "templater" : "core-templates",
+  outputFolder,
+  outputFilename,
+  promptCount: promptAnswers.length,
+  suggesterCount: suggesterAnswers.length,
+});
+
+// --- Execute with timeout ---
+
+const timeoutPromise = new Promise<never>((_, reject) =>
+  setTimeout(
+    () => reject(new Error(\`Template execution timed out after \${Math.round(timeoutMs / 1000)} seconds.\`)),
+    timeoutMs,
+  ),
+);
+
+const executionPromise = utils.queue.enqueue("template-apply", async () => {
+  if (hasTemplater) {
+    // === Templater engine ===
+    const templater = templaterPlugin.templater;
+    const intFn = templater.functions_generator?.internal_functions;
+    const modulesArray = intFn?.modules_array;
+    if (!modulesArray) {
+      throw new Error("Templater internal structure not accessible (modules_array missing). The Templater version may be incompatible.");
+    }
+
+    let systemModule: any = null;
+    for (let i = 0; i < modulesArray.length; i++) {
+      if (modulesArray[i].name === "system") {
+        systemModule = modulesArray[i];
+        break;
+      }
+    }
+    if (!systemModule?.static_object) {
+      throw new Error("Templater system module not found or not initialized. Try reloading the Templater plugin.");
+    }
+
+    const origPrompt = systemModule.static_object.prompt;
+    const origSuggester = systemModule.static_object.suggester;
+
+    const pQueue = [...promptAnswers];
+    const sQueue = [...suggesterAnswers];
+
+    systemModule.static_object.prompt = async (promptText?: string, defaultValue?: string) => {
+      const answer = pQueue.shift();
+      if (answer === undefined) {
+        throw new Error(
+          \`Template called tp.system.prompt("\${promptText ?? ""}") but no answer was provided. \` +
+          \`Supply more entries in prompt_answers (provided \${promptAnswers.length}, needed at least \${promptAnswers.length + 1}).\`
+        );
+      }
+      log.debug("Prompt intercepted", { promptText, answer });
+      return answer;
+    };
+
+    systemModule.static_object.suggester = async (textItems: any, items: any) => {
+      const answer = sQueue.shift();
+      if (answer === undefined) {
+        throw new Error(
+          \`Template called tp.system.suggester() but no answer was provided. \` +
+          \`Supply more entries in suggester_answers (provided \${suggesterAnswers.length}, needed at least \${suggesterAnswers.length + 1}).\`
+        );
+      }
+      log.debug("Suggester intercepted", { answer });
+
+      const valuesArr = Array.isArray(items) ? items : [items];
+      const displayArr = Array.isArray(textItems) ? textItems : [];
+
+      // Match against display labels first, then raw values
+      const displayIdx = displayArr.indexOf(answer);
+      if (displayIdx >= 0 && displayIdx < valuesArr.length) return valuesArr[displayIdx];
+
+      const valueIdx = valuesArr.indexOf(answer);
+      if (valueIdx >= 0) return valuesArr[valueIdx];
+
+      // No match — return the raw answer (template may use it as-is)
+      return answer;
+    };
+
+    try {
+      const folder = outputFolder
+        ? app.vault.getAbstractFileByPath(outputFolder)
+        : undefined;
+
+      const resultFile = await templater.create_new_note_from_template(
+        templateFile,
+        folder || undefined,
+        outputFilename || undefined,
+      );
+
+      const outputPath = resultFile?.path ?? "(created — path not returned)";
+
+      const warnings: string[] = [];
+      if (pQueue.length > 0) warnings.push(\`\${pQueue.length} unused prompt answer(s) — template may have fewer prompts than expected.\`);
+      if (sQueue.length > 0) warnings.push(\`\${sQueue.length} unused suggester answer(s) — template may have fewer suggestors than expected.\`);
+
+      const warningStr = warnings.length > 0 ? "\\nWarnings:\\n- " + warnings.join("\\n- ") : "";
+      return \`Template applied successfully via Templater.\\nCreated: \${outputPath}\${warningStr}\`;
+    } finally {
+      systemModule.static_object.prompt = origPrompt;
+      systemModule.static_object.suggester = origSuggester;
+    }
+  } else {
+    // === Core Templates fallback ===
+    const content = await app.vault.read(templateFile);
+    const now = new Date();
+    const title = outputFilename || templateFile.basename;
+
+    const dateStr = now.toISOString().split("T")[0];
+    const timeStr = now.toTimeString().split(" ")[0].slice(0, 5);
+
+    const processed = content
+      .replace(/\\{\\{date\\}\\}/g, dateStr)
+      .replace(/\\{\\{time\\}\\}/g, timeStr)
+      .replace(/\\{\\{title\\}\\}/g, title);
+
+    const outPath = outputFolder
+      ? \`\${outputFolder}/\${title}.md\`
+      : \`\${title}.md\`;
+
+    await utils.ensureDirectoryExists(outPath);
+    await app.vault.create(outPath, processed);
+
+    return \`Template applied via core Templates engine.\\nCreated: \${outPath}\`;
+  }
+});
+
+return await Promise.race([executionPromise, timeoutPromise]);`,
+	"templates",
+);
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -3315,6 +3616,8 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[SEARCH_CHAT_HISTORY.name, SEARCH_CHAT_HISTORY],
 		[READ_CHAT_HISTORY.name, READ_CHAT_HISTORY],
 		[CAPTURE_MEMORY.name, CAPTURE_MEMORY],
+		[LIST_TEMPLATES.name, LIST_TEMPLATES],
+		[APPLY_TEMPLATE.name, APPLY_TEMPLATE],
 		[WEBVIEW.name, WEBVIEW],
 		[READ_NOTOR_SETTINGS.name, READ_NOTOR_SETTINGS],
 		[EDIT_NOTOR_SETTINGS.name, EDIT_NOTOR_SETTINGS],

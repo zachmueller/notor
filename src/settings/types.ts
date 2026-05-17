@@ -441,6 +441,16 @@ export interface NotorSettings {
 	memory_approval_mode: "auto" | "bulk" | "bulk_and_inline";
 
 	// -------------------------------------------------------------------
+	// Templates Integration
+	// -------------------------------------------------------------------
+
+	/** Master toggle for the templates subsystem. When false, template tool scaffolds are excluded. */
+	templates_enabled: boolean;
+
+	/** Timeout in seconds for Templater template execution (default 30). */
+	templates_apply_timeout: number;
+
+	// -------------------------------------------------------------------
 	// Phase 12: Extension block rate limiting
 	// -------------------------------------------------------------------
 
