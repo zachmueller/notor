@@ -170,6 +170,16 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Browse the web via Obsidian's Web Viewer (navigate, read, click links). Desktop only.",
 		isWrite: true,
 	},
+	list_templates: {
+		name: "List templates",
+		desc: "List available templates from the configured template folder. Detects Templater prompt/suggester calls.",
+		isWrite: false,
+	},
+	apply_template: {
+		name: "Apply template",
+		desc: "Apply a template to create a new note. For Templater templates, automatically answers prompts and suggestors.",
+		isWrite: true,
+	},
 };
 
 // ---------------------------------------------------------------------------
