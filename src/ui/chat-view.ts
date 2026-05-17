@@ -8,42 +8,17 @@
  * @see design/ux.md — chat panel layout, message display
  */
 
-import { ItemView, MarkdownRenderer, Menu, Modal, Notice, setIcon, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Menu, Modal, Notice, setIcon, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
 import type { ConversationMode, Message, ModelInfo, ModelPreset, Checkpoint, Persona, TaskItem } from "../types";
 import type { Attachment } from "../context/attachment";
-import {
-	createVaultNoteAttachment,
-	createVaultNoteSectionAttachment,
-} from "../context/attachment";
 import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
 import { logger } from "../utils/logger";
 import { SettingsPopover } from "./settings-popover";
 import { ConversationList } from "./conversation-list";
-import {
-	renderWriteNoteDiffPreview,
-	renderReplaceInNoteDiffPreview,
-	type DiffRenderContext,
-} from "./diff-view";
-import {
-	VaultNoteSuggest,
-	createAttachmentButton,
-	getAbsoluteFilePath,
-	readExternalBinaryFile,
-	readExternalPdfFile,
-	IMAGE_EXTENSIONS,
-	PDF_EXTENSIONS,
-} from "./attachment-picker";
-import {
-	createExternalFileAttachment,
-	createExternalBinaryAttachment,
-	createExternalPdfAttachment,
-	readExternalFile,
-	isDuplicate,
-} from "../context/attachment";
-import { AttachmentChipManager, createAttachmentChipContainer } from "./attachment-chips";
-import { WorkflowSlashSuggest, detectSlashTrigger } from "./workflow-suggest";
+import { ChatInput } from "./chat-input";
+import { MessageRenderer } from "./message-renderer";
 import { resolveNote } from "../utils/resolve-note";
 import { findExistingLeaf } from "../tools/note-opener";
 import { WorkflowActivityIndicator } from "./workflow-activity-indicator";
@@ -51,11 +26,8 @@ import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tra
 import type { ConversationSession } from "../chat/conversation-session";
 import type { Workflow } from "../types";
 import { McpStatusIndicator } from "./mcp-status-indicator";
-import { getTextContent, type ContentBlock } from "../media/types";
-import { renderCollapsibleCard } from "./chat-blocks/collapsible-card";
+import { getTextContent } from "../media/types";
 import { FindInMessages } from "./find-in-messages";
-import { extractPopoverTags, stripPopoverTags, injectPopoverElements } from "./popover-refs";
-import { marked } from "marked";
 
 const log = logger("ChatView");
 
@@ -70,21 +42,6 @@ export interface ActiveConversationMeta {
 	is_favorite: boolean;
 }
 
-/**
- * Extract the `<attachments>…</attachments>` XML block from a message string.
- *
- * Returns the raw block and the remaining text (with leading/trailing whitespace
- * stripped). If no block is present, `attachmentsXml` is `null` and `remainder`
- * equals the original content unchanged.
- */
-function extractAttachmentsBlock(content: string): { attachmentsXml: string | null; remainder: string } {
-	const ATTACHMENTS_RE = /<attachments>([\s\S]*?)<\/attachments>/;
-	const match = ATTACHMENTS_RE.exec(content);
-	if (!match) return { attachmentsXml: null, remainder: content };
-	const attachmentsXml = match[0];
-	const remainder = (content.slice(0, match.index) + content.slice(match.index + match[0].length)).trim();
-	return { attachmentsXml, remainder };
-}
 
 /**
  * Chat panel ItemView for Notor.
@@ -100,42 +57,26 @@ export class NotorChatView extends ItemView {
 	// DOM elements
 	private headerEl!: HTMLElement;
 	private messageListEl!: HTMLElement;
-	private inputAreaEl!: HTMLElement;
-	private inputToolbarEl!: HTMLElement;
-	private resizeHandler?: () => void;
-	private userDragHeight: number | null = null;
-	private textInputEl!: HTMLDivElement;
-	private sendButtonEl!: HTMLButtonElement;
-	private stopButtonEl!: HTMLButtonElement;
-	private modeToggleEl!: HTMLButtonElement;
 	private conversationList?: ConversationList;
 	private taskPanelEl!: HTMLElement;
 	private taskPanelCollapsed = false;
 	private loadingIndicatorEl!: HTMLElement;
 	private tokenFooterEl!: HTMLElement;
-	private attachmentChipContainerEl!: HTMLElement;
+
+	// Extracted modules
+	private chatInput!: ChatInput;
+	private messageRenderer!: MessageRenderer;
 
 	// State
 	private isResponding = false;
 	private abortController: AbortController | null = null;
 	private showConversationList = false;
-	private lastToolCallEl: HTMLElement | null = null;
-	private streamRenderTimer: ReturnType<typeof setTimeout> | null = null;
-	private pendingStreamRender: { contentEl: HTMLElement; raw: string } | null = null;
-	/** Map of message IDs to their rendered tool call elements, for targeted approval. */
-	private toolCallElMap = new Map<string, HTMLElement>();
-	private renderedMessages = new Map<string, Message>();
-	/** Whether to auto-scroll to the bottom on new content. Set to false when the user scrolls up. */
 	private autoScroll = true;
 
-	// Attachment state
+	// Attachment state (parent-owned, accessed by ChatInput via deps)
 	private pendingAttachments: Attachment[] = [];
-	private attachmentChipManager!: AttachmentChipManager;
-	private vaultNoteSuggest?: VaultNoteSuggest;
-	private tokenObserver?: MutationObserver;
 
-	// Workflow slash-command state (E-010, E-012)
-	private workflowSuggest?: WorkflowSlashSuggest;
+	// Workflow state (parent-owned, accessed by ChatInput via deps)
 	private pendingWorkflow: Workflow | null = null;
 	private getWorkflowsCallback?: () => Workflow[];
 
@@ -329,10 +270,12 @@ export class NotorChatView extends ItemView {
 
 	setOnSendMessage(callback: (content: string, attachments?: Attachment[]) => Promise<void>): void {
 		this.onSendMessage = callback;
+		if (this.chatInput) this.chatInput.deps.onSendMessage = callback;
 	}
 
 	setOnStopResponse(callback: () => void): void {
 		this.onStopResponse = callback;
+		if (this.chatInput) this.chatInput.deps.onStopResponse = callback;
 	}
 
 	setOnNewConversation(callback: () => void): void {
@@ -413,6 +356,7 @@ export class NotorChatView extends ItemView {
 
 	setOnModeToggle(callback: (mode: ConversationMode) => void): void {
 		this.onModeToggle = callback;
+		if (this.chatInput) this.chatInput.deps.onModeToggle = callback;
 	}
 
 	setOnSettingsOpen(callback: () => void): void {
@@ -528,6 +472,7 @@ export class NotorChatView extends ItemView {
 
 	setOnForkToNewPanel(callback: (messageId: string | undefined, initialText?: string) => Promise<void>): void {
 		this.onForkToNewPanel = callback;
+		if (this.chatInput) this.chatInput.deps.onForkToNewPanel = callback;
 	}
 
 	setOnOpenInNewTab(callback: (filename: string) => void): void {
@@ -537,6 +482,7 @@ export class NotorChatView extends ItemView {
 
 	setOnOpenSettingsGroup(callback: (groupTitle: string, subsection?: string) => void): void {
 		this.onOpenSettingsGroup = callback;
+		if (this.messageRenderer) this.messageRenderer.deps.onOpenSettingsGroup = callback;
 	}
 
 	setOnCloseCleanup(callback: () => Promise<void>): void {
@@ -576,6 +522,7 @@ export class NotorChatView extends ItemView {
 	 */
 	setOnSendWorkflow(callback: (workflow: Workflow, supplementaryText: string) => Promise<void>): void {
 		this.onSendWorkflow = callback;
+		if (this.chatInput) this.chatInput.deps.onSendWorkflow = callback;
 	}
 
 	// -----------------------------------------------------------------------
@@ -749,7 +696,7 @@ export class NotorChatView extends ItemView {
 		if (!this.personaLabelEl) {
 			// Create the label element if it doesn't exist yet.
 			// Inserted into the toolbar row, after the mode toggle.
-			const toolbar = this.inputToolbarEl ?? this.inputAreaEl;
+			const toolbar = this.chatInput?.getToolbarEl() ?? this.chatInput?.getInputAreaEl();
 			if (toolbar) {
 				this.personaLabelEl = toolbar.createDiv({
 					cls: "notor-persona-label",
@@ -923,7 +870,45 @@ export class NotorChatView extends ItemView {
 		this.initConversationList(container);
 		this.buildTaskPanel(container);
 		this.buildMessageList(container);
-		this.buildInputArea(container);
+
+		// Initialize MessageRenderer
+		this.messageRenderer = new MessageRenderer({
+			getMessageListEl: () => this.messageListEl,
+			getTokenFooterEl: () => this.tokenFooterEl,
+			app: this.app,
+			component: this,
+			getSettings: () => this.plugin.settings,
+			getChatBlockRegistry: () => this.plugin.getChatBlockRegistry(),
+			getPendingMemoryManager: () => this.plugin.getPendingMemoryManager(),
+			scrollToBottom: () => this.scrollToBottom(),
+			openInternalLink: (href) => this.openInternalLink(href),
+			openChatInNewTab: (filename, createNew, initialText, conversationId) => this.plugin.openChatInNewTab(filename, createNew, initialText, conversationId),
+			onOpenSettingsGroup: this.onOpenSettingsGroup,
+		});
+
+		// Initialize ChatInput
+		this.chatInput = new ChatInput({
+			container,
+			app: this.app,
+			getSettings: () => this.plugin.settings,
+			getIsResponding: () => this.isResponding,
+			getPendingAttachments: () => this.pendingAttachments,
+			setPendingAttachments: (v) => { this.pendingAttachments = v; },
+			getPendingWorkflow: () => this.pendingWorkflow,
+			setPendingWorkflow: (v) => { this.pendingWorkflow = v; },
+			setAutoScroll: (v) => { this.autoScroll = v; },
+			getAbortController: () => this.abortController,
+			getMessageListEl: () => this.messageListEl,
+			getLoadingIndicatorEl: () => this.loadingIndicatorEl,
+			getWorkflows: () => this.getWorkflowsCallback?.() ?? [],
+			isActiveLeaf: () => this.app.workspace.activeLeaf === this.leaf,
+			onSendMessage: this.onSendMessage,
+			onStopResponse: this.onStopResponse,
+			onSendWorkflow: this.onSendWorkflow,
+			onModeToggle: this.onModeToggle,
+			onForkToNewPanel: this.onForkToNewPanel,
+		});
+		this.chatInput.build();
 
 		this.findInMessages = new FindInMessages(container, this.messageListEl, {
 			onClose: () => {},
@@ -953,15 +938,8 @@ export class NotorChatView extends ItemView {
 
 		this.abortController?.abort();
 
-		// Disconnect the inline token mutation observer
-		this.tokenObserver?.disconnect();
-		this.tokenObserver = undefined;
-
-		// Clean up window resize listener
-		if (this.resizeHandler) {
-			window.removeEventListener("resize", this.resizeHandler);
-			this.resizeHandler = undefined;
-		}
+		// Clean up ChatInput (observer + resize listener)
+		this.chatInput?.destroy();
 
 		// H-002: Clean up workflow activity indicator DOM and callbacks
 		this.workflowActivityIndicator?.destroy();
@@ -1149,7 +1127,7 @@ export class NotorChatView extends ItemView {
 			onDirectRename: this.onDirectRename,
 			getActiveConversationMeta: this.getActiveConversationMeta,
 			openChatInNewTab: (_conv, newPanel) => this.plugin.openChatInNewTab(undefined, newPanel),
-			focusInput: () => this.textInputEl.focus(),
+			focusInput: () => this.chatInput?.focus(),
 		});
 		this.conversationList.build();
 	}
@@ -1222,7 +1200,7 @@ export class NotorChatView extends ItemView {
 				this.conversationList?.toggle();
 			}
 			this.onNewConversation?.();
-			this.textInputEl.focus();
+			this.chatInput?.focus();
 		});
 
 		// Right-click: show context menu with "current panel" vs "new panel" options
@@ -1300,7 +1278,7 @@ export class NotorChatView extends ItemView {
 			let hasItems = false;
 
 			if (messageId) {
-				const message = this.renderedMessages.get(messageId);
+				const message = this.messageRenderer.getRenderedMessage(messageId);
 				if (message) {
 					menu.addItem((item) => {
 						item.setTitle("Copy message contents")
@@ -1383,950 +1361,135 @@ export class NotorChatView extends ItemView {
 		});
 	}
 
-	/**
-	 * Recalculate the text input height. The input grows to fit its content up
-	 * to the greater of 10% of the window height or 3 full lines of text.
-	 * When the user has manually dragged the resize handle, their chosen
-	 * height is used as the minimum (content can still push beyond it).
-	 */
-	private recalcInputHeight(): void {
-		this.textInputEl.setCssProps({ '--notor-input-height': 'auto' });
-		const lineHeight = parseFloat(getComputedStyle(this.textInputEl).lineHeight) || 20;
-		const padding = 12 + 2; // 6px top + 6px bottom padding + 2px border
 
-		const maxLines = this.plugin.settings.chat_input_max_lines;
-		const linesH = (lineHeight * maxLines) + padding;
 
-		if (this.userDragHeight !== null) {
-			// User has manually set the height — use it as minimum, but still
-			// allow auto-expand if content exceeds it
-			const newHeight = Math.max(this.userDragHeight, this.textInputEl.scrollHeight);
-			this.textInputEl.setCssProps({
-				'--notor-input-height': newHeight + 'px',
-				'--notor-input-max-height': newHeight + 'px',
-			});
-			return;
-		}
-
-		const pctH = window.innerHeight * (this.plugin.settings.chat_input_max_height_pct / 100);
-		const maxH = Math.max(pctH, linesH);
-		const newHeight = Math.min(this.textInputEl.scrollHeight, maxH);
-		this.textInputEl.setCssProps({
-			'--notor-input-height': newHeight + 'px',
-			'--notor-input-max-height': maxH + 'px',
-		});
-	}
-
-	/**
-	 * Wire up pointer events on the resize handle so the user can
-	 * drag-resize the input height vertically. Dragging up increases
-	 * height; dragging down decreases it (clamped to a 3-line minimum).
-	 */
-	private setupInputResizeHandle(handle: HTMLElement): void {
-		handle.addEventListener("pointerdown", (startEvent) => {
-			startEvent.preventDefault();
-			const startY = startEvent.clientY;
-			const startHeight = this.textInputEl.getBoundingClientRect().height;
-			const lineHeight = parseFloat(getComputedStyle(this.textInputEl).lineHeight) || 20;
-			const padding = 12 + 2;
-			const minHeight = (lineHeight * this.plugin.settings.chat_input_max_lines) + padding;
-
-			const onPointerMove = (moveEvent: PointerEvent) => {
-				// Handle is above the input: dragging up (negative deltaY) increases height
-				const deltaY = startY - moveEvent.clientY;
-				const newHeight = Math.max(minHeight, startHeight + deltaY);
-				this.userDragHeight = newHeight;
-				this.textInputEl.setCssProps({
-					'--notor-input-height': newHeight + 'px',
-					'--notor-input-max-height': newHeight + 'px',
-				});
-			};
-
-			const onPointerUp = () => {
-				document.removeEventListener("pointermove", onPointerMove);
-				document.removeEventListener("pointerup", onPointerUp);
-			};
-
-			document.addEventListener("pointermove", onPointerMove);
-			document.addEventListener("pointerup", onPointerUp);
-		});
-	}
-
-	private buildInputArea(container: HTMLElement): void {
-		this.inputAreaEl = container.createDiv({ cls: "notor-input-area" });
-
-		// Resize handle — allows the user to drag-resize the input height
-		const resizeHandle = this.inputAreaEl.createDiv({ cls: "notor-input-resize-handle" });
-		this.setupInputResizeHandle(resizeHandle);
-
-		// Text input wrapper (full width, above toolbar)
-		const inputWrapper = this.inputAreaEl.createDiv({ cls: "notor-input-wrapper" });
-
-		// Attachment chip container (above the text input)
-		this.attachmentChipContainerEl = createAttachmentChipContainer(inputWrapper);
-		this.attachmentChipManager = new AttachmentChipManager(
-			this.attachmentChipContainerEl,
-			(attachmentId: string) => this.removeAttachment(attachmentId)
-		);
-
-		// contenteditable div — required for AbstractInputSuggest<T> attachment
-		// autocomplete (see R-1 findings). Replaces the former <textarea>.
-		this.textInputEl = inputWrapper.createDiv({
-			cls: "notor-text-input",
-			attr: {
-				contenteditable: "true",
-				role: "textbox",
-				"aria-multiline": "true",
-				"aria-label": "Ask Notor...",
-				"data-placeholder": "Ask Notor...",
-			},
-		});
-
-		// Auto-resize contenteditable div
-		this.textInputEl.addEventListener("paste", () => {
-			// paste fires before clipboard content is committed to the DOM;
-			// defer one tick so scrollHeight reflects the pasted content.
-			setTimeout(() => this.recalcInputHeight(), 0);
-		});
-		this.textInputEl.addEventListener("input", () => {
-			this.recalcInputHeight();
-
-			// Detect `[[` trigger for vault note autocomplete
-			this.detectWikilinkTrigger();
-
-			// Detect `/` trigger for workflow slash-command autocomplete (E-012)
-			this.detectSlashCommandTrigger();
-		});
-
-		// Recalculate max height when the window is resized
-		this.resizeHandler = () => this.recalcInputHeight();
-		window.addEventListener("resize", this.resizeHandler);
-
-		// Enter to send, Shift+Enter for newline; Tab to select workflow or note suggestion (E-012)
-		this.textInputEl.addEventListener("keydown", (e) => {
-			if (e.key === "Enter" && !e.shiftKey) {
-				e.preventDefault();
-				if (this.tryHandleBtw()) return;
-				void this.handleSend();
-			} else if (e.key === "Tab") {
-				if (this.workflowSuggest?.active) {
-					e.preventDefault();
-					this.workflowSuggest.selectFirst();
-				} else if (this.vaultNoteSuggest?.active) {
-					e.preventDefault();
-					this.vaultNoteSuggest.selectFirst();
-				}
-			} else if (e.key === "ArrowDown") {
-				// Shadow-track arrow navigation so Tab picks the highlighted item.
-				// Do NOT preventDefault — Obsidian's scope must also receive it for visual highlight.
-				if (this.workflowSuggest?.active) {
-					log.debug("ChatView keydown ArrowDown → workflowSuggest.navigateSelection");
-					this.workflowSuggest.navigateSelection(1);
-				} else if (this.vaultNoteSuggest?.active) {
-					log.debug("ChatView keydown ArrowDown → vaultNoteSuggest.navigateSelection");
-					this.vaultNoteSuggest.navigateSelection(1);
-				}
-			} else if (e.key === "ArrowUp") {
-				if (this.workflowSuggest?.active) {
-					log.debug("ChatView keydown ArrowUp → workflowSuggest.navigateSelection");
-					this.workflowSuggest.navigateSelection(-1);
-				} else if (this.vaultNoteSuggest?.active) {
-					log.debug("ChatView keydown ArrowUp → vaultNoteSuggest.navigateSelection");
-					this.vaultNoteSuggest.navigateSelection(-1);
-				}
-			}
-		});
-
-		// Force plain-text pastes so rich-text content cannot pollute the input
-		// (required since we removed -webkit-user-modify: read-write-plaintext-only
-		// to allow contenteditable="false" spans to behave as atomic units).
-		// If the pasted text contains an inline workflow reference (/name or /name.md)
-		// that exactly matches a known workflow, convert it to a workflow token.
-		this.textInputEl.addEventListener("paste", (e) => {
-			e.preventDefault();
-			const text = e.clipboardData?.getData("text/plain") ?? "";
-			if (!this.textInputEl.querySelector("[data-workflow-path]")) {
-				if (this.tryInsertPastedWorkflowToken(text)) return;
-			}
-			this.insertTextAtCursor(text);
-		});
-
-		// Collect all Elements with data-attachment-id at or under a given node.
-		const collectTokenElements = (node: Node): Element[] => {
-			const results: Element[] = [];
-			if (node instanceof Element) {
-				if (node.hasAttribute("data-attachment-id")) results.push(node);
-				node
-					.querySelectorAll("[data-attachment-id]")
-					.forEach((el) => results.push(el));
-			}
-			return results;
-		};
-
-		// Collect all Elements with data-workflow-path at or under a given node.
-		const collectWorkflowTokenElements = (node: Node): Element[] => {
-			const results: Element[] = [];
-			if (node instanceof Element) {
-				if (node.hasAttribute("data-workflow-path")) results.push(node);
-				node
-					.querySelectorAll("[data-workflow-path]")
-					.forEach((el) => results.push(el));
-			}
-			return results;
-		};
-
-		// Watch for inline wikilink token spans being added or removed.
-		//
-		// Removal (Backspace / Delete): remove the attachment from pendingAttachments.
-		//
-		// Addition (Undo after deletion): the browser restores the span to the DOM
-		// but pendingAttachments was already cleared — reconstruct the attachment
-		// from the metadata attributes stored on the span and re-add it.
-		// The dedup check (some(a => a.id === id)) prevents double-adding on the
-		// normal insertion path, where addWikilinkAttachment() fires synchronously
-		// before this microtask observer callback runs.
-		//
-		// Workflow tokens (data-workflow-path) are also handled here: removal clears
-		// pendingWorkflow; addition (undo) looks up the workflow by path and re-attaches.
-		this.tokenObserver = new MutationObserver((mutations) => {
-			for (const mutation of mutations) {
-				for (const removed of Array.from(mutation.removedNodes)) {
-					for (const el of collectTokenElements(removed)) {
-						const id = el.getAttribute("data-attachment-id");
-						if (id) {
-							this.pendingAttachments = this.pendingAttachments.filter(
-								(a) => a.id !== id
-							);
-						}
-					}
-					for (const el of collectWorkflowTokenElements(removed)) {
-						if (el.hasAttribute("data-workflow-path")) {
-							this.removeWorkflow();
-						}
-					}
-				}
-				for (const added of Array.from(mutation.addedNodes)) {
-					for (const el of collectTokenElements(added)) {
-						const id = el.getAttribute("data-attachment-id");
-						const path = el.getAttribute("data-attachment-path");
-						const type = el.getAttribute("data-attachment-type");
-						const section = el.getAttribute("data-attachment-section");
-						if (!id || !path || !type) continue;
-						// Already tracked — normal insertion path, skip.
-						if (this.pendingAttachments.some((a) => a.id === id)) continue;
-						// Undo path: reconstruct and re-add with the original id.
-						const attachment =
-							type === "vault_note_section" && section
-								? createVaultNoteSectionAttachment(path, section)
-								: createVaultNoteAttachment(path);
-						attachment.id = id;
-						this.pendingAttachments.push(attachment);
-					}
-					for (const el of collectWorkflowTokenElements(added)) {
-						const workflowPath = el.getAttribute("data-workflow-path");
-						if (!workflowPath) continue;
-						// Already tracked — normal insertion path (attachWorkflow fires
-						// synchronously before this observer callback), skip.
-						if (this.pendingWorkflow?.file_path === workflowPath) continue;
-						// Undo path: look up the workflow by path and re-attach.
-						const workflow = this.getWorkflowsCallback?.().find(
-							(w) => w.file_path === workflowPath
-						);
-						if (workflow) this.attachWorkflow(workflow);
-					}
-				}
-			}
-		});
-		this.tokenObserver.observe(this.textInputEl, {
-			childList: true,
-			subtree: true,
-		});
-
-		// Initialize vault note suggest (lazy — created once, reused).
-		// Uses addWikilinkAttachment (no chip — token is rendered inline).
-		this.vaultNoteSuggest = new VaultNoteSuggest(
-			this.app,
-			this.textInputEl,
-			(attachment: Attachment) => this.addWikilinkAttachment(attachment),
-			() => this.pendingAttachments
-		);
-
-		// Initialize workflow slash suggest (E-010, E-012)
-		this.workflowSuggest = new WorkflowSlashSuggest(
-			this.app,
-			this.textInputEl,
-			(workflow: Workflow) => this.attachWorkflow(workflow),
-			() => this.getWorkflowsCallback?.() ?? []
-		);
-
-		// Toolbar row below the input (mode toggle left, buttons right)
-		this.inputToolbarEl = this.inputAreaEl.createDiv({ cls: "notor-input-toolbar" });
-
-		// Mode toggle (left side of toolbar)
-		this.modeToggleEl = this.inputToolbarEl.createEl("button", {
-			cls: "notor-mode-toggle notor-mode-plan",
-			text: "Plan",
-			attr: { "aria-label": "Toggle plan/act mode" },
-		});
-		this.modeToggleEl.addEventListener("click", () => this.handleModeToggle());
-
-		// Button wrapper (right side of toolbar)
-		const buttonWrapper = this.inputToolbarEl.createDiv({ cls: "notor-input-buttons" });
-
-		// Attachment button
-		createAttachmentButton(
-			buttonWrapper,
-			this.app,
-			this.textInputEl,
-			(attachment: Attachment) => this.addAttachment(attachment),
-			() => this.pendingAttachments,
-			this.plugin.settings.external_file_size_threshold_mb,
-			this.plugin.settings,
-		);
-
-		// Send button
-		this.sendButtonEl = buttonWrapper.createEl("button", {
-			cls: "notor-send-btn",
-			attr: { "aria-label": "Send message" },
-		});
-		setIcon(this.sendButtonEl, "send");
-		this.sendButtonEl.addEventListener("click", () => {
-			if (this.tryHandleBtw()) return;
-			void this.handleSend();
-		});
-
-		// Stop button (hidden by default)
-		this.stopButtonEl = buttonWrapper.createEl("button", {
-			cls: "notor-stop-btn notor-hidden",
-			attr: { "aria-label": "Stop response" },
-		});
-		setIcon(this.stopButtonEl, "octagon-pause");
-		this.stopButtonEl.addEventListener("click", () => this.handleStop());
-
-		// Drag-and-drop support for images and PDFs
-		this.setupDragAndDrop();
-	}
-
-	/**
-	 * Set up drag-and-drop handlers on the input area for images, PDFs, and text files.
-	 */
-	private setupDragAndDrop(): void {
-		let dragCounter = 0;
-
-		this.inputAreaEl.addEventListener("dragover", (e) => {
-			e.preventDefault();
-			if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-		});
-
-		this.inputAreaEl.addEventListener("dragenter", (e) => {
-			e.preventDefault();
-			dragCounter++;
-			if (dragCounter === 1) {
-				this.inputAreaEl.addClass("notor-drop-active");
-			}
-		});
-
-		this.inputAreaEl.addEventListener("dragleave", (e) => {
-			e.preventDefault();
-			dragCounter--;
-			if (dragCounter === 0) {
-				this.inputAreaEl.removeClass("notor-drop-active");
-			}
-		});
-
-		this.inputAreaEl.addEventListener("drop", (e) => {
-			e.preventDefault();
-			dragCounter = 0;
-			this.inputAreaEl.removeClass("notor-drop-active");
-
-			const files = Array.from(e.dataTransfer?.files ?? []);
-			if (files.length === 0) return;
-
-			const settings = this.plugin.settings;
-			const existing = this.pendingAttachments;
-
-			for (const file of files) {
-				const absolutePath = getAbsoluteFilePath(file);
-				if (!absolutePath) {
-					new Notice(`Cannot read file path for: ${file.name}`);
-					continue;
-				}
-
-				if (isDuplicate(existing, { path: absolutePath })) {
-					new Notice(`Already attached: ${file.name}`);
-					continue;
-				}
-
-				const ext = "." + (file.name.split(".").pop()?.toLowerCase() ?? "");
-
-				if (IMAGE_EXTENSIONS.has(ext)) {
-					void (async () => {
-						try {
-							const result = await readExternalBinaryFile(absolutePath, settings);
-							if (!result) {
-								new Notice(`Failed to process image: ${file.name}`);
-								return;
-							}
-							const att = createExternalBinaryAttachment(
-								absolutePath,
-								file.name,
-								result.base64,
-								result.mediaType,
-								result.width,
-								result.height,
-							);
-							this.addAttachment(att);
-						} catch (err) {
-							const msg = err instanceof Error ? err.message : String(err);
-							new Notice(`Failed to process image ${file.name}: ${msg}`);
-						}
-					})();
-				} else if (PDF_EXTENSIONS.has(ext)) {
-					void (async () => {
-						try {
-							const result = await readExternalPdfFile(absolutePath);
-							if (!result) {
-								new Notice(`Failed to process PDF: ${file.name}`);
-								return;
-							}
-							const att = createExternalPdfAttachment(
-								absolutePath,
-								file.name,
-								result.base64,
-								result.pageCount,
-								result.extractedText,
-								result.extractedImages,
-							);
-							this.addAttachment(att);
-						} catch (err) {
-							const msg = err instanceof Error ? err.message : String(err);
-							new Notice(`Failed to process PDF ${file.name}: ${msg}`);
-						}
-					})();
-				} else {
-					// Text file
-					const result = readExternalFile(
-						absolutePath,
-						file.name,
-						settings.external_file_size_threshold_mb,
-					);
-					if (!result.success) {
-						new Notice(result.error ?? `Failed to read file: ${file.name}`);
-						continue;
-					}
-					const att = createExternalFileAttachment(absolutePath, file.name, result.content!);
-					this.addAttachment(att);
-				}
-			}
-		});
-	}
 
 	// -----------------------------------------------------------------------
-	// User interactions
+	// Public UI update methods — delegated to ChatInput / MessageRenderer
 	// -----------------------------------------------------------------------
 
-	/**
-	 * Check if the input starts with `/btw` and handle it as a fork-to-new-panel.
-	 * Returns true if handled (caller should return early).
-	 */
-	private tryHandleBtw(): boolean {
-		const content = this.getInputContentExcludingWorkflowToken();
-		const match = content.match(/^\/btw(?:\s+([\s\S]*))?$/i);
-		if (!match) return false;
-
-		const initialText = match[1]?.trim() || undefined;
-		this.textInputEl.textContent = "";
-		this.onForkToNewPanel?.(undefined, initialText);
-		return true;
-	}
-
-	private async handleSend(): Promise<void> {
-		if (this.isResponding) return;
-
-		// Re-engage auto-scroll for the new exchange so the user sees the response as it streams in.
-		this.autoScroll = true;
-
-		// Capture pending workflow before clearing state (E-012)
-		const pendingWorkflow = this.pendingWorkflow;
-
-		// Supplementary text is the input content minus the inline workflow token text.
-		// (The workflow token span is contenteditable=false so its text is included
-		// in textContent — we exclude it so the executor receives only what the user typed.)
-		const content = this.getInputContentExcludingWorkflowToken();
-
-		// Guard: no content AND no workflow AND no attachments
-		if (!content && this.pendingAttachments.length === 0 && !pendingWorkflow) return;
-
-		// Capture and clear attachments before sending
-		const attachments = [...this.pendingAttachments];
-		this.pendingAttachments = [];
-		this.attachmentChipManager.clear();
-
-		// Clear workflow state (E-012) — token is removed when textContent is cleared below
-		this.pendingWorkflow = null;
-
-		this.textInputEl.textContent = "";
-		this.userDragHeight = null;
-		this.textInputEl.setCssProps({ '--notor-input-height': 'auto', '--notor-input-max-height': '' });
-
-		try {
-			if (pendingWorkflow && this.onSendWorkflow) {
-				// Route to the workflow execution path (E-012, E-013)
-				await this.onSendWorkflow(pendingWorkflow, content);
-			} else {
-				await this.onSendMessage?.(content, attachments);
-			}
-		} catch (e) {
-			log.error("Send message failed", { error: String(e) });
-			new Notice(`Failed to send message: ${e instanceof Error ? e.message : String(e)}`);
-		}
-	}
-
-	private handleStop(): void {
-		this.abortController?.abort();
-		this.onStopResponse?.();
-		// Do NOT call setRespondingState(false) here — the finally block in
-		// orchestrator.handleUserMessage() already does this after the response
-		// loop fully completes (including storing the cancelled assistant message).
-		// Calling it here re-enables input before the cancellation is processed,
-		// creating a race where the next user message can be inserted before the
-		// cancelled assistant message is stored.
-
-		// Clean up any pending approval prompts so the user gets visual feedback
-		// that the cancel took effect. The abort signal will resolve the approval
-		// Promise via Promise.race in the callback, but the DOM elements linger.
-		this.messageListEl.querySelectorAll(".notor-approval-prompt").forEach((el) => el.remove());
-	}
-
-	private handleModeToggle(): void {
-		const currentMode = this.modeToggleEl.textContent?.toLowerCase() as ConversationMode;
-		const newMode: ConversationMode = currentMode === "plan" ? "act" : "plan";
-		this.updateModeDisplay(newMode);
-		this.onModeToggle?.(newMode);
-	}
-
-	// -----------------------------------------------------------------------
-	// Public UI update methods (called by orchestrator)
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Set whether the AI is currently responding.
-	 * Controls send/stop button visibility and input state.
-	 */
-	/** Pre-fill the input box with text (used by /btw auto-send and draft restore). */
 	setInputText(text: string): void {
-		this.textInputEl.textContent = text;
-		this.recalcInputHeight();
+		this.chatInput.setInputText(text);
 	}
 
-	/** Return the current raw text content of the input box. */
 	getInputText(): string {
-		return this.textInputEl.textContent ?? "";
+		return this.chatInput.getInputText();
 	}
 
-	/** Programmatically trigger a send (used after setInputText for /btw auto-send). */
 	triggerSend(): void {
-		void this.handleSend();
+		this.chatInput.triggerSend();
 	}
 
 	setRespondingState(responding: boolean): void {
 		this.isResponding = responding;
-
-		if (responding) {
-			this.sendButtonEl.addClass("notor-hidden");
-			this.stopButtonEl.removeClass("notor-hidden");
-			// Input stays editable so the user can type /btw during streaming.
-			// The isResponding guard in handleSend() blocks normal sends.
-			this.loadingIndicatorEl.removeClass("notor-hidden");
-		} else {
-			this.sendButtonEl.removeClass("notor-hidden");
-			this.stopButtonEl.addClass("notor-hidden");
-			this.loadingIndicatorEl.addClass("notor-hidden");
-			if (this.app.workspace.activeLeaf === this.leaf) {
-				this.textInputEl.focus();
-			}
-		}
+		this.chatInput.setRespondingState(responding);
 	}
 
-	/**
-	 * Update the mode toggle display.
-	 */
 	updateModeDisplay(mode: ConversationMode): void {
-		this.modeToggleEl.textContent = mode === "plan" ? "Plan" : "Act";
-		this.modeToggleEl.removeClass("notor-mode-plan", "notor-mode-act");
-		this.modeToggleEl.addClass(mode === "plan" ? "notor-mode-plan" : "notor-mode-act");
+		this.chatInput.updateModeDisplay(mode);
 	}
 
 	appendForkButton(msgEl: HTMLElement, message?: Message): void {
-		if (message) {
-			this.renderedMessages.set(message.id, message);
-		}
-		const btn = msgEl.createDiv({ cls: "notor-copy-btn" });
-		setIcon(btn, "copy");
-		btn.ariaLabel = "Copy message contents";
-		btn.addEventListener("click", (e) => {
-			e.stopPropagation();
-			const messageId = msgEl.dataset.messageId;
-			if (!messageId) return;
-			const msg = this.renderedMessages.get(messageId);
-			if (!msg) return;
-			void navigator.clipboard.writeText(getTextContent(msg.content)).then(() => {
-				new Notice("Copied");
-			});
-		});
+		this.messageRenderer.appendForkButton(msgEl, message);
 	}
 
-	/**
-	 * Render a user message in the message list.
-	 *
-	 * Hook injection messages (identified by `is_hook_injection`) are
-	 * rendered via {@link renderHookInjection} instead.
-	 *
-	 * Workflow messages (identified by `is_workflow_message`) render any
-	 * `<workflow_instructions type="…">…</workflow_instructions>` block as a
-	 * collapsed `<details>` element (E-014). Text outside the tag — such as
-	 * supplementary user text after the closing tag — is rendered normally as
-	 * a paragraph below the details element.
-	 *
-	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-014
-	 */
 	renderUserMessage(message: Message): void {
-		if (message.is_hook_injection) {
-			this.renderHookInjection(message);
-			return;
-		}
-
-		const msgEl = this.messageListEl.createDiv({ cls: "notor-message notor-message-user" });
-		msgEl.dataset.messageId = message.id;
-		this.appendForkButton(msgEl, message);
-		const contentEl = msgEl.createDiv({ cls: "notor-message-content" });
-
-		// Extract <attachments> block (if any) and render as collapsed <details>
-		const textContent = getTextContent(message.content);
-		const { attachmentsXml, remainder } = extractAttachmentsBlock(textContent);
-		if (attachmentsXml !== null) {
-			this.renderAttachmentsBlock(contentEl, attachmentsXml);
-		}
-		const textToRender = attachmentsXml !== null ? remainder : textContent;
-
-		// E-014: Detect <workflow_instructions> block and render as collapsible <details>
-		if (message.is_workflow_message) {
-			this.renderWorkflowMessage(contentEl, textToRender);
-		} else if (textToRender) {
-			contentEl.createEl("p", { text: textToRender });
-		}
-
-		this.scrollToBottom();
+		this.messageRenderer.renderUserMessage(message);
 	}
 
-	/**
-	 * Render a workflow message with the `<workflow_instructions>` block as a
-	 * collapsed `<details>` element and any supplementary text as a paragraph.
-	 *
-	 * Regex: `/<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/`
-	 *
-	 * - If the regex matches, the matched block is rendered as `<details>`.
-	 * - Text before the opening tag (e.g. `<trigger_context>` for event-triggered
-	 *   workflows) is rendered as a collapsed-by-default `<details>` element.
-	 * - Text after the closing tag (supplementary user text from the slash-command)
-	 *   is rendered as a normal paragraph.
-	 * - If the regex does not match (plain workflow message), falls back to plain text.
-	 *
-	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-014
-	 */
-	private renderWorkflowMessage(container: HTMLElement, content: string): void {
-		const WORKFLOW_RE = /<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/;
-		const match = WORKFLOW_RE.exec(content);
-
-		if (!match) {
-			// Fallback: render as plain text if no <workflow_instructions> block found
-			container.createEl("p", { text: content });
-			return;
-		}
-
-		const matchStart = match.index;
-		const matchEnd = match.index + match[0].length;
-		const workflowType = match[1] ?? "";
-		const workflowBody = match[2] ?? "";
-
-		const beforeText = content.slice(0, matchStart).trim();
-		const afterText = content.slice(matchEnd).trim();
-
-		// Render text before the block (e.g., <trigger_context> for event-triggered workflows)
-		if (beforeText) {
-			const triggerDetails = container.createEl("details", { cls: "notor-trigger-context-details" });
-			triggerDetails.createEl("summary", { text: "Trigger context" });
-			const pre = triggerDetails.createEl("pre");
-			pre.createEl("code", { text: beforeText });
-		}
-
-		// Render the workflow instructions as a collapsed <details> element
-		const details = container.createEl("details", { cls: "notor-workflow-details" });
-		details.createEl("summary", { text: `Workflow: ${workflowType}` });
-		const bodyEl = details.createDiv({ cls: "notor-workflow-content" });
-		bodyEl.textContent = workflowBody;
-
-		// Render supplementary text after the closing tag
-		if (afterText) {
-			container.createEl("p", { text: afterText });
-		}
-	}
-
-	/**
-	 * Render hook injection output as a collapsible element in the chat
-	 * panel (ACI-002).
-	 *
-	 * The content is sent to the LLM as a separate `user` message, but
-	 * displayed to the human as a `<details>` block collapsed by default
-	 * so it doesn't clutter the conversation.
-	 */
 	renderHookInjection(message: Message): void {
-		const wrapper = this.messageListEl.createDiv({ cls: "notor-hook-injection" });
-		const details = wrapper.createEl("details");
-		details.createEl("summary", { text: "Hook output" });
-		const pre = details.createEl("pre", { cls: "notor-hook-injection-content" });
-		pre.createEl("code", { text: getTextContent(message.content) });
-		this.scrollToBottom();
+		this.messageRenderer.renderUserMessage(message);
 	}
 
-	/**
-	 * Render an `<attachments>` XML block as a collapsed `<details>` element.
-	 */
-	private renderAttachmentsBlock(container: HTMLElement, xml: string): void {
-		const details = container.createEl("details", { cls: "notor-attachments-details" });
-		details.createEl("summary", { text: "Attachments" });
-		const pre = details.createEl("pre", { cls: "notor-attachments-content" });
-		pre.createEl("code", { text: xml });
-	}
-
-	/**
-	 * Create a placeholder for a streaming assistant message.
-	 * Returns the content element to append chunks to.
-	 */
 	createAssistantMessagePlaceholder(): HTMLElement {
-		const msgEl = this.messageListEl.createDiv({ cls: "notor-message notor-message-assistant" });
-		const contentEl = msgEl.createDiv({ cls: "notor-message-content" });
-		this.scrollToBottom();
-		return contentEl;
+		return this.messageRenderer.createAssistantMessagePlaceholder();
 	}
 
-	/**
-	 * Append a text chunk to a streaming assistant message.
-	 * Renders markdown incrementally via throttled marked.parse().
-	 */
 	appendStreamChunk(contentEl: HTMLElement, text: string): void {
-		const existing = contentEl.getAttribute("data-raw") ?? "";
-		const updated = existing + text;
-		contentEl.setAttribute("data-raw", updated);
-
-		this.pendingStreamRender = { contentEl, raw: updated };
-		if (!this.streamRenderTimer) {
-			this.renderStreamMarkdown(contentEl, updated);
-			this.streamRenderTimer = setTimeout(() => {
-				this.streamRenderTimer = null;
-				if (this.pendingStreamRender) {
-					this.renderStreamMarkdown(this.pendingStreamRender.contentEl, this.pendingStreamRender.raw);
-					this.pendingStreamRender = null;
-				}
-			}, 100);
-		}
+		this.messageRenderer.appendStreamChunk(contentEl, text);
 	}
 
 	appendThinkingChunk(contentEl: HTMLElement, text: string): void {
-		let detailsEl = contentEl.querySelector<HTMLElement>(".notor-thinking-block");
-		if (!detailsEl) {
-			detailsEl = contentEl.createEl("details", { cls: "notor-thinking-block" });
-			detailsEl.createEl("summary", { text: "Thinking" });
-			detailsEl.createEl("div", { cls: "notor-thinking-content" });
-			// Insert at start of content, before any text response
-			if (contentEl.firstChild && contentEl.firstChild !== detailsEl) {
-				contentEl.insertBefore(detailsEl, contentEl.firstChild);
-			}
-		}
-		const thinkingContent = detailsEl.querySelector<HTMLElement>(".notor-thinking-content")!;
-		const existing = thinkingContent.getAttribute("data-raw") ?? "";
-		const updated = existing + text;
-		thinkingContent.setAttribute("data-raw", updated);
-		thinkingContent.textContent = updated;
-		this.scrollToBottom();
+		this.messageRenderer.appendThinkingChunk(contentEl, text);
 	}
 
-	private renderStreamMarkdown(contentEl: HTMLElement, raw: string): void {
-		const html = marked.parse(raw, { async: false }) as string;
-		while (contentEl.firstChild) contentEl.firstChild.remove();
-		const doc = new DOMParser().parseFromString(html, "text/html");
-		while (doc.body.firstChild) {
-			contentEl.appendChild(activeDocument.adoptNode(doc.body.firstChild));
-		}
-		this.scrollToBottom();
-	}
-
-	/**
-	 * Finalize a streaming assistant message with full markdown rendering.
-	 */
 	async finalizeAssistantMessage(contentEl: HTMLElement, message: Message): Promise<void> {
-		if (this.streamRenderTimer) {
-			clearTimeout(this.streamRenderTimer);
-			this.streamRenderTimer = null;
-			this.pendingStreamRender = null;
-		}
-		contentEl.parentElement!.dataset.messageId = message.id;
-		this.appendForkButton(contentEl.parentElement!, message);
-		contentEl.empty();
-
-		// Re-render thinking block if present
-		if (message.thinking) {
-			const detailsEl = contentEl.createEl("details", { cls: "notor-thinking-block" });
-			detailsEl.createEl("summary", { text: "Thinking" });
-			const thinkingDiv = detailsEl.createEl("div", { cls: "notor-thinking-content" });
-			thinkingDiv.textContent = message.thinking;
-		}
-
-		const assistantText = typeof message.content === "string"
-			? message.content
-			: (() => { throw new Error("Expected string content for assistant message"); })();
-
-		let textForRender: string;
-		let popoverRefs: { index: number; note?: string; href?: string; title?: string; annotation: string }[] = [];
-		if (this.plugin.settings.enable_popover_references) {
-			const extracted = extractPopoverTags(assistantText);
-			textForRender = extracted.cleaned;
-			popoverRefs = extracted.refs;
-		} else {
-			textForRender = stripPopoverTags(assistantText);
-		}
-
-		await MarkdownRenderer.render(
-			this.app,
-			textForRender,
-			contentEl,
-			"",
-			this
-		);
-
-		if (popoverRefs.length > 0) {
-			injectPopoverElements(contentEl, popoverRefs, {
-				openNote: (path) => this.openInternalLink(path),
-				openUrl: (url) => window.open(url, "_blank"),
-			});
-		}
-
-		this.activateInternalLinks(contentEl);
-		this.activateSettingsLinks(contentEl);
-		this.activateConversationLinks(contentEl);
-
-		// Add token annotation if available
-		if (message.input_tokens || message.output_tokens) {
-			const tokenEl = contentEl.createDiv({ cls: "notor-message-tokens" });
-			const parts: string[] = [];
-			if (message.input_tokens) parts.push(`↑${message.input_tokens}`);
-			if (message.output_tokens) parts.push(`↓${message.output_tokens}`);
-			tokenEl.textContent = parts.join(" · ");
-		}
-
-		this.scrollToBottom();
+		return this.messageRenderer.finalizeAssistantMessage(contentEl, message);
 	}
 
-	/**
-	 * Attach click handlers to internal links within a rendered message element.
-	 * Resolves note paths via resolveNote() and opens/focuses the target note.
-	 */
-	private activateInternalLinks(containerEl: HTMLElement): void {
-		const handleLinkClick = (e: MouseEvent) => {
-			const link = (e.target as HTMLElement).closest("a.internal-link");
-			if (!link) return;
-			e.preventDefault();
-			const href = link.getAttribute("data-href");
-			if (href) this.openInternalLink(href);
-		};
-
-		containerEl.addEventListener("click", handleLinkClick);
-		containerEl.addEventListener("auxclick", (e) => {
-			if (e.button !== 1) return; // middle-click only
-			handleLinkClick(e);
-		});
+	renderToolCall(message: Message): HTMLElement {
+		return this.messageRenderer.renderToolCall(message);
 	}
 
-	/**
-	 * Attach click handlers to settings deep-links (notor-settings:// URLs)
-	 * within a rendered message element. Opens Obsidian settings to the target group.
-	 *
-	 * Must attach directly to the `<a>` elements rather than using event delegation,
-	 * because Obsidian's own click handler on rendered external links intercepts
-	 * the event and stops propagation before a container-level listener can see it.
-	 */
-	private activateSettingsLinks(containerEl: HTMLElement): void {
-		const prefix = "notor-settings://";
-		const allLinks = containerEl.querySelectorAll<HTMLAnchorElement>("a");
-		log.debug("activateSettingsLinks: scanning rendered content", {
-			totalAnchors: allLinks.length,
-			hasCallback: !!this.onOpenSettingsGroup,
-		});
-
-		// Log all anchor attributes for diagnostics
-		for (const link of allLinks) {
-			const href = link.getAttribute("href");
-			const dataHref = link.getAttribute("data-href");
-			const cls = link.className;
-			const text = link.textContent?.substring(0, 60);
-			log.debug("activateSettingsLinks: anchor found", { href, dataHref, cls, text });
-		}
-
-		let matched = 0;
-		for (const link of allLinks) {
-			const href = link.getAttribute("href") ?? link.getAttribute("data-href") ?? "";
-			if (!href.startsWith(prefix)) continue;
-			matched++;
-
-			const raw = href.slice(prefix.length);
-			const slashIdx = raw.indexOf("/");
-			const groupTitle = decodeURIComponent(slashIdx === -1 ? raw : raw.slice(0, slashIdx));
-			const subsection = slashIdx === -1 ? undefined : decodeURIComponent(raw.slice(slashIdx + 1));
-			log.debug("activateSettingsLinks: matched settings link", { groupTitle, subsection, href });
-
-			// Attach directly so it fires before Obsidian's external-link handler.
-			link.addEventListener("click", (e: MouseEvent) => {
-				log.debug("activateSettingsLinks: click fired", { groupTitle, subsection });
-				e.preventDefault();
-				e.stopPropagation();
-				this.onOpenSettingsGroup?.(groupTitle, subsection);
-			});
-
-			// Remove href so Obsidian doesn't also try to open it externally.
-			link.removeAttribute("href");
-			link.dataset.notorSettingsGroup = groupTitle;
-			link.classList.add("notor-settings-link");
-		}
-
-		log.debug("activateSettingsLinks: scan complete", { matched, total: allLinks.length });
+	renderToolResult(message: Message): void {
+		this.messageRenderer.renderToolResult(message);
 	}
 
-	/**
-	 * Attach click handlers to conversation deep-links (notor-conversation:// URLs)
-	 * within a rendered message element. Navigates to the referenced conversation.
-	 *
-	 * Same attachment strategy as activateSettingsLinks — must bind directly to
-	 * `<a>` elements before Obsidian's external-link handler intercepts them.
-	 */
-	private activateConversationLinks(containerEl: HTMLElement): void {
-		const prefix = "notor-conversation://";
-		const allLinks = containerEl.querySelectorAll<HTMLAnchorElement>("a");
+	updateToolCallStatus(toolEl: HTMLElement, status: string): void {
+		this.messageRenderer.updateToolCallStatus(toolEl, status);
+	}
 
-		for (const link of allLinks) {
-			const href = link.getAttribute("href") ?? link.getAttribute("data-href") ?? "";
-			if (!href.startsWith(prefix)) continue;
+	updateToolCallProgress(toolEl: HTMLElement, status: string): void {
+		this.messageRenderer.updateToolCallProgress(toolEl, status);
+	}
 
-			const conversationId = decodeURIComponent(href.slice(prefix.length));
+	renderExtensionBlock(message: Message): void {
+		this.messageRenderer.renderExtensionBlock(message);
+	}
 
-			link.addEventListener("click", (e: MouseEvent) => {
-				e.preventDefault();
-				e.stopPropagation();
-				this.plugin.openChatInNewTab(undefined, false, undefined, conversationId);
-			});
+	reRenderExtensionBlock(message: Message): void {
+		this.messageRenderer.reRenderExtensionBlock(message);
+	}
 
-			link.removeAttribute("href");
-			link.classList.add("notor-conversation-link");
-		}
+	hasMessageElement(messageId: string): boolean {
+		return this.messageRenderer.hasMessageElement(messageId);
+	}
+
+	renderApprovalPrompt(toolCallEl: HTMLElement, autoApproved = false): Promise<"approved" | "rejected"> {
+		return this.messageRenderer.renderApprovalPrompt(toolCallEl, autoApproved);
+	}
+
+	reRenderPendingApprovals(
+		pendingApprovals: Map<string, { toolName: string; parameters: Record<string, unknown> }>
+	): Map<string, Promise<"approved" | "rejected">> {
+		return this.messageRenderer.reRenderPendingApprovals(pendingApprovals);
+	}
+
+	async renderDiffApprovalPrompt(
+		toolCallEl: HTMLElement,
+		toolName: string,
+		parameters: Record<string, unknown>,
+		autoApproved = false
+	): Promise<"approved" | "rejected"> {
+		return this.messageRenderer.renderDiffApprovalPrompt(toolCallEl, toolName, parameters, autoApproved);
+	}
+
+	getLastToolCallEl(): HTMLElement | null {
+		return this.messageRenderer.getLastToolCallEl();
+	}
+
+	getToolCallEl(messageId: string): HTMLElement | null {
+		return this.messageRenderer.getToolCallEl(messageId);
+	}
+
+	getMessagesContainer(): HTMLElement {
+		return this.messageRenderer.getMessagesContainer();
+	}
+
+	updateTokenFooter(
+		contextTokens: number,
+		outputTokens: number,
+		estimatedCost: number | null
+	): void {
+		this.messageRenderer.updateTokenFooter(contextTokens, outputTokens, estimatedCost);
+	}
+
+	showTruncationWarning(truncatedCount: number): void {
+		this.messageRenderer.showTruncationWarning(truncatedCount);
+	}
+
+	showError(error: string): void {
+		this.messageRenderer.showError(error);
 	}
 
 	private openInternalLink(href: string): void {
@@ -2343,408 +1506,9 @@ export class NotorChatView extends ItemView {
 		}
 	}
 
-	/**
-	 * Get the most recently rendered tool call element.
-	 * Used by the approval callback in main.ts to attach the approval prompt.
-	 */
-	getLastToolCallEl(): HTMLElement | null {
-		return this.lastToolCallEl;
-	}
-
-	/**
-	 * Get the tool call element for a specific message ID.
-	 * Used by the approval callback to target the correct element
-	 * when multiple tool calls are rendered in one turn.
-	 */
-	getToolCallEl(messageId: string): HTMLElement | null {
-		return this.toolCallElMap.get(messageId) ?? null;
-	}
-
-	/**
-	 * Get the messages container element for compaction markers.
-	 * Phase 3 (COMP-004).
-	 */
-	getMessagesContainer(): HTMLElement {
-		return this.messageListEl;
-	}
-
-	/**
-	 * Update the status badge on an existing tool call card.
-	 *
-	 * Called by the orchestrator after tool dispatch completes to
-	 * reflect success/error/rejected state in the UI.
-	 */
-	updateToolCallStatus(toolEl: HTMLElement, status: string): void {
-		const statusEl = toolEl.querySelector(".notor-tool-call-status");
-		if (!statusEl) return;
-		statusEl.className = `notor-tool-call-status notor-tool-status-${status}`;
-		statusEl.textContent = status;
-
-		// Remove progress indicator on completion
-		const progressEl = toolEl.querySelector(".notor-tool-call-progress");
-		if (progressEl) progressEl.remove();
-	}
-
-	/**
-	 * Update the progress text on an in-flight tool call card.
-	 *
-	 * Called by the orchestrator via the `onProgressMap` wired through
-	 * `executeToolBatches()` → dispatcher → `tool.execute()`.
-	 * Used by long-running tools like `use_subagent` (Phase 8.1).
-	 */
-	updateToolCallProgress(toolEl: HTMLElement, status: string): void {
-		let progressEl = toolEl.querySelector(".notor-tool-call-progress") as HTMLElement | null;
-		if (!progressEl) {
-			progressEl = toolEl.createDiv({ cls: "notor-tool-call-progress" });
-		}
-		progressEl.textContent = status;
-		this.scrollToBottom();
-	}
-
-	/**
-	 * Render a tool call inline in the message list.
-	 */
-	renderToolCall(message: Message): HTMLElement {
-		const toolCall = message.tool_call;
-		if (!toolCall) return this.messageListEl.createDiv();
-
-		const toolEl = this.messageListEl.createDiv({ cls: "notor-tool-call" });
-
-		// Header row: tool name + status
-		const headerEl = toolEl.createDiv({ cls: "notor-tool-call-header" });
-		const nameEl = headerEl.createSpan({ cls: "notor-tool-call-name" });
-		nameEl.textContent = toolCall.tool_name;
-
-		const statusEl = headerEl.createSpan({
-			cls: `notor-tool-call-status notor-tool-status-${toolCall.status}`,
-		});
-		statusEl.textContent = toolCall.status;
-
-		// Collapsible parameters
-		const { body: paramsEl } = renderCollapsibleCard(toolEl, { headerText: "parameters" });
-		paramsEl.addClass("notor-tool-call-params");
-		const pre = paramsEl.createEl("pre");
-		pre.createEl("code", { text: JSON.stringify(toolCall.parameters, null, 2) });
-
-		this.lastToolCallEl = toolEl;
-		if (message.id) {
-			this.toolCallElMap.set(message.id, toolEl);
-		}
-		this.scrollToBottom();
-		return toolEl;
-	}
-
-	/**
-	 * Render a tool result inline in the message list.
-	 */
-	renderToolResult(message: Message): void {
-		const toolResult = message.tool_result;
-		if (!toolResult) return;
-
-		const resultEl = this.messageListEl.createDiv({ cls: "notor-tool-result" });
-		resultEl.dataset.messageId = message.id;
-		this.appendForkButton(resultEl, message);
-
-		// Summary line
-		const summaryEl = resultEl.createDiv({ cls: "notor-tool-result-summary" });
-		if (toolResult.success) {
-			summaryEl.addClass("notor-tool-result-success");
-			const resultStr = typeof toolResult.result === "string"
-				? toolResult.result
-				: JSON.stringify(toolResult.result);
-			summaryEl.textContent = `✓ ${resultStr.substring(0, 100)}${resultStr.length > 100 ? "…" : ""}`;
-		} else {
-			summaryEl.addClass("notor-tool-result-error");
-			summaryEl.textContent = `✗ ${toolResult.error ?? "Unknown error"}`;
-		}
-
-		// Collapsible full result
-		if (toolResult.success) {
-			const resultStr = typeof toolResult.result === "string"
-				? toolResult.result
-				: JSON.stringify(toolResult.result, null, 2);
-
-			if (resultStr.length > 100) {
-				const { body: fullEl } = renderCollapsibleCard(resultEl, { headerText: "full result" });
-				fullEl.addClass("notor-tool-result-full");
-				const pre = fullEl.createEl("pre");
-				pre.createEl("code", { text: resultStr });
-			}
-		}
-
-		this.scrollToBottom();
-	}
-
-	/**
-	 * Render an extension_block message as a dedicated row in the message list.
-	 */
-	renderExtensionBlock(message: Message): void {
-		const rowEl = this.messageListEl.createDiv({ cls: "notor-extension-block" });
-		rowEl.dataset.messageId = message.id;
-		this.populateExtensionBlockEl(rowEl, message);
-		this.scrollToBottom();
-	}
-
-	hasMessageElement(messageId: string): boolean {
-		return !!this.messageListEl.querySelector(`[data-message-id="${messageId}"]`);
-	}
-
-	/**
-	 * Re-render an extension_block message in place (loading → real).
-	 * Finds the existing DOM element by message ID, clears it, and re-renders.
-	 */
-	reRenderExtensionBlock(message: Message): void {
-		const existing = this.messageListEl.querySelector(`[data-message-id="${message.id}"]`) as HTMLElement | null;
-		if (!existing || !existing.classList.contains("notor-extension-block")) return;
-		existing.empty();
-		this.populateExtensionBlockEl(existing, message);
-	}
-
-	private populateExtensionBlockEl(el: HTMLElement, message: Message): void {
-		const blocks = Array.isArray(message.content) ? message.content : [];
-
-		if (message.source_extension) {
-			el.createDiv({ cls: "notor-extension-block-source", text: message.source_extension });
-		}
-
-		const registry = this.plugin.getChatBlockRegistry();
-		const ctx = {
-			message,
-			app: this.app,
-			openInternalLink: (linkText: string) => this.openInternalLink(linkText),
-			collapsibleCard: renderCollapsibleCard,
-			pendingMemoryManager: this.plugin.getPendingMemoryManager(),
-		};
-
-		for (const block of blocks) {
-			const b = block as ContentBlock;
-			if (b.type === "text") {
-				el.createDiv({ cls: "notor-extension-block-text", text: b.text });
-			} else if (b.type === "custom_block") {
-				const def = registry.get(b.kind);
-				const blockEl = el.createDiv({ cls: "notor-extension-block-content" });
-
-				if (def) {
-					if (b.loading && def.renderLoading) {
-						try {
-							def.renderLoading(blockEl, ctx);
-						} catch (e) {
-							log.error("renderLoading threw", { kind: b.kind, error: String(e) });
-							blockEl.empty();
-							this.renderExtensionBlockError(blockEl, b.kind, b.data, e);
-						}
-					} else if (b.loading) {
-						blockEl.createDiv({ cls: "notor-extension-block-loading", text: `Loading ${def.displayName}…` });
-					} else {
-						try {
-							def.render(blockEl, b.data, ctx);
-						} catch (e) {
-							log.error("Block render error", { kind: b.kind, error: String(e) });
-							blockEl.empty();
-							this.renderExtensionBlockError(blockEl, b.kind, b.data, e);
-						}
-					}
-				} else {
-					// Show "disabled extension" placeholder when the source extension is
-					// explicitly disabled in settings; otherwise generic unregistered warning.
-					const sourceExt = message.source_extension;
-					const isExplicitlyDisabled = sourceExt != null &&
-						this.plugin.settings.tool_enabled[sourceExt] === false;
-					const headerText = isExplicitlyDisabled
-						? `[disabled extension: ${sourceExt}]`
-						: `Unregistered block kind: ${b.kind}`;
-					const { body } = renderCollapsibleCard(blockEl, { headerText });
-					if (b.fallback_text) {
-						body.createEl("p", { text: b.fallback_text, cls: "notor-extension-block-fallback" });
-					}
-				}
-			}
-		}
-	}
-
-	private renderExtensionBlockError(container: HTMLElement, kind: string, data: Record<string, unknown>, _error: unknown): void {
-		const errorEl = container.createDiv({ cls: "notor-extension-block-error" });
-		errorEl.createDiv({ cls: "notor-extension-block-error-header", text: `Block render error: ${kind}` });
-		const pre = errorEl.createEl("pre");
-		pre.createEl("code", { text: JSON.stringify(data, null, 2) });
-	}
-
-	/**
-	 * Render an inline approval prompt for a tool call.
-	 * Returns a promise that resolves with the user's decision.
-	 */
-	renderApprovalPrompt(toolCallEl: HTMLElement, autoApproved = false): Promise<"approved" | "rejected"> {
-		if (autoApproved) {
-			return Promise.resolve("approved");
-		}
-		return new Promise((resolve) => {
-			const approvalEl = toolCallEl.createDiv({ cls: "notor-approval-prompt" });
-			approvalEl.createSpan({ text: "Approve this action?", cls: "notor-approval-text" });
-
-			const btnContainer = approvalEl.createDiv({ cls: "notor-approval-buttons" });
-			this.scrollToBottom();
-
-			const approveBtn = btnContainer.createEl("button", {
-				cls: "notor-approve-btn",
-				text: "Approve",
-			});
-
-			const rejectBtn = btnContainer.createEl("button", {
-				cls: "notor-reject-btn",
-				text: "Reject",
-			});
-
-			approveBtn.addEventListener("click", () => {
-				approvalEl.remove();
-				resolve("approved");
-			});
-
-			rejectBtn.addEventListener("click", () => {
-				approvalEl.remove();
-				resolve("rejected");
-			});
-		});
-	}
-
-	reRenderPendingApprovals(
-		pendingApprovals: Map<string, { toolName: string; parameters: Record<string, unknown> }>
-	): Map<string, Promise<"approved" | "rejected">> {
-		const results = new Map<string, Promise<"approved" | "rejected">>();
-		for (const [msgId, { toolName, parameters }] of pendingApprovals) {
-			const toolCallEl = this.getToolCallEl(msgId);
-			if (toolCallEl) {
-				results.set(msgId, this.renderDiffApprovalPrompt(toolCallEl, toolName, parameters, false));
-			}
-		}
-		return results;
-	}
-
-	/**
-	 * Render a diff-based approval prompt for write tool calls.
-	 *
-	 * For `write_note` and `replace_in_note`, reads the current file content
-	 * and renders a full diff preview with approve/reject controls. For all
-	 * other tools falls back to the plain approval prompt.
-	 *
-	 * @param toolCallEl  - The tool call card element to render into.
-	 * @param toolName    - The name of the tool being called.
-	 * @param parameters  - The tool parameters (path, content / changes).
-	 * @returns Promise resolving to "approved" or "rejected".
-	 */
-	async renderDiffApprovalPrompt(
-		toolCallEl: HTMLElement,
-		toolName: string,
-		parameters: Record<string, unknown>,
-		autoApproved = false
-	): Promise<"approved" | "rejected"> {
-		const notePath = parameters["path"] as string | undefined;
-
-		if (!notePath) {
-			return this.renderApprovalPrompt(toolCallEl, autoApproved);
-		}
-
-		if (toolName === "write_note") {
-			const afterContent = (parameters["content"] as string | undefined) ?? "";
-
-			// Read current file content (empty string for new files)
-			let beforeContent = "";
-			try {
-				const file = this.app.vault.getFileByPath(notePath);
-				if (file) {
-					beforeContent = await this.app.vault.read(file);
-				}
-			} catch {
-				// New file — beforeContent stays empty
-			}
-
-			// Render the diff. Scroll once to show the action buttons; after that the
-			// user is free to scroll up and read the full diff without being fought back.
-			const renderCtx: DiffRenderContext = { app: this.app, component: this, sourcePath: notePath };
-			const decisionPromise = renderWriteNoteDiffPreview(
-				this.messageListEl,
-				notePath,
-				beforeContent,
-				afterContent,
-				autoApproved,
-				renderCtx,
-				() => this.scrollToBottom()
-			);
-			this.scrollToBottom();
-			const decision = await decisionPromise;
-			return decision.accepted ? "approved" : "rejected";
-		}
-
-		if (toolName === "replace_in_note") {
-			const changeBlocks = (parameters["changes"] as Array<{ search: string; replace: string }> | undefined) ?? [];
-
-			// Read current note content
-			let noteContent = "";
-			try {
-				const file = this.app.vault.getFileByPath(notePath);
-				if (file) {
-					noteContent = await this.app.vault.read(file);
-				}
-			} catch {
-				// Fall back to plain prompt if file unreadable
-				return this.renderApprovalPrompt(toolCallEl, autoApproved);
-			}
-
-			if (!noteContent) {
-				return this.renderApprovalPrompt(toolCallEl, autoApproved);
-			}
-
-			// Render the diff. Scroll once to show the action buttons; after that the
-			// user is free to scroll up and read the full diff without being fought back.
-			const replaceRenderCtx: DiffRenderContext = { app: this.app, component: this, sourcePath: notePath };
-			const decisionPromise = renderReplaceInNoteDiffPreview(
-				this.messageListEl,
-				notePath,
-				noteContent,
-				changeBlocks,
-				autoApproved,
-				replaceRenderCtx,
-				() => this.scrollToBottom()
-			);
-			this.scrollToBottom();
-			const decision = await decisionPromise;
-			if (!decision.accepted) return "rejected";
-
-			// Filter changes to only include user-accepted blocks so the
-			// tool executes with the partial selection (parameters is the
-			// same object reference the dispatcher passes to tool.execute()).
-			if (decision.acceptedBlockIndexes) {
-				parameters["changes"] = changeBlocks.filter((_, i) =>
-					decision.acceptedBlockIndexes!.has(i)
-				);
-			}
-			return "approved";
-		}
-
-		// Other tools: use the plain approval prompt
-		return this.renderApprovalPrompt(toolCallEl, autoApproved);
-	}
-
-	/**
-	 * Update the token/cost footer for the conversation.
-	 */
-	updateTokenFooter(
-		contextTokens: number,
-		outputTokens: number,
-		estimatedCost: number | null
-	): void {
-		this.tokenFooterEl.empty();
-		this.tokenFooterEl.removeClass("notor-hidden");
-
-		const parts: string[] = [
-			`Context: ↑${contextTokens.toLocaleString()} ↓${outputTokens.toLocaleString()}`,
-		];
-
-		if (estimatedCost != null) {
-			parts.push(`Cost: $${estimatedCost.toFixed(4)}`);
-		}
-
-		this.tokenFooterEl.textContent = parts.join(" · ");
-	}
+	// -----------------------------------------------------------------------
+	// Conversation list delegation
+	// -----------------------------------------------------------------------
 
 	renderConversationList(entries: ConversationListEntry[]): void {
 		this.conversationList?.render(entries);
@@ -2762,274 +1526,13 @@ export class NotorChatView extends ItemView {
 		this.conversationList?.updateHeaderFavorite(conversationId, isFavorite);
 	}
 
-	/**
-	 * Clear all messages from the display.
-	 */
 	clearMessages(): void {
 		this.findInMessages?.close();
-		this.messageListEl.empty();
-		this.tokenFooterEl.addClass("notor-hidden");
-		this.toolCallElMap.clear();
-		this.renderedMessages.clear();
-		this.lastToolCallEl = null;
+		this.messageRenderer.clearMessages();
 		this.taskPanelEl?.addClass("notor-hidden");
 		this.taskPanelEl?.empty();
 		this.taskPanelCollapsed = false;
 	}
-
-	/**
-	 * Display a context window truncation warning.
-	 */
-	showTruncationWarning(truncatedCount: number): void {
-		const warningEl = this.messageListEl.createDiv({ cls: "notor-truncation-warning" });
-		warningEl.textContent = `⚠ ${truncatedCount} older message${truncatedCount > 1 ? "s" : ""} trimmed from AI context to fit within the model's context window. Full history is still visible above and saved in the log.`;
-		this.scrollToBottom();
-	}
-
-	/**
-	 * Display an error message in the chat.
-	 */
-	showError(error: string): void {
-		const errorEl = this.messageListEl.createDiv({ cls: "notor-chat-error" });
-		errorEl.textContent = `⚠ ${error}`;
-		this.scrollToBottom();
-	}
-
-	// -----------------------------------------------------------------------
-	// Attachment management
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Add a vault-note attachment that was inserted as an inline wikilink token.
-	 * No chip is created — the visual representation is the token span itself.
-	 */
-	private addWikilinkAttachment(attachment: Attachment): void {
-		this.pendingAttachments.push(attachment);
-		log.debug("Wikilink attachment added", {
-			id: attachment.id,
-			type: attachment.type,
-			display: attachment.display_name,
-		});
-	}
-
-	/**
-	 * Add an attachment to the pending list and render its chip.
-	 */
-	private addAttachment(attachment: Attachment): void {
-		this.pendingAttachments.push(attachment);
-		this.attachmentChipManager.addChip(attachment);
-		log.debug("Attachment added", {
-			id: attachment.id,
-			type: attachment.type,
-			display: attachment.display_name,
-		});
-	}
-
-	/**
-	 * Remove an attachment from the pending list and its chip.
-	 */
-	private removeAttachment(attachmentId: string): void {
-		this.pendingAttachments = this.pendingAttachments.filter(
-			(a) => a.id !== attachmentId
-		);
-		this.attachmentChipManager.removeChip(attachmentId);
-		log.debug("Attachment removed", { id: attachmentId });
-	}
-
-	// -----------------------------------------------------------------------
-	// Workflow slash-command management (E-012)
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Track the selected workflow in state.
-	 *
-	 * Called after the inline workflow token is inserted into the input.
-	 * The token itself is the visual representation; no separate chip is rendered.
-	 */
-	private attachWorkflow(workflow: Workflow): void {
-		this.pendingWorkflow = workflow;
-		log.debug("Workflow attached via slash command", {
-			display_name: workflow.display_name,
-		});
-	}
-
-	/**
-	 * Clear `pendingWorkflow`.
-	 *
-	 * Called by the MutationObserver when the inline workflow token is removed
-	 * (Backspace) or by handleSend after capturing the workflow for dispatch.
-	 */
-	private removeWorkflow(): void {
-		this.pendingWorkflow = null;
-		log.debug("Workflow token removed");
-	}
-
-	/**
-	 * Parse pasted text for an inline workflow reference (`/name` or `/name.md`)
-	 * and, if an exact match is found, insert the workflow token with surrounding text.
-	 *
-	 * Only the first matching reference is converted. References with no exact
-	 * match are left as plain text (caller falls through to insertTextAtCursor).
-	 *
-	 * @returns true if a workflow token was inserted (caller should skip plain insert).
-	 */
-	private tryInsertPastedWorkflowToken(text: string): boolean {
-		const workflows = this.getWorkflowsCallback?.() ?? [];
-		if (workflows.length === 0) return false;
-
-		// Match /word at start of string or after whitespace.
-		// Group 1: preceding whitespace char (or "" at start of string).
-		// Group 2: the word after /.
-		const pattern = /(^|\s)\/(\S+)/g;
-		let match: RegExpExecArray | null;
-		let foundWorkflow: Workflow | null = null;
-		let matchStart = -1;
-		let matchEnd = -1;
-
-		while ((match = pattern.exec(text)) !== null) {
-			const ref = match[2] ?? "";
-			const name = ref.endsWith(".md") ? ref.slice(0, -3) : ref;
-			const workflow = workflows.find((w) => w.display_name === name) ?? null;
-			if (workflow) {
-				foundWorkflow = workflow;
-				// Skip the leading whitespace captured in group 1 so matchStart
-				// points at the "/" character itself.
-				matchStart = match.index + (match[1]?.length ?? 0);
-				matchEnd = match.index + match[0].length;
-				break;
-			}
-		}
-
-		if (!foundWorkflow) return false;
-
-		const beforeText = text.slice(0, matchStart);
-		const afterText = text.slice(matchEnd);
-
-		if (beforeText) this.insertTextAtCursor(beforeText);
-		this.insertWorkflowTokenAtCursor(foundWorkflow);
-		if (afterText) this.insertTextAtCursor(afterText);
-
-		return true;
-	}
-
-	/**
-	 * Insert a workflow token span at the current cursor position.
-	 * Called from `tryInsertPastedWorkflowToken` after any preceding text is inserted.
-	 */
-	private insertWorkflowTokenAtCursor(workflow: Workflow): void {
-		const sel = window.getSelection();
-		if (!sel || sel.rangeCount === 0) return;
-
-		const range = sel.getRangeAt(0);
-		range.deleteContents();
-
-		const tokenSpan = document.createElement("span");
-		tokenSpan.className = "notor-workflow-token";
-		tokenSpan.contentEditable = "false";
-		tokenSpan.setAttribute("data-workflow-path", workflow.file_path);
-		tokenSpan.setAttribute("data-workflow-name", workflow.display_name);
-		tokenSpan.textContent = `/${workflow.display_name}`;
-		range.insertNode(tokenSpan);
-
-		// Trailing space so the cursor can sit after the token.
-		const spacer = document.createTextNode(" ");
-		tokenSpan.after(spacer);
-
-		// Move cursor to after the spacer.
-		const newRange = document.createRange();
-		newRange.setStart(spacer, 1);
-		newRange.collapse(true);
-		sel.removeAllRanges();
-		sel.addRange(newRange);
-
-		this.attachWorkflow(workflow);
-		log.debug("Workflow token inserted from paste", {
-			display_name: workflow.display_name,
-		});
-	}
-
-	/**
-	 * Insert plain text at the current cursor position using the Selection/Range
-	 * API.  This replaces the deprecated `document.execCommand("insertText")`
-	 * while remaining consistent with `insertWorkflowTokenAtCursor`.
-	 */
-	private insertTextAtCursor(text: string): void {
-		const sel = window.getSelection();
-		if (!sel || sel.rangeCount === 0) return;
-
-		const range = sel.getRangeAt(0);
-		range.deleteContents();
-
-		const node = document.createTextNode(text);
-		range.insertNode(node);
-
-		// Move cursor to the end of the inserted text.
-		const newRange = document.createRange();
-		newRange.setStart(node, node.length);
-		newRange.collapse(true);
-		sel.removeAllRanges();
-		sel.addRange(newRange);
-	}
-
-	/**
-	 * Read the chat input text content, skipping the inline workflow token span.
-	 *
-	 * `textInputEl.textContent` includes the text of `contenteditable="false"`
-	 * spans (e.g. `/daily-review`). We exclude the workflow token so the
-	 * supplementaryText passed to the executor contains only what the user typed,
-	 * not the slash-command trigger text.
-	 */
-	private getInputContentExcludingWorkflowToken(): string {
-		let text = "";
-		for (const node of Array.from(this.textInputEl.childNodes)) {
-			if (node instanceof HTMLElement && node.hasAttribute("data-workflow-path")) continue;
-			text += node.textContent ?? "";
-		}
-		return text.trim();
-	}
-
-	/**
-	 * Detect `/` trigger in the chat input and activate `WorkflowSlashSuggest`.
-	 *
-	 * Only activates when `VaultNoteSuggest` is NOT active (prevents
-	 * interference between the two suggests). Called from the `input`
-	 * event handler alongside `detectWikilinkTrigger()`.
-	 *
-	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-012
-	 */
-	private detectSlashCommandTrigger(): void {
-		// Don't activate if the wikilink suggest is active
-		if (this.vaultNoteSuggest?.["isActive"]) return;
-
-		// Don't activate if a workflow token is already present — only one workflow
-		// can be attached per message.
-		if (this.textInputEl.querySelector("[data-workflow-path]")) return;
-
-		const text = this.textInputEl.textContent ?? "";
-		const slashIdx = detectSlashTrigger(text);
-
-		if (slashIdx !== null && this.workflowSuggest) {
-			this.workflowSuggest.activate(slashIdx);
-		}
-	}
-
-	/**
-	 * Detect `[[` in the chat input and activate the vault note suggest.
-	 */
-	private detectWikilinkTrigger(): void {
-		const text = this.textInputEl.textContent ?? "";
-		const triggerIdx = text.lastIndexOf("[[");
-
-		if (triggerIdx !== -1 && this.vaultNoteSuggest) {
-			// Check there's no `]]` closing the link after the `[[`
-			const afterTrigger = text.slice(triggerIdx + 2);
-			if (!afterTrigger.includes("]]")) {
-				this.vaultNoteSuggest.activate(triggerIdx);
-			}
-		}
-	}
-
-
 
 	// -----------------------------------------------------------------------
 	// Helpers
