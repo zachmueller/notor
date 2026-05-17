@@ -164,11 +164,10 @@ async function testFeatureGroupDisabled(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "Notor plugin not found" };
 
-		const manager = plugin.getExtensionManager();
-		const tools = manager.getRegisteredToolNames?.() ?? manager.getAllToolNames?.() ?? [];
+		const registry = plugin.getToolRegistry();
 		return {
-			hasListTemplates: tools.includes("list_templates"),
-			hasApplyTemplate: tools.includes("apply_template"),
+			hasListTemplates: registry.has("list_templates"),
+			hasApplyTemplate: registry.has("apply_template"),
 			templatesEnabled: plugin.settings.templates_enabled,
 		};
 	});
@@ -205,10 +204,10 @@ async function testFeatureGroupEnabled(ctx: TestContext): Promise<void> {
 		const manager = plugin.getExtensionManager();
 		await manager.reload(false);
 
-		const tools = manager.getRegisteredToolNames?.() ?? manager.getAllToolNames?.() ?? [];
+		const registry = plugin.getToolRegistry();
 		return {
-			hasListTemplates: tools.includes("list_templates"),
-			hasApplyTemplate: tools.includes("apply_template"),
+			hasListTemplates: registry.has("list_templates"),
+			hasApplyTemplate: registry.has("apply_template"),
 		};
 	});
 
@@ -232,10 +231,12 @@ async function testListTemplatesBasic(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "Notor plugin not found" };
 
-		const manager = plugin.getExtensionManager();
+		const registry = plugin.getToolRegistry();
+		const tool = registry.get("list_templates");
+		if (!tool) return { error: "list_templates tool not registered" };
 		try {
-			const toolResult = await manager.executeTool("list_templates", { detect_prompts: false });
-			return { success: true, result: toolResult };
+			const toolResult = await tool.execute({ detect_prompts: false });
+			return { success: true, result: toolResult.success ? toolResult.result : toolResult.error };
 		} catch (err: any) {
 			return { error: err.message };
 		}
@@ -283,10 +284,12 @@ async function testListTemplatesPromptDetection(ctx: TestContext): Promise<void>
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "Notor plugin not found" };
 
-		const manager = plugin.getExtensionManager();
+		const registry = plugin.getToolRegistry();
+		const tool = registry.get("list_templates");
+		if (!tool) return { error: "list_templates tool not registered" };
 		try {
-			const toolResult = await manager.executeTool("list_templates", { detect_prompts: true });
-			return { success: true, result: toolResult };
+			const toolResult = await tool.execute({ detect_prompts: true });
+			return { success: true, result: toolResult.success ? toolResult.result : toolResult.error };
 		} catch (err: any) {
 			return { error: err.message };
 		}
@@ -357,16 +360,18 @@ async function testApplyTemplatePrompts(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "Notor plugin not found" };
 
-		const manager = plugin.getExtensionManager();
+		const registry = plugin.getToolRegistry();
+		const tool = registry.get("apply_template");
+		if (!tool) return { error: "apply_template tool not registered" };
 		try {
-			const toolResult = await manager.executeTool("apply_template", {
+			const toolResult = await tool.execute({
 				template_path: "templates/prompt-template.md",
 				output_folder: "",
 				output_filename: "test-prompt-output",
 				prompt_answers: ["My Test Title", "Test Author"],
 				suggester_answers: [],
 			});
-			return { success: true, result: toolResult };
+			return { success: true, result: toolResult.success ? toolResult.result : toolResult.error };
 		} catch (err: any) {
 			return { error: err.message };
 		}
@@ -413,16 +418,18 @@ async function testApplyTemplateSuggester(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "Notor plugin not found" };
 
-		const manager = plugin.getExtensionManager();
+		const registry = plugin.getToolRegistry();
+		const tool = registry.get("apply_template");
+		if (!tool) return { error: "apply_template tool not registered" };
 		try {
-			const toolResult = await manager.executeTool("apply_template", {
+			const toolResult = await tool.execute({
 				template_path: "templates/suggester-template.md",
 				output_folder: "",
 				output_filename: "test-suggester-output",
 				prompt_answers: [],
 				suggester_answers: ["Project"],
 			});
-			return { success: true, result: toolResult };
+			return { success: true, result: toolResult.success ? toolResult.result : toolResult.error };
 		} catch (err: any) {
 			return { error: err.message };
 		}
@@ -463,16 +470,18 @@ async function testApplyTemplateMixed(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "Notor plugin not found" };
 
-		const manager = plugin.getExtensionManager();
+		const registry = plugin.getToolRegistry();
+		const tool = registry.get("apply_template");
+		if (!tool) return { error: "apply_template tool not registered" };
 		try {
-			const toolResult = await manager.executeTool("apply_template", {
+			const toolResult = await tool.execute({
 				template_path: "templates/mixed-template.md",
 				output_folder: "",
 				output_filename: "test-mixed-output",
 				prompt_answers: ["Mixed Title", "A description here"],
 				suggester_answers: ["Beta"],
 			});
-			return { success: true, result: toolResult };
+			return { success: true, result: toolResult.success ? toolResult.result : toolResult.error };
 		} catch (err: any) {
 			return { error: err.message };
 		}
@@ -516,25 +525,26 @@ async function testApplyTemplateNotFound(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "Notor plugin not found" };
 
-		const manager = plugin.getExtensionManager();
+		const registry = plugin.getToolRegistry();
+		const tool = registry.get("apply_template");
+		if (!tool) return { error: "apply_template tool not registered" };
 		try {
-			const toolResult = await manager.executeTool("apply_template", {
+			const toolResult = await tool.execute({
 				template_path: "templates/nonexistent-template.md",
 				prompt_answers: [],
 				suggester_answers: [],
 			});
-			return { success: true, result: toolResult };
+			return { success: true, result: toolResult.success ? toolResult.result : toolResult.error };
 		} catch (err: any) {
 			return { error: err.message };
 		}
 	});
 
-	if ("error" in result && result.error.includes("not found")) {
-		ctx.pass("apply-template-not-found", `Correct error: ${result.error.substring(0, 100)}`);
-	} else if ("error" in result) {
-		ctx.pass("apply-template-not-found", `Error thrown (may differ): ${result.error.substring(0, 100)}`);
+	const resultStr = String(result.error ?? result.result ?? "");
+	if (resultStr.toLowerCase().includes("not found") || resultStr.toLowerCase().includes("template")) {
+		ctx.pass("apply-template-not-found", `Correct error response: ${resultStr.substring(0, 120)}`);
 	} else {
-		ctx.fail("apply-template-not-found", `Expected error but got success: ${JSON.stringify(result.result).substring(0, 100)}`);
+		ctx.fail("apply-template-not-found", `Expected 'not found' error, got: ${resultStr.substring(0, 120)}`);
 	}
 }
 
@@ -546,17 +556,19 @@ async function testApplyTemplateUnusedAnswers(ctx: TestContext): Promise<void> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "Notor plugin not found" };
 
-		const manager = plugin.getExtensionManager();
+		const registry = plugin.getToolRegistry();
+		const tool = registry.get("apply_template");
+		if (!tool) return { error: "apply_template tool not registered" };
 		try {
 			// Supply 5 prompt answers for a template that only uses 2
-			const toolResult = await manager.executeTool("apply_template", {
+			const toolResult = await tool.execute({
 				template_path: "templates/prompt-template.md",
 				output_folder: "",
 				output_filename: "test-unused-answers",
 				prompt_answers: ["Title", "Author", "Extra1", "Extra2", "Extra3"],
 				suggester_answers: ["UnusedSuggester"],
 			});
-			return { success: true, result: toolResult };
+			return { success: true, result: toolResult.success ? toolResult.result : toolResult.error };
 		} catch (err: any) {
 			return { error: err.message };
 		}
@@ -590,16 +602,18 @@ async function testCoreTemplatesFallback(ctx: TestContext): Promise<void> {
 		const templater = app.plugins.plugins["templater-obsidian"];
 		delete app.plugins.plugins["templater-obsidian"];
 
-		const manager = plugin.getExtensionManager();
+		const registry = plugin.getToolRegistry();
+		const tool = registry.get("apply_template");
+		if (!tool) return { error: "apply_template tool not registered" };
 		try {
-			const toolResult = await manager.executeTool("apply_template", {
+			const toolResult = await tool.execute({
 				template_path: "templates/core-template.md",
 				output_folder: "",
 				output_filename: "test-core-output",
 				prompt_answers: [],
 				suggester_answers: [],
 			});
-			return { success: true, result: toolResult };
+			return { success: true, result: toolResult.success ? toolResult.result : toolResult.error };
 		} catch (err: any) {
 			return { error: err.message };
 		} finally {
