@@ -283,3 +283,76 @@ export interface ExtensionReloadResult {
 	/** Errors encountered during discovery, parsing, or compilation. */
 	errors: ExtensionError[];
 }
+
+// ---------------------------------------------------------------------------
+// Built-in scaffold types
+// ---------------------------------------------------------------------------
+
+/** Definition of a built-in tool scaffold (code-side constant). */
+export interface BuiltinToolScaffold {
+	/** Tool name (matches the vault filename without `.md`). */
+	name: string;
+	/** Short description for the settings UI. */
+	description: string;
+	/** Tool mode. */
+	mode: "read" | "write";
+	/**
+	 * Full content of the `.md` scaffold file including frontmatter,
+	 * YAML params fence, and TS code fence.
+	 */
+	scaffoldContent: string;
+	/** Feature group for gating (e.g. `"memory"` → gated by `memory_enabled`). */
+	featureGroup?: string;
+}
+
+/** Definition of a built-in block-kind scaffold (code-side constant). */
+export interface BuiltinBlockScaffold {
+	/** Block kind identifier (matches `notor-block-kind` in frontmatter). */
+	kind: string;
+	/** Human-readable display name. */
+	displayName: string;
+	/** Emoji or Lucide icon name. */
+	icon?: string;
+	/** Whether to exclude blocks of this kind from compaction. */
+	excludeFromCompaction?: boolean;
+	/** Feature group for gating (e.g. `"memory"` → gated by `memory_enabled`). */
+	featureGroup?: string;
+	/** Named export in scaffoldContent code fence that provides the render function. */
+	rendererExport: string;
+	/** Named export that provides the toLLMText function (optional). */
+	toLLMTextExport?: string;
+	/** Named export that provides the renderLoading function (optional). */
+	renderLoadingExport?: string;
+	/**
+	 * Full content of the `.md` scaffold file including frontmatter
+	 * and code fence — identical to what gets written to the vault.
+	 */
+	scaffoldContent: string;
+}
+
+/** Definition of a built-in automation scaffold (code-side constant). */
+export interface BuiltinAutomationScaffold {
+	/** Internal name (matches the vault filename without `.md`). */
+	name: string;
+	/** Display name shown in settings UI. */
+	displayName: string;
+	/** Trigger event. */
+	trigger: AutomationTrigger;
+	/**
+	 * Full content of the `.md` scaffold file including frontmatter
+	 * and TS code fence — identical to what gets written to the vault.
+	 */
+	scaffoldContent: string;
+	/** Optional settings schema for per-automation settings (rendered in gear modal). */
+	settingsSchema?: SettingsFieldSchema[];
+	/** When true, awaited before the first LLM turn proceeds. */
+	blocking?: boolean;
+	/** Block kind to emit as a loading placeholder (only when `blocking` is true). */
+	blockingEmitKind?: string;
+	/** Timeout in milliseconds for blocking execution. */
+	blockingTimeout?: number;
+	/** Feature group for gating (e.g. `"memory"` → gated by `memory_enabled`). */
+	featureGroup?: string;
+	/** Cron expression for `on_schedule` trigger. */
+	schedule?: string;
+}
