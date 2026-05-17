@@ -9,21 +9,14 @@
  */
 
 import { Notice, Platform, Plugin, WorkspaceLeaf, TFile, TAbstractFile, normalizePath, parseYaml } from "obsidian";
-import { MarkdownView } from "obsidian";
-import { createDefaultSettings, DEFAULT_MODEL_PRESETS, NotorSettingTab } from "./settings";
+import { createDefaultSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
-import { notifyFileLeafActivated, getLastActiveFilePath } from "./context/auto-context";
+import { notifyFileLeafActivated } from "./context/auto-context";
 
 // Workflows
 import { discoverWorkflows } from "./workflows/workflow-discovery";
 import { autoInjectUnidentifiedWorkflows, injectWorkflowFrontmatter } from "./workflows/workflow-frontmatter";
-import {
-	showWorkflowPicker,
-	showActiveNoteWorkflowPicker,
-	buildActiveNoteContent,
-	resolveActiveNotePrompt,
-} from "./workflows/workflow-executor";
 import type { Workflow } from "./types";
 
 // Group G: Workflow hook override manager
@@ -34,12 +27,9 @@ import { WorkflowActivityTracker } from "./workflows/workflow-activity-tracker";
 
 // Export / Import
 import { ExportModal, type ExportFormat } from "./export/export-modal";
-import { ConfirmModal } from "./ui/confirm-modal";
-import { RenameModal } from "./ui/rename-modal";
 import { exportToMarkdown } from "./export/markdown-exporter";
 import { exportToHtml, type SubAgentConversationMap } from "./export/html-exporter";
 import { USE_SUBAGENT_TOOL_NAME } from "./sub-agents/constants";
-import { extractJsonlFromHtml, reassignIds } from "./export/html-importer";
 
 // Group F: Vault event hooks
 import { TagShadowCache } from "./hooks/tag-change-detector";
@@ -66,7 +56,6 @@ import { ProviderRegistry } from "./providers/index";
 import { LocalProvider } from "./providers/local-provider";
 import { AnthropicProvider } from "./providers/anthropic-provider";
 import { OpenAIProvider } from "./providers/openai-provider";
-import { parseOptionValue, buildOptionValue } from "./providers/model-grouping";
 import { resolvePreset } from "./presets/preset-resolver";
 import type { LLMProviderType } from "./types";
 
@@ -76,7 +65,7 @@ import { NoteOpener } from "./tools/note-opener";
 
 // Chat
 import { ToolDispatcher } from "./chat/dispatcher";
-import { HistoryManager, conversationFilename } from "./chat/history";
+import { HistoryManager } from "./chat/history";
 import { SystemPromptBuilder } from "./chat/system-prompt";
 import { ChatOrchestrator, type SessionGuard } from "./chat/orchestrator";
 import type { ConversationSession } from "./chat/conversation-session";
@@ -91,8 +80,6 @@ import { VaultRuleManager } from "./rules/vault-rules";
 
 // Personas
 import { PersonaManager } from "./personas/persona-manager";
-import { resolvePersonaOverrides } from "./personas/persona-overrides";
-import { openPersonaPickerModal } from "./ui/persona-picker-modal";
 
 // Sub-agents
 import { SubAgentManager } from "./sub-agents/manager";
@@ -101,13 +88,18 @@ import { UpdateTasksTool } from "./tools/update-tasks";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
-import { slugifySecretId } from "./extensions/settings-schema";
 import type { AutomationTrigger } from "./extensions/types";
 import { isExtensionFile, isExtensionPath } from "./extensions/watcher";
 import { isPersonaFile, isPersonaPath } from "./personas/watcher";
 
-// Secrets
-import { getSecret, setSecret, clearSecret } from "./utils/secrets";
+// Settings migrations
+import { runAllMigrations } from "./settings/migrations";
+
+// Commands
+import { registerCommands } from "./commands";
+
+// View wiring
+import { wireView as wireViewFn } from "./ui/wire-view";
 
 // MCP
 import { McpHub } from "./mcp/mcp-hub";
@@ -132,7 +124,6 @@ import { setChatBlockRegistry } from "./chat/message-pipeline";
 
 // Memory approval
 import { PendingMemoryManager } from "./memory/pending-memory-manager";
-import { MemoryApprovalModal } from "./ui/memory-approval-modal";
 
 // Template variables
 import { TemplateVariableRegistry, registerBuiltinVars } from "./template-vars";
@@ -456,334 +447,7 @@ export default class NotorPlugin extends Plugin {
 		});
 
 		// 4. Register commands
-		this.addCommand({
-			id: "open-chat-panel",
-			name: "Open chat panel",
-			callback: () => this.openChatPanel(),
-		});
-
-		this.addCommand({
-			id: "new-conversation",
-			name: "New conversation",
-			callback: () => this.newConversation(),
-		});
-
-		// Phase 3 (COMP-004): Manual compaction command
-		this.addCommand({
-			id: "compact-context",
-			name: "Compact context",
-			callback: () => {
-				const orchestrator = this.getActiveOrchestrator();
-				if (!orchestrator) {
-					new Notice("No active chat panel");
-					return;
-				}
-				orchestrator.manualCompaction().catch((e) => {
-					log.error("Manual compaction failed", { error: String(e) });
-					new Notice(`Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
-				});
-			},
-		});
-
-		// UI-003: Open the tool config inspector (FR-88)
-		this.addCommand({
-			id: "open-tool-config-inspector",
-			name: "Open tool config inspector",
-			callback: () => this.openInspector(),
-		});
-
-		// E-009: "Notor: Run workflow" command palette entry.
-		// Rescans workflows on each invocation so newly created/deleted
-		// workflows are reflected without a plugin reload (FR-41).
-		this.addCommand({
-			id: "run-workflow",
-			name: "Run workflow",
-			callback: () => {
-				try {
-					showWorkflowPicker(
-						this.app,
-						() => this.rescanWorkflows(),
-						(workflow) => {
-							// Open the chat panel if not already open, then execute the workflow.
-							this.openChatPanel().then(() => {
-								log.info("Workflow selected from command palette", {
-									display_name: workflow.display_name,
-									file_path: workflow.file_path,
-								});
-								// E-013: Execute the workflow via the orchestrator.
-								const orchestrator = this.getActiveOrchestrator();
-								if (!orchestrator) {
-									new Notice("No active chat panel");
-									return;
-								}
-								return orchestrator.executeWorkflow(workflow);
-							}).catch((e) => {
-								log.error("Failed to execute workflow from command palette", {
-									error: String(e),
-								});
-								new Notice(`Workflow execution failed: ${e instanceof Error ? e.message : String(e)}`);
-							});
-						},
-						this.settings.notor_dir
-					);
-				} catch (e) {
-					log.error("Run workflow command failed", { error: String(e) });
-					new Notice(`Failed to open workflow picker: ${e instanceof Error ? e.message : String(e)}`);
-				}
-			},
-		});
-
-		// Launch active-note-scoped workflow against the currently focused note.
-		// Opens a filtered picker showing only workflows with `notor-active-note-prompt`.
-		this.addCommand({
-			id: "launch-active-note-workflow",
-			name: "Launch active note workflow",
-			callback: () => {
-				try {
-					// Resolve active note path (two-stage: active view + cache fallback).
-					// Only markdown files are valid targets for note workflows.
-					const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-					let activeFilePath = activeView?.file?.path ?? null;
-					if (!activeFilePath) {
-						const cached = getLastActiveFilePath();
-						if (cached?.endsWith(".md")) {
-							activeFilePath = cached;
-						}
-					}
-					if (!activeFilePath) {
-						new Notice("No active note found.");
-						return;
-					}
-
-					const capturedPath = activeFilePath;
-
-					showActiveNoteWorkflowPicker(
-						this.app,
-						() => this.rescanWorkflows(),
-						(workflow) => {
-							(async () => {
-								const activeNoteContent = await buildActiveNoteContent(
-									capturedPath,
-									this.app.vault,
-								);
-								const resolvedPrompt = resolveActiveNotePrompt(
-									workflow.active_note_prompt!,
-									activeNoteContent,
-								);
-
-								await this.openChatPanel();
-								log.info("Active note workflow selected", {
-									display_name: workflow.display_name,
-									active_note: capturedPath,
-								});
-								const orchestrator = this.getActiveOrchestrator();
-								if (!orchestrator) {
-									new Notice("No active chat panel");
-									return;
-								}
-								await orchestrator.executeWorkflow(workflow, resolvedPrompt);
-							})().catch((e) => {
-								log.error("Failed to execute active note workflow", {
-									error: String(e),
-								});
-								new Notice(
-									`Active note workflow failed: ${e instanceof Error ? e.message : String(e)}`
-								);
-							});
-						},
-						this.settings.notor_dir
-					);
-				} catch (e) {
-					log.error("Launch active note workflow command failed", { error: String(e) });
-					new Notice(
-						`Failed to open active note workflow picker: ${e instanceof Error ? e.message : String(e)}`
-					);
-				}
-			},
-		});
-
-		// Export active conversation
-		this.addCommand({
-			id: "export-conversation",
-			name: "Export conversation",
-			callback: () => {
-				try {
-					const orchestrator = this.getActiveOrchestrator();
-					if (!orchestrator) {
-						new Notice("No active chat panel");
-						return;
-					}
-					const convManager = orchestrator.getConversationManager();
-					const conversation = convManager.getActiveConversation();
-					const messages = convManager.getMessages();
-					if (!conversation) {
-						new Notice("No active conversation to export");
-						return;
-					}
-					this.showExportModal(conversation, messages);
-				} catch (e) {
-					log.error("Export conversation command failed", { error: String(e) });
-					new Notice(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
-				}
-			},
-		});
-
-		// Import conversation from exported HTML file
-		this.addCommand({
-			id: "import-conversation",
-			name: "Import conversation from HTML",
-			callback: () => {
-				const input = document.createElement("input");
-				input.type = "file";
-				input.accept = ".html";
-				input.addClass("notor-hidden");
-				document.body.appendChild(input);
-
-				input.addEventListener("change", () => {
-					const file = input.files?.[0];
-					if (!file) {
-						input.remove();
-						return;
-					}
-
-					const reader = new FileReader();
-					reader.onload = async () => {
-						try {
-							const htmlContent = reader.result as string;
-							const extracted = extractJsonlFromHtml(htmlContent);
-							if (!extracted) {
-								new Notice("This HTML file does not contain embedded conversation data");
-								return;
-							}
-							const { conversation, messages } = reassignIds(
-								extracted.conversation,
-								extracted.messages
-							);
-							const filename = await this.getHistoryManager().importConversation(conversation, messages);
-							const orchestrator = this.getActiveOrchestrator();
-							if (orchestrator) {
-								await orchestrator.switchConversation(filename);
-							}
-							new Notice(`Imported conversation: ${conversation.title ?? "Untitled"}`);
-						} catch (e) {
-							log.error("Import conversation command failed", { error: String(e) });
-							new Notice(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
-						} finally {
-							input.remove();
-						}
-					};
-					reader.onerror = () => {
-						log.error("Failed to read imported file", { error: String(reader.error) });
-						new Notice("Failed to read selected file");
-						input.remove();
-					};
-					reader.readAsText(file);
-				});
-
-				input.click();
-			},
-		});
-
-		// Open an additional chat panel in a new tab.
-		// The factory creates a fresh orchestrator automatically — no
-		// isSecondary state needed (A4.7).
-		this.addCommand({
-			id: "open-secondary-chat",
-			name: "Open new chat panel",
-			callback: () => {
-				this.openChatInNewTab(undefined, true);
-			},
-		});
-
-		// /btw — fork current conversation into a new panel (side conversation)
-		this.addCommand({
-			id: "btw-side-conversation",
-			name: "/btw — Open side conversation in new panel",
-			callback: () => {
-				const leafId = this._lastFocusedChatLeafId;
-				if (!leafId) return;
-				const orch = this._orchestrators.get(leafId);
-				if (!orch) return;
-				const messages = orch.getConversationManager().getMessages();
-				const lastId = messages[messages.length - 1]?.id;
-				if (!lastId) return;
-				orch.forkConversation(lastId).then((result) => {
-					if (!result) return;
-					this.openChatInNewTab(result.filename);
-					new Notice(`Side conversation: ${result.conversation.title}`);
-				}).catch((e) => {
-					log.error("Failed to create side conversation", { error: String(e) });
-				});
-			},
-		});
-
-		// EXT-016: Reload user extensions from vault files.
-		this.addCommand({
-			id: "reload-extensions",
-			name: "Reload user extensions",
-			callback: () => {
-				this.getExtensionManager().reload(false).then((result) => {
-					const summary =
-						`Extensions reloaded: ${result.toolCount} tool${result.toolCount !== 1 ? "s" : ""}, ` +
-						`${result.automationCount} automation${result.automationCount !== 1 ? "s" : ""}, ` +
-						`${result.blockCount} block kind${result.blockCount !== 1 ? "s" : ""}` +
-						(result.errors.length > 0 ? ` (${result.errors.length} error${result.errors.length !== 1 ? "s" : ""})` : "");
-					new Notice(summary);
-				}).catch((e) => {
-					log.error("Extension reload failed", { error: String(e) });
-					new Notice(`Extension reload failed: ${e instanceof Error ? e.message : String(e)}`);
-				});
-			},
-		});
-
-		// Switch persona for the active chat panel via fuzzy search modal.
-		// Uses checkCallback so the command only appears in the palette
-		// when a Notor chat panel is the active view.
-		this.addCommand({
-			id: "switch-persona",
-			name: "Switch persona",
-			checkCallback: (checking: boolean) => {
-				const activeView = this.app.workspace.getActiveViewOfType(NotorChatView);
-				if (!activeView) return false;
-				if (checking) return true;
-
-				const personaManager = this.getPersonaManager();
-				void openPersonaPickerModal(this.app, personaManager, (selected) => {
-					if (selected) {
-						activeView.applyPersonaSwitch(selected);
-					} else {
-						activeView.applyPersonaSwitch(null);
-					}
-				});
-				return true;
-			},
-		});
-
-		this.addCommand({
-			id: "find-in-messages",
-			name: "Find in messages",
-			checkCallback: (checking: boolean) => {
-				const activeView = this.app.workspace.getActiveViewOfType(NotorChatView);
-				if (!activeView) return false;
-				if (checking) return true;
-				activeView.openFindBar();
-				return true;
-			},
-		});
-
-		this.addCommand({
-			id: "open-memory-approval",
-			name: "Open memory approval panel",
-			checkCallback: (checking: boolean) => {
-				if (!this.settings.memory_enabled) return false;
-				if (this.settings.memory_approval_mode === "auto") return false;
-				if (checking) return true;
-				const manager = this.getPendingMemoryManager();
-				if (!manager) return false;
-				new MemoryApprovalModal(this.app, manager).open();
-				return true;
-			},
-		});
+		registerCommands(this);
 
 		// 5. Register active-leaf-change listener so the auto-context module
 		// can track the last-focused file even when the chat panel (or another
@@ -1145,336 +809,15 @@ export default class NotorPlugin extends Plugin {
 			this.settings = loaded;
 		}
 
-		// One-time migration of old tool settings into the extension settings system.
-		await this.migrateToolSettingsToExtensions();
-
-		// One-time migration: initialize model presets for existing installs.
-		await this.migrateModelPresets();
-
-		// One-time migration: move title_generation_* into generic automation settings.
-		await this.migrateAutomationSettings();
-
-		// One-time migration: assign instance IDs to providers for multi-instance support.
-		await this.migrateProviderInstances();
-
-		// One-time migration: move multi-provider web search settings to extension tool.
-		await this.migrateWebSearchMultiProvider();
+		await runAllMigrations({
+			settings: this.settings,
+			app: this.app,
+			saveSettings: () => this.saveSettings(),
+			loadData: () => this.loadData(),
+			saveData: (data) => this.saveData(data),
+		});
 	}
 
-	/**
-	 * One-time migration of old NotorSettings tool fields into the extension
-	 * settings system (per-extension + shared). See spec D-2.
-	 *
-	 * Detection: per-tool-group check — migrate only if the extension settings
-	 * key is absent (undefined) AND the old field exists in loaded data.
-	 *
-	 * Atomicity: two-phase write.
-	 *   Phase 1: copy values into extension settings + saveSettings()
-	 *   Phase 2: delete old fields from settings object + saveSettings()
-	 * If the plugin crashes between phases, next boot sees old fields still
-	 * present but extension settings already populated — detection skips
-	 * already-migrated groups.
-	 */
-	private async migrateToolSettingsToExtensions(): Promise<void> {
-		let migrated = false;
-
-		// --- Per-extension settings groups ---
-
-		// fetch_webpage
-		if (
-			this.settings.user_extension_settings["fetch_webpage"] === undefined &&
-			this.settings.fetch_webpage_timeout !== undefined
-		) {
-			this.settings.user_extension_settings["fetch_webpage"] = {
-				fetch_webpage_timeout: this.settings.fetch_webpage_timeout,
-				fetch_webpage_max_download_mb: this.settings.fetch_webpage_max_download_mb,
-				fetch_webpage_max_output_chars: this.settings.fetch_webpage_max_output_chars,
-			};
-			migrated = true;
-		}
-
-		// web_search (fields removed from NotorSettings — cast through raw data)
-		const rawWs = this.settings as unknown as Record<string, unknown>;
-		if (
-			this.settings.user_extension_settings["web_search"] === undefined &&
-			rawWs.web_search_timeout !== undefined
-		) {
-			this.settings.user_extension_settings["web_search"] = {
-				web_search_timeout: rawWs.web_search_timeout as number,
-				web_search_default_num_results: rawWs.web_search_default_num_results as number,
-			};
-			migrated = true;
-		}
-
-		// execute_command
-		if (
-			this.settings.user_extension_settings["execute_command"] === undefined &&
-			this.settings.execute_command_timeout !== undefined
-		) {
-			this.settings.user_extension_settings["execute_command"] = {
-				execute_command_allowed_paths: this.settings.execute_command_allowed_paths,
-				execute_command_timeout: this.settings.execute_command_timeout,
-				execute_command_max_output_chars: this.settings.execute_command_max_output_chars,
-			};
-			migrated = true;
-		}
-
-		// read_file
-		if (
-			this.settings.user_extension_settings["read_file"] === undefined &&
-			this.settings.image_max_dimension !== undefined
-		) {
-			this.settings.user_extension_settings["read_file"] = {
-				image_max_dimension: this.settings.image_max_dimension,
-				image_compression_quality: this.settings.image_compression_quality,
-				pdf_prefer_native: this.settings.pdf_prefer_native,
-				pdf_text_max_chars: this.settings.pdf_text_max_chars,
-				pdf_native_max_size_mb: this.settings.pdf_native_max_size_mb,
-			};
-			migrated = true;
-		}
-
-		// write_docx
-		if (
-			this.settings.user_extension_settings["write_docx"] === undefined &&
-			this.settings.write_docx_default_output_dir !== undefined
-		) {
-			this.settings.user_extension_settings["write_docx"] = {
-				write_docx_default_output_dir: this.settings.write_docx_default_output_dir,
-				write_docx_default_template_path: this.settings.write_docx_default_template_path,
-			};
-			migrated = true;
-		}
-
-		// --- Shared settings ---
-
-		// domain_denylist
-		if (
-			this.settings.user_shared_settings["domain_denylist"] === undefined &&
-			this.settings.domain_denylist !== undefined
-		) {
-			this.settings.user_shared_settings["domain_denylist"] = this.settings.domain_denylist;
-			migrated = true;
-		}
-
-		// read_file_allowed_paths
-		if (
-			this.settings.user_shared_settings["read_file_allowed_paths"] === undefined &&
-			this.settings.read_file_allowed_paths !== undefined
-		) {
-			this.settings.user_shared_settings["read_file_allowed_paths"] = this.settings.read_file_allowed_paths;
-			migrated = true;
-		}
-
-		if (!migrated) return;
-
-		// Phase 1: persist the copied extension settings
-		await this.saveSettings();
-
-		// Phase 2: strip old fields from persisted data only.
-		// The in-memory settings object retains the old fields so that non-tool
-		// code (shell-executor, hooks, orchestrator, attachment-picker) which
-		// still references them continues working during this session. On next
-		// boot, loadSettings() merges defaults (which still provide these fields)
-		// with the cleaned data.json. Phase 7 will remove these legacy references.
-		const oldFields = [
-			"fetch_webpage_timeout",
-			"fetch_webpage_max_download_mb",
-			"fetch_webpage_max_output_chars",
-			"domain_denylist",
-			"web_search_timeout",
-			"web_search_default_num_results",
-			"execute_command_timeout",
-			"execute_command_max_output_chars",
-			"execute_command_allowed_paths",
-			"image_max_dimension",
-			"image_compression_quality",
-			"pdf_native_max_size_mb",
-			"pdf_text_max_chars",
-			"pdf_prefer_native",
-			"read_file_allowed_paths",
-			"write_docx_default_output_dir",
-			"write_docx_default_template_path",
-		];
-
-		const rawData = (await this.loadData()) as Record<string, unknown> | null;
-		if (rawData) {
-			for (const field of oldFields) {
-				delete rawData[field];
-			}
-			await this.saveData(rawData);
-		}
-
-		new Notice("Tool settings have been migrated to Extensions in Settings.", 5000);
-	}
-
-	/**
-	 * One-time migration: initialize model presets for existing installs.
-	 *
-	 * If `model_presets` is absent (pre-preset install), initializes with
-	 * default presets and auto-configures the `medium` preset from the
-	 * current active provider + model, so existing users can continue
-	 * chatting immediately.
-	 *
-	 * @see specs/ZZ-misc/model-presets-design.md — Section 13.1
-	 */
-	private async migrateModelPresets(): Promise<void> {
-		if (this.settings.model_presets?.length > 0) return;
-
-		this.settings.model_presets = DEFAULT_MODEL_PRESETS.map((p) => ({ ...p }));
-		this.settings.default_preset = "medium";
-		// Title generation defaults: disabled, "small" preset — stored in generic systems
-		this.settings.automation_enabled["title-generation"] = false;
-		if (!this.settings.user_extension_settings["Title Generation"]) {
-			this.settings.user_extension_settings["Title Generation"] = {};
-		}
-		this.settings.user_extension_settings["Title Generation"]["preset"] = "small";
-
-		// Auto-configure the "medium" preset from the current active provider+model
-		const activeId = this.settings.active_provider;
-		const activeConfig = this.settings.providers.find((p) => p.id === activeId || p.type === activeId);
-		if (activeId && activeConfig?.model_id) {
-			const medium = this.settings.model_presets.find((p) => p.name === "medium");
-			if (medium) {
-				medium.provider_id = activeConfig.id;
-				medium.model_id = activeConfig.model_id;
-				medium.use_extended_context = activeConfig.use_extended_context ?? false;
-			}
-		}
-
-		await this.saveSettings();
-	}
-
-	/**
-	 * Migrate legacy `title_generation_enabled` / `title_generation_preset`
-	 * into the generic `automation_enabled` / `user_extension_settings` system.
-	 */
-	private async migrateAutomationSettings(): Promise<void> {
-		// Skip if already migrated
-		if (this.settings.automation_enabled["title-generation"] !== undefined) return;
-
-		// Only migrate if the legacy fields were ever set (model presets migration sets them)
-		const legacyEnabled = (this.settings as unknown as Record<string, unknown>).title_generation_enabled;
-		if (legacyEnabled === undefined) return;
-
-		this.settings.automation_enabled["title-generation"] =
-			this.settings.title_generation_enabled ?? false;
-
-		// Extension key must match displayName used by executeAutomation()
-		const extKey = "Title Generation";
-		const legacyPreset = this.settings.title_generation_preset;
-		if (legacyPreset) {
-			if (!this.settings.user_extension_settings[extKey]) {
-				this.settings.user_extension_settings[extKey] = {};
-			}
-			this.settings.user_extension_settings[extKey]["preset"] = legacyPreset;
-		}
-
-		// Remove legacy fields from persisted data
-		const raw = this.settings as unknown as Record<string, unknown>;
-		delete raw.title_generation_enabled;
-		delete raw.title_generation_preset;
-
-		await this.saveSettings();
-	}
-
-	/**
-	 * Migrate providers to multi-instance format by assigning unique IDs.
-	 *
-	 * Detection: first provider in array lacks an `id` field.
-	 * Action: assign `id = type` for each existing provider (preserves
-	 * secret keys and conversation header references). Also migrates
-	 * ModelPreset.provider_type → provider_id.
-	 */
-	private async migrateProviderInstances(): Promise<void> {
-		const firstProvider = this.settings.providers[0];
-		if (!firstProvider || firstProvider.id) return;
-
-		for (const provider of this.settings.providers) {
-			if (!provider.id) {
-				provider.id = provider.type;
-			}
-		}
-
-		// Migrate model presets from provider_type to provider_id
-		for (const preset of this.settings.model_presets ?? []) {
-			const raw = preset as unknown as Record<string, unknown>;
-			if (raw.provider_type && !preset.provider_id) {
-				preset.provider_id = raw.provider_type as string;
-			}
-			delete raw.provider_type;
-		}
-
-		await this.saveSettings();
-	}
-
-	/**
-	 * One-time migration: move multi-provider web search settings from the
-	 * built-in `web_search` extension into `multi_engine_web_search`.
-	 *
-	 * Detection: `web_search` settings contain a provider key like
-	 * `web_search_tavily_enabled` — this field no longer exists in the
-	 * simplified built-in scaffold.
-	 */
-	private async migrateWebSearchMultiProvider(): Promise<void> {
-		const wsSettings = this.settings.user_extension_settings["web_search"] as
-			| Record<string, string | number | boolean | string[]>
-			| undefined;
-
-		if (!wsSettings || wsSettings.web_search_tavily_enabled === undefined) return;
-
-		// Already migrated
-		if (this.settings.user_extension_settings["multi_engine_web_search"]) return;
-
-		const multiProviderKeys = [
-			"web_search_round_robin",
-			"web_search_provider_priority",
-			"web_search_max_fallback_providers",
-			"web_search_duckduckgo_enabled",
-			"web_search_duckduckgo_delay_ms",
-			"web_search_tavily_enabled",
-			"web_search_tavily_api_key",
-			"web_search_tavily_delay_ms",
-			"web_search_brave_enabled",
-			"web_search_brave_api_key",
-			"web_search_brave_delay_ms",
-			"web_search_serpapi_enabled",
-			"web_search_serpapi_api_key",
-			"web_search_serpapi_delay_ms",
-		];
-
-		const migrated: Record<string, string | number | boolean | string[]> = {};
-		for (const key of multiProviderKeys) {
-			if (key in wsSettings && wsSettings[key] !== undefined) {
-				migrated[key] = wsSettings[key]!;
-				delete wsSettings[key];
-			}
-		}
-
-		// Also remove the now-unnecessary duckduckgo_enabled from web_search
-		// (it's always-on in the simplified scaffold)
-		delete wsSettings["web_search_duckduckgo_enabled"];
-
-		this.settings.user_extension_settings["multi_engine_web_search"] = migrated;
-
-		// Migrate secrets (API keys)
-		const secretKeys = ["web_search_tavily_api_key", "web_search_brave_api_key", "web_search_serpapi_api_key"];
-		for (const key of secretKeys) {
-			const oldId = slugifySecretId("notor-ext", "web_search", key);
-			const newId = slugifySecretId("notor-ext", "multi_engine_web_search", key);
-			const value = getSecret(this.app, oldId);
-			if (value) {
-				setSecret(this.app, newId, value);
-				clearSecret(this.app, oldId);
-			}
-		}
-
-		await this.saveSettings();
-		new Notice(
-			"Multi-provider web search settings have been moved to the 'Multi-Engine Web Search' extension tool.",
-			8000,
-		);
-	}
 
 	// -----------------------------------------------------------------------
 	// Group F: Vault event hook initialization (F-023)
@@ -2501,6 +1844,15 @@ export default class NotorPlugin extends Plugin {
 	}
 
 	/**
+	 * Get the orchestrator for the last focused chat panel leaf.
+	 * Returns null if no chat panel has been focused yet.
+	 */
+	getLastFocusedOrchestrator(): ChatOrchestrator | null {
+		if (!this._lastFocusedChatLeafId) return null;
+		return this._orchestrators.get(this._lastFocusedChatLeafId) ?? null;
+	}
+
+	/**
 	 * Get the orchestrator for a specific chat view.
 	 *
 	 * @param view - The chat view to look up
@@ -2510,6 +1862,48 @@ export default class NotorPlugin extends Plugin {
 	 */
 	getOrchestratorForView(view: NotorChatView): ChatOrchestrator | null {
 		return this._orchestrators.get(view.leaf.id) ?? null;
+	}
+
+	/** Remove an orchestrator from the registry (called on panel close). */
+	removeOrchestrator(leafId: string): void {
+		this._orchestrators.delete(leafId);
+	}
+
+	/** Get the workflow activity tracker (may be undefined). */
+	getWorkflowActivityTracker(): WorkflowActivityTracker | undefined {
+		return this._workflowActivityTracker;
+	}
+
+	/** Get active sessions from all open chat panels. */
+	getAllActiveSessions(): ConversationSession[] {
+		return this._getAllActiveSessions();
+	}
+
+	/** Register an activity indicator callback. */
+	addActivityIndicatorCallback(cb: () => void): void {
+		this._activityIndicatorCallbacks.add(cb);
+	}
+
+	/** Unregister an activity indicator callback. */
+	removeActivityIndicatorCallback(cb: () => void): void {
+		this._activityIndicatorCallbacks.delete(cb);
+	}
+
+	/** Fire all registered activity indicator callbacks. */
+	fireActivityIndicatorCallbacks(): void {
+		for (const cb of this._activityIndicatorCallbacks) cb();
+	}
+
+	/** Update the MCP hub settings reference. */
+	updateMcpHubSettings(): void {
+		if (this._mcpHub) {
+			this._mcpHub.updateSettings(this.settings);
+		}
+	}
+
+	/** Scroll settings tab to a specific group/subsection. */
+	scrollSettingsToGroup(groupTitle: string, subsection?: string): void {
+		this._settingTab?.scrollToGroup(groupTitle, subsection);
 	}
 
 	/**
@@ -3109,749 +2503,10 @@ export default class NotorPlugin extends Plugin {
 		return result;
 	}
 
-	/**
-	 * Wire a newly created chat view to the orchestrator.
-	 *
-	 * Called when the view is registered and every time the view is opened
-	 * (Obsidian may recreate views on workspace restore). Each panel gets
-	 * its own orchestrator instance (sharing infrastructure singletons).
-	 *
-	 * @param view - The chat view to wire
-	 * @param orchestrator - The orchestrator for this panel. Primary panels
-	 *   use the shared singleton; secondary panels get their own instance.
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4b
-	 */
 	private wireView(view: NotorChatView, orchestrator: ChatOrchestrator): void {
-		const historyManager = this.getHistoryManager();
-		const providerRegistry = this.getProviderRegistry();
-		const toolDispatcher = this.getToolDispatcher();
-
-		// Wire orchestrator ↔ view
-		orchestrator.setView(view);
-
-		// A7.3: Wire close cleanup — orderly teardown when the panel closes.
-		// Obsidian awaits onClose(), so the async cleanup (JSONL flush,
-		// session guard unregister) completes before DOM teardown.
-		// @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 7.2
-		const leafId = view.leaf.id;
-
-		// Declare before setOnCloseCleanup so the close closure can reference it.
-		const updateThisView = () => view.updateActivityIndicator();
-
-		view.setOnCloseCleanup(async () => {
-			// 1. Abort any in-flight loadConversation() — must be first.
-			//    Without this, a concurrent load can continue after orchestrator
-			//    teardown and call syncViewAfterLoad() on a closing view.
-			view._loadConversationAbort?.abort();
-
-			// 2. Clear deferred load timeout (prevent post-close spurious load)
-			clearTimeout(view._loadFallbackTimeout);
-
-			// 3. Detach view — renders become no-ops via existing this.view?. guards
-			orchestrator.setView(undefined);
-
-			// 4. Clean up session-change, persona-changed, and global activity listeners
-			view._unregisterSessionsChanged?.();
-			view._unregisterPersonaChanged?.();
-			view._removeActivityCallback?.();
-
-			// 5. Remove from registry
-			this._orchestrators.delete(leafId);
-
-			// 6. Destroy (aborts active sessions, flushes JSONL writes).
-			//    Closing a panel does NOT imply consent for unreviewed tool
-			//    execution — abort is the safe default.
-			await orchestrator.destroy();
-		});
-
-		// H-006: Wire workflow activity tracker to the chat view so the
-		// indicator is created in onOpen() and destroyed in onClose().
-		if (this._workflowActivityTracker) {
-			view.setWorkflowActivityTracker(this._workflowActivityTracker);
-		}
-
-		// Wire global session accessor so every panel's indicator shows sessions
-		// from ALL open chat panels, not just its own orchestrator.
-		view.setGetActiveSessions(() => this._getAllActiveSessions());
-
-		// Wire the current conversation ID getter for dropdown entry highlighting.
-		view.setGetCurrentConversationId(() => view.getActiveConversationId());
-
-		// Register this panel's indicator updater in the global set so that a
-		// session change in any panel triggers every panel's indicator to refresh.
-		// Guard against stale closures from a previous wireView call.
-		view._removeActivityCallback?.();
-		this._activityIndicatorCallbacks.add(updateThisView);
-		view._removeActivityCallback = () => this._activityIndicatorCallbacks.delete(updateThisView);
-
-		// A3.5: Clean up previous session-change listener before registering
-		// a new one to prevent listener accumulation across wireView calls.
-		// The handler fires ALL panels' indicators (not just this one) so that
-		// a session starting in Panel A immediately updates Panel B's badge too.
-		view._unregisterSessionsChanged?.();
-		view._unregisterSessionsChanged = orchestrator.onSessionsChanged(() => {
-			for (const cb of this._activityIndicatorCallbacks) cb();
-		});
-
-		// H-005: Wire conversation-by-ID switching for the activity dropdown.
-		// When a user clicks a workflow entry in the dropdown, it calls
-		// switchToConversation(conversationId) on the view, which delegates
-		// to this callback to find and load the conversation from history.
-		view.setOnSwitchToConversationById(async (conversationId: string) => {
-			const result = await orchestrator.switchToConversationById(conversationId);
-			if (result) {
-				view.setActiveConversationId(conversationId);
-				const conv = orchestrator.getConversationManager().getActiveConversation();
-				view.updateHeaderTitle(conversationId, conv?.title ?? null);
-				view.updateHeaderFavorite(conversationId, !!conv?.is_favorite);
-			}
-			return result;
-		});
-
-		// Wire persona manager to view (A-013: picker + label)
-		const personaManager = this.getPersonaManager();
-		view.setPersonaManager(personaManager);
-
-		// Wire persona-changed callback — only responds to file-watcher refreshes
-		// relevant to this panel's active persona. Does not broadcast across panels.
-		view._unregisterPersonaChanged?.();
-		view._unregisterPersonaChanged = personaManager.setOnPersonaChanged((persona) => {
-			const panelPersonaName = orchestrator.getActivePersona()?.name ?? null;
-			if (persona && persona.name === panelPersonaName) {
-				view.updatePersonaLabel(persona);
-				orchestrator.setActivePersona(persona);
-			} else if (persona === null && panelPersonaName !== null) {
-				view.updatePersonaLabel(null);
-				orchestrator.setActivePersona(null);
-			}
-		});
-
-
-		view.setOnPersonaChange((persona) => {
-			// Update per-orchestrator persona state
-			orchestrator.setActivePersona(persona);
-
-			// Apply provider/model overrides per-panel
-			if (persona) {
-				const resolution = resolvePersonaOverrides(persona, this._providerRegistry!, this.settings.model_presets ?? []);
-				if (resolution) {
-					orchestrator.setActiveProvider(resolution.providerId);
-					orchestrator.setActiveModel(resolution.modelId, resolution.useExtendedContext, resolution.thinkingLevel);
-					view.updateProviderDisplay(resolution.providerId);
-					const modelValue = resolution.useExtendedContext
-						? `${resolution.modelId}::1m`
-						: resolution.modelId;
-					view.updateModelDisplay(modelValue);
-					if (resolution.presetName) {
-						orchestrator.setActivePresetName(resolution.presetName);
-						view.updatePresetDisplay(resolution.presetName);
-					}
-				}
-			}
-
-			// Update conversation header
-			const conv = orchestrator.getDisplayedConversation();
-			if (conv) {
-				conv.persona_name = persona?.name ?? null;
-				historyManager.updateConversationHeader(conv).catch((e) => {
-					log.error("Failed to update conversation header on persona change", { error: String(e) });
-				});
-			}
-
-			// Sync ToolDispatcher to this panel's persona
-			toolDispatcher.setActivePersonaName(persona?.name ?? null);
-
-			// Persist as default for new panels/conversations
-			this.settings.active_persona = persona?.name ?? "";
-			void this.saveData(this.settings);
-		});
-
-
-		// personaManager.restoreFromSettings() moved to onload() (A1.7 / Amendment R5).
-		// No longer called per-wireView — single global restore at plugin startup.
-
-		// Tool definitions callback moved to createOrchestrator() (A1.5 / Amendment R3).
-		// No longer set here — each orchestrator receives it at construction time.
-
-		// E-012 / E-015: Wire the workflow send callback from the chat view
-		// to the orchestrator's executeWorkflow() method. When the user sends
-		// a message with a workflow chip attached, this path is taken instead
-		// of the normal handleUserMessage path.
-		view.setOnSendWorkflow(async (workflow, supplementaryText) => {
-			await orchestrator.executeWorkflow(workflow, supplementaryText);
-		});
-
-		// E-015: Provide the workflow discovery callback to the slash-command suggest
-		// so it can list workflows in the autocomplete popup.
-		view.setGetWorkflows(() => this.getDiscoveredWorkflows());
-
-		// Send message (with optional attachments from the chat view)
-		// MAIN-001: Tool definitions are now computed per-iteration inside
-		// responseLoop() via resolveEffectiveConfig() — no longer passed externally.
-		view.setOnSendMessage(async (content: string, attachments?) => {
-			await orchestrator.handleUserMessage(content, attachments);
-		});
-
-		// Stop response — resolve displayed conversation's active session and abort it
-		view.setOnStopResponse(() => {
-			const displayedConvId = orchestrator.getConversationManager().getActiveConversation()?.id;
-			if (displayedConvId) {
-				const session = orchestrator.getActiveSession(displayedConvId);
-				if (session) {
-					session.abortController.abort();
-					return;
-				}
-			}
-			// Fallback: no active session — the view's legacy AbortController is a no-op
-		});
-
-		// New conversation
-		view.setOnNewConversation(() => {
-			const staleTracker = this.getStaleTracker();
-			staleTracker.clear?.();
-			const vaultRuleManager = this.getVaultRuleManager();
-			vaultRuleManager.clearAccessedNotes();
-
-			// Reload settings from disk so any external changes to data.json
-			// (e.g. E2E tests injecting auto-approve configs) are picked up
-			// before the new conversation starts.
-			this.loadSettings().then(() => {
-				// Propagate refreshed auto-approve settings to the dispatcher
-				toolDispatcher.setAutoApprove(this.settings.auto_approve);
-				toolDispatcher.setActivePersonaName(
-					this.settings.active_persona || null
-				);
-				// A3.6: Use closure-captured orchestrator, not hardcoded _orchestrator
-				orchestrator.updateSettings(this.settings);
-				// Phase 4.1: Keep McpHub settings reference in sync after reload
-				// so servers configured after the last reload can still be found.
-				if (this._mcpHub) {
-					this._mcpHub.updateSettings(this.settings);
-				}
-
-				return orchestrator.newConversation();
-			}).then(() => {
-				const conv = orchestrator.getConversationManager().getActiveConversation();
-				if (conv) {
-					view.setActiveConversationId(conv.id);
-					view.updateHeaderTitle(conv.id, conv.title ?? null);
-					view.updateHeaderFavorite(conv.id, !!conv.is_favorite);
-				}
-			}).catch((e) => {
-				log.error("Failed to create new conversation", { error: String(e) });
-				new Notice(`Failed to create conversation: ${e instanceof Error ? e.message : String(e)}`);
-			});
-		});
-
-		// Open conversation list — refresh from disk
-		view.setOnOpenConversationList(() => {
-			return historyManager.listConversations();
-		});
-
-		// Search conversations by query
-		view.setOnSearchConversations((query: string) => {
-			return historyManager.searchConversations(query);
-		});
-
-		// Switch conversation
-		view.setOnSwitchConversation((filename: string) => {
-			orchestrator.switchConversation(filename).then(() => {
-				const conv = orchestrator.getConversationManager().getActiveConversation();
-				if (conv) {
-					view.setActiveConversationId(conv.id);
-					view.updateHeaderTitle(conv.id, conv.title ?? null);
-					view.updateHeaderFavorite(conv.id, !!conv.is_favorite);
-				}
-				// Clear stale tracker and vault rule accessed notes when switching
-				this.getStaleTracker().clear?.();
-				this.getVaultRuleManager().clearAccessedNotes();
-			}).catch((e) => {
-				log.error("Failed to switch conversation", { error: String(e) });
-			});
-		});
-
-		// Fork conversation at a specific message
-		view.setOnForkConversation(async (messageId: string) => {
-			const result = await orchestrator.forkConversation(messageId);
-			if (!result) return;
-
-			await orchestrator.switchConversation(result.filename);
-
-			view.setActiveConversationId(result.conversation.id);
-			view.updateHeaderTitle(result.conversation.id, result.conversation.title ?? null);
-			view.updateHeaderFavorite(result.conversation.id, !!result.conversation.is_favorite);
-			this.getStaleTracker().clear?.();
-			this.getVaultRuleManager().clearAccessedNotes();
-
-			new Notice(`Forked: ${result.conversation.title}`);
-		});
-
-		// /btw — fork conversation to a new panel (side conversation)
-		view.setOnForkToNewPanel(async (messageId, initialText) => {
-			const messages = orchestrator.getConversationManager().getMessages();
-			const forkMessageId = messageId ?? messages[messages.length - 1]?.id;
-			if (!forkMessageId) return;
-
-			const result = await orchestrator.forkConversation(forkMessageId);
-			if (!result) return;
-
-			this.openChatInNewTab(result.filename, false, initialText);
-			new Notice(`Side conversation: ${result.conversation.title}`);
-		});
-
-		// Export conversation from history list
-		view.setOnExportConversation((filename: string) => {
-			historyManager.loadConversation(filename).then(({ conversation, messages }) => {
-				this.showExportModal(conversation, messages);
-			}).catch((e) => {
-				log.error("Failed to load conversation for export", { error: String(e) });
-				new Notice(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
-			});
-		});
-
-		// Toggle favorite
-		view.setOnToggleFavorite(async (filename: string) => {
-			const newValue = await historyManager.toggleFavorite(filename);
-			// Sync in-memory state so getActiveConversationMeta returns fresh is_favorite
-			const convManager = orchestrator.getConversationManager();
-			const activeConv = convManager.getActiveConversation();
-			if (activeConv && filename.includes(activeConv.id)) {
-				convManager.setFavorite(newValue);
-				view.updateHeaderFavorite(activeConv.id, newValue);
-			}
-			const entries = await historyManager.listConversations();
-			view.renderConversationList(
-				view.isFavFilterActive() ? entries.filter((e) => e.is_favorite) : entries
-			);
-		});
-
-		// Rename conversation
-		view.setOnRenameConversation((filename: string, currentTitle: string) => {
-			new RenameModal(
-				this.app,
-				currentTitle,
-				async (newTitle: string) => {
-					const { conversation } = await historyManager.loadConversation(filename);
-					conversation.title = newTitle;
-					await historyManager.updateConversationHeader(conversation);
-
-					// If this is the active conversation, update in-memory state
-					// (setTitle fires onTitleChanged → updateConversationTitleInList)
-					const convManager = orchestrator.getConversationManager();
-					const activeConv = convManager.getActiveConversation();
-					if (activeConv && activeConv.id === conversation.id) {
-						convManager.setTitle(newTitle);
-					} else {
-						view.updateConversationTitleInList(conversation.id, newTitle);
-					}
-				},
-			).open();
-		});
-
-		// Direct rename (for inline header title editing — bypasses RenameModal)
-		view.setOnDirectRename(async (filename: string, newTitle: string) => {
-			const { conversation } = await historyManager.loadConversation(filename);
-			conversation.title = newTitle;
-			await historyManager.updateConversationHeader(conversation);
-
-			const convManager = orchestrator.getConversationManager();
-			const activeConv = convManager.getActiveConversation();
-			if (activeConv && activeConv.id === conversation.id) {
-				convManager.setTitle(newTitle);
-			} else {
-				view.updateConversationTitleInList(conversation.id, newTitle);
-			}
-		});
-
-		// Active conversation metadata (for header context menu and inline edit)
-		view.setGetActiveConversationMeta(() => {
-			const conv = orchestrator.getConversationManager().getActiveConversation();
-			if (!conv) return null;
-			return {
-				id: conv.id,
-				title: conv.title ?? "Untitled",
-				filename: conversationFilename(conv),
-				is_favorite: !!conv.is_favorite,
-			};
-		});
-
-		// Open conversation in a new tab — the factory creates a fresh
-		// orchestrator automatically; setState loads the conversation.
-		view.setOnOpenInNewTab((filename: string) => {
-			this.openChatInNewTab(filename);
-		});
-
-		// Delete conversation with confirmation
-		view.setOnDeleteConversation((filename: string) => {
-			// Step 2c: Block deletion of conversations with active sessions.
-			// Check if any active session's conversation ID is in the filename.
-			const activeSessions = orchestrator.getActiveSessions();
-			const streamingSession = activeSessions.find(s => filename.includes(s.conversationId));
-			if (streamingSession) {
-				new Notice("Cannot delete — conversation is still streaming. Stop it first.");
-				return;
-			}
-			new ConfirmModal(
-				this.app,
-				"Delete conversation",
-				"This conversation will be permanently deleted. This action cannot be undone.",
-				async () => {
-					const convManager = orchestrator.getConversationManager();
-					const activeConv = convManager.getActiveConversation();
-					await historyManager.deleteConversationFile(filename);
-					// Refresh the conversation list
-					const entries = await historyManager.listConversations();
-					view.renderConversationList(entries);
-					// If the deleted conversation was the active one, switch to another
-					const nextEntry = entries[0];
-					if (activeConv && nextEntry && filename.includes(activeConv.id)) {
-						await orchestrator.switchConversation(nextEntry.filename);
-						const conv = convManager.getActiveConversation();
-						if (conv) {
-							view.setActiveConversationId(conv.id);
-							view.updateHeaderTitle(conv.id, conv.title ?? null);
-							view.updateHeaderFavorite(conv.id, !!conv.is_favorite);
-						}
-					} else if (entries.length === 0) {
-						await orchestrator.newConversation();
-						const conv = convManager.getActiveConversation();
-						if (conv) {
-							view.setActiveConversationId(conv.id);
-							view.updateHeaderTitle(conv.id, conv.title ?? null);
-							view.updateHeaderFavorite(conv.id, !!conv.is_favorite);
-						}
-					}
-				},
-				"Delete",
-				true
-			).open();
-		});
-
-		// Import conversation from exported HTML
-		view.setOnImportConversation(async (htmlContent: string) => {
-			const extracted = extractJsonlFromHtml(htmlContent);
-			if (!extracted) {
-				new Notice("This HTML file does not contain embedded conversation data");
-				return;
-			}
-			const { conversation, messages } = reassignIds(
-				extracted.conversation,
-				extracted.messages
-			);
-			try {
-				const filename = await historyManager.importConversation(conversation, messages);
-				await orchestrator.switchConversation(filename);
-				new Notice(`Imported conversation: ${conversation.title ?? "Untitled"}`);
-			} catch (e) {
-				log.error("Failed to import conversation", { error: String(e) });
-				new Notice(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
-			}
-		});
-
-		// Mode toggle — propagate to active session so buildPolicyContext reads the new mode
-		view.setOnModeToggle((mode) => {
-			const convManager = orchestrator.getConversationManager();
-			convManager.setMode(mode);
-
-			// Propagate to active session's ConversationManager
-			const displayedConvId = convManager.getActiveConversation()?.id;
-			if (displayedConvId) {
-				const session = orchestrator.getActiveSession(displayedConvId);
-				session?.conversationManager.setMode(mode);
-			}
-		});
-
-		// Settings open (open Obsidian settings tab)
-		view.setOnSettingsOpen(() => {
-			// Open plugin settings
-			(this.app as import("obsidian").App & {
-				setting?: { open: () => void; openTabById: (id: string) => void };
-			}).setting?.openTabById("notor");
-		});
-
-		// Settings deep-link: open settings panel, switch to Notor tab, scroll to group/subsection
-		view.setOnOpenSettingsGroup((groupTitle: string, subsection?: string) => {
-			const appSetting = (this.app as import("obsidian").App & {
-				setting?: { open: () => void; openTabById: (id: string) => void };
-			}).setting;
-			appSetting?.open();
-			appSetting?.openTabById("notor");
-			// Defer scrollToGroup so the settings DOM renders first
-			setTimeout(() => {
-				this._settingTab?.scrollToGroup(groupTitle, subsection);
-			}, 100);
-		});
-
-		// Provider change — updates per-orchestrator state (Phase 4, Step 4b).
-		// Also persists to global settings for the "default provider" behavior.
-		view.setOnProviderChange((providerId) => {
-			// Update per-orchestrator provider (Phase 4, Step 4b)
-			orchestrator!.setActiveProvider(providerId);
-
-			// Also update global state for backward compat and defaults
-			providerRegistry.switchProvider(providerId);
-			this.settings.active_provider = providerId;
-			this.saveSettings().catch((e) => {
-				log.error("Failed to save provider change", { error: String(e) });
-			});
-
-			// Step 1f-addendum (Trigger 2): Update conversation header so the
-			// next session pins from the user's explicit choice.
-			const conv = orchestrator!.getDisplayedConversation();
-			if (conv) {
-				conv.provider_id = providerId;
-				historyManager.updateConversationHeader(conv).catch((e) => {
-					log.error("Failed to update conversation header on provider change", { error: String(e) });
-				});
-			}
-		});
-
-		// Model change — parses ::1m suffix to set use_extended_context.
-		// Updates per-orchestrator model state (Phase 4, Step 4b).
-		view.setOnModelChange((selectedValue) => {
-			const { modelId, isExtendedContext } = parseOptionValue(selectedValue);
-
-			// Update per-orchestrator model (Phase 4, Step 4b)
-			orchestrator!.setActiveModel(modelId, isExtendedContext);
-
-			const activeId = orchestrator!.getActiveProviderId();
-			const config = providerRegistry.getConfig(activeId);
-			if (config) {
-				const updated = { ...config, model_id: modelId, use_extended_context: isExtendedContext };
-				providerRegistry.updateConfig(updated);
-				// Update settings
-				const idx = this.settings.providers.findIndex(
-					(p) => p.id === activeId
-				);
-				if (idx >= 0) {
-					this.settings.providers[idx] = updated;
-					this.saveSettings().catch((e) => {
-						log.error("Failed to save model change", { error: String(e) });
-					});
-				}
-			}
-
-			// Step 1f-addendum (Trigger 2): Update conversation header so the
-			// next session pins from the user's explicit choice.
-			const conv = orchestrator.getDisplayedConversation();
-			if (conv) {
-				conv.model_id = modelId;
-				conv.use_extended_context = isExtendedContext;
-				historyManager.updateConversationHeader(conv).catch((e) => {
-					log.error("Failed to update conversation header on model change", { error: String(e) });
-				});
-			}
-		});
-
-		// Refresh models
-		view.setOnRefreshModels(async () => {
-			return providerRegistry.refreshModels();
-		});
-
-		// Available providers — returns all configured instances
-		view.setGetAvailableProviders(() => {
-			return providerRegistry.getConfiguredIds().map((id) => {
-				const config = providerRegistry.getConfig(id)!;
-				return {
-					id: config.id,
-					type: config.type,
-					displayName: config.display_name,
-				};
-			});
-		});
-
-		// Available models
-		view.setGetAvailableModels(() => {
-			const activeId = orchestrator!.getActiveProviderId();
-			// Return cached models synchronously (stale-while-revalidate).
-			// The cache is populated when refreshModels() is called (e.g. via
-			// the refresh button in the settings popover). If no cache exists yet,
-			// fall back to the single configured model_id so the UI always shows
-			// something useful.
-			try {
-				const cached = providerRegistry.getCachedModels(activeId);
-				if (cached.length > 0) {
-					return cached;
-				}
-				// Trigger a background fetch so the next popover open will have data
-				providerRegistry.getModels(activeId).catch(() => {});
-				// Fall back to configured model_id
-				const config = providerRegistry.getConfig(activeId);
-				if (config?.model_id) {
-					return [{ id: config.model_id, display_name: config.model_id }];
-				}
-				return [];
-			} catch {
-				return [];
-			}
-		});
-
-		// Current provider — reads from per-orchestrator state (Phase 4, Step 4b)
-		view.setGetCurrentProvider(() => {
-			return orchestrator!.getActiveProviderId();
-		});
-
-		// Current model — reads from per-orchestrator state (Phase 4, Step 4b)
-		// Reconstructs ::1m composite value for picker selection.
-		view.setGetCurrentModel(() => {
-			const modelId = orchestrator!.getActiveModelId();
-			const useExtended = orchestrator!.getActiveUseExtendedContext();
-			return buildOptionValue(modelId, useExtended);
-		});
-
-		// Preset change — resolves preset to concrete provider+model, updates state.
-		view.setOnPresetChange((presetName, providerId, modelId, useExtendedContext) => {
-			let thinkingLevel: string | null | undefined;
-			if (presetName !== null) {
-				// Resolve preset to concrete values
-				const resolved = resolvePreset(presetName, this.settings.model_presets);
-				if (!resolved) {
-					log.warn("Preset not configured", { presetName });
-					return;
-				}
-				providerId = resolved.providerId;
-				modelId = resolved.modelId;
-				useExtendedContext = resolved.useExtendedContext;
-				thinkingLevel = resolved.thinkingLevel;
-			}
-
-			if (providerId) {
-				orchestrator!.setActiveProvider(providerId);
-				providerRegistry.switchProvider(providerId);
-				this.settings.active_provider = providerId;
-			}
-			if (modelId !== undefined) {
-				orchestrator!.setActiveModel(modelId, useExtendedContext ?? false, thinkingLevel);
-				const config = providerRegistry.getConfig(orchestrator!.getActiveProviderId());
-				if (config) {
-					const updated = { ...config, model_id: modelId, use_extended_context: useExtendedContext ?? false };
-					providerRegistry.updateConfig(updated);
-					const idx = this.settings.providers.findIndex((p) => p.id === config.id);
-					if (idx >= 0) {
-						this.settings.providers[idx] = updated;
-					}
-				}
-			}
-
-			// Track active preset on orchestrator
-			orchestrator!.setActivePresetName(presetName);
-
-			// Persist and update conversation header
-			this.saveSettings().catch((e) => {
-				log.error("Failed to save preset change", { error: String(e) });
-			});
-			const conv = orchestrator!.getDisplayedConversation();
-			if (conv) {
-				conv.preset_name = presetName;
-				if (providerId) conv.provider_id = providerId;
-				if (modelId) {
-					conv.model_id = modelId;
-					conv.use_extended_context = useExtendedContext ?? false;
-				}
-				historyManager.updateConversationHeader(conv).catch((e) => {
-					log.error("Failed to update conversation header on preset change", { error: String(e) });
-				});
-			}
-		});
-
-		// Available presets
-		view.setGetAvailablePresets(() => {
-			return this.settings.model_presets;
-		});
-
-		// Current preset — reads from per-orchestrator state
-		view.setGetCurrentPreset(() => {
-			return orchestrator!.getActivePresetName();
-		});
-
-		// Thinking level — reads/writes per-orchestrator state
-		view.setGetActiveModelId(() => {
-			return orchestrator!.getActiveModelId();
-		});
-		view.setGetActiveThinkingLevel(() => {
-			return orchestrator!.getActiveThinkingLevel();
-		});
-		view.setOnThinkingLevelChange((level) => {
-			orchestrator!.setActiveThinkingLevel(level);
-		});
-
-		// Checkpoint callbacks — use per-orchestrator checkpoint manager (A1.6c / A3)
-		const checkpointMgr = orchestrator.getCheckpointManager();
-		view.setOnListCheckpoints(async () => {
-			return checkpointMgr?.listCheckpoints() ?? [];
-		});
-
-		view.setOnRestoreCheckpoint(async (checkpointId) => {
-			return checkpointMgr?.restore(checkpointId) ?? false;
-		});
-
-		view.setOnGetCurrentContent(async (notePath) => {
-			return checkpointMgr?.getCurrentContent(notePath) ?? null;
-		});
-
-		// Wire approval callback for this panel's orchestrator (Phase 4, Step 4e).
-		// Each orchestrator gets its own approval callback bound to the correct
-		// panel's view. Replaces the former ToolDispatcher.setApprovalCallback().
-		orchestrator.setApprovalCallback(async (toolCall, abortSignal?, messageId?, autoApproved?) => {
-			if (autoApproved) {
-				const toolCallEl = messageId
-					? view.getToolCallEl(messageId) ?? view.getLastToolCallEl()
-					: view.getLastToolCallEl();
-				if (toolCallEl) {
-					void view.renderDiffApprovalPrompt(toolCallEl, toolCall.tool_name, toolCall.parameters ?? {}, true);
-				}
-				return "approved";
-			}
-
-			// Find the active session for this panel (one per panel at a time).
-			const session = orchestrator.getActiveSessions()[0];
-
-			const decision = await new Promise<"approved" | "rejected">((resolve) => {
-				// Store the resolver on the session so switch-back can re-wire it.
-				if (messageId && session) {
-					session.pendingApprovals.set(messageId, {
-						resolve,
-						toolCallId: toolCall.id ?? "",
-						messageId,
-						toolName: toolCall.tool_name,
-						parameters: toolCall.parameters ?? {},
-					});
-					session.setStatus("waiting_approval");
-				}
-
-				// Render approval UI (no-ops if view is detached / element missing).
-				const toolCallEl = messageId
-					? view.getToolCallEl(messageId) ?? view.getLastToolCallEl()
-					: view.getLastToolCallEl();
-				if (toolCallEl) {
-					view.renderDiffApprovalPrompt(toolCallEl, toolCall.tool_name, toolCall.parameters ?? {}, false)
-						.then((result) => resolve(result));
-				}
-
-				// Wire abort signal so Stop button unblocks the pending approval.
-				if (abortSignal) {
-					if (abortSignal.aborted) { resolve("rejected"); return; }
-					abortSignal.addEventListener("abort", () => resolve("rejected"), { once: true });
-				}
-			});
-
-			// Cleanup: remove from map, revert status if no more pending approvals.
-			if (messageId && session) {
-				session.pendingApprovals.delete(messageId);
-				if (session.pendingApprovals.size === 0 && session.status === "waiting_approval") {
-					session.setStatus("running");
-				}
-			}
-
-			return decision;
-		});
-
-		// History loading removed — conversation loading is now the sole
-		// responsibility of loadConversation(), called from setState() and
-		// the setTimeout(0) fallback in the registerView factory.
-		// See specs/ZZ-misc/multi-conversation-robustness-redesign.md — Phase A3.1
+		wireViewFn(view, orchestrator, this);
 	}
+
 
 	// -----------------------------------------------------------------------
 	// Commands
@@ -3862,7 +2517,7 @@ export default class NotorPlugin extends Plugin {
 	 *
 	 * Opens alongside the chat panel. If already open, reveals the existing leaf.
 	 */
-	private async openInspector(): Promise<void> {
+	async openInspector(): Promise<void> {
 		const { workspace } = this.app;
 
 		const existing = workspace.getLeavesOfType(INSPECTOR_VIEW_TYPE);
@@ -3882,7 +2537,7 @@ export default class NotorPlugin extends Plugin {
 	}
 
 	/** Open (or reveal) a Notor chat panel. */
-	private async openChatPanel(): Promise<void> {
+	async openChatPanel(): Promise<void> {
 		const { workspace } = this.app;
 
 		// Reveal an existing chat panel if one is open
@@ -3937,7 +2592,7 @@ export default class NotorPlugin extends Plugin {
 	 *
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — A4.1
 	 */
-	private newConversation(): void {
+	newConversation(): void {
 		const orchestrator = this.getActiveOrchestrator();
 		if (!orchestrator) {
 			// No panel open — open one first, then it will auto-start a conversation
@@ -4008,7 +2663,7 @@ export default class NotorPlugin extends Plugin {
 		return map;
 	}
 
-	private showExportModal(conversation: import("./types").Conversation, messages: import("./types").Message[]): void {
+	showExportModal(conversation: import("./types").Conversation, messages: import("./types").Message[]): void {
 		new ExportModal(this.app, conversation, async (format: ExportFormat, folderPath: string) => {
 			try {
 				let content: string;
