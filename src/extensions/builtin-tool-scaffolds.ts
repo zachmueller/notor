@@ -3345,8 +3345,107 @@ if (templateFiles.length === 0) {
 
 // --- Scan for prompts/suggestors ---
 
-const promptRegex = /tp\\.system\\.prompt\\(\\s*["'\`]([^"'\`]*)["'\`]/g;
-const suggesterRegex = /tp\\.system\\.suggester\\(\\s*\\[([^\\]]*)\\]/g;
+function extractArgs(src, startIdx) {
+  let depth = 1;
+  let i = startIdx;
+  while (i < src.length && depth > 0) {
+    const ch = src[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === '"' || ch === "'" || ch === '\`') {
+      const quote = ch;
+      i++;
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === '\\\\') i++;
+        i++;
+      }
+    }
+    if (depth > 0) i++;
+  }
+  return src.substring(startIdx, i);
+}
+
+function splitArgs(argsStr) {
+  const result = [];
+  let depth = 0;
+  let current = '';
+  for (let i = 0; i < argsStr.length; i++) {
+    const ch = argsStr[i];
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') depth--;
+    else if (ch === ',' && depth === 0) {
+      result.push(current.trim());
+      current = '';
+      continue;
+    } else if (ch === '"' || ch === "'" || ch === '\`') {
+      const quote = ch;
+      current += ch;
+      i++;
+      while (i < argsStr.length && argsStr[i] !== quote) {
+        if (argsStr[i] === '\\\\') { current += argsStr[i]; i++; }
+        current += argsStr[i];
+        i++;
+      }
+      if (i < argsStr.length) current += argsStr[i];
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) result.push(current.trim());
+  return result;
+}
+
+function extractStringLiteral(arg) {
+  const m = arg.match(/^["'\`]([\\s\\S]*?)["'\`]$/);
+  return m ? m[1] : null;
+}
+
+function extractArrayLiteral(arg) {
+  const m = arg.match(/^\\[([^\\]]*)\\]$/);
+  if (!m) return null;
+  return m[1].split(',').map(s => s.trim().replace(/^["'\`]|["'\`]$/g, '')).filter(Boolean);
+}
+
+function scanForCalls(src, callRegex, startIdx, sourceTag) {
+  const found = [];
+  let callMatch;
+  callRegex.lastIndex = 0;
+  while ((callMatch = callRegex.exec(src)) !== null) {
+    const type = callMatch[1];
+    const argsStart = callMatch.index + callMatch[0].length;
+    const argsStr = extractArgs(src, argsStart);
+    const args = splitArgs(argsStr);
+
+    if (type === "prompt") {
+      const label = args.length > 0 ? extractStringLiteral(args[0]) : null;
+      const info = { index: startIdx++, type: "prompt", label: label ?? "" };
+      if (label === null && args.length > 0) {
+        info.dynamic = true;
+        info.expression = args[0].substring(0, 60);
+      }
+      if (sourceTag) info.source = sourceTag;
+      found.push(info);
+    } else {
+      const firstArg = args[0] || "";
+      const arrayItems = extractArrayLiteral(firstArg);
+      const promptTextArg = args.length >= 3 ? extractStringLiteral(args[2]) : null;
+
+      const info = { index: startIdx++, type: "suggester" };
+      if (arrayItems) {
+        info.options_preview = arrayItems.slice(0, 5);
+      } else {
+        info.dynamic = true;
+        info.source_expression = firstArg.substring(0, 80);
+      }
+      if (promptTextArg) info.prompt_text = promptTextArg;
+      if (sourceTag) info.source = sourceTag;
+      found.push(info);
+    }
+  }
+  return { found, nextIdx: startIdx };
+}
+
+const callSiteRegex = /tp\\.system\\.(prompt|suggester)\\s*\\(/g;
 
 const templates = [];
 
@@ -3358,28 +3457,32 @@ for (const file of templateFiles) {
 
   if (detectPrompts && engine === "templater") {
     const content = await app.vault.read(file);
-    const prompts: any[] = [];
     let idx = 0;
 
-    let match;
-    const lines = content.split("\\n");
-    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
-      const line = lines[lineNum];
+    const { found: prompts, nextIdx } = scanForCalls(content, callSiteRegex, idx, null);
+    idx = nextIdx;
 
-      promptRegex.lastIndex = 0;
-      while ((match = promptRegex.exec(line)) !== null) {
-        prompts.push({ index: idx++, type: "prompt", label: match[1] || "" });
+    // Scan user scripts for additional prompts/suggestors
+    const userScriptsFolder = templaterPlugin?.settings?.user_scripts_folder;
+    if (userScriptsFolder) {
+      const userCallRegex = /tp\\.user\\.(\\w+)/g;
+      const seenScripts = new Set();
+      let userMatch;
+      userCallRegex.lastIndex = 0;
+      while ((userMatch = userCallRegex.exec(content)) !== null) {
+        seenScripts.add(userMatch[1]);
       }
-
-      suggesterRegex.lastIndex = 0;
-      while ((match = suggesterRegex.exec(line)) !== null) {
-        const rawOptions = match[1];
-        const optionsPreview = rawOptions
-          .split(",")
-          .map((s) => s.trim().replace(/^["'\`]|["'\`]$/g, ""))
-          .filter(Boolean)
-          .slice(0, 5);
-        prompts.push({ index: idx++, type: "suggester", options_preview: optionsPreview });
+      for (const scriptName of seenScripts) {
+        const scriptPath = userScriptsFolder + "/" + scriptName + ".js";
+        const scriptFile = app.vault.getAbstractFileByPath(scriptPath);
+        if (scriptFile) {
+          try {
+            const scriptContent = await app.vault.read(scriptFile);
+            const { found: scriptPrompts, nextIdx: ni } = scanForCalls(scriptContent, callSiteRegex, idx, "user_script:" + scriptName);
+            prompts.push(...scriptPrompts);
+            idx = ni;
+          } catch (e) { /* script unreadable */ }
+        }
       }
     }
 
