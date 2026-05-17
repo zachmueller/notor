@@ -20,7 +20,7 @@ import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
 import { logger } from "../utils/logger";
 import { SettingsPopover } from "./settings-popover";
-import { formatRelativeTime } from "../utils/format-time";
+import { ConversationList } from "./conversation-list";
 import {
 	renderWriteNoteDiffPreview,
 	renderReplaceInNoteDiffPreview,
@@ -108,8 +108,7 @@ export class NotorChatView extends ItemView {
 	private sendButtonEl!: HTMLButtonElement;
 	private stopButtonEl!: HTMLButtonElement;
 	private modeToggleEl!: HTMLButtonElement;
-	private conversationListEl!: HTMLElement;
-	private conversationSearchInputEl!: HTMLInputElement;
+	private conversationList?: ConversationList;
 	private taskPanelEl!: HTMLElement;
 	private taskPanelCollapsed = false;
 	private loadingIndicatorEl!: HTMLElement;
@@ -174,7 +173,6 @@ export class NotorChatView extends ItemView {
 
 	// Header conversation title (displayed between "Notor" and action icons)
 	private headerTitleEl?: HTMLSpanElement;
-	private headerTitleInputEl?: HTMLInputElement;
 	private headerFavoriteEl?: HTMLSpanElement;
 
 	/**
@@ -288,7 +286,6 @@ export class NotorChatView extends ItemView {
 
 	// Favorites filter state
 	private favFilterActive = false;
-	private favFilterBtnEl?: HTMLElement;
 
 	// Open conversation in new tab callback
 	private onOpenInNewTab?: (filename: string) => void;
@@ -340,42 +337,51 @@ export class NotorChatView extends ItemView {
 
 	setOnNewConversation(callback: () => void): void {
 		this.onNewConversation = callback;
+		if (this.conversationList) this.conversationList.deps.onNewConversation = callback;
 	}
 
 	setOnSwitchConversation(callback: (filename: string) => void): void {
 		this.onSwitchConversation = callback;
+		if (this.conversationList) this.conversationList.deps.onSwitchConversation = callback;
 	}
 
 	setOnExportConversation(callback: (filename: string) => void): void {
 		this.onExportConversation = callback;
+		if (this.conversationList) this.conversationList.deps.onExportConversation = callback;
 	}
 
 	setOnDeleteConversation(callback: (filename: string) => void): void {
 		this.onDeleteConversation = callback;
+		if (this.conversationList) this.conversationList.deps.onDeleteConversation = callback;
 	}
 
 	setOnToggleFavorite(callback: (filename: string) => Promise<void>): void {
 		this.onToggleFavorite = callback;
+		if (this.conversationList) this.conversationList.deps.onToggleFavorite = callback;
 	}
 
 	setOnRenameConversation(callback: (filename: string, currentTitle: string) => void): void {
 		this.onRenameConversation = callback;
+		if (this.conversationList) this.conversationList.deps.onRenameConversation = callback;
 	}
 
 	setOnDirectRename(callback: (filename: string, newTitle: string) => Promise<void>): void {
 		this.onDirectRename = callback;
+		if (this.conversationList) this.conversationList.deps.onDirectRename = callback;
 	}
 
 	setGetActiveConversationMeta(callback: () => ActiveConversationMeta | null): void {
 		this.getActiveConversationMeta = callback;
+		if (this.conversationList) this.conversationList.deps.getActiveConversationMeta = callback;
 	}
 
 	isFavFilterActive(): boolean {
-		return this.favFilterActive;
+		return this.conversationList?.isFavFilterActive() ?? this.favFilterActive;
 	}
 
 	setOnImportConversation(callback: (htmlContent: string) => Promise<void>): void {
 		this.onImportConversation = callback;
+		if (this.conversationList) this.conversationList.deps.onImportConversation = callback;
 	}
 
 	/**
@@ -397,10 +403,12 @@ export class NotorChatView extends ItemView {
 
 	setOnOpenConversationList(callback: () => Promise<ConversationListEntry[]>): void {
 		this.onOpenConversationList = callback;
+		if (this.conversationList) this.conversationList.deps.onOpenConversationList = callback;
 	}
 
 	setOnSearchConversations(callback: (query: string) => Promise<ConversationListEntry[]>): void {
 		this.onSearchConversations = callback;
+		if (this.conversationList) this.conversationList.deps.onSearchConversations = callback;
 	}
 
 	setOnModeToggle(callback: (mode: ConversationMode) => void): void {
@@ -524,6 +532,7 @@ export class NotorChatView extends ItemView {
 
 	setOnOpenInNewTab(callback: (filename: string) => void): void {
 		this.onOpenInNewTab = callback;
+		if (this.conversationList) this.conversationList.deps.onOpenInNewTab = callback;
 	}
 
 	setOnOpenSettingsGroup(callback: (groupTitle: string, subsection?: string) => void): void {
@@ -688,7 +697,7 @@ export class NotorChatView extends ItemView {
 
 		// Close conversation list if it was open
 		if (this.showConversationList) {
-			this.toggleConversationList();
+			this.conversationList?.toggle();
 		}
 
 		if (!this.onSwitchToConversationById) {
@@ -911,7 +920,7 @@ export class NotorChatView extends ItemView {
 
 		this.buildHeader(container);
 		this.initSettingsPopover();
-		this.buildConversationList(container);
+		this.initConversationList(container);
 		this.buildTaskPanel(container);
 		this.buildMessageList(container);
 		this.buildInputArea(container);
@@ -967,6 +976,9 @@ export class NotorChatView extends ItemView {
 
 		this.settingsPopover?.destroy();
 		this.settingsPopover = undefined;
+
+		this.conversationList?.destroy();
+		this.conversationList = undefined;
 
 		// A3.8: Release all callback references to prevent GC leaks.
 		// Called AFTER onCloseCleanup (Amendment R2-8 ordering) so the
@@ -1111,8 +1123,35 @@ export class NotorChatView extends ItemView {
 			getCurrentModel: this.getCurrentModel,
 			getActiveModelId: this.getActiveModelId,
 			getActiveThinkingLevel: this.getActiveThinkingLevel,
-			toggleConversationList: () => this.toggleConversationList(),
+			toggleConversationList: () => this.conversationList?.toggle(),
 		});
+	}
+
+	private initConversationList(container: HTMLElement): void {
+		const self = this;
+		this.conversationList = new ConversationList(container, {
+			get messageListEl() { return self.messageListEl; },
+			headerTitleEl: this.headerTitleEl,
+			headerFavoriteEl: this.headerFavoriteEl,
+			getActiveConversationId: () => this.activeConversationId,
+			getShowConversationList: () => this.showConversationList,
+			setShowConversationList: (v) => { this.showConversationList = v; },
+			onOpenConversationList: this.onOpenConversationList,
+			onSearchConversations: this.onSearchConversations,
+			onSwitchConversation: this.onSwitchConversation,
+			onToggleFavorite: this.onToggleFavorite,
+			onRenameConversation: this.onRenameConversation,
+			onExportConversation: this.onExportConversation,
+			onDeleteConversation: this.onDeleteConversation,
+			onImportConversation: this.onImportConversation,
+			onNewConversation: this.onNewConversation,
+			onOpenInNewTab: this.onOpenInNewTab,
+			onDirectRename: this.onDirectRename,
+			getActiveConversationMeta: this.getActiveConversationMeta,
+			openChatInNewTab: (_conv, newPanel) => this.plugin.openChatInNewTab(undefined, newPanel),
+			focusInput: () => this.textInputEl.focus(),
+		});
+		this.conversationList.build();
 	}
 
 	private buildHeader(container: HTMLElement): void {
@@ -1127,11 +1166,11 @@ export class NotorChatView extends ItemView {
 		});
 		this.headerTitleEl.addEventListener("dblclick", (e) => {
 			e.preventDefault();
-			this.startHeaderTitleEdit();
+			this.conversationList?.startHeaderTitleEdit();
 		});
 		this.headerTitleEl.addEventListener("contextmenu", (e) => {
 			e.preventDefault();
-			this.showHeaderTitleContextMenu(e);
+			this.conversationList?.showHeaderTitleContextMenu(e);
 		});
 
 		this.headerFavoriteEl = titleArea.createSpan({
@@ -1153,7 +1192,7 @@ export class NotorChatView extends ItemView {
 			attr: { "aria-label": "Conversation history" },
 		});
 		setIcon(listBtn, "list");
-		listBtn.addEventListener("click", () => this.toggleConversationList());
+		listBtn.addEventListener("click", () => this.conversationList?.toggle());
 
 		// Workflow activity indicator is inserted after this button (see workflow-activity-indicator.ts)
 
@@ -1180,7 +1219,7 @@ export class NotorChatView extends ItemView {
 		setIcon(newBtn, "message-square-plus");
 		newBtn.addEventListener("click", () => {
 			if (this.showConversationList) {
-				this.toggleConversationList();
+				this.conversationList?.toggle();
 			}
 			this.onNewConversation?.();
 			this.textInputEl.focus();
@@ -1189,7 +1228,7 @@ export class NotorChatView extends ItemView {
 		// Right-click: show context menu with "current panel" vs "new panel" options
 		newBtn.addEventListener("contextmenu", (e) => {
 			e.preventDefault();
-			this.showNewConversationMenu(e);
+			this.conversationList?.showNewConversationMenu(e);
 		});
 
 		// Middle-click: immediately open a new chat panel
@@ -1200,116 +1239,6 @@ export class NotorChatView extends ItemView {
 		});
 	}
 
-	private buildConversationList(container: HTMLElement): void {
-		// Search input (sibling above the scrollable list, hidden together)
-		const searchWrapper = container.createDiv({
-			cls: "notor-conversation-search notor-hidden",
-		});
-		this.conversationSearchInputEl = searchWrapper.createEl("input", {
-			type: "text",
-			placeholder: "Search conversations…",
-			cls: "notor-conversation-search-input",
-		});
-		this.conversationSearchInputEl.addEventListener("keydown", (e) => {
-			if (e.key === "Enter") {
-				e.preventDefault();
-				const query = this.conversationSearchInputEl.value.trim();
-				const applyFavFilter = (entries: ConversationListEntry[]) =>
-					this.favFilterActive ? entries.filter((en) => en.is_favorite) : entries;
-				if (!query) {
-					// Empty query — reload full list
-					this.onOpenConversationList?.().then((entries) => {
-						this.renderConversationList(applyFavFilter(entries));
-					}).catch((err) => {
-						log.error("Failed to load conversation list", { error: String(err) });
-					});
-				} else {
-					this.onSearchConversations?.(query).then((entries) => {
-						this.renderConversationList(applyFavFilter(entries));
-					}).catch((err) => {
-						log.error("Failed to search conversations", { error: String(err) });
-					});
-				}
-			}
-		});
-
-		// Import conversation button
-		const importBtn = searchWrapper.createDiv({
-			cls: "notor-conversation-import-btn",
-			attr: { "aria-label": "Import conversation from HTML" },
-		});
-		setIcon(importBtn, "upload");
-		importBtn.addEventListener("click", () => {
-			this.openImportFilePicker();
-		});
-
-		// Favorites filter toggle
-		this.favFilterBtnEl = searchWrapper.createDiv({
-			cls: "notor-conversation-fav-filter-btn",
-			attr: { "aria-label": "Show favorites only" },
-		});
-		setIcon(this.favFilterBtnEl, "star");
-		this.favFilterBtnEl.addEventListener("click", () => {
-			this.favFilterActive = !this.favFilterActive;
-			this.favFilterBtnEl?.toggleClass("is-active", this.favFilterActive);
-			this.favFilterBtnEl?.setAttribute(
-				"aria-label",
-				this.favFilterActive ? "Show all conversations" : "Show favorites only"
-			);
-			// Re-fetch and render with filter
-			const query = this.conversationSearchInputEl.value.trim();
-			const fetcher = query
-				? this.onSearchConversations?.(query)
-				: this.onOpenConversationList?.();
-			fetcher?.then((entries) => {
-				if (this.favFilterActive) {
-					entries = entries.filter((e) => e.is_favorite);
-				}
-				this.renderConversationList(entries);
-			});
-		});
-
-		this.conversationListEl = container.createDiv({
-			cls: "notor-conversation-list notor-hidden",
-		});
-	}
-
-	/**
-	 * Open a file picker for importing a conversation from an exported HTML file.
-	 * Reads the selected file via FileReader and passes the content to the
-	 * import callback.
-	 */
-	private openImportFilePicker(): void {
-		const input = document.createElement("input");
-		input.type = "file";
-		input.accept = ".html";
-		input.addClass("notor-hidden");
-		document.body.appendChild(input);
-
-		input.addEventListener("change", () => {
-			const file = input.files?.[0];
-			if (!file) {
-				input.remove();
-				return;
-			}
-
-			const reader = new FileReader();
-			reader.onload = () => {
-				const htmlContent = reader.result as string;
-				this.onImportConversation?.(htmlContent)?.catch((err) => {
-					log.error("Failed to import conversation", { error: String(err) });
-				});
-				input.remove();
-			};
-			reader.onerror = () => {
-				log.error("Failed to read imported file", { error: String(reader.error) });
-				input.remove();
-			};
-			reader.readAsText(file);
-		});
-
-		input.click();
-	}
 
 	private buildTaskPanel(container: HTMLElement): void {
 		this.taskPanelEl = container.createDiv({ cls: "notor-task-panel notor-hidden" });
@@ -1974,31 +1903,6 @@ export class NotorChatView extends ItemView {
 		const newMode: ConversationMode = currentMode === "plan" ? "act" : "plan";
 		this.updateModeDisplay(newMode);
 		this.onModeToggle?.(newMode);
-	}
-
-	private toggleConversationList(): void {
-		this.showConversationList = !this.showConversationList;
-		const searchWrapper = this.conversationSearchInputEl.parentElement;
-		if (this.showConversationList) {
-			searchWrapper?.removeClass("notor-hidden");
-			this.conversationListEl.removeClass("notor-hidden");
-			this.messageListEl.addClass("notor-hidden");
-			// Clear search and focus input
-			this.conversationSearchInputEl.value = "";
-			this.conversationSearchInputEl.focus();
-			// Refresh the list from disk every time the panel opens
-			if (this.onOpenConversationList) {
-				this.onOpenConversationList().then((entries) => {
-					this.renderConversationList(entries);
-				}).catch((e) => {
-					log.error("Failed to load conversation list", { error: String(e) });
-				});
-			}
-		} else {
-			searchWrapper?.addClass("notor-hidden");
-			this.conversationListEl.addClass("notor-hidden");
-			this.messageListEl.removeClass("notor-hidden");
-		}
 	}
 
 	// -----------------------------------------------------------------------
@@ -2842,312 +2746,20 @@ export class NotorChatView extends ItemView {
 		this.tokenFooterEl.textContent = parts.join(" · ");
 	}
 
-	/**
-	 * Populate the conversation list panel.
-	 */
 	renderConversationList(entries: ConversationListEntry[]): void {
-		this.conversationListEl.empty();
-
-		if (entries.length === 0) {
-			this.conversationListEl.createDiv({
-				cls: "notor-conversation-list-empty",
-				text: "No conversations yet",
-			});
-			return;
-		}
-
-		for (const entry of entries) {
-			const isActive = entry.id === this.activeConversationId;
-			const item = this.conversationListEl.createDiv({
-				cls: `notor-conversation-list-item${isActive ? " is-active" : ""}`,
-			});
-			item.setAttribute("data-conversation-id", entry.id);
-
-			const contentCol = item.createDiv({ cls: "notor-conversation-list-content" });
-
-			const titleEl = contentCol.createDiv({ cls: "notor-conversation-list-title" });
-			titleEl.textContent = entry.title ?? "Untitled";
-
-			// Fork lineage badge — clickable link to parent conversation
-			if (entry.forked_from_conversation_id) {
-				const parentEntry = entries.find(
-					(e) => e.id === entry.forked_from_conversation_id
-				);
-				if (parentEntry) {
-					const badge = titleEl.createSpan({ cls: "notor-fork-badge" });
-					setIcon(badge, "git-branch-plus");
-					badge.setAttribute("aria-label", "Go to parent conversation");
-					badge.addEventListener("click", (e) => {
-						e.stopPropagation();
-						this.onSwitchConversation?.(parentEntry.filename);
-						this.toggleConversationList();
-					});
-				}
-			}
-
-			const metaEl = contentCol.createDiv({ cls: "notor-conversation-list-meta" });
-			const date = new Date(entry.updated_at);
-			metaEl.textContent = formatRelativeTime(date);
-
-			if (entry.preview) {
-				const previewEl = contentCol.createDiv({ cls: "notor-conversation-list-preview" });
-				previewEl.textContent = entry.preview;
-			}
-
-			// Right-side actions column
-			const actionsCol = item.createDiv({ cls: "notor-conversation-item-actions" });
-
-			// Three-dots menu button
-			const menuBtn = actionsCol.createDiv({ cls: "notor-conversation-menu-btn" });
-			setIcon(menuBtn, "more-vertical");
-			menuBtn.setAttribute("aria-label", "More options");
-			menuBtn.addEventListener("click", (e) => {
-				e.stopPropagation();
-				this.showConversationContextMenu(e, entry);
-			});
-
-			// Favorite star indicator (always visible when favorited)
-			if (entry.is_favorite) {
-				const starEl = actionsCol.createDiv({ cls: "notor-conversation-favorite-indicator" });
-				setIcon(starEl, "star");
-			}
-
-			// Right-click context menu
-			item.addEventListener("contextmenu", (e) => {
-				e.preventDefault();
-				e.stopPropagation();
-				this.showConversationContextMenu(e, entry);
-			});
-
-			item.addEventListener("click", () => {
-				this.onSwitchConversation?.(entry.filename);
-				this.toggleConversationList();
-			});
-		}
+		this.conversationList?.render(entries);
 	}
 
-	/**
-	 * Update the title of a specific conversation in the list DOM without
-	 * re-rendering the entire list. No-op if the item isn't rendered.
-	 */
 	updateConversationTitleInList(conversationId: string, title: string): void {
-		const items = this.conversationListEl.querySelectorAll(".notor-conversation-list-item");
-		for (const item of items) {
-			if (item.getAttribute("data-conversation-id") !== conversationId) continue;
-			const titleEl = item.querySelector(".notor-conversation-list-title");
-			if (titleEl) {
-				titleEl.textContent = title;
-			}
-			return;
-		}
+		this.conversationList?.updateTitleInList(conversationId, title);
 	}
 
-	/**
-	 * Update the conversation title displayed in the header bar.
-	 * Shows the element when a title is set; hides it for null/empty.
-	 * Guards against stale updates by checking conversationId.
-	 */
 	updateHeaderTitle(conversationId: string, title: string | null): void {
-		if (!this.headerTitleEl) return;
-		if (conversationId !== this.activeConversationId) return;
-
-		if (title) {
-			this.headerTitleEl.textContent = title;
-			this.headerTitleEl.removeClass("notor-hidden");
-		} else {
-			this.headerTitleEl.textContent = "";
-			this.headerTitleEl.addClass("notor-hidden");
-		}
+		this.conversationList?.updateHeaderTitle(conversationId, title);
 	}
 
 	updateHeaderFavorite(conversationId: string, isFavorite: boolean): void {
-		if (!this.headerFavoriteEl) return;
-		if (conversationId !== this.activeConversationId) return;
-
-		if (isFavorite) {
-			this.headerFavoriteEl.removeClass("notor-hidden");
-		} else {
-			this.headerFavoriteEl.addClass("notor-hidden");
-		}
-	}
-
-	/**
-	 * Show context menu for the active conversation title in the header.
-	 * Reuses the same menu as the conversation list context menu.
-	 */
-	private showHeaderTitleContextMenu(evt: MouseEvent): void {
-		const meta = this.getActiveConversationMeta?.();
-		if (!meta) return;
-
-		const entry: ConversationListEntry = {
-			id: meta.id,
-			title: meta.title,
-			filename: meta.filename,
-			is_favorite: meta.is_favorite,
-			updated_at: "",
-			created_at: "",
-			provider_id: "",
-			model_id: "",
-		};
-
-		this.showConversationContextMenu(evt, entry);
-	}
-
-	/**
-	 * Start inline editing of the header conversation title.
-	 * Replaces the title span with an input field. Enter saves, Esc/blur cancels.
-	 */
-	private startHeaderTitleEdit(): void {
-		const meta = this.getActiveConversationMeta?.();
-		if (!meta || !this.headerTitleEl) return;
-
-		// If already editing, no-op
-		if (this.headerTitleInputEl) return;
-
-		const currentTitle = meta.title ?? "Untitled";
-
-		// Hide the title span
-		this.headerTitleEl.addClass("notor-hidden");
-
-		// Create input element as sibling, inserted after the title span
-		const input = document.createElement("input");
-		input.type = "text";
-		input.value = currentTitle;
-		input.className = "notor-header-title-input";
-		this.headerTitleEl.parentElement!.insertBefore(input, this.headerTitleEl.nextSibling);
-		this.headerTitleInputEl = input;
-
-		input.select();
-		input.focus();
-
-		const commit = () => {
-			const newTitle = input.value.trim();
-			cleanup();
-			if (newTitle && newTitle !== currentTitle) {
-				void this.onDirectRename?.(meta.filename, newTitle);
-			}
-		};
-
-		const cancel = () => {
-			cleanup();
-		};
-
-		const cleanup = () => {
-			input.removeEventListener("blur", onBlur);
-			input.remove();
-			this.headerTitleInputEl = undefined;
-			this.headerTitleEl!.removeClass("notor-hidden");
-		};
-
-		const onBlur = () => cancel();
-
-		input.addEventListener("keydown", (e) => {
-			if (e.key === "Enter") {
-				e.preventDefault();
-				commit();
-			} else if (e.key === "Escape") {
-				e.preventDefault();
-				cancel();
-			}
-		});
-
-		input.addEventListener("blur", onBlur);
-	}
-
-	/**
-	 * Show a context menu for a conversation list item.
-	 */
-	private showConversationContextMenu(evt: MouseEvent, entry: ConversationListEntry): void {
-		const menu = new Menu();
-
-		menu.addItem((item) => {
-			item.setTitle(entry.is_favorite ? "Remove from favorites" : "Add to favorites")
-				.setIcon(entry.is_favorite ? "star-off" : "star")
-				.onClick(() => {
-					this.onToggleFavorite?.(entry.filename);
-				});
-		});
-
-		menu.addItem((item) => {
-			item.setTitle("Rename")
-				.setIcon("pencil")
-				.onClick(() => {
-					this.onRenameConversation?.(entry.filename, entry.title ?? "Untitled");
-				});
-		});
-
-		menu.addSeparator();
-
-		menu.addItem((item) => {
-			item.setTitle("Open in new tab")
-				.setIcon("blocks")
-				.onClick(() => {
-					this.onOpenInNewTab?.(entry.filename);
-				});
-		});
-
-		menu.addItem((item) => {
-			item.setTitle("Export conversation")
-				.setIcon("download")
-				.onClick(() => {
-					this.onExportConversation?.(entry.filename);
-				});
-		});
-
-		menu.addItem((item) => {
-			item.setTitle("Copy conversation link")
-				.setIcon("link")
-				.onClick(async () => {
-					const uri = `obsidian://notor?id=${encodeURIComponent(entry.id)}`;
-					await navigator.clipboard.writeText(uri);
-					new Notice("Conversation link copied to clipboard");
-				});
-		});
-
-		menu.addItem((item) => {
-			item.setTitle("Copy conversation ID")
-				.setIcon("hash")
-				.onClick(async () => {
-					await navigator.clipboard.writeText(entry.id);
-					new Notice("Conversation ID copied");
-				});
-		});
-
-		menu.addItem((item) => {
-			item.setTitle("Delete conversation")
-				.setIcon("trash-2")
-				.onClick(() => {
-					this.onDeleteConversation?.(entry.filename);
-				});
-		});
-
-		menu.showAtMouseEvent(evt);
-	}
-
-	private showNewConversationMenu(evt: MouseEvent): void {
-		const menu = new Menu();
-
-		menu.addItem((item) => {
-			item.setTitle("New conversation")
-				.setIcon("message-square-plus")
-				.onClick(() => {
-					if (this.showConversationList) {
-						this.toggleConversationList();
-					}
-					this.onNewConversation?.();
-					this.textInputEl.focus();
-				});
-		});
-
-		menu.addItem((item) => {
-			item.setTitle("New conversation in new panel")
-				.setIcon("layout-dashboard")
-				.onClick(() => {
-					this.plugin.openChatInNewTab(undefined, true);
-				});
-		});
-
-		menu.showAtMouseEvent(evt);
+		this.conversationList?.updateHeaderFavorite(conversationId, isFavorite);
 	}
 
 	/**
