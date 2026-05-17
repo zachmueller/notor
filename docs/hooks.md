@@ -16,6 +16,7 @@ Configure shell commands to fire automatically at key points in the conversation
 | `on-tool-call` | After tool approval, immediately before tool execution | No |
 | `on-tool-result` | After tool execution, before result is returned to the LLM | No |
 | `after-completion` | After the LLM's full response turn completes | No |
+| `on_approval_required` | Before tool execution, when a tool call needs approval | Yes — sequential, short-circuits on first decision |
 
 > **Note:** An additional trigger, `on_conversation_start`, is available for [user-defined automations](extensions.md) (not shell hooks). It fires once per conversation when the first user message is submitted.
 
@@ -28,6 +29,16 @@ Configure shell commands to fire automatically at key points in the conversation
 - A single global hook timeout (default: 10 seconds) applies to all hook events; timed-out processes are terminated without stalling the conversation.
 
 **Configuration:** **Settings → Notor** under a dedicated hooks section grouped by lifecycle event. Each subsection is collapsible.
+
+### Approval resolution via hooks
+
+The `on_approval_required` event enables programmatic pre-approval or rejection of tool calls. Hooks for this event execute sequentially; the first hook to output `approved` or `rejected` on stdout short-circuits the remaining hooks and resolves the approval without showing a prompt to the user. Any other output (empty, error, or timeout) is treated as `pass`, deferring to the next hook or ultimately to the interactive approval prompt.
+
+**Constraints:**
+
+- Only `execute_command` hooks are supported — `run_workflow` hooks are skipped (workflow hooks cannot return a decision).
+- Not overridable by per-workflow hook overrides (prevents workflows from self-approving their own tools).
+- Context environment variables: `NOTOR_CONVERSATION_ID`, `NOTOR_TOOL_NAME`, `NOTOR_TOOL_PARAMS` (JSON-encoded parameters), `NOTOR_MODE` (`plan` or `act`).
 
 ---
 

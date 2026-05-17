@@ -59,3 +59,13 @@ Conversation history (JSONL files) and checkpoint snapshots are stored in your v
 ## Stale-content protection
 
 If you edit a note directly in Obsidian while the AI has it queued for modification, Notor detects the conflict and fails the write. The AI is prompted to re-read the current content before retrying, preventing it from overwriting your changes with a stale version.
+
+## Output spillover
+
+When a tool produces output exceeding the configured threshold (default: 50,000 characters), the excess is written to a temporary file and the truncated result includes a pointer to the spillover file path. This prevents excessively large tool results from overwhelming the LLM's context window.
+
+- **Configurable** — toggle with `output_spillover_enabled` (default: on) and adjust the character threshold with `output_spillover_threshold` in **Settings → Notor**.
+- **Desktop only** — spillover requires filesystem access; on mobile, large outputs are truncated without a spillover file.
+- **Auto-cleanup** — stale spillover files (older than 1 hour) are removed automatically on plugin load.
+- **Applies broadly** — MCP tools, extension tools, and `execute_command` all route through the spillover mechanism. Built-in tools that already manage their own truncation (e.g., `fetch_webpage`) return short results and are unaffected.
+- Spillover does not affect the approval workflow — the tool still executes normally; only the result returned to the AI is truncated.

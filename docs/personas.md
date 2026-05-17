@@ -62,3 +62,4 @@ For more fine-grained control, personas also support `<notor_tool_config>` block
 - Personas are regular Obsidian notes — fully visible in the file explorer, searchable, and editable.
 - The plugin rescans the personas directory when Settings is opened or the persona picker is activated; no plugin reload is needed when personas are created or deleted.
 - **Auto-refresh on file change** — when you save or modify a persona file, the active persona is automatically reloaded. If a parse error occurs, the previous persona state remains active and a persistent error Notice is shown.
+- **Per-panel isolation** — in multi-panel mode, each chat panel maintains independent persona state. Switching personas in one panel does not affect other open panels.

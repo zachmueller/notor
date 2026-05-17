@@ -32,6 +32,9 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `search_chat_history` | Search past Notor conversations by keyword and return matching conversation metadata | Plan & Act |
 | `read_chat_history` | Read the full message history of a past conversation by ID | Plan & Act |
 | `capture_memory` | Save an insight to long-term [memory](memory.md) as an Evergreen note | Act only |
+| `list_templates` | List available templates and detect Templater prompts/suggesters | Plan & Act |
+| `apply_template` | Create a note by applying a template with auto-answered prompts | Act only |
+| `webview` | Interact with Obsidian's Web Viewer tab (read, navigate, click) | Act only |
 
 ### User-defined tools
 
@@ -158,6 +161,69 @@ Read the full message history of a past conversation by its ID. Use `search_chat
 | `conversation_id` | Yes | The UUID of the conversation to read. |
 
 Both tools are read-only — available in Plan and Act modes.
+
+## Templates
+
+Two tools integrate with Templater and Obsidian's core Templates plugin to discover and apply templates programmatically. Both require **Settings → Notor → Templates → Enable templates integration** to be on.
+
+### `list_templates`
+
+Lists available templates from the configured template folder. Detects the active template engine (Templater or core Templates) and, for Templater templates, scans for `tp.system.prompt()` and `tp.system.suggester()` calls so the AI knows what answers to supply when applying them.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `detect_prompts` | No | Scan templates for prompt/suggester calls and report their sequential order. Default: `true`. |
+
+- Read-only tool — available in Plan and Act modes.
+- Returns JSON with `engine`, `template_folder`, and `templates[]` (each with `name`, `path`, and optionally `prompts[]`).
+- Requires a template folder configured in either Templater or core Templates settings.
+
+### `apply_template`
+
+Creates a new note by applying a template. For Templater templates, automatically answers `tp.system.prompt()` and `tp.system.suggester()` calls from ordered arrays — no interactive modals appear.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `template_path` | Yes | Path to the template file relative to vault root. |
+| `output_folder` | No | Target folder for the new note. If omitted, uses vault root or Templater's configured location. |
+| `output_filename` | No | Filename for the new note (without `.md` extension). If omitted, Templater decides or uses the template name. |
+| `prompt_answers` | No | Ordered array of answers for `tp.system.prompt()` calls. The Nth element answers the Nth prompt encountered during expansion. |
+| `suggester_answers` | No | Ordered array of selected values for `tp.system.suggester()` calls. Matched against display labels or raw values. |
+
+- Write tool — available in Act mode only; requires explicit approval unless auto-approved.
+- Configurable execution timeout (default: 30 seconds, range: 5–120s) in **Settings → Notor → Templates**.
+- Use `list_templates` first to discover available templates and the prompts/suggesters they expect.
+- Desktop only.
+
+## Web Viewer
+
+The `webview` tool interacts with Obsidian's built-in Web Viewer tab — reading page content, navigating to URLs, or clicking links by visible text.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `action` | Yes | The action to perform: `read`, `navigate`, or `click`. |
+| `scope` | No | Which Web Viewer to use. `conversation` (default) uses a dedicated tab for this conversation. `active` targets the user's currently focused Web Viewer tab. |
+| `url` | Conditional | URL to load. Required for `navigate` action. |
+| `text` | Conditional | Visible link text to click (case-insensitive partial match). Required for `click` action. |
+
+**Actions:**
+
+- **`read`** — Extracts the current page as Markdown (via Turndown), a list of clickable links (up to 50), and page metadata (URL, title). Content exceeding the max output cap is truncated.
+- **`navigate`** — Loads the specified URL. Validates protocol (http/https only) and checks the domain denylist. In `conversation` scope, the URL is persisted for the session.
+- **`click`** — Finds a link whose visible text contains the `text` parameter (case-insensitive) and clicks it. Returns the new URL and title after navigation, or a list of available links if no match is found.
+
+Behavioral notes:
+- Write tool — available in Act mode only; requires explicit approval unless auto-approved.
+- Desktop only (requires Electron's webview APIs).
+- Requires Obsidian's **Web Viewer** core plugin to be enabled.
+- The domain denylist (same one used by `fetch_webpage`) applies to `navigate` actions.
+- Configurable max output characters (default: 50,000) in **Settings → Notor → Tools → webview**.
 
 ## Settings tools
 
