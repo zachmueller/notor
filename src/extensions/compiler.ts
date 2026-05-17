@@ -12,7 +12,7 @@ import type { CompiledExtensionFn } from "./types";
 // AsyncFunction constructor
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-empty-function
+// eslint-disable-next-line @typescript-eslint/no-empty-function -- empty body needed to extract AsyncFunction constructor prototype
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (
 	...args: string[]
 ) => CompiledExtensionFn;

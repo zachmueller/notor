@@ -636,7 +636,7 @@ export default class NotorPlugin extends Plugin {
 				const input = document.createElement("input");
 				input.type = "file";
 				input.accept = ".html";
-				input.style.display = "none";
+				input.addClass("notor-hidden");
 				document.body.appendChild(input);
 
 				input.addEventListener("change", () => {

@@ -617,7 +617,7 @@ export async function readExternalBinaryFile(
 	settings: NotorSettings,
 	maxSizeMb = 50,
 ): Promise<{ base64: string; mediaType: string; width?: number; height?: number } | null> {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- Node.js fs has no static import path in Obsidian's plugin sandbox
 	const fs = require("fs") as typeof import("fs");
 
 	const stats = fs.statSync(absolutePath);
@@ -666,7 +666,7 @@ export async function readExternalPdfFile(
 	absolutePath: string,
 	maxSizeMb = 50,
 ): Promise<{ base64: string; pageCount?: number; extractedText?: string; extractedImages?: ExtractedPdfImage[] } | null> {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- Node.js fs has no static import path in Obsidian's plugin sandbox
 	const fs = require("fs") as typeof import("fs");
 
 	const stats = fs.statSync(absolutePath);
@@ -809,7 +809,7 @@ async function extractPdfImages(
  * Throws on read or conversion failure so the caller can surface a Notice.
  */
 export async function readExternalDocxFile(absolutePath: string): Promise<string> {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- Node.js fs has no static import path in Obsidian's plugin sandbox
 	const fs = require("fs") as typeof import("fs");
 	const buffer = Buffer.from(fs.readFileSync(absolutePath));
 	const { value } = await mammoth.extractRawText({ buffer });
@@ -1087,13 +1087,18 @@ export function createAttachmentButton(
 		// Vertical: prefer above button; fall back to below if insufficient space
 		const menuHeight = menuEl.offsetHeight || 80;
 		if (btnRect.top - menuHeight - 4 < 8) {
-			menuEl.style.top = `${btnRect.bottom + 4}px`;
-			menuEl.style.bottom = "auto";
+			menuEl.setCssProps({
+				"--menu-top": `${btnRect.bottom + 4}px`,
+				"--menu-bottom": "auto",
+				"--menu-left": `${left}px`,
+			});
 		} else {
-			menuEl.style.bottom = `${vh - btnRect.top + 4}px`;
-			menuEl.style.top = "auto";
+			menuEl.setCssProps({
+				"--menu-top": "auto",
+				"--menu-bottom": `${vh - btnRect.top + 4}px`,
+				"--menu-left": `${left}px`,
+			});
 		}
-		menuEl.style.left = `${left}px`;
 	};
 
 	btn.addEventListener("click", (e) => {

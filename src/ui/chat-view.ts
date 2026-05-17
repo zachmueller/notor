@@ -764,20 +764,29 @@ export class NotorChatView extends ItemView {
 
 			// Apply custom chip colour or reset to CSS defaults
 			if (persona.chip_color) {
-				this.personaLabelEl.style.color = persona.chip_color;
-				this.personaLabelEl.style.background = `${persona.chip_color}20`;
-				this.personaLabelEl.style.borderColor = `${persona.chip_color}40`;
+				this.personaLabelEl.addClass("notor-persona-label--custom");
+				this.personaLabelEl.setCssProps({
+					"--persona-chip-color": persona.chip_color,
+					"--persona-chip-bg": `${persona.chip_color}20`,
+					"--persona-chip-border": `${persona.chip_color}40`,
+				});
 			} else {
-				this.personaLabelEl.style.color = "";
-				this.personaLabelEl.style.background = "";
-				this.personaLabelEl.style.borderColor = "";
+				this.personaLabelEl.removeClass("notor-persona-label--custom");
+				this.personaLabelEl.setCssProps({
+					"--persona-chip-color": "",
+					"--persona-chip-bg": "",
+					"--persona-chip-border": "",
+				});
 			}
 		} else {
 			this.personaLabelEl.textContent = "🎭 Default";
 			this.personaLabelEl.addClass("notor-persona-label--default");
-			this.personaLabelEl.style.color = "";
-			this.personaLabelEl.style.background = "";
-			this.personaLabelEl.style.borderColor = "";
+			this.personaLabelEl.removeClass("notor-persona-label--custom");
+			this.personaLabelEl.setCssProps({
+				"--persona-chip-color": "",
+				"--persona-chip-bg": "",
+				"--persona-chip-border": "",
+			});
 		}
 	}
 
@@ -1248,7 +1257,7 @@ export class NotorChatView extends ItemView {
 		const input = document.createElement("input");
 		input.type = "file";
 		input.accept = ".html";
-		input.style.display = "none";
+		input.addClass("notor-hidden");
 		document.body.appendChild(input);
 
 		input.addEventListener("change", () => {
@@ -2213,7 +2222,12 @@ export class NotorChatView extends ItemView {
 	}
 
 	private renderStreamMarkdown(contentEl: HTMLElement, raw: string): void {
-		contentEl.innerHTML = marked.parse(raw, { async: false }) as string;
+		const html = marked.parse(raw, { async: false }) as string;
+		while (contentEl.firstChild) contentEl.firstChild.remove();
+		const doc = new DOMParser().parseFromString(html, "text/html");
+		while (doc.body.firstChild) {
+			contentEl.appendChild(activeDocument.adoptNode(doc.body.firstChild));
+		}
 		this.scrollToBottom();
 	}
 
@@ -3495,7 +3509,7 @@ export class NotorChatView extends ItemView {
 		// Custom provider+model section (hidden by default, shown when "Custom" selected)
 		const customSection = container.createDiv({ cls: "notor-settings-section notor-custom-model-section" });
 		if (currentPreset !== null) {
-			customSection.style.display = "none";
+			customSection.addClass("notor-hidden");
 		}
 
 		// Build legacy provider+model dropdowns inside customSection
@@ -3511,10 +3525,10 @@ export class NotorChatView extends ItemView {
 			this.displayedModelValue = null;
 
 			if (value === "__custom") {
-				customSection.style.display = "";
+				customSection.removeClass("notor-hidden");
 				this.onPresetChange?.(null);
 			} else {
-				customSection.style.display = "none";
+				customSection.addClass("notor-hidden");
 				this.onPresetChange?.(value);
 			}
 		});

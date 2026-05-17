@@ -368,17 +368,16 @@ export interface ExtensionUtils {
  * Resolve a dot-separated key path against a settings-like object
  * and return the available keys at that level (for error messages).
  */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
-function getAvailableKeys(root: any, pathParts: string[]): string {
-	let target = root;
+function getAvailableKeys(root: unknown, pathParts: string[]): string {
+	let target: unknown = root;
 	for (const part of pathParts) {
-		const index = /^\d+$/.test(part) ? Number(part) : part;
-		target = target?.[index];
 		if (target === undefined || target === null || typeof target !== "object") return "";
+		const index = /^\d+$/.test(part) ? Number(part) : part;
+		target = (target as Record<string | number, unknown>)[index];
 	}
+	if (target === undefined || target === null || typeof target !== "object") return "";
 	return Object.keys(target).slice(0, 30).join(", ");
 }
-/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
 
 /**
  * Build the `utils` object for extensions.
@@ -1068,16 +1067,12 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 					}
 				}
 
-				// Dynamic key-path traversal requires runtime-typed access
-				/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
-
 				// Resolve the key path
 				const parts = keyPath.split(".");
-				let target: any = plugin.settings;
+				let target: unknown = plugin.settings as unknown;
 				for (let i = 0; i < parts.length - 1; i++) {
 					const key = parts[i]!;
 					const index = /^\d+$/.test(key) ? Number(key) : key;
-					target = target?.[index];
 					if (target === undefined || target === null || typeof target !== "object") {
 						const availableKeys = getAvailableKeys(plugin.settings, parts.slice(0, i));
 						return {
@@ -1085,21 +1080,27 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 							error: `Invalid path: "${keyPath}" — "${parts.slice(0, i + 1).join(".")}" does not exist.${availableKeys ? ` Available keys at "${parts.slice(0, i).join(".") || "(root)"}": ${availableKeys}` : ""}`,
 						};
 					}
+					target = (target as Record<string | number, unknown>)[index];
+				}
+
+				if (target === undefined || target === null || typeof target !== "object") {
+					return { success: false, error: `Invalid path: "${keyPath}" — parent is not an object.` };
 				}
 
 				const lastKey = parts[parts.length - 1]!;
 				const finalIndex = /^\d+$/.test(lastKey) ? Number(lastKey) : lastKey;
+				const targetObj = target as Record<string | number, unknown>;
 
-				if (!(finalIndex in target)) {
+				if (!(finalIndex in targetObj)) {
 					const parentPath = parts.slice(0, -1).join(".");
-					const availableKeys = Object.keys(target).slice(0, 30).join(", ");
+					const availableKeys = Object.keys(targetObj).slice(0, 30).join(", ");
 					return {
 						success: false,
 						error: `Key "${lastKey}" does not exist at "${parentPath || "(root)"}". Available keys: ${availableKeys}`,
 					};
 				}
 
-				const oldValue = target[finalIndex];
+				const oldValue: unknown = targetObj[finalIndex];
 
 				// Type compatibility check
 				if (oldValue !== null && oldValue !== undefined && value !== null && value !== undefined) {
@@ -1114,7 +1115,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 				}
 
 				// Apply the change
-				target[finalIndex] = value;
+				targetObj[finalIndex] = value;
 
 				// Persist and propagate
 				try {
@@ -1123,8 +1124,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 					return { success: true, oldValue, newValue: value };
 				} catch (e) {
 					// Revert on save failure
-					target[finalIndex] = oldValue;
-					/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
+					targetObj[finalIndex] = oldValue;
 					const msg = e instanceof Error ? e.message : String(e);
 					editLog.error("Failed to save settings after edit", { keyPath, error: msg });
 					return { success: false, error: `Failed to save: ${msg}` };

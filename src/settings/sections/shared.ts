@@ -88,7 +88,7 @@ export function promptForCreation(
 			const row = wrapper.createDiv({ cls: "notor-creation-field-row" });
 
 			if (field.showWhen) {
-				row.style.display = "none";
+				row.addClass("notor-hidden");
 				conditionalRows.set(field.key, row);
 			}
 
@@ -121,8 +121,7 @@ export function promptForCreation(
 				const row = conditionalRows.get(field.key);
 				const dep = elements.get(field.showWhen.key);
 				if (row && dep) {
-					row.style.display =
-						dep.value === field.showWhen.value ? "" : "none";
+					row.toggleClass("notor-hidden", dep.value !== field.showWhen.value);
 				}
 			}
 		}

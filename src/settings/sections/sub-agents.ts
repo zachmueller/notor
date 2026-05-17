@@ -188,14 +188,10 @@ function renderProfileEntry(
 	// Add "Built-in" badge for built-in profiles
 	if (profile.is_builtin) {
 		const nameEl = setting.nameEl;
-		const badge = nameEl.createSpan({
+		nameEl.createSpan({
 			text: "Built-in",
-			cls: "notor-subagent-badge-builtin",
+			cls: "notor-extension-badge-builtin",
 		});
-		badge.style.marginLeft = "8px";
-		badge.style.fontSize = "0.75em";
-		badge.style.opacity = "0.7";
-		badge.style.fontStyle = "italic";
 	}
 
 	// Visibility toggle

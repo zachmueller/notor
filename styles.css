@@ -2332,6 +2332,9 @@
 	box-shadow: var(--shadow-s);
 	padding: 4px 0;
 	min-width: 180px;
+	top: var(--menu-top, auto);
+	bottom: var(--menu-bottom, auto);
+	left: var(--menu-left, auto);
 }
 
 .notor-attach-menu-item {
@@ -2675,6 +2678,12 @@
 .notor-persona-label.notor-persona-label--default:hover {
 	opacity: 1;
 	color: var(--text-normal);
+}
+
+.notor-persona-label.notor-persona-label--custom {
+	color: var(--persona-chip-color);
+	background: var(--persona-chip-bg);
+	border-color: var(--persona-chip-border);
 }
 
 

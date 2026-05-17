@@ -156,16 +156,10 @@ function renderPersonaEntry(
 
 	if (isBuiltin) {
 		const nameEl = setting.nameEl;
-		const badge = nameEl.createSpan({
+		nameEl.createSpan({
 			text: "Built-in",
-			cls: "notor-persona-badge-builtin",
+			cls: "notor-extension-badge-builtin",
 		});
-		/* eslint-disable obsidianmd/no-static-styles-assignment -- mirrors sub-agents section pattern */
-		badge.style.marginLeft = "8px";
-		badge.style.fontSize = "0.75em";
-		badge.style.opacity = "0.7";
-		badge.style.fontStyle = "italic";
-		/* eslint-enable obsidianmd/no-static-styles-assignment */
 	}
 
 	// Color picker and emoji text for all personas

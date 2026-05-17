@@ -238,7 +238,7 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 				thinkingSetting.addText((text) => {
 					text.setPlaceholder("budget_tokens")
 						.setValue(preset.thinking_level!);
-					text.inputEl.style.width = "80px";
+					text.inputEl.addClass("notor-input-w-80");
 					text.onChange(async (value) => {
 						const asInt = parseInt(value, 10);
 						if (!isNaN(asInt) && asInt > 0) {
