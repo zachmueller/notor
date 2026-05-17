@@ -19,8 +19,8 @@ import {
 import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
 import { logger } from "../utils/logger";
-import { groupModels, formatVariantLabel, buildOptionValue, type ModelGroup } from "../providers/model-grouping";
-import { supportsThinking } from "../providers/model-metadata";
+import { SettingsPopover } from "./settings-popover";
+import { formatRelativeTime } from "../utils/format-time";
 import {
 	renderWriteNoteDiffPreview,
 	renderReplaceInNoteDiffPreview,
@@ -143,24 +143,11 @@ export class NotorChatView extends ItemView {
 	// Workflow send callback (E-012)
 	private onSendWorkflow?: (workflow: Workflow, supplementaryText: string) => Promise<void>;
 
-	// Settings popover state
-	private settingsPopoverEl?: HTMLElement;
+	// Settings popover (CHAT-008)
+	private settingsPopover?: SettingsPopover;
 	private isSettingsOpen = false;
-	private settingsOutsideClickHandler?: (e: MouseEvent) => void;
-	private settingsEscapeHandler?: (e: KeyboardEvent) => void;
-
-	/**
-	 * Display-only overrides for provider/model shown in the settings popover.
-	 *
-	 * Set by `updateProviderDisplay()` / `updateModelDisplay()` when the user
-	 * switches to a conversation that was using a different provider/model.
-	 * Cleared when the user explicitly changes the picker.
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1f
-	 */
 	private displayedProviderId: string | null = null;
 	private displayedModelValue: string | null = null;
-	/** Display-only preset name override (set during conversation switch). */
 	private displayedPresetName: string | null | undefined = undefined;
 
 	// Persona state (A-009, A-010)
@@ -422,58 +409,72 @@ export class NotorChatView extends ItemView {
 
 	setOnSettingsOpen(callback: () => void): void {
 		this.onSettingsOpen = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.onSettingsOpen = callback;
 	}
 
 	setOnProviderChange(callback: (providerId: string) => void): void {
 		this.onProviderChange = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.onProviderChange = callback;
 	}
 
 	setOnModelChange(callback: (modelId: string) => void): void {
 		this.onModelChange = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.onModelChange = callback;
 	}
 
 	setOnRefreshModels(callback: () => Promise<ModelInfo[]>): void {
 		this.onRefreshModels = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.onRefreshModels = callback;
 	}
 
 	setGetAvailableProviders(callback: () => { id: string; type: string; displayName: string }[]): void {
 		this.getAvailableProviders = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.getAvailableProviders = callback;
 	}
 
 	setGetAvailableModels(callback: () => ModelInfo[]): void {
 		this.getAvailableModels = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.getAvailableModels = callback;
 	}
 
 	setGetCurrentProvider(callback: () => string): void {
 		this.getCurrentProvider = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.getCurrentProvider = callback;
 	}
 
 	setGetCurrentModel(callback: () => string): void {
 		this.getCurrentModel = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.getCurrentModel = callback;
 	}
 
 	setOnPresetChange(callback: (presetName: string | null, providerId?: string, modelId?: string, useExtendedContext?: boolean) => void): void {
 		this.onPresetChange = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.onPresetChange = callback;
 	}
 
 	setGetAvailablePresets(callback: () => ModelPreset[]): void {
 		this.getAvailablePresets = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.getAvailablePresets = callback;
 	}
 
 	setGetCurrentPreset(callback: () => string | null): void {
 		this.getCurrentPreset = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.getCurrentPreset = callback;
 	}
 
 	setGetActiveModelId(callback: () => string): void {
 		this.getActiveModelId = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.getActiveModelId = callback;
 	}
 
 	setGetActiveThinkingLevel(callback: () => string | null): void {
 		this.getActiveThinkingLevel = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.getActiveThinkingLevel = callback;
 	}
 
 	setOnThinkingLevelChange(callback: (level: string | null) => void): void {
 		this.onThinkingLevelChange = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.onThinkingLevelChange = callback;
 	}
 
 	setOnPersonaChange(callback: (persona: Persona | null) => void): void {
@@ -500,14 +501,17 @@ export class NotorChatView extends ItemView {
 
 	setOnListCheckpoints(callback: () => Promise<Checkpoint[]>): void {
 		this.onListCheckpoints = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.onListCheckpoints = callback;
 	}
 
 	setOnRestoreCheckpoint(callback: (checkpointId: string) => Promise<boolean>): void {
 		this.onRestoreCheckpoint = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.onRestoreCheckpoint = callback;
 	}
 
 	setOnGetCurrentContent(callback: (notePath: string) => Promise<string | null>): void {
 		this.onGetCurrentContent = callback;
+		if (this.settingsPopover) this.settingsPopover.deps.onGetCurrentContent = callback;
 	}
 
 	setOnForkConversation(callback: (messageId: string) => Promise<void>): void {
@@ -847,41 +851,24 @@ export class NotorChatView extends ItemView {
 	 */
 	updateProviderDisplay(providerId: string): void {
 		this.displayedProviderId = providerId;
-		// If the popover is currently open, close and reopen to reflect the change
-		if (this.settingsPopoverEl) {
-			this.closeSettingsPopover();
-			this.openSettingsPopover();
+		if (this.settingsPopover?.isOpen()) {
+			this.settingsPopover.close();
+			this.settingsPopover.open();
 		}
 	}
 
-	/**
-	 * Update the displayed model in the settings popover without triggering
-	 * the global `onModelChange` callback.
-	 *
-	 * Accepts the composite option value (e.g. `"claude-3-opus::1m"` for
-	 * extended context), same format as `getCurrentModel()` returns.
-	 *
-	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1f
-	 */
 	updateModelDisplay(modelValue: string): void {
 		this.displayedModelValue = modelValue;
-		if (this.settingsPopoverEl) {
-			this.refreshModelSelect();
+		if (this.settingsPopover?.isOpen()) {
+			this.settingsPopover.refreshModelSelect();
 		}
 	}
 
-	/**
-	 * Update the displayed preset in the settings popover without triggering
-	 * callbacks. Used during conversation switch to show the correct preset.
-	 *
-	 * @param presetName - Preset name, or null for "Custom" display
-	 * @see specs/ZZ-misc/model-presets-design.md — Section 6.3
-	 */
 	updatePresetDisplay(presetName: string | null): void {
 		this.displayedPresetName = presetName;
-		if (this.settingsPopoverEl) {
-			this.closeSettingsPopover();
-			this.openSettingsPopover();
+		if (this.settingsPopover?.isOpen()) {
+			this.settingsPopover.close();
+			this.settingsPopover.open();
 		}
 	}
 
@@ -923,6 +910,7 @@ export class NotorChatView extends ItemView {
 		container.addClass("notor-chat-container");
 
 		this.buildHeader(container);
+		this.initSettingsPopover();
 		this.buildConversationList(container);
 		this.buildTaskPanel(container);
 		this.buildMessageList(container);
@@ -976,6 +964,9 @@ export class NotorChatView extends ItemView {
 
 		this.findInMessages?.destroy();
 		this.findInMessages = undefined;
+
+		this.settingsPopover?.destroy();
+		this.settingsPopover = undefined;
 
 		// A3.8: Release all callback references to prevent GC leaks.
 		// Called AFTER onCloseCleanup (Amendment R2-8 ordering) so the
@@ -1089,6 +1080,41 @@ export class NotorChatView extends ItemView {
 	// UI Construction
 	// -----------------------------------------------------------------------
 
+	private initSettingsPopover(): void {
+		this.settingsPopover = new SettingsPopover({
+			headerEl: this.headerEl,
+			app: this.app,
+			providers: this.plugin.settings.providers,
+			getIsSettingsOpen: () => this.isSettingsOpen,
+			setIsSettingsOpen: (v) => { this.isSettingsOpen = v; },
+			getShowConversationList: () => this.showConversationList,
+			getDisplayedPresetName: () => this.displayedPresetName,
+			setDisplayedPresetName: (v) => { this.displayedPresetName = v; },
+			getDisplayedProviderId: () => this.displayedProviderId,
+			setDisplayedProviderId: (v) => { this.displayedProviderId = v; },
+			getDisplayedModelValue: () => this.displayedModelValue,
+			setDisplayedModelValue: (v) => { this.displayedModelValue = v; },
+			onSettingsOpen: this.onSettingsOpen,
+			onPresetChange: this.onPresetChange,
+			onProviderChange: this.onProviderChange,
+			onModelChange: this.onModelChange,
+			onRefreshModels: this.onRefreshModels,
+			onThinkingLevelChange: this.onThinkingLevelChange,
+			onListCheckpoints: this.onListCheckpoints,
+			onRestoreCheckpoint: this.onRestoreCheckpoint,
+			onGetCurrentContent: this.onGetCurrentContent,
+			getAvailablePresets: this.getAvailablePresets,
+			getCurrentPreset: this.getCurrentPreset,
+			getAvailableProviders: this.getAvailableProviders,
+			getAvailableModels: this.getAvailableModels,
+			getCurrentProvider: this.getCurrentProvider,
+			getCurrentModel: this.getCurrentModel,
+			getActiveModelId: this.getActiveModelId,
+			getActiveThinkingLevel: this.getActiveThinkingLevel,
+			toggleConversationList: () => this.toggleConversationList(),
+		});
+	}
+
 	private buildHeader(container: HTMLElement): void {
 		this.headerEl = container.createDiv({ cls: "notor-chat-header" });
 
@@ -1143,7 +1169,7 @@ export class NotorChatView extends ItemView {
 		});
 		setIcon(settingsBtn, "settings");
 		settingsBtn.addEventListener("click", () => {
-			this.toggleSettingsPopover();
+			this.settingsPopover?.toggle();
 		});
 
 		// New conversation button
@@ -2861,7 +2887,7 @@ export class NotorChatView extends ItemView {
 
 			const metaEl = contentCol.createDiv({ cls: "notor-conversation-list-meta" });
 			const date = new Date(entry.updated_at);
-			metaEl.textContent = this.formatRelativeTime(date);
+			metaEl.textContent = formatRelativeTime(date);
 
 			if (entry.preview) {
 				const previewEl = contentCol.createDiv({ cls: "notor-conversation-list-preview" });
@@ -3391,489 +3417,7 @@ export class NotorChatView extends ItemView {
 		}
 	}
 
-	// -----------------------------------------------------------------------
-	// Settings popover (CHAT-008)
-	// -----------------------------------------------------------------------
 
-	private toggleSettingsPopover(): void {
-		if (this.isSettingsOpen) {
-			this.closeSettingsPopover();
-		} else {
-			this.openSettingsPopover();
-		}
-	}
-
-	private openSettingsPopover(): void {
-		this.closeSettingsPopover();
-		if (this.showConversationList) {
-			this.toggleConversationList();
-		}
-		this.isSettingsOpen = true;
-
-		this.settingsPopoverEl = this.headerEl.createDiv({ cls: "notor-settings-popover" });
-
-		// Close on click outside — deferred to next tick so the opening click
-		// doesn't immediately dismiss the popover.
-		setTimeout(() => {
-			this.settingsOutsideClickHandler = (e: MouseEvent) => {
-				const target = e.target as Node | null;
-				if (
-					this.settingsPopoverEl &&
-					target &&
-					!this.settingsPopoverEl.contains(target) &&
-					!(target as HTMLElement).closest?.("[aria-label='Chat settings']")
-				) {
-					this.closeSettingsPopover();
-				}
-			};
-			document.addEventListener("mousedown", this.settingsOutsideClickHandler, true);
-		}, 0);
-
-		// Close on Escape key
-		this.settingsEscapeHandler = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				this.closeSettingsPopover();
-				e.preventDefault();
-			}
-		};
-		document.addEventListener("keydown", this.settingsEscapeHandler, true);
-
-		// Model preset selection
-		this.buildPresetSelect(this.settingsPopoverEl);
-
-		// Thinking level (only if current model supports it)
-		this.buildThinkingLevelSection(this.settingsPopoverEl);
-
-		// Checkpoints section
-		this.buildCheckpointsSection(this.settingsPopoverEl);
-	}
-
-	/**
-	 * Build the preset-based model selector for the settings popover.
-	 *
-	 * Shows a single dropdown of configured presets + "Custom..." option.
-	 * When "Custom" is selected, reveals legacy provider+model dropdowns.
-	 *
-	 * @see specs/ZZ-misc/model-presets-design.md — Section 6.1
-	 */
-	private buildPresetSelect(container: HTMLElement): void {
-		const presetSection = container.createDiv({ cls: "notor-settings-section notor-preset-section" });
-		presetSection.createDiv({ cls: "notor-settings-label", text: "Model Preset" });
-
-		const presets = this.getAvailablePresets?.() ?? [];
-		const providerLabels: Record<string, string> = {};
-		for (const p of this.plugin.settings.providers) {
-			providerLabels[p.id] = p.display_name;
-		}
-
-		// Determine current selection
-		const currentPreset = this.displayedPresetName !== undefined
-			? this.displayedPresetName
-			: this.getCurrentPreset?.() ?? null;
-
-		const presetSelect = presetSection.createEl("select", { cls: "notor-settings-select" });
-
-		// Render preset options
-		for (const p of presets) {
-			const isConfigured = p.provider_id !== null && p.model_id !== null;
-			const detail = isConfigured
-				? `${providerLabels[p.provider_id!] ?? p.provider_id} \u00B7 ${p.model_id}${p.use_extended_context ? " \u00B7 1M" : ""}`
-				: "(not configured)";
-			const opt = presetSelect.createEl("option", {
-				text: `${p.name}  \u2014  ${detail}`,
-				attr: { value: p.name },
-			});
-			if (!isConfigured) {
-				opt.disabled = true;
-			}
-			if (p.name === currentPreset) {
-				opt.selected = true;
-			}
-		}
-
-		// Separator + Custom option
-		const separatorOpt = presetSelect.createEl("option", {
-			text: "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
-			attr: { value: "__separator" },
-		});
-		separatorOpt.disabled = true;
-
-		const customOpt = presetSelect.createEl("option", {
-			text: "Custom\u2026  \u2014  Select specific provider & model",
-			attr: { value: "__custom" },
-		});
-		if (currentPreset === null) {
-			customOpt.selected = true;
-		}
-
-		// Custom provider+model section (hidden by default, shown when "Custom" selected)
-		const customSection = container.createDiv({ cls: "notor-settings-section notor-custom-model-section" });
-		if (currentPreset !== null) {
-			customSection.addClass("notor-hidden");
-		}
-
-		// Build legacy provider+model dropdowns inside customSection
-		this.buildCustomModelSection(customSection);
-
-		presetSelect.addEventListener("change", () => {
-			const value = presetSelect.value;
-			if (value === "__separator") return;
-
-			// Clear display overrides — user is explicitly choosing
-			this.displayedPresetName = undefined;
-			this.displayedProviderId = null;
-			this.displayedModelValue = null;
-
-			if (value === "__custom") {
-				customSection.removeClass("notor-hidden");
-				this.onPresetChange?.(null);
-			} else {
-				customSection.addClass("notor-hidden");
-				this.onPresetChange?.(value);
-			}
-		});
-	}
-
-	/**
-	 * Build the legacy provider + model dropdowns for "Custom" mode.
-	 * Reuses the same logic as the old provider/model dropdowns.
-	 */
-	private buildCustomModelSection(container: HTMLElement): void {
-		// Provider selection
-		const providerLabel = container.createDiv({ cls: "notor-settings-label", text: "Provider" });
-		void providerLabel; // Used for DOM layout
-
-		const providerSelect = container.createEl("select", { cls: "notor-settings-select" });
-		const providers = this.getAvailableProviders?.() ?? [];
-		const currentProvider = this.displayedProviderId ?? this.getCurrentProvider?.() ?? this.plugin.settings.active_provider;
-
-		for (const p of providers) {
-			const opt = providerSelect.createEl("option", {
-				text: p.displayName,
-				attr: { value: p.id },
-			});
-			if (p.id === currentProvider) {
-				opt.selected = true;
-			}
-		}
-
-		providerSelect.addEventListener("change", () => {
-			this.displayedProviderId = null;
-			this.displayedModelValue = null;
-			this.onProviderChange?.(providerSelect.value);
-			this.refreshModelSelect();
-		});
-
-		// Model selection
-		const modelWrapper = container.createDiv({ cls: "notor-settings-section" });
-		const modelHeader = modelWrapper.createDiv({ cls: "notor-settings-label-row" });
-		modelHeader.createDiv({ cls: "notor-settings-label", text: "Model" });
-
-		const refreshBtn = modelHeader.createEl("button", {
-			cls: "notor-settings-refresh-btn clickable-icon",
-			attr: { "aria-label": "Refresh model list" },
-		});
-		refreshBtn.textContent = "\u21BB";
-		refreshBtn.addEventListener("click", () => {
-			void (async () => {
-				refreshBtn.disabled = true;
-				refreshBtn.textContent = "\u2026";
-				try {
-					await this.onRefreshModels?.();
-					this.refreshModelSelect();
-				} catch {
-					// Fall through to text input
-				} finally {
-					refreshBtn.disabled = false;
-					refreshBtn.textContent = "\u21BB";
-				}
-			})();
-		});
-
-		this.buildModelSelect(modelWrapper);
-	}
-
-	private buildModelSelect(container: HTMLElement): void {
-		// Remove existing model select if any
-		const existing = container.querySelector(".notor-model-select-wrapper");
-		existing?.remove();
-
-		const wrapper = container.createDiv({ cls: "notor-model-select-wrapper" });
-		const models = this.getAvailableModels?.() ?? [];
-		const currentModel = this.displayedModelValue ?? this.getCurrentModel?.() ?? "";
-
-		if (models.length > 0) {
-			const modelSelect = wrapper.createEl("select", { cls: "notor-settings-select" });
-			const groups = groupModels(models);
-
-			// Use optgroup for groups with multiple variants; flat options for single-variant groups
-			if (groups.some((g) => g.variants.length > 1)) {
-				this.renderGroupedModelOptions(modelSelect, groups, currentModel);
-			} else {
-				// All groups have single variants — render flat (non-Bedrock providers)
-				for (const m of models) {
-					const opt = modelSelect.createEl("option", {
-						text: m.display_name || m.id,
-						attr: { value: m.id },
-					});
-					if (m.id === currentModel) {
-						opt.selected = true;
-					}
-				}
-			}
-
-			modelSelect.addEventListener("change", () => {
-				this.displayedModelValue = null; // User explicitly changed
-				this.onModelChange?.(modelSelect.value);
-			});
-		} else {
-			// Free-text input fallback
-			const modelInput = wrapper.createEl("input", {
-				cls: "notor-settings-input",
-				attr: {
-					type: "text",
-					placeholder: "Enter model ID...",
-					value: currentModel,
-				},
-			});
-
-			modelInput.addEventListener("change", () => {
-				this.displayedModelValue = null; // User explicitly changed
-				this.onModelChange?.(modelInput.value);
-			});
-		}
-	}
-
-	/**
-	 * Render grouped model options using `<optgroup>` elements.
-	 *
-	 * Each ModelGroup becomes an `<optgroup>` with its variants as `<option>`s.
-	 * The `::1m` suffix is used as an internal encoding for extended context
-	 * variants — parsed in the `onModelChange` handler in main.ts.
-	 */
-	private renderGroupedModelOptions(
-		select: HTMLSelectElement,
-		groups: ModelGroup[],
-		currentModel: string
-	): void {
-		for (const group of groups) {
-			if (group.variants.length === 1) {
-				// Single variant — render as a flat option (no optgroup needed)
-				const variant = group.variants[0]!;
-				const opt = select.createEl("option", {
-					text: group.label,
-					attr: { value: variant.optionValue },
-				});
-				if (variant.optionValue === currentModel) {
-					opt.selected = true;
-				}
-			} else {
-				// Multiple variants — use optgroup
-				const optgroup = select.createEl("optgroup", {
-					attr: { label: group.label },
-				});
-				for (const variant of group.variants) {
-					const label = formatVariantLabel(variant);
-					const opt = optgroup.createEl("option", {
-						text: label,
-						attr: { value: variant.optionValue },
-					});
-					if (variant.optionValue === currentModel) {
-						opt.selected = true;
-					}
-				}
-			}
-		}
-	}
-
-	private buildThinkingLevelSection(container: HTMLElement): void {
-		const modelId = this.getActiveModelId?.();
-		if (!modelId || !supportsThinking(modelId)) return;
-
-		const section = container.createDiv({ cls: "notor-settings-section notor-thinking-section" });
-		section.createDiv({ cls: "notor-settings-label", text: "Thinking" });
-
-		const select = section.createEl("select", { cls: "notor-settings-select" });
-		const options: [string, string][] = [
-			["", "Off"],
-			["low", "Low"],
-			["medium", "Medium"],
-			["high", "High"],
-		];
-
-		const currentLevel = this.getActiveThinkingLevel?.() ?? null;
-
-		for (const [value, label] of options) {
-			const opt = select.createEl("option", { text: label, attr: { value } });
-			if (value === "" && (currentLevel === null || !["low", "medium", "high"].includes(currentLevel))) {
-				opt.selected = true;
-			} else if (value === currentLevel) {
-				opt.selected = true;
-			}
-		}
-
-		select.addEventListener("change", () => {
-			const value = select.value;
-			this.onThinkingLevelChange?.(value === "" ? null : value);
-		});
-	}
-
-	private buildCheckpointsSection(container: HTMLElement): void {
-		const section = container.createDiv({ cls: "notor-settings-section notor-checkpoints-section" });
-		const header = section.createDiv({ cls: "notor-settings-label-row" });
-		header.createDiv({ cls: "notor-settings-label", text: "Checkpoints" });
-
-		const refreshBtn = header.createEl("button", {
-			cls: "notor-settings-refresh-btn clickable-icon",
-			attr: { "aria-label": "Refresh checkpoint list" },
-		});
-		refreshBtn.textContent = "↻";
-
-		const listEl = section.createDiv({ cls: "notor-checkpoint-list" });
-		listEl.textContent = "Loading…";
-
-		const loadCheckpoints = async () => {
-			listEl.empty();
-			listEl.textContent = "Loading…";
-			try {
-				const checkpoints = (await this.onListCheckpoints?.()) ?? [];
-				listEl.empty();
-				if (checkpoints.length === 0) {
-					listEl.createDiv({
-						cls: "notor-checkpoint-empty",
-						text: "No checkpoints yet",
-					});
-					return;
-				}
-				for (const cp of checkpoints) {
-					this.renderCheckpointItem(listEl, cp);
-				}
-			} catch {
-				listEl.empty();
-				listEl.createDiv({ cls: "notor-checkpoint-empty", text: "Failed to load checkpoints" });
-			}
-		};
-
-		refreshBtn.addEventListener("click", () => void loadCheckpoints());
-
-		// Load immediately when the section is created
-		void loadCheckpoints();
-	}
-
-	private renderCheckpointItem(container: HTMLElement, cp: Checkpoint): void {
-		const item = container.createDiv({ cls: "notor-checkpoint-item" });
-
-		const meta = item.createDiv({ cls: "notor-checkpoint-meta" });
-		const date = new Date(cp.timestamp);
-		meta.createSpan({ cls: "notor-checkpoint-time", text: this.formatRelativeTime(date) });
-		meta.createSpan({ cls: "notor-checkpoint-desc", text: cp.description });
-
-		const actions = item.createDiv({ cls: "notor-checkpoint-actions" });
-
-		// Preview button
-		const previewBtn = actions.createEl("button", {
-			cls: "notor-checkpoint-btn notor-checkpoint-preview-btn",
-			text: "Preview",
-			attr: { "aria-label": "Preview checkpoint" },
-		});
-		previewBtn.addEventListener("click", () => {
-			this.showCheckpointPreviewModal(cp);
-		});
-
-		// Compare button (only if the note currently exists)
-		const compareBtn = actions.createEl("button", {
-			cls: "notor-checkpoint-btn",
-			text: "Compare",
-			attr: { "aria-label": "Compare checkpoint with current note" },
-		});
-		compareBtn.addEventListener("click", () => {
-			void (async () => {
-				try {
-					const current = await this.onGetCurrentContent?.(cp.note_path);
-					if (current == null) {
-						new Notice(`Note not found: ${cp.note_path}`);
-						return;
-					}
-					this.showCheckpointDiffModal(cp, current);
-				} catch (err) {
-					log.error("Failed to compare checkpoint", { err });
-					new Notice("Failed to compare checkpoint");
-				}
-			})();
-		});
-
-		// Restore button
-		const restoreBtn = actions.createEl("button", {
-			cls: "notor-checkpoint-btn notor-checkpoint-restore-btn",
-			text: "Restore",
-			attr: { "aria-label": "Restore note to this checkpoint" },
-		});
-		restoreBtn.addEventListener("click", () => {
-			void (async () => {
-				restoreBtn.disabled = true;
-				restoreBtn.textContent = "Restoring…";
-				try {
-					const ok = await this.onRestoreCheckpoint?.(cp.id);
-					if (ok) {
-						new Notice(`Restored ${cp.note_path} to checkpoint from ${this.formatRelativeTime(new Date(cp.timestamp))}`);
-					} else {
-						new Notice(`Failed to restore checkpoint`);
-					}
-				} catch {
-					new Notice(`Failed to restore checkpoint`);
-				} finally {
-					restoreBtn.disabled = false;
-					restoreBtn.textContent = "Restore";
-				}
-			})();
-		});
-	}
-
-	private showCheckpointPreviewModal(cp: Checkpoint): void {
-		const modal = new CheckpointModal(
-			this.app,
-			`Checkpoint: ${cp.description}`,
-			cp.content,
-			null
-		);
-		modal.open();
-	}
-
-	private showCheckpointDiffModal(cp: Checkpoint, current: string): void {
-		const modal = new CheckpointModal(
-			this.app,
-			`Compare: ${cp.description}`,
-			cp.content,
-			current
-		);
-		modal.open();
-	}
-
-	private refreshModelSelect(): void {
-		if (!this.settingsPopoverEl) return;
-		// Find the model select wrapper inside the custom model section
-		const customSection = this.settingsPopoverEl.querySelector(".notor-custom-model-section");
-		if (customSection) {
-			const modelWrapper = customSection.querySelector(".notor-settings-section");
-			if (modelWrapper) {
-				this.buildModelSelect(modelWrapper as HTMLElement);
-			}
-		}
-	}
-
-	private closeSettingsPopover(): void {
-		if (this.settingsOutsideClickHandler) {
-			document.removeEventListener("mousedown", this.settingsOutsideClickHandler, true);
-			this.settingsOutsideClickHandler = undefined;
-		}
-		if (this.settingsEscapeHandler) {
-			document.removeEventListener("keydown", this.settingsEscapeHandler, true);
-			this.settingsEscapeHandler = undefined;
-		}
-		this.isSettingsOpen = false;
-		this.settingsPopoverEl?.remove();
-		this.settingsPopoverEl = undefined;
-	}
 
 	// -----------------------------------------------------------------------
 	// Helpers
@@ -3884,140 +3428,4 @@ export class NotorChatView extends ItemView {
 		this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
 	}
 
-	private formatRelativeTime(date: Date): string {
-		const now = Date.now();
-		const diff = now - date.getTime();
-		const minutes = Math.floor(diff / 60000);
-		const hours = Math.floor(diff / 3600000);
-		const days = Math.floor(diff / 86400000);
-
-		if (minutes < 1) return "Just now";
-		if (minutes < 60) return `${minutes}m ago`;
-		if (hours < 24) return `${hours}h ago`;
-		if (days < 7) return `${days}d ago`;
-		return date.toLocaleDateString();
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Checkpoint preview / diff modal
-// ---------------------------------------------------------------------------
-
-/**
- * Modal for previewing checkpoint content or comparing it against current
- * note content.
- *
- * When `currentContent` is null: shows checkpoint content only (preview).
- * When `currentContent` is provided: shows a side-by-side diff (compare).
- */
-class CheckpointModal extends Modal {
-	constructor(
-		app: import("obsidian").App,
-		private readonly title: string,
-		private readonly checkpointContent: string,
-		private readonly currentContent: string | null
-	) {
-		super(app);
-	}
-
-	onOpen(): void {
-		const { contentEl } = this;
-		contentEl.empty();
-		contentEl.addClass("notor-checkpoint-modal");
-
-		contentEl.createEl("h2", { text: this.title });
-
-		if (this.currentContent === null) {
-			// Preview mode: show checkpoint content
-			this.renderContentBlock(contentEl, "Checkpoint content", this.checkpointContent);
-		} else {
-			// Compare mode: show inline diff
-			this.renderDiff(contentEl, this.checkpointContent, this.currentContent);
-		}
-	}
-
-	onClose(): void {
-		this.contentEl.empty();
-	}
-
-	private renderContentBlock(container: HTMLElement, label: string, content: string): void {
-		container.createEl("p", { cls: "notor-checkpoint-modal-label", text: label });
-		const pre = container.createEl("pre", { cls: "notor-checkpoint-modal-content" });
-		pre.createEl("code", { text: content });
-	}
-
-	/**
-	 * Render a simple line-by-line diff between checkpoint and current content.
-	 *
-	 * Lines only in checkpoint: shown with "-" prefix (deletion, red).
-	 * Lines only in current: shown with "+" prefix (addition, green).
-	 * Lines in both: shown unchanged.
-	 */
-	private renderDiff(
-		container: HTMLElement,
-		checkpointContent: string,
-		currentContent: string
-	): void {
-		container.createEl("p", {
-			cls: "notor-checkpoint-modal-label",
-			text: "− checkpoint  /  + current",
-		});
-
-		const diffEl = container.createEl("pre", { cls: "notor-checkpoint-modal-diff" });
-
-		const checkpointLines = checkpointContent.split("\n");
-		const currentLines = currentContent.split("\n");
-
-		// Simple LCS-based diff
-		const diff = this.computeDiff(checkpointLines, currentLines);
-
-		for (const entry of diff) {
-			const lineEl = diffEl.createEl("div", { cls: `notor-diff-line notor-diff-${entry.type}` });
-			const prefix = entry.type === "removed" ? "- " : entry.type === "added" ? "+ " : "  ";
-			lineEl.textContent = prefix + entry.text;
-		}
-	}
-
-	/** Very simple O(n²) diff for modest-length notes. */
-	private computeDiff(
-		a: string[],
-		b: string[]
-	): Array<{ type: "unchanged" | "removed" | "added"; text: string }> {
-		// Build LCS table
-		const m = a.length;
-		const n = b.length;
-		const lcs: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-
-		for (let i = 1; i <= m; i++) {
-			for (let j = 1; j <= n; j++) {
-				if (a[i - 1] === b[j - 1]) {
-					lcs[i]![j] = lcs[i - 1]![j - 1]! + 1;
-				} else {
-					lcs[i]![j] = Math.max(lcs[i - 1]![j]!, lcs[i]![j - 1]!);
-				}
-			}
-		}
-
-		// Backtrack to produce diff
-		let i = m;
-		let j = n;
-		const entries: Array<{ type: "unchanged" | "removed" | "added"; text: string }> = [];
-
-		while (i > 0 || j > 0) {
-			if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
-				entries.push({ type: "unchanged", text: a[i - 1]! });
-				i--;
-				j--;
-			} else if (j > 0 && (i === 0 || lcs[i]![j - 1]! >= lcs[i - 1]![j]!)) {
-				entries.push({ type: "added", text: b[j - 1]! });
-				j--;
-			} else {
-				entries.push({ type: "removed", text: a[i - 1]! });
-				i--;
-			}
-		}
-
-		entries.reverse();
-		return entries;
-	}
 }
