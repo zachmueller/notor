@@ -118,7 +118,7 @@ Pushing the tag triggers the GitHub Actions release workflow (`.github/workflows
 Review all commits since the previous release tag and draft a CHANGELOG entry summarizing what was implemented. Get the commit list with:
 
 ```bash
-git log --oneline {PREV_VERSION}..{NEW_VERSION}
+git log {PREV_VERSION}..{NEW_VERSION}
 ```
 
 Read the commit messages carefully and group related changes into meaningful categories (e.g. **New Features**, **Bug Fixes**, **Settings**, **UI Polish**). Omit spec/docs-only commits unless they represent user-visible changes.
