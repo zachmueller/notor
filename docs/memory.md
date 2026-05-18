@@ -88,7 +88,7 @@ Configure memory under **Settings → Notor → Memory**:
 
 ## Sub-agent profiles
 
-Memory uses four built-in sub-agent profiles:
+Memory uses five built-in sub-agent profiles:
 
 | Profile | Purpose | Preset | Iteration cap |
 |---------|---------|--------|---------------|
@@ -96,6 +96,7 @@ Memory uses four built-in sub-agent profiles:
 | `memory-resolver` | Decide whether to create a new note or update an existing one for a given insight | `tiny` | 6 |
 | `memory-capture` | Extract durable insights from a conversation turn | `tiny` | 5 |
 | `memory-dream` | Consolidate and refine memory notes from recent conversations | `large` | 16 |
+| `memory-evaluator` | Evaluate which recalled memory notes were actually useful in the conversation | `tiny` | 2 |
 
 These profiles appear in **Settings → Notor → Sub-agents** with a "Built-in" badge. They use [template variables](system-prompt.md#template-variables-in-other-contexts) like `{notor_dir}/memory/` in their `<notor_tool_config>` blocks to scope tool access to the memory folder.
 

@@ -17,7 +17,7 @@ Notor gives you a full AI chat panel inside Obsidian with the ability to read, s
 
 ### Vault tools
 
-- **[28 built-in tools](docs/vault-tools.md)** — read, write, search, and move notes; manage frontmatter and tags; follow backlinks and outlinks; apply templates (Templater and core Templates); interact with Obsidian's Web Viewer; search the web (DuckDuckGo by default; Tavily, Brave, SerpAPI with API keys) and fetch pages; run shell commands; read, write, and import filesystem files and Word documents (`.docx`)
+- **[31 built-in tools](docs/vault-tools.md)** — read, write, search, and move notes; manage frontmatter and tags; follow backlinks and outlinks; apply templates (Templater and core Templates); interact with Obsidian's Web Viewer; search the web (DuckDuckGo by default; Tavily, Brave, SerpAPI with API keys) and fetch pages; run shell commands; read, write, and import filesystem files and Word documents (`.docx`)
 - **[Safety-first approval model](docs/safety.md)** — Plan/Act mode toggle, diff previews with per-hunk accept/reject, approval gates for write operations, and automatic checkpoints for rollback
 - **[Sub-agents](docs/sub-agents.md)** — the AI can spawn focused child conversations for vault search, web research, or custom tasks with isolated context and default-deny tool access
 
@@ -84,7 +84,7 @@ Reload Obsidian and enable **Notor** in **Settings → Community plugins**.
 2. Choose a provider (defaults to local OpenAI-compatible at `http://localhost:11434/v1`)
 3. Enter credentials if required (stored securely via Obsidian's secrets manager)
 4. Configure model presets in **Settings → Notor → Models** — assign a provider and model to at least one preset (e.g., `medium`). See [docs/model-presets.md](docs/model-presets.md).
-5. Open the Notor chat panel from the sidebar ribbon and start a conversation
+5. Open the Notor chat panel via the command palette (**Notor: Open chat panel**) and start a conversation
 
 For full setup walkthroughs — including creating your first persona, workflow, and MCP server connection — see **[docs/getting-started.md](docs/getting-started.md)**.
 

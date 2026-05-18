@@ -47,7 +47,7 @@ npm run dev
 2. Choose a provider (defaults to local OpenAI-compatible at `http://localhost:11434/v1`)
 3. Enter credentials if required (stored securely via Obsidian's secrets manager)
 4. Configure model presets in **Settings → Notor → Models** — assign a provider and model to at least one preset (e.g., `medium`). Optionally configure [extended thinking](model-presets.md#extended-thinking) levels for Claude or OpenAI o-series models. See [model-presets.md](model-presets.md) for the full reference.
-5. Open the Notor chat panel from the sidebar ribbon — your default preset is selected automatically. Start a conversation.
+5. Open the Notor chat panel via the command palette (**Notor: Open chat panel**) — your default preset is selected automatically. Start a conversation.
 
 You can control which tools are available and configure auto-approve in **Settings → Notor → Tools**. See [vault-tools.md](vault-tools.md#enabling-and-disabling-tools) for details.
 
@@ -81,8 +81,11 @@ All Notor commands are accessible via the Obsidian command palette (Ctrl/Cmd+P):
 | **Notor: Open tool config inspector** | Opens a debugging view showing the effective tool configuration |
 | **Notor: Reload user extensions** | Re-discovers and recompiles all user-defined tools and automations |
 | **Notor: Launch active note workflow** | Opens a picker filtered to workflows with `notor-active-note-prompt`, runs against the active note |
-| **Notor: Open secondary chat panel** | Opens an additional chat panel in a new tab |
+| **Notor: Open new chat panel** | Opens an additional chat panel in a new tab |
 | **Notor: Find in messages** | Opens the find bar in the chat panel to search across message content |
+| **Notor: Switch persona** | Opens a picker to switch the active persona for the current chat |
+| **Notor: /btw — Open side conversation** | Forks the current conversation at the last message and opens it in a new tab |
+| **Notor: Open memory approval panel** | Opens the pending memory approval queue (visible only when memory is enabled with manual approval mode) |
 
 > You can assign custom hotkeys to any Notor command in **Settings → Hotkeys**.
 

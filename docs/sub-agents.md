@@ -13,7 +13,7 @@ When the AI determines that a task benefits from a focused investigation, it inv
 
 ## Built-in profiles
 
-Notor ships with seven ready-to-use sub-agent profiles:
+Notor ships with eight ready-to-use sub-agent profiles:
 
 | Profile | Description | Tools | Preset |
 |---------|-------------|-------|--------|
@@ -24,8 +24,9 @@ Notor ships with seven ready-to-use sub-agent profiles:
 | `memory-resolver` | Decide whether to create a new note or update an existing one for a given insight | `read_note`, `search_vault` (scoped to memory folder) | `tiny` |
 | `memory-capture` | Extract durable insights from a conversation turn | `read_note`, `search_vault`, `list_vault`, `read_frontmatter`, `get_backlinks`, `get_outlinks` | `tiny` |
 | `memory-dream` | Consolidate and refine memory notes across sessions | `read_note`, `search_vault`, `list_vault`, `read_frontmatter`, `get_backlinks`, `get_outlinks` | `large` |
+| `memory-evaluator` | Evaluate which recalled memory notes were actually useful in the conversation | _(none)_ | `tiny` |
 
-The four `memory-*` profiles are part of the [knowledge memory](memory.md) feature and are only active when memory is enabled.
+The five `memory-*` profiles are part of the [knowledge memory](memory.md) feature and are only active when memory is enabled.
 
 Built-in profiles appear in **Settings → Notor → Sub-agents** with a "Built-in" badge. You can customize them by clicking the Open button — Notor creates a vault file from the default on first click, preserving your edits afterward. A "Reset to default" action is available if you want to restore the original.
 
