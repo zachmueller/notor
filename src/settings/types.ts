@@ -225,6 +225,12 @@ export interface NotorSettings {
 	/** Name of the currently active persona (empty string = no persona active). */
 	active_persona: string;
 
+	/** Behavior when creating a new conversation: "inherit" uses the panel's current persona; "default" resets to default_persona. */
+	new_chat_persona_mode: "inherit" | "default";
+
+	/** Persona to activate on new conversations when new_chat_persona_mode is "default". Empty = no persona. */
+	default_persona: string;
+
 	// -------------------------------------------------------------------
 	// Group F: Vault event hook settings
 	// -------------------------------------------------------------------

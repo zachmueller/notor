@@ -174,6 +174,8 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 
 	// Phase 4: Personas
 	active_persona: "",
+	new_chat_persona_mode: "inherit",
+	default_persona: "",
 
 	// Group F: Vault event hooks
 	vault_event_hooks: DEFAULT_VAULT_EVENT_HOOKS,

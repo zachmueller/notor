@@ -12,7 +12,7 @@
 import { Notice } from "obsidian";
 import type { Conversation, Message, Persona } from "../types";
 import { buildOptionValue } from "../providers/model-grouping";
-import { resolveConversationModel } from "../presets/preset-resolver";
+import { resolveConversationModel, resolvePreset } from "../presets/preset-resolver";
 import type { ConversationManager } from "./conversation";
 import { HistoryManager } from "./history";
 import { conversationFilename } from "./history";
@@ -144,6 +144,34 @@ export class ConversationLifecycleManager {
 		// Save any unsent draft from the current conversation before leaving
 		await this.maybeSaveDraft(convManager, view);
 		if (signal?.aborted) return;
+
+		// Mode B: Reset to configured default persona for new chats
+		if (settings.new_chat_persona_mode === "default") {
+			const personaManager = this.getPersonaManager();
+			if (personaManager) {
+				const defaultName = settings.default_persona;
+				if (defaultName) {
+					const persona = await personaManager.getPersonaByName(defaultName);
+					if (signal?.aborted) return;
+					if (persona) {
+						this.setActivePersona(persona);
+						const targetPreset = persona.preferred_preset ?? settings.default_preset;
+						const resolved = resolvePreset(targetPreset, settings.model_presets);
+						if (resolved) {
+							this.setActivePresetName(resolved.presetName);
+							this.setActiveProviderId(resolved.providerId);
+							this.setActiveModelId(resolved.modelId);
+							this.setActiveUseExtendedContext(resolved.useExtendedContext);
+							this.setActiveThinkingLevel(resolved.thinkingLevel);
+						}
+					} else {
+						this.setActivePersona(null);
+					}
+				} else {
+					this.setActivePersona(null);
+				}
+			}
+		}
 
 		const currentMode = convManager.hasActiveConversation()
 			? convManager.getMode()

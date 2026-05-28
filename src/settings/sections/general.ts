@@ -5,6 +5,7 @@
  */
 
 import { Setting } from "obsidian";
+import { discoverPersonas } from "../../personas/persona-discovery";
 import type { SettingsContext } from "./context";
 
 /** Render the "General" settings section. */
@@ -110,4 +111,62 @@ export function renderGeneralSection(
 					}
 				})
 		);
+
+	new Setting(containerEl)
+		.setName("New chat persona behavior")
+		.setDesc(
+			"Controls which persona is active when you start a new conversation. " +
+				"\"Inherit\" uses whatever the panel currently has; \"Always use default\" resets to a configured persona."
+		)
+		.addDropdown((dropdown) => {
+			dropdown.addOption("inherit", "Inherit from panel");
+			dropdown.addOption("default", "Always use default");
+			dropdown.setValue(ctx.settings.new_chat_persona_mode);
+			dropdown.onChange(async (value) => {
+				ctx.settings.new_chat_persona_mode = value as "inherit" | "default";
+				await ctx.saveSettings();
+				ctx.redisplay();
+			});
+		});
+
+	if (ctx.settings.new_chat_persona_mode === "default") {
+		const personaContainer = containerEl.createDiv();
+		discoverPersonas(
+			ctx.app.vault,
+			ctx.app.metadataCache,
+			ctx.settings.notor_dir,
+		).then((personas) => {
+			new Setting(personaContainer)
+				.setName("Default persona")
+				.setDesc("The persona activated for every new conversation.")
+				.addDropdown((dropdown) => {
+					dropdown.addOption("", "(None — no persona)");
+					for (const p of personas.sort((a, b) => a.name.localeCompare(b.name))) {
+						dropdown.addOption(p.name, p.chip_emoji ? `${p.chip_emoji} ${p.name}` : p.name);
+					}
+					dropdown.setValue(ctx.settings.default_persona);
+					dropdown.onChange(async (value) => {
+						ctx.settings.default_persona = value;
+						await ctx.saveSettings();
+						ctx.redisplay();
+					});
+				});
+
+			if (ctx.settings.default_persona) {
+				const selected = personas.find((p) => p.name === ctx.settings.default_persona);
+				if (selected?.preferred_preset && selected.preferred_preset !== ctx.settings.default_preset) {
+					personaContainer.createEl("p", {
+						text: `Note: This persona's preferred preset ("${selected.preferred_preset}") will override your global default preset ("${ctx.settings.default_preset}") for new conversations.`,
+						cls: "setting-item-description mod-warning",
+					});
+				}
+				if (!selected) {
+					personaContainer.createEl("p", {
+						text: `Warning: Persona "${ctx.settings.default_persona}" not found. It may have been deleted.`,
+						cls: "setting-item-description mod-warning",
+					});
+				}
+			}
+		});
+	}
 }
