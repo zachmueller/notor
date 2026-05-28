@@ -127,6 +127,35 @@ export function createSettingsGroup(
 }
 
 // ---------------------------------------------------------------------------
+// Tool sub-group collapsible
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a collapsible sub-group within the Tools settings section.
+ *
+ * Lighter-weight than `createSettingsGroup()` — no border/card treatment,
+ * just a disclosure triangle and hover state.
+ */
+export function createToolSubgroup(
+	containerEl: HTMLElement,
+	title: string,
+	persistKey: string,
+	persistedState: Record<string, boolean>,
+	onToggle: (key: string, open: boolean) => void,
+	summaryExtra?: (summaryEl: HTMLElement) => void,
+): { body: HTMLElement; details: HTMLDetailsElement } {
+	const isOpen = persistKey in persistedState ? persistedState[persistKey]! : true;
+	const details = containerEl.createEl("details", { cls: "notor-tool-subgroup" });
+	if (isOpen) details.setAttribute("open", "");
+	const summary = details.createEl("summary", { cls: "notor-tool-subgroup-summary" });
+	if (summaryExtra) summaryExtra(summary);
+	else summary.createEl("strong", { text: title });
+	details.addEventListener("toggle", () => onToggle(persistKey, details.open));
+	const body = details.createDiv({ cls: "notor-tool-subgroup-body" });
+	return { body, details };
+}
+
+// ---------------------------------------------------------------------------
 // Subsection marking
 // ---------------------------------------------------------------------------
 

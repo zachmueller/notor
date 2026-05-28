@@ -453,6 +453,60 @@
 	padding-left: 18px;
 }
 
+/* Tool sub-group collapsible sections */
+.notor-tool-subgroup {
+	margin-bottom: 4px;
+}
+
+.notor-tool-subgroup-summary {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 18px;
+	font-size: var(--font-ui-medium);
+	cursor: pointer;
+	user-select: none;
+	list-style: none;
+	border-radius: var(--radius-s);
+}
+
+.notor-tool-subgroup-summary::-webkit-details-marker {
+	display: none;
+}
+
+.notor-tool-subgroup-summary::before {
+	content: "›";
+	display: inline-block;
+	transition: transform 0.15s ease;
+	font-size: 1.1em;
+	line-height: 1;
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.notor-tool-subgroup[open] > .notor-tool-subgroup-summary::before {
+	transform: rotate(90deg);
+}
+
+.notor-tool-subgroup-summary:hover {
+	background: var(--background-modifier-hover);
+}
+
+.notor-tool-subgroup-summary strong,
+.notor-tool-subgroup-summary .notor-tool-mcp-server-name {
+	font-weight: var(--font-semibold);
+}
+
+.notor-tool-subgroup-body {
+	padding: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.notor-tool-subgroup-summary::before {
+		transition: none;
+	}
+}
+
 /* Tool description truncation — expand/collapse long descriptions */
 .notor-desc-wrapper {
 	display: flex;

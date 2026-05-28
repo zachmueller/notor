@@ -20,7 +20,7 @@ import type { UserToolDefinition } from "../../extensions/types";
 import { ToolSettingsModal } from "../../ui/tool-settings-modal";
 import type { CreationField } from "./shared";
 import { promptForCreation, ensureDirectory } from "./shared";
-import { markSubsection, applyDescriptionTruncation } from "../helpers";
+import { markSubsection, applyDescriptionTruncation, createToolSubgroup } from "../helpers";
 import { logger } from "../../utils/logger";
 
 const log = logger("ToolsSection");
@@ -37,6 +37,12 @@ interface ToolFilterEntry {
 interface SectionGroup {
 	elements: HTMLElement[];
 	entries: ToolFilterEntry[];
+}
+
+interface ToolSubgroupOpts {
+	persisted: Record<string, boolean>;
+	onToggle: (key: string, open: boolean) => void;
+	subgroupRefs: Array<{ details: HTMLDetailsElement; persistKey: string }>;
 }
 
 /** Persistent search query — survives ctx.redisplay() re-renders. */
@@ -177,14 +183,24 @@ export function renderToolsSection(
 				})
 		);
 
+	// Sub-group collapsible plumbing
+	const subgroupOpts: ToolSubgroupOpts = {
+		persisted: ctx.settings.settings_collapsed_sections,
+		onToggle: (key, open) => {
+			ctx.settings.settings_collapsed_sections[key] = open;
+			ctx.saveSettings();
+		},
+		subgroupRefs: [],
+	};
+
 	// --- Built-in tools ---
-	renderBuiltinTools(containerEl, ctx, groups);
+	renderBuiltinTools(containerEl, ctx, groups, subgroupOpts);
 
 	// --- User tools ---
-	renderUserTools(containerEl, ctx, groups);
+	renderUserTools(containerEl, ctx, groups, subgroupOpts);
 
 	// --- MCP tools ---
-	renderMcpTools(containerEl, ctx, groups);
+	renderMcpTools(containerEl, ctx, groups, subgroupOpts);
 
 	// --- Copy tool config YAML ---
 	new Setting(containerEl)
@@ -222,9 +238,22 @@ export function renderToolsSection(
 				for (const el of group.elements) el.removeClass("notor-hidden");
 				for (const entry of group.entries) entry.settingEl.removeClass("notor-hidden");
 			}
+			// Restore persisted collapse state
+			for (const { details, persistKey } of subgroupOpts.subgroupRefs) {
+				const shouldBeOpen = persistKey in subgroupOpts.persisted
+					? subgroupOpts.persisted[persistKey]
+					: true;
+				if (shouldBeOpen) details.setAttribute("open", "");
+				else details.removeAttribute("open");
+			}
 			clearBtn.addClass("notor-hidden");
 			noMatchEl.addClass("notor-hidden");
 			return;
+		}
+
+		// Force all sub-groups open while filtering
+		for (const { details } of subgroupOpts.subgroupRefs) {
+			details.setAttribute("open", "");
 		}
 
 		clearBtn.removeClass("notor-hidden");
@@ -280,7 +309,12 @@ export function renderToolsSection(
 // Built-in tools
 // ---------------------------------------------------------------------------
 
-function renderBuiltinTools(containerEl: HTMLElement, ctx: SettingsContext, groups: SectionGroup[]): void {
+function renderBuiltinTools(
+	containerEl: HTMLElement,
+	ctx: SettingsContext,
+	groups: SectionGroup[],
+	opts: ToolSubgroupOpts,
+): void {
 	const manager = ctx.plugin.getExtensionManager();
 	const toolDefs = new Map(manager.getTools().map((t) => [t.name, t]));
 
@@ -292,22 +326,30 @@ function renderBuiltinTools(containerEl: HTMLElement, ctx: SettingsContext, grou
 	);
 
 	// Read-only tools
-	const readHeading = new Setting(containerEl).setHeading().setName("Read-only tools");
-	const readHeaders = renderColumnHeaders(containerEl, true);
-	const readGroup: SectionGroup = { elements: [readHeading.settingEl, readHeaders], entries: [] };
+	const readPersistKey = "Tools/Read-only tools";
+	const { body: readBody, details: readDetails } = createToolSubgroup(
+		containerEl, "Read-only tools", readPersistKey, opts.persisted, opts.onToggle,
+	);
+	opts.subgroupRefs.push({ details: readDetails, persistKey: readPersistKey });
+	const readHeaders = renderColumnHeaders(readBody, true);
+	const readGroup: SectionGroup = { elements: [readDetails], entries: [] };
 	for (const [toolId, meta] of readTools) {
-		const setting = renderBuiltinToolRow(containerEl, toolId, meta, ctx, true);
+		const setting = renderBuiltinToolRow(readBody, toolId, meta, ctx, true);
 		addBuiltinToolIcons(setting, toolId, toolDefs, ctx);
 		readGroup.entries.push({ settingEl: setting.settingEl, searchTexts: [meta.name, meta.desc, toolId] });
 	}
 	groups.push(readGroup);
 
 	// Write tools
-	const writeHeading = new Setting(containerEl).setHeading().setName("Write tools");
-	const writeHeaders = renderColumnHeaders(containerEl, true);
-	const writeGroup: SectionGroup = { elements: [writeHeading.settingEl, writeHeaders], entries: [] };
+	const writePersistKey = "Tools/Write tools";
+	const { body: writeBody, details: writeDetails } = createToolSubgroup(
+		containerEl, "Write tools", writePersistKey, opts.persisted, opts.onToggle,
+	);
+	opts.subgroupRefs.push({ details: writeDetails, persistKey: writePersistKey });
+	const writeHeaders = renderColumnHeaders(writeBody, true);
+	const writeGroup: SectionGroup = { elements: [writeDetails], entries: [] };
 	for (const [toolId, meta] of writeTools) {
-		const setting = renderBuiltinToolRow(containerEl, toolId, meta, ctx, false);
+		const setting = renderBuiltinToolRow(writeBody, toolId, meta, ctx, false);
 		addBuiltinToolIcons(setting, toolId, toolDefs, ctx);
 		writeGroup.entries.push({ settingEl: setting.settingEl, searchTexts: [meta.name, meta.desc, toolId] });
 	}
@@ -476,7 +518,12 @@ function buildToolSkeleton(name: string, description: string, mode: string): str
 // User tools
 // ---------------------------------------------------------------------------
 
-function renderUserTools(containerEl: HTMLElement, ctx: SettingsContext, groups: SectionGroup[]): void {
+function renderUserTools(
+	containerEl: HTMLElement,
+	ctx: SettingsContext,
+	groups: SectionGroup[],
+	opts: ToolSubgroupOpts,
+): void {
 	const userTools = getUserTools(ctx);
 
 	containerEl.createEl("hr", { cls: "notor-tool-divider" });
@@ -540,23 +587,25 @@ function renderUserTools(containerEl: HTMLElement, ctx: SettingsContext, groups:
 			text: "No user tools yet.",
 			cls: "setting-item-description",
 		});
-		// Track the whole empty section so it hides on search
 		groups.push({ elements: [userToolsHeading.settingEl, userToolsDesc, emptyMsg], entries: [] });
 		return;
 	}
 
-	// Track the parent heading/desc for hiding when all user tools are filtered out
 	const userParentElements = [userToolsHeading.settingEl, userToolsDesc];
 
 	const readTools = userTools.filter((t) => t.mode === "read");
 	const writeTools = userTools.filter((t) => t.mode === "write");
 
 	if (readTools.length > 0) {
-		const heading = new Setting(containerEl).setHeading().setName("Read-only");
-		const headers = renderColumnHeaders(containerEl, true);
-		const group: SectionGroup = { elements: [...userParentElements, heading.settingEl, headers], entries: [] };
+		const readPersistKey = "Tools/User: Read-only";
+		const { body: readBody, details: readDetails } = createToolSubgroup(
+			containerEl, "Read-only", readPersistKey, opts.persisted, opts.onToggle,
+		);
+		opts.subgroupRefs.push({ details: readDetails, persistKey: readPersistKey });
+		renderColumnHeaders(readBody, true);
+		const group: SectionGroup = { elements: [...userParentElements, readDetails], entries: [] };
 		for (const tool of readTools) {
-			const setting = renderUserToolRow(containerEl, tool, ctx, true);
+			const setting = renderUserToolRow(readBody, tool, ctx, true);
 			addUserToolIcons(setting, tool, ctx);
 			group.entries.push({ settingEl: setting.settingEl, searchTexts: [tool.name, tool.description] });
 		}
@@ -564,13 +613,16 @@ function renderUserTools(containerEl: HTMLElement, ctx: SettingsContext, groups:
 	}
 
 	if (writeTools.length > 0) {
-		const heading = new Setting(containerEl).setHeading().setName("Write");
-		const headers = renderColumnHeaders(containerEl, true);
-		// Only include parent elements if read group didn't already
+		const writePersistKey = "Tools/User: Write";
+		const { body: writeBody, details: writeDetails } = createToolSubgroup(
+			containerEl, "Write", writePersistKey, opts.persisted, opts.onToggle,
+		);
+		opts.subgroupRefs.push({ details: writeDetails, persistKey: writePersistKey });
+		renderColumnHeaders(writeBody, true);
 		const parentEls = readTools.length > 0 ? [] : userParentElements;
-		const group: SectionGroup = { elements: [...parentEls, heading.settingEl, headers], entries: [] };
+		const group: SectionGroup = { elements: [...parentEls, writeDetails], entries: [] };
 		for (const tool of writeTools) {
-			const setting = renderUserToolRow(containerEl, tool, ctx, false);
+			const setting = renderUserToolRow(writeBody, tool, ctx, false);
 			addUserToolIcons(setting, tool, ctx);
 			group.entries.push({ settingEl: setting.settingEl, searchTexts: [tool.name, tool.description] });
 		}
@@ -663,7 +715,12 @@ function addUserToolIcons(
 // MCP tools
 // ---------------------------------------------------------------------------
 
-function renderMcpTools(containerEl: HTMLElement, ctx: SettingsContext, groups: SectionGroup[]): void {
+function renderMcpTools(
+	containerEl: HTMLElement,
+	ctx: SettingsContext,
+	groups: SectionGroup[],
+	opts: ToolSubgroupOpts,
+): void {
 	const mcpHub = getMcpHub(ctx);
 	const servers = ctx.settings.mcp_servers ?? {};
 	const serverNames = Object.keys(servers);
@@ -683,7 +740,7 @@ function renderMcpTools(containerEl: HTMLElement, ctx: SettingsContext, groups: 
 	for (const serverName of serverNames) {
 		const config = servers[serverName];
 		if (!config) continue;
-		renderMcpServerTools(containerEl, serverName, config, ctx, mcpHub, groups, mcpParentElements);
+		renderMcpServerTools(containerEl, serverName, config, ctx, mcpHub, groups, mcpParentElements, opts);
 	}
 
 	// Subscribe to live status changes so tool lists update as servers connect.
@@ -700,53 +757,59 @@ function renderMcpServerTools(
 	mcpHub: McpHub | undefined,
 	groups: SectionGroup[],
 	mcpParentElements: HTMLElement[],
+	opts: ToolSubgroupOpts,
 ): void {
 	const conn = mcpHub?.getConnection(serverName);
 	const status = conn?.status;
 
-	// Server sub-heading with status dot
-	const headerEl = containerEl.createDiv({ cls: "notor-tool-mcp-server-header" });
-	headerEl.setAttribute("data-notor-subsection", `mcp-server:${serverName}`);
-	const dotSpan = headerEl.createSpan({
-		cls: `notor-mcp-status-dot notor-mcp-dot-${status ?? "disconnected"}`,
-	});
-	setStatusIcon(dotSpan, status);
-	headerEl.createSpan({ text: serverName, cls: "notor-tool-mcp-server-name" });
+	const persistKey = `Tools/MCP:${serverName}`;
+	const { body, details } = createToolSubgroup(
+		containerEl, serverName, persistKey, opts.persisted, opts.onToggle,
+		(summaryEl) => {
+			const dotSpan = summaryEl.createSpan({
+				cls: `notor-mcp-status-dot notor-mcp-dot-${status ?? "disconnected"}`,
+			});
+			setStatusIcon(dotSpan, status);
+			summaryEl.createSpan({ text: serverName, cls: "notor-tool-mcp-server-name" });
+		},
+	);
+	opts.subgroupRefs.push({ details, persistKey });
+	details.setAttribute("data-notor-subsection", `mcp-server:${serverName}`);
 
 	if (config.disabled) {
-		const noteEl = containerEl.createEl("p", {
+		body.createEl("p", {
 			text: "Server is disabled. Enable it in the MCP servers section.",
 			cls: "setting-item-description notor-tool-mcp-note",
 		});
-		groups.push({ elements: [...mcpParentElements, headerEl, noteEl], entries: [] });
+		groups.push({ elements: [...mcpParentElements, details], entries: [] });
 		return;
 	}
 
 	if (status !== "connected") {
-		const noteEl = containerEl.createEl("p", {
+		body.createEl("p", {
 			text: status === "connecting"
 				? "Connecting to server\u2026"
 				: "Server is not connected.",
 			cls: "setting-item-description notor-tool-mcp-note",
 		});
-		groups.push({ elements: [...mcpParentElements, headerEl, noteEl], entries: [] });
+		groups.push({ elements: [...mcpParentElements, details], entries: [] });
 		return;
 	}
 
 	const tools = conn?.tools ?? [];
 	if (tools.length === 0) {
-		const noteEl = containerEl.createEl("p", {
+		body.createEl("p", {
 			text: "No tools discovered for this server.",
 			cls: "setting-item-description notor-tool-mcp-note",
 		});
-		groups.push({ elements: [...mcpParentElements, headerEl, noteEl], entries: [] });
+		groups.push({ elements: [...mcpParentElements, details], entries: [] });
 		return;
 	}
 
-	const colHeaders = renderColumnHeaders(containerEl);
-	const group: SectionGroup = { elements: [...mcpParentElements, headerEl, colHeaders], entries: [] };
+	renderColumnHeaders(body);
+	const group: SectionGroup = { elements: [...mcpParentElements, details], entries: [] };
 	for (const tool of tools) {
-		const setting = renderMcpToolRow(containerEl, serverName, tool, config, ctx);
+		const setting = renderMcpToolRow(body, serverName, tool, config, ctx);
 		group.entries.push({ settingEl: setting.settingEl, searchTexts: [tool.name, tool.description, serverName] });
 	}
 	groups.push(group);
