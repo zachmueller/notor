@@ -129,6 +129,23 @@ export class SettingsPopover {
 		}
 	}
 
+	refreshThinkingSection(): void {
+		if (!this.popoverEl) return;
+		const existing = this.popoverEl.querySelector(".notor-thinking-section");
+		if (existing) existing.remove();
+		const checkpointsSection = this.popoverEl.querySelector(".notor-checkpoints-section");
+		if (checkpointsSection) {
+			const tempContainer = createDiv();
+			this.buildThinkingLevelSection(tempContainer);
+			const newSection = tempContainer.firstElementChild;
+			if (newSection) {
+				this.popoverEl.insertBefore(newSection, checkpointsSection);
+			}
+		} else {
+			this.buildThinkingLevelSection(this.popoverEl);
+		}
+	}
+
 	isOpen(): boolean {
 		return !!this.popoverEl;
 	}
@@ -206,6 +223,7 @@ export class SettingsPopover {
 				customSection.addClass("notor-hidden");
 				this.deps.onPresetChange?.(value);
 			}
+			this.refreshThinkingSection();
 		});
 	}
 
