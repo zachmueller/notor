@@ -10,7 +10,7 @@
  * and the per-server tool controls that lived inside "MCP servers".
  */
 
-import { Notice, Setting, normalizePath, setIcon, prepareFuzzySearch } from "obsidian";
+import { Notice, Platform, Setting, TextComponent, normalizePath, setIcon, prepareFuzzySearch } from "obsidian";
 import { TOOL_DISPLAY_NAMES, TOOLS_DEFAULT_DISABLED } from "../constants";
 import type { SettingsContext } from "./context";
 import type { McpServerConfig } from "../../mcp/mcp-types";
@@ -182,6 +182,58 @@ export function renderToolsSection(
 					await ctx.saveSettings();
 				})
 		);
+
+	// --- Output spillover ---
+	let thresholdText: TextComponent | null = null;
+	let thresholdSetting: Setting | null = null;
+
+	new Setting(containerEl)
+		.setName("Output spillover")
+		.setDesc(
+			"When enabled, tool output exceeding the threshold is truncated and " +
+			"written to a temporary file the AI can retrieve via read_file. " +
+			"Requires restart to take effect." +
+			(Platform.isDesktopApp ? "" : " (Desktop only.)")
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(ctx.settings.output_spillover_enabled)
+				.onChange(async (value) => {
+					ctx.settings.output_spillover_enabled = value;
+					await ctx.saveSettings();
+					if (thresholdText) {
+						thresholdText.setDisabled(!value);
+					}
+					if (thresholdSetting) {
+						thresholdSetting.settingEl.toggleClass("notor-tool-row-disabled", !value);
+					}
+					new Notice("Output spillover change requires a restart to take effect.");
+				})
+		);
+
+	thresholdSetting = new Setting(containerEl)
+		.setName("Output spillover threshold (characters)")
+		.setDesc(
+			"Tool output exceeding this character count will be spilled to a temp file. " +
+			"Changes take effect immediately for new tool calls."
+		)
+		.addText((text) => {
+			thresholdText = text;
+			text
+				.setPlaceholder("50000")
+				.setValue(ctx.settings.output_spillover_threshold ? String(ctx.settings.output_spillover_threshold) : "")
+				.onChange(async (value) => {
+					ctx.settings.output_spillover_threshold = Math.max(1, parseInt(value) || 50000);
+					await ctx.saveSettings();
+				});
+			if (!ctx.settings.output_spillover_enabled) {
+				text.setDisabled(true);
+			}
+		});
+
+	if (!ctx.settings.output_spillover_enabled) {
+		thresholdSetting.settingEl.addClass("notor-tool-row-disabled");
+	}
 
 	// Sub-group collapsible plumbing
 	const subgroupOpts: ToolSubgroupOpts = {
