@@ -48,9 +48,9 @@ When working with tools, follow these principles:
 - Suggest a concrete corrective action (re-read the note, check the path, try different search terms).
 - Never pretend a failed operation succeeded or silently retry without informing the user.
 
-**Stale content.** If a write operation fails with a stale-content error, re-read the note with \`read_note\` to get the current content, then propose your changes again based on the updated content.
+**Stale content.** If a write operation fails with a stale-content error, the current note content is automatically included in the error response. Retry your changes based on that content without calling \`read_note\` again.
 
-**Tool result interpretation.** Read tool results carefully. For \`search_vault\`, zero matches is a valid result — it means the information isn't present, not that the tool failed. For \`replace_in_note\`, a no-match error means your search text didn't exactly match — re-read the note and correct the search block.
+**Tool result interpretation.** Read tool results carefully. For \`search_vault\`, zero matches is a valid result — it means the information isn't present, not that the tool failed. For \`replace_in_note\`, a no-match error means your search text didn't exactly match. The current note content is included in the error response — correct your search block based on that content and retry immediately.
 
 ## Note editing strategy
 

@@ -147,6 +147,22 @@ export class UserToolAdapter implements Tool {
 				}
 			}
 
+			// Detect tool-error-with-content sentinel (__toolError)
+			if (
+				returnValue &&
+				typeof returnValue === "object" &&
+				(returnValue as Record<string, unknown>).__toolError === true
+			) {
+				const errorObj = returnValue as Record<string, unknown>;
+				return {
+					tool_name: this.name,
+					success: false,
+					result: typeof errorObj.result === "string" ? errorObj.result : "",
+					error: typeof errorObj.error === "string" ? errorObj.error : "Unknown tool error",
+					duration_ms,
+				};
+			}
+
 			return result;
 		} catch (err: unknown) {
 			const duration_ms = Date.now() - startTime;

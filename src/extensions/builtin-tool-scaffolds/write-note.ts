@@ -43,10 +43,12 @@ const currentContent = await app.vault.read(existingFile);
 
 const staleResult = utils.staleTracker.check(existingFile.path, currentContent);
 if (staleResult.isStale) {
-  throw new Error(
-    "Note content has changed since last read. " +
-    "Re-read the note with read_note before retrying."
-  );
+  utils.staleTracker.recordRead(existingFile.path, currentContent);
+  return {
+    __toolError: true,
+    error: "Note content has changed since last read. The current content is included below — retry your edit based on this content.",
+    result: "Error: Stale content detected for " + params.path + ". The note was modified since you last read it.\\n\\n---\\nCurrent note content:\\n\\n" + currentContent,
+  };
 }
 
 // Checkpoint before overwriting (non-fatal)

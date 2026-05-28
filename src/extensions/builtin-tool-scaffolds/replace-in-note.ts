@@ -53,10 +53,12 @@ const currentContent = await app.vault.read(file);
 
 const staleResult = utils.staleTracker.check(file.path, currentContent);
 if (staleResult.isStale) {
-  throw new Error(
-    "Note content has changed since last read. " +
-    "Re-read the note with read_note before retrying."
-  );
+  utils.staleTracker.recordRead(file.path, currentContent);
+  return {
+    __toolError: true,
+    error: "Note content has changed since last read. The current content is included below — retry your edit based on this content.",
+    result: "Error: Stale content detected for " + params.path + ". The note was modified since you last read it.\\n\\n---\\nCurrent note content:\\n\\n" + currentContent,
+  };
 }
 
 // Checkpoint before write (non-fatal)
@@ -93,10 +95,13 @@ try {
     const preview = failedSearchText.length > 80
       ? failedSearchText.slice(0, 80) + "..."
       : failedSearchText;
-    throw new Error(
-      \`Search block \${failedBlockIndex} did not match any text in \${params.path}. \` +
-      \`No changes were applied. The search text was: "\${preview}"\`
-    );
+    const errorMsg = \`Search block \${failedBlockIndex} did not match any text in \${params.path}. No changes were applied. The search text was: "\${preview}"\`;
+    utils.staleTracker.recordRead(file.path, currentContent);
+    return {
+      __toolError: true,
+      error: errorMsg,
+      result: "Error: " + errorMsg + "\\n\\n---\\nCurrent note content:\\n\\n" + currentContent,
+    };
   }
   throw e;
 }
