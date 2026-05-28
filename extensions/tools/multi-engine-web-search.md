@@ -1,7 +1,7 @@
 ---
 notor-type: tool
 notor-tool-name: multi_engine_web_search
-notor-description: "Search the web using multiple engines (Tavily, Brave, SerpApi, DuckDuckGo) with automatic fallback and optional round-robin."
+notor-description: "Search the web using multiple engines (Tavily, Brave, SerpApi, Kagi, DuckDuckGo) with automatic fallback and optional round-robin."
 notor-mode: read
 tested-notor-version: "0.8.0"
 author: Notor
@@ -21,6 +21,7 @@ This is useful when you need higher reliability or want to leverage paid search 
 | Tavily | Yes | AI-optimized search API |
 | Brave Search | Yes | Privacy-focused search API |
 | SerpApi | Yes | Google results via API |
+| Kagi | Yes | Premium ad-free search API |
 
 ### Fallback behavior
 
@@ -60,15 +61,15 @@ settings:
   web_search_provider_priority:
     name: "Provider priority order"
     type: "string[]"
-    description: "Order in which search providers are tried. Valid values: duckduckgo, tavily, brave, serpapi."
-    default: ["duckduckgo", "tavily", "brave", "serpapi"]
+    description: "Order in which search providers are tried. Valid values: duckduckgo, tavily, brave, serpapi, kagi."
+    default: ["duckduckgo", "tavily", "brave", "serpapi", "kagi"]
   web_search_max_fallback_providers:
     name: "Max providers to try"
     type: number
     description: "Maximum number of search providers to try before giving up."
     default: 2
     min: 1
-    max: 4
+    max: 5
   web_search_duckduckgo_enabled:
     name: "DuckDuckGo — Enabled"
     type: boolean
@@ -131,6 +132,23 @@ settings:
     min: 0
     max: 10000
     requiresSecret: web_search_serpapi_api_key
+  web_search_kagi_enabled:
+    name: "Kagi — Enabled"
+    type: boolean
+    default: false
+    requiresSecret: web_search_kagi_api_key
+  web_search_kagi_api_key:
+    name: "Kagi — API Key"
+    type: string
+    secret: true
+    default: ""
+  web_search_kagi_delay_ms:
+    name: "Kagi — Delay (ms)"
+    type: number
+    default: 0
+    min: 0
+    max: 10000
+    requiresSecret: web_search_kagi_api_key
 ```
 
 ```ts

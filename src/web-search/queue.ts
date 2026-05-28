@@ -151,6 +151,7 @@ export class WebSearchQueue {
 					"tavily",
 					"brave",
 					"serpapi",
+					"kagi",
 				],
 			maxFallbackProviders:
 				(settings.web_search_max_fallback_providers as number) ?? 2,
@@ -185,6 +186,14 @@ export class WebSearchQueue {
 						(settings.web_search_serpapi_delay_ms as number) ?? 0,
 					apiKey:
 						(settings.web_search_serpapi_api_key as string) ?? null,
+				},
+				kagi: {
+					enabled:
+						(settings.web_search_kagi_enabled as boolean) ?? false,
+					delayMs:
+						(settings.web_search_kagi_delay_ms as number) ?? 0,
+					apiKey:
+						(settings.web_search_kagi_api_key as string) ?? null,
 				},
 			},
 		};

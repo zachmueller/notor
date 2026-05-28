@@ -303,7 +303,7 @@ async function migrateWebSearchMultiProvider(deps: MigrationDeps): Promise<void>
 
 	settings.user_extension_settings["multi_engine_web_search"] = migrated;
 
-	const secretKeys = ["web_search_tavily_api_key", "web_search_brave_api_key", "web_search_serpapi_api_key"];
+	const secretKeys = ["web_search_tavily_api_key", "web_search_brave_api_key", "web_search_serpapi_api_key", "web_search_kagi_api_key"];
 	for (const key of secretKeys) {
 		const oldId = slugifySecretId("notor-ext", "web_search", key);
 		const newId = slugifySecretId("notor-ext", "multi_engine_web_search", key);

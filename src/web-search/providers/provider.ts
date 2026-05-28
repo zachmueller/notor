@@ -1,5 +1,5 @@
 /** Supported web search provider identifiers. */
-export type WebSearchProviderType = "duckduckgo" | "tavily" | "brave" | "serpapi";
+export type WebSearchProviderType = "duckduckgo" | "tavily" | "brave" | "serpapi" | "kagi";
 
 /** Static metadata for a search provider. */
 export interface SearchProviderMeta {
