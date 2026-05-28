@@ -468,7 +468,7 @@ In-flight tool calls continue using the version compiled at dispatch time; reloa
 
 ## Community extensions gallery
 
-Notor maintains a gallery of optional extensions in the `extensions/` directory of the repository. These are single `.md` files you copy into your vault — no plugin code changes required.
+Notor maintains a gallery of optional extensions in the `examples/extensions/` directory of the repository. These are single `.md` files you copy into your vault — no plugin code changes required.
 
 **Currently available:**
 

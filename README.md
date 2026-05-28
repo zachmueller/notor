@@ -123,6 +123,8 @@ src/
   sub-agents/          # Sub-agent profile discovery, manager, built-in profiles, preamble, semaphore
   extensions/          # User-defined tool, automation, and chat block runtime: discovery, parsing,
                        #   compilation, settings, built-in scaffolds
+examples/              # Community gallery: extension examples, workflow templates, orchestrations,
+                       #   persona examples, rule examples
   memory/              # Evergreen memory note format, dedup cache, concept resolver
   settings/            # Settings interface, defaults, tab UI, per-section UI components
   template-vars/       # Template variable registry and built-in variable definitions

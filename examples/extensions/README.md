@@ -32,4 +32,4 @@ Each extension includes a `tested-notor-version` field in its frontmatter. This 
 
 ## Writing Your Own Extensions
 
-See the [Extensions documentation](../docs/extensions.md) for the full file format specification, available runtime APIs, and examples.
+See the [Extensions documentation](../../docs/extensions.md) for the full file format specification, available runtime APIs, and examples.
