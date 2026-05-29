@@ -213,9 +213,10 @@ export class AnthropicProvider implements LLMProvider {
 			toAnthropicMessages(messages);
 
 		// Resolve thinking configuration
-		const thinkingConfig = supportsThinking(options.model)
+		const resolved = supportsThinking(options.model)
 			? resolveAnthropicThinking(options.thinking_level, options.model)
 			: undefined;
+		const thinkingConfig = resolved?.thinking;
 
 		const defaultMaxTokens = thinkingConfig ? 16384 : 4096;
 
@@ -228,6 +229,11 @@ export class AnthropicProvider implements LLMProvider {
 
 		if (thinkingConfig) {
 			body.thinking = thinkingConfig;
+			// Effort models (Opus 4.8+) require output_config.effort alongside
+			// thinking.type=adaptive instead of a token budget.
+			if (resolved?.effort) {
+				body.output_config = { effort: resolved.effort };
+			}
 			// Temperature is incompatible with thinking
 		} else if (options.temperature !== undefined) {
 			body.temperature = options.temperature;

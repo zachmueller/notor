@@ -60,6 +60,12 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 	// -----------------------------------------------------------------------
 	// Anthropic models (direct API)
 	// -----------------------------------------------------------------------
+	"claude-opus-4-8": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015, // verify pricing
+		output_price_per_1k: 0.075, // verify pricing
+		display_name: "Claude Opus 4.8",
+	},
 	"claude-opus-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
@@ -222,6 +228,52 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 	// passed directly to the Converse API as modelId.
 	// Covers us., eu., apac., and global. geographic prefixes.
 	// -----------------------------------------------------------------------
+
+	// Claude Opus 4.8 — 1M context beta supported (pricing copied from 4.6, verify)
+	"us.anthropic.claude-opus-4-8": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030,
+			output_price_per_1k: 0.150,
+		},
+	},
+	"eu.anthropic.claude-opus-4-8": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030,
+			output_price_per_1k: 0.150,
+		},
+	},
+	"apac.anthropic.claude-opus-4-8": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030,
+			output_price_per_1k: 0.150,
+		},
+	},
+	"global.anthropic.claude-opus-4-8": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030,
+			output_price_per_1k: 0.150,
+		},
+	},
 
 	// Claude Opus 4.6 — 1M context beta supported
 	"us.anthropic.claude-opus-4-6-v1": {
@@ -646,11 +698,19 @@ const THINKING_PATTERNS = [
 ];
 
 const ADAPTIVE_THINKING_PATTERNS = [
-	// Only Opus 4.6+ and Sonnet 4.6+ support adaptive thinking
+	// Only Opus 4.6 and Sonnet 4.6 support adaptive thinking (no effort field)
 	/^claude-opus-4-6/,
 	/^claude-sonnet-4-6/,
 	/^(us|eu|apac|global)\.anthropic\.claude-opus-4-6/,
 	/^(us|eu|apac|global)\.anthropic\.claude-sonnet-4-6/,
+];
+
+const ADAPTIVE_EFFORT_PATTERNS = [
+	// Opus 4.8+ uses adaptive thinking with output_config.effort and rejects
+	// thinking.type=enabled. Mutually exclusive with ADAPTIVE_THINKING_PATTERNS.
+	/^claude-opus-4-8/,
+	/^(us|eu|apac|global)\.anthropic\.claude-opus-4-8/,
+	// add sonnet-4-8 here if/when released
 ];
 
 export function supportsThinking(modelId: string): boolean {
@@ -659,4 +719,8 @@ export function supportsThinking(modelId: string): boolean {
 
 export function supportsAdaptiveThinking(modelId: string): boolean {
 	return ADAPTIVE_THINKING_PATTERNS.some((pattern) => pattern.test(modelId));
+}
+
+export function supportsEffortThinking(modelId: string): boolean {
+	return ADAPTIVE_EFFORT_PATTERNS.some((pattern) => pattern.test(modelId));
 }

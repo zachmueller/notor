@@ -360,11 +360,17 @@ export class BedrockProvider implements LLMProvider {
 		// Inject thinking config for Anthropic-on-Bedrock models
 		const isAnthropicModel = options.model.includes("anthropic");
 		if (isAnthropicModel && supportsThinking(options.model)) {
-			const thinkingConfig = resolveAnthropicThinking(options.thinking_level, options.model);
-			if (thinkingConfig) {
+			const resolved = resolveAnthropicThinking(options.thinking_level, options.model);
+			if (resolved) {
+				const thinkingConfig = resolved.thinking;
 				input.additionalModelRequestFields = {
 					...input.additionalModelRequestFields as Record<string, DocumentType>,
 					thinking: thinkingConfig,
+					// Effort models (Opus 4.8+) require output_config.effort alongside
+					// thinking.type=adaptive instead of a token budget.
+					...(resolved.effort && {
+						output_config: { effort: resolved.effort },
+					}),
 				};
 				// Temperature is incompatible with thinking
 				if (input.inferenceConfig) {

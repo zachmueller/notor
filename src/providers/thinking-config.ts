@@ -1,9 +1,15 @@
-import { supportsAdaptiveThinking } from "./model-metadata";
+import { supportsAdaptiveThinking, supportsEffortThinking } from "./model-metadata";
 
 const ANTHROPIC_BUDGET_MAP: Record<string, number> = {
 	low: 1024,
 	medium: 4096,
 	high: 16384,
+};
+
+const EFFORT_MAP: Record<string, "low" | "medium" | "high"> = {
+	low: "low",
+	medium: "medium",
+	high: "high",
 };
 
 const OPENAI_LEVEL_MAP: Record<string, "low" | "medium" | "high"> = {
@@ -18,24 +24,44 @@ export type AnthropicThinkingConfig =
 
 export type OpenAIReasoningEffort = "low" | "medium" | "high";
 
+/**
+ * Resolved thinking configuration. `thinking` is the on-the-wire thinking
+ * object; `effort` (present only for effort-capable models like Opus 4.8) is a
+ * sibling field that callers place in `output_config.effort`.
+ */
+export interface ResolvedAnthropicThinking {
+	thinking: AnthropicThinkingConfig;
+	effort?: "low" | "medium" | "high";
+}
+
 export function resolveAnthropicThinking(
 	level: string | null | undefined,
 	modelId: string,
-): AnthropicThinkingConfig | undefined {
+): ResolvedAnthropicThinking | undefined {
 	if (!level || level === "off") return undefined;
 
 	const asInt = parseInt(level, 10);
+
+	// Effort models (Opus 4.8+) use adaptive thinking + output_config.effort and
+	// reject thinking.type=enabled. Must come before the numeric→enabled branch.
+	if (supportsEffortThinking(modelId)) {
+		return {
+			thinking: { type: "adaptive" },
+			effort: EFFORT_MAP[level] ?? "medium",
+		};
+	}
+
 	if (!isNaN(asInt) && asInt > 0) {
-		return { type: "enabled", budget_tokens: asInt };
+		return { thinking: { type: "enabled", budget_tokens: asInt } };
 	}
 
 	if (supportsAdaptiveThinking(modelId)) {
-		return { type: "adaptive" };
+		return { thinking: { type: "adaptive" } };
 	}
 
 	const budget = ANTHROPIC_BUDGET_MAP[level];
 	if (budget) {
-		return { type: "enabled", budget_tokens: budget };
+		return { thinking: { type: "enabled", budget_tokens: budget } };
 	}
 
 	return undefined;
