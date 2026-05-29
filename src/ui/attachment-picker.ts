@@ -188,8 +188,6 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	private triggerStartIndex = -1;
 	private currentSuggestions: VaultNoteSuggestion[] = [];
 	private selectedIndex = -1;
-	private pendingFile: TFile | null = null;
-	private sectionSuggest: SectionSuggest | null = null;
 
 	constructor(
 		app: App,
@@ -224,16 +222,6 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	/** Whether the suggest overlay is currently active. */
 	get active(): boolean {
 		return this.isActive;
-	}
-
-	/** Whether a note has been selected and we're awaiting # or ]] to finalize. */
-	get pendingNoteSelection(): boolean {
-		return this.pendingFile !== null;
-	}
-
-	/** The active SectionSuggest instance (if in section-selection phase). */
-	get activeSectionSuggest(): SectionSuggest | null {
-		return this.sectionSuggest?.active ? this.sectionSuggest : null;
 	}
 
 	/**
@@ -418,188 +406,25 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 
 		// Create the attachment — route image/PDF files to appropriate attachment type
 		const ext = "." + suggestion.file.extension.toLowerCase();
+		let attachment: Attachment;
 		if (IMAGE_EXTENSIONS.has(ext)) {
-			const attachment = createVaultImageAttachment(suggestion.file.path);
-			insertWikilinkToken(this.chatInputEl, attachment);
-			this.onAttachmentAdded(attachment);
-			this.deactivate();
-			this.close();
-			log.debug("Vault image attached", { path: suggestion.file.path });
+			attachment = createVaultImageAttachment(suggestion.file.path);
 		} else if (PDF_EXTENSIONS.has(ext)) {
-			const attachment = createVaultPdfAttachment(suggestion.file.path);
-			insertWikilinkToken(this.chatInputEl, attachment);
-			this.onAttachmentAdded(attachment);
-			this.deactivate();
-			this.close();
-			log.debug("Vault PDF attached", { path: suggestion.file.path });
+			attachment = createVaultPdfAttachment(suggestion.file.path);
 		} else {
-			// Markdown note: enter pending state to allow section selection via #
-			this.enterPendingState(suggestion);
+			attachment = createVaultNoteAttachment(suggestion.file.path);
 		}
-	}
 
-	/**
-	 * Enter the pending-note state after a markdown note is selected.
-	 * Replaces `[[query` with `[[NoteName` and waits for # or ]] to finalize.
-	 */
-	private enterPendingState(suggestion: VaultNoteSuggestion): void {
-		this.replaceWikilinkQuery(suggestion.file.basename);
-		this.pendingFile = suggestion.file;
+		// Insert inline token (replaces `[[query` text with a styled span)
+		insertWikilinkToken(this.chatInputEl, attachment);
+
+		// Notify chat-view to track the attachment (no chip needed — token is inline)
+		this.onAttachmentAdded(attachment);
+
 		this.deactivate();
 		this.close();
 
-		// Instantiate section suggest for this file
-		this.sectionSuggest = new SectionSuggest(
-			this.app,
-			this.chatInputEl,
-			suggestion.file,
-			this.onAttachmentAdded,
-			this.existingAttachments
-		);
-		this.sectionSuggest.activate();
-
-		log.debug("Entered pending note state", { path: suggestion.file.path });
-	}
-
-	/**
-	 * Finalize the pending note as a whole-note or section attachment.
-	 * Called when user types `]]`, presses Enter, or SectionSuggest selects a heading.
-	 */
-	finalizePendingNote(section?: string): void {
-		if (!this.pendingFile) return;
-
-		const file = this.pendingFile;
-		this.cleanupPendingState();
-
-		let attachment: Attachment;
-		if (section) {
-			attachment = createVaultNoteSectionAttachment(file.path, section);
-		} else {
-			attachment = createVaultNoteAttachment(file.path);
-		}
-
-		insertWikilinkToken(this.chatInputEl, attachment);
-		this.onAttachmentAdded(attachment);
-
-		log.debug("Pending note finalized", { path: file.path, section: section ?? null });
-	}
-
-	/**
-	 * Cancel the pending note selection entirely.
-	 * Removes `[[NoteName...` text and returns to idle state.
-	 */
-	cancelPendingNote(): void {
-		if (!this.pendingFile) return;
-		this.cleanupPendingState();
-		this.removeWikilinkText();
-		log.debug("Pending note cancelled");
-	}
-
-	private cleanupPendingState(): void {
-		if (this.sectionSuggest) {
-			this.sectionSuggest.deactivate();
-			this.sectionSuggest.close();
-			this.sectionSuggest = null;
-		}
-		this.pendingFile = null;
-	}
-
-	/**
-	 * Replace the `[[query` text with `[[displayText` (without closing ]]).
-	 * Leaves cursor positioned right after the display text.
-	 */
-	private replaceWikilinkQuery(displayText: string): void {
-		const fullText = this.chatInputEl.textContent ?? "";
-		const triggerIdx = fullText.lastIndexOf("[[");
-		if (triggerIdx === -1) return;
-
-		const walker = document.createTreeWalker(this.chatInputEl, NodeFilter.SHOW_TEXT);
-		let accumulated = 0;
-		let targetTextNode: Text | null = null;
-		let offsetInNode = 0;
-
-		let node = walker.nextNode() as Text | null;
-		while (node) {
-			const len = node.length;
-			if (accumulated + len > triggerIdx) {
-				targetTextNode = node;
-				offsetInNode = triggerIdx - accumulated;
-				break;
-			}
-			accumulated += len;
-			node = walker.nextNode() as Text | null;
-		}
-		if (!targetTextNode) return;
-
-		// Split at triggerIdx — splitNode starts with "[[query..."
-		const splitNode = targetTextNode.splitText(offsetInNode);
-
-		// Remove splitNode and everything after it
-		let sibling: ChildNode | null = splitNode;
-		while (sibling) {
-			const next: ChildNode | null = sibling.nextSibling;
-			sibling.parentNode?.removeChild(sibling);
-			sibling = next;
-		}
-
-		// Insert replacement text: "[[NoteName"
-		const replacementText = `[[${displayText}`;
-		const textNode = document.createTextNode(replacementText);
-		this.chatInputEl.appendChild(textNode);
-
-		// Position cursor at end
-		const range = document.createRange();
-		range.setStart(textNode, replacementText.length);
-		range.collapse(true);
-		const sel = window.getSelection();
-		sel?.removeAllRanges();
-		sel?.addRange(range);
-	}
-
-	/**
-	 * Remove everything from the last `[[` to end of input.
-	 * Used when cancelling the pending note state.
-	 */
-	private removeWikilinkText(): void {
-		const fullText = this.chatInputEl.textContent ?? "";
-		const triggerIdx = fullText.lastIndexOf("[[");
-		if (triggerIdx === -1) return;
-
-		const walker = document.createTreeWalker(this.chatInputEl, NodeFilter.SHOW_TEXT);
-		let accumulated = 0;
-		let targetTextNode: Text | null = null;
-		let offsetInNode = 0;
-
-		let node = walker.nextNode() as Text | null;
-		while (node) {
-			const len = node.length;
-			if (accumulated + len > triggerIdx) {
-				targetTextNode = node;
-				offsetInNode = triggerIdx - accumulated;
-				break;
-			}
-			accumulated += len;
-			node = walker.nextNode() as Text | null;
-		}
-		if (!targetTextNode) return;
-
-		const splitNode = targetTextNode.splitText(offsetInNode);
-		let sibling: ChildNode | null = splitNode;
-		while (sibling) {
-			const next: ChildNode | null = sibling.nextSibling;
-			sibling.parentNode?.removeChild(sibling);
-			sibling = next;
-		}
-
-		// Position cursor at end of remaining content
-		const sel = window.getSelection();
-		if (sel && this.chatInputEl.lastChild) {
-			const range = document.createRange();
-			range.selectNodeContents(this.chatInputEl);
-			range.collapse(false);
-			sel.removeAllRanges();
-			sel.addRange(range);
-		}
+		log.debug("Vault note attached", { path: suggestion.file.path });
 	}
 
 	/**
@@ -634,8 +459,6 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 	private chatInputEl: HTMLDivElement;
 	private targetFile: TFile;
 	private isActive = false;
-	private currentSuggestions: SectionSuggestion[] = [];
-	private selectedIndex = -1;
 
 	constructor(
 		app: App,
@@ -652,37 +475,12 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 		this.limit = 30;
 	}
 
-	get active(): boolean {
-		return this.isActive;
-	}
-
 	activate(): void {
 		this.isActive = true;
-		this.selectedIndex = -1;
 	}
 
 	deactivate(): void {
 		this.isActive = false;
-		this.currentSuggestions = [];
-		this.selectedIndex = -1;
-	}
-
-	navigateSelection(delta: 1 | -1): void {
-		const len = this.currentSuggestions.length;
-		if (len === 0) return;
-		if (this.selectedIndex === -1) {
-			this.selectedIndex = delta === 1 ? 0 : len - 1;
-		} else {
-			this.selectedIndex = (this.selectedIndex + delta + len) % len;
-		}
-	}
-
-	selectFirst(): void {
-		const idx = this.selectedIndex >= 0 ? this.selectedIndex : 0;
-		const item = this.currentSuggestions[idx];
-		if (item !== undefined) {
-			this.selectSuggestion(item);
-		}
 	}
 
 	getSuggestions(inputStr: string): SectionSuggestion[] {
@@ -693,7 +491,6 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 		const cache = this.app.metadataCache.getFileCache(this.targetFile);
 		const headings = cache?.headings;
 		if (!headings || headings.length === 0) {
-			this.currentSuggestions = [];
 			return [];
 		}
 
@@ -708,14 +505,12 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 		}));
 
 		if (!query) {
-			this.currentSuggestions = suggestions;
 			return suggestions;
 		}
 
 		// Filter by fuzzy match
 		const fuzzySearch = prepareFuzzySearch(query);
-		this.currentSuggestions = suggestions.filter((s) => fuzzySearch(s.heading) !== null);
-		return this.currentSuggestions;
+		return suggestions.filter((s) => fuzzySearch(s.heading) !== null);
 	}
 
 	renderSuggestion(suggestion: SectionSuggestion, el: HTMLElement): void {
@@ -742,7 +537,6 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 		) {
 			new Notice("This section is already attached");
 			this.deactivate();
-			this.close();
 			return;
 		}
 
@@ -758,7 +552,6 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 		this.onAttachmentAdded(attachment);
 
 		this.deactivate();
-		this.close();
 		log.debug("Section attached", {
 			path: suggestion.filePath,
 			section: suggestion.heading,

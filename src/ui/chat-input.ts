@@ -121,31 +121,12 @@ export class ChatInput {
 
 		// Enter to send, Shift+Enter for newline; Tab to select workflow or note suggestion
 		this.textInputEl.addEventListener("keydown", (e) => {
-			const sectionSuggest = this.vaultNoteSuggest?.activeSectionSuggest;
-
-			if (e.key === "Escape" && this.vaultNoteSuggest?.pendingNoteSelection) {
-				e.preventDefault();
-				this.vaultNoteSuggest.cancelPendingNote();
-				return;
-			}
-
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
-				if (this.vaultNoteSuggest?.pendingNoteSelection) {
-					if (sectionSuggest) {
-						sectionSuggest.selectFirst();
-					} else {
-						this.vaultNoteSuggest.finalizePendingNote();
-					}
-					return;
-				}
 				if (this.tryHandleBtw()) return;
 				void this.handleSend();
 			} else if (e.key === "Tab") {
-				if (sectionSuggest) {
-					e.preventDefault();
-					sectionSuggest.selectFirst();
-				} else if (this.workflowSuggest?.active) {
+				if (this.workflowSuggest?.active) {
 					e.preventDefault();
 					this.workflowSuggest.selectFirst();
 				} else if (this.vaultNoteSuggest?.active) {
@@ -153,17 +134,13 @@ export class ChatInput {
 					this.vaultNoteSuggest.selectFirst();
 				}
 			} else if (e.key === "ArrowDown") {
-				if (sectionSuggest) {
-					sectionSuggest.navigateSelection(1);
-				} else if (this.workflowSuggest?.active) {
+				if (this.workflowSuggest?.active) {
 					this.workflowSuggest.navigateSelection(1);
 				} else if (this.vaultNoteSuggest?.active) {
 					this.vaultNoteSuggest.navigateSelection(1);
 				}
 			} else if (e.key === "ArrowUp") {
-				if (sectionSuggest) {
-					sectionSuggest.navigateSelection(-1);
-				} else if (this.workflowSuggest?.active) {
+				if (this.workflowSuggest?.active) {
 					this.workflowSuggest.navigateSelection(-1);
 				} else if (this.vaultNoteSuggest?.active) {
 					this.vaultNoteSuggest.navigateSelection(-1);
@@ -742,7 +719,6 @@ export class ChatInput {
 
 	private detectSlashCommandTrigger(): void {
 		if (this.vaultNoteSuggest?.["isActive"]) return;
-		if (this.vaultNoteSuggest?.pendingNoteSelection) return;
 		if (this.textInputEl.querySelector("[data-workflow-path]")) return;
 
 		const text = this.textInputEl.textContent ?? "";
@@ -755,23 +731,8 @@ export class ChatInput {
 
 	private detectWikilinkTrigger(): void {
 		const text = this.textInputEl.textContent ?? "";
-
-		// Phase 2: pending-note state — watch for ]] to finalize or deletion of [[
-		if (this.vaultNoteSuggest?.pendingNoteSelection) {
-			const triggerIdx = text.lastIndexOf("[[");
-			if (triggerIdx === -1) {
-				this.vaultNoteSuggest.cancelPendingNote();
-				return;
-			}
-			const afterTrigger = text.slice(triggerIdx + 2);
-			if (afterTrigger.includes("]]")) {
-				this.vaultNoteSuggest.finalizePendingNote();
-			}
-			return;
-		}
-
-		// Phase 1: normal [[ detection
 		const triggerIdx = text.lastIndexOf("[[");
+
 		if (triggerIdx !== -1 && this.vaultNoteSuggest) {
 			const afterTrigger = text.slice(triggerIdx + 2);
 			if (!afterTrigger.includes("]]")) {
