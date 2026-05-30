@@ -12,7 +12,6 @@ import type { ToolResult } from "../types";
 import type {
 	AutomationTrigger,
 	BlockKindDeclaration,
-	CompiledExtensionFn,
 	ExtensionError,
 	ExtensionReloadResult,
 	SharedSettingsDefinition,
@@ -303,7 +302,7 @@ export class ExtensionManager {
 				continue;
 			}
 			if ("name" in parsed && "mode" in parsed) {
-				const toolDef = parsed as UserToolDefinition;
+				const toolDef = parsed;
 				toolDef.isScaffold = true;
 				discovered.tools.push(toolDef);
 			}
@@ -363,7 +362,7 @@ export class ExtensionManager {
 				continue;
 			}
 			if ("trigger" in parsed) {
-				const automationDef = parsed as UserAutomationDefinition;
+				const automationDef = parsed;
 				automationDef.isScaffold = true;
 				// Carry over code-side settingsSchema if the scaffold defines one
 				if (scaffold.settingsSchema && !automationDef.settingsSchema?.length) {
@@ -418,7 +417,7 @@ export class ExtensionManager {
 				continue;
 			}
 			if ("kind" in parsed && "rendererExport" in parsed) {
-				const blockDef = parsed as UserBlockDefinition;
+				const blockDef = parsed;
 				blockDef.isScaffold = true;
 				discovered.blocks.push(blockDef);
 			}

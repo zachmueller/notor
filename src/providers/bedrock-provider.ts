@@ -167,7 +167,7 @@ function toBedrockMessages(
 			if (Array.isArray(msg.content)) {
 				bedrockMessages.push({
 					role: "user" as ConversationRole,
-					content: (msg.content as MediaContentBlock[]).map(mapToBedrockBlock),
+					content: msg.content.map(mapToBedrockBlock),
 				});
 			} else {
 				bedrockMessages.push({

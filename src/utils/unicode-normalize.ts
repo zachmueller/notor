@@ -74,7 +74,6 @@ function buildNfcToOrigMap(original: string, nfc: string): number[] {
 	const nfcCPs = [...nfc];
 	const map: number[] = new Array(nfc.length);
 
-	let origCharIdx = 0; // index into original (UTF-16 offset)
 	let oi = 0; // codepoint index into origCPs
 	let ni = 0; // codepoint index into nfcCPs
 

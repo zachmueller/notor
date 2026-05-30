@@ -14,7 +14,7 @@
  */
 
 import type { LLMProvider, ChatMessage, ToolDefinition, SendMessageOptions } from "../providers/provider";
-import type { ConversationMode, ToolResult } from "../types";
+import type { ConversationMode } from "../types";
 import type { ToolDispatcher } from "./dispatcher";
 import { parseStreamEvents } from "./stream-utils";
 import {

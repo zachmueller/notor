@@ -204,14 +204,16 @@ async function migrateAutomationSettings(deps: MigrationDeps): Promise<void> {
 	const { settings, saveSettings } = deps;
 	if (settings.automation_enabled["title-generation"] !== undefined) return;
 
-	const legacyEnabled = (settings as unknown as Record<string, unknown>).title_generation_enabled;
+	// Legacy fields are @deprecated on the typed interface; read them through an
+	// untyped view to migrate pre-existing values without tripping deprecation lint.
+	const raw = settings as unknown as Record<string, unknown>;
+	const legacyEnabled = raw.title_generation_enabled;
 	if (legacyEnabled === undefined) return;
 
-	settings.automation_enabled["title-generation"] =
-		settings.title_generation_enabled ?? false;
+	settings.automation_enabled["title-generation"] = (legacyEnabled as boolean) ?? false;
 
 	const extKey = "Title Generation";
-	const legacyPreset = settings.title_generation_preset;
+	const legacyPreset = raw.title_generation_preset as string | undefined;
 	if (legacyPreset) {
 		if (!settings.user_extension_settings[extKey]) {
 			settings.user_extension_settings[extKey] = {};
@@ -219,7 +221,6 @@ async function migrateAutomationSettings(deps: MigrationDeps): Promise<void> {
 		settings.user_extension_settings[extKey]["preset"] = legacyPreset;
 	}
 
-	const raw = settings as unknown as Record<string, unknown>;
 	delete raw.title_generation_enabled;
 	delete raw.title_generation_preset;
 

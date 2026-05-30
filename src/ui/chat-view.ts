@@ -8,7 +8,7 @@
  * @see design/ux.md — chat panel layout, message display
  */
 
-import { ItemView, Menu, Modal, Notice, setIcon, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Menu, Notice, setIcon, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
 import type { ConversationMode, Message, ModelInfo, ModelPreset, Checkpoint, Persona, TaskItem } from "../types";
 import type { Attachment } from "../context/attachment";
@@ -901,6 +901,7 @@ export class NotorChatView extends ItemView {
 			getMessageListEl: () => this.messageListEl,
 			getLoadingIndicatorEl: () => this.loadingIndicatorEl,
 			getWorkflows: () => this.getWorkflowsCallback?.() ?? [],
+			// eslint-disable-next-line @typescript-eslint/no-deprecated -- no non-deprecated API for active-leaf identity check
 			isActiveLeaf: () => this.app.workspace.activeLeaf === this.leaf,
 			onSendMessage: this.onSendMessage,
 			onStopResponse: this.onStopResponse,
@@ -1271,7 +1272,7 @@ export class NotorChatView extends ItemView {
 
 		// Context menu for messages and panel background
 		this.messageListEl.addEventListener("contextmenu", (evt: MouseEvent) => {
-			const target = (evt.target as HTMLElement).closest("[data-message-id]") as HTMLElement | null;
+			const target = (evt.target as HTMLElement).closest<HTMLElement>("[data-message-id]");
 			const messageId = target?.dataset.messageId ?? null;
 			const selectedText = window.getSelection()?.toString().trim() ?? "";
 			const menu = new Menu();

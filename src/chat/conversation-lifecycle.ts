@@ -10,7 +10,7 @@
  */
 
 import { Notice } from "obsidian";
-import type { Conversation, Message, Persona } from "../types";
+import type { Conversation, Persona } from "../types";
 import { buildOptionValue } from "../providers/model-grouping";
 import { resolveConversationModel, resolvePreset } from "../presets/preset-resolver";
 import type { ConversationManager } from "./conversation";

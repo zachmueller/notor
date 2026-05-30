@@ -85,7 +85,7 @@ export async function discoverExtensions(
 			errors.push(result);
 		} else if ("name" in result && "mode" in result) {
 			// UserToolDefinition
-			tools.push(result as UserToolDefinition);
+			tools.push(result);
 		} else {
 			// Unexpected type from tools/ dir — skip with warning
 			log.warn("File in tools/ directory is not a tool extension, skipping", { file: file.path });
@@ -103,7 +103,7 @@ export async function discoverExtensions(
 			errors.push(result);
 		} else if ("trigger" in result) {
 			// UserAutomationDefinition
-			automations.push(result as UserAutomationDefinition);
+			automations.push(result);
 		} else {
 			log.warn("File in automations/ directory is not an automation extension, skipping", { file: file.path });
 			errors.push({ filePath: file.path, message: "File in automations/ directory has notor-type other than 'automation'" });
@@ -120,7 +120,7 @@ export async function discoverExtensions(
 			errors.push(result);
 		} else if ("kind" in result && "rendererExport" in result) {
 			// UserBlockDefinition
-			blocks.push(result as UserBlockDefinition);
+			blocks.push(result);
 		} else {
 			log.warn("File in blocks/ directory is not a block extension, skipping", { file: file.path });
 			errors.push({ filePath: file.path, message: "File in blocks/ directory has notor-type other than 'block'" });
@@ -137,7 +137,7 @@ export async function discoverExtensions(
 			errors.push(result);
 		} else if ("settingsSchema" in result && !("name" in result) && !("trigger" in result)) {
 			// SharedSettingsDefinition
-			sharedSettings = result as SharedSettingsDefinition;
+			sharedSettings = result;
 		} else {
 			log.warn("settings.md has unexpected notor-type, expected 'settings'", { file: settingsFile.path });
 			errors.push({ filePath: settingsFile.path, message: "settings.md has notor-type other than 'settings'" });

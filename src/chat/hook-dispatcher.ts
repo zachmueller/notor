@@ -21,9 +21,6 @@ import {
 	type LifecycleAutomationAccessors,
 	type ToolEventAutomationAccessors,
 } from "../hooks/hook-events";
-import { logger } from "../utils/logger";
-
-const log = logger("HookDispatcher");
 
 export class HookDispatcher {
 	constructor(

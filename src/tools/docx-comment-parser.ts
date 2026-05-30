@@ -60,17 +60,6 @@ function walkNodes(node: Node, callback: (n: Node) => boolean | void): boolean {
 	return false;
 }
 
-/** Collect all `<w:t>` text content within a DOM element. */
-function collectText(element: Element): string {
-	const parts: string[] = [];
-	const textNodes = element.getElementsByTagNameNS(W_NS, "t");
-	for (let i = 0; i < textNodes.length; i++) {
-		const t = textNodes[i]!;
-		parts.push(t.textContent ?? "");
-	}
-	return parts.join("");
-}
-
 /** Collect text from a comment, joining paragraphs with spaces. */
 function collectCommentText(element: Element): string {
 	const paragraphs = element.getElementsByTagNameNS(W_NS, "p");
@@ -363,7 +352,7 @@ export function buildCommentThreads(
 				(r) =>
 					r.paraId &&
 					threadingMap.get(r.paraId) === c.paraId &&
-					includedParaIds.has(c.paraId!)
+					includedParaIds.has(c.paraId)
 			)
 			.sort(
 				(a, b) =>

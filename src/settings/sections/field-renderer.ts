@@ -204,9 +204,9 @@ export function renderField(
 	if (field.type === "string[]") {
 		const persisted = getPersistedValue(ctx, field, target);
 		let currentList: string[] = Array.isArray(persisted)
-			? (persisted as string[])
+			? persisted
 			: Array.isArray(field.default)
-				? [...(field.default as string[])]
+				? [...field.default]
 				: [];
 
 		// When options are constrained, drop any existing entries that are no longer valid.

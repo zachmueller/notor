@@ -231,7 +231,7 @@ export interface ExtensionUtils {
 		readDreamCursor: () => Promise<string | null>;
 		advanceDreamCursor: (timestamp: string) => Promise<void>;
 		hasMemoryNotes: () => Promise<boolean>;
-		extractJSON: (text: string) => unknown | null;
+		extractJSON: (text: string) => unknown;
 		patchFrontmatterField: (content: string, key: string, value: string) => string;
 		extractMemoryWikilinks: (body: string, memoryDir: string) => string[];
 		/** Manager for pending (unapproved) memory notes. */

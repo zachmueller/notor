@@ -294,14 +294,12 @@ export function renderReplaceInNoteDiffPreview(
 		const blocksContainerEl = wrapperEl.createDiv({ cls: "notor-diff-blocks" });
 
 		// View mode toggle controls all blocks
-		let currentMode: "source" | "rendered" = "source";
 		if (renderCtx) {
 			const ctx = renderCtx;
 			const renderedBlockEls: HTMLElement[] = [];
 			let blocksRenderedOnce = false;
 
 			renderViewModeToggleRaw(headerEl, async (mode) => {
-				currentMode = mode;
 				const blockEls = blocksContainerEl.querySelectorAll(".notor-diff-block");
 				if (mode === "rendered") {
 					blockEls.forEach((el) => {
@@ -489,8 +487,8 @@ function renderViewModeToggle(
 		const container = bodyEl ?? headerEl.closest(".notor-diff-preview")?.querySelector(".notor-diff-body") as HTMLElement | null;
 		if (!container) return;
 
-		const sourceView = container.querySelector(".notor-diff-source-view") as HTMLElement | null;
-		const renderedView = container.querySelector(".notor-diff-rendered-view") as HTMLElement | null;
+		const sourceView = container.querySelector<HTMLElement>(".notor-diff-source-view");
+		const renderedView = container.querySelector<HTMLElement>(".notor-diff-rendered-view");
 		if (!sourceView || !renderedView) return;
 
 		if (mode === "rendered") {

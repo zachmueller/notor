@@ -102,7 +102,7 @@ export function parseSettingsSchema(
 		}
 
 		if (Array.isArray(value.options) && value.options.every((o: unknown) => typeof o === "string")) {
-			schema.options = value.options as string[];
+			schema.options = value.options;
 		}
 
 		if (typeof value.optionsSource === "string") {

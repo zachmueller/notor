@@ -16,7 +16,7 @@ import { markSubsection } from "../helpers";
 import { BUILTIN_AUTOMATION_SCAFFOLDS } from "../../extensions/builtin-automation-scaffolds";
 import type { BuiltinAutomationScaffold } from "../../extensions/builtin-automation-scaffolds";
 import { AutomationSettingsModal } from "../../ui/automation-settings-modal";
-import type { UserAutomationDefinition, AutomationTrigger } from "../../extensions/types";
+import type { UserAutomationDefinition } from "../../extensions/types";
 import type { Workflow } from "../../types";
 import { discoverWorkflows } from "../../workflows/workflow-discovery";
 import type { VaultEventScheduler } from "../../hooks/vault-event-scheduler";

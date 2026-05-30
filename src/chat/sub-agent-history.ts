@@ -10,7 +10,7 @@
  */
 
 import type { ChatMessage } from "../providers/provider";
-import type { Message, ToolCall, ToolResult } from "../types";
+import type { Message } from "../types";
 
 /**
  * Generate a JSONL filename for a sub-agent conversation.

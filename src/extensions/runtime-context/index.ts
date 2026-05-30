@@ -35,6 +35,11 @@ import { marked } from "marked";
 import * as xmldom from "@xmldom/xmldom";
 import { Cron } from "croner";
 
+// Node built-ins exposed to extensions (externalized by esbuild's node target)
+import * as fs from "node:fs";
+import * as crypto from "node:crypto";
+import * as path from "node:path";
+
 // Obsidian exports (for buildObsidianExports)
 import { requestUrl, Notice, TFile as TFileClass, TFolder, getFrontMatterInfo, normalizePath, MarkdownView, Platform } from "obsidian";
 
@@ -93,9 +98,9 @@ export function buildLibs(): ExtensionLibs {
 		marked,
 		xmldom,
 		croner: { Cron },
-		fs: require("fs") as typeof import("fs"),
-		crypto: require("crypto") as typeof import("crypto"),
-		path: require("path") as typeof import("path"),
+		fs,
+		crypto,
+		path,
 	};
 }
 

@@ -770,7 +770,7 @@ async function extractPdfImages(
 			const dataUrl = await renderPageAsImage(pdf, pageNum, {
 				scale: 1.5,
 				toDataURL: true,
-			}) as string;
+			});
 
 			if (!dataUrl || dataUrl === "data:,") continue;
 

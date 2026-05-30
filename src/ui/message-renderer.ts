@@ -11,7 +11,7 @@ import type { Message } from "../types";
 import type { NotorSettings } from "../settings/types";
 import type { ChatBlockRegistry } from "./chat-blocks/registry";
 import type { PendingMemoryManager } from "../memory/pending-memory-manager";
-import { getTextContent, type ContentBlock } from "../media/types";
+import { getTextContent } from "../media/types";
 import { renderCollapsibleCard } from "./chat-blocks/collapsible-card";
 import { extractPopoverTags, stripPopoverTags, injectPopoverElements } from "./popover-refs";
 import {
@@ -287,7 +287,7 @@ export class MessageRenderer {
 	}
 
 	updateToolCallProgress(toolEl: HTMLElement, status: string): void {
-		let progressEl = toolEl.querySelector(".notor-tool-call-progress") as HTMLElement | null;
+		let progressEl = toolEl.querySelector(".notor-tool-call-progress");
 		if (!progressEl) {
 			progressEl = toolEl.createDiv({ cls: "notor-tool-call-progress" });
 		}
@@ -305,7 +305,7 @@ export class MessageRenderer {
 
 	reRenderExtensionBlock(message: Message): void {
 		const messageListEl = this.deps.getMessageListEl();
-		const existing = messageListEl.querySelector(`[data-message-id="${message.id}"]`) as HTMLElement | null;
+		const existing = messageListEl.querySelector<HTMLElement>(`[data-message-id="${message.id}"]`);
 		if (!existing || !existing.classList.contains("notor-extension-block")) return;
 		existing.empty();
 		this.populateExtensionBlockEl(existing, message);
@@ -507,7 +507,7 @@ export class MessageRenderer {
 	// --- Private helpers ---
 
 	private renderStreamMarkdown(contentEl: HTMLElement, raw: string): void {
-		const html = marked.parse(raw, { async: false }) as string;
+		const html = marked.parse(raw, { async: false });
 		while (contentEl.firstChild) contentEl.firstChild.remove();
 		const doc = new DOMParser().parseFromString(html, "text/html");
 		while (doc.body.firstChild) {
@@ -664,7 +664,7 @@ export class MessageRenderer {
 		};
 
 		for (const block of blocks) {
-			const b = block as ContentBlock;
+			const b = block;
 			if (b.type === "text") {
 				el.createDiv({ cls: "notor-extension-block-text", text: b.text });
 			} else if (b.type === "custom_block") {

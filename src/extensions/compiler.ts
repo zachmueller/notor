@@ -12,7 +12,6 @@ import type { CompiledExtensionFn } from "./types";
 // AsyncFunction constructor
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-empty-function -- empty body needed to extract AsyncFunction constructor prototype
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (
 	...args: string[]
 ) => CompiledExtensionFn;
@@ -116,7 +115,7 @@ export function compileBlockModule(
 		const fn = new AsyncFunction("exports", strippedCode);
 		const exports: Record<string, unknown> = {};
 		// Execute synchronously — block modules should not contain top-level await
-		const result = fn(exports) as Promise<unknown>;
+		const result = fn(exports);
 		// If the function returned a promise (due to async wrapper), swallow it;
 		// exports will have been populated synchronously before any awaits.
 		result.catch(() => { /* ignore top-level async errors in block module init */ });

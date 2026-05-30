@@ -383,7 +383,7 @@ function renderBuiltinTools(
 		containerEl, "Read-only tools", readPersistKey, opts.persisted, opts.onToggle,
 	);
 	opts.subgroupRefs.push({ details: readDetails, persistKey: readPersistKey });
-	const readHeaders = renderColumnHeaders(readBody, true);
+	renderColumnHeaders(readBody, true);
 	const readGroup: SectionGroup = { elements: [readDetails], entries: [] };
 	for (const [toolId, meta] of readTools) {
 		const setting = renderBuiltinToolRow(readBody, toolId, meta, ctx, true);
@@ -398,7 +398,7 @@ function renderBuiltinTools(
 		containerEl, "Write tools", writePersistKey, opts.persisted, opts.onToggle,
 	);
 	opts.subgroupRefs.push({ details: writeDetails, persistKey: writePersistKey });
-	const writeHeaders = renderColumnHeaders(writeBody, true);
+	renderColumnHeaders(writeBody, true);
 	const writeGroup: SectionGroup = { elements: [writeDetails], entries: [] };
 	for (const [toolId, meta] of writeTools) {
 		const setting = renderBuiltinToolRow(writeBody, toolId, meta, ctx, false);

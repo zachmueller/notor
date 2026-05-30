@@ -11,7 +11,7 @@ import { assertUnreachable } from "../utils/assert-unreachable";
 import { formatToolDisplayName } from "../ui/tool-call-ui";
 import { USE_SUBAGENT_TOOL_NAME } from "../sub-agents/constants";
 import { marked } from "marked";
-import { getTextContent, type ContentBlock } from "../media/types";
+import { getTextContent } from "../media/types";
 
 const WORKFLOW_RE = /<workflow_instructions\s+type="([^"]*)">([\s\S]*?)<\/workflow_instructions>/;
 const ATTACHMENTS_RE = /<attachments>([\s\S]*?)<\/attachments>/;
@@ -451,7 +451,7 @@ function renderUserMessage(msg: Message): string {
 	// Render inline media blocks (images and PDF placeholders).
 	// custom_block entries won't appear in user messages — they only appear in extension_block messages.
 	if (Array.isArray(msg.content)) {
-		for (const block of msg.content as ContentBlock[]) {
+		for (const block of msg.content) {
 			if (block.type === "image") {
 				const widthAttr = block.width ? ` width="${block.width}"` : "";
 				const heightAttr = block.height ? ` height="${block.height}"` : "";
@@ -470,7 +470,7 @@ function renderAssistantMessage(msg: Message): string {
 	const assistantText = typeof msg.content === "string"
 		? msg.content
 		: (() => { throw new Error("Expected string content for assistant message"); })();
-	const htmlContent = marked.parse(assistantText, { async: false }) as string;
+	const htmlContent = marked.parse(assistantText, { async: false });
 
 	let body = "";
 	if (msg.thinking) {
@@ -566,7 +566,7 @@ function renderExtensionBlockHtml(msg: Message): string {
 	const label = source ? `Extension: ${source}` : "Extension block";
 	const parts: string[] = [];
 	if (Array.isArray(msg.content)) {
-		for (const block of msg.content as ContentBlock[]) {
+		for (const block of msg.content) {
 			if (block.type === "custom_block" && block.fallback_text) {
 				parts.push(`<div class="message-content">${escapeHtml(block.fallback_text).replace(/\n/g, "<br>")}</div>`);
 			}
@@ -618,7 +618,7 @@ function renderSubAgentMessage(msg: Message): string | null {
 			const asstText = typeof msg.content === "string"
 				? msg.content
 				: (() => { throw new Error("Expected string content for assistant message"); })();
-			return `<div class="sub-agent-msg sub-agent-assistant"><strong>Assistant:</strong> <div class="message-content">${marked.parse(asstText, { async: false }) as string}</div></div>`;
+			return `<div class="sub-agent-msg sub-agent-assistant"><strong>Assistant:</strong> <div class="message-content">${marked.parse(asstText, { async: false })}</div></div>`;
 		}
 		case "tool_call": {
 			const tc = msg.tool_call;

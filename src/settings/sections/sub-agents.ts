@@ -12,7 +12,6 @@
 import { Notice, Setting, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
 import { promptForName, ensureDirectory } from "./shared";
-import { BUILTIN_SUBAGENT_PROFILES } from "../../sub-agents/builtin-profiles";
 import type { SubAgentProfile } from "../../sub-agents/types";
 import { logger } from "../../utils/logger";
 

@@ -57,7 +57,6 @@ import { LocalProvider } from "./providers/local-provider";
 import { AnthropicProvider } from "./providers/anthropic-provider";
 import { OpenAIProvider } from "./providers/openai-provider";
 import { resolvePreset } from "./presets/preset-resolver";
-import type { LLMProviderType } from "./types";
 
 // Tools
 import { ToolRegistry } from "./tools/index";
@@ -2299,14 +2298,14 @@ export default class NotorPlugin extends Plugin {
 					);
 					this._extensionStaleNotice = notice;
 					if (Platform.isDesktop) {
-						notice.noticeEl.oncontextmenu = (e) => {
+						notice.messageEl.oncontextmenu = (e) => {
 							e.preventDefault();
 							notice.hide();
 							if (this._extensionStaleNotice === notice) this._extensionStaleNotice = null;
 							void this.app.workspace.openLinkText(error.filePath, "", true);
 						};
 					}
-					notice.noticeEl.addEventListener("click", () => {
+					notice.messageEl.addEventListener("click", () => {
 						if (this._extensionStaleNotice === notice) this._extensionStaleNotice = null;
 					});
 				}
@@ -2426,14 +2425,14 @@ export default class NotorPlugin extends Plugin {
 						);
 						this._personaStaleNotice = notice;
 						if (Platform.isDesktop) {
-							notice.noticeEl.oncontextmenu = (e) => {
+							notice.messageEl.oncontextmenu = (e) => {
 								e.preventDefault();
 								notice.hide();
 								if (this._personaStaleNotice === notice) this._personaStaleNotice = null;
 								void this.app.workspace.openLinkText(result.filePath, "", true);
 							};
 						}
-						notice.noticeEl.addEventListener("click", () => {
+						notice.messageEl.addEventListener("click", () => {
 							if (this._personaStaleNotice === notice) this._personaStaleNotice = null;
 						});
 						break;

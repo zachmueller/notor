@@ -246,8 +246,8 @@ export class AnthropicProvider implements LLMProvider {
 		if (anthropicTools) {
 			body.tools = anthropicTools;
 			// tool_choice "any" is incompatible with thinking
-			if (thinkingConfig && (body as Record<string, unknown>).tool_choice === "any") {
-				(body as Record<string, unknown>).tool_choice = "auto";
+			if (thinkingConfig && body.tool_choice === "any") {
+				body.tool_choice = "auto";
 			}
 		}
 		if (options.stop_sequences !== undefined) {

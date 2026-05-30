@@ -55,6 +55,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				const viewType = resolveWebViewerType();
 				if (!viewType) return null;
 				const leaves = plugin.app.workspace.getLeavesOfType(viewType);
+				// eslint-disable-next-line @typescript-eslint/no-deprecated -- no non-deprecated API for active-leaf identity check
 				const activeLeaf = plugin.app.workspace.activeLeaf;
 				const targetLeaf = leaves.find((l: any) => l === activeLeaf) ?? null;
 				if (!targetLeaf) return null;
@@ -313,14 +314,14 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 			const notice = new Notice(message, duration);
 
 			if (options?.onClick) {
-				notice.noticeEl.addEventListener("click", () => {
+				notice.messageEl.addEventListener("click", () => {
 					notice.hide();
 					options.onClick!();
 				});
 			}
 
 			if (options?.onRightClick && Platform.isDesktop) {
-				notice.noticeEl.oncontextmenu = (e) => {
+				notice.messageEl.oncontextmenu = (e) => {
 					e.preventDefault();
 					notice.hide();
 					options.onRightClick!();

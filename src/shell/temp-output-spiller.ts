@@ -176,7 +176,7 @@ export class TempOutputSpiller {
 		truncatedContent: string,
 		filePath: string,
 		totalChars: number,
-		maxChars: number,
+		_maxChars: number,
 	): string {
 		return (
 			truncatedContent +

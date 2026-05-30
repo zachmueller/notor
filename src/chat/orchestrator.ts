@@ -10,7 +10,7 @@
 
 import { type App, Notice } from "obsidian";
 import type { Conversation, ConversationMode, Message, Persona, TaskItem, ToolResult, WorkflowExecution, ExecutionChain } from "../types";
-import type { ChatMessage, ToolDefinition, StreamChunk, SendMessageOptions } from "../providers/provider";
+import type { SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
 import { ConversationManager } from "./conversation";
@@ -18,7 +18,7 @@ import { ContextManager } from "./context";
 import type { SystemPromptBuilder } from "./system-prompt";
 import type { ToolDispatcher } from "./dispatcher";
 import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./tool-orchestration";
-import { toChatMessages, processStream, calculateCost, type StreamResult } from "./message-pipeline";
+import { toChatMessages, processStream, calculateCost } from "./message-pipeline";
 import { ConfigResolver } from "./config-resolver";
 import { HookDispatcher } from "./hook-dispatcher";
 import { CompactionManager } from "./compaction-manager";
@@ -38,7 +38,7 @@ import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment"
 import type { LifecycleAutomationAccessors, ToolEventAutomationAccessors } from "../hooks/hook-events";
 import { dispatchOnConversationStart } from "../hooks/hook-events";
 import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-override";
-import type { Workflow, WorkflowExecutionRequest, VaultRule } from "../types";
+import type { Workflow, WorkflowExecutionRequest } from "../types";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
 import { ConversationSession } from "./conversation-session";

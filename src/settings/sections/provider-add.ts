@@ -6,7 +6,7 @@ import { Setting, Notice } from "obsidian";
 import type { LLMProviderConfig, LLMProviderType } from "../../types";
 import { ConfirmModal } from "../../ui/confirm-modal";
 import { clearProviderSecrets } from "../../utils/secrets";
-import { generateProviderId, updateProvider } from "../helpers";
+import { generateProviderId } from "../helpers";
 import type { SettingsContext } from "./context";
 
 const PROVIDER_TYPE_LABELS: Record<LLMProviderType, string> = {

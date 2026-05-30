@@ -288,7 +288,7 @@ function normalizVaultPath(p: string): string {
  * Tries `JSON.parse` on the full text first, then looks for a ```json code block,
  * then falls back to finding the first `{...}` balanced brace pair.
  */
-export function extractJSON(text: string): unknown | null {
+export function extractJSON(text: string): unknown {
 	const trimmed = text.trim();
 	try {
 		return JSON.parse(trimmed);

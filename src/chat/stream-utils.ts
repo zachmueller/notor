@@ -10,7 +10,6 @@
  */
 
 import type { StreamChunk } from "../providers/provider";
-import type { ToolCallInfo } from "./tool-orchestration";
 import { logger } from "../utils/logger";
 
 const log = logger("stream-utils");

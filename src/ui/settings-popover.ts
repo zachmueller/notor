@@ -4,7 +4,7 @@
  * Manages the model preset selector, thinking level, and checkpoints UI.
  */
 
-import { Modal, Notice, setIcon } from "obsidian";
+import { Modal, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type { ModelInfo, ModelPreset, Checkpoint } from "../types";
 import { groupModels, formatVariantLabel, type ModelGroup } from "../providers/model-grouping";

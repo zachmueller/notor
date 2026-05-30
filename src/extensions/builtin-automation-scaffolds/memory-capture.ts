@@ -1,4 +1,4 @@
-import type { AutomationTrigger, BuiltinAutomationScaffold, SettingsFieldSchema } from "../types";
+import type { AutomationTrigger, BuiltinAutomationScaffold } from "../types";
 
 export const MEMORY_CAPTURE: BuiltinAutomationScaffold = {
 	name: "memory-capture",

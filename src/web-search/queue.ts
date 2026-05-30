@@ -1,7 +1,6 @@
 import type { TaskLaneQueue } from "../queue/task-lane-queue";
 import type { SearchProviderRegistry } from "./provider-registry";
 import type {
-	WebSearchProviderType,
 	WebSearchResult,
 	ProviderConfig,
 	SearchProvider,

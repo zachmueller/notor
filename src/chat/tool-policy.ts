@@ -14,8 +14,7 @@ import type { EffectiveToolConfig } from "../tool-config/types";
 import type { DispatchableTool } from "./dispatcher";
 import { isDomainBlocked } from "../utils/domain-denylist";
 import { enforcePathConstraints } from "../tool-config/path-enforcer";
-import { resolveAutoApprove } from "../personas/auto-approve-resolver";
-import { isMcpTool, McpRegisteredTool } from "../mcp/mcp-tool-adapter";
+import { isMcpTool } from "../mcp/mcp-tool-adapter";
 import { matchCommandPattern } from "../utils/command-pattern-matcher";
 
 // ---------------------------------------------------------------------------
@@ -46,26 +45,6 @@ export interface PolicyDecision {
 	allowed: boolean;
 	autoApproved: boolean;
 	error?: string;
-}
-
-// ---------------------------------------------------------------------------
-// MCP auto-approve resolution (FEAT-002)
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve the effective auto-approve decision for an MCP tool call.
- *
- * MCP auto-approve precedence:
- * 1. Server-level: raw tool name (without namespace) in `McpServerConfig.autoApprove[]` -> true
- * 2. Global default: false (all MCP tools require manual approval unless configured)
- */
-function resolveMcpAutoApprove(tool: McpRegisteredTool): boolean {
-	const config = tool.getServerConfig();
-	const rawToolName = tool.getRawToolName();
-	if (config.autoApprove && config.autoApprove.includes(rawToolName)) {
-		return true;
-	}
-	return false;
 }
 
 // ---------------------------------------------------------------------------
