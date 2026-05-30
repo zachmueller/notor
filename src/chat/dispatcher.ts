@@ -13,6 +13,7 @@ import type { StreamChunk } from "../providers/provider";
 import type { NotorSettings } from "../settings";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { ToolExecuteOptions, ToolSessionContext } from "../tools/tool";
+import type { InteractionRequest, InteractionResponse } from "../ui/interaction-ui";
 import { isDomainBlocked } from "../utils/domain-denylist";
 import { enforcePathConstraints } from "../tool-config/path-enforcer";
 import { resolveAutoApprove } from "../personas/auto-approve-resolver";
@@ -65,6 +66,18 @@ export interface DispatchableTool {
 
 /** Callback for requesting user approval of a tool call. */
 export type ApprovalCallback = (toolCall: ToolCall, abortSignal?: AbortSignal, messageId?: string, autoApproved?: boolean) => Promise<"approved" | "rejected">;
+
+/**
+ * Callback for requesting a user interaction (e.g. a follow-up question) from
+ * inside a tool call. Unlike {@link ApprovalCallback}, this is NOT raced
+ * against a timeout or an approval hook — an interaction always awaits explicit
+ * user input (abort-only). Rejection (via abort) unwinds the tool loop.
+ */
+export type InteractionCallback = (
+	request: InteractionRequest,
+	abortSignal?: AbortSignal,
+	messageId?: string,
+) => Promise<InteractionResponse>;
 
 /** Events emitted by the dispatcher for UI updates. */
 export interface DispatcherEvents {
@@ -361,6 +374,7 @@ export class ToolDispatcher {
 		perCallApprovalCallback?: ApprovalCallback,
 		sessionContext?: ToolSessionContext,
 		approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
+		interactionCallback?: InteractionCallback,
 	): Promise<ToolResult> {
 		// 1. Look up tool in registry
 		const tool = this.tools.get(toolName);
@@ -621,7 +635,13 @@ export class ToolDispatcher {
 		//    the background but its result is discarded.
 		const startTime = Date.now();
 		try {
-			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext, silentNoteOpener: this.silentMode || undefined };
+			// Bind messageId + abortSignal so the scaffold's `utils.ask` routes
+			// the question to the correct tool-call card and unwinds on abort.
+			const boundInteractionCallback = interactionCallback
+				? (request: InteractionRequest, signal?: AbortSignal) =>
+					interactionCallback(request, signal ?? abortSignal, messageId)
+				: undefined;
+			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext, silentNoteOpener: this.silentMode || undefined, interactionCallback: boundInteractionCallback };
 			const executePromise = tool.execute(parameters, executeOptions);
 
 			let result: ToolResult;

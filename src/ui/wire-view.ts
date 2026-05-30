@@ -643,4 +643,41 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 
 		return decision;
 	});
+
+	// Wire interaction callback (follow-up questions). Unlike approval, this is
+	// never raced against a timeout or hook — it always awaits explicit input.
+	orchestrator.setInteractionCallback(async (request, abortSignal?, messageId?) => {
+		const session = orchestrator.getActiveSessions()[0];
+
+		const toolCallEl = messageId
+			? view.getToolCallEl(messageId) ?? view.getLastToolCallEl()
+			: view.getLastToolCallEl();
+
+		if (!toolCallEl) {
+			throw new Error("No tool-call element available to render interaction.");
+		}
+
+		if (messageId && session) {
+			session.setStatus("waiting_approval");
+		}
+
+		try {
+			const response = await new Promise<import("./interaction-ui").InteractionResponse>((resolve, reject) => {
+				if (messageId && session) {
+					session.pendingInteractions.set(messageId, { reject, messageId });
+				}
+				view.renderInteractionPrompt(toolCallEl, request, abortSignal)
+					.then(resolve)
+					.catch(reject);
+			});
+			return response;
+		} finally {
+			if (messageId && session) {
+				session.pendingInteractions.delete(messageId);
+				if (session.pendingInteractions.size === 0 && session.status === "waiting_approval") {
+					session.setStatus("running");
+				}
+			}
+		}
+	});
 }

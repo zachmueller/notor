@@ -6,6 +6,41 @@ import { getTextContent } from "../../media/types";
 import { estimateTokenCount } from "../../utils/tokens";
 import { checkRateLimit } from "../rate-limiter";
 
+/**
+ * Build the `ask` primitive. Wired after `buildUtils` assembles the object so
+ * `ask` can read the per-call `interactionCallback` that UserToolAdapter
+ * attaches at invocation time (mirroring how `memory` is wired last).
+ *
+ * Returns null when no interaction channel is wired (headless/background runs).
+ */
+export function buildAsk(utils: ExtensionUtils): ExtensionUtils["ask"] {
+	const log = logger("ext:ask");
+	let counter = 0;
+	return async (
+		question: string,
+		opts?: { suggestions?: string[]; allowFreeText?: boolean },
+	): Promise<string | null> => {
+		const cb = utils.interactionCallback;
+		if (!cb) {
+			log.warn("utils.ask called with no interaction channel available");
+			return null;
+		}
+		if (typeof question !== "string" || question.trim().length === 0) {
+			throw new Error("utils.ask requires a non-empty question string.");
+		}
+		counter += 1;
+		const id = `ask-${counter}`;
+		const response = await cb({
+			type: "ask",
+			id,
+			question,
+			suggestions: opts?.suggestions,
+			allowFreeText: opts?.allowFreeText,
+		});
+		return response.value;
+	};
+}
+
 export function buildChatUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 	"llmCall" | "conversationApi" | "chatHistory" | "chatBlocks"
 > {

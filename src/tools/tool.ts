@@ -49,6 +49,17 @@ export interface ToolExecuteOptions {
 	sessionContext?: ToolSessionContext;
 	/** Suppress editor-open side effects (e.g. noteOpener) — used by background/silent sub-agents. */
 	silentNoteOpener?: boolean;
+	/**
+	 * Callback for requesting a user interaction (e.g. follow-up question) from
+	 * inside a tool. Bridged into the extension sandbox as `utils.ask`. Type is
+	 * `InteractionCallback` from `../chat/dispatcher`; declared structurally here
+	 * to avoid a tools→chat import cycle.
+	 */
+	interactionCallback?: (
+		request: import("../ui/interaction-ui").InteractionRequest,
+		abortSignal?: AbortSignal,
+		messageId?: string,
+	) => Promise<import("../ui/interaction-ui").InteractionResponse>;
 }
 
 /**

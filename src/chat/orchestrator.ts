@@ -42,7 +42,7 @@ import type { Workflow, WorkflowExecutionRequest } from "../types";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
 import { ConversationSession } from "./conversation-session";
-import type { ApprovalCallback } from "./dispatcher";
+import type { ApprovalCallback, InteractionCallback } from "./dispatcher";
 import type { ToolSessionContext } from "../tools/tool";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
 import type { StaleContentTracker } from "./stale-tracker";
@@ -376,6 +376,18 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	setApprovalCallback(callback: ApprovalCallback): void {
 		this.panelApprovalCallback = callback;
+	}
+
+	/**
+	 * Per-orchestrator interaction callback for tool dispatch (e.g. follow-up
+	 * questions). Bound to this panel's view, mirroring `panelApprovalCallback`.
+	 * Sessions snapshot it at creation time.
+	 */
+	private panelInteractionCallback?: InteractionCallback;
+
+	/** Set the interaction callback for this orchestrator's panel. */
+	setInteractionCallback(callback: InteractionCallback): void {
+		this.panelInteractionCallback = callback;
 	}
 
 	/** Update settings reference. */
@@ -942,6 +954,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 		const approvalCallback: ApprovalCallback = this.panelApprovalCallback
 			?? (async () => "approved" as const);
 
+		// Capture the interaction callback (follow-up questions) from this panel.
+		const interactionCallback = this.panelInteractionCallback;
+
 		const session = new ConversationSession({
 			conversationId: snapshotConv.id,
 			conversationManager: sessionConvManager,
@@ -954,6 +969,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			thinkingLevel: this.activeThinkingLevel,
 			workflowAssembly: null,
 			approvalCallback,
+			interactionCallback,
 			initialConfig,
 			initialParsedConfigs,
 		});
@@ -1295,6 +1311,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 						session.approvalCallback,
 						this, // sessionContext (A4.4e)
 						approvalHookFn,
+						session.interactionCallback,
 					);
 
 					// Map results back to entries for UI updates

@@ -95,6 +95,9 @@ export class UserToolAdapter implements Tool {
 			if (options?.onProgress) {
 				utils.onProgress = options.onProgress;
 			}
+			if (options?.interactionCallback) {
+				utils.interactionCallback = options.interactionCallback;
+			}
 			if (options?.silentNoteOpener) {
 				utils.noteOpener = new NoteOpener(this.plugin.app, false, false);
 			}

@@ -217,6 +217,7 @@ describe("SubAgentRunner", () => {
 				undefined, // approvalCallback (not used by sub-agent runner)
 				undefined, // sessionContext (not used by sub-agent runner)
 				undefined, // approvalHookDispatcher (not used by sub-agent runner)
+				undefined, // interactionCallback (not used by sub-agent runner)
 			);
 		});
 
@@ -553,6 +554,7 @@ describe("SubAgentRunner", () => {
 				undefined, // approvalCallback
 				undefined, // sessionContext
 				undefined, // approvalHookDispatcher
+				undefined, // interactionCallback
 			);
 			expect(result.iterationCount).toBe(2);
 		});

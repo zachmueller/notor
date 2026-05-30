@@ -19,6 +19,11 @@ import {
 	renderReplaceInNoteDiffPreview,
 	type DiffRenderContext,
 } from "./diff-view";
+import {
+	renderInteractionPrompt,
+	type InteractionRequest,
+	type InteractionResponse,
+} from "./interaction-ui";
 import { marked } from "marked";
 import { logger } from "../utils/logger";
 
@@ -342,6 +347,21 @@ export class MessageRenderer {
 				resolve("rejected");
 			});
 		});
+	}
+
+	/**
+	 * Render a user-interaction prompt (e.g. follow-up question) inside a
+	 * tool-call card and await the user's response. Mirrors the approval
+	 * prompt but with richer UI (chips + free-text). Delegates to the
+	 * interaction renderer registry.
+	 */
+	renderInteractionPrompt(
+		toolCallEl: HTMLElement,
+		request: InteractionRequest,
+		abortSignal?: AbortSignal,
+	): Promise<InteractionResponse> {
+		this.deps.scrollToBottom();
+		return renderInteractionPrompt(toolCallEl, request, abortSignal);
 	}
 
 	reRenderPendingApprovals(

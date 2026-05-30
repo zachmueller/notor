@@ -288,6 +288,29 @@ export interface ExtensionUtils {
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */
 	onProgress?: (status: string) => void;
+	/**
+	 * Raw interaction callback — set per-invocation by UserToolAdapter from
+	 * `ToolExecuteOptions.interactionCallback`. Extension code should use the
+	 * higher-level `ask()` rather than calling this directly.
+	 * @internal
+	 */
+	interactionCallback?: (
+		request: import("../../ui/interaction-ui").InteractionRequest,
+		abortSignal?: AbortSignal,
+		messageId?: string,
+	) => Promise<import("../../ui/interaction-ui").InteractionResponse>;
+	/**
+	 * Ask the user a follow-up question mid-execution, suspending the tool loop
+	 * until they answer. Renders question text with optional suggested-answer
+	 * chips and (by default) a free-text input. Resolves to the chosen answer.
+	 *
+	 * Returns null when no interaction channel is available (e.g. headless or
+	 * background sub-agent runs).
+	 */
+	ask: (
+		question: string,
+		opts?: { suggestions?: string[]; allowFreeText?: boolean },
+	) => Promise<string | null>;
 }
 
 import type mammoth from "mammoth";

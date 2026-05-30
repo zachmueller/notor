@@ -19,6 +19,7 @@ import { SettingsPopover } from "./settings-popover";
 import { ConversationList } from "./conversation-list";
 import { ChatInput } from "./chat-input";
 import { MessageRenderer } from "./message-renderer";
+import type { InteractionRequest, InteractionResponse } from "./interaction-ui";
 import { resolveNote } from "../utils/resolve-note";
 import { findExistingLeaf } from "../tools/note-opener";
 import { WorkflowActivityIndicator } from "./workflow-activity-indicator";
@@ -1448,6 +1449,14 @@ export class NotorChatView extends ItemView {
 
 	renderApprovalPrompt(toolCallEl: HTMLElement, autoApproved = false): Promise<"approved" | "rejected"> {
 		return this.messageRenderer.renderApprovalPrompt(toolCallEl, autoApproved);
+	}
+
+	renderInteractionPrompt(
+		toolCallEl: HTMLElement,
+		request: InteractionRequest,
+		abortSignal?: AbortSignal,
+	): Promise<InteractionResponse> {
+		return this.messageRenderer.renderInteractionPrompt(toolCallEl, request, abortSignal);
 	}
 
 	reRenderPendingApprovals(

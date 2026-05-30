@@ -12,7 +12,7 @@ import type { ConversationManager } from "./conversation";
 import type { Persona, WorkflowAssemblyResult } from "../types";
 import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
 import type { ToolPolicyContext } from "./tool-policy";
-import type { ApprovalCallback } from "./dispatcher";
+import type { ApprovalCallback, InteractionCallback } from "./dispatcher";
 import type { NotorSettings } from "../settings";
 
 export type SessionStatus =
@@ -30,6 +30,12 @@ export interface PendingApproval {
 	parameters: Record<string, unknown>;
 }
 
+export interface PendingInteraction {
+	/** Reject the interaction promise so the tool loop unwinds (on abort/teardown). */
+	reject: (reason: Error) => void;
+	messageId: string;
+}
+
 export interface ConversationSessionOptions {
 	conversationId: string;
 	conversationManager: ConversationManager;
@@ -42,6 +48,7 @@ export interface ConversationSessionOptions {
 	thinkingLevel: string | null;
 	workflowAssembly?: WorkflowAssemblyResult | null;
 	approvalCallback: ApprovalCallback;
+	interactionCallback?: InteractionCallback;
 	initialConfig: EffectiveToolConfig;
 	initialParsedConfigs: ParsedToolConfig[];
 }
@@ -68,11 +75,17 @@ export class ConversationSession {
 	/** Per-session routing — bound to the correct panel's view. */
 	readonly approvalCallback: ApprovalCallback;
 
+	/** Per-session interaction routing (follow-up questions) — bound to the panel's view. */
+	readonly interactionCallback?: InteractionCallback;
+
 	/** The response loop promise — used by destroy() to await cleanup. */
 	responsePromise?: Promise<void>;
 
 	/** Pending approval resolvers — keyed by messageId. Survives view teardown. */
 	readonly pendingApprovals = new Map<string, PendingApproval>();
+
+	/** Pending interaction rejecters — keyed by messageId. Used to unwind on teardown. */
+	readonly pendingInteractions = new Map<string, PendingInteraction>();
 
 	private _status: SessionStatus = "running";
 	onStatusChange?: (session: ConversationSession) => void;
@@ -90,6 +103,7 @@ export class ConversationSession {
 		this.thinkingLevel = opts.thinkingLevel;
 		this.workflowAssembly = opts.workflowAssembly ?? null;
 		this.approvalCallback = opts.approvalCallback;
+		this.interactionCallback = opts.interactionCallback;
 		this.effectiveConfig = opts.initialConfig;
 		this.parsedConfigs = opts.initialParsedConfigs;
 	}
@@ -108,6 +122,10 @@ export class ConversationSession {
 			pending.resolve("rejected");
 		}
 		this.pendingApprovals.clear();
+		for (const pending of this.pendingInteractions.values()) {
+			pending.reject(new Error("Interaction cancelled by user."));
+		}
+		this.pendingInteractions.clear();
 	}
 
 	/**

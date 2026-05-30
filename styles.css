@@ -1190,6 +1190,121 @@
 }
 
 /* ==========================================================================
+   Interaction prompt — inline follow-up questions (ask_user / utils.ask)
+   ========================================================================== */
+
+.notor-interaction-prompt {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 8px 0;
+	margin-top: 6px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.notor-interaction-question {
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	font-weight: var(--font-medium);
+}
+
+.notor-interaction-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.notor-interaction-chip {
+	padding: 4px 12px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.notor-interaction-chip:hover {
+	background: var(--background-modifier-hover);
+	border-color: var(--interactive-accent);
+}
+
+.notor-interaction-input-row {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+}
+
+.notor-interaction-input {
+	flex: 1;
+	padding: 4px 8px;
+	border-radius: var(--radius-s);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-interaction-submit {
+	padding: 4px 12px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	border: 1px solid var(--interactive-accent);
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.notor-interaction-submit:hover {
+	background: var(--interactive-accent-hover);
+}
+
+/* Persisted Q&A replay (interaction block) */
+.notor-interaction-block {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 4px 0;
+}
+
+.notor-interaction-qa {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.notor-interaction-q {
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	font-weight: var(--font-medium);
+}
+
+.notor-interaction-chips--replay .notor-interaction-chip {
+	cursor: default;
+	opacity: 0.6;
+}
+
+.notor-interaction-chip--chosen {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+	opacity: 1;
+}
+
+.notor-interaction-a {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.notor-interaction-a-label {
+	font-weight: var(--font-medium);
+}
+
+.notor-interaction-a-value {
+	color: var(--text-normal);
+}
+
+/* ==========================================================================
    Memory Approval — inline block (memory_pending_approval)
    ========================================================================== */
 

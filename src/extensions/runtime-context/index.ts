@@ -20,7 +20,7 @@ import type { ExtensionUtils, ExtensionLibs, ExtensionObsidianExports } from "./
 import { buildFileUtils } from "./file-utils";
 import { buildMediaUtils } from "./media-utils";
 import { buildWebUtils } from "./web-utils";
-import { buildChatUtils } from "./chat-utils";
+import { buildChatUtils, buildAsk } from "./chat-utils";
 import { buildSubAgentUtils } from "./sub-agent-utils";
 import { buildMemoryUtils } from "./memory-utils";
 import { buildPluginUtils } from "./plugin-utils";
@@ -71,12 +71,18 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 		...buildPluginUtils(ctx),
 		memory: null,
 		memoryApprovalMode: null,
+		// Placeholder — wired below once `utils` exists so `ask` can read the
+		// per-call `interactionCallback`.
+		ask: async () => null,
 	};
 
 	// Wire memory last — resolveConcept needs runSubAgent
 	const mem = buildMemoryUtils(ctx, utils.runSubAgent);
 	utils.memory = mem.memory;
 	utils.memoryApprovalMode = mem.memoryApprovalMode;
+
+	// Wire ask — reads the per-call interactionCallback attached by UserToolAdapter.
+	utils.ask = buildAsk(utils);
 
 	return utils;
 }

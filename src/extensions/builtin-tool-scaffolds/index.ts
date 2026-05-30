@@ -24,6 +24,7 @@ import { WRITE_FILE } from "./write-file";
 import { REPLACE_IN_FILE } from "./replace-in-file";
 import { EXTRACT_DOCX_COMMENTS } from "./extract-docx-comments";
 import { SLEEP } from "./sleep";
+import { ASK_USER } from "./ask-user";
 import { SEARCH_CHAT_HISTORY } from "./search-chat-history";
 import { READ_CHAT_HISTORY } from "./read-chat-history";
 import { CAPTURE_MEMORY } from "./capture-memory";
@@ -65,6 +66,7 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[REPLACE_IN_FILE.name, REPLACE_IN_FILE],
 		[EXTRACT_DOCX_COMMENTS.name, EXTRACT_DOCX_COMMENTS],
 		[SLEEP.name, SLEEP],
+		[ASK_USER.name, ASK_USER],
 		[SEARCH_CHAT_HISTORY.name, SEARCH_CHAT_HISTORY],
 		[READ_CHAT_HISTORY.name, READ_CHAT_HISTORY],
 		[CAPTURE_MEMORY.name, CAPTURE_MEMORY],

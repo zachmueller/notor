@@ -9,7 +9,7 @@
  */
 
 import type { ToolResult, ConversationMode } from "../types";
-import type { ToolDispatcher, ApprovalCallback } from "./dispatcher";
+import type { ToolDispatcher, ApprovalCallback, InteractionCallback } from "./dispatcher";
 import type { ToolPolicyContext } from "./tool-policy";
 import type { ToolSessionContext } from "../tools/tool";
 import { isMcpTool } from "../mcp/mcp-tool-adapter";
@@ -123,6 +123,7 @@ export async function executeToolBatches(
 	approvalCallback?: ApprovalCallback,
 	sessionContext?: ToolSessionContext,
 	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
+	interactionCallback?: InteractionCallback,
 ): Promise<ToolCallResult[]> {
 	const allResults: ToolCallResult[] = [];
 
@@ -159,6 +160,7 @@ export async function executeToolBatches(
 				approvalCallback,
 				sessionContext,
 				approvalHookDispatcher,
+				interactionCallback,
 			);
 			allResults.push(...results);
 		} else {
@@ -178,7 +180,7 @@ export async function executeToolBatches(
 					continue;
 				}
 
-				const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext, approvalHookDispatcher);
+				const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext, approvalHookDispatcher, interactionCallback);
 				allResults.push({ call, result });
 			}
 		}
@@ -205,6 +207,7 @@ async function runConcurrentBatch(
 	approvalCallback?: ApprovalCallback,
 	sessionContext?: ToolSessionContext,
 	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
+	interactionCallback?: InteractionCallback,
 ): Promise<ToolCallResult[]> {
 	log.info("Running concurrent batch", { count: calls.length, cap: concurrencyCap });
 
@@ -246,7 +249,7 @@ async function runConcurrentBatch(
 					},
 				};
 			}
-			const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext, approvalHookDispatcher);
+			const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext, approvalHookDispatcher, interactionCallback);
 			return { call, result };
 		} finally {
 			release();
@@ -271,6 +274,7 @@ async function safeDispatch(
 	approvalCallback?: ApprovalCallback,
 	sessionContext?: ToolSessionContext,
 	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
+	interactionCallback?: InteractionCallback,
 ): Promise<ToolResult> {
 	try {
 		const result = await dispatcher.dispatch(
@@ -284,6 +288,7 @@ async function safeDispatch(
 			approvalCallback,
 			sessionContext,
 			approvalHookDispatcher,
+			interactionCallback,
 		);
 		result.tool_call_id = call.toolCallId;
 		return result;
