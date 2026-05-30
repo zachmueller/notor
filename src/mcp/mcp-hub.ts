@@ -36,6 +36,7 @@ import type {
 import { mcpEnvSecretKey, mcpHeaderSecretKey } from "./mcp-types";
 import type { TaskLaneQueue } from "../queue/task-lane-queue";
 import { logger } from "../utils/logger";
+import { sanitizeInputSchemaForBedrock } from "../utils/json-schema-sanitizer";
 
 const log = logger("McpHub");
 
@@ -410,12 +411,27 @@ export class McpHub {
 				{ timeout: timeoutMs }
 			);
 
-			connection.tools = (result.tools ?? []).map((tool) => ({
-				name: tool.name,
-				description: tool.description ?? "",
-				inputSchema: tool.inputSchema as Record<string, unknown> | undefined,
-				annotations: tool.annotations as McpDiscoveredTool["annotations"],
-			}));
+			connection.tools = (result.tools ?? []).map((tool) => {
+				// Normalize MCP-provided schemas into the strict JSON Schema
+				// draft-2020-12 subset that Bedrock accepts. A single offending
+				// schema otherwise rejects the entire tool-use request.
+				const { schema, modifications } = sanitizeInputSchemaForBedrock(
+					tool.inputSchema
+				);
+				if (modifications.length > 0) {
+					log.warn("MCP tool schema sanitized for provider compatibility", {
+						serverName: connection.serverName,
+						toolName: tool.name,
+						modifications,
+					});
+				}
+				return {
+					name: tool.name,
+					description: tool.description ?? "",
+					inputSchema: schema as Record<string, unknown>,
+					annotations: tool.annotations as McpDiscoveredTool["annotations"],
+				};
+			});
 
 			log.debug("Tools discovered", {
 				serverName: connection.serverName,

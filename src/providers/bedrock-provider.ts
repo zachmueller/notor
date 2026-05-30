@@ -38,6 +38,7 @@ import { getModelExtendedContext, supportsThinking } from "./model-metadata";
 import { parseProfileId } from "./model-grouping";
 import { resolveAnthropicThinking } from "./thinking-config";
 import { logger } from "../utils/logger";
+import { sanitizeInputSchemaForBedrock } from "../utils/json-schema-sanitizer";
 
 // AWS SDK imports — these are bundled by esbuild
 import {
@@ -211,7 +212,11 @@ function toBedrockToolConfig(
 				name: tool.name,
 				description: tool.description,
 				inputSchema: {
-					json: tool.input_schema as unknown as DocumentType,
+					// Defensive guard: MCP schemas are already sanitized at
+					// discovery, but this catches any schema that reaches Bedrock
+					// by another path. Idempotent on already-clean schemas.
+					json: sanitizeInputSchemaForBedrock(tool.input_schema)
+						.schema as unknown as DocumentType,
 				},
 			},
 		})),
