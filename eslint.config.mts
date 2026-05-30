@@ -102,6 +102,8 @@ export default tseslint.config(
 		"dist",
 		"specs",
 		"e2e",
+		"**/*.test.ts",        // sibling test files
+		"src/**/__tests__/**", // test files + fixtures (excluded from tsconfig)
 		"esbuild.config.mjs",
 		"eslint.config.js",
 		"version-bump.mjs",
