@@ -253,29 +253,29 @@ export class MessageRenderer {
 		resultEl.dataset.messageId = message.id;
 		this.appendForkButton(resultEl, message);
 
+		const resultStr = typeof toolResult.result === "string"
+			? toolResult.result
+			: JSON.stringify(toolResult.result, null, 2);
+
 		const summaryEl = resultEl.createDiv({ cls: "notor-tool-result-summary" });
 		if (toolResult.success) {
 			summaryEl.addClass("notor-tool-result-success");
-			const resultStr = typeof toolResult.result === "string"
-				? toolResult.result
-				: JSON.stringify(toolResult.result);
 			summaryEl.textContent = `✓ ${resultStr.substring(0, 100)}${resultStr.length > 100 ? "…" : ""}`;
 		} else {
 			summaryEl.addClass("notor-tool-result-error");
 			summaryEl.textContent = `✗ ${toolResult.error ?? "Unknown error"}`;
 		}
 
-		if (toolResult.success) {
-			const resultStr = typeof toolResult.result === "string"
-				? toolResult.result
-				: JSON.stringify(toolResult.result, null, 2);
-
-			if (resultStr.length > 100) {
-				const { body: fullEl } = renderCollapsibleCard(resultEl, { headerText: "full result" });
-				fullEl.addClass("notor-tool-result-full");
-				const pre = fullEl.createEl("pre");
-				pre.createEl("code", { text: resultStr });
-			}
+		// Full result body (collapsible) whenever there's substantive result content —
+		// for failures too. Tools like replace_in_note / write_note auto-return the
+		// current note content in `result` on a stale or no-match failure; surface it
+		// so the user can see what the model received. Plain errors carry an empty
+		// `result`, so the panel stays hidden for them.
+		if (resultStr.length > 100) {
+			const { body: fullEl } = renderCollapsibleCard(resultEl, { headerText: "full result" });
+			fullEl.addClass("notor-tool-result-full");
+			const pre = fullEl.createEl("pre");
+			pre.createEl("code", { text: resultStr });
 		}
 
 		this.deps.scrollToBottom();

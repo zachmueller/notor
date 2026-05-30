@@ -173,13 +173,21 @@ function renderToolResult(msg: Message): string {
 	const calloutType = tr.success ? "success" : "failure";
 	const icon = tr.success ? "✓" : "✗";
 
+	const resultStr = typeof tr.result === "string"
+		? tr.result
+		: JSON.stringify(tr.result, null, 2);
+
 	let body: string;
 	if (!tr.success) {
 		body = tr.error ?? "Unknown error";
+		// Tools like replace_in_note / write_note auto-return the current note
+		// content in `result` on a stale or no-match failure. Include it so the
+		// exported transcript matches what the model received. Plain errors carry
+		// an empty `result` (or one equal to the error), so nothing extra is added.
+		if (resultStr && resultStr.trim() && resultStr.trim() !== (tr.error ?? "").trim()) {
+			body += "\n\n```\n" + resultStr + "\n```";
+		}
 	} else {
-		const resultStr = typeof tr.result === "string"
-			? tr.result
-			: JSON.stringify(tr.result, null, 2);
 		body = resultStr.length > 200
 			? "```\n" + resultStr + "\n```"
 			: resultStr;
