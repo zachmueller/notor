@@ -21,7 +21,7 @@ import type {
 } from "../types";
 import type { ProviderRegistry } from "../providers/index";
 import type { SystemPromptBuilder } from "./system-prompt";
-import type { ToolDispatcher, ApprovalCallback } from "./dispatcher";
+import type { ToolDispatcher, ApprovalCallback, InteractionCallback } from "./dispatcher";
 import type { HistoryManager } from "./history";
 import type { ConversationManager } from "./conversation";
 import type { NotorSettings } from "../settings";
@@ -125,6 +125,7 @@ export interface WorkflowExecutorDeps {
 	getWorkflowHookOverrideManager(): WorkflowHookOverrideManager | undefined;
 	getVaultRuleManager(): VaultRuleManager | undefined;
 	getPanelApprovalCallback(): ApprovalCallback | undefined;
+	getPanelInteractionCallback(): InteractionCallback | undefined;
 	getConversationManager(): ConversationManager;
 	getActiveProviderId(): string;
 	getActiveModelId(): string;
@@ -345,6 +346,12 @@ export class WorkflowExecutor {
 		const approvalCallback: ApprovalCallback = this.deps.getPanelApprovalCallback()
 			?? (async () => "approved" as const);
 
+		// A manual workflow runs through the real (UI-bound) response loop, so it
+		// must carry the panel's interaction callback — otherwise tools like
+		// ask_user have no channel to render their prompt and error out. Mirrors
+		// ChatOrchestrator.handleUserMessage, which snapshots the same callback.
+		const interactionCallback = this.deps.getPanelInteractionCallback();
+
 		const session = new ConversationSession({
 			conversationId: conversation.id,
 			conversationManager: sessionConvManager,
@@ -357,6 +364,7 @@ export class WorkflowExecutor {
 			thinkingLevel,
 			workflowAssembly: assemblyResult,
 			approvalCallback,
+			interactionCallback,
 			initialConfig,
 			initialParsedConfigs,
 		});

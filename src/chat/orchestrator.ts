@@ -319,6 +319,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			getWorkflowHookOverrideManager: () => this.workflowHookOverrideManager,
 			getVaultRuleManager: () => this.vaultRuleManager,
 			getPanelApprovalCallback: () => this.panelApprovalCallback,
+			getPanelInteractionCallback: () => this.panelInteractionCallback,
 			getConversationManager: () => this.conversationManager,
 			getActiveProviderId: () => this.activeProviderId,
 			getActiveModelId: () => this.activeModelId,
