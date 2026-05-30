@@ -49,6 +49,19 @@ const answers = await Promise.all(
   questions.map((q) => utils.ask(q.question, { suggestions: q.suggestions, allowFreeText: true }))
 );
 
+// utils.ask returns null only when no interaction channel is wired (headless /
+// background / sub-agent contexts). Do NOT coerce that to a blank string — the
+// model would mistake an empty answer for the user's response. Surface a clear
+// error instead so the caller knows ask_user is unavailable in this context.
+if (utils.abortSignal?.aborted) {
+  throw new Error("ask_user cancelled before all questions were answered.");
+}
+if (answers.some((a) => a == null)) {
+  throw new Error(
+    "ask_user requires an interactive chat panel; no interaction channel was available in this context (e.g. a background or sub-agent run). Proceed without asking, or surface the questions in your reply."
+  );
+}
+
 const items = questions.map((q, i) => ({
   question: q.question,
   suggestions: q.suggestions ?? [],

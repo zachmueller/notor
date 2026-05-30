@@ -26,6 +26,7 @@ import { ToolDispatcher } from "../chat/dispatcher";
 import { SubAgentRunner } from "../chat/sub-agent-runner";
 import { intersectToolConfig } from "../tool-config/merger";
 import { SUB_AGENT_PREAMBLE } from "../sub-agents/preamble";
+import { ASK_USER } from "../extensions/builtin-tool-scaffolds/ask-user";
 import {
 	USE_SUBAGENT_TOOL_NAME,
 	SUB_AGENT_ITERATION_CAP,
@@ -333,10 +334,15 @@ export class UseSubagentTool implements Tool {
 			});
 		}
 
-		// Step 7: Build sub-agent tool definitions and dispatcher
+		// Step 7: Build sub-agent tool definitions and dispatcher.
+		// ask_user is excluded: sub-agents have no UI surface, so its interaction
+		// channel can't be wired — offering it would only let the model call a
+		// tool that errors out. Filter it from both the tool defs the model sees
+		// and the sub-dispatcher so it can't be dispatched even if hallucinated.
 		const enabledToolNames = Object.entries(intersectedConfig.tools)
 			.filter(([, entry]) => entry.enabled)
-			.map(([name]) => name);
+			.map(([name]) => name)
+			.filter((name) => name !== ASK_USER.name);
 
 		const toolDefs: ProviderToolDefinition[] = enabledToolNames
 			.map((name) => this.toolRegistry.get(name))

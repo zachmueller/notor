@@ -758,6 +758,96 @@ async function testRealDispatchRoundTrip(ctx: TestContext): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Test 11: no interaction channel → clear error, NOT blank answers
+//
+// This is the exact reported regression: ask_user dispatched in a context with
+// no interaction channel (headless / background / sub-agent) used to coerce the
+// null answers from utils.ask into "" and return success — so the model saw a
+// populated answers array of empty strings and mistook it for the user's reply.
+// Dispatch with interactionCallback=undefined and assert the tool now FAILS
+// with an explanatory error instead of fabricating blank answers.
+// ---------------------------------------------------------------------------
+
+async function testNoChannelErrors(ctx: TestContext): Promise<void> {
+	console.log("\nTest 11: no interaction channel → error (not blank answers)");
+	const { page } = ctx;
+
+	const outcome = await page.evaluate(async () => {
+		const w = window as any;
+		const plugin = w.app?.plugins?.plugins?.["notor"];
+		if (!plugin) return { ok: false, error: "Plugin not found" };
+
+		const orchestrator = plugin.getActiveOrchestrator?.();
+		const dispatcher = plugin.getToolDispatcher?.();
+		if (!orchestrator || !dispatcher) return { ok: false, error: "Missing orchestrator/dispatcher" };
+
+		const resolver = orchestrator.configResolver;
+		if (!resolver?.resolveEffectiveConfig) return { ok: false, error: "No config resolver" };
+		const { effective } = await resolver.resolveEffectiveConfig(undefined, null, null);
+		if (!effective) return { ok: false, error: "No effective tool config" };
+
+		const vaultRootPath = orchestrator.getVaultRootPath?.() ?? "";
+		const policyCtx = {
+			effectiveConfig: effective,
+			mode: "act",
+			domainDenylist: plugin.settings?.domain_denylist ?? [],
+			vaultRootPath,
+			resolveVaultPath: (p: string) => p,
+		};
+
+		try {
+			// NOTE: interactionCallback intentionally omitted (undefined) to mirror
+			// a headless / sub-agent context with no UI channel.
+			const result = await dispatcher.dispatch(
+				"ask_user",
+				{ questions: [{ question: "Pick a color", suggestions: ["Red", "Green"] }] },
+				"act",
+				"msg-ask-no-channel",
+				undefined, // abortSignal
+				undefined, // onProgress
+				policyCtx,
+				() => Promise.resolve("approved"), // approvalCb (auto-approved anyway)
+				orchestrator, // sessionContext
+				undefined, // approvalHookDispatcher
+				undefined, // interactionCallback — the point of this test
+			);
+			return { ok: true, result };
+		} catch (e: any) {
+			return { ok: true, threw: e?.message ?? String(e) };
+		}
+	});
+
+	if (!outcome.ok) {
+		ctx.fail("No-channel ask_user errors", outcome.error ?? "unknown");
+		return;
+	}
+
+	const result = (outcome as any).result;
+	const blankAnswers =
+		result?.success === true &&
+		Array.isArray(result?.result?.answers) &&
+		result.result.answers.length > 0 &&
+		result.result.answers.every((a: any) => a?.answer === "" || a?.answer == null);
+
+	if (blankAnswers) {
+		ctx.fail(
+			"No-channel ask_user errors",
+			`Regression: returned success with BLANK answers (${JSON.stringify(result.result.answers)}) instead of erroring`,
+		);
+	} else if (result?.success === false || (outcome as any).threw) {
+		ctx.pass(
+			"No-channel ask_user errors",
+			`Tool failed cleanly with no interaction channel (error="${result?.error ?? (outcome as any).threw}")`,
+		);
+	} else {
+		ctx.fail(
+			"No-channel ask_user errors",
+			`Unexpected outcome: ${JSON.stringify(outcome).substring(0, 200)}`,
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Test 10: no render errors logged
 // ---------------------------------------------------------------------------
 
@@ -802,6 +892,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	await testPersistenceReplay(ctx);
 	await testAutoApproved(ctx);
 	await testRealDispatchRoundTrip(ctx);
+	await testNoChannelErrors(ctx);
 	await testNoErrors(ctx);
 }
 

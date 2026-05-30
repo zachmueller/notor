@@ -810,6 +810,14 @@ export class WorkflowExecutor {
 						return file?.path ?? null;
 					})
 					: undefined;
+				// Approval-required hooks can still gate background tool calls. There
+				// is no interaction channel in a headless run, so interactionCallback
+				// is intentionally left undefined (ask_user errors out cleanly).
+				const bgConvForApprovalHook = bgConvManager.getActiveConversation();
+				const approvalHookFn = bgConvForApprovalHook
+					? async (tn: string, params: Record<string, unknown>, m: string) =>
+						this.deps.hookDispatcher.dispatchApprovalRequiredHook(bgConvForApprovalHook.id, tn, params, m)
+					: undefined;
 				const toolResult = await this.deps.dispatcher.dispatch(
 					toolName,
 					parameters,
@@ -820,6 +828,8 @@ export class WorkflowExecutor {
 					policyCtx,
 					session.approvalCallback,
 					this.deps.getSessionContext(), // sessionContext (A4.4e)
+					approvalHookFn,
+					undefined, // interactionCallback — headless, no UI channel
 				);
 				toolResult.tool_call_id = toolCallId;
 
