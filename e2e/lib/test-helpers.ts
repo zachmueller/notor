@@ -395,7 +395,7 @@ export function buildDefaultSettings(overrides?: Record<string, unknown>): Recor
 			read_note: true, search_vault: true, list_vault: true, read_frontmatter: true,
 			fetch_webpage: true, write_note: false, replace_in_note: false,
 			update_frontmatter: false, manage_tags: false, execute_command: false,
-			read_file: false, read_docx: false, write_docx: false,
+			read_file: false, read_docx: false, write_docx: false, ask_user: true,
 		},
 		mode: "plan",
 		open_notes_on_access: true,

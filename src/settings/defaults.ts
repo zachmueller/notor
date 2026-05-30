@@ -77,6 +77,11 @@ export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	capture_memory: true,
 	read_notor_settings: false,
 	edit_notor_settings: false,
+	// ask_user is read-only and inherently interactive — it has nothing to
+	// pre-approve (the user is already being prompted to answer). Without this,
+	// it falls through to the generic Approve/Reject gate and a Reject returns a
+	// blank result, so the questions never render.
+	ask_user: true,
 };
 
 /** Default empty hook configuration. */

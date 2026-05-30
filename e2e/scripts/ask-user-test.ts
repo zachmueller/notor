@@ -6,10 +6,14 @@
  * interaction-primitive framework (utils.ask + interaction renderer + the
  * persistent `interaction` chat block).
  *
- * Because the tool depends on the LLM choosing to call it, these tests drive
- * the UI + framework deterministically via the plugin's public surface
- * (`view.renderInteractionPrompt`, the tool/block registries, and JSONL import)
- * rather than relying on a live model invocation.
+ * These tests drive the framework deterministically (no live model). Tests 1-7
+ * exercise the renderer + persistence via the plugin's public surface
+ * (`view.renderInteractionPrompt`, the tool/block registries, JSONL import).
+ * Tests 8-9 exercise the REAL dispatch path — the route the model actually
+ * uses — to guard against the auto-approve regression that made ask_user fall
+ * through to the generic Approve/Reject gate (a Reject returned a blank result
+ * and the questions never rendered). A separate LLM-driven test
+ * (`ask-user-llm-test.ts`) covers the full model→UI→answer round-trip.
  *
  * Scenarios:
  *   1. ask_user tool is registered as a read-mode tool
@@ -20,10 +24,14 @@
  *   6. Aborting a pending interaction rejects and removes the prompt
  *   7. Persisted `interaction` block re-renders read-only (question + chosen
  *      answer highlighted) and survives a conversation reload
- *   8. No render errors logged
+ *   8. ask_user resolves to auto_approve=true (regression guard)
+ *   9. Real dispatch renders questions + returns the chosen answer (not blank),
+ *      hitting the auto-approved branch rather than the manual gate
+ *  10. No render errors logged
  *
  * @see src/ui/interaction-ui.ts, src/extensions/builtin-tool-scaffolds/ask-user.ts
  * @see src/extensions/builtin-block-scaffolds/interaction.ts
+ * @see src/settings/defaults.ts — DEFAULT_AUTO_APPROVE.ask_user
  */
 
 import { runTest, type TestContext } from "../lib/test-harness";
@@ -504,7 +512,253 @@ async function testPersistenceReplay(ctx: TestContext): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Test 8: no render errors logged
+// Test 8: ask_user is auto-approved (regression guard)
+//
+// The original bug: ask_user was absent from DEFAULT_AUTO_APPROVE, so it fell
+// through to the generic Approve/Reject gate and a Reject returned a blank
+// result — the questions never rendered. This asserts the effective tool
+// config resolves ask_user to auto_approve=true.
+// ---------------------------------------------------------------------------
+
+async function testAutoApproved(ctx: TestContext): Promise<void> {
+	console.log("\nTest 8: ask_user resolves to auto_approve=true");
+	const { page } = ctx;
+
+	// getEffectiveToolConfig() is only published during a response loop, so on an
+	// idle panel it's null. Resolve the effective config the same way the loop
+	// does (ConfigResolver.resolveEffectiveConfig, orchestrator.ts:950) — this
+	// runs the real merge over settings.auto_approve without sending a message.
+	const info = await page.evaluate(async () => {
+		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
+		if (!plugin) return { error: "Plugin not found" };
+		const orchestrator = plugin.getActiveOrchestrator?.();
+		if (!orchestrator) return { error: "No active orchestrator" };
+		const resolver = orchestrator.configResolver;
+		if (!resolver?.resolveEffectiveConfig) return { error: "No config resolver" };
+		const { effective } = await resolver.resolveEffectiveConfig(undefined, null, null);
+		const entry = effective?.tools?.["ask_user"];
+		return {
+			settingValue: plugin.settings?.auto_approve?.["ask_user"] ?? null,
+			effectiveAutoApprove: entry ? entry.auto_approve : null,
+			enabled: entry ? entry.enabled : null,
+		};
+	});
+
+	if ("error" in info) {
+		ctx.fail("ask_user auto-approved", info.error as string);
+		return;
+	}
+
+	if (info.settingValue === true) {
+		ctx.pass("ask_user auto-approve setting", "settings.auto_approve.ask_user === true");
+	} else {
+		ctx.fail("ask_user auto-approve setting", `Expected true, got ${JSON.stringify(info.settingValue)}`);
+	}
+
+	if (info.effectiveAutoApprove === true) {
+		ctx.pass("ask_user effective auto-approve", "Effective config resolves ask_user → auto_approve=true (no approval gate)");
+	} else {
+		ctx.fail(
+			"ask_user effective auto-approve",
+			`Expected effective auto_approve=true, got ${JSON.stringify(info.effectiveAutoApprove)} — ask_user would hit the manual Approve/Reject gate`,
+		);
+	}
+
+	if (info.enabled !== false) {
+		ctx.pass("ask_user enabled", "ask_user is enabled in the effective config");
+	} else {
+		ctx.fail("ask_user enabled", "ask_user is disabled in the effective config");
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 9: full dispatch round-trip — questions render and answers flow back
+//
+// Drives the REAL dispatcher (the path the model uses), not renderInteractionPrompt
+// directly. Asserts the call is auto-approved (approval callback sees
+// autoApproved=true rather than the manual gate) and that the user's chosen
+// answer is returned in the tool result — i.e. NOT the blank result the bug
+// produced.
+// ---------------------------------------------------------------------------
+
+async function testRealDispatchRoundTrip(ctx: TestContext): Promise<void> {
+	console.log("\nTest 9: real dispatch renders questions + returns chosen answer");
+	const { page } = ctx;
+
+	// Kick off the dispatch in the page. The interaction callback renders into a
+	// real tool-call card via view.renderInteractionPrompt and resolves when we
+	// click the chip below. Result + diagnostics are stashed on window.
+	const setup = await page.evaluate(async () => {
+		const w = window as any;
+		const plugin = w.app?.plugins?.plugins?.["notor"];
+		if (!plugin) return { ok: false, error: "Plugin not found" };
+
+		const orchestrator = plugin.getActiveOrchestrator?.();
+		const view = orchestrator?.getView?.();
+		const dispatcher = plugin.getToolDispatcher?.();
+		if (!orchestrator || !view || !dispatcher) {
+			return { ok: false, error: "Missing orchestrator/view/dispatcher" };
+		}
+
+		// Resolve the effective config the way the response loop does, so the
+		// dispatcher's policy check sees the real merged auto_approve for ask_user.
+		const resolver = orchestrator.configResolver;
+		if (!resolver?.resolveEffectiveConfig) return { ok: false, error: "No config resolver" };
+		const { effective } = await resolver.resolveEffectiveConfig(undefined, null, null);
+		if (!effective) return { ok: false, error: "No effective tool config" };
+
+		const vaultRootPath = orchestrator.getVaultRootPath?.() ?? "";
+		const policyCtx = {
+			effectiveConfig: effective,
+			mode: "act",
+			domainDenylist: plugin.settings?.domain_denylist ?? [],
+			vaultRootPath,
+			resolveVaultPath: (p: string) => p,
+		};
+
+		// Fabricate a real tool-call card to render the prompt into.
+		const container: HTMLElement = view.getMessagesContainer();
+		const card = container.createDiv({ cls: "notor-tool-call notor-e2e-dispatch-card" });
+
+		w.__dispatchAutoApprovedArg = undefined;
+		w.__dispatchApprovalCalls = 0;
+		w.__dispatchInteractionCalls = 0;
+		w.__dispatchResult = undefined;
+		w.__dispatchError = undefined;
+
+		// Per-call approval callback — records whether it was invoked on the
+		// auto-approved branch (4th arg true). Resolves "approved" either way.
+		const approvalCb = (_toolCall: any, _signal: any, _messageId: any, autoApproved: any) => {
+			w.__dispatchApprovalCalls += 1;
+			w.__dispatchAutoApprovedArg = autoApproved === true;
+			return Promise.resolve("approved");
+		};
+
+		// Per-call interaction callback — renders the prompt into our card and,
+		// on the next tick, clicks the "Green" chip to simulate the user picking
+		// a specific (non-first) suggestion.
+		const interactionCb = (request: any, signal: any) => {
+			w.__dispatchInteractionCalls += 1;
+			const promise = view.renderInteractionPrompt(card, request, signal);
+			window.setTimeout(() => {
+				const chips = Array.from(
+					card.querySelectorAll(".notor-interaction-chip"),
+				) as HTMLButtonElement[];
+				const green = chips.find((c) => (c.textContent ?? "").trim() === "Green");
+				(green ?? chips[0])?.click();
+			}, 50);
+			return promise;
+		};
+
+		dispatcher
+			.dispatch(
+				"ask_user",
+				{ questions: [{ question: "Pick a color", suggestions: ["Red", "Green"] }] },
+				"act",
+				"msg-ask-real-dispatch",
+				undefined, // abortSignal
+				undefined, // onProgress
+				policyCtx,
+				approvalCb,
+				orchestrator, // sessionContext
+				undefined, // approvalHookDispatcher
+				interactionCb,
+			)
+			.then((r: any) => {
+				w.__dispatchResult = r;
+			})
+			.catch((e: any) => {
+				w.__dispatchError = e?.message ?? String(e);
+			});
+
+		return { ok: true };
+	});
+
+	if (!setup.ok) {
+		ctx.fail("Real dispatch setup", setup.error ?? "unknown");
+		return;
+	}
+
+	// Wait for the prompt to render, then for the dispatch to settle.
+	const prompt = await waitForSelector(page, ".notor-e2e-dispatch-card .notor-interaction-prompt", 5_000);
+	if (prompt) {
+		ctx.pass("Dispatch renders interaction prompt", "Questions rendered via real dispatch (not an approval prompt)");
+	} else {
+		const shot = await ctx.screenshot("09-no-dispatch-prompt");
+		ctx.fail("Dispatch renders interaction prompt", "No .notor-interaction-prompt rendered during real dispatch", shot);
+	}
+
+	// No generic Approve/Reject prompt should appear on our card.
+	const approvalButtons = await page.evaluate(() => {
+		const card = document.querySelector(".notor-e2e-dispatch-card");
+		return {
+			approve: !!card?.querySelector(".notor-approve-btn"),
+			reject: !!card?.querySelector(".notor-reject-btn"),
+		};
+	});
+	if (!approvalButtons.approve && !approvalButtons.reject) {
+		ctx.pass("No Approve/Reject gate on dispatch", "Generic approval buttons absent (auto-approved)");
+	} else {
+		ctx.fail("No Approve/Reject gate on dispatch", `Approve=${approvalButtons.approve}, Reject=${approvalButtons.reject}`);
+	}
+
+	const shot = await ctx.screenshot("09-dispatch-prompt");
+
+	// Poll for the dispatch to resolve (chip auto-clicked after ~50ms).
+	let outcome: { result?: any; error?: string; autoApproved?: boolean; approvalCalls?: number; interactionCalls?: number } = {};
+	for (let i = 0; i < 20; i++) {
+		await page.waitForTimeout(250);
+		outcome = await page.evaluate(() => {
+			const w = window as any;
+			return {
+				result: w.__dispatchResult,
+				error: w.__dispatchError,
+				autoApproved: w.__dispatchAutoApprovedArg,
+				approvalCalls: w.__dispatchApprovalCalls,
+				interactionCalls: w.__dispatchInteractionCalls,
+			};
+		});
+		if (outcome.result !== undefined || outcome.error !== undefined) break;
+	}
+
+	if (outcome.error) {
+		ctx.fail("Dispatch resolves with answer", `Dispatch threw: ${outcome.error}`, shot);
+	} else if (!outcome.result) {
+		ctx.fail("Dispatch resolves with answer", "Dispatch did not settle within timeout", shot);
+	} else {
+		const result = outcome.result;
+		const answer = result?.result?.answers?.[0]?.answer;
+		if (result.success === true && answer === "Green") {
+			ctx.pass("Dispatch resolves with answer", `Tool result carries chosen answer (answers[0].answer="Green")`, shot);
+		} else if (result.success === true && (answer === "" || answer == null)) {
+			ctx.fail("Dispatch resolves with answer", `Regression: success but BLANK answer (${JSON.stringify(answer)}) — interaction did not flow back`, shot);
+		} else {
+			ctx.fail("Dispatch resolves with answer", `Unexpected result: ${JSON.stringify(result)?.substring(0, 200)}`, shot);
+		}
+	}
+
+	// The approval callback must have run on the auto-approved branch.
+	if (outcome.autoApproved === true) {
+		ctx.pass("Dispatch hit auto-approved branch", "Approval callback invoked with autoApproved=true (not the manual gate)");
+	} else {
+		ctx.fail(
+			"Dispatch hit auto-approved branch",
+			`Expected autoApproved=true; approvalCalls=${outcome.approvalCalls}, autoApprovedArg=${JSON.stringify(outcome.autoApproved)}`,
+		);
+	}
+
+	if ((outcome.interactionCalls ?? 0) >= 1) {
+		ctx.pass("Interaction callback fired", `interactionCallback invoked ${outcome.interactionCalls} time(s)`);
+	} else {
+		ctx.fail("Interaction callback fired", `Expected ≥1 interaction call, got ${outcome.interactionCalls}`);
+	}
+
+	// Clean up the throwaway card.
+	await page.evaluate(() => document.querySelector(".notor-e2e-dispatch-card")?.remove());
+}
+
+// ---------------------------------------------------------------------------
+// Test 10: no render errors logged
 // ---------------------------------------------------------------------------
 
 async function testNoErrors(ctx: TestContext): Promise<void> {
@@ -529,6 +783,16 @@ async function testNoErrors(ctx: TestContext): Promise<void> {
 
 async function tests(ctx: TestContext): Promise<void> {
 	await ctx.page.waitForTimeout(5_000); // plugin init + extension/tool load
+
+	// tsx/esbuild injects __name() for function-name tracking into serialized
+	// page.evaluate() bodies, but it's undefined in the Obsidian browser context.
+	// Define a no-op polyfill so inline arrow functions inside evaluate() work.
+	await ctx.page.evaluate(() => {
+		if (typeof (window as any).__name === "undefined") {
+			(window as any).__name = (fn: unknown, _name: string) => fn;
+		}
+	});
+
 	await testToolRegistered(ctx);
 	await testBlockRegistered(ctx);
 	await testChipResolves(ctx);
@@ -536,6 +800,8 @@ async function tests(ctx: TestContext): Promise<void> {
 	await testChipsOnly(ctx);
 	await testAbort(ctx);
 	await testPersistenceReplay(ctx);
+	await testAutoApproved(ctx);
+	await testRealDispatchRoundTrip(ctx);
 	await testNoErrors(ctx);
 }
 
