@@ -27,22 +27,30 @@
 export type InteractionRequest =
 	| {
 			type: "ask";
-			/** Stable id used to correlate the response (one per question). */
+			/** Stable id used to correlate the response. */
 			id: string;
-			/** The question text shown to the user. */
-			question: string;
-			/** Optional suggested answers, rendered as clickable chips. */
-			suggestions?: string[];
-			/** When true (default), a free-text input is offered alongside chips. */
-			allowFreeText?: boolean;
+			/**
+			 * The questions to ask, rendered together as one prompt. All stay
+			 * visible and editable until every one is answered, then the prompt
+			 * auto-submits with one response. A single-question array auto-submits
+			 * on its first answer.
+			 */
+			questions: Array<{
+				/** The question text shown to the user. */
+				question: string;
+				/** Optional suggested answers, rendered as clickable chips. */
+				suggestions?: string[];
+				/** When true (default), a free-text input is offered alongside chips. */
+				allowFreeText?: boolean;
+			}>;
 	  };
 
-/** The user's answer to a single `InteractionRequest`. */
+/** The user's answers to an `InteractionRequest`. */
 export type InteractionResponse = {
 	/** Matches the `id` of the originating request. */
 	id: string;
-	/** The user's answer — a chosen suggestion or free-text input. */
-	value: string;
+	/** The answers, index-aligned with `request.questions`. */
+	values: string[];
 };
 
 /**
@@ -58,65 +66,106 @@ interface InteractionRenderer {
 	): () => void;
 }
 
-/** Built-in `ask` renderer: question text, suggestion chips, optional free-text. */
+/**
+ * Built-in `ask` renderer: renders every question in the set together — each
+ * with its text, optional suggestion chips, and optional free-text input — and
+ * keeps them all visible and editable. Answering a question marks it (chip gets
+ * `--chosen`); the user can change earlier answers freely. Once every question
+ * is answered the prompt auto-submits with one response. A single-question set
+ * therefore submits on its first answer.
+ */
 const askRenderer: InteractionRenderer = {
 	render(el, request, resolve) {
 		if (request.type !== "ask") {
 			// Defensive — registry dispatch guarantees the type.
-			resolve({ id: request.id, value: "" });
+			resolve({ id: request.id, values: [] });
 			return () => {};
 		}
 
+		const questions = request.questions;
+		const values: string[] = new Array(questions.length).fill("");
+		const answered: boolean[] = new Array(questions.length).fill(false);
+
 		const promptEl = el.createDiv({ cls: "notor-interaction-prompt" });
-		promptEl.createSpan({ cls: "notor-interaction-question", text: request.question });
 
-		const allowFreeText = request.allowFreeText !== false;
-
-		// Suggested-answer chips
-		if (request.suggestions && request.suggestions.length > 0) {
-			const chipsEl = promptEl.createDiv({ cls: "notor-interaction-chips" });
-			for (const suggestion of request.suggestions) {
-				const chip = chipsEl.createEl("button", {
-					cls: "notor-interaction-chip",
-					text: suggestion,
-				});
-				chip.addEventListener("click", () => {
-					resolve({ id: request.id, value: suggestion });
-				});
+		// Resolve only once all questions have a committed answer.
+		const maybeSubmit = () => {
+			if (answered.every(Boolean)) {
+				resolve({ id: request.id, values: values.slice() });
 			}
-		}
+		};
 
-		// Free-text input + submit
-		if (allowFreeText) {
-			const inputRow = promptEl.createDiv({ cls: "notor-interaction-input-row" });
-			const input = inputRow.createEl("input", {
-				cls: "notor-interaction-input",
-				type: "text",
-			});
-			input.placeholder = "Type your answer…";
+		let firstInput: HTMLInputElement | null = null;
 
-			const submit = () => {
-				const value = input.value.trim();
-				if (value.length === 0) return;
-				resolve({ id: request.id, value });
+		questions.forEach((q, i) => {
+			const group = promptEl.createDiv({ cls: "notor-interaction-question-group" });
+			group.createSpan({ cls: "notor-interaction-question", text: q.question });
+
+			const allowFreeText = q.allowFreeText !== false;
+			let chipEls: HTMLButtonElement[] = [];
+			let input: HTMLInputElement | null = null;
+
+			const clearChosen = () => {
+				for (const c of chipEls) c.removeClass("notor-interaction-chip--chosen");
 			};
 
-			input.addEventListener("keydown", (e: KeyboardEvent) => {
-				if (e.key === "Enter") {
-					e.preventDefault();
-					submit();
+			// Suggested-answer chips
+			if (q.suggestions && q.suggestions.length > 0) {
+				const chipsEl = group.createDiv({ cls: "notor-interaction-chips" });
+				for (const suggestion of q.suggestions) {
+					const chip = chipsEl.createEl("button", {
+						cls: "notor-interaction-chip",
+						text: suggestion,
+					});
+					chip.addEventListener("click", () => {
+						values[i] = suggestion;
+						answered[i] = true;
+						clearChosen();
+						chip.addClass("notor-interaction-chip--chosen");
+						if (input) input.value = "";
+						maybeSubmit();
+					});
+					chipEls.push(chip);
 				}
-			});
+			}
 
-			const submitBtn = inputRow.createEl("button", {
-				cls: "notor-interaction-submit",
-				text: "Send",
-			});
-			submitBtn.addEventListener("click", submit);
+			// Free-text input — commits on Enter or blur (non-empty). Typing alone
+			// updates the value but does not mark the question answered, so a set
+			// never auto-submits mid-keystroke.
+			if (allowFreeText) {
+				const inputRow = group.createDiv({ cls: "notor-interaction-input-row" });
+				input = inputRow.createEl("input", {
+					cls: "notor-interaction-input",
+					type: "text",
+				});
+				input.placeholder = "Type your answer…";
+				if (!firstInput) firstInput = input;
 
-			// Focus the input so the user can type immediately.
-			window.setTimeout(() => input.focus(), 0);
-		}
+				const commit = () => {
+					const value = input!.value.trim();
+					if (value.length === 0) return;
+					values[i] = value;
+					answered[i] = true;
+					clearChosen();
+					maybeSubmit();
+				};
+
+				input.addEventListener("input", () => {
+					// Live-track the typed value without committing (Enter/blur commits).
+					values[i] = input!.value.trim();
+				});
+				input.addEventListener("keydown", (e: KeyboardEvent) => {
+					if (e.key === "Enter") {
+						e.preventDefault();
+						commit();
+					}
+				});
+				input.addEventListener("blur", commit);
+			}
+		});
+
+		// Focus the first input so the user can type immediately.
+		if (firstInput) window.setTimeout(() => firstInput!.focus(), 0);
 
 		return () => promptEl.remove();
 	},

@@ -311,6 +311,19 @@ export interface ExtensionUtils {
 		question: string,
 		opts?: { suggestions?: string[]; allowFreeText?: boolean },
 	) => Promise<string | null>;
+	/**
+	 * Ask several follow-up questions at once, suspending the tool loop until
+	 * they are all answered. All questions render together and stay visible and
+	 * editable; the user can revise earlier answers, and the prompt auto-submits
+	 * once every question is answered.
+	 *
+	 * Resolves to an array of answers index-aligned with `questions`. Each entry
+	 * is null when no interaction channel is available (e.g. headless or
+	 * background sub-agent runs); the whole array is null-filled in that case.
+	 */
+	askMany: (
+		questions: Array<{ question: string; suggestions?: string[]; allowFreeText?: boolean }>,
+	) => Promise<(string | null)[]>;
 }
 
 import type mammoth from "mammoth";

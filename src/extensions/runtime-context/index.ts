@@ -20,7 +20,7 @@ import type { ExtensionUtils, ExtensionLibs, ExtensionObsidianExports } from "./
 import { buildFileUtils } from "./file-utils";
 import { buildMediaUtils } from "./media-utils";
 import { buildWebUtils } from "./web-utils";
-import { buildChatUtils, buildAsk } from "./chat-utils";
+import { buildChatUtils, buildAsk, buildAskMany } from "./chat-utils";
 import { buildSubAgentUtils } from "./sub-agent-utils";
 import { buildMemoryUtils } from "./memory-utils";
 import { buildPluginUtils } from "./plugin-utils";
@@ -71,9 +71,10 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 		...buildPluginUtils(ctx),
 		memory: null,
 		memoryApprovalMode: null,
-		// Placeholder — wired below once `utils` exists so `ask` can read the
-		// per-call `interactionCallback`.
+		// Placeholders — wired below once `utils` exists so `ask`/`askMany` can
+		// read the per-call `interactionCallback`.
 		ask: async () => null,
+		askMany: async (qs) => (Array.isArray(qs) ? qs : []).map(() => null),
 	};
 
 	// Wire memory last — resolveConcept needs runSubAgent
@@ -81,8 +82,10 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 	utils.memory = mem.memory;
 	utils.memoryApprovalMode = mem.memoryApprovalMode;
 
-	// Wire ask — reads the per-call interactionCallback attached by UserToolAdapter.
-	utils.ask = buildAsk(utils);
+	// Wire ask/askMany — read the per-call interactionCallback attached by
+	// UserToolAdapter. `ask` is a thin wrapper over `askMany`.
+	utils.askMany = buildAskMany(utils);
+	utils.ask = buildAsk(utils.askMany);
 
 	return utils;
 }

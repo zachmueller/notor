@@ -43,10 +43,11 @@ if (utils.abortSignal?.aborted) {
   throw new Error("ask_user cancelled before any question was answered.");
 }
 
-// Render all questions together and await every answer. utils.ask suspends the
-// tool loop until the user responds (or aborts, which throws).
-const answers = await Promise.all(
-  questions.map((q) => utils.ask(q.question, { suggestions: q.suggestions, allowFreeText: true }))
+// Render all questions together and await every answer. utils.askMany suspends
+// the tool loop until the user has answered every question (or aborts, which
+// throws). One question or many — the prompt auto-submits once all are answered.
+const answers = await utils.askMany(
+  questions.map((q) => ({ question: q.question, suggestions: q.suggestions, allowFreeText: true }))
 );
 
 // utils.ask returns null only when no interaction channel is wired (headless /

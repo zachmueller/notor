@@ -1202,6 +1202,20 @@
 	border-top: 1px solid var(--background-modifier-border);
 }
 
+/* One question within a (possibly multi-question) live prompt. */
+.notor-interaction-question-group {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+/* Separate stacked questions so the set reads as distinct items. */
+.notor-interaction-question-group + .notor-interaction-question-group {
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
 .notor-interaction-question {
 	font-size: var(--font-ui-small);
 	color: var(--text-normal);

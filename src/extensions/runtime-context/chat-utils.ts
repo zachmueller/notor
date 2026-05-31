@@ -7,37 +7,70 @@ import { estimateTokenCount } from "../../utils/tokens";
 import { checkRateLimit } from "../rate-limiter";
 
 /**
- * Build the `ask` primitive. Wired after `buildUtils` assembles the object so
- * `ask` can read the per-call `interactionCallback` that UserToolAdapter
- * attaches at invocation time (mirroring how `memory` is wired last).
+ * Build the `askMany` primitive — the core follow-up-question channel. Wired
+ * after `buildUtils` assembles the object so it can read the per-call
+ * `interactionCallback` that UserToolAdapter attaches at invocation time
+ * (mirroring how `memory` is wired last).
  *
- * Returns null when no interaction channel is wired (headless/background runs).
+ * Renders all questions together as one prompt; they stay visible and editable
+ * until every one is answered, then the prompt auto-submits. Returns an array
+ * of `null` (one per question) when no interaction channel is wired
+ * (headless/background runs) — callers detect this to fail cleanly.
  */
-export function buildAsk(utils: ExtensionUtils): ExtensionUtils["ask"] {
-	const log = logger("ext:ask");
+export function buildAskMany(utils: ExtensionUtils): ExtensionUtils["askMany"] {
+	const log = logger("ext:askMany");
 	let counter = 0;
 	return async (
-		question: string,
-		opts?: { suggestions?: string[]; allowFreeText?: boolean },
-	): Promise<string | null> => {
+		questions: Array<{ question: string; suggestions?: string[]; allowFreeText?: boolean }>,
+	): Promise<(string | null)[]> => {
 		const cb = utils.interactionCallback;
 		if (!cb) {
-			log.warn("utils.ask called with no interaction channel available");
-			return null;
+			log.warn("utils.askMany called with no interaction channel available");
+			return (Array.isArray(questions) ? questions : []).map(() => null);
 		}
-		if (typeof question !== "string" || question.trim().length === 0) {
-			throw new Error("utils.ask requires a non-empty question string.");
+		if (!Array.isArray(questions) || questions.length === 0) {
+			throw new Error("utils.askMany requires a non-empty questions array.");
+		}
+		for (const q of questions) {
+			if (!q || typeof q.question !== "string" || q.question.trim().length === 0) {
+				throw new Error("utils.askMany requires each question to be a non-empty string.");
+			}
 		}
 		counter += 1;
 		const id = `ask-${counter}`;
 		const response = await cb({
 			type: "ask",
 			id,
-			question,
-			suggestions: opts?.suggestions,
-			allowFreeText: opts?.allowFreeText,
+			questions: questions.map((q) => ({
+				question: q.question,
+				suggestions: q.suggestions,
+				allowFreeText: q.allowFreeText,
+			})),
 		});
-		return response.value;
+		const values = response.values ?? [];
+		return questions.map((_, i) => values[i] ?? null);
+	};
+}
+
+/**
+ * Build the single-question `ask` primitive as a thin wrapper over `askMany`,
+ * so there is one render+resolve path. Returns null when no interaction channel
+ * is wired (headless/background runs).
+ */
+export function buildAsk(
+	askMany: ExtensionUtils["askMany"],
+): ExtensionUtils["ask"] {
+	return async (
+		question: string,
+		opts?: { suggestions?: string[]; allowFreeText?: boolean },
+	): Promise<string | null> => {
+		if (typeof question !== "string" || question.trim().length === 0) {
+			throw new Error("utils.ask requires a non-empty question string.");
+		}
+		const [answer] = await askMany([
+			{ question, suggestions: opts?.suggestions, allowFreeText: opts?.allowFreeText },
+		]);
+		return answer ?? null;
 	};
 }
 

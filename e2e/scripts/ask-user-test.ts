@@ -158,18 +158,21 @@ async function testBlockRegistered(ctx: TestContext): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: live prompt — chips + free-text; chip click resolves
+// Test 3: multi-question prompt — all stay visible; selecting one does NOT
+// submit; re-selection works; the set auto-submits only after the LAST answer.
 // ---------------------------------------------------------------------------
 
 async function testChipResolves(ctx: TestContext): Promise<void> {
-	console.log("\nTest 3: live prompt renders chips + input; chip click resolves");
+	console.log("\nTest 3: multi-question prompt persists until all answered, then auto-submits");
 	const { page } = ctx;
 
 	const setup = await startInteraction(ctx, {
 		type: "ask",
-		id: "q-chip",
-		question: "Which color?",
-		suggestions: ["Red", "Green", "Blue"],
+		id: "q-multi",
+		questions: [
+			{ question: "Which color?", suggestions: ["Red", "Green", "Blue"] },
+			{ question: "Anything else?" },
+		],
 	});
 	if (!setup.ok) {
 		ctx.fail("Render interaction prompt", setup.error ?? "unknown");
@@ -186,51 +189,105 @@ async function testChipResolves(ctx: TestContext): Promise<void> {
 	const counts = await page.evaluate(() => {
 		const card = document.querySelector(".notor-e2e-ask-card");
 		return {
-			question: card?.querySelector(".notor-interaction-question")?.textContent ?? null,
+			groups: card?.querySelectorAll(".notor-interaction-question-group").length ?? 0,
 			chips: card?.querySelectorAll(".notor-interaction-chip").length ?? 0,
-			hasInput: !!card?.querySelector(".notor-interaction-input"),
+			inputs: card?.querySelectorAll(".notor-interaction-input").length ?? 0,
 		};
 	});
 
-	if (counts.question === "Which color?") {
-		ctx.pass("Question text rendered", `"${counts.question}"`);
+	if (counts.groups === 2) {
+		ctx.pass("All questions rendered together", "2 question groups present");
 	} else {
-		ctx.fail("Question text rendered", `Got "${counts.question}"`);
+		ctx.fail("All questions rendered together", `Expected 2 groups, got ${counts.groups}`);
 	}
 	if (counts.chips === 3) {
-		ctx.pass("Suggestion chips rendered", "3 chips present");
+		ctx.pass("Suggestion chips rendered", "3 chips present in Q1");
 	} else {
 		ctx.fail("Suggestion chips rendered", `Expected 3 chips, got ${counts.chips}`);
 	}
-	if (counts.hasInput) {
-		ctx.pass("Free-text input rendered", "Input present (allowFreeText default)");
+	if (counts.inputs >= 1) {
+		ctx.pass("Free-text input rendered", `${counts.inputs} input(s) present`);
 	} else {
 		ctx.fail("Free-text input rendered", "No free-text input found");
 	}
 
 	const shot = await ctx.screenshot("03-prompt-rendered");
 
-	// Click the second chip ("Green")
+	// Answer Q1 by clicking "Green" — must NOT submit (Q2 still unanswered).
 	await page.evaluate(() => {
-		const chips = document.querySelectorAll<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-chip");
-		chips[1]?.click();
+		const g = document.querySelectorAll(".notor-e2e-ask-card .notor-interaction-question-group");
+		const chips = g[0]!.querySelectorAll<HTMLButtonElement>(".notor-interaction-chip");
+		chips[1]?.click(); // Green
+	});
+	await page.waitForTimeout(300);
+
+	const afterQ1 = await page.evaluate(() => {
+		const g = document.querySelectorAll(".notor-e2e-ask-card .notor-interaction-question-group");
+		const chips = Array.from(g[0]!.querySelectorAll(".notor-interaction-chip"));
+		return {
+			greenChosen: chips[1]?.classList.contains("notor-interaction-chip--chosen") ?? false,
+			promptStillThere: !!document.querySelector(".notor-e2e-ask-card .notor-interaction-prompt"),
+			result: (window as any).__askResult,
+		};
+	});
+	if (afterQ1.greenChosen) {
+		ctx.pass("Selected chip highlighted", "'Green' has --chosen after click");
+	} else {
+		ctx.fail("Selected chip highlighted", "Clicked chip did not gain --chosen");
+	}
+	if (afterQ1.promptStillThere && afterQ1.result === undefined) {
+		ctx.pass("No submit until all answered", "Prompt remains and no result after answering only Q1");
+	} else {
+		ctx.fail("No submit until all answered", `promptStillThere=${afterQ1.promptStillThere}, result=${JSON.stringify(afterQ1.result)}`);
+	}
+
+	// Re-select Q1 → "Blue". Highlight should move; still no submit.
+	await page.evaluate(() => {
+		const g = document.querySelectorAll(".notor-e2e-ask-card .notor-interaction-question-group");
+		const chips = g[0]!.querySelectorAll<HTMLButtonElement>(".notor-interaction-chip");
+		chips[2]?.click(); // Blue
+	});
+	await page.waitForTimeout(300);
+
+	const afterReselect = await page.evaluate(() => {
+		const g = document.querySelectorAll(".notor-e2e-ask-card .notor-interaction-question-group");
+		const chips = Array.from(g[0]!.querySelectorAll(".notor-interaction-chip"));
+		return {
+			greenChosen: chips[1]?.classList.contains("notor-interaction-chip--chosen") ?? false,
+			blueChosen: chips[2]?.classList.contains("notor-interaction-chip--chosen") ?? false,
+			result: (window as any).__askResult,
+		};
+	});
+	if (!afterReselect.greenChosen && afterReselect.blueChosen && afterReselect.result === undefined) {
+		ctx.pass("Re-selection moves highlight", "'Blue' now chosen, 'Green' cleared, still no submit");
+	} else {
+		ctx.fail("Re-selection moves highlight", `green=${afterReselect.greenChosen}, blue=${afterReselect.blueChosen}, result=${JSON.stringify(afterReselect.result)}`);
+	}
+
+	// Answer Q2 via free text + Enter → now all answered → auto-submit.
+	await page.evaluate(() => {
+		const g = document.querySelectorAll(".notor-e2e-ask-card .notor-interaction-question-group");
+		const input = g[1]!.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+		input.value = "  done  ";
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+		input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 	});
 	await page.waitForTimeout(400);
 
 	const { result, error } = await readResult(ctx);
 	if (error) {
-		ctx.fail("Chip click resolves", `Promise rejected: ${error}`);
-	} else if (result && result.id === "q-chip" && result.value === "Green") {
-		ctx.pass("Chip click resolves", `Resolved with {id: q-chip, value: Green}`, shot);
+		ctx.fail("Auto-submit returns all answers", `Promise rejected: ${error}`);
+	} else if (result && result.id === "q-multi" && Array.isArray(result.values) && result.values[0] === "Blue" && result.values[1] === "done") {
+		ctx.pass("Auto-submit returns all answers", `Resolved with values ["Blue","done"]`, shot);
 	} else {
-		ctx.fail("Chip click resolves", `Unexpected result: ${JSON.stringify(result)}`);
+		ctx.fail("Auto-submit returns all answers", `Unexpected result: ${JSON.stringify(result)}`);
 	}
 
 	const promptGone = await page.evaluate(() => !document.querySelector(".notor-e2e-ask-card .notor-interaction-prompt"));
 	if (promptGone) {
-		ctx.pass("Prompt removed after resolve", "No .notor-interaction-prompt remains");
+		ctx.pass("Prompt removed after final answer", "No .notor-interaction-prompt remains");
 	} else {
-		ctx.fail("Prompt removed after resolve", "Prompt still in DOM after chip click");
+		ctx.fail("Prompt removed after final answer", "Prompt still in DOM after all answered");
 	}
 
 	// Clean up the throwaway card
@@ -238,17 +295,17 @@ async function testChipResolves(ctx: TestContext): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Test 4: free-text submit resolves with trimmed value
+// Test 4: single free-text question auto-submits on Enter (trimmed value)
 // ---------------------------------------------------------------------------
 
 async function testFreeTextResolves(ctx: TestContext): Promise<void> {
-	console.log("\nTest 4: free-text submit resolves with trimmed value");
+	console.log("\nTest 4: single free-text question auto-submits on Enter with trimmed value");
 	const { page } = ctx;
 
 	const setup = await startInteraction(ctx, {
 		type: "ask",
 		id: "q-text",
-		question: "Anything else?",
+		questions: [{ question: "Anything else?" }],
 	});
 	if (!setup.ok) {
 		ctx.fail("Render free-text prompt", setup.error ?? "unknown");
@@ -264,15 +321,15 @@ async function testFreeTextResolves(ctx: TestContext): Promise<void> {
 	await page.evaluate(() => {
 		const el = document.querySelector<HTMLInputElement>(".notor-e2e-ask-card .notor-interaction-input")!;
 		el.value = "  hello world  ";
-		const submit = document.querySelector<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-submit")!;
-		submit.click();
+		el.dispatchEvent(new Event("input", { bubbles: true }));
+		el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 	});
 	await page.waitForTimeout(400);
 
 	const { result, error } = await readResult(ctx);
 	if (error) {
 		ctx.fail("Free-text submit resolves", `Promise rejected: ${error}`);
-	} else if (result && result.id === "q-text" && result.value === "hello world") {
+	} else if (result && result.id === "q-text" && Array.isArray(result.values) && result.values[0] === "hello world") {
 		ctx.pass("Free-text submit resolves", `Resolved with trimmed value "hello world"`);
 	} else {
 		ctx.fail("Free-text submit resolves", `Unexpected result: ${JSON.stringify(result)}`);
@@ -292,9 +349,7 @@ async function testChipsOnly(ctx: TestContext): Promise<void> {
 	const setup = await startInteraction(ctx, {
 		type: "ask",
 		id: "q-chips-only",
-		question: "Confirm?",
-		suggestions: ["Yes", "No"],
-		allowFreeText: false,
+		questions: [{ question: "Confirm?", suggestions: ["Yes", "No"], allowFreeText: false }],
 	});
 	if (!setup.ok) {
 		ctx.fail("Render chips-only prompt", setup.error ?? "unknown");
@@ -333,7 +388,7 @@ async function testAbort(ctx: TestContext): Promise<void> {
 
 	const setup = await startInteraction(
 		ctx,
-		{ type: "ask", id: "q-abort", question: "Waiting…" },
+		{ type: "ask", id: "q-abort", questions: [{ question: "Waiting…" }] },
 		{ withAbort: true },
 	);
 	if (!setup.ok) {
@@ -634,18 +689,30 @@ async function testRealDispatchRoundTrip(ctx: TestContext): Promise<void> {
 			return Promise.resolve("approved");
 		};
 
-		// Per-call interaction callback — renders the prompt into our card and,
-		// on the next tick, clicks the "Green" chip to simulate the user picking
-		// a specific (non-first) suggestion.
+		// Per-call interaction callback — renders the prompt (TWO questions, so the
+		// whole set renders in ONE card) and, on the next tick, answers both: click
+		// "Green" for Q1 and type + Enter a free-text answer for Q2. The set
+		// auto-submits only once both are answered.
 		const interactionCb = (request: any, signal: any) => {
 			w.__dispatchInteractionCalls += 1;
 			const promise = view.renderInteractionPrompt(card, request, signal);
 			window.setTimeout(() => {
-				const chips = Array.from(
-					card.querySelectorAll(".notor-interaction-chip"),
+				const groups = Array.from(
+					card.querySelectorAll(".notor-interaction-question-group"),
+				) as HTMLElement[];
+				// Q1: click Green.
+				const q1Chips = Array.from(
+					groups[0]?.querySelectorAll(".notor-interaction-chip") ?? [],
 				) as HTMLButtonElement[];
-				const green = chips.find((c) => (c.textContent ?? "").trim() === "Green");
-				(green ?? chips[0])?.click();
+				const green = q1Chips.find((c) => (c.textContent ?? "").trim() === "Green");
+				(green ?? q1Chips[0])?.click();
+				// Q2: type + Enter to commit (this is the final answer → auto-submit).
+				const q2Input = groups[1]?.querySelector(".notor-interaction-input") as HTMLInputElement | undefined;
+				if (q2Input) {
+					q2Input.value = "no thanks";
+					q2Input.dispatchEvent(new Event("input", { bubbles: true }));
+					q2Input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+				}
 			}, 50);
 			return promise;
 		};
@@ -653,7 +720,12 @@ async function testRealDispatchRoundTrip(ctx: TestContext): Promise<void> {
 		dispatcher
 			.dispatch(
 				"ask_user",
-				{ questions: [{ question: "Pick a color", suggestions: ["Red", "Green"] }] },
+				{
+					questions: [
+						{ question: "Pick a color", suggestions: ["Red", "Green"] },
+						{ question: "Any notes?" },
+					],
+				},
 				"act",
 				"msg-ask-real-dispatch",
 				undefined, // abortSignal
@@ -727,13 +799,15 @@ async function testRealDispatchRoundTrip(ctx: TestContext): Promise<void> {
 		ctx.fail("Dispatch resolves with answer", "Dispatch did not settle within timeout", shot);
 	} else {
 		const result = outcome.result;
-		const answer = result?.result?.answers?.[0]?.answer;
-		if (result.success === true && answer === "Green") {
-			ctx.pass("Dispatch resolves with answer", `Tool result carries chosen answer (answers[0].answer="Green")`, shot);
-		} else if (result.success === true && (answer === "" || answer == null)) {
-			ctx.fail("Dispatch resolves with answer", `Regression: success but BLANK answer (${JSON.stringify(answer)}) — interaction did not flow back`, shot);
+		const answers = result?.result?.answers;
+		const a0 = answers?.[0]?.answer;
+		const a1 = answers?.[1]?.answer;
+		if (result.success === true && a0 === "Green" && a1 === "no thanks") {
+			ctx.pass("Dispatch resolves with answers", `Both answers flowed back (["Green","no thanks"]) from one batched prompt`, shot);
+		} else if (result.success === true && (a0 === "" || a0 == null)) {
+			ctx.fail("Dispatch resolves with answers", `Regression: success but BLANK answer (${JSON.stringify(a0)}) — interaction did not flow back`, shot);
 		} else {
-			ctx.fail("Dispatch resolves with answer", `Unexpected result: ${JSON.stringify(result)?.substring(0, 200)}`, shot);
+			ctx.fail("Dispatch resolves with answers", `Unexpected result: ${JSON.stringify(result)?.substring(0, 200)}`, shot);
 		}
 	}
 
@@ -747,10 +821,10 @@ async function testRealDispatchRoundTrip(ctx: TestContext): Promise<void> {
 		);
 	}
 
-	if ((outcome.interactionCalls ?? 0) >= 1) {
-		ctx.pass("Interaction callback fired", `interactionCallback invoked ${outcome.interactionCalls} time(s)`);
+	if (outcome.interactionCalls === 1) {
+		ctx.pass("Interaction callback fired once", `One batched interaction call for the whole set (got ${outcome.interactionCalls})`);
 	} else {
-		ctx.fail("Interaction callback fired", `Expected ≥1 interaction call, got ${outcome.interactionCalls}`);
+		ctx.fail("Interaction callback fired once", `Expected exactly 1 interaction call (one render for all questions), got ${outcome.interactionCalls}`);
 	}
 
 	// Clean up the throwaway card.

@@ -113,46 +113,42 @@ async function waitForInteractionUI(page: Page, timeoutMs = 60_000): Promise<boo
 }
 
 /**
- * Answer every pending interaction prompt one at a time. Prefers the "Green"
- * chip when present (deterministic assertion target); otherwise clicks the
- * first chip, or types a free-text reply for chip-less prompts. Returns the
- * number of prompts answered.
+ * Answer every question in the single grouped prompt, then let it auto-submit.
+ * All questions render together as `.notor-interaction-question-group`s. For each
+ * group: click the "Green" chip when present (deterministic assertion target),
+ * else the first chip; for chip-less groups, type a free-text reply and commit
+ * with Enter. The set auto-submits once the last question is answered — no
+ * Submit button. Returns the number of question-groups answered.
  */
 async function answerAllPrompts(page: Page, freeText: string): Promise<number> {
-	let answered = 0;
-	for (let i = 0; i < 6; i++) {
-		const remaining = await page.$$(".notor-interaction-prompt");
-		if (remaining.length === 0) break;
+	const prompt = await page.$(".notor-interaction-prompt");
+	if (!prompt) return 0;
 
-		const acted = await page.evaluate((text) => {
-			const prompt = document.querySelector(".notor-interaction-prompt");
-			if (!prompt) return "none";
-
+	return page.evaluate((text) => {
+		const prompt = document.querySelector(".notor-interaction-prompt");
+		if (!prompt) return 0;
+		const groups = Array.from(prompt.querySelectorAll(".notor-interaction-question-group"));
+		let answered = 0;
+		for (const group of groups) {
 			const chips = Array.from(
-				prompt.querySelectorAll<HTMLButtonElement>(".notor-interaction-chip"),
+				group.querySelectorAll<HTMLButtonElement>(".notor-interaction-chip"),
 			);
 			if (chips.length > 0) {
 				const green = chips.find((c) => (c.textContent ?? "").trim().toLowerCase() === "green");
 				(green ?? chips[0])!.click();
-				return "chip";
+				answered += 1;
+				continue;
 			}
-
-			const input = prompt.querySelector<HTMLInputElement>(".notor-interaction-input");
-			const submit = prompt.querySelector<HTMLButtonElement>(".notor-interaction-submit");
-			if (input && submit) {
+			const input = group.querySelector<HTMLInputElement>(".notor-interaction-input");
+			if (input) {
 				input.value = text;
 				input.dispatchEvent(new Event("input", { bubbles: true }));
-				submit.click();
-				return "text";
+				input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+				answered += 1;
 			}
-			return "stuck";
-		}, freeText);
-
-		if (acted === "none" || acted === "stuck") break;
-		answered += 1;
-		await page.waitForTimeout(600);
-	}
-	return answered;
+		}
+		return answered;
+	}, freeText);
 }
 
 // ---------------------------------------------------------------------------
