@@ -20,6 +20,7 @@ const log = logger("stream-utils");
 
 export type ParsedStreamEvent =
 	| { type: "text_delta"; text: string; delta: string }
+	| { type: "thinking_started" }
 	| { type: "thinking_delta"; text: string; delta: string }
 	| { type: "tool_call"; id: string; name: string; parameters: Record<string, unknown> }
 	| { type: "message_end"; inputTokens: number; outputTokens: number }
@@ -45,6 +46,10 @@ export async function* parseStreamEvents(
 ): AsyncIterable<ParsedStreamEvent> {
 	let textContent = "";
 	let thinkingContent = "";
+	// Latch so `thinking_started` is emitted at most once per stream, whether the
+	// provider sends an explicit `thinking_start` boundary or only `thinking_delta`
+	// chunks (in which case we synthesize the start from the first delta).
+	let thinkingStarted = false;
 
 	// Per-tool-call accumulation state
 	let currentToolCallId = "";
@@ -64,7 +69,18 @@ export async function* parseStreamEvents(
 					yield { type: "text_delta", text: textContent, delta: chunk.text };
 					break;
 
+				case "thinking_start":
+					if (!thinkingStarted) {
+						thinkingStarted = true;
+						yield { type: "thinking_started" };
+					}
+					break;
+
 				case "thinking_delta":
+					if (!thinkingStarted) {
+						thinkingStarted = true;
+						yield { type: "thinking_started" };
+					}
 					thinkingContent += chunk.text;
 					yield { type: "thinking_delta", text: thinkingContent, delta: chunk.text };
 					break;

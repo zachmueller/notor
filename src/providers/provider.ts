@@ -96,6 +96,7 @@ export interface SendMessageOptions {
 /** Union type covering all streaming response chunk types. */
 export type StreamChunk =
 	| { type: "text_delta"; text: string }
+	| { type: "thinking_start" }
 	| { type: "thinking_delta"; text: string }
 	| { type: "tool_call_start"; id: string; tool_name: string }
 	| { type: "tool_call_delta"; id: string; partial_json: string }

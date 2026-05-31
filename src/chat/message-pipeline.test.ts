@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../utils/logger", () => ({
 	logger: () => ({
@@ -9,9 +9,10 @@ vi.mock("../utils/logger", () => ({
 	}),
 }));
 
-import { toChatMessages, getWireText, setChatBlockRegistry } from "./message-pipeline";
+import { toChatMessages, getWireText, setChatBlockRegistry, processStream } from "./message-pipeline";
 import type { Message } from "../types";
 import type { ContentBlock } from "../media/types";
+import type { StreamChunk } from "../providers/provider";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -302,6 +303,154 @@ describe("toChatMessages — extension_block", () => {
 			expect(allText).toContain('<notor-ext source="my-ext">');
 		} else {
 			expect(content).toContain('<notor-ext source="my-ext">');
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// processStream — thinking indicator lifecycle + duration
+// ---------------------------------------------------------------------------
+
+type FakeView = {
+	createAssistantMessagePlaceholder: ReturnType<typeof vi.fn>;
+	startThinkingIndicator: ReturnType<typeof vi.fn>;
+	stopThinkingIndicator: ReturnType<typeof vi.fn>;
+	appendThinkingChunk: ReturnType<typeof vi.fn>;
+	appendStreamChunk: ReturnType<typeof vi.fn>;
+};
+
+function makeFakeView(): { view: FakeView; contentEl: object } {
+	const contentEl = { __sentinel: "contentEl" };
+	const view: FakeView = {
+		createAssistantMessagePlaceholder: vi.fn(() => contentEl),
+		startThinkingIndicator: vi.fn(),
+		stopThinkingIndicator: vi.fn(),
+		appendThinkingChunk: vi.fn(),
+		appendStreamChunk: vi.fn(),
+	};
+	return { view, contentEl };
+}
+
+async function* streamOf(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
+	for (const chunk of chunks) yield chunk;
+}
+
+describe("processStream — thinking indicator", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("starts and stops the indicator and records a duration for a thinking→text turn", async () => {
+		// Date.now() is called once on thinking_started and once inside stopThinking.
+		vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(4_000);
+		const { view, contentEl } = makeFakeView();
+
+		const result = await processStream(
+			streamOf([
+				{ type: "thinking_start" },
+				{ type: "text_delta", text: "hello" },
+				{ type: "message_end", input_tokens: 5, output_tokens: 7 },
+			]),
+			new AbortController(),
+			contentEl as never,
+			() => view as never,
+		);
+
+		expect(view.startThinkingIndicator).toHaveBeenCalledTimes(1);
+		expect(view.startThinkingIndicator).toHaveBeenCalledWith(contentEl);
+		expect(view.stopThinkingIndicator).toHaveBeenCalledTimes(1);
+		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 3_000);
+		expect(result.type).toBe("text");
+		if (result.type === "text") {
+			expect(result.thinkingDurationMs).toBe(3_000);
+		}
+	});
+
+	it("stops the indicator when the first tool call arrives", async () => {
+		vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(2_500);
+		const { view, contentEl } = makeFakeView();
+
+		const result = await processStream(
+			streamOf([
+				{ type: "thinking_start" },
+				{ type: "tool_call_start", id: "t1", tool_name: "read_note" },
+				{ type: "tool_call_end", id: "t1" },
+				{ type: "message_end", input_tokens: 1, output_tokens: 1 },
+			]),
+			new AbortController(),
+			contentEl as never,
+			() => view as never,
+		);
+
+		expect(view.stopThinkingIndicator).toHaveBeenCalledTimes(1);
+		expect(result.type).toBe("tool_calls");
+		if (result.type === "tool_calls") {
+			expect(result.thinkingDurationMs).toBe(1_500);
+		}
+	});
+
+	it("records a duration for a hidden-thinking-only turn (no text, no tools)", async () => {
+		vi.spyOn(Date, "now").mockReturnValueOnce(10_000).mockReturnValueOnce(12_000);
+		const { view, contentEl } = makeFakeView();
+
+		const result = await processStream(
+			streamOf([
+				{ type: "thinking_start" },
+				{ type: "message_end", input_tokens: 3, output_tokens: 0 },
+			]),
+			new AbortController(),
+			contentEl as never,
+			() => view as never,
+		);
+
+		// stopThinking fires once after the loop ends.
+		expect(view.stopThinkingIndicator).toHaveBeenCalledTimes(1);
+		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 2_000);
+		expect(result.type).toBe("text");
+		if (result.type === "text") {
+			expect(result.thinking).toBe("");
+			expect(result.thinkingDurationMs).toBe(2_000);
+		}
+	});
+
+	it("stops the indicator and reports a duration when cancelled mid-thinking", async () => {
+		vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(1_800);
+		const { view, contentEl } = makeFakeView();
+		const ac = new AbortController();
+
+		// Abort after thinking_start is consumed but before the next chunk.
+		async function* aborting(): AsyncIterable<StreamChunk> {
+			yield { type: "thinking_start" };
+			ac.abort();
+			yield { type: "text_delta", text: "never seen" };
+		}
+
+		const result = await processStream(aborting(), ac, contentEl as never, () => view as never);
+
+		expect(view.stopThinkingIndicator).toHaveBeenCalledTimes(1);
+		expect(result.type).toBe("cancelled");
+		if (result.type === "cancelled") {
+			expect(result.thinkingDurationMs).toBe(800);
+		}
+	});
+
+	it("is a safe no-op when no view is available", async () => {
+		vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(3_000);
+
+		const result = await processStream(
+			streamOf([
+				{ type: "thinking_start" },
+				{ type: "text_delta", text: "hi" },
+				{ type: "message_end", input_tokens: 1, output_tokens: 1 },
+			]),
+			new AbortController(),
+			undefined,
+			() => undefined,
+		);
+
+		expect(result.type).toBe("text");
+		if (result.type === "text") {
+			expect(result.thinkingDurationMs).toBe(2_000);
 		}
 	});
 });

@@ -405,8 +405,15 @@ export class AnthropicProvider implements LLMProvider {
 						id: block.id ?? "",
 						tool_name: block.name ?? "",
 					};
-				} else if (block?.type === "thinking" && block.thinking) {
-					yield { type: "thinking_delta", text: block.thinking };
+				} else if (block?.type === "thinking" || block?.type === "redacted_thinking") {
+					// Emit a lifecycle signal on the thinking block boundary even when
+					// no thinking text is present (Opus 4.8+ hidden thinking still opens
+					// a thinking block on the wire with its text omitted). The optional
+					// text delta follows only when the block actually carries content.
+					yield { type: "thinking_start" };
+					if (block.type === "thinking" && block.thinking) {
+						yield { type: "thinking_delta", text: block.thinking };
+					}
 				}
 				break;
 			}

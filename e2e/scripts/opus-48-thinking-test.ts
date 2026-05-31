@@ -27,6 +27,11 @@
  * That is why Test 2 asserts a substantive answer rather than a rendered
  * thinking block. (Opus 4.6 returns plaintext reasoning, which does render.)
  *
+ * Thinking indicator: Test 1 observes the live "Thinking Ns" indicator
+ * concurrently with the send, but only logs it (the signed-reasoning case above
+ * may emit no wire boundary on Bedrock). Test 4 deterministically asserts the
+ * Opus 4.6 thinking block's summary finalizes to "Thought for Ns".
+ *
  * @see src/providers/thinking-config.ts — resolveAnthropicThinking
  * @see src/providers/bedrock-provider.ts — output_config injection
  * @see src/providers/model-metadata.ts — supportsEffortThinking
@@ -63,11 +68,36 @@ const REJECTION_MARKERS = [
 // Local helpers (test-specific only)
 // ---------------------------------------------------------------------------
 
+const THINKING_ACTIVE_SELECTOR = ".notor-thinking-active";
+const THINKING_SUMMARY_SELECTOR = ".notor-thinking-block > summary";
+
 /** Collect the text of every chat error currently rendered in the DOM. */
 async function getChatErrorTexts(ctx: TestContext): Promise<string[]> {
 	return ctx.page.$$eval(CHAT_ERROR_SELECTOR, (els) =>
 		els.map((e) => (e.textContent ?? "").trim()).filter((t) => t.length > 0),
 	);
+}
+
+/**
+ * Poll for the live "thinking" indicator (`.notor-thinking-active`) for up to
+ * `timeoutMs`. Used concurrently with an in-flight send to catch the transient
+ * active state before the response finalizes. Returns the summary text seen
+ * while active (e.g. "Thinking 2s"), or null if never observed.
+ */
+async function pollForActiveThinking(
+	ctx: TestContext,
+	timeoutMs: number,
+): Promise<string | null> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const text = await ctx.page.evaluate((sel: string) => {
+			const el = document.querySelector(sel + " > summary");
+			return el ? (el.textContent ?? "").trim() : null;
+		}, THINKING_ACTIVE_SELECTOR);
+		if (text) return text;
+		await ctx.page.waitForTimeout(150);
+	}
+	return null;
 }
 
 /** Find any rendered error that matches the Opus 4.8 thinking rejection. */
@@ -143,14 +173,32 @@ async function testOpus48NoRejectionError(ctx: TestContext): Promise<void> {
 
 	// A genuinely hard, multi-step reasoning prompt so adaptive thinking actually
 	// engages at effort=high — a trivial prompt would let the model skip thinking.
-	const responded = await sendMessage(
-		page,
+	const prompt =
 		"Solve this step by step and show your reasoning: I have three boxes labeled " +
-			"'Apples', 'Oranges', and 'Apples & Oranges'. Every label is wrong. You may " +
-			"draw one fruit from one box without looking inside. Which box do you draw from, " +
-			"and how can you correctly relabel all three boxes from that single draw? Then, " +
-			"separately, compute the 12th Fibonacci number by hand and verify it.",
-	);
+		"'Apples', 'Oranges', and 'Apples & Oranges'. Every label is wrong. You may " +
+		"draw one fruit from one box without looking inside. Which box do you draw from, " +
+		"and how can you correctly relabel all three boxes from that single draw? Then, " +
+		"separately, compute the 12th Fibonacci number by hand and verify it.";
+
+	// Observe the live thinking indicator concurrently with the in-flight send —
+	// the active state is transient and gone by the time the response finalizes.
+	const livePromise = pollForActiveThinking(ctx, 30_000);
+	const responded = await sendMessage(page, prompt);
+	const liveSummary = await livePromise;
+
+	// Informational only: on Bedrock, adaptive Opus 4.8 may return a *signed*
+	// reasoning block that emits no recognizable wire boundary, so the live
+	// indicator may not appear (same as today — no regression). On the direct
+	// Anthropic API the boundary always arrives and this would be populated.
+	if (liveSummary) {
+		console.log(`    Live thinking indicator observed: "${liveSummary}"`);
+		if (!/^Thinking \d+s$/.test(liveSummary)) {
+			console.log(`    ⚠ Unexpected live summary format: "${liveSummary}"`);
+		}
+	} else {
+		console.log("    Live thinking indicator not observed (expected on Bedrock signed reasoning)");
+	}
+
 	await page.waitForTimeout(1_000);
 	const screenshot = await ctx.screenshot("01-opus48-response");
 
@@ -319,9 +367,25 @@ async function testOpus46Regression(ctx: TestContext): Promise<void> {
 		return;
 	}
 
+	// The response has finalized, so the summary should read "Thought for Ns"
+	// (driven by the persisted thinking_duration_ms) rather than the live timer.
+	const summaryText = (await page.evaluate((sel: string) => {
+		const el = document.querySelector(".notor-message-assistant:last-child " + sel);
+		return el ? (el.textContent ?? "").trim() : null;
+	}, THINKING_SUMMARY_SELECTOR)) ?? "";
+
+	if (!/^Thought for \d+m?\s?\d*s?$/.test(summaryText)) {
+		ctx.fail(
+			"Opus 4.6 regression",
+			`Thinking block summary did not finalize to "Thought for Ns" (got "${summaryText}")`,
+			screenshot,
+		);
+		return;
+	}
+
 	ctx.pass(
 		"Opus 4.6 regression",
-		"Opus 4.6 responded with adaptive thinking and no rejection error",
+		`Opus 4.6 responded with adaptive thinking; summary finalized to "${summaryText}"`,
 		screenshot,
 	);
 }

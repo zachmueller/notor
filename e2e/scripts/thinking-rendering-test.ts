@@ -112,7 +112,7 @@ async function testThinkingBlockHasContent(ctx: TestContext): Promise<void> {
 }
 
 async function testThinkingSummaryLabel(ctx: TestContext): Promise<void> {
-	console.log("\nTest 3: Thinking block has 'Thinking' summary label");
+	console.log("\nTest 3: Thinking block summary shows finalized 'Thought for Ns' label");
 	const { page } = ctx;
 
 	const summary = await page.$(
@@ -124,11 +124,13 @@ async function testThinkingSummaryLabel(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	const text = await summary.textContent();
-	if (text?.trim() === "Thinking") {
-		ctx.pass("Thinking summary label", "Summary text is 'Thinking'");
+	// The response has finalized, so the live "Thinking Ns" timer should now read
+	// "Thought for Ns" (driven by the persisted thinking_duration_ms).
+	const text = (await summary.textContent())?.trim() ?? "";
+	if (/^Thought for \d+m?\s?\d*s?$/.test(text)) {
+		ctx.pass("Thinking summary label", `Summary text is '${text}'`);
 	} else {
-		ctx.fail("Thinking summary label", `Expected 'Thinking' but got '${text}'`);
+		ctx.fail("Thinking summary label", `Expected 'Thought for Ns' but got '${text}'`);
 	}
 }
 

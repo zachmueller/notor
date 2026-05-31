@@ -151,6 +151,8 @@ export interface Message {
 	cost_estimate?: number | null;
 	/** Thinking/reasoning content from extended thinking (null if disabled). */
 	thinking?: string | null;
+	/** Elapsed wall-clock time the model spent thinking, in ms (null if none). */
+	thinking_duration_ms?: number | null;
 	/** Tool call details (for tool_call role only). */
 	tool_call?: ToolCall | null;
 	/** Tool result details (for tool_result role only). */

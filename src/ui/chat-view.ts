@@ -960,6 +960,9 @@ export class NotorChatView extends ItemView {
 		this.conversationList?.destroy();
 		this.conversationList = undefined;
 
+		// Clear renderer timers (stream-render debounce + thinking interval).
+		this.messageRenderer?.destroy();
+
 		// A3.8: Release all callback references to prevent GC leaks.
 		// Called AFTER onCloseCleanup (Amendment R2-8 ordering) so the
 		// cleanup callback can still use view callbacks if needed.
@@ -1413,6 +1416,14 @@ export class NotorChatView extends ItemView {
 
 	appendThinkingChunk(contentEl: HTMLElement, text: string): void {
 		this.messageRenderer.appendThinkingChunk(contentEl, text);
+	}
+
+	startThinkingIndicator(contentEl: HTMLElement): void {
+		this.messageRenderer.startThinkingIndicator(contentEl);
+	}
+
+	stopThinkingIndicator(contentEl: HTMLElement, durationMs: number): void {
+		this.messageRenderer.stopThinkingIndicator(contentEl, durationMs);
 	}
 
 	async finalizeAssistantMessage(contentEl: HTMLElement, message: Message): Promise<void> {

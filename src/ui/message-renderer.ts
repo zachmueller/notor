@@ -29,6 +29,15 @@ import { logger } from "../utils/logger";
 
 const log = logger("MessageRenderer");
 
+/** Format an elapsed thinking duration for display (e.g. 1s, 12s, 1m 5s). */
+function formatThinkingDuration(ms: number): string {
+	const totalSeconds = Math.max(1, Math.round(ms / 1000));
+	if (totalSeconds < 60) return `${totalSeconds}s`;
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
 function extractAttachmentsBlock(content: string): { attachmentsXml: string | null; remainder: string } {
 	const ATTACHMENTS_RE = /<attachments>([\s\S]*?)<\/attachments>/;
 	const match = ATTACHMENTS_RE.exec(content);
@@ -58,6 +67,8 @@ export class MessageRenderer {
 	private renderedMessages = new Map<string, Message>();
 	private streamRenderTimer: ReturnType<typeof setTimeout> | null = null;
 	private pendingStreamRender: { contentEl: HTMLElement; raw: string } | null = null;
+	private thinkingTimer: ReturnType<typeof setInterval> | null = null;
+	private thinkingStartMs: number | null = null;
 
 	constructor(public deps: MessageRendererDeps) {}
 
@@ -117,7 +128,12 @@ export class MessageRenderer {
 		}
 	}
 
-	appendThinkingChunk(contentEl: HTMLElement, text: string): void {
+	/**
+	 * Create (or return the existing) `.notor-thinking-block` for this message,
+	 * inserted as the first child of the content element. Shared by the live
+	 * indicator and the streamed-text path.
+	 */
+	private ensureThinkingBlock(contentEl: HTMLElement): HTMLElement {
 		let detailsEl = contentEl.querySelector<HTMLElement>(".notor-thinking-block");
 		if (!detailsEl) {
 			detailsEl = contentEl.createEl("details", { cls: "notor-thinking-block" });
@@ -127,6 +143,57 @@ export class MessageRenderer {
 				contentEl.insertBefore(detailsEl, contentEl.firstChild);
 			}
 		}
+		return detailsEl;
+	}
+
+	/** Set the thinking block's summary line ("Thinking 3s" / "Thought for 4s"). */
+	private updateThinkingSummary(detailsEl: HTMLElement, elapsedMs: number, done: boolean): void {
+		const summary = detailsEl.querySelector<HTMLElement>("summary");
+		if (!summary) return;
+		summary.textContent = done
+			? `Thought for ${formatThinkingDuration(elapsedMs)}`
+			: `Thinking ${Math.floor(elapsedMs / 1000)}s`;
+	}
+
+	/**
+	 * Begin the live "thinking" indicator: a pulsing summary that counts up.
+	 * Works whether or not reasoning text subsequently streams in.
+	 */
+	startThinkingIndicator(contentEl: HTMLElement): void {
+		const detailsEl = this.ensureThinkingBlock(contentEl);
+		detailsEl.addClass("notor-thinking-active");
+		this.thinkingStartMs = Date.now();
+		this.updateThinkingSummary(detailsEl, 0, false);
+		if (this.thinkingTimer) clearInterval(this.thinkingTimer);
+		this.thinkingTimer = setInterval(() => {
+			if (this.thinkingStartMs == null) return;
+			this.updateThinkingSummary(detailsEl, Date.now() - this.thinkingStartMs, false);
+		}, 1000);
+		this.deps.scrollToBottom();
+	}
+
+	/** End the live indicator, freezing the summary at "Thought for Ns". */
+	stopThinkingIndicator(contentEl: HTMLElement, durationMs: number): void {
+		if (this.thinkingTimer) {
+			clearInterval(this.thinkingTimer);
+			this.thinkingTimer = null;
+		}
+		this.thinkingStartMs = null;
+		const detailsEl = contentEl.querySelector<HTMLElement>(".notor-thinking-block");
+		if (!detailsEl) return;
+		detailsEl.removeClass("notor-thinking-active");
+		this.updateThinkingSummary(detailsEl, durationMs, true);
+		// Hidden thinking produces no body text; mark the block so it renders as a
+		// plain "Thought for Ns" trace rather than an empty expandable.
+		const body = detailsEl.querySelector<HTMLElement>(".notor-thinking-content");
+		if (body && !body.getAttribute("data-raw")) {
+			detailsEl.addClass("notor-thinking-empty");
+		}
+	}
+
+	appendThinkingChunk(contentEl: HTMLElement, text: string): void {
+		const detailsEl = this.ensureThinkingBlock(contentEl);
+		detailsEl.removeClass("notor-thinking-empty");
 		const thinkingContent = detailsEl.querySelector<HTMLElement>(".notor-thinking-content")!;
 		const existing = thinkingContent.getAttribute("data-raw") ?? "";
 		const updated = existing + text;
@@ -141,15 +208,33 @@ export class MessageRenderer {
 			this.streamRenderTimer = null;
 			this.pendingStreamRender = null;
 		}
+		// contentEl.empty() below destroys the live thinking node, so stop the
+		// interval first to avoid it writing to a detached element.
+		if (this.thinkingTimer) {
+			clearInterval(this.thinkingTimer);
+			this.thinkingTimer = null;
+		}
+		this.thinkingStartMs = null;
 		contentEl.parentElement!.dataset.messageId = message.id;
 		this.appendForkButton(contentEl.parentElement!, message);
 		contentEl.empty();
 
-		if (message.thinking) {
+		// Render the thinking block when there's reasoning text OR a recorded
+		// duration (hidden thinking leaves only a "Thought for Ns" trace).
+		if (message.thinking || message.thinking_duration_ms) {
 			const detailsEl = contentEl.createEl("details", { cls: "notor-thinking-block" });
-			detailsEl.createEl("summary", { text: "Thinking" });
+			detailsEl.createEl("summary", {
+				text: message.thinking_duration_ms
+					? `Thought for ${formatThinkingDuration(message.thinking_duration_ms)}`
+					: "Thinking",
+			});
 			const thinkingDiv = detailsEl.createEl("div", { cls: "notor-thinking-content" });
-			thinkingDiv.textContent = message.thinking;
+			if (message.thinking) {
+				thinkingDiv.setAttribute("data-raw", message.thinking);
+				thinkingDiv.textContent = message.thinking;
+			} else {
+				detailsEl.addClass("notor-thinking-empty");
+			}
 		}
 
 		const assistantText = typeof message.content === "string"
@@ -502,6 +587,20 @@ export class MessageRenderer {
 		this.toolCallElMap.clear();
 		this.renderedMessages.clear();
 		this.lastToolCallEl = null;
+	}
+
+	/** Clear any pending timers. Called from the view's teardown path. */
+	destroy(): void {
+		if (this.streamRenderTimer) {
+			clearTimeout(this.streamRenderTimer);
+			this.streamRenderTimer = null;
+			this.pendingStreamRender = null;
+		}
+		if (this.thinkingTimer) {
+			clearInterval(this.thinkingTimer);
+			this.thinkingTimer = null;
+		}
+		this.thinkingStartMs = null;
 	}
 
 	hasMessageElement(messageId: string): boolean {

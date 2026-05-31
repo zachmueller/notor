@@ -815,10 +815,53 @@
 	margin-bottom: 8px;
 }
 
+.notor-thinking-block > summary {
+	cursor: pointer;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+/* Live "thinking" state — pulsing dot before the summary while the model thinks. */
+.notor-thinking-active > summary::before {
+	content: "";
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	margin-right: 6px;
+	border-radius: 50%;
+	background: var(--text-accent);
+	animation: notor-thinking-pulse 1.2s ease-in-out infinite;
+	vertical-align: middle;
+}
+
+/* Hidden thinking left no body text — render as a plain trace, not an expandable. */
+.notor-thinking-empty > summary {
+	list-style: none;
+	cursor: default;
+}
+
 .notor-thinking-content {
 	font-size: 0.85em;
 	opacity: 0.6;
 	white-space: pre-wrap;
+}
+
+@keyframes notor-thinking-pulse {
+	0%, 100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	50% {
+		opacity: 0.4;
+		transform: scale(0.85);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.notor-thinking-active > summary::before {
+		animation: none;
+		opacity: 0.8;
+	}
 }
 
 .notor-message-content p:first-child {

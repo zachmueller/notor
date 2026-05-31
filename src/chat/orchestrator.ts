@@ -1175,6 +1175,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 						role: "assistant",
 						content: result.text,
 						thinking: result.thinking || null,
+						thinking_duration_ms: result.thinkingDurationMs || null,
 						input_tokens: result.inputTokens,
 						output_tokens: result.outputTokens,
 						cost_estimate: calculateCost(result.inputTokens, result.outputTokens, session.modelId, this.settings),
@@ -1207,6 +1208,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 							role: "assistant",
 							content: result.text || "",
 							thinking: result.thinking || null,
+							thinking_duration_ms: result.thinkingDurationMs || null,
 							input_tokens: result.inputTokens,
 							output_tokens: result.outputTokens,
 							cost_estimate: calculateCost(result.inputTokens, result.outputTokens, session.modelId, this.settings),
@@ -1482,6 +1484,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 						role: "assistant",
 						content: cancelledContent,
 						thinking: result.thinking || null,
+						thinking_duration_ms: result.thinkingDurationMs || null,
 					});
 
 					const cancelView = this.getViewForSession(session);

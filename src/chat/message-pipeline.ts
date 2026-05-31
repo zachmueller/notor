@@ -74,9 +74,9 @@ export function getWireText(
 
 /** Result type for stream processing. */
 export type StreamResult =
-	| { type: "text"; text: string; thinking: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; thinking: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "cancelled"; text: string; thinking: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "text"; text: string; thinking: string; thinkingDurationMs: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; thinking: string; thinkingDurationMs: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "cancelled"; text: string; thinking: string; thinkingDurationMs: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "error"; error: string; text: string; inputTokens: number; outputTokens: number };
 
 /**
@@ -102,10 +102,36 @@ export async function processStream(
 
 	const resolveView = viewResolver ?? (() => undefined);
 
+	// Thinking timer state. The pipeline owns the authoritative elapsed time
+	// (Date.now() deltas survive mid-stream view navigation); the renderer's
+	// interval is purely cosmetic.
+	let thinkingStartTime: number | null = null;
+	let thinkingDurationMs = 0;
+	let thinkingStopped = false;
+	const stopThinking = () => {
+		if (thinkingStartTime !== null && !thinkingStopped) {
+			thinkingDurationMs = Date.now() - thinkingStartTime;
+			thinkingStopped = true;
+			if (contentEl) resolveView()?.stopThinkingIndicator(contentEl, thinkingDurationMs);
+		}
+	};
+
 	const accumulatedToolCalls: ToolCallInfo[] = [];
 
 	for await (const event of parseStreamEvents(stream, abortController.signal)) {
 		switch (event.type) {
+			case "thinking_started": {
+				thinkingStartTime = Date.now();
+				const view = resolveView();
+				if (!contentEl) {
+					contentEl = view?.createAssistantMessagePlaceholder();
+				}
+				if (contentEl) {
+					view?.startThinkingIndicator(contentEl);
+				}
+				break;
+			}
+
 			case "thinking_delta": {
 				thinkingContent += event.delta;
 				const view = resolveView();
@@ -119,6 +145,8 @@ export async function processStream(
 			}
 
 			case "text_delta": {
+				// First visible text ends the thinking phase.
+				stopThinking();
 				// contentEl may already be set from the eager placeholder
 				const view = resolveView();
 				if (!contentEl) {
@@ -132,6 +160,8 @@ export async function processStream(
 			}
 
 			case "tool_call":
+				// First tool call ends the thinking phase.
+				stopThinking();
 				accumulatedToolCalls.push({
 					toolCallId: event.id,
 					toolName: event.name,
@@ -150,6 +180,7 @@ export async function processStream(
 				break;
 
 			case "error":
+				stopThinking();
 				return {
 					type: "error",
 					error: event.message,
@@ -159,16 +190,22 @@ export async function processStream(
 				};
 
 			case "cancelled":
+				stopThinking();
 				return {
 					type: "cancelled",
 					text: event.text,
 					thinking: thinkingContent,
+					thinkingDurationMs,
 					inputTokens,
 					outputTokens,
 					contentEl,
 				};
 		}
 	}
+
+	// Stream ended normally. Stop any still-running thinking timer (covers
+	// hidden-thinking-only turns that emit no text and no tool calls).
+	stopThinking();
 
 	// If we accumulated tool calls, return them all
 	if (accumulatedToolCalls.length > 0) {
@@ -177,6 +214,7 @@ export async function processStream(
 			calls: accumulatedToolCalls,
 			text: textContent,
 			thinking: thinkingContent,
+			thinkingDurationMs,
 			inputTokens,
 			outputTokens,
 			contentEl,
@@ -187,6 +225,7 @@ export async function processStream(
 		type: "text",
 		text: textContent,
 		thinking: thinkingContent,
+		thinkingDurationMs,
 		inputTokens,
 		outputTokens,
 		contentEl,

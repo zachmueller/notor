@@ -531,10 +531,16 @@ export class BedrockProvider implements LLMProvider {
 					tool_name: start.toolUse.name ?? "",
 				};
 			}
-			// Thinking block start may carry initial content
+			// Thinking block start. Emit a lifecycle signal on the boundary even
+			// when no plaintext is present (adaptive Opus 4.8 may return a signed
+			// reasoning block with its text omitted). Initial content follows only
+			// when the block actually carries it.
 			const rawStart = start as Record<string, unknown> | undefined;
-			if (rawStart?.type === "thinking" && typeof rawStart.thinking === "string" && rawStart.thinking) {
-				yield { type: "thinking_delta", text: rawStart.thinking };
+			if (rawStart?.type === "thinking" || rawStart?.type === "redacted_thinking" || rawStart?.reasoningContent) {
+				yield { type: "thinking_start" };
+				if (typeof rawStart.thinking === "string" && rawStart.thinking) {
+					yield { type: "thinking_delta", text: rawStart.thinking };
+				}
 			}
 		}
 
