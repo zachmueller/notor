@@ -418,6 +418,19 @@ export class ConversationLifecycleManager {
 			}
 		}
 
+		// Re-render pending interaction prompts (ask_user) destroyed by clearMessages.
+		if (view && activeSession.pendingInteractions.size > 0) {
+			const interactionResults = view.reRenderPendingInteractions(activeSession.pendingInteractions);
+			for (const [msgId, promise] of interactionResults) {
+				const pending = activeSession.pendingInteractions.get(msgId);
+				if (pending) {
+					promise
+						.then((response) => pending.resolve(response))
+						.catch((err) => pending.reject(err));
+				}
+			}
+		}
+
 		// Display-restore from session's pinned state
 		view?.updatePersonaLabel(activeSession.pinnedPersona);
 		this.setActivePersona(activeSession.pinnedPersona);

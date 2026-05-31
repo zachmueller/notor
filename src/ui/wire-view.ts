@@ -664,7 +664,7 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		try {
 			const response = await new Promise<import("./interaction-ui").InteractionResponse>((resolve, reject) => {
 				if (messageId && session) {
-					session.pendingInteractions.set(messageId, { reject, messageId });
+					session.pendingInteractions.set(messageId, { resolve, reject, request, messageId });
 				}
 				view.renderInteractionPrompt(toolCallEl, request, abortSignal)
 					.then(resolve)

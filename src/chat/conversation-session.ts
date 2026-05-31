@@ -13,6 +13,7 @@ import type { Persona, WorkflowAssemblyResult } from "../types";
 import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
 import type { ToolPolicyContext } from "./tool-policy";
 import type { ApprovalCallback, InteractionCallback } from "./dispatcher";
+import type { InteractionRequest, InteractionResponse } from "../ui/interaction-ui";
 import type { NotorSettings } from "../settings";
 
 export type SessionStatus =
@@ -31,8 +32,12 @@ export interface PendingApproval {
 }
 
 export interface PendingInteraction {
+	/** Resolve the original interaction promise with the user's answers. */
+	resolve: (response: InteractionResponse) => void;
 	/** Reject the interaction promise so the tool loop unwinds (on abort/teardown). */
 	reject: (reason: Error) => void;
+	/** The originating request — needed to re-render the prompt after view teardown. */
+	request: InteractionRequest;
 	messageId: string;
 }
 

@@ -1480,6 +1480,12 @@ export class NotorChatView extends ItemView {
 		return this.messageRenderer.reRenderPendingApprovals(pendingApprovals);
 	}
 
+	reRenderPendingInteractions(
+		pendingInteractions: Map<string, { request: InteractionRequest }>
+	): Map<string, Promise<InteractionResponse>> {
+		return this.messageRenderer.reRenderPendingInteractions(pendingInteractions);
+	}
+
 	async renderDiffApprovalPrompt(
 		toolCallEl: HTMLElement,
 		toolName: string,

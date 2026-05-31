@@ -484,6 +484,25 @@ export class MessageRenderer {
 		return results;
 	}
 
+	/**
+	 * Re-render pending interaction prompts (ask_user) after the DOM was torn
+	 * down by clearMessages — e.g. when returning to a still-running session.
+	 * Mirrors reRenderPendingApprovals. The caller wires each returned promise
+	 * back to the original interaction's resolve/reject.
+	 */
+	reRenderPendingInteractions(
+		pendingInteractions: Map<string, { request: InteractionRequest }>
+	): Map<string, Promise<InteractionResponse>> {
+		const results = new Map<string, Promise<InteractionResponse>>();
+		for (const [msgId, { request }] of pendingInteractions) {
+			const toolCallEl = this.getToolCallEl(msgId);
+			if (toolCallEl) {
+				results.set(msgId, this.renderInteractionPrompt(toolCallEl, request));
+			}
+		}
+		return results;
+	}
+
 	async renderDiffApprovalPrompt(
 		toolCallEl: HTMLElement,
 		toolName: string,
