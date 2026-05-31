@@ -1551,8 +1551,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 					// Auto-clear cached credentials for Bedrock so the next
 					// attempt picks up refreshed tokens without restarting.
 					if (e.provider === "bedrock") {
+						// Safety net: drop cached clients so the next attempt
+						// re-resolves credentials. The provider message is already
+						// self-contained, so no suggestion is appended here.
 						this.providerRegistry.resetProviderCredentials("bedrock");
-						suggestion = " Cached credentials have been cleared — please try again. If the error persists, refresh your Midway token and retry.";
 					} else {
 						suggestion = " Check your API key or credentials in Settings → Notor.";
 					}

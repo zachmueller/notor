@@ -49,6 +49,7 @@ import type {
 	ContentBlock,
 	ConversationRole,
 	ConverseStreamCommandInput,
+	ConverseStreamCommandOutput,
 	ConverseStreamOutput,
 	Message as BedrockMessage,
 	SystemContentBlock,
@@ -258,6 +259,62 @@ export class BedrockProvider implements LLMProvider {
 	}
 
 	/**
+	 * Whether an SDK error represents expired/invalid security credentials.
+	 * Centralizes the check used to trigger a transparent retry and to map the
+	 * failure to a clean AUTH_FAILED message.
+	 */
+	private isExpiredCredentialError(e: unknown): boolean {
+		const name =
+			e instanceof Error
+				? e.name
+				: typeof e === "object" && e !== null && "name" in e
+					? String((e as { name: unknown }).name)
+					: "";
+		if (name === "ExpiredTokenException") return true;
+		const msg =
+			e instanceof Error
+				? e.message
+				: typeof e === "object" && e !== null && "message" in e
+					? String((e as { message: unknown }).message)
+					: String(e);
+		return msg.includes("security token") && msg.includes("expired");
+	}
+
+	/**
+	 * Provider-agnostic message for expired/invalid credentials, tailored by the
+	 * configured auth method (no references to any external credential tooling).
+	 */
+	private expiredCredentialMessage(): string {
+		return this.authMethod === "keys"
+			? "AWS Bedrock credentials have expired or are invalid. Update your access keys in Settings → Notor, then try again."
+			: "AWS Bedrock credentials have expired. Refresh your AWS credentials for this profile, then try again.";
+	}
+
+	/**
+	 * Send a command, transparently retrying once if the failure is an expired
+	 * security token. Recreating the client forces the credential chain to
+	 * re-resolve — profiles backed by an external credential process or SSO
+	 * refresh themselves on a fresh client, so the second attempt succeeds with
+	 * no user action. Static keys can't self-refresh, so the retry is skipped
+	 * and the original error surfaces for the caller to translate.
+	 */
+	private async sendWithCredentialRetry<T>(
+		getClient: () => { send: (command: unknown) => Promise<unknown> },
+		makeCommand: () => unknown
+	): Promise<T> {
+		try {
+			return (await getClient().send(makeCommand())) as T;
+		} catch (e) {
+			if (this.isExpiredCredentialError(e) && this.authMethod !== "keys") {
+				// Drop cached clients so the next getClient() re-resolves creds.
+				this.clearCachedClients();
+				return (await getClient().send(makeCommand())) as T;
+			}
+			throw e;
+		}
+	}
+
+	/**
 	 * Create AWS credentials based on auth method.
 	 */
 	private getCredentials():
@@ -325,7 +382,6 @@ export class BedrockProvider implements LLMProvider {
 		 * when multiple callers (e.g. concurrent sub-agents) use the same provider.
 		 */
 		const activeToolBlockIndices = new Map<number, string>();
-		const client = this.getRuntimeClient();
 		const { system, messages: bedrockMessages } =
 			toBedrockMessages(messages);
 
@@ -395,8 +451,9 @@ export class BedrockProvider implements LLMProvider {
 
 		let response;
 		try {
-			response = await client.send(
-				new ConverseStreamCommand(input)
+			response = await this.sendWithCredentialRetry<ConverseStreamCommandOutput>(
+				() => this.getRuntimeClient(),
+				() => new ConverseStreamCommand(input)
 			);
 		} catch (e: unknown) {
 			if (options.abort_signal?.aborted) {
@@ -456,13 +513,10 @@ export class BedrockProvider implements LLMProvider {
 					e instanceof Error ? e : undefined
 				);
 			}
-			if (
-				errName === "ExpiredTokenException" ||
-				(errMsg.includes("security token") && errMsg.includes("expired"))
-			) {
+			if (this.isExpiredCredentialError(e)) {
 				this.clearCachedClients();
 				throw new ProviderError(
-					"AWS security token has expired. Credentials have been refreshed — please try again. If the error persists, refresh your Midway token (e.g. via `ada credentials update`) and try again.",
+					this.expiredCredentialMessage(),
 					"bedrock",
 					"AUTH_FAILED",
 					e instanceof Error ? e : undefined
@@ -657,16 +711,17 @@ export class BedrockProvider implements LLMProvider {
 	private async fetchInferenceProfilesPage(
 		token: string | undefined
 	): Promise<ListInferenceProfilesCommandOutput> {
-		const client = this.getBedrockClient();
 		try {
 			// BedrockClient.send() returns ServiceOutputTypes (a broad union type).
 			// We cast via unknown to the concrete output type we know this command returns.
-			const rawResult = await client.send(
-				new ListInferenceProfilesCommand({
-					typeEquals: "SYSTEM_DEFINED",
-					...(token ? { nextToken: token } : {}),
-				})
-			) as unknown as ListInferenceProfilesCommandOutput;
+			const rawResult = await this.sendWithCredentialRetry<unknown>(
+				() => this.getBedrockClient(),
+				() =>
+					new ListInferenceProfilesCommand({
+						typeEquals: "SYSTEM_DEFINED",
+						...(token ? { nextToken: token } : {}),
+					})
+			) as ListInferenceProfilesCommandOutput;
 			return rawResult;
 		} catch (e: unknown) {
 			const errMsg = e instanceof Error ? e.message : String(e);
@@ -691,13 +746,10 @@ export class BedrockProvider implements LLMProvider {
 					e instanceof Error ? e : undefined
 				);
 			}
-			if (
-				errName === "ExpiredTokenException" ||
-				(errMsg.includes("security token") && errMsg.includes("expired"))
-			) {
+			if (this.isExpiredCredentialError(e)) {
 				this.clearCachedClients();
 				throw new ProviderError(
-					"AWS security token has expired. Credentials have been refreshed — please try again.",
+					this.expiredCredentialMessage(),
 					"bedrock",
 					"AUTH_FAILED",
 					e instanceof Error ? e : undefined
