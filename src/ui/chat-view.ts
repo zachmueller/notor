@@ -1426,6 +1426,10 @@ export class NotorChatView extends ItemView {
 		this.messageRenderer.stopThinkingIndicator(contentEl, durationMs);
 	}
 
+	cancelThinkingIndicator(contentEl: HTMLElement): void {
+		this.messageRenderer.cancelThinkingIndicator(contentEl);
+	}
+
 	async finalizeAssistantMessage(contentEl: HTMLElement, message: Message): Promise<void> {
 		return this.messageRenderer.finalizeAssistantMessage(contentEl, message);
 	}

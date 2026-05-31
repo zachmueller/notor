@@ -172,6 +172,28 @@ export class MessageRenderer {
 		this.deps.scrollToBottom();
 	}
 
+	/**
+	 * Retract an optimistically-started indicator that was never confirmed
+	 * (thinking was enabled but the model chose not to think). Removes the
+	 * block entirely unless reasoning text actually arrived.
+	 */
+	cancelThinkingIndicator(contentEl: HTMLElement): void {
+		if (this.thinkingTimer) {
+			clearInterval(this.thinkingTimer);
+			this.thinkingTimer = null;
+		}
+		this.thinkingStartMs = null;
+		const detailsEl = contentEl.querySelector<HTMLElement>(".notor-thinking-block");
+		if (!detailsEl) return;
+		const body = detailsEl.querySelector<HTMLElement>(".notor-thinking-content");
+		// Only remove if no reasoning text streamed in; otherwise keep the block.
+		if (!body || !body.getAttribute("data-raw")) {
+			detailsEl.remove();
+		} else {
+			detailsEl.removeClass("notor-thinking-active");
+		}
+	}
+
 	/** End the live indicator, freezing the summary at "Thought for Ns". */
 	stopThinkingIndicator(contentEl: HTMLElement, durationMs: number): void {
 		if (this.thinkingTimer) {

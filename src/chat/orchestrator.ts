@@ -19,6 +19,7 @@ import type { SystemPromptBuilder } from "./system-prompt";
 import type { ToolDispatcher } from "./dispatcher";
 import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./tool-orchestration";
 import { toChatMessages, processStream, calculateCost } from "./message-pipeline";
+import { supportsThinking } from "../providers/model-metadata";
 import { ConfigResolver } from "./config-resolver";
 import { HookDispatcher } from "./hook-dispatcher";
 import { CompactionManager } from "./compaction-manager";
@@ -1160,12 +1161,23 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 				const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
 
+				// Thinking is requested for this turn when the model supports it and a
+				// level is set. Used to optimistically show the thinking indicator
+				// during the pre-first-token window — on Bedrock, adaptive Opus 4.8
+				// reasons server-side before any byte streams, so a purely
+				// signal-driven indicator would never appear in time.
+				const thinkingEnabled =
+					!!session.thinkingLevel &&
+					session.thinkingLevel !== "off" &&
+					supportsThinking(session.modelId);
+
 				// 7. Process stream (pass in the already-created placeholder + session-aware view resolver)
 				const result = await processStream(
 					stream,
 					abortController,
 					eagerContentEl,
 					() => this.getViewForSession(session),
+					thinkingEnabled,
 				);
 
 				// 8. Handle result

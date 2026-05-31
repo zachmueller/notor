@@ -71,6 +71,11 @@ const REJECTION_MARKERS = [
 const THINKING_ACTIVE_SELECTOR = ".notor-thinking-active";
 const THINKING_SUMMARY_SELECTOR = ".notor-thinking-block > summary";
 
+// Live thinking-indicator summary observed during Test 1's in-flight send
+// (e.g. "Thinking 4s"), asserted by testOpus48LiveThinkingIndicator. null if
+// the indicator never appeared.
+let observedLiveThinking: string | null = null;
+
 /** Collect the text of every chat error currently rendered in the DOM. */
 async function getChatErrorTexts(ctx: TestContext): Promise<string[]> {
 	return ctx.page.$$eval(CHAT_ERROR_SELECTOR, (els) =>
@@ -182,21 +187,17 @@ async function testOpus48NoRejectionError(ctx: TestContext): Promise<void> {
 
 	// Observe the live thinking indicator concurrently with the in-flight send —
 	// the active state is transient and gone by the time the response finalizes.
+	// The indicator is started optimistically when thinking is enabled, so it
+	// must appear during the (multi-second) pre-first-token window even though
+	// Bedrock's adaptive Opus 4.8 reasoning is signed/encrypted with no
+	// streamed text. See src/chat/message-pipeline.ts (optimistic start).
 	const livePromise = pollForActiveThinking(ctx, 30_000);
 	const responded = await sendMessage(page, prompt);
 	const liveSummary = await livePromise;
 
-	// Informational only: on Bedrock, adaptive Opus 4.8 may return a *signed*
-	// reasoning block that emits no recognizable wire boundary, so the live
-	// indicator may not appear (same as today — no regression). On the direct
-	// Anthropic API the boundary always arrives and this would be populated.
+	observedLiveThinking = liveSummary;
 	if (liveSummary) {
 		console.log(`    Live thinking indicator observed: "${liveSummary}"`);
-		if (!/^Thinking \d+s$/.test(liveSummary)) {
-			console.log(`    ⚠ Unexpected live summary format: "${liveSummary}"`);
-		}
-	} else {
-		console.log("    Live thinking indicator not observed (expected on Bedrock signed reasoning)");
 	}
 
 	await page.waitForTimeout(1_000);
@@ -240,6 +241,52 @@ async function testOpus48NoRejectionError(ctx: TestContext): Promise<void> {
 	);
 }
 
+async function testOpus48LiveThinkingIndicator(ctx: TestContext): Promise<void> {
+	console.log("\nTest 1b: Live thinking indicator appears during Opus 4.8 pre-first-token window");
+	const { page } = ctx;
+
+	// Uses the observation captured during Test 1's send. The indicator is
+	// started optimistically when thinking is enabled, so it must show even
+	// though Opus 4.8 adaptive reasoning is signed (no streamed thinking text)
+	// and arrives only as a single wire signal ~2ms before the answer.
+	if (observedLiveThinking === null) {
+		ctx.fail(
+			"Opus 4.8 live thinking indicator",
+			"No `.notor-thinking-active` indicator observed during the pre-first-token window",
+		);
+		return;
+	}
+
+	if (!/^Thinking \d+s$/.test(observedLiveThinking)) {
+		ctx.fail(
+			"Opus 4.8 live thinking indicator",
+			`Indicator appeared but summary was not a live timer: "${observedLiveThinking}"`,
+		);
+		return;
+	}
+
+	// After the response finalized (Test 1 awaited it), the signed-reasoning
+	// signal confirmed thinking, so the indicator must leave a persisted
+	// "Thought for Ns" trace even though no reasoning text was rendered.
+	const finalizedSummary = (await page.evaluate((sel: string) => {
+		const el = document.querySelector(".notor-message-assistant:last-child " + sel);
+		return el ? (el.textContent ?? "").trim() : null;
+	}, THINKING_SUMMARY_SELECTOR)) ?? "";
+
+	if (!/^Thought for \d+m?\s?\d*s?$/.test(finalizedSummary)) {
+		ctx.fail(
+			"Opus 4.8 live thinking indicator",
+			`Live indicator shown ("${observedLiveThinking}") but did not finalize to "Thought for Ns" (got "${finalizedSummary}")`,
+		);
+		return;
+	}
+
+	ctx.pass(
+		"Opus 4.8 live thinking indicator",
+		`Live indicator "${observedLiveThinking}" finalized to "${finalizedSummary}"`,
+	);
+}
+
 async function testOpus48ProducesSubstantiveAnswer(ctx: TestContext): Promise<void> {
 	console.log("\nTest 2: Opus 4.8 produces a substantive reasoned answer (request fully processed)");
 	const { page } = ctx;
@@ -248,13 +295,10 @@ async function testOpus48ProducesSubstantiveAnswer(ctx: TestContext): Promise<vo
 	// answer proves the adaptive+effort request was accepted AND fully processed —
 	// i.e. the model actually did the reasoning work, not just opened a stream.
 	//
-	// We deliberately do NOT assert a rendered thinking block here: in adaptive
-	// mode Opus 4.8 returns its reasoning as a signed (encrypted) reasoningContent
-	// block with no plaintext text deltas, so nothing renders in the UI even
-	// though the model genuinely reasoned. The provider already renders plaintext
-	// reasoning when Bedrock returns it (Format 4, reasoningContent.text), as
-	// Opus 4.6 does. Thinking-block rendering is covered by thinking-rendering-test.ts;
-	// wire-shape (adaptive + effort) is covered by thinking-config.test.ts.
+	// In adaptive mode Opus 4.8 returns its reasoning as a signed (encrypted)
+	// reasoningContent block with no plaintext text deltas — so no reasoning
+	// *text* renders, but the thinking *indicator* (live timer → "Thought for Ns")
+	// is covered by Test 1b. This test focuses on answer substance.
 	const answer = (await page.evaluate(() => {
 		const msgs = document.querySelectorAll(
 			".notor-message-assistant .notor-message-content",
@@ -399,6 +443,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	await page.waitForTimeout(5_000); // Wait for plugin init
 
 	await testOpus48NoRejectionError(ctx);
+	await testOpus48LiveThinkingIndicator(ctx);
 	await testOpus48ProducesSubstantiveAnswer(ctx);
 	await testThinkingLevelPropagated(ctx);
 	await testOpus46Regression(ctx);

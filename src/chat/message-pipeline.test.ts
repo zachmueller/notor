@@ -315,6 +315,7 @@ type FakeView = {
 	createAssistantMessagePlaceholder: ReturnType<typeof vi.fn>;
 	startThinkingIndicator: ReturnType<typeof vi.fn>;
 	stopThinkingIndicator: ReturnType<typeof vi.fn>;
+	cancelThinkingIndicator: ReturnType<typeof vi.fn>;
 	appendThinkingChunk: ReturnType<typeof vi.fn>;
 	appendStreamChunk: ReturnType<typeof vi.fn>;
 };
@@ -325,6 +326,7 @@ function makeFakeView(): { view: FakeView; contentEl: object } {
 		createAssistantMessagePlaceholder: vi.fn(() => contentEl),
 		startThinkingIndicator: vi.fn(),
 		stopThinkingIndicator: vi.fn(),
+		cancelThinkingIndicator: vi.fn(),
 		appendThinkingChunk: vi.fn(),
 		appendStreamChunk: vi.fn(),
 	};
@@ -452,5 +454,78 @@ describe("processStream — thinking indicator", () => {
 		if (result.type === "text") {
 			expect(result.thinkingDurationMs).toBe(2_000);
 		}
+	});
+
+	// --- optimistic-start (pre-first-token) behavior -----------------------
+
+	it("optimistically starts the indicator when thinking is enabled, before any event", async () => {
+		// Date.now(): optimistic start, then stop on confirmed thinking_start→text.
+		vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(8_000);
+		const { view, contentEl } = makeFakeView();
+
+		const result = await processStream(
+			streamOf([
+				{ type: "thinking_start" }, // confirmation (e.g. Bedrock signature delta)
+				{ type: "text_delta", text: "answer" },
+				{ type: "message_end", input_tokens: 1, output_tokens: 1 },
+			]),
+			new AbortController(),
+			contentEl as never,
+			() => view as never,
+			true, // thinkingEnabled
+		);
+
+		// Started once (optimistically); the later thinking_start must NOT restart it.
+		expect(view.startThinkingIndicator).toHaveBeenCalledTimes(1);
+		expect(view.stopThinkingIndicator).toHaveBeenCalledTimes(1);
+		expect(view.cancelThinkingIndicator).not.toHaveBeenCalled();
+		// Duration spans the full optimistic window (request → first token), ~7s.
+		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 7_000);
+		if (result.type === "text") expect(result.thinkingDurationMs).toBe(7_000);
+	});
+
+	it("retracts the optimistic indicator when the model does not actually think", async () => {
+		vi.spyOn(Date, "now").mockReturnValue(1_000);
+		const { view, contentEl } = makeFakeView();
+
+		const result = await processStream(
+			streamOf([
+				// No thinking_start — adaptive model chose not to think.
+				{ type: "text_delta", text: "quick answer" },
+				{ type: "message_end", input_tokens: 1, output_tokens: 1 },
+			]),
+			new AbortController(),
+			contentEl as never,
+			() => view as never,
+			true, // thinkingEnabled
+		);
+
+		expect(view.startThinkingIndicator).toHaveBeenCalledTimes(1); // optimistic
+		expect(view.cancelThinkingIndicator).toHaveBeenCalledTimes(1); // retracted
+		expect(view.stopThinkingIndicator).not.toHaveBeenCalled();
+		expect(result.type).toBe("text");
+		if (result.type === "text") {
+			// No confirmed thinking → no persisted duration.
+			expect(result.thinkingDurationMs).toBe(0);
+		}
+	});
+
+	it("does not start an indicator when thinking is disabled and none occurs", async () => {
+		const { view, contentEl } = makeFakeView();
+
+		await processStream(
+			streamOf([
+				{ type: "text_delta", text: "hi" },
+				{ type: "message_end", input_tokens: 1, output_tokens: 1 },
+			]),
+			new AbortController(),
+			contentEl as never,
+			() => view as never,
+			false, // thinkingEnabled
+		);
+
+		expect(view.startThinkingIndicator).not.toHaveBeenCalled();
+		expect(view.cancelThinkingIndicator).not.toHaveBeenCalled();
+		expect(view.stopThinkingIndicator).not.toHaveBeenCalled();
 	});
 });

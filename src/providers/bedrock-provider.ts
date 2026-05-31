@@ -575,6 +575,12 @@ export class BedrockProvider implements LLMProvider {
 				else if (rawDelta.reasoningContent && typeof (rawDelta.reasoningContent as Record<string, unknown>).text === "string") {
 					yield { type: "thinking_delta", text: (rawDelta.reasoningContent as Record<string, unknown>).text as string };
 				}
+				// Format 5: delta.reasoningContent with no plaintext (signature/redacted
+				// blob from adaptive Opus 4.8). No text to render, but it confirms the
+				// model reasoned — emit a boundary signal so the indicator can resolve.
+				else if (rawDelta.reasoningContent) {
+					yield { type: "thinking_start" };
+				}
 			}
 		}
 

@@ -91,6 +91,7 @@ export async function processStream(
 	abortController: AbortController,
 	eagerContentEl?: HTMLElement,
 	viewResolver?: () => NotorChatView | undefined,
+	thinkingEnabled = false,
 ): Promise<StreamResult> {
 	let textContent = "";
 	let thinkingContent = "";
@@ -105,39 +106,64 @@ export async function processStream(
 	// Thinking timer state. The pipeline owns the authoritative elapsed time
 	// (Date.now() deltas survive mid-stream view navigation); the renderer's
 	// interval is purely cosmetic.
+	//
+	// Detection is optimistic-then-confirmed: when thinking is enabled for the
+	// turn we start the indicator immediately (the model reasons server-side
+	// during the multi-second pre-first-token window — on Bedrock the only
+	// thinking signal arrives ~2ms before the answer text, far too late to show
+	// a live timer). The indicator is *confirmed* by a `thinking_started` event
+	// (any provider/format) and *retracted* if the first real output arrives
+	// without one (e.g. an adaptive model that chose not to think).
 	let thinkingStartTime: number | null = null;
 	let thinkingDurationMs = 0;
+	let thinkingConfirmed = false;
 	let thinkingStopped = false;
+
+	const startThinking = () => {
+		if (thinkingStartTime !== null) return; // already running (optimistic or confirmed)
+		thinkingStartTime = Date.now();
+		const view = resolveView();
+		if (!contentEl) contentEl = view?.createAssistantMessagePlaceholder();
+		if (contentEl) view?.startThinkingIndicator(contentEl);
+	};
+
 	const stopThinking = () => {
-		if (thinkingStartTime !== null && !thinkingStopped) {
+		if (thinkingStartTime === null || thinkingStopped) return;
+		thinkingStopped = true;
+		const view = resolveView();
+		if (thinkingConfirmed) {
 			thinkingDurationMs = Date.now() - thinkingStartTime;
-			thinkingStopped = true;
-			if (contentEl) resolveView()?.stopThinkingIndicator(contentEl, thinkingDurationMs);
+			if (contentEl) view?.stopThinkingIndicator(contentEl, thinkingDurationMs);
+		} else {
+			// Optimistically started but never confirmed — the model didn't think.
+			// Retract the indicator entirely and record no duration.
+			thinkingDurationMs = 0;
+			if (contentEl) view?.cancelThinkingIndicator(contentEl);
 		}
 	};
+
+	// Optimistic start: show the indicator for the pre-first-token window.
+	if (thinkingEnabled) startThinking();
 
 	const accumulatedToolCalls: ToolCallInfo[] = [];
 
 	for await (const event of parseStreamEvents(stream, abortController.signal)) {
 		switch (event.type) {
 			case "thinking_started": {
-				thinkingStartTime = Date.now();
-				const view = resolveView();
-				if (!contentEl) {
-					contentEl = view?.createAssistantMessagePlaceholder();
-				}
-				if (contentEl) {
-					view?.startThinkingIndicator(contentEl);
-				}
+				// Confirm thinking actually happened; keep the optimistic start
+				// time if already running so the pre-first-token window counts.
+				thinkingConfirmed = true;
+				startThinking();
 				break;
 			}
 
 			case "thinking_delta": {
+				// Streamed reasoning text confirms thinking (parseStreamEvents
+				// emits thinking_started first, but confirm defensively).
+				thinkingConfirmed = true;
+				startThinking();
 				thinkingContent += event.delta;
 				const view = resolveView();
-				if (!contentEl) {
-					contentEl = view?.createAssistantMessagePlaceholder();
-				}
 				if (contentEl) {
 					view?.appendThinkingChunk(contentEl, event.delta);
 				}
