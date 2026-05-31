@@ -6,7 +6,7 @@
  * `thinking.type=enabled` and requires `thinking.type=adaptive` plus
  * `output_config.effort`. This test confirms the real Bedrock round-trip is
  * accepted (no rejection error) and that thinking renders, while Opus 4.6
- * (adaptive-only, no effort) keeps working.
+ * (legacy enabled+budget, visible thinking) keeps working.
  *
  * Scenarios:
  *   1. Opus 4.8 + thinking High → no "thinking.type.enabled is not supported"
@@ -14,7 +14,7 @@
  *   2. Opus 4.8 + thinking High → a substantive, on-topic answer to a hard
  *      multi-step reasoning prompt (request accepted AND fully processed)
  *   3. Orchestrator active thinking level is propagated as "high" from the preset
- *   4. Regression: switching to an Opus 4.6 preset still works (adaptive-only,
+ *   4. Regression: switching to an Opus 4.6 preset still works (visible thinking,
  *      no rejection error)
  *
  * Note: the wire-level shape (thinking:{type:"adaptive"} + output_config.effort)
@@ -34,7 +34,7 @@
  *
  * @see src/providers/thinking-config.ts — resolveAnthropicThinking
  * @see src/providers/bedrock-provider.ts — output_config injection
- * @see src/providers/model-metadata.ts — supportsEffortThinking
+ * @see src/providers/model-metadata.ts — getThinkingMode
  */
 
 import { runTest, type TestContext } from "../lib/test-harness";
@@ -350,7 +350,7 @@ async function testThinkingLevelPropagated(ctx: TestContext): Promise<void> {
 }
 
 async function testOpus46Regression(ctx: TestContext): Promise<void> {
-	console.log("\nTest 4: Regression — Opus 4.6 (adaptive-only) still works");
+	console.log("\nTest 4: Regression — Opus 4.6 (visible thinking) still works");
 	const { page } = ctx;
 
 	await ensureCleanState(page);
@@ -405,7 +405,22 @@ async function testOpus46Regression(ctx: TestContext): Promise<void> {
 	if (!thinkingBlock) {
 		ctx.fail(
 			"Opus 4.6 regression",
-			"Opus 4.6 responded without a thinking block — adaptive thinking not active",
+			"Opus 4.6 responded without a thinking block — visible thinking not rendered",
+			screenshot,
+		);
+		return;
+	}
+
+	// 4.6 uses the legacy enabled+budget protocol, so the reasoning streams as
+	// VISIBLE text — the block must have non-empty content (this is the exact
+	// symptom that regressed when 4.6 was routed through adaptive thinking).
+	const thinkingText = (await (await page.$(
+		".notor-message-assistant:last-child .notor-thinking-content",
+	))?.textContent())?.trim() ?? "";
+	if (thinkingText.length === 0) {
+		ctx.fail(
+			"Opus 4.6 regression",
+			"Opus 4.6 thinking block is empty — visible reasoning transcript missing",
 			screenshot,
 		);
 		return;
@@ -429,7 +444,7 @@ async function testOpus46Regression(ctx: TestContext): Promise<void> {
 
 	ctx.pass(
 		"Opus 4.6 regression",
-		`Opus 4.6 responded with adaptive thinking; summary finalized to "${summaryText}"`,
+		`Opus 4.6 streamed visible thinking (${thinkingText.length} chars); summary finalized to "${summaryText}"`,
 		screenshot,
 	);
 }

@@ -5,6 +5,11 @@
  * Validates that the extended thinking / reasoning feature renders correctly
  * in the chat UI when enabled on a thinking-capable model preset.
  *
+ * Regression guard: uses a NAMED thinking level (High) on Sonnet 4.6, which must
+ * resolve to enabled+budget_tokens and stream a VISIBLE thinking transcript — not
+ * a hidden adaptive trace. Briefly (mid-2026) 4.6 was routed through adaptive
+ * thinking, which returns encrypted reasoning on Bedrock and rendered no text.
+ *
  * Scenarios:
  *   1. Thinking block renders in assistant message after LLM response completes
  *   2. Thinking block contains non-empty content
@@ -36,7 +41,8 @@ const SETTINGS_POPOVER_SELECTOR = ".notor-settings-popover";
 const SETTINGS_BTN_SELECTOR = ".notor-chat-header-btn[aria-label='Chat settings']";
 const THINKING_SECTION_SELECTOR = ".notor-thinking-section";
 
-// Use Sonnet 4.6 inference profile on Bedrock — supports thinking + adaptive
+// Use Sonnet 4.6 inference profile on Bedrock. Named levels (Low/Medium/High)
+// resolve to enabled+budget_tokens, which streams a VISIBLE thinking transcript.
 const THINKING_MODEL_ID = "us.anthropic.claude-sonnet-4-6";
 
 // ---------------------------------------------------------------------------
@@ -336,7 +342,9 @@ const settings = buildDefaultSettings({
 			provider_id: "bedrock",
 			model_id: THINKING_MODEL_ID,
 			use_extended_context: false,
-			thinking_level: "10000",
+			// Named level (not a custom integer): exercises the enabled+budget path
+			// that regressed when 4.6 was briefly routed through adaptive thinking.
+			thinking_level: "high",
 		},
 		{ name: "large", provider_id: null, model_id: null, use_extended_context: false, thinking_level: null },
 	],

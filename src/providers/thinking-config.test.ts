@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolveAnthropicThinking } from "./thinking-config";
-import { supportsEffortThinking } from "./model-metadata";
+import { getThinkingMode } from "./model-metadata";
 
 describe("resolveAnthropicThinking", () => {
 	describe("effort models (Opus 4.8)", () => {
@@ -38,16 +38,24 @@ describe("resolveAnthropicThinking", () => {
 		});
 	});
 
-	describe("adaptive-only models (Opus/Sonnet 4.6)", () => {
-		it("returns adaptive with no effort field", () => {
-			const result = resolveAnthropicThinking("high", "us.anthropic.claude-opus-4-6-v1");
-			expect(result).toEqual({ thinking: { type: "adaptive" } });
-			expect(result?.effort).toBeUndefined();
+	describe("4.6 models (Opus/Sonnet 4.6) — enabled + budget (visible thinking)", () => {
+		it("maps high to enabled budget 16384 for Opus 4.6", () => {
+			expect(resolveAnthropicThinking("high", "us.anthropic.claude-opus-4-6-v1")).toEqual({
+				thinking: { type: "enabled", budget_tokens: 16384 },
+			});
 		});
 
-		it("returns adaptive (no effort) for Sonnet 4.6", () => {
-			const result = resolveAnthropicThinking("medium", "us.anthropic.claude-sonnet-4-6");
-			expect(result).toEqual({ thinking: { type: "adaptive" } });
+		it("maps medium to enabled budget 4096 for Sonnet 4.6", () => {
+			expect(resolveAnthropicThinking("medium", "us.anthropic.claude-sonnet-4-6")).toEqual({
+				thinking: { type: "enabled", budget_tokens: 4096 },
+			});
+		});
+
+		// Regression guard: 4.6 must NOT route through adaptive (adaptive returns
+		// encrypted reasoning on Bedrock, which renders no visible thinking text).
+		it("never returns adaptive for 4.6", () => {
+			const result = resolveAnthropicThinking("high", "us.anthropic.claude-sonnet-4-6");
+			expect(result?.thinking.type).toBe("enabled");
 			expect(result?.effort).toBeUndefined();
 		});
 	});
@@ -87,18 +95,51 @@ describe("resolveAnthropicThinking", () => {
 	});
 });
 
-describe("supportsEffortThinking", () => {
-	it("is true for Opus 4.8 direct and all regional ids", () => {
-		expect(supportsEffortThinking("claude-opus-4-8")).toBe(true);
-		expect(supportsEffortThinking("us.anthropic.claude-opus-4-8")).toBe(true);
-		expect(supportsEffortThinking("eu.anthropic.claude-opus-4-8")).toBe(true);
-		expect(supportsEffortThinking("apac.anthropic.claude-opus-4-8")).toBe(true);
-		expect(supportsEffortThinking("global.anthropic.claude-opus-4-8")).toBe(true);
+describe("getThinkingMode", () => {
+	// Closed-set boundary: this is the guard for the one-time legacy classification.
+	it("is 'effort' for Opus 4.8 direct + all regional ids", () => {
+		expect(getThinkingMode("claude-opus-4-8")).toBe("effort");
+		expect(getThinkingMode("us.anthropic.claude-opus-4-8")).toBe("effort");
+		expect(getThinkingMode("eu.anthropic.claude-opus-4-8")).toBe("effort");
+		expect(getThinkingMode("apac.anthropic.claude-opus-4-8")).toBe("effort");
+		expect(getThinkingMode("global.anthropic.claude-opus-4-8")).toBe("effort");
 	});
 
-	it("is false for Opus 4.6 and Opus 4.0", () => {
-		expect(supportsEffortThinking("us.anthropic.claude-opus-4-6-v1")).toBe(false);
-		expect(supportsEffortThinking("claude-opus-4-6")).toBe(false);
-		expect(supportsEffortThinking("claude-opus-4-20250514")).toBe(false);
+	it("is 'enabled' for the entire legacy set (3.5/3.7, 4.0, 4.5, 4.6)", () => {
+		const legacy = [
+			// 3.5 / 3.7 Sonnet
+			"claude-3-5-sonnet-20240620",
+			"claude-3-5-sonnet-20241022",
+			"us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+			"claude-3-7-sonnet-20250219",
+			"eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
+			// 4.0 (dated)
+			"claude-sonnet-4-20250514",
+			"claude-opus-4-20250514",
+			"us.anthropic.claude-sonnet-4-20250514-v1:0",
+			"global.anthropic.claude-opus-4-20250514-v1:0",
+			// 4.5
+			"claude-sonnet-4-5-20250929",
+			"apac.anthropic.claude-sonnet-4-5-20250929-v1:0",
+			// 4.6
+			"claude-opus-4-6",
+			"claude-sonnet-4-6",
+			"us.anthropic.claude-opus-4-6-v1",
+			"global.anthropic.claude-opus-4-6-v1",
+			"us.anthropic.claude-sonnet-4-6",
+			"eu.anthropic.claude-sonnet-4-6",
+			"apac.anthropic.claude-sonnet-4-6",
+			"global.anthropic.claude-sonnet-4-6",
+		];
+		for (const id of legacy) {
+			expect(getThinkingMode(id)).toBe("enabled");
+		}
+	});
+
+	// Default: any unrecognized / future model id is treated as effort by design,
+	// so new adaptive models work without a code change.
+	it("defaults to 'effort' for an unknown/future model id", () => {
+		expect(getThinkingMode("claude-opus-5-0")).toBe("effort");
+		expect(getThinkingMode("global.anthropic.claude-sonnet-5-0")).toBe("effort");
 	});
 });

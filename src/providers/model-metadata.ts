@@ -697,30 +697,45 @@ const THINKING_PATTERNS = [
 	/^o[134]/,
 ];
 
-const ADAPTIVE_THINKING_PATTERNS = [
-	// Only Opus 4.6 and Sonnet 4.6 support adaptive thinking (no effort field)
-	/^claude-opus-4-6/,
-	/^claude-sonnet-4-6/,
-	/^(us|eu|apac|global)\.anthropic\.claude-opus-4-6/,
-	/^(us|eu|apac|global)\.anthropic\.claude-sonnet-4-6/,
+// Closed, final set: models that use the legacy `enabled`+budget_tokens thinking
+// protocol, which streams a VISIBLE reasoning transcript. This list never grows —
+// every model using the old protocol already exists. All newer models (Opus 4.8+)
+// use the adaptive/effort protocol and are covered by the default in
+// getThinkingMode(), so they need no entry here.
+const LEGACY_ENABLED_THINKING_PATTERNS = [
+	// Claude 3.5 / 3.7 Sonnet (direct API + Bedrock inference profiles)
+	/^claude-3-5-sonnet/,
+	/^claude-3-7-sonnet/,
+	/^(us|eu|apac|global)\.anthropic\.claude-3-5-sonnet/,
+	/^(us|eu|apac|global)\.anthropic\.claude-3-7-sonnet/,
+	// Sonnet/Opus 4.0 (dated id), Sonnet 4.5, Sonnet/Opus 4.6 — NOT 4.8
+	/^claude-(opus|sonnet)-4-(5|6)/,
+	/^claude-(opus|sonnet)-4-20250514/,
+	/^(us|eu|apac|global)\.anthropic\.claude-(opus|sonnet)-4-(5|6)/,
+	/^(us|eu|apac|global)\.anthropic\.claude-(opus|sonnet)-4-20250514/,
 ];
 
-const ADAPTIVE_EFFORT_PATTERNS = [
-	// Opus 4.8+ uses adaptive thinking with output_config.effort and rejects
-	// thinking.type=enabled. Mutually exclusive with ADAPTIVE_THINKING_PATTERNS.
-	/^claude-opus-4-8/,
-	/^(us|eu|apac|global)\.anthropic\.claude-opus-4-8/,
-	// add sonnet-4-8 here if/when released
-];
+export type ThinkingMode = "enabled" | "effort";
 
 export function supportsThinking(modelId: string): boolean {
 	return THINKING_PATTERNS.some((pattern) => pattern.test(modelId));
 }
 
-export function supportsAdaptiveThinking(modelId: string): boolean {
-	return ADAPTIVE_THINKING_PATTERNS.some((pattern) => pattern.test(modelId));
-}
-
-export function supportsEffortThinking(modelId: string): boolean {
-	return ADAPTIVE_EFFORT_PATTERNS.some((pattern) => pattern.test(modelId));
+/**
+ * The thinking protocol a (thinking-capable) model uses on the wire.
+ *
+ * - `"enabled"`: legacy `budget_tokens` reasoning with a VISIBLE streamed
+ *   transcript. Only the closed `LEGACY_ENABLED_THINKING_PATTERNS` set
+ *   (Claude 3.5/3.7, Sonnet/Opus 4.0–4.6). This set is final and never grows.
+ * - `"effort"`: adaptive thinking + `output_config.effort`; reasoning is returned
+ *   encrypted (no visible transcript) and `thinking.type=enabled` is REJECTED.
+ *   THE DEFAULT — every model not in the legacy set (Opus 4.8 and all future
+ *   models) uses this, so new models need no change here.
+ *
+ * Only consulted for models where `supportsThinking()` is already true.
+ */
+export function getThinkingMode(modelId: string): ThinkingMode {
+	return LEGACY_ENABLED_THINKING_PATTERNS.some((pattern) => pattern.test(modelId))
+		? "enabled"
+		: "effort";
 }

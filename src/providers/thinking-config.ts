@@ -1,4 +1,4 @@
-import { supportsAdaptiveThinking, supportsEffortThinking } from "./model-metadata";
+import { getThinkingMode } from "./model-metadata";
 
 const ANTHROPIC_BUDGET_MAP: Record<string, number> = {
 	low: 1024,
@@ -40,23 +40,20 @@ export function resolveAnthropicThinking(
 ): ResolvedAnthropicThinking | undefined {
 	if (!level || level === "off") return undefined;
 
-	const asInt = parseInt(level, 10);
-
 	// Effort models (Opus 4.8+) use adaptive thinking + output_config.effort and
-	// reject thinking.type=enabled. Must come before the numeric→enabled branch.
-	if (supportsEffortThinking(modelId)) {
+	// reject thinking.type=enabled. Named levels map directly; a custom integer
+	// budget has no effort meaning, so default to medium.
+	if (getThinkingMode(modelId) === "effort") {
 		return {
 			thinking: { type: "adaptive" },
 			effort: EFFORT_MAP[level] ?? "medium",
 		};
 	}
 
+	// "enabled" mode: visible streamed thinking via budget_tokens.
+	const asInt = parseInt(level, 10);
 	if (!isNaN(asInt) && asInt > 0) {
 		return { thinking: { type: "enabled", budget_tokens: asInt } };
-	}
-
-	if (supportsAdaptiveThinking(modelId)) {
-		return { thinking: { type: "adaptive" } };
 	}
 
 	const budget = ANTHROPIC_BUDGET_MAP[level];
