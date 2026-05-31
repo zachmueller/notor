@@ -31,14 +31,16 @@ export type InteractionRequest =
 			id: string;
 			/**
 			 * The questions to ask, rendered together as one prompt. All stay
-			 * visible and editable until every one is answered, then the prompt
-			 * auto-submits with one response. A single-question array auto-submits
-			 * on its first answer.
+			 * visible and editable; each is answered by selecting a suggested option
+			 * or typing free text. A single Submit button at the bottom is enabled
+			 * only once every question has an answer, and submits all answers as one
+			 * response. Nothing auto-submits — even a single-question prompt requires
+			 * an explicit Submit.
 			 */
 			questions: Array<{
 				/** The question text shown to the user. */
 				question: string;
-				/** Optional suggested answers, rendered as clickable chips. */
+				/** Optional suggested answers, rendered as full-width clickable options. */
 				suggestions?: string[];
 				/** When true (default), a free-text input is offered alongside chips. */
 				allowFreeText?: boolean;
@@ -68,11 +70,13 @@ interface InteractionRenderer {
 
 /**
  * Built-in `ask` renderer: renders every question in the set together — each
- * with its text, optional suggestion chips, and optional free-text input — and
- * keeps them all visible and editable. Answering a question marks it (chip gets
- * `--chosen`); the user can change earlier answers freely. Once every question
- * is answered the prompt auto-submits with one response. A single-question set
- * therefore submits on its first answer.
+ * with its text, optional suggested-answer options (full-width stacked buttons),
+ * and optional free-text input — and keeps them all visible and editable.
+ * Selecting an option marks it (`--selected`) and clears that question's free
+ * text; typing free text clears that question's selected option. A single Submit
+ * button at the bottom stays disabled until every question has a non-empty
+ * answer, then resolves with all answers. Pressing Enter in a free-text field
+ * submits the whole prompt when it is complete.
  */
 const askRenderer: InteractionRenderer = {
 	render(el, request, resolve) {
@@ -83,16 +87,35 @@ const askRenderer: InteractionRenderer = {
 		}
 
 		const questions = request.questions;
-		const values: string[] = new Array(questions.length).fill("");
-		const answered: boolean[] = new Array(questions.length).fill(false);
+		const values: string[] = Array.from({ length: questions.length }, () => "");
+		// A question is "required" if it offers any way to answer it (options or
+		// free text). A question with neither can never be answered, so it must not
+		// gate Submit — otherwise the prompt would deadlock. The shipped `ask_user`
+		// tool always sets allowFreeText, so this only guards extension-built asks.
+		const required: boolean[] = questions.map(
+			(q) => (q.suggestions?.length ?? 0) > 0 || q.allowFreeText !== false,
+		);
 
 		const promptEl = el.createDiv({ cls: "notor-interaction-prompt" });
 
-		// Resolve only once all questions have a committed answer.
-		const maybeSubmit = () => {
-			if (answered.every(Boolean)) {
-				resolve({ id: request.id, values: values.slice() });
-			}
+		// A question is answered iff it has a non-empty trimmed value. `values` is
+		// the single source of truth — option clicks and typing both write to it.
+		const isComplete = () =>
+			values.every((v, i) => !required[i] || v.trim().length > 0);
+
+		let submitBtn: HTMLButtonElement;
+
+		// Reflect completeness on the Submit button. Recomputed on every mutation.
+		const refreshSubmit = () => {
+			const disabled = !isComplete();
+			submitBtn.disabled = disabled;
+			submitBtn.classList.toggle("notor-interaction-submit--disabled", disabled);
+		};
+
+		// Resolve with all answers — only when every question is answered.
+		const submit = () => {
+			if (!isComplete()) return;
+			resolve({ id: request.id, values: values.slice() });
 		};
 
 		let firstInput: HTMLInputElement | null = null;
@@ -102,36 +125,36 @@ const askRenderer: InteractionRenderer = {
 			group.createSpan({ cls: "notor-interaction-question", text: q.question });
 
 			const allowFreeText = q.allowFreeText !== false;
-			let chipEls: HTMLButtonElement[] = [];
+			const options: HTMLButtonElement[] = [];
 			let input: HTMLInputElement | null = null;
 
-			const clearChosen = () => {
-				for (const c of chipEls) c.removeClass("notor-interaction-chip--chosen");
+			const clearSelected = () => {
+				for (const o of options) o.removeClass("notor-interaction-option--selected");
 			};
 
-			// Suggested-answer chips
+			// Suggested-answer options — full-width stacked buttons. Clicking one only
+			// selects it (highlights, records the value); the user submits explicitly.
 			if (q.suggestions && q.suggestions.length > 0) {
-				const chipsEl = group.createDiv({ cls: "notor-interaction-chips" });
+				const optionsEl = group.createDiv({ cls: "notor-interaction-options" });
 				for (const suggestion of q.suggestions) {
-					const chip = chipsEl.createEl("button", {
-						cls: "notor-interaction-chip",
+					const opt = optionsEl.createEl("button", {
+						cls: "notor-interaction-option",
 						text: suggestion,
 					});
-					chip.addEventListener("click", () => {
+					opt.addEventListener("click", () => {
 						values[i] = suggestion;
-						answered[i] = true;
-						clearChosen();
-						chip.addClass("notor-interaction-chip--chosen");
+						clearSelected();
+						opt.addClass("notor-interaction-option--selected");
 						if (input) input.value = "";
-						maybeSubmit();
+						refreshSubmit();
 					});
-					chipEls.push(chip);
+					options.push(opt);
 				}
 			}
 
-			// Free-text input — commits on Enter or blur (non-empty). Typing alone
-			// updates the value but does not mark the question answered, so a set
-			// never auto-submits mid-keystroke.
+			// Free-text input — typing live-tracks the value (no commit step). A
+			// non-empty entry clears this question's selected option, so the two
+			// never both count as the answer.
 			if (allowFreeText) {
 				const inputRow = group.createDiv({ cls: "notor-interaction-input-row" });
 				input = inputRow.createEl("input", {
@@ -141,28 +164,28 @@ const askRenderer: InteractionRenderer = {
 				input.placeholder = "Type your answer…";
 				if (!firstInput) firstInput = input;
 
-				const commit = () => {
-					const value = input!.value.trim();
-					if (value.length === 0) return;
-					values[i] = value;
-					answered[i] = true;
-					clearChosen();
-					maybeSubmit();
-				};
-
 				input.addEventListener("input", () => {
-					// Live-track the typed value without committing (Enter/blur commits).
 					values[i] = input!.value.trim();
+					if (values[i].length > 0) clearSelected();
+					refreshSubmit();
 				});
 				input.addEventListener("keydown", (e: KeyboardEvent) => {
+					// Enter submits the whole prompt, but only when it's complete.
 					if (e.key === "Enter") {
 						e.preventDefault();
-						commit();
+						submit();
 					}
 				});
-				input.addEventListener("blur", commit);
 			}
 		});
+
+		// Single Submit for the whole prompt, disabled until every question is answered.
+		submitBtn = promptEl.createEl("button", {
+			cls: "notor-interaction-submit",
+			text: "Submit",
+		});
+		submitBtn.addEventListener("click", submit);
+		refreshSubmit();
 
 		// Focus the first input so the user can type immediately.
 		if (firstInput) window.setTimeout(() => firstInput!.focus(), 0);

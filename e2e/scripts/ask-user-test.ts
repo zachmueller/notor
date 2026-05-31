@@ -18,9 +18,10 @@
  * Scenarios:
  *   1. ask_user tool is registered as a read-mode tool
  *   2. `interaction` block kind is registered in the ChatBlockRegistry
- *   3. Live prompt renders chips + free-text input; clicking a chip resolves
- *   4. Free-text submit resolves with the trimmed typed value
- *   5. allowFreeText:false hides the input (chips only)
+ *   3. Live prompt renders options + free-text input; selecting only enables
+ *      Submit (no auto-send); clicking Submit resolves with all answers
+ *   4. Free-text Enter submits with the trimmed typed value once complete
+ *   5. allowFreeText:false hides the input (options only)
  *   6. Aborting a pending interaction rejects and removes the prompt
  *   7. Persisted `interaction` block re-renders read-only (question + chosen
  *      answer highlighted) and survives a conversation reload
@@ -159,11 +160,12 @@ async function testBlockRegistered(ctx: TestContext): Promise<void> {
 
 // ---------------------------------------------------------------------------
 // Test 3: multi-question prompt — all stay visible; selecting one does NOT
-// submit; re-selection works; the set auto-submits only after the LAST answer.
+// submit; re-selection works; Submit stays disabled until every question is
+// answered, then clicking Submit resolves with all answers.
 // ---------------------------------------------------------------------------
 
 async function testChipResolves(ctx: TestContext): Promise<void> {
-	console.log("\nTest 3: multi-question prompt persists until all answered, then auto-submits");
+	console.log("\nTest 3: multi-question prompt persists until all answered, then submits on click");
 	const { page } = ctx;
 
 	const setup = await startInteraction(ctx, {
@@ -188,10 +190,13 @@ async function testChipResolves(ctx: TestContext): Promise<void> {
 
 	const counts = await page.evaluate(() => {
 		const card = document.querySelector(".notor-e2e-ask-card");
+		const submit = card?.querySelector<HTMLButtonElement>(".notor-interaction-submit") ?? null;
 		return {
 			groups: card?.querySelectorAll(".notor-interaction-question-group").length ?? 0,
-			chips: card?.querySelectorAll(".notor-interaction-chip").length ?? 0,
+			options: card?.querySelectorAll(".notor-interaction-option").length ?? 0,
 			inputs: card?.querySelectorAll(".notor-interaction-input").length ?? 0,
+			hasSubmit: !!submit,
+			submitDisabled: submit?.disabled ?? false,
 		};
 	});
 
@@ -200,15 +205,20 @@ async function testChipResolves(ctx: TestContext): Promise<void> {
 	} else {
 		ctx.fail("All questions rendered together", `Expected 2 groups, got ${counts.groups}`);
 	}
-	if (counts.chips === 3) {
-		ctx.pass("Suggestion chips rendered", "3 chips present in Q1");
+	if (counts.options === 3) {
+		ctx.pass("Suggestion options rendered", "3 options present in Q1");
 	} else {
-		ctx.fail("Suggestion chips rendered", `Expected 3 chips, got ${counts.chips}`);
+		ctx.fail("Suggestion options rendered", `Expected 3 options, got ${counts.options}`);
 	}
 	if (counts.inputs >= 1) {
 		ctx.pass("Free-text input rendered", `${counts.inputs} input(s) present`);
 	} else {
 		ctx.fail("Free-text input rendered", "No free-text input found");
+	}
+	if (counts.hasSubmit && counts.submitDisabled) {
+		ctx.pass("Submit disabled before any answer", "Submit button present and disabled");
+	} else {
+		ctx.fail("Submit disabled before any answer", `hasSubmit=${counts.hasSubmit}, disabled=${counts.submitDisabled}`);
 	}
 
 	const shot = await ctx.screenshot("03-prompt-rendered");
@@ -216,78 +226,92 @@ async function testChipResolves(ctx: TestContext): Promise<void> {
 	// Answer Q1 by clicking "Green" — must NOT submit (Q2 still unanswered).
 	await page.evaluate(() => {
 		const g = document.querySelectorAll(".notor-e2e-ask-card .notor-interaction-question-group");
-		const chips = g[0]!.querySelectorAll<HTMLButtonElement>(".notor-interaction-chip");
-		chips[1]?.click(); // Green
+		const options = g[0]!.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		options[1]?.click(); // Green
 	});
 	await page.waitForTimeout(300);
 
 	const afterQ1 = await page.evaluate(() => {
 		const g = document.querySelectorAll(".notor-e2e-ask-card .notor-interaction-question-group");
-		const chips = Array.from(g[0]!.querySelectorAll(".notor-interaction-chip"));
+		const options = Array.from(g[0]!.querySelectorAll(".notor-interaction-option"));
+		const submit = document.querySelector<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-submit");
 		return {
-			greenChosen: chips[1]?.classList.contains("notor-interaction-chip--chosen") ?? false,
+			greenSelected: options[1]?.classList.contains("notor-interaction-option--selected") ?? false,
 			promptStillThere: !!document.querySelector(".notor-e2e-ask-card .notor-interaction-prompt"),
+			submitDisabled: submit?.disabled ?? false,
 			result: (window as any).__askResult,
 		};
 	});
-	if (afterQ1.greenChosen) {
-		ctx.pass("Selected chip highlighted", "'Green' has --chosen after click");
+	if (afterQ1.greenSelected) {
+		ctx.pass("Selected option highlighted", "'Green' has --selected after click");
 	} else {
-		ctx.fail("Selected chip highlighted", "Clicked chip did not gain --chosen");
+		ctx.fail("Selected option highlighted", "Clicked option did not gain --selected");
 	}
-	if (afterQ1.promptStillThere && afterQ1.result === undefined) {
-		ctx.pass("No submit until all answered", "Prompt remains and no result after answering only Q1");
+	if (afterQ1.promptStillThere && afterQ1.submitDisabled && afterQ1.result === undefined) {
+		ctx.pass("No submit until all answered", "Prompt remains, Submit still disabled after only Q1");
 	} else {
-		ctx.fail("No submit until all answered", `promptStillThere=${afterQ1.promptStillThere}, result=${JSON.stringify(afterQ1.result)}`);
+		ctx.fail("No submit until all answered", `promptStillThere=${afterQ1.promptStillThere}, submitDisabled=${afterQ1.submitDisabled}, result=${JSON.stringify(afterQ1.result)}`);
 	}
 
-	// Re-select Q1 → "Blue". Highlight should move; still no submit.
+	// Re-select Q1 → "Blue". Highlight should move; still not complete.
 	await page.evaluate(() => {
 		const g = document.querySelectorAll(".notor-e2e-ask-card .notor-interaction-question-group");
-		const chips = g[0]!.querySelectorAll<HTMLButtonElement>(".notor-interaction-chip");
-		chips[2]?.click(); // Blue
+		const options = g[0]!.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		options[2]?.click(); // Blue
 	});
 	await page.waitForTimeout(300);
 
 	const afterReselect = await page.evaluate(() => {
 		const g = document.querySelectorAll(".notor-e2e-ask-card .notor-interaction-question-group");
-		const chips = Array.from(g[0]!.querySelectorAll(".notor-interaction-chip"));
+		const options = Array.from(g[0]!.querySelectorAll(".notor-interaction-option"));
+		const submit = document.querySelector<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-submit");
 		return {
-			greenChosen: chips[1]?.classList.contains("notor-interaction-chip--chosen") ?? false,
-			blueChosen: chips[2]?.classList.contains("notor-interaction-chip--chosen") ?? false,
+			greenSelected: options[1]?.classList.contains("notor-interaction-option--selected") ?? false,
+			blueSelected: options[2]?.classList.contains("notor-interaction-option--selected") ?? false,
+			submitDisabled: submit?.disabled ?? false,
 			result: (window as any).__askResult,
 		};
 	});
-	if (!afterReselect.greenChosen && afterReselect.blueChosen && afterReselect.result === undefined) {
-		ctx.pass("Re-selection moves highlight", "'Blue' now chosen, 'Green' cleared, still no submit");
+	if (!afterReselect.greenSelected && afterReselect.blueSelected && afterReselect.submitDisabled && afterReselect.result === undefined) {
+		ctx.pass("Re-selection moves highlight", "'Blue' now selected, 'Green' cleared, Submit still disabled");
 	} else {
-		ctx.fail("Re-selection moves highlight", `green=${afterReselect.greenChosen}, blue=${afterReselect.blueChosen}, result=${JSON.stringify(afterReselect.result)}`);
+		ctx.fail("Re-selection moves highlight", `green=${afterReselect.greenSelected}, blue=${afterReselect.blueSelected}, submitDisabled=${afterReselect.submitDisabled}, result=${JSON.stringify(afterReselect.result)}`);
 	}
 
-	// Answer Q2 via free text + Enter → now all answered → auto-submit.
-	await page.evaluate(() => {
+	// Answer Q2 via free text → all answered → Submit enables → click it.
+	const enabledAfterQ2 = await page.evaluate(() => {
 		const g = document.querySelectorAll(".notor-e2e-ask-card .notor-interaction-question-group");
 		const input = g[1]!.querySelector<HTMLInputElement>(".notor-interaction-input")!;
 		input.value = "  done  ";
 		input.dispatchEvent(new Event("input", { bubbles: true }));
-		input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+		const submit = document.querySelector<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-submit");
+		return !(submit?.disabled ?? true);
+	});
+	if (enabledAfterQ2) {
+		ctx.pass("Submit enables once all answered", "Submit enabled after Q2 free text");
+	} else {
+		ctx.fail("Submit enables once all answered", "Submit still disabled after answering Q2");
+	}
+
+	await page.evaluate(() => {
+		document.querySelector<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-submit")?.click();
 	});
 	await page.waitForTimeout(400);
 
 	const { result, error } = await readResult(ctx);
 	if (error) {
-		ctx.fail("Auto-submit returns all answers", `Promise rejected: ${error}`);
+		ctx.fail("Submit returns all answers", `Promise rejected: ${error}`);
 	} else if (result && result.id === "q-multi" && Array.isArray(result.values) && result.values[0] === "Blue" && result.values[1] === "done") {
-		ctx.pass("Auto-submit returns all answers", `Resolved with values ["Blue","done"]`, shot);
+		ctx.pass("Submit returns all answers", `Resolved with values ["Blue","done"]`, shot);
 	} else {
-		ctx.fail("Auto-submit returns all answers", `Unexpected result: ${JSON.stringify(result)}`);
+		ctx.fail("Submit returns all answers", `Unexpected result: ${JSON.stringify(result)}`);
 	}
 
 	const promptGone = await page.evaluate(() => !document.querySelector(".notor-e2e-ask-card .notor-interaction-prompt"));
 	if (promptGone) {
-		ctx.pass("Prompt removed after final answer", "No .notor-interaction-prompt remains");
+		ctx.pass("Prompt removed after submit", "No .notor-interaction-prompt remains");
 	} else {
-		ctx.fail("Prompt removed after final answer", "Prompt still in DOM after all answered");
+		ctx.fail("Prompt removed after submit", "Prompt still in DOM after submit");
 	}
 
 	// Clean up the throwaway card
@@ -343,7 +367,7 @@ async function testFreeTextResolves(ctx: TestContext): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function testChipsOnly(ctx: TestContext): Promise<void> {
-	console.log("\nTest 5: allowFreeText:false renders chips only (no input)");
+	console.log("\nTest 5: allowFreeText:false renders options only (no input)");
 	const { page } = ctx;
 
 	const setup = await startInteraction(ctx, {
@@ -352,28 +376,45 @@ async function testChipsOnly(ctx: TestContext): Promise<void> {
 		questions: [{ question: "Confirm?", suggestions: ["Yes", "No"], allowFreeText: false }],
 	});
 	if (!setup.ok) {
-		ctx.fail("Render chips-only prompt", setup.error ?? "unknown");
+		ctx.fail("Render options-only prompt", setup.error ?? "unknown");
 		return;
 	}
 
 	await waitForSelector(page, ".notor-e2e-ask-card .notor-interaction-prompt", 4_000);
 	const state = await page.evaluate(() => {
 		const card = document.querySelector(".notor-e2e-ask-card");
+		const submit = card?.querySelector<HTMLButtonElement>(".notor-interaction-submit") ?? null;
 		return {
-			chips: card?.querySelectorAll(".notor-interaction-chip").length ?? 0,
+			options: card?.querySelectorAll(".notor-interaction-option").length ?? 0,
 			hasInput: !!card?.querySelector(".notor-interaction-input"),
+			submitDisabled: submit?.disabled ?? false,
 		};
 	});
 
-	if (state.chips === 2 && !state.hasInput) {
-		ctx.pass("Chips-only prompt", "2 chips, no free-text input");
+	if (state.options === 2 && !state.hasInput) {
+		ctx.pass("Options-only prompt", "2 options, no free-text input");
 	} else {
-		ctx.fail("Chips-only prompt", `chips=${state.chips}, hasInput=${state.hasInput}`);
+		ctx.fail("Options-only prompt", `options=${state.options}, hasInput=${state.hasInput}`);
+	}
+	if (state.submitDisabled) {
+		ctx.pass("Submit gated on selection", "Submit disabled before selecting an option");
+	} else {
+		ctx.fail("Submit gated on selection", "Submit was enabled with no option selected");
 	}
 
-	// Resolve and clean up
+	// Select an option → Submit enables → resolves, then clean up.
+	const enabled = await page.evaluate(() => {
+		document.querySelector<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-option")?.click();
+		const submit = document.querySelector<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-submit");
+		return !(submit?.disabled ?? true);
+	});
+	if (enabled) {
+		ctx.pass("Submit enables after selecting", "Submit enabled once an option is chosen");
+	} else {
+		ctx.fail("Submit enables after selecting", "Submit still disabled after selecting an option");
+	}
 	await page.evaluate(() => {
-		document.querySelector<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-chip")?.click();
+		document.querySelector<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-submit")?.click();
 		document.querySelector(".notor-e2e-ask-card")?.remove();
 	});
 }
@@ -690,9 +731,9 @@ async function testRealDispatchRoundTrip(ctx: TestContext): Promise<void> {
 		};
 
 		// Per-call interaction callback — renders the prompt (TWO questions, so the
-		// whole set renders in ONE card) and, on the next tick, answers both: click
-		// "Green" for Q1 and type + Enter a free-text answer for Q2. The set
-		// auto-submits only once both are answered.
+		// whole set renders in ONE card) and, on the next tick, answers both: select
+		// "Green" for Q1 and type a free-text answer for Q2, then click Submit (which
+		// is enabled only once both are answered).
 		const interactionCb = (request: any, signal: any) => {
 			w.__dispatchInteractionCalls += 1;
 			const promise = view.renderInteractionPrompt(card, request, signal);
@@ -700,19 +741,21 @@ async function testRealDispatchRoundTrip(ctx: TestContext): Promise<void> {
 				const groups = Array.from(
 					card.querySelectorAll(".notor-interaction-question-group"),
 				) as HTMLElement[];
-				// Q1: click Green.
-				const q1Chips = Array.from(
-					groups[0]?.querySelectorAll(".notor-interaction-chip") ?? [],
+				// Q1: select Green.
+				const q1Options = Array.from(
+					groups[0]?.querySelectorAll(".notor-interaction-option") ?? [],
 				) as HTMLButtonElement[];
-				const green = q1Chips.find((c) => (c.textContent ?? "").trim() === "Green");
-				(green ?? q1Chips[0])?.click();
-				// Q2: type + Enter to commit (this is the final answer → auto-submit).
+				const green = q1Options.find((o) => (o.textContent ?? "").trim() === "Green");
+				(green ?? q1Options[0])?.click();
+				// Q2: type a free-text answer.
 				const q2Input = groups[1]?.querySelector(".notor-interaction-input") as HTMLInputElement | undefined;
 				if (q2Input) {
 					q2Input.value = "no thanks";
 					q2Input.dispatchEvent(new Event("input", { bubbles: true }));
-					q2Input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 				}
+				// Both answered → Submit is enabled → click it to send.
+				const submit = card.querySelector(".notor-interaction-submit") as HTMLButtonElement | null;
+				if (submit && !submit.disabled) submit.click();
 			}, 50);
 			return promise;
 		};
@@ -776,7 +819,7 @@ async function testRealDispatchRoundTrip(ctx: TestContext): Promise<void> {
 
 	const shot = await ctx.screenshot("09-dispatch-prompt");
 
-	// Poll for the dispatch to resolve (chip auto-clicked after ~50ms).
+	// Poll for the dispatch to resolve (answers + Submit auto-clicked after ~50ms).
 	let outcome: { result?: any; error?: string; autoApproved?: boolean; approvalCalls?: number; interactionCalls?: number } = {};
 	for (let i = 0; i < 20; i++) {
 		await page.waitForTimeout(250);

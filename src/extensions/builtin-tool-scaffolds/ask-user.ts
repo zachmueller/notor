@@ -44,8 +44,9 @@ if (utils.abortSignal?.aborted) {
 }
 
 // Render all questions together and await every answer. utils.askMany suspends
-// the tool loop until the user has answered every question (or aborts, which
-// throws). One question or many — the prompt auto-submits once all are answered.
+// the tool loop until the user clicks Submit (enabled once every question is
+// answered) or aborts (which throws). One question or many — submission is a
+// single explicit Submit; nothing auto-submits.
 const answers = await utils.askMany(
   questions.map((q) => ({ question: q.question, suggestions: q.suggestions, allowFreeText: true }))
 );

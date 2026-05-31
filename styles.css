@@ -1286,6 +1286,45 @@
 	border-color: var(--interactive-accent);
 }
 
+/* Live-prompt answer options — full-width stacked rows that wrap long text. */
+.notor-interaction-options {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.notor-interaction-option {
+	display: block;
+	width: 100%;
+	text-align: left;
+	white-space: normal;
+	overflow-wrap: anywhere;
+	padding: 8px 12px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-small);
+	line-height: 1.4;
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.notor-interaction-option:hover {
+	background: var(--background-modifier-hover);
+	border-color: var(--interactive-accent);
+}
+
+.notor-interaction-option--selected {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.notor-interaction-option--selected:hover {
+	background: var(--interactive-accent-hover);
+	color: var(--text-on-accent);
+}
+
 .notor-interaction-input-row {
 	display: flex;
 	gap: 6px;
@@ -1303,6 +1342,7 @@
 }
 
 .notor-interaction-submit {
+	align-self: flex-start;
 	padding: 4px 12px;
 	border-radius: var(--radius-s);
 	font-size: var(--font-ui-smaller);
@@ -1314,6 +1354,16 @@
 
 .notor-interaction-submit:hover {
 	background: var(--interactive-accent-hover);
+}
+
+.notor-interaction-submit--disabled,
+.notor-interaction-submit:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.notor-interaction-submit:disabled:hover {
+	background: var(--interactive-accent);
 }
 
 /* Persisted Q&A replay (interaction block) */

@@ -11,16 +11,16 @@
  * This guards the original bug end-to-end: ask_user was not auto-approved, so
  * it rendered a generic "Approve this action?" prompt and a Reject returned a
  * blank result — the questions never appeared. Here we assert the interaction
- * prompt (chips + free-text input) renders directly, NO Approve/Reject buttons
+ * prompt (options + free-text input) renders directly, NO Approve/Reject buttons
  * appear, the chosen answer round-trips into the model's response, and a
  * replayable `interaction` block is persisted.
  *
  * Scenarios:
  *   1. Chat panel ready
- *   2. Model calls ask_user → interaction prompt renders (chips + input),
+ *   2. Model calls ask_user → interaction prompt renders (options + input),
  *      and NO generic Approve/Reject buttons appear
- *   3. Answering each question (chip + free-text) lets the response complete
- *      and the model's reply references the chosen answer
+ *   3. Answering each question (option + free-text) then clicking Submit lets the
+ *      response complete and the model's reply references the chosen answer
  *   4. A persistent `interaction` block is rendered in the thread
  *   5. No interaction render errors logged
  *
@@ -88,12 +88,12 @@ async function waitForInteractionUI(page: Page, timeoutMs = 45_000): Promise<boo
 }
 
 /**
- * Answer every question in the single grouped prompt, then let it auto-submit.
+ * Answer every question in the single grouped prompt, then click Submit.
  * All questions render together as `.notor-interaction-question-group`s. For each
- * group: click the "Green" chip when present (deterministic assertion target),
- * else the first chip; for chip-less groups, type a free-text reply and commit
- * with Enter. The set auto-submits once the last question is answered — no
- * Submit button. Returns the number of question-groups answered.
+ * group: select the "Green" option when present (deterministic assertion target),
+ * else the first option; for option-less groups, type a free-text reply. Once
+ * every question is answered the Submit button enables — click it to send.
+ * Returns the number of question-groups answered.
  */
 async function answerAllPrompts(page: Page, freeText: string): Promise<number> {
 	const prompt = await page.$(".notor-interaction-prompt");
@@ -105,12 +105,12 @@ async function answerAllPrompts(page: Page, freeText: string): Promise<number> {
 		const groups = Array.from(prompt.querySelectorAll(".notor-interaction-question-group"));
 		let answered = 0;
 		for (const group of groups) {
-			const chips = Array.from(
-				group.querySelectorAll<HTMLButtonElement>(".notor-interaction-chip"),
+			const options = Array.from(
+				group.querySelectorAll<HTMLButtonElement>(".notor-interaction-option"),
 			);
-			if (chips.length > 0) {
-				const green = chips.find((c) => (c.textContent ?? "").trim().toLowerCase() === "green");
-				(green ?? chips[0])!.click();
+			if (options.length > 0) {
+				const green = options.find((o) => (o.textContent ?? "").trim().toLowerCase() === "green");
+				(green ?? options[0])!.click();
 				answered += 1;
 				continue;
 			}
@@ -118,10 +118,12 @@ async function answerAllPrompts(page: Page, freeText: string): Promise<number> {
 			if (input) {
 				input.value = text;
 				input.dispatchEvent(new Event("input", { bubbles: true }));
-				input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 				answered += 1;
 			}
 		}
+		// Every question answered → Submit is enabled → click it to send.
+		const submit = prompt.querySelector<HTMLButtonElement>(".notor-interaction-submit");
+		if (submit && !submit.disabled) submit.click();
 		return answered;
 	}, freeText);
 }
@@ -171,13 +173,13 @@ async function testAskUserRoundTrip(ctx: TestContext): Promise<void> {
 	}
 
 	// Verify the interaction prompt shape: a SINGLE prompt holding all questions
-	// as groups, with chips and at least one free-text input across them.
+	// as groups, with options and at least one free-text input across them.
 	const shape = await page.evaluate(() => {
 		const prompts = Array.from(document.querySelectorAll(".notor-interaction-prompt"));
 		return {
 			prompts: prompts.length,
 			groups: document.querySelectorAll(".notor-interaction-question-group").length,
-			chips: document.querySelectorAll(".notor-interaction-chip").length,
+			options: document.querySelectorAll(".notor-interaction-option").length,
 			inputs: document.querySelectorAll(".notor-interaction-input").length,
 		};
 	});
@@ -187,10 +189,10 @@ async function testAskUserRoundTrip(ctx: TestContext): Promise<void> {
 	} else {
 		ctx.fail("ask_user — questions grouped in one prompt", `Expected 1 prompt with ≥2 groups, got prompts=${shape.prompts}, groups=${shape.groups}`, shot1);
 	}
-	if (shape.chips > 0) {
-		ctx.pass("ask_user — suggestion chips rendered", `${shape.chips} chip(s) across ${shape.groups} group(s)`);
+	if (shape.options > 0) {
+		ctx.pass("ask_user — suggestion options rendered", `${shape.options} option(s) across ${shape.groups} group(s)`);
 	} else {
-		ctx.fail("ask_user — suggestion chips rendered", `No chips rendered (prompts=${shape.prompts})`, shot1);
+		ctx.fail("ask_user — suggestion options rendered", `No options rendered (prompts=${shape.prompts})`, shot1);
 	}
 	if (shape.inputs > 0) {
 		ctx.pass("ask_user — free-text input rendered", `${shape.inputs} input(s) present`);

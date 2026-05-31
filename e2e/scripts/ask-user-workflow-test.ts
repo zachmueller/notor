@@ -16,7 +16,7 @@
  *
  * This test drives a live model (AWS Bedrock) through a manual workflow whose
  * body instructs it to call ask_user, then asserts:
- *   1. The inline interaction prompt (chips + input) renders — NOT the
+ *   1. The inline interaction prompt (options + input) renders — NOT the
  *      no-channel error, and NOT a generic Approve/Reject gate.
  *   2. The chosen answer round-trips back into the model's reply.
  *   3. No "no interaction channel" error appears in the structured logs.
@@ -113,12 +113,12 @@ async function waitForInteractionUI(page: Page, timeoutMs = 60_000): Promise<boo
 }
 
 /**
- * Answer every question in the single grouped prompt, then let it auto-submit.
+ * Answer every question in the single grouped prompt, then click Submit.
  * All questions render together as `.notor-interaction-question-group`s. For each
- * group: click the "Green" chip when present (deterministic assertion target),
- * else the first chip; for chip-less groups, type a free-text reply and commit
- * with Enter. The set auto-submits once the last question is answered — no
- * Submit button. Returns the number of question-groups answered.
+ * group: select the "Green" option when present (deterministic assertion target),
+ * else the first option; for option-less groups, type a free-text reply. Once
+ * every question is answered the Submit button enables — click it to send.
+ * Returns the number of question-groups answered.
  */
 async function answerAllPrompts(page: Page, freeText: string): Promise<number> {
 	const prompt = await page.$(".notor-interaction-prompt");
@@ -130,12 +130,12 @@ async function answerAllPrompts(page: Page, freeText: string): Promise<number> {
 		const groups = Array.from(prompt.querySelectorAll(".notor-interaction-question-group"));
 		let answered = 0;
 		for (const group of groups) {
-			const chips = Array.from(
-				group.querySelectorAll<HTMLButtonElement>(".notor-interaction-chip"),
+			const options = Array.from(
+				group.querySelectorAll<HTMLButtonElement>(".notor-interaction-option"),
 			);
-			if (chips.length > 0) {
-				const green = chips.find((c) => (c.textContent ?? "").trim().toLowerCase() === "green");
-				(green ?? chips[0])!.click();
+			if (options.length > 0) {
+				const green = options.find((o) => (o.textContent ?? "").trim().toLowerCase() === "green");
+				(green ?? options[0])!.click();
 				answered += 1;
 				continue;
 			}
@@ -143,10 +143,12 @@ async function answerAllPrompts(page: Page, freeText: string): Promise<number> {
 			if (input) {
 				input.value = text;
 				input.dispatchEvent(new Event("input", { bubbles: true }));
-				input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 				answered += 1;
 			}
 		}
+		// Every question answered → Submit is enabled → click it to send.
+		const submit = prompt.querySelector<HTMLButtonElement>(".notor-interaction-submit");
+		if (submit && !submit.disabled) submit.click();
 		return answered;
 	}, freeText);
 }
@@ -218,16 +220,16 @@ async function testAskUserInsideWorkflow(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	// Verify prompt shape: chips and a free-text input across the questions.
+	// Verify prompt shape: options and a free-text input across the questions.
 	const shape = await page.evaluate(() => ({
 		prompts: document.querySelectorAll(".notor-interaction-prompt").length,
-		chips: document.querySelectorAll(".notor-interaction-chip").length,
+		options: document.querySelectorAll(".notor-interaction-option").length,
 		inputs: document.querySelectorAll(".notor-interaction-input").length,
 	}));
-	if (shape.chips > 0) {
-		ctx.pass("Workflow ask_user — chips rendered", `${shape.chips} chip(s) across ${shape.prompts} prompt(s)`);
+	if (shape.options > 0) {
+		ctx.pass("Workflow ask_user — options rendered", `${shape.options} option(s) across ${shape.prompts} prompt(s)`);
 	} else {
-		ctx.fail("Workflow ask_user — chips rendered", `No chips rendered (prompts=${shape.prompts})`, shot1);
+		ctx.fail("Workflow ask_user — options rendered", `No options rendered (prompts=${shape.prompts})`, shot1);
 	}
 
 	// Answer everything (Green for the color, free text for the rest).
