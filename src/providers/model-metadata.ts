@@ -708,10 +708,17 @@ const LEGACY_ENABLED_THINKING_PATTERNS = [
 	/^claude-3-7-sonnet/,
 	/^(us|eu|apac|global)\.anthropic\.claude-3-5-sonnet/,
 	/^(us|eu|apac|global)\.anthropic\.claude-3-7-sonnet/,
-	// Sonnet/Opus 4.0 (dated id), Sonnet 4.5, Sonnet/Opus 4.6 — NOT 4.8
+	// Sonnet/Opus 4.0 (dated id), Opus 4.1, Sonnet 4.5, Sonnet/Opus 4.6 — NOT 4.7/4.8.
+	// Opus 4.1 (dated id claude-opus-4-1-20250805) predates the adaptive era and
+	// still serves a VISIBLE reasoning transcript on Bedrock — verified by live
+	// converse probe (accepts thinking.type=enabled, returns reasoningContent text),
+	// unlike 4.7/4.8 which reject it. Without this entry it falls through to the
+	// "effort" default and silently loses its transcript.
 	/^claude-(opus|sonnet)-4-(5|6)/,
+	/^claude-opus-4-1/,
 	/^claude-(opus|sonnet)-4-20250514/,
 	/^(us|eu|apac|global)\.anthropic\.claude-(opus|sonnet)-4-(5|6)/,
+	/^(us|eu|apac|global)\.anthropic\.claude-opus-4-1/,
 	/^(us|eu|apac|global)\.anthropic\.claude-(opus|sonnet)-4-20250514/,
 ];
 

@@ -118,6 +118,10 @@ describe("getThinkingMode", () => {
 			"claude-opus-4-20250514",
 			"us.anthropic.claude-sonnet-4-20250514-v1:0",
 			"global.anthropic.claude-opus-4-20250514-v1:0",
+			// 4.1 (dated) — visible transcript confirmed by live Bedrock probe
+			"claude-opus-4-1-20250805",
+			"us.anthropic.claude-opus-4-1-20250805-v1:0",
+			"global.anthropic.claude-opus-4-1-20250805-v1:0",
 			// 4.5
 			"claude-sonnet-4-5-20250929",
 			"apac.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -134,6 +138,20 @@ describe("getThinkingMode", () => {
 		for (const id of legacy) {
 			expect(getThinkingMode(id)).toBe("enabled");
 		}
+	});
+
+	// Regression: Opus 4.1 predates the adaptive era and serves a VISIBLE reasoning
+	// transcript on Bedrock (live converse probe: accepts thinking.type=enabled,
+	// returns reasoningContent text), so it must classify "enabled". Opus 4.7/4.8
+	// reject thinking.type=enabled and must stay "effort" — the 4.1 regex must not
+	// bleed into them.
+	it("is 'enabled' for Opus 4.1 but 'effort' for 4.7/4.8 (closed-set boundary)", () => {
+		expect(getThinkingMode("claude-opus-4-1-20250805")).toBe("enabled");
+		expect(getThinkingMode("us.anthropic.claude-opus-4-1-20250805-v1:0")).toBe("enabled");
+		expect(getThinkingMode("global.anthropic.claude-opus-4-1-20250805-v1:0")).toBe("enabled");
+		expect(getThinkingMode("us.anthropic.claude-opus-4-7")).toBe("effort");
+		expect(getThinkingMode("global.anthropic.claude-opus-4-7")).toBe("effort");
+		expect(getThinkingMode("us.anthropic.claude-opus-4-8")).toBe("effort");
 	});
 
 	// Default: any unrecognized / future model id is treated as effort by design,
