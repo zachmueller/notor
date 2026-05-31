@@ -135,14 +135,15 @@ describe("BedrockProvider — credential expiry retry", () => {
 		expect(calls).toBe(1);
 	});
 
-	it("uses an auth-tailored message free of internal tooling references", () => {
+	it("uses generic AWS messaging tailored by auth method", () => {
 		const profileMsg = expiredMessage(makeProvider({ aws_auth_method: "profile" }));
 		const keysMsg = expiredMessage(makeProvider({ aws_auth_method: "keys" }));
 
+		// Profile auth points at refreshing the profile's credentials; keys auth
+		// points at Settings. Both stay vendor-neutral (AWS SDK terms only).
 		expect(profileMsg).toMatch(/profile/i);
 		expect(keysMsg).toMatch(/access keys/i);
-		for (const msg of [profileMsg, keysMsg]) {
-			expect(msg).not.toMatch(/midway|ada|mwinit/i);
-		}
+		expect(profileMsg).toMatch(/credentials have expired/i);
+		expect(keysMsg).toMatch(/Settings → Notor/);
 	});
 });

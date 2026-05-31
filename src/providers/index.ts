@@ -221,6 +221,20 @@ export class ProviderRegistry {
 		log.info("Reset provider credentials", { id });
 	}
 
+	/**
+	 * Reset cached credentials for every configured instance of a provider type.
+	 *
+	 * Instances are keyed by unique instance ID, so a bare type string is not a
+	 * valid key for {@link resetProviderCredentials}. When credentials expire,
+	 * all instances of a type typically share the same underlying source, so
+	 * clearing them together lets concurrent sessions and sub-agents recover.
+	 */
+	resetCredentialsForType(type: LLMProviderType): void {
+		for (const config of this.getConfigsForType(type)) {
+			this.resetProviderCredentials(config.id);
+		}
+	}
+
 	// -----------------------------------------------------------------------
 	// Model list caching (PROV-007)
 	// -----------------------------------------------------------------------

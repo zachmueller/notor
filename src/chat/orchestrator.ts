@@ -1551,10 +1551,13 @@ export class ChatOrchestrator implements ToolSessionContext {
 					// Auto-clear cached credentials for Bedrock so the next
 					// attempt picks up refreshed tokens without restarting.
 					if (e.provider === "bedrock") {
-						// Safety net: drop cached clients so the next attempt
-						// re-resolves credentials. The provider message is already
-						// self-contained, so no suggestion is appended here.
-						this.providerRegistry.resetProviderCredentials("bedrock");
+						// Safety net: drop cached clients for every bedrock
+						// instance so the next attempt re-resolves credentials.
+						// Must reset by type — the registry is keyed by instance
+						// ID, so the bare "bedrock" type is not a valid key. The
+						// provider message is already self-contained, so no
+						// suggestion is appended here.
+						this.providerRegistry.resetCredentialsForType("bedrock");
 					} else {
 						suggestion = " Check your API key or credentials in Settings → Notor.";
 					}
