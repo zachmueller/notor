@@ -17,7 +17,7 @@ Notor gives you a full AI chat panel inside Obsidian with the ability to read, s
 
 ### Vault tools
 
-- **[31 built-in tools](docs/vault-tools.md)** — read, write, search, and move notes; manage frontmatter and tags; follow backlinks and outlinks; apply templates (Templater and core Templates); interact with Obsidian's Web Viewer; search the web (DuckDuckGo by default; Tavily, Brave, SerpAPI with API keys) and fetch pages; run shell commands; read, write, and import filesystem files and Word documents (`.docx`)
+- **[32 built-in tools](docs/vault-tools.md)** — read, write, search, and move notes; manage frontmatter and tags; follow backlinks and outlinks; apply templates (Templater and core Templates); interact with Obsidian's Web Viewer; search the web (DuckDuckGo by default; Tavily, Brave, SerpAPI, Kagi with API keys) and fetch pages; run shell commands; read, write, and import filesystem files and Word documents (`.docx`)
 - **[Safety-first approval model](docs/safety.md)** — Plan/Act mode toggle, diff previews with per-hunk accept/reject, approval gates for write operations, and automatic checkpoints for rollback
 - **[Sub-agents](docs/sub-agents.md)** — the AI can spawn focused child conversations for vault search, web research, or custom tasks with isolated context and default-deny tool access
 

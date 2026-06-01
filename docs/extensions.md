@@ -53,7 +53,7 @@ Each parameter supports:
 
 | Property | Type | Description |
 |---|---|---|
-| `type` | string | `"string"`, `"number"`, `"boolean"`, or `"string[]"` |
+| `type` | string | `"string"`, `"number"`, `"boolean"`, `"string[]"`, or `"object[]"` |
 | `description` | string | Sent to the AI to explain the parameter. |
 | `default` | matches type | Makes the parameter optional. Params without a default are required. |
 | `enum` | string[] | Constrains to listed values (string type only). |
@@ -424,6 +424,9 @@ All extension code executes with these variables in scope:
 | `libs.marked` | marked | Markdown parsing and rendering |
 | `libs.xmldom` | @xmldom/xmldom | XML DOM parsing |
 | `libs.croner` | croner | Cron expression parsing — `new libs.croner.Cron("0 9 * * 1")` |
+| `libs.fs` | node:fs | Node filesystem module (desktop only) |
+| `libs.crypto` | node:crypto | Node crypto module (desktop only) |
+| `libs.path` | node:path | Node path module (desktop only) |
 
 ### Extension settings
 

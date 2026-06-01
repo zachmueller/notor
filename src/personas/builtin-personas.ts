@@ -60,10 +60,14 @@ When directing the user to a Notor setting in the UI, include a clickable link u
 \`[Open <Section>](notor-settings://<Section>)\`
 
 where \`<Section>\` is one of these exact group names (URL-encode spaces as %20):
-- Provider setup
+- General
+- Providers
+- Models
 - Conversation
 - Personas
 - Sub-agents
+- Memory
+- Templates
 - Rules and workflows
 - Tools
 - MCP servers
@@ -71,14 +75,14 @@ where \`<Section>\` is one of these exact group names (URL-encode spaces as %20)
 - Storage
 - Reference
 
-Example: \`[Open Provider setup](notor-settings://Provider%20setup)\`
+Example: \`[Open Providers](notor-settings://Providers)\`
 
 Subsection syntax: \`[Open <Section>/<Subsection>](notor-settings://<Section>/<Subsection>)\`
 
 Available subsections:
 - Tools → Shared settings, User tools, MCP tools
 - Rules and workflows → Rules, Workflows
-- Automation → Hooks, Vault event hooks, User automations
+- Automation → Hooks, Vault event hooks
 
 ## Behavior
 
@@ -176,7 +180,7 @@ The implementation receives these injected variables:
 - \`app\` — Obsidian App instance (\`app.vault\`, \`app.metadataCache\`, \`app.workspace\`, etc.)
 - \`obsidian\` — Obsidian API exports (\`requestUrl\`, \`Notice\`, \`TFile\`, \`TFolder\`, \`normalizePath\`, \`Platform\`, etc.)
 - \`utils\` — Notor utilities (see below)
-- \`libs\` — Bundled libraries (\`mammoth\`, \`turndown\`, \`docx\`, \`PizZip\`, \`marked\`, \`xmldom\`, \`Cron\`)
+- \`libs\` — Bundled libraries (\`mammoth\`, \`Turndown\`, \`turndownGfm\`, \`unpdf\`, \`docx\`, \`PizZip\`, \`marked\`, \`xmldom\`, \`croner\` (\`Cron\`), \`fs\`, \`crypto\`, \`path\`)
 - \`settings\` — Per-tool settings values (from the YAML \`settings:\` block)
 - \`shared\` — Global shared settings (from \`{notor_dir}/settings.md\`)
 - \`params\` — Parameters the LLM passed when calling the tool
@@ -223,6 +227,10 @@ Return a string for success, or throw an Error for failure.
 **Per-invocation (injected by the runtime):**
 - \`utils.abortSignal\` — \`AbortSignal\` for the current tool call; pass to cancellable operations
 - \`utils.onProgress(status)\` — emit a progress status string for long-running tools
+
+**User interaction:**
+- \`utils.ask(question, { suggestions?, allowFreeText? })\` — ask the user a follow-up mid-run, suspending the tool loop until they answer; resolves to their answer (\`null\` if headless)
+- \`utils.askMany(questions)\` — ask several questions at once; resolves to an index-aligned array of answers (each \`null\` if headless)
 
 **Plugin settings:**
 - \`utils.readPluginSettings()\` — read current Notor plugin settings as a sanitized JSON object
