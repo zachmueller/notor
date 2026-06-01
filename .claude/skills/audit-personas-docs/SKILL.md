@@ -1,6 +1,6 @@
 ---
 name: audit-personas-docs
-description: Audit the built-in personas (notor-help, tool-creator) and the repo docs against the real code, find drift (renamed/removed tools, dead settings deep-links, stale utils/libs API, missing tools in tables), report it as a findings table, then propose diffs and apply them ONLY after the user approves. Use when personas or docs feel out of date, after adding/renaming/removing a built-in tool, setting, settings-section, sub-agent, or extension API, before a release, or when asked to "update notor-help / tool-creator" or "bring the docs up to date".
+description: Audit the built-in personas (notor-help, tool-creator) and the repo docs against the real code, find drift (renamed/removed tools, dead settings deep-links, stale OR missing utils/libs API entries, missing tools in tables), report it as a findings table, then propose diffs and apply them ONLY after the user approves. Diffs the utils/libs API in BOTH directions — flagging real supported members (e.g. utils.webview) that are documented in neither the persona nor docs/extensions.md, since that gap makes tool-creator misinform users. Use when personas or docs feel out of date, after adding/renaming/removing a built-in tool, setting, settings-section, sub-agent, or extension API, before a release, or when asked to "update notor-help / tool-creator" or "bring the docs up to date".
 ---
 
 # Audit Built-in Personas & Repo Docs for Drift
@@ -122,11 +122,31 @@ covers it.
   (case- and word-sensitive; the handler matches on the literal string). A renamed or
   removed group = a **dead link = high severity**. Also flag real groups that exist in
   code but are missing from the persona's enumerated list.
-- **`tool-creator` API prose.** Diff the documented `utils.*` methods, the `libs` members,
-  the injected variable list, the frontmatter fields (`notor-type`, `notor-tool-name`,
-  `notor-description`, `notor-mode` values), and the param/setting type lists against
-  their sources in the map. Flag removed/renamed APIs (teaching a nonexistent API is
-  high severity) and undocumented additions (lower severity).
+- **`tool-creator` API prose — diff BOTH directions.** Diff the documented `utils.*`
+  methods, the `libs` members, the injected variable list, the frontmatter fields
+  (`notor-type`, `notor-tool-name`, `notor-description`, `notor-mode` values), and the
+  param/setting type lists against their sources in the map.
+  - **Forward (doc → code):** flag removed/renamed APIs — teaching a nonexistent API is
+    high severity.
+  - **Reverse (code → doc) — this is the easy-to-miss direction, do not skip it.**
+    Enumerate **every public member** of the `ExtensionUtils` interface and the
+    `ExtensionLibs` interface (`src/extensions/runtime-context/types.ts`) one by one, and
+    confirm each appears **somewhere** in the documented surface — the `tool-creator`
+    persona prose **or** the `docs/extensions.md` `utils`/`libs` tables. List the members
+    as a checklist in the report so the coverage is auditable; a member missing from
+    *both* surfaces is a finding.
+  - **Severity of an undocumented-but-real member:** judge by whether the gap can make the
+    persona *misinform* the user. A load-bearing, supported API a custom tool would
+    plausibly reach for (e.g. `utils.webview`, `utils.docxComments`, `utils.normalizedIndexOf`,
+    `utils.ask`/`askMany`) being absent is **high severity** — because the `tool-creator`'s
+    whole job is to teach the `utils` surface, an omission leads it to declare the API
+    "private/unsupported" and steer the user to a wrong fallback. Only a genuinely
+    internal/`@internal`-tagged or per-invocation-plumbing member (e.g. `interactionCallback`)
+    is low severity when omitted.
+  - **Do not mistake nullable / desktop-only / per-invocation members for private.**
+    Members typed `… | null` (e.g. `webview`, `conversationApi`, `memory`, `chatBlocks`)
+    or only set per-call (`abortSignal`, `onProgress`) are still **public, supported**
+    surface — they belong in the docs with their null/availability caveat, not omitted.
 - **Hidden `log_level` (`notor-help`).** Confirm the setting still exists and the claimed
   default (`"error"`) still matches `src/settings/defaults.ts`.
 
@@ -143,6 +163,13 @@ covers it.
   same sources above. Cross-check `docs/extensions.md` against the `tool-creator` sources,
   `docs/personas.md` against `inventory.ts.personas`, `docs/sub-agents.md` against
   `subAgentProfiles`, etc.
+- **`docs/extensions.md` `utils`/`libs` tables — diff BOTH directions, same as the
+  persona.** The `utils.*` and `libs.*` tables in `docs/extensions.md` are a primary
+  source the `tool-creator` leans on, so apply the identical reverse check: every public
+  `ExtensionUtils` / `ExtensionLibs` member must appear in these tables (with its
+  null/desktop-only caveat where applicable), and every documented row must still exist in
+  the interface. A real, supported member missing from the table is a finding at the same
+  severity it would carry in the persona.
 - **`README.md` / `AGENTS.md` / `examples/`.** Check the README feature list and any tool
   counts ("N built-in tools") against reality; check `AGENTS.md` paths/commands resolve;
   spot-check `examples/` extension templates against the current extension format.
@@ -157,9 +184,13 @@ Emit a Markdown findings table — one row per drift item:
 |---------|-------|---------|-----------|----------|--------------|
 
 - **surface** — e.g. `notor-help persona`, `docs/vault-tools.md`, `tool-creator persona`.
-- **severity** — `high` = user-visible breakage (dead deep-link, documented tool/API that
-  doesn't exist); `medium` = real but non-breaking (missing tool row, stale provider list);
-  `low` = cosmetic (wording, ordering, undocumented-but-harmless addition).
+- **severity** — `high` = user-visible breakage **or active misinformation**: a dead
+  deep-link, a documented tool/API that doesn't exist, **or a real supported `utils`/`libs`
+  member absent from a teaching surface** (persona + `docs/extensions.md`), which leads the
+  `tool-creator` to declare a working API "private/unsupported"; `medium` = real but
+  non-breaking (missing tool row, stale provider list, a real-but-niche member documented in
+  one surface but not the other); `low` = cosmetic (wording, ordering, truly harmless
+  undocumented addition such as an `@internal` plumbing member).
 - **proposed fix** — the concrete edit you would make (the exact new string / new table
   row), not a vague "update this".
 
@@ -191,6 +222,11 @@ there is **no drift**, say so plainly.
 - Give concrete proposed edits (exact strings), and apply them **only after approval**.
 - State the scope audited and anything skipped — never let a partial pass look complete.
 - Add a row to the source-of-truth map when a new claim surface appears.
+- Diff the `utils`/`libs` API in **both directions** — and explicitly enumerate every
+  `ExtensionUtils`/`ExtensionLibs` member as a coverage checklist. A real, supported member
+  documented in *neither* the persona nor `docs/extensions.md` is high severity, not a
+  cosmetic omission — the `tool-creator`'s job is to teach that surface, so a gap makes it
+  misinform the user (this is what happened with `utils.webview`).
 
 ### DO NOT
 - **Never edit personas or docs before the user approves the proposed diffs.**
