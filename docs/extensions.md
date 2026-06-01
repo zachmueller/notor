@@ -388,6 +388,7 @@ All extension code executes with these variables in scope:
 | `obsidian.getFrontMatterInfo` | function | Parse frontmatter boundaries from file content |
 | `obsidian.normalizePath` | function | Normalize vault-relative paths |
 | `obsidian.MarkdownView` | class | Active Markdown editor view |
+| `obsidian.Platform` | object | Platform detection — `Platform.isMobile`, `Platform.isDesktop`, etc. |
 
 ### Notor utilities
 
@@ -398,18 +399,39 @@ All extension code executes with these variables in scope:
 | `utils.checkpointManager` | Create snapshots before destructive operations for rollback. |
 | `utils.noteOpener` | Open notes programmatically in the editor. |
 | `utils.logger(name)` | Create a scoped logger (prefixed with `ext:`). |
-| `utils.resolveAndValidatePath(path, allowedPaths?)` | Validate and resolve filesystem paths against allowed paths. |
+| `utils.resolveAndValidatePath(path, allowedPaths?)` | Validate and resolve filesystem paths against allowed paths. Returns `{ valid: true, resolvedPath }` or `{ valid: false, error }` — check `.valid` first. |
 | `utils.executeShellCommand(cmd, opts?)` | Run a shell command. |
+| `utils.isDomainBlocked(url, denylist)` | Check whether a URL's domain matches any denylist pattern. Returns `{ blocked: true, pattern }` or `{ blocked: false }`. |
 | `utils.pathEnforcer.enforcePathConstraints(toolName, params, entry)` | Apply path enforcement rules. |
 | `utils.pathEnforcer.isPathWithin(target, base)` | Check if a path is within a base directory. |
+| `utils.ensureDirectoryExists(filePath)` | Create intermediate vault directories for a file path. |
+| `utils.normalizedIndexOf(haystack, needle)` | Unicode-normalized `indexOf` for fuzzy SEARCH/REPLACE matching. Returns `{ index, length }` or `null`. |
 | `utils.readNote(path)` | Read the raw Markdown content of a vault note by vault-relative path. Returns `string`. |
 | `utils.resolveNotorPath(subdir)` | Resolve a subdirectory under the user's Notor dir. Returns a vault-relative path (e.g., `notor/memory`). |
+| `utils.queue.enqueue(lane, fn, delayMs?)` | Per-lane FIFO serialization queue. `utils.queue.pending(lane)` returns the pending count. |
+| `utils.webSearch.search(query, numResults, timeoutMs, signal?)` | Multi-provider web search with fallback. Also `searchWithConfig(...)` and `buildConfig(settings)`. |
+| `utils.llmCall(presetName, messages)` | Make an LLM call using a named model preset. Returns `string \| null` (null if the preset is unconfigured or the call fails). Max recursion depth 1. |
+| `utils.detectMediaFormat(buffer)` | Detect media format from buffer magic bytes (`png`/`jpeg`/`gif`/`webp`/`pdf` or `null`). |
+| `utils.processImage(buffer, mediaType, opts?)` | Process an image buffer for LLM consumption (resize/compress). Returns a content block. |
+| `utils.processPdf(buffer, opts)` | Process a PDF buffer for LLM consumption. Returns `{ contentBlocks, textSummary }`. |
+| `utils.resolveImageForDocx(href, allowedPaths?)` | Resolve an image href to data embeddable in a DOCX via `ImageRun`. `null` if unresolvable. |
+| `utils.graftDocxIntoTemplate(generatedZip, templateZip)` | Graft generated DOCX body content into a template, preserving its styles/margins/headers/footers. |
+| `utils.docxComments` | DOCX comment-parsing utilities: `parseCommentsXml`, `parseCommentsExtendedXml`, `extractQuotedText`, `parsePeopleXml`, `buildCommentThreads`, `formatCommentsAsMarkdown`, `extractExistingCommentIds`. |
 | `utils.memory` | Memory subsystem facade — exposes note format, dedup, dream cursor, and concept resolver. `null` when memory is disabled. See [memory.md](memory.md). |
+| `utils.memoryApprovalMode` | Current memory approval mode: `"auto"` \| `"bulk"` \| `"bulk_and_inline"`. `null` when memory is disabled. |
 | `utils.chatBlocks` | API for emitting extension blocks into the conversation. Method: `emit(kind, data, opts?)`. `null` when no conversation is available. |
-| `utils.chatHistory` | API for searching and reading past conversations. Methods: `search(query)`, `loadFull(id)`. `null` when history is unavailable. |
-| `utils.runSubAgent(opts)` | Spawn a sub-agent from extension code. Supports detached (background) and synchronous modes. |
+| `utils.chatHistory` | API for searching and reading past conversations. Methods: `search(query)`, `loadConversation(id)`, `listRecent(limit?)`, `loadFull(id)`. `null` when history is unavailable. |
+| `utils.conversationApi` | Read/set conversation title and favorite status (`getTitle`/`setTitle`/`isFavorite`/`setFavorite`). `null` when no active conversation. |
+| `utils.runSubAgent(opts)` | Spawn a sub-agent from extension code. Supports detached (background) and synchronous modes. Max depth 1. |
+| `utils.readPluginSettings()` | Read current Notor plugin settings as a sanitized JSON object (sensitive fields redacted). |
+| `utils.editPluginSetting(keyPath, value)` | Update a single setting by dot-separated key path. Returns `{ success, oldValue, newValue, error }`. |
+| `utils.ask(question, opts?)` | Ask the user a follow-up mid-run, suspending the tool loop until they answer. Resolves to their answer (`null` if headless). |
+| `utils.askMany(questions)` | Ask several follow-up questions at once. Resolves to an index-aligned array of answers (each `null` if headless). |
+| `utils.webview` | Web Viewer browser facade (`getConversationWebview`, `getActiveWebview`, `waitForReady`, `getConversationId`, `persistUrl`, `readPersistedUrl`). `null` off-desktop (Electron required). |
+| `utils.tempOutputSpiller` | Spill truncated tool output to disk. `undefined` when disabled or on mobile. |
 | `utils.abortSignal` | `AbortSignal` for the current tool call (tools only, not automations). |
-| `utils.notify(message, opts?)` | Display a toast notification. Options: `duration` (ms). |
+| `utils.onProgress(status)` | Emit a progress status string for long-running tools (tools only, set per-invocation). |
+| `utils.notify(message, opts?)` | Display a toast notification. Options: `duration` (ms), `onClick`, `onRightClick`. |
 
 ### Bundled libraries
 

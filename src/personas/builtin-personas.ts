@@ -210,6 +210,7 @@ Return a string for success, or throw an Error for failure.
 - \`utils.resolveAndValidatePath(path)\` — returns \`{ valid: true; resolvedPath: string }\` or \`{ valid: false; error: string }\`; always check \`.valid\` before using \`.resolvedPath\`
 - \`utils.executeShellCommand(cmd, opts)\` — run a shell command
 - \`utils.isDomainBlocked(url, denylist)\` — check domain denylist
+- \`utils.normalizedIndexOf(haystack, needle)\` — Unicode-normalized \`indexOf\` for fuzzy SEARCH/REPLACE matching (curly quotes, em/en-dashes, etc. treated as ASCII equivalents); returns \`{ index, length }\` or \`null\`
 - \`utils.pathEnforcer\` — enforces path constraints automatically at dispatch; rarely needed in tool code
 
 **LLM & agents:**
@@ -231,17 +232,26 @@ Return a string for success, or throw an Error for failure.
 **User interaction:**
 - \`utils.ask(question, { suggestions?, allowFreeText? })\` — ask the user a follow-up mid-run, suspending the tool loop until they answer; resolves to their answer (\`null\` if headless)
 - \`utils.askMany(questions)\` — ask several questions at once; resolves to an index-aligned array of answers (each \`null\` if headless)
+- \`utils.notify(message, { duration?, onClick?, onRightClick? })\` — show an Obsidian Notice popup; \`duration\` in ms (0 = persistent), \`onRightClick\` desktop only
 
 **Plugin settings:**
 - \`utils.readPluginSettings()\` — read current Notor plugin settings as a sanitized JSON object
 - \`utils.editPluginSetting(keyPath, value)\` — update a setting by dot-separated key; returns \`{ success, oldValue, newValue, error }\`
+
+**DOCX & media:**
+- \`utils.detectMediaFormat(buffer)\`, \`utils.processImage(...)\`, \`utils.processPdf(...)\` — media processing for LLM consumption
+- \`utils.resolveImageForDocx(href, allowedPaths?)\` — resolve an image href to data embeddable in a DOCX via \`ImageRun\` (\`null\` if unresolvable)
+- \`utils.graftDocxIntoTemplate(generatedZip, templateZip)\` — graft generated DOCX body into a template, preserving its styles/margins/headers/footers
+- \`utils.docxComments\` — DOCX comment-parsing utilities (\`parseCommentsXml\`, \`parseCommentsExtendedXml\`, \`extractQuotedText\`, \`parsePeopleXml\`, \`buildCommentThreads\`, \`formatCommentsAsMarkdown\`, \`extractExistingCommentIds\`)
 
 **Advanced (nullable — check before use):**
 - \`utils.conversationApi\` — read/set conversation title and favorite status (\`null\` if no active conversation)
 - \`utils.chatHistory\` — search and load past conversations (\`null\` if unavailable)
 - \`utils.chatBlocks\` — emit custom blocks into the chat transcript (\`null\` if unavailable)
 - \`utils.memory\` — memory subsystem (\`null\` when \`memory_enabled\` is false)
-- \`utils.detectMediaFormat(buffer)\`, \`utils.processImage(...)\`, \`utils.processPdf(...)\` — media processing for LLM consumption
+- \`utils.memoryApprovalMode\` — current memory approval mode: \`"auto"\` | \`"bulk"\` | \`"bulk_and_inline"\` (\`null\` when memory is disabled)
+- \`utils.webview\` — Web Viewer browser facade (\`getConversationWebview\`, \`getActiveWebview\`, \`waitForReady\`, \`getConversationId\`, \`persistUrl\`, \`readPersistedUrl\`); \`null\` off-desktop (Electron required)
+- \`utils.tempOutputSpiller\` — spill truncated tool output to disk; \`undefined\` when disabled or on mobile
 
 ### Common patterns
 
