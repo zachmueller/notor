@@ -692,3 +692,89 @@ describe("ConversationManager.updateMessage()", () => {
 		expect(messages[loadingIdx]!.content).toEqual(realContent);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// setWorkflowMetadata — mid-conversation workflow deactivate / switch
+// ---------------------------------------------------------------------------
+
+describe("ConversationManager.setWorkflowMetadata()", () => {
+	let mgr: ConversationManager;
+
+	beforeEach(() => {
+		mgr = createManager();
+	});
+
+	it("patches only the provided fields on the in-memory active conversation", () => {
+		const initialConfigs = [
+			{
+				source: "workflow" as const,
+				sourceFile: "/workflows/a.md",
+				documentPosition: 0,
+				tools: { web_search: { enabled: false } },
+			},
+		];
+		mgr.createConversation("openai", "gpt-4", "act", {
+			workflow_path: "/workflows/a.md",
+			workflow_name: "Workflow A",
+			workflow_tool_configs: initialConfigs,
+		});
+
+		// Deactivate-style patch: only flip the flag, leave everything else.
+		mgr.setWorkflowMetadata({ workflow_deactivated: true });
+
+		const conv = mgr.getActiveConversation()!;
+		expect(conv.workflow_deactivated).toBe(true);
+		expect(conv.workflow_path).toBe("/workflows/a.md");
+		expect(conv.workflow_name).toBe("Workflow A");
+		expect(conv.workflow_tool_configs).toEqual(initialConfigs);
+	});
+
+	it("replaces workflow identity + tool configs and clears deactivation (switch)", () => {
+		mgr.createConversation("openai", "gpt-4", "act", {
+			workflow_path: "/workflows/a.md",
+			workflow_name: "Workflow A",
+		});
+		// Put the conversation into a deactivated state first (as the chip would).
+		mgr.setWorkflowMetadata({ workflow_deactivated: true });
+
+		const newConfigs = [
+			{
+				source: "workflow" as const,
+				sourceFile: "/workflows/b.md",
+				documentPosition: 0,
+				tools: { execute_command: { enabled: true } },
+			},
+		];
+		mgr.setWorkflowMetadata({
+			workflow_path: "/workflows/b.md",
+			workflow_name: "Workflow B",
+			workflow_tool_configs: newConfigs,
+			workflow_deactivated: false,
+		});
+
+		const conv = mgr.getActiveConversation()!;
+		expect(conv.workflow_path).toBe("/workflows/b.md");
+		expect(conv.workflow_name).toBe("Workflow B");
+		expect(conv.workflow_tool_configs).toEqual(newConfigs);
+		expect(conv.workflow_deactivated).toBe(false);
+	});
+
+	it("fires onConversationChanged so the header is persisted", () => {
+		const onChanged = vi.fn();
+		mgr.createConversation("openai", "gpt-4", "act", {
+			workflow_path: "/workflows/a.md",
+			workflow_name: "Workflow A",
+		});
+		mgr.setOnConversationChanged(onChanged);
+
+		mgr.setWorkflowMetadata({ workflow_deactivated: true });
+
+		expect(onChanged).toHaveBeenCalledTimes(1);
+		expect(onChanged.mock.calls[0]![0]).toMatchObject({ workflow_deactivated: true });
+	});
+
+	it("is a no-op when there is no active conversation", () => {
+		expect(() => mgr.setWorkflowMetadata({ workflow_deactivated: true })).not.toThrow();
+		expect(mgr.getActiveConversation()).toBeNull();
+	});
+});

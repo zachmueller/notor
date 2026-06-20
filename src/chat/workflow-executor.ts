@@ -11,6 +11,7 @@
 import { Notice } from "obsidian";
 import type { App } from "obsidian";
 import type {
+	Conversation,
 	ConversationMode,
 	Persona,
 	Workflow,
@@ -182,10 +183,58 @@ export class WorkflowExecutor {
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-013
 	 */
 	async executeWorkflow(workflow: Workflow, supplementaryText = ""): Promise<void> {
+		return this._runWorkflowIntoConversation(workflow, supplementaryText, null);
+	}
+
+	/**
+	 * Switch the current conversation to a different workflow mid-chat.
+	 *
+	 * Applies the workflow *fully* into the existing conversation — its tool
+	 * configs, persona, provider/model, and hook overrides — and injects its
+	 * assembled prompt as the next user turn, WITHOUT creating a new
+	 * conversation. Rejected (with a Notice) when the conversation is already
+	 * processing a message, so we never half-apply a workflow that can't run.
+	 *
+	 * Wired from the workflow chip's context menu.
+	 */
+	async switchWorkflow(workflow: Workflow, supplementaryText = ""): Promise<void> {
+		const conversationManager = this.deps.getConversationManager();
+		const active = conversationManager.getActiveConversation();
+		if (!active) {
+			new Notice("No active conversation to switch.");
+			return;
+		}
+		// Guard FIRST — before any persona switch, assembly, or header mutation —
+		// so a blocked switch leaves the conversation completely untouched.
+		const guardError = this.deps.sessionManager.checkSessionGuards(active.id);
+		if (guardError) {
+			new Notice(guardError);
+			return;
+		}
+		return this._runWorkflowIntoConversation(workflow, supplementaryText, active.id);
+	}
+
+	/**
+	 * Shared workflow-execution body for both the new-conversation path
+	 * (`targetConversationId === null`) and the switch-into-existing path
+	 * (`targetConversationId` set).
+	 *
+	 * With a null target this is byte-for-byte the original `executeWorkflow`
+	 * behavior. The `isExisting` branches diverge only where they must: reuse
+	 * vs. create the conversation, append vs. clear messages, persona-revert
+	 * bookkeeping, and clearing a prior workflow's hooks.
+	 */
+	private async _runWorkflowIntoConversation(
+		workflow: Workflow,
+		supplementaryText: string,
+		targetConversationId: string | null,
+	): Promise<void> {
+		const isExisting = targetConversationId !== null;
 		log.info("Executing workflow", {
 			display_name: workflow.display_name,
 			file_path: workflow.file_path,
 			persona_name: workflow.persona_name,
+			into_existing: isExisting,
 		});
 
 		const personaManager = this.deps.getPersonaManager();
@@ -268,33 +317,71 @@ export class WorkflowExecutor {
 		// Determine the active persona name after any switch
 		const activePersonaName = personaManager?.getActivePersona()?.name ?? null;
 
-		const conversation = conversationManager.createConversation(
-			providerId,
-			modelId,
-			currentMode,
-			{
-				workflow_path: workflow.file_path,
-				workflow_name: workflow.display_name,
-				workflow_tool_configs: assemblyResult.toolConfigs,
-				persona_name: activePersonaName,
-				is_background: false,
-				title: `Workflow: ${workflow.display_name}`,
-				use_extended_context: useExtendedContext,
-			}
-		);
-
-		await this.deps.historyManager.createConversationFile(conversation);
-
 		const view = this.deps.viewRouter.getView();
-		view?.clearMessages();
-		view?.updateModeDisplay(conversation.mode);
-
-		// Step 7: Store persona revert state for E-008
-		if (personaSwitchResult.switched) {
-			this.deps.setWorkflowPersonaRevert(personaSwitchResult.previousPersona);
+		let conversation: Conversation;
+		if (isExisting) {
+			// Switch path: reuse the active conversation. Mutate its workflow
+			// metadata (and provider/model/persona/mode per "full workflow") in
+			// place so the snapshot below and follow-up turns see the new state;
+			// do NOT create a file or clear the visible message history. Load the
+			// mutated clone back (silent) so the in-memory conversation reflects
+			// it, then persist the header once.
+			const active = conversationManager.getActiveConversation()!;
+			active.workflow_path = workflow.file_path;
+			active.workflow_name = workflow.display_name;
+			active.workflow_tool_configs = assemblyResult.toolConfigs;
+			active.workflow_deactivated = false;
+			active.persona_name = activePersonaName;
+			active.provider_id = providerId;
+			active.model_id = modelId;
+			active.use_extended_context = useExtendedContext;
+			if (workflow.mode) active.mode = workflow.mode;
+			conversationManager.loadConversation(active, conversationManager.getMessages(), { silent: true });
+			await this.deps.historyManager.updateConversationHeader(active);
+			conversation = active;
+			if (workflow.mode) view?.updateModeDisplay(conversation.mode);
+			// Reflect the applied provider/model/persona in the panel UI.
+			view?.updateProviderDisplay(providerId);
+			view?.updateModelDisplay(useExtendedContext ? `${modelId}::1m` : modelId);
+			view?.updatePersonaLabel(this.deps.getActivePersona());
+			view?.updateWorkflowLabel(conversation);
 		} else {
-			// No switch performed — clear any stale revert state from a previous workflow
-			this.deps.setWorkflowPersonaRevert(undefined);
+			// Step 5: Create a new conversation with workflow metadata
+			// (This also calls maybeRevertWorkflowPersona for the *previous* conversation
+			// via the E-008 path — we intentionally skip that here because we already
+			// handled persona switching above before creating the new conversation.)
+			conversation = conversationManager.createConversation(
+				providerId,
+				modelId,
+				currentMode,
+				{
+					workflow_path: workflow.file_path,
+					workflow_name: workflow.display_name,
+					workflow_tool_configs: assemblyResult.toolConfigs,
+					persona_name: activePersonaName,
+					is_background: false,
+					title: `Workflow: ${workflow.display_name}`,
+					use_extended_context: useExtendedContext,
+				}
+			);
+
+			await this.deps.historyManager.createConversationFile(conversation);
+
+			view?.clearMessages();
+			view?.updateModeDisplay(conversation.mode);
+		}
+
+		// Step 7: Store persona revert state for E-008. Only for the
+		// new-conversation path — a mid-conversation switch must not clobber the
+		// original conversation's revert slot, and its persona now persists in
+		// the conversation header.
+		if (!isExisting) {
+			if (personaSwitchResult.switched) {
+				this.deps.setWorkflowPersonaRevert(personaSwitchResult.previousPersona);
+			} else {
+				// No switch performed — clear any stale revert state from a previous workflow
+				this.deps.setWorkflowPersonaRevert(undefined);
+			}
 		}
 
 		// Step 8: Add the assembled message as the first user message
@@ -372,14 +459,21 @@ export class WorkflowExecutor {
 
 		this.deps.sessionManager.registerSession(session);
 
-		// G-006: Activate workflow-scoped hook overrides before the first LLM call
+		// G-006: Activate workflow-scoped hook overrides before the first LLM call.
+		// activate() is last-write-wins, so switching cleanly replaces a prior
+		// workflow's hooks. When switching to a workflow with NO hooks, the prior
+		// override must be explicitly cleared (deactivate is idempotent).
 		const whOverrideManager = this.deps.getWorkflowHookOverrideManager();
-		if (workflow.hooks && whOverrideManager) {
-			whOverrideManager.activate(conversation.id, workflow.hooks);
-			log.info("Workflow hook overrides activated for manual execution", {
-				conversationId: conversation.id,
-				events: Object.keys(workflow.hooks),
-			});
+		if (whOverrideManager) {
+			if (workflow.hooks) {
+				whOverrideManager.activate(conversation.id, workflow.hooks);
+				log.info("Workflow hook overrides activated for manual execution", {
+					conversationId: conversation.id,
+					events: Object.keys(workflow.hooks),
+				});
+			} else if (isExisting) {
+				whOverrideManager.deactivate(conversation.id);
+			}
 		}
 
 		// Step 10: Start the response loop

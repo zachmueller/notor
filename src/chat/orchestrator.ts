@@ -671,6 +671,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 		return this.workflowExecutor.executeWorkflow(workflow, supplementaryText);
 	}
 
+	/** @see WorkflowExecutor.switchWorkflow */
+	async switchWorkflow(workflow: Workflow, supplementaryText = ""): Promise<void> {
+		return this.workflowExecutor.switchWorkflow(workflow, supplementaryText);
+	}
+
 	/** @see WorkflowExecutor.executeBackgroundWorkflow */
 	async executeBackgroundWorkflow(
 		request: WorkflowExecutionRequest,

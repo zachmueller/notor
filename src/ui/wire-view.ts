@@ -147,6 +147,12 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		view.updateWorkflowLabel({ ...conv, workflow_deactivated: true });
 	});
 
+	// Workflow chip — switch: apply the chosen workflow fully into the current
+	// conversation (tool configs, persona, provider/model, hooks) as the next turn.
+	view.setOnSwitchWorkflow(async (workflow) => {
+		await orchestrator.switchWorkflow(workflow);
+	});
+
 	// E-015: Workflow discovery callback for slash-command suggest
 	view.setGetWorkflows(() => plugin.getDiscoveredWorkflows());
 
