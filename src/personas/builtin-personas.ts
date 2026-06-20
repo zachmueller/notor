@@ -246,7 +246,7 @@ Return a string for success, or throw an Error for failure.
 - \`utils.docxComments\` — DOCX comment-parsing utilities (\`parseCommentsXml\`, \`parseCommentsExtendedXml\`, \`extractQuotedText\`, \`parsePeopleXml\`, \`buildCommentThreads\`, \`formatCommentsAsMarkdown\`, \`extractExistingCommentIds\`)
 
 **Advanced (nullable — check before use):**
-- \`utils.conversationApi\` — read/set conversation title and favorite status (\`null\` if no active conversation)
+- \`utils.conversationApi\` — read/set conversation title and favorite status, plus \`current()\` for a parse-free snapshot of resolved state (id, title, isFavorite, activePersona, activeWorkflow, model, mode, useExtendedContext, toolCallsThisTurn — the last includes the in-flight call); \`null\` if no active conversation
 - \`utils.chatHistory\` — search and load past conversations (\`null\` if unavailable)
 - \`utils.chatBlocks\` — emit custom blocks into the chat transcript (\`null\` if unavailable)
 - \`utils.memory\` — memory subsystem (\`null\` when \`memory_enabled\` is false)

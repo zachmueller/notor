@@ -1,5 +1,6 @@
-import type { BuilderContext, ExtensionUtils, ChatHistorySummary } from "./types";
-import type { Message } from "../../types";
+import type { BuilderContext, ExtensionUtils, ChatHistorySummary, ConversationSnapshot } from "./types";
+import type { Message, Conversation, ConversationMode } from "../../types";
+import type { ConversationSession } from "../../chat/conversation-session";
 import { logger } from "../../utils/logger";
 import { resolvePreset } from "../../presets/preset-resolver";
 import { getTextContent } from "../../media/types";
@@ -81,6 +82,79 @@ export function buildAsk(
 		return answer ?? null;
 	};
 	return ask as ExtensionUtils["ask"];
+}
+
+/**
+ * Assemble a parse-free conversation snapshot from the active session (when a
+ * turn is live) plus the conversation header.
+ *
+ * Effective persona/workflow/model come from the session's pinned `readonly`
+ * fields when a session exists, falling back to the stored header otherwise.
+ * `toolCallsThisTurn` reads the SESSION's `ConversationManager` — the live turn
+ * runs on an isolated manager that only syncs back to the display manager after
+ * the response loop ends, so the in-flight tool call (added with status
+ * `pending` before dispatch) is visible only there.
+ *
+ * Returns a plain, reference-free object (`JSON` round-trip) so extensions can
+ * never mutate internal conversation/session state.
+ *
+ * Written with explicit params (no closure) so it lifts cleanly to a shared
+ * `chat/conversation-metadata.ts` module if/when an inspector panel consumes it.
+ */
+function buildConversationSnapshot(
+	conversationId: string,
+	conv: Conversation,
+	mode: ConversationMode,
+	session: ConversationSession | undefined,
+): ConversationSnapshot {
+	const wfName = session?.workflowAssembly?.workflowName ?? conv.workflow_name ?? null;
+	const wfPath = conv.workflow_path ?? null;
+	const activeWorkflow = wfName !== null || wfPath !== null ? { name: wfName, path: wfPath } : null;
+
+	const providerId = session?.providerId ?? conv.provider_id;
+	const modelId = session?.modelId ?? conv.model_id;
+	const presetName = conv.preset_name ?? undefined;
+	const model = providerId && modelId
+		? { ...(presetName ? { presetName } : {}), providerId, modelId }
+		: null;
+
+	// Derive the current turn's tool calls from the SESSION's manager. Without a
+	// live session (background automation / outside a turn) there is no "this
+	// turn", so the list is empty.
+	const toolCallsThisTurn: Array<{ name: string; status: string }> = [];
+	if (session) {
+		const messages = session.conversationManager.getMessages();
+		// "This turn" begins after the most recent non-hook user message.
+		let startIdx = 0;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i];
+			if (m && m.role === "user" && !m.is_hook_injection) {
+				startIdx = i + 1;
+				break;
+			}
+		}
+		for (let i = startIdx; i < messages.length; i++) {
+			const m = messages[i];
+			if (m && m.role === "tool_call" && m.tool_call) {
+				toolCallsThisTurn.push({ name: m.tool_call.tool_name, status: m.tool_call.status });
+			}
+		}
+	}
+
+	const snapshot: ConversationSnapshot = {
+		id: conversationId,
+		title: conv.title,
+		isFavorite: conv.is_favorite ?? false,
+		activePersona: session ? session.pinnedPersona?.name ?? null : conv.persona_name ?? null,
+		activeWorkflow,
+		model,
+		mode,
+		useExtendedContext: session ? session.useExtendedContext : conv.use_extended_context ?? false,
+		toolCallsThisTurn,
+	};
+
+	// Return a plain, reference-free object (also strips `undefined` fields).
+	return JSON.parse(JSON.stringify(snapshot)) as ConversationSnapshot;
 }
 
 export function buildChatUtils(ctx: BuilderContext): Pick<ExtensionUtils,
@@ -224,6 +298,21 @@ export function buildChatUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				},
 				isFavorite: () => convManager.getActiveConversation()?.is_favorite ?? false,
 				setFavorite: (favorite: boolean) => { convManager.setFavorite(favorite); },
+				current: (): ConversationSnapshot | null => {
+					// Re-read freshly each call: the displayed conversation may have
+					// switched after the API was bound, and a session can start/end
+					// between calls within a long-lived `utils` object.
+					const liveConv = convManager.getActiveConversation();
+					if (!liveConv || liveConv.id !== conversationId) {
+						apiLog.debug("conversationApi.current: conversation mismatch, returning null", {
+							conversationId,
+							activeConvId: liveConv?.id ?? null,
+						});
+						return null;
+					}
+					const session = orchestrator.getActiveSession?.(conversationId) ?? undefined;
+					return buildConversationSnapshot(conversationId, liveConv, convManager.getMode(), session);
+				},
 			};
 		})(),
 

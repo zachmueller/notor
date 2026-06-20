@@ -35,6 +35,41 @@ export interface ChatHistorySummary {
 	deep_link: string;
 }
 
+/**
+ * Resolved, parse-free snapshot of current conversation state, returned by
+ * `conversationApi.current()`.
+ *
+ * Sources the EFFECTIVE persona/workflow/model from the active response-loop
+ * session when one exists, falling back to the stored conversation header
+ * otherwise. `toolCallsThisTurn` is empty unless a turn is actively running.
+ */
+export interface ConversationSnapshot {
+	id: string;
+	title?: string;
+	isFavorite: boolean;
+	/** Effective persona name (session-pinned, else header). `null` when none. */
+	activePersona: string | null;
+	/**
+	 * Effective workflow — name from the live session/header, path from the
+	 * header. `null` when the conversation is not running a workflow.
+	 */
+	activeWorkflow: { name: string | null; path: string | null } | null;
+	/**
+	 * Resolved model. `providerId`/`modelId` are the session-pinned values when
+	 * a turn is running, else the header values. `presetName` is omitted when
+	 * the conversation is in Custom mode. `null` when unresolvable.
+	 */
+	model: { presetName?: string; providerId: string; modelId: string } | null;
+	mode: "plan" | "act";
+	useExtendedContext: boolean;
+	/**
+	 * Tool calls in the current turn — name + status only, chronological order.
+	 * INCLUDES the in-flight call that invoked the accessor (status `pending`).
+	 * Empty when no turn is actively running (e.g. background automations).
+	 */
+	toolCallsThisTurn: Array<{ name: string; status: string }>;
+}
+
 /** Full conversation with messages returned by chat history tools. */
 export interface ChatHistoryConversation {
 	id: string;
@@ -126,6 +161,16 @@ export interface ExtensionUtils {
 		setTitle: (title: string) => void;
 		isFavorite: () => boolean;
 		setFavorite: (favorite: boolean) => void;
+		/**
+		 * Resolved, parse-free snapshot of current conversation state — active
+		 * persona/workflow/model, mode, extended-context, and the tool calls
+		 * issued so far this turn (name + status, including the in-flight call).
+		 *
+		 * Sources EFFECTIVE values from the live response-loop session when one
+		 * exists, falling back to the stored conversation header otherwise.
+		 * Returns `null` if the bound conversation is no longer the active one.
+		 */
+		current: () => ConversationSnapshot | null;
 	} | null;
 	/**
 	 * API for searching and reading past chat conversations from local history.

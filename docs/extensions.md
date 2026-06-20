@@ -421,7 +421,7 @@ All extension code executes with these variables in scope:
 | `utils.memoryApprovalMode` | Current memory approval mode: `"auto"` \| `"bulk"` \| `"bulk_and_inline"`. `null` when memory is disabled. |
 | `utils.chatBlocks` | API for emitting extension blocks into the conversation. Method: `emit(kind, data, opts?)`. `null` when no conversation is available. |
 | `utils.chatHistory` | API for searching and reading past conversations. Methods: `search(query)`, `loadConversation(id)`, `listRecent(limit?)`, `loadFull(id)`. `null` when history is unavailable. |
-| `utils.conversationApi` | Read/set conversation title and favorite status (`getTitle`/`setTitle`/`isFavorite`/`setFavorite`). `null` when no active conversation. |
+| `utils.conversationApi` | Read/set conversation title and favorite status (`getTitle`/`setTitle`/`isFavorite`/`setFavorite`), plus `current()` for a parse-free snapshot of resolved state: `{ id, title?, isFavorite, activePersona, activeWorkflow, model, mode, useExtendedContext, toolCallsThisTurn }` (the last includes the in-flight call; `current()` returns `null` if the conversation is no longer active). `null` when no active conversation. |
 | `utils.runSubAgent(opts)` | Spawn a sub-agent from extension code. Supports detached (background) and synchronous modes. Max depth 1. |
 | `utils.readPluginSettings()` | Read current Notor plugin settings as a sanitized JSON object (sensitive fields redacted). |
 | `utils.editPluginSetting(keyPath, value)` | Update a single setting by dot-separated key path. Returns `{ success, oldValue, newValue, error }`. |
