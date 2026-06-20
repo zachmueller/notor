@@ -60,6 +60,39 @@ describe("buildAskMany", () => {
 		const askMany = buildAskMany(makeUtils(async (req) => ({ id: req.id, values: [] })));
 		await expect(askMany([{ question: "   " }])).rejects.toThrow("non-empty string");
 	});
+
+	it("forwards the multiSelect flag into the request", async () => {
+		const seen: InteractionRequest[] = [];
+		const utils = makeUtils(async (req) => {
+			seen.push(req);
+			return { id: req.id, values: [["a"]] };
+		});
+		const askMany = buildAskMany(utils);
+		await askMany([{ question: "Pick several?", suggestions: ["a", "b"], multiSelect: true }]);
+		expect((seen[0] as { questions: unknown[] }).questions).toMatchObject([
+			{ question: "Pick several?", suggestions: ["a", "b"], multiSelect: true },
+		]);
+	});
+
+	it("returns heterogeneous string and string[] answers index-aligned", async () => {
+		const utils = makeUtils(async (req) => ({ id: req.id, values: ["red", ["a", "b"]] }));
+		const askMany = buildAskMany(utils);
+		const answers = await askMany([
+			{ question: "Color?", suggestions: ["red", "blue"] },
+			{ question: "Tags?", suggestions: ["a", "b", "c"], multiSelect: true },
+		]);
+		expect(answers).toEqual(["red", ["a", "b"]]);
+	});
+
+	it("pads missing multi-select answers with null", async () => {
+		const utils = makeUtils(async (req) => ({ id: req.id, values: [["x"]] }));
+		const askMany = buildAskMany(utils);
+		const answers = await askMany([
+			{ question: "a", multiSelect: true },
+			{ question: "b", multiSelect: true },
+		]);
+		expect(answers).toEqual([["x"], null]);
+	});
 });
 
 describe("buildAsk (wrapper over askMany)", () => {
@@ -89,5 +122,20 @@ describe("buildAsk (wrapper over askMany)", () => {
 		const utils = makeUtils(async (req) => ({ id: req.id, values: [""] }));
 		const ask = buildAsk(buildAskMany(utils));
 		await expect(ask("   ")).rejects.toThrow("non-empty question");
+	});
+
+	it("returns a string[] answer for a multiSelect question", async () => {
+		const seen: InteractionRequest[] = [];
+		const utils = makeUtils(async (req) => {
+			seen.push(req);
+			return { id: req.id, values: [["x", "y"]] };
+		});
+		const ask = buildAsk(buildAskMany(utils));
+		const answer = await ask("Pick several?", { multiSelect: true, suggestions: ["x", "y", "z"] });
+
+		expect(answer).toEqual(["x", "y"]);
+		expect((seen[0] as { questions: unknown[] }).questions).toMatchObject([
+			{ question: "Pick several?", suggestions: ["x", "y", "z"], multiSelect: true },
+		]);
 	});
 });

@@ -2,7 +2,7 @@ import { scaffold } from "./_scaffold-helper";
 
 export const ASK_USER = scaffold(
 	"ask_user",
-	"Ask the user one or more follow-up questions and wait for their answers before continuing. Use this when you need clarification, a decision, or missing information to proceed correctly — instead of guessing or ending your turn. Provide concise suggested answers when there are likely choices; the user can pick a suggestion or type a free-text reply. Keep to a few focused questions (max 5).",
+	"Ask the user one or more follow-up questions and wait for their answers before continuing. Use this when you need clarification, a decision, or missing information to proceed correctly — instead of guessing or ending your turn. Provide concise suggested answers when there are likely choices; the user can pick a suggestion or type a free-text reply. Set multiSelect: true on a question to let the user pick several answers at once — its answer comes back as an array of strings. Keep to a few focused questions (max 5).",
 	"read",
 	`params:
   questions:
@@ -15,6 +15,9 @@ export const ASK_USER = scaffold(
       suggestions:
         type: "string[]"
         description: "Optional suggested answers rendered as clickable chips."
+      multiSelect:
+        type: boolean
+        description: "When true, the user can check multiple suggestions and free text is added as an extra selection; the answer is an array of strings. Default false (single-select)."
     required_items:
       - question`,
 	`const log = utils.logger("ask_user");
@@ -36,7 +39,8 @@ const questions = rawQuestions.map((q, i) => {
   const suggestions = Array.isArray(q.suggestions)
     ? q.suggestions.filter((s) => typeof s === "string" && s.trim().length > 0)
     : undefined;
-  return { question: question.trim(), suggestions };
+  const multiSelect = q.multiSelect === true;
+  return { question: question.trim(), suggestions, multiSelect };
 });
 
 if (utils.abortSignal?.aborted) {
@@ -48,7 +52,7 @@ if (utils.abortSignal?.aborted) {
 // answered) or aborts (which throws). One question or many — submission is a
 // single explicit Submit; nothing auto-submits.
 const answers = await utils.askMany(
-  questions.map((q) => ({ question: q.question, suggestions: q.suggestions, allowFreeText: true }))
+  questions.map((q) => ({ question: q.question, suggestions: q.suggestions, multiSelect: q.multiSelect, allowFreeText: true }))
 );
 
 // utils.ask returns null only when no interaction channel is wired (headless /

@@ -1329,6 +1329,24 @@
 	color: var(--text-on-accent);
 }
 
+/* Multi-select (checkbox) option, checked. A leading ✓ distinguishes the
+   accumulate-many semantics from the single-select radio highlight above. */
+.notor-interaction-option--checked {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
+
+.notor-interaction-option--checked:hover {
+	background: var(--interactive-accent-hover);
+	color: var(--text-on-accent);
+}
+
+.notor-interaction-option--checked::before {
+	content: "✓ ";
+	font-weight: var(--font-bold);
+}
+
 .notor-interaction-input-row {
 	display: flex;
 	gap: 6px;

@@ -44,6 +44,13 @@ export type InteractionRequest =
 				suggestions?: string[];
 				/** When true (default), a free-text input is offered alongside chips. */
 				allowFreeText?: boolean;
+				/**
+				 * When true, options render as checkboxes: the user can select several
+				 * at once and free text is appended as an additional selection rather
+				 * than being mutually exclusive with the options. Default false
+				 * (single-select, radio-style).
+				 */
+				multiSelect?: boolean;
 			}>;
 	  };
 
@@ -51,8 +58,11 @@ export type InteractionRequest =
 export type InteractionResponse = {
 	/** Matches the `id` of the originating request. */
 	id: string;
-	/** The answers, index-aligned with `request.questions`. */
-	values: string[];
+	/**
+	 * The answers, index-aligned with `request.questions`. A single-select
+	 * question yields a `string`; a `multiSelect` question yields a `string[]`.
+	 */
+	values: Array<string | string[]>;
 };
 
 /**
@@ -72,11 +82,18 @@ interface InteractionRenderer {
  * Built-in `ask` renderer: renders every question in the set together — each
  * with its text, optional suggested-answer options (full-width stacked buttons),
  * and optional free-text input — and keeps them all visible and editable.
- * Selecting an option marks it (`--selected`) and clears that question's free
- * text; typing free text clears that question's selected option. A single Submit
- * button at the bottom stays disabled until every question has a non-empty
- * answer, then resolves with all answers. Pressing Enter in a free-text field
- * submits the whole prompt when it is complete.
+ *
+ * Single-select (default): selecting an option marks it (`--selected`) and clears
+ * that question's free text; typing free text clears that question's selected
+ * option. The answer is a single string.
+ *
+ * Multi-select (`multiSelect: true`): options toggle as checkboxes (`--checked`)
+ * and accumulate; free text is appended as an additional selection rather than
+ * clearing the options. The answer is a `string[]`.
+ *
+ * A single Submit button at the bottom stays disabled until every question has a
+ * non-empty answer, then resolves with all answers. Pressing Enter in a free-text
+ * field submits the whole prompt when it is complete.
  */
 const askRenderer: InteractionRenderer = {
 	render(el, request, resolve) {
@@ -87,7 +104,10 @@ const askRenderer: InteractionRenderer = {
 		}
 
 		const questions = request.questions;
-		const values: string[] = Array.from({ length: questions.length }, () => "");
+		// Single-select questions hold a string; multi-select hold a string[].
+		const values: Array<string | string[]> = questions.map((q) =>
+			q.multiSelect === true ? [] : "",
+		);
 		// A question is "required" if it offers any way to answer it (options or
 		// free text). A question with neither can never be answered, so it must not
 		// gate Submit — otherwise the prompt would deadlock. The shipped `ask_user`
@@ -98,10 +118,14 @@ const askRenderer: InteractionRenderer = {
 
 		const promptEl = el.createDiv({ cls: "notor-interaction-prompt" });
 
-		// A question is answered iff it has a non-empty trimmed value. `values` is
-		// the single source of truth — option clicks and typing both write to it.
+		// A question is answered iff it has a non-empty value. `values` is the single
+		// source of truth — option clicks and typing both write to it. Multi-select
+		// answers are arrays (≥1 selection); single-select answers are non-empty
+		// trimmed strings.
 		const isComplete = () =>
-			values.every((v, i) => !required[i] || v.trim().length > 0);
+			values.every((v, i) =>
+				!required[i] || (Array.isArray(v) ? v.length > 0 : v.trim().length > 0),
+			);
 
 		let submitBtn: HTMLButtonElement;
 
@@ -112,10 +136,15 @@ const askRenderer: InteractionRenderer = {
 			submitBtn.classList.toggle("notor-interaction-submit--disabled", disabled);
 		};
 
-		// Resolve with all answers — only when every question is answered.
+		// Resolve with all answers — only when every question is answered. Deep-copy
+		// multi-select arrays so the resolved response never aliases the live
+		// per-question state captured in the closures below.
 		const submit = () => {
 			if (!isComplete()) return;
-			resolve({ id: request.id, values: values.slice() });
+			resolve({
+				id: request.id,
+				values: values.map((v) => (Array.isArray(v) ? v.slice() : v)),
+			});
 		};
 
 		let firstInput: HTMLInputElement | null = null;
@@ -125,6 +154,7 @@ const askRenderer: InteractionRenderer = {
 			group.createSpan({ cls: "notor-interaction-question", text: q.question });
 
 			const allowFreeText = q.allowFreeText !== false;
+			const multiSelect = q.multiSelect === true;
 			const options: HTMLButtonElement[] = [];
 			let input: HTMLInputElement | null = null;
 
@@ -132,8 +162,17 @@ const askRenderer: InteractionRenderer = {
 				for (const o of options) o.removeClass("notor-interaction-option--selected");
 			};
 
-			// Suggested-answer options — full-width stacked buttons. Clicking one only
-			// selects it (highlights, records the value); the user submits explicitly.
+			// Multi-select state: the checked option set is the membership truth.
+			// `values[i]` is recomputed from it (plus any free text) on every change.
+			const checked = new Set<string>();
+			const recomputeMulti = () => {
+				const ft = input ? input.value.trim() : "";
+				const selected = [...checked]; // preserves option-click order
+				// Append free text as a trailing selection, deduped against options.
+				values[i] = ft && !checked.has(ft) ? [...selected, ft] : selected;
+			};
+
+			// Suggested-answer options — full-width stacked buttons.
 			if (q.suggestions && q.suggestions.length > 0) {
 				const optionsEl = group.createDiv({ cls: "notor-interaction-options" });
 				for (const suggestion of q.suggestions) {
@@ -141,20 +180,36 @@ const askRenderer: InteractionRenderer = {
 						cls: "notor-interaction-option",
 						text: suggestion,
 					});
-					opt.addEventListener("click", () => {
-						values[i] = suggestion;
-						clearSelected();
-						opt.addClass("notor-interaction-option--selected");
-						if (input) input.value = "";
-						refreshSubmit();
-					});
+					if (multiSelect) {
+						// Toggle membership; accumulate. Does not touch free text.
+						opt.addEventListener("click", () => {
+							if (checked.has(suggestion)) {
+								checked.delete(suggestion);
+								opt.removeClass("notor-interaction-option--checked");
+							} else {
+								checked.add(suggestion);
+								opt.addClass("notor-interaction-option--checked");
+							}
+							recomputeMulti();
+							refreshSubmit();
+						});
+					} else {
+						// Single-select: clicking selects exactly one and clears free text.
+						opt.addEventListener("click", () => {
+							values[i] = suggestion;
+							clearSelected();
+							opt.addClass("notor-interaction-option--selected");
+							if (input) input.value = "";
+							refreshSubmit();
+						});
+					}
 					options.push(opt);
 				}
 			}
 
-			// Free-text input — typing live-tracks the value (no commit step). A
-			// non-empty entry clears this question's selected option, so the two
-			// never both count as the answer.
+			// Free-text input — typing live-tracks the value (no commit step). In
+			// single-select a non-empty entry clears the selected option (mutually
+			// exclusive); in multi-select it is appended as an extra selection.
 			if (allowFreeText) {
 				const inputRow = group.createDiv({ cls: "notor-interaction-input-row" });
 				input = inputRow.createEl("input", {
@@ -165,8 +220,13 @@ const askRenderer: InteractionRenderer = {
 				if (!firstInput) firstInput = input;
 
 				input.addEventListener("input", () => {
-					values[i] = input!.value.trim();
-					if (values[i].length > 0) clearSelected();
+					if (multiSelect) {
+						recomputeMulti();
+					} else {
+						const v = input!.value.trim();
+						values[i] = v;
+						if (v.length > 0) clearSelected();
+					}
 					refreshSubmit();
 				});
 				input.addEventListener("keydown", (e: KeyboardEvent) => {

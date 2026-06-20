@@ -238,3 +238,204 @@ describe("renderInteractionPrompt — ask (grouped, explicit submit)", () => {
 		).rejects.toThrow("Interaction cancelled by user.");
 	});
 });
+
+describe("renderInteractionPrompt — ask (multi-select)", () => {
+	it("accumulates checked options as an array in click order", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "m1",
+			questions: [
+				{ question: "Pick several?", suggestions: ["A", "B", "C"], multiSelect: true },
+			],
+		});
+
+		const options = card.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		options[0]!.click(); // A
+		options[2]!.click(); // C
+		expect(options[0]!.classList.contains("notor-interaction-option--checked")).toBe(true);
+		expect(options[1]!.classList.contains("notor-interaction-option--checked")).toBe(false);
+		expect(options[2]!.classList.contains("notor-interaction-option--checked")).toBe(true);
+		// Multi-select uses --checked, not the single-select --selected.
+		expect(options[0]!.classList.contains("notor-interaction-option--selected")).toBe(false);
+
+		const submit = card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!;
+		submit.click();
+		const response = await promise;
+		expect(response).toEqual({ id: "m1", values: [["A", "C"]] });
+		expect(Array.isArray(response.values[0])).toBe(true);
+	});
+
+	it("toggles an option off on second click", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "m2",
+			questions: [{ question: "Toggle?", suggestions: ["A", "B"], multiSelect: true }],
+		});
+
+		const options = card.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		options[0]!.click(); // on
+		options[1]!.click(); // on
+		options[0]!.click(); // off
+		expect(options[0]!.classList.contains("notor-interaction-option--checked")).toBe(false);
+		expect(options[1]!.classList.contains("notor-interaction-option--checked")).toBe(true);
+
+		card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!.click();
+		await expect(promise).resolves.toEqual({ id: "m2", values: [["B"]] });
+	});
+
+	it("appends free text as a trailing selection after the checked options", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "m3",
+			questions: [{ question: "Pick + note?", suggestions: ["A", "B"], multiSelect: true }],
+		});
+
+		const options = card.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		options[0]!.click(); // A
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+		input.value = "extra";
+		input.dispatchEvent(new Event("input"));
+
+		// Checking an option does NOT clear the free text in multi-select mode.
+		expect(input.value).toBe("extra");
+		expect(options[0]!.classList.contains("notor-interaction-option--checked")).toBe(true);
+
+		card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!.click();
+		await expect(promise).resolves.toEqual({ id: "m3", values: [["A", "extra"]] });
+	});
+
+	it("drops the free-text element when the input is cleared", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "m3b",
+			questions: [{ question: "Pick + note?", suggestions: ["A", "B"], multiSelect: true }],
+		});
+
+		const options = card.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		options[0]!.click(); // A
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+		input.value = "extra";
+		input.dispatchEvent(new Event("input"));
+		// Clear the free text back to empty — the trailing element is dropped.
+		input.value = "";
+		input.dispatchEvent(new Event("input"));
+
+		card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!.click();
+		await expect(promise).resolves.toEqual({ id: "m3b", values: [["A"]] });
+	});
+
+	it("dedupes free text that matches an already-checked option", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "m4",
+			questions: [{ question: "Dedupe?", suggestions: ["Alpha", "Beta"], multiSelect: true }],
+		});
+
+		const options = card.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		options[0]!.click(); // Alpha
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+		input.value = "Alpha";
+		input.dispatchEvent(new Event("input"));
+
+		card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!.click();
+		await expect(promise).resolves.toEqual({ id: "m4", values: [["Alpha"]] });
+	});
+
+	it("keeps Submit disabled until at least one selection, then enables", async () => {
+		const card = makeCard();
+		let settled = false;
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "m5",
+			questions: [{ question: "Need one?", suggestions: ["A", "B"], multiSelect: true }],
+		}).then((r) => {
+			settled = true;
+			return r;
+		});
+
+		const submit = card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!;
+		expect(submit.disabled).toBe(true);
+		await Promise.resolve();
+		expect(settled).toBe(false);
+
+		const options = card.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		options[0]!.click();
+		expect(submit.disabled).toBe(false);
+
+		// Toggling the only selection back off re-disables Submit.
+		options[0]!.click();
+		expect(submit.disabled).toBe(true);
+		options[1]!.click();
+		expect(submit.disabled).toBe(false);
+
+		submit.click();
+		await expect(promise).resolves.toEqual({ id: "m5", values: [["B"]] });
+	});
+
+	it("supports free-text-only multi-select (no options checked)", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "m6",
+			questions: [{ question: "Type only?", suggestions: ["A", "B"], multiSelect: true }],
+		});
+
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+		input.value = "typed";
+		input.dispatchEvent(new Event("input"));
+		card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!.click();
+		await expect(promise).resolves.toEqual({ id: "m6", values: [["typed"]] });
+	});
+
+	it("multi-select with no suggestions returns an array-wrapped free-text answer", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "m7",
+			questions: [{ question: "No options?", multiSelect: true }],
+		});
+
+		expect(card.querySelectorAll(".notor-interaction-option")).toHaveLength(0);
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+		input.value = "  free  ";
+		input.dispatchEvent(new Event("input"));
+		card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!.click();
+		await expect(promise).resolves.toEqual({ id: "m7", values: [["free"]] });
+	});
+
+	it("mixes single-select, multi-select, and free-text questions in one prompt", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "mix",
+			questions: [
+				{ question: "Single?", suggestions: ["s0", "s1"] },
+				{ question: "Many?", suggestions: ["m1a", "m1b", "m1c"], multiSelect: true },
+				{ question: "Notes?" },
+			],
+		});
+
+		const groups = card.querySelectorAll(".notor-interaction-question-group");
+		const q0 = groups[0]!.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		q0[0]!.click(); // single → "s0"
+
+		const q1 = groups[1]!.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		q1[0]!.click(); // m1a
+		q1[1]!.click(); // m1b
+
+		const q2Input = groups[2]!.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+		q2Input.value = "f2";
+		q2Input.dispatchEvent(new Event("input"));
+
+		card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!.click();
+		await expect(promise).resolves.toEqual({
+			id: "mix",
+			values: ["s0", ["m1a", "m1b"], "f2"],
+		});
+	});
+});

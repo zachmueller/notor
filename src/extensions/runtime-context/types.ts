@@ -314,26 +314,37 @@ export interface ExtensionUtils {
 	 * until they answer. Renders question text with optional suggested-answer
 	 * chips and (by default) a free-text input. Resolves to the chosen answer.
 	 *
+	 * With `multiSelect: true`, options render as checkboxes (the user can pick
+	 * several, and free text is appended as an extra selection) and the answer is
+	 * a `string[]`; otherwise it is a single `string`.
+	 *
 	 * Returns null when no interaction channel is available (e.g. headless or
 	 * background sub-agent runs).
 	 */
-	ask: (
-		question: string,
-		opts?: { suggestions?: string[]; allowFreeText?: boolean },
-	) => Promise<string | null>;
+	ask: {
+		(
+			question: string,
+			opts: { multiSelect: true; suggestions?: string[]; allowFreeText?: boolean },
+		): Promise<string[] | null>;
+		(
+			question: string,
+			opts?: { multiSelect?: false; suggestions?: string[]; allowFreeText?: boolean },
+		): Promise<string | null>;
+	};
 	/**
 	 * Ask several follow-up questions at once, suspending the tool loop until
 	 * they are all answered. All questions render together and stay visible and
 	 * editable; the user can revise earlier answers, and the prompt auto-submits
 	 * once every question is answered.
 	 *
-	 * Resolves to an array of answers index-aligned with `questions`. Each entry
-	 * is null when no interaction channel is available (e.g. headless or
+	 * Resolves to an array of answers index-aligned with `questions`. A
+	 * `multiSelect` question yields a `string[]`; others yield a `string`. Each
+	 * entry is null when no interaction channel is available (e.g. headless or
 	 * background sub-agent runs); the whole array is null-filled in that case.
 	 */
 	askMany: (
-		questions: Array<{ question: string; suggestions?: string[]; allowFreeText?: boolean }>,
-	) => Promise<(string | null)[]>;
+		questions: Array<{ question: string; suggestions?: string[]; allowFreeText?: boolean; multiSelect?: boolean }>,
+	) => Promise<(string | string[] | null)[]>;
 }
 
 import type mammoth from "mammoth";

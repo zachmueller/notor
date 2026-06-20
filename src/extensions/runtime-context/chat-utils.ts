@@ -21,8 +21,8 @@ export function buildAskMany(utils: ExtensionUtils): ExtensionUtils["askMany"] {
 	const log = logger("ext:askMany");
 	let counter = 0;
 	return async (
-		questions: Array<{ question: string; suggestions?: string[]; allowFreeText?: boolean }>,
-	): Promise<(string | null)[]> => {
+		questions: Array<{ question: string; suggestions?: string[]; allowFreeText?: boolean; multiSelect?: boolean }>,
+	): Promise<(string | string[] | null)[]> => {
 		const cb = utils.interactionCallback;
 		if (!cb) {
 			log.warn("utils.askMany called with no interaction channel available");
@@ -45,6 +45,7 @@ export function buildAskMany(utils: ExtensionUtils): ExtensionUtils["askMany"] {
 				question: q.question,
 				suggestions: q.suggestions,
 				allowFreeText: q.allowFreeText,
+				multiSelect: q.multiSelect,
 			})),
 		});
 		const values = response.values ?? [];
@@ -60,18 +61,26 @@ export function buildAskMany(utils: ExtensionUtils): ExtensionUtils["askMany"] {
 export function buildAsk(
 	askMany: ExtensionUtils["askMany"],
 ): ExtensionUtils["ask"] {
-	return async (
+	// Single runtime path; the `ask` overloads in types.ts narrow the return type
+	// for callers (multiSelect: true → string[] | null, else string | null).
+	const ask = async (
 		question: string,
-		opts?: { suggestions?: string[]; allowFreeText?: boolean },
-	): Promise<string | null> => {
+		opts?: { suggestions?: string[]; allowFreeText?: boolean; multiSelect?: boolean },
+	): Promise<string | string[] | null> => {
 		if (typeof question !== "string" || question.trim().length === 0) {
 			throw new Error("utils.ask requires a non-empty question string.");
 		}
 		const [answer] = await askMany([
-			{ question, suggestions: opts?.suggestions, allowFreeText: opts?.allowFreeText },
+			{
+				question,
+				suggestions: opts?.suggestions,
+				allowFreeText: opts?.allowFreeText,
+				multiSelect: opts?.multiSelect,
+			},
 		]);
 		return answer ?? null;
 	};
+	return ask as ExtensionUtils["ask"];
 }
 
 export function buildChatUtils(ctx: BuilderContext): Pick<ExtensionUtils,
