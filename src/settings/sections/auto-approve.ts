@@ -6,7 +6,7 @@
  */
 
 import { Notice, Setting } from "obsidian";
-import { TOOL_DISPLAY_NAMES } from "../constants";
+import { TOOL_DISPLAY_NAMES, defaultAutoApproveFor } from "../constants";
 import type { SettingsContext } from "./context";
 
 /**
@@ -20,9 +20,8 @@ export function generateToolConfigSnippet(
 ): string {
 	const lines: string[] = [];
 
-	for (const [toolId, meta] of Object.entries(TOOL_DISPLAY_NAMES)) {
-		const defaultValue = !meta.isWrite; // read tools default true, write tools default false
-		const currentValue = autoApprove[toolId] ?? defaultValue;
+	for (const [toolId] of Object.entries(TOOL_DISPLAY_NAMES)) {
+		const currentValue = autoApprove[toolId] ?? defaultAutoApproveFor(toolId);
 		lines.push(`${toolId}:`);
 		lines.push(`  auto_approve: ${currentValue}`);
 	}
@@ -60,7 +59,7 @@ export function renderAutoApproveSection(
 			.addToggle((toggle) =>
 				toggle
 					.setValue(
-						ctx.settings.auto_approve[toolId] ?? true
+						ctx.settings.auto_approve[toolId] ?? defaultAutoApproveFor(toolId)
 					)
 					.onChange(async (value) => {
 						ctx.settings.auto_approve[toolId] = value;
@@ -78,7 +77,7 @@ export function renderAutoApproveSection(
 			.addToggle((toggle) =>
 				toggle
 					.setValue(
-						ctx.settings.auto_approve[toolId] ?? false
+						ctx.settings.auto_approve[toolId] ?? defaultAutoApproveFor(toolId)
 					)
 					.onChange(async (value) => {
 						ctx.settings.auto_approve[toolId] = value;

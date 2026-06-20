@@ -156,3 +156,42 @@ describe("evaluateToolPolicy — command pattern auto-approve", () => {
 		expect(result.autoApproved).toBe(false);
 	});
 });
+
+describe("evaluateToolPolicy — read tool auto-approve flows through", () => {
+	const SLEEP_TOOL: DispatchableTool = { name: "sleep", mode: "read" } as any;
+
+	function makeSleepCtx(entry: Partial<ResolvedToolConfigEntry>): ToolPolicyContext {
+		return {
+			effectiveConfig: {
+				tools: {
+					sleep: {
+						enabled: true,
+						auto_approve: false,
+						allowed_paths: [],
+						blocked_paths: [],
+						allowed_command_patterns: [],
+						blocked_command_patterns: [],
+						...entry,
+					},
+				},
+			},
+			mode: "act",
+			vaultRootPath: "/vault",
+		};
+	}
+
+	it("read tool with auto_approve=true → auto-approved (no prompt)", () => {
+		// Guards the end-to-end contract that the merged auto_approve value
+		// reaches the policy decision — the fix for sleep prompting despite
+		// an enabled toggle.
+		const result = evaluateToolPolicy("sleep", { seconds: 5 }, SLEEP_TOOL, makeSleepCtx({ auto_approve: true }));
+		expect(result.allowed).toBe(true);
+		expect(result.autoApproved).toBe(true);
+	});
+
+	it("read tool with auto_approve=false → requires approval (explicit opt-out honored)", () => {
+		const result = evaluateToolPolicy("sleep", { seconds: 5 }, SLEEP_TOOL, makeSleepCtx({ auto_approve: false }));
+		expect(result.allowed).toBe(true);
+		expect(result.autoApproved).toBe(false);
+	});
+});

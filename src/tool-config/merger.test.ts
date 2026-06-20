@@ -133,8 +133,33 @@ describe("mergeToolConfigs", () => {
 			expect(result.tools.read_note!.auto_approve).toBe(true);
 			expect(result.tools.write_note!.auto_approve).toBe(false);
 			expect(result.tools.execute_command!.auto_approve).toBe(true);
-			// Not in globalAutoApprove → defaults to false
-			expect(result.tools.fetch_webpage!.auto_approve).toBe(false);
+			// Not in globalAutoApprove → falls back to the mode-aware default.
+			// fetch_webpage is a read tool, so it defaults to auto-approved.
+			expect(result.tools.fetch_webpage!.auto_approve).toBe(true);
+		});
+
+		it("falls back to mode-aware default for tools absent from globalAutoApprove", () => {
+			// Read tools default to auto-approved; write tools require approval.
+			// Guards the fix for default-disabled read tools (e.g. sleep) that
+			// were never materialized into stored settings.
+			const toolNames = ["sleep", "search_chat_history", "write_note", "some_mcp__tool"];
+			const result = mergeToolConfigs([], {}, toolNames);
+
+			// Built-in read tools → true
+			expect(result.tools.sleep!.auto_approve).toBe(true);
+			expect(result.tools.search_chat_history!.auto_approve).toBe(true);
+			// Built-in write tool → false
+			expect(result.tools.write_note!.auto_approve).toBe(false);
+			// Unknown / MCP-style tool (not in TOOL_DISPLAY_NAMES) → false (conservative)
+			expect(result.tools["some_mcp__tool"]!.auto_approve).toBe(false);
+		});
+
+		it("explicit globalAutoApprove=false wins over the mode-aware default (opt-out preserved)", () => {
+			// A user who deliberately disabled auto-approve for a read tool stores
+			// `false`; the deep-merge keeps that value, so it must short-circuit
+			// before the mode-aware fallback.
+			const result = mergeToolConfigs([], { sleep: false }, ["sleep"]);
+			expect(result.tools.sleep!.auto_approve).toBe(false);
 		});
 
 		it("config overrides globalAutoApprove", () => {
@@ -380,10 +405,14 @@ describe("mergeToolConfigs", () => {
 
 			for (const toolName of ALL_TOOLS) {
 				expect(result.tools[toolName]!.enabled).toBe(true);
-				expect(result.tools[toolName]!.auto_approve).toBe(false);
 				expect(result.tools[toolName]!.allowed_paths).toEqual([]);
 				expect(result.tools[toolName]!.blocked_paths).toEqual([]);
 			}
+			// auto_approve falls back to the mode-aware default per tool.
+			expect(result.tools.read_note!.auto_approve).toBe(true);
+			expect(result.tools.fetch_webpage!.auto_approve).toBe(true);
+			expect(result.tools.write_note!.auto_approve).toBe(false);
+			expect(result.tools.execute_command!.auto_approve).toBe(false);
 		});
 	});
 });

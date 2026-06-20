@@ -12,7 +12,7 @@
 
 import { Notice, Platform, Setting, TextComponent, normalizePath, setIcon, prepareSimpleSearch } from "obsidian";
 import type { SearchMatchPart } from "obsidian";
-import { TOOL_DISPLAY_NAMES, TOOLS_DEFAULT_DISABLED } from "../constants";
+import { TOOL_DISPLAY_NAMES, TOOLS_DEFAULT_DISABLED, defaultAutoApproveFor } from "../constants";
 import type { SettingsContext } from "./context";
 import type { McpServerConfig } from "../../mcp/mcp-types";
 import type { McpHub } from "../../mcp/mcp-hub";
@@ -88,9 +88,8 @@ export function generateToolConfigSnippet(
 	const lines: string[] = [];
 
 	// Built-in tools
-	for (const [toolId, meta] of Object.entries(TOOL_DISPLAY_NAMES)) {
-		const defaultAutoApprove = !meta.isWrite;
-		const currentAutoApprove = autoApprove[toolId] ?? defaultAutoApprove;
+	for (const [toolId] of Object.entries(TOOL_DISPLAY_NAMES)) {
+		const currentAutoApprove = autoApprove[toolId] ?? defaultAutoApproveFor(toolId);
 		const currentEnabled = toolEnabled[toolId] ?? !TOOLS_DEFAULT_DISABLED.has(toolId);
 		lines.push(`${toolId}:`);
 		lines.push(`  enabled: ${currentEnabled}`);
@@ -410,7 +409,7 @@ function renderBuiltinTools(
 	renderColumnHeaders(readBody, true);
 	const readGroup: SectionGroup = { elements: [readDetails], entries: [] };
 	for (const [toolId, meta] of readTools) {
-		const setting = renderBuiltinToolRow(readBody, toolId, meta, ctx, true);
+		const setting = renderBuiltinToolRow(readBody, toolId, meta, ctx, defaultAutoApproveFor(toolId));
 		addBuiltinToolIcons(setting, toolId, toolDefs, ctx);
 		readGroup.entries.push({ settingEl: setting.settingEl, nameEl: setting.nameEl, name: meta.name, searchTexts: [meta.name, meta.desc, toolId] });
 	}
@@ -425,7 +424,7 @@ function renderBuiltinTools(
 	renderColumnHeaders(writeBody, true);
 	const writeGroup: SectionGroup = { elements: [writeDetails], entries: [] };
 	for (const [toolId, meta] of writeTools) {
-		const setting = renderBuiltinToolRow(writeBody, toolId, meta, ctx, false);
+		const setting = renderBuiltinToolRow(writeBody, toolId, meta, ctx, defaultAutoApproveFor(toolId));
 		addBuiltinToolIcons(setting, toolId, toolDefs, ctx);
 		writeGroup.entries.push({ settingEl: setting.settingEl, nameEl: setting.nameEl, name: meta.name, searchTexts: [meta.name, meta.desc, toolId] });
 	}

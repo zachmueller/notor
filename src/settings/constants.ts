@@ -182,6 +182,23 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 	},
 };
 
+/**
+ * Default auto-approve for a tool with no explicit per-tool setting.
+ *
+ * Built-in read tools auto-approve; write tools require approval. This is the
+ * single source of truth for the mode-derived default, shared by the settings
+ * UI and the tool-config merger so they can never diverge (the divergence that
+ * caused enabled read tools like `sleep` to prompt despite an "on" toggle).
+ *
+ * Tools not in `TOOL_DISPLAY_NAMES` (MCP, user-extension) default to `false`
+ * (conservative) — their auto-approve is sourced elsewhere (e.g. MCP server
+ * `autoApprove[]`, pre-expanded into `globalAutoApprove`).
+ */
+export function defaultAutoApproveFor(toolName: string): boolean {
+	const meta = TOOL_DISPLAY_NAMES[toolName];
+	return meta ? !meta.isWrite : false;
+}
+
 // ---------------------------------------------------------------------------
 // Tools that default to disabled (user must opt-in via Settings → Tools)
 // ---------------------------------------------------------------------------
