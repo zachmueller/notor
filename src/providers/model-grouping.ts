@@ -266,3 +266,17 @@ export function formatVariantLabel(variant: ModelVariant): string {
 	if (variant.isExtendedContext) parts.push("(beta)");
 	return parts.join(" — ") || variant.model.id;
 }
+
+/**
+ * Full label including the model name, for collapsed-select readability.
+ *
+ * A collapsed native `<select>` renders only the selected `<option>`'s text,
+ * never its parent `<optgroup>` label — so the model name is prefixed here.
+ *
+ * @returns e.g. "Claude Opus 4.8 · US — 200K", "Claude Opus 4.8 · US — 1M — (beta)",
+ *   or just the model name when there is no region/context/beta suffix.
+ */
+export function formatFullVariantLabel(group: ModelGroup, variant: ModelVariant): string {
+	const suffix = formatVariantLabel(variant); // "US — 200K", "US — 1M — (beta)", …
+	return suffix && suffix !== variant.model.id ? `${group.label} · ${suffix}` : group.label;
+}

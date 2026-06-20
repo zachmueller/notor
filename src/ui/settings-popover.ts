@@ -7,7 +7,7 @@
 import { Modal, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type { ModelInfo, ModelPreset, Checkpoint } from "../types";
-import { groupModels, formatVariantLabel, type ModelGroup } from "../providers/model-grouping";
+import { groupModels, formatFullVariantLabel, type ModelGroup } from "../providers/model-grouping";
 import { supportsThinking } from "../providers/model-metadata";
 import { formatRelativeTime } from "../utils/format-time";
 import { logger } from "../utils/logger";
@@ -343,13 +343,11 @@ export class SettingsPopover {
 					opt.selected = true;
 				}
 			} else {
-				const optgroup = select.createEl("optgroup", {
-					attr: { label: group.label },
-				});
+				// Flat full-label options (no <optgroup>): a collapsed <select> never
+				// renders the optgroup label, so the model name must live on each option.
 				for (const variant of group.variants) {
-					const label = formatVariantLabel(variant);
-					const opt = optgroup.createEl("option", {
-						text: label,
+					const opt = select.createEl("option", {
+						text: formatFullVariantLabel(group, variant),
 						attr: { value: variant.optionValue },
 					});
 					if (variant.optionValue === currentModel) {

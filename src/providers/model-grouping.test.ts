@@ -8,6 +8,7 @@ import {
 	parseOptionValue,
 	buildOptionValue,
 	formatVariantLabel,
+	formatFullVariantLabel,
 	EXTENDED_CONTEXT_SUFFIX,
 } from "./model-grouping";
 import type { ModelInfo } from "../types";
@@ -310,5 +311,61 @@ describe("formatVariantLabel", () => {
 			optionValue: "claude-sonnet-4-6",
 		});
 		expect(label).toBe("claude-sonnet-4-6");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// formatFullVariantLabel
+// ---------------------------------------------------------------------------
+
+describe("formatFullVariantLabel", () => {
+	const group = {
+		label: "Claude Opus 4.8",
+		key: "anthropic.claude-opus-4-8",
+		variants: [],
+	};
+
+	it("prefixes the model name onto region + context", () => {
+		const label = formatFullVariantLabel(group, {
+			model: { id: "us.anthropic.claude-opus-4-8", display_name: "test", context_window: 200_000 },
+			region: "US",
+			contextLabel: "200K",
+			isExtendedContext: false,
+			optionValue: "us.anthropic.claude-opus-4-8",
+		});
+		expect(label).toBe("Claude Opus 4.8 · US — 200K");
+	});
+
+	it("prefixes the model name onto extended-context variants", () => {
+		const label = formatFullVariantLabel(group, {
+			model: { id: "us.anthropic.claude-opus-4-8", display_name: "test", context_window: 1_000_000 },
+			region: "US",
+			contextLabel: "1M",
+			isExtendedContext: true,
+			optionValue: "us.anthropic.claude-opus-4-8::1m",
+		});
+		expect(label).toBe("Claude Opus 4.8 · US — 1M — (beta)");
+	});
+
+	it("prefixes the model name onto a region-only variant", () => {
+		const label = formatFullVariantLabel(group, {
+			model: { id: "global.anthropic.claude-opus-4-8", display_name: "test" },
+			region: "Global",
+			contextLabel: null,
+			isExtendedContext: false,
+			optionValue: "global.anthropic.claude-opus-4-8",
+		});
+		expect(label).toBe("Claude Opus 4.8 · Global");
+	});
+
+	it("shows just the model name when the variant has no suffix", () => {
+		const label = formatFullVariantLabel(group, {
+			model: { id: "anthropic.claude-opus-4-8", display_name: "Claude Opus 4.8" },
+			region: null,
+			contextLabel: null,
+			isExtendedContext: false,
+			optionValue: "anthropic.claude-opus-4-8",
+		});
+		expect(label).toBe("Claude Opus 4.8");
 	});
 });
