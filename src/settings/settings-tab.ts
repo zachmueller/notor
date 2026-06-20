@@ -25,6 +25,7 @@ import { renderFileAttachmentsSection } from "./sections/file-attachments";
 import { renderCompactionSection } from "./sections/compaction";
 import { renderProviderModelReferenceSection } from "./sections/provider-reference";
 import { renderGeneralSection } from "./sections/general";
+import { renderNotificationsSection } from "./sections/notifications";
 import { renderToolsSection } from "./sections/tools";
 import { renderHistorySection } from "./sections/history";
 import { renderCheckpointSection } from "./sections/checkpoints";
@@ -162,6 +163,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		// --- General (expanded by default) ---
 		const generalGroup = createSettingsGroup(containerEl, "General", true, persisted, onToggle);
 		renderGeneralSection(generalGroup, ctx);
+		renderNotificationsSection(generalGroup, ctx);
 
 		// --- Providers (expanded by default) ---
 		const providerGroup = createSettingsGroup(containerEl, "Providers", true, persisted, onToggle);

@@ -29,6 +29,8 @@ import { ConversationLifecycleManager } from "./conversation-lifecycle";
 import { WorkflowExecutor } from "./workflow-executor";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
+import { showOsNotification, revealChatPanel } from "../ui/os-notification";
+import { getTextContent } from "../media/types";
 import type { NotorSettings } from "../settings";
 import type { VaultRuleManager } from "../rules/vault-rules";
 import type { PersonaManager } from "../personas/persona-manager";
@@ -1576,6 +1578,20 @@ export class ChatOrchestrator implements ToolSessionContext {
 			const completionConvId = convManager.getActiveConversation()?.id
 				?? this.conversationManager.getActiveConversation()?.id;
 			this.hookDispatcher.dispatchAfterCompletionHooks(completionConvId);
+
+			// OS-level desktop notification for foreground chat completion.
+			// Focus-gating and the enable toggle are handled inside the helper.
+			const messages = convManager.getMessages();
+			const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+			if (lastAssistant) {
+				const preview = getTextContent(lastAssistant.content).trim().slice(0, 100);
+				showOsNotification(this.settings, {
+					kind: "chat_complete",
+					title: "Notor — Chat response ready",
+					body: preview || "Your chat response is ready.",
+					onClick: () => revealChatPanel(this.app),
+				});
+			}
 		}
 	}
 

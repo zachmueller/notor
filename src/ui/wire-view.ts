@@ -9,6 +9,7 @@ import { resolvePreset } from "../presets/preset-resolver";
 import { extractJsonlFromHtml, reassignIds } from "../export/html-importer";
 import { RenameModal } from "./rename-modal";
 import { ConfirmModal } from "./confirm-modal";
+import { showOsNotification, revealChatPanel } from "./os-notification";
 import { logger } from "../utils/logger";
 
 const log = logger("WireView");
@@ -636,6 +637,28 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 					parameters: toolCall.parameters ?? {},
 				});
 				session.setStatus("waiting_approval");
+
+				// OS-level desktop notification — conversation is now blocked on
+				// the user. In "coalesce" mode, fire only once per blocked episode
+				// (when the first approval becomes pending) so a batch of tool calls
+				// produces a single notification; in "per_call" mode, fire one per
+				// call naming the tool.
+				const coalesce = plugin.settings.os_notifications_coalesce_approvals === "coalesce";
+				if (!coalesce) {
+					showOsNotification(plugin.settings, {
+						kind: "approval_required",
+						title: "Notor — Approval needed",
+						body: toolCall.tool_name,
+						onClick: () => revealChatPanel(plugin.app, true),
+					});
+				} else if (session.pendingApprovals.size === 1) {
+					showOsNotification(plugin.settings, {
+						kind: "approval_required",
+						title: "Notor — Approval needed",
+						body: "One or more actions need your approval.",
+						onClick: () => revealChatPanel(plugin.app, true),
+					});
+				}
 			}
 
 			const toolCallEl = messageId
@@ -678,6 +701,16 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		if (messageId && session) {
 			session.setStatus("waiting_approval");
 		}
+
+		// OS-level desktop notification — the agent is asking a follow-up
+		// question and cannot proceed until the user answers.
+		const firstQuestion = request.type === "ask" ? request.questions[0]?.question : undefined;
+		showOsNotification(plugin.settings, {
+			kind: "input_required",
+			title: "Notor — Input needed",
+			body: firstQuestion ? firstQuestion.slice(0, 100) : "The assistant needs your input.",
+			onClick: () => revealChatPanel(plugin.app, true),
+		});
 
 		try {
 			const response = await new Promise<import("./interaction-ui").InteractionResponse>((resolve, reject) => {

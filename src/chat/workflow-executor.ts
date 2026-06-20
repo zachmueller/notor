@@ -28,6 +28,7 @@ import type { ConversationManager } from "./conversation";
 import type { NotorSettings } from "../settings";
 import type { PersonaManager } from "../personas/persona-manager";
 import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-override";
+import { showOsNotification, revealChatPanel } from "../ui/os-notification";
 import type { VaultRuleManager } from "../rules/vault-rules";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import type { ToolSessionContext } from "../tools/tool";
@@ -718,8 +719,20 @@ export class WorkflowExecutor {
 					workflowName: workflow.display_name,
 				});
 				new Notice(`Workflow '${workflow.display_name}' completed.`);
+				showOsNotification(this.deps.getSettings(), {
+					kind: "workflow_complete",
+					title: "Notor — Workflow completed",
+					body: workflow.display_name,
+					onClick: () => revealChatPanel(this.deps.app),
+				});
 			} else if (finalStatus === "errored") {
 				new Notice(`Workflow '${workflow.display_name}' failed: ${errorMessage ?? "Unknown error"}`);
+				showOsNotification(this.deps.getSettings(), {
+					kind: "error",
+					title: "Notor — Workflow failed",
+					body: `${workflow.display_name}: ${errorMessage ?? "Unknown error"}`,
+					onClick: () => revealChatPanel(this.deps.app),
+				});
 			}
 
 			// Revert persona if we switched it — scoped to this background execution

@@ -107,6 +107,18 @@ export interface NotorSettings {
 	/** Render <popover> tags in assistant messages as interactive superscript references. */
 	enable_popover_references: boolean;
 
+	/** Fire OS-native desktop notifications when a chat turn or background workflow completes (desktop only). */
+	os_notifications_completion_enabled: boolean;
+
+	/** Fire OS-native desktop notifications when the conversation blocks on the user (approval, diff, follow-up question; desktop only). */
+	os_notifications_input_required_enabled: boolean;
+
+	/** Only fire OS notifications when Obsidian is NOT the active OS application. */
+	os_notifications_only_when_app_inactive: boolean;
+
+	/** Whether multiple pending approvals collapse into one notification ("coalesce") or fire one each ("per_call"). */
+	os_notifications_coalesce_approvals: "coalesce" | "per_call";
+
 	/** Maximum number of lines the chat input auto-resizes to before capping. */
 	chat_input_max_lines: number;
 
