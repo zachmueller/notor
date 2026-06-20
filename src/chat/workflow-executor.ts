@@ -370,6 +370,7 @@ export class WorkflowExecutor {
 
 			view?.clearMessages();
 			view?.updateModeDisplay(conversation.mode);
+			view?.updateWorkflowLabel(conversation);
 		}
 
 		// Step 7: Store persona revert state for E-008. Only for the
