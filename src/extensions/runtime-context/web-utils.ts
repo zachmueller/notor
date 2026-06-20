@@ -1,9 +1,9 @@
 import type { BuilderContext, ExtensionUtils } from "./types";
 import { isDomainBlocked } from "../../utils/domain-denylist";
-import { normalizedIndexOf } from "../../utils/unicode-normalize";
+import { normalizedIndexOf, resilientIndexOf } from "../../utils/unicode-normalize";
 
 export function buildWebUtils(ctx: BuilderContext): Pick<ExtensionUtils,
-	"webSearch" | "isDomainBlocked" | "normalizedIndexOf"
+	"webSearch" | "isDomainBlocked" | "normalizedIndexOf" | "resilientIndexOf"
 > {
 	const { plugin } = ctx;
 
@@ -11,6 +11,8 @@ export function buildWebUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 		isDomainBlocked,
 
 		normalizedIndexOf,
+
+		resilientIndexOf,
 
 		webSearch: {
 			search: (query, numResults, timeoutMs, signal?) =>

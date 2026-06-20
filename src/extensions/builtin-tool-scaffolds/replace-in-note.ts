@@ -12,11 +12,11 @@ export const REPLACE_IN_NOTE = scaffold(
     path_resolve_as: note
   changes:
     type: "object[]"
-    description: "Array of search/replace blocks to apply in sequence. Each block replaces only the first occurrence of the search text."
+    description: "Array of search/replace blocks to apply in sequence. Each block's search text must match exactly one location in the note (add surrounding context to disambiguate if it appears more than once)."
     properties:
       search:
         type: string
-        description: "Exact text to find in the note (character-for-character match including whitespace)."
+        description: "Text to find in the note. Leading/trailing and interior whitespace differences are tolerated, but the search must match a UNIQUE location — include 2–4 lines of surrounding context if the text appears multiple times."
       replace:
         type: string
         description: "Text to replace the matched search text with. Use empty string to delete the matched text."
@@ -67,9 +67,12 @@ try {
 } catch { /* non-fatal */ }
 
 // Apply changes atomically via vault.process —
-// if any search block doesn't match, the callback throws and vault.process writes nothing.
+// if any search block doesn't match (or matches ambiguously), the callback
+// throws and vault.process writes nothing.
 let failedBlockIndex = -1;
 let failedSearchText = "";
+let failedReason = "";
+let failedCount = 0;
 
 try {
   await app.vault.process(file, (data: string) => {
@@ -77,12 +80,15 @@ try {
     for (let i = 0; i < params.changes.length; i++) {
       const block = params.changes[i];
       if (!block) continue;
-      const match = utils.normalizedIndexOf(modified, block.search);
-      if (!match) {
+      const result = utils.resilientIndexOf(modified, block.search);
+      if (!result.ok) {
         failedBlockIndex = i + 1;
         failedSearchText = block.search;
-        throw new Error(\`Search block \${i + 1} did not match\`);
+        failedReason = result.reason;
+        failedCount = result.count || 0;
+        throw new Error(\`Search block \${i + 1} did not match uniquely\`);
       }
+      const match = result.match;
       modified =
         modified.slice(0, match.index) +
         block.replace +
@@ -95,7 +101,9 @@ try {
     const preview = failedSearchText.length > 80
       ? failedSearchText.slice(0, 80) + "..."
       : failedSearchText;
-    const errorMsg = \`Search block \${failedBlockIndex} did not match any text in \${params.path}. No changes were applied. The search text was: "\${preview}"\`;
+    const errorMsg = failedReason === "not_unique"
+      ? \`Search block \${failedBlockIndex} matched \${failedCount} locations in \${params.path}. Add surrounding context (2–4 lines) so it matches exactly one place. No changes were applied. The search text was: "\${preview}"\`
+      : \`Search block \${failedBlockIndex} did not match any text in \${params.path}. No changes were applied. The search text was: "\${preview}"\`;
     utils.staleTracker.recordRead(file.path, currentContent);
     return {
       __toolError: true,

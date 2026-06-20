@@ -211,6 +211,7 @@ Return a string for success, or throw an Error for failure.
 - \`utils.executeShellCommand(cmd, opts)\` — run a shell command
 - \`utils.isDomainBlocked(url, denylist)\` — check domain denylist
 - \`utils.normalizedIndexOf(haystack, needle)\` — Unicode-normalized \`indexOf\` for fuzzy SEARCH/REPLACE matching (curly quotes, em/en-dashes, etc. treated as ASCII equivalents); returns \`{ index, length }\` or \`null\`
+- \`utils.resilientIndexOf(haystack, needle)\` — tiered, drift-tolerant matcher with uniqueness enforcement (exact → line-trimmed → intra-line-whitespace-flexible); returns \`{ ok: true, match: { index, length } }\` or \`{ ok: false, reason: "not_found" | "not_unique", count? }\`. Prefer over \`normalizedIndexOf\` for SEARCH/REPLACE-style edits
 - \`utils.pathEnforcer\` — enforces path constraints automatically at dispatch; rarely needed in tool code
 
 **LLM & agents:**

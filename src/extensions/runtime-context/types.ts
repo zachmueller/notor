@@ -273,6 +273,16 @@ export interface ExtensionUtils {
 	/** Unicode-normalized indexOf for fuzzy SEARCH/REPLACE matching. */
 	normalizedIndexOf: (haystack: string, needle: string) => { index: number; length: number } | null;
 	/**
+	 * Tiered, drift-tolerant SEARCH/REPLACE matcher with uniqueness enforcement.
+	 * Tries exact (normalized) → line-trimmed → intra-line-whitespace-flexible,
+	 * stopping at the first tier that yields candidates. Returns
+	 * `{ ok: true, match: { index, length } }` (offsets in the original string),
+	 * or `{ ok: false, reason: "not_found" | "not_unique", count? }`.
+	 */
+	resilientIndexOf: (haystack: string, needle: string) =>
+		| { ok: true; match: { index: number; length: number } }
+		| { ok: false; reason: "not_found" | "not_unique"; count?: number };
+	/**
 	 * Webview browser facade for interacting with Obsidian's Web Viewer.
 	 * Null when not on desktop (Electron required).
 	 */

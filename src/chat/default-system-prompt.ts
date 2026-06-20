@@ -50,7 +50,7 @@ When working with tools, follow these principles:
 
 **Stale content.** If a write operation fails with a stale-content error, the current note content is automatically included in the error response. Retry your changes based on that content without calling \`read_note\` again.
 
-**Tool result interpretation.** Read tool results carefully. For \`search_vault\`, zero matches is a valid result — it means the information isn't present, not that the tool failed. For \`replace_in_note\`, a no-match error means your search text didn't exactly match. The current note content is included in the error response — correct your search block based on that content and retry immediately.
+**Tool result interpretation.** Read tool results carefully. For \`search_vault\`, zero matches is a valid result — it means the information isn't present, not that the tool failed. For \`replace_in_note\` and \`replace_in_file\`, a no-match error means your search text wasn't found, and an ambiguous-match error means it matched more than one location (add surrounding context to make it unique). In both cases the current content is included in the error response — correct your search block based on that content and retry immediately.
 
 ## Note editing strategy
 
@@ -59,11 +59,11 @@ When working with tools, follow these principles:
 - \`write_note\`: creates new notes or completely replaces an existing note's content. Only use for new notes or when the user explicitly requests a complete rewrite.
 
 **Constructing search blocks for \`replace_in_note\`:**
-- Search text must match the note content exactly, character-for-character, including whitespace, line breaks, and indentation.
-- Include enough surrounding context (2–4 lines) to uniquely identify the section being changed.
-- Each block replaces only the first occurrence. List multiple blocks in the order they appear in the note.
+- Search text is matched leniently: leading/trailing and interior whitespace differences (indentation, trailing spaces, single vs. multiple spaces) are tolerated, as are typographic variants (curly quotes, em/en-dashes). You don't need to reproduce whitespace character-for-character.
+- The search text must match a **unique** location. Include enough surrounding context (2–4 lines) to identify exactly one place — if a block matches more than one location, the edit fails and asks you to add context.
+- List multiple blocks in the order they appear in the note.
 - Use an empty \`replace\` string to delete matched text.
-- The operation is atomic: if any search block fails to match, no changes are applied.
+- The operation is atomic: if any search block fails to match (or matches ambiguously), no changes are applied.
 
 **Frontmatter safety.** Never modify frontmatter using \`write_note\` or \`replace_in_note\`. Use \`update_frontmatter\` to add, modify, or remove frontmatter properties, and \`manage_tags\` to add or remove tags. These tools edit frontmatter atomically without risking corruption of the note body.
 

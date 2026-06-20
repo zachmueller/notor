@@ -499,7 +499,7 @@ Makes targeted edits within a text file on the filesystem using SEARCH/REPLACE b
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `path` | Yes | Path to the file. Vault-relative or absolute. |
-| `changes` | Yes | Array of `{search, replace}` blocks to apply in sequence. Each block replaces only the first occurrence. |
+| `changes` | Yes | Array of `{search, replace}` blocks to apply in sequence. Each block's search text must match a unique location (see [Match resilience](#match-resilience)). |
 
 - Multiple blocks are applied in order — earlier replacements affect the text seen by later blocks.
 - An empty `replace` string deletes the matched text.
@@ -509,16 +509,21 @@ Makes targeted edits within a text file on the filesystem using SEARCH/REPLACE b
 - Auto-approve default: off.
 - Desktop only.
 
-### Fuzzy Unicode matching
+### Match resilience
 
-Both `replace_in_note` and `replace_in_file` use Unicode-normalized comparison when matching search strings. Typographic variants are treated as equivalent to their ASCII counterparts:
+Both `replace_in_note` and `replace_in_file` match search strings using a tiered, drift-tolerant matcher rather than a strict byte-for-byte comparison. Tiers are tried in order, and the **first tier that finds any candidate decides the result**:
 
-- Curly quotes (`'` `'` `"` `"`) match straight quotes (`'` `"`)
-- Em-dashes (`—`), en-dashes (`–`) match hyphens (`-`)
-- Non-breaking spaces, thin spaces match regular spaces
-- Horizontal ellipsis (`…`) matches three dots (`...`)
+1. **Exact (Unicode-normalized).** Typographic variants are treated as equivalent to their ASCII counterparts:
+   - Curly quotes (`'` `'` `"` `"`) match straight quotes (`'` `"`)
+   - Em-dashes (`—`), en-dashes (`–`) match hyphens (`-`)
+   - Non-breaking spaces, thin spaces match regular spaces
+   - Horizontal ellipsis (`…`) matches three dots (`...`)
+2. **Line-trimmed.** For multi-line blocks, each line is compared ignoring its leading and trailing whitespace, so indentation drift and trailing-whitespace differences don't break the match. The matched whole lines are replaced, so your `replace` text controls the resulting indentation.
+3. **Whitespace-flexible.** Runs of spaces and tabs *within* a line are collapsed before comparison (newlines remain significant), so "single vs. multiple spaces" and "tabs vs. spaces" differences match.
 
-This makes it easier to match text pasted from word processors or web pages where invisible character substitutions are common.
+Together these make it easier to match text pasted from word processors or web pages, and to edit notes whose whitespace has drifted since you last read them.
+
+**Uniqueness rule.** Within whichever tier first finds candidates, the search text must match **exactly one** location. If it matches more than one place, the edit fails with an ambiguous-match error asking you to add surrounding context — it does *not* silently edit the first occurrence. The current content is returned in the error so the search block can be corrected and retried without re-reading.
 
 ### `extract_docx_comments`
 

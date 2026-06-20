@@ -171,3 +171,176 @@ export function normalizedIndexOf(haystack: string, needle: string): NormalizedM
 
 	return { index: origStart, length: origLength };
 }
+
+// ---------------------------------------------------------------------------
+// Resilient (tiered) matching
+// ---------------------------------------------------------------------------
+//
+// `resilientIndexOf` layers structural fallbacks on top of the Unicode
+// normalization above so SEARCH/REPLACE blocks survive realistic drift
+// (indentation changes, trailing whitespace, single-vs-double spaces) without
+// the AI having to reproduce the note byte-for-byte. Tiers are tried in order
+// and the FIRST tier that yields any candidate decides the outcome:
+//
+//   1. Exact (normalized)        — current behaviour, fastest, tightest.
+//   2. Line-trimmed              — compare line-by-line ignoring each line's
+//                                  leading/trailing whitespace.
+//   3. Intra-line whitespace     — additionally collapse runs of spaces/tabs
+//      flexible                    within each line (newlines stay significant).
+//
+// Within whichever tier first produces candidates, more than one distinct
+// match is reported as `not_unique` rather than silently editing the first
+// occurrence — and we do NOT fall through to a looser tier, because multiple
+// matches at a tighter tier is a disambiguation signal, not a reason to loosen.
+//
+// All returned offsets are in ORIGINAL-haystack coordinates. The line-based
+// tiers replace whole matched lines (the span starts at column 0 of the first
+// matched line and ends at the last content character of the last matched line,
+// excluding its trailing newline) so the caller's `replace` text controls the
+// resulting indentation — mirroring Cline's line-trimmed fallback.
+
+export interface ResilientMatch {
+	/** Start offset in the ORIGINAL haystack. */
+	index: number;
+	/** Length of the matched span in the ORIGINAL haystack. */
+	length: number;
+}
+
+export type ResilientResult =
+	| { ok: true; match: ResilientMatch }
+	| { ok: false; reason: "not_found" | "not_unique"; count?: number };
+
+/**
+ * Map a span expressed in normalized coordinates back to original-haystack
+ * coordinates via the position map. `normLastInclusive` is the index of the
+ * last included normalized character. Returns null for degenerate spans.
+ */
+function mapNormSpanToOrig(
+	posMap: number[],
+	normStart: number,
+	normLastInclusive: number,
+): ResilientMatch | null {
+	if (normStart >= posMap.length) return null;
+	if (normLastInclusive < normStart) return null;
+	const lastInclusive = Math.min(normLastInclusive, posMap.length - 1);
+	const origStart = posMap[normStart]!;
+	const lastOrig = posMap[lastInclusive]!;
+	return { index: origStart, length: lastOrig - origStart + 1 };
+}
+
+/** Collapse a candidate list into a ResilientResult, deduping by span. */
+function finalizeCandidates(candidates: ResilientMatch[]): ResilientResult {
+	if (candidates.length === 0) return { ok: false, reason: "not_found" };
+
+	const seen = new Set<string>();
+	const unique: ResilientMatch[] = [];
+	for (const c of candidates) {
+		const key = `${c.index}:${c.length}`;
+		if (!seen.has(key)) {
+			seen.add(key);
+			unique.push(c);
+		}
+	}
+
+	if (unique.length === 1) return { ok: true, match: unique[0]! };
+	return { ok: false, reason: "not_unique", count: unique.length };
+}
+
+/** Tier 1: every occurrence of the normalized needle in the normalized haystack. */
+function exactNormalizedCandidates(h: NormalizeResult, n: NormalizeResult): ResilientMatch[] {
+	const candidates: ResilientMatch[] = [];
+	const needleLen = n.normalized.length;
+	let from = 0;
+	for (;;) {
+		const idx = h.normalized.indexOf(n.normalized, from);
+		if (idx === -1) break;
+		const m = mapNormSpanToOrig(h.posMap, idx, idx + needleLen - 1);
+		if (m) candidates.push(m);
+		from = idx + 1; // advance by one to catch overlapping occurrences
+	}
+	return candidates;
+}
+
+/**
+ * Tiers 2 & 3: match line-by-line after applying `lineTransform` to each line
+ * (trim for tier 2; collapse-intra-line-whitespace + trim for tier 3). Both
+ * tiers share this machinery because both replace whole lines, so the matched
+ * span is always line-bounded regardless of the transform.
+ */
+function lineBasedCandidates(
+	h: NormalizeResult,
+	n: NormalizeResult,
+	lineTransform: (line: string) => string,
+): ResilientMatch[] {
+	const hLines = h.normalized.split("\n");
+	const nLines = n.normalized.split("\n");
+
+	// Drop a single trailing empty needle line — the artifact of a search block
+	// that ends with a newline — so it doesn't require a trailing blank line.
+	if (nLines.length > 1 && nLines[nLines.length - 1] === "") nLines.pop();
+
+	const hT = hLines.map(lineTransform);
+	const nT = nLines.map(lineTransform);
+
+	// Degenerate needle (all blank after transform) can't anchor a match.
+	if (nT.length === 0 || nT.every((l) => l === "")) return [];
+
+	// Normalized-space start offset of each haystack line.
+	const hLineStart: number[] = new Array(hLines.length);
+	let off = 0;
+	for (let i = 0; i < hLines.length; i++) {
+		hLineStart[i] = off;
+		off += hLines[i]!.length + 1; // +1 for the consumed "\n"
+	}
+
+	const candidates: ResilientMatch[] = [];
+	const maxStart = hLines.length - nT.length;
+	for (let i = 0; i <= maxStart; i++) {
+		let matched = true;
+		for (let j = 0; j < nT.length; j++) {
+			if (hT[i + j] !== nT[j]) {
+				matched = false;
+				break;
+			}
+		}
+		if (!matched) continue;
+
+		const lastLineIdx = i + nT.length - 1;
+		const normStart = hLineStart[i]!;
+		// End at the last content character of the last matched line (exclude its
+		// trailing newline) so `replace` text governs the trailing newline.
+		const normLastInclusive = hLineStart[lastLineIdx]! + hLines[lastLineIdx]!.length - 1;
+		const m = mapNormSpanToOrig(h.posMap, normStart, normLastInclusive);
+		if (m) candidates.push(m);
+	}
+
+	return candidates;
+}
+
+/**
+ * Find `needle` in `haystack` using tiered, drift-tolerant matching with
+ * uniqueness enforcement. See the block comment above for tier semantics.
+ */
+export function resilientIndexOf(haystack: string, needle: string): ResilientResult {
+	if (needle.length === 0) return { ok: true, match: { index: 0, length: 0 } };
+
+	const h = normalizeForMatch(haystack);
+	const n = normalizeForMatch(needle);
+
+	if (n.normalized.length === 0) return { ok: true, match: { index: 0, length: 0 } };
+
+	// Tier 1: exact (normalized).
+	const t1 = finalizeCandidates(exactNormalizedCandidates(h, n));
+	if (t1.ok || t1.reason === "not_unique") return t1;
+
+	// Tier 2: line-trimmed.
+	const t2 = finalizeCandidates(lineBasedCandidates(h, n, (l) => l.trim()));
+	if (t2.ok || t2.reason === "not_unique") return t2;
+
+	// Tier 3: intra-line whitespace-flexible (lines have no "\n", so /\s+/ is
+	// safe — it collapses spaces/tabs/CR but never crosses a line boundary).
+	const t3 = finalizeCandidates(lineBasedCandidates(h, n, (l) => l.replace(/\s+/g, " ").trim()));
+	if (t3.ok || t3.reason === "not_unique") return t3;
+
+	return { ok: false, reason: "not_found" };
+}

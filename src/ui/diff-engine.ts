@@ -10,7 +10,7 @@
  * @see design/ux.md — diff preview and change approval
  */
 
-import { normalizedIndexOf } from "../utils/unicode-normalize";
+import { resilientIndexOf } from "../utils/unicode-normalize";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -245,12 +245,15 @@ export function applyBlocks(
 			continue;
 		}
 
-		const match = normalizedIndexOf(result, block.search);
-		if (!match) {
-			// Block no longer matches (can happen when earlier blocks shift text).
-			// Skip silently — the caller is responsible for presenting warnings.
+		const matchResult = resilientIndexOf(result, block.search);
+		if (!matchResult.ok) {
+			// Block no longer matches uniquely — either it doesn't match (can happen
+			// when earlier blocks shift text) or it matches ambiguously (which the
+			// real atomic write will reject). Skip silently to preview the rest; the
+			// caller is responsible for presenting warnings.
 			continue;
 		}
+		const match = matchResult.match;
 
 		result =
 			result.slice(0, match.index) + block.replace + result.slice(match.index + match.length);

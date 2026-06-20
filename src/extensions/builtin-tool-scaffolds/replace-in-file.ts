@@ -11,11 +11,11 @@ export const REPLACE_IN_FILE = scaffold(
     path_namespace: filesystem
   changes:
     type: "object[]"
-    description: "Array of search/replace blocks to apply in sequence. Each block replaces only the first occurrence of the search text."
+    description: "Array of search/replace blocks to apply in sequence. Each block's search text must match exactly one location in the file (add surrounding context to disambiguate if it appears more than once)."
     properties:
       search:
         type: string
-        description: "Exact text to find in the file (character-for-character match including whitespace)."
+        description: "Text to find in the file. Leading/trailing and interior whitespace differences are tolerated, but the search must match a UNIQUE location — include 2–4 lines of surrounding context if the text appears multiple times."
       replace:
         type: string
         description: "Text to replace the matched search text with. Use empty string to delete the matched text."
@@ -68,22 +68,29 @@ if (buf.subarray(0, 8192).includes(0)) {
   );
 }
 
-let content = buf.toString("utf-8");
+const originalContent = buf.toString("utf-8");
+let content = originalContent;
 
 // Apply SEARCH/REPLACE blocks sequentially in memory (atomic: all must match before write)
 for (let i = 0; i < params.changes.length; i++) {
   const block = params.changes[i];
   if (!block) continue;
-  const match = utils.normalizedIndexOf(content, block.search);
-  if (!match) {
+  const result = utils.resilientIndexOf(content, block.search);
+  if (!result.ok) {
     const preview = block.search.length > 80
       ? block.search.slice(0, 80) + "..."
       : block.search;
-    throw new Error(
-      \`Search block \${i + 1} did not match any text in \${params.path}. \` +
-      \`No changes were applied. The search text was: "\${preview}"\`
-    );
+    const errorMsg = result.reason === "not_unique"
+      ? \`Search block \${i + 1} matched \${result.count} locations in \${params.path}. Add surrounding context (2–4 lines) so it matches exactly one place. No changes were applied. The search text was: "\${preview}"\`
+      : \`Search block \${i + 1} did not match any text in \${params.path}. No changes were applied. The search text was: "\${preview}"\`;
+    // Auto-return the current file content so the model can correct without re-reading.
+    return {
+      __toolError: true,
+      error: errorMsg,
+      result: "Error: " + errorMsg + "\\n\\n---\\nCurrent file content:\\n\\n" + originalContent,
+    };
   }
+  const match = result.match;
   content = content.slice(0, match.index) + block.replace + content.slice(match.index + match.length);
 }
 

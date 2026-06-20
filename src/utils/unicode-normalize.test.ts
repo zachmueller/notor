@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizedIndexOf, normalizeForMatch } from "./unicode-normalize";
+import { normalizedIndexOf, normalizeForMatch, resilientIndexOf } from "./unicode-normalize";
 
 describe("normalizeForMatch", () => {
 	it("leaves plain ASCII unchanged", () => {
@@ -173,5 +173,145 @@ describe("normalizedIndexOf", () => {
 		content = content.slice(0, match2!.index) + "Second -- Third" + content.slice(match2!.index + match2!.length);
 
 		expect(content).toBe("First -- Second -- Third");
+	});
+});
+
+describe("resilientIndexOf", () => {
+	/** Helper: assert ok and return the match for chaining. */
+	function expectMatch(result: ReturnType<typeof resilientIndexOf>) {
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected ok result");
+		return result.match;
+	}
+
+	describe("tier 1: exact (normalized)", () => {
+		it("finds an exact ASCII match", () => {
+			const r = resilientIndexOf("hello world", "world");
+			expect(r).toEqual({ ok: true, match: { index: 6, length: 5 } });
+		});
+
+		it("still resolves Unicode variants via tier 1 (regression)", () => {
+			const r = resilientIndexOf("foo — bar", "foo - bar");
+			expect(r).toEqual({ ok: true, match: { index: 0, length: 9 } });
+		});
+
+		it("expands ellipsis via tier 1 (regression)", () => {
+			const r = resilientIndexOf("wait… more", "wait... more");
+			const m = expectMatch(r);
+			expect(m.index).toBe(0);
+			expect(m.length).toBe(10);
+		});
+
+		it("empty needle returns a zero-length match at 0", () => {
+			expect(resilientIndexOf("hello", "")).toEqual({ ok: true, match: { index: 0, length: 0 } });
+		});
+
+		it("splice round-trips on an exact match", () => {
+			const haystack = "before — after";
+			const m = expectMatch(resilientIndexOf(haystack, " - "));
+			const out = haystack.slice(0, m.index) + " -- " + haystack.slice(m.index + m.length);
+			expect(out).toBe("before -- after");
+		});
+	});
+
+	describe("tier 2: line-trimmed", () => {
+		// NOTE: a SINGLE-line trimmed needle is always an exact substring of the
+		// haystack, so tier 1 handles it (tight substring replace). Tier 2 only
+		// becomes load-bearing for MULTI-line blocks, where newline adjacency
+		// breaks the exact substring — that's what these cases exercise.
+
+		it("matches a multi-line block despite interior indentation drift", () => {
+			// Note indents the body with 8 spaces; the search block used 4.
+			const haystack = "func() {\n        return 1;\n}\n";
+			const search = "func() {\n    return 1;\n}";
+			const m = expectMatch(resilientIndexOf(haystack, search));
+			const out = haystack.slice(0, m.index) + "func() {\n    return 2;\n}" + haystack.slice(m.index + m.length);
+			expect(out).toBe("func() {\n    return 2;\n}\n");
+		});
+
+		it("matches a multi-line block despite trailing whitespace on interior lines", () => {
+			const haystack = "x = [\n  1,  \n  2,\t\n]\n"; // trailing spaces / tab after items
+			const search = "x = [\n  1,\n  2,\n]";
+			const m = expectMatch(resilientIndexOf(haystack, search));
+			const out = haystack.slice(0, m.index) + "x = []" + haystack.slice(m.index + m.length);
+			expect(out).toBe("x = []\n");
+		});
+
+		it("matches a multi-line block ignoring per-line indentation", () => {
+			const haystack = "head\n   one\n      two\nthree\ntail\n";
+			const search = "one\ntwo\nthree";
+			const m = expectMatch(resilientIndexOf(haystack, search));
+			const out = haystack.slice(0, m.index) + "ONE\nTWO\nTHREE" + haystack.slice(m.index + m.length);
+			expect(out).toBe("head\nONE\nTWO\nTHREE\ntail\n");
+		});
+
+		it("tolerates a trailing newline on the search block", () => {
+			// Multi-line so tier 1's substring match doesn't fire first.
+			const haystack = "head\n    a\n    b\ntail\n";
+			const search = "a\nb\n"; // note the trailing newline
+			const m = expectMatch(resilientIndexOf(haystack, search));
+			const out = haystack.slice(0, m.index) + "A\nB" + haystack.slice(m.index + m.length);
+			expect(out).toBe("head\nA\nB\ntail\n");
+		});
+	});
+
+	describe("tier 3: intra-line whitespace-flexible", () => {
+		it("matches single-vs-multiple spaces inside a line", () => {
+			const haystack = "the   quick    brown fox\n";
+			const m = expectMatch(resilientIndexOf(haystack, "the quick brown fox"));
+			const out = haystack.slice(0, m.index) + "DONE" + haystack.slice(m.index + m.length);
+			expect(out).toBe("DONE\n");
+		});
+
+		it("matches tabs against spaces inside a line", () => {
+			const haystack = "key:\tvalue\n";
+			const m = expectMatch(resilientIndexOf(haystack, "key: value"));
+			const out = haystack.slice(0, m.index) + "REPLACED" + haystack.slice(m.index + m.length);
+			expect(out).toBe("REPLACED\n");
+		});
+
+		it("does NOT cross line boundaries (newlines stay significant)", () => {
+			// "a b" must not match across the newline between "a" and "b".
+			const r = resilientIndexOf("a\nb\n", "a b");
+			expect(r).toEqual({ ok: false, reason: "not_found" });
+		});
+	});
+
+	describe("uniqueness enforcement", () => {
+		it("reports not_unique with a count when the needle occurs twice (tier 1)", () => {
+			const r = resilientIndexOf("foo bar foo", "foo");
+			expect(r).toEqual({ ok: false, reason: "not_unique", count: 2 });
+		});
+
+		it("matches uniquely once disambiguating context is added", () => {
+			const r = resilientIndexOf("foo bar foo baz", "foo baz");
+			expect(r).toEqual({ ok: true, match: { index: 8, length: 7 } });
+		});
+
+		it("does not fall through to a looser tier when a tighter tier is ambiguous", () => {
+			// Two exact occurrences at tier 1 → not_unique. We report ambiguity at
+			// the tighter tier rather than loosening to tier 2/3.
+			const r = resilientIndexOf("  item\nitem\n", "item");
+			expect(r.ok).toBe(false);
+			if (!r.ok) expect(r.reason).toBe("not_unique");
+		});
+
+		it("counts ambiguity at the line-trimmed tier (tier 1 misses)", () => {
+			// Multi-line needle: tier 1 can't substring-match across the indented
+			// newline, but two blocks match after per-line trimming.
+			const haystack = "   a\n   b\nxxx\n   a\n   b\n";
+			const r = resilientIndexOf(haystack, "a\nb");
+			expect(r.ok).toBe(false);
+			if (!r.ok) {
+				expect(r.reason).toBe("not_unique");
+				expect(r.count).toBe(2);
+			}
+		});
+	});
+
+	describe("negative", () => {
+		it("returns not_found for genuinely absent text", () => {
+			expect(resilientIndexOf("hello world", "goodbye")).toEqual({ ok: false, reason: "not_found" });
+		});
 	});
 });
