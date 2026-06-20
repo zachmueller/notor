@@ -10,7 +10,8 @@
  * and the per-server tool controls that lived inside "MCP servers".
  */
 
-import { Notice, Platform, Setting, TextComponent, normalizePath, setIcon, prepareFuzzySearch } from "obsidian";
+import { Notice, Platform, Setting, TextComponent, normalizePath, setIcon, prepareSimpleSearch } from "obsidian";
+import type { SearchMatchPart } from "obsidian";
 import { TOOL_DISPLAY_NAMES, TOOLS_DEFAULT_DISABLED } from "../constants";
 import type { SettingsContext } from "./context";
 import type { McpServerConfig } from "../../mcp/mcp-types";
@@ -31,6 +32,8 @@ const log = logger("ToolsSection");
 
 interface ToolFilterEntry {
 	settingEl: HTMLElement;
+	nameEl: HTMLElement;
+	name: string;
 	searchTexts: string[];
 }
 
@@ -47,6 +50,20 @@ interface ToolSubgroupOpts {
 
 /** Persistent search query — survives ctx.redisplay() re-renders. */
 let persistedToolSearchQuery = "";
+
+/** Render `text` into `el`, wrapping the [start,end] match ranges in highlight spans. */
+function renderNameHighlights(el: HTMLElement, text: string, matches: SearchMatchPart[]): void {
+	el.empty();
+	const sorted = [...matches].filter((m) => m[0] < m[1]).sort((a, b) => a[0] - b[0]);
+	let cursor = 0;
+	for (const [start, end] of sorted) {
+		if (start < cursor) continue; // skip overlaps
+		if (start > cursor) el.appendText(text.slice(cursor, start));
+		el.createSpan({ cls: "notor-tool-search-highlight", text: text.slice(start, end) });
+		cursor = end;
+	}
+	if (cursor < text.length) el.appendText(text.slice(cursor));
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -288,7 +305,10 @@ export function renderToolsSection(
 			// Show everything
 			for (const group of groups) {
 				for (const el of group.elements) el.removeClass("notor-hidden");
-				for (const entry of group.entries) entry.settingEl.removeClass("notor-hidden");
+				for (const entry of group.entries) {
+					entry.settingEl.removeClass("notor-hidden");
+					entry.nameEl.setText(entry.name);
+				}
 			}
 			// Restore persisted collapse state
 			for (const { details, persistKey } of subgroupOpts.subgroupRefs) {
@@ -309,13 +329,17 @@ export function renderToolsSection(
 		}
 
 		clearBtn.removeClass("notor-hidden");
-		const fuzzy = prepareFuzzySearch(query);
+		const search = prepareSimpleSearch(query);
 		let totalVisible = 0;
 
 		for (const group of groups) {
 			let groupVisible = 0;
 			for (const entry of group.entries) {
-				const matched = entry.searchTexts.some((t) => fuzzy(t) !== null);
+				const nameResult = search(entry.name);
+				const matched = nameResult !== null || entry.searchTexts.some((t) => search(t) !== null);
+				// Always rebuild the name so stale highlights from prior keystrokes are cleared.
+				if (nameResult) renderNameHighlights(entry.nameEl, entry.name, nameResult.matches);
+				else entry.nameEl.setText(entry.name);
 				if (matched) {
 					entry.settingEl.removeClass("notor-hidden");
 					groupVisible++;
@@ -388,7 +412,7 @@ function renderBuiltinTools(
 	for (const [toolId, meta] of readTools) {
 		const setting = renderBuiltinToolRow(readBody, toolId, meta, ctx, true);
 		addBuiltinToolIcons(setting, toolId, toolDefs, ctx);
-		readGroup.entries.push({ settingEl: setting.settingEl, searchTexts: [meta.name, meta.desc, toolId] });
+		readGroup.entries.push({ settingEl: setting.settingEl, nameEl: setting.nameEl, name: meta.name, searchTexts: [meta.name, meta.desc, toolId] });
 	}
 	groups.push(readGroup);
 
@@ -403,7 +427,7 @@ function renderBuiltinTools(
 	for (const [toolId, meta] of writeTools) {
 		const setting = renderBuiltinToolRow(writeBody, toolId, meta, ctx, false);
 		addBuiltinToolIcons(setting, toolId, toolDefs, ctx);
-		writeGroup.entries.push({ settingEl: setting.settingEl, searchTexts: [meta.name, meta.desc, toolId] });
+		writeGroup.entries.push({ settingEl: setting.settingEl, nameEl: setting.nameEl, name: meta.name, searchTexts: [meta.name, meta.desc, toolId] });
 	}
 	groups.push(writeGroup);
 }
@@ -659,7 +683,7 @@ function renderUserTools(
 		for (const tool of readTools) {
 			const setting = renderUserToolRow(readBody, tool, ctx, true);
 			addUserToolIcons(setting, tool, ctx);
-			group.entries.push({ settingEl: setting.settingEl, searchTexts: [tool.name, tool.description] });
+			group.entries.push({ settingEl: setting.settingEl, nameEl: setting.nameEl, name: tool.name, searchTexts: [tool.name, tool.description] });
 		}
 		groups.push(group);
 	}
@@ -676,7 +700,7 @@ function renderUserTools(
 		for (const tool of writeTools) {
 			const setting = renderUserToolRow(writeBody, tool, ctx, false);
 			addUserToolIcons(setting, tool, ctx);
-			group.entries.push({ settingEl: setting.settingEl, searchTexts: [tool.name, tool.description] });
+			group.entries.push({ settingEl: setting.settingEl, nameEl: setting.nameEl, name: tool.name, searchTexts: [tool.name, tool.description] });
 		}
 		groups.push(group);
 	}
@@ -862,7 +886,7 @@ function renderMcpServerTools(
 	const group: SectionGroup = { elements: [...mcpParentElements, details], entries: [] };
 	for (const tool of tools) {
 		const setting = renderMcpToolRow(body, serverName, tool, config, ctx);
-		group.entries.push({ settingEl: setting.settingEl, searchTexts: [tool.name, tool.description, serverName] });
+		group.entries.push({ settingEl: setting.settingEl, nameEl: setting.nameEl, name: tool.name, searchTexts: [tool.name, tool.description, serverName] });
 	}
 	groups.push(group);
 }
