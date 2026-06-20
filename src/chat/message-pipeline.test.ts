@@ -308,6 +308,117 @@ describe("toChatMessages — extension_block", () => {
 });
 
 // ---------------------------------------------------------------------------
+// toChatMessages — tool_call / tool_result pairing
+//
+// Bedrock/Anthropic require every tool_result block to correlate 1:1 to a
+// tool_use block in the immediately preceding assistant turn. These cover the
+// orphaned-tool_result repair (parallel-batch + standalone) and the existing
+// orphaned-tool_call synthetic-result injection (regression lock).
+// ---------------------------------------------------------------------------
+
+describe("toChatMessages — tool pairing", () => {
+	beforeEach(() => {
+		setChatBlockRegistry({ get: () => undefined });
+	});
+
+	function makeToolCall(id: string, toolName = "search"): Message {
+		return makeMessage({
+			role: "tool_call",
+			content: "",
+			tool_call: { id, tool_name: toolName, parameters: {}, status: "success" },
+		});
+	}
+
+	function makeToolResult(toolCallId: string, toolName = "search", result = "ok"): Message {
+		return makeMessage({
+			role: "tool_result",
+			content: "",
+			tool_result: { tool_name: toolName, success: true, result, tool_call_id: toolCallId },
+		});
+	}
+
+	/** Assert every tool_result block references a call in the preceding tool_call turn. */
+	function assertNoOrphanResults(result: ReturnType<typeof toChatMessages>): void {
+		for (let i = 0; i < result.length; i++) {
+			const m = result[i]!;
+			if (m.role !== "tool_result" || !m.tool_results?.length) continue;
+			const prev = result[i - 1];
+			const callIds = new Set(
+				prev?.role === "tool_call" ? (prev.tool_calls ?? []).map((tc) => tc.id) : []
+			);
+			for (const tr of m.tool_results) {
+				expect(callIds.has(tr.tool_call_id)).toBe(true);
+			}
+		}
+	}
+
+	it("drops an orphaned result block in a parallel batch (calls A,B; results A,B,C)", () => {
+		const msgs: Message[] = [
+			makeMessage({ role: "system", content: "sys" }),
+			makeMessage({ role: "user", content: "go" }),
+			makeToolCall("A"),
+			makeToolCall("B"),
+			makeToolResult("A"),
+			makeToolResult("B"),
+			makeToolResult("C"), // orphan — no matching call
+		];
+		const result = toChatMessages(msgs, "sys");
+		const trMsg = result.find((m) => m.role === "tool_result");
+		expect(trMsg).toBeDefined();
+		const ids = (trMsg!.tool_results ?? []).map((tr) => tr.tool_call_id).sort();
+		expect(ids).toEqual(["A", "B"]);
+		assertNoOrphanResults(result);
+	});
+
+	it("drops a standalone tool_result with no preceding tool_call", () => {
+		const msgs: Message[] = [
+			makeMessage({ role: "system", content: "sys" }),
+			makeMessage({ role: "user", content: "hi" }),
+			makeToolResult("ghost"), // originating call truncated away
+			makeMessage({ role: "assistant", content: "done" }),
+		];
+		const result = toChatMessages(msgs, "sys");
+		expect(result.some((m) => m.role === "tool_result")).toBe(false);
+		assertNoOrphanResults(result);
+	});
+
+	it("injects a synthetic result for an orphaned tool_call (regression lock)", () => {
+		const msgs: Message[] = [
+			makeMessage({ role: "system", content: "sys" }),
+			makeMessage({ role: "user", content: "go" }),
+			makeToolCall("A"),
+			// no result for A
+			makeMessage({ role: "assistant", content: "next" }),
+		];
+		const result = toChatMessages(msgs, "sys");
+		const trMsg = result.find((m) => m.role === "tool_result");
+		expect(trMsg).toBeDefined();
+		const synthetic = (trMsg!.tool_results ?? []).find((tr) => tr.tool_call_id === "A");
+		expect(synthetic).toBeDefined();
+		expect(synthetic!.result).toBe("Tool call was cancelled by the user.");
+		expect(synthetic!.is_error).toBe(true);
+		assertNoOrphanResults(result);
+	});
+
+	it("keeps a well-formed parallel batch intact", () => {
+		const msgs: Message[] = [
+			makeMessage({ role: "system", content: "sys" }),
+			makeMessage({ role: "user", content: "go" }),
+			makeToolCall("A"),
+			makeToolCall("B"),
+			makeToolResult("A"),
+			makeToolResult("B"),
+		];
+		const result = toChatMessages(msgs, "sys");
+		const tcMsg = result.find((m) => m.role === "tool_call");
+		const trMsg = result.find((m) => m.role === "tool_result");
+		expect((tcMsg!.tool_calls ?? []).map((tc) => tc.id).sort()).toEqual(["A", "B"]);
+		expect((trMsg!.tool_results ?? []).map((tr) => tr.tool_call_id).sort()).toEqual(["A", "B"]);
+		assertNoOrphanResults(result);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // processStream — thinking indicator lifecycle + duration
 // ---------------------------------------------------------------------------
 

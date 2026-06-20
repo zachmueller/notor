@@ -386,6 +386,21 @@ export function toChatMessages(messages: Message[], systemPrompt: string): ChatM
 	while (i < chatMessages.length) {
 		const msg = chatMessages[i]!;
 
+		// Standalone orphaned tool_result: a tool_result reached here without a
+		// preceding tool_call run (its originating call was truncated/compacted
+		// away). Drop it — Bedrock/Anthropic reject a tool_result with no
+		// matching tool_use, and the model never saw the call it answers.
+		if (msg.role === "tool_result" && msg.tool_results?.length) {
+			for (const tr of msg.tool_results) {
+				log.warn("Dropped orphaned tool_result (no preceding tool_call)", {
+					toolName: tr.tool_name,
+					toolCallId: tr.tool_call_id,
+				});
+			}
+			i++;
+			continue;
+		}
+
 		// Not a tool_call — pass through
 		if (msg.role !== "tool_call" || !msg.tool_calls?.length) {
 			repaired.push(msg);
@@ -412,14 +427,38 @@ export function toChatMessages(messages: Message[], systemPrompt: string): ChatM
 			toolResultRun.flatMap((r) => r.tool_results!.map((tr) => tr.tool_call_id))
 		);
 
+		// Build the set of tool_call_ids actually present in this run, so we can
+		// drop orphaned result blocks (a result whose call was truncated, e.g.
+		// only part of a parallel batch survived). An orphan would otherwise
+		// make the coalesced tool_result turn carry more blocks than the
+		// tool_call turn → Bedrock "toolResult blocks exceed toolUse blocks".
+		const callIds = new Set(
+			toolCallRun.flatMap((tc) => tc.tool_calls!.map((tcData) => tcData.id))
+		);
+
 		// Emit all tool_calls
 		for (const tc of toolCallRun) {
 			repaired.push(tc);
 		}
 
-		// Emit all existing tool_results
+		// Emit existing tool_results, dropping any orphaned result blocks
+		// whose tool_call_id is not present in this run's calls.
 		for (const tr of toolResultRun) {
-			repaired.push(tr);
+			const kept = tr.tool_results!.filter((r) => callIds.has(r.tool_call_id));
+			for (const dropped of tr.tool_results!) {
+				if (!callIds.has(dropped.tool_call_id)) {
+					log.warn("Dropped orphaned tool_result block (no matching tool_call in run)", {
+						toolName: dropped.tool_name,
+						toolCallId: dropped.tool_call_id,
+					});
+				}
+			}
+			if (kept.length === tr.tool_results!.length) {
+				repaired.push(tr);
+			} else if (kept.length > 0) {
+				repaired.push({ ...tr, tool_results: kept });
+			}
+			// else: all blocks orphaned → skip the message entirely
 		}
 
 		// Inject synthetic results for any unmatched tool_calls
@@ -532,15 +571,49 @@ export function toChatMessages(messages: Message[], systemPrompt: string): ChatM
 		}
 	}
 
+	// Phase 5: Final wire-validation guard (belt-and-suspenders).
+	// Every tool_result block must correlate to a tool_use block in the
+	// immediately preceding tool_call turn, or Bedrock/Anthropic reject the
+	// request ("toolResult blocks exceed toolUse blocks"). Phases 1–4 plus the
+	// pair-aware truncation should make this unreachable; if an orphan slips
+	// through, drop it here and log at error level to surface the regression.
+	const validated: ChatMessage[] = [];
+	for (let k = 0; k < final.length; k++) {
+		const msg = final[k]!;
+		if (msg.role !== "tool_result" || !msg.tool_results?.length) {
+			validated.push(msg);
+			continue;
+		}
+		const prev = validated[validated.length - 1];
+		const callIds = prev?.role === "tool_call" && prev.tool_calls?.length
+			? new Set(prev.tool_calls.map((tc) => tc.id))
+			: new Set<string>();
+		const kept = msg.tool_results.filter((tr) => callIds.has(tr.tool_call_id));
+		for (const tr of msg.tool_results) {
+			if (!callIds.has(tr.tool_call_id)) {
+				log.error("Phase 5 guard dropped orphaned tool_result block (unreachable after upstream repair)", {
+					toolName: tr.tool_name,
+					toolCallId: tr.tool_call_id,
+				});
+			}
+		}
+		if (kept.length === msg.tool_results.length) {
+			validated.push(msg);
+		} else if (kept.length > 0) {
+			validated.push({ ...msg, tool_results: kept });
+		}
+		// else: all blocks orphaned → drop the message entirely
+	}
+
 	log.info("ChatMessages built for provider", {
-		totalCount: final.length,
-		firstRole: final[0]?.role ?? "none",
-		secondRole: final[1]?.role ?? "none",
-		lastRole: final[final.length - 1]?.role ?? "none",
-		roles: final.map((m) => m.role),
+		totalCount: validated.length,
+		firstRole: validated[0]?.role ?? "none",
+		secondRole: validated[1]?.role ?? "none",
+		lastRole: validated[validated.length - 1]?.role ?? "none",
+		roles: validated.map((m) => m.role),
 	});
 
-	return final;
+	return validated;
 }
 
 /**

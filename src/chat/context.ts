@@ -191,6 +191,37 @@ export class ContextManager {
 			truncatedCount++;
 		}
 
+		// Tool-pair integrity: never keep a tool_result whose originating
+		// tool_call was truncated. The token loop above can stop mid-pair (or
+		// partway through a parallel tool batch), leaving a surviving result
+		// with no matching call. Bedrock/Anthropic reject that with
+		// "toolResult blocks exceed toolUse blocks". Drop the orphaned result
+		// (the model never saw the call, so the result answers no question).
+		// The reverse — a surviving call whose result was truncated — is
+		// repaired downstream by the synthetic-result injection in
+		// toChatMessages(), so it is intentionally left alone here.
+		const survivingCallIds = new Set<string>();
+		for (const m of messages) {
+			if (!m.truncated && m.role === "tool_call") {
+				survivingCallIds.add(m.tool_call?.id ?? m.id);
+			}
+		}
+		for (let i = 0; i < messages.length; i++) {
+			const m = messages[i];
+			if (!m || m.truncated || m.role !== "tool_result") continue;
+			const refId = m.tool_result?.tool_call_id ?? m.id;
+			if (!survivingCallIds.has(refId)) {
+				m.truncated = true;
+				tokensToRemove -= (tokenCounts[i] ?? 0); // track for logging
+				truncatedCount++;
+				log.warn("Truncated orphaned tool_result (originating tool_call was truncated)", {
+					messageId: m.id,
+					toolCallId: refId,
+					toolName: m.tool_result?.tool_name,
+				});
+			}
+		}
+
 		log.info("Context window after truncation", {
 			truncatedCount,
 			remainingCount: messages.filter((m) => !m.truncated).length,
