@@ -10,7 +10,7 @@
 
 import { ItemView, Menu, Notice, setIcon, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type NotorPlugin from "../main";
-import type { ConversationMode, Message, ModelInfo, ModelPreset, Checkpoint, Persona, TaskItem } from "../types";
+import type { Conversation, ConversationMode, Message, ModelInfo, ModelPreset, Checkpoint, Persona, TaskItem } from "../types";
 import type { Attachment } from "../context/attachment";
 import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
@@ -83,6 +83,12 @@ export class NotorChatView extends ItemView {
 
 	// Workflow send callback (E-012)
 	private onSendWorkflow?: (workflow: Workflow, supplementaryText: string) => Promise<void>;
+
+	// Active-workflow chip state — shows the workflow that owns the current
+	// conversation, with a context menu to deactivate or switch it.
+	private workflowLabelEl?: HTMLElement;
+	private onSwitchWorkflow?: (workflow: Workflow) => Promise<void>;
+	private onDeactivateWorkflow?: () => void;
 
 	// Settings popover (CHAT-008)
 	private settingsPopover?: SettingsPopover;
@@ -526,6 +532,26 @@ export class NotorChatView extends ItemView {
 		if (this.chatInput) this.chatInput.deps.onSendWorkflow = callback;
 	}
 
+	/**
+	 * Set the callback invoked when the user picks a different workflow from the
+	 * workflow chip's context menu. The orchestrator wires this to
+	 * `ChatOrchestrator.switchWorkflow()`, which applies the workflow into the
+	 * current conversation.
+	 */
+	setOnSwitchWorkflow(callback: (workflow: Workflow) => Promise<void>): void {
+		this.onSwitchWorkflow = callback;
+	}
+
+	/**
+	 * Set the callback invoked when the user deactivates the active workflow via
+	 * the workflow chip. The orchestrator wires this to flip
+	 * `workflow_deactivated` on the conversation header so its tool configs stop
+	 * being re-applied on follow-up turns.
+	 */
+	setOnDeactivateWorkflow(callback: () => void): void {
+		this.onDeactivateWorkflow = callback;
+	}
+
 	// -----------------------------------------------------------------------
 	// Workflow activity indicator (H-002, H-003)
 	// -----------------------------------------------------------------------
@@ -797,6 +823,88 @@ export class NotorChatView extends ItemView {
 	}
 
 	/**
+	 * Update the active-workflow chip from the displayed conversation.
+	 *
+	 * Shows the workflow name (no emoji — workflows have no per-workflow chip
+	 * config) when the conversation was created by a workflow and the user has
+	 * not deactivated it. Hidden for non-workflow conversations or after
+	 * deactivation. Mirrors {@link updatePersonaLabel}; positioned right after
+	 * the persona chip in the toolbar.
+	 */
+	updateWorkflowLabel(conv: Conversation | null): void {
+		if (!this.workflowLabelEl) {
+			// Create the label element if it doesn't exist yet. Inserted into the
+			// toolbar row immediately after the persona chip.
+			const toolbar = this.chatInput?.getToolbarEl() ?? this.chatInput?.getInputAreaEl();
+			if (toolbar) {
+				this.workflowLabelEl = toolbar.createDiv({
+					cls: "notor-workflow-label",
+				});
+				// Place after the persona label when present, else after the mode toggle.
+				const anchor = this.personaLabelEl ?? toolbar.querySelector(".notor-mode-toggle");
+				if (anchor?.nextSibling) {
+					toolbar.insertBefore(this.workflowLabelEl, anchor.nextSibling);
+				}
+				// Click to open the workflow context menu.
+				this.workflowLabelEl.addEventListener("click", (evt) => {
+					this.showWorkflowContextMenu(evt);
+				});
+			} else {
+				return;
+			}
+		}
+
+		if (conv?.workflow_path && conv.workflow_deactivated !== true) {
+			this.workflowLabelEl.textContent = conv.workflow_name ?? "Workflow";
+			this.workflowLabelEl.removeClass("notor-hidden");
+		} else {
+			this.workflowLabelEl.addClass("notor-hidden");
+		}
+	}
+
+	/**
+	 * Show an Obsidian context menu for the active workflow: deactivate it, or
+	 * switch to a different workflow (applied into the current conversation).
+	 *
+	 * Mirrors {@link showPersonaContextMenu}. Switch items are disabled while a
+	 * response is streaming — the orchestrator also rejects switches on an
+	 * active session as the authoritative backstop.
+	 */
+	private showWorkflowContextMenu(evt: MouseEvent): void {
+		const menu = new Menu();
+
+		// "Deactivate workflow" at the top.
+		menu.addItem((item) => {
+			item.setTitle("Deactivate workflow")
+				.setIcon("x-circle")
+				.onClick(() => {
+					this.onDeactivateWorkflow?.();
+				});
+		});
+
+		// Switch-to-workflow items appear only when the switch callback is wired.
+		const workflows = this.getWorkflowsCallback?.() ?? [];
+		if (this.onSwitchWorkflow && workflows.length > 0) {
+			menu.addSeparator();
+			const sorted = [...workflows].sort((a, b) =>
+				a.display_name.localeCompare(b.display_name),
+			);
+			for (const wf of sorted) {
+				menu.addItem((item) => {
+					item.setTitle(wf.display_name)
+						.setIcon("workflow")
+						.setDisabled(this.isResponding)
+						.onClick(() => {
+							void this.onSwitchWorkflow?.(wf);
+						});
+				});
+			}
+		}
+
+		menu.showAtMouseEvent(evt);
+	}
+
+	/**
 	 * Update the displayed provider in the settings popover without triggering
 	 * the global `onProviderChange` callback.
 	 *
@@ -1005,6 +1113,8 @@ export class NotorChatView extends ItemView {
 		this.onOpenInNewTab = undefined;
 		this.onOpenSettingsGroup = undefined;
 		this.onSendWorkflow = undefined;
+		this.onSwitchWorkflow = undefined;
+		this.onDeactivateWorkflow = undefined;
 		this.onPersonaChange = undefined;
 		this.onDirectRename = undefined;
 

@@ -2992,6 +2992,33 @@
 	border-color: var(--persona-chip-border);
 }
 
+/* Active-workflow chip — mirrors the persona chip but purple-tinted (matching
+   the workflow input chip) and without an emoji/custom-color variant. */
+.notor-workflow-label {
+	padding: 4px 8px;
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	color: var(--color-purple, #7c3aed);
+	background: rgba(124, 58, 237, 0.1);
+	border: 1px solid rgba(124, 58, 237, 0.25);
+	white-space: nowrap;
+	user-select: none;
+	flex-shrink: 0;
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+
+.notor-workflow-label:hover {
+	background: rgba(124, 58, 237, 0.2);
+}
+
+.theme-dark .notor-workflow-label {
+	color: var(--color-purple, #a78bfa);
+	background: rgba(167, 139, 250, 0.14);
+	border-color: rgba(167, 139, 250, 0.3);
+}
+
 
 /* ==========================================================================
    Provider/Model Reference (Phase 4 — A-012)

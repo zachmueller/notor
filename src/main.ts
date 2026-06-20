@@ -2063,6 +2063,10 @@ export default class NotorPlugin extends Plugin {
 			} else {
 				view.updatePersonaLabel(this.getPersonaManager().getActivePersona() ?? null);
 			}
+
+			// Ensure the active-workflow chip is set after the DOM is built,
+			// covering the same load paths as the persona label above.
+			view.updateWorkflowLabel(conv);
 		}
 	}
 

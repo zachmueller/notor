@@ -135,6 +135,18 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		await orchestrator.executeWorkflow(workflow, supplementaryText);
 	});
 
+	// Workflow chip — deactivate: drop the workflow's tool-config overrides for
+	// future turns (keep workflow_path/name for history; persona untouched).
+	// Patches the in-memory conversation so the next turn's snapshot sees the
+	// flag (the manager's onConversationChanged persists the header).
+	view.setOnDeactivateWorkflow(() => {
+		const convManager = orchestrator.getConversationManager();
+		const conv = convManager.getActiveConversation();
+		if (!conv) return;
+		convManager.setWorkflowMetadata({ workflow_deactivated: true });
+		view.updateWorkflowLabel({ ...conv, workflow_deactivated: true });
+	});
+
 	// E-015: Workflow discovery callback for slash-command suggest
 	view.setGetWorkflows(() => plugin.getDiscoveredWorkflows());
 

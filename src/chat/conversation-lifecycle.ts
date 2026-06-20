@@ -210,6 +210,9 @@ export class ConversationLifecycleManager {
 			view?.updatePersonaLabel(null);
 		}
 
+		// Display the active-workflow chip for the new conversation
+		view?.updateWorkflowLabel(conversation);
+
 		// Scope checkpoint managers to the new conversation (A1.6b)
 		this.getCheckpointManager()?.setConversationId(conversation.id);
 		this.getSharedCheckpointManager?.()?.setConversationId(conversation.id);
@@ -310,6 +313,9 @@ export class ConversationLifecycleManager {
 				view?.updatePersonaLabel(null);
 				this.setActivePersona(null);
 			}
+
+			// Display-restore the active-workflow chip from the conversation header
+			view?.updateWorkflowLabel(conversation);
 
 			// Resolve model configuration via preset-first fallback chain
 			const resolution = resolveConversationModel(
@@ -434,6 +440,7 @@ export class ConversationLifecycleManager {
 		// Display-restore from session's pinned state
 		view?.updatePersonaLabel(activeSession.pinnedPersona);
 		this.setActivePersona(activeSession.pinnedPersona);
+		view?.updateWorkflowLabel(sessionConv);
 
 		// Resolve model configuration via preset-first fallback chain
 		const resolution = resolveConversationModel(

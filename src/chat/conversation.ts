@@ -556,6 +556,29 @@ export class ConversationManager {
 		}
 	}
 
+	/**
+	 * Patch the active conversation's workflow metadata in place and persist.
+	 *
+	 * Used for mid-conversation workflow changes (deactivate via the chip, or
+	 * switching to a different workflow). Mutating the in-memory conversation —
+	 * not just the persisted header — matters because follow-up turns snapshot
+	 * `getActiveConversation()` to re-hydrate workflow tool configs, so the
+	 * change must be visible without a reload. Only provided fields are touched.
+	 */
+	setWorkflowMetadata(patch: {
+		workflow_path?: string | null;
+		workflow_name?: string | null;
+		workflow_tool_configs?: import("../tool-config/types").ParsedToolConfig[] | null;
+		workflow_deactivated?: boolean;
+	}): void {
+		if (!this.activeConversation) return;
+		if (patch.workflow_path !== undefined) this.activeConversation.workflow_path = patch.workflow_path;
+		if (patch.workflow_name !== undefined) this.activeConversation.workflow_name = patch.workflow_name;
+		if (patch.workflow_tool_configs !== undefined) this.activeConversation.workflow_tool_configs = patch.workflow_tool_configs;
+		if (patch.workflow_deactivated !== undefined) this.activeConversation.workflow_deactivated = patch.workflow_deactivated;
+		void this.onConversationChanged?.(this.activeConversation);
+	}
+
 	// -----------------------------------------------------------------------
 	// Token and cost tracking
 	// -----------------------------------------------------------------------
