@@ -275,6 +275,7 @@ export class WorkflowExecutor {
 			{
 				workflow_path: workflow.file_path,
 				workflow_name: workflow.display_name,
+				workflow_tool_configs: assemblyResult.toolConfigs,
 				persona_name: activePersonaName,
 				is_background: false,
 				title: `Workflow: ${workflow.display_name}`,
@@ -542,6 +543,7 @@ export class WorkflowExecutor {
 			{
 				workflow_path: workflow.file_path,
 				workflow_name: workflow.display_name,
+				workflow_tool_configs: assemblyResult.toolConfigs,
 				persona_name: activePersonaName,
 				is_background: true,
 				title: `Workflow: ${workflow.display_name}`,

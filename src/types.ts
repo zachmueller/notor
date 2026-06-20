@@ -57,6 +57,23 @@ export interface Conversation {
 	 */
 	workflow_name?: string | null;
 	/**
+	 * Tool configs extracted from the workflow's `<notor_tool_config>` blocks,
+	 * persisted on the conversation so follow-up turns re-apply them (the
+	 * transient `WorkflowAssemblyResult` only lives for the first execution
+	 * session). Absent/null for non-workflow conversations or workflows with
+	 * no config blocks. Re-hydrated into a minimal `WorkflowAssemblyResult` by
+	 * `handleUserMessage()` when `workflow_deactivated` is not true.
+	 */
+	workflow_tool_configs?: import("./tool-config/types").ParsedToolConfig[] | null;
+	/**
+	 * Whether the user has explicitly deactivated this conversation's workflow
+	 * via the workflow chip. When true, `workflow_tool_configs` are NOT
+	 * re-applied on follow-up turns (config reverts to persona/rule/global
+	 * precedence). `workflow_path`/`workflow_name` are retained for history.
+	 * Omitted (= false) for backward compatibility.
+	 */
+	workflow_deactivated?: boolean;
+	/**
 	 * Active persona name at the time the workflow conversation was created
 	 * (after any persona switch). null for non-workflow conversations or
 	 * workflow conversations without a persona override.

@@ -395,6 +395,32 @@ describe("ConversationManager.prepareFork()", () => {
 			expect(fork!.conversation.persona_name).toBe("Helper");
 		});
 
+		it("workflow_tool_configs and workflow_deactivated are preserved from parent", () => {
+			const toolConfigs = [
+				{
+					source: "workflow" as const,
+					sourceFile: "/workflows/test.md",
+					documentPosition: 0,
+					tools: { web_search: { enabled: false } },
+				},
+			];
+			mgr.createConversation("openai", "gpt-4", "act", {
+				workflow_path: "/workflows/test.md",
+				workflow_name: "Test Workflow",
+				workflow_tool_configs: toolConfigs,
+			});
+			// Simulate the user deactivating the workflow before forking.
+			// (getActiveConversation returns a clone, so mutate it then load it back.)
+			const parent = mgr.getActiveConversation()!;
+			parent.workflow_deactivated = true;
+			mgr.loadConversation(parent, []);
+			const u1 = mgr.addMessage({ role: "user", content: "Hello" });
+
+			const fork = mgr.prepareFork(u1.id, "openai", "gpt-4", "act");
+			expect(fork!.conversation.workflow_tool_configs).toEqual(toolConfigs);
+			expect(fork!.conversation.workflow_deactivated).toBe(true);
+		});
+
 		it("is_background is cleared to false", () => {
 			mgr.createConversation("openai", "gpt-4", "act", {
 				is_background: true,

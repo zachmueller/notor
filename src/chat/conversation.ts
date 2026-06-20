@@ -96,6 +96,7 @@ export class ConversationManager {
 		workflowMetadata?: {
 			workflow_path?: string | null;
 			workflow_name?: string | null;
+			workflow_tool_configs?: import("../tool-config/types").ParsedToolConfig[] | null;
 			persona_name?: string | null;
 			is_background?: boolean;
 			title?: string;
@@ -124,6 +125,9 @@ export class ConversationManager {
 			}),
 			...(workflowMetadata?.workflow_name !== undefined && {
 				workflow_name: workflowMetadata.workflow_name,
+			}),
+			...(workflowMetadata?.workflow_tool_configs !== undefined && {
+				workflow_tool_configs: workflowMetadata.workflow_tool_configs,
 			}),
 			...(workflowMetadata?.persona_name !== undefined && {
 				persona_name: workflowMetadata.persona_name,
@@ -260,6 +264,8 @@ export class ConversationManager {
 			// Workflow metadata from parent
 			...(parent.workflow_path !== undefined && { workflow_path: parent.workflow_path }),
 			...(parent.workflow_name !== undefined && { workflow_name: parent.workflow_name }),
+			...(parent.workflow_tool_configs !== undefined && { workflow_tool_configs: parent.workflow_tool_configs }),
+			...(parent.workflow_deactivated !== undefined && { workflow_deactivated: parent.workflow_deactivated }),
 			...(parent.persona_name !== undefined && { persona_name: parent.persona_name }),
 			is_background: false,
 			...(parent.use_extended_context && { use_extended_context: parent.use_extended_context }),

@@ -9,7 +9,7 @@
  */
 
 import { type App, Notice } from "obsidian";
-import type { Conversation, ConversationMode, Message, Persona, TaskItem, ToolResult, WorkflowExecution, ExecutionChain } from "../types";
+import type { Conversation, ConversationMode, Message, Persona, TaskItem, ToolResult, WorkflowExecution, WorkflowAssemblyResult, ExecutionChain } from "../types";
 import type { SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
@@ -947,9 +947,28 @@ export class ChatOrchestrator implements ToolSessionContext {
 			? (snapshotConv.use_extended_context ?? false)
 			: this.activeUseExtendedContext;
 
+		// Re-hydrate workflow tool configs for follow-up turns. The transient
+		// WorkflowAssemblyResult only lives for the first execution session
+		// (created by executeWorkflow); follow-up messages flow through here, so
+		// without this the workflow's <notor_tool_config> overrides would decay
+		// to [] after turn one. We persist toolConfigs on the conversation header
+		// and rebuild a minimal assembly from them (only toolConfigs is read by
+		// resolveEffectiveConfig). Skipped when the user has deactivated the
+		// workflow via the chip (workflow_deactivated === true).
+		const workflowAssembly: WorkflowAssemblyResult | null =
+			(snapshotConv.workflow_tool_configs && snapshotConv.workflow_tool_configs.length > 0
+				&& snapshotConv.workflow_deactivated !== true)
+				? {
+					assembledMessage: "",
+					workflowName: snapshotConv.workflow_name ?? "",
+					attachments: [],
+					toolConfigs: snapshotConv.workflow_tool_configs,
+				}
+				: null;
+
 		// Resolve initial effective config
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
-			await this.configResolver.resolveEffectiveConfig(undefined, null, pinnedPersona);
+			await this.configResolver.resolveEffectiveConfig(undefined, workflowAssembly, pinnedPersona);
 
 		// Capture the approval callback from this orchestrator's panel.
 		// This binds approval prompts to the correct panel's view.
@@ -969,7 +988,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			modelId,
 			useExtendedContext,
 			thinkingLevel: this.activeThinkingLevel,
-			workflowAssembly: null,
+			workflowAssembly,
 			approvalCallback,
 			interactionCallback,
 			initialConfig,
@@ -1029,11 +1048,13 @@ export class ChatOrchestrator implements ToolSessionContext {
 				}
 			}
 			// Workflow hook deactivation is intentionally absent here because
-			// handleUserMessage() always creates sessions with workflowAssembly: null
-			// (verified: orchestrator.ts session creation). No code path through
-			// handleUserMessage() sets a non-null workflowAssembly — that field is
-			// only populated by executeWorkflow(). See executeWorkflow()'s finally
-			// block which handles the workflow case.
+			// handleUserMessage() never *activates* hook overrides — only
+			// executeWorkflow() does (see its finally block). The session's
+			// workflowAssembly may now be non-null (re-hydrated from the
+			// conversation header to keep tool configs alive across turns), but
+			// that re-hydrated assembly only carries toolConfigs for config
+			// resolution; it is never tied to an active hook override here, so
+			// there is nothing to deactivate.
 			session.rejectAllPendingApprovals();
 			this.sessionManager.unregisterSession(session.conversationId);
 			this.getViewForSession(session)?.setRespondingState(false);
