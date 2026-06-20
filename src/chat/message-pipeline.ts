@@ -185,6 +185,18 @@ export async function processStream(
 				break;
 			}
 
+			case "tool_call_started": {
+				// A tool call opened mid-stream — show a name-only placeholder
+				// card immediately (params are NOT streamed; they arrive on the
+				// finalized `tool_call`). This also ends the thinking phase, just
+				// like the finalized tool_call below. `stopThinking()` is latched,
+				// so calling it again on `tool_call` is a safe no-op.
+				stopThinking();
+				const view = resolveView();
+				view?.renderStreamingToolCall(event.id, event.name);
+				break;
+			}
+
 			case "tool_call":
 				// First tool call ends the thinking phase.
 				stopThinking();

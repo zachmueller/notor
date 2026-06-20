@@ -78,3 +78,74 @@ describe("parseStreamEvents — thinking lifecycle", () => {
 		expect(events.some((e) => e.type === "thinking_started")).toBe(false);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// streaming tool calls
+// ---------------------------------------------------------------------------
+
+describe("parseStreamEvents — streaming tool calls", () => {
+	it("emits tool_call_started (name only) before the finalized tool_call", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "t1", tool_name: "read_note" },
+			{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"a.md"}' },
+			{ type: "tool_call_end", id: "t1" },
+			{ type: "message_end", input_tokens: 1, output_tokens: 2 },
+		]);
+
+		const startedIdx = events.findIndex((e) => e.type === "tool_call_started");
+		const callIdx = events.findIndex((e) => e.type === "tool_call");
+
+		expect(startedIdx).toBeGreaterThanOrEqual(0);
+		expect(callIdx).toBeGreaterThan(startedIdx);
+
+		const started = events[startedIdx] as Extract<ParsedStreamEvent, { type: "tool_call_started" }>;
+		expect(started).toEqual({ type: "tool_call_started", id: "t1", name: "read_note" });
+		// The start event carries no parameters.
+		expect("parameters" in started).toBe(false);
+
+		const call = events[callIdx] as Extract<ParsedStreamEvent, { type: "tool_call" }>;
+		expect(call).toEqual({
+			type: "tool_call",
+			id: "t1",
+			name: "read_note",
+			parameters: { path: "a.md" },
+		});
+	});
+
+	it("emits a paired tool_call_started + tool_call for each of N concurrent calls", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "t1", tool_name: "read_note" },
+			{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"a.md"}' },
+			{ type: "tool_call_end", id: "t1" },
+			{ type: "tool_call_start", id: "t2", tool_name: "list_notes" },
+			{ type: "tool_call_delta", id: "t2", partial_json: "{}" },
+			{ type: "tool_call_end", id: "t2" },
+			{ type: "message_end", input_tokens: 1, output_tokens: 2 },
+		]);
+
+		const started = events.filter(
+			(e): e is Extract<ParsedStreamEvent, { type: "tool_call_started" }> => e.type === "tool_call_started",
+		);
+		const calls = events.filter(
+			(e): e is Extract<ParsedStreamEvent, { type: "tool_call" }> => e.type === "tool_call",
+		);
+
+		expect(started.map((s) => s.id)).toEqual(["t1", "t2"]);
+		expect(calls.map((c) => c.id)).toEqual(["t1", "t2"]);
+		expect(calls.map((c) => c.name)).toEqual(["read_note", "list_notes"]);
+	});
+
+	it("emits tool_call_started then error (no tool_call) on malformed JSON", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "t1", tool_name: "read_note" },
+			{ type: "tool_call_delta", id: "t1", partial_json: "{not valid json" },
+			{ type: "tool_call_end", id: "t1" },
+		]);
+
+		const started = events.filter((e) => e.type === "tool_call_started");
+		expect(started).toHaveLength(1);
+
+		expect(events.some((e) => e.type === "tool_call")).toBe(false);
+		expect(events.at(-1)?.type).toBe("error");
+	});
+});

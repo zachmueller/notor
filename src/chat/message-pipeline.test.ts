@@ -318,6 +318,7 @@ type FakeView = {
 	cancelThinkingIndicator: ReturnType<typeof vi.fn>;
 	appendThinkingChunk: ReturnType<typeof vi.fn>;
 	appendStreamChunk: ReturnType<typeof vi.fn>;
+	renderStreamingToolCall: ReturnType<typeof vi.fn>;
 };
 
 function makeFakeView(): { view: FakeView; contentEl: object } {
@@ -329,6 +330,7 @@ function makeFakeView(): { view: FakeView; contentEl: object } {
 		cancelThinkingIndicator: vi.fn(),
 		appendThinkingChunk: vi.fn(),
 		appendStreamChunk: vi.fn(),
+		renderStreamingToolCall: vi.fn(),
 	};
 	return { view, contentEl };
 }
@@ -385,6 +387,8 @@ describe("processStream — thinking indicator", () => {
 		);
 
 		expect(view.stopThinkingIndicator).toHaveBeenCalledTimes(1);
+		// The placeholder card is rendered the moment the call opens (name only).
+		expect(view.renderStreamingToolCall).toHaveBeenCalledWith("t1", "read_note");
 		expect(result.type).toBe("tool_calls");
 		if (result.type === "tool_calls") {
 			expect(result.thinkingDurationMs).toBe(1_500);

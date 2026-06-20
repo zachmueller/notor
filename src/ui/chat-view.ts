@@ -1438,6 +1438,18 @@ export class NotorChatView extends ItemView {
 		return this.messageRenderer.renderToolCall(message);
 	}
 
+	renderStreamingToolCall(toolCallId: string, toolName: string): HTMLElement | null {
+		return this.messageRenderer.renderStreamingToolCall(toolCallId, toolName);
+	}
+
+	finalizeStreamingToolCall(toolCallId: string, message: Message): HTMLElement | null {
+		return this.messageRenderer.finalizeStreamingToolCall(toolCallId, message);
+	}
+
+	clearStreamingToolCalls(): void {
+		this.messageRenderer.clearStreamingToolCalls();
+	}
+
 	renderToolResult(message: Message): void {
 		this.messageRenderer.renderToolResult(message);
 	}

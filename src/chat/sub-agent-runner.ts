@@ -494,6 +494,10 @@ export class SubAgentRunner {
 					text = event.text;
 					break;
 
+				// tool_call_started / thinking_* are intentionally ignored:
+				// sub-agents render no tool-call cards in the parent chat, so the
+				// in-progress placeholder event is a no-op here.
+
 				case "tool_call":
 					toolCalls.push({
 						toolCallId: event.id,

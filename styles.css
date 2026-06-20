@@ -951,6 +951,14 @@
 	color: var(--text-muted);
 }
 
+/* In-progress: the tool call is still streaming from the model. Accent color +
+   fade distinguishes it from the static, muted `pending` badge. */
+.notor-tool-status-streaming {
+	background: var(--background-modifier-hover);
+	color: var(--text-accent);
+	animation: notor-progress-fade 1.4s ease-in-out infinite alternate;
+}
+
 .notor-tool-status-approved {
 	background: var(--color-blue);
 	color: var(--text-on-accent);

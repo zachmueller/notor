@@ -64,6 +64,10 @@ export interface MessageRendererDeps {
 export class MessageRenderer {
 	private lastToolCallEl: HTMLElement | null = null;
 	private toolCallElMap = new Map<string, HTMLElement>();
+	// In-progress tool-call placeholder cards, keyed by provider TOOL-CALL id
+	// (not message id — the Message doesn't exist until the stream completes).
+	// Bridges the mid-stream placeholder to the post-stream finalize step.
+	private streamingToolCallElMap = new Map<string, HTMLElement>();
 	private renderedMessages = new Map<string, Message>();
 	private streamRenderTimer: ReturnType<typeof setTimeout> | null = null;
 	private pendingStreamRender: { contentEl: HTMLElement; raw: string } | null = null;
@@ -351,6 +355,102 @@ export class MessageRenderer {
 		return toolEl;
 	}
 
+	/**
+	 * Render an in-progress placeholder card the moment the model begins
+	 * emitting a tool call. Shows the tool NAME only with a distinct
+	 * `streaming` status badge; the parameters panel is omitted (params are
+	 * not streamed — they're filled in by {@link finalizeStreamingToolCall}).
+	 *
+	 * Keyed by the provider tool-call id so multiple concurrent calls each get
+	 * their own card. Idempotent — a duplicate start for the same id returns
+	 * the existing element. No-ops (returns null) when the id is empty, in
+	 * which case the post-stream `renderToolCall` builds the card as before.
+	 *
+	 * NOTE: the header structure here is kept byte-for-byte aligned with
+	 * `renderToolCall` so the finalized card is indistinguishable from a
+	 * freshly-rendered one.
+	 */
+	renderStreamingToolCall(toolCallId: string, toolName: string): HTMLElement | null {
+		if (!toolCallId) return null;
+		const existing = this.streamingToolCallElMap.get(toolCallId);
+		if (existing) return existing;
+
+		const messageListEl = this.deps.getMessageListEl();
+		const toolEl = messageListEl.createDiv({ cls: "notor-tool-call" });
+
+		const headerEl = toolEl.createDiv({ cls: "notor-tool-call-header" });
+		const nameEl = headerEl.createSpan({ cls: "notor-tool-call-name" });
+		nameEl.textContent = toolName;
+
+		const statusEl = headerEl.createSpan({
+			cls: "notor-tool-call-status notor-tool-status-streaming",
+		});
+		// eslint-disable-next-line obsidianmd/ui/sentence-case -- status-badge text is intentionally lowercase, matching the other ToolCallStatus values ("pending", "success", …)
+		statusEl.textContent = "streaming";
+
+		// No parameters panel yet — appended by finalizeStreamingToolCall once
+		// the full tool-call object exists.
+
+		this.lastToolCallEl = toolEl;
+		this.streamingToolCallElMap.set(toolCallId, toolEl);
+		this.deps.scrollToBottom();
+		return toolEl;
+	}
+
+	/**
+	 * Finalize a streaming placeholder in place: append the parameters panel,
+	 * flip the badge from `streaming` to the message's real status, and migrate
+	 * the map entry from {@link streamingToolCallElMap} (keyed by tool-call id)
+	 * to {@link toolCallElMap} (keyed by message id, matching `renderToolCall`).
+	 *
+	 * Returns the SAME element so the caller can wire up status/fork/progress
+	 * against one stable node — no second card, no flicker. Returns null when no
+	 * placeholder exists for the id, signalling the caller to fall back to
+	 * `renderToolCall`.
+	 */
+	finalizeStreamingToolCall(toolCallId: string, message: Message): HTMLElement | null {
+		const toolEl = toolCallId ? this.streamingToolCallElMap.get(toolCallId) : undefined;
+		if (!toolEl) return null;
+		const toolCall = message.tool_call;
+		if (!toolCall) return null;
+
+		// Append the parameters panel — identical structure to renderToolCall.
+		const { body: paramsEl } = renderCollapsibleCard(toolEl, { headerText: "parameters" });
+		paramsEl.addClass("notor-tool-call-params");
+		const pre = paramsEl.createEl("pre");
+		pre.createEl("code", { text: JSON.stringify(toolCall.parameters, null, 2) });
+
+		// Flip the badge from "streaming" to the real status (e.g. "pending").
+		const statusEl = toolEl.querySelector(".notor-tool-call-status");
+		if (statusEl) {
+			statusEl.className = `notor-tool-call-status notor-tool-status-${toolCall.status}`;
+			statusEl.textContent = toolCall.status;
+		}
+
+		// Migrate the map entry: streaming(tool-call id) -> toolCallElMap(message id).
+		this.streamingToolCallElMap.delete(toolCallId);
+		if (message.id) {
+			this.toolCallElMap.set(message.id, toolEl);
+		}
+		this.deps.scrollToBottom();
+		return toolEl;
+	}
+
+	/**
+	 * Tear down any dangling streaming placeholders (cancel / error /
+	 * JSON-parse-failure / orphan sweep). Removes the DOM nodes and empties the
+	 * map; finalized cards in {@link toolCallElMap} are left untouched.
+	 */
+	clearStreamingToolCalls(): void {
+		for (const el of this.streamingToolCallElMap.values()) {
+			el.remove();
+		}
+		this.streamingToolCallElMap.clear();
+		if (this.lastToolCallEl && !this.lastToolCallEl.isConnected) {
+			this.lastToolCallEl = null;
+		}
+	}
+
 	renderToolResult(message: Message): void {
 		const messageListEl = this.deps.getMessageListEl();
 		const toolResult = message.tool_result;
@@ -626,6 +726,7 @@ export class MessageRenderer {
 		messageListEl.empty();
 		this.deps.getTokenFooterEl().addClass("notor-hidden");
 		this.toolCallElMap.clear();
+		this.streamingToolCallElMap.clear();
 		this.renderedMessages.clear();
 		this.lastToolCallEl = null;
 	}

@@ -1261,7 +1261,15 @@ export class ChatOrchestrator implements ToolSessionContext {
 							},
 						});
 
-						const toolCallEl = this.getViewForSession(session)?.renderToolCall(toolCallMessage);
+						// Adopt the mid-stream streaming placeholder when one exists
+						// (mutate it in place — no second card), otherwise build a
+						// fresh card. The fallback covers no-placeholder cases: empty
+						// provider id, a non-streaming provider, or the view being
+						// absent when streaming started.
+						const view = this.getViewForSession(session);
+						const toolCallEl =
+							view?.finalizeStreamingToolCall(call.toolCallId, toolCallMessage)
+							?? view?.renderToolCall(toolCallMessage);
 
 						// HOOK-005: Fire on_tool_call hooks
 						const currentConv = convManager.getActiveConversation();
@@ -1275,6 +1283,12 @@ export class ChatOrchestrator implements ToolSessionContext {
 							el: toolCallEl,
 						});
 					}
+
+					// Sweep any streaming placeholders that never matched a finalized
+					// call (defensive — e.g. a start with no usable end that somehow
+					// still returned tool_calls). Adopted placeholders were already
+					// migrated out of the streaming map above.
+					this.getViewForSession(session)?.clearStreamingToolCalls();
 
 					// --- Step 2: Dispatch tools via batch orchestration ---
 					// Partition into concurrent/serial batches and execute
@@ -1484,6 +1498,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 					// Continue the loop — send tool results back to LLM
 					continueLoop = true;
 				} else if (result.type === "cancelled") {
+					// Tear down any in-progress streaming tool-call placeholders —
+					// they live outside the normal message lifecycle and are never
+					// adopted when the turn is cancelled mid-stream.
+					this.getViewForSession(session)?.clearStreamingToolCalls();
+
 					// User cancelled — always render an assistant message so the
 					// .notor-message-assistant element exists in the DOM (the E2E
 					// test asserts this even when the abort fires before any text
@@ -1511,6 +1530,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 						}
 					}
 				} else if (result.type === "error") {
+					// Tear down any streaming placeholder — covers JSON-parse
+					// failures too (parseStreamEvents emits `error` after the
+					// tool_call_started, so the placeholder is never adopted).
+					this.getViewForSession(session)?.clearStreamingToolCalls();
+
 					const errStr = typeof result.error === "string"
 						? result.error
 						: (result.error as unknown) instanceof Error

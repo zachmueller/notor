@@ -22,6 +22,10 @@ export type ParsedStreamEvent =
 	| { type: "text_delta"; text: string; delta: string }
 	| { type: "thinking_started" }
 	| { type: "thinking_delta"; text: string; delta: string }
+	// Emitted the moment a tool call opens in the stream — carries the tool
+	// name/id but no parameters yet (those arrive on `tool_call`). Lets the UI
+	// render an in-progress placeholder card during the parse window.
+	| { type: "tool_call_started"; id: string; name: string }
 	| { type: "tool_call"; id: string; name: string; parameters: Record<string, unknown> }
 	| { type: "message_end"; inputTokens: number; outputTokens: number }
 	| { type: "error"; message: string }
@@ -35,7 +39,8 @@ export type ParsedStreamEvent =
  * Async generator that transforms a raw provider stream into parsed events.
  *
  * - `text_delta` events carry both the accumulated text and the new delta.
- * - `tool_call` events are emitted only once the full JSON has been received
+ * - `tool_call_started` is emitted as soon as a tool call opens (name/id only,
+ *   no parameters); `tool_call` follows once the full JSON has been received
  *   and parsed (on `tool_call_end`).
  * - `cancelled` is emitted at most once, when the abort signal fires.
  * - `error` is emitted for provider errors or JSON parse failures.
@@ -89,6 +94,7 @@ export async function* parseStreamEvents(
 					currentToolCallId = chunk.id;
 					currentToolName = chunk.tool_name;
 					toolCallJson = "";
+					yield { type: "tool_call_started", id: chunk.id, name: chunk.tool_name };
 					break;
 
 				case "tool_call_delta":
