@@ -620,7 +620,16 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 				? view.getToolCallEl(messageId) ?? view.getLastToolCallEl()
 				: view.getLastToolCallEl();
 			if (toolCallEl) {
-				void view.renderDiffApprovalPrompt(toolCallEl, toolCall.tool_name, toolCall.parameters ?? {}, true);
+				void view.renderDiffApprovalPrompt(toolCallEl, toolCall.tool_name, toolCall.parameters ?? {}, true)
+					.catch((err) => {
+						// Best-effort diff card for auto-approved calls; control flow
+						// already returns "approved", so just swallow + log the
+						// unhandled rejection rather than letting it float.
+						log.error("auto-approved renderDiffApprovalPrompt failed", {
+							toolName: toolCall.tool_name,
+							error: String(err),
+						});
+					});
 			}
 			return "approved";
 		}
@@ -666,7 +675,18 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 				: view.getLastToolCallEl();
 			if (toolCallEl) {
 				view.renderDiffApprovalPrompt(toolCallEl, toolCall.tool_name, toolCall.parameters ?? {}, false)
-					.then((result) => resolve(result));
+					.then((result) => resolve(result))
+					.catch((err) => {
+						// A thrown/rejected render must never leave the approval
+						// promise unsettled — that hangs the whole conversation (the
+						// dispatcher awaits this decision). Fail closed: reject so the
+						// model gets a clean, recoverable result.
+						log.error("renderDiffApprovalPrompt failed; rejecting tool call", {
+							toolName: toolCall.tool_name,
+							error: String(err),
+						});
+						resolve("rejected");
+					});
 			}
 
 			if (abortSignal) {

@@ -778,3 +778,30 @@ describe("ConversationManager.setWorkflowMetadata()", () => {
 		expect(mgr.getActiveConversation()).toBeNull();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// addMessage — tool_call cloning
+// ---------------------------------------------------------------------------
+
+describe("ConversationManager.addMessage() — tool_call cloning", () => {
+	it("clones tool_call so mutating the caller's object does not corrupt the message", () => {
+		const mgr = createManager();
+		mgr.createConversation("openai", "gpt-4", "act");
+
+		// The dispatcher reuses this same object for tool.execute, and the approval
+		// UI mutates parameters.changes on partial-accept. The persisted message
+		// must not share that reference.
+		const params = { path: "n.md", changes: [{ search: "a", replace: "b" }, { search: "c", replace: "d" }] };
+		const toolCall = { id: "tc1", tool_name: "replace_in_note", parameters: params, status: "pending" as const };
+
+		const msg = mgr.addMessage({ role: "tool_call", content: "", tool_call: toolCall });
+
+		// Simulate the partial-accept mutation on the caller's object.
+		params.changes = [params.changes[0]!];
+
+		// The persisted message keeps the full original set.
+		const persisted = msg.tool_call!.parameters as { changes: unknown[] };
+		expect(persisted.changes).toHaveLength(2);
+		expect(msg.tool_call!.parameters).not.toBe(params);
+	});
+});

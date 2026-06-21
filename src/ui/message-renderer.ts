@@ -19,6 +19,7 @@ import {
 	renderReplaceInNoteDiffPreview,
 	type DiffRenderContext,
 } from "./diff-view";
+import type { ChangeBlock } from "./diff-engine";
 import {
 	renderInteractionPrompt,
 	type InteractionRequest,
@@ -45,6 +46,54 @@ function extractAttachmentsBlock(content: string): { attachmentsXml: string | nu
 	const attachmentsXml = match[0];
 	const remainder = (content.slice(0, match.index) + content.slice(match.index + match[0].length)).trim();
 	return { attachmentsXml, remainder };
+}
+
+/**
+ * Coerce the `changes` parameter of a replace_in_note tool call into a clean
+ * ChangeBlock[]. Models sometimes double-encode it as a JSON string or emit a
+ * single {search,replace} object instead of a one-element array. Returns null
+ * when the value can't be normalized into a non-empty array of valid blocks —
+ * the caller then falls back to the generic approve/reject prompt.
+ */
+export function normalizeChangeBlocks(value: unknown): ChangeBlock[] | null {
+	let candidate: unknown = value;
+
+	if (typeof candidate === "string") {
+		// Double-encoded JSON — parse once.
+		try {
+			candidate = JSON.parse(candidate);
+		} catch {
+			return null;
+		}
+	}
+
+	if (
+		candidate !== null &&
+		typeof candidate === "object" &&
+		!Array.isArray(candidate) &&
+		"search" in candidate &&
+		"replace" in candidate
+	) {
+		// Single {search,replace} object — wrap in a one-element array.
+		candidate = [candidate];
+	}
+
+	if (!Array.isArray(candidate) || candidate.length === 0) return null;
+
+	const blocks: ChangeBlock[] = [];
+	for (const block of candidate) {
+		if (
+			block === null ||
+			typeof block !== "object" ||
+			typeof (block as { search?: unknown }).search !== "string" ||
+			typeof (block as { replace?: unknown }).replace !== "string"
+		) {
+			return null;
+		}
+		// Build fresh objects so the result is detached from parameters["changes"].
+		blocks.push({ search: (block as ChangeBlock).search, replace: (block as ChangeBlock).replace });
+	}
+	return blocks;
 }
 
 export interface MessageRendererDeps {
@@ -645,7 +694,16 @@ export class MessageRenderer {
 		}
 
 		if (toolName === "replace_in_note") {
-			const changeBlocks = (parameters["changes"] as Array<{ search: string; replace: string }> | undefined) ?? [];
+			const changeBlocks = normalizeChangeBlocks(parameters["changes"]);
+			if (!changeBlocks) {
+				// Not a usable array of {search,replace} blocks (e.g. double-encoded
+				// string, single object that failed validation, number, missing).
+				// Fall back to the generic approve/reject prompt so the user can still
+				// act; the tool's own Array.isArray guard
+				// (builtin-tool-scaffolds/replace-in-note.ts:31) then returns a clean
+				// error to the model on execution.
+				return this.renderApprovalPrompt(toolCallEl, autoApproved);
+			}
 
 			let noteContent = "";
 			try {
@@ -677,6 +735,11 @@ export class MessageRenderer {
 			if (!decision.accepted) return "rejected";
 
 			if (decision.acceptedBlockIndexes) {
+				// Narrow the parameters the executor will run to just the accepted
+				// blocks. The dispatcher reads this same object for tool.execute, so
+				// this mutation is load-bearing. It no longer corrupts persisted
+				// history: ConversationManager.addMessage stores a clone on the
+				// message, so this object is the dispatch-side copy only.
 				parameters["changes"] = changeBlocks.filter((_, i) =>
 					decision.acceptedBlockIndexes!.has(i)
 				);

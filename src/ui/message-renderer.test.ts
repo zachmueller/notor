@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import { MessageRenderer, type MessageRendererDeps } from "./message-renderer";
+import { MessageRenderer, normalizeChangeBlocks, type MessageRendererDeps } from "./message-renderer";
 import type { Message } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -73,6 +73,80 @@ function toolCallMessage(id: string, name: string, params: Record<string, unknow
 		tool_call: { id, tool_name: name, parameters: params, status: "pending" },
 	} as unknown as Message;
 }
+
+// ---------------------------------------------------------------------------
+// normalizeChangeBlocks
+// ---------------------------------------------------------------------------
+
+describe("normalizeChangeBlocks", () => {
+	it("passes a valid array through (as fresh, detached objects)", () => {
+		const input = [{ search: "a", replace: "b" }, { search: "c", replace: "" }];
+		const result = normalizeChangeBlocks(input);
+		expect(result).toEqual(input);
+		// Fresh objects — not the same references as the input.
+		expect(result![0]).not.toBe(input[0]);
+	});
+
+	it("parses a double-encoded JSON string of an array", () => {
+		const result = normalizeChangeBlocks(JSON.stringify([{ search: "a", replace: "b" }]));
+		expect(result).toEqual([{ search: "a", replace: "b" }]);
+	});
+
+	it("wraps a single {search,replace} object into a one-element array", () => {
+		const result = normalizeChangeBlocks({ search: "a", replace: "b" });
+		expect(result).toEqual([{ search: "a", replace: "b" }]);
+	});
+
+	it("parses then wraps a double-encoded single object", () => {
+		const result = normalizeChangeBlocks(JSON.stringify({ search: "a", replace: "b" }));
+		expect(result).toEqual([{ search: "a", replace: "b" }]);
+	});
+
+	it("returns null for a non-JSON string", () => {
+		expect(normalizeChangeBlocks("not json")).toBeNull();
+	});
+
+	it("returns null for a number", () => {
+		expect(normalizeChangeBlocks(42)).toBeNull();
+	});
+
+	it("returns null for undefined / null", () => {
+		expect(normalizeChangeBlocks(undefined)).toBeNull();
+		expect(normalizeChangeBlocks(null)).toBeNull();
+	});
+
+	it("returns null for an empty array", () => {
+		expect(normalizeChangeBlocks([])).toBeNull();
+	});
+
+	it("returns null when any block is malformed", () => {
+		expect(normalizeChangeBlocks([{ search: 1, replace: "b" }])).toBeNull();
+		expect(normalizeChangeBlocks([{ search: "a" }])).toBeNull();
+		expect(normalizeChangeBlocks([{ search: "a", replace: "b" }, null])).toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// renderDiffApprovalPrompt — malformed `changes` must not throw
+// ---------------------------------------------------------------------------
+
+describe("MessageRenderer — renderDiffApprovalPrompt malformed changes", () => {
+	for (const [label, changes] of [
+		["a number", 42],
+		["a non-JSON string", "oops"],
+		["missing", undefined],
+		["an empty array", []],
+		["a malformed block", [{ search: 1 }]],
+	] as const) {
+		it(`falls back to the generic prompt (no throw) when changes is ${label}`, async () => {
+			const toolCallEl = listEl.createDiv();
+			// autoApproved: the generic fallback prompt auto-resolves "approved".
+			await expect(
+				renderer.renderDiffApprovalPrompt(toolCallEl, "replace_in_note", { path: "n.md", changes }, true),
+			).resolves.toBe("approved");
+		});
+	}
+});
 
 // ---------------------------------------------------------------------------
 // renderStreamingToolCall

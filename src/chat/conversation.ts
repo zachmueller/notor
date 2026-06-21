@@ -372,7 +372,13 @@ export class ConversationManager {
 			cost_estimate: params.cost_estimate ?? null,
 			thinking: params.thinking ?? null,
 			thinking_duration_ms: params.thinking_duration_ms ?? null,
-			tool_call: params.tool_call ?? null,
+			// Clone tool_call so the persisted message is decoupled from the
+			// caller's object. The dispatcher passes the same `parameters` object to
+			// both the approval UI and tool.execute, and the approval UI mutates it
+			// for partial-accept (see message-renderer.ts renderDiffApprovalPrompt);
+			// without this clone that mutation would corrupt the saved parameters
+			// used for fork/replay/compaction.
+			tool_call: params.tool_call ? (JSON.parse(JSON.stringify(params.tool_call)) as ToolCall) : null,
 			tool_result: params.tool_result ?? null,
 			truncated: false,
 			auto_context: params.auto_context ?? null,
