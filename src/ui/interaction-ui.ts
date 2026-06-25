@@ -158,6 +158,12 @@ const askRenderer: InteractionRenderer = {
 			const options: HTMLButtonElement[] = [];
 			let input: HTMLInputElement | null = null;
 
+			// Reflects the free-text input's answer state as CSS classes. Reassigned to
+			// the real implementation once the input element exists (only when
+			// `allowFreeText`); the no-op default lets option-click handlers — which are
+			// constructed before the input — call it harmlessly when there is no input.
+			let refreshInputState = () => {};
+
 			const clearSelected = () => {
 				for (const o of options) o.removeClass("notor-interaction-option--selected");
 			};
@@ -194,12 +200,15 @@ const askRenderer: InteractionRenderer = {
 							refreshSubmit();
 						});
 					} else {
-						// Single-select: clicking selects exactly one and clears free text.
+						// Single-select: clicking selects exactly one. Any typed free text is
+						// retained (not wiped) but greyed out via `refreshInputState`, so the
+						// chosen answer — the option, held in `values[i]` — reads clearly while
+						// the user's earlier typing is preserved.
 						opt.addEventListener("click", () => {
 							values[i] = suggestion;
 							clearSelected();
 							opt.addClass("notor-interaction-option--selected");
-							if (input) input.value = "";
+							refreshInputState();
 							refreshSubmit();
 						});
 					}
@@ -219,6 +228,31 @@ const askRenderer: InteractionRenderer = {
 				input.placeholder = "Type your answer…";
 				if (!firstInput) firstInput = input;
 
+				// Highlight the input to match its answer state:
+				//  • active   — non-empty text that IS the chosen answer (accent-tinted).
+				//  • inactive  — non-empty text retained but NOT chosen, because an option
+				//                is selected (greyed). Single-select only.
+				//  • neutral   — empty.
+				// Decision uses the trimmed value but never mutates `input.value`.
+				refreshInputState = () => {
+					if (!input) return;
+					const hasText = input.value.trim().length > 0;
+					if (!hasText) {
+						input.removeClass("notor-interaction-input--active");
+						input.removeClass("notor-interaction-input--inactive");
+						return;
+					}
+					// Multi-select text is always an additional active selection, so it is
+					// never "inactive". Single-select text is inactive when an option owns
+					// the answer instead.
+					const inactive =
+						!multiSelect &&
+						options.some((o) => o.classList.contains("notor-interaction-option--selected"));
+					input.toggleClass("notor-interaction-input--inactive", inactive);
+					input.toggleClass("notor-interaction-input--active", !inactive);
+				};
+				refreshInputState();
+
 				input.addEventListener("input", () => {
 					if (multiSelect) {
 						recomputeMulti();
@@ -227,6 +261,7 @@ const askRenderer: InteractionRenderer = {
 						values[i] = v;
 						if (v.length > 0) clearSelected();
 					}
+					refreshInputState();
 					refreshSubmit();
 				});
 				input.addEventListener("keydown", (e: KeyboardEvent) => {

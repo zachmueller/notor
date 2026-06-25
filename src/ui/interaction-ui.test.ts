@@ -31,6 +31,9 @@ beforeAll(() => {
 	proto.removeClass = function (this: HTMLElement, cls: string) {
 		this.classList.remove(cls);
 	};
+	proto.toggleClass = function (this: HTMLElement, cls: string, on: boolean) {
+		this.classList.toggle(cls, on);
+	};
 });
 
 function makeCard(): HTMLElement {
@@ -191,6 +194,107 @@ describe("renderInteractionPrompt — ask (grouped, explicit submit)", () => {
 		const submit = card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!;
 		submit.click();
 		await expect(promise).resolves.toEqual({ id: "q7", values: ["typed instead"] });
+	});
+
+	it("highlights the free-text input as active while it holds the chosen answer", async () => {
+		const card = makeCard();
+		renderInteractionPrompt(card, {
+			type: "ask",
+			id: "qa",
+			questions: [{ question: "One?", suggestions: ["Alpha", "Beta"] }],
+		});
+
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+		input.value = "hi";
+		input.dispatchEvent(new Event("input"));
+		expect(input.classList.contains("notor-interaction-input--active")).toBe(true);
+		expect(input.classList.contains("notor-interaction-input--inactive")).toBe(false);
+	});
+
+	it("retains typed text but greys it out (inactive) when an option is selected", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "qb2",
+			questions: [{ question: "One?", suggestions: ["Alpha", "Beta"] }],
+		});
+
+		const options = card.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+
+		// Type, then select an option: the text is retained (not wiped) and greyed.
+		input.value = "typed";
+		input.dispatchEvent(new Event("input"));
+		options[0]!.click();
+		expect(input.value).toBe("typed"); // not erased
+		expect(input.classList.contains("notor-interaction-input--inactive")).toBe(true);
+		expect(input.classList.contains("notor-interaction-input--active")).toBe(false);
+		expect(options[0]!.classList.contains("notor-interaction-option--selected")).toBe(true);
+
+		// Submitting sends the option, not the greyed text.
+		card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!.click();
+		await expect(promise).resolves.toEqual({ id: "qb2", values: ["Alpha"] });
+	});
+
+	it("re-activates the input and clears the option when typing resumes", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "qc",
+			questions: [{ question: "One?", suggestions: ["Alpha", "Beta"] }],
+		});
+
+		const options = card.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+
+		input.value = "typed";
+		input.dispatchEvent(new Event("input"));
+		options[0]!.click(); // greys the input
+		input.value = "typed more";
+		input.dispatchEvent(new Event("input")); // re-activates
+
+		expect(options[0]!.classList.contains("notor-interaction-option--selected")).toBe(false);
+		expect(input.classList.contains("notor-interaction-input--active")).toBe(true);
+		expect(input.classList.contains("notor-interaction-input--inactive")).toBe(false);
+
+		card.querySelector<HTMLButtonElement>(".notor-interaction-submit")!.click();
+		await expect(promise).resolves.toEqual({ id: "qc", values: ["typed more"] });
+	});
+
+	it("Enter submits the selected option, not the retained greyed text", async () => {
+		const card = makeCard();
+		const promise = renderInteractionPrompt(card, {
+			type: "ask",
+			id: "qd",
+			questions: [{ question: "One?", suggestions: ["Alpha", "Beta"] }],
+		});
+
+		const options = card.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+		input.value = "typed";
+		input.dispatchEvent(new Event("input"));
+		options[1]!.click(); // Beta selected; "typed" retained but inactive
+		input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+
+		await expect(promise).resolves.toEqual({ id: "qd", values: ["Beta"] });
+	});
+
+	it("clears both input-state classes when the field is emptied", async () => {
+		const card = makeCard();
+		renderInteractionPrompt(card, {
+			type: "ask",
+			id: "qe",
+			questions: [{ question: "One?", suggestions: ["Alpha"] }],
+		});
+
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+		input.value = "typed";
+		input.dispatchEvent(new Event("input"));
+		expect(input.classList.contains("notor-interaction-input--active")).toBe(true);
+		input.value = "";
+		input.dispatchEvent(new Event("input"));
+		expect(input.classList.contains("notor-interaction-input--active")).toBe(false);
+		expect(input.classList.contains("notor-interaction-input--inactive")).toBe(false);
 	});
 
 	it("hides the free-text input when allowFreeText is false and gates Submit on selection", async () => {
@@ -437,5 +541,33 @@ describe("renderInteractionPrompt — ask (multi-select)", () => {
 			id: "mix",
 			values: ["s0", ["m1a", "m1b"], "f2"],
 		});
+	});
+
+	it("marks multi-select free text active but never inactive", async () => {
+		const card = makeCard();
+		renderInteractionPrompt(card, {
+			type: "ask",
+			id: "m8",
+			questions: [{ question: "Pick + note?", suggestions: ["A", "B"], multiSelect: true }],
+		});
+
+		const options = card.querySelectorAll<HTMLButtonElement>(".notor-interaction-option");
+		const input = card.querySelector<HTMLInputElement>(".notor-interaction-input")!;
+
+		input.value = "extra";
+		input.dispatchEvent(new Event("input"));
+		expect(input.classList.contains("notor-interaction-input--active")).toBe(true);
+		expect(input.classList.contains("notor-interaction-input--inactive")).toBe(false);
+
+		// Checking an option leaves the text an active selection — still --active.
+		options[0]!.click();
+		expect(input.classList.contains("notor-interaction-input--active")).toBe(true);
+		expect(input.classList.contains("notor-interaction-input--inactive")).toBe(false);
+
+		// Clearing the field removes the active highlight.
+		input.value = "";
+		input.dispatchEvent(new Event("input"));
+		expect(input.classList.contains("notor-interaction-input--active")).toBe(false);
+		expect(input.classList.contains("notor-interaction-input--inactive")).toBe(false);
 	});
 });
