@@ -6,7 +6,7 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 
 | Tool | What it does | Mode |
 |---|---|---|
-| `read_note` | Read a note's content (optionally including frontmatter) | Plan & Act |
+| `read_note` | Read a note's content (optionally including frontmatter and backlinks) | Plan & Act |
 | `write_note` | Create a new note or overwrite an existing one | Act only |
 | `replace_in_note` | Surgical SEARCH/REPLACE edits within a note | Act only |
 | `move_note` | Move and/or rename a note within the vault (auto-updates all internal links) | Act only |
@@ -269,6 +269,31 @@ The `move_note` tool moves and/or renames a note within the vault. Obsidian auto
 - A checkpoint is created before the operation for rollback.
 - Rejects the operation if a note already exists at the destination path.
 - Write tool — available in Act mode only; requires explicit approval unless auto-approved.
+
+## Reading notes
+
+### `read_note`
+
+Reads a note's Markdown content. Optionally strips frontmatter and/or appends a **Backlinks** section so the AI gains link-graph awareness without a separate `get_backlinks` call.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `path` | Yes | Path to the note relative to vault root. The `.md` extension is optional. |
+| `include_frontmatter` | No | Whether to include YAML frontmatter in the returned content. Defaults to `false`. |
+| `backlinks` | No | Append a Backlinks section: `"list"` (linking note paths) or `"context"` (paths plus snippet windows around each incoming link). Use `"none"` to suppress. If omitted, uses the configured default. |
+
+When the `backlinks` parameter is omitted, the behavior is governed by the tool's settings (Settings → Tools → `read_note` → gear icon), which also cap the output to prevent context bloat:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Default backlinks mode | `list` | What `read_note` appends when the AI does not specify a mode (`none`, `list`, or `context`). |
+| Backlinks context lines | `2` | Lines of surrounding context around each backlink in `context` mode (`0` = link line only). |
+| Max backlinks per source note | `5` | Maximum link snippets shown from a single source note in `context` mode. |
+| Max backlink source notes | `25` | Maximum number of source notes listed in the Backlinks section. |
+
+The Backlinks section is omitted entirely when the note has no incoming links. Self-links are excluded. See [Backlinks and outlinks](#backlinks-and-outlinks) for the standalone `get_backlinks` tool.
 
 ## Backlinks and outlinks
 
