@@ -1311,6 +1311,14 @@
 	text-align: left;
 	white-space: normal;
 	overflow-wrap: anywhere;
+	/* Neutralize Obsidian's default `button` styling, which otherwise pins the
+	   box to a single line and clips the wrapped remainder: release the fixed
+	   height, drop any min-height, stop clipping overflow, and disable the
+	   inherited ellipsis so the box grows to fit multi-line content. */
+	height: auto;
+	min-height: 0;
+	overflow: visible;
+	text-overflow: clip;
 	padding: 8px 12px;
 	border-radius: var(--radius-s);
 	font-size: var(--font-ui-small);

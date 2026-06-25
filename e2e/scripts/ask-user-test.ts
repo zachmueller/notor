@@ -22,6 +22,8 @@
  *      Submit (no auto-send); clicking Submit resolves with all answers
  *   4. Free-text Enter submits with the trimmed typed value once complete
  *   5. allowFreeText:false hides the input (options only)
+ *   5b. A long suggestion's option box grows vertically (wrapped text is not
+ *      clipped, and the long box is taller than a short single-line option)
  *   6. Aborting a pending interaction rejects and removes the prompt
  *   7. Persisted `interaction` block re-renders read-only (question + chosen
  *      answer highlighted) and survives a conversation reload
@@ -36,7 +38,7 @@
  */
 
 import { runTest, type TestContext } from "../lib/test-harness";
-import { buildDefaultSettings, waitForSelector } from "../lib/test-helpers";
+import { buildDefaultSettings, waitForSelector, writeCleanWorkspace } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -417,6 +419,107 @@ async function testChipsOnly(ctx: TestContext): Promise<void> {
 		document.querySelector<HTMLButtonElement>(".notor-e2e-ask-card .notor-interaction-submit")?.click();
 		document.querySelector(".notor-e2e-ask-card")?.remove();
 	});
+}
+
+// ---------------------------------------------------------------------------
+// Test 5b: a long suggestion's option box grows vertically to fit wrapped text
+//
+// Regression guard for the reported bug: the live `.notor-interaction-option`
+// is a bare <button>, so it inherits Obsidian's default button styling (fixed
+// height + overflow:hidden + text-overflow:ellipsis). Without the CSS resets,
+// long answers wrap their text logically but the box stays pinned to one line
+// and clips the remainder. Render a short option next to a long one (multi-word
+// wrap PLUS a long unbroken token) and assert the long box is BOTH unclipped
+// (scrollHeight <= clientHeight) AND taller than the short single-line option.
+// ---------------------------------------------------------------------------
+
+async function testOptionGrowsWhenWrapped(ctx: TestContext): Promise<void> {
+	console.log("\nTest 5b: long option box grows vertically (no clipping)");
+	const { page } = ctx;
+
+	// A multi-sentence answer that must wrap across several lines, plus a long
+	// unbroken token (URL/path) to exercise overflow-wrap: anywhere.
+	const longSuggestion =
+		"Yes, but only after we migrate the existing notes and confirm the index " +
+		"rebuilds cleanly across every vault, including the very long path " +
+		"/Volumes/workplace/notor/shared/notor/src/extensions/builtin-block-scaffolds/interaction.ts " +
+		"which on its own is wider than the option box.";
+
+	const setup = await startInteraction(ctx, {
+		type: "ask",
+		id: "q-wrap",
+		questions: [
+			{
+				question: "Proceed?",
+				suggestions: ["Yes", longSuggestion],
+				allowFreeText: false,
+			},
+		],
+	});
+	if (!setup.ok) {
+		ctx.fail("Render wrapping prompt", setup.error ?? "unknown");
+		return;
+	}
+
+	const prompt = await waitForSelector(page, ".notor-e2e-ask-card .notor-interaction-prompt", 4_000);
+	if (!prompt) {
+		const shot = await ctx.screenshot("05b-no-prompt");
+		ctx.fail("Render wrapping prompt", "No .notor-interaction-prompt rendered", shot);
+		return;
+	}
+
+	const dims = await page.evaluate(() => {
+		const opts = Array.from(
+			document.querySelectorAll<HTMLButtonElement>(
+				".notor-e2e-ask-card .notor-interaction-option",
+			),
+		);
+		if (opts.length < 2) return { count: opts.length };
+		const measure = (el: HTMLButtonElement) => ({
+			clientHeight: el.clientHeight,
+			scrollHeight: el.scrollHeight,
+		});
+		return { count: opts.length, short: measure(opts[0]!), long: measure(opts[1]!) };
+	});
+
+	const shot = await ctx.screenshot("05b-wrapping-options");
+
+	if (dims.count < 2 || !dims.short || !dims.long) {
+		ctx.fail("Wrapping options rendered", `Expected 2 options, got ${dims.count}`, shot);
+		await page.evaluate(() => document.querySelector(".notor-e2e-ask-card")?.remove());
+		return;
+	}
+
+	// Not clipped: the box fully contains its content. +1 absorbs sub-pixel
+	// rounding. This is the exact property the bug violated (scrollHeight > clientHeight).
+	if (dims.long.scrollHeight <= dims.long.clientHeight + 1) {
+		ctx.pass(
+			"Long option not clipped",
+			`scrollHeight (${dims.long.scrollHeight}) <= clientHeight (${dims.long.clientHeight})`,
+			shot,
+		);
+	} else {
+		ctx.fail(
+			"Long option not clipped",
+			`Clipped: scrollHeight (${dims.long.scrollHeight}) > clientHeight (${dims.long.clientHeight}) — wrapped text is hidden`,
+			shot,
+		);
+	}
+
+	// Grew: the long option is taller than the single-line short option.
+	if (dims.long.clientHeight > dims.short.clientHeight) {
+		ctx.pass(
+			"Long option grew vertically",
+			`long clientHeight (${dims.long.clientHeight}) > short clientHeight (${dims.short.clientHeight})`,
+		);
+	} else {
+		ctx.fail(
+			"Long option grew vertically",
+			`Long option did not grow: long (${dims.long.clientHeight}) <= short (${dims.short.clientHeight}) — box pinned to one line`,
+		);
+	}
+
+	await page.evaluate(() => document.querySelector(".notor-e2e-ask-card")?.remove());
 }
 
 // ---------------------------------------------------------------------------
@@ -1005,6 +1108,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	await testChipResolves(ctx);
 	await testFreeTextResolves(ctx);
 	await testChipsOnly(ctx);
+	await testOptionGrowsWhenWrapped(ctx);
 	await testAbort(ctx);
 	await testPersistenceReplay(ctx);
 	await testAutoApproved(ctx);
@@ -1013,4 +1117,13 @@ async function tests(ctx: TestContext): Promise<void> {
 	await testNoErrors(ctx);
 }
 
-runTest({ name: "ask-user-test", settings: buildDefaultSettings() }, tests);
+runTest(
+	{
+		name: "ask-user-test",
+		settings: buildDefaultSettings(),
+		// Pin a clean workspace so the chat panel (deferred view in Obsidian 1.12)
+		// mounts regardless of leftover workspace state from prior runs.
+		setupVault: (vaultPath) => writeCleanWorkspace(vaultPath),
+	},
+	tests,
+);
