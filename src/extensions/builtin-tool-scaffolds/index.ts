@@ -6,6 +6,7 @@ import { READ_NOTE } from "./read-note";
 import { SEARCH_VAULT } from "./search-vault";
 import { LIST_VAULT } from "./list-vault";
 import { READ_FRONTMATTER } from "./read-frontmatter";
+import { WORD_COUNT } from "./word-count";
 import { GET_BACKLINKS } from "./get-backlinks";
 import { GET_OUTLINKS } from "./get-outlinks";
 import { WRITE_NOTE } from "./write-note";
@@ -48,6 +49,7 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[SEARCH_VAULT.name, SEARCH_VAULT],
 		[LIST_VAULT.name, LIST_VAULT],
 		[READ_FRONTMATTER.name, READ_FRONTMATTER],
+		[WORD_COUNT.name, WORD_COUNT],
 		[GET_BACKLINKS.name, GET_BACKLINKS],
 		[GET_OUTLINKS.name, GET_OUTLINKS],
 		[WRITE_NOTE.name, WRITE_NOTE],

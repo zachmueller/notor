@@ -50,6 +50,11 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Read parsed YAML frontmatter from a note.",
 		isWrite: false,
 	},
+	word_count: {
+		name: "Word count",
+		desc: "Count words and characters in a note or a single section.",
+		isWrite: false,
+	},
 	get_backlinks: {
 		name: "Get backlinks",
 		desc: "List all notes that link to a given note.",
@@ -205,6 +210,7 @@ export function defaultAutoApproveFor(toolName: string): boolean {
 
 export const TOOLS_DEFAULT_DISABLED: ReadonlySet<string> = new Set([
 	"sleep",
+	"word_count",
 	"search_chat_history",
 	"read_chat_history",
 	"read_notor_settings",
