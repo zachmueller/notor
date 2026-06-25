@@ -21,8 +21,33 @@ export const REPLACE_IN_FILE = scaffold(
         description: "Text to replace the matched search text with. Use empty string to delete the matched text."
     required_items:
       - search
-      - replace`,
+      - replace
+settings:
+  replace_in_file_return_full_content_on_failure:
+    name: "Return Full File Content on Failure"
+    type: boolean
+    description: "When a replace fails (no match or ambiguous match), include the file's full current content in the error so the model can self-correct without re-reading. Disable to save context window."
+    default: true
+  replace_in_file_failure_content_max_chars:
+    name: "Max Failure-Content Characters"
+    type: number
+    description: "When returning full content on failure, truncate it to this many characters (a marker notes the cut). Prevents large files from flooding the context window."
+    default: 20000
+    min: 1000
+    max: 500000`,
 	`const log = utils.logger("replace_in_file");
+
+const buildFailureResult = (errorMsg, fullContent) => {
+  if (!settings.replace_in_file_return_full_content_on_failure) {
+    return "Error: " + errorMsg + "\\n\\n(Full file content omitted by setting — re-read the file to see current content.)";
+  }
+  const cap = settings.replace_in_file_failure_content_max_chars;
+  let body = fullContent;
+  if (typeof cap === "number" && body.length > cap) {
+    body = body.slice(0, cap) + "\\n\\n…[truncated " + (body.length - cap) + " chars — re-read the file for full content]";
+  }
+  return "Error: " + errorMsg + "\\n\\n---\\nCurrent file content:\\n\\n" + body;
+};
 
 if (!params.path || typeof params.path !== "string" || params.path.trim() === "") {
   throw new Error("Missing required parameter: path");
@@ -72,9 +97,16 @@ const originalContent = buf.toString("utf-8");
 let content = originalContent;
 
 // Apply SEARCH/REPLACE blocks sequentially in memory (atomic: all must match before write)
+const noOpBlocks = [];
 for (let i = 0; i < params.changes.length; i++) {
   const block = params.changes[i];
   if (!block) continue;
+  // No-op block (search === replace) changes nothing — record a warning and skip.
+  // Skipping before matching ensures a harmless no-op can never abort other changes.
+  if (block.search === block.replace) {
+    noOpBlocks.push(i + 1);
+    continue;
+  }
   const result = utils.resilientIndexOf(content, block.search);
   if (!result.ok) {
     const preview = block.search.length > 80
@@ -87,7 +119,7 @@ for (let i = 0; i < params.changes.length; i++) {
     return {
       __toolError: true,
       error: errorMsg,
-      result: "Error: " + errorMsg + "\\n\\n---\\nCurrent file content:\\n\\n" + originalContent,
+      result: buildFailureResult(errorMsg, originalContent),
     };
   }
   const match = result.match;
@@ -97,6 +129,11 @@ for (let i = 0; i < params.changes.length; i++) {
 // All blocks matched — write
 await libs.fs.promises.writeFile(resolvedPath, content, "utf-8");
 
-log.info("Applied replacements", { path: resolvedPath, count: params.changes.length });
-return \`Applied \${params.changes.length} replacement\${params.changes.length > 1 ? "s" : ""} to \${resolvedPath}\`;`,
+log.info("Applied replacements", { path: resolvedPath, count: params.changes.length, noOps: noOpBlocks.length });
+const applied = params.changes.length - noOpBlocks.length;
+let msg = \`Applied \${applied} replacement\${applied === 1 ? "" : "s"} to \${resolvedPath}\`;
+if (noOpBlocks.length) {
+  msg += \` ⚠️ Block(s) \${noOpBlocks.join(", ")} were no-ops (search and replace text were identical) — those edits did NOT change the file.\`;
+}
+return msg;`,
 );

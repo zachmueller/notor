@@ -22,8 +22,33 @@ export const REPLACE_IN_NOTE = scaffold(
         description: "Text to replace the matched search text with. Use empty string to delete the matched text."
     required_items:
       - search
-      - replace`,
+      - replace
+settings:
+  replace_in_note_return_full_content_on_failure:
+    name: "Return Full Note Content on Failure"
+    type: boolean
+    description: "When a replace fails (no match, ambiguous match, or stale content), include the note's full current content in the error so the model can self-correct without re-reading. Disable to save context window."
+    default: true
+  replace_in_note_failure_content_max_chars:
+    name: "Max Failure-Content Characters"
+    type: number
+    description: "When returning full content on failure, truncate it to this many characters (a marker notes the cut). Prevents large notes from flooding the context window."
+    default: 20000
+    min: 1000
+    max: 500000`,
 	`const log = utils.logger("replace_in_note");
+
+const buildFailureResult = (errorMsg, fullContent) => {
+  if (!settings.replace_in_note_return_full_content_on_failure) {
+    return "Error: " + errorMsg + "\\n\\n(Full note content omitted by setting — re-read the note to see current content.)";
+  }
+  const cap = settings.replace_in_note_failure_content_max_chars;
+  let body = fullContent;
+  if (typeof cap === "number" && body.length > cap) {
+    body = body.slice(0, cap) + "\\n\\n…[truncated " + (body.length - cap) + " chars — re-read the note for full content]";
+  }
+  return "Error: " + errorMsg + "\\n\\n---\\nCurrent note content:\\n\\n" + body;
+};
 
 if (!params.path || typeof params.path !== "string") {
   throw new Error("Missing required parameter: path");
@@ -57,7 +82,7 @@ if (staleResult.isStale) {
   return {
     __toolError: true,
     error: "Note content has changed since last read. The current content is included below — retry your edit based on this content.",
-    result: "Error: Stale content detected for " + params.path + ". The note was modified since you last read it.\\n\\n---\\nCurrent note content:\\n\\n" + currentContent,
+    result: buildFailureResult("Stale content detected for " + params.path + ". The note was modified since you last read it.", currentContent),
   };
 }
 
@@ -73,6 +98,7 @@ let failedBlockIndex = -1;
 let failedSearchText = "";
 let failedReason = "";
 let failedCount = 0;
+const noOpBlocks = [];
 
 try {
   await app.vault.process(file, (data: string) => {
@@ -80,6 +106,12 @@ try {
     for (let i = 0; i < params.changes.length; i++) {
       const block = params.changes[i];
       if (!block) continue;
+      // No-op block (search === replace) changes nothing — record a warning and skip.
+      // Skipping before matching ensures a harmless no-op can never abort other changes.
+      if (block.search === block.replace) {
+        if (!noOpBlocks.includes(i + 1)) noOpBlocks.push(i + 1);
+        continue;
+      }
       const result = utils.resilientIndexOf(modified, block.search);
       if (!result.ok) {
         failedBlockIndex = i + 1;
@@ -108,7 +140,7 @@ try {
     return {
       __toolError: true,
       error: errorMsg,
-      result: "Error: " + errorMsg + "\\n\\n---\\nCurrent note content:\\n\\n" + currentContent,
+      result: buildFailureResult(errorMsg, currentContent),
     };
   }
   throw e;
@@ -122,10 +154,15 @@ try {
   utils.staleTracker.invalidate(file.path);
 }
 
-log.info("Applied replacements", { path: params.path, count: params.changes.length });
+log.info("Applied replacements", { path: params.path, count: params.changes.length, noOps: noOpBlocks.length });
 
 // Open in editor
 await utils.noteOpener.openNote(file.path);
 
-return \`Applied \${params.changes.length} replacement\${params.changes.length > 1 ? "s" : ""} to \${params.path}\`;`,
+const applied = params.changes.length - noOpBlocks.length;
+let msg = \`Applied \${applied} replacement\${applied === 1 ? "" : "s"} to \${params.path}\`;
+if (noOpBlocks.length) {
+  msg += \` ⚠️ Block(s) \${noOpBlocks.join(", ")} were no-ops (search and replace text were identical) — those edits did NOT change the note.\`;
+}
+return msg;`,
 );
