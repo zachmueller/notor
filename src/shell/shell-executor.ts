@@ -11,6 +11,7 @@
  */
 
 import { spawn, type ChildProcess } from "child_process";
+import { existsSync } from "node:fs";
 import { Platform } from "obsidian";
 import type { NotorSettings } from "../settings";
 import { resolveShell } from "./shell-resolver";
@@ -150,12 +151,18 @@ export async function executeShellCommand(
 			}, timeoutMs);
 		}
 
-		// Handle spawn errors (e.g., ENOENT for missing shell)
+		// Handle spawn errors. ENOENT is ambiguous — it fires when either the
+		// shell executable OR the working directory is missing — so disambiguate
+		// by checking whether the configured cwd exists before blaming the shell.
 		child.on("error", (err) => {
 			clearTimers();
 			const code = (err as NodeJS.ErrnoException).code;
 			if (code === "ENOENT") {
-				reject(new Error(`Shell not found: ${executable}`));
+				if (options.cwd && !existsSync(options.cwd)) {
+					reject(new Error(`Working directory not found: ${options.cwd}`));
+				} else {
+					reject(new Error(`Shell not found: ${executable}`));
+				}
 			} else {
 				reject(new Error(`Shell execution failed: ${err.message}`));
 			}

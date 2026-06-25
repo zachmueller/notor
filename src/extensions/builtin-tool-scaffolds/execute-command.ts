@@ -70,6 +70,27 @@ if (!cwdResult.valid) {
   );
 }
 
+// Verify the working directory exists before spawning, so a missing cwd
+// surfaces a clear error instead of an ambiguous "Shell not found" ENOENT.
+// Empty working_directory defaults to the vault root, which always exists.
+if (workingDirectory) {
+  let cwdStat;
+  try {
+    cwdStat = await libs.fs.promises.stat(cwdResult.resolvedPath);
+  } catch (e: any) {
+    if (e.code === "ENOENT") {
+      throw new Error(
+        \`Working directory '\${workingDirectory}' does not exist. \` +
+        \`Provide an existing directory path (relative to the vault root or absolute).\`
+      );
+    }
+    throw e;
+  }
+  if (!cwdStat.isDirectory()) {
+    throw new Error(\`Working directory '\${workingDirectory}' is not a directory.\`);
+  }
+}
+
 log.info("Executing command", {
   command: (params.command as string).substring(0, 200),
   cwd: cwdResult.resolvedPath,
@@ -113,10 +134,13 @@ try {
 
   return output;
 } catch (e: any) {
-  // Re-throw errors already created above
+  // Re-throw errors already created above (and the precise working-directory
+  // errors) so they keep their actionable message and never get the
+  // shell-config hint appended below.
   if (e instanceof Error && (
     e.message.includes("timed out") ||
-    e.message.includes("exited with code")
+    e.message.includes("exited with code") ||
+    e.message.includes("Working directory")
   )) {
     throw e;
   }
