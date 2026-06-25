@@ -622,8 +622,22 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 
 	setConversationTasks(tasks: TaskItem[] | null): void {
+		// Write to the display manager so the live panel renders during the turn.
 		this.conversationManager.setTasks(tasks);
 		this.view?.renderTaskPanel(tasks);
+
+		// Propagate tasks into the active session's ConversationManager (mirrors the
+		// title propagation in setOnTitleChanged above). The session rewrites the
+		// header on every addMessage; without this, those writes — and the
+		// end-of-turn silent sync-back — clobber the tasks, so they never reach the
+		// JSONL header. Safe no-op when no session exists (e.g. tasks set outside a
+		// turn): getActiveSession returns undefined and setTasks no-ops with no
+		// active conversation.
+		const conversationId = this.conversationManager.getActiveConversation()?.id;
+		if (conversationId) {
+			const session = this.sessionManager.getActiveSession(conversationId);
+			session?.conversationManager.setTasks(tasks);
+		}
 	}
 
 	// -----------------------------------------------------------------------

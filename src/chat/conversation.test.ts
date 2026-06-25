@@ -10,7 +10,7 @@ vi.mock("../utils/logger", () => ({
 }));
 
 import { ConversationManager } from "./conversation";
-import type { Message, ToolResult } from "../types";
+import type { Message, ToolResult, TaskItem } from "../types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -775,6 +775,59 @@ describe("ConversationManager.setWorkflowMetadata()", () => {
 
 	it("is a no-op when there is no active conversation", () => {
 		expect(() => mgr.setWorkflowMetadata({ workflow_deactivated: true })).not.toThrow();
+		expect(mgr.getActiveConversation()).toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// setTasks — task list persistence
+// ---------------------------------------------------------------------------
+
+describe("ConversationManager.setTasks()", () => {
+	let mgr: ConversationManager;
+
+	beforeEach(() => {
+		mgr = createManager();
+	});
+
+	it("sets tasks on the active conversation", () => {
+		mgr.createConversation("openai", "gpt-4", "act");
+		const tasks: TaskItem[] = [
+			{ content: "step one", status: "completed" },
+			{ content: "step two", status: "in_progress" },
+		];
+
+		mgr.setTasks(tasks);
+
+		expect(mgr.getActiveConversation()!.tasks).toEqual(tasks);
+	});
+
+	it("fires onConversationChanged so the header is persisted with tasks", () => {
+		const onChanged = vi.fn();
+		mgr.createConversation("openai", "gpt-4", "act");
+		mgr.setOnConversationChanged(onChanged);
+
+		const tasks: TaskItem[] = [{ content: "do thing", status: "pending" }];
+		mgr.setTasks(tasks);
+
+		expect(onChanged).toHaveBeenCalledTimes(1);
+		expect(onChanged.mock.calls[0]![0]).toMatchObject({ tasks });
+	});
+
+	it("clears tasks when passed null and still persists", () => {
+		const onChanged = vi.fn();
+		mgr.createConversation("openai", "gpt-4", "act");
+		mgr.setTasks([{ content: "x", status: "pending" }]);
+		mgr.setOnConversationChanged(onChanged);
+
+		mgr.setTasks(null);
+
+		expect(mgr.getActiveConversation()!.tasks).toBeNull();
+		expect(onChanged).toHaveBeenCalledTimes(1);
+	});
+
+	it("is a no-op when there is no active conversation", () => {
+		expect(() => mgr.setTasks([{ content: "x", status: "pending" }])).not.toThrow();
 		expect(mgr.getActiveConversation()).toBeNull();
 	});
 });
