@@ -155,6 +155,9 @@ const askRenderer: InteractionRenderer = {
 
 			const allowFreeText = q.allowFreeText !== false;
 			const multiSelect = q.multiSelect === true;
+			// Tag multi-select groups so the stylesheet can swap radio glyphs (single)
+			// for checkbox glyphs (multi) without the renderer touching per-option markup.
+			if (multiSelect) group.addClass("notor-interaction-question-group--multi");
 			const options: HTMLButtonElement[] = [];
 			let input: HTMLInputElement | null = null;
 

@@ -1334,39 +1334,48 @@
 	border-color: var(--interactive-accent);
 }
 
-.notor-interaction-option--selected {
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
-	border-color: var(--interactive-accent);
-	/* Reinforce the accent fill with a bold label and an inset left bar so the
-	   chosen answer reads unmistakably at a glance. */
-	font-weight: var(--font-bold);
-	box-shadow: inset 3px 0 0 0 var(--interactive-accent-hover);
-}
-
-.notor-interaction-option--selected:hover {
-	background: var(--interactive-accent-hover);
-	color: var(--text-on-accent);
-}
-
-/* Multi-select (checkbox) option, checked. A leading ✓ distinguishes the
-   accumulate-many semantics from the single-select radio highlight above. */
-.notor-interaction-option--checked {
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
+/* Selected (single-select) and checked (multi-select) share one look: a subtle
+   accent-tinted block with readable text, an accent border, and an inset left
+   bar. Scoped under `.notor-interaction-options` so the tint out-specifies the
+   themed `button` rules that otherwise override a bare modifier class — the
+   reason the pre-submit highlight wasn't reading before. */
+.notor-interaction-options .notor-interaction-option--selected,
+.notor-interaction-options .notor-interaction-option--checked {
+	background: color-mix(in srgb, var(--interactive-accent) 15%, var(--background-primary));
+	color: var(--text-normal);
 	border-color: var(--interactive-accent);
 	font-weight: var(--font-bold);
-	box-shadow: inset 3px 0 0 0 var(--interactive-accent-hover);
+	box-shadow: inset 3px 0 0 0 var(--interactive-accent);
 }
 
-.notor-interaction-option--checked:hover {
-	background: var(--interactive-accent-hover);
-	color: var(--text-on-accent);
+.notor-interaction-options .notor-interaction-option--selected:hover,
+.notor-interaction-options .notor-interaction-option--checked:hover {
+	background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-primary));
 }
 
-.notor-interaction-option--checked::before {
-	content: "✓ ";
-	font-weight: var(--font-bold);
+/* Leading radio (single-select) / checkbox (multi-select) glyph, filled with the
+   accent color once chosen. Pure ::before so the renderer stays class-only. The
+   trailing space matches the prior ✓ spacing and won't disturb text wrapping. */
+.notor-interaction-option::before {
+	content: "○ ";
+	color: var(--text-muted);
+}
+
+.notor-interaction-option--selected::before {
+	content: "● ";
+	color: var(--interactive-accent);
+}
+
+/* Multi-select groups swap the radio glyph for a checkbox. Scoped under the
+   `--multi` group modifier so its higher specificity wins over the radio rules. */
+.notor-interaction-question-group--multi .notor-interaction-option::before {
+	content: "☐ ";
+	color: var(--text-muted);
+}
+
+.notor-interaction-question-group--multi .notor-interaction-option--checked::before {
+	content: "☑ ";
+	color: var(--interactive-accent);
 }
 
 .notor-interaction-input-row {
@@ -1393,10 +1402,11 @@
 }
 
 /* Typed text retained but NOT the chosen answer (an option is selected) —
-   greyed/muted so it's clearly inactive without being erased. */
+   strongly greyed/muted so it's unmistakably inactive without being erased. */
 .notor-interaction-input--inactive {
-	background: var(--background-secondary);
-	color: var(--text-muted);
+	background: var(--background-modifier-hover);
+	color: var(--text-faint);
+	opacity: 0.7;
 }
 
 .notor-interaction-submit {

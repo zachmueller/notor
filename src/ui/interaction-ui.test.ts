@@ -344,6 +344,24 @@ describe("renderInteractionPrompt — ask (grouped, explicit submit)", () => {
 });
 
 describe("renderInteractionPrompt — ask (multi-select)", () => {
+	it("tags only multi-select question groups with the --multi modifier class", async () => {
+		const card = makeCard();
+		renderInteractionPrompt(card, {
+			type: "ask",
+			id: "mg",
+			questions: [
+				{ question: "Single?", suggestions: ["A", "B"] },
+				{ question: "Multi?", suggestions: ["C", "D"], multiSelect: true },
+			],
+		});
+
+		const groups = card.querySelectorAll<HTMLDivElement>(".notor-interaction-question-group");
+		// The stylesheet keys checkbox vs radio glyphs off this class, so the
+		// single-select group must stay clean and only the multi-select group tagged.
+		expect(groups[0]!.classList.contains("notor-interaction-question-group--multi")).toBe(false);
+		expect(groups[1]!.classList.contains("notor-interaction-question-group--multi")).toBe(true);
+	});
+
 	it("accumulates checked options as an array in click order", async () => {
 		const card = makeCard();
 		const promise = renderInteractionPrompt(card, {
