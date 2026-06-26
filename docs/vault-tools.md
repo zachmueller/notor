@@ -10,6 +10,7 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `write_note` | Create a new note or overwrite an existing one | Act only |
 | `replace_in_note` | Surgical find/replace edits within a note | Act only |
 | `move_note` | Move and/or rename a note within the vault (auto-updates all internal links) | Act only |
+| `delete_note` | Delete a note from the vault (moves to trash; disabled by default) | Act only |
 | `search_vault` | Regex/text search across notes with context lines | Plan & Act |
 | `list_vault` | List vault folder structure and file metadata | Plan & Act |
 | `read_frontmatter` | Read a note's YAML frontmatter as structured data | Plan & Act |
@@ -268,6 +269,21 @@ The `move_note` tool moves and/or renames a note within the vault. Obsidian auto
 
 - A checkpoint is created before the operation for rollback.
 - Rejects the operation if a note already exists at the destination path.
+- Write tool — available in Act mode only; requires explicit approval unless auto-approved.
+
+## Deleting notes
+
+The `delete_note` tool removes a note from the vault. It ships **disabled by default** — you must opt in via **Settings → Notor → Tools → Write tools** before the AI can call it.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `path` | Yes | Path of the note to delete relative to vault root. The `.md` extension is optional; a bare note name is also accepted. |
+
+- Deletion is recoverable: the note is moved to your configured Obsidian trash location (system trash, the vault's `.trash` folder, or permanent — see **Settings → Files and links → Deleted files**), and a checkpoint is created beforehand for rollback.
+- Only Markdown (`.md`) notes can be deleted; attachments and other files are rejected.
+- If other notes still link to the deleted note, the result reports how many links are now broken.
 - Write tool — available in Act mode only; requires explicit approval unless auto-approved.
 
 ## Reading notes

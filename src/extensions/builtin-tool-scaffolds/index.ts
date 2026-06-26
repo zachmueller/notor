@@ -14,6 +14,7 @@ import { REPLACE_IN_NOTE } from "./replace-in-note";
 import { UPDATE_FRONTMATTER } from "./update-frontmatter";
 import { MANAGE_TAGS } from "./manage-tags";
 import { MOVE_NOTE } from "./move-note";
+import { DELETE_NOTE } from "./delete-note";
 import { FETCH_WEBPAGE } from "./fetch-webpage";
 import { WEB_SEARCH } from "./web-search";
 import { EXECUTE_COMMAND } from "./execute-command";
@@ -57,6 +58,7 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[UPDATE_FRONTMATTER.name, UPDATE_FRONTMATTER],
 		[MANAGE_TAGS.name, MANAGE_TAGS],
 		[MOVE_NOTE.name, MOVE_NOTE],
+		[DELETE_NOTE.name, DELETE_NOTE],
 		[FETCH_WEBPAGE.name, FETCH_WEBPAGE],
 		[WEB_SEARCH.name, WEB_SEARCH],
 		[EXECUTE_COMMAND.name, EXECUTE_COMMAND],

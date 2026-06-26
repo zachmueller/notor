@@ -90,6 +90,11 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Move and/or rename a note within the vault.",
 		isWrite: true,
 	},
+	delete_note: {
+		name: "Delete note",
+		desc: "Delete a note from the vault (moves it to trash).",
+		isWrite: true,
+	},
 	fetch_webpage: {
 		name: "Fetch webpage",
 		desc: "Fetch a webpage by URL and return its content as Markdown.",
@@ -209,6 +214,7 @@ export function defaultAutoApproveFor(toolName: string): boolean {
 // ---------------------------------------------------------------------------
 
 export const TOOLS_DEFAULT_DISABLED: ReadonlySet<string> = new Set([
+	"delete_note",
 	"sleep",
 	"word_count",
 	"search_chat_history",
