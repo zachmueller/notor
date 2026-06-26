@@ -37,6 +37,7 @@ import { mcpEnvSecretKey, mcpHeaderSecretKey } from "./mcp-types";
 import type { TaskLaneQueue } from "../queue/task-lane-queue";
 import { logger } from "../utils/logger";
 import { sanitizeInputSchemaForBedrock } from "../utils/json-schema-sanitizer";
+import type { SleepWakeDetector } from "../utils/sleep-wake-detector";
 
 const log = logger("McpHub");
 
@@ -58,12 +59,6 @@ const STDIO_RECONNECT_MAX_DELAY_MS = 120_000;
 const STDIO_RECONNECT_MAX_ATTEMPTS = 5;
 const STDIO_CRASH_LOOP_WINDOW_MS = 30_000;
 const STDIO_CRASH_LOOP_THRESHOLD = 3;
-
-/** Sleep-detection heartbeat interval (ms). */
-const SLEEP_HEARTBEAT_INTERVAL_MS = 15_000;
-
-/** If the gap between ticks exceeds this, a sleep event likely occurred. */
-const SLEEP_DETECTION_THRESHOLD_MS = 60_000;
 
 /** Delay after sleep detection before starting reconnection (ms). */
 const SLEEP_RECONNECT_DELAY_MS = 2_000;
@@ -116,9 +111,6 @@ export class McpHub {
 
 	/** Per-server exit timestamps for stdio crash-loop detection. */
 	private stdioExitTimestamps = new Map<string, number[]>();
-
-	/** Last heartbeat timestamp for sleep/wake detection. */
-	private _lastHeartbeat: number = 0;
 
 	/**
 	 * Cached PATH from the user's login shell.
@@ -1115,22 +1107,17 @@ export class McpHub {
 	// Sleep/wake detection
 	// -----------------------------------------------------------------------
 
-	startSleepDetection(
-		registerInterval: (callback: () => void, ms: number) => number
-	): void {
-		this._lastHeartbeat = Date.now();
-		registerInterval(() => this._heartbeatTick(), SLEEP_HEARTBEAT_INTERVAL_MS);
-	}
-
-	private _heartbeatTick(): void {
-		const now = Date.now();
-		const gap = now - this._lastHeartbeat;
-		this._lastHeartbeat = now;
-
-		if (gap > SLEEP_DETECTION_THRESHOLD_MS) {
-			log.info("System sleep/wake detected", { gapMs: gap });
+	/**
+	 * Subscribe MCP reconnection to a shared {@link SleepWakeDetector}.
+	 *
+	 * On a detected wake, eligible servers are reconnected after a short settle
+	 * delay (so the network stack can come back first). The detector owns the
+	 * heartbeat timer; this only registers the response.
+	 */
+	startSleepDetection(detector: SleepWakeDetector): void {
+		detector.onWake(() => {
 			setTimeout(() => this._reconnectAllAfterSleep(), SLEEP_RECONNECT_DELAY_MS);
-		}
+		});
 	}
 
 	private _reconnectAllAfterSleep(): void {

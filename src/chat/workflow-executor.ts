@@ -855,6 +855,9 @@ export class WorkflowExecutor {
 
 			// 5. Send to LLM
 			const abortController = new AbortController();
+			// Register liveness for this stream iteration so the sleep/wake
+			// reconciler can tell a frozen socket apart from a busy tool call.
+			concurrencyManager.markStreaming(execution.id, abortController);
 			const provider = this.deps.providerRegistry.getProvider(session.providerId);
 			const stream = provider.sendMessage(chatMessages, toolDefinitions, {
 				model: session.modelId,
@@ -874,6 +877,9 @@ export class WorkflowExecutor {
 			for await (const event of parseStreamEvents(stream, abortController.signal, {
 				onPartialToolCall: this.deps.dispatcher.makePartialToolCallHandler(),
 			})) {
+				// Every event proves the stream socket is alive — stamp it so a
+				// post-sleep reconciliation doesn't clear an actively-streaming run.
+				concurrencyManager.touchStreamActivity(execution.id);
 				switch (event.type) {
 					case "text_delta":
 						textContent = event.text;
@@ -922,6 +928,10 @@ export class WorkflowExecutor {
 						toolName,
 					});
 				}
+
+				// Entering a (possibly long-running) tool call — the reconciler
+				// must never clear an execution in this phase.
+				concurrencyManager.markInToolCall(execution.id);
 
 				// Dispatch the tool with session-scoped policy context and approval
 				const policyCtx = vaultRootPath

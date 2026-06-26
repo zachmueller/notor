@@ -102,6 +102,7 @@ import { wireView as wireViewFn } from "./ui/wire-view";
 
 // MCP
 import { McpHub } from "./mcp/mcp-hub";
+import { SleepWakeDetector } from "./utils/sleep-wake-detector";
 import type { McpServerConfig } from "./mcp/mcp-types";
 import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
 import { showMcpMissingAnnotationsNotice } from "./tool-config/notices";
@@ -328,6 +329,9 @@ export default class NotorPlugin extends Plugin {
 
 	/** Concurrency manager for background workflow executions (F-020). */
 	private _workflowConcurrencyManager?: WorkflowConcurrencyManager;
+
+	/** Shared system sleep/wake detector (MCP reconnect + workflow reconciliation). */
+	private _sleepWakeDetector?: SleepWakeDetector;
 
 	/** Per-hook debounce delay manager (Phase 5). */
 	private _hookDelayManager?: HookDelayManager;
@@ -718,6 +722,7 @@ export default class NotorPlugin extends Plugin {
 		// this._executionChainTracker — stateless, nothing to destroy
 		this._tagShadowCache?.destroy();
 		this._workflowConcurrencyManager?.destroy();
+		this._sleepWakeDetector?.destroy();
 
 		// Group H: Destroy workflow activity tracker (H-006)
 		this._workflowActivityTracker?.destroy();
@@ -896,6 +901,39 @@ export default class NotorPlugin extends Plugin {
 		this._workflowActivityTracker = workflowActivityTracker;
 		workflowConcurrencyManager.setOnStateChange(() => {
 			workflowActivityTracker.notifyChange();
+		});
+
+		// Step 6c: Shared sleep/wake detector. One heartbeat timer feeds both
+		// MCP reconnection (wired in _initMcpHub) and background-workflow
+		// reconciliation. On wake, clear executions whose LLM stream was frozen
+		// by the system sleep so the next trigger isn't blocked by the
+		// single-instance "already running" guard.
+		const sleepWakeDetector = new SleepWakeDetector();
+		this._sleepWakeDetector = sleepWakeDetector;
+		sleepWakeDetector.start((cb, ms) =>
+			this.registerInterval(window.setInterval(cb, ms))
+		);
+		sleepWakeDetector.onWake((gapMs) => {
+			// Short settle delay mirrors the MCP reconnect path — give the
+			// event loop a moment to stabilise before sweeping.
+			window.setTimeout(() => {
+				const { cleared, waitingApproval } =
+					workflowConcurrencyManager.reconcileAfterWake(gapMs);
+				if (cleared > 0) {
+					log.info("Cleared stranded workflow executions after sleep", { cleared });
+					new Notice(
+						`Cleared ${cleared} stranded workflow execution${cleared === 1 ? "" : "s"} after system sleep.`
+					);
+				}
+				if (waitingApproval > 0) {
+					log.info("Background conversations awaiting approval after sleep", {
+						waitingApproval,
+					});
+					new Notice(
+						`${waitingApproval} background conversation${waitingApproval === 1 ? " is" : "s are"} waiting for your approval.`
+					);
+				}
+			}, 2_000);
 		});
 
 		// Step 7: Vault event scheduler (cron jobs for on_schedule hooks)
@@ -1168,9 +1206,13 @@ export default class NotorPlugin extends Plugin {
 			log.error("McpHub initialization failed", { error: String(e) });
 		});
 
-		mcpHub.startSleepDetection(
-			(cb, ms) => this.registerInterval(window.setInterval(cb, ms))
-		);
+		// Subscribe MCP reconnection to the shared sleep/wake detector created
+		// in _initVaultEventHooks (runs before _initMcpHub).
+		if (this._sleepWakeDetector) {
+			mcpHub.startSleepDetection(this._sleepWakeDetector);
+		} else {
+			log.warn("SleepWakeDetector unavailable; MCP sleep reconnection disabled");
+		}
 
 		// Catch-up: after a microtask yield, register tools for any servers
 		// that connected before the onStatusChange listener was fully wired.

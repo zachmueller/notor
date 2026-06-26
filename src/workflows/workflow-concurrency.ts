@@ -36,6 +36,28 @@ interface QueueItem {
 	runFn: () => Promise<void>;
 }
 
+/**
+ * Liveness record for an in-flight background execution.
+ *
+ * Used by {@link WorkflowConcurrencyManager.reconcileAfterWake} to tell a
+ * genuinely-stranded execution (frozen LLM stream after system sleep) apart
+ * from one that is legitimately busy — e.g. a long-running auto-approved tool
+ * call, which keeps `status === "running"` and so cannot be distinguished by
+ * status alone.
+ */
+interface ExecutionLiveness {
+	/**
+	 * What the execution is currently doing.
+	 * - `"streaming"` — awaiting/processing LLM stream events.
+	 * - `"in_tool_call"` — a dispatched tool is running (may be long-lived).
+	 */
+	phase: "streaming" | "in_tool_call";
+	/** `Date.now()` of the most recent stream event (proves the socket is alive). */
+	lastStreamEventAt: number;
+	/** Current stream iteration's abort controller — aborted when clearing a stranded run. */
+	abortController: AbortController;
+}
+
 // ---------------------------------------------------------------------------
 // WorkflowConcurrencyManager
 // ---------------------------------------------------------------------------
@@ -54,6 +76,12 @@ export class WorkflowConcurrencyManager {
 
 	/** FIFO queue for overflow executions (beyond the concurrency limit). */
 	private readonly queue: QueueItem[] = [];
+
+	/**
+	 * Liveness records keyed by execution ID, for running executions only.
+	 * Populated by the background execution loop; cleared in `onComplete()`.
+	 */
+	private readonly liveness = new Map<string, ExecutionLiveness>();
 
 	/**
 	 * Bounded list of recently completed executions for the activity indicator.
@@ -185,6 +213,7 @@ export class WorkflowConcurrencyManager {
 		}
 
 		this.active.delete(executionId);
+		this.liveness.delete(executionId);
 
 		log.info("Background workflow completed", {
 			id: executionId,
@@ -228,6 +257,131 @@ export class WorkflowConcurrencyManager {
 			log.debug("Execution status updated", { executionId, status });
 			this.notifyStateChange();
 		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Liveness tracking (sleep/wake reconciliation)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Record that an execution has entered (or re-entered) the streaming phase.
+	 *
+	 * Called by the background loop at the start of each LLM stream iteration
+	 * with that iteration's abort controller. Also stamps stream activity.
+	 *
+	 * @param executionId - The running execution.
+	 * @param abortController - The current stream iteration's abort controller.
+	 */
+	markStreaming(executionId: string, abortController: AbortController): void {
+		this.liveness.set(executionId, {
+			phase: "streaming",
+			lastStreamEventAt: Date.now(),
+			abortController,
+		});
+	}
+
+	/**
+	 * Stamp stream activity for an execution — proves the socket is alive.
+	 * Called on every parsed stream event. No-op if no liveness record exists.
+	 */
+	touchStreamActivity(executionId: string): void {
+		const live = this.liveness.get(executionId);
+		if (live) {
+			live.lastStreamEventAt = Date.now();
+		}
+	}
+
+	/**
+	 * Mark an execution as being inside a dispatched tool call.
+	 *
+	 * Tool calls (including auto-approved sub-agents) can legitimately run for
+	 * a long time, so `reconcileAfterWake()` never clears an execution in this
+	 * phase. No-op if no liveness record exists.
+	 */
+	markInToolCall(executionId: string): void {
+		const live = this.liveness.get(executionId);
+		if (live) {
+			live.phase = "in_tool_call";
+		}
+	}
+
+	/**
+	 * Reconcile stranded executions after a detected system sleep/wake.
+	 *
+	 * A frozen LLM stream often never rejects on resume, so the background
+	 * loop's `finally` (which calls `onComplete()`) never fires and the
+	 * execution lingers in `active` forever — blocking the next trigger via
+	 * `isWorkflowRunning()`. This sweeps `active` and clears only the
+	 * demonstrably-stranded streaming executions, leaving genuinely-busy ones
+	 * (long tool calls, pending approvals) alone.
+	 *
+	 * Decision rule (false-positive-safe):
+	 * - `waiting_approval` → exempt + counted (user must act).
+	 * - `queued` → skip (never started; drains once the guard frees).
+	 * - `in_tool_call` → never clear (may be a legitimate hour-long tool call).
+	 * - `streaming` with no stream event since before the sleep gap → stranded:
+	 *   abort the dead socket and clear via `onComplete(..., "errored")`.
+	 * - `streaming` that produced an event after wake → alive, left running.
+	 *
+	 * `onComplete()` handles the rest (recent list, guard release, queue
+	 * advance, indicator refresh via `notifyStateChange()`).
+	 *
+	 * @param gapMs - The detected sleep gap in milliseconds.
+	 * @returns Counts of cleared executions and those left waiting for approval.
+	 */
+	reconcileAfterWake(gapMs: number): { cleared: number; waitingApproval: number } {
+		// Anything whose last stream event predates the start of the sleep gap
+		// did not stream after wake → treat as stranded.
+		const sleepStart = Date.now() - gapMs;
+		let cleared = 0;
+		let waitingApproval = 0;
+
+		for (const exec of [...this.active.values()]) {
+			if (exec.status === "waiting_approval") {
+				waitingApproval++;
+				continue;
+			}
+			if (exec.status !== "running") {
+				// "queued" (and any non-running state) — leave untouched.
+				continue;
+			}
+
+			const live = this.liveness.get(exec.id);
+
+			// No liveness record yet, or mid tool call → assume alive.
+			if (!live || live.phase === "in_tool_call") {
+				continue;
+			}
+
+			// Streamed an event after the machine woke → alive.
+			if (live.lastStreamEventAt > sleepStart) {
+				continue;
+			}
+
+			// Stranded streaming execution — abort the dead socket, then clear.
+			try {
+				live.abortController.abort();
+			} catch (e) {
+				log.warn("Failed to abort stranded execution stream", {
+					executionId: exec.id,
+					error: String(e),
+				});
+			}
+			this.onComplete(
+				exec.id,
+				"errored",
+				"Cleared after system sleep — execution was stranded"
+			);
+			cleared++;
+		}
+
+		log.info("Reconciled background executions after wake", {
+			gapMs,
+			cleared,
+			waitingApproval,
+		});
+
+		return { cleared, waitingApproval };
 	}
 
 	// -----------------------------------------------------------------------
@@ -314,6 +468,7 @@ export class WorkflowConcurrencyManager {
 	destroy(): void {
 		this.active.clear();
 		this.queue.length = 0;
+		this.liveness.clear();
 		this.recentExecutions = [];
 		log.info("WorkflowConcurrencyManager destroyed");
 	}
