@@ -57,8 +57,8 @@ describe("WorkflowConcurrencyManager.reconcileAfterWake", () => {
 		expect(mgr.isWorkflowRunning(exec.workflow_path)).toBe(false);
 		expect(mgr.getActiveExecutions()).toHaveLength(0);
 		const recent = mgr.getRecentExecutions(5);
-		expect(recent[0].status).toBe("errored");
-		expect(recent[0].error_message).toMatch(/stranded/i);
+		expect(recent[0]!.status).toBe("errored");
+		expect(recent[0]!.error_message).toMatch(/stranded/i);
 	});
 
 	it("never clears an execution mid tool call", () => {
