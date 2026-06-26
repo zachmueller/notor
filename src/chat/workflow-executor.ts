@@ -871,7 +871,9 @@ export class WorkflowExecutor {
 			let parameters: Record<string, unknown> = {};
 			let hasToolCall = false;
 
-			for await (const event of parseStreamEvents(stream, abortController.signal)) {
+			for await (const event of parseStreamEvents(stream, abortController.signal, {
+				onPartialToolCall: this.deps.dispatcher.makePartialToolCallHandler(),
+			})) {
 				switch (event.type) {
 					case "text_delta":
 						textContent = event.text;

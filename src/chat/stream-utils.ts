@@ -31,6 +31,74 @@ export type ParsedStreamEvent =
 	| { type: "error"; message: string }
 	| { type: "cancelled"; text: string };
 
+/** Why an in-flight tool call's accumulated JSON could not be finalized. */
+export type PartialToolCallReason =
+	// `JSON.parse` threw — the accumulated JSON is malformed/incomplete.
+	| "parse_failure"
+	// The stream ended (message_end) with a max_tokens/length stop reason while
+	// a tool call was still open — the output ceiling cut off its JSON.
+	| "max_tokens"
+	// The stream simply exhausted with a non-empty, never-finalized tool call
+	// and no stop reason (e.g. a dropped/aborted upstream connection).
+	| "truncated_stream";
+
+/** Options for {@link parseStreamEvents}. */
+export interface ParseStreamOpts {
+	/**
+	 * Preserve the raw accumulated JSON of a tool call that failed to parse or
+	 * was cut off mid-stream, so the streamed content is never silently lost.
+	 *
+	 * Returns the spill file path (embedded in the diagnostic `error` event), or
+	 * `undefined` when preservation is unavailable (mobile / spillover disabled)
+	 * or the write failed. Must never throw — preservation is best-effort.
+	 */
+	onPartialToolCall?: (info: {
+		toolName: string;
+		partialJson: string;
+		reason: PartialToolCallReason;
+	}) => Promise<string | undefined>;
+}
+
+/**
+ * Stop/finish reasons that indicate the model hit its output token ceiling.
+ * Covers Anthropic/Bedrock ("max_tokens") and OpenAI/local ("length").
+ */
+function isTruncationStopReason(reason: string | undefined): boolean {
+	return reason === "max_tokens" || reason === "length";
+}
+
+/** Bounded head/tail preview of (potentially multi-MB) accumulated JSON. */
+function previewJson(json: string): { byteLength: number; head: string; tail: string } {
+	return {
+		byteLength: json.length,
+		head: json.slice(0, 200),
+		tail: json.length > 200 ? json.slice(-200) : "",
+	};
+}
+
+/**
+ * Build the user-facing `error` message for a tool call whose JSON could not be
+ * finalized. Surfaces the cause, byte count, and (when preserved) the spill path
+ * so the user can recover the content via `read_file`.
+ */
+function formatTruncationError(
+	toolName: string,
+	byteLength: number,
+	spillPath: string | undefined,
+	reason: PartialToolCallReason,
+): string {
+	const cause =
+		reason === "parse_failure"
+			? `Failed to parse tool call parameters for ${toolName} — the response appears to have been cut off mid-write`
+			: reason === "max_tokens"
+				? `The ${toolName} tool call was cut off before completing — the model hit its output token limit`
+				: `The ${toolName} tool call was cut off before completing — the response stream ended early`;
+	const preserved = spillPath
+		? ` Partial content was preserved at: ${spillPath} (open it with read_file).`
+		: "";
+	return `${cause} (received ${byteLength.toLocaleString()} bytes).${preserved}`;
+}
+
 // ---------------------------------------------------------------------------
 // parseStreamEvents
 // ---------------------------------------------------------------------------
@@ -44,10 +112,18 @@ export type ParsedStreamEvent =
  *   and parsed (on `tool_call_end`).
  * - `cancelled` is emitted at most once, when the abort signal fires.
  * - `error` is emitted for provider errors or JSON parse failures.
+ *
+ * When a tool call's JSON cannot be finalized — it fails to parse, or the
+ * stream ends with the call still open (max_tokens truncation / dropped
+ * connection) — the accumulated raw JSON is handed to `opts.onPartialToolCall`
+ * (if provided) so the streamed content can be preserved instead of silently
+ * lost, and a descriptive `error` is emitted (never a `tool_call`, so partial
+ * content never re-enters the conversation as a successful write).
  */
 export async function* parseStreamEvents(
 	stream: AsyncIterable<StreamChunk>,
 	abortSignal: AbortSignal,
+	opts: ParseStreamOpts = {},
 ): AsyncIterable<ParsedStreamEvent> {
 	let textContent = "";
 	let thinkingContent = "";
@@ -60,6 +136,33 @@ export async function* parseStreamEvents(
 	let currentToolCallId = "";
 	let currentToolName = "";
 	let toolCallJson = "";
+	// True between tool_call_start and its matching tool_call_end. If the stream
+	// ends (or hits its token ceiling) while this is set, the call's JSON was
+	// truncated — we preserve it rather than letting it silently vanish.
+	let toolCallOpen = false;
+	// Latest stop/finish reason from the provider (message_end). "max_tokens"/
+	// "length" mean the output ceiling was hit.
+	let lastStopReason: string | undefined;
+
+	// Best-effort preservation of an unfinalized tool call's raw JSON. Never
+	// throws — the spill callback itself is expected to swallow write errors,
+	// but guard regardless so preservation can never break the stream parse.
+	const preservePartial = async (reason: PartialToolCallReason): Promise<string | undefined> => {
+		if (!opts.onPartialToolCall || toolCallJson.length === 0) return undefined;
+		try {
+			return await opts.onPartialToolCall({
+				toolName: currentToolName,
+				partialJson: toolCallJson,
+				reason,
+			});
+		} catch (e) {
+			log.error("onPartialToolCall threw while preserving tool-call content", {
+				toolName: currentToolName,
+				error: String(e),
+			});
+			return undefined;
+		}
+	};
 
 	try {
 		for await (const chunk of stream) {
@@ -94,6 +197,7 @@ export async function* parseStreamEvents(
 					currentToolCallId = chunk.id;
 					currentToolName = chunk.tool_name;
 					toolCallJson = "";
+					toolCallOpen = true;
 					yield { type: "tool_call_started", id: chunk.id, name: chunk.tool_name };
 					break;
 
@@ -108,14 +212,25 @@ export async function* parseStreamEvents(
 							parameters = JSON.parse(toolCallJson);
 						}
 					} catch (e) {
-						log.warn("Failed to parse tool call JSON", {
+						// Truncated/malformed JSON — preserve the raw content before
+						// erroring so the streamed write is never silently lost. Logged
+						// at `error` level (not `warn`) so it surfaces at the default log
+						// level; preview only (head/tail) to avoid flooding the console.
+						const spillPath = await preservePartial("parse_failure");
+						log.error("Tool-call JSON parse failed — partial content preserved", {
 							toolName: currentToolName,
-							json: toolCallJson,
+							...previewJson(toolCallJson),
+							spillPath,
 							error: String(e),
 						});
 						yield {
 							type: "error",
-							message: `Failed to parse tool call parameters for ${currentToolName}`,
+							message: formatTruncationError(
+								currentToolName,
+								toolCallJson.length,
+								spillPath,
+								"parse_failure",
+							),
 						};
 						return;
 					}
@@ -131,10 +246,12 @@ export async function* parseStreamEvents(
 					currentToolCallId = "";
 					currentToolName = "";
 					toolCallJson = "";
+					toolCallOpen = false;
 					break;
 				}
 
 				case "message_end":
+					lastStopReason = chunk.stop_reason;
 					yield {
 						type: "message_end",
 						inputTokens: chunk.input_tokens,
@@ -146,6 +263,29 @@ export async function* parseStreamEvents(
 					yield { type: "error", message: chunk.error };
 					return;
 			}
+		}
+
+		// Stream exhausted with a tool call still open (no tool_call_end). This is
+		// the silent-abandon case — e.g. OpenAI/local hitting finish_reason
+		// "length", or a dropped connection — where no exception is ever thrown.
+		// Preserve the partial JSON and emit a diagnostic rather than letting the
+		// call vanish. Gate on !aborted so a user Stop (handled as `cancelled`)
+		// never produces a spurious truncation error.
+		if (toolCallOpen && toolCallJson.length > 0 && !abortSignal.aborted) {
+			const reason: PartialToolCallReason = isTruncationStopReason(lastStopReason)
+				? "max_tokens"
+				: "truncated_stream";
+			const spillPath = await preservePartial(reason);
+			log.error("Stream ended with an unfinished tool call — content preserved", {
+				toolName: currentToolName,
+				...previewJson(toolCallJson),
+				stopReason: lastStopReason,
+				spillPath,
+			});
+			yield {
+				type: "error",
+				message: formatTruncationError(currentToolName, toolCallJson.length, spillPath, reason),
+			};
 		}
 	} catch (e) {
 		if (abortSignal.aborted) {

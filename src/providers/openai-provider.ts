@@ -287,10 +287,22 @@ export class OpenAIProvider implements LLMProvider {
 
 		// Track active tool calls for accumulating deltas
 		const activeToolCalls = new Map<number, { id: string; name: string; args: string }>();
+		// Latest finish_reason seen this stream. Captured early so it can ride on
+		// the usage-bearing `message_end` whether the server co-locates usage with
+		// finish_reason in one chunk or splits them across chunks. A "length"
+		// finish_reason here means the output ceiling was hit — when a tool call is
+		// open that truncates its JSON, which the stream parser uses to diagnose
+		// (rather than silently dropping) the cut-off call.
+		let finishReason: string | undefined;
 
 		for await (const data of parseSSEStream(response.body, options.abort_signal)) {
 			try {
 				const parsed = JSON.parse(data);
+
+				const choice = parsed.choices?.[0];
+				if (choice?.finish_reason) {
+					finishReason = choice.finish_reason;
+				}
 
 				// Handle usage info (may come in the final chunk)
 				if (parsed.usage) {
@@ -303,10 +315,10 @@ export class OpenAIProvider implements LLMProvider {
 						type: "message_end",
 						input_tokens: parsed.usage.prompt_tokens ?? 0,
 						output_tokens: parsed.usage.completion_tokens ?? 0,
+						stop_reason: finishReason,
 					};
 				}
 
-				const choice = parsed.choices?.[0];
 				if (!choice) continue;
 
 				const delta = choice.delta;

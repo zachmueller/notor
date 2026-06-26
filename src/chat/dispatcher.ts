@@ -19,6 +19,7 @@ import { enforcePathConstraints } from "../tool-config/path-enforcer";
 import { resolveAutoApprove } from "../personas/auto-approve-resolver";
 import { isMcpTool, McpRegisteredTool } from "../mcp/mcp-tool-adapter";
 import { evaluateToolPolicy, type ToolPolicyContext } from "./tool-policy";
+import type { ParseStreamOpts } from "./stream-utils";
 import { logger } from "../utils/logger";
 
 const log = logger("ToolDispatcher");
@@ -206,6 +207,27 @@ export class ToolDispatcher {
 	/** Set the temp output spiller for dispatcher-level spillover of large results. */
 	setSpiller(spiller: import("../shell/temp-output-spiller").TempOutputSpiller | undefined): void {
 		this.spiller = spiller;
+	}
+
+	/**
+	 * The temp output spiller, if configured (undefined on mobile or when
+	 * spillover is disabled). Used by stream consumers to preserve partial
+	 * tool-call content on a failed/cut-off write.
+	 */
+	getSpiller(): import("../shell/temp-output-spiller").TempOutputSpiller | undefined {
+		return this.spiller;
+	}
+
+	/**
+	 * Build the `onPartialToolCall` handler for `parseStreamEvents`, backed by the
+	 * configured spiller. Returns `undefined` when no spiller is available (mobile
+	 * / spillover disabled) — the parser still logs and emits a diagnostic, just
+	 * without persisting a recovery file.
+	 */
+	makePartialToolCallHandler(): ParseStreamOpts["onPartialToolCall"] {
+		const spiller = this.spiller;
+		if (!spiller) return undefined;
+		return ({ toolName, partialJson }) => spiller.spillRaw(toolName, partialJson);
 	}
 
 	/**

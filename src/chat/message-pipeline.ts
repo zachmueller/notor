@@ -16,7 +16,7 @@ import { assertUnreachable } from "../utils/assert-unreachable";
 import type { ChatMessage, StreamChunk } from "../providers/provider";
 import type { ContentBlock } from "../media/types";
 import { getModelMetadata } from "../providers/model-metadata";
-import { parseStreamEvents } from "./stream-utils";
+import { parseStreamEvents, type ParseStreamOpts } from "./stream-utils";
 import type { ToolCallInfo } from "./tool-orchestration";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings, ModelPricing } from "../settings";
@@ -92,6 +92,7 @@ export async function processStream(
 	eagerContentEl?: HTMLElement,
 	viewResolver?: () => NotorChatView | undefined,
 	thinkingEnabled = false,
+	parseOpts?: ParseStreamOpts,
 ): Promise<StreamResult> {
 	let textContent = "";
 	let thinkingContent = "";
@@ -147,7 +148,7 @@ export async function processStream(
 
 	const accumulatedToolCalls: ToolCallInfo[] = [];
 
-	for await (const event of parseStreamEvents(stream, abortController.signal)) {
+	for await (const event of parseStreamEvents(stream, abortController.signal, parseOpts)) {
 		switch (event.type) {
 			case "thinking_started": {
 				// Confirm thinking actually happened; keep the optimistic start

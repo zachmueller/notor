@@ -488,7 +488,9 @@ export class SubAgentRunner {
 		let inputTokens = 0;
 		let outputTokens = 0;
 
-		for await (const event of parseStreamEvents(stream, this.abortController.signal)) {
+		for await (const event of parseStreamEvents(stream, this.abortController.signal, {
+			onPartialToolCall: this.dispatcher.makePartialToolCallHandler(),
+		})) {
 			switch (event.type) {
 				case "text_delta":
 					text = event.text;

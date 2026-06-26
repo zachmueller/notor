@@ -112,6 +112,38 @@ export class TempOutputSpiller {
 	}
 
 	/**
+	 * Write raw content to a temp file and return the bare path.
+	 *
+	 * Unlike `spillToFile`, this returns just the file path (not a formatted,
+	 * truncation-style message) so callers can embed it cleanly in a diagnostic.
+	 * Used to preserve partial tool-call JSON that failed to parse / was cut off
+	 * mid-stream so the streamed content is never silently lost.
+	 *
+	 * Returns `undefined` on write failure — preservation is best-effort and must
+	 * never throw into the stream-parse path.
+	 */
+	async spillRaw(toolName: string, content: string): Promise<string | undefined> {
+		const filePath = this.generatePath(toolName);
+		try {
+			await fs.writeFile(filePath, content, "utf-8");
+			this.trackedFiles.add(filePath);
+			log.info("Spilled partial tool-call content to temp file", {
+				toolName,
+				filePath,
+				totalChars: content.length,
+			});
+			return filePath;
+		} catch (e) {
+			log.error("Failed to write partial tool-call spillover file", {
+				toolName,
+				filePath,
+				error: String(e),
+			});
+			return undefined;
+		}
+	}
+
+	/**
 	 * Create an incremental spiller for streaming overflow to disk.
 	 *
 	 * Used by OutputBuffer when capturing execute_command output that

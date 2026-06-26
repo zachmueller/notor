@@ -382,6 +382,12 @@ export class BedrockProvider implements LLMProvider {
 		 * when multiple callers (e.g. concurrent sub-agents) use the same provider.
 		 */
 		const activeToolBlockIndices = new Map<number, string>();
+		// Stash the messageStop.stopReason so it can ride on the metadata-driven
+		// message_end. Bedrock emits messageStop just before the final metadata
+		// event, so a single message_end carries both real token counts and the
+		// stop reason — avoids a second, token-zeroed message_end that would clobber
+		// accounting downstream.
+		const streamState: { stopReason?: string } = {};
 		const { system, messages: bedrockMessages } =
 			toBedrockMessages(messages);
 
@@ -551,7 +557,7 @@ export class BedrockProvider implements LLMProvider {
 				if (options.abort_signal?.aborted) {
 					return;
 				}
-				yield* this.handleBedrockEvent(event, activeToolBlockIndices);
+				yield* this.handleBedrockEvent(event, activeToolBlockIndices, streamState);
 			}
 		} catch (e: unknown) {
 			if (options.abort_signal?.aborted) {
@@ -570,7 +576,8 @@ export class BedrockProvider implements LLMProvider {
 	 */
 	private *handleBedrockEvent(
 		event: ConverseStreamOutput,
-		activeToolBlockIndices: Map<number, string>
+		activeToolBlockIndices: Map<number, string>,
+		streamState: { stopReason?: string }
 	): Iterable<StreamChunk> {
 		if (event.contentBlockStart) {
 			const start = event.contentBlockStart.start;
@@ -651,6 +658,13 @@ export class BedrockProvider implements LLMProvider {
 			}
 		}
 
+		// messageStop carries the stop reason ("max_tokens", "end_turn",
+		// "tool_use", ...). It arrives just before the final metadata event;
+		// stash it so the metadata-driven message_end can carry it.
+		if (event.messageStop) {
+			streamState.stopReason = event.messageStop.stopReason ?? undefined;
+		}
+
 		if (event.metadata) {
 			const usage = event.metadata.usage;
 			log.debug("Bedrock metadata event", {
@@ -658,12 +672,14 @@ export class BedrockProvider implements LLMProvider {
 				inputTokens: usage?.inputTokens,
 				outputTokens: usage?.outputTokens,
 				totalTokens: usage?.totalTokens,
+				stopReason: streamState.stopReason,
 			});
 			if (usage) {
 				yield {
 					type: "message_end",
 					input_tokens: usage.inputTokens ?? 0,
 					output_tokens: usage.outputTokens ?? 0,
+					stop_reason: streamState.stopReason,
 				};
 			}
 		}

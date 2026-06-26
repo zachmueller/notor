@@ -101,7 +101,19 @@ export type StreamChunk =
 	| { type: "tool_call_start"; id: string; tool_name: string }
 	| { type: "tool_call_delta"; id: string; partial_json: string }
 	| { type: "tool_call_end"; id: string }
-	| { type: "message_end"; input_tokens: number; output_tokens: number }
+	| {
+			type: "message_end";
+			input_tokens: number;
+			output_tokens: number;
+			/**
+			 * Provider stop/finish reason, normalized to the raw provider string
+			 * (e.g. Anthropic "max_tokens"/"end_turn", OpenAI/local "length"/"stop",
+			 * Bedrock "max_tokens"/"end_turn"). Optional — providers populate it when
+			 * available so the stream parser can detect output-ceiling truncation that
+			 * cut off a tool call mid-write.
+			 */
+			stop_reason?: string;
+	  }
 	| { type: "error"; error: string };
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,12 @@ function makeProvider(): AnthropicProvider {
 	return new AnthropicProvider({ id: "test", endpoint: "" } as never, {} as App);
 }
 
-function blockStart(provider: AnthropicProvider, contentBlock: Record<string, unknown>): StreamChunk[] {
+function handleEvent(
+	provider: AnthropicProvider,
+	eventType: string,
+	data: Record<string, unknown>,
+	streamState: { pendingInputTokens: number } = { pendingInputTokens: 0 },
+): StreamChunk[] {
 	// handleAnthropicEvent is private; access via cast for a focused unit test.
 	const handle = (provider as unknown as {
 		handleAnthropicEvent: (
@@ -27,7 +32,11 @@ function blockStart(provider: AnthropicProvider, contentBlock: Record<string, un
 			streamState: { pendingInputTokens: number },
 		) => Iterable<StreamChunk>;
 	}).handleAnthropicEvent.bind(provider);
-	return [...handle("content_block_start", { content_block: contentBlock }, { pendingInputTokens: 0 })];
+	return [...handle(eventType, data, streamState)];
+}
+
+function blockStart(provider: AnthropicProvider, contentBlock: Record<string, unknown>): StreamChunk[] {
+	return handleEvent(provider, "content_block_start", { content_block: contentBlock });
 }
 
 describe("AnthropicProvider — thinking block lifecycle", () => {
@@ -52,5 +61,31 @@ describe("AnthropicProvider — thinking block lifecycle", () => {
 	it("still emits tool_call_start for tool_use blocks", () => {
 		const chunks = blockStart(makeProvider(), { type: "tool_use", id: "tu_1", name: "read_note" });
 		expect(chunks).toEqual([{ type: "tool_call_start", id: "tu_1", tool_name: "read_note" }]);
+	});
+});
+
+describe("AnthropicProvider — stop_reason on message_end", () => {
+	it("surfaces stop_reason=max_tokens with the output token count", () => {
+		const chunks = handleEvent(
+			makeProvider(),
+			"message_delta",
+			{ stop_reason: "max_tokens", usage: { output_tokens: 4096 } },
+			{ pendingInputTokens: 12 },
+		);
+		expect(chunks).toEqual([
+			{ type: "message_end", input_tokens: 12, output_tokens: 4096, stop_reason: "max_tokens" },
+		]);
+	});
+
+	it("passes through a normal end_turn stop reason", () => {
+		const chunks = handleEvent(
+			makeProvider(),
+			"message_delta",
+			{ stop_reason: "end_turn", usage: { output_tokens: 10 } },
+			{ pendingInputTokens: 5 },
+		);
+		expect(chunks).toEqual([
+			{ type: "message_end", input_tokens: 5, output_tokens: 10, stop_reason: "end_turn" },
+		]);
 	});
 });

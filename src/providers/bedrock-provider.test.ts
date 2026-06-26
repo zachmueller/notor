@@ -49,14 +49,20 @@ function expiredTokenError(): Error {
 	return e;
 }
 
+type BedrockEventHandler = (
+	event: unknown,
+	activeToolBlockIndices: Map<number, string>,
+	streamState: { stopReason?: string },
+) => Iterable<StreamChunk>;
+
+function getHandler(provider: BedrockProvider): BedrockEventHandler {
+	return (provider as unknown as { handleBedrockEvent: BedrockEventHandler }).handleBedrockEvent.bind(
+		provider,
+	);
+}
+
 function handleDelta(provider: BedrockProvider, delta: Record<string, unknown>): StreamChunk[] {
-	const handle = (provider as unknown as {
-		handleBedrockEvent: (
-			event: unknown,
-			activeToolBlockIndices: Map<number, string>,
-		) => Iterable<StreamChunk>;
-	}).handleBedrockEvent.bind(provider);
-	return [...handle({ contentBlockDelta: { delta, contentBlockIndex: 0 } }, new Map())];
+	return [...getHandler(provider)({ contentBlockDelta: { delta, contentBlockIndex: 0 } }, new Map(), {})];
 }
 
 describe("BedrockProvider — thinking reasoningContent deltas", () => {
@@ -78,6 +84,47 @@ describe("BedrockProvider — thinking reasoningContent deltas", () => {
 	it("emits text_delta for a normal answer delta (no reasoning)", () => {
 		const chunks = handleDelta(makeProvider(), { text: "answer" });
 		expect(chunks).toEqual([{ type: "text_delta", text: "answer" }]);
+	});
+});
+
+describe("BedrockProvider — stop_reason on message_end", () => {
+	it("attaches messageStop.stopReason to the single metadata-driven message_end", () => {
+		const provider = makeProvider();
+		const handle = getHandler(provider);
+		const indices = new Map<number, string>();
+		const streamState: { stopReason?: string } = {};
+
+		// messageStop arrives first (no message_end of its own — avoids double-emit)…
+		const stopChunks = [...handle({ messageStop: { stopReason: "max_tokens" } }, indices, streamState)];
+		expect(stopChunks).toEqual([]);
+		expect(streamState.stopReason).toBe("max_tokens");
+
+		// …then the metadata event yields exactly one message_end carrying both the
+		// real token counts and the stashed stop reason.
+		const metaChunks = [
+			...handle(
+				{ metadata: { usage: { inputTokens: 100, outputTokens: 4096 } } },
+				indices,
+				streamState,
+			),
+		];
+		expect(metaChunks).toEqual([
+			{ type: "message_end", input_tokens: 100, output_tokens: 4096, stop_reason: "max_tokens" },
+		]);
+	});
+
+	it("emits message_end with undefined stop_reason when no messageStop preceded metadata", () => {
+		const provider = makeProvider();
+		const chunks = [
+			...getHandler(provider)(
+				{ metadata: { usage: { inputTokens: 5, outputTokens: 6 } } },
+				new Map(),
+				{},
+			),
+		];
+		expect(chunks).toEqual([
+			{ type: "message_end", input_tokens: 5, output_tokens: 6, stop_reason: undefined },
+		]);
 	});
 });
 

@@ -1220,6 +1220,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					eagerContentEl,
 					() => this.getViewForSession(session),
 					thinkingEnabled,
+					{ onPartialToolCall: this.dispatcher.makePartialToolCallHandler() },
 				);
 
 				// 8. Handle result

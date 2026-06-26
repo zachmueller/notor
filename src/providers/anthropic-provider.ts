@@ -35,6 +35,8 @@ interface AnthropicEventData {
 	index?: number;
 	usage?: { input_tokens?: number; output_tokens?: number };
 	message?: { usage?: { input_tokens?: number } };
+	/** Stop reason on the message_delta event (e.g. "end_turn", "max_tokens"). */
+	stop_reason?: string | null;
 	error?: { message?: string };
 }
 
@@ -455,6 +457,7 @@ export class AnthropicProvider implements LLMProvider {
 						type: "message_end",
 						input_tokens: streamState.pendingInputTokens,
 						output_tokens: data.usage.output_tokens ?? 0,
+						stop_reason: data.stop_reason ?? undefined,
 					};
 				}
 				break;

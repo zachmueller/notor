@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
-import { parseStreamEvents, type ParsedStreamEvent } from "./stream-utils";
+import { parseStreamEvents, type ParsedStreamEvent, type ParseStreamOpts } from "./stream-utils";
 import type { StreamChunk } from "../providers/provider";
 
 // ---------------------------------------------------------------------------
@@ -13,10 +13,14 @@ async function* fromChunks(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
 	}
 }
 
-async function collect(chunks: StreamChunk[], signal?: AbortSignal): Promise<ParsedStreamEvent[]> {
+async function collect(
+	chunks: StreamChunk[],
+	signal?: AbortSignal,
+	opts?: ParseStreamOpts,
+): Promise<ParsedStreamEvent[]> {
 	const events: ParsedStreamEvent[] = [];
 	const ac = signal ? { signal } : new AbortController();
-	for await (const event of parseStreamEvents(fromChunks(chunks), ac.signal)) {
+	for await (const event of parseStreamEvents(fromChunks(chunks), ac.signal, opts)) {
 		events.push(event);
 	}
 	return events;
@@ -147,5 +151,138 @@ describe("parseStreamEvents — streaming tool calls", () => {
 
 		expect(events.some((e) => e.type === "tool_call")).toBe(false);
 		expect(events.at(-1)?.type).toBe("error");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// partial tool-call content preservation (diagnostic stage)
+// ---------------------------------------------------------------------------
+
+describe("parseStreamEvents — partial tool-call preservation", () => {
+	it("spills the accumulated JSON and surfaces the path on a parse failure", async () => {
+		const onPartialToolCall = vi.fn().mockResolvedValue("/tmp/notor-spillover/x.txt");
+		const events = await collect(
+			[
+				{ type: "tool_call_start", id: "t1", tool_name: "write_note" },
+				{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"a.md","content":"hello' },
+				{ type: "tool_call_end", id: "t1" },
+			],
+			undefined,
+			{ onPartialToolCall },
+		);
+
+		expect(onPartialToolCall).toHaveBeenCalledTimes(1);
+		expect(onPartialToolCall).toHaveBeenCalledWith({
+			toolName: "write_note",
+			partialJson: '{"path":"a.md","content":"hello',
+			reason: "parse_failure",
+		});
+
+		expect(events.some((e) => e.type === "tool_call")).toBe(false);
+		const last = events.at(-1);
+		expect(last?.type).toBe("error");
+		expect((last as Extract<ParsedStreamEvent, { type: "error" }>).message).toContain(
+			"/tmp/notor-spillover/x.txt",
+		);
+	});
+
+	it("still errors (without throwing) on a parse failure when no spill callback is given", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "t1", tool_name: "write_note" },
+			{ type: "tool_call_delta", id: "t1", partial_json: "{not valid" },
+			{ type: "tool_call_end", id: "t1" },
+		]);
+
+		expect(events.some((e) => e.type === "tool_call")).toBe(false);
+		expect(events.at(-1)?.type).toBe("error");
+	});
+
+	it("preserves an unfinished tool call when the stream ends with stop_reason=length and no tool_call_end", async () => {
+		const onPartialToolCall = vi.fn().mockResolvedValue("/tmp/spill.txt");
+		const events = await collect(
+			[
+				{ type: "tool_call_start", id: "t1", tool_name: "write_note" },
+				{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"a.md","content":"abc' },
+				{ type: "message_end", input_tokens: 1, output_tokens: 2, stop_reason: "length" },
+				// NOTE: no tool_call_end — provider hit the output ceiling mid-call.
+			],
+			undefined,
+			{ onPartialToolCall },
+		);
+
+		expect(onPartialToolCall).toHaveBeenCalledWith({
+			toolName: "write_note",
+			partialJson: '{"path":"a.md","content":"abc',
+			reason: "max_tokens",
+		});
+		expect(events.some((e) => e.type === "tool_call")).toBe(false);
+		expect(events.at(-1)?.type).toBe("error");
+	});
+
+	it("classifies an unfinished call with no stop reason as truncated_stream", async () => {
+		const onPartialToolCall = vi.fn().mockResolvedValue(undefined);
+		const events = await collect(
+			[
+				{ type: "tool_call_start", id: "t1", tool_name: "write_note" },
+				{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"a.md"' },
+				// stream simply ends — no message_end, no tool_call_end.
+			],
+			undefined,
+			{ onPartialToolCall },
+		);
+
+		expect(onPartialToolCall).toHaveBeenCalledWith({
+			toolName: "write_note",
+			partialJson: '{"path":"a.md"',
+			reason: "truncated_stream",
+		});
+		expect(events.at(-1)?.type).toBe("error");
+	});
+
+	it("does NOT treat a user abort as truncation (cancelled, no spill)", async () => {
+		const onPartialToolCall = vi.fn();
+		const ac = new AbortController();
+		ac.abort();
+
+		const events = await collect(
+			[
+				{ type: "tool_call_start", id: "t1", tool_name: "write_note" },
+				{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"a.md"' },
+			],
+			ac.signal,
+			{ onPartialToolCall },
+		);
+
+		expect(onPartialToolCall).not.toHaveBeenCalled();
+		expect(events.some((e) => e.type === "error")).toBe(false);
+		expect(events.at(-1)?.type).toBe("cancelled");
+	});
+
+	it("does not leak a finalized call's JSON into a later truncated call's spill", async () => {
+		const onPartialToolCall = vi.fn().mockResolvedValue("/tmp/spill.txt");
+		const events = await collect(
+			[
+				// First call parses cleanly.
+				{ type: "tool_call_start", id: "t1", tool_name: "read_note" },
+				{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"a.md"}' },
+				{ type: "tool_call_end", id: "t1" },
+				// Second call is truncated.
+				{ type: "tool_call_start", id: "t2", tool_name: "write_note" },
+				{ type: "tool_call_delta", id: "t2", partial_json: '{"path":"b.md","content":"xyz' },
+				{ type: "message_end", input_tokens: 1, output_tokens: 2, stop_reason: "length" },
+			],
+			undefined,
+			{ onPartialToolCall },
+		);
+
+		// The first call still finalizes normally.
+		expect(events.some((e) => e.type === "tool_call")).toBe(true);
+		// The spill carries ONLY the second call's JSON — no leakage from the first.
+		expect(onPartialToolCall).toHaveBeenCalledTimes(1);
+		expect(onPartialToolCall).toHaveBeenCalledWith({
+			toolName: "write_note",
+			partialJson: '{"path":"b.md","content":"xyz',
+			reason: "max_tokens",
+		});
 	});
 });
