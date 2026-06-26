@@ -21,12 +21,13 @@
 8. [Programmatic Code Steps](#programmatic-code-steps)
 9. [Conversation Model](#conversation-model)
 10. [Session Workspace](#session-workspace)
-11. [Safety Mechanisms](#safety-mechanisms)
-12. [Tools (Built-in Scaffolds)](#tools-built-in-scaffolds)
-13. [Feature Group Settings](#feature-group-settings)
-14. [Built-in Orchestration Creator Persona](#built-in-orchestration-creator-persona)
-15. [Implementation Phases](#implementation-phases)
-16. [Risk Assessment](#risk-assessment)
+11. [Composition / Flow Handoff](#composition--flow-handoff)
+12. [Safety Mechanisms](#safety-mechanisms)
+13. [Tools (Built-in Scaffolds)](#tools-built-in-scaffolds)
+14. [Feature Group Settings](#feature-group-settings)
+15. [Built-in Orchestration Creator Persona](#built-in-orchestration-creator-persona)
+16. [Implementation Phases](#implementation-phases)
+17. [Risk Assessment](#risk-assessment)
 
 ---
 
@@ -121,7 +122,7 @@ OrchestrationRunner
   ├── OrchestrationEventEngine      (pub/sub with wildcard)
   │     └── FallbackCoordinator     ("*" wildcard subscriber)
   ├── StepPromptBuilder             (wraps instructions in scaffold)
-  ├── StepTurnExecutor              (creates session, runs responseLoop OR code)
+  ├── StepTurnExecutor            (creates session, runs responseLoop OR code; runs step turns on the shared RunLoop)
   │     ├── PersonaManager          (activates step's persona — conversation steps)
   │     ├── emit_event scaffold     (captures events — conversation steps)
   │     └── CodeStepExecutor        (compiles + runs TypeScript — code steps)
@@ -129,6 +130,30 @@ OrchestrationRunner
   ├── OrchestrationSessionManager   (workspace, event log, recovery)
   └── UI: command palette + Notice system
 ```
+
+### Run-Loop Engine (shared execution substrate)
+
+Step turns do **not** run on the full `ChatOrchestrator.responseLoop()` (which carries
+persistence, compaction, view rendering, hooks) nor a hand-rolled loop. They run on a
+generalized **`RunLoop`** — a headless turn engine extracted from `SubAgentRunner` (which
+already describes itself as "a lightweight mini-orchestrator"). The same `RunLoop` underpins
+sub-agents and flow-as-tool invocation.
+
+- **`RunContext`** (carried as an optional field on `ToolExecuteOptions`, riding the existing
+  dispatch seam): `{ depth, maxDepth, iterationsRemaining, costRemainingUsd, abort }`. A child
+  run inherits the parent's remaining budget and `depth + 1`; spawning checks `depth <
+  maxDepth` and budget before launching. This **replaces the sub-agent binary recursion ban**
+  (`SUBAGENT_EXCLUDED_TOOLS` + `_isSubAgentContext`): sub-agents pass `maxDepth = 0`
+  (identical behavior to today); flows pass `maxDepth = N` or unlimited.
+- **`RunResult`** is always-both: `text` (always present) + optional `structured` payload slot
+  (populated by a terminal code step). `SubAgentResult` is a strict subset (`structured` stays
+  null), so the refactor is non-breaking.
+- Child-run concurrency uses a shared semaphore in the run-loop layer; aggregate
+  `max_iterations` / `max_cost_usd` / `max_depth` decrement across the flow tree via
+  `RunContext`.
+
+Full design: `ai/notor/ideas/Generalized run-loop engine for sub-agents and orchestration.md`.
+This extraction is a prerequisite for Phase 1's `StepTurnExecutor` and Phase 7's flow-as-tool.
 
 ### Relationship to Existing Systems
 
@@ -226,6 +251,14 @@ phases automatically.
 | `notor-required-events` | string[] | Events that must have been seen before completion is accepted |
 | `notor-steps` | wikilink[] | Ordered list of step note references (resolved under `steps/`) |
 | `notor-guardrails` | string[] | Constraints injected into every step's system prompt |
+| `notor-flow-invocable` | boolean | Whether this flow may be called as a tool by other flows' steps (default `false`; opt-in to appear in the `run_flow` registry) |
+| `notor-flow-inputs` | string | **Freeform natural-language** description of what the flow expects to begin. Not strictly typed. Lives in the callee; surfaced to any caller. |
+| `notor-flow-returns` | string | **Freeform** description of what the flow hands back to a caller. |
+| `notor-on-complete-flow` | wikilink \| null | Chaining: successor flow launched at the terminal event (one-way handoff, no return) |
+| `notor-handoff-isolation` | `"isolated"` \| `"shared"` | Per-handoff scratchpad mode (default `isolated`; `shared` inherits the parent's scratchpad) |
+| `notor-max-depth` | number | Composition-depth guardrail (caps nesting/chaining; alongside cascading `max_iterations` / `max_cost_usd`) |
+
+> Composition fields are inert unless the orchestration feature group is enabled. `notor-flow-inputs` / `notor-flow-returns` are deliberately loose (natural-language) — the design leans on LLM flexibility to coerce data to fit. See [[ai/notor/ideas/Make orchestration flows highly composable]].
 
 **Note body:** The body of `definition.md` is human-readable documentation. It is not
 injected into any LLM prompt — only the frontmatter drives engine behavior.
@@ -749,41 +782,85 @@ history directory. This enables:
 
 ### Conversation Header Metadata
 
-The JSONL conversation header includes orchestration-specific fields:
+The JSONL header carries orchestration metadata plus a typed-edge adjacency list:
 
-```json
-{
-  "_type": "conversation",
-  "id": "step-conv-uuid",
-  "created_at": "...",
-  "provider_id": "...",
-  "model_id": "...",
-  "title": "[Code Implementation] Planner — iteration 3",
-  "orchestration_session_id": "session-uuid",
-  "orchestration_flow_name": "Code Implementation",
-  "orchestration_step_name": "📋 Planner",
-  "orchestration_iteration": 3,
-  "orchestration_previous_conversation_id": "prev-step-conv-uuid",
-  "orchestration_next_conversation_id": null
-}
-```
+    {
+      "_type": "conversation",
+      "id": "step-conv-uuid",
+      "title": "[Code Implementation] Planner — iteration 3",
+      "orchestration_session_id": "session-uuid",
+      "orchestration_flow_name": "Code Implementation",
+      "orchestration_step_name": "📋 Planner",
+      "orchestration_iteration": 3,
+      "orchestration_edges": [
+        { "kind": "prev",  "conversation_id": "..." },
+        { "kind": "next",  "conversation_id": "..." },
+        { "kind": "child", "conversation_id": "...", "session_id": "...", "via_tool_call_id": "..." },
+        { "kind": "parent","conversation_id": "...", "session_id": "..." }
+      ]
+    }
 
-**Navigation fields:**
-- `orchestration_session_id` — links all conversations in the same flow run
-- `orchestration_previous_conversation_id` — the step conversation that ran before this one
-- `orchestration_next_conversation_id` — set after the next step completes (backfilled)
+**Edge model: typed edges, tree-constrained (a DAG).** `kind ∈ {next, prev, child, parent}`.
+This **replaces** the earlier linear `orchestration_previous/next_conversation_id` scalars.
 
-### Conversation Navigation
+- `next` / `prev` — step chain within one flow (backfilled, as the old scalars were).
+- `child` — a calling step's `run_flow` (or a chaining handoff) points to the child flow's
+  entry conversation; carries `session_id` (child session) and `via_tool_call_id` (the
+  specific invoking call, so the UI can render "descend" on that exact tool-call card). The
+  `child` edge is the **uniform structural source for both invocation and chaining** (chained
+  children have no tool call, so a tool-result-only scheme could not represent them).
+- `parent` — back-link from the child entry to the caller.
+- **No cyclic / sibling / `return` edges.** The mechanisms only ever produce hierarchy.
+  Returning from a deep child to the caller is one hop via `parent`. Keeping it a pure DAG
+  keeps crash-recovery replay and aggregate-budget rollup cycle-free.
 
-The `search_chat_history` and `read_chat_history` tools (existing) work with
-orchestration conversations. New capabilities to support:
+### Child Run Metadata (shared with sub-agents)
 
-1. **Filter by orchestration session** — list all conversations for a given session ID
-2. **Navigate previous/next** — jump to the prior or following conversation in the flow
-3. **Session overview** — list all step conversations for a session with step names and statuses
+The existing `ToolResult.sub_agent_metadata` is **generalized into a shared
+`child_run_metadata` block** used by **both** `use_subagent` and `run_flow`, with one
+rendering path (the inline expandable child-conversation card) and one token-rollup path
+(`convManager.addTokens(...)` at tool-return time, in `orchestrator.ts` /
+`chat/workflow-executor.ts`).
 
-These are implemented as extensions to the existing conversation history tools, gated
-behind the orchestration feature group.
+- Fields: `{ jsonl_filename | entry_conversation_id, session_id, token_usage, cost_usd,
+  iteration_count, depth, stop_reason, name }`.
+- For **flows**, the rollup carries **aggregate subtree numbers** (cost / iterations / depth
+  accumulated across the entire child flow tree, sourced from the child `RunContext`) — not
+  just the direct child. Sub-agents populate the same fields with single-run totals (subtree =
+  themselves).
+- **Back-compat:** the shared shape must keep `sub_agent_metadata`'s existing fields
+  (`jsonl_filename`, `token_usage`, `iteration_count`, `stop_reason`, `profile_name`) readable
+  for already-persisted conversations.
+
+### Conversation Navigation — unified run-tree view
+
+Orchestration step conversations **and** sub-agent conversations are **hidden from the flat
+conversation sidebar** (sub-agents already are, via `isSubAgentFilename` / `_type:
+"sub_agent_conversation"` filtered out of `listConversations()`). They are surfaced via a new
+contextual **run-tree view**:
+
+- Reachable by clicking the spawning block in the main chat (the `run_flow` / sub-agent
+  tool-call card), reusing the existing `notor-conversation://{id}` jump + `switchToConversationById`.
+- **Unified** for orchestration and sub-agents — one tree renders both (it reads
+  `orchestration_edges` and sub-agents' existing `parent_conversation_id`).
+- **Live for active runs, static for completed runs** — in-flight runs subscribe to runner
+  state changes (reusing the `WorkflowActivityTracker.onChange()` pattern; turn.start /
+  turn.complete / event.emitted are the `session-log.jsonl` write points), highlighting the
+  current node; completed runs render once from the persisted log. A recovered run re-attaches
+  its subscription.
+- **Collapse/expand:** smart auto-expand the spine to the active / most-recent node and
+  collapse finished branches on each open; manual collapse state is **ephemeral** (not
+  persisted).
+
+### Activity indicator (unified)
+
+Generalize toward **one** "activity" indicator with **typed entries**: background-workflow
+entries navigate to their conversation (as today); **flow-run entries open the run-tree
+view**. Do not build a second parallel indicator. The surface reads from **two sources**:
+in-memory for background workflows (`WorkflowConcurrencyManager`, lost on reload) and
+session-file-backed for flows (which have crash recovery). Staged: the first orchestration cut
+may feed flow runs in as a distinct source rather than a full `WorkflowActivityTracker`
+refactor.
 
 ### Conversation Title Convention
 
@@ -881,6 +958,86 @@ Cross-session learnings at `{notor_dir}/orchestrations/memories.md`:
 The `StepPromptBuilder` tells every step to check this note before acting in
 unfamiliar territory and to record fix memories when blocked.
 
+### Parent/Child Sessions
+
+`session.json` records `parent_session_id` and the invocation/chain origin. Child sessions
+(from flow-as-tool or chaining) link into the parent's recovery tree so a crash can resume the
+whole tree coherently. Child-run conversation/session handles also surface on the caller's
+`child_run_metadata` (flow-as-tool) and via the `orchestration_edges` `child` edge.
+
+### Scratchpad isolation modes
+
+- `isolated` (default): child gets a fresh `scratchpad/` and `tasks/`, like a sub-agent.
+- `shared` (`notor-handoff-isolation: shared`): child inherits the parent's scratchpad; the
+  parent scratchpad path is auto-allowed in the child's path enforcement
+  (`tool-config/path-enforcer.ts`).
+
+---
+
+## Composition / Flow Handoff
+
+Flows compose as reusable building blocks. Two mechanisms share one self-describing,
+loosely-typed contract. Full rationale: see the idea notes
+(`ai/notor/ideas/Make orchestration flows highly composable.md`).
+
+### The self-describing contract
+
+Each flow declares, in its own `definition.md`, freeform natural-language descriptions of
+what it consumes (`notor-flow-inputs`) and produces (`notor-flow-returns`). The contract
+lives in the **callee**, so every upstream caller receives the same description and stays
+decoupled. Deliberately not strictly typed — the LLM coerces messy data to fit.
+
+### Mechanism A — Flow-as-invocable-tool (primary)
+
+A flow with `notor-flow-invocable: true` becomes callable by other flows' steps via a
+single built-in **`run_flow`** tool (gated by the orchestration feature group):
+
+- `run_flow` has a `flow` parameter that is an **enum of discovered invocable flow names**,
+  with each flow's `notor-flow-inputs` surfaced in the tool description — exactly the
+  `use_subagent` pattern (dynamic `get description()` / `get input_schema()`). Flow names are
+  enum *values*, so naming collisions are sidestepped entirely.
+- A single loose `payload` arg matches the loose contract. The caller's LLM fills `{flow,
+  payload}` (dynamic), `definition.md` can pre-bind them (static), or mix.
+- Invocation runs the child flow to its terminal event in a **child session** on a child
+  `RunLoop` (see Run-Loop Engine note), then returns the child's result to the caller.
+- **Returns** are satisfied two ways: a terminal **code step** returns a structured payload
+  deterministically (preferred, reliable), OR a final **conversation step** is instructed via
+  `notor-flow-returns` to "produce this as your closing message". The executor reads whichever
+  the terminal step produced; the `RunResult` is always-both (prefer `structured`, fall back
+  to `text`).
+
+Discovery mirrors `SubAgentManager`: a stateless `FlowCompositionManager` re-scans
+`orchestrations/*/definition.md` for `notor-flow-invocable: true` on demand.
+
+### Mechanism B — Chaining / one-way handoff (secondary)
+
+At the terminal event, if `notor-on-complete-flow` is set, the runner launches the successor
+instead of finalizing. No return to the originator — the chain *is* the end of the starting
+flow.
+
+- **Decoupling:** the engine injects the successor's `notor-flow-inputs` into the
+  predecessor's terminal step, so the predecessor shapes its forwarded payload to fit without
+  hardcoding knowledge of the successor.
+- **Handoff adaptation (tiered):** default is free **prompt-injection** (inject the
+  successor's input description into the terminal step). For non-trivial reshaping, the chain
+  edge may declare an **optional adapter**, **code-step preferred** (deterministic), or an LLM
+  turn if genuinely fuzzy.
+- Data forwards via the emitted payload (default) or shared scratchpad
+  (`notor-handoff-isolation: shared`).
+
+### Callee-agnostic entry
+
+A flow enters identically regardless of how it was reached — same `notor-starting-event`,
+same payload-conforms-to-`notor-flow-inputs` expectation. Only the **return path** differs:
+flow-as-tool routes the result back to the waiting caller; chaining treats completion as
+terminal.
+
+### Isolation
+
+Per-handoff, default `isolated` (fresh scratchpad/tasks, like a sub-agent). `shared` mode
+opts into the parent's scratchpad and auto-allows the parent scratchpad path in the child's
+path enforcement.
+
 ---
 
 ## Safety Mechanisms
@@ -896,6 +1053,7 @@ Essential to prevent infinite token burn on stuck loops:
 | `default_publishes` synthesis | Step produces no `emit_event` call | Auto-fire the default topic |
 | `required_events` enforcement | Completion event received before all required events seen | Block completion, inject resume |
 | `max_cost_usd` | Cumulative LLM cost exceeds limit | Terminate flow |
+| `max_depth` | Composition depth exceeds limit when spawning a child flow/sub-agent | Reject the spawn; surface to caller |
 
 ### Stale Loop Detection
 
@@ -916,6 +1074,15 @@ function isStale(history: OrchestrationEvent[]): boolean {
 
 Track per-task abandonment counts. When a step emits `tasks.ready` for a task key
 that has been abandoned (started then re-queued) 3+ times, the loop is thrashing.
+
+### Cascading / Aggregate Guardrails Across a Flow Tree
+
+With composition, `max_iterations` and `max_cost_usd` are **aggregate across the whole flow
+tree**, not per-session. They live on the `RunContext` (see Run-Loop Engine) and decrement as
+children spawn, so a tree of flows cannot collectively blow past budget even though each
+individual flow looks within limits. `max_depth` caps nesting/chaining depth. Arbitrary depth
+is permitted unless a limit is set. A child run inheriting an exhausted budget fails its spawn
+check and returns control to the caller (flow-as-tool) or terminates the chain (chaining).
 
 ---
 
@@ -942,6 +1109,29 @@ params:
 session context, and returns a confirmation. The actual event publishing happens
 after the `responseLoop()` completes (the engine reads the captured event from
 the session). This prevents mid-turn event routing.
+
+**Mode:** `write` (only available in Act mode)
+
+### `run_flow`
+
+Calls another flow as a tool (Mechanism A in [Composition / Flow Handoff](#composition--flow-handoff)).
+Gated by the orchestration feature group. Mirrors the `use_subagent` dynamic-description pattern:
+
+```yaml
+params:
+  flow:
+    type: string  # enum of discovered invocable flow names (notor-flow-invocable: true)
+    description: "Which flow to invoke; each flow's notor-flow-inputs is surfaced dynamically"
+  payload:
+    type: string
+    description: "Loose, natural-language input conforming to the callee's notor-flow-inputs"
+```
+
+**Implementation:** A stateless `FlowCompositionManager` discovers invocable flows on demand;
+the tool's `flow` enum and per-flow input descriptions are built dynamically (`get description()`
+/ `get input_schema()`). Invocation runs the child flow to its terminal event on a child
+`RunLoop` in a child session, then returns the child's `RunResult` (prefer `structured`, fall
+back to `text`) to the caller.
 
 **Mode:** `write` (only available in Act mode)
 
@@ -1110,6 +1300,15 @@ Added to `BUILTIN_PERSONA_PROFILES` in `src/personas/builtin-personas.ts` alongs
 
 **Goal:** Run a flow end-to-end with correct step routing and loop termination.
 
+> **Prerequisite — Run-Loop extraction.** Before `StepTurnExecutor`, extract the generalized
+> `RunLoop` from `SubAgentRunner` (new `src/run-loop/`), and refactor `SubAgentRunner` to
+> consume it. This yields `RunContext` (depth/budget cascade) and the always-both `RunResult`
+> that Phase 7 composition depends on. See
+> `ai/notor/ideas/Generalized run-loop engine for sub-agents and orchestration.md`.
+> Foundational steps: (1) extract `RunContext`/`RunResult`/hook types; (2) lift the loop into
+> `RunLoop` + refactor `SubAgentRunner`; (3) add `runContext` to `ToolExecuteOptions` and
+> enforce depth via it; (4) cascading budget/concurrency helpers.
+
 | Component | Complexity | Description |
 |-----------|-----------|-------------|
 | `FlowDefinitionParser` | Low | Parse `definition.md` frontmatter |
@@ -1198,6 +1397,25 @@ src/orchestration/
 | `orchestration-creator` built-in persona | Medium (prompt engineering) |
 | Reference flows (code-assist, research, review) | Medium (prompt engineering) |
 
+### Phase 7: Composability / Flow Handoff
+
+**Goal:** flows compose via flow-as-tool (call/return) and chaining (one-way handoff) over the
+self-describing loose contract. Full design:
+`ai/notor/ideas/Make orchestration flows highly composable.md`.
+
+| Component | Complexity |
+|-----------|-----------|
+| `definition.md` composition frontmatter + parser (`notor-flow-inputs/returns/invocable`, `notor-on-complete-flow`, `notor-handoff-isolation`, `notor-max-depth`) | Low |
+| `FlowCompositionManager` — stateless re-scan discovery of invocable flows | Medium |
+| Single `run_flow` tool (dynamic `flow` enum + loose `payload`); registers gated by feature group | Medium |
+| Flow-as-tool execution + return capture over a child `RunLoop` (generalize `chat/workflow-executor.ts` await-result) | Medium |
+| Child session creation + `parent_session_id` + isolation modes | Medium |
+| Chaining at terminal event + input-description injection + optional code-step adapter | Medium |
+| Cascading guardrails + `max_depth` on `RunContext` | Small/Medium |
+| `orchestration_edges` typed-edge schema + `child_run_metadata` generalization + unified run-tree view | Medium |
+
+Mechanism A (flow-as-tool) is the high-value core and can ship before chaining.
+
 ---
 
 ## Risk Assessment
@@ -1232,5 +1450,22 @@ src/orchestration/
   good tools to diagnose what happened. The per-step conversation model helps (each step
   is independently inspectable), but the flow-level view (which step ran when, what events
   were exchanged) needs thoughtful UX.
+
+### Composition Risks (design resolved 2026-06-27)
+
+- **Run-loop refactor regression (Medium).** `SubAgentRunner` is load-bearing
+  (`use_subagent`, `sub-agent-runner.test.ts`). The `RunLoop` extraction must be
+  behavior-preserving — identical caps, wind-down, abort behavior; gate on the existing suite.
+- **Recursion/budget cascade (Low–Medium).** Replacing the binary sub-agent ban with a
+  `RunContext` depth counter must preserve today's "no nested sub-agents" behavior
+  (`maxDepth = 0`) while enabling arbitrary flow depth. Aggregate budget accounting depends on
+  per-turn cost (`message-pipeline.ts` `calculateCost`) being reachable from the run-loop
+  layer without orchestrator-specific deps.
+- **Structured-return reliability (Medium).** Reliable structured returns depend on a terminal
+  code step populating the `structured` slot; the conversation-step `text` path is the loose
+  fallback. Flows whose `notor-flow-returns` implies structure but produce none degrade to
+  text (detectable, not fatal).
+- **Run-tree dual-source state (Low).** The unified activity surface reads in-memory workflow
+  state and session-file-backed flow state; the two must reconcile in one ordered view.
 
 
