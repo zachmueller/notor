@@ -1355,6 +1355,8 @@ export class NotorChatView extends ItemView {
 
 		const body = this.taskPanelEl.createDiv({ cls: "notor-task-panel-body" });
 		if (this.taskPanelCollapsed) body.addClass("notor-hidden");
+		let firstInProgressEl: HTMLElement | null = null;
+		let firstPendingEl: HTMLElement | null = null;
 		for (const task of tasks) {
 			const taskEl = body.createDiv({ cls: "notor-task-item" });
 			const icon = task.status === "completed" ? "☑"
@@ -1365,6 +1367,23 @@ export class NotorChatView extends ItemView {
 				: "";
 			if (cls) taskEl.addClass(cls);
 			taskEl.createSpan({ text: `${icon} ${task.content}` });
+			if (task.status === "in_progress" && !firstInProgressEl) firstInProgressEl = taskEl;
+			else if (task.status === "pending" && !firstPendingEl) firstPendingEl = taskEl;
+		}
+
+		// Auto-scroll the body to reveal the next unchecked task. The body is
+		// rebuilt every render (resetting scrollTop to 0), so for long lists with
+		// many completed tasks at the top, surface the active work instead. Skip
+		// when collapsed (the body is hidden with zero layout). Contained scrollTop
+		// math (not scrollIntoView) avoids perturbing the outer message list.
+		if (!this.taskPanelCollapsed) {
+			const target = firstInProgressEl ?? firstPendingEl;
+			if (target) {
+				body.scrollTop += target.getBoundingClientRect().top - body.getBoundingClientRect().top;
+			} else {
+				// All tasks completed — show the last/most-recent task.
+				body.scrollTop = body.scrollHeight;
+			}
 		}
 
 		header.addEventListener("click", () => {
