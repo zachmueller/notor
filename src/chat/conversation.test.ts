@@ -844,7 +844,7 @@ describe("ConversationManager.addMessage() — tool_call cloning", () => {
 		// The dispatcher reuses this same object for tool.execute, and the approval
 		// UI mutates parameters.changes on partial-accept. The persisted message
 		// must not share that reference.
-		const params = { path: "n.md", changes: [{ search: "a", replace: "b" }, { search: "c", replace: "d" }] };
+		const params = { path: "n.md", changes: [{ old_text: "a", new_text: "b" }, { old_text: "c", new_text: "d" }] };
 		const toolCall = { id: "tc1", tool_name: "replace_in_note", parameters: params, status: "pending" as const };
 
 		const msg = mgr.addMessage({ role: "tool_call", content: "", tool_call: toolCall });

@@ -315,10 +315,10 @@ export interface ExtensionUtils {
 		/** Callback invoked on right-click (desktop only). Notice is auto-hidden after. */
 		onRightClick?: () => void;
 	}) => void;
-	/** Unicode-normalized indexOf for fuzzy SEARCH/REPLACE matching. */
+	/** Unicode-normalized indexOf for fuzzy find/replace matching. */
 	normalizedIndexOf: (haystack: string, needle: string) => { index: number; length: number } | null;
 	/**
-	 * Tiered, drift-tolerant SEARCH/REPLACE matcher with uniqueness enforcement.
+	 * Tiered, drift-tolerant find/replace matcher with uniqueness enforcement.
 	 * Tries exact (normalized) → line-trimmed → intra-line-whitespace-flexible,
 	 * stopping at the first tier that yields candidates. Returns
 	 * `{ ok: true, match: { index, length } }` (offsets in the original string),

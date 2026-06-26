@@ -231,7 +231,7 @@ async function testMatchFailureReturnsContent(ctx: TestContext): Promise<void> {
 		seed: "none",
 		params: {
 			path: NOTE_REL,
-			changes: [{ search: "NONEXISTENT_SEARCH_ZZZ_QQQ", replace: "whatever" }],
+			changes: [{ old_text: "NONEXISTENT_SEARCH_ZZZ_QQQ", new_text: "whatever" }],
 		},
 	});
 
@@ -286,10 +286,10 @@ async function testReplaceStaleReturnsContent(ctx: TestContext): Promise<void> {
 		notePath: NOTE_REL,
 		seed: "stale",
 		params: {
-			// A search that WOULD match the current disk content — proving it was
+			// An old_text that WOULD match the current disk content — proving it was
 			// the stale check (which runs first), not a no-match, that blocked it.
 			path: NOTE_REL,
-			changes: [{ search: `Original body marker ${BODY_MARKER}`, replace: "edited" }],
+			changes: [{ old_text: `Original body marker ${BODY_MARKER}`, new_text: "edited" }],
 		},
 	});
 

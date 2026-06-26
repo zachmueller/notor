@@ -54,20 +54,20 @@ export interface FileDiff {
 }
 
 /**
- * A diff scoped to a single SEARCH/REPLACE block from `replace_in_note`.
- * Represents the change for one block only.
+ * A diff scoped to a single find/replace edit from `replace_in_note`.
+ * Represents the change for one edit only.
  */
 export interface BlockDiff {
-	/** 0-based index of the SEARCH/REPLACE block in the changes array. */
+	/** 0-based index of the edit in the changes array. */
 	blockIndex: number;
-	/** The search text for this block. */
-	searchText: string;
-	/** The replacement text for this block. */
-	replaceText: string;
-	/** The diff between searchText and replaceText. */
+	/** The text to find for this edit. */
+	oldText: string;
+	/** The replacement text for this edit. */
+	newText: string;
+	/** The diff between oldText and newText. */
 	diff: FileDiff;
 	/**
-	 * Whether this block results in a deletion (empty replace text).
+	 * Whether this edit results in a deletion (empty replacement text).
 	 * Convenience flag for the UI.
 	 */
 	isDeletion: boolean;
@@ -80,9 +80,9 @@ export interface BlockDiff {
 export interface ReplaceNoteDiff {
 	/** Path of the note being modified. */
 	notePath: string;
-	/** Per-block diffs for each SEARCH/REPLACE block. */
+	/** Per-block diffs for each find/replace edit. */
 	blocks: BlockDiff[];
-	/** The complete before/after diff if all blocks are applied. */
+	/** The complete before/after diff if all edits are applied. */
 	combinedDiff: FileDiff;
 }
 
@@ -172,23 +172,23 @@ export function computeWriteNoteDiff(
 // Replace-in-note diff
 // ---------------------------------------------------------------------------
 
-/** A single SEARCH/REPLACE block. */
+/** A single find/replace edit. */
 export interface ChangeBlock {
-	search: string;
-	replace: string;
+	old_text: string;
+	new_text: string;
 }
 
 /**
  * Compute per-block diffs and a combined diff for a `replace_in_note`
  * operation.
  *
- * Each block is diffed independently (search vs. replace text) for the
+ * Each edit is diffed independently (old_text vs. new_text) for the
  * per-change accept/reject UI. The combined diff shows the full note
- * before/after applying all blocks.
+ * before/after applying all edits.
  *
  * @param notePath      - Vault-relative path of the note.
  * @param noteContent   - Current full note content.
- * @param changeBlocks  - The SEARCH/REPLACE blocks to apply.
+ * @param changeBlocks  - The find/replace edits to apply.
  * @returns Per-block diffs and combined diff.
  */
 export function computeReplaceInNoteDiff(
@@ -198,13 +198,13 @@ export function computeReplaceInNoteDiff(
 ): ReplaceNoteDiff {
 	// Compute per-block diffs
 	const blocks: BlockDiff[] = changeBlocks.map((block, index) => {
-		const diff = computeDiff(block.search, block.replace);
+		const diff = computeDiff(block.old_text, block.new_text);
 		return {
 			blockIndex: index,
-			searchText: block.search,
-			replaceText: block.replace,
+			oldText: block.old_text,
+			newText: block.new_text,
 			diff,
-			isDeletion: block.replace === "",
+			isDeletion: block.new_text === "",
 		};
 	});
 
@@ -221,13 +221,13 @@ export function computeReplaceInNoteDiff(
 }
 
 /**
- * Apply a subset of SEARCH/REPLACE blocks to note content.
+ * Apply a subset of find/replace edits to note content.
  * Used to compute the after-content for a partial acceptance of changes.
  *
  * @param noteContent    - Original note content.
- * @param changeBlocks   - All blocks in the operation.
- * @param acceptedIndexes - Which block indexes to apply (all if omitted).
- * @returns Note content after applying accepted blocks.
+ * @param changeBlocks   - All edits in the operation.
+ * @param acceptedIndexes - Which edit indexes to apply (all if omitted).
+ * @returns Note content after applying accepted edits.
  */
 export function applyBlocks(
 	noteContent: string,
@@ -240,15 +240,15 @@ export function applyBlocks(
 		const block = changeBlocks[i];
 		if (!block) continue;
 
-		// Skip blocks not in the accepted set (if a set was provided)
+		// Skip edits not in the accepted set (if a set was provided)
 		if (acceptedIndexes !== undefined && !acceptedIndexes.has(i)) {
 			continue;
 		}
 
-		const matchResult = resilientIndexOf(result, block.search);
+		const matchResult = resilientIndexOf(result, block.old_text);
 		if (!matchResult.ok) {
-			// Block no longer matches uniquely — either it doesn't match (can happen
-			// when earlier blocks shift text) or it matches ambiguously (which the
+			// Edit no longer matches uniquely — either it doesn't match (can happen
+			// when earlier edits shift text) or it matches ambiguously (which the
 			// real atomic write will reject). Skip silently to preview the rest; the
 			// caller is responsible for presenting warnings.
 			continue;
@@ -256,7 +256,7 @@ export function applyBlocks(
 		const match = matchResult.match;
 
 		result =
-			result.slice(0, match.index) + block.replace + result.slice(match.index + match.length);
+			result.slice(0, match.index) + block.new_text + result.slice(match.index + match.length);
 	}
 
 	return result;

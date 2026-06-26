@@ -50,8 +50,8 @@ const FIXTURES: Record<string, string> = {
 async function dispatchReplace(
 	page: Page,
 	notePath: string,
-	search: string,
-	replace: string,
+	oldText: string,
+	newText: string,
 ): Promise<any> {
 	return page.evaluate(async (args) => {
 		const w = window as any;
@@ -78,7 +78,7 @@ async function dispatchReplace(
 		try {
 			const result = await dispatcher.dispatch(
 				"replace_in_note",
-				{ path: args.notePath, changes: [{ search: args.search, replace: args.replace }] },
+				{ path: args.notePath, changes: [{ old_text: args.oldText, new_text: args.newText }] },
 				"act",
 				"msg-replace",
 				undefined, // abortSignal
@@ -96,7 +96,7 @@ async function dispatchReplace(
 		} catch (e: any) {
 			return { ok: false, error: e?.message ?? String(e) };
 		}
-	}, { notePath, search, replace });
+	}, { notePath, oldText, newText });
 }
 
 // ---------------------------------------------------------------------------
@@ -106,8 +106,8 @@ async function dispatchReplace(
 interface SuccessCase {
 	label: string;
 	file: string;
-	search: string;
-	replace: string;
+	oldText: string;
+	newText: string;
 	/** Substring expected to be present after the write. */
 	expectPresent: string;
 	/** Substring expected to be ABSENT after the write (the original variant). */
@@ -117,7 +117,7 @@ interface SuccessCase {
 async function testSuccessCase(ctx: TestContext, c: SuccessCase, idx: number): Promise<void> {
 	console.log(`\nTest ${idx}: ${c.label}`);
 	const notePath = `${DIR}/${c.file}`;
-	const outcome = await dispatchReplace(ctx.page, notePath, c.search, c.replace);
+	const outcome = await dispatchReplace(ctx.page, notePath, c.oldText, c.newText);
 
 	if (!outcome.ok) {
 		ctx.fail(c.label, outcome.error ?? "dispatch failed");
@@ -207,32 +207,32 @@ async function tests(ctx: TestContext): Promise<void> {
 		{
 			label: "em-dash vs hyphen (normalized tier)",
 			file: "emdash.md",
-			search: "The plan-revised-ships Friday.", // hyphens; file has em-dashes
-			replace: "The plan is final.",
+			oldText: "The plan-revised-ships Friday.", // hyphens; file has em-dashes
+			newText: "The plan is final.",
 			expectPresent: "The plan is final.",
 			expectAbsent: "plan—revised",
 		},
 		{
 			label: "curly vs straight quotes (normalized tier)",
 			file: "quotes.md",
-			search: "He said \"hello\" to O'Brien.", // straight quotes; file has curly
-			replace: "He greeted everyone.",
+			oldText: "He said \"hello\" to O'Brien.", // straight quotes; file has curly
+			newText: "He greeted everyone.",
 			expectPresent: "He greeted everyone.",
 			expectAbsent: "“hello”",
 		},
 		{
 			label: "non-breaking space vs regular space (normalized tier)",
 			file: "nbsp.md",
-			search: "Total price: 100 dollars.", // regular space; file has NBSP
-			replace: "Total price: 200 dollars.",
+			oldText: "Total price: 100 dollars.", // regular space; file has NBSP
+			newText: "Total price: 200 dollars.",
 			expectPresent: "Total price: 200 dollars.",
 			expectAbsent: "Total price",
 		},
 		{
 			label: "altered leading indentation (line-trimmed tier)",
 			file: "indent.md",
-			search: "return 42;", // no indent; file line is indented 8 spaces
-			replace: "return 99;",
+			oldText: "return 42;", // no indent; file line is indented 8 spaces
+			newText: "return 99;",
 			expectPresent: "return 99;",
 			expectAbsent: "return 42;",
 		},

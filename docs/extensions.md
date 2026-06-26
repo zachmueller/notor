@@ -405,7 +405,7 @@ All extension code executes with these variables in scope:
 | `utils.pathEnforcer.enforcePathConstraints(toolName, params, entry)` | Apply path enforcement rules. |
 | `utils.pathEnforcer.isPathWithin(target, base)` | Check if a path is within a base directory. |
 | `utils.ensureDirectoryExists(filePath)` | Create intermediate vault directories for a file path. |
-| `utils.normalizedIndexOf(haystack, needle)` | Unicode-normalized `indexOf` for fuzzy SEARCH/REPLACE matching. Returns `{ index, length }` or `null`. |
+| `utils.normalizedIndexOf(haystack, needle)` | Unicode-normalized `indexOf` for fuzzy find/replace matching. Returns `{ index, length }` or `null`. |
 | `utils.readNote(path)` | Read the raw Markdown content of a vault note by vault-relative path. Returns `string`. |
 | `utils.resolveNotorPath(subdir)` | Resolve a subdirectory under the user's Notor dir. Returns a vault-relative path (e.g., `notor/memory`). |
 | `utils.queue.enqueue(lane, fn, delayMs?)` | Per-lane FIFO serialization queue. `utils.queue.pending(lane)` returns the pending count. |

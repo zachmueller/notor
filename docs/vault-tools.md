@@ -8,7 +8,7 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 |---|---|---|
 | `read_note` | Read a note's content (optionally including frontmatter and backlinks) | Plan & Act |
 | `write_note` | Create a new note or overwrite an existing one | Act only |
-| `replace_in_note` | Surgical SEARCH/REPLACE edits within a note | Act only |
+| `replace_in_note` | Surgical find/replace edits within a note | Act only |
 | `move_note` | Move and/or rename a note within the vault (auto-updates all internal links) | Act only |
 | `search_vault` | Regex/text search across notes with context lines | Plan & Act |
 | `list_vault` | List vault folder structure and file metadata | Plan & Act |
@@ -25,7 +25,7 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `import_docx` | Parse a `.docx` file and save its content as a Markdown note in the vault, extracting embedded images as vault attachments (desktop only) | Act only |
 | `write_docx` | Convert Markdown to a `.docx` file on the filesystem (desktop only) | Act only |
 | `write_file` | Write text content to a file on the filesystem (desktop only) | Act only |
-| `replace_in_file` | Make targeted SEARCH/REPLACE edits in a text file (desktop only) | Act only |
+| `replace_in_file` | Make targeted find/replace edits in a text file (desktop only) | Act only |
 | `extract_docx_comments` | Extract review comments from a `.docx` file and write them as a structured note (desktop only) | Act only |
 | `use_subagent` | Spawn a focused [sub-agent](sub-agents.md) child conversation for a specific task | Plan & Act |
 | `sleep` | Pause execution for a specified duration (useful in workflows and automations) | Plan & Act |
@@ -517,17 +517,17 @@ Writes text content to a file on the filesystem. Creates the file if it does not
 
 ### `replace_in_file`
 
-Makes targeted edits within a text file on the filesystem using SEARCH/REPLACE blocks — the filesystem counterpart to `replace_in_note`. The operation is atomic: if any search block fails to match, no changes are applied.
+Makes targeted find/replace edits within a text file on the filesystem — the filesystem counterpart to `replace_in_note`. The operation is atomic: if any edit fails to match, no changes are applied.
 
 **Parameters:**
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `path` | Yes | Path to the file. Vault-relative or absolute. |
-| `changes` | Yes | Array of `{search, replace}` blocks to apply in sequence. Each block's search text must match a unique location (see [Match resilience](#match-resilience)). |
+| `changes` | Yes | Array of `{old_text, new_text}` edits to apply in sequence. Each edit's `old_text` must match a unique location (see [Match resilience](#match-resilience)). |
 
-- Multiple blocks are applied in order — earlier replacements affect the text seen by later blocks.
-- An empty `replace` string deletes the matched text.
+- Multiple edits are applied in order — earlier replacements affect the text seen by later edits.
+- An empty `new_text` deletes the matched text.
 - Binary files (detected by null bytes in the first 8 KB) are rejected.
 - Path must be within the vault or a user-configured allowed path (see **Settings → Notor → Word & file tools → Allowed read/write paths**).
 - Write tool — available in Act mode only; requires explicit approval unless auto-approved.
@@ -536,19 +536,19 @@ Makes targeted edits within a text file on the filesystem using SEARCH/REPLACE b
 
 ### Match resilience
 
-Both `replace_in_note` and `replace_in_file` match search strings using a tiered, drift-tolerant matcher rather than a strict byte-for-byte comparison. Tiers are tried in order, and the **first tier that finds any candidate decides the result**:
+Both `replace_in_note` and `replace_in_file` match the `old_text` using a tiered, drift-tolerant matcher rather than a strict byte-for-byte comparison. Tiers are tried in order, and the **first tier that finds any candidate decides the result**:
 
 1. **Exact (Unicode-normalized).** Typographic variants are treated as equivalent to their ASCII counterparts:
    - Curly quotes (`'` `'` `"` `"`) match straight quotes (`'` `"`)
    - Em-dashes (`—`), en-dashes (`–`) match hyphens (`-`)
    - Non-breaking spaces, thin spaces match regular spaces
    - Horizontal ellipsis (`…`) matches three dots (`...`)
-2. **Line-trimmed.** For multi-line blocks, each line is compared ignoring its leading and trailing whitespace, so indentation drift and trailing-whitespace differences don't break the match. The matched whole lines are replaced, so your `replace` text controls the resulting indentation.
+2. **Line-trimmed.** For multi-line edits, each line is compared ignoring its leading and trailing whitespace, so indentation drift and trailing-whitespace differences don't break the match. The matched whole lines are replaced, so your `new_text` controls the resulting indentation.
 3. **Whitespace-flexible.** Runs of spaces and tabs *within* a line are collapsed before comparison (newlines remain significant), so "single vs. multiple spaces" and "tabs vs. spaces" differences match.
 
 Together these make it easier to match text pasted from word processors or web pages, and to edit notes whose whitespace has drifted since you last read them.
 
-**Uniqueness rule.** Within whichever tier first finds candidates, the search text must match **exactly one** location. If it matches more than one place, the edit fails with an ambiguous-match error asking you to add surrounding context — it does *not* silently edit the first occurrence. The current content is returned in the error so the search block can be corrected and retried without re-reading.
+**Uniqueness rule.** Within whichever tier first finds candidates, the `old_text` must match **exactly one** location. If it matches more than one place, the edit fails with an ambiguous-match error asking you to add surrounding context — it does *not* silently edit the first occurrence. The current content is returned in the error so the `old_text` can be corrected and retried without re-reading.
 
 ### `extract_docx_comments`
 

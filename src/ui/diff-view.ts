@@ -212,7 +212,7 @@ export function renderWriteNoteDiffPreview(
  * @param container    - Parent element (chat message list) to render into.
  * @param notePath     - Vault-relative path of the note.
  * @param noteContent  - Current full note content.
- * @param changeBlocks - The SEARCH/REPLACE blocks to apply.
+ * @param changeBlocks - The find/replace edits to apply.
  * @param autoApproved - If true, apply immediately and show collapsed diff.
  * @param renderCtx    - Optional context for rendered markdown preview toggle.
  * @returns Promise resolving with the user's decision.
@@ -313,8 +313,8 @@ export function renderReplaceInNoteDiffPreview(
 							if (block) {
 								await renderBlockMarkdownPreview(
 									renderedBlockEls[i]!,
-									block.search,
-									block.replace,
+									block.old_text,
+									block.new_text,
 									ctx
 								);
 							}
@@ -583,28 +583,28 @@ async function renderMarkdownPreview(
 }
 
 /**
- * Render side-by-side Markdown preview for a single replace_in_note block.
+ * Render side-by-side Markdown preview for a single replace_in_note edit.
  */
 async function renderBlockMarkdownPreview(
 	container: HTMLElement,
-	searchText: string,
-	replaceText: string,
+	oldText: string,
+	newText: string,
 	ctx: DiffRenderContext
 ): Promise<void> {
 	const panelsEl = container.createDiv({ cls: "notor-diff-rendered-panels" });
 
-	const isDeletion = !replaceText;
+	const isDeletion = !newText;
 
 	const beforePanel = panelsEl.createDiv({ cls: "notor-diff-rendered-panel notor-diff-rendered-before" });
 	beforePanel.createDiv({ cls: "notor-diff-rendered-panel-label", text: "Before" });
 	const beforeContentEl = beforePanel.createDiv({ cls: "notor-diff-rendered-panel-content" });
-	await MarkdownRenderer.render(ctx.app, searchText, beforeContentEl, ctx.sourcePath, ctx.component);
+	await MarkdownRenderer.render(ctx.app, oldText, beforeContentEl, ctx.sourcePath, ctx.component);
 
 	if (!isDeletion) {
 		const afterPanel = panelsEl.createDiv({ cls: "notor-diff-rendered-panel notor-diff-rendered-after" });
 		afterPanel.createDiv({ cls: "notor-diff-rendered-panel-label", text: "After" });
 		const afterContentEl = afterPanel.createDiv({ cls: "notor-diff-rendered-panel-content" });
-		await MarkdownRenderer.render(ctx.app, replaceText, afterContentEl, ctx.sourcePath, ctx.component);
+		await MarkdownRenderer.render(ctx.app, newText, afterContentEl, ctx.sourcePath, ctx.component);
 	} else {
 		const deletedPanel = panelsEl.createDiv({ cls: "notor-diff-rendered-panel notor-diff-rendered-after" });
 		deletedPanel.createDiv({ cls: "notor-diff-rendered-panel-label", text: "Deleted" });

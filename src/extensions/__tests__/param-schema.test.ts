@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { paramSchemaToJsonSchema, extractPathParams } from "../param-schema";
+import { extractYamlFence } from "../parser";
+import { REPLACE_IN_NOTE } from "../builtin-tool-scaffolds/replace-in-note";
+import { REPLACE_IN_FILE } from "../builtin-tool-scaffolds/replace-in-file";
 import type { ParamSchema } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -61,26 +64,26 @@ describe("paramSchemaToJsonSchema", () => {
 		const params: ParamSchema = {
 			changes: {
 				type: "object[]",
-				description: "Array of search/replace blocks",
+				description: "Array of find/replace edits",
 				properties: {
-					search: { type: "string", description: "Text to find" },
-					replace: { type: "string", description: "Text to replace with" },
+					old_text: { type: "string", description: "Text to find" },
+					new_text: { type: "string", description: "Replacement text" },
 				},
-				required_items: ["search", "replace"],
+				required_items: ["old_text", "new_text"],
 			},
 		};
 		const schema = paramSchemaToJsonSchema(params);
 
 		expect(schema.properties?.changes).toEqual({
 			type: "array",
-			description: "Array of search/replace blocks",
+			description: "Array of find/replace edits",
 			items: {
 				type: "object",
 				properties: {
-					search: { type: "string", description: "Text to find" },
-					replace: { type: "string", description: "Text to replace with" },
+					old_text: { type: "string", description: "Text to find" },
+					new_text: { type: "string", description: "Replacement text" },
 				},
-				required: ["search", "replace"],
+				required: ["old_text", "new_text"],
 			},
 		});
 		expect(schema.required).toEqual(["changes"]);
@@ -190,6 +193,39 @@ describe("paramSchemaToJsonSchema", () => {
 		expect(schema.required).toEqual(["path", "depth"]);
 		expect(Object.keys(schema.properties!)).toHaveLength(3);
 	});
+});
+
+// ---------------------------------------------------------------------------
+// Hidden-from-LLM guard: the replace_in_* scaffolds expose only old_text/
+// new_text to the model. The YAML fence is the SOLE source of the LLM-facing
+// schema (paramSchemaToJsonSchema reads nothing else — see the converter tests
+// above, which prove keys are copied verbatim). So asserting on the fence text
+// transitively guarantees the legacy search/replace aliases never reach the model.
+// ---------------------------------------------------------------------------
+
+describe("replace_in_* scaffolds — change-block schema is canonical only", () => {
+	for (const { label, scaffold } of [
+		{ label: "replace_in_note", scaffold: REPLACE_IN_NOTE },
+		{ label: "replace_in_file", scaffold: REPLACE_IN_FILE },
+	]) {
+		const yamlFence = extractYamlFence(scaffold.scaffoldContent);
+
+		it(`${label}: YAML fence exists`, () => {
+			expect(yamlFence).not.toBeNull();
+		});
+
+		it(`${label}: exposes old_text/new_text and required_items, never search/replace`, () => {
+			const yaml = yamlFence!;
+			// Canonical property keys + required_items are present.
+			expect(yaml).toContain("old_text:");
+			expect(yaml).toContain("new_text:");
+			expect(yaml).toMatch(/required_items:\s*\n\s*-\s*old_text\s*\n\s*-\s*new_text/);
+			// Legacy aliases must NOT appear anywhere the model can see.
+			expect(yaml).not.toMatch(/\bsearch:/);
+			expect(yaml).not.toMatch(/\breplace:/);
+			expect(yaml.toLowerCase()).not.toContain("search/replace");
+		});
+	}
 });
 
 // ---------------------------------------------------------------------------

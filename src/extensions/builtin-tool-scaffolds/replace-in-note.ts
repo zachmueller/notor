@@ -2,7 +2,7 @@ import { scaffold } from "./_scaffold-helper";
 
 export const REPLACE_IN_NOTE = scaffold(
 	"replace_in_note",
-	"Make targeted edits within a note using SEARCH/REPLACE blocks.",
+	"Make targeted find/replace edits within a note.",
 	"write",
 	`params:
   path:
@@ -12,17 +12,17 @@ export const REPLACE_IN_NOTE = scaffold(
     path_resolve_as: note
   changes:
     type: "object[]"
-    description: "Array of search/replace blocks to apply in sequence. Each block's search text must match exactly one location in the note (add surrounding context to disambiguate if it appears more than once)."
+    description: "Array of find/replace edits to apply in sequence. Each edit's old_text must match exactly one location in the note (add surrounding context to disambiguate if it appears more than once)."
     properties:
-      search:
+      old_text:
         type: string
-        description: "Text to find in the note. Leading/trailing and interior whitespace differences are tolerated, but the search must match a UNIQUE location — include 2–4 lines of surrounding context if the text appears multiple times."
-      replace:
+        description: "Text to find in the note. Leading/trailing and interior whitespace differences are tolerated, but it must match a UNIQUE location — include 2–4 lines of surrounding context if the text appears multiple times."
+      new_text:
         type: string
-        description: "Text to replace the matched search text with. Use empty string to delete the matched text."
+        description: "Replacement text. Use an empty string to delete the matched text."
     required_items:
-      - search
-      - replace
+      - old_text
+      - new_text
 settings:
   replace_in_note_return_full_content_on_failure:
     name: "Return Full Note Content on Failure"
@@ -57,14 +57,24 @@ if (!Array.isArray(params.changes) || params.changes.length === 0) {
   throw new Error("Missing or empty required parameter: changes");
 }
 
+// Canonicalize legacy {search,replace} aliases to {old_text,new_text}.
+// Hidden from the LLM schema; lets old persisted conversations replay.
+for (let i = 0; i < params.changes.length; i++) {
+  const b = params.changes[i];
+  if (b && typeof b === "object") {
+    if (b.old_text === undefined && b.search !== undefined) b.old_text = b.search;
+    if (b.new_text === undefined && b.replace !== undefined) b.new_text = b.replace;
+  }
+}
+
 // Validate change blocks
 for (let i = 0; i < params.changes.length; i++) {
   const block = params.changes[i];
-  if (typeof block?.search !== "string" || typeof block?.replace !== "string") {
-    throw new Error(\`Change block \${i + 1} is missing required 'search' or 'replace' property\`);
+  if (typeof block?.old_text !== "string" || typeof block?.new_text !== "string") {
+    throw new Error(\`Edit \${i + 1} is missing required 'old_text' or 'new_text' property\`);
   }
-  if (block.search === "") {
-    throw new Error(\`Change block \${i + 1} has an empty search string. Search text must be non-empty.\`);
+  if (block.old_text === "") {
+    throw new Error(\`Edit \${i + 1} has an empty old_text string. The text to find must be non-empty.\`);
   }
 }
 
@@ -92,10 +102,10 @@ try {
 } catch { /* non-fatal */ }
 
 // Apply changes atomically via vault.process —
-// if any search block doesn't match (or matches ambiguously), the callback
+// if any edit doesn't match (or matches ambiguously), the callback
 // throws and vault.process writes nothing.
 let failedBlockIndex = -1;
-let failedSearchText = "";
+let failedOldText = "";
 let failedReason = "";
 let failedCount = 0;
 const noOpBlocks = [];
@@ -106,36 +116,36 @@ try {
     for (let i = 0; i < params.changes.length; i++) {
       const block = params.changes[i];
       if (!block) continue;
-      // No-op block (search === replace) changes nothing — record a warning and skip.
+      // No-op edit (old_text === new_text) changes nothing — record a warning and skip.
       // Skipping before matching ensures a harmless no-op can never abort other changes.
-      if (block.search === block.replace) {
+      if (block.old_text === block.new_text) {
         if (!noOpBlocks.includes(i + 1)) noOpBlocks.push(i + 1);
         continue;
       }
-      const result = utils.resilientIndexOf(modified, block.search);
+      const result = utils.resilientIndexOf(modified, block.old_text);
       if (!result.ok) {
         failedBlockIndex = i + 1;
-        failedSearchText = block.search;
+        failedOldText = block.old_text;
         failedReason = result.reason;
         failedCount = result.count || 0;
-        throw new Error(\`Search block \${i + 1} did not match uniquely\`);
+        throw new Error(\`Edit \${i + 1} did not match uniquely\`);
       }
       const match = result.match;
       modified =
         modified.slice(0, match.index) +
-        block.replace +
+        block.new_text +
         modified.slice(match.index + match.length);
     }
     return modified;
   });
 } catch (e: any) {
   if (failedBlockIndex !== -1) {
-    const preview = failedSearchText.length > 80
-      ? failedSearchText.slice(0, 80) + "..."
-      : failedSearchText;
+    const preview = failedOldText.length > 80
+      ? failedOldText.slice(0, 80) + "..."
+      : failedOldText;
     const errorMsg = failedReason === "not_unique"
-      ? \`Search block \${failedBlockIndex} matched \${failedCount} locations in \${params.path}. Add surrounding context (2–4 lines) so it matches exactly one place. No changes were applied. The search text was: "\${preview}"\`
-      : \`Search block \${failedBlockIndex} did not match any text in \${params.path}. No changes were applied. The search text was: "\${preview}"\`;
+      ? \`Edit \${failedBlockIndex} matched \${failedCount} locations in \${params.path}. Add surrounding context (2–4 lines) so it matches exactly one place. No changes were applied. The text to find was: "\${preview}"\`
+      : \`Edit \${failedBlockIndex} did not match any text in \${params.path}. No changes were applied. The text to find was: "\${preview}"\`;
     utils.staleTracker.recordRead(file.path, currentContent);
     return {
       __toolError: true,
@@ -162,7 +172,7 @@ await utils.noteOpener.openNote(file.path);
 const applied = params.changes.length - noOpBlocks.length;
 let msg = \`Applied \${applied} replacement\${applied === 1 ? "" : "s"} to \${params.path}\`;
 if (noOpBlocks.length) {
-  msg += \` ⚠️ Block(s) \${noOpBlocks.join(", ")} were no-ops (search and replace text were identical) — those edits did NOT change the note.\`;
+  msg += \` ⚠️ Edit(s) \${noOpBlocks.join(", ")} were no-ops (the find and replacement text were identical) — those edits did NOT change the note.\`;
 }
 return msg;`,
 );

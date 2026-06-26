@@ -80,7 +80,7 @@ function toolCallMessage(id: string, name: string, params: Record<string, unknow
 
 describe("normalizeChangeBlocks", () => {
 	it("passes a valid array through (as fresh, detached objects)", () => {
-		const input = [{ search: "a", replace: "b" }, { search: "c", replace: "" }];
+		const input = [{ old_text: "a", new_text: "b" }, { old_text: "c", new_text: "" }];
 		const result = normalizeChangeBlocks(input);
 		expect(result).toEqual(input);
 		// Fresh objects — not the same references as the input.
@@ -88,18 +88,34 @@ describe("normalizeChangeBlocks", () => {
 	});
 
 	it("parses a double-encoded JSON string of an array", () => {
-		const result = normalizeChangeBlocks(JSON.stringify([{ search: "a", replace: "b" }]));
-		expect(result).toEqual([{ search: "a", replace: "b" }]);
+		const result = normalizeChangeBlocks(JSON.stringify([{ old_text: "a", new_text: "b" }]));
+		expect(result).toEqual([{ old_text: "a", new_text: "b" }]);
 	});
 
-	it("wraps a single {search,replace} object into a one-element array", () => {
-		const result = normalizeChangeBlocks({ search: "a", replace: "b" });
-		expect(result).toEqual([{ search: "a", replace: "b" }]);
+	it("wraps a single {old_text,new_text} object into a one-element array", () => {
+		const result = normalizeChangeBlocks({ old_text: "a", new_text: "b" });
+		expect(result).toEqual([{ old_text: "a", new_text: "b" }]);
 	});
 
 	it("parses then wraps a double-encoded single object", () => {
-		const result = normalizeChangeBlocks(JSON.stringify({ search: "a", replace: "b" }));
-		expect(result).toEqual([{ search: "a", replace: "b" }]);
+		const result = normalizeChangeBlocks(JSON.stringify({ old_text: "a", new_text: "b" }));
+		expect(result).toEqual([{ old_text: "a", new_text: "b" }]);
+	});
+
+	// --- Backward compatibility: legacy {search,replace} aliases canonicalize ---
+	it("canonicalizes a legacy {search,replace} array to {old_text,new_text}", () => {
+		const result = normalizeChangeBlocks([{ search: "a", replace: "b" }]);
+		expect(result).toEqual([{ old_text: "a", new_text: "b" }]);
+	});
+
+	it("wraps and canonicalizes a single legacy {search,replace} object", () => {
+		const result = normalizeChangeBlocks({ search: "a", replace: "b" });
+		expect(result).toEqual([{ old_text: "a", new_text: "b" }]);
+	});
+
+	it("preserves a legacy deletion (empty replace) as empty new_text", () => {
+		const result = normalizeChangeBlocks([{ search: "a", replace: "" }]);
+		expect(result).toEqual([{ old_text: "a", new_text: "" }]);
 	});
 
 	it("returns null for a non-JSON string", () => {
@@ -120,9 +136,10 @@ describe("normalizeChangeBlocks", () => {
 	});
 
 	it("returns null when any block is malformed", () => {
+		expect(normalizeChangeBlocks([{ old_text: 1, new_text: "b" }])).toBeNull();
+		expect(normalizeChangeBlocks([{ old_text: "a" }])).toBeNull();
 		expect(normalizeChangeBlocks([{ search: 1, replace: "b" }])).toBeNull();
-		expect(normalizeChangeBlocks([{ search: "a" }])).toBeNull();
-		expect(normalizeChangeBlocks([{ search: "a", replace: "b" }, null])).toBeNull();
+		expect(normalizeChangeBlocks([{ old_text: "a", new_text: "b" }, null])).toBeNull();
 	});
 });
 

@@ -51,9 +51,11 @@ function extractAttachmentsBlock(content: string): { attachmentsXml: string | nu
 /**
  * Coerce the `changes` parameter of a replace_in_note tool call into a clean
  * ChangeBlock[]. Models sometimes double-encode it as a JSON string or emit a
- * single {search,replace} object instead of a one-element array. Returns null
- * when the value can't be normalized into a non-empty array of valid blocks —
- * the caller then falls back to the generic approve/reject prompt.
+ * single {old_text,new_text} object instead of a one-element array. Legacy
+ * {search,replace} keys are accepted as hidden aliases so old persisted
+ * conversations still render. Returns null when the value can't be normalized
+ * into a non-empty array of valid blocks — the caller then falls back to the
+ * generic approve/reject prompt.
  */
 export function normalizeChangeBlocks(value: unknown): ChangeBlock[] | null {
 	let candidate: unknown = value;
@@ -71,10 +73,10 @@ export function normalizeChangeBlocks(value: unknown): ChangeBlock[] | null {
 		candidate !== null &&
 		typeof candidate === "object" &&
 		!Array.isArray(candidate) &&
-		"search" in candidate &&
-		"replace" in candidate
+		("old_text" in candidate || "search" in candidate) &&
+		("new_text" in candidate || "replace" in candidate)
 	) {
-		// Single {search,replace} object — wrap in a one-element array.
+		// Single edit object — wrap in a one-element array.
 		candidate = [candidate];
 	}
 
@@ -82,16 +84,17 @@ export function normalizeChangeBlocks(value: unknown): ChangeBlock[] | null {
 
 	const blocks: ChangeBlock[] = [];
 	for (const block of candidate) {
-		if (
-			block === null ||
-			typeof block !== "object" ||
-			typeof (block as { search?: unknown }).search !== "string" ||
-			typeof (block as { replace?: unknown }).replace !== "string"
-		) {
+		if (block === null || typeof block !== "object") return null;
+		const b = block as { old_text?: unknown; new_text?: unknown; search?: unknown; replace?: unknown };
+		// Prefer canonical keys; fall back to legacy aliases. Use ?? so an empty
+		// new_text (a deletion) is preserved rather than discarded.
+		const oldText = b.old_text ?? b.search;
+		const newText = b.new_text ?? b.replace;
+		if (typeof oldText !== "string" || typeof newText !== "string") {
 			return null;
 		}
-		// Build fresh objects so the result is detached from parameters["changes"].
-		blocks.push({ search: (block as ChangeBlock).search, replace: (block as ChangeBlock).replace });
+		// Build fresh canonical objects so the result is detached from parameters["changes"].
+		blocks.push({ old_text: oldText, new_text: newText });
 	}
 	return blocks;
 }
@@ -696,7 +699,7 @@ export class MessageRenderer {
 		if (toolName === "replace_in_note") {
 			const changeBlocks = normalizeChangeBlocks(parameters["changes"]);
 			if (!changeBlocks) {
-				// Not a usable array of {search,replace} blocks (e.g. double-encoded
+				// Not a usable array of {old_text,new_text} edits (e.g. double-encoded
 				// string, single object that failed validation, number, missing).
 				// Fall back to the generic approve/reject prompt so the user can still
 				// act; the tool's own Array.isArray guard

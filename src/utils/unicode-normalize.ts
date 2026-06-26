@@ -177,7 +177,7 @@ export function normalizedIndexOf(haystack: string, needle: string): NormalizedM
 // ---------------------------------------------------------------------------
 //
 // `resilientIndexOf` layers structural fallbacks on top of the Unicode
-// normalization above so SEARCH/REPLACE blocks survive realistic drift
+// normalization above so find/replace edits survive realistic drift
 // (indentation changes, trailing whitespace, single-vs-double spaces) without
 // the AI having to reproduce the note byte-for-byte. Tiers are tried in order
 // and the FIRST tier that yields any candidate decides the outcome:

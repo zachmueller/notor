@@ -72,7 +72,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 	},
 	replace_in_note: {
 		name: "Replace in note",
-		desc: "Make targeted edits using SEARCH/REPLACE blocks.",
+		desc: "Make targeted find/replace edits.",
 		isWrite: true,
 	},
 	update_frontmatter: {
@@ -127,7 +127,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 	},
 	replace_in_file: {
 		name: "Replace in file",
-		desc: "Make targeted SEARCH/REPLACE edits in a text file (desktop only).",
+		desc: "Make targeted find/replace edits in a text file (desktop only).",
 		isWrite: true,
 	},
 	extract_docx_comments: {
