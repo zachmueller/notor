@@ -216,14 +216,24 @@ path. Persona content integrates via the existing `SystemPromptBuilder` append/r
 
 - AC: the must-publish rule is present even when the step has custom instructions.
 - AC: flow guardrails from `definition.md` are injected into every step turn.
+- AC: the scaffold instructs **overwrite-only** scratchpad writes (write the complete content / use a
+  per-iteration filename; never incrementally append) for recovery safety (FR-121/125).
 
 **FR-115: Step turn execution.** `StepTurnExecutor` runs a conversation step on the shared `RunLoop`
 (not `ChatOrchestrator.responseLoop()`): it creates a `ConversationSession`, resolves the step's
-persona via `PersonaManager.getPersonaByName()` without mutating global state, runs the turn, and
-captures the emitted event (or synthesizes `default_publishes` if none).
+persona via `PersonaManager.getPersonaByName()` without mutating global state, **resolves the step's
+provider/model into a pinned `ResolvedProviderConfig` value object via the pure
+`resolvePersonaProviderConfig(...)` (ARCH-007) — never `applyProviderModelOverrides()`, which mutates
+the global `ProviderRegistry`** — pins that config into the `ConversationSession`, runs the turn, and
+captures the emitted event (or synthesizes `default_publishes` if none, or `{step}.capped` on a
+non-`completed` stop reason; see FR-117a). `notor-step-model` overrides the persona's model preference
+in the resolver.
 
 - AC: a step turn runs on `RunLoop`.
 - AC: a no-emit turn synthesizes the step's `default_publishes` topic.
+- AC: resolving a step's provider/model performs **no** global registry mutation
+  (`switchProvider`/`updateConfig`); two concurrent step turns with different `notor-step-model` values
+  each run on their own pinned model, and the global active provider/model is unchanged by a step turn.
 
 **FR-116: `emit_event` tool.** A built-in tool scaffold (feature-group-gated, mode `write`) that
 captures `{topic, payload}` onto the per-step **`orchestrationContext`** carriage (the
@@ -243,9 +253,46 @@ thrashing detection (a task re-queued after abandonment 3+ times) terminate a st
 excluded because `default_publishes` synthesizes payloads from per-turn LLM text that varies each
 turn, so a payload-keyed signature missed the common non-converging-LLM-loop case.
 
+**Scope of stale detection (known limitation, by decision).** The `(topic, source_step)` signature
+catches a **self-loop** (one step re-firing one topic). It does **not** detect multi-step cycles
+(`A→B→C→A…`, distinct topics) or the completion-enforcement *alternation*
+(`FLOW_COMPLETE ↔ flow.tasks_remaining`), whose consecutive pairs differ. Those are **not** caught by a
+new cycle detector in v1; they are bounded by the **aggregate budget** (LLM-driven cycles draw down
+`iterationsRemaining`/`costRemainingUsd` each hop) and **`max_runtime`**. A **code-step-only** cycle
+consumes neither LLM turns nor cost, so it is bounded **only by `notor-max-runtime-minutes`** — authors
+of code-step-heavy flows must set one. Authoring mitigation: distinct topics per outcome, code-step
+routers for branching, and sensible `max_iterations` + `max_runtime`. (Full rationale:
+[contracts/event-engine.md](contracts/event-engine.md) "Known limitation".)
+
 - AC: a stale loop (4 consecutive identical `(topic, source_step)` pairs) terminates the flow,
   regardless of payload variation.
 - AC: a runtime overrun terminates the flow.
+- AC: the cycle-detection limitation is documented (stale catches self-loops; multi-step cycles and
+  completion-alternation rely on budget/runtime; code-step-only cycles rely on `max_runtime`).
+
+**FR-117a: Capped-step failure channel.** When a conversation step's `RunLoop` turn returns a
+**non-`completed`** `stopReason` (`iteration_cap` / `token_limit` / `context_window` / `cost_cap` /
+`depth_cap`) **and** the step did not explicitly emit its own event, the executor does **not** synthesize
+the step's normal `default_publishes` (which would falsely signal success). It instead synthesizes a
+distinct **`{step}.capped`** topic carrying the `stopReason` + the wind-down text. This mirrors the
+`{step}.code_error` channel: if no step subscribes to `{step}.capped`, it routes (orphaned) to the
+`FallbackCoordinator` → `FLOW_ERROR` (loud, never silent); authors may subscribe to it for graceful
+degradation or retry. A step that **did** explicitly emit an event before being capped has its emission
+honored (the cap raced an already-decided turn).
+
+**Design constraint (semantic verification is the code step's job).** `{step}.capped` catches a
+*cut-off* turn; it does **not** catch a turn that completed normally but produced wrong/empty work and
+emitted its success topic anyway. The engine has no semantic verifier — a `completed` emission is taken
+at face value. Authors needing a quality gate on a step's output must wire a verification step (code or
+conversation) on that edge (the `[Builder] → [Verify Tests] → …` pattern). The engine guarantees only
+that a *cut-off* or *no-emit* step never silently advances as success.
+
+- AC: a step turn ending non-`completed` with no explicit emission synthesizes `{step}.capped` (not
+  `default_publishes`), carrying the `stopReason`.
+- AC: an unsubscribed `{step}.capped` reaches the `FallbackCoordinator` and terminates with `FLOW_ERROR`
+  (never silently advances as success).
+- AC: the "semantic verification is the author's job (via a verifier step)" boundary is documented
+  (scaffold guidance + `orchestration-creator` persona + docs).
 
 **FR-118: OrchestrationRunner.** The main loop: load definition + steps, register the fallback,
 create the session, publish the starting event, run the event loop, and finalize on the completion
@@ -270,11 +317,19 @@ and `tasks/`. The scratchpad is shared, restriction-free working space for the o
 - AC: the session directory and scratchpad are created on flow start.
 - AC: the scratchpad path is auto-allowed in path enforcement for the owning session's steps.
 
-**FR-121: Shared scratchpad.** Every step in a run can read/write the session scratchpad without
-restriction; the prompt scaffold tells each step where it lives and to use it for cross-step state.
+**FR-121: Shared scratchpad (overwrite-only for recovery safety).** Every step in a run can read/write
+the session scratchpad without restriction; the prompt scaffold tells each step where it lives and to use
+it for cross-step state. Scratchpad writes **must be overwrite/idempotent** (write the complete current
+content, or use a per-iteration filename) — **never incremental append** — because crash-recovery
+(FR-125) re-runs an interrupted step from fresh context, and an append would duplicate content on
+re-run (`once(...)` guards only *external* effects, not scratchpad state). The scaffold (FR-114), the
+reference flows (FR-161), and the `orchestration-creator` persona (FR-160) all carry this overwrite-only
+instruction.
 
 - AC: a step can write a file other steps then read.
 - AC: scratchpad access bypasses per-step path constraints for the owning session.
+- AC: the prompt scaffold + reference flows + persona instruct overwrite-only (no incremental append)
+  scratchpad writes, so a recovery re-run reproduces (not duplicates) content.
 
 **FR-122: Runtime task registry.** Four task tools (`orchestration_task_ensure`/`_start`/`_close`/
 `_list`) maintain task notes under `sessions/{id}/tasks/` with `notor-type: orchestration-task`
@@ -300,21 +355,37 @@ prompt scaffold instructs steps to consult and append fix-memories to.
 - AC: the memories note is seeded on first use.
 - AC: steps are instructed to consult it before acting in unfamiliar territory.
 
-**FR-125: Session recovery on reload (at-least-once).** On plugin load, sessions with status
-`active`/`interrupted` are recovered by replaying `session-log.jsonl`: a dangling `turn.start`
-re-emits the trigger (the step **re-runs** from fresh context); a dangling `event.emitted`
-re-publishes the event; the user is offered a resume prompt. Recovery is **at-least-once, not
-exactly-once**: replay is idempotent for the engine's own bookkeeping (events/turns) and for vault
-state (re-writing the scratchpad overwrites), but a re-run step **repeats any external,
-non-idempotent side effect** (e.g. `git push`, a Slack/MCP post, a deploy) it performed before
-crashing. Steps with such effects must be idempotent or guard themselves with
-`orchestration.once(key, fn)` (FR-131), which records a `side_effect.committed` log entry so a re-run
-skips the already-committed effect (best-effort — it cannot cover a crash *during* the effect). A
-plugin cannot make arbitrary shell/MCP effects transactional, so this boundary is named explicitly
-rather than implied as solved.
+**FR-125: Session recovery on reload (at-least-once, parent-rooted).** On plugin load, recovery scans
+sessions and replays `session-log.jsonl`: a dangling `turn.start` re-emits the trigger (the step
+**re-runs** from fresh context); a dangling `event.emitted` re-publishes the event; the user is offered
+a resume prompt. Two properties make this safe:
+
+- **Parent-rooted (no double-execution of children).** Recovery's top-level scan recovers **only root
+  sessions** (`origin: "user"`). **Child sessions** (`origin ∈ {run_flow, chaining}`) are **not**
+  recovered independently — they are reconciled by their parent's replay. When a parent step that
+  invoked `run_flow` is replayed: if the child already reached its terminal event (child status
+  `completed`/`cancelled`), the parent **reuses the child's recorded result** instead of re-spawning; if
+  the child is non-terminal, the parent's replay deterministically **discards (tombstones) the stale
+  child and re-spawns** a fresh one. This removes the race where an independently-recovered child runs
+  *and* a re-run parent spawns a duplicate (see [contracts/vault-schema.md](contracts/vault-schema.md)
+  recovery rules and FR-174 child linkage).
+- **Scratchpad overwrite-idempotency.** Vault-state replay is safe **because scratchpad writes are
+  overwrite/idempotent** (FR-121) — a re-run rewrites the whole file. Append-style writes are
+  prohibited precisely because they would duplicate on re-run.
+
+Recovery is **at-least-once, not exactly-once**: replay is idempotent for the engine's own bookkeeping
+(events/turns) and for overwrite-style vault state, but a re-run step **repeats any external,
+non-idempotent side effect** (e.g. `git push`, a Slack/MCP post, a deploy) it performed before crashing.
+Steps with such effects must be idempotent or guard themselves with `orchestration.once(key, fn)`
+(FR-131), which records a `side_effect.committed` log entry so a re-run skips the already-committed
+effect (best-effort — it cannot cover a crash *during* the effect). A plugin cannot make arbitrary
+shell/MCP effects transactional, so this boundary is named explicitly rather than implied as solved.
 
 - AC: an interrupted turn re-emits its trigger (step re-runs from fresh context).
 - AC: engine-bookkeeping replay is idempotent (no double-routed event, no double-counted turn).
+- AC: only root (`origin: "user"`) sessions are recovered by the top-level scan; a crash mid-`run_flow`
+  does **not** produce a duplicate child run — the parent's replay reuses a completed child's result or
+  tombstones-and-respawns a non-terminal child.
 - AC: `orchestration.once(key, fn)` skips an already-committed side effect on re-run; the
   at-least-once boundary (external effects may repeat) is documented for authors (scaffold + persona +
   docs).
@@ -326,31 +397,46 @@ tree-constrained DAG), and are hidden from the flat conversation sidebar (genera
 
 - AC: step conversations are excluded from `listConversations()`/`searchConversations()`.
 - AC: `next`/`prev` edges are backfilled to chain a flow's step conversations; no cyclic edges.
+- AC: edge consumers (the run-tree) tolerate **dangling** `next`/`prev` edges — after a recovery re-run
+  mints new conversation ids, a stale edge target is skipped (not fatal), and recovery re-backfills
+  edges against the new ids.
 
 ### FR-130 group — Programmatic code steps (design Phase 3)
 
 **FR-130: Code step execution mode.** A step with `notor-step-mode: code` executes a TypeScript code
 fence deterministically with no LLM call and no JSONL conversation, via the existing Sucrase pipeline
 (`stripTypes` + `AsyncFunction` arg injection). Arg signature: `[app, obsidian, utils, libs, event,
-orchestration]`.
+orchestration]`. The compiled function runs under an outer **timeout guard** defaulting to **300 s**,
+overridable per step via `notor-step-timeout-seconds`; the outer timeout must exceed any inner
+`utils.executeShellCommand` `timeoutSeconds` (the 300 s default comfortably exceeds the build/test
+budgets in the reference flows).
 
 - AC: a code step creates no conversation and consumes no tokens.
 - AC: a code error fires `{step}.code_error` with the stack and shows an error Notice, while still
   logging `turn.start`/`turn.complete`.
+- AC: the code-step timeout defaults to 300 s and honors `notor-step-timeout-seconds`; a step whose inner
+  shell `timeoutSeconds` is below the step timeout runs to the shell command's completion.
 
 **FR-131: OrchestrationHelper runtime API.** Code steps receive an `orchestration` helper:
-`emit(topic, payload?, structured?)`, `once(key, fn)`, `scratchpad` (read/write/list/exists),
-`callTool`, `callMcpTool`, `tasks` (list/ensure/start/close), `flow` (name/iteration/sessionId),
-`eventHistory(limit?)`. Built on the existing extension `runtime-context/`. Full API:
-[contracts/orchestration-helper.md](contracts/orchestration-helper.md). `emit`'s optional third arg is
-the **only** producer of `RunResult.structured` (a terminal code step's typed return for flow-as-tool,
-FR-173); `once(key, fn)` is the at-least-once side-effect guard (FR-125).
+`emit(topic, payload?, structured?)`, `once(key, fn)`, `scratchpad` (read/write/list/exists; **overwrite
+only — no append**, FR-121), `callTool`, `callMcpTool`, `tasks` (list/ensure/start/close), `flow`
+(name/iteration/sessionId), `eventHistory(limit?)`. Built on the existing extension `runtime-context/`.
+Full API: [contracts/orchestration-helper.md](contracts/orchestration-helper.md). `emit`'s optional
+third arg is the **only** producer of `RunResult.structured` (a terminal code step's typed return for
+flow-as-tool, FR-173); `once(key, fn)` is the at-least-once side-effect guard (FR-125).
+**`callTool`/`callMcpTool` thread the step's `runContext` (depth + shared aggregate-budget cell + parent
+abort) and `orchestrationContext` onto `ToolExecuteOptions`** — so a code-step `run_flow` is depth/budget
+gated and abort-cascaded by the **same** spawn rule as an LLM-step `run_flow` (the cascading guardrail,
+FR-176, has no code-step hole).
 
 - AC: `return orchestration.emit(...)` routes the next event deterministically.
 - AC: a terminal `emit(topic, payload, structured)` populates `RunResult.structured` (lifted verbatim,
   no JSON round-trip); a non-terminal emit ignores `structured`.
 - AC: `once(key, fn)` runs `fn` once, records `side_effect.committed`, and skips on a recovery re-run.
-- AC: `callTool`/`callMcpTool` dispatch through registered built-in tools / connected MCP servers.
+- AC: `callTool`/`callMcpTool` dispatch through registered built-in tools / connected MCP servers,
+  threading the step's `runContext` + `orchestrationContext`.
+- AC: a code-step `run_flow` (via `callTool`) is gated on `depth < maxDepth` AND the shared budget cell
+  exactly as an LLM-step `run_flow`; a blocked spawn returns a clear tool error (no guardrail bypass).
 
 **FR-132: `FLOW_CANCELLED` terminal event.** A terminal event (from code *or* conversation steps) that
 ends the loop with status `cancelled` and **bypasses** completion task enforcement.
@@ -441,13 +527,16 @@ via `notor-flow-returns`.
 - AC: the tool result prefers `structured` (when a terminal code step supplied it) and falls back to
   `text` otherwise.
 
-**FR-174: Child sessions + isolation modes.** Child sessions record `parent_session_id` and link into
-the parent's recovery tree. `notor-handoff-isolation` selects `isolated` (default; fresh
-scratchpad/tasks) or `shared` (inherits parent scratchpad; the parent scratchpad path is auto-allowed
-in the child's path enforcement).
+**FR-174: Child sessions + isolation modes.** Child sessions record `parent_session_id` and
+`origin ∈ {run_flow, chaining}`, and link into the parent's recovery tree. `notor-handoff-isolation`
+selects `isolated` (default; fresh scratchpad/tasks) or `shared` (inherits parent scratchpad; the parent
+scratchpad path is auto-allowed in the child's path enforcement). Child sessions are recovered
+**by their parent's replay** (parent-rooted recovery, FR-125), never independently — preventing
+duplicate child runs after a crash mid-`run_flow`.
 
 - AC: `isolated` gives a fresh scratchpad; `shared` auto-allows the parent scratchpad path.
-- AC: a child session links to its parent for coherent recovery.
+- AC: a child session links to its parent for coherent recovery and is reconciled by the parent's replay
+  (reuse a terminal child's result; tombstone-and-respawn a non-terminal one) — not double-executed.
 
 **FR-175: Chaining / one-way handoff.** At the terminal event, if `notor-on-complete-flow` is set, the
 runner launches the successor instead of finalizing (no return). The engine injects the successor's

@@ -209,6 +209,39 @@ Code steps (`notor-step-mode: code`) have the symmetric rule via their return va
 that returns no `orchestration.emit(...)` result falls back to `default_publishes` the same way; a
 thrown error fires `{step}.code_error` (see [orchestration-helper.md](orchestration-helper.md)).
 
+### `{step}.capped` synthesis (FR-117a) — a capped turn is NOT a silent success
+
+`default_publishes` synthesis above applies to a turn that ended **`completed`** (the LLM simply forgot
+to emit). A turn that ended **non-`completed`** is different: it was *cut off* (per-run iteration cap,
+token limit, context-window proximity, aggregate `cost_cap`, or `depth_cap`) mid-work. Synthesizing the
+step's normal `default_publishes` for a cut-off turn would falsely advance the flow as if the step
+finished. So:
+
+- When the `StepTurnExecutor` reads back the turn and the `RunResult.stopReason` is **not** `completed`
+  **and** no explicit `emit_event` was captured, it synthesizes **`{step}.capped`** (where `{step}` is
+  the step name), with a payload carrying the `stopReason` and the wind-down text — **instead of**
+  `default_publishes`.
+- `{step}.capped` routes by the normal rules: an author who declares a trigger for it handles the cap
+  (degrade / retry / route elsewhere); **unsubscribed**, it is an orphan → `FallbackCoordinator` →
+  `FLOW_ERROR` (loud, never silent — FR-113).
+- If the step **did** capture an explicit `emit_event` before the cap fired, that emission is honored
+  (the turn had already decided its next event; the cap merely ended an over-long turn).
+
+This is the conversation-step analog of `{step}.code_error`: a *failure-shaped* outcome gets its own
+topic rather than masquerading as the step's success topic. (Authority for the `stopReason` union and
+which conditions are "capped": [run-loop.md](run-loop.md).)
+
+> **Design constraint — semantic correctness is the code step's job (5c).** `{step}.capped` catches a
+> *cut-off* turn (the step ran out of budget). It does **not** catch a turn that **completed normally
+> but produced wrong, empty, or low-quality work** and emitted its success topic anyway — by design, a
+> `completed` turn's emission is taken at face value. The engine has **no** semantic verifier; combined
+> with payload-excluded stale detection, a repeatedly-failing-but-emitting conversation step is
+> indistinguishable from a succeeding one **unless the flow author wires a verification step after it**.
+> This is the intended division of labor: **conversation steps do work; code steps verify it**
+> (deterministic checks, multi-way routing on outcome — the `[Builder] → [Verify Tests] → …` pattern).
+> Authors who need a quality gate on a step's output must place a (code or conversation) verifier on that
+> edge; the engine guarantees only that a *cut-off* or *no-emit* step never silently advances as success.
+
 ---
 
 ## Terminal Events — Producers and Semantics
@@ -324,6 +357,36 @@ function isStale(history: OrchestrationEvent[]): boolean {
   forward progress, prefer a deterministic **code-step router** (distinct topics per outcome) or a
   progress-bearing topic name over relying on the stale window.
 
+#### Known limitation — the stale detector catches self-loops, not multi-step cycles
+
+The `(topic, source_step)` "4 consecutive identical" signature detects a **self-loop** (one step
+re-firing one topic). It **does not** detect a cycle of length ≥ 2, where consecutive pairs differ:
+
+- **Multi-step cycles** — `A →x→ B →y→ C →z→ A …` (distinct topics) never produce consecutive-identical
+  pairs, so the stale guard does not fire.
+- **Completion-enforcement alternation** — a blocked `FLOW_COMPLETE` auto-re-triggers the completing
+  step with `flow.tasks_remaining` / `flow.requirements_unmet`; if the step keeps re-emitting
+  `FLOW_COMPLETE` without closing the work, the stream **alternates**
+  `FLOW_COMPLETE(stepX) → flow.tasks_remaining(engine) → FLOW_COMPLETE(stepX) → …`, which the
+  consecutive-identical signature also misses.
+
+**This is an accepted limitation (decision: rely on budget/runtime, not new cycle detection).** The
+backstops for these cases are the **two-layer budget** and **`max_runtime`**, not the stale detector:
+
+- An **LLM-driven** cycle (each hop is a conversation step turn) draws down the aggregate
+  `iterationsRemaining` / `costRemainingUsd` cell every hop, so it terminates at `cost_cap` /
+  iteration exhaustion — *eventually*, after consuming the configured ceiling, not cheaply at the 4th
+  repeat. The completion-enforcement alternation above is LLM-driven (each `FLOW_COMPLETE` re-emit is a
+  step turn), so it is bounded by the aggregate budget.
+- A **code-step-only** cycle consumes neither LLM turns nor cost (D2/FR-117), so it is bounded **only by
+  `notor-max-runtime-minutes`** (and any self-loop the stale detector does catch). Authors of
+  code-step-heavy flows **must** set a sensible `notor-max-runtime-minutes`.
+
+**Authoring guidance (the real mitigation):** route distinct outcomes through **distinct topics**, drive
+non-trivial branching through a **code-step router** (deterministic, multi-way), and set
+`notor-max-iterations` + `notor-max-runtime-minutes` as the cycle backstop. The engine does **not**
+attempt general cycle detection in v1.
+
 ### Thrashing detection
 
 Track per-task **abandonment counts**. A task is "abandoned" when it is started (`_start`) and then
@@ -339,6 +402,16 @@ thrashing keys on the task lifecycle in the runtime task registry (FR-122).
 per the two-layer model in [run-loop.md](run-loop.md). A turn proceeds iff both the per-run cap and
 the aggregate budget have headroom; the engine's stale/thrashing guards are the *orchestration-level*
 overlay on top of those substrate caps.
+
+> **`max_iterations` counts LLM turns only.** `notor-max-iterations` maps to
+> `AggregateBudget.iterationsRemaining` ([../data-model.md](../data-model.md)), which is decremented
+> **per LLM turn** ([run-loop.md](run-loop.md)). A **code step is not an LLM turn** — it consumes zero
+> tokens and decrements **neither** half of the aggregate budget. A code step still emits an event (so
+> it participates in stale-loop detection) and still elapses wall-clock time (so `max_runtime` applies).
+> **Consequence (called out so it is not a surprise):** a flow composed *entirely* of code steps — or a
+> non-converging cycle that routes only through code steps — is bounded by **`max_runtime`** and
+> stale-loop detection, **not** by `max_iterations`. Authors of code-step-heavy flows should set a
+> sensible `notor-max-runtime-minutes`.
 
 ---
 

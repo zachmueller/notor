@@ -61,7 +61,10 @@ argument list `CODE_STEP_ARG_NAMES = ["app", "obsidian", "utils", "libs", "event
 
 The executor: (1) extracts the first fenced block tagged `ts`/`typescript`/`js`/`javascript` from the
 step note `bodyContent`; (2) strips types and compiles; (3) executes the async function under a
-**timeout guard** (default **60 s**, configurable — mirrors the per-server MCP timeout convention);
+**timeout guard** wrapping the whole function (default **300 s**, overridable per step via
+`notor-step-timeout-seconds` — the outer guard **must exceed** any inner
+`utils.executeShellCommand` `timeoutSeconds`, so a long `npm test`/deploy is not killed by the outer
+guard; 300 s is the default because build/test verification is a primary code-step use case);
 (4) captures the returned `CodeStepResult` and hands its `{topic, payload}` back to the engine for
 write-before-route routing, exactly like a conversation step's captured `emit_event` call. When the
 returned `CodeStepResult` carries `structured` (from `emit(topic, payload?, structured?)`) **and** the
@@ -77,14 +80,23 @@ crash recovery (write-order per [../contracts/event-engine.md](../contracts/even
 vault-schema). The error event then routes normally — to a step subscribing on `{step}.code_error`,
 or to the `FallbackCoordinator` (FR-113).
 
-**Cost / identity:** a code step creates no conversation and consumes zero tokens; it does **not**
-draw on the shared aggregate `RunContext.budget.costRemainingUsd` cell (it is not an LLM turn). It **does** count
-as an engine turn for `notor-max-iterations` / runtime / stale-loop accounting — the engine
-(FEAT-008), not the code, owns those guards (see [../contracts/run-loop.md](../contracts/run-loop.md)).
+**Cost / identity:** a code step creates no conversation and consumes zero tokens; it is **not an LLM
+turn**, so it draws on **neither** half of the shared aggregate `RunContext.budget` cell — neither
+`costRemainingUsd` **nor** `iterationsRemaining` (`notor-max-iterations` counts LLM turns only, D2/FR-117;
+see [../contracts/run-loop.md](../contracts/run-loop.md)). It **does** advance the engine step-turn
+sequence counter, participate in **stale-loop** detection, and elapse **wall-clock runtime** — the engine
+(FEAT-008), not the code, owns those guards.
+
+**`runContext` construction (D6/FR-131).** Even though a code step is not an LLM turn, INT-010
+**constructs the step's `RunContext`** — `{ depth, maxDepth, budget (the runner-supplied shared cell),
+abort (parent signal) }` — and passes it (plus the per-step `orchestrationContext`) to
+`buildOrchestrationHelper` (INT-011), so `orchestration.callTool`/`callMcpTool` thread it onto
+`ToolExecuteOptions`. This is what keeps a code-step `run_flow` depth/budget-gated and abort-cascaded
+exactly like an LLM-step call — no code-step bypass of the cascading guardrails (FR-176).
 
 The runtime `event` / `orchestration` arguments are populated by INT-011; INT-010 establishes the
-extraction → compile → execute → capture skeleton and injects placeholder `event` (the routed
-`CodeStepEvent` projection) while wiring the helper itself in INT-011.
+extraction → compile → execute → capture skeleton, constructs the `runContext`, and injects placeholder
+`event` (the routed `CodeStepEvent` projection) while wiring the helper itself in INT-011.
 
 **FRs:** FR-130 (code step execution mode).
 
@@ -110,14 +122,16 @@ into this executor; the conversation path it skips).
 - [ ] The first `ts`/`typescript`/`js`/`javascript` fence in `bodyContent` is extracted, type-stripped
   via `stripTypes()`, and compiled to an `AsyncFunction` with exactly `CODE_STEP_ARG_NAMES`.
 - [ ] A missing/empty fence is treated as a code error (does not throw).
-- [ ] Execution is bounded by a timeout guard (default 60 s, configurable); on expiry the run is
+- [ ] Execution is bounded by a timeout guard (default **300 s**, overridable per step via `notor-step-timeout-seconds`; the outer guard must exceed any inner shell `timeoutSeconds`); on expiry the run is
   abandoned and the step errors.
 - [ ] On compile error, runtime throw, unhandled rejection, or timeout, the executor fires a
   `{step}.code_error` event carrying the error message + stack **and** shows an error `Notice`.
 - [ ] `turn.start` and `turn.complete` are written to `session-log.jsonl` **even on error** (audit +
   recovery).
-- [ ] A code step does **not** decrement `RunContext.budget.costRemainingUsd` (it is not an LLM turn) but
-  **does** advance the engine iteration / runtime / stale-loop counters.
+- [ ] A code step decrements **neither** `RunContext.budget.costRemainingUsd` **nor**
+  `budget.iterationsRemaining` (it is not an LLM turn; `notor-max-iterations` counts LLM turns only —
+  D2/FR-117). It **does** advance the engine **step-turn** sequence counter (`flow.iteration` display),
+  participate in **stale-loop** detection (it emits an event), and elapse **wall-clock runtime**.
 - [ ] A returned `CodeStepResult`'s `{topic, payload}` is handed to the engine for write-before-route
   routing; a `topic` not in the step's `notor-step-publishes` is treated as an orphan
   (FallbackCoordinator, FR-113), identical to a conversation-step emission.
@@ -149,12 +163,20 @@ contract; do not redefine it here. Members:
   At-least-once recovery).
 - `scratchpad` (`read`/`write`/`list`/`exists`) → backed by the owning session's
   `sessions/{id}/scratchpad/` (INT-001). The session's scratchpad path is auto-allowed in path
-  enforcement (FR-120/FR-121), so a code step needs no explicit `allowed_paths`.
+  enforcement (FR-120/FR-121), so a code step needs no explicit `allowed_paths`. **`write` is
+  overwrite-only** (no `append` variant) so a recovery re-run reproduces rather than duplicates content
+  (FR-121/125).
 - `callTool(name, params)` / `callMcpTool(server, tool, params)` → dispatch through the **same**
-  `ToolDispatcher.dispatch()` seam (`src/chat/dispatcher.ts:388`) as LLM tool calls; honor path
-  enforcement and the owning session's auto-allowed scratchpad path. `callMcpTool` namespaces as
-  `{serverName}__{toolName}` and respects the step's `notor-step-mcp-servers` filter (null = inherit
-  all). A dispatch rejection is caught by INT-010 and surfaces as `{step}.code_error`.
+  `ToolDispatcher.dispatch()` seam (`src/chat/dispatcher.ts:388`) as LLM tool calls, **threading the
+  step's `runContext` (depth + shared aggregate-budget cell + parent abort) and `orchestrationContext`
+  onto `ToolExecuteOptions`** (constructed by INT-010 from the runner-supplied shared budget cell + depth
+  + abort) — so a child-spawning tool (`run_flow`) reached from a code step is **depth/budget-gated and
+  abort-cascaded identically** to an LLM-step call (no guardrail bypass; authority
+  [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md) "runContext propagation"
+  + [../contracts/run-loop.md](../contracts/run-loop.md) spawn gate). Honor path enforcement and the
+  owning session's auto-allowed scratchpad path. `callMcpTool` namespaces as `{serverName}__{toolName}`
+  and respects the step's `notor-step-mcp-servers` filter (null = inherit all). A dispatch rejection is
+  caught by INT-010 and surfaces as `{step}.code_error`.
 - `tasks` (`list`/`ensure`/`start`/`close`) → the **same backing** as the four task-tool scaffolds
   (INT-002 / FR-122); `ensure` is idempotent. Open/running tasks block `FLOW_COMPLETE` (FR-123) but
   not `FLOW_CANCELLED` (FR-132 / INT-012).
@@ -174,8 +196,10 @@ stdout+stderr — there is no separate `stderr` field), `utils.notify` (`plugin-
 **FRs:** FR-131 (`OrchestrationHelper` runtime API).
 
 **Files:**
-- `src/orchestration/orchestration-helper.ts` — `buildOrchestrationHelper(session, event, engine, dispatcher, ...)`
-  factory returning the `orchestration` object; `CodeStepEvent` projection from `OrchestrationEvent`.
+- `src/orchestration/orchestration-helper.ts` — `buildOrchestrationHelper(session, event, engine, dispatcher, runContext, orchestrationContext, ...)`
+  factory returning the `orchestration` object; `callTool`/`callMcpTool` close over `runContext` +
+  `orchestrationContext` and set them on the `ToolExecuteOptions` they dispatch with; `CodeStepEvent`
+  projection from `OrchestrationEvent`.
 - `src/orchestration/code-step-executor.ts` — (INT-010) inject the built `orchestration` + `event` as
   the final two `CODE_STEP_ARG_NAMES` args.
 - `src/orchestration/orchestration-helper.test.ts` — unit coverage seed (assertions in TEST-004).
@@ -200,8 +224,12 @@ the `tasks` member shares their backing).
 - [ ] A code step that returns no `CodeStepResult` synthesizes the step's
   `notor-step-default-publishes` (parity with a no-emit conversation turn, FR-115).
 - [ ] `callTool` / `callMcpTool` dispatch through `ToolDispatcher.dispatch()` (registered built-in
-  tools / connected MCP servers); a dispatch rejection surfaces as `{step}.code_error` (caught by
-  INT-010, not a plugin crash).
+  tools / connected MCP servers), **threading the step's `runContext` + `orchestrationContext`**; a
+  dispatch rejection surfaces as `{step}.code_error` (caught by INT-010, not a plugin crash).
+- [ ] A code-step `callTool("run_flow", …)` is gated on `depth < maxDepth` AND the shared budget cell
+  exactly as an LLM-step `run_flow`; a blocked spawn returns a clear tool error (no bypass of `max_depth`
+  / aggregate budget), and a long-running code step's tool calls observe parent abort via
+  `runContext.abort`.
 - [ ] `callMcpTool` respects the step's `notor-step-mcp-servers` filter (null = inherit all).
 - [ ] `scratchpad.read/write/list/exists` operate under `sessions/{id}/scratchpad/`; writes are
   readable by downstream steps; access bypasses per-step path constraints for the owning session.

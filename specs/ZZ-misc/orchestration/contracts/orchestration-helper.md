@@ -68,15 +68,31 @@ Pipeline:
    For comparison, user tools use
    `["app", "obsidian", "utils", "libs", "settings", "shared", "params"]`.
 
-4. **Execute** the compiled async function with a **timeout guard** (default **60 s**, configurable;
-   mirrors the per-server MCP timeout convention). On expiry the run is abandoned and the step errors.
+4. **Execute** the compiled async function with a **timeout guard** wrapping the *whole* async function.
+   The default is **300 s (5 min)**, overridable per step via the **`notor-step-timeout-seconds`**
+   frontmatter field ([vault-schema.md](vault-schema.md)). On expiry the run is abandoned and the step
+   errors (`{step}.code_error`).
+
+   > **The step timeout must exceed any inner shell timeout.** A code step that runs a long command
+   > (e.g. `utils.executeShellCommand("npm test", { timeoutSeconds: 120 })`) sets an **inner** budget;
+   > the **outer** code-step timeout must be larger or the outer guard kills the step before the command
+   > can finish. The 300 s default comfortably exceeds the 120 s shell budget in the worked examples; a
+   > step that needs a longer command (large test suite, deploy) raises `notor-step-timeout-seconds`
+   > accordingly. (This is why the default is 300 s, not the 60 s an MCP-style convention would suggest —
+   > build/test verification is a primary code-step use case.)
 5. **Capture** the returned `CodeStepResult` and hand its `{topic, payload}` back to the engine to
    route the next event (write-before-route, exactly like a conversation step's captured emit).
 
-**Cost / identity:** a code step creates **no** conversation, consumes **zero** tokens, and does
-**not** count against the aggregate `RunContext` cost budget (it is not an LLM turn). It *does* count
-as an engine turn for `notor-max-iterations` / runtime / stale-loop accounting (the engine, not the
-code, owns those guards — see [run-loop.md](run-loop.md) and the spec FR-117 safety guards).
+**Cost / identity:** a code step creates **no** conversation, consumes **zero** tokens, and is **not an
+LLM turn**. Consequently it does **not** count against either half of the aggregate `RunContext` budget:
+neither `costRemainingUsd` (zero tokens) **nor `iterationsRemaining`** — `notor-max-iterations` counts
+**LLM turns only** (the authoritative unit; see [run-loop.md](run-loop.md) "Two-Layer Limit Model" and
+[../data-model.md](../data-model.md) `AggregateBudget`). A code step **is** still an *event-producing*
+step: its emitted event is appended to history, so it **does** participate in **stale-loop** detection
+(the `(topic, source_step)` window) and in **wall-clock runtime** accounting (`notor-max-runtime-minutes`
+elapses regardless of token spend). The practical consequence — a flow whose only steps are code steps
+is bounded by **`max-runtime`** (and stale-loop detection), **not** by `max-iterations` — is called out
+explicitly in [event-engine.md](event-engine.md) (Loop Safety Guards) and the spec FR-117 safety guards.
 
 ---
 
@@ -157,11 +173,17 @@ interface OrchestrationHelper {
    */
   once<T>(key: string, fn: () => Promise<T>): Promise<T | undefined>;
 
-  /** The session scratchpad — shared, restriction-free working space for the owning session. */
+  /**
+   * The session scratchpad — shared, restriction-free working space for the owning session.
+   * OVERWRITE-ONLY by design: there is deliberately NO `append`. Crash-recovery (FR-125) re-runs an
+   * interrupted step from fresh context, so writes must be idempotent — a step writes the COMPLETE
+   * current content (or uses a per-iteration filename), so a re-run reproduces rather than duplicates.
+   * `once(...)` guards only EXTERNAL effects, never scratchpad state. (See "At-least-once recovery".)
+   */
   scratchpad: {
     /** Read a scratchpad file; null if it does not exist. */
     read(file: string): Promise<string | null>;
-    /** Write (create or overwrite) a scratchpad file. */
+    /** Write (create or OVERWRITE) a scratchpad file with its complete content. Idempotent by design — no append variant. */
     write(file: string, content: string): Promise<void>;
     /** List scratchpad file names (relative to scratchpad/). */
     list(): Promise<string[]>;
@@ -171,14 +193,18 @@ interface OrchestrationHelper {
 
   /**
    * Dispatch a registered built-in tool by name. Returns the tool's textual output.
-   * Routes through the same ToolDispatcher pipeline as an LLM tool call; honors path
-   * enforcement and the owning session's auto-allowed scratchpad path.
+   * Routes through the same ToolDispatcher pipeline as an LLM tool call, threading the step's
+   * `runContext` (depth + SHARED aggregate-budget cell + parent abort) AND `orchestrationContext`
+   * onto `ToolExecuteOptions` — so a child-spawning tool (e.g. `run_flow`) is depth/budget-gated and
+   * abort-cascaded exactly as it would be from an LLM turn (see "runContext propagation" below).
+   * Honors path enforcement and the owning session's auto-allowed scratchpad path.
    */
   callTool(toolName: string, params: Record<string, unknown>): Promise<string>;
 
   /**
    * Dispatch a tool on a connected MCP server (server + tool named separately —
    * the helper namespaces them as `{serverName}__{toolName}` internally). Returns textual output.
+   * Threads `runContext` + `orchestrationContext` identically to `callTool` (below).
    */
   callMcpTool(serverName: string, toolName: string, params: Record<string, unknown>): Promise<string>;
 
@@ -217,11 +243,11 @@ interface OrchestrationHelper {
 |---|---|
 | `emit(topic, payload?, structured?)` | The **only** way a code step routes the next event. The engine routes **the returned value**, so `return orchestration.emit(...)` is mandatory; a bare call is a no-op. A code step that returns no `CodeStepResult` falls back to the step's `notor-step-default-publishes` (synthesized exactly as a no-emit conversation turn would be, FR-115). The optional `structured` is lifted onto `RunResult.structured` only when `topic` is the flow's terminal/completion event (FR-173); ignored otherwise. |
 | `once(key, fn)` | At-least-once side-effect guard (FR-125). Runs `fn` and appends a keyed `side_effect.committed` log entry on success; on a recovery re-run of the step, an already-committed `key` skips `fn` (returns `undefined`). Wrap non-idempotent external effects (push/post/deploy). Best-effort — cannot cover a crash *during* `fn`; see [At-least-once recovery](#at-least-once-recovery-fr-125). |
-| `scratchpad.*` | Reads/writes under `sessions/{id}/scratchpad/`. The owning session's scratchpad path is auto-allowed in path enforcement (FR-120/FR-121), so a code step never needs explicit `allowed_paths`. This is the cross-step state channel: a code step writes here for downstream steps. |
-| `callTool` | Dispatches a built-in tool (the same registry the LLM sees). Throws/rejects on dispatch failure (the rejection is caught and surfaces as `{step}.code_error`). |
-| `callMcpTool` | Dispatches against a **connected** MCP server. Subject to the step's `notor-step-mcp-servers` filter (null = inherit all). |
+| `scratchpad.*` | Reads/writes under `sessions/{id}/scratchpad/`. The owning session's scratchpad path is auto-allowed in path enforcement (FR-120/FR-121), so a code step never needs explicit `allowed_paths`. This is the cross-step state channel: a code step writes here for downstream steps. **Overwrite-only** — `write` replaces the whole file; there is no `append`, because recovery re-runs would duplicate appended content (FR-125). Write the complete current content, or a per-iteration filename. |
+| `callTool` | Dispatches a built-in tool (the same registry the LLM sees), threading the step's `runContext` + `orchestrationContext` (see "runContext propagation"). Throws/rejects on dispatch failure (the rejection is caught and surfaces as `{step}.code_error`). A child-spawning tool (`run_flow`) is depth/budget-gated and abort-cascaded just as from an LLM turn. |
+| `callMcpTool` | Dispatches against a **connected** MCP server, threading `runContext` + `orchestrationContext` identically. Subject to the step's `notor-step-mcp-servers` filter (null = inherit all). |
 | `tasks.ensure` | Idempotent; repeat keys do not duplicate. Pairs with `FLOW_COMPLETE` task-completion enforcement (FR-123) — open/running tasks block `FLOW_COMPLETE` (but **not** `FLOW_CANCELLED`, FR-132). |
-| `flow.iteration` | The engine turn counter, identical to the conversation-step prompt scaffold's `{iteration}`. |
+| `flow.iteration` | The engine **step-turn** counter (increments once per executed step, code or conversation), identical to the conversation-step prompt scaffold's `{iteration}`. This is a *display/sequence* counter — distinct from `notor-max-iterations`, which counts **LLM turns only** ([run-loop.md](run-loop.md)). |
 | `eventHistory(limit?)` | The same history the conversation-step scaffold injects as "EVENT HISTORY (last 10)"; here it is data, not prose. |
 
 ---
@@ -250,6 +276,33 @@ interface CodeStepResult {
   (FR-173). On a non-terminal emit it is ignored. This is the only mechanism that populates
   `structured` — without it `RunResult.structured` is always `null` and `run_flow` falls back to
   `text`. `payload` stays a string for routing/logging even when `structured` is set.
+
+---
+
+## `runContext` propagation from a code step (the spawn-gate is not bypassable)
+
+A code step runs as a deterministic `AsyncFunction`, **not** on a `RunLoop` turn — so, unlike a
+conversation step, there is no `RunLoop` to assemble and thread the `RunContext` into
+`executeToolBatches`. Left unaddressed, a code step's `orchestration.callTool("run_flow", …)` would
+dispatch a child-spawning tool with **no** depth/budget context, letting a code step spawn child flows
+that escape `notor-max-depth` and the aggregate `notor-max-cost-usd` ceiling entirely (and miss the
+parent abort cascade). That hole is closed explicitly:
+
+- **`CodeStepExecutor` constructs the step's `RunContext`** for the turn — `{ depth, maxDepth, budget,
+  abort }` — using the **current depth** and the **shared `AggregateBudget` cell** the runner passes in
+  (the same cell every node in the tree references; [run-loop.md](run-loop.md)), and the parent abort
+  signal.
+- **`orchestration.callTool` / `callMcpTool` thread that `runContext` (and the step's
+  `orchestrationContext`) onto `ToolExecuteOptions`** at the same `ToolDispatcher.dispatch()` assembly
+  site an LLM turn uses. The dispatch path is therefore identical for code-step and LLM-step tool calls.
+- **Consequence:** a code-step `run_flow` is gated by the **same** spawn rule as an LLM-step `run_flow`
+  — `depth < maxDepth` AND the shared budget cell has headroom — and a blocked spawn returns the same
+  clear tool error (authority: [run-loop.md](run-loop.md) spawn gate, [tools.md](tools.md) `run_flow`).
+  A long-running code step's tool calls also observe parent abort via the threaded `runContext.abort`.
+
+This makes the cascading-guardrail model (FR-176) hole-free regardless of whether composition is driven
+from a conversation step or a code step. (Authority for the gate itself stays [run-loop.md](run-loop.md);
+this section only states that a code step's tool dispatch carries the same `runContext`.)
 
 ---
 
@@ -292,11 +345,13 @@ Author a step subscribing to `{step}.code_error` to handle failures, or let it r
 
 Crash recovery (FR-125) replays `session-log.jsonl`: a dangling `turn.start` with no matching
 `turn.complete` means the turn was interrupted, so the engine **re-emits the trigger and the step
-runs again** from fresh context. This is safe for vault state (re-writing the scratchpad just
-overwrites it) — but **recovery is at-least-once, not exactly-once**: a step that performed an
-**external, non-idempotent side effect** (e.g. `utils.executeShellCommand("git push")`, a Slack post
-via `callMcpTool`, a deploy) and then crashed before `turn.complete` will **repeat that effect** on
-re-run.
+runs again** from fresh context. This is safe for vault state **only because scratchpad writes are
+overwrite/idempotent** — a re-run rewrites the whole file, reproducing (not duplicating) it. An
+**append** would duplicate on re-run, which is exactly why the scratchpad API has no `append` and the
+scaffold/persona instruct overwrite-only writes (FR-121). But **recovery is at-least-once, not
+exactly-once**: a step that performed an **external, non-idempotent side effect** (e.g.
+`utils.executeShellCommand("git push")`, a Slack post via `callMcpTool`, a deploy) and then crashed
+before `turn.complete` will **repeat that effect** on re-run.
 
 This is an inherent property — a plugin cannot make `git push` transactional — so the contract is
 named honestly and a guard primitive is provided rather than a guarantee implied:
@@ -418,7 +473,8 @@ old verification concept.
 - **`OrchestrationTask` / `OrchestrationEvent` / terminal constants:** [../data-model.md](../data-model.md).
 - **Task notes + scratchpad + `session-log.jsonl` write order:** [vault-schema.md](vault-schema.md).
 - **Per-run cap vs. aggregate budget + `RunContext`:** [run-loop.md](run-loop.md) (a code step is not
-  an LLM turn and does not draw on the cost budget).
+  an LLM turn — it draws on neither the cost budget nor `notor-max-iterations`, which counts LLM turns
+  only; it is bounded by `max-runtime` and stale-loop detection).
 - **`structured` return populated by a terminal code step (flow-as-tool):** [edges.md](edges.md)
   (`child_run_metadata`) and spec FR-173.
 - **Sucrase pipeline reuse:** `src/extensions/compiler.ts` (`stripTypes:31`, `TOOL_ARG_NAMES:67`,

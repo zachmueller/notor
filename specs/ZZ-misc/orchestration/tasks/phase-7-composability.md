@@ -306,6 +306,18 @@ and `origin: "run_flow"` on its `session.json` (`OrchestrationSessionMeta` — s
 child session links into the parent's recovery tree so crash recovery (`INT-005`) can resume the whole
 tree coherently (FR-174).
 
+**Parent-rooted recovery reconciliation (the half of FR-125 that lands here).** `INT-005` established
+the contract that child sessions (`origin ∈ {run_flow, chaining}`) are **not** recovered by the
+top-level scan. This task wires the **parent-replay** behavior that makes that safe: when the parent
+step that called `run_flow` is replayed (dangling `turn.start`), the runner inspects the linked child
+session before re-spawning — if the child reached a terminal status (`completed`/`cancelled`) it
+**reuses the child's recorded result** (no re-spawn); if the child is non-terminal it **tombstones** the
+stale child (`session.json` status → `error`) and **re-spawns** a fresh one. This is what prevents the
+double-execution race (an independently-recovered child *and* a duplicate spawned by the re-run parent).
+Because `once(...)` keys are per-session, they cannot dedupe across a respawn — the parent-rooted rule,
+not per-effect guarding, is the mechanism (see [../contracts/vault-schema.md](../contracts/vault-schema.md)
+"Parent-rooted recovery").
+
 **Isolation modes (`notor-handoff-isolation`, from the callee's `definition.md`):**
 
 - **`isolated` (default):** the child gets a **fresh** scratchpad and task registry — clean isolation,
@@ -334,8 +346,10 @@ to sibling or unrelated sessions' scratchpads.
 - `src/orchestration/runner.ts` — the child-invocation entry point (`INT-043`) reads
   `notor-handoff-isolation` from the callee `OrchestrationFlow` and asks the session manager for the
   appropriate child session.
-- `src/orchestration/session-recovery.ts` — `parent_session_id` is followed so recovery (`INT-005`)
-  resumes the parent/child tree coherently (no orphaned child session).
+- `src/orchestration/session-recovery.ts` / `src/orchestration/runner.ts` — the parent-replay path
+  follows `parent_session_id` and reconciles the linked child (reuse a terminal child's result, or
+  tombstone-and-respawn a non-terminal one) so recovery (`INT-005`) resumes the parent/child tree
+  coherently with **no orphaned or duplicated** child run.
 
 **Dependencies:** `INT-001` (session manager + the owning-session scratchpad auto-allow this extends),
 `INT-043` (the flow-as-tool execution that spawns the child session).
@@ -349,6 +363,9 @@ to sibling or unrelated sessions' scratchpads.
 - [ ] The auto-allow remains scoped — a `shared` child gains the parent scratchpad only, not unrelated
   sessions'.
 - [ ] The child session links into the parent's recovery tree so `INT-005` resumes the whole tree.
+- [ ] A crash mid-`run_flow` does **not** produce a duplicate child: the replayed parent reuses a
+  terminal child's recorded result, or tombstones-and-respawns a non-terminal child (no
+  independently-recovered child runs alongside a freshly-spawned one).
 
 ---
 
@@ -577,7 +594,10 @@ ItemView` (`src/ui/chat-view.ts:55`, `CHAT_VIEW_TYPE = "notor-chat-view"` `:36`)
 - **Header aggregate rollup** (root cost / iterations / max depth) reads the root run's shared
   `RunContext.budget` cell consumption ([../contracts/run-loop.md](../contracts/run-loop.md)).
 - The view needs **no cycle-detection or infinite-expansion guards** — the edges are a tree-constrained
-  DAG ([../contracts/edges.md](../contracts/edges.md) §3).
+  DAG ([../contracts/edges.md](../contracts/edges.md) §3) — but it **must tolerate dangling edges**: a
+  recovery re-run mints new conversation ids, so a `next`/`prev` target may be an abandoned pre-crash
+  conversation. Render only edges whose target resolves; **skip** a dangling target silently (it is
+  inert, not an error). See [../contracts/edges.md](../contracts/edges.md) §2 (recovery tolerance).
 
 **(2) Inline peek card — NEW chat UI (Risk #7).** The spawning `run_flow` / sub-agent tool-call card
 renders an inline **one-level peek**: the direct child's summary line + status + **aggregate rollup**
@@ -615,6 +635,8 @@ live view subscribes to).
 **Acceptance Criteria:**
 - [ ] One run-tree `ItemView` leaf renders **both** orchestration steps (via `orchestration_edges`) and
   sub-agents (via `parent_conversation_id`) as one collapsible hierarchy.
+- [ ] The view tolerates **dangling** `next`/`prev` edges (renders resolvable edges, skips stale targets
+  from a recovery re-run) — a dangling edge never throws or blanks the tree.
 - [ ] The view is **live** for active runs (subscribed via `WorkflowActivityTracker.onChange()`) and
   **static** for completed runs; a recovered run re-attaches its subscription.
 - [ ] Smart auto-expand to the active / most-recent / clicked node; ephemeral collapse (not persisted);
@@ -749,8 +771,12 @@ composition invariants called out in [../tasks.md](../tasks.md):
 5. **`child_run_metadata` back-compat** — a legacy `sub_agent_metadata` record (`jsonl_filename`,
    `token_usage`, `iteration_count`, `stop_reason`, `profile_name`) parses unchanged through the shared
    reader; new fields are optional/absent on legacy records (`INT-047`).
+6. **Parent-rooted recovery (no duplicate child)** — a crash mid-`run_flow` does **not** double-execute
+   the child: a replayed parent reuses a **terminal** child's recorded result (no re-spawn), and
+   **tombstones-and-respawns** a non-terminal child; the top-level recovery scan never recovers a child
+   session (`origin ∈ {run_flow, chaining}`) independently (`INT-044` + `INT-005`).
 
-**FRs:** FR-172, FR-173, FR-176, FR-177 (and FR-126's DAG invariant exercised cross-cuttingly).
+**FRs:** FR-172, FR-173, FR-176, FR-177, FR-174/FR-125 (parent-rooted recovery) (and FR-126's DAG invariant exercised cross-cuttingly).
 
 **Files:**
 - `src/orchestration/flow-composition-manager.test.ts` — invocable-flow discovery + `run_flow` enum
@@ -762,8 +788,11 @@ composition invariants called out in [../tasks.md](../tasks.md):
 - `src/orchestration/edges.test.ts` — the edge-DAG no-cycle invariant over invocation + chaining edges.
 - `src/types.test.ts` (or a colocated `child-run-metadata.test.ts`) — the `child_run_metadata` back-compat
   parse of a persisted `sub_agent_metadata` record.
+- `src/orchestration/session-recovery.test.ts` — extend (`INT-005`'s suite) for parent-rooted child
+  reconciliation: a replayed parent reuses a terminal child's result and tombstones-and-respawns a
+  non-terminal one; the top-level scan ignores `origin ∈ {run_flow, chaining}` sessions (`INT-044`).
 
-**Dependencies:** `INT-042`, `INT-043`, `INT-046`, `INT-047` (the units under test).
+**Dependencies:** `INT-042`, `INT-043`, `INT-044`, `INT-046`, `INT-047` (the units under test).
 
 **Acceptance Criteria:**
 - [ ] The `run_flow` `flow` enum reflects discovered invocable flows and rebuilds per `execute()`; an
@@ -776,6 +805,9 @@ composition invariants called out in [../tasks.md](../tasks.md):
 - [ ] The edge graph is asserted to be a tree-constrained DAG (no cyclic / sibling / `return` edges).
 - [ ] A legacy `sub_agent_metadata` record parses unchanged through the shared `child_run_metadata`
   reader.
+- [ ] Parent-rooted recovery: a crash mid-`run_flow` replayed through the parent reuses a terminal
+  child's recorded result (no second child run) and tombstones-and-respawns a non-terminal child; a
+  child session is never independently recovered by the top-level scan.
 
 ---
 

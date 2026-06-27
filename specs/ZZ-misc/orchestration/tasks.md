@@ -16,7 +16,7 @@ gate. Task IDs and their dependency edges defined here are authoritative; per-ph
 
 ## Task Summary
 
-**Total tasks:** ~52 across 8 design phases
+**Total tasks:** ~53 across 8 design phases
 **Ships as:** one cohesive implementation (no phase independently shippable)
 **Repo phase convention:** Setup → Foundation → Core → Integration → Quality → Polish
 **Feature group:** `orchestration_enabled` (default off)
@@ -59,6 +59,7 @@ Bodies in the linked per-phase files. `→` = depends on.
 | ARCH-004 | Replace recursion ban with `depth < maxDepth` check in `use-subagent` | ARCH-002, ARCH-003 |
 | ARCH-005 | Two-layer budget helpers (`budget.ts`) + per-turn cost wiring via `calculateCost` | ARCH-002, ARCH-004 |
 | ARCH-006 | Shared `Semaphore` generalized into the run-loop layer | ARCH-002 |
+| ARCH-007 | Pure `resolvePersonaProviderConfig(...)` → session-pinned provider/model (no global registry mutation) | ARCH-001 |
 
 ### Phase 1 — Core engine (Core)
 
@@ -71,7 +72,7 @@ Bodies in the linked per-phase files. `→` = depends on.
 | FEAT-004 | `FallbackCoordinator` (`*` subscriber, pure backstop → `FLOW_ERROR`) | FEAT-003 |
 | FEAT-005 | `StepPromptBuilder` (scaffold + always-inject must-publish) | FEAT-001 |
 | FEAT-009 | `emit_event` built-in tool scaffold (gated) | ENV-002, FEAT-001 |
-| FEAT-007 | `StepTurnExecutor` (conversation path on `RunLoop`, persona wiring) | ARCH-002, ARCH-005, FEAT-002, FEAT-005, FEAT-006, FEAT-009 |
+| FEAT-007 | `StepTurnExecutor` (conversation path on `RunLoop`, persona wiring) | ARCH-002, ARCH-005, ARCH-007, FEAT-002, FEAT-005, FEAT-006, FEAT-009 |
 | FEAT-008 | `LoopSafetyGuards` (iteration/runtime/stale/thrashing) | FEAT-001, FEAT-003 |
 | FEAT-010 | `OrchestrationRunner` main loop | FEAT-002, FEAT-003, FEAT-004, FEAT-007, FEAT-008 |
 | FEAT-011 | Command palette "Run Orchestration" + flow picker | FEAT-010, ENV-002 |
@@ -168,6 +169,7 @@ schema (INT-006) and the shared metadata shape (INT-047) exist.
 ## Parallelism Groups
 
 - **After ARCH-001:** ARCH-003 runs parallel to ARCH-002 (different files; both need only the types).
+  ARCH-007 (pure persona provider/model resolver) also needs only ARCH-001 and runs in parallel.
 - **After FEAT-001:** FEAT-002 (parsers), FEAT-005 (prompt builder), FEAT-006 (session log), FEAT-008
   (safety) are four independent tracks.
 - **After FEAT-010:** Lane A (session/nav), Lane B (code steps), Lane C (notices), Lane D (interactive)
@@ -211,3 +213,15 @@ The hazards that govern ordering (full rationale in [plan.md](plan.md)):
 10. **Chaining adapter (INT-045) depends on code steps (INT-010)** — don't parallelize across Lane B.
 11. **Finalize `use-subagent.ts` (Phase 0) before `run_flow` (INT-042) mirrors its dynamic-tool
     pattern.**
+12. **Parent-rooted recovery (FR-125) — root-only scan in INT-005, child reconciliation in INT-044.**
+    Recovery's top-level scan recovers only root sessions (`origin: "user"`); child sessions
+    (`origin ∈ {run_flow, chaining}`) are reconciled by the parent's replay (reuse a terminal child's
+    result, or tombstone-and-respawn a non-terminal one) — never recovered independently, or a crash
+    mid-`run_flow` duplicates the child. INT-005 defines the root-only contract; INT-044 (composition)
+    wires the reuse/respawn. `once(...)` keys are per-session and cannot dedupe a respawn, so the
+    parent-rooted rule is the mechanism, not per-effect guarding.
+13. **Session-pinned provider/model (ARCH-007) before any concurrent step turn (FEAT-007).** Step turns
+    must resolve provider/model via the pure `resolvePersonaProviderConfig(...)` pinned into the
+    `ConversationSession` — never the global-mutating `applyProviderModelOverrides()` — or concurrent
+    step turns / `run_flow` children clobber each other's model. ARCH-007 is a Phase-0 correctness
+    prerequisite for FEAT-007; see [research.md](research.md) Finding 5.

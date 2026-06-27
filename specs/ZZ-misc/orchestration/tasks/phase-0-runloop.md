@@ -71,6 +71,7 @@ caps, wind-down, and abort cascading are therefore byte-identical to HEAD. See
 | ARCH-004 | Replace recursion ban with `depth < maxDepth` check in `use-subagent` | ARCH-002, ARCH-003 |
 | ARCH-005 | Two-layer budget helpers (`budget.ts`) + per-turn cost wiring via `calculateCost` | ARCH-002, ARCH-004 |
 | ARCH-006 | Shared `Semaphore` generalized into the run-loop layer | ARCH-002 |
+| ARCH-007 | Pure `resolvePersonaProviderConfig(...)` → session-pinned `ResolvedProviderConfig` (no global registry mutation) | ARCH-001 |
 | TEST-001 | RunLoop regression gate + `run-loop.test.ts` + `budget.test.ts` | ARCH-002 / 004 / 005 — **release blocker** |
 
 **Parallelism (from [tasks.md](../tasks.md)):** after ARCH-001 lands the types, **ARCH-003** runs
@@ -312,6 +313,34 @@ the three axes. Move the primitive, re-export from the old path (or update impor
 - [ ] **GATE:** `src/sub-agents/constants.test.ts` (and any semaphore test) passes unmodified
 - [ ] `npm run build` succeeds with no type errors
 
+### ARCH-007: Pure `resolvePersonaProviderConfig(...)` → session-pinned provider/model (no global mutation)
+**Description:** Provide the **pure** provider/model resolver that lets each step turn pin its own model
+**without** mutating the shared `ProviderRegistry`. This is a foundation-level **correctness**
+requirement, not a polish item: the engine relies on concurrency (the shared `Semaphore`, cap 3;
+concurrent `run_flow` children; a flow running alongside foreground chat), and the existing
+`PersonaManager.applyProviderModelOverrides()` (`src/personas/persona-manager.ts` ~349-453) mutates
+**global** state via `providerRegistry.switchProvider(...)` (~357/396) and `updateConfig(...)`
+(~363/436) — so two concurrent step turns with different models would clobber each other's selection
+(see [research.md](../research.md) Finding 5). Add `resolvePersonaProviderConfig(persona,
+stepModelOverride, settings, providerRegistry)` returning a **`ResolvedProviderConfig`** value object
+(`{ providerId, modelId, useExtendedContext, thinkingLevel }`, [data-model.md](../data-model.md)) by
+**reading** the preset/provider/model tables — **no `switchProvider`/`updateConfig` call**. It mirrors
+the existing pure `resolveWorkflowProviderConfig()` (`src/chat/workflow-executor.ts` ~68-96).
+`stepModelOverride` (`notor-step-model`) takes precedence over the persona's `preferred_model`.
+FEAT-007's `StepTurnExecutor` consumes this (pins the result into each step's `ConversationSession`,
+passes `modelId` as `RunLoopOptions.model`); FEAT-007 therefore **depends on ARCH-007**.
+**FRs:** FR-115 (concurrency-safe per-step provider/model)
+**Files:**
+- `src/personas/persona-manager.ts` (or a new `src/personas/provider-config-resolver.ts`) — add the pure `resolvePersonaProviderConfig(...)`; do **not** modify `applyProviderModelOverrides()` (it stays for interactive persona activation, which legitimately mutates global active state)
+- `src/run-loop/types.ts` — `ResolvedProviderConfig` (or import from the persona module) if not already present
+**Dependencies:** ARCH-001
+**Acceptance Criteria:**
+- [ ] `resolvePersonaProviderConfig(...)` returns a `ResolvedProviderConfig` value object and performs **no** `providerRegistry.switchProvider` / `updateConfig` call (verified by inspection + a test that spies the registry and asserts zero mutating calls)
+- [ ] `notor-step-model` (the `stepModelOverride` arg) overrides the persona's `preferred_model`
+- [ ] Preset → provider → model precedence matches `resolveWorkflowProviderConfig()`'s shape; an unavailable provider/model falls back gracefully (value-object fallback, no global write, no blocking)
+- [ ] Two resolutions for different personas/models produce two independent value objects with no shared mutation and no change to the global active provider/model
+- [ ] `npm run build` succeeds with no type errors
+
 ---
 
 ## Quality — RunLoop Regression Gate
@@ -332,7 +361,8 @@ green.**
 - `src/chat/sub-agent-runner.test.ts` — must pass **unmodified** (gate)
 - `src/tools/use-subagent.test.ts` — must pass **unmodified** (gate; `iterationCap === 20` assert)
 - `src/sub-agents/constants.test.ts` — must pass **unmodified** (gate)
-**Dependencies:** ARCH-002, ARCH-004, ARCH-005 (authorable the moment ARCH-002 is in progress — it *is* the existing suite)
+- `src/personas/provider-config-resolver.test.ts` (or colocated) — new unit suite for ARCH-007 (`resolvePersonaProviderConfig(...)` purity + `notor-step-model` override)
+**Dependencies:** ARCH-002, ARCH-004, ARCH-005, ARCH-007 (authorable the moment ARCH-002 is in progress — it *is* the existing suite)
 **Acceptance Criteria:**
 - [ ] **RELEASE BLOCKER:** `src/chat/sub-agent-runner.test.ts`, `src/tools/use-subagent.test.ts`, `src/sub-agents/constants.test.ts` all pass with **zero** modifications
 - [ ] `run-loop.test.ts` asserts `RunLoop` returns a `RunResult` on each terminal condition (`completed`, `iteration_cap`, `token_limit`, `context_window`, `cost_cap`, `depth_cap`)
@@ -342,4 +372,5 @@ green.**
 - [ ] `budget.test.ts` asserts the **shared** `budget` cell decrements in place per-turn and that a child sharing the cell by reference sees a parent/sibling decrement (and vice versa) — i.e. the ceiling is tree-wide, not per-branch
 - [ ] `budget.test.ts` asserts exhaustion blocks **only** new child spawns (in-flight turn completes; bounded overshoot under concurrency)
 - [ ] `budget.test.ts` asserts sub-agent seeding (`maxDepth = 0`, a fresh both-`Infinity` cell) reduces the rule to today's single per-run cap and that decrementing the `Infinity` cell is a no-op observable-wise
-- [ ] `npm test` is green across all five files
+- [ ] A `provider-config-resolver` test (ARCH-007) asserts `resolvePersonaProviderConfig(...)` returns a `ResolvedProviderConfig` and makes **zero** `providerRegistry.switchProvider`/`updateConfig` calls (spied), and that `notor-step-model` overrides the persona's preferred model
+- [ ] `npm test` is green across all files

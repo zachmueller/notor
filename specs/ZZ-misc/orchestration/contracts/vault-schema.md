@@ -56,7 +56,7 @@ lives under `{notor_dir}/orchestrations/`.
         {session-id}/
           session.json                   # OrchestrationSessionMeta (status, iteration, active step)
           session-log.jsonl              # append-only turn+event log (crash-recovery source)
-          scratchpad/                    # shared, restriction-free cross-step working dir
+          scratchpad/                    # shared, restriction-free cross-step working dir (OVERWRITE-only writes; see FR-121/125)
             context.md                   #   (free-form; steps create whatever files they need)
             plan.md
             progress.md
@@ -92,7 +92,7 @@ frontmatter**. Parsed into `OrchestrationFlow` ([data-model.md](../data-model.md
 | `notor-flow-description` | string | yes | — | Short description for the flow picker. |
 | `notor-starting-event` | string | yes | — | First event published when the flow starts. |
 | `notor-completion-event` | string | no | `FLOW_COMPLETE` | Terminal event that ends the loop; subject to task enforcement (FR-123). |
-| `notor-max-iterations` | number | no | — | Aggregate tree-wide turn ceiling (see [contracts/run-loop.md](run-loop.md)); a safety limit on total step turns. |
+| `notor-max-iterations` | number | no | — | Aggregate tree-wide ceiling on **LLM turns** (maps to `AggregateBudget.iterationsRemaining`; see [contracts/run-loop.md](run-loop.md)). **Code steps are not LLM turns and do not count toward it** — a code-step-only flow/cycle is bounded by `notor-max-runtime-minutes` + stale-loop detection instead (see [contracts/event-engine.md](event-engine.md)). |
 | `notor-max-runtime-minutes` | number | no | — | Wall-clock runtime cap (FR-117). |
 | `notor-required-events` | string[] | no | `[]` | Events that must have been seen before `notor-completion-event` is accepted. |
 | `notor-fanout-topics` | string[] | no | `[]` | Topics explicitly allowed to route to **more than one** step (ordered fan-out, FR-112). A topic with >1 subscriber that is **not** listed here is a load error (FR-111). See the routing rules in [contracts/event-engine.md](event-engine.md). |
@@ -175,6 +175,7 @@ Step notes live under `{flow-dir}/steps/`. Each defines one step. Parsed into `S
 | `notor-step-model` | string \| null | no | `null` | Model override; takes precedence over the persona's model. |
 | `notor-step-mode` | `"conversation"` \| `"code"` | no | `conversation` | Execution mode. `conversation` = LLM turn on the shared `RunLoop`; `code` = deterministic TypeScript, no LLM, no conversation. |
 | `notor-step-mcp-servers` | string[] \| null | no | `null` | MCP servers active for this step (`null` = inherit all connected). |
+| `notor-step-timeout-seconds` | number \| null | no | `null` (→ 300) | **Code steps only.** Outer timeout guard for the whole code-step async function (default **300 s**). Must exceed any inner `utils.executeShellCommand` `timeoutSeconds` or the outer guard kills the step first. Ignored in `conversation` mode. See [contracts/orchestration-helper.md](orchestration-helper.md). |
 
 **Note body & `<include_note>`:** the Markdown body is injected into the `### 1. EXECUTE` section of
 the step prompt scaffold (FR-114). The body may contain `<include_note>` tags to transclude other
@@ -337,6 +338,25 @@ The order below is **mandatory** — recovery replay depends on it (FR-112, FR-1
 
 Sequence per step turn: `turn.start` → (LLM/code runs; `side_effect.committed` per guarded effect) →
 `turn.complete` → `event.emitted` → (route).
+
+### Parent-rooted recovery (no duplicate child runs — FR-125)
+
+Recovery is **parent-rooted**: the load-time scan recovers **only root sessions** (`session.json`
+`origin: "user"`). A **child session** (`origin ∈ {run_flow, chaining}`, with `parent_session_id` set)
+is **never** recovered by the top-level scan — its lifecycle belongs to the parent turn that spawned it,
+which is itself replayed. When a parent step that invoked `run_flow` is replayed:
+
+- if the child already reached a terminal status (`completed`/`cancelled`), the parent **reuses the
+  child's recorded result** instead of re-spawning;
+- if the child is non-terminal, the parent's replay **tombstones** it (sets its `session.json` status to
+  `error`) and **re-spawns** a fresh child.
+
+This removes the double-execution race (an independently-recovered child running *while* the re-run
+parent spawns a duplicate). The `origin` discriminator on `session.json` is the load-bearing field:
+**recovery filters on `origin === "user"`** at the top level. Wiring: INT-005 (root-only scan +
+contract) → INT-044 (parent-replay reuse/respawn). `once(...)` keys are per-session, so they do **not**
+deduplicate across a tombstoned-and-respawned child — which is *why* the parent-rooted rule (not
+per-effect guarding) is the mechanism that prevents duplicate child runs.
 
 ### Sample lines
 

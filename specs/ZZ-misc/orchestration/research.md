@@ -87,20 +87,42 @@ children never share a slot. Sub-agents pass `orchestrationContext: undefined` (
 Authority for the shape: [data-model.md](data-model.md) (`OrchestrationToolContext`); consumption:
 [contracts/tools.md](contracts/tools.md).
 
-### Finding 5 — `applyProviderModelOverrides()` mutates global provider-registry state (concurrency risk, deferred)
+### Finding 5 — `applyProviderModelOverrides()` mutates global provider-registry state → step turns MUST use a pure session-pinned resolver (ARCH-007)
 
 Verified at `src/personas/persona-manager.ts` ~349-453: `applyProviderModelOverrides()` calls
-`this.providerRegistry.switchProvider(...)` and `this.providerRegistry.updateConfig(...)`, mutating
-**global** provider/model selection — the same class of global-state mutation the design deliberately
-avoids by using `getPersonaByName()` (read-only, ~106) instead of `activatePersona()` (~125). The
-design's claim that "many step turns interleave safely" holds for *persona resolution* but **not** for
-this provider/model application: two concurrently-running step turns (fan-out, `run_flow` children, or
-two background flows) could clobber each other's model selection through the shared registry. This is a
-**known, unresolved risk recorded for implementation** (no spec mechanism added in this revision): the
-per-step provider/model application path must be made resolve-into-the-`ConversationSession` (not
-global) **before** relying on concurrent step turns. Flagged here so the implementer treats it as a
-required pre-condition for any concurrency, not a latent surprise. (Tracked against FEAT-007 / the
-concurrency model; no AC added — deferred by decision.)
+`this.providerRegistry.switchProvider(...)` (~357, ~396) and `this.providerRegistry.updateConfig(...)`
+(~363, ~436), mutating **global** provider/model selection on the shared `ProviderRegistry` singleton —
+the same class of global-state mutation the design deliberately avoids by using `getPersonaByName()`
+(read-only, ~106) instead of `activatePersona()` (~125). The design's claim that "many step turns
+interleave safely" holds for *persona resolution* but **not** for this provider/model application: two
+concurrently-running step turns (fan-out, `run_flow` children, two background flows, or a flow running
+while the user chats in the foreground) would clobber each other's model selection through the shared
+registry. Because the engine relies on concurrency (the shared semaphore, cap 3, and concurrent
+`run_flow` children), this is a **correctness bug, not a latent risk** — it must be resolved in the
+foundation, not deferred.
+
+**Resolution (ARCH-007, new Phase-0 task; AC added).** Step turns must **never** call
+`applyProviderModelOverrides()` (which mutates the global registry). Instead, mirror the *existing*
+workflow precedent: `resolveWorkflowProviderConfig()` (`src/chat/workflow-executor.ts` ~68-96) is a
+**pure resolver** that turns a persona's preset/provider/model preference into a `ResolvedProviderConfig`
+value object (`{ providerId, modelId, useExtendedContext, thinkingLevel }`) **without touching the
+registry**, and that value is **pinned into the per-run `ConversationSession`**
+(`src/chat/conversation-session.ts`, the isolated snapshot with its own `ConversationManager`/abort/
+pinned provider+model — verified genuinely per-session, see seam table). ARCH-007 adds a persona analog
+(`resolvePersonaProviderConfig(persona, stepModelOverride, settings, providerRegistry)` → pure
+`ResolvedProviderConfig`; `notor-step-model` overrides the persona's model preference), and FEAT-007's
+`StepTurnExecutor` pins the result into each step's `ConversationSession`; `RunLoop` reads the pinned
+`model` from `RunLoopOptions.model`, never from global state.
+
+- **AC (ARCH-007):** resolving a step's provider/model performs **no** `providerRegistry.switchProvider`
+  / `updateConfig` call — it returns a value object only.
+- **AC (FEAT-007):** two concurrent step turns with different `notor-step-model` values each run on their
+  own pinned model; the global `ProviderRegistry` active provider/model is unchanged by a step turn (a
+  foreground chat's model is not flipped by a background flow, and vice versa).
+
+Authority for the resolution: this Finding + [data-model.md](data-model.md) (`ResolvedProviderConfig`
+pinning) + [contracts/run-loop.md](contracts/run-loop.md) (the `model` on `RunLoopOptions` is pinned,
+never global). Tracked as **ARCH-007** ([tasks.md](tasks.md), Phase 0); FEAT-007 depends on it.
 
 ---
 
@@ -140,7 +162,8 @@ argument below.
 |---|---|---|---|
 | `getPersonaByName()` (resolve WITHOUT activating/mutating global state) | `src/personas/persona-manager.ts` ~106 | `StepTurnExecutor` (FEAT-007) resolves a step's persona per turn via this, **not** `activatePersona()` | Read-only resolution leaves global persona state untouched — many step turns interleave safely |
 | `activatePersona()` | `src/personas/persona-manager.ts` ~125 | Deliberately **not** used by step turns | Avoiding it is what keeps concurrent step turns from clobbering global state |
-| `applyProviderModelOverrides()` (preset→provider→model) | `src/personas/persona-manager.ts` ~349-453 | Resolves per-step provider/model; `notor-step-model` overrides the persona's preference | ⚠️ **Mutates global provider-registry state** (`providerRegistry.switchProvider()` / `updateConfig()`) — see the concurrency-safety note below; **not** side-effect-free like `getPersonaByName()` |
+| `applyProviderModelOverrides()` (preset→provider→model) | `src/personas/persona-manager.ts` ~349-453 | **NOT used by step turns** — ⚠️ it **mutates global provider-registry state** (`providerRegistry.switchProvider()` ~357/396, `updateConfig()` ~363/436). ARCH-007 adds a pure `resolvePersonaProviderConfig(...)` analog instead; see Finding 5 | The global mutation would let concurrent step turns clobber each other's model; the pure resolver returns a value object pinned into the `ConversationSession` (no global write) — concurrency-correct by construction |
+| `resolveWorkflowProviderConfig()` (pure preset→`ResolvedProviderConfig`, **no registry mutation**) | `src/chat/workflow-executor.ts` ~68-96 | The **precedent** ARCH-007's `resolvePersonaProviderConfig(...)` mirrors: resolve a persona's preset/provider/model into a value object, pin it into the step's `ConversationSession` | Proven pure-resolution pattern already shipping for workflows; step turns reuse the shape, never the global-mutating path (Finding 5) |
 | `discoverPersonas()` scans `{notor_dir}/personas/`; frontmatter `notor-persona-prompt-mode` (append\|replace), `notor-preferred-provider/model/preset`, `notor-persona-chip-color/emoji` | `src/personas/persona-discovery.ts` ~42 | The `orchestration-creator` persona (POL-001) is discovered identically | Built-in personas register through the existing discovery/profile mechanism |
 | `BUILTIN_PERSONA_PROFILES` (Map: `notor-help` + `tool-creator`); `BuiltinPersonaDefinition {name, description, systemPromptContent}` | `src/personas/builtin-personas.ts` ~318 | POL-001 registers `orchestration-creator` in this Map alongside the existing two | Same registration shape; additive (FR-160 AC) |
 
@@ -159,7 +182,7 @@ argument below.
 
 | Symbol | Real path:line | Use / extension | Why safe |
 |---|---|---|---|
-| `enforcePathConstraints(toolName, parameters, entry, vaultRootPath, resolveVaultPath?)` ~45; `TOOL_PATH_PARAMS` ~28 | `src/tool-config/path-enforcer.ts` | INT-001 auto-allows the session `scratchpad/` path for the owning session's steps; `shared` handoff (FR-174) auto-allows the parent scratchpad in the child | Auto-allow is an additive allowance on the existing enforcement, scoped to the owning session |
+| `enforcePathConstraints(toolName, parameters, entry, vaultRootPath, resolveVaultPath?)` ~45; `TOOL_PATH_PARAMS` ~28 | `src/tool-config/path-enforcer.ts` | INT-001 **adds an optional `sessionAllowedPaths?` param** to this signature and auto-allows the session `scratchpad/` path for the owning session's steps; `shared` handoff (FR-174) adds the parent scratchpad | ⚠️ **Signature change required (not a free consultation):** today `allowed_paths` is fixed on `entry` at dispatch time — there is no per-session seam. INT-001 adds the optional param (sourced from `OrchestrationToolContext` at the single dispatch assembly site); non-orchestration callers pass `undefined` and are unaffected. Additive + scoped to the owning session; no global config mutation |
 | `mergeToolConfigs()` (precedence workflow > persona > rule) ~57; `intersectToolConfig()` (sub-agent intersection) ~142 | `src/tool-config/merger.ts` | Per-step tool access flows from the step's persona config through the existing merge | Existing precedence model unchanged; steps are just another persona-config consumer |
 | `showToolConfigError()` (Notice + `messageEl.oncontextmenu`, `Platform.isDesktop` guard) ~25-40; `showDraftSavedNotice()` (`oncontextmenu` → `onSwitchBack`) ~52-65 | `src/tool-config/notices.ts` | The right-click-Notice pattern (INT-021, FR-141) reuses this `oncontextmenu` + `Platform.isDesktop` precedent | Mobile already omits the right-click affordance via the existing desktop guard |
 

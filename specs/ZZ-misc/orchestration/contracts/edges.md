@@ -108,6 +108,12 @@ to migrate; the uniform structure is free to adopt now.
 - **`next` / `prev`** chain a flow's step conversations in execution order. They **replace** the old
   scalar prev/next and are backfilled the same way the scalars were. They never cross a session
   boundary, so they omit `session_id`.
+  - **Recovery tolerance (FR-125 / INT-005).** A crash-recovery re-run mints **new** conversation ids,
+    so a `next`/`prev` written before the crash may now point at an **abandoned** pre-crash
+    conversation. This is **expected and non-fatal**: recovery **re-backfills** `next`/`prev` against
+    the new conversation ids as the resumed steps run, and every consumer (the run-tree, §6) must
+    **render only resolvable edges and silently skip a dangling target** — an edge is a hint, never a
+    guaranteed-live pointer. No consumer may assume an edge target exists.
 - **`child`** is the **uniform structural source for both invocation and chaining.** A `run_flow`
   call and a `notor-on-complete-flow` chaining handoff both emit a `child` edge to the child flow's
   *entry* conversation, carrying `session_id` (the child session) so the run-tree can root/descend
@@ -298,6 +304,9 @@ what it reads:
 | Select-to-navigate into a node | the existing `notor-conversation://{id}` jump + `switchToConversationById` (`src/ui/message-renderer.ts:957`, `src/chat/orchestrator.ts:741`) |
 
 Because the edges are a tree-constrained DAG (§3), the view needs no cycle-detection or
-infinite-expansion guards at any depth. The run-tree cannot render until **both** INT-006 (edges +
-hide) and INT-047 (`child_run_metadata`) exist — the Phase-7 long pole ([tasks.md](../tasks.md)
-critical path: `INT-006 → INT-043 → INT-047 → POL-003`).
+infinite-expansion guards at any depth. **It must, however, tolerate dangling edges:** after a
+crash-recovery re-run (FR-125), a `next`/`prev` edge may point at an abandoned pre-crash conversation
+id. The view **renders only edges whose target resolves and skips the rest** (a dangling edge is inert,
+not an error) — see §2. The run-tree cannot render until **both** INT-006 (edges + hide) and INT-047
+(`child_run_metadata`) exist — the Phase-7 long pole ([tasks.md](../tasks.md) critical path:
+`INT-006 → INT-043 → INT-047 → POL-003`).

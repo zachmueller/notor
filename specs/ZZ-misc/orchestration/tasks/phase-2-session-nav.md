@@ -57,12 +57,18 @@ for the engine to thread into step turns.
 
 The defining responsibility beyond directory creation is **path auto-allow**: while a step turn that
 belongs to the owning session is executing, the session's `scratchpad/` path must bypass per-step path
-constraints so any step can read/write shared state (FR-121). This is wired through the existing path
-enforcer — `enforcePathConstraints(toolName, parameters, entry, vaultRootPath, resolveVaultPath?)` at
-`src/tool-config/path-enforcer.ts:45` (param set `TOOL_PATH_PARAMS` ~28) — by recognizing the active
-session's scratchpad prefix as an allowed root for the steps of that session only. The auto-allow is
+constraints so any step can read/write shared state (FR-121). This requires a **signature change** to
+the existing path enforcer — `enforcePathConstraints(toolName, parameters, entry, vaultRootPath,
+resolveVaultPath?)` at `src/tool-config/path-enforcer.ts:45` (param set `TOOL_PATH_PARAMS` ~28) **has no
+per-session seam today** (`entry.allowed_paths` is fixed at dispatch time). INT-001 adds an **optional
+`sessionAllowedPaths?: string[]`** parameter (sourced from `OrchestrationToolContext.scratchpadPath` —
+and `parentScratchpadPath` for `shared` handoffs — at the single `ToolDispatcher.dispatch()` assembly
+site, beside `runContext`/`orchestrationContext`). A path under any `sessionAllowedPaths` prefix is
+allowed **in addition to** `entry.allowed_paths`, so the active session's scratchpad is allowed
+**without** mutating the shared/global tool config and **without** a global "current session".
+Non-orchestration callers pass `undefined` and behave exactly as today. The auto-allow is
 **session-scoped**: a step in session A must not gain access to session B's scratchpad. (The Phase 7
-`shared` handoff mode reuses this same mechanism to auto-allow a *parent* session's scratchpad in a
+`shared` handoff mode reuses this same parameter to auto-allow a *parent* session's scratchpad in a
 child — see `INT-044`; this task implements only the owning-session case.)
 
 `session.json` shape and the `session-log.jsonl` entry types / enforced write order are defined by
@@ -79,9 +85,10 @@ fields exist on `session.json` from the start but are written `null` until Phase
   scratchpad-allow).
 - `src/orchestration/types.ts` — reuse `OrchestrationSessionMeta` (added by `FEAT-001`); no new domain
   types expected here.
-- `src/tool-config/path-enforcer.ts` — extend `enforcePathConstraints(...)` (~45) to consult the active
-  session's auto-allowed scratchpad prefix (session-scoped), without weakening the default constraints
-  for non-orchestration tool calls.
+- `src/tool-config/path-enforcer.ts` — **add an optional `sessionAllowedPaths?: string[]` parameter** to
+  `enforcePathConstraints(...)` (~45); a path under any such prefix is allowed in addition to
+  `entry.allowed_paths`. The param defaults to `undefined` (non-orchestration calls unchanged). Sourced
+  from `OrchestrationToolContext` at the dispatch assembly site.
 - `src/orchestration/runner.ts` — `OrchestrationRunner` (`FEAT-010`) constructs the session via the
   manager at flow start and passes `scratchpadPath`/`tasksPath` into the prompt scaffold + step turns.
 
@@ -96,6 +103,9 @@ caller that creates a session on start).
   if neither step's persona `<notor_tool_config>` grants that path.
 - [ ] The auto-allow is session-scoped — a step belonging to another session does **not** gain access to
   this session's scratchpad.
+- [ ] `enforcePathConstraints` gains an optional `sessionAllowedPaths?` parameter; passing `undefined`
+  (every non-orchestration call) yields **byte-identical** behavior to today (asserted by the existing
+  path-enforcer tests, unmodified).
 - [ ] Per-step path constraints for all non-scratchpad paths are unchanged for orchestration step turns,
   and `enforcePathConstraints` behavior is unchanged for all non-orchestration tool calls.
 - [ ] `parent_session_id` and `origin` are present in `session.json` and default to `null`.
@@ -241,17 +251,33 @@ step's persona already grants for the orchestrations directory.
 
 ## INT-005: Session recovery on reload (idempotent replay of `session-log.jsonl`)
 
-**Description:** On plugin load, scan `{notor_dir}/orchestrations/sessions/*/session.json` for sessions
-whose status is `active` or `interrupted` and recover them by replaying `session-log.jsonl` to the last
-consistent state (FR-125). The recovery rules follow [orchestration.md → Session Recovery]:
+**Description:** On plugin load, scan `{notor_dir}/orchestrations/sessions/*/session.json` for
+recoverable sessions and replay `session-log.jsonl` to the last consistent state (FR-125). The recovery
+rules follow [orchestration.md → Session Recovery]:
 
+- **Parent-rooted scan (no duplicate child runs).** The top-level scan recovers **only root sessions**
+  (`origin: "user"`) with status `active`/`interrupted`. A **child session** (`origin ∈ {run_flow,
+  chaining}`) is **never** recovered by the top-level scan — its lifecycle is owned by the parent turn
+  that spawned it, which is *also* being replayed. When the parent step that invoked `run_flow` is
+  replayed (its `turn.start` dangles): if the linked child session already reached a terminal status
+  (`completed`/`cancelled`), the parent **reuses the child's recorded result** (read from the child's
+  `session.json`/log) rather than re-spawning; if the child is non-terminal, the parent's replay
+  **tombstones** the stale child (mark its `session.json` status `error`/abandoned) and **re-spawns** a
+  fresh child. This eliminates the race where an independently-recovered child runs *and* the re-run
+  parent spawns a duplicate (the bug this rule exists to prevent). Child↔parent linkage is
+  `parent_session_id` + the `child`/`parent` edges (INT-006 / INT-044).
 - If the last log entry is a `turn.start` with no matching `turn.complete`, the turn was interrupted →
   **re-emit the triggering event** (the step retries from fresh context; per-step turns are
-  fresh-context by design, so retry is safe).
+  fresh-context by design, so retry is safe — **provided scratchpad writes are overwrite-only**, FR-121,
+  so a re-run reproduces rather than duplicates scratchpad content).
 - If the last entry is an `event.emitted` with no following `turn.start`, the event was logged but not
   routed → **re-publish the event**.
 - A **truncated/partial final line** (crash mid-write) is treated as absent — the last *complete* entry
   governs recovery (this is the `TEST-005` truncated-log case).
+- **Edge backfill tolerance (5b).** A re-run mints **new** conversation ids, so a pre-crash `next`/`prev`
+  edge may now point at an abandoned conversation. Recovery **re-backfills** `next`/`prev` against the
+  new conversation ids as the resumed steps run; the run-tree (POL-003) **renders only resolvable edges
+  and skips dangling ones** (it never assumes an edge target exists). Stale edges are inert, not fatal.
 - The user is offered a "Resume orchestration?" prompt summarizing where the run left off.
 
 The defining correctness property is **idempotency of the engine's bookkeeping**: replaying the same
@@ -274,6 +300,15 @@ must define recovery generically enough that a dangling `user.input.required` (n
 `user.input.received`) recovers as "still paused, re-surface the prompt" rather than re-emitting a
 trigger. `INT-030` lists `INT-005` as a dependency.
 
+**Sequencing note (Risk #12 — parent-rooted child reconciliation):** The **root-only scan** and the
+overwrite-safety/edge-tolerance rules land in `INT-005` itself (Phase 2). The **child-reconciliation**
+half (a replayed `run_flow` reusing a completed child's result, or tombstoning-and-respawning a
+non-terminal child) depends on child sessions existing, which is composition (`INT-043`/`INT-044`, Phase
+7). `INT-005` therefore **defines the parent-rooted contract** (child sessions are not recovered by the
+top-level scan — they carry `origin ∈ {run_flow, chaining}`) so child sessions are inert to the Phase-2
+scanner; `INT-044` wires the parent-replay reuse/respawn behavior against it. Until composition lands,
+the only recoverable sessions are roots, so the contract is correct and complete for Phase 2.
+
 **FRs:** FR-125 (session recovery on reload).
 
 **Files:**
@@ -292,8 +327,10 @@ trigger. `INT-030` lists `INT-005` as a dependency.
 `FEAT-010` (the runner that re-emits/re-publishes and continues the loop).
 
 **Acceptance Criteria:**
-- [ ] On load, sessions with status `active` or `interrupted` are discovered; `completed` / `cancelled` /
-  `error` sessions are ignored.
+- [ ] On load, **root** sessions (`origin: "user"`) with status `active` or `interrupted` are discovered;
+  `completed` / `cancelled` / `error` sessions are ignored, and **child sessions
+  (`origin ∈ {run_flow, chaining}`) are NOT recovered by the top-level scan** (they are reconciled by
+  the parent replay — INT-044).
 - [ ] A dangling `turn.start` (no `turn.complete`) re-emits its trigger; the step retries from fresh
   context.
 - [ ] A dangling `event.emitted` (no following `turn.start`) re-publishes the event.
@@ -307,6 +344,9 @@ trigger. `INT-030` lists `INT-005` as a dependency.
   marker is written may still re-run it).
 - [ ] The recovery classifier leaves room for a dangling `user.input.required` to be treated as "still
   paused" (consumed by `INT-030`), not as an interrupted turn.
+- [ ] Recovery re-runs are safe against scratchpad state because writes are overwrite-only (FR-121); a
+  pre-crash `next`/`prev` edge pointing at an abandoned conversation is tolerated (re-backfilled against
+  new conversation ids; the run-tree skips unresolved edges) — not an error.
 
 ---
 

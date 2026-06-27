@@ -97,6 +97,13 @@ interface RunResult {
 }
 ```
 
+**`model` is pinned, never global (ARCH-007).** `RunLoopOptions.model` is the model the run executes
+on, supplied by the caller. For orchestration step turns it is the pinned `ResolvedProviderConfig.modelId`
+resolved by the pure `resolvePersonaProviderConfig(...)` and carried on the step's `ConversationSession`
+([../data-model.md](../data-model.md) `ResolvedProviderConfig`) — `RunLoop` never reads the global
+`ProviderRegistry` active model, so concurrent runs with different models do not race. For sub-agents it
+is the sub-agent profile's model, exactly as today.
+
 **`orchestrationContext` carriage (authority: [../data-model.md](../data-model.md)).** `RunLoop`
 threads `orchestrationContext` (when present) into `executeToolBatches` so orchestration tools
 (`emit_event`, task tools) can read the active session and write their captured emission into the
@@ -138,6 +145,14 @@ behavior-preservation during the extraction.
 |---|---|---|---|---|
 | **Per-run cap** (floor) | One runner | `RunLoop.iterationCap` (= `SUB_AGENT_ITERATION_CAP = 20`, from `src/sub-agents/constants.ts`); `tokenLimit` likewise | Stop a *single* loop from spinning; resets fresh for every runner | **Unchanged** by this refactor |
 | **Aggregate budget** (ceiling) | The whole call tree | `RunContext.budget` → a **shared `AggregateBudget` cell** (`iterationsRemaining` / `costRemainingUsd`), referenced by every `RunContext` in the tree | Stop a *deep/wide tree* from collectively over-spending even when every node is individually under its per-run cap | **New** (composition needs it) |
+
+> **Unit of `iterationsRemaining`: LLM turns only.** `notor-max-iterations` maps to
+> `AggregateBudget.iterationsRemaining` ([../data-model.md](../data-model.md)) and is decremented once
+> **per LLM turn**. A **code step is not an LLM turn** (zero tokens, no `RunLoop` run) and decrements
+> **neither** `iterationsRemaining` **nor** `costRemainingUsd`. Code steps are bounded instead by
+> wall-clock `max_runtime` and the engine's stale-loop detector (orchestration overlay, see
+> [event-engine.md](event-engine.md)) — a flow or cycle composed only of code steps is **not** bounded
+> by `max_iterations`.
 
 > **The aggregate budget is a SHARED CELL, not a per-child copy** ([../data-model.md](../data-model.md)
 > `AggregateBudget`). Every `RunContext` in one call tree references the *same* `AggregateBudget`

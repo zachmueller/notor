@@ -177,7 +177,11 @@ required: [flow, payload]
    child inherits the **same `AggregateBudget` cell by reference** (its turns draw down the same
    tree-wide ceiling) and `depth + 1`. A blocked spawn returns control with a clear tool error. **This
    gate and the shared-cell budget model are the single authority of [run-loop.md](run-loop.md); do
-   not restate the decision rule here — reference it.**
+   not restate the decision rule here — reference it.** The gate reads `runContext` off
+   `ToolExecuteOptions` **regardless of caller**: an LLM step turn threads it via `RunLoop`, and a **code
+   step** threads the identical `runContext` via `orchestration.callTool`
+   ([orchestration-helper.md](orchestration-helper.md) "runContext propagation"), so a code-step
+   `run_flow` is gated identically — there is no code-step bypass of `max_depth` / the aggregate budget.
 3. **Run-to-terminal on a child `RunLoop`.** The selected flow runs **to its terminal event** in a
    **child session** on a **child `RunLoop`** (depth + 1, inheriting the parent's remaining aggregate
    budget). This is the `use_subagent` pattern generalized from a single sub-agent run to a whole flow:

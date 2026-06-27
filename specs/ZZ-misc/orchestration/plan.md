@@ -67,13 +67,19 @@ the two-layer limit rule and `RunLoop` hook semantics are the authority of
   `notor-type: orchestration-flow` / `orchestration-step` discriminator. Note bodies are documentation
   (`definition.md`) or instructions/code (step notes) — `definition.md`'s body is never injected into a
   prompt. Schema: [data-model.md](data-model.md); frontmatter: [contracts/vault-schema.md](contracts/vault-schema.md).
-- **Per-step persona.** Each step references a persona by name. `StepTurnExecutor` resolves it with
-  `PersonaManager.getPersonaByName()` (`src/personas/persona-manager.ts`) **without** calling
-  `activatePersona()` (which mutates global state). The persona drives system prompt
-  (append/replace via `SystemPromptBuilder`), tool access + path enforcement (its
-  `<notor_tool_config>`), and provider/model (its preset/provider/model preferences, applied via
-  `applyProviderModelOverrides()`). `notor-step-model` overrides the persona's model. This lets a
-  cheap/fast model plan and a capable model build.
+- **Per-step persona (resolved into the session, never globally — ARCH-007).** Each step references a
+  persona by name. `StepTurnExecutor` resolves it with `PersonaManager.getPersonaByName()`
+  (`src/personas/persona-manager.ts`) **without** calling `activatePersona()` (which mutates global
+  state). The persona drives system prompt (append/replace via `SystemPromptBuilder`) and tool access +
+  path enforcement (its `<notor_tool_config>`). For provider/model the executor uses the **pure**
+  `resolvePersonaProviderConfig(...)` (ARCH-007) to produce a `ResolvedProviderConfig` value object and
+  **pins it into the step's `ConversationSession`** — it must **not** call
+  `applyProviderModelOverrides()`, which mutates the global `ProviderRegistry` (`switchProvider` /
+  `updateConfig`) and would let concurrent step turns clobber each other's model. This mirrors the
+  existing pure `resolveWorkflowProviderConfig()` (`src/chat/workflow-executor.ts`) precedent.
+  `notor-step-model` overrides the persona's model in the resolver. This lets a cheap/fast model plan and
+  a capable model build — **safely under concurrency** (the shared semaphore, concurrent `run_flow`
+  children, foreground chat alongside a background flow). See [research.md](research.md) Finding 5.
 - **Feature-group gating.** A single `orchestration_enabled` setting (`src/settings/types.ts`,
   default `false` in `src/settings/defaults.ts`) gates the subsystem. Registration adds
   `orchestration: "orchestration_enabled"` to `FEATURE_GROUP_TOGGLES` in `src/extensions/manager.ts`;
@@ -141,7 +147,7 @@ verified seam table):
   - `src/sub-agents/semaphore.ts` — `Semaphore` generalized into the run-loop layer for child-run concurrency.
   - `src/chat/message-pipeline.ts` — `calculateCost()` (standalone; reachable from the run-loop layer with no orchestrator deps) feeds per-turn aggregate cost decrement.
 - **Personas:**
-  - `src/personas/persona-manager.ts` — `getPersonaByName()` (resolve without mutating global state), `applyProviderModelOverrides()`.
+  - `src/personas/persona-manager.ts` — `getPersonaByName()` (resolve without mutating global state); **new pure `resolvePersonaProviderConfig(...)` (ARCH-007)** for session-pinned provider/model. `applyProviderModelOverrides()` is **not** used by step turns (it mutates the global registry — see [research.md](research.md) Finding 5).
   - `src/personas/builtin-personas.ts` — `BUILTIN_PERSONA_PROFILES` gains the `orchestration-creator` persona.
 - **Extensions / feature groups / compile:**
   - `src/extensions/manager.ts` — `FEATURE_GROUP_TOGGLES` gains `orchestration`; `reload(false)` re-registers scaffolds.
@@ -222,7 +228,9 @@ until both the edge schema (INT-006) and the shared metadata shape (INT-047) exi
 ## Parallelism Groups
 
 - **After ARCH-001:** `ARCH-003` (thread `runContext` through dispatch) runs parallel to `ARCH-002`
-  (the loop lift) — different files; both need only the types.
+  (the loop lift) — different files; both need only the types. `ARCH-007` (pure persona provider/model
+  resolver — session-pinned, no global mutation; the concurrency-correctness prerequisite for FEAT-007)
+  also needs only the types and runs in parallel.
 - **After FEAT-001:** `FEAT-002` (parsers), `FEAT-005` (prompt builder), `FEAT-006` (session log), and
   `FEAT-008` (safety) are four independent tracks.
 - **After FEAT-010:** Lane A (session/nav), Lane B (code steps), Lane C (notices), and Lane D

@@ -137,7 +137,9 @@ notor-step-mcp-servers: null
 
 1. Read `plan.md` from the session scratchpad to see the planned angles.
 2. Use `web_search` / `fetch_webpage` to collect findings for each angle.
-3. Append your findings (with sources) to `findings.md` in the scratchpad.
+3. Write the **complete** set of findings (with sources) to `findings.md` in the scratchpad —
+   **overwrite the whole file** with the full current set; do **not** append incrementally. (Scratchpad
+   writes must be overwrite/idempotent so a crash-recovery re-run cannot duplicate content — FR-121/125.)
 4. When you have at least one well-sourced finding per planned angle, call
    `emit_event` with topic `gather.done` and a one-line summary as the payload.
 ```
@@ -366,8 +368,15 @@ only if `depth < maxDepth` AND the **shared** aggregate-budget cell has headroom
   → the engine **re-publishes the event**.
 
 Replay is **at-least-once, not exactly-once.** The engine's own bookkeeping (events, turns) replays
-idempotently, and vault state is safe to repeat (a re-run step just overwrites its scratchpad files).
-But a re-run step **repeats any external, non-idempotent side effect** it performed before crashing —
+idempotently, and vault state is safe to repeat **provided scratchpad writes are overwrite/idempotent**
+(a re-run step rewrites the whole file, so re-running just reproduces the same content). This is a real
+authoring constraint, not an automatic guarantee: a step that *appends* to a scratchpad file would
+**duplicate** content on a recovery re-run, and `once(...)` does **not** cover scratchpad state (it
+guards only external effects). The scaffold, reference flows, and `orchestration-creator` persona all
+instruct steps to **overwrite, never append** (write the complete current content, or use a
+per-iteration filename like `findings-{iteration}.md`). With that constraint honored, recovery is safe
+for vault state. But a re-run step **repeats any external, non-idempotent side effect** it performed
+before crashing —
 e.g. a `git push`, a Slack/MCP post, a deploy. A plugin cannot make those transactional, so steps with
 such effects must be idempotent or **guard themselves with `orchestration.once(key, fn)`** (FR-131),
 which records a `side_effect.committed` log entry so a re-run skips the already-committed effect

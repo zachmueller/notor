@@ -22,9 +22,12 @@ restatement.)
 termination. Every component here is gated behind `orchestration_enabled` (Phase 0, ENV-001/002) and
 builds on the `RunLoop` substrate (Phase 0, ARCH-001…006). No new prompt seam is invented:
 `StepTurnExecutor` runs each conversation step turn on the shared **`RunLoop`** (NOT
-`ChatOrchestrator.responseLoop()`), and step personas are resolved with
+`ChatOrchestrator.responseLoop()`), step personas are resolved with
 `PersonaManager.getPersonaByName()` (`src/personas/persona-manager.ts:106`) **without** mutating
-global state (no `activatePersona()`).
+global state (no `activatePersona()`), and each step's provider/model is resolved by the pure
+`resolvePersonaProviderConfig(...)` (ARCH-007) and **pinned into the `ConversationSession`** — never
+the global-mutating `applyProviderModelOverrides()` — so concurrent step turns never race on model
+selection.
 
 **Module:** all new code lands under `src/orchestration/` except the gated tool scaffold
 (`src/extensions/builtin-tool-scaffolds/emit-event.ts`) and the command registration (`src/main.ts`).
@@ -44,7 +47,7 @@ global state (no `activatePersona()`).
 | FEAT-004 | `FallbackCoordinator` | FEAT-003 |
 | FEAT-005 | `StepPromptBuilder` | FEAT-001 |
 | FEAT-009 | `emit_event` built-in tool scaffold (gated) | ENV-002, FEAT-001 |
-| FEAT-007 | `StepTurnExecutor` | ARCH-002, ARCH-005, FEAT-002, FEAT-005, FEAT-006, FEAT-009 |
+| FEAT-007 | `StepTurnExecutor` | ARCH-002, ARCH-005, ARCH-007, FEAT-002, FEAT-005, FEAT-006, FEAT-009 |
 | FEAT-008 | `LoopSafetyGuards` | FEAT-001, FEAT-003 |
 | FEAT-010 | `OrchestrationRunner` main loop | FEAT-002, FEAT-003, FEAT-004, FEAT-007, FEAT-008 |
 | FEAT-011 | Command palette "Run Orchestration" + flow picker | FEAT-010, ENV-002 |
@@ -53,7 +56,8 @@ global state (no `activatePersona()`).
 
 **Parallelism (after FEAT-001):** FEAT-002 (parsers), FEAT-005 (prompt builder), FEAT-006 (session
 log), FEAT-008 (safety) are independent tracks. FEAT-009 (scaffold) only needs ENV-002 + FEAT-001.
-FEAT-007 is the convergence point (six edges); FEAT-010 funnels all integration lanes downstream.
+FEAT-007 is the convergence point (seven edges, incl. ARCH-007 for session-pinned provider/model);
+FEAT-010 funnels all integration lanes downstream.
 
 ---
 
@@ -301,7 +305,9 @@ guardrails). The builder **always** injects, regardless of the step's custom ins
 - the **objective** (original user prompt, set once at flow start, injected every turn);
 - the **incoming event** (topic + payload);
 - the **recent event history** (last N, e.g. 10);
-- the **scratchpad path** (and tasks path) for cross-step state.
+- the **scratchpad path** (and tasks path) for cross-step state, with the **overwrite-only rule**
+  ("write the COMPLETE current content or a per-iteration filename; never incrementally append — a
+  crash-recovery re-run would duplicate appended content", FR-121/125).
 Flow `guardrails` from `definition.md` are injected into the `### GUARDRAILS` section of **every** step
 turn. Persona content integrates through the **existing** `SystemPromptBuilder` append/replace
 mechanism (per the persona's `notor-persona-prompt-mode`) — the step scaffold is appended after persona
@@ -323,7 +329,8 @@ per-turn guardrails + persona append/replace integration).
 - [ ] The must-publish rule is present in the output **even when** the step body contains its own
   custom instructions (asserted directly — this is the Phase-1 gate in [../tasks.md](../tasks.md)).
 - [ ] The objective, incoming event (topic + payload), recent event history, and scratchpad/tasks paths
-  are present in every assembled prompt.
+  are present in every assembled prompt; the scratchpad guidance states the **overwrite-only** rule
+  (no incremental append) for recovery safety.
 - [ ] Flow `guardrails` from `definition.md` appear in the `### GUARDRAILS` section of every step turn.
 - [ ] The raw step body is embedded only inside `### 1. EXECUTE`, never emitted standalone.
 - [ ] Persona content is composed via the existing `SystemPromptBuilder` append/replace mechanism (the
@@ -392,16 +399,24 @@ persistence/compaction/view rendering Notor's orchestration does not want) and n
 Per turn it: (1) writes `turn.start` to the session log (FEAT-006) **before** any LLM call; (2) resolves
 the step's persona via `PersonaManager.getPersonaByName()` (`src/personas/persona-manager.ts:106`)
 **without** mutating global state — never `activatePersona()`; the resolved persona supplies system
-prompt (append/replace), `<notor_tool_config>` tool access/path enforcement, and provider/model (with
-`notor-step-model` overriding the persona model); (3) creates an isolated `ConversationSession` (new
-conversation id + JSONL file) seeded with the resolved persona/provider/model; (4) asks
+prompt (append/replace) and `<notor_tool_config>` tool access/path enforcement. Provider/model is
+resolved by the **pure** `resolvePersonaProviderConfig(...)` (ARCH-007) into a `ResolvedProviderConfig`
+value object (`notor-step-model` overriding the persona model) — **never**
+`applyProviderModelOverrides()`, which mutates the global `ProviderRegistry` and would let concurrent
+step turns clobber each other (see [research.md](../research.md) Finding 5); (3) creates an isolated
+`ConversationSession` (new conversation id + JSONL file) seeded with the resolved persona and the
+**pinned** `ResolvedProviderConfig` (its `modelId` passed as `RunLoopOptions.model`); (4) asks
 `StepPromptBuilder` (FEAT-005) to assemble the prompt; (5) constructs a **fresh per-turn
 `OrchestrationToolContext`** (`{ sessionId, scratchpadPath, tasksPath, pendingEmission: null }`) and
 runs the turn on `RunLoop`, passing that as `RunLoopOptions.orchestrationContext` (so `emit_event` and
 the task tools see this session) and attaching the JSONL-persistence `onPersist` hook (and progress
 hook) from `RunLoopHooks` so persistence stays out of the engine; (6) after the turn, reads
 `orchestrationContext.pendingEmission` (written by the `emit_event` scaffold, FEAT-009); (7) if no
-emission was captured, **synthesizes** the step's `default_publishes` topic; (8) writes `turn.complete`;
+emission was captured, **synthesizes** the step's `default_publishes` topic **when the turn ended
+`completed`**, or the distinct **`{step}.capped`** topic (carrying `stopReason` + wind-down text) when
+the turn ended **non-`completed`** (iteration/token/context/cost/depth cap) — FR-117a, so a cut-off turn
+never masquerades as success (an unsubscribed `{step}.capped` orphans to the `FallbackCoordinator` →
+`FLOW_ERROR`); (8) writes `turn.complete`;
 (9) returns the captured/synthesized event for the runner to route. The `RunLoop` is seeded with the
 step's `RunContext` (depth + **shared** `budget` cell) supplied by the runner; aggregate per-turn cost
 decrements that shared cell via ARCH-005's `budget.ts` (via `calculateCost`). The **code-step** path
@@ -422,7 +437,8 @@ synthesis on no-emit). Relies on FR-116's `orchestrationContext.pendingEmission`
   event. Holds the dispatch seam for the Phase-3 code path.
 
 **Dependencies:** ARCH-002 (`RunLoop` engine), ARCH-005 (two-layer budget helpers + per-turn cost via
-`calculateCost`), FEAT-002 (`StepDefinition` from parser), FEAT-005 (`StepPromptBuilder`), FEAT-006
+`calculateCost`), ARCH-007 (pure `resolvePersonaProviderConfig(...)` — session-pinned provider/model, no
+global mutation), FEAT-002 (`StepDefinition` from parser), FEAT-005 (`StepPromptBuilder`), FEAT-006
 (`SessionLog` for `turn.start`/`turn.complete`), FEAT-009 (`emit_event` capture contract).
 
 **Acceptance Criteria:**
@@ -430,13 +446,19 @@ synthesis on no-emit). Relies on FR-116's `orchestrationContext.pendingEmission`
   invoked by the executor).
 - [ ] The step's persona is resolved with `PersonaManager.getPersonaByName()`; the global
   active-persona state is unchanged after the turn (no `activatePersona()` call).
+- [ ] Provider/model is resolved via the pure `resolvePersonaProviderConfig(...)` (ARCH-007) and pinned
+  into the `ConversationSession` (`modelId` → `RunLoopOptions.model`); the executor performs **no**
+  `providerRegistry.switchProvider`/`updateConfig` call, and the global active provider/model is
+  unchanged after the turn (asserted — two concurrent step turns with different models do not race).
 - [ ] `notor-step-model`, when set, overrides the persona's preferred model for that turn; otherwise the
   persona's preset/provider/model preference applies.
 - [ ] `turn.start` is written before any LLM call; `turn.complete` after the emit is captured.
 - [ ] A fresh per-turn `OrchestrationToolContext` is constructed and passed as
   `RunLoopOptions.orchestrationContext`; after the turn the executor reads
-  `orchestrationContext.pendingEmission`. When set, that `{topic, payload}` is returned; when null, the
-  step's `default_publishes` topic is synthesized and returned.
+  `orchestrationContext.pendingEmission`. When set, that `{topic, payload}` is returned; when null and
+  the turn ended `completed`, the step's `default_publishes` topic is synthesized and returned; when null
+  and the turn ended **non-`completed`**, `{step}.capped` (carrying `stopReason`) is synthesized instead
+  (FR-117a) — verified that a capped no-emit turn does **not** synthesize `default_publishes`.
 - [ ] JSONL persistence is attached via the `RunLoopHooks.onPersist` hook, not baked into the engine.
 - [ ] The `RunContext` (depth + **shared** `budget` cell) provided by the runner is threaded into the
   `RunLoop`; per-turn cost decrements that shared cell in place via ARCH-005's `budget.ts`.
@@ -450,8 +472,14 @@ synthesis on no-emit). Relies on FR-116's `orchestrationContext.pendingEmission`
 **Description:** Implement the loop safety guards per the canonical design doc *Safety Mechanisms*
 and FR-117. These are flow-level guards layered on top of the per-run `RunLoop` iteration cap (Phase 0)
 — they terminate a *flow* that is stuck even when each individual turn is within its per-run cap.
-Implement: (1) **iteration cap** — `flow.maxIterations` on total step turns; (2) **runtime cap** —
-wall-clock check each turn against `flow.maxRuntimeMinutes`; (3) **stale-loop detection** — the same
+Implement: (1) **iteration cap** — `flow.maxIterations` counts **LLM turns only** (it is the aggregate
+`AggregateBudget.iterationsRemaining` ceiling decremented per LLM turn by the run-loop layer, ARCH-005 /
+FR-105; **code steps do not count** — D2/FR-117). `LoopSafetyGuards` surfaces the predicate but the
+decrement/enforcement lives in the two-layer budget model, not a separate step-turn counter here; a
+code-step-only flow/cycle is therefore bounded by the runtime cap + stale-loop, not this cap;
+(2) **runtime cap** — wall-clock check each turn against `flow.maxRuntimeMinutes`; (3) **stale-loop
+detection** (self-loops only; multi-step cycles / completion-alternation rely on budget+runtime per
+[../contracts/event-engine.md](../contracts/event-engine.md) "Known limitation") — the same
 `(topic, source_step)` pair (**payload deliberately excluded**) for **4** consecutive events over a
 rolling window of the last 5 (`isStale` per [../contracts/event-engine.md](../contracts/event-engine.md));
 (4) **thrashing detection** — a task re-queued after abandonment 3+ times. Payload is excluded because
@@ -480,7 +508,8 @@ stale-loop detection).
 - [ ] `isStale` returns true iff the last 4 events share the same `(topic, source_step)` pair (payload
   excluded; over the trailing window); fewer than 4 events → false.
 - [ ] `checkRuntime` fires when wall-clock since `started_at` exceeds `maxRuntimeMinutes`.
-- [ ] `checkIteration` fires when total step turns reach `maxIterations`.
+- [ ] `checkIteration` fires when **LLM turns** reach `maxIterations` (the aggregate
+  `iterationsRemaining` ceiling); a code step does **not** advance this count (D2/FR-117).
 - [ ] `isThrashing` fires when a task key is re-queued after abandonment 3+ times.
 - [ ] Each guard maps to a terminal flow reason; the guards are pure (no I/O, no loop ownership).
 - [ ] Guards are independent of the per-run `RunLoop` cap (they bound the *flow*, not a single runner).

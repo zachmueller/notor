@@ -26,8 +26,8 @@ cell is the authority for FR-176 cascading guardrails and the `child_run_metadat
 
 ```typescript
 interface AggregateBudget {
-  iterationsRemaining: number; // AGGREGATE tree-wide ceiling (Infinity for sub-agents); NOT the per-run cap
-  costRemainingUsd: number;    // AGGREGATE tree-wide ceiling (Infinity for sub-agents)
+  iterationsRemaining: number; // AGGREGATE tree-wide ceiling, counts LLM TURNS ONLY (Infinity for sub-agents); NOT the per-run cap; code steps (zero tokens, not an LLM turn) do NOT decrement this
+  costRemainingUsd: number;    // AGGREGATE tree-wide ceiling (Infinity for sub-agents); code steps do NOT decrement this
 }
 ```
 
@@ -120,6 +120,34 @@ Hooks are how orchestration attaches per-step JSONL persistence, progress Notice
 **without** baking them into the engine. Keep this surface minimal (do not pull in
 `ChatOrchestrator`'s compaction/context management).
 
+### ResolvedProviderConfig (pinned per step turn — ARCH-007)
+
+The `model` (and provider) a step turn runs on is resolved by a **pure** function and **pinned** into
+the step's `ConversationSession` — it is **never** applied to the global `ProviderRegistry`. This is
+the concurrency-correctness foundation: two step turns (fan-out, concurrent `run_flow` children, a flow
+running alongside foreground chat) each carry their own pinned model, and no step turn mutates shared
+provider/model state.
+
+```typescript
+// Returned by resolvePersonaProviderConfig(...) (ARCH-007); mirrors the workflow precedent
+// resolveWorkflowProviderConfig() (src/chat/workflow-executor.ts ~68-96).
+interface ResolvedProviderConfig {
+  providerId: string;
+  modelId: string;
+  useExtendedContext: boolean;
+  thinkingLevel: string | null;
+}
+```
+
+- **Pure, no global write.** `resolvePersonaProviderConfig(persona, stepModelOverride, settings,
+  providerRegistry)` reads the registry/preset tables and returns a value object. It **must not** call
+  `providerRegistry.switchProvider(...)` / `updateConfig(...)` (the global-mutating path
+  `applyProviderModelOverrides()` takes — `src/personas/persona-manager.ts` ~349-453). `notor-step-model`
+  overrides the persona's `preferred_model` in the resolver.
+- **Pinned into the session.** `StepTurnExecutor` (FEAT-007) constructs each step's `ConversationSession`
+  with this config and passes `modelId` as `RunLoopOptions.model`. `RunLoop` reads the pinned `model`,
+  never the global active model.
+
 `RunLoop` threads `orchestrationContext` (when present) into `executeToolBatches` so the
 orchestration tools (`emit_event`, the task tools) can read the active session and capture their
 emission. **Sub-agents pass `orchestrationContext: undefined`** — preserving today's behavior, where
@@ -160,10 +188,19 @@ interface OrchestrationToolContext {
   `ToolSessionContext.setConversationTasks(...)` precedent (`src/tools/update-tasks.ts` →
   `ChatOrchestrator`), generalized to a per-step carriage. Authority for the capture contract:
   [contracts/tools.md](contracts/tools.md).
-- **Path auto-allow source.** `scratchpadPath` (and `parentScratchpadPath` for `shared` handoffs) is
-  the prefix `enforcePathConstraints(...)` consults to auto-allow the session scratchpad for the
-  owning session's step turns (INT-001 / FR-121). The prefix arrives via this carriage at the same
-  dispatch assembly site, so the path enforcer learns the active session without a global.
+- **Path auto-allow source (requires a path-enforcer signature change — INT-001).** `scratchpadPath`
+  (and `parentScratchpadPath` for `shared` handoffs) is the prefix the path enforcer auto-allows for the
+  owning session's step turns (INT-001 / FR-121). **This is a real signature change, not a free
+  consultation:** `enforcePathConstraints(toolName, parameters, entry, vaultRootPath, resolveVaultPath?)`
+  (`src/tool-config/path-enforcer.ts:45`) today resolves against a fixed `ResolvedToolConfigEntry` whose
+  `allowed_paths` are immutable at dispatch time — there is **no** seam for a per-session prefix. INT-001
+  adds an **optional `sessionAllowedPaths?: string[]` (or equivalent prefix) parameter** to
+  `enforcePathConstraints`, sourced from this carriage at the single `ToolDispatcher.dispatch()` assembly
+  site (beside `runContext`/`orchestrationContext`). The enforcer treats a path under any
+  `sessionAllowedPaths` prefix as allowed **in addition** to `entry.allowed_paths` — so the active
+  session's scratchpad (and a `shared` child's parent scratchpad) is allowed **without** mutating the
+  shared/global tool config and without a global "current session". Non-orchestration callers pass the
+  param `undefined` and behave exactly as today.
 
 ---
 
@@ -214,6 +251,7 @@ interface StepDefinition {
   model: string | null;         // notor-step-model (overrides persona model)
   mode: "conversation" | "code";// notor-step-mode (default conversation)
   mcpServers: string[] | null;  // notor-step-mcp-servers (null = inherit all)
+  timeoutSeconds: number | null;// notor-step-timeout-seconds (code steps only; null → 300s default)
   bodyContent: string;          // Markdown body (instructions) OR code fence (mode: code)
   notePath: string;
 }
