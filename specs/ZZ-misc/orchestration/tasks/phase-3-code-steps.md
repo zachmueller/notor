@@ -220,12 +220,12 @@ rather than introducing one. The `FLOW_CANCELLED` constant is defined in
 **FRs:** FR-132 (`FLOW_CANCELLED` terminal event).
 
 **Files:**
-- `src/orchestration/orchestration-runner.ts` — (FEAT-010) terminal-event handling: `FLOW_CANCELLED`
+- `src/orchestration/runner.ts` — (FEAT-010) terminal-event handling: `FLOW_CANCELLED`
   branch that bypasses the INT-003 remaining-task gate, sets status `cancelled`, writes
   `session.cancelled`.
 - `src/orchestration/types.ts` — (FEAT-001) ensure `FLOW_CANCELLED` is exported among the terminal
   constants (consumed by the runner, the helper `emit`, and the `emit_event` tool).
-- `src/orchestration/orchestration-runner.test.ts` — terminal-handling coverage (open-tasks-bypass
+- `src/orchestration/runner.test.ts` — terminal-handling coverage (open-tasks-bypass
   case noted in TEST-004 / the runner suite).
 
 **Dependencies:** FEAT-010 (`OrchestrationRunner` — the loop that finalizes on a terminal event),
