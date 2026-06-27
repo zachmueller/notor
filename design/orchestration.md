@@ -5,7 +5,7 @@
 > **Status:** Design — not yet implemented
 > **Feature group:** `orchestration_enabled` (defaults to off)
 > **Source location:** `src/orchestration/` (new directory)
-> **Commit ref:** `8bfef16`
+> **Commit ref:** `77c2db1`
 
 ---
 
@@ -148,9 +148,10 @@ sub-agents and flow-as-tool invocation.
 - **`RunResult`** is always-both: `text` (always present) + optional `structured` payload slot
   (populated by a terminal code step). `SubAgentResult` is a strict subset (`structured` stays
   null), so the refactor is non-breaking.
-- Child-run concurrency uses a shared semaphore in the run-loop layer; aggregate
-  `max_iterations` / `max_cost_usd` / `max_depth` decrement across the flow tree via
-  `RunContext`.
+- Child-run concurrency uses a shared semaphore in the run-loop layer. Aggregate
+  `max_iterations` / `max_cost_usd` / `max_depth` are a **tree-wide ceiling** carried on
+  `RunContext`, layered *on top of* (never replacing) each runner's per-run iteration cap.
+  See [Safety Mechanisms → Two-Layer Limit Model](#two-layer-limit-model-per-run-cap--aggregate-tree-budget).
 
 Full design: `ai/notor/ideas/Generalized run-loop engine for sub-agents and orchestration.md`.
 This extraction is a prerequisite for Phase 1's `StepTurnExecutor` and Phase 7's flow-as-tool.
@@ -1046,13 +1047,14 @@ Essential to prevent infinite token burn on stuck loops:
 
 | Mechanism | Trigger | Action |
 |-----------|---------|--------|
-| `max_iterations` | Counter check each step turn | Terminate flow |
+| `iteration_cap` (per-run) | Counter check each turn within one runner (default 20) | Wind down that runner |
+| `max_iterations` (aggregate) | Tree-wide turn counter check before each turn | Block new child spawns (tree ceiling) |
 | `max_runtime` | Wall-clock check each step turn | Terminate flow |
 | **Stale loop** | Same (topic + source + payload fingerprint) emitted 3× in a row | Terminate flow |
 | **Thrashing** | Step redispatches 3+ already-abandoned tasks | Terminate flow |
 | `default_publishes` synthesis | Step produces no `emit_event` call | Auto-fire the default topic |
 | `required_events` enforcement | Completion event received before all required events seen | Block completion, inject resume |
-| `max_cost_usd` | Cumulative LLM cost exceeds limit | Terminate flow |
+| `max_cost_usd` (aggregate) | Cumulative LLM cost across the flow tree exceeds limit | Block new child spawns (tree ceiling) |
 | `max_depth` | Composition depth exceeds limit when spawning a child flow/sub-agent | Reject the spawn; surface to caller |
 
 ### Stale Loop Detection
@@ -1075,14 +1077,40 @@ function isStale(history: OrchestrationEvent[]): boolean {
 Track per-task abandonment counts. When a step emits `tasks.ready` for a task key
 that has been abandoned (started then re-queued) 3+ times, the loop is thrashing.
 
-### Cascading / Aggregate Guardrails Across a Flow Tree
+### Two-Layer Limit Model (per-run cap + aggregate tree budget)
 
-With composition, `max_iterations` and `max_cost_usd` are **aggregate across the whole flow
-tree**, not per-session. They live on the `RunContext` (see Run-Loop Engine) and decrement as
-children spawn, so a tree of flows cannot collectively blow past budget even though each
-individual flow looks within limits. `max_depth` caps nesting/chaining depth. Arbitrary depth
-is permitted unless a limit is set. A child run inheriting an exhausted budget fails its spawn
-check and returns control to the caller (flow-as-tool) or terminates the chain (chaining).
+Iteration and cost limits exist at **two independent scopes**. The aggregate budget is layered
+*on top of* the per-run cap — it does **not** replace it. Conflating them is the single most
+common way to break behavior-preservation during the `RunLoop` extraction.
+
+| Layer | Scope | Lives on | Purpose | Status |
+| ----- | ----- | -------- | ------- | ------ |
+| **Per-run cap** (floor) | One runner | `RunLoop.iterationCap` (today's `SUB_AGENT_ITERATION_CAP = 20`) | Stop a *single* loop from spinning; resets fresh per runner | **Unchanged** by composition |
+| **Aggregate budget** (ceiling) | The whole call tree | `RunContext.iterationsRemaining` / `costRemainingUsd` | Stop a *deep/wide tree* from collectively over-spending even when every node is individually within its per-run cap | **New** for composition |
+
+**Decision rule:** a turn proceeds iff **both** layers have headroom — `localIterations <
+iterationCap` AND `RunContext.iterationsRemaining > 0` AND `RunContext.costRemainingUsd > 0`.
+Whichever is tighter wins.
+
+**Resolved policies:**
+
+1. **Independent layers, both must pass.** Aggregate is additive on top of the per-run cap,
+   never a substitute.
+2. **Per-turn decrement, checked before each turn.** Aggregate counters decrement as each turn
+   completes and are checked before the next begins (catches cost drift mid-run, not only at
+   spawn boundaries).
+3. **Exhaustion blocks new child spawns only.** When the tree ceiling is hit, no new children
+   launch; in-flight runs finish their current turn gracefully (no hard-abort, no forced
+   mid-turn wind-down). A spawn is gated on `depth < maxDepth` AND aggregate budget `> 0`; a
+   blocked spawn returns control to the caller (flow-as-tool) or terminates the chain
+   (chaining).
+4. **Sub-agent equivalence is provable, not coincidental.** Sub-agents pass `maxDepth = 0` and
+   seed the aggregate budget to **`Infinity`**, so the per-run `iterationCap` is the only
+   effective limit — behavior is identical to today by construction, and `sub-agent-runner.test.ts`
+   stays green unmodified.
+
+`max_depth` caps nesting/chaining depth; arbitrary depth is permitted unless a limit is set.
+Full model: `ai/notor/ideas/Generalized run-loop engine for sub-agents and orchestration.md`.
 
 ---
 
@@ -1458,7 +1486,9 @@ Mechanism A (flow-as-tool) is the high-value core and can ship before chaining.
   behavior-preserving — identical caps, wind-down, abort behavior; gate on the existing suite.
 - **Recursion/budget cascade (Low–Medium).** Replacing the binary sub-agent ban with a
   `RunContext` depth counter must preserve today's "no nested sub-agents" behavior
-  (`maxDepth = 0`) while enabling arbitrary flow depth. Aggregate budget accounting depends on
+  (`maxDepth = 0`) while enabling arbitrary flow depth. The per-run cap and aggregate tree
+  budget are independent layers (both must pass per turn); sub-agents seed the aggregate to
+  `Infinity` so behavior is unchanged by construction. Aggregate budget accounting depends on
   per-turn cost (`message-pipeline.ts` `calculateCost`) being reachable from the run-loop
   layer without orchestrator-specific deps.
 - **Structured-return reliability (Medium).** Reliable structured returns depend on a terminal
