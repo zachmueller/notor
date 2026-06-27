@@ -68,7 +68,7 @@ Bodies in the linked per-phase files. `→` = depends on.
 | FEAT-002 | `FlowDefinitionParser` + `StepNoteParser` | FEAT-001 |
 | FEAT-006 | `SessionLog` writer (append-only JSONL + write order) | FEAT-001 |
 | FEAT-003 | `OrchestrationEventEngine` (pub/sub + wildcard, write-before-route) | FEAT-001, FEAT-006 |
-| FEAT-004 | `FallbackCoordinator` (`*` subscriber, steer-or-`FLOW_ERROR`) | FEAT-003 |
+| FEAT-004 | `FallbackCoordinator` (`*` subscriber, pure backstop → `FLOW_ERROR`) | FEAT-003 |
 | FEAT-005 | `StepPromptBuilder` (scaffold + always-inject must-publish) | FEAT-001 |
 | FEAT-009 | `emit_event` built-in tool scaffold (gated) | ENV-002, FEAT-001 |
 | FEAT-007 | `StepTurnExecutor` (conversation path on `RunLoop`, persona wiring) | ARCH-002, ARCH-005, FEAT-002, FEAT-005, FEAT-006, FEAT-009 |

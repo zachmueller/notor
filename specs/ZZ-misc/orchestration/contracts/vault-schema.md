@@ -95,7 +95,8 @@ frontmatter**. Parsed into `OrchestrationFlow` ([data-model.md](../data-model.md
 | `notor-max-iterations` | number | no | — | Aggregate tree-wide turn ceiling (see [contracts/run-loop.md](run-loop.md)); a safety limit on total step turns. |
 | `notor-max-runtime-minutes` | number | no | — | Wall-clock runtime cap (FR-117). |
 | `notor-required-events` | string[] | no | `[]` | Events that must have been seen before `notor-completion-event` is accepted. |
-| `notor-steps` | wikilink[] | yes | — | Ordered step references (`"[[planner]]"`), resolved under `steps/`. Order is the multi-subscriber tie-break (FR-112). |
+| `notor-fanout-topics` | string[] | no | `[]` | Topics explicitly allowed to route to **more than one** step (ordered fan-out, FR-112). A topic with >1 subscriber that is **not** listed here is a load error (FR-111). See the routing rules in [contracts/event-engine.md](event-engine.md). |
+| `notor-steps` | wikilink[] | yes | — | Ordered step references (`"[[planner]]"`), resolved under `steps/`. Order is the fan-out tie-break for a declared `notor-fanout-topics` topic (FR-112). |
 | `notor-guardrails` | string[] | no | `[]` | Constraints injected into **every** step prompt (FR-114). |
 | **Composition fields (design Phase 7; inert unless feature group enabled):** | | | | |
 | `notor-flow-invocable` | boolean | no | `false` | Opt-in: the flow appears in the `run_flow` registry and may be called as a tool by other flows' steps (FR-171/172). |
@@ -122,6 +123,7 @@ notor-max-iterations: 100
 notor-max-runtime-minutes: 240
 notor-required-events:
   - review.approved
+notor-fanout-topics: []   # e.g. [tasks.ready] to allow that one topic to drive >1 step in notor-steps order
 notor-steps:
   - "[[planner]]"
   - "[[builder]]"
@@ -247,17 +249,19 @@ Runs `npm test` and routes based on the exit code. Replaces the legacy verificat
 ```typescript
 const result = await utils.executeShellCommand("npm test", {
   cwd: event.payload, // repo path forwarded by the builder
-  timeout: 120000,
+  timeoutSeconds: 120,
 });
 
-if (result.exitCode === 0) {
+// ShellExecuteResult.stdout is COMBINED stdout+stderr — there is no separate `stderr` field.
+if (result.exitCode === 0 && !result.timedOut) {
   await orchestration.scratchpad.write("test-output.txt", result.stdout);
   return orchestration.emit("tests.passed", result.stdout);
 }
 
 return orchestration.emit("tests.failed", JSON.stringify({
   exitCode: result.exitCode,
-  stderr: result.stderr,
+  timedOut: result.timedOut,
+  output: result.stdout,
 }));
 ```
 ```
@@ -303,6 +307,7 @@ writer (FEAT-006).
 | `session.start` | Flow start, before the starting event | `session_id`, `flow`, `prompt`, `ts` |
 | `event.emitted` | Immediately **before** an event is routed (write-before-route) | `turn`, `topic`, `payload`, `source_step`, `ts` |
 | `turn.start` | **Before** the LLM call (conversation) or code execution (code) begins | `turn`, `step`, `trigger_topic`, `conversation_id` (null for code), `ts` |
+| `side_effect.committed` | **After** a guarded side effect completes inside `orchestration.once(key, fn)` (FR-125) | `turn`, `step`, `key`, `ts` |
 | `turn.complete` | **After** the emitted event is captured (or `default_publishes` synthesized) | `turn`, `step`, `emitted_topic`, `conversation_id`, `ts` |
 | `user.input.required` | A step emits the pausing event (FR-150) | `turn`, `step`, `prompt`, `ts` |
 | `user.input.received` | The user supplies input and the loop resumes | `turn`, `payload`, `ts` |
@@ -321,8 +326,17 @@ The order below is **mandatory** — recovery replay depends on it (FR-112, FR-1
 3. **`event.emitted` before the event is routed** — *write-before-route* (FR-112 AC). A dangling
    `event.emitted` with no following `turn.start` ⇒ the event was logged but not routed ⇒ recovery
    re-publishes it. Replay is idempotent (FR-125 AC).
+4. **`side_effect.committed` after a guarded side effect lands** (within `orchestration.once`, FR-125).
+   Recovery's at-least-once replay consults committed `key`s: when a re-run step calls
+   `orchestration.once(key, fn)` for an already-committed `key`, `fn` is **skipped**. This is
+   **best-effort**, not exactly-once — a crash *between* the external effect and this append can still
+   re-run the effect (the irreducible window). Authority for the helper:
+   [contracts/orchestration-helper.md](orchestration-helper.md) (At-least-once recovery). Recovery is
+   **at-least-once**: a step with non-idempotent external effects must be idempotent or guard itself
+   with `once(...)`.
 
-Sequence per step turn: `turn.start` → (LLM/code runs) → `turn.complete` → `event.emitted` → (route).
+Sequence per step turn: `turn.start` → (LLM/code runs; `side_effect.committed` per guarded effect) →
+`turn.complete` → `event.emitted` → (route).
 
 ### Sample lines
 

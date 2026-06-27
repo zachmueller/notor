@@ -70,7 +70,8 @@ interface RunLoopOptions {
   iterationCap?: number;        // per-run cap; default SUB_AGENT_ITERATION_CAP (20)
   tokenLimit?: number;          // per-run; default SUB_AGENT_TOKEN_LIMIT (0 = none)
   thinkingLevel?: ThinkingLevel | null;
-  runContext: RunContext;       // depth + aggregate budget + abort
+  runContext: RunContext;       // depth + SHARED aggregate budget + abort
+  orchestrationContext?: OrchestrationToolContext;  // per-step session carriage; undefined for sub-agents
   hooks?: RunLoopHooks;
   onProgress?: (status: string) => void;
 }
@@ -88,13 +89,27 @@ interface RunLoopHooks {
 ```typescript
 interface RunResult {
   text: string;                       // always present (final / wind-down output)
-  structured: unknown | null;         // populated only by a terminal code step
+  structured: unknown | null;         // populated only by a terminal code step (via emit's 3rd arg)
   messages: ChatMessage[];
   tokenUsage: { input: number; output: number };
   iterationCount: number;
   stopReason: "completed" | "iteration_cap" | "token_limit" | "context_window" | "cost_cap" | "depth_cap";
 }
 ```
+
+**`orchestrationContext` carriage (authority: [../data-model.md](../data-model.md)).** `RunLoop`
+threads `orchestrationContext` (when present) into `executeToolBatches` so orchestration tools
+(`emit_event`, task tools) can read the active session and write their captured emission into the
+context's `pendingEmission` slot — which `StepTurnExecutor` reads back after the turn. It rides the
+dispatch seam *beside* `runContext`, assembled at the single `ToolDispatcher.dispatch()` site, and is
+**not** merged into `ToolSessionContext` (same different-lifecycle rationale as `runContext`, FR-102).
+**Sub-agents pass `orchestrationContext: undefined`** — `SubAgentRunner` already supplies no session
+context to `executeToolBatches` today, so this is behavior-preserving by construction.
+
+**`structured` data path.** `RunLoop` does not itself populate `structured`; a terminal code step
+does, via `orchestration.emit(topic, payload?, structured?)` → `CodeStepResult.structured`, which the
+`OrchestrationRunner`/`StepTurnExecutor` lifts onto the terminal `RunResult.structured`. For
+sub-agents and conversation-only runs, `structured` is always `null`.
 
 ### Responsibilities
 
@@ -104,7 +119,7 @@ interface RunResult {
 | **Per-run caps** | iteration cap (default 20), token limit (default 0 = none), context-window proximity (pre-flight reserve `lastInputTokens + 4096` vs `getContextWindow(model)`). | `sub-agent-runner.ts` ~163-205 |
 | **Wind-down** | On any terminal cap (`iteration_cap` / `token_limit` / `context_window` / `cost_cap`), run a final summarization turn and return its text as `RunResult.text`. | `sub-agent-runner.ts` `runWindDown()` ~365-445 |
 | **Abort cascade** | Own `AbortController` linked to `runContext.abort`; parent abort cascades to this run (and to children, since each child inherits a derived signal). Checked before each LLM call. | `sub-agent-runner.ts` ~127-142, ~165 |
-| **Budget accounting** | Per-turn: decrement `runContext.iterationsRemaining` and `runContext.costRemainingUsd` after each turn completes; check both **before** the next turn (see decision rule). | new (`budget.ts`, ARCH-005) |
+| **Budget accounting** | Per-turn: decrement the shared `runContext.budget` cell (`iterationsRemaining` / `costRemainingUsd`) in place after each turn completes; check both **before** the next turn (see decision rule). | new (`budget.ts`, ARCH-005) |
 | **Hooks** | Fire optional `onTurnStart` / `onTurnComplete` / `onPersist` / `onProgress` at the loop boundaries. | new (ARCH-001) |
 | **Dispatch seam** | Tools dispatched via `executeToolBatches`, which threads `ToolExecuteOptions` (carrying `runContext?`, assembled once in `ToolDispatcher.dispatch()`). | `tool-orchestration.ts` `executeToolBatches` ~114; `dispatcher.ts` ~666 |
 
@@ -122,7 +137,15 @@ behavior-preservation during the extraction.
 | Layer | Scope | Lives on | Purpose | Status |
 |---|---|---|---|---|
 | **Per-run cap** (floor) | One runner | `RunLoop.iterationCap` (= `SUB_AGENT_ITERATION_CAP = 20`, from `src/sub-agents/constants.ts`); `tokenLimit` likewise | Stop a *single* loop from spinning; resets fresh for every runner | **Unchanged** by this refactor |
-| **Aggregate budget** (ceiling) | The whole call tree | `RunContext.iterationsRemaining` / `RunContext.costRemainingUsd` | Stop a *deep/wide tree* from collectively over-spending even when every node is individually under its per-run cap | **New** (composition needs it) |
+| **Aggregate budget** (ceiling) | The whole call tree | `RunContext.budget` → a **shared `AggregateBudget` cell** (`iterationsRemaining` / `costRemainingUsd`), referenced by every `RunContext` in the tree | Stop a *deep/wide tree* from collectively over-spending even when every node is individually under its per-run cap | **New** (composition needs it) |
+
+> **The aggregate budget is a SHARED CELL, not a per-child copy** ([../data-model.md](../data-model.md)
+> `AggregateBudget`). Every `RunContext` in one call tree references the *same* `AggregateBudget`
+> object; a child inherits it **by reference** (`{ ...parent, depth: depth + 1 }` copies the
+> reference). Any node's decrement is immediately visible tree-wide — which is the whole point: a
+> spread-copied `number` would give each branch a private allowance and silently degrade the
+> "tree-wide ceiling" into a per-branch one. This is the load-bearing correction; the rest of this
+> section assumes the shared cell.
 
 ### Decision rule
 
@@ -130,8 +153,8 @@ A turn proceeds **iff all three conditions hold**:
 
 ```
 localIterations < iterationCap
-  AND RunContext.iterationsRemaining > 0
-  AND RunContext.costRemainingUsd  > 0
+  AND RunContext.budget.iterationsRemaining > 0
+  AND RunContext.budget.costRemainingUsd    > 0
 ```
 
 Whichever layer is tighter wins. (Per-run `tokenLimit` and context-window proximity are additional
@@ -140,20 +163,27 @@ per-run terminal conditions, evaluated as today; they trigger wind-down, not a b
 ### Resolved policies
 
 1. **Independent layers, both must pass.** The aggregate budget is additive on top of the per-run
-   cap, never a substitute. A reader seeing `iterationsRemaining` on `RunContext` must not assume it
-   supersedes `iterationCap`.
-2. **Per-turn decrement, checked before each turn.** Aggregate counters decrement as each turn
-   completes and are checked before the next begins — catching cost drift mid-run, not only at spawn
-   boundaries. (Most accurate; cost is computed via `calculateCost`, see [Cost](#cost).)
-3. **Exhaustion blocks new child spawns only.** When the tree ceiling is hit, no new children launch;
-   **in-flight runs finish their current turn gracefully** — no hard-abort, no forced mid-turn
-   wind-down. A blocked spawn returns control to the caller (flow-as-tool / `run_flow`) or terminates
-   the chain (chaining); see [tools.md](tools.md).
-4. **Sub-agent equivalence is provable, not coincidental.** Sub-agents pass `maxDepth = 0` and seed
-   **both** aggregate budgets to `Infinity`, so the per-run `iterationCap` is the *only* effective
-   limit. `iterationsRemaining > 0` and `costRemainingUsd > 0` are always true (`Infinity > 0`), so the
-   decision rule collapses to `localIterations < iterationCap` — byte-identical to today, by
-   construction. This is why the existing sub-agent suites stay green unmodified (see
+   cap, never a substitute. A reader seeing `budget.iterationsRemaining` on `RunContext` must not
+   assume it supersedes `iterationCap`.
+2. **Per-turn decrement of the shared cell, checked before each turn.** As each turn completes, the
+   turn's cost/iteration is subtracted from the **shared** `AggregateBudget` cell (mutated in place,
+   so parent/siblings/children all see it), and the next turn is gated on the cell before it begins —
+   catching cost drift mid-run, not only at spawn boundaries. (Cost is computed via `calculateCost`,
+   see [Cost](#cost).)
+3. **Exhaustion blocks new child spawns only; bounded overshoot is accepted.** When the shared cell
+   hits zero, no new children launch; **in-flight runs finish their current turn gracefully** — no
+   hard-abort, no forced mid-turn wind-down. Because concurrent in-flight turns (semaphore cap 3;
+   concurrent `run_flow`) check-then-act across `await` points, the ceiling tolerates **bounded
+   overshoot** (≈ concurrency × one turn's spend); no lock is taken on the cell. A blocked spawn
+   returns control to the caller (flow-as-tool / `run_flow`) or terminates the chain (chaining); see
+   [tools.md](tools.md).
+4. **Sub-agent equivalence is provable, not coincidental.** Sub-agents pass `maxDepth = 0` and a fresh
+   `budget` cell of `{ iterationsRemaining: Infinity, costRemainingUsd: Infinity }`, so the per-run
+   `iterationCap` is the *only* effective limit. `budget.iterationsRemaining > 0` and
+   `budget.costRemainingUsd > 0` are always true (`Infinity > 0`), and decrementing an `Infinity` cell
+   leaves it `Infinity` (nothing observable changes), so the decision rule collapses to
+   `localIterations < iterationCap` — byte-identical to today, by construction. This is why the
+   existing sub-agent suites stay green unmodified (see
    [Behavior-preservation gate](#behavior-preservation-gate)).
 
 `stopReason` on the terminal `RunResult` distinguishes the layers: a per-run cap yields
@@ -176,8 +206,7 @@ That binary ban is replaced by a **depth counter on `RunContext`**.
 interface RunContext {
   depth: number;               // current nesting depth (0 = top level)
   maxDepth: number;            // 0 for sub-agents (no nesting); N or Infinity for flows
-  iterationsRemaining: number; // AGGREGATE tree-wide ceiling (Infinity for sub-agents); NOT the per-run cap
-  costRemainingUsd: number;    // AGGREGATE tree-wide ceiling (Infinity for sub-agents)
+  budget: AggregateBudget;     // SHARED tree-wide cell { iterationsRemaining, costRemainingUsd } (by reference)
   abort: AbortSignal;          // cascades from parent
 }
 ```
@@ -188,12 +217,13 @@ A child run (a nested `use_subagent`, or a `run_flow` invocation) may be spawned
 
 ```
 RunContext.depth < RunContext.maxDepth
-  AND RunContext.iterationsRemaining > 0
-  AND RunContext.costRemainingUsd  > 0
+  AND RunContext.budget.iterationsRemaining > 0
+  AND RunContext.budget.costRemainingUsd    > 0
 ```
 
-- A spawned child inherits the parent's **remaining** aggregate budget (shared, decrementing the same
-  ceiling) and `depth + 1`, with an abort signal derived from the parent's.
+- A spawned child inherits the parent's `budget` **by reference** (the same shared cell, so the child's
+  per-turn decrements draw down the same tree-wide ceiling) and `depth + 1`, with an abort signal
+  derived from the parent's.
 - **Sub-agents pass `maxDepth = 0`.** The top-level sub-agent runs at `depth = 0`; a nested
   `use_subagent` would require `depth (0) < maxDepth (0)` → **false**, so it is rejected exactly as the
   `_isSubAgentContext` ban does today.
@@ -309,9 +339,10 @@ calculateCost(inputTokens: number, outputTokens: number, modelId: string, settin
 - `budget.ts` (ARCH-005) imports **only** `calculateCost` + settings — **no orchestrator dependencies**
   (tasks.md sequencing-risk #3: "Cost reachability"). This keeps the run-loop layer free of
   `ChatOrchestrator`.
-- After each turn, the turn's cost is subtracted from `RunContext.costRemainingUsd`; the next turn is
-  gated on `costRemainingUsd > 0` (decision rule, policy #2).
-- For sub-agents, `costRemainingUsd = Infinity`, so cost never blocks — preserving today's behavior.
+- After each turn, the turn's cost is subtracted from the shared `RunContext.budget.costRemainingUsd`
+  cell; the next turn is gated on `budget.costRemainingUsd > 0` (decision rule, policy #2).
+- For sub-agents, the `budget` cell is `{ …, costRemainingUsd: Infinity }`, so cost never blocks —
+  preserving today's behavior.
 
 ---
 
@@ -319,8 +350,9 @@ calculateCost(inputTokens: number, outputTokens: number, modelId: string, settin
 
 The extraction is gated on **TEST-001** (a release blocker; tasks.md per-phase gate, Phase 0). The
 existing sub-agent suites must pass **unmodified** after `SubAgentRunner` is refactored to a thin
-adapter over `RunLoop` (`maxDepth = 0`, aggregate budgets `Infinity`, no persistence hooks; mapping
-`RunResult` → `SubAgentResult` where `structured` is always null):
+adapter over `RunLoop` (`maxDepth = 0`, a fresh `budget` cell of both-`Infinity`,
+`orchestrationContext: undefined`, no persistence hooks; mapping `RunResult` → `SubAgentResult` where
+`structured` is always null):
 
 - `src/chat/sub-agent-runner.test.ts` — runner loop, caps, wind-down, abort behavior.
 - `src/tools/use-subagent.test.ts` — **hard-asserts `iterationCap === 20`**; depth-0 nested rejection.

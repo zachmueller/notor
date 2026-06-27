@@ -63,7 +63,11 @@ The executor: (1) extracts the first fenced block tagged `ts`/`typescript`/`js`/
 step note `bodyContent`; (2) strips types and compiles; (3) executes the async function under a
 **timeout guard** (default **60 s**, configurable — mirrors the per-server MCP timeout convention);
 (4) captures the returned `CodeStepResult` and hands its `{topic, payload}` back to the engine for
-write-before-route routing, exactly like a conversation step's captured `emit_event` call.
+write-before-route routing, exactly like a conversation step's captured `emit_event` call. When the
+returned `CodeStepResult` carries `structured` (from `emit(topic, payload?, structured?)`) **and** the
+emitted `topic` is the flow's terminal/completion event, the runner lifts `structured` onto
+`RunResult.structured` verbatim (the only producer of `structured`; FR-104/173); a non-terminal emit's
+`structured` is ignored.
 
 **Error handling (FR-130 AC):** a code step must **never crash the plugin**. On a missing fence,
 compile error, runtime throw, unhandled rejection, or timeout, the executor fires a
@@ -74,7 +78,7 @@ vault-schema). The error event then routes normally — to a step subscribing on
 or to the `FallbackCoordinator` (FR-113).
 
 **Cost / identity:** a code step creates no conversation and consumes zero tokens; it does **not**
-draw on the aggregate `RunContext.costRemainingUsd` budget (it is not an LLM turn). It **does** count
+draw on the shared aggregate `RunContext.budget.costRemainingUsd` cell (it is not an LLM turn). It **does** count
 as an engine turn for `notor-max-iterations` / runtime / stale-loop accounting — the engine
 (FEAT-008), not the code, owns those guards (see [../contracts/run-loop.md](../contracts/run-loop.md)).
 
@@ -112,11 +116,14 @@ into this executor; the conversation path it skips).
   `{step}.code_error` event carrying the error message + stack **and** shows an error `Notice`.
 - [ ] `turn.start` and `turn.complete` are written to `session-log.jsonl` **even on error** (audit +
   recovery).
-- [ ] A code step does **not** decrement `RunContext.costRemainingUsd` (it is not an LLM turn) but
+- [ ] A code step does **not** decrement `RunContext.budget.costRemainingUsd` (it is not an LLM turn) but
   **does** advance the engine iteration / runtime / stale-loop counters.
 - [ ] A returned `CodeStepResult`'s `{topic, payload}` is handed to the engine for write-before-route
   routing; a `topic` not in the step's `notor-step-publishes` is treated as an orphan
   (FallbackCoordinator, FR-113), identical to a conversation-step emission.
+- [ ] When a returned `CodeStepResult` carries `structured` **and** `topic` is terminal, the runner
+  lifts `structured` onto `RunResult.structured` verbatim (no JSON round-trip); a non-terminal emit's
+  `structured` is ignored.
 
 ---
 
@@ -128,10 +135,18 @@ TypeScript surface and per-member semantics are the **single authority** of
 [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md) — implement to that
 contract; do not redefine it here. Members:
 
-- `emit(topic, payload?)` → builds the terminal `CodeStepResult` (the only constructor of it;
-  `return`ing it is mandatory — a bare call is a no-op). A code step that returns nothing falls back
+- `emit(topic, payload?, structured?)` → builds the terminal `CodeStepResult` (the only constructor of
+  it; `return`ing it is mandatory — a bare call is a no-op). A code step that returns nothing falls back
   to the step's `notor-step-default-publishes`, synthesized exactly as a no-emit conversation turn
-  would be (FR-115).
+  would be (FR-115). The optional `structured` is the **only** producer of `RunResult.structured`
+  (lifted by the runner on a **terminal** emit, INT-010; ignored on a non-terminal emit) — the reliable
+  flow-as-tool return (FR-173).
+- `once(key, fn)` → at-least-once side-effect guard (FR-125). Runs `fn` only if no
+  `side_effect.committed` entry for `key` exists this session; appends one on success; on a recovery
+  re-run an already-committed `key` skips `fn` (returns `undefined`). Wrap non-idempotent external
+  effects (git push, Slack/MCP post, deploy). Best-effort, not exactly-once — cannot cover a crash
+  *during* `fn` (authority: [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md),
+  At-least-once recovery).
 - `scratchpad` (`read`/`write`/`list`/`exists`) → backed by the owning session's
   `sessions/{id}/scratchpad/` (INT-001). The session's scratchpad path is auto-allowed in path
   enforcement (FR-120/FR-121), so a code step needs no explicit `allowed_paths`.
@@ -176,8 +191,12 @@ the `tasks` member shares their backing).
   `executeShellCommand(...)` (inherited via `utils`).
 
 **Acceptance Criteria:**
-- [ ] `return orchestration.emit(topic, payload?)` routes the next event deterministically; a bare
-  (un-`return`ed) call has no effect.
+- [ ] `return orchestration.emit(topic, payload?, structured?)` routes the next event deterministically;
+  a bare (un-`return`ed) call has no effect.
+- [ ] A terminal `emit(topic, payload, structured)` populates `RunResult.structured` (lifted by the
+  runner, INT-010); a non-terminal emit ignores `structured`.
+- [ ] `once(key, fn)` runs `fn` once and appends `side_effect.committed`; a re-run with an
+  already-committed `key` skips `fn` and returns `undefined` (best-effort at-least-once guard).
 - [ ] A code step that returns no `CodeStepResult` synthesizes the step's
   `notor-step-default-publishes` (parity with a no-emit conversation turn, FR-115).
 - [ ] `callTool` / `callMcpTool` dispatch through `ToolDispatcher.dispatch()` (registered built-in
@@ -310,12 +329,17 @@ runner suite but is verified here for the helper-emit path).
   `{step}.code_error` (payload carries message + stack), show an error `Notice`, and still write
   `turn.start`/`turn.complete`.
 - [ ] **No tokens / no cost:** a code step records zero token usage and does not decrement
-  `RunContext.costRemainingUsd`, while advancing the engine iteration counter.
+  `RunContext.budget.costRemainingUsd`, while advancing the engine iteration counter.
 - [ ] **Helper dispatch:** `callTool`/`callMcpTool` route through `ToolDispatcher.dispatch()` (mocked);
   `callMcpTool` honors the `notor-step-mcp-servers` filter; a dispatch rejection becomes
   `{step}.code_error`.
 - [ ] **`emit` routing:** `return orchestration.emit(t, p)` yields `{topic: t, payload: p}`; a bare
   call is a no-op; returning nothing synthesizes `notor-step-default-publishes`.
+- [ ] **`emit` structured:** `emit(t, p, s)` carries `structured: s` on `CodeStepResult`; the runner
+  lifts it onto `RunResult.structured` only for a terminal `topic` (verified at the executor boundary;
+  full flow-as-tool return in INT-043 / TEST-006).
+- [ ] **`once`:** `once(key, fn)` runs `fn` and records `side_effect.committed`; a second call (or a
+  recovery re-run) with the same committed `key` skips `fn` and returns `undefined`.
 - [ ] **`scratchpad` / `tasks` / `eventHistory`:** scratchpad round-trips under the session dir;
   `tasks.ensure` is idempotent and `list({status})` filters; `eventHistory(limit?)` returns the
   recent events (newest last).

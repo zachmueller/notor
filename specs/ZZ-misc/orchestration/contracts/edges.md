@@ -145,8 +145,9 @@ hierarchy; nothing emits a non-tree edge.
 
 - **Crash-recovery replay** (FR-125 / INT-005) walks the session/edge structure; a pure DAG
   guarantees replay terminates and is idempotent.
-- **Aggregate-budget rollup** (the `RunContext.iterationsRemaining` / `costRemainingUsd` accumulator;
-  see [contracts/run-loop.md](run-loop.md)) sums over the subtree; a cycle would double-count or loop.
+- **Aggregate-subtree rollup** (the consumed cost/iterations summed over the subtree; sourced from the
+  shared `RunContext.budget` cell — `AggregateBudget`, see [contracts/run-loop.md](run-loop.md)) sums
+  over the subtree; a cycle would double-count or loop.
 - **Run-tree rendering** needs no cycle-detection or infinite-expansion guards at any depth — the
   constraint is what lets a 50-node tree render cleanly.
 
@@ -234,10 +235,15 @@ interface ChildRunMetadata {
 | `name` | sub-agent profile name | flow name |
 | `profile_name` | profile name (also as `name`) | absent |
 
-For **flows**, the aggregate numbers come from the child's root `RunContext` accumulator (the
-cascading budget; see [contracts/run-loop.md](run-loop.md)) — the *whole* child flow tree, not just
-the direct child. For **sub-agents**, the subtree is the sub-agent itself, so the same fields carry
-single-run totals.
+For **flows**, the aggregate numbers are the **consumed** cost/iterations of the *whole* child flow
+tree, derived from the shared `AggregateBudget` cell the child subtree drew down (the cascading
+budget; see [contracts/run-loop.md](run-loop.md)) — measured as the cell's spend over the child run
+(e.g. captured-at-spawn remaining minus remaining-at-return, or an explicit per-subtree consumed
+accumulator), not just the direct child. Because the cell is **shared by reference** across the
+subtree, every descendant turn's decrement is already reflected in it, so the rollup is a single read
+rather than a tree walk. For **sub-agents**, the subtree is the sub-agent itself (its `budget` cell is
+seeded `Infinity` and unused for gating), so the same fields carry single-run totals taken from the
+run's own token/iteration counts.
 
 ### Back-compat guarantee (the back-compat parse — TEST-006)
 
@@ -285,7 +291,7 @@ what it reads:
 | Structure: orchestration steps + child flows | `orchestration_edges` (`next`/`prev` for the step chain; `child`/`parent` for cross-flow descent/ascent) |
 | Structure: sub-agent children | the sub-agent `parent_conversation_id` scalar (`src/tools/use-subagent.ts:430`) |
 | Per-node identity / label | `orchestration_*` header fields (§1) for steps; `name` / `profile_name` from `child_run_metadata` for child-flow / sub-agent nodes |
-| Header aggregate rollup (root cost / iterations / max depth) | the root `RunContext` accumulator ([contracts/run-loop.md](run-loop.md)) |
+| Header aggregate rollup (root cost / iterations / max depth) | the root run's shared `RunContext.budget` cell consumption ([contracts/run-loop.md](run-loop.md)) |
 | Peek-card numbers on a spawning tool-call | `child_run_metadata` (aggregate subtree for flows; single-run for sub-agents) — §5 |
 | Live updates while a run is active | `WorkflowActivityTracker.onChange()` over the `session-log.jsonl` write points (`turn.start` / `turn.complete` / `event.emitted`) — see [contracts/vault-schema.md](vault-schema.md) |
 | Descend affordance on a tool-call card | `via_tool_call_id` on the `child` edge (run_flow only) |

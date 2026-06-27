@@ -98,7 +98,8 @@ distinct `notor-persona-chip-emoji` (e.g. a flow/loop glyph), and it MUST includ
   parser (`FEAT-002`) rejects. DOC-001's audit is the standing guard against that drift.
 - **Code-step guidance (the `INT-013` work item).** When to choose `notor-step-mode: code`, the arg
   signature `["app", "obsidian", "utils", "libs", "event", "orchestration"]`, the
-  `return orchestration.emit(topic, payload?)` contract, the scratchpad / `callTool` / `callMcpTool` /
+  `return orchestration.emit(topic, payload?, structured?)` contract (incl. `once(key, fn)` for
+  non-idempotent side effects and the terminal-`structured` return), the scratchpad / `callTool` / `callMcpTool` /
   `tasks` helper surface, and the error model (a thrown error fires `{step}.code_error` and shows a
   Notice). The authority is [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md);
   the persona inlines a faithful summary.

@@ -81,15 +81,26 @@ required: [topic, payload]
 
 `emit_event` is a **capture-only** tool. It does **not** route.
 
-1. On `execute`, it reads the active orchestration context off `ToolSessionContext`
-   (`src/tools/tool.ts:35`) and **stores `{ topic, payload }` onto the session context** as the
-   turn's pending emission (overwriting any prior pending emission within the same turn — last call
-   wins).
+1. On `execute`, it reads the active **`orchestrationContext`** off `ToolExecuteOptions`
+   (`src/tools/tool.ts`; shape `OrchestrationToolContext` in [../data-model.md](../data-model.md)) —
+   the per-step session carriage assembled at the single `ToolDispatcher.dispatch()` site, **distinct
+   from `ToolSessionContext`** (it is *not* merged into the chat read-accessor; same different-lifecycle
+   rationale as `runContext`, FR-102) — and **writes `{ topic, payload }` to its `pendingEmission`
+   slot** as the turn's pending emission (overwriting any prior pending emission within the same turn —
+   last call wins). Because each step turn gets its **own** `OrchestrationToolContext` instance,
+   concurrent step turns / `run_flow` children never share or race on this slot. If
+   `orchestrationContext` is absent (e.g. the tool is somehow reached outside a step turn),
+   `emit_event` returns `success: false` rather than mutating anything.
 2. It returns a confirmation `ToolResult` (`success: true`) so the LLM sees the emission was recorded;
    the turn then continues or ends normally.
-3. **After** the `RunLoop` turn completes, the `StepTurnExecutor` (FR-115) reads the captured emission
-   and hands it to `OrchestrationEventEngine.publish()`, which appends `event.emitted` to
-   `session-log.jsonl` **before** routing (write-before-route, FR-112).
+3. **After** the `RunLoop` turn completes, the `StepTurnExecutor` (FR-115) reads
+   `orchestrationContext.pendingEmission` and hands it to `OrchestrationEventEngine.publish()`, which
+   appends `event.emitted` to `session-log.jsonl` **before** routing (write-before-route, FR-112).
+
+> **Precedent.** This capture-then-read-back across a turn boundary mirrors the existing `update_tasks`
+> → `ToolSessionContext.setConversationTasks(...)` → `ChatOrchestrator` pattern
+> (`src/tools/update-tasks.ts`), generalized to a per-step orchestration carriage with its own mutable
+> `pendingEmission` slot rather than chat's shared session accessor.
 
 **No mid-turn routing.** The next step never begins while the emitting turn is still running — the
 engine routes strictly between turns. This keeps the loop single-threaded per session and makes
@@ -161,9 +172,12 @@ required: [flow, payload]
 2. **Spawn gate.** Before launching, the child spawn is gated on the `RunContext` carried on
    `ToolExecuteOptions` (`runContext?` — assembled once in `ToolDispatcher.dispatch()` at
    `src/chat/dispatcher.ts:666` and threaded through `executeToolBatches`). A spawn proceeds iff
-   `depth < maxDepth` **and** aggregate budget (`iterationsRemaining > 0` and `costRemainingUsd > 0`).
-   A blocked spawn returns control with a clear tool error. **This gate is the single authority of
-   [run-loop.md](run-loop.md); do not restate the decision rule here — reference it.**
+   `depth < maxDepth` **and** the **shared** aggregate-budget cell has headroom
+   (`runContext.budget.iterationsRemaining > 0` and `runContext.budget.costRemainingUsd > 0`). The
+   child inherits the **same `AggregateBudget` cell by reference** (its turns draw down the same
+   tree-wide ceiling) and `depth + 1`. A blocked spawn returns control with a clear tool error. **This
+   gate and the shared-cell budget model are the single authority of [run-loop.md](run-loop.md); do
+   not restate the decision rule here — reference it.**
 3. **Run-to-terminal on a child `RunLoop`.** The selected flow runs **to its terminal event** in a
    **child session** on a **child `RunLoop`** (depth + 1, inheriting the parent's remaining aggregate
    budget). This is the `use_subagent` pattern generalized from a single sub-agent run to a whole flow:
@@ -172,9 +186,13 @@ required: [flow, payload]
    `INT-044`; isolation (`notor-handoff-isolation: isolated | shared`) follows the
    [vault-schema.md](vault-schema.md) `definition.md` contract.
 4. **Return.** The tool returns the child's `RunResult` (see [../data-model.md](../data-model.md)):
-   **prefer `structured`, fall back to `text`**. A terminal **code step** populates `structured`
-   deterministically (the reliable path); otherwise a final conversation step instructed via
-   `notor-flow-returns` produces the closing `text` (the loose fallback).
+   **prefer `structured`, fall back to `text`**. The **only** producer of `structured` is a terminal
+   **code step** that passes a third arg to `orchestration.emit(topic, payload?, structured?)`
+   (authority: [orchestration-helper.md](orchestration-helper.md)); the runner lifts that value onto
+   `RunResult.structured` verbatim — no JSON round-trip of `payload`. Absent a terminal code step (or
+   when it passes no `structured`), `structured` is `null` and `run_flow` falls back to the closing
+   `text` produced by a final conversation step instructed via `notor-flow-returns` (the loose
+   fallback).
 5. **Edge + rollup.** On return, the calling step's conversation gains a `child` edge to the child
    flow's entry conversation, and the `ToolResult` carries a `child_run_metadata` block with the
    child subtree's aggregate cost / iterations / depth. Both the edge model and the rollup block are
@@ -268,6 +286,7 @@ These are two distinct, easily-confused mechanisms. They run on **different loop
 | Return | Child `RunResult` (prefer `structured`, fall back to `text`) | The workflow's single-turn result merged into the step's context |
 | Child session | New child session (`parent_session_id`, isolation mode) | No child session — the step awaits a workflow result inline |
 | Edge/rollup | `child` edge + `child_run_metadata` ([edges.md](edges.md)) | None (no child-flow tree) |
+| Aggregate budget | Child turns decrement the **shared** `RunContext.budget` cell live (it runs on a child `RunLoop`) | Runs off-`RunLoop`, so it cannot decrement live; instead **post-hoc reconciliation** (below) |
 | Task | `INT-042` / `INT-043` | `INT-031` |
 
 In short: **`run_flow` composes flow→flow** (call/return over the shared run-loop, run-to-terminal);
@@ -275,6 +294,18 @@ In short: **`run_flow` composes flow→flow** (call/return over the shared run-l
 background-execution loop). The background-workflow loop is deliberately **not** the seam `run_flow`
 uses — it is one-call-at-a-time and entangled with background approval/concurrency/liveness concerns a
 child flow turn must not inherit.
+
+> **Aggregate-budget accounting for step→workflow (FR-151 / FR-176).** Because the invoked workflow
+> runs on the background-workflow loop — which has **no `RunContext`** — its LLM turns cannot decrement
+> the shared aggregate-budget cell live. Without accounting, a step could delegate unbounded spend the
+> flow's `notor-max-cost-usd` / `notor-max-iterations` ceilings never see. The resolution is **post-hoc
+> reconciliation**: when the invoking step awaits the workflow's result (the `INT-031` await-result
+> boundary), it subtracts the workflow's total reported cost/iterations from the **shared**
+> `RunContext.budget` cell in one decrement. The ceiling is therefore accurate *after* the invocation
+> (the next spawn/turn gate sees the real remaining total); it is not checked *during* the workflow's
+> own loop, which is instead bounded by the workflow's per-run cap. This keeps the background loop free
+> of `RunContext` plumbing while closing the accounting hole. Authority for the shared cell:
+> [run-loop.md](run-loop.md); the reconciliation wiring is `INT-031`.
 
 ---
 

@@ -15,6 +15,31 @@ authority of another contract file, that is noted and the type is not redefined 
 
 Authority: [contracts/run-loop.md](contracts/run-loop.md). Module: `src/run-loop/types.ts`.
 
+### AggregateBudget (shared tree-wide cell)
+
+The aggregate budget is a **single mutable object shared by reference across the whole run tree** —
+**not** a value copied into each child. Every `RunContext` in one call tree points at the *same*
+`AggregateBudget` instance, so any node's decrement is immediately visible to the parent, siblings,
+and children. This is what makes the ceiling genuinely *tree-wide*: a spread-copied `number` would
+give each branch its own private allowance (a per-branch budget), defeating the purpose. The shared
+cell is the authority for FR-176 cascading guardrails and the `child_run_metadata` aggregate rollup.
+
+```typescript
+interface AggregateBudget {
+  iterationsRemaining: number; // AGGREGATE tree-wide ceiling (Infinity for sub-agents); NOT the per-run cap
+  costRemainingUsd: number;    // AGGREGATE tree-wide ceiling (Infinity for sub-agents)
+}
+```
+
+- **Sharing model:** the root run constructs one `AggregateBudget`; every descendant `RunContext`
+  carries a reference to it. `decrementAggregate(budget, turnCostUsd)` (`src/run-loop/budget.ts`,
+  ARCH-005) mutates the shared cell in place — there is no per-child copy.
+- **Concurrency:** concurrent in-flight turns (sub-agent semaphore cap 3; concurrent `run_flow`
+  children) may check-then-act across `await` points, so the ceiling tolerates **bounded overshoot**
+  (up to ≈ concurrency × one turn's spend). This is the same "in-flight runs finish their current
+  turn" semantics the spawn gate already specifies — exhaustion blocks *new* spawns, it never
+  hard-aborts a running turn. No lock is required.
+
 ### RunContext
 
 Carried as an optional field `runContext?` on `ToolExecuteOptions` (`src/tools/tool.ts`), assembled
@@ -25,29 +50,40 @@ into `ToolSessionContext` (a stable per-dispatch read-accessor).
 interface RunContext {
   depth: number;               // current nesting depth (0 = top level)
   maxDepth: number;            // 0 for sub-agents (no nesting); N or Infinity for flows
-  iterationsRemaining: number; // AGGREGATE tree-wide ceiling (Infinity for sub-agents); NOT the per-run cap
-  costRemainingUsd: number;    // AGGREGATE tree-wide ceiling (Infinity for sub-agents)
+  budget: AggregateBudget;     // SHARED tree-wide cell (by reference, never copied); see above
   abort: AbortSignal;          // cascades from parent
 }
 ```
 
-- A child run inherits the parent's remaining budget and `depth + 1`.
-- Spawning a child is gated on `depth < maxDepth` AND `iterationsRemaining > 0` AND
-  `costRemainingUsd > 0`.
-- Sub-agents seed `maxDepth = 0` and both budgets to `Infinity` → today's behavior, by construction.
+- A child run inherits the parent's `budget` **by reference** (`{ ...parent, depth: depth + 1 }`
+  copies the *reference*, so the cell is shared) and `depth + 1`.
+- Spawning a child is gated on `depth < maxDepth` AND `budget.iterationsRemaining > 0` AND
+  `budget.costRemainingUsd > 0`.
+- Sub-agents seed `maxDepth = 0` and a fresh `budget` of `{ iterationsRemaining: Infinity,
+  costRemainingUsd: Infinity }` → today's behavior, by construction (an `Infinity` cell can never be
+  the binding constraint, and nothing observable decrements it).
 
 ### RunResult (always-both)
 
 ```typescript
 interface RunResult {
   text: string;                       // always present (final/wind-down output)
-  structured: unknown | null;         // optional; populated only by a terminal code step
+  structured: unknown | null;         // optional; populated only by a terminal code step (see below)
   messages: ChatMessage[];
   tokenUsage: { input: number; output: number };
   iterationCount: number;
   stopReason: "completed" | "iteration_cap" | "token_limit" | "context_window" | "cost_cap" | "depth_cap";
 }
 ```
+
+**How `structured` is populated (the data path).** A conversation step never sets `structured` (it
+stays `null`; the closing `text` is its only output). The **only** producer is a terminal **code
+step** that passes a third argument to `orchestration.emit(topic, payload?, structured?)` (authority:
+[contracts/orchestration-helper.md](contracts/orchestration-helper.md)). That `structured` value
+flows `CodeStepResult.structured` → the runner lifts it onto the terminal `RunResult.structured`
+verbatim (no JSON round-trip — `payload` stays a clean routing/log string, `structured` carries the
+typed object). `run_flow` then returns `structured` if present, else `text` (FR-173). Absent this
+explicit channel, `structured` is always `null` and `run_flow` always falls back to `text`.
 
 `SubAgentResult` (`src/chat/sub-agent-runner.ts`, today `{ text, messages, tokenUsage,
 iterationCount, stopReason }`) becomes a **strict subset** — `structured` is always null and the
@@ -66,7 +102,8 @@ interface RunLoopOptions {
   iterationCap?: number;        // per-run cap; default SUB_AGENT_ITERATION_CAP (20)
   tokenLimit?: number;          // per-run; default SUB_AGENT_TOKEN_LIMIT (0 = none)
   thinkingLevel?: ThinkingLevel | null;
-  runContext: RunContext;       // depth + aggregate budget + abort
+  runContext: RunContext;       // depth + shared aggregate budget + abort
+  orchestrationContext?: OrchestrationToolContext;  // per-step session carriage (see below); undefined for sub-agents
   hooks?: RunLoopHooks;
   onProgress?: (status: string) => void;
 }
@@ -82,6 +119,51 @@ interface RunLoopHooks {
 Hooks are how orchestration attaches per-step JSONL persistence, progress Notices, and navigation
 **without** baking them into the engine. Keep this surface minimal (do not pull in
 `ChatOrchestrator`'s compaction/context management).
+
+`RunLoop` threads `orchestrationContext` (when present) into `executeToolBatches` so the
+orchestration tools (`emit_event`, the task tools) can read the active session and capture their
+emission. **Sub-agents pass `orchestrationContext: undefined`** — preserving today's behavior, where
+`SubAgentRunner` already supplies no session context to `executeToolBatches` (the regression gate
+stays green by construction). See the `OrchestrationToolContext` shape below and
+[contracts/run-loop.md](contracts/run-loop.md) / [contracts/tools.md](contracts/tools.md) for how the
+tools consume it.
+
+### OrchestrationToolContext (per-step session carriage)
+
+Authority for this shape: this file. Carried as an optional field `orchestrationContext?` on
+`ToolExecuteOptions` (`src/tools/tool.ts`), **distinct** from both `runContext` and
+`ToolSessionContext` — assembled once at the single `ToolDispatcher.dispatch()` assembly site,
+exactly like `runContext`. It delivers per-step orchestration session identity *into* a tool's
+`execute()` and carries the captured emission *back out* for the executor to read after the turn.
+Each step turn gets its **own** instance (constructed by `StepTurnExecutor`/`OrchestrationRunner`),
+so concurrent step turns / `run_flow` children never share or race on it — there is no global
+"current session".
+
+```typescript
+interface OrchestrationToolContext {
+  sessionId: string;            // owning orchestration session
+  scratchpadPath: string;       // sessions/{id}/scratchpad/ — auto-allowed in path enforcement
+  tasksPath: string;            // sessions/{id}/tasks/
+  parentScratchpadPath?: string;// present for `shared`-handoff children (auto-allowed too; FR-174)
+  // Mutable capture slot — emit_event writes here during execute(); the executor reads it post-turn.
+  pendingEmission: { topic: string; payload: string; structured?: unknown } | null;
+}
+```
+
+- **Why not `ToolSessionContext`?** Same rationale that keeps `RunContext` out of it (FR-102):
+  `ToolSessionContext` is chat's stable per-dispatch read-accessor; `OrchestrationToolContext` is a
+  per-step, orchestration-only carriage with a mutable capture slot. Different lifecycles → composed
+  on `ToolExecuteOptions`, not conflated. Chat's `ToolSessionContext` is unchanged.
+- **Capture seam.** `emit_event` (FEAT-009) writes `{ topic, payload, structured? }` to
+  `pendingEmission` during `execute()`; after the `RunLoop` turn completes, `StepTurnExecutor` reads
+  it back (last-write-wins within a turn). This mirrors the existing `update_tasks` →
+  `ToolSessionContext.setConversationTasks(...)` precedent (`src/tools/update-tasks.ts` →
+  `ChatOrchestrator`), generalized to a per-step carriage. Authority for the capture contract:
+  [contracts/tools.md](contracts/tools.md).
+- **Path auto-allow source.** `scratchpadPath` (and `parentScratchpadPath` for `shared` handoffs) is
+  the prefix `enforcePathConstraints(...)` consults to auto-allow the session scratchpad for the
+  owning session's step turns (INT-001 / FR-121). The prefix arrives via this carriage at the same
+  dispatch assembly site, so the path enforcer learns the active session without a global.
 
 ---
 
@@ -103,6 +185,7 @@ interface OrchestrationFlow {
   maxIterations: number;        // notor-max-iterations
   maxRuntimeMinutes: number;    // notor-max-runtime-minutes
   requiredEvents: string[];     // notor-required-events
+  fanoutTopics: string[];       // notor-fanout-topics (default []); topics that MAY route to >1 step
   steps: StepDefinition[];      // resolved from notor-steps wikilinks under steps/
   guardrails: string[];         // notor-guardrails (injected into every step prompt)
   // Composition (design Phase 7; inert unless feature group enabled):
@@ -162,6 +245,11 @@ Authority: [contracts/orchestration-helper.md](contracts/orchestration-helper.md
 steps as `event` and `orchestration`. Arg signature:
 `CODE_STEP_ARG_NAMES = ["app", "obsidian", "utils", "libs", "event", "orchestration"]`.
 
+`CodeStepResult` is `{ topic: string; payload: string; structured?: unknown }` — the optional
+`structured` is the data path for a terminal code step's typed return (see `RunResult` above);
+`orchestration.emit(topic, payload?, structured?)` is its only constructor. `OrchestrationHelper`
+also exposes `once(key, fn)` for at-least-once side-effect guarding (FR-125; see below).
+
 ---
 
 ## Persisted Vault Entities
@@ -188,8 +276,13 @@ interface OrchestrationSessionMeta {
 ### session-log.jsonl (append-only; crash-recovery source)
 
 Entry types and **enforced write order** in [contracts/vault-schema.md](contracts/vault-schema.md).
-Entry `type ∈ { session.start, turn.start, turn.complete, event.emitted, session.cancelled,
-session.complete, user.input.required, user.input.received }`.
+Entry `type ∈ { session.start, turn.start, turn.complete, event.emitted, side_effect.committed,
+session.cancelled, session.complete, user.input.required, user.input.received }`.
+
+`side_effect.committed` (FR-125) records that a guarded side effect keyed `key` completed within a
+turn; recovery's at-least-once replay consults it so `orchestration.once(key, fn)` skips an
+already-committed effect on re-run (see [contracts/orchestration-helper.md](contracts/orchestration-helper.md)
+for the helper and [contracts/vault-schema.md](contracts/vault-schema.md) for the entry shape).
 
 ### Task note (`tasks/{key}.md`)
 

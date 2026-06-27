@@ -134,8 +134,28 @@ interface OrchestrationHelper {
    * Build the terminal CodeStepResult that routes the next event.
    * MUST be `return`ed from the code step — calling it without returning has no effect
    * (the engine only routes the returned value). `payload` defaults to "".
+   *
+   * The optional `structured` is the DATA PATH for a terminal code step's typed return: when this
+   * step's emitted topic is the flow's terminal/completion event, the runner lifts `structured` onto
+   * RunResult.structured verbatim (no JSON round-trip), which `run_flow` returns in preference to
+   * `text` (FR-173). For non-terminal emits, `structured` is ignored (routing uses topic/payload).
+   * Keep `payload` a clean string (routing + logging); put the typed object in `structured`.
    */
-  emit(topic: string, payload?: string): CodeStepResult;
+  emit(topic: string, payload?: string, structured?: unknown): CodeStepResult;
+
+  /**
+   * At-least-once side-effect guard for crash recovery (FR-125). Runs `fn` only if a side effect
+   * keyed `key` has not already been recorded committed for this session; on success it appends a
+   * `side_effect.committed` entry (keyed) to session-log.jsonl, so a recovery RE-RUN of this step
+   * skips the already-committed effect. Returns `fn`'s result (or the prior result is NOT replayed —
+   * a skipped effect returns undefined). Use it to wrap NON-IDEMPOTENT external effects (git push,
+   * Slack post, deploy, charge) that a re-run after an interrupted turn would otherwise repeat.
+   *
+   * BEST-EFFORT, not exactly-once: it cannot cover a crash that occurs DURING `fn` (after the effect
+   * landed but before `side_effect.committed` is written) — such an effect may still re-run. It
+   * collapses the common window, not the irreducible one. See "At-least-once recovery" below.
+   */
+  once<T>(key: string, fn: () => Promise<T>): Promise<T | undefined>;
 
   /** The session scratchpad — shared, restriction-free working space for the owning session. */
   scratchpad: {
@@ -195,7 +215,8 @@ interface OrchestrationHelper {
 
 | Member | Semantics |
 |---|---|
-| `emit(topic, payload?)` | The **only** way a code step routes the next event. The engine routes **the returned value**, so `return orchestration.emit(...)` is mandatory; a bare call is a no-op. A code step that returns no `CodeStepResult` falls back to the step's `notor-step-default-publishes` (synthesized exactly as a no-emit conversation turn would be, FR-115). |
+| `emit(topic, payload?, structured?)` | The **only** way a code step routes the next event. The engine routes **the returned value**, so `return orchestration.emit(...)` is mandatory; a bare call is a no-op. A code step that returns no `CodeStepResult` falls back to the step's `notor-step-default-publishes` (synthesized exactly as a no-emit conversation turn would be, FR-115). The optional `structured` is lifted onto `RunResult.structured` only when `topic` is the flow's terminal/completion event (FR-173); ignored otherwise. |
+| `once(key, fn)` | At-least-once side-effect guard (FR-125). Runs `fn` and appends a keyed `side_effect.committed` log entry on success; on a recovery re-run of the step, an already-committed `key` skips `fn` (returns `undefined`). Wrap non-idempotent external effects (push/post/deploy). Best-effort — cannot cover a crash *during* `fn`; see [At-least-once recovery](#at-least-once-recovery-fr-125). |
 | `scratchpad.*` | Reads/writes under `sessions/{id}/scratchpad/`. The owning session's scratchpad path is auto-allowed in path enforcement (FR-120/FR-121), so a code step never needs explicit `allowed_paths`. This is the cross-step state channel: a code step writes here for downstream steps. |
 | `callTool` | Dispatches a built-in tool (the same registry the LLM sees). Throws/rejects on dispatch failure (the rejection is caught and surfaces as `{step}.code_error`). |
 | `callMcpTool` | Dispatches against a **connected** MCP server. Subject to the step's `notor-step-mcp-servers` filter (null = inherit all). |
@@ -212,8 +233,9 @@ conversation step's captured `emit_event` call.
 
 ```typescript
 interface CodeStepResult {
-  topic: string;     // next event topic (may be a terminal: FLOW_COMPLETE / FLOW_CANCELLED / FLOW_ERROR)
-  payload: string;   // next event payload (defaults to "")
+  topic: string;       // next event topic (may be a terminal: FLOW_COMPLETE / FLOW_CANCELLED / FLOW_ERROR)
+  payload: string;     // next event payload (defaults to "")
+  structured?: unknown;// optional typed return; lifted onto RunResult.structured by a TERMINAL emit
 }
 ```
 
@@ -223,6 +245,11 @@ interface CodeStepResult {
   a conversation step's emission; an unlisted topic is treated as an orphan and routed to the
   `FallbackCoordinator` (FR-113).
 - A terminal `topic` ends the loop (see [Terminal events](#terminal-events-flow_complete--flow_cancelled)).
+- **`structured` is the flow-as-tool return channel.** On a **terminal** emit, the runner copies
+  `structured` to `RunResult.structured` verbatim; `run_flow` returns it in preference to `text`
+  (FR-173). On a non-terminal emit it is ignored. This is the only mechanism that populates
+  `structured` — without it `RunResult.structured` is always `null` and `run_flow` falls back to
+  `text`. `payload` stays a string for routing/logging even when `structured` is set.
 
 ---
 
@@ -257,7 +284,46 @@ timeout (per INT-010 / FR-130):
 3. `turn.start` / `turn.complete` are **still written** to `session-log.jsonl` (audit + recovery).
 
 Author a step subscribing to `{step}.code_error` to handle failures, or let it route to the
-`FallbackCoordinator` (which steers or terminates with `FLOW_ERROR`, FR-113).
+`FallbackCoordinator` (which terminates with `FLOW_ERROR`, FR-113).
+
+---
+
+## At-least-once recovery (FR-125)
+
+Crash recovery (FR-125) replays `session-log.jsonl`: a dangling `turn.start` with no matching
+`turn.complete` means the turn was interrupted, so the engine **re-emits the trigger and the step
+runs again** from fresh context. This is safe for vault state (re-writing the scratchpad just
+overwrites it) — but **recovery is at-least-once, not exactly-once**: a step that performed an
+**external, non-idempotent side effect** (e.g. `utils.executeShellCommand("git push")`, a Slack post
+via `callMcpTool`, a deploy) and then crashed before `turn.complete` will **repeat that effect** on
+re-run.
+
+This is an inherent property — a plugin cannot make `git push` transactional — so the contract is
+named honestly and a guard primitive is provided rather than a guarantee implied:
+
+- **The boundary is the step author's to manage.** A code (or conversation) step with irreversible
+  external effects must be idempotent or guard itself.
+- **`orchestration.once(key, fn)` is the guard.** It runs `fn` only if no `side_effect.committed`
+  entry for `key` exists in this session's log, and appends one on success. On a recovery re-run, the
+  already-committed `key` is skipped:
+
+  ```typescript
+  // Without a guard, a crash after push but before turn.complete re-pushes on recovery.
+  await orchestration.once("push-main", async () => {
+    await utils.executeShellCommand("git push origin main", { cwd: repoPath });
+  });
+  ```
+
+- **Best-effort, not exactly-once.** `once` collapses the *common* re-run window (crash anywhere
+  after `fn` fully completed and the marker was written). It cannot cover the *irreducible* window — a
+  crash that lands **after** the external effect but **before** `side_effect.committed` is appended —
+  so an effect can still, rarely, repeat. Design genuinely irreversible actions accordingly (prefer
+  idempotent operations; use natural idempotency keys on the remote where one exists).
+
+The `side_effect.committed` log entry shape and write order are owned by
+[vault-schema.md](vault-schema.md); recovery's classifier consuming it is INT-005 (FR-125). The
+prompt scaffold and `orchestration-creator` persona instruct authors to wrap non-idempotent effects
+in `once(...)`.
 
 ---
 
@@ -271,7 +337,7 @@ Author a step subscribing to `{step}.code_error` to handle failures, or let it r
 | **Task management** | `orchestration.tasks.ensure/start/close/list(...)` to drive a runtime work queue; pop the next item and route to a worker. |
 | **External notify** | `await orchestration.callMcpTool("slack", "post_message", {...})` or `utils.notify(...)` to surface progress to a team/user. |
 | **Conditional routing** | `JSON.parse(event.payload)`, inspect, and `emit` a different topic per branch — multi-way routing impossible in the old pass/fail verification model. |
-| **Aggregation** | Read several `orchestration.scratchpad` files, synthesize a combined payload, `emit` to a finalizer (or populate a terminal-step `structured` return for flow-as-tool, FR-173). |
+| **Aggregation / structured return** | Read several `orchestration.scratchpad` files, synthesize a combined result, and on the terminal emit pass it as the 3rd arg so a `run_flow` caller gets a typed object: `return orchestration.emit("FLOW_COMPLETE", "Done; 3 files changed.", { filesChanged: ["a.ts","b.ts","c.ts"], summary })` (FR-173). |
 
 ---
 

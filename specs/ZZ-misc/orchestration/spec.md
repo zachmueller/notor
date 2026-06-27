@@ -104,13 +104,17 @@ persistence hooks), mapping `RunResult` → `SubAgentResult`.
   change (the **RunLoop regression gate**).
 - AC: sub-agent caps, wind-down, and abort behavior are byte-identical to today.
 
-**FR-102: `RunContext` rides the dispatch seam.** `RunContext = { depth, maxDepth,
-iterationsRemaining, costRemainingUsd, abort }` is added as an optional `runContext?` field on
-`ToolExecuteOptions`, assembled once in `ToolDispatcher.dispatch()` and threaded through
-`executeToolBatches`. Existing tools ignore it; `use_subagent` (and later `run_flow`) read it.
+**FR-102: `RunContext` rides the dispatch seam.** `RunContext = { depth, maxDepth, budget, abort }`
+— where `budget` is a **shared `AggregateBudget` cell** (`{ iterationsRemaining, costRemainingUsd }`)
+referenced (never copied) by every `RunContext` in the run tree — is added as an optional
+`runContext?` field on `ToolExecuteOptions`, assembled once in `ToolDispatcher.dispatch()` and threaded
+through `executeToolBatches`. Existing tools ignore it; `use_subagent` (and later `run_flow`) read it.
+A **separate** optional `orchestrationContext?` field (the per-step session carriage; see FR-116)
+rides the same seam — distinct from both `runContext` and `ToolSessionContext`.
 
-- AC: a child run inherits the parent's remaining budget and `depth + 1`.
-- AC: `RunContext` is **not** merged into `ToolSessionContext` (different lifecycle).
+- AC: a child run inherits the parent's `budget` **by reference** (the same shared cell) and `depth + 1`.
+- AC: `RunContext` is **not** merged into `ToolSessionContext` (different lifecycle); neither is
+  `orchestrationContext`.
 
 **FR-103: Depth model replaces the binary recursion ban.** The sub-agent no-nesting ban
 (`SUBAGENT_EXCLUDED_TOOLS` + `_isSubAgentContext`) is replaced by a `depth < maxDepth` check on
@@ -121,20 +125,29 @@ iterationsRemaining, costRemainingUsd, abort }` is added as an optional `runCont
 - AC: the rejection path returns a clear tool error, not a throw.
 
 **FR-104: Always-both `RunResult`.** `RunResult` always carries `text` plus an optional `structured`
-payload slot (populated only by a terminal code step). `SubAgentResult` is a strict subset
-(`structured` always null).
+payload slot. The **only** producer of `structured` is a terminal code step that passes a third arg to
+`orchestration.emit(topic, payload?, structured?)`; the runner lifts that value onto
+`RunResult.structured` verbatim (no JSON round-trip). `SubAgentResult` is a strict subset (`structured`
+always null).
 
 - AC: `stopReason ∈ {completed, iteration_cap, token_limit, context_window, cost_cap, depth_cap}`.
+- AC: `structured` is populated **iff** a terminal code step supplied it via `emit`'s third arg; it is
+  `null` for conversation-only and sub-agent runs.
 - AC: the refactor of `SubAgentResult` is non-breaking.
 
 **FR-105: Two-layer limit model.** A per-run iteration cap (unchanged, 20) and a new **aggregate
-tree-wide budget** (`iterationsRemaining` / `costRemainingUsd` on `RunContext`) coexist. A turn
-proceeds iff **both** layers have headroom. Aggregate counters decrement per-turn; exhaustion blocks
-new child spawns only (in-flight runs finish their current turn).
+tree-wide budget** — a **shared `AggregateBudget` cell** (`iterationsRemaining` / `costRemainingUsd`)
+referenced by reference from every `RunContext` in the tree, **not** value-copied per child — coexist.
+A turn proceeds iff **both** layers have headroom. The shared cell is decremented in place per-turn;
+exhaustion blocks new child spawns only (in-flight runs finish their current turn; bounded overshoot
+under concurrency is accepted).
 
-- AC: a turn proceeds iff `localIterations < iterationCap AND iterationsRemaining > 0 AND
-  costRemainingUsd > 0`.
-- AC: sub-agents seed the aggregate to `Infinity`, so the per-run cap is the only effective limit.
+- AC: a turn proceeds iff `localIterations < iterationCap AND budget.iterationsRemaining > 0 AND
+  budget.costRemainingUsd > 0`.
+- AC: a child inherits the parent's `budget` cell **by reference**, so a deep/wide subtree draws down
+  one shared ceiling (not a per-branch copy).
+- AC: sub-agents seed a fresh `budget` cell to `Infinity`, so the per-run cap is the only effective
+  limit.
 
 **FR-106: Shared concurrency semaphore.** The counting `Semaphore` (currently `src/sub-agents/`) is
 generalized into the run-loop layer so orchestration child-run concurrency uses the same primitive.
@@ -144,35 +157,57 @@ generalized into the run-loop layer so orchestration child-run concurrency uses 
 
 ### FR-110 group — Core engine + flow schema (design Phase 1)
 
-**FR-110: Flow definition as a vault note.** A flow is a directory
+**FR-110: Flow definition as a vault note + load-time topology validation.** A flow is a directory
 `{notor_dir}/orchestrations/{flow-name}/` with a `definition.md` (topology, loop config, guardrails)
 and a `steps/` subdirectory of step notes. `definition.md` frontmatter uses the `notor-type:
-orchestration-flow` discriminator. Full schema in [data-model.md](data-model.md) and
-[contracts/vault-schema.md](contracts/vault-schema.md).
+orchestration-flow` discriminator. The parser **validates the flow graph at load** (deterministic, not
+delegated to the authoring persona): it **hard-errors** on a structurally-broken flow (the
+`notor-completion-event` unreachable from `notor-starting-event`; a `notor-required-events` topic that
+no step publishes) and **warns** on suspicious-but-legal cases (a published topic with no subscriber
+that is not terminal; a step whose trigger topic is never published). Full schema in
+[data-model.md](data-model.md) and [contracts/vault-schema.md](contracts/vault-schema.md); routing
+rules in [contracts/event-engine.md](contracts/event-engine.md).
 
 - AC: flows are discovered from `{notor_dir}/orchestrations/`.
 - AC: the note body of `definition.md` is documentation only — never injected into any prompt.
+- AC: a flow whose completion event is unreachable, or whose required-event is never published, is
+  rejected at load with a clear error; orphan/dead topics produce warnings.
 
-**FR-111: Step note as a vault note.** Each step is a note under `{flow-dir}/steps/` with
-`notor-type: orchestration-step` frontmatter (triggers, publishes, default-publishes, persona, model,
-mode, mcp-servers) and a Markdown body of instructions.
+**FR-111: Step note as a vault note; single-subscriber routing with opt-in fan-out.** Each step is a
+note under `{flow-dir}/steps/` with `notor-type: orchestration-step` frontmatter (triggers, publishes,
+default-publishes, persona, model, mode, mcp-servers) and a Markdown body of instructions. By default
+each trigger topic maps to **exactly one step**; a topic may route to **more than one** step **only**
+when it is declared in the flow's `notor-fanout-topics` (then the subscribers run in `notor-steps`
+order, FR-112). An **undeclared** collision (two steps triggering on the same topic not in
+`notor-fanout-topics`) is rejected at load — this declaration is the schema signal that distinguishes
+intended fan-out from an accidental collision.
 
-- AC: each trigger topic maps to at most one step per flow; ambiguous routing is rejected at load
-  with a clear error.
+- AC: a topic in two steps' triggers is rejected at load (naming the topic + both steps) **unless** it
+  is declared in `notor-fanout-topics`, in which case it is accepted as ordered fan-out.
 - AC: step bodies may use `<include_note>` tags.
 
 **FR-112: Event engine (pub/sub + wildcard).** `OrchestrationEventEngine` provides `subscribe`,
-`publish` (write-before-route), `getSubscribers`, `getEventHistory`. Multiple steps triggering on one
-topic execute in `notor-steps` order.
+`publish` (write-before-route), `getSubscribers`, `getEventHistory`. A single-subscriber topic routes
+to its one step; a topic declared in `notor-fanout-topics` with multiple subscribers executes them in
+`notor-steps` order. The engine **auto-subscribes** its own synthesized re-trigger topics
+(`flow.tasks_remaining` / `flow.requirements_unmet`, FR-123) to the step that emitted the blocked
+`FLOW_COMPLETE` when no step declares a trigger for them, so completion-enforcement re-entry never
+dead-ends at the fallback.
 
 - AC: `publish` appends the event to `session-log.jsonl` before routing.
-- AC: a topic with no subscriber routes to the `FallbackCoordinator`.
+- AC: a declared fan-out topic dispatches its subscribers in `notor-steps` order.
+- AC: a synthesized re-trigger topic with no explicit subscriber auto-routes to the completing step.
+- AC: a topic with no subscriber (and not auto-subscribed) routes to the `FallbackCoordinator`.
 
-**FR-113: FallbackCoordinator.** A mandatory `*` subscriber that receives any orphaned event, attempts
-to steer back to a known topic, and terminates with `FLOW_ERROR` if unrecoverable.
+**FR-113: FallbackCoordinator (pure backstop).** A mandatory `*` subscriber that receives any orphaned
+event, logs it with context, and terminates with `FLOW_ERROR`. It is **deterministic and synchronous
+— no LLM, no fuzzy/string-distance steering** (which a synchronous handler could not do without
+risking silent mis-routing). Orphan-prone topologies are caught earlier by the FR-110 load-time
+validator; the coordinator is the loud last line of defense, not a guesser.
 
 - AC: it is always registered and cannot be overridden.
-- AC: an orphaned event never silently stalls the loop.
+- AC: an orphaned event never silently stalls the loop — it always yields a logged `FLOW_ERROR`.
+- AC: the coordinator performs no LLM call and no payload-based topic inference.
 
 **FR-114: Step prompt scaffold.** `StepPromptBuilder` wraps a step's raw instructions in a structural
 scaffold (orientation → execute → verify → report → guardrails) and **always** injects the
@@ -191,17 +226,25 @@ captures the emitted event (or synthesizes `default_publishes` if none).
 - AC: a no-emit turn synthesizes the step's `default_publishes` topic.
 
 **FR-116: `emit_event` tool.** A built-in tool scaffold (feature-group-gated, mode `write`) that
-captures `{topic, payload}` onto the session context; the engine reads and routes it **after** the
-turn completes (no mid-turn routing).
+captures `{topic, payload}` onto the per-step **`orchestrationContext`** carriage (the
+`pendingEmission` slot on `ToolExecuteOptions.orchestrationContext`, distinct from `ToolSessionContext`
+— a per-step instance, so concurrent step turns never race); the engine reads `pendingEmission` and
+routes it **after** the turn completes (no mid-turn routing). Each step turn carries its own
+`orchestrationContext` instance, so the capture is isolated per turn (no global "current session").
 
 - AC: it appears only when `orchestration_enabled` is true.
+- AC: it writes to `orchestrationContext.pendingEmission` (not a global/shared slot); concurrent step
+  turns / `run_flow` children do not clobber each other's capture.
 - AC: narrative text alone never counts as an emission.
 
 **FR-117: Loop safety guards.** Iteration cap, runtime cap, stale-loop detection (same
-`(topic, source, payload_hash)` triple 3× in a row), and thrashing detection (a task re-queued after
-abandonment 3+ times) terminate a stuck flow.
+`(topic, source_step)` pair — payload deliberately excluded — for **4** consecutive events), and
+thrashing detection (a task re-queued after abandonment 3+ times) terminate a stuck flow. Payload is
+excluded because `default_publishes` synthesizes payloads from per-turn LLM text that varies each
+turn, so a payload-keyed signature missed the common non-converging-LLM-loop case.
 
-- AC: a stale loop terminates the flow.
+- AC: a stale loop (4 consecutive identical `(topic, source_step)` pairs) terminates the flow,
+  regardless of payload variation.
 - AC: a runtime overrun terminates the flow.
 
 **FR-118: OrchestrationRunner.** The main loop: load definition + steps, register the fallback,
@@ -242,9 +285,13 @@ frontmatter.
 
 **FR-123: Completion task enforcement.** When `FLOW_COMPLETE` is emitted with open/running tasks, the
 engine rejects it and publishes `flow.tasks_remaining` instead, re-triggering with remaining-task
-context.
+context. The synthesized `flow.tasks_remaining` (and the analogous `flow.requirements_unmet`) is
+**auto-subscribed** to the step that emitted the blocked `FLOW_COMPLETE` when no step declares a
+trigger for it (FR-112), so the re-trigger never dead-ends at the fallback.
 
 - AC: `FLOW_COMPLETE` with open tasks is rejected and re-triggers.
+- AC: `flow.tasks_remaining` reaches a step even when the author wired no explicit subscriber
+  (auto-subscribed to the completing step).
 - AC: `FLOW_COMPLETE` with all tasks closed finalizes the flow.
 
 **FR-124: Persistent memory.** A cross-session `{notor_dir}/orchestrations/memories.md` note that the
@@ -253,12 +300,24 @@ prompt scaffold instructs steps to consult and append fix-memories to.
 - AC: the memories note is seeded on first use.
 - AC: steps are instructed to consult it before acting in unfamiliar territory.
 
-**FR-125: Session recovery on reload.** On plugin load, sessions with status `active`/`interrupted`
-are recovered by replaying `session-log.jsonl`: a dangling `turn.start` re-emits the trigger; a
-dangling `event.emitted` re-publishes the event; the user is offered a resume prompt.
+**FR-125: Session recovery on reload (at-least-once).** On plugin load, sessions with status
+`active`/`interrupted` are recovered by replaying `session-log.jsonl`: a dangling `turn.start`
+re-emits the trigger (the step **re-runs** from fresh context); a dangling `event.emitted`
+re-publishes the event; the user is offered a resume prompt. Recovery is **at-least-once, not
+exactly-once**: replay is idempotent for the engine's own bookkeeping (events/turns) and for vault
+state (re-writing the scratchpad overwrites), but a re-run step **repeats any external,
+non-idempotent side effect** (e.g. `git push`, a Slack/MCP post, a deploy) it performed before
+crashing. Steps with such effects must be idempotent or guard themselves with
+`orchestration.once(key, fn)` (FR-131), which records a `side_effect.committed` log entry so a re-run
+skips the already-committed effect (best-effort — it cannot cover a crash *during* the effect). A
+plugin cannot make arbitrary shell/MCP effects transactional, so this boundary is named explicitly
+rather than implied as solved.
 
-- AC: an interrupted turn re-emits its trigger (step retries from fresh context).
-- AC: replay is idempotent.
+- AC: an interrupted turn re-emits its trigger (step re-runs from fresh context).
+- AC: engine-bookkeeping replay is idempotent (no double-routed event, no double-counted turn).
+- AC: `orchestration.once(key, fn)` skips an already-committed side effect on re-run; the
+  at-least-once boundary (external effects may repeat) is documented for authors (scaffold + persona +
+  docs).
 
 **FR-126: Conversation edges + hidden-from-list.** Step conversations carry orchestration header
 metadata including a typed-edge adjacency list `orchestration_edges` (`kind ∈ next/prev/child/parent`,
@@ -280,11 +339,17 @@ orchestration]`.
   logging `turn.start`/`turn.complete`.
 
 **FR-131: OrchestrationHelper runtime API.** Code steps receive an `orchestration` helper:
-`emit(topic, payload?)`, `scratchpad` (read/write/list/exists), `callTool`, `callMcpTool`, `tasks`
-(list/ensure/start/close), `flow` (name/iteration/sessionId), `eventHistory(limit?)`. Built on the
-existing extension `runtime-context/`. Full API: [contracts/orchestration-helper.md](contracts/orchestration-helper.md).
+`emit(topic, payload?, structured?)`, `once(key, fn)`, `scratchpad` (read/write/list/exists),
+`callTool`, `callMcpTool`, `tasks` (list/ensure/start/close), `flow` (name/iteration/sessionId),
+`eventHistory(limit?)`. Built on the existing extension `runtime-context/`. Full API:
+[contracts/orchestration-helper.md](contracts/orchestration-helper.md). `emit`'s optional third arg is
+the **only** producer of `RunResult.structured` (a terminal code step's typed return for flow-as-tool,
+FR-173); `once(key, fn)` is the at-least-once side-effect guard (FR-125).
 
 - AC: `return orchestration.emit(...)` routes the next event deterministically.
+- AC: a terminal `emit(topic, payload, structured)` populates `RunResult.structured` (lifted verbatim,
+  no JSON round-trip); a non-terminal emit ignores `structured`.
+- AC: `once(key, fn)` runs `fn` once, records `side_effect.committed`, and skips on a recovery re-run.
 - AC: `callTool`/`callMcpTool` dispatch through registered built-in tools / connected MCP servers.
 
 **FR-132: `FLOW_CANCELLED` terminal event.** A terminal event (from code *or* conversation steps) that
@@ -317,9 +382,16 @@ entry (interplays with FR-125).
 
 **FR-151: Step-to-workflow invocation.** A step can invoke a named single-turn workflow to direct its
 task, awaiting the workflow's result into the step's context (hooking the background loop in
-`src/chat/workflow-executor.ts`).
+`src/chat/workflow-executor.ts`). Because that loop runs off-`RunLoop` (no `RunContext`), the
+workflow's spend is folded into the aggregate budget by **post-hoc reconciliation**: at the
+await-result boundary the invoking step subtracts the workflow's total reported cost/iterations from
+the shared `RunContext.budget` cell, so the flow's `notor-max-cost-usd` / `notor-max-iterations`
+ceilings account for workflow-invocation spend (accurate after the call; the workflow's own per-run
+cap bounds it during).
 
 - AC: a step can invoke a workflow and receive its result.
+- AC: the workflow's total cost/iterations are reconciled into the shared aggregate-budget cell at the
+  await-result boundary (the ceiling sees workflow-invocation spend).
 
 ### FR-160 group — Built-in flows + orchestration-creator persona (design Phase 6)
 
@@ -360,10 +432,14 @@ the description, mirroring `UseSubagentTool`) and a single loose `payload` arg.
 
 **FR-173: Flow-as-tool execution + structured return.** `run_flow` runs the child flow to its terminal
 event in a child session on a child `RunLoop`, then returns the child's result (prefer `structured`,
-fall back to `text`). A terminal code step populates `structured` deterministically.
+fall back to `text`). `structured` is populated **only** by a terminal code step passing a third arg
+to `orchestration.emit(topic, payload?, structured?)`, lifted onto `RunResult.structured` verbatim
+(FR-104/131); absent that, the result is the closing `text` from a final conversation step instructed
+via `notor-flow-returns`.
 
 - AC: the child flow runs on a child `RunLoop` to a terminal event.
-- AC: the tool result prefers `structured` and falls back to `text`.
+- AC: the tool result prefers `structured` (when a terminal code step supplied it) and falls back to
+  `text` otherwise.
 
 **FR-174: Child sessions + isolation modes.** Child sessions record `parent_session_id` and link into
 the parent's recovery tree. `notor-handoff-isolation` selects `isolated` (default; fresh
@@ -381,12 +457,15 @@ code-step adapter for non-trivial reshaping).
 - AC: a chained successor launches with the forwarded, shaped payload.
 - AC: chaining does not return to the originator.
 
-**FR-176: Cascading guardrails.** Aggregate `max_iterations` / `max_cost_usd` / `max_depth` across the
-flow tree (on `RunContext`) gate child spawns; a blocked spawn returns control (flow-as-tool) or
-terminates the chain (chaining).
+**FR-176: Cascading guardrails.** Aggregate `max_iterations` / `max_cost_usd` (the **shared
+`AggregateBudget` cell** on `RunContext`) and `max_depth` across the flow tree gate child spawns;
+because the cell is shared by reference, every descendant turn draws down one tree-wide ceiling
+(not a per-branch copy). A blocked spawn returns control (flow-as-tool) or terminates the chain
+(chaining).
 
-- AC: a spawn is gated on `depth < maxDepth` AND aggregate budget `> 0`.
-- AC: in-flight runs finish their current turn when the ceiling is hit.
+- AC: a spawn is gated on `depth < maxDepth` AND the shared `budget` cell `> 0`.
+- AC: a deep/wide subtree collectively respects one shared ceiling (decrements are visible tree-wide).
+- AC: in-flight runs finish their current turn when the ceiling is hit (bounded overshoot accepted).
 
 **FR-177: Shared `child_run_metadata`.** `ToolResult.sub_agent_metadata` is generalized into a shared
 `child_run_metadata` block used by both `use_subagent` and `run_flow`, with one rendering path and one
@@ -424,7 +503,10 @@ See [data-model.md](data-model.md) for full schemas. Summary:
 - **Flow** — `definition.md` topology + `steps/`. **Step** — a step note (conversation or code).
 - **Persona** — existing concept; a step references one for system prompt / tools / model.
 - **Event** — `{ topic, payload, source_step }`. **Session** — one flow execution + its workspace.
-- **RunContext / RunResult** — the run-loop substrate's cascade + result types.
+- **RunContext / RunResult** — the run-loop substrate's cascade + result types; `RunContext.budget` is
+  a shared `AggregateBudget` cell (tree-wide, by reference).
+- **OrchestrationToolContext** — per-step session carriage on `ToolExecuteOptions` (session id,
+  scratchpad/tasks paths, `pendingEmission` capture slot); distinct from `ToolSessionContext`.
 - **Conversation edges** — `orchestration_edges` typed adjacency; **`child_run_metadata`** — shared
   rollup block.
 

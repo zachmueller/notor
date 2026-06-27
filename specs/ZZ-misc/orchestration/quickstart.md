@@ -107,8 +107,13 @@ Give it a research question as the prompt. The flow plans an approach, gathers f
 the scratchpad, checks that something was actually gathered, then writes a short report.
 ```
 
-`notor-steps` wikilinks resolve against `steps/`. Each trigger topic must map to at most one step in
-the flow — ambiguous routing is rejected at load with a clear error (FR-111).
+`notor-steps` wikilinks resolve against `steps/`. By default each trigger topic maps to **exactly one**
+step in the flow — an undeclared collision (two steps triggering on the same topic) is rejected at load
+with a clear error (FR-111). To intentionally fan one topic out to multiple steps, list it in the
+flow's `notor-fanout-topics`; those steps then run in `notor-steps` order (FR-112). The parser also runs
+**load-time topology validation** (FR-110): it hard-errors if the completion event is unreachable from
+the starting event or a required-event is never published, and warns on orphan/dead topics — so
+structural mistakes surface at author time, not mid-run.
 
 ### 2c. A conversation step — `steps/gather.md`
 
@@ -311,12 +316,17 @@ A code step can call it programmatically via `orchestration.callTool("run_flow",
 payload: "..." })`.
 
 **What happens.** `run_flow` runs the child flow to its terminal event in a **child session** on a
-**child `RunLoop`**, then returns the child's result to the caller — preferring `structured`
-(populated by a terminal code step) and falling back to `text` (FR-173). The child session records
-`parent_session_id` and links into the parent's recovery tree; `isolated` (default) gives it a fresh
-scratchpad/tasks, while `shared` would inherit the parent's scratchpad and auto-allow its path
-(FR-174). Cascading guardrails gate the spawn: it proceeds only if `depth < maxDepth` AND the
-aggregate budget has headroom (FR-176).
+**child `RunLoop`**, then returns the child's result to the caller — preferring `structured` and
+falling back to `text` (FR-173). `structured` is populated **only** when the child's *terminal* step is
+a **code step** that passes a third argument to `emit`, e.g. `return orchestration.emit("FLOW_COMPLETE",
+"3 angles covered.", { report, sources })` — the runner lifts that object onto `RunResult.structured`
+verbatim. If the terminal step is instead a conversation step (as in the `report` step above), the
+caller receives its closing `text` (shaped by `notor-flow-returns`). To make `hello-research` return
+`structured`, give it a terminal code step that aggregates the scratchpad and emits the completion event
+with the structured object. The child session records `parent_session_id` and links into the parent's
+recovery tree; `isolated` (default) gives it a fresh scratchpad/tasks, while `shared` would inherit the
+parent's scratchpad and auto-allow its path (FR-174). Cascading guardrails gate the spawn: it proceeds
+only if `depth < maxDepth` AND the **shared** aggregate-budget cell has headroom (FR-176).
 
 **What you observe.**
 
@@ -330,10 +340,12 @@ aggregate budget has headroom (FR-176).
 
 > **Validation points:** (a) `Hello Research` appears in the `run_flow` enum once invocable, and
 > disappears if you set `notor-flow-invocable: false`; (b) the child subtree appears under the caller
-> in the run tree; (c) the returned value is the child's `structured` payload (from the `check` /
-> terminal code step) when present, else its text; (d) setting `notor-max-depth: 1` and nesting a
-> third level blocks the deepest spawn and surfaces that to the caller. (Tasks: INT-040, INT-041,
-> INT-042, INT-043, INT-044, INT-046, INT-047; e2e gate TEST-008.)
+> in the run tree; (c) the returned value is the child's `structured` payload when its **terminal step
+> is a code step** that called `emit(topic, payload, structured)`, else its closing `text`; (d) setting
+> `notor-max-depth: 1` and nesting a third level blocks the deepest spawn and surfaces that to the
+> caller; (e) the deep-spawn block is over the *shared* budget cell — a child's spend is visible to the
+> root rollup. (Tasks: INT-040, INT-041, INT-042, INT-043, INT-044, INT-046, INT-047; e2e gate
+> TEST-008.)
 
 ---
 
@@ -353,14 +365,23 @@ aggregate budget has headroom (FR-176).
 - A dangling `event.emitted` with no following `turn.start` means an event was written but not routed
   → the engine **re-publishes the event**.
 
-Because step turns start from fresh context and the scratchpad is the source of truth, replay is safe
-to repeat. A run paused on `user.input.required` (FR-150) is treated as a recoverable log state and
-resumes at the prompt after a reload. A recovered run re-attaches its run-tree live subscription,
-flipping the badge back to `[⟳ live]`.
+Replay is **at-least-once, not exactly-once.** The engine's own bookkeeping (events, turns) replays
+idempotently, and vault state is safe to repeat (a re-run step just overwrites its scratchpad files).
+But a re-run step **repeats any external, non-idempotent side effect** it performed before crashing —
+e.g. a `git push`, a Slack/MCP post, a deploy. A plugin cannot make those transactional, so steps with
+such effects must be idempotent or **guard themselves with `orchestration.once(key, fn)`** (FR-131),
+which records a `side_effect.committed` log entry so a re-run skips the already-committed effect
+(best-effort — it cannot cover a crash *during* the effect). The prompt scaffold and the
+`orchestration-creator` persona instruct authors to wrap non-idempotent effects this way. A run paused
+on `user.input.required` (FR-150) is treated as a recoverable log state and resumes at the prompt after
+a reload. A recovered run re-attaches its run-tree live subscription, flipping the badge back to
+`[⟳ live]`.
 
 > **Validation points:** (a) the resume prompt appears after reloading mid-run; (b) confirming resumes
-> to completion; (c) re-running recovery twice (e.g. reload again immediately) does not duplicate work
-> or events. (Tasks: INT-005, INT-001, FEAT-006; e2e/unit gate TEST-005.)
+> to completion; (c) re-running recovery twice (e.g. reload again immediately) does not duplicate
+> *engine events/turns*; (d) a side effect wrapped in `orchestration.once(key, fn)` is **not** repeated
+> on re-run (a `side_effect.committed` entry was written), whereas an unguarded external effect **may**
+> repeat — the at-least-once boundary. (Tasks: INT-005, INT-001, FEAT-006; e2e/unit gate TEST-005.)
 
 ---
 
@@ -393,9 +414,12 @@ tasks in [tasks.md](tasks.md).
 - [ ] **Composition:** an invocable flow appears in the `run_flow` enum; calling it runs a child
       session on a child `RunLoop`; the structured return is preferred over text; the child subtree
       nests in the run tree via a `child` edge with `via_tool_call_id`. (FR-170…FR-174, FR-177)
-- [ ] **Cascading guardrails:** a spawn is gated on `depth < maxDepth` AND aggregate budget; a blocked
-      spawn surfaces to the caller and in-flight runs finish their current turn. (FR-176)
-- [ ] **Recovery:** reloading mid-run offers a resume prompt; resuming completes the run; replay is
-      idempotent (including a paused-on-input session). (FR-125, FR-150)
+- [ ] **Cascading guardrails:** a spawn is gated on `depth < maxDepth` AND the **shared** aggregate
+      budget cell (tree-wide, decrements visible to parent/siblings); a blocked spawn surfaces to the
+      caller and in-flight runs finish their current turn. (FR-176)
+- [ ] **Recovery (at-least-once):** reloading mid-run offers a resume prompt; resuming completes the
+      run; engine-bookkeeping replay is idempotent (including a paused-on-input session); an
+      `orchestration.once`-guarded side effect is not repeated on re-run, while unguarded external
+      effects may repeat (documented boundary). (FR-125, FR-131, FR-150)
 - [ ] **Sub-agent regression gate (foundation):** existing sub-agent suites pass unmodified after the
       `RunLoop` extraction — no behavioral change. (FR-101; release-blocker TEST-001)

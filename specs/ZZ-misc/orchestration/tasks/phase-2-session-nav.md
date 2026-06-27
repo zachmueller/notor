@@ -169,6 +169,9 @@ This enforcement lives at the engine's terminal-event handling in `Orchestration
 the same point that recognizes the configured `notor-completion-event` (default `FLOW_COMPLETE`). The
 check runs after the engine has captured the emitted event but as part of routing it, and uses the
 write-before-route discipline: the substituted `flow.tasks_remaining` event is the one logged + routed.
+`flow.tasks_remaining` is an engine-**synthesized** topic: if no step declares a trigger for it, the
+engine **auto-subscribes** it to the step that emitted the blocked `FLOW_COMPLETE` (FEAT-003 / FR-123),
+so the re-trigger never dead-ends at the `FallbackCoordinator`. An explicit subscriber wins if present.
 
 **Risk #8:** `INT-003` must land before `INT-012` (`FLOW_CANCELLED`). `FLOW_CANCELLED` (FR-132, Lane B)
 is explicitly the terminal event that **bypasses** this enforcement (open tasks are acceptable on
@@ -182,9 +185,10 @@ first and `INT-012` depends on it.
   `FLOW_COMPLETE`, query open/running tasks, substitute `flow.tasks_remaining` when any remain.
 - `src/orchestration/task-registry.ts` — a query helper (`hasOpenTasks()` / `listOpen()`) reused by the
   runner (introduced in `INT-002`).
-- `src/orchestration/event-engine.ts` — no schema change; `flow.tasks_remaining` is an ordinary topic
-  routed via the existing pub/sub (a step subscribing to it, or the `FallbackCoordinator` steering, per
-  `FEAT-004`).
+- `src/orchestration/event-engine.ts` — no schema change; `flow.tasks_remaining` is a **synthesized**
+  topic routed via the existing pub/sub — to an explicit subscriber if one declares the trigger, else
+  **auto-subscribed** to the step that emitted the blocked `FLOW_COMPLETE` (FEAT-003 / FR-123), so it
+  never reaches the `FallbackCoordinator`.
 
 **Dependencies:** `INT-002` (task registry to query), `FEAT-010` (the runner that owns terminal-event
 handling).
@@ -192,6 +196,9 @@ handling).
 **Acceptance Criteria:**
 - [ ] `FLOW_COMPLETE` emitted while any task is `open` or `running` does **not** finalize the flow;
   `flow.tasks_remaining` is published instead and re-triggers a step.
+- [ ] `flow.tasks_remaining` reaches a step even when the author declared no explicit subscriber —
+  auto-subscribed to the step that emitted the blocked `FLOW_COMPLETE` (FEAT-003); it does **not**
+  dead-end at the `FallbackCoordinator`.
 - [ ] The `flow.tasks_remaining` payload enumerates the remaining task keys/descriptions.
 - [ ] `FLOW_COMPLETE` with all tasks `closed` (or with no tasks) finalizes the flow.
 - [ ] `flow.tasks_remaining` is written to `session-log.jsonl` before it is routed (write-before-route).
@@ -247,11 +254,18 @@ consistent state (FR-125). The recovery rules follow [orchestration.md → Sessi
   governs recovery (this is the `TEST-005` truncated-log case).
 - The user is offered a "Resume orchestration?" prompt summarizing where the run left off.
 
-The defining correctness property is **idempotency**: replaying the same log must converge to the same
-state and must not double-route an event or double-count a turn. The scan hooks plugin load in
-`src/main.ts` (alongside existing load-time work; the plugin already does conversation/session loading,
-e.g. `loadConversation()` ~1964 and `SessionManager` wiring) and drives recovery through
-`OrchestrationRunner` (`FEAT-010`) using the `SessionLog` reader (`FEAT-006`).
+The defining correctness property is **idempotency of the engine's bookkeeping**: replaying the same
+log must converge to the same state and must not double-route an event or double-count a turn. Recovery
+is, however, **at-least-once for step execution, not exactly-once**: a re-emitted trigger **re-runs the
+step**, which re-runs any external, non-idempotent side effect (e.g. `git push`, a Slack/MCP post, a
+deploy) the step performed before crashing. This is inherent — a plugin cannot make arbitrary shell/MCP
+effects transactional — so the boundary is named explicitly. Steps guard such effects with
+`orchestration.once(key, fn)` (FR-131 / INT-011), which appends a `side_effect.committed` log entry on
+success; this recovery classifier consults committed `key`s so a re-run **skips** an already-committed
+effect (best-effort — it cannot cover a crash *during* the effect, before the marker is written). The
+scan hooks plugin load in `src/main.ts` (alongside existing load-time work; the plugin already does
+conversation/session loading, e.g. `loadConversation()` ~1964 and `SessionManager` wiring) and drives
+recovery through `OrchestrationRunner` (`FEAT-010`) using the `SessionLog` reader (`FEAT-006`).
 
 **Sequencing note (Risk #9):** A session **paused on user input** (`INT-030`, Lane D) is modeled as a
 recoverable log state (`user.input.required` / `user.input.received` entries from
@@ -264,7 +278,9 @@ trigger. `INT-030` lists `INT-005` as a dependency.
 
 **Files:**
 - `src/orchestration/session-recovery.ts` — new: scan for `active`/`interrupted` sessions, read each
-  `session-log.jsonl`, classify the dangling tail, compute the idempotent resume action.
+  `session-log.jsonl`, classify the dangling tail, compute the idempotent resume action, and collect
+  the set of committed `side_effect.committed` keys so a re-run step's `orchestration.once(key, fn)`
+  skips already-committed effects.
 - `src/orchestration/session-log.ts` — a reader/parser for `session-log.jsonl` (writer is `FEAT-006`);
   tolerant of a truncated final line.
 - `src/orchestration/runner.ts` — a `resume(session)` entry point that re-emits / re-publishes per the
@@ -282,8 +298,13 @@ trigger. `INT-030` lists `INT-005` as a dependency.
   context.
 - [ ] A dangling `event.emitted` (no following `turn.start`) re-publishes the event.
 - [ ] A truncated final log line is ignored; the last complete entry governs.
-- [ ] Replay is **idempotent**: replaying a recovered log a second time produces no additional events,
-  turns, or duplicated side effects (asserted by `TEST-005`).
+- [ ] Engine-bookkeeping replay is **idempotent**: replaying a recovered log a second time produces no
+  additional events or double-counted turns (asserted by `TEST-005`).
+- [ ] Recovery is **at-least-once for step execution**: a re-emitted trigger re-runs the step (and may
+  repeat an unguarded external side effect — documented boundary, not a defect).
+- [ ] A side effect wrapped in `orchestration.once(key, fn)` that already recorded a
+  `side_effect.committed` entry is **skipped** on a recovery re-run (best-effort; a crash before the
+  marker is written may still re-run it).
 - [ ] The recovery classifier leaves room for a dangling `user.input.required` to be treated as "still
   paused" (consumed by `INT-030`), not as an interrupted turn.
 
@@ -373,8 +394,11 @@ idempotent" AC.
 - [ ] A log ending in a dangling `event.emitted` recovers by re-publishing exactly once.
 - [ ] A log with a **truncated final line** recovers from the last complete entry (the truncated line is
   ignored, no parse throw).
-- [ ] **Idempotency:** running recovery twice over the same log produces the same resume action and no
-  duplicate events/turns/side effects.
+- [ ] **Idempotency (engine bookkeeping):** running recovery twice over the same log produces the same
+  resume action and no duplicate events or double-counted turns.
+- [ ] **`once`-guarded side effect skip:** a log with a `side_effect.committed` entry for `key` causes a
+  re-run's `orchestration.once(key, fn)` to skip `fn` (the committed-key set is collected during
+  replay); an unguarded effect is documented as re-runnable (at-least-once boundary).
 - [ ] A fully-completed log (ends in `session.complete`) yields **no** recovery action.
 - [ ] A dangling `user.input.required` (no `user.input.received`) is classified as "still paused", not as
   an interrupted turn (forward-compat with `INT-030`).

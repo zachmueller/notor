@@ -151,10 +151,12 @@ orchestration attaches persistence/Notices/navigation to in Phase 1 (FEAT-007) �
 - `src/run-loop/types.ts` — `RunContext`, `RunResult`, `RunLoopOptions`, `RunLoopHooks`, `TurnOutcome`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `RunContext` matches [data-model.md](../data-model.md): `{ depth, maxDepth, iterationsRemaining, costRemainingUsd, abort }` — `iterationsRemaining`/`costRemainingUsd` documented as **aggregate** (NOT the per-run cap)
-- [ ] `RunResult` matches [data-model.md](../data-model.md): `{ text, structured: unknown | null, messages, tokenUsage: {input, output}, iterationCount, stopReason }`
+- [ ] `AggregateBudget` is defined as `{ iterationsRemaining: number; costRemainingUsd: number }` and documented as a **shared cell** (referenced by every `RunContext` in a tree, never value-copied per child)
+- [ ] `RunContext` matches [data-model.md](../data-model.md): `{ depth, maxDepth, budget: AggregateBudget, abort }` — `budget` documented as the **shared aggregate** tree-wide cell (NOT the per-run cap)
+- [ ] `RunResult` matches [data-model.md](../data-model.md): `{ text, structured: unknown | null, messages, tokenUsage: {input, output}, iterationCount, stopReason }`; `structured` documented as populated only by a terminal code step's `emit(topic, payload?, structured?)` third arg
 - [ ] `stopReason` union is `"completed" | "iteration_cap" | "token_limit" | "context_window" | "cost_cap" | "depth_cap"`
-- [ ] `RunLoopOptions` includes `provider, model, systemPrompt, toolDefinitions, dispatcher, mode, iterationCap?, tokenLimit?, thinkingLevel?, runContext, hooks?, onProgress?` (defaults: `iterationCap = SUB_AGENT_ITERATION_CAP` (20), `tokenLimit = SUB_AGENT_TOKEN_LIMIT` (0))
+- [ ] `RunLoopOptions` includes `provider, model, systemPrompt, toolDefinitions, dispatcher, mode, iterationCap?, tokenLimit?, thinkingLevel?, runContext, orchestrationContext?, hooks?, onProgress?` (defaults: `iterationCap = SUB_AGENT_ITERATION_CAP` (20), `tokenLimit = SUB_AGENT_TOKEN_LIMIT` (0))
+- [ ] `OrchestrationToolContext` is defined per [data-model.md](../data-model.md) (`{ sessionId, scratchpadPath, tasksPath, parentScratchpadPath?, pendingEmission }`) and imported by the orchestration tools; `RunLoopOptions.orchestrationContext?` is `undefined` for sub-agents
 - [ ] `RunLoopHooks` includes only `onTurnStart?`, `onTurnComplete?`, `onPersist?`, `onProgress?` — no compaction/view hooks
 - [ ] Types compile and are importable from `src/run-loop/types.ts` with no `src/chat/` orchestrator dependency
 - [ ] `npm run build` succeeds with no type errors
@@ -185,41 +187,45 @@ the **narrowest waist** of the feature and the core of the **RunLoop Regression 
 - [ ] `RunLoop` dispatches tools via `executeToolBatches` (inheriting batched/parallel intra-turn dispatch; cap `DEFAULT_CONCURRENCY_CAP = 5`)
 - [ ] `RunLoop` honors the per-run `iterationCap` and `tokenLimit`, the context-window proximity check, and wind-down summarization on any terminal cap — lifted unchanged from `SubAgentRunner`
 - [ ] Parent abort cascades into the run via `runContext.abort` exactly as `SubAgentRunner` cascades today
-- [ ] `SubAgentRunner` constructs `RunLoopOptions` with `maxDepth = 0`, `iterationsRemaining = Infinity`, `costRemainingUsd = Infinity`, and no `onPersist` hook
+- [ ] `SubAgentRunner` constructs `RunLoopOptions` with `maxDepth = 0`, a **fresh** `budget` cell `{ iterationsRemaining: Infinity, costRemainingUsd: Infinity }`, `orchestrationContext: undefined`, and no `onPersist` hook
 - [ ] `SubAgentResult` is a strict subset of `RunResult` (`structured` always null); the refactor is non-breaking for `use_subagent`
 - [ ] **GATE:** `src/chat/sub-agent-runner.test.ts` passes unmodified
 - [ ] **GATE:** `src/tools/use-subagent.test.ts` passes unmodified (incl. `iterationCap === 20` hard-assert)
 - [ ] **GATE:** `src/sub-agents/constants.test.ts` passes unmodified
 - [ ] `npm run build` succeeds with no type errors
 
-### ARCH-003: `runContext?` on `ToolExecuteOptions`; thread through dispatch + `executeToolBatches`
-**Description:** Add the cascade seam so `RunContext` reaches the tools that spawn children. Add
-`runContext?: RunContext` to `ToolExecuteOptions` (`src/tools/tool.ts` ~41-63 — alongside `onProgress,
-mode, abortSignal, sessionContext, silentNoteOpener, interactionCallback`). Assemble it at the **single**
+### ARCH-003: `runContext?` (+ `orchestrationContext?`) on `ToolExecuteOptions`; thread through dispatch + `executeToolBatches`
+**Description:** Add the cascade seam so `RunContext` reaches the tools that spawn children, **and** the
+per-step `orchestrationContext` seam the orchestration tools (FEAT-009 `emit_event`, INT-002 task tools)
+read. Add `runContext?: RunContext` **and** `orchestrationContext?: OrchestrationToolContext` to
+`ToolExecuteOptions` (`src/tools/tool.ts` ~41-63 — alongside `onProgress, mode, abortSignal,
+sessionContext, silentNoteOpener, interactionCallback`). Assemble both at the **single**
 `ToolExecuteOptions` construction site in `ToolDispatcher.dispatch()` (`src/chat/dispatcher.ts` ~666),
-sourcing the value threaded from the `RunLoop`/orchestrator through `executeToolBatches`
+sourcing the values threaded from the `RunLoop`/orchestrator through `executeToolBatches`
 (`src/chat/tool-orchestration.ts` ~114, which already threads `sessionContext`). **Do not** merge
-`RunContext` into `ToolSessionContext` (`src/tools/tool.ts` ~35-39) — that is a stable per-dispatch
-read-accessor ("whose session am I in?"); `RunContext` is mutable, cascading, tree-scoped ("how deep /
-how much budget left?"). Different lifecycles; keep composed, not conflated. Existing tools ignore the
-new field. **Critically (risk #2):** this task seeds the **default** `runContext` — sub-agents get
-`maxDepth = 0` — and must land **before** ARCH-004 removes the recursion ban, so the depth check has a
-seed to fail against. ARCH-003 may proceed in parallel with ARCH-002 (different files; both need only
-ARCH-001's types).
-**FRs:** FR-102, FR-105
+either into `ToolSessionContext` (`src/tools/tool.ts` ~35-39) — that is a stable per-dispatch
+read-accessor ("whose session am I in?"); `RunContext` is mutable/cascading/tree-scoped ("how deep /
+how much budget left?") and `OrchestrationToolContext` is the per-step session carriage with a mutable
+`pendingEmission` slot. Different lifecycles; keep composed, not conflated (FR-102). Existing tools
+ignore the new fields. **Critically (risk #2):** this task seeds the **default** `runContext` —
+sub-agents get `maxDepth = 0` and `orchestrationContext: undefined` — and must land **before** ARCH-004
+removes the recursion ban, so the depth check has a seed to fail against. ARCH-003 may proceed in
+parallel with ARCH-002 (different files; both need only ARCH-001's types). The orchestration consumer
+of `orchestrationContext` is Phase 1 (FEAT-009/FEAT-007); this task only establishes the seam.
+**FRs:** FR-102, FR-105, FR-116 (the capture seam)
 **Files:**
-- `src/tools/tool.ts` — add `runContext?: RunContext` to `ToolExecuteOptions`
-- `src/chat/dispatcher.ts` — set `runContext` in the single `executeOptions` assembly (~666); accept/thread it on `dispatch()` (~388)
-- `src/chat/tool-orchestration.ts` — thread `runContext` through `executeToolBatches` (~114) → `safeDispatch` (~266) alongside `sessionContext`
-- `src/run-loop/run-loop.ts` — pass `runContext` into `executeToolBatches` from the loop
+- `src/tools/tool.ts` — add `runContext?: RunContext` and `orchestrationContext?: OrchestrationToolContext` to `ToolExecuteOptions`
+- `src/chat/dispatcher.ts` — set both in the single `executeOptions` assembly (~666); accept/thread them on `dispatch()` (~388)
+- `src/chat/tool-orchestration.ts` — thread `runContext` + `orchestrationContext` through `executeToolBatches` (~114) → `safeDispatch` (~266) alongside `sessionContext`
+- `src/run-loop/run-loop.ts` — pass `runContext` + `orchestrationContext` (from `RunLoopOptions`) into `executeToolBatches` from the loop
 **Dependencies:** ARCH-001
 **Acceptance Criteria:**
-- [ ] `ToolExecuteOptions` has optional `runContext?: RunContext`
-- [ ] `runContext` is assembled at the single `executeOptions` site in `dispatch()` and threaded through `executeToolBatches`/`safeDispatch`
-- [ ] `RunContext` is **not** merged into `ToolSessionContext` (verified by inspection; different lifecycle)
-- [ ] A child run can read `runContext` to inherit the parent's remaining budget and `depth + 1`
-- [ ] Sub-agent dispatch receives a default `runContext` with `maxDepth = 0`, budgets `Infinity` (the depth seed for ARCH-004)
-- [ ] Existing tools that ignore `runContext` behave identically; no regressions in `src/chat/tool-orchestration.test.ts` or dispatcher tests
+- [ ] `ToolExecuteOptions` has optional `runContext?: RunContext` and `orchestrationContext?: OrchestrationToolContext`
+- [ ] Both are assembled at the single `executeOptions` site in `dispatch()` and threaded through `executeToolBatches`/`safeDispatch`
+- [ ] Neither is merged into `ToolSessionContext` (verified by inspection; different lifecycle)
+- [ ] A child run can read `runContext` to inherit the parent's `budget` cell **by reference** and `depth + 1`
+- [ ] Sub-agent dispatch receives a default `runContext` with `maxDepth = 0` and a fresh both-`Infinity` `budget` cell (the depth seed for ARCH-004), and `orchestrationContext: undefined`
+- [ ] Existing tools that ignore the new fields behave identically; no regressions in `src/chat/tool-orchestration.test.ts` or dispatcher tests
 - [ ] `npm run build` succeeds with no type errors
 
 ### ARCH-004: Replace the recursion ban with a `depth < maxDepth` check in `use-subagent`
@@ -239,13 +245,13 @@ in spirit by the depth gate (flows will later pass `maxDepth = N`); keep `consta
 **Files:**
 - `src/tools/use-subagent.ts` — replace `_isSubAgentContext` check (~201-209) with `runContext.depth < runContext.maxDepth`; on fail, return an error ToolResult; the `_isSubAgentContext` flag (line 64) is removed or retired
 - `src/sub-agents/constants.ts` — `SUBAGENT_EXCLUDED_TOOLS` / `filterSubAgentTools` retained for back-compat but the *enforcement* moves to the depth gate (document the shift; keep `SUB_AGENT_ITERATION_CAP`/`SUB_AGENT_TOKEN_LIMIT`/`SUB_AGENT_CONCURRENCY_CAP` unchanged)
-- `src/run-loop/run-loop.ts` — when spawning, child `runContext = { ...parent, depth: depth + 1 }` (budgets inherited)
+- `src/run-loop/run-loop.ts` — when spawning, child `runContext = { ...parent, depth: depth + 1 }` — the `budget` cell is inherited **by reference** (the spread copies the reference, so the child shares the same `AggregateBudget` object)
 **Dependencies:** ARCH-002, ARCH-003
 **Acceptance Criteria:**
 - [ ] Nested `use_subagent` is rejected exactly as today (sub-agent depth 0, `0 < 0` false)
 - [ ] The rejection returns a clear tool **error ToolResult**, not a throw
 - [ ] A child run launched with `maxDepth ≥ 1` (the flow path) is permitted at `depth < maxDepth`
-- [ ] Child `runContext` is `depth + 1` with the parent's inherited aggregate budget
+- [ ] Child `runContext` is `depth + 1` and shares the parent's `budget` cell **by reference** (not a copy)
 - [ ] **GATE:** `src/tools/use-subagent.test.ts` passes (nested-rejection assertion now satisfied via the depth gate; `iterationCap === 20` still holds)
 - [ ] **GATE:** `src/sub-agents/constants.test.ts` passes unmodified
 - [ ] `npm run build` succeeds with no type errors
@@ -255,29 +261,31 @@ in spirit by the depth gate (flows will later pass `maxDepth = N`); keep `consta
 per-turn cost accounting into `RunLoop`. This is the second of the two coexisting limit layers; it does
 **not** replace the per-run `iterationCap`. Per the two-layer decision rule (authoritative in
 [contracts/run-loop.md](../contracts/run-loop.md)): a turn proceeds iff **both** layers have headroom —
-`localIterations < iterationCap AND runContext.iterationsRemaining > 0 AND runContext.costRemainingUsd >
-0`. Aggregate counters **decrement per-turn** and are checked **before** the next turn begins;
-exhaustion **blocks new child spawns only** — in-flight runs finish their current turn (no hard-abort).
-`budget.ts` provides the decrement/check/inherit helpers and computes per-turn cost via
-`calculateCost(inputTokens, outputTokens, modelId, settings)` (`src/chat/message-pipeline.ts` ~643-668).
-**Risk #3 (cost reachability):** `budget.ts` imports **only** `calculateCost` and the `settings`
-object — **no** `ChatOrchestrator` or orchestrator state. `calculateCost` is standalone precisely so the
-run-loop layer can reach cost without dragging in orchestrator deps. Sub-agents seed both aggregate
-counters to `Infinity`, so the rule reduces to today's per-run check and the gate stays green by
-construction (FR-105).
+`localIterations < iterationCap AND runContext.budget.iterationsRemaining > 0 AND
+runContext.budget.costRemainingUsd > 0`. The **shared** `AggregateBudget` cell is **decremented in
+place per-turn** (so the decrement is visible to the parent, siblings, and children that reference the
+same cell) and checked **before** the next turn begins; exhaustion **blocks new child spawns only** —
+in-flight runs finish their current turn (no hard-abort; **bounded overshoot** under concurrency is
+accepted, no lock taken). `budget.ts` provides the decrement/check helpers and computes per-turn cost
+via `calculateCost(inputTokens, outputTokens, modelId, settings)` (`src/chat/message-pipeline.ts`
+~643-668). **Risk #3 (cost reachability):** `budget.ts` imports **only** `calculateCost` and the
+`settings` object — **no** `ChatOrchestrator` or orchestrator state. `calculateCost` is standalone
+precisely so the run-loop layer can reach cost without dragging in orchestrator deps. Sub-agents seed a
+fresh both-`Infinity` `budget` cell, so the rule reduces to today's per-run check (decrementing
+`Infinity` leaves `Infinity`) and the gate stays green by construction (FR-105).
 **FRs:** FR-105
 **Files:**
-- `src/run-loop/budget.ts` — `decrementAggregate(runContext, turnCostUsd)`, `hasHeadroom(runContext, localIterations, iterationCap)`, `inheritForChild(parent)`; imports `calculateCost` + `settings` ONLY
-- `src/run-loop/run-loop.ts` — call `calculateCost` per turn, decrement aggregate via `budget.ts`, check headroom before each turn, set `stopReason = "cost_cap"` when the aggregate cost ceiling blocks (and `"depth_cap"` is set by the spawn gate from ARCH-004)
-- `src/run-loop/types.ts` — no shape change (aggregate counters already on `RunContext`)
+- `src/run-loop/budget.ts` — `decrementAggregate(budget, turnCostUsd, turnIterations)` (mutates the shared cell in place), `hasHeadroom(runContext, localIterations, iterationCap)`, `newRootBudget(maxIterations, maxCostUsd)` (constructs a fresh cell; `Infinity` when unset); imports `calculateCost` + `settings` ONLY. **No per-child copy helper** — children share the parent cell by reference (ARCH-004).
+- `src/run-loop/run-loop.ts` — call `calculateCost` per turn, decrement the shared `runContext.budget` cell via `budget.ts`, check headroom before each turn, set `stopReason = "cost_cap"` when the aggregate cost ceiling blocks (and `"depth_cap"` is set by the spawn gate from ARCH-004)
+- `src/run-loop/types.ts` — no shape change (`budget: AggregateBudget` already on `RunContext` from ARCH-001)
 **Dependencies:** ARCH-002, ARCH-004
 **Acceptance Criteria:**
 - [ ] `budget.ts` imports **only** `calculateCost` (from `src/chat/message-pipeline.ts`) and the settings object — verified by inspection (risk #3)
-- [ ] A turn proceeds iff `localIterations < iterationCap AND iterationsRemaining > 0 AND costRemainingUsd > 0`
-- [ ] Aggregate counters decrement per-turn and are checked before the next turn begins
-- [ ] Aggregate exhaustion blocks new child spawns only; an in-flight run finishes its current turn
+- [ ] A turn proceeds iff `localIterations < iterationCap AND budget.iterationsRemaining > 0 AND budget.costRemainingUsd > 0`
+- [ ] The shared `budget` cell is decremented **in place** per-turn and checked before the next turn begins; a decrement by one node is observed by parent/siblings/children sharing the cell (asserted in `budget.test.ts`)
+- [ ] Aggregate exhaustion blocks new child spawns only; an in-flight run finishes its current turn (bounded overshoot accepted)
 - [ ] A run that exhausts the aggregate cost ceiling returns `stopReason = "cost_cap"`; the depth-gate rejection path is `"depth_cap"`
-- [ ] Sub-agents (aggregate `Infinity`) behave identically to today — per-run cap is the only effective limit
+- [ ] Sub-agents (fresh both-`Infinity` cell) behave identically to today — per-run cap is the only effective limit; decrementing the `Infinity` cell changes nothing observable
 - [ ] **GATE:** all three sub-agent suites pass unmodified
 - [ ] `npm run build` succeeds with no type errors
 
@@ -330,7 +338,8 @@ green.**
 - [ ] `run-loop.test.ts` asserts `RunLoop` returns a `RunResult` on each terminal condition (`completed`, `iteration_cap`, `token_limit`, `context_window`, `cost_cap`, `depth_cap`)
 - [ ] `run-loop.test.ts` asserts hooks fire in order (`onTurnStart` → tool dispatch → `onTurnComplete`; `onPersist` when supplied) and that a missing hook is a no-op
 - [ ] `run-loop.test.ts` asserts parent abort cascades into the run via `runContext.abort`
-- [ ] `budget.test.ts` asserts a turn proceeds iff `localIterations < iterationCap AND iterationsRemaining > 0 AND costRemainingUsd > 0`
-- [ ] `budget.test.ts` asserts aggregate counters decrement per-turn and exhaustion blocks **only** new child spawns (in-flight turn completes)
-- [ ] `budget.test.ts` asserts sub-agent seeding (`maxDepth = 0`, both budgets `Infinity`) reduces the rule to today's single per-run cap
+- [ ] `budget.test.ts` asserts a turn proceeds iff `localIterations < iterationCap AND budget.iterationsRemaining > 0 AND budget.costRemainingUsd > 0`
+- [ ] `budget.test.ts` asserts the **shared** `budget` cell decrements in place per-turn and that a child sharing the cell by reference sees a parent/sibling decrement (and vice versa) — i.e. the ceiling is tree-wide, not per-branch
+- [ ] `budget.test.ts` asserts exhaustion blocks **only** new child spawns (in-flight turn completes; bounded overshoot under concurrency)
+- [ ] `budget.test.ts` asserts sub-agent seeding (`maxDepth = 0`, a fresh both-`Infinity` cell) reduces the rule to today's single per-run cap and that decrementing the `Infinity` cell is a no-op observable-wise
 - [ ] `npm test` is green across all five files

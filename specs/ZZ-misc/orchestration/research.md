@@ -70,6 +70,38 @@ unidirectional one. This is why INT-006 (edges) gates POL-003 ([tasks.md](tasks.
 risk item 4), and why the hide-from-list filter must generalize the `isSubAgentFilename`/`_type`
 predicate rather than replace it.
 
+### Finding 4 — `SubAgentRunner` passes NO `sessionContext`; orchestration needs a new dispatch carriage
+
+Verified: `SubAgentRunner` calls `executeToolBatches(...)` (`src/chat/sub-agent-runner.ts` ~318) with
+**no `sessionContext`** argument (it passes `undefined`), and `RunLoopOptions` (as extracted) has no
+session field. `ToolSessionContext` (`src/tools/tool.ts` ~35-39) is `{ getEffectiveToolConfig,
+getActiveConversation, setConversationTasks? }` — there is **no** orchestration-session slot and no
+emission-capture slot. Therefore `emit_event`/task tools cannot read "which orchestration session am I
+in?" or hand a captured emission back to the executor through any existing seam. The design adds a
+**separate** `orchestrationContext?: OrchestrationToolContext` on `ToolExecuteOptions` (assembled at the
+single `ToolDispatcher.dispatch()` site beside `runContext`, ARCH-003; threaded via a new
+`RunLoopOptions.orchestrationContext`), with a per-step `pendingEmission` capture slot — modeled on the
+existing `update_tasks` → `ToolSessionContext.setConversationTasks(...)` → `ChatOrchestrator` write-back
+precedent (`src/tools/update-tasks.ts`), but per-step-isolated so concurrent step turns / `run_flow`
+children never share a slot. Sub-agents pass `orchestrationContext: undefined` (behavior-preserving).
+Authority for the shape: [data-model.md](data-model.md) (`OrchestrationToolContext`); consumption:
+[contracts/tools.md](contracts/tools.md).
+
+### Finding 5 — `applyProviderModelOverrides()` mutates global provider-registry state (concurrency risk, deferred)
+
+Verified at `src/personas/persona-manager.ts` ~349-453: `applyProviderModelOverrides()` calls
+`this.providerRegistry.switchProvider(...)` and `this.providerRegistry.updateConfig(...)`, mutating
+**global** provider/model selection — the same class of global-state mutation the design deliberately
+avoids by using `getPersonaByName()` (read-only, ~106) instead of `activatePersona()` (~125). The
+design's claim that "many step turns interleave safely" holds for *persona resolution* but **not** for
+this provider/model application: two concurrently-running step turns (fan-out, `run_flow` children, or
+two background flows) could clobber each other's model selection through the shared registry. This is a
+**known, unresolved risk recorded for implementation** (no spec mechanism added in this revision): the
+per-step provider/model application path must be made resolve-into-the-`ConversationSession` (not
+global) **before** relying on concurrent step turns. Flagged here so the implementer treats it as a
+required pre-condition for any concurrency, not a latent surprise. (Tracked against FEAT-007 / the
+concurrency model; no AC added — deferred by decision.)
+
 ---
 
 ## Verified seam table
@@ -90,7 +122,8 @@ it** | **why the refactor is safe**. Paths and lines are verbatim from the HEAD 
 | `executeToolBatches(...)` call site | `src/chat/sub-agent-runner.ts` ~318 | `RunLoop` dispatches tools through the same call | Batched/parallel intra-turn dispatch inherited unchanged (FR-100 AC) |
 | `partitionToolCalls` / `executeToolBatches` (threads `sessionContext`) / `safeDispatch`; `DEFAULT_CONCURRENCY_CAP = 5` | `src/chat/tool-orchestration.ts` ~56 / ~114 / ~266 / ~106 | `runContext?` is threaded alongside `sessionContext` through `executeToolBatches` (ARCH-003) | `runContext?` is optional and additive; existing tools ignore it |
 | `ToolDispatcher.dispatch()`; single `ToolExecuteOptions` assembly site | `src/chat/dispatcher.ts` ~388 / ~666 | ARCH-003 adds `runContext` to the one assembly site `{ onProgress, mode, abortSignal, sessionContext, silentNoteOpener, interactionCallback }` | A single assembly point means one edit; `RunContext` rides the existing seam, not a new param everywhere |
-| `ToolSessionContext` `{getEffectiveToolConfig, getActiveConversation, setConversationTasks?}`; `ToolExecuteOptions` `{onProgress, mode, abortSignal, sessionContext, silentNoteOpener, interactionCallback}` | `src/tools/tool.ts` ~35-39 / ~41-63 | `runContext?` added to `ToolExecuteOptions`, **not** to `ToolSessionContext` | Different lifecycles: `ToolSessionContext` is a stable per-dispatch read-accessor; `RunContext` is mutable/cascading (FR-102 AC, data-model.md) |
+| `ToolSessionContext` `{getEffectiveToolConfig, getActiveConversation, setConversationTasks?}`; `ToolExecuteOptions` `{onProgress, mode, abortSignal, sessionContext, silentNoteOpener, interactionCallback}` | `src/tools/tool.ts` ~35-39 / ~41-63 | `runContext?` **and** `orchestrationContext?` added to `ToolExecuteOptions`, **not** to `ToolSessionContext` (ARCH-003) | Different lifecycles: `ToolSessionContext` is a stable per-dispatch read-accessor; `RunContext` is mutable/cascading and `OrchestrationToolContext` is the per-step session carriage with a `pendingEmission` slot (FR-102/FR-116, data-model.md; Finding 4) |
+| `update_tasks` writes back via `sessionContext.setConversationTasks(...)`; `ChatOrchestrator` reads it | `src/tools/update-tasks.ts`; `src/chat/orchestrator.ts` | The **precedent** for a tool capturing state during `execute()` that the loop reads after the turn — generalized to `orchestrationContext.pendingEmission` for `emit_event` (per-step isolated) | Proven tool→loop write-back pattern; orchestration uses its own per-step carriage so concurrent turns don't race (Finding 4) |
 | `UseSubagentTool`: dynamic `get description()` ~113-122; `get input_schema()` (enum of profiles) ~127-143; `SubAgentRunner` instantiation ~382-393; `_isSubAgentContext` flag declared line 64, checked ~201-209; returns ~451-462 with `sub_agent_metadata`; writes `parent_conversation_id` ~430 | `src/tools/use-subagent.ts` | ARCH-004 replaces the `_isSubAgentContext` ban with a `depth < maxDepth` check; the dynamic description/enum pattern is the template `run_flow` (INT-042) mirrors | Sub-agents seed `maxDepth = 0`, so nested `use_subagent` is rejected exactly as today; rejection returns a tool error, not a throw (FR-103) |
 | `SUBAGENT_EXCLUDED_TOOLS = new Set(["use_subagent"])`; `filterSubAgentTools`; `SUB_AGENT_CONCURRENCY_CAP = 3`; `SUB_AGENT_ITERATION_CAP = 20`; `SUB_AGENT_TOKEN_LIMIT = 0` | `src/sub-agents/constants.ts` | `ITERATION_CAP`/`TOKEN_LIMIT` become the `RunLoopOptions` defaults; the binary exclusion ban gives way to the depth check | The constants are the per-run defaults; keeping `20`/`0` keeps sub-agent behavior byte-identical (FR-105) |
 | `Semaphore(cap)`: `acquire()`/`release()`/`get pending`/`get active` | `src/sub-agents/semaphore.ts` | ARCH-006 generalizes it into the run-loop layer for orchestration child concurrency | Pure counting primitive with no sub-agent deps; cap 3 unchanged for sub-agents (FR-106) |
@@ -107,7 +140,7 @@ argument below.
 |---|---|---|---|
 | `getPersonaByName()` (resolve WITHOUT activating/mutating global state) | `src/personas/persona-manager.ts` ~106 | `StepTurnExecutor` (FEAT-007) resolves a step's persona per turn via this, **not** `activatePersona()` | Read-only resolution leaves global persona state untouched — many step turns interleave safely |
 | `activatePersona()` | `src/personas/persona-manager.ts` ~125 | Deliberately **not** used by step turns | Avoiding it is what keeps concurrent step turns from clobbering global state |
-| `applyProviderModelOverrides()` (preset→provider→model) | `src/personas/persona-manager.ts` ~349-453 | Resolves per-step provider/model; `notor-step-model` overrides the persona's preference | Existing precedence chain reused as-is |
+| `applyProviderModelOverrides()` (preset→provider→model) | `src/personas/persona-manager.ts` ~349-453 | Resolves per-step provider/model; `notor-step-model` overrides the persona's preference | ⚠️ **Mutates global provider-registry state** (`providerRegistry.switchProvider()` / `updateConfig()`) — see the concurrency-safety note below; **not** side-effect-free like `getPersonaByName()` |
 | `discoverPersonas()` scans `{notor_dir}/personas/`; frontmatter `notor-persona-prompt-mode` (append\|replace), `notor-preferred-provider/model/preset`, `notor-persona-chip-color/emoji` | `src/personas/persona-discovery.ts` ~42 | The `orchestration-creator` persona (POL-001) is discovered identically | Built-in personas register through the existing discovery/profile mechanism |
 | `BUILTIN_PERSONA_PROFILES` (Map: `notor-help` + `tool-creator`); `BuiltinPersonaDefinition {name, description, systemPromptContent}` | `src/personas/builtin-personas.ts` ~318 | POL-001 registers `orchestration-creator` in this Map alongside the existing two | Same registration shape; additive (FR-160 AC) |
 
@@ -185,14 +218,16 @@ structural, not empirical — it holds *by construction*, and the three regressi
 without modification.
 
 **The two-layer limit collapses to one layer for sub-agents.** A turn proceeds iff
-`localIterations < iterationCap` **AND** `RunContext.iterationsRemaining > 0` **AND**
-`RunContext.costRemainingUsd > 0` (the decision rule, authority [contracts/run-loop.md](contracts/run-loop.md)).
+`localIterations < iterationCap` **AND** `RunContext.budget.iterationsRemaining > 0` **AND**
+`RunContext.budget.costRemainingUsd > 0` (the decision rule over the shared `AggregateBudget` cell,
+authority [contracts/run-loop.md](contracts/run-loop.md)).
 The `SubAgentRunner` adapter seeds its `RunContext` with:
 
 - `maxDepth = 0` → the `depth < maxDepth` spawn gate is `0 < 0 = false`, so nested `use_subagent` is
   rejected exactly as the old `_isSubAgentContext` / `SUBAGENT_EXCLUDED_TOOLS` ban did.
-- `iterationsRemaining = Infinity` and `costRemainingUsd = Infinity` → both aggregate predicates are
-  **always true**, so they can never be the binding constraint.
+- a fresh `budget` cell `{ iterationsRemaining: Infinity, costRemainingUsd: Infinity }` → both
+  aggregate predicates are **always true**, so they can never be the binding constraint (and
+  decrementing an `Infinity` cell leaves it `Infinity` — nothing observable changes).
 
 With both aggregate predicates permanently true, the *only* effective limit is the per-run
 `iterationCap`, defaulted to `SUB_AGENT_ITERATION_CAP = 20` (`src/sub-agents/constants.ts`). The loop

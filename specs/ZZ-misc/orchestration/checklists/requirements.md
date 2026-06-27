@@ -56,9 +56,9 @@ Verify every cited ID exists in tasks.md with the same dependency edges.
 - [ ] `src/chat/sub-agent-runner.test.ts` passes unmodified (loop, wind-down, parent-abort cascade byte-identical)
 - [ ] `src/tools/use-subagent.test.ts` passes unmodified — including the hard assertion `iterationCap === 20`
 - [ ] `src/sub-agents/constants.test.ts` passes unmodified (`SUB_AGENT_CONCURRENCY_CAP = 3`, `SUB_AGENT_ITERATION_CAP = 20`, `SUB_AGENT_TOKEN_LIMIT = 0`)
-- [ ] Sub-agent adapter seeds `RunContext` with `maxDepth = 0` and aggregate budget `Infinity` (no persistence hooks); nested `use_subagent` still rejected via `depth < maxDepth` (not `_isSubAgentContext`)
+- [ ] Sub-agent adapter seeds `RunContext` with `maxDepth = 0`, a fresh both-`Infinity` `budget` cell, and `orchestrationContext: undefined` (no persistence hooks); nested `use_subagent` still rejected via `depth < maxDepth` (not `_isSubAgentContext`)
 - [ ] New `src/run-loop/run-loop.test.ts` added and green (terminal `stopReason` set, `executeToolBatches` dispatch inherited, hooks fire)
-- [ ] New `src/run-loop/budget.test.ts` added and green (a turn proceeds iff `localIterations < iterationCap AND iterationsRemaining > 0 AND costRemainingUsd > 0`; exhaustion blocks new child spawns only)
+- [ ] New `src/run-loop/budget.test.ts` added and green (a turn proceeds iff `localIterations < iterationCap AND budget.iterationsRemaining > 0 AND budget.costRemainingUsd > 0`; the **shared** `budget` cell decrements in place and a child's decrement is visible to the parent; exhaustion blocks new child spawns only)
 - [ ] Per-turn cost wiring reuses standalone `calculateCost` (`src/chat/message-pipeline.ts`) — no orchestrator dependency pulled into `budget.ts`
 
 ## Notes

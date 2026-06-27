@@ -221,8 +221,9 @@ registration — Risk #6).
 
 **Description:** Implement `run_flow`'s execution body (FR-173). On `execute()`, after the spawn gate
 passes, `run_flow` runs the selected flow **to its terminal event** in a **child session** on a **child
-`RunLoop`** (depth + 1, inheriting the parent's remaining aggregate budget and a derived abort signal),
-then returns the child's result — **prefer `structured`, fall back to `text`**. This is the
+`RunLoop`** (depth + 1, inheriting the parent's shared `AggregateBudget` cell **by reference** and a
+derived abort signal), then returns the child's result — **prefer `structured`, fall back to `text`**.
+This is the
 `use_subagent` pattern generalized from a single sub-agent run to a whole event-driven flow: the child
 flow's step turns dispatch through `executeToolBatches`, inheriting batched/parallel intra-turn tool
 dispatch for free (one structural difference from sub-agents: `run_flow` runs many step turns to a
@@ -232,17 +233,22 @@ terminal event rather than one isolated conversation — see
 - **Spawn gate (read, do not restate):** the child spawn is gated on the `RunContext` carried on
   `ToolExecuteOptions` (`runContext?` — assembled once in `ToolDispatcher.dispatch()` at
   `src/chat/dispatcher.ts:666` and threaded through `executeToolBatches`). A spawn proceeds iff
-  `depth < maxDepth` **and** `iterationsRemaining > 0` **and** `costRemainingUsd > 0`. The decision rule
-  is the single authority of [../contracts/run-loop.md](../contracts/run-loop.md); this task consumes it,
-  with `maxDepth` populated by `INT-046`. A blocked spawn returns control with a clear tool error
-  (notional `stopReason: depth_cap` / `cost_cap`), **not** a throw.
+  `depth < maxDepth` **and** `budget.iterationsRemaining > 0` **and** `budget.costRemainingUsd > 0`,
+  where `budget` is the **shared `AggregateBudget` cell** the child inherits **by reference** (its turns
+  draw down the same tree-wide ceiling). The decision rule is the single authority of
+  [../contracts/run-loop.md](../contracts/run-loop.md); this task consumes it, with `maxDepth` populated
+  by `INT-046`. A blocked spawn returns control with a clear tool error (notional `stopReason:
+  depth_cap` / `cost_cap`), **not** a throw.
 - **Run-to-terminal:** the child `OrchestrationRunner` (`FEAT-010`) runs the flow to its
   `notor-completion-event` (or `FLOW_CANCELLED` / `FLOW_ERROR`); `run_flow` awaits the terminal
   `RunResult`.
 - **Structured-return capture:** the `RunResult` is always-both (see [../data-model.md](../data-model.md)).
-  A terminal **code step** populates `structured` deterministically (the reliable path); otherwise a
-  final conversation step instructed via the callee's `notor-flow-returns` produces the closing `text`
-  (the loose fallback). The tool returns `structured` if present, else `text`.
+  The **only** producer of `structured` is a terminal **code step** that passes a third arg to
+  `orchestration.emit(topic, payload?, structured?)`, which the child runner lifts onto
+  `RunResult.structured` verbatim (no JSON round-trip; authority
+  [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md)). Otherwise a final
+  conversation step instructed via the callee's `notor-flow-returns` produces the closing `text` (the
+  loose fallback). The tool returns `structured` if present, else `text`.
 - **Edge + rollup:** on return, the calling step's conversation gains a `child` edge to the child flow's
   entry conversation (carrying `session_id` + `via_tool_call_id`), and the `ToolResult` carries a
   `child_run_metadata` block. Both are the single authority of
@@ -265,20 +271,22 @@ exist before the child spawn can be correctly gated and budgeted. `INT-044` (chi
   that runs a flow on a supplied child `RunLoop`/`RunContext` to its terminal event and surfaces the
   always-both `RunResult` (`structured` set by a terminal code step).
 - `src/run-loop/run-loop.ts` — reused as the child engine (`ARCH-002`); `run_flow` constructs a child
-  `RunLoop` with `depth + 1` and the inherited aggregate budget.
-- `src/orchestration/step-turn-executor.ts` — the terminal-step path that captures `structured` (code
-  step) or `text` (conversation step instructed by `notor-flow-returns`).
+  `RunLoop` with `depth + 1` and the parent's shared `AggregateBudget` cell (by reference).
+- `src/orchestration/step-turn-executor.ts` — the terminal-step path that lifts `structured` from a
+  terminal code step's `emit(..., structured)` onto `RunResult.structured` (the only producer), or
+  falls back to `text` (conversation step instructed by `notor-flow-returns`).
 
 **Dependencies:** `INT-042` (the tool shell + enum), `ARCH-002` (the `RunLoop` substrate the child runs
 on), `ARCH-005` (the two-layer budget helpers / per-turn cost), `INT-046` (cascading guardrails +
 `max_depth` on `RunContext` — `INT-043 → INT-046`).
 
 **Acceptance Criteria:**
-- [ ] The selected flow runs on a **child `RunLoop`** (depth + 1, inherited aggregate budget) to its
-  terminal event in a child session.
-- [ ] The tool result **prefers `structured`** (from a terminal code step) and **falls back to `text`**
+- [ ] The selected flow runs on a **child `RunLoop`** (depth + 1, inheriting the parent's shared
+  `AggregateBudget` cell **by reference**) to its terminal event in a child session.
+- [ ] The tool result **prefers `structured`** — populated **only** by a terminal code step's
+  `emit(topic, payload?, structured?)` lifted onto `RunResult.structured` — and **falls back to `text`**
   (from a final conversation step instructed via `notor-flow-returns`).
-- [ ] The spawn is gated on the `RunContext` decision rule
+- [ ] The spawn is gated on the `RunContext` decision rule over the **shared budget cell**
   ([../contracts/run-loop.md](../contracts/run-loop.md)); a blocked spawn returns control with a clear
   tool error, not a throw.
 - [ ] The child flow's step turns dispatch through `executeToolBatches` (batched/parallel intra-turn
@@ -416,25 +424,30 @@ ceilings — `notor-max-iterations`, `notor-max-cost-usd`, and the new compositi
 `notor-max-depth` — live on the `RunContext` carried through the dispatch seam and gate **child spawns**
 across the whole flow tree, layered **on top of** (never replacing) each runner's per-run iteration cap.
 
-This task seeds and consumes the `RunContext` aggregate fields for orchestration:
+This task seeds and consumes the `RunContext` aggregate fields for orchestration. The root run
+constructs **one shared `AggregateBudget` cell** (`newRootBudget`, ARCH-005) that every descendant
+`RunContext` references **by reference** (never value-copied), so the ceiling is genuinely tree-wide:
 
 - `maxDepth` ← `notor-max-depth` (number, or `Infinity` when unset — arbitrary depth permitted by
   default). The spawn gate is `depth < maxDepth`.
-- `iterationsRemaining` ← `notor-max-iterations` (aggregate tree-wide ceiling; decremented per-turn).
-- `costRemainingUsd` ← `notor-max-cost-usd` (aggregate tree-wide ceiling; decremented per-turn via
+- `budget.iterationsRemaining` ← `notor-max-iterations` (shared cell; decremented in place per-turn).
+- `budget.costRemainingUsd` ← `notor-max-cost-usd` (shared cell; decremented in place per-turn via
   `calculateCost`).
 
 The **decision rule is the single authority of [../contracts/run-loop.md](../contracts/run-loop.md)** —
 this task does **not** restate it. It reuses the two-layer budget helpers from `ARCH-005`
 (`src/run-loop/budget.ts`, which imports only `calculateCost` + settings, no orchestrator deps — Risk #3)
 and applies them at orchestration spawn points. A spawn is gated on `depth < maxDepth` **AND**
-`iterationsRemaining > 0` **AND** `costRemainingUsd > 0`. Exhaustion **blocks new child spawns only**;
-**in-flight runs finish their current turn** (no hard-abort, no forced mid-turn wind-down). A blocked
-spawn **returns control** to the caller for flow-as-tool (`run_flow` gets a `success: false` tool error;
-notional `stopReason: depth_cap` / `cost_cap`) or **terminates the chain** for chaining (`INT-045`).
+`budget.iterationsRemaining > 0` **AND** `budget.costRemainingUsd > 0` over the **shared** cell.
+Exhaustion **blocks new child spawns only**; **in-flight runs finish their current turn** (no
+hard-abort, no forced mid-turn wind-down; bounded overshoot under concurrency is accepted, no lock). A
+blocked spawn **returns control** to the caller for flow-as-tool (`run_flow` gets a `success: false`
+tool error; notional `stopReason: depth_cap` / `cost_cap`) or **terminates the chain** for chaining
+(`INT-045`).
 
-For sub-agents, `maxDepth = 0` and both aggregate budgets are seeded to `Infinity` (`ARCH`-era seeding),
-so the per-run cap stays the only effective limit and today's behavior is preserved by construction.
+For sub-agents, `maxDepth = 0` and a fresh both-`Infinity` `budget` cell are seeded (`ARCH`-era
+seeding), so the per-run cap stays the only effective limit and today's behavior is preserved by
+construction (decrementing an `Infinity` cell changes nothing observable).
 
 **FRs:** FR-176 (cascading guardrails).
 
@@ -452,17 +465,17 @@ so the per-run cap stays the only effective limit and today's behavior is preser
 spawn point the gate guards — `INT-043 → INT-046`).
 
 **Acceptance Criteria:**
-- [ ] A child-flow / sub-agent spawn is gated on `depth < maxDepth` **AND** aggregate
-  `iterationsRemaining > 0` **AND** `costRemainingUsd > 0` (the rule referenced from
-  [../contracts/run-loop.md](../contracts/run-loop.md), not restated).
+- [ ] A child-flow / sub-agent spawn is gated on `depth < maxDepth` **AND**
+  `budget.iterationsRemaining > 0` **AND** `budget.costRemainingUsd > 0` over the **shared** cell (the
+  rule referenced from [../contracts/run-loop.md](../contracts/run-loop.md), not restated).
 - [ ] `notor-max-depth` (or `Infinity` when unset) seeds `RunContext.maxDepth`; `notor-max-iterations` /
-  `notor-max-cost-usd` seed the aggregate budgets; a child inherits the parent's **remaining** budget and
-  `depth + 1`.
+  `notor-max-cost-usd` seed the **one shared `AggregateBudget` cell**; a child inherits that cell **by
+  reference** (not a copy) and `depth + 1`, so a deep/wide subtree collectively respects one ceiling.
 - [ ] Exhausting the ceiling **blocks new child spawns** while **in-flight runs finish their current
-  turn** (no hard-abort).
+  turn** (no hard-abort; bounded overshoot accepted).
 - [ ] A blocked spawn **returns control** (flow-as-tool, `success: false`) or **terminates the chain**
   (chaining); the notional child `stopReason` is `depth_cap` / `cost_cap`.
-- [ ] Sub-agent behavior is unchanged: `maxDepth = 0`, aggregate budgets `Infinity` (per-run cap is the
+- [ ] Sub-agent behavior is unchanged: `maxDepth = 0`, a fresh both-`Infinity` `budget` cell (per-run cap is the
   only effective limit).
 
 ---
@@ -520,8 +533,9 @@ contract; it does not define the field shape here.
   emitted by both `use_subagent` and `run_flow`.
 - [ ] A legacy `sub_agent_metadata` record (`jsonl_filename`, `token_usage`, `iteration_count`,
   `stop_reason`, `profile_name`) **parses unchanged** through the shared reader (`TEST-006` back-compat).
-- [ ] For flows the rollup numbers are **aggregate subtree** totals (from the child `RunContext`); for
-  sub-agents they are single-run totals.
+- [ ] For flows the rollup numbers are **aggregate subtree** totals — the consumption of the child
+  subtree's shared `AggregateBudget` cell (`RunContext.budget`); for sub-agents they are single-run
+  totals.
 - [ ] The token rollup happens at exactly **one** site (`src/chat/orchestrator.ts:1635`, generalized);
   no second rollup site is introduced.
 - [ ] The shape is referenced, not redefined: this file links to
@@ -560,8 +574,8 @@ ItemView` (`src/ui/chat-view.ts:55`, `CHAT_VIEW_TYPE = "notor-chat-view"` `:36`)
   existing `notor-conversation://{id}` jump + `switchToConversationById` (`src/ui/message-renderer.ts:957`,
   `src/chat/orchestrator.ts:741`); the leaf stays open with the node marked selected. Auto-follow tracks
   the active node until a manual select; a "jump to active" pill re-attaches.
-- **Header aggregate rollup** (root cost / iterations / max depth) reads the root `RunContext`
-  accumulator ([../contracts/run-loop.md](../contracts/run-loop.md)).
+- **Header aggregate rollup** (root cost / iterations / max depth) reads the root run's shared
+  `RunContext.budget` cell consumption ([../contracts/run-loop.md](../contracts/run-loop.md)).
 - The view needs **no cycle-detection or infinite-expansion guards** — the edges are a tree-constrained
   DAG ([../contracts/edges.md](../contracts/edges.md) §3).
 
@@ -721,12 +735,14 @@ composition invariants called out in [../tasks.md](../tasks.md):
 1. **`run_flow` enum** — the `flow` enum reflects currently discovered invocable flows (rebuilt per
    `execute()`); an unknown / no-longer-invocable flow returns `success: false` (not a throw)
    (`INT-041`/`INT-042`).
-2. **Structured-vs-text return** — a child flow with a terminal code step returns `structured`; one with
-   only a final conversation step falls back to `text`; `run_flow` prefers `structured` (`INT-043`).
-3. **Budget / `max_depth`** — a spawn is gated on `depth < maxDepth` AND aggregate budget `> 0`; an
-   exhausted ceiling blocks a new spawn (`success: false`, notional `depth_cap` / `cost_cap`) while an
-   in-flight run finishes its current turn; sub-agents (`maxDepth = 0`, budgets `Infinity`) are
-   unaffected (`INT-046`).
+2. **Structured-vs-text return** — a child flow with a terminal code step that calls
+   `emit(topic, payload, structured)` returns `structured` (lifted onto `RunResult.structured`); one
+   with only a final conversation step falls back to `text`; `run_flow` prefers `structured` (`INT-043`).
+3. **Budget / `max_depth` (shared cell)** — a spawn is gated on `depth < maxDepth` AND the **shared**
+   `budget` cell `> 0`; a decrement by one subtree node is visible to the parent/siblings (tree-wide,
+   not per-branch); an exhausted ceiling blocks a new spawn (`success: false`, notional `depth_cap` /
+   `cost_cap`) while an in-flight run finishes its current turn; sub-agents (`maxDepth = 0`, fresh
+   both-`Infinity` cell) are unaffected (`INT-046`).
 4. **Edge-DAG no-cycle** — the `orchestration_edges` produced by invocation + chaining + intra-flow
    chaining form a tree-constrained DAG: no cyclic / sibling / `return` edges
    ([../contracts/edges.md](../contracts/edges.md) §3 invariant) (`INT-043`/`INT-045`).
@@ -752,10 +768,11 @@ composition invariants called out in [../tasks.md](../tasks.md):
 **Acceptance Criteria:**
 - [ ] The `run_flow` `flow` enum reflects discovered invocable flows and rebuilds per `execute()`; an
   unknown flow returns `success: false`.
-- [ ] Structured return is preferred over text; a code-step terminal flow yields `structured`, a
-  conversation-only terminal flow yields `text`.
-- [ ] The budget / `max_depth` gate blocks a too-deep / over-budget spawn while letting in-flight runs
-  finish their turn; sub-agents are unaffected (`maxDepth = 0`, budgets `Infinity`).
+- [ ] Structured return is preferred over text; a code-step terminal flow that calls
+  `emit(topic, payload, structured)` yields `structured`, a conversation-only terminal flow yields `text`.
+- [ ] The budget / `max_depth` gate over the **shared** cell blocks a too-deep / over-budget spawn
+  while letting in-flight runs finish their turn; a child's decrement is visible to the parent
+  (tree-wide ceiling); sub-agents are unaffected (`maxDepth = 0`, fresh both-`Infinity` cell).
 - [ ] The edge graph is asserted to be a tree-constrained DAG (no cyclic / sibling / `return` edges).
 - [ ] A legacy `sub_agent_metadata` record parses unchanged through the shared `child_run_metadata`
   reader.
