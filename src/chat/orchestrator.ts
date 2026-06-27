@@ -14,6 +14,7 @@ import type { SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
 import { ConversationManager } from "./conversation";
+import type { ForkMode } from "./conversation";
 import { ContextManager } from "./context";
 import type { SystemPromptBuilder } from "./system-prompt";
 import type { ToolDispatcher } from "./dispatcher";
@@ -666,8 +667,71 @@ export class ChatOrchestrator implements ToolSessionContext {
 		return this.lifecycle.newConversation(opts);
 	}
 
-	async forkConversation(forkAtMessageId: string): Promise<{ filename: string; conversation: Conversation } | null> {
-		return this.lifecycle.forkConversation(forkAtMessageId);
+	async forkConversation(
+		forkAtMessageId: string,
+		forkMode: ForkMode = "resume",
+	): Promise<{ filename: string; conversation: Conversation } | null> {
+		return this.lifecycle.forkConversation(forkAtMessageId, forkMode);
+	}
+
+	/**
+	 * Re-dispatch trailing unpaired tool_call(s) in the active display
+	 * conversation, then continue the response loop so the fresh results flow
+	 * back to the LLM.
+	 *
+	 * This is the second half of a `"rerun"` fork: `forkConversation(id,
+	 * "rerun")` slices to a conversation ending on a bare tool_call run (its
+	 * results dropped); after the caller switches to that fork, this method
+	 * drives the re-execution. For `ask_user` this re-renders the original
+	 * questions; for other tools it re-runs the tool fresh.
+	 *
+	 * Detection is structural — a trailing run of `tool_call` messages with no
+	 * following `tool_result` — because the persisted `tool_call.status` is
+	 * always `"pending"` in JSONL (the dispatcher only mutates a local copy and
+	 * the DOM badge). No-ops when the conversation does not end on an unpaired
+	 * tool_call run.
+	 */
+	async resumePendingToolCalls(): Promise<void> {
+		const conv = this.conversationManager.getActiveConversation();
+		if (!conv) return;
+
+		// Guard against duplicate sessions for this conversation.
+		if (this.sessionManager.checkSessionGuards(conv.id)) return;
+
+		// Collect the trailing contiguous run of tool_call messages. A normal
+		// completed conversation ends on an assistant turn, so this is empty.
+		const messages = this.conversationManager.getMessages();
+		const pending: Message[] = [];
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i]!;
+			if (m.role !== "tool_call" || !m.tool_call) break;
+			pending.unshift(m);
+		}
+		if (pending.length === 0) return;
+
+		const mode = this.conversationManager.getMode();
+		const session = await this.createSessionFromDisplay(mode);
+
+		// Build dispatch entries from the existing (snapshotted) tool_call
+		// messages. The DOM cards were already rendered by switchConversation,
+		// so look them up by message id for status badges + interaction prompts.
+		const view = this.getViewForSession(session);
+		const sessionMessages = session.conversationManager.getMessages();
+		const toolCallEntries = pending
+			.map((displayMsg) => {
+				const message = sessionMessages.find((m) => m.id === displayMsg.id) ?? displayMsg;
+				const tc = message.tool_call!;
+				const call: ToolCallInfo = {
+					toolCallId: tc.id ?? message.id,
+					toolName: tc.tool_name,
+					parameters: tc.parameters,
+				};
+				return { call, message, el: view?.getToolCallEl(message.id) ?? undefined };
+			});
+
+		await this.runSession(session, mode, {
+			preLoop: () => this.dispatchToolCallEntries(session, mode, toolCallEntries),
+		});
 	}
 
 	async switchConversation(filename: string, opts?: { signal?: AbortSignal }): Promise<void> {
@@ -913,7 +977,23 @@ export class ChatOrchestrator implements ToolSessionContext {
 			}
 		}
 
-		// --- Create isolated ConversationSession ---
+		// --- Create isolated ConversationSession and run the response loop ---
+		const session = await this.createSessionFromDisplay(mode);
+		await this.runSession(session, mode);
+	}
+
+	/**
+	 * Build an isolated `ConversationSession` from the current display
+	 * conversation: snapshot conversation + messages into a private
+	 * `ConversationManager` (so the response loop never reads shared state),
+	 * pin provider/model/persona/extended-context from the header, re-hydrate
+	 * workflow tool configs, and capture this panel's approval + interaction
+	 * callbacks. Also flushes a dirty conversation header.
+	 *
+	 * Shared by `handleUserMessage` and the re-run-fork path
+	 * (`resumePendingToolCalls`).
+	 */
+	private async createSessionFromDisplay(mode: ConversationMode): Promise<ConversationSession> {
 		// Snapshot conversation + messages from display manager into an isolated
 		// ConversationManager so the response loop never reads shared state.
 		const snapshotConv = this.conversationManager.getActiveConversation()!;
@@ -1016,9 +1096,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 			initialParsedConfigs,
 		});
 
-		// Register session and start response loop
-		this.sessionManager.registerSession(session);
-
 		// Step 1f-addendum (Trigger 1): Update conversation header if the
 		// pinned values differ from what's stored (e.g. user changed provider
 		// via picker since the conversation was last used).
@@ -1034,7 +1111,31 @@ export class ChatOrchestrator implements ToolSessionContext {
 			await this.historyManager.updateConversationHeader(sessionConv);
 		}
 
-		session.responsePromise = this.responseLoop(mode, session);
+		return session;
+	}
+
+	/**
+	 * Register a session, run its response loop, and tear it down — including
+	 * draining JSONL writes and syncing session state back into the display
+	 * manager.
+	 *
+	 * @param opts.preLoop optional async step run *before* the response loop
+	 *   (inside the session's responsePromise). The re-run-fork path uses this
+	 *   to dispatch the trailing pending tool_call(s) so their results are in
+	 *   place before the loop sends them back to the LLM.
+	 */
+	private async runSession(
+		session: ConversationSession,
+		mode: ConversationMode,
+		opts?: { preLoop?: () => Promise<void> },
+	): Promise<void> {
+		// Register session and start response loop
+		this.sessionManager.registerSession(session);
+
+		session.responsePromise = (async () => {
+			if (opts?.preLoop) await opts.preLoop();
+			await this.responseLoop(mode, session);
+		})();
 		try {
 			await session.responsePromise;
 		} catch (e) {
@@ -1104,7 +1205,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 		session: ConversationSession,
 	): Promise<void> {
 		let continueLoop = true;
-		const vaultRootPath = this.getVaultRootPath();
 		const convManager = session.conversationManager;
 
 		try {
@@ -1333,205 +1433,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 					// migrated out of the streaming map above.
 					this.getViewForSession(session)?.clearStreamingToolCalls();
 
-					// --- Step 2: Dispatch tools via batch orchestration ---
-					// Partition into concurrent/serial batches and execute
-					// with parallel execution for concurrency-safe (read) tools.
-					const messageIdMap = new Map<string, string>();
-					for (const entry of toolCallEntries) {
-						messageIdMap.set(entry.call.toolCallId, entry.message.id);
-					}
-
-					const batches = partitionToolCalls(
-						result.calls,
-						this.dispatcher,
-					);
-
-					// Phase 8.1: Build progress callbacks for tool calls
-					// that support onProgress (e.g., use_subagent).
-					const onProgressMap = new Map<string, (status: string) => void>();
-					for (const entry of toolCallEntries) {
-						if (entry.el) {
-							const el = entry.el;
-							onProgressMap.set(entry.call.toolCallId, (status: string) => {
-								this.getViewForSession(session)?.updateToolCallProgress(el, status);
-							});
-						}
-					}
-
-					// Build policy context and pass per-session approval callback
-					const policyCtx = vaultRootPath
-						? session.buildPolicyContext(this.settings, vaultRootPath, (path: string) => {
-							const file = resolveNote(path, this.app.vault, this.app.metadataCache);
-							return file?.path ?? null;
-						})
-						: undefined;
-
-					const approvalHookFn = currentConv
-						? async (tn: string, params: Record<string, unknown>, m: string) =>
-							this.hookDispatcher.dispatchApprovalRequiredHook(currentConv.id, tn, params, m)
-						: undefined;
-
-					const batchResults = await executeToolBatches(
-						batches,
-						this.dispatcher,
-						mode,
-						messageIdMap,
-						abortController.signal,
-						undefined, // concurrencyCap — use default
-						onProgressMap,
-						policyCtx,
-						session.approvalCallback,
-						this, // sessionContext (A4.4e)
-						approvalHookFn,
-						session.interactionCallback,
-					);
-
-					// Map results back to entries for UI updates
-					const toolResults: ToolResult[] = [];
-					for (const batchResult of batchResults) {
-						const entry = toolCallEntries.find(
-							e => e.call.toolCallId === batchResult.call.toolCallId
-						);
-
-						// Update tool call status badge in the UI
-						if (entry?.el) {
-							this.getViewForSession(session)?.updateToolCallStatus(
-								entry.el,
-								batchResult.result.success ? "success" : "error"
-							);
-							// Set message ID after dispatch completes so only
-							// finished tool calls are forkable (not pending ones)
-							entry.el.dataset.messageId = entry.message.id;
-							this.getViewForSession(session)?.appendForkButton(entry.el, entry.message);
-						}
-
-						toolResults.push(batchResult.result);
-					}
-
-					// --- Step 3: Add all tool_result messages ---
-					for (let i = 0; i < toolCallEntries.length; i++) {
-						const entry = toolCallEntries[i]!;
-						const toolResult = toolResults[i]!;
-
-						// Record note access for vault rule re-evaluation
-						const notePath = entry.call.parameters["path"] as string | undefined;
-						if (notePath && this.vaultRuleManager) {
-							this.vaultRuleManager.recordNoteAccess(notePath);
-						}
-
-						const toolResultMessage = convManager.addMessage({
-							role: "tool_result",
-							content: "",
-							tool_result: toolResult,
-						});
-
-						// Roll up sub-agent tokens into conversation totals without
-						// inflating per-message estimates (which would cause premature
-						// compaction/truncation).
-						const subAgentTokens = toolResult.sub_agent_metadata?.token_usage;
-						if (subAgentTokens) {
-							convManager.addTokens(subAgentTokens.input, subAgentTokens.output);
-						}
-
-						this.getViewForSession(session)?.renderToolResult(toolResultMessage);
-
-						// HOOK-005: Fire on_tool_result hooks
-						const convForToolResult = convManager.getActiveConversation();
-						if (convForToolResult) {
-							this.hookDispatcher.dispatchToolResultHook(
-								convForToolResult.id, entry.call.toolName, entry.call.parameters, toolResult,
-							);
-						}
-
-						// Update token footer after sub-agent token rollup
-						const convAfterToolResult = convManager.getActiveConversation();
-						if (convAfterToolResult) {
-							this.getViewForSession(session)?.updateTokenFooter(
-								convManager.getCurrentContextUsage().contextTokens,
-								convAfterToolResult.total_output_tokens,
-								convAfterToolResult.estimated_cost
-							);
-						}
-					}
-
-					// --- Phase 10: emit extension_block for tool content_blocks ---
-					// Collect custom_blocks from all tool results in this batch,
-					// then emit a single extension_block message after the entire
-					// tool_result group (preserving tool_call/tool_result coalescing).
-					const customBlocksForBatch: Array<{
-						block: import("../media/types").ContentBlock & { type: "custom_block" };
-						toolName: string;
-					}> = [];
-					for (const toolResult of toolResults) {
-						if (toolResult.content_blocks?.length) {
-							for (const block of toolResult.content_blocks) {
-								if (block.type === "custom_block") {
-									// Validate JSON-serializability
-									try {
-										const serialized = JSON.stringify(block.data);
-										if (serialized.length > 102400) {
-											log.error(
-												`Phase 10: custom_block data exceeds 100KB size limit — skipping`,
-												{ kind: block.kind, tool: toolResult.tool_name, size: serialized.length },
-											);
-											continue;
-										}
-									} catch {
-										log.error(
-											`Phase 10: custom_block data is not JSON-serializable — skipping`,
-											{ kind: block.kind, tool: toolResult.tool_name },
-										);
-										continue;
-									}
-
-									const registry = this.chatBlockRegistry;
-									const def = registry?.get(block.kind);
-									if (!def) {
-										log.warn(
-											`Phase 10: block kind '${block.kind}' is not registered — will render with fallback`,
-											{ tool: toolResult.tool_name },
-										);
-									}
-
-									// Compute estimated_wire_tokens if not already set
-									let blockWithTokens = block;
-									if (block.estimated_wire_tokens === undefined) {
-										let estimated_wire_tokens: number;
-										if (def?.toLLMText) {
-											const wireText = def.toLLMText(block.data);
-											estimated_wire_tokens = wireText != null ? estimateTokenCount(wireText) : 0;
-										} else if (block.fallback_text != null) {
-											estimated_wire_tokens = estimateTokenCount(block.fallback_text);
-										} else {
-											estimated_wire_tokens = 0;
-										}
-										blockWithTokens = { ...block, estimated_wire_tokens };
-									}
-
-									customBlocksForBatch.push({ block: blockWithTokens, toolName: toolResult.tool_name });
-								}
-							}
-						}
-					}
-
-					if (customBlocksForBatch.length > 0) {
-						// Group by source tool name for attribution
-						const blocksByTool = new Map<string, typeof customBlocksForBatch>();
-						for (const entry of customBlocksForBatch) {
-							const existing = blocksByTool.get(entry.toolName) ?? [];
-							existing.push(entry);
-							blocksByTool.set(entry.toolName, existing);
-						}
-
-						for (const [toolName, entries] of blocksByTool) {
-							convManager.addMessage({
-								role: "extension_block",
-								content: entries.map((e) => e.block),
-								source_extension: toolName,
-								exclude_from_compaction: false,
-							});
-						}
-					}
+					// --- Steps 2–3: dispatch tools, add results, emit blocks ---
+					// Extracted so the re-run-fork path (resumePendingToolCalls)
+					// can drive the exact same dispatch flow against pre-existing
+					// tool_call messages.
+					await this.dispatchToolCallEntries(session, mode, toolCallEntries);
 
 					// If abort was triggered during the tool dispatch loop, break out
 					if (abortController.signal.aborted) {
@@ -1605,6 +1511,228 @@ export class ChatOrchestrator implements ToolSessionContext {
 					title: "Notor — Chat response ready",
 					body: preview || "Your chat response is ready.",
 					onClick: () => revealChatPanel(this.app),
+				});
+			}
+		}
+	}
+
+	/**
+	 * Dispatch a batch of already-created tool_call messages: run the tools,
+	 * add their tool_result messages, roll up sub-agent tokens, fire
+	 * on_tool_result hooks, and emit any extension_block content.
+	 *
+	 * Extracted from `responseLoop` (Steps 2–3 + Phase 10) so the re-run-fork
+	 * path can drive the identical dispatch flow against tool_call messages
+	 * that were sliced into a fork rather than freshly streamed. The caller is
+	 * responsible for Step 1 (creating the tool_call messages + cards) and for
+	 * continuing the response loop afterward.
+	 */
+	private async dispatchToolCallEntries(
+		session: ConversationSession,
+		mode: ConversationMode,
+		toolCallEntries: Array<{ call: ToolCallInfo; message: Message; el?: HTMLElement }>,
+	): Promise<void> {
+		const convManager = session.conversationManager;
+		const vaultRootPath = this.getVaultRootPath();
+		const currentConv = convManager.getActiveConversation();
+		const abortSignal = session.abortController.signal;
+
+		// --- Step 2: Dispatch tools via batch orchestration ---
+		// Partition into concurrent/serial batches and execute
+		// with parallel execution for concurrency-safe (read) tools.
+		const messageIdMap = new Map<string, string>();
+		for (const entry of toolCallEntries) {
+			messageIdMap.set(entry.call.toolCallId, entry.message.id);
+		}
+
+		const batches = partitionToolCalls(
+			toolCallEntries.map((e) => e.call),
+			this.dispatcher,
+		);
+
+		// Phase 8.1: Build progress callbacks for tool calls
+		// that support onProgress (e.g., use_subagent).
+		const onProgressMap = new Map<string, (status: string) => void>();
+		for (const entry of toolCallEntries) {
+			if (entry.el) {
+				const el = entry.el;
+				onProgressMap.set(entry.call.toolCallId, (status: string) => {
+					this.getViewForSession(session)?.updateToolCallProgress(el, status);
+				});
+			}
+		}
+
+		// Build policy context and pass per-session approval callback
+		const policyCtx = vaultRootPath
+			? session.buildPolicyContext(this.settings, vaultRootPath, (path: string) => {
+				const file = resolveNote(path, this.app.vault, this.app.metadataCache);
+				return file?.path ?? null;
+			})
+			: undefined;
+
+		const approvalHookFn = currentConv
+			? async (tn: string, params: Record<string, unknown>, m: string) =>
+				this.hookDispatcher.dispatchApprovalRequiredHook(currentConv.id, tn, params, m)
+			: undefined;
+
+		const batchResults = await executeToolBatches(
+			batches,
+			this.dispatcher,
+			mode,
+			messageIdMap,
+			abortSignal,
+			undefined, // concurrencyCap — use default
+			onProgressMap,
+			policyCtx,
+			session.approvalCallback,
+			this, // sessionContext (A4.4e)
+			approvalHookFn,
+			session.interactionCallback,
+		);
+
+		// Map results back to entries for UI updates
+		const toolResults: ToolResult[] = [];
+		for (const batchResult of batchResults) {
+			const entry = toolCallEntries.find(
+				e => e.call.toolCallId === batchResult.call.toolCallId
+			);
+
+			// Update tool call status badge in the UI
+			if (entry?.el) {
+				this.getViewForSession(session)?.updateToolCallStatus(
+					entry.el,
+					batchResult.result.success ? "success" : "error"
+				);
+				// Set message ID after dispatch completes so only
+				// finished tool calls are forkable (not pending ones)
+				entry.el.dataset.messageId = entry.message.id;
+				this.getViewForSession(session)?.appendForkButton(entry.el, entry.message);
+			}
+
+			toolResults.push(batchResult.result);
+		}
+
+		// --- Step 3: Add all tool_result messages ---
+		for (let i = 0; i < toolCallEntries.length; i++) {
+			const entry = toolCallEntries[i]!;
+			const toolResult = toolResults[i]!;
+
+			// Record note access for vault rule re-evaluation
+			const notePath = entry.call.parameters["path"] as string | undefined;
+			if (notePath && this.vaultRuleManager) {
+				this.vaultRuleManager.recordNoteAccess(notePath);
+			}
+
+			const toolResultMessage = convManager.addMessage({
+				role: "tool_result",
+				content: "",
+				tool_result: toolResult,
+			});
+
+			// Roll up sub-agent tokens into conversation totals without
+			// inflating per-message estimates (which would cause premature
+			// compaction/truncation).
+			const subAgentTokens = toolResult.sub_agent_metadata?.token_usage;
+			if (subAgentTokens) {
+				convManager.addTokens(subAgentTokens.input, subAgentTokens.output);
+			}
+
+			this.getViewForSession(session)?.renderToolResult(toolResultMessage);
+
+			// HOOK-005: Fire on_tool_result hooks
+			const convForToolResult = convManager.getActiveConversation();
+			if (convForToolResult) {
+				this.hookDispatcher.dispatchToolResultHook(
+					convForToolResult.id, entry.call.toolName, entry.call.parameters, toolResult,
+				);
+			}
+
+			// Update token footer after sub-agent token rollup
+			const convAfterToolResult = convManager.getActiveConversation();
+			if (convAfterToolResult) {
+				this.getViewForSession(session)?.updateTokenFooter(
+					convManager.getCurrentContextUsage().contextTokens,
+					convAfterToolResult.total_output_tokens,
+					convAfterToolResult.estimated_cost
+				);
+			}
+		}
+
+		// --- Phase 10: emit extension_block for tool content_blocks ---
+		// Collect custom_blocks from all tool results in this batch,
+		// then emit a single extension_block message after the entire
+		// tool_result group (preserving tool_call/tool_result coalescing).
+		const customBlocksForBatch: Array<{
+			block: import("../media/types").ContentBlock & { type: "custom_block" };
+			toolName: string;
+		}> = [];
+		for (const toolResult of toolResults) {
+			if (toolResult.content_blocks?.length) {
+				for (const block of toolResult.content_blocks) {
+					if (block.type === "custom_block") {
+						// Validate JSON-serializability
+						try {
+							const serialized = JSON.stringify(block.data);
+							if (serialized.length > 102400) {
+								log.error(
+									`Phase 10: custom_block data exceeds 100KB size limit — skipping`,
+									{ kind: block.kind, tool: toolResult.tool_name, size: serialized.length },
+								);
+								continue;
+							}
+						} catch {
+							log.error(
+								`Phase 10: custom_block data is not JSON-serializable — skipping`,
+								{ kind: block.kind, tool: toolResult.tool_name },
+							);
+							continue;
+						}
+
+						const registry = this.chatBlockRegistry;
+						const def = registry?.get(block.kind);
+						if (!def) {
+							log.warn(
+								`Phase 10: block kind '${block.kind}' is not registered — will render with fallback`,
+								{ tool: toolResult.tool_name },
+							);
+						}
+
+						// Compute estimated_wire_tokens if not already set
+						let blockWithTokens = block;
+						if (block.estimated_wire_tokens === undefined) {
+							let estimated_wire_tokens: number;
+							if (def?.toLLMText) {
+								const wireText = def.toLLMText(block.data);
+								estimated_wire_tokens = wireText != null ? estimateTokenCount(wireText) : 0;
+							} else if (block.fallback_text != null) {
+								estimated_wire_tokens = estimateTokenCount(block.fallback_text);
+							} else {
+								estimated_wire_tokens = 0;
+							}
+							blockWithTokens = { ...block, estimated_wire_tokens };
+						}
+
+						customBlocksForBatch.push({ block: blockWithTokens, toolName: toolResult.tool_name });
+					}
+				}
+			}
+		}
+
+		if (customBlocksForBatch.length > 0) {
+			// Group by source tool name for attribution
+			const blocksByTool = new Map<string, typeof customBlocksForBatch>();
+			for (const entry of customBlocksForBatch) {
+				const existing = blocksByTool.get(entry.toolName) ?? [];
+				existing.push(entry);
+				blocksByTool.set(entry.toolName, existing);
+			}
+
+			for (const [toolName, entries] of blocksByTool) {
+				convManager.addMessage({
+					role: "extension_block",
+					content: entries.map((e) => e.block),
+					source_extension: toolName,
+					exclude_from_compaction: false,
 				});
 			}
 		}

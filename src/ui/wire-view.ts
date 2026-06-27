@@ -245,6 +245,30 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		new Notice(`Forked: ${result.conversation.title}`);
 	});
 
+	// Fork & re-run the tool at a specific message (same panel). Slices to
+	// just before the tool ran (dropping its result) and re-dispatches it.
+	view.setOnForkConversationRerun(async (messageId: string) => {
+		const result = await orchestrator.forkConversation(messageId, "rerun");
+		if (!result) return;
+
+		await orchestrator.switchConversation(result.filename);
+
+		view.setActiveConversationId(result.conversation.id);
+		view.updateHeaderTitle(result.conversation.id, result.conversation.title ?? null);
+		view.updateHeaderFavorite(result.conversation.id, !!result.conversation.is_favorite);
+		plugin.getStaleTracker().clear?.();
+		plugin.getVaultRuleManager().clearAccessedNotes();
+
+		// Surface which tool is being re-run (the trailing tool_call).
+		const messages = orchestrator.getConversationManager().getMessages();
+		const lastCall = [...messages].reverse().find((m) => m.role === "tool_call");
+		const toolName = lastCall?.tool_call?.tool_name;
+		new Notice(toolName ? `Re-running ${toolName}…` : "Re-running tool…");
+
+		// Auto-dispatch the trailing pending tool_call(s) and continue the loop.
+		await orchestrator.resumePendingToolCalls();
+	});
+
 	// /btw — fork conversation to a new panel
 	view.setOnForkToNewPanel(async (messageId, initialText) => {
 		const messages = orchestrator.getConversationManager().getMessages();

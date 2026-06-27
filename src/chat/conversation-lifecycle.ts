@@ -13,7 +13,7 @@ import { Notice } from "obsidian";
 import type { Conversation, Persona } from "../types";
 import { buildOptionValue } from "../providers/model-grouping";
 import { resolveConversationModel, resolvePreset } from "../presets/preset-resolver";
-import type { ConversationManager } from "./conversation";
+import type { ConversationManager, ForkMode } from "./conversation";
 import { HistoryManager } from "./history";
 import { conversationFilename } from "./history";
 import type { ConversationSession } from "./conversation-session";
@@ -222,9 +222,14 @@ export class ConversationLifecycleManager {
 
 	/**
 	 * Fork the current conversation at a specific message.
+	 *
+	 * @param forkMode `"resume"` (default) keeps the existing tool result;
+	 *   `"rerun"` excludes the result and resets the trailing tool_call(s) to
+	 *   `pending` so the caller can re-dispatch the tool.
 	 */
 	async forkConversation(
 		forkAtMessageId: string,
+		forkMode: ForkMode = "resume",
 	): Promise<{ filename: string; conversation: Conversation } | null> {
 		const convManager = this.getConversationManager();
 		const providerId = this.getActiveProviderId();
@@ -238,6 +243,7 @@ export class ConversationLifecycleManager {
 			providerId,
 			modelId,
 			currentMode,
+			forkMode,
 		);
 
 		if (!forkData) {

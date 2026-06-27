@@ -17,6 +17,17 @@ import { estimateConversationTokens } from "../context/compaction";
 
 const log = logger("ConversationManager");
 
+/**
+ * Fork semantics at a tool call:
+ * - `"resume"`: keep the existing tool result intact (auto-pair the
+ *   following `tool_result` into the fork). This is the default and
+ *   matches historical behavior.
+ * - `"rerun"`: slice up to and including the tool_call(s) but *exclude*
+ *   the paired result(s), and reset the trailing call(s) to `pending` so
+ *   the orchestrator re-dispatches the tool on fork open.
+ */
+export type ForkMode = "resume" | "rerun";
+
 /** Generate a UUID v4 string. */
 function generateId(): string {
 	return crypto.randomUUID();
@@ -188,9 +199,17 @@ export class ConversationManager {
 	 * the given fork-point message. Does NOT persist or switch — the caller
 	 * is responsible for that.
 	 *
-	 * If the fork-point message is a `tool_call`, the immediately following
-	 * `tool_result` whose `tool_call_id` matches is auto-included so the
-	 * forked conversation is never left with an unpaired tool call.
+	 * In `"resume"` mode (default), if the fork-point message is a
+	 * `tool_call`, the immediately following `tool_result` whose
+	 * `tool_call_id` matches is auto-included so the forked conversation is
+	 * never left with an unpaired tool call.
+	 *
+	 * In `"rerun"` mode, the fork slices up to and including the tool_call(s)
+	 * but *excludes* the paired result(s), and resets the trailing call(s) to
+	 * `pending` so the caller can re-dispatch the tool. The fork-point may be
+	 * either a `tool_call` or its `tool_result` (the latter resolves back to
+	 * the preceding call). Re-run on a non-tool message falls back to
+	 * `"resume"`.
 	 *
 	 * @returns Fork data, or `null` if the fork-point message was not found.
 	 */
@@ -199,6 +218,7 @@ export class ConversationManager {
 		currentProviderId: string,
 		currentModelId: string,
 		currentMode: ConversationMode,
+		forkMode: ForkMode = "resume",
 	): { conversation: Conversation; messages: Message[] } | null {
 		if (!this.activeConversation) return null;
 
@@ -208,10 +228,55 @@ export class ConversationManager {
 
 		// --- Slice messages up to fork point (inclusive) ---
 		let endIdx = forkIdx;
+		// Indices of the trailing tool_call run whose results are dropped on
+		// re-run, so we can reset their status to "pending" below.
+		let rerunCallStart = -1;
 
-		// Auto-pair: if fork-point is a tool_call, include the paired tool_result
 		const forkMsg = this.messages[forkIdx]!;
-		if (forkMsg.role === "tool_call" && forkMsg.tool_call) {
+
+		if (forkMode === "rerun") {
+			// Resolve an anchor tool_call from the fork-point.
+			let anchorIdx = -1;
+			if (forkMsg.role === "tool_call" && forkMsg.tool_call) {
+				anchorIdx = forkIdx;
+			} else if (forkMsg.role === "tool_result" && forkMsg.tool_result) {
+				// Scan backward to the matching tool_call, staying within the
+				// contiguous tool_call/tool_result run.
+				const targetId = forkMsg.tool_result.tool_call_id;
+				for (let i = forkIdx - 1; i >= 0; i--) {
+					const m = this.messages[i]!;
+					if (m.role !== "tool_call" && m.role !== "tool_result") break;
+					if (m.role === "tool_call" && (m.tool_call?.id ?? m.id) === targetId) {
+						anchorIdx = i;
+						break;
+					}
+				}
+			}
+
+			if (anchorIdx !== -1) {
+				// Expand to the full run of consecutive tool_call messages
+				// (a multi-tool batch). Re-running one means re-running the
+				// whole batch, so its results stay paired.
+				let runStart = anchorIdx;
+				while (runStart > 0 && this.messages[runStart - 1]!.role === "tool_call") {
+					runStart--;
+				}
+				let runEnd = anchorIdx;
+				while (
+					runEnd + 1 < this.messages.length &&
+					this.messages[runEnd + 1]!.role === "tool_call"
+				) {
+					runEnd++;
+				}
+				endIdx = runEnd;
+				rerunCallStart = runStart;
+			}
+			// anchorIdx === -1 → fall through to resume semantics below.
+		}
+
+		// Auto-pair (resume): if fork-point is a tool_call, include the paired
+		// tool_result. Skipped when re-run already chose an end index.
+		if (rerunCallStart === -1 && forkMsg.role === "tool_call" && forkMsg.tool_call) {
 			const expectedId = forkMsg.tool_call.id ?? forkMsg.id;
 			const next = this.messages[forkIdx + 1];
 			if (next?.role === "tool_result" && next.tool_result?.tool_call_id === expectedId) {
@@ -219,7 +284,18 @@ export class ConversationManager {
 			}
 		}
 
-		const slicedMessages = this.messages.slice(0, endIdx + 1);
+		let slicedMessages = this.messages.slice(0, endIdx + 1);
+
+		// On re-run, reset the trailing tool_call run to "pending" so the
+		// orchestrator re-dispatches it. Clone the tool_call to avoid mutating
+		// the parent conversation's in-memory messages.
+		if (rerunCallStart !== -1) {
+			slicedMessages = slicedMessages.map((m, i) =>
+				i >= rerunCallStart && m.role === "tool_call" && m.tool_call
+					? { ...m, tool_call: { ...m.tool_call, status: "pending" as const } }
+					: m,
+			);
+		}
 
 		// --- Build new conversation object ---
 		const now = new Date().toISOString();

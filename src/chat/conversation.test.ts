@@ -345,6 +345,142 @@ describe("ConversationManager.prepareFork()", () => {
 	});
 
 	// -----------------------------------------------------------------------
+	// 6.6b Re-run fork mode
+	// -----------------------------------------------------------------------
+
+	describe("forkMode = rerun", () => {
+		it("fork at tool_call excludes the paired tool_result and resets status to pending", () => {
+			mgr.createConversation("openai", "gpt-4", "act");
+			mgr.addMessage({ role: "user", content: "Ask me", input_tokens: 10 });
+			const tc = mgr.addMessage({
+				role: "tool_call",
+				content: "",
+				tool_call: { id: "call_123", tool_name: "ask_user", parameters: { questions: [] }, status: "success" },
+			});
+			mgr.addMessage({
+				role: "tool_result",
+				content: "answered",
+				tool_result: { tool_name: "ask_user", success: true, result: "answered", tool_call_id: "call_123" },
+				output_tokens: 99,
+			});
+			mgr.addMessage({ role: "assistant", content: "Thanks." });
+
+			const fork = mgr.prepareFork(tc.id, "openai", "gpt-4", "act", "rerun");
+			expect(fork).not.toBeNull();
+			// user + tool_call only (result excluded)
+			expect(fork!.messages).toHaveLength(2);
+			expect(fork!.messages[1]!.role).toBe("tool_call");
+			expect(fork!.messages[1]!.tool_call!.status).toBe("pending");
+			// Parent's in-memory tool_call status must not be mutated.
+			expect(tc.tool_call!.status).toBe("success");
+		});
+
+		it("fork at tool_result resolves back to the preceding tool_call and excludes the result", () => {
+			mgr.createConversation("openai", "gpt-4", "act");
+			mgr.addMessage({ role: "user", content: "Search" });
+			mgr.addMessage({
+				role: "tool_call",
+				content: "",
+				tool_call: { id: "call_1", tool_name: "search", parameters: { q: "X" }, status: "success" },
+			});
+			const tr = mgr.addMessage({
+				role: "tool_result",
+				content: "R1",
+				tool_result: { tool_name: "search", success: true, result: "R1", tool_call_id: "call_1" },
+			});
+			mgr.addMessage({ role: "assistant", content: "Done." });
+
+			const fork = mgr.prepareFork(tr.id, "openai", "gpt-4", "act", "rerun");
+			expect(fork).not.toBeNull();
+			// user + tool_call (result excluded)
+			expect(fork!.messages).toHaveLength(2);
+			expect(fork!.messages[1]!.role).toBe("tool_call");
+			expect(fork!.messages[1]!.tool_call!.status).toBe("pending");
+		});
+
+		it("multi-tool batch — re-run includes the whole tool_call run and excludes all results", () => {
+			mgr.createConversation("openai", "gpt-4", "act");
+			mgr.addMessage({ role: "user", content: "Two tools" });
+			mgr.addMessage({
+				role: "tool_call",
+				content: "",
+				tool_call: { id: "call_a", tool_name: "search", parameters: {}, status: "success" },
+			});
+			const tcB = mgr.addMessage({
+				role: "tool_call",
+				content: "",
+				tool_call: { id: "call_b", tool_name: "fetch", parameters: {}, status: "success" },
+			});
+			mgr.addMessage({
+				role: "tool_result",
+				content: "RA",
+				tool_result: { tool_name: "search", success: true, result: "RA", tool_call_id: "call_a" },
+			});
+			mgr.addMessage({
+				role: "tool_result",
+				content: "RB",
+				tool_result: { tool_name: "fetch", success: true, result: "RB", tool_call_id: "call_b" },
+			});
+			mgr.addMessage({ role: "assistant", content: "Done." });
+
+			// Re-run one tool of the batch → whole tool_call run is included,
+			// all results dropped, both calls reset to pending.
+			const fork = mgr.prepareFork(tcB.id, "openai", "gpt-4", "act", "rerun");
+			expect(fork).not.toBeNull();
+			// user + tc_a + tc_b = 3 (both results dropped)
+			expect(fork!.messages).toHaveLength(3);
+			expect(fork!.messages.map((m) => m.role)).toEqual(["user", "tool_call", "tool_call"]);
+			expect(fork!.messages[1]!.tool_call!.status).toBe("pending");
+			expect(fork!.messages[2]!.tool_call!.status).toBe("pending");
+		});
+
+		it("re-run on a non-tool message falls back to resume semantics", () => {
+			const { a1 } = setupStandardConversation(mgr);
+
+			const resume = mgr.prepareFork(a1.id, "openai", "gpt-4", "act");
+			const rerun = mgr.prepareFork(a1.id, "openai", "gpt-4", "act", "rerun");
+			expect(rerun).not.toBeNull();
+			expect(rerun!.messages).toHaveLength(resume!.messages.length);
+			expect(rerun!.messages.at(-1)!.role).toBe("assistant");
+		});
+
+		it("token totals exclude the dropped tool_result", () => {
+			mgr.createConversation("openai", "gpt-4", "act");
+			mgr.addMessage({ role: "user", content: "Ask", input_tokens: 10, cost_estimate: 0.01 });
+			const tc = mgr.addMessage({
+				role: "tool_call",
+				content: "",
+				tool_call: { id: "call_x", tool_name: "ask_user", parameters: {}, status: "success" },
+			});
+			mgr.addMessage({
+				role: "tool_result",
+				content: "r",
+				tool_result: {
+					tool_name: "ask_user",
+					success: true,
+					result: "r",
+					tool_call_id: "call_x",
+					sub_agent_metadata: {
+						jsonl_filename: "x.jsonl",
+						token_usage: { input: 500, output: 700 },
+						iteration_count: 1,
+						stop_reason: "completed",
+						profile_name: "p",
+					},
+				},
+				output_tokens: 99,
+			});
+
+			const fork = mgr.prepareFork(tc.id, "openai", "gpt-4", "act", "rerun");
+			expect(fork).not.toBeNull();
+			// Only the user message's tokens remain; the result (incl. sub-agent
+			// usage and its own output_tokens) is dropped.
+			expect(fork!.conversation.total_input_tokens).toBe(10);
+			expect(fork!.conversation.total_output_tokens).toBe(0);
+		});
+	});
+
+	// -----------------------------------------------------------------------
 	// 6.7 Preservation
 	// -----------------------------------------------------------------------
 

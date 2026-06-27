@@ -218,6 +218,7 @@ export class NotorChatView extends ItemView {
 
 	// Fork callbacks
 	private onForkConversation?: (messageId: string) => Promise<void>;
+	private onForkConversationRerun?: (messageId: string) => Promise<void>;
 	private onForkToNewPanel?: (messageId: string | undefined, initialText?: string) => Promise<void>;
 
 	// Favorite callback
@@ -475,6 +476,10 @@ export class NotorChatView extends ItemView {
 
 	setOnForkConversation(callback: (messageId: string) => Promise<void>): void {
 		this.onForkConversation = callback;
+	}
+
+	setOnForkConversationRerun(callback: (messageId: string) => Promise<void>): void {
+		this.onForkConversationRerun = callback;
 	}
 
 	setOnForkToNewPanel(callback: (messageId: string | undefined, initialText?: string) => Promise<void>): void {
@@ -1109,6 +1114,7 @@ export class NotorChatView extends ItemView {
 		this.onRestoreCheckpoint = undefined;
 		this.onGetCurrentContent = undefined;
 		this.onForkConversation = undefined;
+		this.onForkConversationRerun = undefined;
 		this.onForkToNewPanel = undefined;
 		this.onOpenInNewTab = undefined;
 		this.onOpenSettingsGroup = undefined;
@@ -1449,6 +1455,19 @@ export class NotorChatView extends ItemView {
 							this.onForkConversation?.(messageId);
 						});
 				});
+				// "Fork & re-run this tool" — only on a finished tool call/result.
+				// Slices to just before the tool ran and re-dispatches it (e.g.
+				// re-asks an ask_user prompt so you can answer differently).
+				const forkRole = this.messageRenderer.getRenderedMessage(messageId)?.role;
+				if (forkRole === "tool_call" || forkRole === "tool_result") {
+					menu.addItem((item) => {
+						item.setTitle("Fork & re-run this tool")
+							.setIcon("refresh-cw")
+							.onClick(() => {
+								this.onForkConversationRerun?.(messageId);
+							});
+					});
+				}
 				menu.addItem((item) => {
 					item.setTitle("/btw")
 						.setIcon("message-square-plus")
