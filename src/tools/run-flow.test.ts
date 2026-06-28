@@ -91,7 +91,7 @@ describe("RunFlowTool", () => {
 		const tool = new RunFlowTool(fakeComposition([flow("Alpha"), flow("Beta")]), vi.fn());
 		await tool.refreshInvocableFlows();
 
-		expect(tool.input_schema.properties?.flow.enum).toEqual(["Alpha", "Beta"]);
+		expect(tool.input_schema.properties?.flow?.enum).toEqual(["Alpha", "Beta"]);
 		expect(tool.description).toContain("Alpha: a question");
 		expect(tool.description).toContain("Beta: a question");
 	});

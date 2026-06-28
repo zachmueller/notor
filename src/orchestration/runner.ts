@@ -93,6 +93,15 @@ export interface OrchestrationRunResult {
 	subtreeConsumed: SubtreeConsumed;
 	/** Aggregate token usage across this run's own turns + settled descendant subtrees. */
 	tokenUsage: { input: number; output: number };
+	/**
+	 * The live SHARED `AggregateBudget` cell this run drew down (INT-045). A
+	 * chaining successor (`notor-on-complete-flow`) inherits this **same** cell by
+	 * reference so an `A → B → A` on-complete cycle is bounded by one tree-wide
+	 * ceiling rather than a fresh budget per hop.
+	 */
+	budget: AggregateBudget;
+	/** This run's base depth (the chaining successor runs at `depth + 1` over the same cell). */
+	depth: number;
 }
 
 /** A queued routing job: an event to deliver to a specific subscriber step. */
@@ -128,6 +137,13 @@ export interface OrchestrationRunnerDeps {
 	 * @see specs/ZZ-misc/orchestration/contracts/run-loop.md — Spawn gate
 	 */
 	inheritedContext?: { budget: AggregateBudget; depth: number };
+	/**
+	 * The chaining successor's `notor-flow-inputs` (INT-045), resolved by the
+	 * launcher when this flow has `notor-on-complete-flow`. Threaded into each step
+	 * turn so the prompt builder injects the `### HANDOFF` section on the terminal
+	 * step. `undefined` when the flow has no chaining successor.
+	 */
+	onCompleteFlowInputs?: string | null;
 	/**
 	 * Query the session's still-open/running tasks for `FLOW_COMPLETE` enforcement
 	 * (INT-003). Returns each remaining task's key + description so the synthesized
@@ -397,6 +413,7 @@ export class OrchestrationRunner {
 				mode: this.deps.mode,
 				conversationId,
 				onProgress: this.deps.onProgress,
+				onCompleteFlowInputs: this.deps.onCompleteFlowInputs,
 			});
 
 			if (job.step.mode === "conversation") this.llmTurns += 1;
@@ -792,6 +809,9 @@ export class OrchestrationRunner {
 			text: terminal.payload || this.lastText,
 			subtreeConsumed: { ...this.subtree },
 			tokenUsage: { ...this.tokenUsage },
+			// The live shared cell + depth — a chaining successor inherits them.
+			budget: this.budget,
+			depth: this.baseDepth,
 		};
 	}
 

@@ -183,3 +183,39 @@ describe("StepPromptBuilder — always-injected sections", () => {
 		expect(out).not.toContain("<include_note>x</include_note>");
 	});
 });
+
+describe("StepPromptBuilder — chaining HANDOFF injection (INT-045)", () => {
+	function buildWith(over: { stepOver?: Partial<StepDefinition>; onCompleteFlowInputs?: string | null }) {
+		return builder.build({
+			step: step("body", over.stepOver),
+			flow: flow({ onCompleteFlow: "Successor" }),
+			event: event(),
+			eventHistory: [],
+			objective: "obj",
+			scratchpadPath: "sp",
+			tasksPath: "tp",
+			iteration: 1,
+			onCompleteFlowInputs: over.onCompleteFlowInputs,
+		});
+	}
+
+	it("injects the successor's input contract on the TERMINAL step", () => {
+		// The default step publishes FLOW_COMPLETE → terminal.
+		const out = buildWith({ onCompleteFlowInputs: "A repo path and a feature summary." });
+		expect(out).toContain("### HANDOFF");
+		expect(out).toContain("A repo path and a feature summary.");
+	});
+
+	it("omits HANDOFF on a non-terminal step (it does not publish the completion event)", () => {
+		const out = buildWith({
+			stepOver: { publishes: ["tasks.ready"], defaultPublishes: "tasks.ready" },
+			onCompleteFlowInputs: "should not appear",
+		});
+		expect(out).not.toContain("### HANDOFF");
+	});
+
+	it("omits HANDOFF when there is no chaining successor input", () => {
+		const out = buildWith({ onCompleteFlowInputs: null });
+		expect(out).not.toContain("### HANDOFF");
+	});
+});

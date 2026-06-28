@@ -208,6 +208,28 @@ describe("OrchestrationRunner — composition (INT-043/046/047)", () => {
 		expect(shared.costRemainingUsd).toBe(10 - 1 - 2);
 	});
 
+	it("a chaining successor sharing the cell by reference is bounded by the aggregate budget", async () => {
+		// Simulate A → B → A over ONE shared cell: each run inherits the same cell.
+		// With costRemainingUsd starting at $2 and each turn costing $1, the chain
+		// stops drawing turns once the cell is exhausted (the runner's per-turn gate).
+		const shared: AggregateBudget = { iterationsRemaining: 100, costRemainingUsd: 2 };
+		const only = step("Only", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
+
+		const runHop = (depth: number) =>
+			makeRunner(flow([only], { maxDepth: 10 }), spendExecutor({
+				emitFor: () => ({ topic: FLOW_COMPLETE }),
+				costPerTurn: 1,
+			}), { budget: shared, depth }).start(flow([only], { maxDepth: 10 }), "obj");
+
+		await runHop(0); // hop A: 1 turn → cell $1 left
+		await runHop(1); // hop B: 1 turn → cell $0 left
+		expect(shared.costRemainingUsd).toBe(0);
+		// A third hop would find no headroom: the runner's hasHeadroom gate is
+		// strict-positive, so the cell at 0 admits no further LLM turn — the cycle
+		// is genuinely bounded by the shared aggregate budget, not "by intent".
+		expect(shared.costRemainingUsd > 0).toBe(false);
+	});
+
 	it("offsets the flow's maxDepth by the inherited base depth (min-of-ancestors)", async () => {
 		// A child run at base depth 2 with flow.maxDepth 1 → effective ceiling = 2 + 1 = 3.
 		const only = step("Only", { triggers: ["start"], publishes: [FLOW_COMPLETE] });

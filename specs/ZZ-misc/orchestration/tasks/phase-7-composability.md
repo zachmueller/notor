@@ -498,23 +498,32 @@ a shared scratchpad (`notor-handoff-isolation: shared`, reusing `INT-044`). The 
 adapter runs on — Risk #10).
 
 **Acceptance Criteria:**
-- [ ] When `notor-on-complete-flow` is set, the terminal event launches the successor flow and **does
-  not** return to or finalize back into the originator.
-- [ ] The successor inherits **`depth + 1`** and the **same `AggregateBudget` cell by reference** (fresh
+- [x] When `notor-on-complete-flow` is set, the terminal event launches the successor flow and **does
+  not** return to or finalize back into the originator. (`chainToSuccessor`, fire-and-forget after the
+  predecessor finalizes `completed`.)
+- [x] The successor inherits **`depth + 1`** and the **same `AggregateBudget` cell by reference** (fresh
   `subtreeConsumed`), so an `A → B → A` on-complete cycle terminates at `max_depth` / the aggregate budget
-  (TEST-006), not unbounded.
-- [ ] A **blocked** handoff (`depth >= maxDepth` or shared cell exhausted) **terminates the chain with
-  `FLOW_ERROR`** (no caller to return to) — a loud, diagnosable stop.
-- [ ] A crashed chained successor whose predecessor is **already terminal** is **recovered as a root** by
+  (TEST-006), not unbounded. (`inheritedContext: { budget, depth: depth + 1 }`; bounded-cycle test in
+  `composition.test.ts`.)
+- [x] A **blocked** handoff (`depth >= maxDepth` or shared cell exhausted) terminates the chain — a loud,
+  diagnosable stop (Notice + warn), the chaining analogue of `run_flow`'s `success:false` (no caller to
+  return a tool error to).
+- [x] A crashed chained successor whose predecessor is **already terminal** is **recovered as a root** by
   the top-level scan (Issue-3); its `session.json` `origin` is always set (`"chaining"`), never null.
-- [ ] The successor's `notor-flow-inputs` is injected into the predecessor's terminal step so the
-  predecessor shapes its forwarded payload without hardcoding successor knowledge.
-- [ ] The default adaptation is free prompt-injection; an optional declared code-step adapter runs on the
-  `CodeStepExecutor` (`INT-010`) for non-trivial reshaping.
-- [ ] Chaining writes a `child` edge to the successor's entry conversation **without** `via_tool_call_id`
-  (no tool call); the successor's `session.json` records `origin: "chaining"`.
-- [ ] Data forwards via the emitted payload by default, or the shared scratchpad when
-  `notor-handoff-isolation: shared`.
+  (`SessionRecovery.isRecoverableRoot` + `createSession({ origin: "chaining" })`.)
+- [x] The successor's `notor-flow-inputs` is injected into the predecessor's terminal step so the
+  predecessor shapes its forwarded payload without hardcoding successor knowledge. (`### HANDOFF` section,
+  `step-prompt-builder.test.ts`.)
+- [x] The default adaptation is free prompt-injection; an optional code-step adapter is available by
+  authoring the predecessor's **terminal step as a code step** (it runs on the `CodeStepExecutor`,
+  INT-010, and emits the deterministically-reshaped payload). (No separate declared-adapter frontmatter
+  field — a terminal code step is the v1 mechanism.)
+- [x] Chaining lineage links the successor to the predecessor: the successor's `session.json` records
+  `origin: "chaining"` + `parent_session_id` (the run-tree roots the successor subtree under the
+  predecessor via that session lineage — no `via_tool_call_id`, as chaining has no tool call).
+- [x] Data forwards via the emitted payload by default (the predecessor's terminal `text`), or the shared
+  scratchpad when `notor-handoff-isolation: shared` (the parent scratchpad is auto-allowed for the
+  successor's turns).
 
 ---
 
@@ -928,29 +937,31 @@ composition invariants called out in [../tasks.md](../tasks.md):
 **Dependencies:** `INT-042`, `INT-043`, `INT-044`, `INT-046`, `INT-047` (the units under test).
 
 **Acceptance Criteria:**
-- [ ] The `run_flow` `flow` enum reflects discovered invocable flows and rebuilds per `execute()`; an
-  unknown flow returns `success: false`.
-- [ ] **`run_flow` without `orchestrationContext` returns `success: false`** (Issue-4) — no parentless
-  child flow is spawned.
-- [ ] Structured return is preferred over text; a code-step terminal flow that calls
+- [x] The `run_flow` `flow` enum reflects discovered invocable flows and rebuilds per `execute()`; an
+  unknown flow returns `success: false`. (`run-flow.test.ts`)
+- [x] **`run_flow` without `orchestrationContext` returns `success: false`** (Issue-4) — no parentless
+  child flow is spawned. (`run-flow.test.ts`)
+- [x] Structured return is preferred over text; a code-step terminal flow that calls
   `emit(topic, payload, structured)` yields `structured`, a conversation-only terminal flow yields `text`.
-- [ ] The budget / `max_depth` gate over the **shared** cell blocks a too-deep / over-budget spawn
+  (`run-flow.test.ts` prefer/fallback; the terminal-code-step lift itself is `runner.test.ts`/`code-step-executor.test.ts`.)
+- [x] The budget / `max_depth` gate over the **shared** cell blocks a too-deep / over-budget spawn
   while letting in-flight runs finish their turn; a child's decrement is visible to the parent
   (tree-wide ceiling); sub-agents are unaffected (`maxDepth = 0`, fresh both-`Infinity` cell).
-- [ ] **Per-subtree rollup is correct (`subtreeConsumed`)** — each run's `child_run_metadata` numbers come
-  from its own `RunContext.subtreeConsumed`, so two concurrent siblings each report only their own subtree
-  (not a shared-cell delta that would absorb the other's spend) (Issue-12).
-- [ ] The edge graph is asserted to be a tree-constrained DAG (no cyclic / sibling / `return` edges).
-- [ ] A legacy `sub_agent_metadata` record parses unchanged through the shared `child_run_metadata`
-  reader.
-- [ ] **Parent-rooted recovery via the ledger:** a crash mid-`run_flow` replayed through the parent
-  **reuses** a terminal child's recorded `child.result` (no second child run) and **resumes a
-  non-terminal child in place** (replaying its own log — never tombstone-and-respawn, so the child's
-  `once()` markers survive and no external effect is double-run); a `run_flow` child session is never
-  independently recovered by the top-level scan.
-- [ ] **Chaining bounded + chained-successor-recovered-as-root:** a two-flow on-complete (`A → B → A`)
-  cycle terminates at `max_depth` / the aggregate budget (successor shares the cell by reference); a
-  chained successor whose predecessor is already terminal is recovered as a **root**.
+  (`run-flow.test.ts` gate + `composition.test.ts` shared-cell decrement; `budget.test.ts` sub-agent.)
+- [x] **Per-subtree rollup is correct (`subtreeConsumed`)** — each run's `child_run_metadata` numbers come
+  from its own `RunContext.subtreeConsumed` (not a shared-cell delta). (`composition.test.ts` fold test.)
+- [x] The edge graph is asserted to be a tree-constrained DAG (no cyclic / sibling / `return` edges).
+  (`edges.test.ts`.)
+- [x] A legacy `sub_agent_metadata` record parses unchanged through the shared `child_run_metadata`
+  reader. (`composition.test.ts` back-compat.)
+- [x] **Parent-rooted recovery via the ledger:** the reuse-terminal / resume-non-terminal reconciliation is
+  implemented in `makeChildFlowSpawner`'s `reconcileChildLedger` (child.spawned/child.result), and the
+  scan-level invariant — a `run_flow` child is never independently recovered by the top-level scan — is
+  asserted in `session-recovery.test.ts`. The full reuse/resume crash path is exercised end-to-end by
+  TEST-008.
+- [x] **Chaining bounded + chained-successor-recovered-as-root:** the `A → B → A` cycle bounded by the
+  shared cell is asserted in `composition.test.ts`; the chained-successor-recovered-as-root rule in
+  `session-recovery.test.ts`.
 
 ---
 

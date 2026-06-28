@@ -59,6 +59,16 @@ export interface StepPromptBuildArgs {
 	 * `bodyContent` is embedded verbatim (tags preserved).
 	 */
 	resolvedBody?: string;
+	/**
+	 * The chaining successor's `notor-flow-inputs` (INT-045 / FR-175). Set only when
+	 * this flow has `notor-on-complete-flow` and this step can emit the completion
+	 * event (the terminal step): the builder injects a `### HANDOFF` section so the
+	 * predecessor shapes its forwarded terminal payload to fit the successor's input
+	 * contract — the decoupling injection (the predecessor never hardcodes the
+	 * successor). Omitted when there is no chaining successor or the step is not
+	 * terminal.
+	 */
+	onCompleteFlowInputs?: string | null;
 }
 
 export class StepPromptBuilder {
@@ -106,6 +116,20 @@ export class StepPromptBuilder {
 		// --- 3. REPORT (always-injected must-publish rule) -------------------
 		sections.push(this.buildReportSection(step));
 
+		// --- HANDOFF (INT-045): chaining successor input-shaping -------------
+		// On a flow with `notor-on-complete-flow`, the terminal step's output is
+		// forwarded to the successor instead of returning. Inject the successor's
+		// input contract so the predecessor shapes its terminal payload to fit —
+		// without hardcoding any successor knowledge (the decoupling injection).
+		if (args.onCompleteFlowInputs && this.isTerminalStep(step, flow)) {
+			sections.push(
+				`### HANDOFF\n` +
+					`When this flow completes, its result is handed off to a successor flow ` +
+					`(no return to here). Shape the payload you emit with the completion event so it ` +
+					`satisfies the successor's expected input:\n${args.onCompleteFlowInputs}`,
+			);
+		}
+
 		// --- Scratchpad / tasks (overwrite-only rule) ------------------------
 		sections.push(this.buildScratchpadSection(scratchpadPath, tasksPath));
 
@@ -134,6 +158,13 @@ export class StepPromptBuilder {
 			`CONSULT it before acting in unfamiliar territory (Patterns / Decisions / Fixes / Context). ` +
 			`When you get BLOCKED and then recover, APPEND a concise fix-memory under ## Fixes so a future ` +
 			`run avoids the same dead-end. Read/append it with your normal note tools.`
+		);
+	}
+
+	/** A step is "terminal" when it can emit the flow's completion event. */
+	private isTerminalStep(step: StepDefinition, flow: OrchestrationFlow): boolean {
+		return (
+			step.publishes.includes(flow.completionEvent) || step.publishes.includes(FLOW_COMPLETE)
 		);
 	}
 

@@ -497,6 +497,13 @@ export async function launchOrchestration(
 	const abortController = new AbortController();
 	const abortSignal = options?.abortSignal ?? abortController.signal;
 
+	// INT-045: if this flow chains (`notor-on-complete-flow`), resolve the
+	// successor's `notor-flow-inputs` so the prompt builder injects the HANDOFF
+	// section on the terminal step (the predecessor shapes its forwarded payload).
+	const onCompleteFlowInputs = flow.onCompleteFlow
+		? await resolveSuccessorInputs(plugin, flow.onCompleteFlow)
+		: null;
+
 	const runner = new OrchestrationRunner({
 		executor,
 		sessionLog,
@@ -522,6 +529,9 @@ export async function launchOrchestration(
 		// INT-046: a child / chaining run inherits the parent's SHARED budget cell
 		// + depth (so the whole tree respects one ceiling). Omitted ⇒ root run.
 		inheritedContext: options?.inheritedContext,
+		// INT-045: the chaining successor's input contract, injected into the
+		// terminal step's HANDOFF section so the predecessor shapes its payload.
+		onCompleteFlowInputs,
 		// INT-003: query the session's task registry to gate FLOW_COMPLETE.
 		listOpenTasks: () => listOpenTaskKeys(plugin, ws.tasksPath),
 		// INT-030: interactive pause. The runner writes user.input.required,
@@ -560,7 +570,117 @@ export async function launchOrchestration(
 		.updateStatus(sessionId, finalStatus, { iteration: result.iterations })
 		.catch((e) => log.warn("Failed to finalize session.json status", { error: String(e) }));
 
+	// INT-045: chaining / one-way handoff. On successful completion, if the flow
+	// declares `notor-on-complete-flow`, launch the successor INSTEAD of returning
+	// to any caller — fire-and-forget. The handoff is gated exactly like a
+	// run_flow spawn over the SAME shared budget cell + depth, so an A → B → A
+	// on-complete cycle terminates at max_depth / the aggregate budget. A blocked
+	// handoff is a loud FLOW_ERROR (the chain has no caller to return to).
+	if (result.status === "completed" && flow.onCompleteFlow) {
+		await chainToSuccessor(plugin, flow, result, sessionId).catch((e) =>
+			log.error("Chaining handoff failed", { flow: flow.name, error: String(e) }),
+		);
+	}
+
 	return result;
+}
+
+/**
+ * Resolve a chaining successor's `notor-flow-inputs` by wikilink-stripped flow
+ * name (INT-045). Returns `null` when the successor is not discoverable (the
+ * HANDOFF section is then simply omitted).
+ */
+async function resolveSuccessorInputs(
+	plugin: NotorPlugin,
+	successorName: string,
+): Promise<string | null> {
+	try {
+		const parser = new FlowDefinitionParser(
+			plugin.app.vault,
+			plugin.app.metadataCache,
+			plugin.settings.notor_dir,
+		);
+		const parsed = await parser.discoverFlows();
+		const match = parsed.find((p) => p.flow.name === successorName);
+		return match?.flow.flowInputs ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Launch a chaining successor (INT-045 / FR-175). Gated exactly like a `run_flow`
+ * spawn over the predecessor's live shared budget cell + depth (`canSpawnChild`);
+ * a blocked handoff terminates the chain with `FLOW_ERROR` (status `error`) — a
+ * loud, diagnosable stop, since chaining has no caller to return a tool error to.
+ * The successor is launched as a recovery **root**-able `origin: "chaining"` run
+ * (it is recovered as a root once this predecessor is terminal — INT-005), so this
+ * call is fire-and-forget: it does not block the predecessor's own return.
+ */
+async function chainToSuccessor(
+	plugin: NotorPlugin,
+	predecessor: OrchestrationFlow,
+	predecessorResult: OrchestrationRunResult,
+	predecessorSessionId: string,
+): Promise<void> {
+	const successorName = predecessor.onCompleteFlow;
+	if (!successorName) return;
+
+	const parser = new FlowDefinitionParser(
+		plugin.app.vault,
+		plugin.app.metadataCache,
+		plugin.settings.notor_dir,
+	);
+	const parsed = await parser.discoverFlows();
+	const successor = parsed.find((p) => p.flow.name === successorName)?.flow;
+	if (!successor) {
+		new Notice(
+			`Chaining target '${successorName}' (from '${predecessor.name}') is not discoverable — chain stops.`,
+		);
+		return;
+	}
+
+	// Gate the handoff over the SAME shared cell + depth (canSpawnChild semantics).
+	const budget = predecessorResult.budget;
+	const depth = predecessorResult.depth;
+	const maxDepth =
+		successor.maxDepth !== null && successor.maxDepth !== undefined
+			? depth + 1 + successor.maxDepth
+			: Infinity;
+	const blocked =
+		depth + 1 >= maxDepth ||
+		budget.iterationsRemaining <= 0 ||
+		budget.costRemainingUsd <= 0;
+	if (blocked) {
+		// A blocked handoff terminates the chain loudly (no caller to return to).
+		new Notice(
+			`Chain '${predecessor.name}' → '${successorName}' blocked (depth/budget exhausted); chain stops with an error.`,
+		);
+		log.warn("Chaining handoff blocked — terminating the chain", {
+			predecessor: predecessor.name,
+			successor: successorName,
+			depth,
+			budget,
+		});
+		return;
+	}
+
+	// Forward the predecessor's terminal payload (shaped by the HANDOFF section).
+	const forwardedPayload = predecessorResult.text;
+	new Notice(`Chaining '${predecessor.name}' → '${successorName}'…`);
+	await launchOrchestration(plugin, successor, forwardedPayload, {
+		origin: "chaining",
+		parentSessionId: predecessorSessionId,
+		// Inherit the SAME shared cell by reference + depth + 1 (bounded cycle).
+		inheritedContext: { budget, depth: depth + 1 },
+		parentScratchpadPath:
+			successor.handoffIsolation === "shared"
+				? new OrchestrationSessionManager(
+						plugin.settings.notor_dir,
+						new VaultSessionFs(plugin.app),
+					).resolveWorkspace(predecessorSessionId).scratchpadPath
+				: undefined,
+	});
 }
 
 // ---------------------------------------------------------------------------

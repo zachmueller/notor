@@ -179,6 +179,13 @@ export interface StepTurnRequest {
 	onPersist?: RunLoopHooks["onPersist"];
 	/** Optional progress callback. */
 	onProgress?: (status: string) => void;
+	/**
+	 * The chaining successor's `notor-flow-inputs` (INT-045), resolved by the
+	 * launcher when this flow has `notor-on-complete-flow`. The prompt builder
+	 * injects it as a `### HANDOFF` section on the terminal step so the predecessor
+	 * shapes its forwarded payload to fit. `undefined` when there is no successor.
+	 */
+	onCompleteFlowInputs?: string | null;
 }
 
 /** What the executor returns to the runner. */
@@ -269,6 +276,7 @@ export class StepTurnExecutor {
 			iteration: req.iteration,
 			memoriesPath: this.deps.memoriesPath,
 			resolvedBody,
+			onCompleteFlowInputs: req.onCompleteFlowInputs,
 		});
 
 		// (5b) Run the turn on the shared RunLoop with the PINNED model.
