@@ -253,6 +253,71 @@ in path enforcement for the owning session's steps.
 
 ---
 
+## Scenario 3A — Pause for input, then reload and resume (FR-150)
+
+This exercises the **interactive pause** (`user.input.required`) and proves a paused run is a
+**recoverable** log state — it survives a plugin reload.
+
+1. Add a conversation step that emits **`user.input.required`** (via `emit_event`, with a `payload`
+   carrying the question to show — e.g. *"Which database should I target — Postgres or SQLite?"*), and
+   wire its declared "I have the input" topic to the next step. Run the flow to that step.
+2. **Observe the pause.** The runner **suspends** the event loop (stops consuming further events),
+   surfaces the captured question as a prompt (a Notice + input affordance), and sets `session.json`
+   `status: interrupted`. A `user.input.required` entry is written to `session-log.jsonl` **before** the
+   loop suspends.
+3. **Simulate a crash.** Reload the plugin (or disable/enable Notor) while the run is paused. On load,
+   recovery scans the session, sees the **dangling `user.input.required`** (no following
+   `user.input.received`), classifies it as **"still paused,"** and **re-surfaces the same prompt** — it
+   does **not** re-emit a trigger or re-run the paused step. Running recovery again is idempotent (same
+   prompt, no double-resume).
+4. **Supply input.** Answer the prompt. The runner writes `user.input.received`, restores
+   `status: active`, and **resumes** by publishing the resume event with your answer as its payload
+   (write-before-route). The run proceeds to `FLOW_COMPLETE`.
+5. **Decline (optional).** Dismissing the prompt finalizes the run via `FLOW_CANCELLED`
+   (`status: cancelled`), bypassing open-task enforcement — open tasks do not block the cancel.
+
+> **Validation points:** (a) emitting `user.input.required` pauses the loop and surfaces the prompt,
+> with `status: interrupted` and the entry durably written **before** suspending; (b) a reload while
+> paused **re-surfaces** the prompt (still-paused recovery), not a re-run; (c) supplying input writes
+> `user.input.received`, restores `status: active`, and resumes to `FLOW_COMPLETE` exactly once;
+> (d) declining finalizes via `FLOW_CANCELLED` (`cancelled`). (Tasks: INT-030, INT-005, INT-012; gate:
+> pause/resume + paused-session recovery, Phase 4–5.)
+
+---
+
+## Scenario 3B — Delegate a sub-task to a workflow (FR-151)
+
+This exercises **step→workflow invocation** — a conversation step invokes a named single-turn
+**workflow** (a reusable prompt template under `{notor_dir}/workflows/`) and folds its result into the
+step's own context before emitting.
+
+1. Have a workflow available (any note discoverable by `discoverWorkflows` under
+   `{notor_dir}/workflows/`), e.g. a `Summarize Sources` workflow.
+2. Author/use a conversation step that **invokes that workflow by name** to direct a bounded sub-task.
+   The workflow runs to completion on the **background-workflow loop** (one tool call per iteration,
+   headless — `ask_user`-style tools error out cleanly since there is no interaction channel), and its
+   final assistant text is returned **into the step's context**, so the step can reason over it before
+   emitting its own event.
+3. **Observe the result fold.** The step's emitted event reflects the workflow's output; the invoked
+   workflow runs as its own background conversation and does **not** appear as an orchestration step
+   conversation (no `orchestration_edges`, no child-flow tree).
+
+> **Budget caveat (uncapped — read before relying on this).** The invoked workflow runs **uncapped**
+> during the call (the background loop has no per-run iteration/cost cap), and its spend is folded into
+> the flow's aggregate budget only by **post-hoc reconciliation** at the await-result boundary
+> (`decrementAggregate`). The flow's `notor-max-cost-usd` / `notor-max-iterations` ceiling is therefore
+> accurate **after** the call but is **not** enforced during it — a single step→workflow invocation can
+> overshoot the ceiling by an **unbounded** amount (a whole workflow run), **unlike** `run_flow`'s bounded
+> ≤-one-turn soft ceiling (Scenario 5). Treat step→workflow as a **deliberate, potentially expensive
+> delegation** (FR-151).
+
+> **Validation points:** (a) the step invokes a named workflow and folds its result into context before
+> emitting; (b) the workflow runs on the background loop (not a child flow), with no `orchestration_edges`;
+> (c) the workflow's cost/iterations are reconciled into the shared budget cell after the call.
+> (Tasks: INT-031, FEAT-007; distinct from `run_flow` / Scenario 5.)
+
+---
+
 ## Scenario 4 — Inspect the run tree
 
 The **run-tree view** is the only surface where hidden step conversations are visible. It is unified —
@@ -464,6 +529,17 @@ tasks in [tasks.md](tasks.md).
       step bodies avoid them and insert `await` yield points. (FR-130, FR-131)
 - [ ] **Cancellation:** an empty `findings.md` drives `FLOW_CANCELLED`, terminating with status
       `cancelled` and bypassing task enforcement. (FR-132)
+- [ ] **Interactive pause + paused-reload (Scenario 3A):** emitting `user.input.required` suspends the
+      loop and surfaces the prompt with `status: interrupted` (entry written **before** suspending); a
+      reload while paused **re-surfaces** the prompt (still-paused recovery, not a re-run); supplying input
+      writes `user.input.received`, restores `status: active`, and resumes to `FLOW_COMPLETE` once;
+      declining finalizes via `FLOW_CANCELLED`. (FR-150, FR-125)
+- [ ] **Step→workflow invocation (Scenario 3B):** a conversation step invokes a named single-turn
+      workflow and folds its result into the step's context before emitting; the workflow runs on the
+      background loop (not a child flow — no `orchestration_edges`); its cost/iterations are reconciled
+      into the shared budget cell **after** the call. The invoked workflow runs **uncapped** during the
+      call, so the aggregate overshoot is **unbounded** (a whole workflow run) — a documented v1 property,
+      **unlike** `run_flow`'s bounded soft ceiling. (FR-151)
 - [ ] **Progress Notices:** a per-turn Notice names flow + step + iteration; right-click (desktop)
       jumps into the step conversation. (FR-140, FR-141)
 - [ ] **Hidden from flat list:** step conversations do not appear in the flat sidebar or search.

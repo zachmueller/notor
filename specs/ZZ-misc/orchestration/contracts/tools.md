@@ -386,25 +386,32 @@ These are two distinct, easily-confused mechanisms. They run on **different loop
 | Return | Child `RunResult` (prefer `structured`, fall back to `text`) | The workflow's single-turn result merged into the step's context |
 | Child session | New child session (`parent_session_id`, isolation mode) | No child session — the step awaits a workflow result inline |
 | Edge/rollup | `child` edge + `child_run_metadata` ([edges.md](edges.md)) | None (no child-flow tree) |
-| Aggregate budget | Child turns decrement the **shared** `RunContext.budget` cell live (it runs on a child `RunLoop`) | Runs off-`RunLoop`, so it cannot decrement live; instead **post-hoc reconciliation** (below) |
+| Aggregate budget | Child turns decrement the **shared** `RunContext.budget` cell **live** (runs on a child `RunLoop`); overshoot is **bounded** (≤ one turn's spend per in-flight runner, FR-176) | Runs off-`RunLoop`, **uncapped**; cannot decrement live and is **not** bounded during the call; **post-hoc reconciliation** only (below), so aggregate overshoot is **unbounded** (a whole workflow run) |
 | Task | `INT-042` / `INT-043` | `INT-031` |
 
-In short: **`run_flow` composes flow→flow** (call/return over the shared run-loop, run-to-terminal);
-**step→workflow composes flow→workflow** (a step delegating one bounded task, hooking the existing
-background-execution loop). The background-workflow loop is deliberately **not** the seam `run_flow`
-uses — it is one-call-at-a-time and entangled with background approval/concurrency/liveness concerns a
-child flow turn must not inherit.
+In short: **`run_flow` composes flow→flow** (call/return over the shared run-loop, run-to-terminal,
+budget-gated live); **step→workflow composes flow→workflow** (a step delegating a task to an existing
+workflow, hooking the background-execution loop — **uncapped during the call**, reconciled after). The
+background-workflow loop is deliberately **not** the seam `run_flow` uses — it is one-call-at-a-time and
+entangled with background approval/concurrency/liveness concerns a child flow turn must not inherit.
 
-> **Aggregate-budget accounting for step→workflow (FR-151 / FR-176).** Because the invoked workflow
-> runs on the background-workflow loop — which has **no `RunContext`** — its LLM turns cannot decrement
-> the shared aggregate-budget cell live. Without accounting, a step could delegate unbounded spend the
-> flow's `notor-max-cost-usd` / `notor-max-iterations` ceilings never see. The resolution is **post-hoc
-> reconciliation**: when the invoking step awaits the workflow's result (the `INT-031` await-result
-> boundary), it subtracts the workflow's total reported cost/iterations from the **shared**
-> `RunContext.budget` cell in one decrement. The ceiling is therefore accurate *after* the invocation
-> (the next spawn/turn gate sees the real remaining total); it is not checked *during* the workflow's
-> own loop, which is instead bounded by the workflow's per-run cap. This keeps the background loop free
-> of `RunContext` plumbing while closing the accounting hole. Authority for the shared cell:
+> **Aggregate-budget accounting for step→workflow (FR-151) — uncapped, unbounded post-hoc overshoot
+> (Issue-13h).** Because the invoked workflow runs on the background-workflow loop — which has **no
+> `RunContext`** — its LLM turns cannot decrement the shared aggregate-budget cell live. Worse, that loop
+> has **no per-run iteration or cost cap of its own** (`while(continueLoop)` toggles solely on whether the
+> model called a tool; workflow frontmatter has no max-iteration field), so the invoked workflow is **not
+> bounded during the call** at all. The accounting resolution is **post-hoc reconciliation**: when the
+> invoking step awaits the workflow's result (the `INT-031` await-result boundary), it subtracts the
+> workflow's total reported cost/iterations from the **shared** `RunContext.budget` cell in one decrement.
+> The ceiling is therefore accurate **after** the invocation (the next spawn/turn gate sees the real
+> remaining total) but is **not** enforced during it — so a single step→workflow call can overshoot the
+> flow's `notor-max-cost-usd` / `notor-max-iterations` by an **unbounded** amount (a whole workflow run).
+> This is **larger and differently-shaped** than FR-176's `run_flow` soft ceiling, whose overshoot is
+> **bounded** (≤ one full turn per in-flight runner) because a `run_flow` child decrements the shared cell
+> live. FR-176 covers `run_flow` / chaining only — **not** step→workflow. Bounding the invoked workflow
+> during its run (a per-run cap or live gating) is **out of scope for v1**; the accepted v1 contract is
+> "uncapped during, reconciled after, unbounded overshoot," surfaced to authors as a deliberate-delegation
+> caveat. This keeps the background loop free of `RunContext` plumbing. Authority for the shared cell:
 > [run-loop.md](run-loop.md); the reconciliation wiring is `INT-031`.
 
 ---

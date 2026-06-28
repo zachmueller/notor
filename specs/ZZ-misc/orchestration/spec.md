@@ -651,12 +651,28 @@ task, awaiting the workflow's result into the step's context (hooking the backgr
 workflow's spend is folded into the aggregate budget by **post-hoc reconciliation**: at the
 await-result boundary the invoking step subtracts the workflow's total reported cost/iterations from
 the shared `RunContext.budget` cell, so the flow's `notor-max-cost-usd` / `notor-max-iterations`
-ceilings account for workflow-invocation spend (accurate after the call; the workflow's own per-run
-cap bounds it during).
+ceilings see workflow-invocation spend (accurate **after** the call).
+
+> **The invoked workflow runs UNCAPPED — the aggregate overshoot here is UNBOUNDED (Issue-13h).** The
+> background-workflow loop (`_backgroundResponseLoop`, `src/chat/workflow-executor.ts` `while(continueLoop)`)
+> has **no per-run iteration or cost cap** — it loops until the model stops calling tools, and workflow
+> frontmatter exposes no max-iteration field. Reconciliation happens only **after** the workflow returns,
+> so the flow's ceiling is **not** enforced during the call: a single step→workflow invocation can run an
+> unbounded number of turns and overshoot `notor-max-cost-usd` / `notor-max-iterations` by an **unbounded**
+> amount (a whole workflow run) before the next gate sees the corrected total. This is **larger and
+> differently-shaped** than FR-176's `run_flow` soft ceiling, whose overshoot is **bounded** (≤ one full
+> turn's spend per in-flight runner) because a `run_flow` child runs on a child `RunLoop` that decrements
+> the shared cell **live**. FR-176 governs `run_flow` / chaining only; it does **not** cover step→workflow.
+> Authors should treat a step→workflow invocation as a **deliberate, potentially expensive delegation**, not
+> a cheaply-bounded sub-call. Bounding the invoked workflow during its run (a per-run cap or live gating) is
+> **out of scope for v1**.
 
 - AC: a step can invoke a workflow and receive its result.
 - AC: the workflow's total cost/iterations are reconciled into the shared aggregate-budget cell at the
-  await-result boundary (the ceiling sees workflow-invocation spend).
+  await-result boundary (the ceiling sees workflow-invocation spend after the call).
+- AC: the invoked workflow runs **uncapped** during the call; the resulting aggregate overshoot is
+  **unbounded** (a whole workflow run), explicitly **unlike** FR-176's bounded `run_flow` soft ceiling —
+  this is a documented, accepted v1 property, surfaced to authors (persona + docs).
 
 ### FR-160 group — Built-in flows + orchestration-creator persona (design Phase 6)
 

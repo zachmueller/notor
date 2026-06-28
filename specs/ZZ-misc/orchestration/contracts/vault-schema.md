@@ -382,10 +382,21 @@ The order below is **mandatory** — recovery replay depends on it (FR-112, FR-1
    stale window and per-task thrashing counters are likewise **rehydrated** from the replayed
    `event.emitted` / task history before the run resumes — so a near-stale self-loop is not reset by a
    reload (see Parent-rooted recovery, "State rehydration").
+7. **`user.input.required` before the runner suspends the loop; `user.input.received` before the resume
+   event is routed (FR-150).** The pausing entry must be durable **before** the runner stops consuming
+   events, so a crash between "asked" and "answered" leaves a **dangling `user.input.required`** (no
+   following `user.input.received`) — which recovery classifies as **"still paused"** and re-surfaces the
+   prompt, *not* as a dangling `turn.start` that re-emits a trigger (Risk #9; the pause is a recoverable
+   log state, INT-030/INT-005). On input, `user.input.received` is appended **before** the resume event is
+   published (write-before-route, item 3), so a crash after the answer resumes from the published resume
+   event idempotently. The pause is the **runner's** interpretation of these entries at its event-loop
+   boundary — `user.input.required` is **not** an engine routing rule (the engine stays LLM/UI-agnostic;
+   [event-engine.md](event-engine.md)).
 
 Sequence per step turn: `turn.start` → (LLM/code runs; `side_effect.committed` per guarded effect;
 `child.spawned`/`child.result` per `run_flow` call) → `turn.complete` (with `cost_usd`/`token_usage`)
-→ `event.emitted` → (route).
+→ `event.emitted` → (route). A step that pauses for input instead writes `user.input.required` (before
+suspending) and, on resume, `user.input.received` (before routing the resume event).
 
 ### Parent-rooted recovery (no duplicate child runs — FR-125)
 

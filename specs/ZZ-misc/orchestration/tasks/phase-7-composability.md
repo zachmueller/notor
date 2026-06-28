@@ -806,7 +806,7 @@ feature behaves as documented as a user would experience it, and that the quicks
 checklist (VAL-001)** passes. This is the final feature acceptance gate — it exercises every phase
 together, not just Phase 7. It is performed after the e2e gates (`TEST-007`, `TEST-008`) are green.
 
-The walkthrough covers the quickstart's six scenarios:
+The walkthrough covers the quickstart's scenarios (1–6, plus the two Phase-5 scenarios 3A/3B):
 
 1. **Enable the feature group** (Scenario 1, FR-119) — toggle `orchestration_enabled`; confirm the
    `orchestrations/` directory is created, the `orchestration-creator` persona appears, and the "Notor:
@@ -817,6 +817,17 @@ The walkthrough covers the quickstart's six scenarios:
 3. **Run it** (Scenario 3) — run to `FLOW_COMPLETE`; confirm the session workspace
    (`session.json`/`session-log.jsonl`/`scratchpad/`/`tasks/`), per-turn progress Notices, and task
    enforcement behave as documented.
+3A. **Interactive pause + paused-reload** (Scenario 3A, FR-150, INT-030/INT-005) — a step emits
+   `user.input.required`; confirm the loop suspends with `status: interrupted` (entry durable **before**
+   suspending), a reload while paused **re-surfaces** the prompt (still-paused recovery, not a re-run),
+   supplying input writes `user.input.received` and resumes to `FLOW_COMPLETE` once, and declining
+   finalizes via `FLOW_CANCELLED`.
+3B. **Step→workflow invocation** (Scenario 3B, FR-151, INT-031) — a step invokes a named single-turn
+   workflow and folds its result into the step's context before emitting; confirm the workflow runs on the
+   background loop (not a child flow — no `orchestration_edges`) and its cost/iterations are reconciled
+   into the shared budget cell **after** the call. Confirm the **uncapped** behavior is as documented: the
+   invoked workflow has no per-run cap, so the aggregate overshoot is unbounded — distinct from
+   `run_flow`'s bounded soft ceiling (Scenario 5).
 4. **Inspect the run tree** (Scenario 4, POL-003/POL-004) — open the run-tree leaf from the spawning
    card / activity indicator / progress Notice; confirm step conversations are hidden from the flat list
    and visible only in the tree; confirm live→static rendering and select-to-navigate.
@@ -827,18 +838,29 @@ The walkthrough covers the quickstart's six scenarios:
 6. **Recovery after reload** (Scenario 6, INT-005 + INT-044) — interrupt a run, reload, confirm the
    parent/child session tree resumes coherently and the run-tree re-attaches live.
 
-**FRs:** All (end-to-end), with emphasis on FR-119, FR-120/122/123/125/126, FR-170…179.
+**FRs:** All (end-to-end), with emphasis on FR-119, FR-120/122/123/125/126, **FR-150/151** (the Phase-5
+pause + step→workflow scenarios), FR-170…179.
 
 **Files:**
 - `../quickstart.md` — the script being validated (no code file; this task is a manual walkthrough whose
   output is the checked Validation checklist + any defect tickets filed against the relevant phase tasks).
 
 **Dependencies:** `POL-003` (the run-tree view inspected in Scenario 4 + the inline card in Scenario 5),
-`TEST-008` (the e2e gate that must be green before the manual walkthrough).
+`TEST-008` (the e2e gate that must be green before the manual walkthrough). The Phase-5 scenarios (3A/3B)
+additionally exercise `INT-030` / `INT-031`, which must be landed for those two scenarios to pass.
 
 **Acceptance Criteria:**
-- [ ] Every step of [../quickstart.md](../quickstart.md) Scenarios 1–6 produces the documented behavior.
-- [ ] The quickstart's own **Validation checklist (VAL-001)** is fully checked.
+- [ ] Every step of [../quickstart.md](../quickstart.md) Scenarios 1–6 **plus the Phase-5 scenarios 3A
+  (interactive pause + paused-reload) and 3B (step→workflow)** produces the documented behavior.
+- [ ] The quickstart's own **Validation checklist (VAL-001)** is fully checked (including the
+  interactive-pause and step→workflow items).
+- [ ] Interactive pause (Scenario 3A) shows: loop suspends with `status: interrupted` (durable before
+  suspend), a paused reload re-surfaces the prompt (not a re-run), input resumes to `FLOW_COMPLETE` once,
+  decline finalizes via `FLOW_CANCELLED`.
+- [ ] Step→workflow (Scenario 3B) shows: the workflow result folds into the step context before emitting;
+  it runs on the background loop (no `orchestration_edges` / child-flow tree); cost/iterations reconcile
+  into the shared budget cell **after** the call; the **uncapped/unbounded-overshoot** behavior matches
+  the documented v1 contract (distinct from `run_flow`'s bounded soft ceiling).
 - [ ] Composition (Scenario 5) shows: child session, `structured`-preferred return, inline peek card with
   aggregate rollup, `child` edge + `child_run_metadata`, and a `max_depth` / budget-gated blocked spawn.
 - [ ] Recovery (Scenario 6) resumes the parent/child session tree coherently and the run-tree re-attaches

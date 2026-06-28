@@ -191,18 +191,27 @@ Phase 7 generalizes (design note: "generalize `chat/workflow-executor.ts` await-
 [orchestration.md → Phase 7]); `INT-031` is the simpler, workflow-scoped consumer of that loop and does
 not depend on Phase 7.
 
-**Aggregate-budget reconciliation (FR-176, the accounting hole this closes).** The background-workflow
-loop has **no `RunContext`**, so its LLM turns cannot decrement the shared aggregate-budget cell live —
-without accounting, a step could delegate unbounded spend the flow's `notor-max-cost-usd` /
-`notor-max-iterations` ceilings never see. At the **await-result boundary** (where the step captures the
-workflow's final output), the executor performs **post-hoc reconciliation**: it subtracts the
+**Aggregate-budget reconciliation (FR-151, the accounting hole this closes) — uncapped during,
+unbounded overshoot (Issue-13h).** The background-workflow loop has **no `RunContext`**, so its LLM
+turns cannot decrement the shared aggregate-budget cell live — and, crucially, it also has **no per-run
+iteration or cost cap of its own** (`_backgroundResponseLoop`'s `while(continueLoop)` toggles solely on
+whether the model called a tool; workflow frontmatter exposes no max-iteration field). So the invoked
+workflow is **not bounded during the call**. At the **await-result boundary** (where the step captures
+the workflow's final output), the executor performs **post-hoc reconciliation**: it subtracts the
 workflow's total reported cost/iterations from the **shared** `RunContext.budget` cell
-(`decrementAggregate`, ARCH-005) in one decrement. The ceiling is therefore accurate *after* the
-invocation (the next turn/spawn gate sees the real remaining total); it is not checked *during* the
-workflow's own loop, which is bounded instead by the workflow's per-run cap. This keeps `RunContext`
-out of the background loop while closing the hole. Authority for the shared cell:
-[../contracts/run-loop.md](../contracts/run-loop.md); the budget model and reconciliation note are in
-[../contracts/tools.md](../contracts/tools.md) (`run_flow` vs step→workflow table).
+(`decrementAggregate`, ARCH-005) in one decrement. The ceiling is therefore accurate **after** the
+invocation (the next turn/spawn gate sees the real remaining total) but is **not** enforced during it —
+so a single step→workflow call can overshoot the flow's `notor-max-cost-usd` / `notor-max-iterations` by
+an **unbounded** amount (a whole workflow run). This is **larger and differently-shaped** than FR-176's
+`run_flow` soft ceiling, whose overshoot is **bounded** (≤ one full turn per in-flight runner) because a
+`run_flow` child runs on a child `RunLoop` that decrements the shared cell live — **FR-176 does not cover
+step→workflow.** Bounding the invoked workflow during its run (a per-run cap or live gating) is **out of
+scope for v1**; the accepted contract is "uncapped during, reconciled after, unbounded overshoot,"
+surfaced to authors as a deliberate-delegation caveat (POL-001 / DOC-001). This keeps `RunContext` out of
+the background loop while closing the *accounting* hole (the ceiling is correct going forward). Authority
+for the shared cell: [../contracts/run-loop.md](../contracts/run-loop.md); the uncapped/unbounded-overshoot
+budget model is the authority of [../contracts/tools.md](../contracts/tools.md) (`run_flow` vs
+step→workflow table) and [../spec.md](../spec.md) FR-151.
 
 **FRs:** FR-151 (step-to-workflow invocation — invoke a named single-turn workflow, await its result
 into the step's context).
@@ -213,11 +222,17 @@ into the step's context).
   step emits its event. (Whether the invocation surfaces as a dedicated tool the step calls, or as a
   step-frontmatter binding, is an implementation choice resolved in this task; either way it drives the
   background loop below and folds the returned text into the step turn.)
-- `src/chat/workflow-executor.ts` — the **background execution** loop (`while (continueLoop)` ~809;
-  single `dispatcher.dispatch()` ~951) is the seam that runs the invoked workflow to completion; expose
-  / reuse an entry point that runs an assembled workflow prompt headlessly and returns its final
-  assistant text **plus its total token usage / iteration count** (the latter is what FR-176
-  reconciliation needs; the same loop Phase 7 `run_flow` later generalizes).
+- `src/chat/workflow-executor.ts` — the **background execution** loop (`_backgroundResponseLoop`,
+  `while (continueLoop)` ~809; single `dispatcher.dispatch()` ~951) is the seam that runs the invoked
+  workflow to completion. **Wrap, do not modify:** the loop returns `Promise<void>` today and serves live
+  background workflows, so INT-031 **wraps** the existing entry point rather than changing its signature —
+  it reads the workflow's cumulative spend from the background `ConversationManager` after the loop settles
+  (the per-turn token rollup is already maintained on the background conversation, ~`:1003-1011`:
+  `total_output_tokens` / `estimated_cost`) and derives the iteration count at that same await-result
+  boundary. The captured `{ text, costUsd, iterations }` feeds both the step-context fold and the
+  post-hoc `decrementAggregate` reconciliation. Leaving the shared loop's signature and live-workflow
+  behavior untouched keeps the regression surface minimal (the same loop Phase 7 `run_flow` later
+  generalizes — but Phase 7 owns that generalization, not INT-031).
 - `src/run-loop/budget.ts` — reused (`ARCH-005`): at the await-result boundary, `StepTurnExecutor`
   calls `decrementAggregate(runContext.budget, workflowCostUsd, workflowIterations)` to fold the
   workflow's spend into the shared aggregate-budget cell (post-hoc reconciliation).
@@ -239,7 +254,11 @@ that the workflow invocation hangs off of).
   can reason over it before emitting its own event.
 - [ ] At the await-result boundary, the workflow's total cost/iterations are **reconciled** into the
   shared `RunContext.budget` cell (`decrementAggregate`), so the flow's `notor-max-cost-usd` /
-  `notor-max-iterations` ceilings account for workflow-invocation spend (accurate after the call).
+  `notor-max-iterations` ceilings account for workflow-invocation spend (accurate **after** the call).
+- [ ] The invoked workflow runs **uncapped** during the call (the background loop has no per-run
+  iteration/cost cap), so the aggregate overshoot is **unbounded** (a whole workflow run) — explicitly
+  **unlike** FR-176's bounded `run_flow` soft ceiling. This is a documented, accepted v1 property (not a
+  bug); no per-run cap or live gating is added here.
 - [ ] The invocation reuses the existing assembly path (`assembleWorkflowPrompt` in
   `src/workflows/workflow-executor.ts`) — no duplicate prompt-assembly logic is introduced.
 - [ ] The invoked workflow runs as its own (background) conversation; it does **not** become an
