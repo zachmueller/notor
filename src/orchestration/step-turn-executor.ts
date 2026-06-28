@@ -53,6 +53,7 @@ import { logger } from "../utils/logger";
 import type { SessionLog } from "./session-log";
 import type { StepPromptBuilder } from "./step-prompt-builder";
 import type { StepConversationStore } from "./step-conversation-store";
+import type { CodeStepExecutor } from "./code-step-executor";
 import type { OrchestrationEvent, OrchestrationFlow, StepDefinition } from "./types";
 
 const log = logger("StepTurnExecutor");
@@ -111,6 +112,14 @@ export interface StepTurnExecutorDeps {
 	stepConversationStore?: StepConversationStore;
 	/** Provider/model labels for the persisted step-conversation header (INT-006). */
 	providerLabel?: { providerId: string; modelId: string };
+	/**
+	 * The deterministic code-step executor (Phase 3, INT-010). When a step has
+	 * `notor-step-mode: code` this executor runs its code fence instead of the
+	 * conversation path. Omitted in Phase-1 unit tests → a `code` step falls back
+	 * to the inert default-emission seam (a Phase-1 flow with an accidental code
+	 * step never silently stalls).
+	 */
+	codeStepExecutor?: CodeStepExecutor;
 }
 
 /** Inputs the runner threads into a single step-turn execution. */
@@ -379,14 +388,18 @@ export class StepTurnExecutor {
 	// -- Code-step seam (Phase 3, INT-010) -----------------------------------
 
 	/**
-	 * Code-step dispatch seam. The deterministic `CodeStepExecutor` (Phase 3,
-	 * INT-010) replaces this; until then a code step is a no-op that synthesizes
-	 * its `default_publishes` (or `{step}.no_emit`) so a Phase-1 flow with an
-	 * accidental code step never silently stalls.
+	 * Code-step dispatch seam (Phase 3, INT-010). Delegates to the injected
+	 * `CodeStepExecutor` (deterministic fence execution, zero tokens). When no
+	 * executor is wired (Phase-1 unit tests), falls back to an inert default
+	 * emission so a flow with an accidental code step never silently stalls.
 	 */
 	private async executeCodeStep(req: StepTurnRequest): Promise<StepTurnResult> {
+		if (this.deps.codeStepExecutor) {
+			return this.deps.codeStepExecutor.execute(req);
+		}
+
 		const { step, event } = req;
-		log.warn("Code-step execution is a Phase-3 seam; synthesizing default emission", {
+		log.warn("Code-step execution has no executor wired; synthesizing default emission", {
 			step: step.name,
 		});
 		await this.sessionLog.appendTurnStart({

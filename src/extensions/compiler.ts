@@ -85,6 +85,22 @@ export function compileAutomationFunction(strippedCode: string): CompiledExtensi
 	return new AsyncFunction(...AUTOMATION_ARG_NAMES, strippedCode);
 }
 
+/**
+ * Compile stripped JavaScript into an async function with a caller-supplied
+ * argument list. The same `new AsyncFunction(...names, code)` mechanism as
+ * {@link compileToolFunction} — there is **no second compiler**. Orchestration
+ * code steps (Phase 3, INT-010) use this with `CODE_STEP_ARG_NAMES`
+ * (`["app", "obsidian", "utils", "libs", "event", "orchestration"]`), i.e.
+ * {@link TOOL_ARG_NAMES} with the trailing `settings`/`shared`/`params` swapped
+ * for `event`/`orchestration`.
+ */
+export function compileFunction(
+	argNames: readonly string[],
+	strippedCode: string,
+): CompiledExtensionFn {
+	return new AsyncFunction(...argNames, strippedCode);
+}
+
 // ---------------------------------------------------------------------------
 // Block module compilation
 // ---------------------------------------------------------------------------

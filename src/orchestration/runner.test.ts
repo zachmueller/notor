@@ -216,6 +216,62 @@ describe("OrchestrationRunner", () => {
 		expect(result.terminal.payload).toBe("nothing to do");
 	});
 
+	it("FLOW_CANCELLED bypasses open-task enforcement — unlike FLOW_COMPLETE (INT-012 / FR-132)", async () => {
+		// A pre-flight Planner cancels while a task is still open. FLOW_COMPLETE
+		// would be blocked + re-injected (see the INT-003 test); FLOW_CANCELLED
+		// must terminate immediately with status `cancelled`, NOT re-trigger.
+		const planner = step("Planner", {
+			triggers: ["start", "flow.tasks_remaining"],
+			publishes: [FLOW_CANCELLED],
+		});
+		const f = flow([planner]);
+		const runOrder: string[] = [];
+		const executor = fakeExecutor(() => ({ topic: FLOW_CANCELLED, payload: "no work to do" }), runOrder);
+		// A task is open the whole time — it must NOT block FLOW_CANCELLED.
+		const listOpenTasks = async () => [{ key: "step-01", description: "speculative task" }];
+
+		const result = await makeRunner(f, executor, listOpenTasks).start(f, "objective");
+		expect(result.status).toBe("cancelled");
+		expect(result.terminal.topic).toBe(FLOW_CANCELLED);
+		// Planner ran exactly once — no flow.tasks_remaining re-trigger.
+		expect(runOrder.filter((n) => n === "Planner").length).toBe(1);
+	});
+
+	it("writes session.cancelled with the payload as the reason on FLOW_CANCELLED (INT-012)", async () => {
+		const planner = step("Planner", { triggers: ["start"], publishes: [FLOW_CANCELLED] });
+		const f = flow([planner]);
+		const executor = fakeExecutor(() => ({ topic: FLOW_CANCELLED, payload: "nothing unread" }), []);
+
+		const cancelled: Array<{ reason: string }> = [];
+		const log = noopLog();
+		(log as unknown as { appendSessionCancelled: (e: { reason: string }) => Promise<void> })
+			.appendSessionCancelled = async (e) => {
+			cancelled.push(e);
+		};
+
+		let convId = 0;
+		const runner = new OrchestrationRunner({
+			executor,
+			sessionLog: log,
+			makeOrchestrationContext: () => ({
+				sessionId: "s1",
+				scratchpadPath: "sp",
+				tasksPath: "tp",
+				pendingEmission: null,
+				emissionOverwrites: [],
+			}),
+			makeConversationId: () => `c${convId++}`,
+			mode: "act",
+			sessionId: "s1",
+			abortSignal: new AbortController().signal,
+			origin: "user",
+		});
+		const result = await runner.start(f, "objective");
+		expect(result.status).toBe("cancelled");
+		expect(cancelled).toHaveLength(1);
+		expect(cancelled[0]!.reason).toBe("nothing unread");
+	});
+
 	it("blocks a premature completion until a required event is seen, then completes", async () => {
 		// Planner emits FLOW_COMPLETE prematurely; required event "review.approved"
 		// is unmet → re-injected as flow.requirements_unmet (auto-subscribed back to

@@ -48,3 +48,23 @@ export const COMPLETION_NOPROGRESS_THRESHOLD = 3;
 
 /** Number of recent events the step prompt scaffold injects as "EVENT HISTORY". */
 export const EVENT_HISTORY_PROMPT_LIMIT = 10;
+
+// ---------------------------------------------------------------------------
+// Code-step execution (Phase 3, INT-010)
+// ---------------------------------------------------------------------------
+
+/**
+ * Default per-step timeout for a `notor-step-mode: code` step (seconds),
+ * overridable per step via `notor-step-timeout-seconds`. 300 s (5 min) — not the
+ * 60 s an MCP-style convention suggests — because build/test verification is a
+ * primary code-step use case and the outer guard must comfortably exceed any
+ * inner `utils.executeShellCommand` `timeoutSeconds`.
+ *
+ * Known limitation (Issue-7): the guard is a `setTimeout`-based race around a
+ * `new AsyncFunction` on the main event-loop thread (no Worker/VM isolation in
+ * v1), so it only fires at `await` boundaries — an unbounded *synchronous* loop
+ * is NOT interruptible.
+ *
+ * @see specs/ZZ-misc/orchestration/contracts/orchestration-helper.md
+ */
+export const DEFAULT_CODE_STEP_TIMEOUT_SECONDS = 300;

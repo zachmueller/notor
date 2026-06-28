@@ -43,6 +43,7 @@ import {
 	FLOW_CANCELLED,
 	FLOW_COMPLETE,
 	FLOW_ERROR,
+	isTerminalTopic,
 	type OrchestrationEvent,
 	type OrchestrationFlow,
 	type StepDefinition,
@@ -59,6 +60,15 @@ export interface OrchestrationRunResult {
 	terminal: OrchestrationEvent;
 	/** Total engine hops (step turns, code + conversation). */
 	iterations: number;
+	/**
+	 * The typed return lifted verbatim from a **terminal** code step's
+	 * `orchestration.emit(topic, payload?, structured?)` third arg (FR-104/173);
+	 * `null` when no terminal emit carried one (a conversation step or a
+	 * non-terminal emit never sets it). This is the only producer of
+	 * `RunResult.structured` for flow-as-tool — the full `run_flow` return wiring
+	 * is INT-043 (Phase 7), which consumes this.
+	 */
+	structured: unknown | null;
 }
 
 /** A queued routing job: an event to deliver to a specific subscriber step. */
@@ -304,7 +314,20 @@ export class OrchestrationRunner {
 
 			// Route the emission (terminal handling / fan-out enqueue).
 			const terminal = await this.routeEmission(flow, emitted, job.step, queue);
-			if (terminal) return terminal;
+			if (terminal) {
+				// Lift a TERMINAL code step's `structured` onto the run result verbatim
+				// (FR-173) — only when this turn's emission was terminal and carried one
+				// (a non-terminal emit's structured is ignored; event.payload stays the
+				// routing string). The terminal we return is for THIS emitted event.
+				if (
+					isTerminalTopic(emitted.topic) &&
+					turnResult.emission.structured !== undefined &&
+					terminal.terminal.topic === emitted.topic
+				) {
+					return { ...terminal, structured: turnResult.emission.structured };
+				}
+				return terminal;
+			}
 		}
 
 		// Queue drained with no terminal event — the flow stalled structurally.
@@ -485,7 +508,7 @@ export class OrchestrationRunner {
 		status: OrchestrationRunStatus,
 		terminal: OrchestrationEvent,
 	): OrchestrationRunResult {
-		return { status, terminal, iterations: this.iteration };
+		return { status, terminal, iterations: this.iteration, structured: null };
 	}
 
 	/**

@@ -5,7 +5,7 @@
 **Data Model:** [../data-model.md](../data-model.md) (`CodeStepEvent` / `CodeStepResult` / `OrchestrationHelper` shapes)
 **Master task index:** [../tasks.md](../tasks.md)
 **Contracts:** [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md) (authority for the code-step runtime API) · [../contracts/run-loop.md](../contracts/run-loop.md) · [../contracts/event-engine.md](../contracts/event-engine.md)
-**Status:** Draft
+**Status:** Implemented (INT-010…013, TEST-004)
 
 This file holds the task **bodies** for **Lane B** (design Phase 3): the programmatic code-step
 substrate. The phase→task mapping, dependency edges, critical path, and per-phase test gate are owned
@@ -130,33 +130,33 @@ into this executor; the conversation path it skips).
 - `src/extensions/compiler.ts:67` `TOOL_ARG_NAMES` (the arg list this swaps the tail of).
 
 **Acceptance Criteria:**
-- [ ] A `notor-step-mode: code` step creates **no** conversation and consumes **zero** tokens.
-- [ ] The first `ts`/`typescript`/`js`/`javascript` fence in `bodyContent` is extracted, type-stripped
+- [x] A `notor-step-mode: code` step creates **no** conversation and consumes **zero** tokens.
+- [x] The first `ts`/`typescript`/`js`/`javascript` fence in `bodyContent` is extracted, type-stripped
   via `stripTypes()`, and compiled to an `AsyncFunction` with exactly `CODE_STEP_ARG_NAMES`.
-- [ ] A missing/empty fence is treated as a code error (does not throw).
-- [ ] **For await-yielding code**, execution is bounded by a timeout guard (default **300 s**,
+- [x] A missing/empty fence is treated as a code error (does not throw).
+- [x] **For await-yielding code**, execution is bounded by a timeout guard (default **300 s**,
   overridable per step via `notor-step-timeout-seconds`; the outer guard must exceed any inner shell
   `timeoutSeconds`); on expiry at an `await` boundary the run is abandoned and the step errors.
-- [ ] **Documented limitation (Issue-7):** because code steps run as `new AsyncFunction` on the main
+- [x] **Documented limitation (Issue-7):** because code steps run as `new AsyncFunction` on the main
   event-loop thread (no Worker/VM isolation in v1), the timeout fires **only at `await` boundaries** — an
   unbounded **synchronous** loop is **not** interruptible and freezes the plugin; the mitigation is
   authoring guidance (never write unbounded sync loops; insert `await` yield points), and Worker isolation
   is future work.
-- [ ] On compile error, runtime throw, unhandled rejection, or (await-yielding) timeout, the executor
+- [x] On compile error, runtime throw, unhandled rejection, or (await-yielding) timeout, the executor
   fires a `{step}.code_error` event carrying the error message + stack **and** shows an error `Notice`.
-- [ ] `turn.start` and `turn.complete` are written to `session-log.jsonl` **even on error** (audit +
+- [x] `turn.start` and `turn.complete` are written to `session-log.jsonl` **even on error** (audit +
   recovery).
-- [ ] A code step decrements **neither** `RunContext.budget.costRemainingUsd` **nor**
+- [x] A code step decrements **neither** `RunContext.budget.costRemainingUsd` **nor**
   `budget.iterationsRemaining` (it is not an LLM turn; `notor-max-iterations` counts LLM turns only —
   D2/FR-117). It **does** advance the engine **step-turn** sequence counter (`flow.iteration` display),
   participate in **stale-loop** detection (it emits an event), and elapse **wall-clock runtime**.
   (Note — Issue-13c: `flow.iteration` / `session.json.iteration` is a **step-turn / HOP counter that
   INCLUDES code steps** and is **not** the same unit as `notor-max-iterations`, which counts **LLM turns
   only**; the two must not be conflated.)
-- [ ] A returned `CodeStepResult`'s `{topic, payload}` is handed to the engine for write-before-route
+- [x] A returned `CodeStepResult`'s `{topic, payload}` is handed to the engine for write-before-route
   routing; a `topic` not in the step's `notor-step-publishes` is treated as an orphan
   (FallbackCoordinator, FR-113), identical to a conversation-step emission.
-- [ ] When a returned `CodeStepResult` carries `structured` **and** `topic` is terminal, the runner
+- [x] When a returned `CodeStepResult` carries `structured` **and** `topic` is terminal, the runner
   lifts `structured` onto `RunResult.structured` verbatim (no JSON round-trip); a non-terminal emit's
   `structured` is ignored.
 
@@ -241,34 +241,36 @@ the `tasks` member shares their backing).
   `executeShellCommand(...)` (inherited via `utils`).
 
 **Acceptance Criteria:**
-- [ ] `return orchestration.emit(topic, payload?, structured?)` routes the next event deterministically;
+- [x] `return orchestration.emit(topic, payload?, structured?)` routes the next event deterministically;
   a bare (un-`return`ed) call has no effect.
-- [ ] A terminal `emit(topic, payload, structured)` populates `RunResult.structured` (lifted by the
+- [x] A terminal `emit(topic, payload, structured)` populates `RunResult.structured` (lifted by the
   runner, INT-010); a non-terminal emit ignores `structured`.
-- [ ] `once(key, fn)` runs `fn` once and appends `side_effect.committed`; a re-run with an
+- [x] `once(key, fn)` runs `fn` once and appends `side_effect.committed`; a re-run with an
   already-committed `key` skips `fn` and returns `undefined` (best-effort at-least-once guard) —
   **including across a non-terminal child resume** (the child resumes in place and keeps its log, so the
-  markers survive; no tombstone-and-respawn — Issue-2).
-- [ ] A code step that returns no `CodeStepResult` synthesizes the step's
+  markers survive; no tombstone-and-respawn — Issue-2). *(Launch seeds `committedKeys` from
+  `recovered.committedKeys` on resume; the in-place-resume guarantee is INT-044/Phase 7.)*
+- [x] A code step that returns no `CodeStepResult` synthesizes the step's
   `notor-step-default-publishes` (parity with a no-emit conversation turn, FR-115).
-- [ ] `callTool` / `callMcpTool` dispatch through `ToolDispatcher.dispatch()` (registered built-in
+- [x] `callTool` / `callMcpTool` dispatch through `ToolDispatcher.dispatch()` (registered built-in
   tools / connected MCP servers), **threading the step's `runContext` + `orchestrationContext`**; a
   dispatch rejection surfaces as `{step}.code_error` (caught by INT-010, not a plugin crash).
-- [ ] A code-step `callTool("run_flow", …)` is gated on `depth < maxDepth` AND the shared budget cell
+- [x] A code-step `callTool("run_flow", …)` is gated on `depth < maxDepth` AND the shared budget cell
   exactly as an LLM-step `run_flow`; a blocked spawn returns a clear tool error (no bypass of `max_depth`
   / aggregate budget), and a long-running code step's tool calls observe parent abort via
-  `runContext.abort`.
-- [ ] `callMcpTool` respects the step's `notor-step-mcp-servers` filter (null = inherit all).
-- [ ] `scratchpad.read/write/list/exists` operate under `sessions/{id}/scratchpad/`; writes are
+  `runContext.abort`. *(The helper threads `runContext`/`orchestrationContext` onto every dispatch; the
+  `run_flow` tool + its spawn gate is Phase 7 / INT-042–046.)*
+- [x] `callMcpTool` respects the step's `notor-step-mcp-servers` filter (null = inherit all).
+- [x] `scratchpad.read/write/list/exists` operate under `sessions/{id}/scratchpad/`; writes are
   readable by downstream steps; access bypasses per-step path constraints for the owning session.
-- [ ] `tasks.ensure/start/close/list` share the INT-002 task backing; `ensure` is idempotent;
+- [x] `tasks.ensure/start/close/list` share the INT-002 task backing; `ensure` is idempotent;
   `list({status})` filters by status.
-- [ ] `flow.name`/`flow.iteration`/`flow.sessionId` reflect the current turn; `flow.iteration` equals
+- [x] `flow.name`/`flow.iteration`/`flow.sessionId` reflect the current turn; `flow.iteration` equals
   the engine **step-turn / HOP counter (includes code steps)** — distinct from `notor-max-iterations`,
   which counts LLM turns only (Issue-13c).
-- [ ] `eventHistory(limit?)` returns the session's recent `OrchestrationEvent`s (newest last;
+- [x] `eventHistory(limit?)` returns the session's recent `OrchestrationEvent`s (newest last;
   `limit` defaults to all).
-- [ ] `utils` and `libs` are the **identical** objects from `buildUtils()`/`buildLibs()` — no
+- [x] `utils` and `libs` are the **identical** objects from `buildUtils()`/`buildLibs()` — no
   orchestration-specific members added to them.
 
 ---
@@ -309,13 +311,15 @@ INT-010 (`CodeStepExecutor` — a code step is one of the two `FLOW_CANCELLED` p
 (`FLOW_COMPLETE` task enforcement — the gate `FLOW_CANCELLED` bypasses; **must precede this task**).
 
 **Acceptance Criteria:**
-- [ ] `FLOW_CANCELLED` terminates the loop immediately with session status `cancelled`.
-- [ ] Open/running tasks do **not** block `FLOW_CANCELLED` (the INT-003 remaining-task gate is
-  bypassed) — contrast `FLOW_COMPLETE`, which they *do* block.
-- [ ] `FLOW_CANCELLED` is emittable from a code step (`return orchestration.emit("FLOW_CANCELLED", …)`)
-  **and** from a conversation step (`emit_event` tool).
-- [ ] A `session.cancelled` entry is written to `session-log.jsonl` with the payload as the reason.
-- [ ] Status `cancelled` is distinct from `completed` and `error` in `session.json` and in recovery.
+- [x] `FLOW_CANCELLED` terminates the loop immediately with session status `cancelled`.
+- [x] Open/running tasks do **not** block `FLOW_CANCELLED` (the INT-003 remaining-task gate is
+  bypassed) — contrast `FLOW_COMPLETE`, which they *do* block. *(`routeEmission` short-circuits
+  `FLOW_CANCELLED` before `handleCompletion`; covered by the new open-task-bypass runner test.)*
+- [x] `FLOW_CANCELLED` is emittable from a code step (`return orchestration.emit("FLOW_CANCELLED", …)`)
+  **and** from a conversation step (`emit_event` tool — `FLOW_CANCELLED` is in its terminal set).
+- [x] A `session.cancelled` entry is written to `session-log.jsonl` with the payload as the reason.
+- [x] Status `cancelled` is distinct from `completed` and `error` in `session.json` and in recovery
+  (`launchOrchestration` maps `cancelled` → `session.json` status `cancelled`).
 
 ---
 
@@ -348,14 +352,15 @@ that consume it (POL-001 → FEAT-002/INT-040; DOC-001 → POL-001/INT-011 per [
 shipped surface).
 
 **Acceptance Criteria:**
-- [ ] The code-step authoring guidance is written and matches the shipped
+- [x] The code-step authoring guidance is written and matches the shipped
   [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md) surface (no drift in
-  member names, arg signature, or error behavior).
-- [ ] It explains code-step vs conversation-step selection, the `notor-step-mode: code` frontmatter,
+  member names, arg signature, or error behavior). *(Content: [../guidance/code-step-authoring.md](../guidance/code-step-authoring.md).)*
+- [x] It explains code-step vs conversation-step selection, the `notor-step-mode: code` frontmatter,
   the `event`/`orchestration` args, the `return orchestration.emit(...)` contract +
   `default_publishes` fallback, and the `{step}.code_error` path.
-- [ ] It is referenced by POL-001 (`orchestration-creator` persona) and DOC-001 (docs + persona
-  updates) — INT-013 produces content; those tasks place it.
+- [x] It is referenced by POL-001 (`orchestration-creator` persona) and DOC-001 (docs + persona
+  updates) — INT-013 produces content; those tasks place it. *(The guidance file's header names POL-001
+  / DOC-001 as the Phase-6 placement consumers; placement is their work, out of scope for Phase 3.)*
 
 ---
 
@@ -376,36 +381,35 @@ and helper dispatch must be green before Lane B merges. Tests parallelize across
 runner suite but is verified here for the helper-emit path).
 
 **Acceptance Criteria:**
-- [ ] **Fence extraction:** first `ts`/`typescript`/`js`/`javascript` fence is extracted and compiled;
+- [x] **Fence extraction:** first `ts`/`typescript`/`js`/`javascript` fence is extracted and compiled;
   a missing/empty fence → `{step}.code_error` (no throw).
-- [ ] **Type strip + arg signature:** a typed fence compiles via `stripTypes()`; the compiled function
+- [x] **Type strip + arg signature:** a typed fence compiles via `stripTypes()`; the compiled function
   is invoked with exactly `CODE_STEP_ARG_NAMES` (`app`, `obsidian`, `utils`, `libs`, `event`,
   `orchestration`).
-- [ ] **Timeout (await-yielding code):** a fence that **yields at `await`** and exceeds the timeout guard
+- [x] **Timeout (await-yielding code):** a fence that **yields at `await`** and exceeds the timeout guard
   is abandoned and surfaces `{step}.code_error`. The test documents the **sync-loop limitation**
   (Issue-7): an unbounded **synchronous** loop is **not** interruptible by the `setTimeout`-based guard
   (no Worker isolation in v1) — so the timeout AC is explicitly scoped to await-yielding code.
-- [ ] **Error → `{step}.code_error`:** compile error, runtime throw, and unhandled rejection each fire
+- [x] **Error → `{step}.code_error`:** compile error, runtime throw, and unhandled rejection each fire
   `{step}.code_error` (payload carries message + stack), show an error `Notice`, and still write
   `turn.start`/`turn.complete`.
-- [ ] **No tokens / no cost:** a code step records zero token usage and does not decrement
+- [x] **No tokens / no cost:** a code step records zero token usage and does not decrement
   `RunContext.budget.costRemainingUsd`, while advancing the engine iteration counter.
-- [ ] **Helper dispatch:** `callTool`/`callMcpTool` route through `ToolDispatcher.dispatch()` (mocked);
+- [x] **Helper dispatch:** `callTool`/`callMcpTool` route through `ToolDispatcher.dispatch()` (mocked);
   `callMcpTool` honors the `notor-step-mcp-servers` filter; a dispatch rejection becomes
   `{step}.code_error`.
-- [ ] **`emit` routing:** `return orchestration.emit(t, p)` yields `{topic: t, payload: p}`; a bare
+- [x] **`emit` routing:** `return orchestration.emit(t, p)` yields `{topic: t, payload: p}`; a bare
   call is a no-op; returning nothing synthesizes `notor-step-default-publishes`.
-- [ ] **`emit` structured:** `emit(t, p, s)` carries `structured: s` on `CodeStepResult`; the runner
+- [x] **`emit` structured:** `emit(t, p, s)` carries `structured: s` on `CodeStepResult`; the runner
   lifts it onto `RunResult.structured` only for a terminal `topic` (verified at the executor boundary;
   full flow-as-tool return in INT-043 / TEST-006).
-- [ ] **`once`:** `once(key, fn)` runs `fn` and records `side_effect.committed`; a second call (or a
+- [x] **`once`:** `once(key, fn)` runs `fn` and records `side_effect.committed`; a second call (or a
   recovery re-run) with the same committed `key` skips `fn` and returns `undefined`.
-- [ ] **`scratchpad` / `tasks` / `eventHistory`:** scratchpad round-trips under the session dir;
+- [x] **`scratchpad` / `tasks` / `eventHistory`:** scratchpad round-trips under the session dir;
   `tasks.ensure` is idempotent and `list({status})` filters; `eventHistory(limit?)` returns the
   recent events (newest last).
-- [ ] **`FLOW_CANCELLED` (INT-012):** an emitted `FLOW_CANCELLED` is a terminal that bypasses
-  open-task enforcement (verified at the helper-emit boundary; full terminal-loop behavior in the
-  runner suite).
+- [x] **`FLOW_CANCELLED` (INT-012):** an emitted `FLOW_CANCELLED` is a terminal that bypasses
+  open-task enforcement (verified in the runner suite — open-task-bypass + `session.cancelled` reason).
 
 ---
 

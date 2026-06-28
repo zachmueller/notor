@@ -49,6 +49,23 @@ export type { SafetyGuardResult, ThrashingCounters } from "./safety";
 export { StepTurnExecutor } from "./step-turn-executor";
 export { OrchestrationRunner } from "./runner";
 export type { OrchestrationRunResult } from "./runner";
+export { CodeStepExecutor } from "./code-step-executor";
+export type {
+	CodeStepExecutorDeps,
+	CodeStepRuntime,
+	CodeStepRuntimeFactory,
+} from "./code-step-executor";
+export {
+	buildOrchestrationHelper,
+	projectCodeStepEvent,
+} from "./orchestration-helper";
+export type {
+	OrchestrationHelper,
+	CodeStepEvent,
+	CodeStepResult,
+	ScratchpadFs,
+	BuildOrchestrationHelperArgs,
+} from "./orchestration-helper";
 export { OrchestrationSessionManager } from "./session-manager";
 export type {
 	SessionFs,
