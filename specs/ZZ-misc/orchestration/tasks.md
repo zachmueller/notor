@@ -76,6 +76,7 @@ Bodies in the linked per-phase files. `→` = depends on.
 | FEAT-008 | `LoopSafetyGuards` (iteration/runtime/stale/thrashing) | FEAT-001, FEAT-003 |
 | FEAT-010 | `OrchestrationRunner` main loop | FEAT-002, FEAT-003, FEAT-004, FEAT-007, FEAT-008 |
 | FEAT-011 | Command palette "Run Orchestration" + flow picker | FEAT-010, ENV-002 |
+| FEAT-012 | `run_orchestration` hook action type (hook-triggered launch, FR-119b) | FEAT-010, FEAT-011, ENV-002 |
 
 ### Phase 2 — Session/nav (Integration, Lane A)
 

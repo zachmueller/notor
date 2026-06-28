@@ -51,6 +51,7 @@ selection.
 | FEAT-008 | `LoopSafetyGuards` | FEAT-001, FEAT-003 |
 | FEAT-010 | `OrchestrationRunner` main loop | FEAT-002, FEAT-003, FEAT-004, FEAT-007, FEAT-008 |
 | FEAT-011 | Command palette "Run Orchestration" + flow picker | FEAT-010, ENV-002 |
+| FEAT-012 | `run_orchestration` hook action type (hook-triggered launch) | FEAT-010, FEAT-011, ENV-002 |
 | TEST-002 | Event-engine / fallback / safety unit tests | FEAT-003/004/008 |
 | TEST-003 | Flow/step parser unit tests | FEAT-002 |
 
@@ -746,6 +747,69 @@ creates `orchestrations/` and registers scaffolds).
 - [ ] Enabling the feature group ensures `{notor_dir}/orchestrations/` exists (directory seeded, like
   the memory toggle).
 - [ ] When disabled, neither the command nor any orchestration scaffold (`emit_event`) is present.
+
+---
+
+## FEAT-012: `run_orchestration` hook action type (hook-triggered launch)
+
+**Description:** Implement FR-119b — let the existing hooks subsystem launch a flow, so flows run
+unattended (on a schedule or any vault/lifecycle event), not only from the command palette. Add a
+**third hook action type, `run_orchestration`**, beside the existing `execute_command` / `run_workflow`,
+available across **all** hook types the system already supports (the vault-event types
+`on_note_open`/`on_note_create`/`on_save`/`on_manual_save`/`on_tag_change`/`on_schedule` **and** the
+LLM-lifecycle events `pre_send`/`on_tool_call`/`on_tool_result`/`after_completion`). A
+`run_orchestration` hook carries the target flow name/dir (the analog of `run_workflow`'s
+`workflow_path`); when it fires, the dispatcher resolves the flow via FEAT-002 discovery and calls
+`OrchestrationRunner.start(flowDir, objectiveText)` (FEAT-010) with the hook's `TriggerContext`
+(`src/types.ts` — event type, note path, tag diff) assembled into the **objective / starting-event
+payload** (mirroring how `assembleWorkflowPrompt` injects trigger context for workflows). The session is
+stamped **`origin: "hook"`** (the new recovery-root discriminator, FR-125 / FEAT — recovered like
+`origin: "user"`).
+
+The action is **gated on `orchestration_enabled`**: a `run_orchestration` hook is skipped with a
+diagnostic Notice when the feature group is off (mirroring how an unresolved `run_workflow` target
+degrades), and the hook UI / frontmatter parsing surfaces the action type only when the group is on.
+**Loop prevention reuses the existing `ExecutionChainTracker`** (`src/hooks/execution-chain.ts`): the
+launch extends the same execution chain a hook-launched workflow does, so a flow that re-triggers its
+own launching hook is cycle-broken by the existing path — **no new loop-prevention machinery**. Dispatch
+reuses the hooks system's existing **fire-and-forget** delivery; the flow runs on `OrchestrationRunner`,
+**not** the background-workflow loop (`src/chat/workflow-executor.ts`) — that loop stays reserved for
+step→workflow invocation (FR-151 / INT-031). This task **adds** the action type and routing; it does not
+restructure the dispatcher.
+
+**FRs:** FR-119b (hook-triggered launch across all hook types; `origin: "hook"` recovery root; trigger
+context in the starting-event payload; gated on the feature group; reuses `ExecutionChainTracker`).
+
+**Files:**
+- `src/types.ts` — extend the hook `action_type` union with `"run_orchestration"` (on `VaultEventHook`
+  and `WorkflowScopedHook`); add the target-flow field (e.g. `orchestration_flow`) beside
+  `workflow_path`. Extend `AutomationTrigger`/automation frontmatter only if the automation surface also
+  exposes the action (parity with `run_workflow`).
+- `src/hooks/vault-event-dispatcher.ts` — add a `run_orchestration` branch in `_executeOneHook`'s
+  `action_type` switch (beside `execute_command` / `run_workflow`), plus an
+  `executeRunOrchestrationAction(...)` mirroring `executeRunWorkflowAction(...)` (resolve flow → assemble
+  objective from `TriggerContext` → start the runner) — feature-group-gated, chain-extended.
+- `src/hooks/hook-events.ts` — route `run_orchestration` from the LLM-lifecycle hook path (F-022) to the
+  same `executeRunOrchestrationAction(...)`, exactly as `run_workflow` is routed today.
+- `src/hooks/vault-event-hook-config.ts` (+ the hook settings UI) — accept/validate the new action type
+  and its target-flow field; surface it only when `orchestration_enabled`.
+- `src/orchestration/session-manager.ts` (FEAT — session creation) — accept `origin: "hook"` and stamp
+  it on `session.json` / the `session.start` log entry.
+
+**Dependencies:** FEAT-010 (`OrchestrationRunner.start`), FEAT-011 (the launch path it reuses), ENV-002
+(feature-group gating). Touches the hooks subsystem, which exists independently of orchestration.
+
+**Acceptance Criteria:**
+- [ ] A `run_orchestration` hook on any vault-event **or** lifecycle event launches the named flow with
+  the hook's `TriggerContext` in the starting-event payload.
+- [ ] The action is inert when `orchestration_enabled` is off (skipped with a Notice; no flow launches)
+  and is surfaced in the hook UI / frontmatter only when the group is on.
+- [ ] A hook-launched session is stamped `origin: "hook"` and is recovered by the top-level scan as a
+  root (like `origin: "user"`), with the parser-defaulted finite ceilings (FR-119a).
+- [ ] The launch extends the existing `ExecutionChainTracker` chain — a self-re-triggering flow is
+  cycle-broken by the existing loop-prevention path (no new mechanism added).
+- [ ] A `run_orchestration` hook whose target flow is unknown/no-longer-discovered is skipped with a
+  diagnostic Notice (never a throw), mirroring an unresolved `run_workflow` target.
 
 ---
 

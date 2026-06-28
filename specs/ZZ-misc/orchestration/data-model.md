@@ -358,18 +358,19 @@ interface OrchestrationSessionMeta {
   started_at: string;
   prompt: string;                       // original user objective
   parent_session_id: string | null;    // composition linkage (design Phase 7)
-  origin: "user" | "run_flow" | "chaining"; // ALWAYS set at session creation — never null; see below
+  origin: "user" | "hook" | "run_flow" | "chaining"; // ALWAYS set at session creation — never null; see below
 }
 ```
 
 - **`origin` is always set at creation (FR-125).** It is the load-bearing recovery discriminator, so
   it is **never** `null`/absent: `OrchestrationSessionManager` stamps it when it writes `session.json`
-  (`user` for a command/`Run Orchestration` launch, `run_flow` for a `run_flow` child, `chaining` for
-  an `on-complete` successor). Recovery filters on it (below), so a missing/unknown value is a
-  **loud diagnostic**, not a silent skip:
-  - the top-level scan recovers `origin: "user"` (always), and `origin: "chaining"` **iff** its
-    `parent_session_id` resolves to an already-terminal predecessor (the chained-successor recovery
-    rule — [contracts/vault-schema.md](contracts/vault-schema.md) Parent-rooted recovery);
+  (`user` for a command/`Run Orchestration` launch, **`hook` for a hook-triggered launch — FR-119b**,
+  `run_flow` for a `run_flow` child, `chaining` for an `on-complete` successor). Recovery filters on it
+  (below), so a missing/unknown value is a **loud diagnostic**, not a silent skip:
+  - the top-level scan recovers `origin: "user"` and `origin: "hook"` (both always — each is a root run
+    with no live launcher to reconcile it), and `origin: "chaining"` **iff** its `parent_session_id`
+    resolves to an already-terminal predecessor (the chained-successor recovery rule —
+    [contracts/vault-schema.md](contracts/vault-schema.md) Parent-rooted recovery);
   - `origin: "run_flow"` (and a `chaining` session whose parent is still non-terminal) is reconciled
     by its parent's replay, never recovered independently;
   - a session whose `origin` is **absent or any unexpected value** (a defaulting bug, a partially

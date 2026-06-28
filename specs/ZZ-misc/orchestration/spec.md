@@ -77,6 +77,9 @@ mirroring the memory subsystem.
   sub-agents) as a navigable, collapsible tree, live while running and static when done.
 - As a user, I want a built-in `orchestration-creator` persona that guides me through authoring a new
   flow interactively.
+- As a user, I want to **trigger a flow from a vault event or a schedule** (the existing hooks system),
+  not only from the command palette, so flows can run unattended — e.g. "every morning" or "when a note
+  is tagged `#inbox`" — with the same cost/safety ceilings and crash recovery as a manually-launched run.
 
 ---
 
@@ -366,6 +369,44 @@ code-step-only flow (bounded by the always-present runtime cap). Authority: [dat
 - AC: a flow omitting all three ceiling fields parses with the finite defaults (not `Infinity`); a
   code-step-only flow with no ceilings set still terminates at the default runtime cap.
 
+**FR-119b: Hook-triggered flow launch (`run_orchestration` hook action).** A flow is launchable not
+only from the "Run Orchestration" command but from the **existing hooks system**, so flows can run
+unattended. The hooks subsystem (`src/hooks/`) already fires actions on every vault-event hook type
+(`on_note_open` / `on_note_create` / `on_save` / `on_manual_save` / `on_tag_change` / `on_schedule`) and
+the LLM-lifecycle hook events (`pre_send` / `on_tool_call` / `on_tool_result` / `after_completion`),
+routing each to one of two action types today (`execute_command` / `run_workflow`,
+`src/hooks/vault-event-dispatcher.ts`). This FR adds a **third action type, `run_orchestration`**, that
+launches a discovered flow with the hook's trigger context as its objective. It is available across
+**all** hook types (vault-event *and* lifecycle) — wherever `run_workflow` is today — and is **gated on
+`orchestration_enabled`** (a `run_orchestration` hook is inert/skipped-with-a-Notice when the feature
+group is off, mirroring how a `run_workflow` hook degrades when its target is missing).
+
+A hook-launched flow is a **first-class root run**: `OrchestrationSessionManager` stamps a new
+**`origin: "hook"`** on its `session.json` (the recovery discriminator gains this value, FR-125), so it
+is recovered by the top-level scan exactly like an `origin: "user"` command launch, carries the same
+parser-defaulted finite ceilings (FR-119a), and appears in the run-tree. The hook's `TriggerContext`
+(event type, note path, tag diff — `src/types.ts`) is assembled into the flow's starting-event payload
+(the analog of `assembleWorkflowPrompt`'s trigger context for workflows), so a `gather`/pre-flight step
+can branch on what fired it. **Loop prevention reuses the existing `ExecutionChainTracker`**
+(`src/hooks/execution-chain.ts`): a hook-launched flow extends the same execution chain a hook-launched
+workflow does, so a flow that (via a step's side effects) re-triggers its own launching hook is
+cycle-broken by the existing tracker — no new loop-prevention machinery. Background dispatch reuses the
+hooks system's existing **fire-and-forget** delivery; the flow then runs on its own
+`OrchestrationRunner` (it does **not** run on the background-workflow loop — that loop is reserved for
+step→workflow invocation, FR-151), respecting the run-tree concurrency model (run-loop.md axes table).
+
+- AC: a `run_orchestration` hook (settings-configured or workflow/automation-frontmatter-declared)
+  launches the named flow on the matching vault-event **or** lifecycle event, with the trigger context
+  in the starting-event payload.
+- AC: the action type is inert when `orchestration_enabled` is off (skipped with a Notice; no flow
+  launches), and the hook surfaces it only when the feature group is on.
+- AC: a hook-launched session is stamped `origin: "hook"`, is recovered by the top-level scan as a root
+  (like `origin: "user"`), and carries the parser-defaulted finite ceilings (FR-119a).
+- AC: a hook-launched flow extends the existing `ExecutionChainTracker` chain, so a self-re-triggering
+  flow is cycle-broken by the existing loop-prevention path (no new mechanism).
+- AC: a `run_orchestration` hook whose target flow is unknown/no-longer-discovered is skipped with a
+  diagnostic Notice (never a throw), mirroring an unresolved `run_workflow` target.
+
 ### FR-120 group — Session workspace + tasks + conversation navigation (design Phase 2)
 
 **FR-120: Session workspace.** `OrchestrationSessionManager` creates
@@ -435,13 +476,15 @@ is offered a resume prompt. Several properties make this safe and complete:
 
 - **Recovery-root selection by `origin` (always set; loud on unexpected).** `session.json.origin` is
   **never null** — it is stamped at creation and is the recovery discriminator. The top-level scan
-  recovers: **`origin: "user"`** (always); and **`origin: "chaining"` iff its `parent_session_id`
-  resolves to an already-terminal predecessor** (a chained successor is fire-and-forget — its
-  predecessor finalizes before it launches, so there is no live parent to reconcile it; it is therefore
-  recovered as its own root, closing the "crashed chained successor is an orphan" hole, Issue-3).
-  `origin: "run_flow"` (and a `chaining` session whose parent is still non-terminal) is reconciled by
-  its parent's replay, not scanned independently. A session with an **absent or unexpected `origin`** is
-  surfaced as a **loud recovery error** (offered as resume-as-root), never silently skipped (Issue-4b).
+  recovers: **`origin: "user"`** (always); **`origin: "hook"`** (always — a hook-launched flow is a
+  first-class root with no live launcher to reconcile it, FR-119b); and **`origin: "chaining"` iff its
+  `parent_session_id` resolves to an already-terminal predecessor** (a chained successor is
+  fire-and-forget — its predecessor finalizes before it launches, so there is no live parent to reconcile
+  it; it is therefore recovered as its own root, closing the "crashed chained successor is an orphan"
+  hole, Issue-3). `origin: "run_flow"` (and a `chaining` session whose parent is still non-terminal) is
+  reconciled by its parent's replay, not scanned independently. A session with an **absent or unexpected
+  `origin`** is surfaced as a **loud recovery error** (offered as resume-as-root), never silently skipped
+  (Issue-4b).
 - **`run_flow` child reconciliation via the durable `child.spawned`/`child.result` ledger.** A parent
   turn that invokes `run_flow` writes **`child.spawned`** (before launch) and **`child.result`** (the
   child's `structured`/`text` + `stop_reason`, on return) to its log. On replay of a dangling parent
@@ -793,3 +836,9 @@ See [data-model.md](data-model.md) for full schemas. Summary:
 - The feature depends on existing subsystems: personas, extensions/feature-groups, tool-config/path
   enforcement, the Sucrase compile pipeline, the chat history/session model, and the
   `WorkflowActivityTracker`/`Notice` UI primitives.
+- **Hook-triggered launch (FR-119b)** depends on the existing hooks subsystem (`src/hooks/`): the
+  vault-event dispatcher (`vault-event-dispatcher.ts`, the `action_type` switch), the LLM-lifecycle hook
+  router (`hook-events.ts`), the `ExecutionChainTracker` (`execution-chain.ts`) for loop prevention, and
+  the hook/automation frontmatter parsers. The integration adds a `run_orchestration` action type beside
+  the existing `execute_command` / `run_workflow`; it does **not** modify the background-workflow loop
+  (`src/chat/workflow-executor.ts`), which the spec reserves for step→workflow invocation (FR-151).

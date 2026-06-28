@@ -217,6 +217,14 @@ ends the run with status `cancelled` and **bypasses** completion-task enforcemen
 3. Enter a prompt, e.g. `What are the tradeoffs of event-sourcing for a small app?`
 4. Press run.
 
+> **Unattended launch (FR-119b).** The command palette is one entry point; the **hooks system** is the
+> other. A hook (any vault-event type — `on_save`, `on_tag_change`, `on_schedule`, … — or an LLM-lifecycle
+> event) with the **`run_orchestration`** action type launches a flow with the hook's trigger context as
+> its objective, exactly where a `run_workflow` hook would launch a workflow. A hook-launched run is
+> stamped `origin: "hook"` (a recovery root, like a command launch), carries the same finite ceilings,
+> and is cycle-broken by the existing `ExecutionChainTracker`. Configure one in **Settings → Notor →
+> Hooks** (or in workflow/automation frontmatter); it appears only when `orchestration_enabled` is on.
+
 **What you see.** After each step turn, a brief **progress Notice** names the flow, step, and
 iteration — e.g. `Hello Research · 🔎 Gather · iteration 2` (FR-140). (That `iteration N` is the
 **step-turn / HOP counter, which INCLUDES code steps** — it is **not** the same unit as
@@ -370,11 +378,12 @@ only if `depth < maxDepth` AND the **shared** aggregate-budget cell has headroom
 
 **How recovery works (FR-125).** Recovery replays `session-log.jsonl` idempotently. The top-level scan
 selects recovery roots by `origin` (which is **always set** at creation, never null — an absent/unexpected
-origin is surfaced as a **loud diagnostic**, not silently skipped): **`origin: "user"`** roots always, and
-**`origin: "chaining"` successors whose predecessor is already terminal are recovered as roots** (a chained
-successor is fire-and-forget — its predecessor finalized before it launched, so it has no live parent to
-reconcile it). `origin: "run_flow"` children are **not** scanned at the top level — they are reconciled by
-the parent's replay.
+origin is surfaced as a **loud diagnostic**, not silently skipped): **`origin: "user"`** and
+**`origin: "hook"`** roots always (a hook-triggered launch, FR-119b, has no live launcher to reconcile
+it, so it is recovered exactly like a command launch), and **`origin: "chaining"` successors whose
+predecessor is already terminal are recovered as roots** (a chained successor is fire-and-forget — its
+predecessor finalized before it launched, so it has no live parent to reconcile it). `origin: "run_flow"`
+children are **not** scanned at the top level — they are reconciled by the parent's replay.
 
 - A dangling `turn.start` with no matching `turn.complete` means a turn was interrupted → the engine
   **re-emits the triggering event** so the step retries from fresh context.
@@ -436,6 +445,10 @@ tasks in [tasks.md](tasks.md).
       defaults (`100` / `60` / `5.00`, never `Infinity`). (FR-117/FR-119a)
 - [ ] **Orphan hard-error:** a published-but-unsubscribed non-terminal topic is rejected at **load**
       (hard error, not a runtime fallback). (FR-110)
+- [ ] **Hook-triggered launch:** a `run_orchestration` hook (vault-event or lifecycle) launches the flow
+      with the trigger context in the starting-event payload, stamps `origin: "hook"`, and is recovered
+      as a root; the action is inert when the feature group is off; a self-re-triggering flow is
+      cycle-broken by the existing `ExecutionChainTracker`. (FR-119b)
 - [ ] **Routing + breadth-first FIFO fan-out:** the run routes
       `research.start → plan → gather → check → report → FLOW_COMPLETE` with one step per trigger topic;
       a declared fan-out drains breadth-first FIFO (all direct subscribers, then their consequences in

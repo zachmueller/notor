@@ -190,7 +190,9 @@ required: [flow, payload]
    `run_flow` to orchestration contexts guarantees **every** child flow has either a replayable
    orchestration parent (`run_flow`) or is a recovery root (`chaining`), so the parent-rooted recovery
    model holds without exception. A flow is still launchable directly via the **"Run Orchestration"**
-   command (which creates an `origin: "user"` root) and from a step via `run_flow` / `orchestration.callTool`.
+   command (an `origin: "user"` root) or a **`run_orchestration` hook** (an `origin: "hook"` root,
+   FR-119b) — both are recovery roots, neither is a `run_flow` child — and from a step via `run_flow` /
+   `orchestration.callTool`.
 1. **Resolve.** Look up the selected `flow` via `FlowCompositionManager`. An unknown / no-longer-invocable
    flow returns a `ToolResult` `success: false` (not a throw).
 2. **Spawn gate.** Before launching, the child spawn is gated on the `RunContext` carried on

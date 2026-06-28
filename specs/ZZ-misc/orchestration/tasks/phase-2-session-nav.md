@@ -75,8 +75,9 @@ child — see `INT-044`; this task implements only the owning-session case.)
 [../contracts/vault-schema.md](../contracts/vault-schema.md) (`OrchestrationSessionMeta` in
 [../data-model.md](../data-model.md)); do not redefine them here. **`origin` is always set at creation
 and is never null** (the recovery discriminator, Issue-4b): a command/`Run Orchestration` launch stamps
-`origin: "user"`; Phase 7 composition stamps `run_flow` / `chaining` (`INT-044`/`INT-045`).
-`parent_session_id` is `null` for a root and set for a composition child (Phase 7).
+`origin: "user"`; a hook-triggered launch stamps `origin: "hook"` (`FEAT-012` / FR-119b — recovered as a
+root, like `user`); Phase 7 composition stamps `run_flow` / `chaining` (`INT-044`/`INT-045`).
+`parent_session_id` is `null` for a root (`user` / `hook`) and set for a composition child (Phase 7).
 
 **FRs:** FR-120 (session workspace), FR-121 (shared scratchpad + path auto-allow).
 
@@ -109,8 +110,8 @@ caller that creates a session on start).
   path-enforcer tests, unmodified).
 - [ ] Per-step path constraints for all non-scratchpad paths are unchanged for orchestration step turns,
   and `enforcePathConstraints` behavior is unchanged for all non-orchestration tool calls.
-- [ ] `origin` is **always set** in `session.json` at creation (`"user"` for a command launch — never
-  null); `parent_session_id` is `null` for a root.
+- [ ] `origin` is **always set** in `session.json` at creation (`"user"` for a command launch, `"hook"`
+  for a hook-triggered launch — never null); `parent_session_id` is `null` for a root (`user` / `hook`).
 
 ---
 
@@ -258,7 +259,8 @@ recoverable sessions and replay `session-log.jsonl` to the last consistent state
 rules follow [orchestration.md → Session Recovery]:
 
 - **Recovery-root selection by `origin` (always set; loud on unexpected).** The top-level scan recovers
-  sessions with status `active`/`interrupted` by `origin`: **`origin: "user"`** (always); and
+  sessions with status `active`/`interrupted` by `origin`: **`origin: "user"`** and **`origin: "hook"`**
+  (both always — a hook-triggered launch, FR-119b, is a root with no live launcher to reconcile it); and
   **`origin: "chaining"` iff its `parent_session_id` resolves to an already-terminal predecessor** — a
   chained successor is fire-and-forget (its predecessor finalized before it launched, so there is no
   live parent to reconcile it; it is recovered as its own root, closing the orphan hole, Issue-3).
@@ -327,8 +329,9 @@ which is composition (`INT-043`/`INT-044`, Phase 7). `INT-005` therefore **defin
 chaining-root contract** (which `origin`s the top-level scan selects, and that `run_flow` children are
 reconciled by parent replay — **never tombstoned-and-respawned**, always reused-or-resumed) so child
 sessions are inert to the Phase-2 scanner; `INT-044` wires the parent-replay reuse/resume behavior
-against it. Until composition lands, the only recoverable sessions are roots (`user`) and, once chaining
-lands, chaining-roots, so the contract is correct and complete for Phase 2.
+against it. Until composition lands, the only recoverable sessions are roots (`user`, plus `hook` once
+`FEAT-012` lands) and, once chaining lands, chaining-roots, so the contract is correct and complete for
+Phase 2.
 
 **FRs:** FR-125 (session recovery on reload).
 

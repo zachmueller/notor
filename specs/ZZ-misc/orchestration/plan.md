@@ -166,6 +166,11 @@ verified seam table):
   - `src/chat/workflow-executor.ts` — the **background** single-call loop; the seam for step→workflow invocation (Phase 5).
   - `src/workflows/workflow-discovery.ts` / `workflow-frontmatter.ts` — the discovery/frontmatter pattern the flow parser mirrors.
   - `src/workflows/workflow-activity-tracker.ts` — `WorkflowActivityTracker.onChange()` is the live-update pattern reused by the run-tree view and the unified activity indicator.
+- **Hooks (hook-triggered launch — FR-119b / FEAT-012):**
+  - `src/hooks/vault-event-dispatcher.ts` — the `action_type` switch (`execute_command` / `run_workflow`); FEAT-012 adds a `run_orchestration` branch + `executeRunOrchestrationAction(...)` mirroring `executeRunWorkflowAction(...)`.
+  - `src/hooks/hook-events.ts` — LLM-lifecycle hook → action routing (F-022); routes `run_orchestration` to the same executor.
+  - `src/hooks/execution-chain.ts` — `ExecutionChainTracker` reused for loop prevention (no new mechanism); a hook-launched flow extends the same chain a hook-launched workflow does.
+  - `src/hooks/vault-event-hook-config.ts` — hook config validation; accepts the new action type + target-flow field, surfaced only when `orchestration_enabled`.
 - **Chat core / history / navigation:**
   - `src/chat/orchestrator.ts` — `ChatOrchestrator` (implements `ToolSessionContext`); `switchToConversationById()` for node navigation; `addTokens(...)` rollup path generalized for `child_run_metadata`.
   - `src/chat/conversation-session.ts` — `ConversationSession` isolated snapshot, created per step turn.

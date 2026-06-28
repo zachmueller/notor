@@ -297,7 +297,7 @@ defined in [data-model.md](../data-model.md#sessionjson) — not redefined here.
 | `started_at` | string | ISO timestamp. |
 | `prompt` | string | The original user objective (injected into every step turn). |
 | `parent_session_id` | string \| null | Composition linkage (FR-174). |
-| `origin` | `"user"` \| `"run_flow"` \| `"chaining"` | **Always set at creation** (never null); the recovery discriminator. See [data-model.md](../data-model.md) `OrchestrationSessionMeta` and Parent-rooted recovery below. |
+| `origin` | `"user"` \| `"hook"` \| `"run_flow"` \| `"chaining"` | **Always set at creation** (never null); the recovery discriminator. `hook` = a hook-triggered launch (FR-119b), recovered as a root exactly like `user`. See [data-model.md](../data-model.md) `OrchestrationSessionMeta` and Parent-rooted recovery below. |
 
 `status` is the recovery entry point; the authoritative replay source is `session-log.jsonl`.
 
@@ -395,6 +395,7 @@ session to recover by its `session.json` `origin` (always set — see [data-mode
 | `origin` | Recovered by the top-level scan? | Lifecycle owner |
 |---|---|---|
 | `"user"` | **Yes**, always | itself (a root run) |
+| `"hook"` | **Yes**, always | itself (a root run — a hook-triggered launch, FR-119b; the firing hook is fire-and-forget and does not survive to reconcile it, so it is recovered exactly like `user`) |
 | `"chaining"` | **Yes, iff** its `parent_session_id` resolves to an **already-terminal** predecessor | itself (the predecessor finalized — there is no live parent; see below) |
 | `"run_flow"` | **No** | its parent turn's replay (reuse / resume; see below) |
 | `"chaining"` with a **non-terminal** parent | **No** | its parent's replay (the rare case the parent is still alive) |
