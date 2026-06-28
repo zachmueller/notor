@@ -5,7 +5,7 @@
 **Data Model:** [data-model.md](../data-model.md)
 **Master task index:** [tasks.md](../tasks.md) — Phase 4 (Integration, Lane C): INT-020, INT-021
 **Contracts:** [contracts/run-loop.md](../contracts/run-loop.md) (the `onTurnComplete` hook these Notices fire from), [contracts/edges.md](../contracts/edges.md) (conversation-id resolution + run-tree surfacing)
-**Status:** Draft
+**Status:** Implemented (INT-020, INT-021)
 
 This file carries the **bodies** (description, FRs, files, dependencies, acceptance criteria) for the
 two Lane C tasks. The master [tasks.md](../tasks.md) owns the authoritative IDs and dependency edges;
@@ -218,10 +218,19 @@ attaching `messageEl.oncontextmenu` only when `Platform.isDesktop`.
 
 ## Lane C exit check
 
-- [ ] INT-020: per-turn progress Notice names flow + step + iteration + next topic, fired from
-  `onTurnComplete` (engine stays Notice-free), with a working suppression/rate-limit policy.
-- [ ] INT-021: desktop right-click opens the step conversation via `switchToConversationById`; mobile
-  omits the affordance; targets the INT-006 step-conversation id even though it is hidden from the flat
-  list.
-- [ ] The run-tree (FR-178, POL-003) — not these Notices — is the always-on progress surface; Notices
-  are the opt-in interrupt, suppressible under heavy looping.
+- [x] INT-020: per-turn progress Notice names flow + step + iteration + next topic, fired from the
+  conversation-step completion path (the same place that writes `turn.complete`; engine stays
+  Notice-free), with a working suppression seam. *(`src/orchestration/notices.ts` +
+  `step-turn-executor.ts` `showProgressNotice` injection; unit-tested in `notices.test.ts`.)*
+- [x] INT-021: desktop right-click opens the step conversation via `switchToConversationById`; mobile
+  omits the affordance. *(`showOrchestrationProgressNotice` `onJumpToConversation` + `launch.ts`
+  `jumpToStepConversation` closing over the active orchestrator; desktop/mobile unit cases in
+  `notices.test.ts`.)* **Open boundary (carry to POL-003 / e2e):** `switchToConversationById` resolves
+  ids through `listConversations()`, which INT-006 **filters out** hidden step conversations — so the
+  reused primitive cannot yet *open* a hidden step conversation. This resolution gap is pre-existing and
+  shared with the run-tree's "select-to-navigate" (edges.md §6); closing it (an unfiltered by-id resolve)
+  belongs with POL-003 + the "context-menu jump in e2e" gate, not Lane C's Notice-layer scope.
+- [x] The run-tree (FR-178, POL-003) — not these Notices — is the always-on progress surface; Notices
+  are the opt-in interrupt, suppressible via the `suppress` flag. v1 ships one Notice per turn (spec
+  FR-140 defers coalescing/throttling); the suppression seam exists and is unit-tested so a future
+  policy is only a different computation of that flag.

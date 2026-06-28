@@ -100,3 +100,10 @@ export type {
 	StepConversationRecord,
 	StepConversationFs,
 } from "./step-conversation-store";
+export {
+	showOrchestrationProgressNotice,
+	buildProgressNoticeMessage,
+	PROGRESS_NOTICE_TIMEOUT_MS,
+} from "./notices";
+export type { OrchestrationProgressNoticeArgs } from "./notices";
+export type { StepProgressNotifier } from "./step-turn-executor";

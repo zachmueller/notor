@@ -87,6 +87,32 @@ export interface StepRuntimeFactory {
 /** Resolves `<include_note>` tags in a step body (reuses the existing path). */
 export type IncludeResolver = (body: string, notePath: string) => Promise<string>;
 
+/**
+ * The per-turn progress-Notice synthesis seam (INT-020 / FR-140). Invoked after a
+ * **conversation-step** turn writes `turn.complete` and persists its step
+ * conversation, carrying flow + step + iteration + the emitted topic, plus the
+ * step conversation's id for the desktop right-click jump (INT-021 / FR-141).
+ *
+ * Injected (not open-coded) so `StepTurnExecutor` stays free of `obsidian`'s
+ * `Notice` and of `ChatOrchestrator` — the runtime wiring (`launch.ts`) supplies
+ * a callback that builds the Notice via `showOrchestrationProgressNotice(...)`
+ * and closes the jump over `switchToConversationById(conversationId)`. Omitted in
+ * unit tests → no Notice (the engine's routing is unaffected). Mirrors the
+ * `notifyError` injection the code-step path already uses.
+ */
+export interface StepProgressNotifier {
+	(args: {
+		flowName: string;
+		stepName: string;
+		/** The flow hop/step-turn counter (includes code steps). */
+		iteration: number;
+		/** The topic this turn emitted (or the synthesized default). */
+		emittedTopic: string;
+		/** The step conversation's id (target of the INT-021 right-click jump). */
+		conversationId: string;
+	}): void;
+}
+
 export interface StepTurnExecutorDeps {
 	personaManager: { getPersonaByName(name: string): Promise<Persona | null> };
 	providerRegistry: ProviderRegistry;
@@ -120,6 +146,13 @@ export interface StepTurnExecutorDeps {
 	 * step never silently stalls).
 	 */
 	codeStepExecutor?: CodeStepExecutor;
+	/**
+	 * Per-turn progress-Notice synthesizer (INT-020 / INT-021). Called after a
+	 * conversation-step turn writes `turn.complete` + persists its step
+	 * conversation. Omitted in unit tests → no Notice; a code step never calls it
+	 * (it runs no `RunLoop` turn — see {@link executeCodeStep}, AC-5).
+	 */
+	showProgressNotice?: StepProgressNotifier;
 }
 
 /** Inputs the runner threads into a single step-turn execution. */
@@ -294,6 +327,20 @@ export class StepTurnExecutor {
 		// header; backfill the next/prev chain. The header `_type` marker hides it
 		// from the flat conversation list. Persistence failure never fails the turn.
 		await this.persistStepConversation(req, result.messages, resolved.modelId);
+
+		// (INT-020 / FR-140) Synthesize the per-turn progress Notice from this same
+		// completion path — naming flow + step + iteration + the just-emitted topic
+		// ("what's next"), carrying the step conversation id for the INT-021
+		// right-click jump. The engine never constructs a Notice (AC-3); the
+		// notifier is injected, so this stays obsidian-free. A suppressed turn
+		// (Notice-fatigue policy) still wrote turn.complete + persisted above.
+		this.deps.showProgressNotice?.({
+			flowName: flow.name,
+			stepName: step.name,
+			iteration: req.iteration,
+			emittedTopic: emission.topic,
+			conversationId: req.conversationId,
+		});
 
 		return { emission, stopReason: result.stopReason, costUsd, tokenUsage };
 	}

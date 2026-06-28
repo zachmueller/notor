@@ -43,6 +43,7 @@ import { TaskRegistry, type TaskFs } from "./task-registry";
 import { seedMemoriesNote, memoriesPath } from "./memories";
 import { SessionRecovery, type RecoveryFs, type RecoverableSession } from "./session-recovery";
 import { VaultStepConversationStore } from "./step-conversation-store";
+import { showOrchestrationProgressNotice } from "./notices";
 import { OrchestrationRunner, type OrchestrationRunResult } from "./runner";
 import type { OrchestrationFlow } from "./types";
 
@@ -51,6 +52,30 @@ const log = logger("OrchestrationLaunch");
 /** Generate a short session id. */
 function newSessionId(): string {
 	return `sess-${crypto.randomUUID().slice(0, 12)}`;
+}
+
+/**
+ * Open a step conversation by id from a progress-Notice right-click (INT-021 /
+ * FR-141). Opens the chat panel if needed, then reuses
+ * `ChatOrchestrator.switchToConversationById(...)` — the **same** navigation
+ * primitive behind the `notor-conversation://{id}` link and main.ts's
+ * `obsidian://notor?id=` handler (no new navigation is introduced, AC-4). A
+ * conversation that cannot be resolved surfaces the same "may have been deleted"
+ * Notice the protocol handler uses.
+ */
+function jumpToStepConversation(plugin: NotorPlugin, conversationId: string): void {
+	void plugin.openChatPanel().then(() => {
+		const orchestrator = plugin.getActiveOrchestrator();
+		if (!orchestrator) {
+			new Notice("No active chat panel");
+			return;
+		}
+		void orchestrator.switchToConversationById(conversationId).then((found) => {
+			if (!found) {
+				new Notice("Step conversation not found — it may have been deleted");
+			}
+		});
+	});
 }
 
 /**
@@ -118,6 +143,21 @@ function buildExecutor(
 			memoriesPath: memoriesPath(plugin.settings.notor_dir),
 			stepConversationStore,
 			codeStepExecutor,
+			// INT-020 / INT-021: per-turn progress Notice. The jump callback reuses
+			// the existing notor-conversation:// navigation primitive
+			// (`switchToConversationById`, the same path main.ts's obsidian://notor?id=
+			// handler uses) — no new navigation is introduced. The closure resolves the
+			// active orchestrator lazily at right-click time (a panel may not be open
+			// when the flow is launched from a hook).
+			showProgressNotice: ({ flowName, stepName, iteration, emittedTopic, conversationId }) =>
+				showOrchestrationProgressNotice({
+					flowName,
+					stepName,
+					iteration,
+					emittedTopic,
+					conversationId,
+					onJumpToConversation: () => jumpToStepConversation(plugin, conversationId),
+				}),
 			resolveIncludes: async (body, notePath) => {
 				const result = await resolveIncludeNotes(
 					body,
