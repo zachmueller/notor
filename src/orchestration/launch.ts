@@ -474,6 +474,7 @@ export async function launchOrchestration(
 			tasksPath: ws.tasksPath,
 			pendingEmission: null,
 			emissionOverwrites: [],
+			workflowInvocations: [],
 		}),
 		makeConversationId: () => crypto.randomUUID(),
 		mode: options?.mode ?? plugin.settings.mode,
@@ -483,6 +484,13 @@ export async function launchOrchestration(
 		parentSessionId,
 		// INT-003: query the session's task registry to gate FLOW_COMPLETE.
 		listOpenTasks: () => listOpenTaskKeys(plugin, ws.tasksPath),
+		// INT-030: interactive pause. The runner writes user.input.required,
+		// suspends, and calls this to collect the answer (a modal). Returning
+		// null (declined/dismissed) finalizes via FLOW_CANCELLED.
+		requestUserInput: (promptText) => requestOrchestrationInput(plugin.app, flow.name, promptText),
+		// INT-030: mirror session.json status while paused so a crash-while-paused
+		// is recovered as a dangling user.input.required tail ("still paused").
+		setSessionStatus: (status) => sessionManager.updateStatus(sessionId, status),
 		onProgress: (status) => log.debug("orchestration progress", { status }),
 	});
 
@@ -636,6 +644,7 @@ async function resumeRecoveredSession(
 			tasksPath: ws.tasksPath,
 			pendingEmission: null,
 			emissionOverwrites: [],
+			workflowInvocations: [],
 		}),
 		makeConversationId: () => crypto.randomUUID(),
 		mode: plugin.settings.mode,
@@ -644,6 +653,10 @@ async function resumeRecoveredSession(
 		origin: recovered.meta.origin,
 		parentSessionId: recovered.meta.parent_session_id,
 		listOpenTasks: () => listOpenTaskKeys(plugin, ws.tasksPath),
+		// INT-030: a recovered paused session re-surfaces its prompt through the
+		// same modal; supplying input resumes the loop, dismissing cancels it.
+		requestUserInput: (promptText) => requestOrchestrationInput(plugin.app, flow.name, promptText),
+		setSessionStatus: (status) => sessionManager.updateStatus(recovered.sessionId, status),
 		onProgress: (status) => log.debug("orchestration resume progress", { status }),
 	});
 
@@ -746,6 +759,89 @@ class ObjectiveModal extends Modal {
 		this.close();
 		this.onSubmit(objective);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Interactive pause prompt (INT-030 / FR-150)
+// ---------------------------------------------------------------------------
+
+/**
+ * The modal a paused flow surfaces to collect the user's answer. Resolves with
+ * the entered text on submit, or `null` when the user dismisses/cancels (which
+ * the runner finalizes via `FLOW_CANCELLED`). Resolves exactly once.
+ */
+class UserInputModal extends Modal {
+	private settled = false;
+
+	constructor(
+		app: App,
+		private readonly flowName: string,
+		private readonly question: string,
+		private readonly resolve: (value: string | null) => void,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl("h2", { text: `"${this.flowName}" needs your input` });
+		contentEl.createEl("p", { text: this.question, cls: "setting-item-description" });
+
+		const input = contentEl.createEl("textarea", { cls: "notor-orchestration-objective-input" });
+		input.rows = 4;
+		input.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+				e.preventDefault();
+				this.submit(input.value.trim());
+			}
+		});
+
+		const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
+		new ButtonComponent(buttonRow).setButtonText("Cancel run").onClick(() => this.close());
+		new ButtonComponent(buttonRow)
+			.setButtonText("Submit")
+			.setCta()
+			.onClick(() => this.submit(input.value.trim()));
+
+		setTimeout(() => input.focus(), 10);
+	}
+
+	onClose(): void {
+		// Dismissed without submitting → the run cancels. (submit() settles first,
+		// so a settled modal closing is a no-op.)
+		this.settle(null);
+	}
+
+	private submit(value: string): void {
+		if (!value) {
+			new Notice("Enter a response, or cancel the run.");
+			return;
+		}
+		this.settle(value);
+		this.close();
+	}
+
+	private settle(value: string | null): void {
+		if (this.settled) return;
+		this.settled = true;
+		this.resolve(value);
+	}
+}
+
+/**
+ * Surface the interactive-pause prompt and await the user's answer (INT-030).
+ * Wired as the runner's `requestUserInput` callback; resolves with the entered
+ * text or `null` on dismiss/cancel.
+ */
+function requestOrchestrationInput(
+	app: App,
+	flowName: string,
+	question: string,
+): Promise<string | null> {
+	return new Promise((resolve) => {
+		new UserInputModal(app, flowName, question, resolve).open();
+	});
 }
 
 /**

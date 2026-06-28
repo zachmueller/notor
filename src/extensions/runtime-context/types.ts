@@ -376,6 +376,23 @@ export interface ExtensionUtils {
 			filter?: { status?: import("../../orchestration/task-registry").TaskStatus },
 		) => Promise<import("../../orchestration/task-registry").TaskNote[]>;
 	};
+	/**
+	 * Step→workflow invocation bridge for the `invoke_workflow` tool scaffold
+	 * (INT-031 / FR-151). Resolves a workflow by name through `discoverWorkflows`,
+	 * runs it headlessly on the background loop, and returns its final assistant
+	 * text + total spend. Returns `null` when the feature/orchestrator is
+	 * unavailable (e.g. no live chat panel) so the tool can error cleanly. Always
+	 * present (the bridge is cheap); the tool that uses it is feature-gated.
+	 *
+	 * @see specs/ZZ-misc/orchestration/tasks/phase-5-interactive-workflow.md — INT-031
+	 */
+	invokeWorkflow:
+		| ((workflowName: string, task: string) => Promise<{
+				text: string;
+				costUsd: number;
+				iterations: number;
+		  }>)
+		| null;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */

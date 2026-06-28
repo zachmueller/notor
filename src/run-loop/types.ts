@@ -157,6 +157,18 @@ export interface OrchestrationToolContext {
 	 * non-orchestration carriage; the scaffold no-ops the audit when it is absent.
 	 */
 	emissionOverwrites?: Array<{ prev_topic: string; new_topic: string }>;
+	/**
+	 * Step→workflow spend accumulator (INT-031 / FR-151). The `invoke_workflow`
+	 * tool pushes each invoked workflow's reported `{ costUsd, iterations }` here
+	 * during a step turn; `StepTurnExecutor` drains it **after** the turn and folds
+	 * the totals into the shared `RunContext.budget` cell in one `decrementAggregate`
+	 * (post-hoc reconciliation — the background-workflow loop has no `RunContext`,
+	 * so it cannot decrement live). Optional — `undefined` for sub-agents and any
+	 * non-orchestration carriage; the tool no-ops the accounting when it is absent.
+	 *
+	 * @see specs/ZZ-misc/orchestration/contracts/tools.md — run_flow vs step→workflow
+	 */
+	workflowInvocations?: Array<{ costUsd: number; iterations: number }>;
 }
 
 // ---------------------------------------------------------------------------

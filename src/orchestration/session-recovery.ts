@@ -65,14 +65,15 @@ const log = logger("SessionRecovery");
  *    re-publish it.
  *  - `still_paused` — a dangling `user.input.required` (no following
  *    `user.input.received`): re-surface the prompt (consumed by INT-030); NOT an
- *    interrupted turn.
+ *    interrupted turn. Carries the paused `step` (from the log entry) so the
+ *    runner re-triggers exactly that step with the user's answer on resume.
  *  - `none` — the log is terminal (`session.complete`/`session.cancelled`) or
  *    carries nothing replayable.
  */
 export type RecoveryAction =
 	| { kind: "re_emit_trigger"; topic: string; payload: string; turn: number }
 	| { kind: "re_publish_event"; topic: string; payload: string; source_step: string | null; turn: number }
-	| { kind: "still_paused"; prompt: string; turn: number }
+	| { kind: "still_paused"; step: string; prompt: string; turn: number }
 	| { kind: "none" };
 
 /** The rehydrated safety-guard state derived from a replayed log. */
@@ -167,7 +168,7 @@ export class SessionRecovery {
 					// later iteration; if it's the tail, nothing replayable remains.)
 					return { kind: "none" };
 				case "user.input.required":
-					return { kind: "still_paused", prompt: e.prompt, turn: e.turn };
+					return { kind: "still_paused", step: e.step, prompt: e.prompt, turn: e.turn };
 				case "event.emitted":
 					return {
 						kind: "re_publish_event",

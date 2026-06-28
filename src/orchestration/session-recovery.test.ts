@@ -117,7 +117,7 @@ describe("SessionRecovery — tail classification", () => {
 			turnComplete(2, "Asker", "needs.input", 0.01),
 			{ type: "user.input.required", turn: 2, step: "Asker", prompt: "Which option?", ts: TS } as SessionLogEntry,
 		];
-		expect(recovery.classifyTail(entries)).toEqual({ kind: "still_paused", prompt: "Which option?", turn: 2 });
+		expect(recovery.classifyTail(entries)).toEqual({ kind: "still_paused", step: "Asker", prompt: "Which option?", turn: 2 });
 	});
 
 	it("idempotency: classifying twice yields the identical action", () => {

@@ -20,6 +20,8 @@ export {
 	FLOW_ERROR,
 	TERMINAL_TOPICS,
 	isTerminalTopic,
+	USER_INPUT_REQUIRED,
+	USER_INPUT_RECEIVED,
 	CODE_STEP_ARG_NAMES,
 } from "./types";
 export {

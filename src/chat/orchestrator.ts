@@ -770,6 +770,19 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 
 	/**
+	 * Run a named single-turn workflow headlessly and await its result + spend
+	 * (INT-031 / FR-151). Used by the `invoke_workflow` step→workflow bridge.
+	 *
+	 * @see WorkflowExecutor.runWorkflowHeadless
+	 */
+	async runWorkflowHeadless(
+		workflow: Workflow,
+		supplementaryText = "",
+	): Promise<{ text: string; costUsd: number; iterations: number }> {
+		return this.workflowExecutor.runWorkflowHeadless(workflow, supplementaryText);
+	}
+
+	/**
 	 * Set the callback that provides tool definitions for the response loop.
 	 *
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-015

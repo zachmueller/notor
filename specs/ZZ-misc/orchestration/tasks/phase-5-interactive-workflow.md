@@ -5,7 +5,7 @@
 **Data Model:** [../data-model.md](../data-model.md)
 **Master Task Index:** [../tasks.md](../tasks.md)
 **Contracts:** [../contracts/vault-schema.md](../contracts/vault-schema.md) · [../contracts/event-engine.md](../contracts/event-engine.md) · [../contracts/run-loop.md](../contracts/run-loop.md)
-**Status:** Draft
+**Status:** Implemented (INT-030 + INT-031)
 
 This file holds the full task **bodies** for design Phase 5 (repo phase: Integration, **Lane D**) —
 task IDs **INT-030** and **INT-031**. Task IDs and their dependency edges are owned by
@@ -127,23 +127,38 @@ with FR-125).
 `INT-030`).
 
 **Acceptance Criteria:**
-- [ ] A step emitting `user.input.required` **pauses** the loop (the runner suspends event consumption)
+- [x] A step emitting `user.input.required` **pauses** the loop (the runner suspends event consumption)
   and surfaces the captured payload as a prompt to the user.
-- [ ] On user input, a `user.input.received` entry is written, `session.json` `status` returns to
+- [x] On user input, a `user.input.received` entry is written, `session.json` `status` returns to
   `active`, and the loop **resumes** by publishing the resume event with the user's payload as its
   payload (write-before-route).
-- [ ] The pause is durable: `user.input.required` is appended to `session-log.jsonl` **before** the loop
+- [x] The pause is durable: `user.input.required` is appended to `session-log.jsonl` **before** the loop
   suspends, and `session.json` `status` is `interrupted` while paused.
-- [ ] A session paused on input **survives a reload**: `INT-005` recovery classifies the dangling
+- [x] A session paused on input **survives a reload**: `INT-005` recovery classifies the dangling
   `user.input.required` (no `user.input.received`) as "still paused" and re-surfaces the prompt — it
   does **not** re-emit a trigger or re-run the paused step.
-- [ ] Resuming a recovered paused session writes `user.input.received` and continues the loop exactly
+- [x] Resuming a recovered paused session writes `user.input.received` and continues the loop exactly
   once (idempotent: re-running recovery over the same paused tail re-surfaces the same prompt and does
   not double-resume).
-- [ ] Declining the prompt finalizes the run via `FLOW_CANCELLED` (status `cancelled`), reusing
+- [x] Declining the prompt finalizes the run via `FLOW_CANCELLED` (status `cancelled`), reusing
   `INT-012`'s terminal handling; open tasks do not block the cancel.
-- [ ] No `session-log.jsonl` entry schema is defined in this file — it links to
+- [x] No `session-log.jsonl` entry schema is defined in this file — it links to
   [../contracts/vault-schema.md](../contracts/vault-schema.md).
+
+**Implementation notes (INT-030):**
+- The resume re-triggers the **paused step itself** with the user's answer as the resume event's
+  payload (decision: re-trigger the paused step). `user.input.required` is intercepted by the runner at
+  its routing boundary ([runner.ts](../../../../src/orchestration/runner.ts) `handlePause` /
+  `collectInputAndResume`), never routed to a subscriber — the engine stays UI-agnostic. The
+  `still_paused` recovery action now carries the paused `step` (surfaced from the existing log entry, no
+  new classifier logic) so resume re-triggers exactly that step.
+- The runner gained injected `requestUserInput` (collect the answer; `null` ⇒ decline ⇒ `FLOW_CANCELLED`)
+  and `setSessionStatus` (mirror `interrupted`/`active`) deps, wired in [launch.ts](../../../../src/orchestration/launch.ts)
+  to a `UserInputModal` + `OrchestrationSessionManager.updateStatus`. Omitting `requestUserInput` (unit
+  tests) cancels the run rather than hanging the loop.
+- `user.input.required` is exempted from the load-time static-orphan validator
+  ([flow-parser.ts](../../../../src/orchestration/flow-parser.ts) `isValidatorExemptTopic`) — it is a
+  runtime-intercepted pause signal, not a routable topic.
 
 ---
 
@@ -246,28 +261,47 @@ into the step's context).
 that the workflow invocation hangs off of).
 
 **Acceptance Criteria:**
-- [ ] A conversation step can invoke a **named single-turn workflow** (resolved via
+- [x] A conversation step can invoke a **named single-turn workflow** (resolved via
   `discoverWorkflows`) and the workflow runs to completion through the **background loop** in
   `src/chat/workflow-executor.ts` (one tool call per iteration via `dispatcher.dispatch()`), not through
   `executeToolBatches`.
-- [ ] The workflow's final assistant output is **returned into the invoking step's context** so the step
+- [x] The workflow's final assistant output is **returned into the invoking step's context** so the step
   can reason over it before emitting its own event.
-- [ ] At the await-result boundary, the workflow's total cost/iterations are **reconciled** into the
+- [x] At the await-result boundary, the workflow's total cost/iterations are **reconciled** into the
   shared `RunContext.budget` cell (`decrementAggregate`), so the flow's `notor-max-cost-usd` /
   `notor-max-iterations` ceilings account for workflow-invocation spend (accurate **after** the call).
-- [ ] The invoked workflow runs **uncapped** during the call (the background loop has no per-run
+- [x] The invoked workflow runs **uncapped** during the call (the background loop has no per-run
   iteration/cost cap), so the aggregate overshoot is **unbounded** (a whole workflow run) — explicitly
   **unlike** FR-176's bounded `run_flow` soft ceiling. This is a documented, accepted v1 property (not a
   bug); no per-run cap or live gating is added here.
-- [ ] The invocation reuses the existing assembly path (`assembleWorkflowPrompt` in
+- [x] The invocation reuses the existing assembly path (`assembleWorkflowPrompt` in
   `src/workflows/workflow-executor.ts`) — no duplicate prompt-assembly logic is introduced.
-- [ ] The invoked workflow runs as its own (background) conversation; it does **not** become an
+- [x] The invoked workflow runs as its own (background) conversation; it does **not** become an
   orchestration step conversation (no `orchestration_edges`), and it does not consume an orchestration
   event-loop turn beyond the invoking step's own turn.
-- [ ] The mechanism is **distinct from `run_flow`**: no child flow session, no `parent_session_id`, no
+- [x] The mechanism is **distinct from `run_flow`**: no child flow session, no `parent_session_id`, no
   terminal event, no structured return, no `child_run_metadata` — those are Phase 7 (`INT-042`/`INT-043`)
   and are not introduced here.
-- [ ] `INT-031` introduces **no dependency** on any Phase 7 task; it depends only on `FEAT-007`.
+- [x] `INT-031` introduces **no dependency** on any Phase 7 task; it depends only on `FEAT-007`.
+
+**Implementation notes (INT-031):**
+- Invocation surface is a **dedicated tool** (decision): the feature-gated `invoke_workflow` scaffold
+  ([invoke-workflow.ts](../../../../src/extensions/builtin-tool-scaffolds/invoke-workflow.ts)) the step's
+  LLM calls with a workflow name + task, mirroring `emit_event`. It reaches the seam via the
+  `utils.invokeWorkflow` bridge ([orchestration-utils.ts](../../../../src/extensions/runtime-context/orchestration-utils.ts)),
+  which resolves the workflow and drives the live orchestrator's background loop.
+- The loop seam **wraps, does not modify** (decision; the task body reserves loop *generalization* for
+  Phase 7): a new public `WorkflowExecutor.runWorkflowHeadless`
+  ([workflow-executor.ts](../../../../src/chat/workflow-executor.ts)) drives the **existing**
+  `_backgroundResponseLoop` (signature untouched) with a throwaway `WorkflowExecution` + a local
+  `WorkflowConcurrencyManager`, then reads `{ text, costUsd, iterations }` off the settled background
+  conversation. Exposed on `ChatOrchestrator.runWorkflowHeadless`.
+- Reconciliation: `invoke_workflow` pushes the reported `{ costUsd, iterations }` onto the carriage's
+  `workflowInvocations` accumulator; `StepTurnExecutor.reconcileWorkflowInvocations` drains it after the
+  turn and applies one `decrementAggregate` per invocation (post-hoc; uncapped during the call).
+- **v1 limitation (documented):** step→workflow requires a live chat orchestrator; when none is
+  available (a hook-launched flow with no chat panel) the bridge is `null` and `invoke_workflow` errors
+  cleanly (the step's LLM sees the error and proceeds), rather than opening a panel on demand.
 
 ---
 

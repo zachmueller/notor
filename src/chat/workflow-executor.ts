@@ -30,7 +30,6 @@ import type { PersonaManager } from "../personas/persona-manager";
 import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-override";
 import { showOsNotification, revealChatPanel } from "../ui/os-notification";
 import type { VaultRuleManager } from "../rules/vault-rules";
-import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import type { ToolSessionContext } from "../tools/tool";
 import type { TemplateVariableRegistry } from "../template-vars";
 import type { SessionManager } from "./session-manager";
@@ -38,7 +37,8 @@ import type { ConfigResolver } from "./config-resolver";
 import type { HookDispatcher } from "./hook-dispatcher";
 import type { ViewRouter } from "./view-router";
 import { ConversationSession } from "./conversation-session";
-import { toChatMessages } from "./message-pipeline";
+import { calculateCost, toChatMessages } from "./message-pipeline";
+import { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import { parseStreamEvents } from "./stream-utils";
 import { buildAutoContextBlock } from "../context/auto-context";
 import { ContextManager } from "./context";
@@ -508,6 +508,177 @@ export class WorkflowExecutor {
 			this.deps.sessionManager.unregisterSession(session.conversationId);
 			this.deps.viewRouter.getViewForSession(session)?.setRespondingState(false);
 		}
+	}
+
+	// -------------------------------------------------------------------
+	// Step→workflow invocation (INT-031 / FR-151)
+	// -------------------------------------------------------------------
+
+	/**
+	 * Run a named single-turn workflow **headlessly** and await its final
+	 * assistant text + total spend (INT-031 / FR-151). This is the seam an
+	 * orchestration conversation step uses to delegate a well-bounded sub-task to
+	 * an existing workflow and fold the result back into its own turn.
+	 *
+	 * **Wraps, does not modify, the background loop.** It drives the *existing*
+	 * private {@link _backgroundResponseLoop} (the one-tool-at-a-time
+	 * `while(continueLoop)` loop) with a throwaway {@link WorkflowExecution} and a
+	 * **local** {@link WorkflowConcurrencyManager} — so the live background-workflow
+	 * path's signature and behavior are untouched (Phase 7 owns generalizing the
+	 * loop, not INT-031). After the loop settles it reads the workflow's cumulative
+	 * `total_output_tokens` / `estimated_cost` off the isolated background
+	 * conversation and derives the iteration count from the assistant turns. The
+	 * returned `{ text, costUsd, iterations }` feeds both the step-context fold and
+	 * the caller's post-hoc aggregate-budget reconciliation (`decrementAggregate`).
+	 *
+	 * Budget note (FR-151 / Issue-13h): the invoked workflow runs **uncapped**
+	 * during the call — the background loop has no per-run iteration/cost cap and
+	 * no `RunContext` — so the aggregate overshoot is **unbounded** (a whole
+	 * workflow run). Reconciliation is the caller's responsibility at the
+	 * await-result boundary; this method only reports the spend.
+	 *
+	 * @param workflow            - The resolved workflow to run (via `discoverWorkflows`).
+	 * @param supplementaryText   - The step's task/direction folded into the prompt.
+	 * @returns The workflow's final assistant text + total cost/iterations.
+	 *
+	 * @see specs/ZZ-misc/orchestration/tasks/phase-5-interactive-workflow.md — INT-031
+	 */
+	async runWorkflowHeadless(
+		workflow: Workflow,
+		supplementaryText: string,
+	): Promise<{ text: string; costUsd: number; iterations: number }> {
+		const personaManager = this.deps.getPersonaManager();
+
+		// Assemble the workflow prompt via the SHARED assembly path (no duplicate
+		// prompt-assembly logic — reuses src/workflows/workflow-executor.ts).
+		const assemblyResult = await assembleWorkflowPrompt(
+			{
+				workflow,
+				supplementaryText: supplementaryText || null,
+				triggerContext: null,
+			},
+			this.deps.app.vault,
+			this.deps.app.metadataCache,
+			this.deps.getTemplateRegistry(),
+		);
+		if (assemblyResult === null) {
+			throw new Error(`Workflow '${workflow.display_name}' has no prompt content.`);
+		}
+
+		// Resolve provider/model exactly as the background path (preset → fallback).
+		const mode = workflow.mode ?? this.deps.getSettings().mode;
+		const registryProviderId = this.deps.providerRegistry.getActiveId();
+		const registryConfig = this.deps.providerRegistry.getConfig(registryProviderId);
+		const { providerId, modelId, useExtendedContext, thinkingLevel } = resolveWorkflowProviderConfig(
+			workflow,
+			this.deps.getSettings(),
+			registryProviderId,
+			registryConfig?.model_id ?? "",
+			registryConfig?.use_extended_context ?? false,
+			null,
+		);
+
+		const activePersonaName = personaManager?.getActivePersona()?.name ?? null;
+
+		// Isolated background conversation manager (never touches the user's panel).
+		const { ConversationManager } = await import("./conversation");
+		const bgConversationManager = new ConversationManager(mode);
+		bgConversationManager.setOnMessageAdded(async (message) => {
+			const conv = bgConversationManager.getActiveConversation();
+			if (conv) {
+				await this.deps.historyManager.appendMessage(conv, message);
+			}
+		});
+		bgConversationManager.setOnConversationChanged(async (conv) => {
+			await this.deps.historyManager.updateConversationHeader(conv);
+		});
+
+		const bgConversation = bgConversationManager.createConversation(providerId, modelId, mode, {
+			workflow_path: workflow.file_path,
+			workflow_name: workflow.display_name,
+			workflow_tool_configs: assemblyResult.toolConfigs,
+			persona_name: activePersonaName,
+			is_background: true,
+			title: `Step→workflow: ${workflow.display_name}`,
+			use_extended_context: useExtendedContext,
+		});
+		await this.deps.historyManager.createConversationFile(bgConversation);
+
+		bgConversationManager.addMessage({
+			role: "user",
+			content: assemblyResult.assembledMessage,
+			is_workflow_message: true,
+		});
+
+		// A throwaway execution + LOCAL concurrency manager so the shared
+		// _backgroundResponseLoop runs unchanged without touching the global
+		// background-workflow pool (liveness/status updates land on this manager
+		// and are discarded). onComplete/submit are NOT called — the loop only
+		// uses markStreaming/touchStreamActivity/updateStatus/markInToolCall.
+		const execution: WorkflowExecution = {
+			id: crypto.randomUUID(),
+			workflow_path: workflow.file_path,
+			workflow_name: workflow.display_name,
+			conversation_id: bgConversation.id,
+			trigger_event: "step_workflow_invocation",
+			trigger_source: null,
+			status: "running",
+			started_at: new Date().toISOString(),
+			completed_at: null,
+			error_message: null,
+		};
+		const localConcurrency = new WorkflowConcurrencyManager(1);
+		const chain: ExecutionChain = { sourceHooks: new Set(), modifiedNotePaths: new Set() };
+
+		// G-007 parity: activate workflow-scoped hook overrides for this run, then
+		// always deactivate (mirrors executeBackgroundWorkflow's finally).
+		const whOverrideManager = this.deps.getWorkflowHookOverrideManager();
+		if (workflow.hooks && whOverrideManager) {
+			whOverrideManager.activate(bgConversation.id, workflow.hooks);
+		}
+
+		const pinnedPersona = this.deps.getActivePersona();
+		try {
+			await this._backgroundResponseLoop(
+				bgConversationManager,
+				assemblyResult,
+				mode,
+				execution,
+				localConcurrency,
+				chain,
+				providerId,
+				modelId,
+				useExtendedContext,
+				thinkingLevel,
+				pinnedPersona,
+			);
+		} finally {
+			if (whOverrideManager) {
+				whOverrideManager.deactivate(bgConversation.id);
+			}
+		}
+
+		// Read the workflow's cumulative spend off the settled background
+		// conversation (the per-turn rollup the loop already maintains), and the
+		// final assistant text. Iterations = assistant turns (LLM turns).
+		const settled = bgConversationManager.getActiveConversation();
+		const messages = bgConversationManager.getMessages();
+		const finalText = [...messages]
+			.reverse()
+			.find((m) => m.role === "assistant" && typeof m.content === "string" && m.content.length > 0)
+			?.content as string | undefined;
+		const iterations = messages.filter((m) => m.role === "assistant").length;
+		const costUsd =
+			settled?.estimated_cost
+			?? calculateCost(
+				settled?.total_input_tokens ?? 0,
+				settled?.total_output_tokens ?? 0,
+				modelId,
+				this.deps.getSettings(),
+			)
+			?? 0;
+
+		return { text: finalText ?? "", costUsd, iterations };
 	}
 
 	// -------------------------------------------------------------------

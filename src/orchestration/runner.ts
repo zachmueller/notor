@@ -44,6 +44,8 @@ import {
 	FLOW_COMPLETE,
 	FLOW_ERROR,
 	isTerminalTopic,
+	USER_INPUT_RECEIVED,
+	USER_INPUT_REQUIRED,
 	type OrchestrationEvent,
 	type OrchestrationFlow,
 	type StepDefinition,
@@ -100,6 +102,26 @@ export interface OrchestrationRunnerDeps {
 	listOpenTasks?: () => Promise<Array<{ key: string; description: string }>>;
 	/** Optional progress callback surfaced per turn. */
 	onProgress?: (status: string) => void;
+	/**
+	 * Collect user input for an interactive pause (FR-150 / INT-030). Invoked by
+	 * the runner when a step emits `user.input.required`; receives the captured
+	 * prompt and returns the user's answer, or `null` when the user
+	 * declines/dismisses (which finalizes the run via `FLOW_CANCELLED`, reusing
+	 * INT-012's terminal path). Omitted in unit tests → a `user.input.required`
+	 * emission cannot be answered and the runner cancels the run (so a paused
+	 * flow with no UI surface never hangs the loop). The real wiring (launch.ts)
+	 * supplies a modal/input prompt.
+	 */
+	requestUserInput?: (prompt: string) => Promise<string | null>;
+	/**
+	 * Reflect the live `session.json` status while paused (FR-150 / INT-030): the
+	 * runner sets `interrupted` **before** suspending the loop and restores
+	 * `active` on resume, so the recovery scan classifies a crash-while-paused as
+	 * a dangling `user.input.required` tail ("still paused"). Omitted in unit
+	 * tests (and any flow without a session manager) → status is not mirrored
+	 * mid-run (the terminal status is still written at finalize by the caller).
+	 */
+	setSessionStatus?: (status: "active" | "interrupted") => Promise<void>;
 }
 
 export class OrchestrationRunner {
@@ -153,8 +175,11 @@ export class OrchestrationRunner {
 	 *  - `re_emit_trigger` → re-emit the interrupted turn's trigger (the step
 	 *    retries from fresh context);
 	 *  - `re_publish_event` → re-publish the logged-but-not-routed event;
-	 *  - `still_paused` / `none` → nothing to drive (INT-030 handles the pause;
-	 *    a terminal tail needs no action).
+	 *  - `still_paused` → re-surface the prompt for the paused step and resume on
+	 *    the user's answer (INT-030 / Risk #9): the `user.input.required` entry is
+	 *    already durable, so it is NOT re-appended — re-running recovery over the
+	 *    same paused tail re-surfaces the same prompt and does not double-resume;
+	 *  - `none` → a terminal tail needs no action.
 	 *
 	 * Engine-bookkeeping replay is idempotent: it does **not** re-run already
 	 * completed turns; it re-injects exactly the one dangling event. Step
@@ -190,6 +215,31 @@ export class OrchestrationRunner {
 		const objective = recovered.meta.prompt;
 		const action = recovered.action;
 
+		// A recovered paused tail (INT-030 / Risk #9): the `user.input.required`
+		// entry is already durable in the log, so we do NOT re-append it — we
+		// re-surface the prompt and resume from the user's answer. Re-running
+		// recovery over the same paused tail re-surfaces the same prompt and does
+		// not double-resume (no `user.input.received` is written until the user
+		// actually answers — idempotent).
+		if (action.kind === "still_paused") {
+			const pausedStep = this.findStep(flow, action.step);
+			if (!pausedStep) {
+				log.warn("Paused session references an unknown step; cannot re-surface prompt", {
+					sessionId: recovered.sessionId,
+					pausedStep: action.step,
+				});
+				return this.terminalResult(
+					"error",
+					this.synthTerminal(FLOW_ERROR, "Paused step is no longer in the flow."),
+				);
+			}
+			const queue: RoutingJob[] = [];
+			const pauseTerminal = await this.collectInputAndResume(pausedStep, action.prompt, queue);
+			const result = pauseTerminal ?? (await this.driveQueue(flow, objective, queue));
+			await this.finalize(result);
+			return result;
+		}
+
 		let seed: OrchestrationEvent | null = null;
 		if (action.kind === "re_emit_trigger") {
 			this.engine.setEmissionContext(this.nextIteration(), null);
@@ -200,7 +250,7 @@ export class OrchestrationRunner {
 		}
 
 		if (!seed) {
-			// still_paused / none — nothing to drive in Phase 2.
+			// `none` — a terminal tail needs no action.
 			log.info("Resume has no replayable tail; leaving session as-is", {
 				sessionId: recovered.sessionId,
 				action: action.kind,
@@ -361,6 +411,15 @@ export class OrchestrationRunner {
 			return this.handleCompletion(flow, emitted, sourceStep, queue);
 		}
 
+		// Interactive-pause short-circuit (FR-150 / INT-030). `user.input.required`
+		// is NOT routed to a subscriber step — the runner intercepts it as a pause
+		// signal, suspends, collects input, and resumes by re-triggering the
+		// paused step. (Engine stays UI-agnostic: this is the runner's reading of
+		// the captured topic, not an engine routing rule.)
+		if (emitted.topic === USER_INPUT_REQUIRED) {
+			return this.handlePause(flow, emitted, sourceStep, queue);
+		}
+
 		return this.enqueueRouting(flow, emitted, queue, sourceStep);
 	}
 
@@ -435,6 +494,105 @@ export class OrchestrationRunner {
 		return null;
 	}
 
+	// -- Interactive pause (FR-150 / INT-030) --------------------------------
+
+	/**
+	 * Handle a `user.input.required` emission: pause the loop, collect input, and
+	 * resume by re-triggering the paused step. The pause is the runner's reading
+	 * of the captured topic at its routing boundary (the engine stays UI-agnostic;
+	 * [event-engine.md]). Returns a terminal result when the user declines
+	 * (`FLOW_CANCELLED`), else `null` (the resume re-trigger was enqueued).
+	 *
+	 * Write order (vault-schema item 7 / recovery invariant): the
+	 * `user.input.required` entry is appended **before** the loop suspends, so a
+	 * crash between "asked" and "answered" leaves a dangling `user.input.required`
+	 * tail that `INT-005` recovery classifies as "still paused" (not a dangling
+	 * `turn.start` that re-emits a trigger). `session.json` `status` is set to
+	 * `interrupted` while paused — the same status the recovery scan looks for.
+	 */
+	private async handlePause(
+		flow: OrchestrationFlow,
+		emitted: OrchestrationEvent,
+		sourceStep: StepDefinition,
+		queue: RoutingJob[],
+	): Promise<OrchestrationRunResult | null> {
+		// Durable pause entry BEFORE suspending (recovery anchor).
+		await this.deps.sessionLog.appendUserInputRequired({
+			turn: emitted.turn,
+			step: sourceStep.name,
+			prompt: emitted.payload,
+		});
+		await this.setSessionStatusSafe("interrupted");
+		this.deps.onProgress?.(`${flow.name}: paused awaiting input (${sourceStep.name})`);
+
+		// Suspend the loop: await the user's answer. No further events are consumed
+		// until this settles (the driveQueue loop is blocked here).
+		return this.collectInputAndResume(sourceStep, emitted.payload, queue);
+	}
+
+	/**
+	 * Collect user input for a paused step and resume the loop, or finalize with
+	 * `FLOW_CANCELLED` when the user declines. Shared by the live pause path
+	 * ({@link handlePause}) and a recovered paused tail ({@link resume}); the
+	 * caller owns writing the `user.input.required` entry (the live path writes it;
+	 * a recovered tail already has it durably in the log — re-running recovery must
+	 * NOT re-append it, which is what keeps re-resume idempotent).
+	 *
+	 * On input it writes `user.input.received` **before** publishing the resume
+	 * event (write-before-route), restores `status: active`, then re-triggers the
+	 * paused step with the user's answer as the event payload (the resume routes
+	 * directly to the paused step — author declares no trigger for it, mirroring
+	 * the completion re-trigger auto-subscription).
+	 */
+	private async collectInputAndResume(
+		pausedStep: StepDefinition,
+		prompt: string,
+		queue: RoutingJob[],
+	): Promise<OrchestrationRunResult | null> {
+		const userInput = this.deps.requestUserInput
+			? await this.deps.requestUserInput(prompt)
+			: null;
+
+		if (userInput === null) {
+			// Declined / dismissed (or no input channel) → finalize via FLOW_CANCELLED
+			// (INT-012), bypassing task enforcement. Open tasks do not block the cancel.
+			return this.terminalResult(
+				"cancelled",
+				this.synthTerminal(
+					FLOW_CANCELLED,
+					`User declined the input prompt from step '${pausedStep.name}'.`,
+				),
+			);
+		}
+
+		// Resume: user.input.received BEFORE the resume event is routed.
+		await this.deps.sessionLog.appendUserInputReceived({
+			turn: this.iteration,
+			payload: userInput,
+		});
+		await this.setSessionStatusSafe("active");
+
+		// Publish the resume event (write-before-route) and re-trigger the paused
+		// step directly with the user's payload.
+		this.engine.setEmissionContext(this.iteration, null);
+		const resumeEvent = this.engine.publish(USER_INPUT_RECEIVED, userInput, this.deps.sessionLog);
+		queue.push({ event: resumeEvent, step: pausedStep });
+		return null;
+	}
+
+	/** Mirror `session.json` status while paused/resumed; never throws into the loop. */
+	private async setSessionStatusSafe(status: "active" | "interrupted"): Promise<void> {
+		if (!this.deps.setSessionStatus) return;
+		try {
+			await this.deps.setSessionStatus(status);
+		} catch (e) {
+			log.warn("Failed to mirror session status during pause/resume", {
+				status,
+				error: String(e),
+			});
+		}
+	}
+
 	/**
 	 * Resolve subscribers for `event` and enqueue routing jobs (breadth-first:
 	 * all subscribers of a fan-out topic enqueued together). An orphaned event
@@ -477,6 +635,12 @@ export class OrchestrationRunner {
 	private nextIteration(): number {
 		this.iteration += 1;
 		return this.iteration;
+	}
+
+	/** Resolve a step by name within the flow (or `null`). */
+	private findStep(flow: OrchestrationFlow, name: string | null): StepDefinition | null {
+		if (!name) return null;
+		return flow.steps.find((s) => s.name === name) ?? null;
 	}
 
 	private missingRequiredEvents(flow: OrchestrationFlow): string[] {

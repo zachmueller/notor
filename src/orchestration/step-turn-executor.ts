@@ -48,6 +48,7 @@ import type {
 	RunLoopHooks,
 } from "../run-loop/types";
 import { RunLoop } from "../run-loop/run-loop";
+import { decrementAggregate } from "../run-loop/budget";
 import { resolvePersonaProviderConfig } from "../personas/provider-config-resolver";
 import { logger } from "../utils/logger";
 import type { SessionLog } from "./session-log";
@@ -307,6 +308,16 @@ export class StepTurnExecutor {
 		const costUsd = perTurnCost;
 		const tokenUsage = result.tokenUsage;
 
+		// (INT-031 / FR-151) Post-hoc step→workflow budget reconciliation. Any
+		// `invoke_workflow` call during the turn pushed the invoked workflow's
+		// reported `{ costUsd, iterations }` onto the carriage (the background loop
+		// has no RunContext, so it could not decrement the shared cell live). Fold
+		// the totals into the shared aggregate-budget cell now, at the await-result
+		// boundary — so the next turn/spawn gate sees the corrected remaining total.
+		// Overshoot during the call is unbounded by design (Issue-13h); this only
+		// makes the ceiling accurate going forward.
+		this.reconcileWorkflowInvocations(runContext, req.orchestrationContext);
+
 		// (6/7) Capture the emission, or synthesize default_publishes / {step}.capped.
 		const emission = this.resolveEmission(step, req.orchestrationContext, result.stopReason);
 
@@ -411,6 +422,32 @@ export class StepTurnExecutor {
 			topic: `${step.name}.capped`,
 			payload: JSON.stringify({ stopReason, step: step.name }),
 		};
+	}
+
+	/**
+	 * Fold any step→workflow invocations' reported spend into the shared
+	 * aggregate-budget cell (INT-031 / FR-151). Drains the carriage's
+	 * `workflowInvocations` accumulator and applies one `decrementAggregate` per
+	 * invocation. No-op when the carriage carries no invocations (the common case)
+	 * or has no accumulator (sub-agents / non-orchestration carriages).
+	 */
+	private reconcileWorkflowInvocations(
+		runContext: RunContext,
+		ctx: OrchestrationToolContext,
+	): void {
+		const invocations = ctx.workflowInvocations;
+		if (!invocations || invocations.length === 0) return;
+		for (const { costUsd, iterations } of invocations) {
+			decrementAggregate(runContext.budget, costUsd, iterations);
+			log.info("Reconciled step→workflow spend into aggregate budget", {
+				costUsd,
+				iterations,
+				iterationsRemaining: runContext.budget.iterationsRemaining,
+				costRemainingUsd: runContext.budget.costRemainingUsd,
+			});
+		}
+		// Drain so a (hypothetical) re-read never double-counts.
+		invocations.length = 0;
 	}
 
 	/** Flush the within-turn overwrite audit (Issue-13e) to `event.emission_overwritten`. */

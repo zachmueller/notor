@@ -47,6 +47,7 @@ import {
 import {
 	FLOW_COMPLETE,
 	isTerminalTopic,
+	USER_INPUT_REQUIRED,
 	type OrchestrationFlow,
 	type StepDefinition,
 } from "./types";
@@ -105,7 +106,12 @@ function isValidatorExemptTopic(topic: string): boolean {
 	return (
 		isTerminalTopic(topic) ||
 		SYNTHESIZED_TOPICS.has(topic) ||
-		isFailureChannelTopic(topic)
+		isFailureChannelTopic(topic) ||
+		// `user.input.required` is a runtime-intercepted pause signal (FR-150 /
+		// INT-030): the runner suspends on it and resumes by re-triggering the
+		// paused step — it is never routed to a subscriber, so a step publishing
+		// it with no subscriber is NOT a static orphan.
+		topic === USER_INPUT_REQUIRED
 	);
 }
 

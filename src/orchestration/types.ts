@@ -195,6 +195,30 @@ export function isTerminalTopic(topic: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Interactive-pause topics (FR-150 / INT-030)
+// ---------------------------------------------------------------------------
+
+/**
+ * The pause signal a step emits (via `emit_event` / `orchestration.emit`) to
+ * suspend the loop awaiting user input (FR-150). It is an **ordinary topic at
+ * the engine layer** (write-before-route applies); the *pause* is the
+ * `OrchestrationRunner`'s interpretation of it at its routing boundary, not an
+ * engine routing rule. The payload carries the question shown to the user.
+ *
+ * @see specs/ZZ-misc/orchestration/contracts/event-engine.md — Event Routing Rules
+ * @see specs/ZZ-misc/orchestration/contracts/vault-schema.md — Enforced write order (item 7)
+ */
+export const USER_INPUT_REQUIRED = "user.input.required";
+
+/**
+ * The synthesized **resume** topic the runner publishes once the user supplies
+ * input. Its payload is the user's answer; the runner re-triggers the paused
+ * step with it (write-before-route). Authors do not declare it as a trigger —
+ * the runner routes the resume directly to the paused step.
+ */
+export const USER_INPUT_RECEIVED = "user.input.received";
+
+// ---------------------------------------------------------------------------
 // Code-step argument signature (consumed in Phase 3 INT-010; declared here)
 // ---------------------------------------------------------------------------
 

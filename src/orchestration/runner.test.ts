@@ -15,6 +15,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { COMPLETION_NOPROGRESS_THRESHOLD } from "./constants";
 import { OrchestrationRunner } from "./runner";
+import { SessionRecovery, type RecoverableSession } from "./session-recovery";
+import type { SessionLogEntry } from "./session-log";
 import type { StepTurnExecutor, StepTurnRequest, StepTurnResult } from "./step-turn-executor";
 import type { SessionLog } from "./session-log";
 import {
@@ -374,6 +376,207 @@ describe("OrchestrationRunner", () => {
 		expect(calls).toBeGreaterThanOrEqual(2);
 	});
 
+	// -- INT-030: interactive pause (user.input.required) --------------------
+
+	/** A SessionLog that records every appended entry (for write-order assertions). */
+	function recordingLog(events: Array<{ type: string; [k: string]: unknown }>): SessionLog {
+		const rec = (type: string) => async (e?: Record<string, unknown>) => {
+			events.push({ type, ...(e ?? {}) });
+		};
+		return {
+			appendSessionStart: rec("session.start"),
+			appendTurnStart: rec("turn.start"),
+			appendTurnComplete: rec("turn.complete"),
+			appendEventEmitted: rec("event.emitted"),
+			appendEventEmissionOverwritten: rec("event.emission_overwritten"),
+			appendChildSpawned: rec("child.spawned"),
+			appendChildResult: rec("child.result"),
+			appendSessionCancelled: rec("session.cancelled"),
+			appendSessionComplete: rec("session.complete"),
+			appendUserInputRequired: rec("user.input.required"),
+			appendUserInputReceived: rec("user.input.received"),
+		} as unknown as SessionLog;
+	}
+
+	function makeInteractiveRunner(args: {
+		f: OrchestrationFlow;
+		executor: StepTurnExecutor;
+		log: SessionLog;
+		requestUserInput?: (prompt: string) => Promise<string | null>;
+		setSessionStatus?: (status: "active" | "interrupted") => Promise<void>;
+	}) {
+		let convId = 0;
+		return new OrchestrationRunner({
+			executor: args.executor,
+			sessionLog: args.log,
+			makeOrchestrationContext: () => ({
+				sessionId: "s1",
+				scratchpadPath: "sp",
+				tasksPath: "tp",
+				pendingEmission: null,
+				emissionOverwrites: [],
+			}),
+			makeConversationId: () => `c${convId++}`,
+			mode: "act",
+			sessionId: "s1",
+			abortSignal: new AbortController().signal,
+			origin: "user",
+			requestUserInput: args.requestUserInput,
+			setSessionStatus: args.setSessionStatus,
+		});
+	}
+
+	it("pauses on user.input.required, then resumes by re-triggering the paused step with the user's answer", async () => {
+		// Asker emits user.input.required (its emission); on the resume re-trigger it
+		// emits FLOW_COMPLETE. The runner must collect input and feed it back as the
+		// resume event's payload to the same step.
+		const asker = step("Asker", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
+		const f = flow([asker]);
+
+		const events: Array<{ type: string; [k: string]: unknown }> = [];
+		const log = recordingLog(events);
+		const statusLog: string[] = [];
+		const seenPayloads: string[] = [];
+		let calls = 0;
+
+		const executor = {
+			execute: vi.fn(async (req: StepTurnRequest): Promise<StepTurnResult> => {
+				calls++;
+				seenPayloads.push(req.event.payload);
+				// First turn → ask. Resume turn → complete.
+				const topic = calls === 1 ? "user.input.required" : FLOW_COMPLETE;
+				const payload = calls === 1 ? "Which database?" : "";
+				return {
+					emission: { topic, payload },
+					stopReason: "completed",
+					costUsd: 0,
+					tokenUsage: { input: 0, output: 0 },
+				};
+			}),
+		} as unknown as StepTurnExecutor;
+
+		const runner = makeInteractiveRunner({
+			f,
+			executor,
+			log,
+			requestUserInput: async () => "PostgreSQL",
+			setSessionStatus: async (s) => {
+				statusLog.push(s);
+			},
+		});
+
+		const result = await runner.start(f, "objective");
+
+		expect(result.status).toBe("completed");
+		// The pausing entry is written BEFORE the resume entry (write order).
+		const requiredIdx = events.findIndex((e) => e.type === "user.input.required");
+		const receivedIdx = events.findIndex((e) => e.type === "user.input.received");
+		expect(requiredIdx).toBeGreaterThanOrEqual(0);
+		expect(receivedIdx).toBeGreaterThan(requiredIdx);
+		// Status went interrupted (paused) then active (resumed).
+		expect(statusLog).toEqual(["interrupted", "active"]);
+		// The resume re-triggered Asker with the user's answer as the payload.
+		expect(seenPayloads).toContain("PostgreSQL");
+		// user.input.received is written BEFORE the resume event.emitted is routed.
+		const resumeEventIdx = events.findIndex(
+			(e) => e.type === "event.emitted" && e.topic === "user.input.received",
+		);
+		expect(resumeEventIdx).toBeGreaterThan(receivedIdx);
+	});
+
+	it("writes user.input.required BEFORE suspending and sets status interrupted", async () => {
+		const asker = step("Asker", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
+		const f = flow([asker]);
+		const events: Array<{ type: string; [k: string]: unknown }> = [];
+		const log = recordingLog(events);
+		let statusAtPrompt: string | null = null;
+		const statusLog: string[] = [];
+
+		let calls = 0;
+		const executor = {
+			execute: vi.fn(async (): Promise<StepTurnResult> => {
+				calls++;
+				return {
+					emission:
+						calls === 1
+							? { topic: "user.input.required", payload: "Proceed?" }
+							: { topic: FLOW_COMPLETE, payload: "" },
+					stopReason: "completed",
+					costUsd: 0,
+					tokenUsage: { input: 0, output: 0 },
+				};
+			}),
+		} as unknown as StepTurnExecutor;
+
+		const runner = makeInteractiveRunner({
+			f,
+			executor,
+			log,
+			requestUserInput: async () => {
+				// At the moment we are asked, the pause entry must already be durable
+				// and status interrupted.
+				statusAtPrompt = statusLog[statusLog.length - 1] ?? null;
+				expect(events.some((e) => e.type === "user.input.required")).toBe(true);
+				return "yes";
+			},
+			setSessionStatus: async (s) => {
+				statusLog.push(s);
+			},
+		});
+
+		await runner.start(f, "objective");
+		expect(statusAtPrompt).toBe("interrupted");
+	});
+
+	it("declining the prompt finalizes via FLOW_CANCELLED (status cancelled), bypassing task enforcement", async () => {
+		const asker = step("Asker", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
+		const f = flow([asker]);
+		const events: Array<{ type: string; [k: string]: unknown }> = [];
+		const log = recordingLog(events);
+
+		const executor = {
+			execute: vi.fn(async (): Promise<StepTurnResult> => ({
+				emission: { topic: "user.input.required", payload: "Pick one" },
+				stopReason: "completed",
+				costUsd: 0,
+				tokenUsage: { input: 0, output: 0 },
+			})),
+		} as unknown as StepTurnExecutor;
+
+		const runner = makeInteractiveRunner({
+			f,
+			executor,
+			log,
+			requestUserInput: async () => null, // declined / dismissed
+			setSessionStatus: async () => {},
+		});
+
+		const result = await runner.start(f, "objective");
+		expect(result.status).toBe("cancelled");
+		expect(result.terminal.topic).toBe(FLOW_CANCELLED);
+		// No resume was written.
+		expect(events.some((e) => e.type === "user.input.received")).toBe(false);
+	});
+
+	it("cancels the run when no input channel is wired (requestUserInput omitted) — never hangs", async () => {
+		const asker = step("Asker", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
+		const f = flow([asker]);
+		const events: Array<{ type: string; [k: string]: unknown }> = [];
+		const log = recordingLog(events);
+		const executor = {
+			execute: vi.fn(async (): Promise<StepTurnResult> => ({
+				emission: { topic: "user.input.required", payload: "?" },
+				stopReason: "completed",
+				costUsd: 0,
+				tokenUsage: { input: 0, output: 0 },
+			})),
+		} as unknown as StepTurnExecutor;
+
+		// No requestUserInput / setSessionStatus injected.
+		const result = await makeInteractiveRunner({ f, executor, log }).start(f, "objective");
+		expect(result.status).toBe("cancelled");
+	});
+
 	it("terminates with FLOW_ERROR after the completion no-progress threshold (Issue-9)", async () => {
 		// Planner keeps emitting FLOW_COMPLETE but never produces the required event,
 		// and is auto-re-triggered with flow.requirements_unmet — a non-shrinking
@@ -391,5 +594,147 @@ describe("OrchestrationRunner", () => {
 		expect(result.terminal.payload).toMatch(/never\.happens|without closing/i);
 		// Planner ran the initial turn + up to the threshold re-triggers (bounded).
 		expect(runOrder.length).toBeLessThanOrEqual(COMPLETION_NOPROGRESS_THRESHOLD + 2);
+	});
+
+	// -- INT-030: paused-session recovery (resume from a dangling tail) -------
+
+	/** Classify a synthetic paused log into a RecoverableSession via real SessionRecovery. */
+	function recoverPausedSession(pausedStep: string, prompt: string): RecoverableSession {
+		const TS = "2026-06-29T00:00:00.000Z";
+		const log =
+			[
+				{ type: "session.start", session_id: "s1", flow: "Demo", prompt: "objective", origin: "user", parent_session_id: null, ts: TS },
+				{ type: "event.emitted", turn: 1, topic: "start", payload: "objective", source_step: null, ts: TS },
+				{ type: "turn.start", turn: 2, step: pausedStep, trigger_topic: "start", conversation_id: "c0", ts: TS },
+				{ type: "turn.complete", turn: 2, step: pausedStep, emitted_topic: "user.input.required", conversation_id: "c0", cost_usd: 0.01, token_usage: { input: 10, output: 5 }, ts: TS },
+				{ type: "user.input.required", turn: 2, step: pausedStep, prompt, ts: TS },
+			]
+				.map((e) => JSON.stringify(e as SessionLogEntry))
+				.join("\n") + "\n";
+		return new SessionRecovery().replay(
+			{
+				session_id: "s1",
+				flow_name: "Demo",
+				status: "interrupted",
+				iteration: 2,
+				active_step: pausedStep,
+				started_at: TS,
+				prompt: "objective",
+				parent_session_id: null,
+				origin: "user",
+			},
+			log,
+			{ resolveCeilings: () => ({ maxIterations: 100, maxCostUsd: 5 }) },
+		);
+	}
+
+	it("recovers a paused session: re-surfaces the prompt and resumes by re-triggering the paused step", async () => {
+		const asker = step("Asker", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
+		const f = flow([asker]);
+		const recovered = recoverPausedSession("Asker", "Which option?");
+		expect(recovered.action.kind).toBe("still_paused");
+
+		const seenPayloads: string[] = [];
+		const executor = {
+			execute: vi.fn(async (req: StepTurnRequest): Promise<StepTurnResult> => {
+				seenPayloads.push(req.event.payload);
+				return {
+					emission: { topic: FLOW_COMPLETE, payload: "" },
+					stopReason: "completed",
+					costUsd: 0,
+					tokenUsage: { input: 0, output: 0 },
+				};
+			}),
+		} as unknown as StepTurnExecutor;
+
+		const events: Array<{ type: string; [k: string]: unknown }> = [];
+		let prompted = 0;
+		const runner = makeInteractiveRunner({
+			f,
+			executor,
+			log: recordingLog(events),
+			requestUserInput: async (p) => {
+				prompted++;
+				expect(p).toBe("Which option?"); // the re-surfaced prompt
+				return "Option B";
+			},
+			setSessionStatus: async () => {},
+		});
+
+		const result = await runner.resume(f, recovered);
+		expect(result.status).toBe("completed");
+		expect(prompted).toBe(1);
+		// The recovered paused tail is NOT re-appended; only the resume entry is.
+		expect(events.some((e) => e.type === "user.input.required")).toBe(false);
+		expect(events.some((e) => e.type === "user.input.received")).toBe(true);
+		// The paused step was re-triggered with the user's answer.
+		expect(seenPayloads).toContain("Option B");
+	});
+
+	it("re-running recovery over the same paused tail re-surfaces the prompt and does not double-resume (idempotent)", async () => {
+		const asker = step("Asker", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
+		const f = flow([asker]);
+
+		const run = async () => {
+			const recovered = recoverPausedSession("Asker", "Pick?");
+			const events: Array<{ type: string; [k: string]: unknown }> = [];
+			let prompted = 0;
+			const executor = {
+				execute: vi.fn(async (): Promise<StepTurnResult> => ({
+					emission: { topic: FLOW_COMPLETE, payload: "" },
+					stopReason: "completed",
+					costUsd: 0,
+					tokenUsage: { input: 0, output: 0 },
+				})),
+			} as unknown as StepTurnExecutor;
+			const runner = makeInteractiveRunner({
+				f,
+				executor,
+				log: recordingLog(events),
+				requestUserInput: async () => {
+					prompted++;
+					return "answer";
+				},
+				setSessionStatus: async () => {},
+			});
+			const result = await runner.resume(f, recovered);
+			return { result, prompted, receivedCount: events.filter((e) => e.type === "user.input.received").length };
+		};
+
+		const a = await run();
+		const b = await run();
+		// Each independent recovery re-surfaces the prompt exactly once and resumes once.
+		expect(a.prompted).toBe(1);
+		expect(b.prompted).toBe(1);
+		expect(a.receivedCount).toBe(1);
+		expect(b.receivedCount).toBe(1);
+		expect(a.result.status).toBe("completed");
+		expect(b.result.status).toBe("completed");
+	});
+
+	it("cancels a recovered paused session when the user declines the re-surfaced prompt", async () => {
+		const asker = step("Asker", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
+		const f = flow([asker]);
+		const recovered = recoverPausedSession("Asker", "Continue?");
+		const events: Array<{ type: string; [k: string]: unknown }> = [];
+		const executor = {
+			execute: vi.fn(async (): Promise<StepTurnResult> => ({
+				emission: { topic: FLOW_COMPLETE, payload: "" },
+				stopReason: "completed",
+				costUsd: 0,
+				tokenUsage: { input: 0, output: 0 },
+			})),
+		} as unknown as StepTurnExecutor;
+		const runner = makeInteractiveRunner({
+			f,
+			executor,
+			log: recordingLog(events),
+			requestUserInput: async () => null,
+			setSessionStatus: async () => {},
+		});
+		const result = await runner.resume(f, recovered);
+		expect(result.status).toBe("cancelled");
+		expect(result.terminal.topic).toBe(FLOW_CANCELLED);
+		expect(executor.execute).not.toHaveBeenCalled();
 	});
 });
