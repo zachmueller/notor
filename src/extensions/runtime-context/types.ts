@@ -339,6 +339,16 @@ export interface ExtensionUtils {
 		persistUrl: (conversationId: string, url: string) => Promise<void>;
 		readPersistedUrl: (conversationId: string) => Promise<string | null>;
 	} | null;
+	/**
+	 * Per-step orchestration session carriage — only set per-invocation when the
+	 * tool is dispatched from an orchestration step turn (threaded from
+	 * `ToolExecuteOptions.orchestrationContext`). The `emit_event` scaffold reads
+	 * it to capture its emission into `pendingEmission`; `undefined` for ordinary
+	 * chat / sub-agent tool calls. Shape: `OrchestrationToolContext`
+	 * (`src/run-loop/types.ts`).
+	 * @internal
+	 */
+	orchestrationContext?: import("../../run-loop/types").OrchestrationToolContext;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */

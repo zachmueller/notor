@@ -147,6 +147,16 @@ export interface OrchestrationToolContext {
 	 * executor reads it post-turn (last-write-wins within a turn).
 	 */
 	pendingEmission: { topic: string; payload: string; structured?: unknown } | null;
+	/**
+	 * Audit back-channel for the within-turn overwrite policy (Issue-13e,
+	 * FEAT-009 → FEAT-006). `emit_event` pushes `{ prev_topic, new_topic }` here
+	 * when it overwrites a pending non-terminal emission (last-write-wins) or
+	 * rejects an attempt to overwrite a latched terminal; `StepTurnExecutor`
+	 * flushes these to `session-log.jsonl` as `event.emission_overwritten`
+	 * entries after the turn. Optional — `undefined` for sub-agents and any
+	 * non-orchestration carriage; the scaffold no-ops the audit when it is absent.
+	 */
+	emissionOverwrites?: Array<{ prev_topic: string; new_topic: string }>;
 }
 
 // ---------------------------------------------------------------------------

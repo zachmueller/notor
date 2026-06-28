@@ -961,6 +961,31 @@ export default class NotorPlugin extends Plugin {
 				templateRegistry: this.getTemplateRegistry(),
 				hookDelayManager,
 				createHeadlessOrchestrator: () => this.createHeadlessOrchestrator(),
+				// FEAT-012: hook-triggered orchestration launch (FR-119b). Present
+				// only when orchestration_enabled — otherwise the dispatcher skips
+				// the action with a diagnostic Notice.
+				launchOrchestration: this.settings.orchestration_enabled
+					? async (flowNameOrDir: string, objective: string) => {
+							const { FlowDefinitionParser } = await import("./orchestration/flow-parser");
+							const { launchOrchestration } = await import("./orchestration/launch");
+							const parser = new FlowDefinitionParser(
+								this.app.vault,
+								this.app.metadataCache,
+								this.settings.notor_dir,
+							);
+							// Resolve by directory if it looks like a path, else by flow name.
+							const flows = await parser.discoverFlows();
+							const ref = flowNameOrDir.trim();
+							const match = flows.find(
+								(f) => f.flow.name === ref || f.flow.flowDir === ref || f.flow.flowDir.endsWith(`/${ref}`),
+							);
+							if (!match) {
+								new Notice(`Orchestration flow '${ref}' not found; hook skipped.`);
+								return;
+							}
+							await launchOrchestration(this, match.flow, objective, { origin: "hook" });
+						}
+					: undefined,
 			};
 		};
 

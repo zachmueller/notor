@@ -267,6 +267,80 @@ async function executeScopedWorkflowHook(
 	await executeRunWorkflowAction(workflowPath, vaultContext, null, deps);
 }
 
+/**
+ * Execute a `run_orchestration` action for a Phase 3 LLM lifecycle hook
+ * (FR-119b / FEAT-012). Mirrors {@link executeLifecycleHookWorkflowAction}:
+ * builds a lifecycle `VaultEventHookContext` and delegates to
+ * `executeRunOrchestrationAction()` (which is feature-group-gated via
+ * `deps.launchOrchestration`).
+ */
+async function executeLifecycleHookOrchestrationAction(
+	hook: Hook,
+	context: LifecycleHookWorkflowContext,
+	_settings: NotorSettings,
+): Promise<void> {
+	const flowRef = hook.orchestration_flow;
+	if (!flowRef?.trim()) {
+		log.warn("run_orchestration lifecycle hook has no orchestration_flow; skipping", {
+			hookId: hook.id,
+			hookEvent: context.hookEvent,
+		});
+		new Notice(`Hook '${hook.label || hook.id}' has no orchestration flow configured; skipping.`);
+		return;
+	}
+
+	const { executeRunOrchestrationAction } = await import("./vault-event-dispatcher");
+	const deps = getRegisteredDispatcherDeps();
+	if (!deps) {
+		log.warn("Dispatcher deps not registered; cannot execute run_orchestration lifecycle hook", {
+			hookId: hook.id,
+		});
+		return;
+	}
+
+	const vaultContext: import("./vault-event-hook-engine").VaultEventHookContext = {
+		hookEvent: context.hookEvent,
+		timestamp: context.timestamp,
+		notePath: null,
+		tagsAdded: null,
+		tagsRemoved: null,
+	};
+	await executeRunOrchestrationAction(flowRef, vaultContext, null, deps);
+}
+
+/** Scoped-hook analog of {@link executeLifecycleHookOrchestrationAction}. */
+async function executeScopedOrchestrationHook(
+	scopedHook: WorkflowScopedHook,
+	lifecycleContext: LifecycleHookWorkflowContext,
+	_settings: NotorSettings,
+): Promise<void> {
+	const flowRef = scopedHook.orchestration_flow;
+	if (!flowRef?.trim()) {
+		log.warn("Scoped run_orchestration hook has no orchestration_flow; skipping", {
+			event: scopedHook.event,
+		});
+		return;
+	}
+
+	const { executeRunOrchestrationAction } = await import("./vault-event-dispatcher");
+	const deps = getRegisteredDispatcherDeps();
+	if (!deps) {
+		log.warn("Dispatcher deps not registered; cannot execute scoped run_orchestration hook", {
+			event: scopedHook.event,
+		});
+		return;
+	}
+
+	const vaultContext: import("./vault-event-hook-engine").VaultEventHookContext = {
+		hookEvent: lifecycleContext.hookEvent,
+		timestamp: lifecycleContext.timestamp,
+		notePath: null,
+		tagsAdded: null,
+		tagsRemoved: null,
+	};
+	await executeRunOrchestrationAction(flowRef, vaultContext, null, deps);
+}
+
 // ---------------------------------------------------------------------------
 // Pre-send context (specific to pre_send hooks)
 // ---------------------------------------------------------------------------
@@ -368,6 +442,8 @@ export async function dispatchPreSend(
 				// run_workflow: fire-and-forget for pre_send scoped hooks
 				// (stdout capture not applicable to workflow actions per F-022)
 				void executeScopedWorkflowHook(hook, lifecycleCtx, settings);
+			} else if (hook.action_type === "run_orchestration") {
+				void executeScopedOrchestrationHook(hook, lifecycleCtx, settings);
 			} else {
 				// execute_command: await and capture stdout
 				const stdout = await executeScopedCommandHook(
@@ -394,6 +470,11 @@ export async function dispatchPreSend(
 					lifecycleCtx,
 					settings
 				);
+				continue;
+			}
+			if (actionType === "run_orchestration") {
+				// run_orchestration: fire-and-forget (FR-119b)
+				void executeLifecycleHookOrchestrationAction(hook, lifecycleCtx, settings);
 				continue;
 			}
 
@@ -511,6 +592,8 @@ export function dispatchOnToolCall(
 			for (const hook of effectiveHooks as WorkflowScopedHook[]) {
 				if (hook.action_type === "run_workflow") {
 					await executeScopedWorkflowHook(hook, lifecycleCtx, settings);
+				} else if (hook.action_type === "run_orchestration") {
+					await executeScopedOrchestrationHook(hook, lifecycleCtx, settings);
 				} else {
 					await executeScopedCommandHook(hook, hookContext, settings, vaultRootPath);
 				}
@@ -522,6 +605,10 @@ export function dispatchOnToolCall(
 				const actionType = hook.action_type ?? "execute_command";
 				if (actionType === "run_workflow") {
 					await executeLifecycleHookWorkflowAction(hook, lifecycleCtx, settings);
+					continue;
+				}
+				if (actionType === "run_orchestration") {
+					await executeLifecycleHookOrchestrationAction(hook, lifecycleCtx, settings);
 					continue;
 				}
 				await executeHook(hook, hookContext, settings, vaultRootPath);
@@ -628,6 +715,8 @@ export function dispatchOnToolResult(
 			for (const hook of effectiveHooks as WorkflowScopedHook[]) {
 				if (hook.action_type === "run_workflow") {
 					await executeScopedWorkflowHook(hook, lifecycleCtx, settings);
+				} else if (hook.action_type === "run_orchestration") {
+					await executeScopedOrchestrationHook(hook, lifecycleCtx, settings);
 				} else {
 					await executeScopedCommandHook(hook, hookContext, settings, vaultRootPath);
 				}
@@ -643,6 +732,10 @@ export function dispatchOnToolResult(
 						lifecycleCtx,
 						settings
 					);
+					continue;
+				}
+				if (actionType === "run_orchestration") {
+					await executeLifecycleHookOrchestrationAction(hook, lifecycleCtx, settings);
 					continue;
 				}
 				await executeHook(hook, hookContext, settings, vaultRootPath);
@@ -746,6 +839,8 @@ export function dispatchAfterCompletion(
 			for (const hook of effectiveHooks as WorkflowScopedHook[]) {
 				if (hook.action_type === "run_workflow") {
 					await executeScopedWorkflowHook(hook, lifecycleCtx, settings);
+				} else if (hook.action_type === "run_orchestration") {
+					await executeScopedOrchestrationHook(hook, lifecycleCtx, settings);
 				} else {
 					await executeScopedCommandHook(hook, hookContext, settings, vaultRootPath);
 				}
@@ -761,6 +856,10 @@ export function dispatchAfterCompletion(
 						lifecycleCtx,
 						settings
 					);
+					continue;
+				}
+				if (actionType === "run_orchestration") {
+					await executeLifecycleHookOrchestrationAction(hook, lifecycleCtx, settings);
 					continue;
 				}
 				await executeHook(hook, hookContext, settings, vaultRootPath);
@@ -1006,8 +1105,11 @@ export async function dispatchOnApprovalRequired(
 	// Execute shell hooks sequentially; short-circuit on first decision
 	for (const hook of hooks) {
 		const actionType = hook.action_type ?? "execute_command";
-		if (actionType === "run_workflow") {
-			log.debug("Skipping run_workflow hook for on_approval_required", { hookId: hook.id });
+		if (actionType === "run_workflow" || actionType === "run_orchestration") {
+			log.debug("Skipping non-command hook for on_approval_required", {
+				hookId: hook.id,
+				actionType,
+			});
 			continue;
 		}
 

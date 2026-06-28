@@ -44,13 +44,18 @@ export interface Hook {
 	 *
 	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001, F-004
 	 */
-	action_type?: "execute_command" | "run_workflow";
+	action_type?: "execute_command" | "run_workflow" | "run_orchestration";
 	/**
 	 * Vault-relative workflow path (required when action_type is "run_workflow").
 	 *
 	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001, F-004
 	 */
 	workflow_path?: string | null;
+	/**
+	 * Orchestration flow name or flow-directory path (required when action_type
+	 * is "run_orchestration"; gated on `orchestration_enabled`, FR-119b).
+	 */
+	orchestration_flow?: string | null;
 }
 
 /** Supported lifecycle hook event types. */

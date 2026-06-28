@@ -14,3 +14,22 @@ export function getFrontMatterInfo(content: string): { exists: boolean; contentS
 	if (!match) return { exists: false, contentStart: 0 };
 	return { exists: true, contentStart: match[0].length };
 }
+
+/**
+ * Minimal abstract-file hierarchy so `instanceof TFile` / `instanceof TFolder`
+ * checks work in unit tests (the parser/discovery code branches on these).
+ * Tests construct these directly and register them in a fake Vault.
+ */
+export class TAbstractFile {
+	path = "";
+	name = "";
+}
+
+export class TFile extends TAbstractFile {
+	extension = "md";
+	stat = { ctime: 0, mtime: 0, size: 0 };
+}
+
+export class TFolder extends TAbstractFile {
+	children: TAbstractFile[] = [];
+}

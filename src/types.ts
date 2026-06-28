@@ -522,11 +522,16 @@ export interface WorkflowScopedHook {
 	/** Lifecycle event this hook fires on. */
 	event: LLMHookEvent;
 	/** Action to perform when the hook fires. */
-	action_type: "execute_command" | "run_workflow";
+	action_type: "execute_command" | "run_workflow" | "run_orchestration";
 	/** Shell command (required when action_type is "execute_command"). */
 	command: string | null;
 	/** Vault-relative workflow path (required when action_type is "run_workflow"). */
 	workflow_path: string | null;
+	/**
+	 * Orchestration flow name or flow-directory path (required when action_type
+	 * is "run_orchestration"; gated on `orchestration_enabled`, FR-119b).
+	 */
+	orchestration_flow?: string | null;
 }
 
 /**
@@ -686,11 +691,16 @@ export interface VaultEventHook {
 	/** The vault event type that triggers this hook. */
 	event: VaultEventHookType;
 	/** Action to perform when the hook fires. */
-	action_type: "execute_command" | "run_workflow";
+	action_type: "execute_command" | "run_workflow" | "run_orchestration";
 	/** Shell command to execute (required when action_type is "execute_command"). */
 	command: string | null;
 	/** Vault-relative workflow path (required when action_type is "run_workflow"). */
 	workflow_path: string | null;
+	/**
+	 * Orchestration flow name or flow-directory path (required when action_type
+	 * is "run_orchestration"; gated on `orchestration_enabled`, FR-119b).
+	 */
+	orchestration_flow?: string | null;
 	/** Human-readable label (optional; falls back to command or workflow_path). */
 	label: string;
 	/** Whether this hook is active. */

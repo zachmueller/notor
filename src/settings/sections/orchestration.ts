@@ -10,8 +10,21 @@
  * @see src/settings/sections/memory.ts — mirrored toggle
  */
 
-import { Setting } from "obsidian";
+import { Setting, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
+
+/**
+ * Ensure `{notor_dir}/orchestrations/` exists (mirrors the memory toggle seeding
+ * its folder). Created on first enable so the flow picker / hook launch have a
+ * place to discover flows.
+ */
+async function ensureOrchestrationsFolder(ctx: SettingsContext): Promise<void> {
+	const dir = normalizePath(`${ctx.settings.notor_dir}/orchestrations`);
+	const existing = ctx.app.vault.getAbstractFileByPath(dir);
+	if (!existing) {
+		await ctx.app.vault.createFolder(dir);
+	}
+}
 
 /** Render the "Orchestration" settings section. */
 export function renderOrchestrationSection(
@@ -36,6 +49,15 @@ export function renderOrchestrationSection(
 				.onChange(async (value) => {
 					ctx.settings.orchestration_enabled = value;
 					await ctx.saveSettings();
+
+					// Seed the orchestrations/ directory on first enable.
+					if (value) {
+						try {
+							await ensureOrchestrationsFolder(ctx);
+						} catch {
+							// Non-fatal — discovery tolerates an absent directory.
+						}
+					}
 
 					const manager = ctx.plugin.getExtensionManager();
 					await manager.reload(false);

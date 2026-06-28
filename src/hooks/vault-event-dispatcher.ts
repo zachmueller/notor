@@ -77,6 +77,13 @@ export interface DispatcherDeps {
 	hookDelayManager?: HookDelayManager;
 	/** Factory to create a headless orchestrator for background workflow execution. */
 	createHeadlessOrchestrator?: () => ChatOrchestrator;
+	/**
+	 * Launch an orchestration flow by name/dir with an objective (FR-119b /
+	 * FEAT-012). Wired in `main.ts` to the orchestration launch module; absent
+	 * when `orchestration_enabled` is off (the dispatcher then skips the action
+	 * with a diagnostic Notice). Stamps the session `origin: "hook"`.
+	 */
+	launchOrchestration?: (flowNameOrDir: string, objective: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +312,18 @@ async function _executeOneHook(
 			vaultHook.delay_ms, // hookDelayMs — null=inherit, 0=immediate, >0=override
 			vaultHook.id,       // hookId — use hook ID as debounce key
 		);
+	} else if (actionType === "run_orchestration") {
+		// Orchestration flow launch (FR-119b / FEAT-012) — gated on the feature
+		// group; chain-extended for loop prevention (reuses ExecutionChainTracker).
+		const flowRef = vaultHook.orchestration_flow;
+		if (!flowRef?.trim()) {
+			log.warn("run_orchestration hook has no orchestration_flow; skipping", {
+				hookId: vaultHook.id,
+			});
+			new Notice(`Vault event hook '${vaultHook.label || vaultHook.id}' has no orchestration flow configured.`);
+			return;
+		}
+		await executeRunOrchestrationAction(flowRef, context, chain, deps);
 	}
 }
 
@@ -471,6 +490,84 @@ export async function executeRunWorkflowAction(
 
 	// effectiveDelay === 0 → immediate execution
 	await _executeWorkflowSubmission(workflow, workflowFile, context, chain, deps);
+}
+
+// ---------------------------------------------------------------------------
+// FEAT-012: "Run an orchestration flow" hook action executor (FR-119b)
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute a "run an orchestration flow" hook action. Mirrors
+ * {@link executeRunWorkflowAction}: assembles the hook's `TriggerContext` into
+ * the flow's starting-event objective and delegates to the orchestration launch
+ * module (`deps.launchOrchestration`, which stamps `origin: "hook"`).
+ *
+ * Gated on `orchestration_enabled`: when the feature group is off,
+ * `deps.launchOrchestration` is absent and the action is skipped with a
+ * diagnostic Notice (mirroring how an unresolved `run_workflow` target degrades).
+ * Loop prevention reuses the existing `ExecutionChainTracker` — the launch
+ * extends the same execution chain a hook-launched workflow does, so a flow that
+ * re-triggers its own launching hook is cycle-broken by the existing path.
+ * Dispatch is fire-and-forget; the flow runs on `OrchestrationRunner`, not the
+ * background-workflow loop.
+ *
+ * @see specs/ZZ-misc/orchestration/tasks/phase-1-engine.md — FEAT-012
+ */
+export async function executeRunOrchestrationAction(
+	flowRef: string,
+	context: VaultEventHookContext,
+	chain: ExecutionChain | null,
+	deps: DispatcherDeps,
+): Promise<void> {
+	log.info("Executing run_orchestration action", {
+		flowRef,
+		hookEvent: context.hookEvent,
+	});
+
+	if (!deps.launchOrchestration) {
+		// orchestration_enabled is off — skip with a diagnostic Notice.
+		log.warn("run_orchestration hook skipped: orchestration is disabled", { flowRef });
+		new Notice(`Orchestration hook skipped: enable orchestration in Settings → Notor to run '${flowRef}'.`);
+		return;
+	}
+
+	// Assemble the trigger context into the objective (mirrors how
+	// assembleWorkflowPrompt injects <trigger_context> for workflows).
+	const trigger: TriggerContext = {
+		event: context.hookEvent,
+		note_path: context.notePath,
+		tags_added: context.tagsAdded,
+		tags_removed: context.tagsRemoved,
+	};
+	const objective = buildOrchestrationObjective(trigger);
+
+	// Extend (or create) the execution chain for loop prevention.
+	const extendedChain =
+		chain !== null
+			? deps.chainTracker.extendChain(chain, context.hookEvent)
+			: deps.chainTracker.createChain(context.hookEvent);
+	void extendedChain; // chain is carried by the launch path; recorded for parity with run_workflow
+
+	try {
+		await deps.launchOrchestration(flowRef, objective);
+	} catch (e) {
+		const msg = e instanceof Error ? e.message : String(e);
+		log.error("run_orchestration launch failed", { flowRef, error: msg });
+		new Notice(`Orchestration flow '${flowRef}' failed to launch: ${msg}`);
+	}
+}
+
+/** Build the starting-event objective from a hook's trigger context. */
+function buildOrchestrationObjective(ctx: TriggerContext): string {
+	const lines: string[] = [`Triggered by hook event: ${ctx.event}`];
+	if (ctx.note_path !== null) lines.push(`note_path: ${ctx.note_path}`);
+	if (ctx.tags_added !== null && ctx.tags_added.length > 0) {
+		lines.push(`tags_added: ${ctx.tags_added.join(", ")}`);
+	}
+	if (ctx.tags_removed !== null && ctx.tags_removed.length > 0) {
+		lines.push(`tags_removed: ${ctx.tags_removed.join(", ")}`);
+	}
+	return lines.join("\n");
 }
 
 /**

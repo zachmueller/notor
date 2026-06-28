@@ -321,4 +321,21 @@ export function registerCommands(plugin: NotorPlugin): void {
 			return true;
 		},
 	});
+
+	// Run Orchestration — gated on the orchestration feature group (FEAT-011).
+	plugin.addCommand({
+		id: "run-orchestration",
+		name: "Run orchestration",
+		checkCallback: (checking: boolean) => {
+			if (!plugin.settings.orchestration_enabled) return false;
+			if (checking) return true;
+			void import("../orchestration/launch").then(({ showOrchestrationPicker }) =>
+				showOrchestrationPicker(plugin).catch((e) => {
+					log.error("Run Orchestration command failed", { error: String(e) });
+					new Notice(`Run Orchestration failed: ${e instanceof Error ? e.message : String(e)}`);
+				}),
+			);
+			return true;
+		},
+	});
 }

@@ -87,20 +87,20 @@ and orchestration imports them.
 `RunResult`/`RunLoopOptions`/`RunLoopHooks` types — imported, not redefined).
 
 **Acceptance Criteria:**
-- [ ] `OrchestrationFlow` matches [../data-model.md](../data-model.md) field-for-field: `name`,
+- [x] `OrchestrationFlow` matches [../data-model.md](../data-model.md) field-for-field: `name`,
   `description`, `flowDir`, `startingEvent`, `completionEvent`, `maxIterations`, `maxRuntimeMinutes`,
   `requiredEvents`, `steps: StepDefinition[]`, `guardrails`, plus the inert composition fields
   (`invocable`, `flowInputs`, `flowReturns`, `onCompleteFlow`, `handoffIsolation`, `maxDepth`,
   `maxCostUsd`).
-- [ ] `StepDefinition` matches the data model: `name`, `description`, `triggers`, `publishes`,
+- [x] `StepDefinition` matches the data model: `name`, `description`, `triggers`, `publishes`,
   `defaultPublishes`, `persona`, `model`, `mode: "conversation" | "code"`, `mcpServers`, `bodyContent`,
   `notePath`.
-- [ ] `OrchestrationEvent` is `{ topic, payload, source_step: string | null, turn: number, ts: string }`.
-- [ ] `FLOW_COMPLETE`/`FLOW_CANCELLED`/`FLOW_ERROR` exported as `const` string literals matching the
+- [x] `OrchestrationEvent` is `{ topic, payload, source_step: string | null, turn: number, ts: string }`.
+- [x] `FLOW_COMPLETE`/`FLOW_CANCELLED`/`FLOW_ERROR` exported as `const` string literals matching the
   data model.
-- [ ] `RunContext`/`RunResult` are **imported** from `src/run-loop/types.ts`, never redeclared in
+- [x] `RunContext`/`RunResult` are **imported** from `src/run-loop/types.ts`, never redeclared in
   `src/orchestration/`.
-- [ ] `npm run build` succeeds with no type errors; no runtime behavior added.
+- [x] `npm run build` succeeds with no type errors; no runtime behavior added.
 
 ---
 
@@ -170,37 +170,37 @@ inert fields but is otherwise untouched here (the Phase-7 extension is INT-040).
 **Dependencies:** FEAT-001 (domain types).
 
 **Acceptance Criteria:**
-- [ ] Flows are discovered by scanning `{notor_dir}/orchestrations/` for child directories containing a
+- [x] Flows are discovered by scanning `{notor_dir}/orchestrations/` for child directories containing a
   `definition.md` with `notor-type: orchestration-flow` (directories without it — e.g. `sessions/`,
   `memories.md` — are skipped).
-- [ ] `FlowDefinitionParser` populates every `OrchestrationFlow` field from frontmatter; absent
+- [x] `FlowDefinitionParser` populates every `OrchestrationFlow` field from frontmatter; absent
   optional fields take documented defaults (`completionEvent` → `FLOW_COMPLETE`, `handoffIsolation` →
   `"isolated"`, `invocable` → `false`).
-- [ ] `notor-steps` wikilinks resolve to step notes under `{flow-dir}/steps/`; an unresolved wikilink
+- [x] `notor-steps` wikilinks resolve to step notes under `{flow-dir}/steps/`; an unresolved wikilink
   raises a clear load error naming the missing step.
-- [ ] `StepNoteParser` parses all `StepDefinition` fields; `notor-step-mode` defaults to
+- [x] `StepNoteParser` parses all `StepDefinition` fields; `notor-step-mode` defaults to
   `"conversation"`; the Markdown body (excluding frontmatter) becomes `bodyContent`.
-- [ ] The `definition.md` body is never returned as prompt content (only frontmatter drives behavior).
-- [ ] A topic appearing in `notor-step-triggers` of two steps in the same flow is rejected at load with
+- [x] The `definition.md` body is never returned as prompt content (only frontmatter drives behavior).
+- [x] A topic appearing in `notor-step-triggers` of two steps in the same flow is rejected at load with
   an error naming the topic and both steps — **unless** the topic is declared in the flow's
   `notor-fanout-topics`, in which case it is accepted as ordered fan-out (dispatched in `notor-steps`
   order by the runner, FR-112).
-- [ ] `notor-fanout-topics` parses to `OrchestrationFlow.fanoutTopics` (default `[]`).
-- [ ] Topology validation hard-errors when `notor-completion-event` is unreachable from
+- [x] `notor-fanout-topics` parses to `OrchestrationFlow.fanoutTopics` (default `[]`).
+- [x] Topology validation hard-errors when `notor-completion-event` is unreachable from
   `notor-starting-event`, or when a `notor-required-events` topic is published by no step.
-- [ ] Topology validation **hard-errors** on **any published-but-unsubscribed non-terminal topic**
+- [x] Topology validation **hard-errors** on **any published-but-unsubscribed non-terminal topic**
   (Issue-10 — was previously a warning); the synthesized topics `flow.tasks_remaining` /
   `flow.requirements_unmet` and the runtime-only failure channels `{step}.capped` / `{step}.no_emit` /
   `{step}.code_error` are exempt (auto-subscribed / default-failure-handled at runtime, FEAT-003).
-- [ ] Topology validation warns on a dead step (trigger never published).
-- [ ] When `notor-max-iterations` / `notor-max-runtime-minutes` / `notor-max-cost-usd` are omitted, the
+- [x] Topology validation warns on a dead step (trigger never published).
+- [x] When `notor-max-iterations` / `notor-max-runtime-minutes` / `notor-max-cost-usd` are omitted, the
   parser injects the **finite** defaults `100` / `60` / `5.00` (never `Infinity`); `notor-max-depth` may
   remain `null`. Constants live in `src/orchestration/constants.ts` (Issue-8 / FR-119a).
-- [ ] A **definition-lint warning** is emitted when a step's `notor-step-publishes` has >1 entry AND its
+- [x] A **definition-lint warning** is emitted when a step's `notor-step-publishes` has >1 entry AND its
   resolved persona disables `emit_event` (otherwise-unreachable branches — Issue-13f).
-- [ ] `<include_note>` tags in a step body are preserved verbatim in `bodyContent` (resolution is the
+- [x] `<include_note>` tags in a step body are preserved verbatim in `bodyContent` (resolution is the
   prompt builder's job, not the parser's).
-- [ ] Covered by TEST-003.
+- [x] Covered by TEST-003.
 
 ---
 
@@ -246,21 +246,21 @@ runner's session lifecycle log entries). Underpins FR-125 recovery (Phase 2) by 
 **Dependencies:** FEAT-001 (`OrchestrationEvent` and entry shapes).
 
 **Acceptance Criteria:**
-- [ ] Every append writes exactly one newline-terminated JSON object; the file is opened append-only and
+- [x] Every append writes exactly one newline-terminated JSON object; the file is opened append-only and
   never truncated or rewritten.
-- [ ] Each entry carries `type`, `ts` (ISO), and `turn` where applicable, matching the entry-type union
+- [x] Each entry carries `type`, `ts` (ISO), and `turn` where applicable, matching the entry-type union
   in [../data-model.md](../data-model.md).
-- [ ] `appendEventEmitted` is the write-before-route hook: the event engine (FEAT-003) calls it
+- [x] `appendEventEmitted` is the write-before-route hook: the event engine (FEAT-003) calls it
   **before** delivering to any subscriber.
-- [ ] `appendTurnStart` is callable before any LLM/code execution; `appendTurnComplete` records the
+- [x] `appendTurnStart` is callable before any LLM/code execution; `appendTurnComplete` records the
   captured emitted topic **plus `cost_usd` + `token_usage`** (Issue-5) — a code step records `cost_usd: 0`.
-- [ ] `appendChildSpawned` writes `{ turn, step, via_tool_call_id, child_session_id }` and
+- [x] `appendChildSpawned` writes `{ turn, step, via_tool_call_id, child_session_id }` and
   `appendChildResult` writes `{ turn, child_session_id, structured?, text, stop_reason }` (Issue-1 — the
   reuse-on-recovery ledger; behavior wired in INT-043/INT-044).
-- [ ] `appendEventEmissionOverwritten` writes `{ turn, step, prev_topic, new_topic }` (Issue-13e) when a
+- [x] `appendEventEmissionOverwritten` writes `{ turn, step, prev_topic, new_topic }` (Issue-13e) when a
   pending emission is replaced or a latched-terminal overwrite is rejected (behavior wired in FEAT-009).
-- [ ] Concurrent appends from one runner are serialized (no interleaved partial lines).
-- [ ] Unit-covered as part of TEST-002's write-order assertions (engine writes before routes).
+- [x] Concurrent appends from one runner are serialized (no interleaved partial lines).
+- [x] Unit-covered as part of TEST-002's write-order assertions (engine writes before routes).
 
 ---
 
@@ -314,27 +314,27 @@ handoff, by routing contract), FR-123 (completion no-progress guard, by the engi
 **Dependencies:** FEAT-001 (types), FEAT-006 (`SessionLog` for write-before-route).
 
 **Acceptance Criteria:**
-- [ ] `publish()` appends an `event.emitted` entry to the session log **before** routing to any
+- [x] `publish()` appends an `event.emitted` entry to the session log **before** routing to any
   subscriber (assert ordering against a fake log in TEST-002).
-- [ ] `getSubscribers(topic)` returns the single subscriber, or — for a `notor-fanout-topics` topic —
+- [x] `getSubscribers(topic)` returns the single subscriber, or — for a `notor-fanout-topics` topic —
   all subscribers in `notor-steps` order.
-- [ ] Fan-out drain is **breadth-first FIFO** (Issue-11): for a fan-out topic `[A, B, …]`, every
+- [x] Fan-out drain is **breadth-first FIFO** (Issue-11): for a fan-out topic `[A, B, …]`, every
   subscriber runs (in `notor-steps` order) with its emission **enqueued**, and the queue is drained FIFO
   **only after the fan-out set is exhausted** (no reentrant/depth-first descent); TEST-002 asserts the
   resulting event-history order.
-- [ ] A synthesized re-trigger topic (`flow.tasks_remaining` / `flow.requirements_unmet`) with no
+- [x] A synthesized re-trigger topic (`flow.tasks_remaining` / `flow.requirements_unmet`) with no
   explicit subscriber auto-routes to the step that emitted the blocked `FLOW_COMPLETE`; an explicit
   subscriber overrides the auto-subscription.
-- [ ] The **completion no-progress guard** (Issue-9) terminates with `FLOW_ERROR` after
+- [x] The **completion no-progress guard** (Issue-9) terminates with `FLOW_ERROR` after
   `COMPLETION_NOPROGRESS_THRESHOLD` (default 3) consecutive blocked completions from the same step whose
   blocking set did **not** shrink; a shrinking set resets the counter.
-- [ ] A topic with no concrete subscriber (and not auto-subscribed) routes to the `*` subscriber; the
+- [x] A topic with no concrete subscriber (and not auto-subscribed) routes to the `*` subscriber; the
   runner consults the fallback when concrete subscribers are empty.
-- [ ] `getEventHistory()` returns events in publish order with `topic`, `payload`, `source_step`,
+- [x] `getEventHistory()` returns events in publish order with `topic`, `payload`, `source_step`,
   `turn`, `ts`.
-- [ ] The engine performs no step execution and no mid-turn routing (routing is invoked by the runner
+- [x] The engine performs no step execution and no mid-turn routing (routing is invoked by the runner
   after `turn.complete`).
-- [ ] Covered by TEST-002.
+- [x] Covered by TEST-002.
 
 ---
 
@@ -362,14 +362,14 @@ fuzzy steering).
 **Dependencies:** FEAT-003 (event engine — the `*` subscription point).
 
 **Acceptance Criteria:**
-- [ ] The runner registers the coordinator on `*` and a flow cannot replace it (concrete subscribers
+- [x] The runner registers the coordinator on `*` and a flow cannot replace it (concrete subscribers
   shadow it only for their own topics).
-- [ ] An orphaned event is logged (topic + payload) and yields a terminal `FLOW_ERROR` carrying the
+- [x] An orphaned event is logged (topic + payload) and yields a terminal `FLOW_ERROR` carrying the
   orphan as context, terminating the loop with status `error`.
-- [ ] The coordinator performs **no** LLM call and **no** payload-based topic inference / fuzzy match
+- [x] The coordinator performs **no** LLM call and **no** payload-based topic inference / fuzzy match
   (verified by inspection; it is a pure synchronous function).
-- [ ] No orphaned event is silently dropped — every orphan yields a logged `FLOW_ERROR`.
-- [ ] Covered by TEST-002.
+- [x] No orphaned event is silently dropped — every orphan yields a logged `FLOW_ERROR`.
+- [x] Covered by TEST-002.
 
 ---
 
@@ -406,17 +406,17 @@ per-turn guardrails + persona append/replace integration).
 **Dependencies:** FEAT-001 (types).
 
 **Acceptance Criteria:**
-- [ ] The must-publish rule is present in the output **even when** the step body contains its own
+- [x] The must-publish rule is present in the output **even when** the step body contains its own
   custom instructions (asserted directly — this is the Phase-1 gate in [../tasks.md](../tasks.md)).
-- [ ] The objective, incoming event (topic + payload), recent event history, and scratchpad/tasks paths
+- [x] The objective, incoming event (topic + payload), recent event history, and scratchpad/tasks paths
   are present in every assembled prompt; the scratchpad guidance states the **overwrite-only** rule
   (no incremental append) for recovery safety.
-- [ ] Flow `guardrails` from `definition.md` appear in the `### GUARDRAILS` section of every step turn.
-- [ ] The raw step body is embedded only inside `### 1. EXECUTE`, never emitted standalone.
-- [ ] Persona content is composed via the existing `SystemPromptBuilder` append/replace mechanism (the
+- [x] Flow `guardrails` from `definition.md` appear in the `### GUARDRAILS` section of every step turn.
+- [x] The raw step body is embedded only inside `### 1. EXECUTE`, never emitted standalone.
+- [x] Persona content is composed via the existing `SystemPromptBuilder` append/replace mechanism (the
   builder does not duplicate that logic); the step scaffold follows persona content.
-- [ ] `<include_note>` tags in `bodyContent` are expanded before embedding.
-- [ ] Unit test asserts must-publish injection across both empty-body and custom-body steps (gate).
+- [x] `<include_note>` tags in `bodyContent` are expanded before embedding.
+- [x] Unit test asserts must-publish injection across both empty-body and custom-body steps (gate).
 
 ---
 
@@ -467,22 +467,22 @@ narrative ≠ emission), FR-119 (scaffold absent when disabled).
 constants / topic vocabulary referenced in the description).
 
 **Acceptance Criteria:**
-- [ ] The scaffold sets `featureGroup: "orchestration"` and is registered only when
+- [x] The scaffold sets `featureGroup: "orchestration"` and is registered only when
   `orchestration_enabled` is true (absent otherwise — verified via the gated reload path).
-- [ ] `execute({topic, payload})` writes the pair to `options.orchestrationContext.pendingEmission`
+- [x] `execute({topic, payload})` writes the pair to `options.orchestrationContext.pendingEmission`
   (not a global/shared slot) and returns a confirmation; it performs **no** publish/routing; absent
   `orchestrationContext` it returns `success: false`.
-- [ ] Concurrent step turns / `run_flow` children do not clobber each other's capture (each turn has its
+- [x] Concurrent step turns / `run_flow` children do not clobber each other's capture (each turn has its
   own `orchestrationContext` instance).
-- [ ] Mode is `write` (unavailable in non-Act mode).
-- [ ] The `pendingEmission` slot is the documented contract consumed by `StepTurnExecutor` (FEAT-007)
+- [x] Mode is `write` (unavailable in non-Act mode).
+- [x] The `pendingEmission` slot is the documented contract consumed by `StepTurnExecutor` (FEAT-007)
   after the turn completes; emitting `FLOW_COMPLETE`/`FLOW_CANCELLED` via this tool is captured
   identically.
-- [ ] Within one turn, a later **non-terminal** emit overwrites the pending one (last-write-wins) and
+- [x] Within one turn, a later **non-terminal** emit overwrites the pending one (last-write-wins) and
   logs `event.emission_overwritten` (`prev_topic` → `new_topic`); a **terminal** emit **latches** — any
   subsequent `emit_event` returns `success: false` and the latch is recorded via
   `event.emission_overwritten` (Issue-13e).
-- [ ] Built via `_scaffold-helper.ts` (same construction as `capture-memory.ts`), not a bespoke tool
+- [x] Built via `_scaffold-helper.ts` (same construction as `capture-memory.ts`), not a bespoke tool
   class.
 
 ---
@@ -544,30 +544,30 @@ global mutation), FEAT-002 (`StepDefinition` from parser), FEAT-005 (`StepPrompt
 (`SessionLog` for `turn.start`/`turn.complete`), FEAT-009 (`emit_event` capture contract).
 
 **Acceptance Criteria:**
-- [ ] A conversation step turn runs on `RunLoop` (asserted: `ChatOrchestrator.responseLoop()` is **not**
+- [x] A conversation step turn runs on `RunLoop` (asserted: `ChatOrchestrator.responseLoop()` is **not**
   invoked by the executor).
-- [ ] The step's persona is resolved with `PersonaManager.getPersonaByName()`; the global
+- [x] The step's persona is resolved with `PersonaManager.getPersonaByName()`; the global
   active-persona state is unchanged after the turn (no `activatePersona()` call).
-- [ ] Provider/model is resolved via the pure `resolvePersonaProviderConfig(...)` (ARCH-007) and pinned
+- [x] Provider/model is resolved via the pure `resolvePersonaProviderConfig(...)` (ARCH-007) and pinned
   into the `ConversationSession` (`modelId` → `RunLoopOptions.model`); the executor performs **no**
   `providerRegistry.switchProvider`/`updateConfig` call, and the global active provider/model is
   unchanged after the turn (asserted — two concurrent step turns with different models do not race).
-- [ ] `notor-step-model`, when set, overrides the persona's preferred model for that turn; otherwise the
+- [x] `notor-step-model`, when set, overrides the persona's preferred model for that turn; otherwise the
   persona's preset/provider/model preference applies.
-- [ ] `turn.start` is written before any LLM call; `turn.complete` after the emit is captured, carrying
+- [x] `turn.start` is written before any LLM call; `turn.complete` after the emit is captured, carrying
   the per-turn **`cost_usd` + `token_usage`** (Issue-5; reload-reconstruction input for INT-005).
-- [ ] A fresh per-turn `OrchestrationToolContext` is constructed and passed as
+- [x] A fresh per-turn `OrchestrationToolContext` is constructed and passed as
   `RunLoopOptions.orchestrationContext`; after the turn the executor reads
   `orchestrationContext.pendingEmission`. When set, that `{topic, payload}` is returned; when null and
   the turn ended `completed`, the step's `default_publishes` topic is synthesized and returned; when null
   and the turn ended **non-`completed`**, `{step}.capped` (carrying `stopReason`) is synthesized instead
   (FR-117a) — verified that a capped no-emit turn does **not** synthesize `default_publishes`.
-- [ ] JSONL persistence is attached via the `RunLoopHooks.onPersist` hook, not baked into the engine.
-- [ ] The `RunContext` (depth + **shared** `budget` cell + a **fresh per-node `subtreeConsumed`**,
+- [x] JSONL persistence is attached via the `RunLoopHooks.onPersist` hook, not baked into the engine.
+- [x] The `RunContext` (depth + **shared** `budget` cell + a **fresh per-node `subtreeConsumed`**,
   Issue-12) provided/constructed by the runner is threaded into the `RunLoop`; per-turn cost decrements
   the shared cell in place via ARCH-005's `budget.ts` **and** is folded into `subtreeConsumed` (the
   per-subtree attribution channel, not a shared-cell delta).
-- [ ] A code-mode step is dispatched through the seam reserved for INT-010 (not executed as a
+- [x] A code-mode step is dispatched through the seam reserved for INT-010 (not executed as a
   conversation turn).
 
 ---
@@ -627,21 +627,21 @@ FR-125 (stale-window + thrashing-counter rehydration on reload, by replay).
 stale-loop detection).
 
 **Acceptance Criteria:**
-- [ ] `isStale` returns true iff the last 4 events share the same `(topic, source_step)` pair (payload
+- [x] `isStale` returns true iff the last 4 events share the same `(topic, source_step)` pair (payload
   excluded; over the trailing window); fewer than 4 events → false.
-- [ ] `checkRuntime` fires when wall-clock since `started_at` exceeds `maxRuntimeMinutes`.
-- [ ] `checkIteration` fires when **LLM turns** reach `maxIterations` (the aggregate
+- [x] `checkRuntime` fires when wall-clock since `started_at` exceeds `maxRuntimeMinutes`.
+- [x] `checkIteration` fires when **LLM turns** reach `maxIterations` (the aggregate
   `iterationsRemaining` ceiling); a code step does **not** advance this count (D2/FR-117).
-- [ ] `isThrashing` fires when a task key is re-queued after abandonment 3+ times.
-- [ ] Each guard maps to a terminal flow reason; the guards are pure (no I/O, no loop ownership).
-- [ ] Guards are independent of the per-run `RunLoop` cap (they bound the *flow*, not a single runner).
-- [ ] The detector predicates accept the rolling window / abandonment counters as inputs, so they work
+- [x] `isThrashing` fires when a task key is re-queued after abandonment 3+ times.
+- [x] Each guard maps to a terminal flow reason; the guards are pure (no I/O, no loop ownership).
+- [x] Guards are independent of the per-run `RunLoop` cap (they bound the *flow*, not a single runner).
+- [x] The detector predicates accept the rolling window / abandonment counters as inputs, so they work
   identically whether the state was accumulated live or **rehydrated from replay on reload** (Issue-6;
   replay itself is INT-005) — a self-loop at 3 of 4 fires on the next repeat post-reload, not N more.
-- [ ] The **completion no-progress guard** (Issue-9) and the **breadth-first FIFO fan-out drain**
+- [x] The **completion no-progress guard** (Issue-9) and the **breadth-first FIFO fan-out drain**
   (Issue-11) are owned at the engine/runner boundary (FEAT-003/FEAT-010), **not** in `safety.ts` — noted
   here as the backstops for cases the stale signature does not catch.
-- [ ] Covered by TEST-002.
+- [x] Covered by TEST-002.
 
 ---
 
@@ -688,28 +688,28 @@ FR-117 (consults the guards) and FR-132 (`FLOW_CANCELLED` terminal handling).
 (`StepTurnExecutor`), FEAT-008 (`LoopSafetyGuards`).
 
 **Acceptance Criteria:**
-- [ ] A hand-authored flow runs end-to-end with correct routing (starting event → step turns → terminal
+- [x] A hand-authored flow runs end-to-end with correct routing (starting event → step turns → terminal
   event), each step's emitted/synthesized event routed to the next subscriber in `notor-steps` order.
-- [ ] The loop terminates on the flow's `completionEvent` (default `FLOW_COMPLETE`) and finalizes the
+- [x] The loop terminates on the flow's `completionEvent` (default `FLOW_COMPLETE`) and finalizes the
   session — subject to `required_events` (a completion before all required events are seen is blocked
   and re-injected with remaining-event context).
-- [ ] The **completion no-progress guard** terminates with `FLOW_ERROR` after
+- [x] The **completion no-progress guard** terminates with `FLOW_ERROR` after
   `COMPLETION_NOPROGRESS_THRESHOLD` (default 3) consecutive blocked completions from the same step whose
   blocking set (open/running tasks or missing required-events) did **not** shrink; a shrinking set resets
   the counter (Issue-9).
-- [ ] Fan-out drain is **breadth-first FIFO** — a fan-out topic's subscribers run in `notor-steps` order
+- [x] Fan-out drain is **breadth-first FIFO** — a fan-out topic's subscribers run in `notor-steps` order
   with emissions enqueued, drained FIFO only after the fan-out set is exhausted (Issue-11; TEST-002).
-- [ ] `FLOW_CANCELLED` terminates with status `cancelled`; `FLOW_ERROR` (from the fallback or the
+- [x] `FLOW_CANCELLED` terminates with status `cancelled`; `FLOW_ERROR` (from the fallback or the
   no-progress guard) terminates with status `error`.
-- [ ] `LoopSafetyGuards.evaluate()` is consulted each turn; a firing guard terminates the flow.
-- [ ] The root run constructs one shared `AggregateBudget` cell seeded from the flow's **finite**
+- [x] `LoopSafetyGuards.evaluate()` is consulted each turn; a firing guard terminates the flow.
+- [x] The root run constructs one shared `AggregateBudget` cell seeded from the flow's **finite**
   (parser-defaulted, never `Infinity`) `maxIterations`/`maxCostUsd` (Issue-8); each turn's `RunContext`
   (depth + that shared `budget` cell **by reference** + a fresh per-node `subtreeConsumed`, Issue-12) is
   seeded and passed into `StepTurnExecutor`/`RunLoop`.
-- [ ] `session.start` is written at start and a terminal session entry (`session.complete`/
+- [x] `session.start` is written at start and a terminal session entry (`session.complete`/
   `session.cancelled`) at the end.
-- [ ] The FR-123 (task enforcement) and INT-001 (session manager) seams exist but are inert in Phase 1.
-- [ ] e2e-covered by TEST-007 (Phase 2 lane), with the single-flow happy path runnable in Phase 1.
+- [x] The FR-123 (task enforcement) and INT-001 (session manager) seams exist but are inert in Phase 1.
+- [x] e2e-covered by TEST-007 (Phase 2 lane), with the single-flow happy path runnable in Phase 1.
 
 ---
 
@@ -739,14 +739,14 @@ creates `orchestrations/` and registers scaffolds).
 + `settings/sections/orchestration.ts` directory seeding).
 
 **Acceptance Criteria:**
-- [ ] The "Notor: Run Orchestration" command is registered only when `orchestration_enabled` is true and
+- [x] The "Notor: Run Orchestration" command is registered only when `orchestration_enabled` is true and
   absent otherwise.
-- [ ] Invoking it shows a picker over discovered flows (name + description), then prompts for objective
+- [x] Invoking it shows a picker over discovered flows (name + description), then prompts for objective
   text.
-- [ ] Selecting a flow + entering a prompt calls `OrchestrationRunner.start(flowDir, promptText)`.
-- [ ] Enabling the feature group ensures `{notor_dir}/orchestrations/` exists (directory seeded, like
+- [x] Selecting a flow + entering a prompt calls `OrchestrationRunner.start(flowDir, promptText)`.
+- [x] Enabling the feature group ensures `{notor_dir}/orchestrations/` exists (directory seeded, like
   the memory toggle).
-- [ ] When disabled, neither the command nor any orchestration scaffold (`emit_event`) is present.
+- [x] When disabled, neither the command nor any orchestration scaffold (`emit_event`) is present.
 
 ---
 
@@ -800,15 +800,15 @@ context in the starting-event payload; gated on the feature group; reuses `Execu
 (feature-group gating). Touches the hooks subsystem, which exists independently of orchestration.
 
 **Acceptance Criteria:**
-- [ ] A `run_orchestration` hook on any vault-event **or** lifecycle event launches the named flow with
+- [x] A `run_orchestration` hook on any vault-event **or** lifecycle event launches the named flow with
   the hook's `TriggerContext` in the starting-event payload.
-- [ ] The action is inert when `orchestration_enabled` is off (skipped with a Notice; no flow launches)
+- [x] The action is inert when `orchestration_enabled` is off (skipped with a Notice; no flow launches)
   and is surfaced in the hook UI / frontmatter only when the group is on.
-- [ ] A hook-launched session is stamped `origin: "hook"` and is recovered by the top-level scan as a
+- [x] A hook-launched session is stamped `origin: "hook"` and is recovered by the top-level scan as a
   root (like `origin: "user"`), with the parser-defaulted finite ceilings (FR-119a).
-- [ ] The launch extends the existing `ExecutionChainTracker` chain — a self-re-triggering flow is
+- [x] The launch extends the existing `ExecutionChainTracker` chain — a self-re-triggering flow is
   cycle-broken by the existing loop-prevention path (no new mechanism added).
-- [ ] A `run_orchestration` hook whose target flow is unknown/no-longer-discovered is skipped with a
+- [x] A `run_orchestration` hook whose target flow is unknown/no-longer-discovered is skipped with a
   diagnostic Notice (never a throw), mirroring an unresolved `run_workflow` target.
 
 ---
@@ -838,23 +838,23 @@ coordinator (FEAT-004), and safety guards (FEAT-008) — with no LLM and no real
 **Dependencies:** FEAT-003, FEAT-004, FEAT-008.
 
 **Acceptance Criteria:**
-- [ ] Event-engine test asserts `publish()` writes `event.emitted` to a fake `SessionLog` **before** any
+- [x] Event-engine test asserts `publish()` writes `event.emitted` to a fake `SessionLog` **before** any
   subscriber is invoked (call-order assertion).
-- [ ] Multiple subscribers on a **declared** `notor-fanout-topics` topic are dispatched in `notor-steps`
+- [x] Multiple subscribers on a **declared** `notor-fanout-topics` topic are dispatched in `notor-steps`
   order; an undeclared multi-subscriber topic is a FEAT-002 load error (not a runtime case).
-- [ ] A fan-out whose subscribers each emit produces the deterministic **breadth-first FIFO** event
+- [x] A fan-out whose subscribers each emit produces the deterministic **breadth-first FIFO** event
   history (all direct subscribers, then their consequences in order — Issue-11).
-- [ ] A synthesized `flow.tasks_remaining` / `flow.requirements_unmet` with no explicit subscriber
+- [x] A synthesized `flow.tasks_remaining` / `flow.requirements_unmet` with no explicit subscriber
   auto-routes to the completing step; a step that re-emits `FLOW_COMPLETE` with a non-shrinking blocking
   set terminates with `FLOW_ERROR` at `COMPLETION_NOPROGRESS_THRESHOLD` (Issue-9).
-- [ ] An orphaned topic routes to the fallback, which logs it and yields a terminal `FLOW_ERROR` (no
+- [x] An orphaned topic routes to the fallback, which logs it and yields a terminal `FLOW_ERROR` (no
   steering, no LLM); no orphan is silently dropped. A runtime failure channel
   (`{step}.capped`/`.no_emit`/`.code_error`) without an explicit subscriber yields a *diagnosable*
   `FLOW_ERROR` naming the step via the default failure handler (Issue-10), not an anonymous orphan.
-- [ ] `isStale` true on 4 identical consecutive `(topic, source_step)` pairs (regardless of payload), false with
+- [x] `isStale` true on 4 identical consecutive `(topic, source_step)` pairs (regardless of payload), false with
   fewer than 4 events or a varied window.
-- [ ] `checkRuntime`/`checkIteration`/`isThrashing` each fire at their documented thresholds.
-- [ ] All tests are pure (no network, no real vault writes) and pass under the existing Vitest config.
+- [x] `checkRuntime`/`checkIteration`/`isThrashing` each fire at their documented thresholds.
+- [x] All tests are pure (no network, no real vault writes) and pass under the existing Vitest config.
 
 ---
 
@@ -880,25 +880,25 @@ uses (mirroring how the workflow-discovery tests fixture their input). Phase-1 q
 **Dependencies:** FEAT-002.
 
 **Acceptance Criteria:**
-- [ ] A valid flow fixture parses into an `OrchestrationFlow` with every field populated and documented
+- [x] A valid flow fixture parses into an `OrchestrationFlow` with every field populated and documented
   defaults applied (`completionEvent` → `FLOW_COMPLETE`, `handoffIsolation` → `"isolated"`, `invocable`
   → `false`).
-- [ ] Each step note parses into a `StepDefinition`; `notor-step-mode` defaults to `"conversation"`; the
+- [x] Each step note parses into a `StepDefinition`; `notor-step-mode` defaults to `"conversation"`; the
   body becomes `bodyContent`.
-- [ ] An unresolved `notor-steps` wikilink raises a clear error naming the missing step.
-- [ ] A topic in two steps' `notor-step-triggers` within one flow is rejected at load with an error
+- [x] An unresolved `notor-steps` wikilink raises a clear error naming the missing step.
+- [x] A topic in two steps' `notor-step-triggers` within one flow is rejected at load with an error
   naming the topic and both steps.
-- [ ] A **published-but-unsubscribed non-terminal topic** is a load **hard-error** (Issue-10); terminal
+- [x] A **published-but-unsubscribed non-terminal topic** is a load **hard-error** (Issue-10); terminal
   topics, the synthesized re-trigger topics, and the `{step}.capped`/`.no_emit`/`.code_error` channels
   are exempt.
-- [ ] When the three ceiling fields are omitted, the parser injects the **finite** defaults
+- [x] When the three ceiling fields are omitted, the parser injects the **finite** defaults
   `100`/`60`/`5.00` (never `Infinity`); `notor-max-depth` may remain `null` (Issue-8).
-- [ ] A step with >1 `notor-step-publishes` AND a persona that disables `emit_event` produces a
+- [x] A step with >1 `notor-step-publishes` AND a persona that disables `emit_event` produces a
   **definition-lint warning** (unreachable branches — Issue-13f), without failing the load.
-- [ ] The `definition.md` body is not surfaced as prompt content.
-- [ ] Composition frontmatter (`notor-flow-invocable`, `notor-flow-inputs`, etc.) parses into the inert
+- [x] The `definition.md` body is not surfaced as prompt content.
+- [x] Composition frontmatter (`notor-flow-invocable`, `notor-flow-inputs`, etc.) parses into the inert
   fields without affecting Phase-1 behavior.
-- [ ] `<include_note>` tags in a step body survive parsing verbatim (expansion is the prompt builder's
+- [x] `<include_note>` tags in a step body survive parsing verbatim (expansion is the prompt builder's
   job, FEAT-005).
 
 ---
@@ -907,9 +907,9 @@ uses (mirroring how the workflow-discovery tests fixture their input). Phase-1 q
 
 Per the per-phase test gate in [../tasks.md](../tasks.md):
 
-- [ ] **TEST-002** (event-engine / fallback / safety units) green.
-- [ ] **TEST-003** (flow/step parser units) green.
-- [ ] `step-prompt-builder` test asserts the **must-publish rule is always injected** (FEAT-005), across
+- [x] **TEST-002** (event-engine / fallback / safety units) green.
+- [x] **TEST-003** (flow/step parser units) green.
+- [x] `step-prompt-builder` test asserts the **must-publish rule is always injected** (FEAT-005), across
   empty-body and custom-body steps.
-- [ ] A hand-authored flow runs end-to-end via FEAT-010 (single-flow happy path; full e2e is TEST-007
+- [x] A hand-authored flow runs end-to-end via FEAT-010 (single-flow happy path; full e2e is TEST-007
   with the Phase-2 session lane).

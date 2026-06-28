@@ -101,6 +101,11 @@ export class UserToolAdapter implements Tool {
 			if (options?.silentNoteOpener) {
 				utils.noteOpener = new NoteOpener(this.plugin.app, false, false);
 			}
+			if (options?.orchestrationContext) {
+				// Per-step orchestration carriage — lets the `emit_event` scaffold
+				// capture its emission into `pendingEmission` (FEAT-009).
+				utils.orchestrationContext = options.orchestrationContext;
+			}
 
 			const libs = this.manager.getCachedLibs();
 			const obsidian = this.manager.getCachedObsidianExports();

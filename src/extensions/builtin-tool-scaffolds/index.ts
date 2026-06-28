@@ -35,6 +35,7 @@ import { APPLY_TEMPLATE } from "./apply-template";
 import { WEBVIEW } from "./webview";
 import { READ_NOTOR_SETTINGS } from "./read-notor-settings";
 import { EDIT_NOTOR_SETTINGS } from "./edit-notor-settings";
+import { EMIT_EVENT } from "./emit-event";
 
 /**
  * All built-in tool scaffolds, keyed by tool name.
@@ -79,6 +80,7 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[WEBVIEW.name, WEBVIEW],
 		[READ_NOTOR_SETTINGS.name, READ_NOTOR_SETTINGS],
 		[EDIT_NOTOR_SETTINGS.name, EDIT_NOTOR_SETTINGS],
+		[EMIT_EVENT.name, EMIT_EVENT],
 	]);
 
 /**
