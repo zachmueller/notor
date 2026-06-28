@@ -51,7 +51,8 @@ import { SessionRecovery, type RecoveryFs, type RecoverableSession } from "./ses
 import { VaultStepConversationStore } from "./step-conversation-store";
 import { showOrchestrationProgressNotice } from "./notices";
 import { OrchestrationRunner, type OrchestrationRunResult } from "./runner";
-import type { OrchestrationFlow } from "./types";
+import type { OrchestrationFlow, OrchestrationSessionMeta } from "./types";
+import type { ChildResultEntry, ChildSpawnedEntry, SessionLogEntry } from "./session-log";
 
 const log = logger("OrchestrationLaunch");
 
@@ -490,6 +491,16 @@ export async function launchOrchestration(
 		log.warn("memories.md seeding failed", { error: String(e) }),
 	);
 
+	// POL-004: surface this run in the unified activity indicator as an active
+	// `flow-run` entry (session-file-backed registry).
+	plugin.upsertFlowRun?.({
+		type: "flow-run",
+		sessionId,
+		flowName: flow.name,
+		status: "active",
+		startedAt: new Date().toISOString(),
+	});
+
 	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(plugin.app));
 	// Fresh launch: no prior committed side-effects (INT-010 once() skip set).
 	const executor = buildExecutor(plugin, sessionLog, new Set<string>());
@@ -569,6 +580,15 @@ export async function launchOrchestration(
 	await sessionManager
 		.updateStatus(sessionId, finalStatus, { iteration: result.iterations })
 		.catch((e) => log.warn("Failed to finalize session.json status", { error: String(e) }));
+
+	// POL-004: reflect the terminal status into the unified indicator's flow-run entry.
+	plugin.upsertFlowRun?.({
+		type: "flow-run",
+		sessionId,
+		flowName: flow.name,
+		status: finalStatus,
+		startedAt: new Date().toISOString(),
+	});
 
 	// INT-045: chaining / one-way handoff. On successful completion, if the flow
 	// declares `notor-on-complete-flow`, launch the successor INSTEAD of returning
@@ -833,35 +853,36 @@ async function reconcileChildLedger(
 	const entries = raw
 		.split("\n")
 		.filter((l) => l.trim().length > 0)
-		.map((l) => {
+		.map((l): SessionLogEntry | null => {
 			try {
-				return JSON.parse(l) as { type: string; [k: string]: unknown };
+				return JSON.parse(l) as SessionLogEntry;
 			} catch {
 				return null;
 			}
 		})
-		.filter((e): e is { type: string; [k: string]: unknown } => e !== null);
+		.filter((e): e is SessionLogEntry => e !== null);
 
 	const spawned = entries.find(
-		(e) => e.type === "child.spawned" && e["via_tool_call_id"] === req.viaToolCallId,
+		(e): e is ChildSpawnedEntry =>
+			e.type === "child.spawned" && e.via_tool_call_id === req.viaToolCallId,
 	);
 	if (!spawned) return null; // fresh spawn
 
-	const childSessionId = String(spawned["child_session_id"] ?? "");
+	const childSessionId = spawned.child_session_id;
 	const childResult = entries.find(
-		(e) => e.type === "child.result" && e["child_session_id"] === childSessionId,
+		(e): e is ChildResultEntry =>
+			e.type === "child.result" && e.child_session_id === childSessionId,
 	);
 
 	if (childResult) {
 		// Terminal child → REUSE the recorded result (no re-spawn).
 		log.info("run_flow recovery: reusing terminal child result", { childSessionId });
-		const text = String(childResult["text"] ?? "");
 		const entryConversationId = await resolveChildEntryConversationId(plugin, childSessionId);
 		return {
-			status: childResult["stop_reason"] === "FLOW_CANCELLED" ? "cancelled" : "completed",
-			structured: "structured" in childResult ? childResult["structured"] : null,
-			text,
-			stopReason: String(childResult["stop_reason"] ?? "completed"),
+			status: childResult.stop_reason === "FLOW_CANCELLED" ? "cancelled" : "completed",
+			structured: childResult.structured ?? null,
+			text: childResult.text,
+			stopReason: childResult.stop_reason,
 			childSessionId,
 			entryConversationId,
 			rollup: { costUsd: 0, iterations: 0, maxDepthReached: req.cascade.depth + 1, tokenUsage: { input: 0, output: 0 } },
@@ -885,7 +906,8 @@ async function reconcileChildLedger(
 	if (!logRaw || !metaRaw) {
 		return childErrorResult(req, "Child session log/meta missing on resume.", childSessionId);
 	}
-	const recovered = recovery.replay(JSON.parse(metaRaw), logRaw, {
+	const childMeta = JSON.parse(metaRaw) as OrchestrationSessionMeta;
+	const recovered = recovery.replay(childMeta, logRaw, {
 		resolveCeilings: () => ({ maxIterations: flow.maxIterations, maxCostUsd: flow.maxCostUsd }),
 	});
 	const result = await resumeChildSession(plugin, flow, recovered, sessionManager, req.cascade);
@@ -1083,6 +1105,14 @@ export async function recoverOrchestrations(plugin: NotorPlugin): Promise<void> 
 			continue;
 		}
 		new Notice(`Resuming orchestration '${flow.name}' (${recovered.action.kind})…`);
+		// POL-004: re-seed the unified indicator so a recovered run surfaces.
+		plugin.upsertFlowRun?.({
+			type: "flow-run",
+			sessionId: recovered.sessionId,
+			flowName: flow.name,
+			status: "active",
+			startedAt: recovered.meta.started_at,
+		});
 		resumeRecoveredSession(plugin, flow, recovered, sessionManager).catch((e) =>
 			log.error("Orchestration resume failed", {
 				sessionId: recovered.sessionId,

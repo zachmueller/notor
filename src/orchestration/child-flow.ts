@@ -49,7 +49,7 @@ export interface SpawnChildFlowResult {
 	/** Terminal status of the child run. */
 	status: "completed" | "cancelled" | "error";
 	/** The child's `RunResult.structured` (a terminal code step's typed return), or `null`. */
-	structured: unknown | null;
+	structured: unknown;
 	/** The child's closing text (the loose fallback when `structured` is null). */
 	text: string;
 	/** The child run's stop reason / terminal topic. */

@@ -44,6 +44,8 @@ export class WorkflowActivityIndicator {
 	private dropdown: WorkflowActivityDropdown | null = null;
 	/** Callback for navigating to a conversation (H-005). */
 	private onNavigateToConversation: NavigateToConversationCallback | null = null;
+	/** Callback for opening the run-tree view from a flow-run entry (POL-004). */
+	private onOpenRunTree: ((sessionId: string) => void) | null = null;
 	/** Optional accessor for active foreground conversation sessions (Phase 3). */
 	private readonly getActiveSessions?: () => ConversationSession[];
 	/** Optional accessor for the conversation ID currently shown in THIS panel. */
@@ -124,7 +126,7 @@ export class WorkflowActivityIndicator {
 			this.containerEl.appendChild(this.indicatorEl);
 		}
 
-		// Initialize the dropdown component (H-004)
+		// Initialize the dropdown component (H-004 + POL-004 flow-run entries)
 		this.dropdown = new WorkflowActivityDropdown(
 			this.tracker,
 			(conversationId: string) => {
@@ -132,6 +134,9 @@ export class WorkflowActivityIndicator {
 			},
 			this.getActiveSessions,
 			this.getCurrentConversationId,
+			(sessionId: string) => {
+				this.onOpenRunTree?.(sessionId);
+			},
 		);
 
 		// Register the onChange callback for reactive updates
@@ -236,6 +241,14 @@ export class WorkflowActivityIndicator {
 	 */
 	setOnNavigateToConversation(callback: NavigateToConversationCallback): void {
 		this.onNavigateToConversation = callback;
+	}
+
+	/**
+	 * Wire the run-tree opener for `flow-run` entries (POL-004). Wired by
+	 * `chat-view.ts` to the plugin's `openRunTreeView`.
+	 */
+	setOnOpenRunTree(callback: (sessionId: string) => void): void {
+		this.onOpenRunTree = callback;
 	}
 
 	// -----------------------------------------------------------------------

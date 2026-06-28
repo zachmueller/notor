@@ -75,7 +75,7 @@ export interface OrchestrationRunResult {
 	 * `RunResult.structured` for flow-as-tool — `run_flow` (INT-043) consumes this,
 	 * preferring it over `text`.
 	 */
-	structured: unknown | null;
+	structured: unknown;
 	/**
 	 * The closing text of the run — the terminal event's payload (the loose
 	 * fallback a `run_flow` caller receives when no terminal code step supplied

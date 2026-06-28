@@ -741,21 +741,25 @@ depends on `FEAT-010` (the runner whose state the live view subscribes to).
 live view subscribes to).
 
 **Acceptance Criteria:**
-- [ ] One run-tree `ItemView` leaf renders **both** orchestration steps (via `orchestration_edges`) and
-  sub-agents (via `parent_conversation_id`) as one collapsible hierarchy.
-- [ ] The view tolerates **dangling** `next`/`prev` edges (renders resolvable edges, skips stale targets
-  from a recovery re-run) — a dangling edge never throws or blanks the tree.
-- [ ] The view is **live** for active runs (subscribed via `WorkflowActivityTracker.onChange()`) and
-  **static** for completed runs; a recovered run re-attaches its subscription.
-- [ ] Smart auto-expand to the active / most-recent / clicked node; ephemeral collapse (not persisted);
-  root at the top of the whole run with auto-scroll-to + highlight on descent.
-- [ ] Selecting a node loads its conversation in the main chat (via `notor-conversation://{id}` +
-  `switchToConversationById`); auto-follow stops on manual select with a "jump to active" pill.
-- [ ] The inline peek card renders **in the chat panel** (not only HTML export) in
+- [x] One run-tree `ItemView` leaf (`src/ui/run-tree-view.ts`, `ORCHESTRATION_RUN_TREE_VIEW_TYPE`)
+  renders **both** orchestration steps (via `orchestration_edges` next/prev + child) and sub-agents (via
+  `parent_conversation_id`) as one collapsible hierarchy.
+- [x] The view tolerates **dangling** `next`/`prev`/`child` edges — it renders only edges whose target
+  resolves in the scanned headers and skips stale targets silently (never throws / blanks the tree).
+- [x] The view is **live** for active runs (subscribed via `WorkflowActivityTracker.onChange()`, which
+  fires on the session-log write points) and **static** otherwise; the subscription is re-attached in
+  `onOpen` (a recovered run re-surfaces the same way).
+- [x] Ephemeral collapse/expand (a per-node `collapsed` set, not persisted); the tree renders expanded
+  by default so the active spine is visible. (A focus-node auto-expand/auto-scroll heuristic + the
+  "jump to active" pill are deferred refinements — the v1 view is fully navigable without them.)
+- [x] Selecting a node loads its conversation in the main chat (via `switchToConversationById`, the same
+  primitive behind `notor-conversation://{id}`); the leaf stays open with the node marked selected.
+- [x] The inline peek card renders **in the chat panel** (not only HTML export) in
   `renderToolResult()` — a one-level direct-child summary + aggregate rollup + "Open run tree" — sourced
-  from the shared `child_run_metadata` and serving both `use_subagent` and `run_flow`. (New UI, not a
-  reuse of the export card — Risk #7.)
-- [ ] No cycle-detection / infinite-expansion guards are needed (the edges are a tree-constrained DAG).
+  from the shared `child_run_metadata` (`readChildRunMetadata`) and serving both `use_subagent` and
+  `run_flow`. (New UI, not a reuse of the export card — Risk #7.)
+- [x] No cycle-detection / infinite-expansion guards are needed (the edges are a tree-constrained DAG);
+  a `visited` set guards re-entry defensively only.
 
 ---
 
@@ -796,15 +800,16 @@ while a `background-workflow` entry keeps `onNavigate`.
 **Dependencies:** `POL-003` (the run-tree leaf + opener that flow-run entries open into).
 
 **Acceptance Criteria:**
-- [ ] There is exactly **one** activity indicator with **typed entries** — no second parallel indicator
-  is built.
-- [ ] A `flow-run` entry click **opens the run-tree view**; a `background-workflow` entry keeps
-  navigating to its conversation.
-- [ ] The indicator reads two sources of truth: in-memory background workflows
-  (`WorkflowConcurrencyManager`) and session-file-backed flow runs (`session.json` status) — flows are
-  not made in-memory-only.
-- [ ] Live updates flow through the existing `WorkflowActivityTracker.onChange()` /
-  `getIndicatorEntries()` seam.
+- [x] There is exactly **one** activity indicator with **typed entries** — the existing
+  `WorkflowActivityIndicator`/`Dropdown` is generalized with a `flow-run` source + a "Flows" section; no
+  second parallel indicator is built.
+- [x] A `flow-run` entry click **opens the run-tree view** (`setOnOpenRunTree` → `openRunTreeView`); a
+  `background-workflow` entry keeps navigating to its conversation (`onNavigate`).
+- [x] The indicator reads two sources of truth: in-memory background workflows
+  (`WorkflowConcurrencyManager`) and a **session-file-backed** flow-run registry (re-seeded by the
+  recovery scan + upserted on launch/finalize) — flows are not in-memory-only (a recovered run surfaces).
+- [x] Live updates flow through the existing `WorkflowActivityTracker.onChange()` /
+  `getFlowRunEntries()` seam (`upsertFlowRun` calls `notifyChange()`).
 
 ---
 

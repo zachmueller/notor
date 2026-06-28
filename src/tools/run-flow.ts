@@ -108,8 +108,8 @@ export class RunFlowTool implements Tool {
 	): Promise<ToolResult> {
 		await this.refreshInvocableFlows();
 
-		const flowName = typeof params["flow"] === "string" ? (params["flow"] as string) : "";
-		const payload = typeof params["payload"] === "string" ? (params["payload"] as string) : "";
+		const flowName = typeof params["flow"] === "string" ? params["flow"] : "";
+		const payload = typeof params["payload"] === "string" ? params["payload"] : "";
 
 		// (0) Orchestration-context-only (Issue-4 / FR-172). No orchestrationContext
 		// ⇒ reached outside a flow step (foreground chat / non-orchestration caller)

@@ -328,9 +328,10 @@ export interface ToolResult {
 	 */
 	child_run_metadata?: ChildRunMetadata | null;
 	/**
-	 * @deprecated Legacy alias of {@link child_run_metadata} (kept so already-persisted
-	 * `use_subagent` results still parse — INT-047 back-compat). New code reads via
-	 * {@link readChildRunMetadata}; do not write both.
+	 * Legacy alias of {@link child_run_metadata} (kept readable so already-persisted
+	 * `use_subagent` results still parse — INT-047 back-compat). New code writes
+	 * {@link child_run_metadata} and reads via {@link readChildRunMetadata}; this
+	 * field is a permanent read-compat shim, never written by new code.
 	 */
 	sub_agent_metadata?: ChildRunMetadata | null;
 }
@@ -367,7 +368,7 @@ export interface ChildRunMetadata {
 	name?: string;
 
 	// --- back-compat alias (kept readable for persisted sub-agent conversations) ---
-	/** @deprecated Legacy sub-agent field; `name` is the generalized form. */
+	/** Legacy sub-agent label; `name` is the generalized form (read-compat only). */
 	profile_name?: string;
 }
 

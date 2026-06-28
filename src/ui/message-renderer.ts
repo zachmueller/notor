@@ -8,6 +8,7 @@
 import { MarkdownRenderer, Notice, setIcon } from "obsidian";
 import type { App, Component } from "obsidian";
 import type { Message } from "../types";
+import { readChildRunMetadata } from "../types";
 import type { NotorSettings } from "../settings/types";
 import type { ChatBlockRegistry } from "./chat-blocks/registry";
 import type { PendingMemoryManager } from "../memory/pending-memory-manager";
@@ -111,6 +112,14 @@ export interface MessageRendererDeps {
 	openInternalLink: (href: string) => void;
 	openChatInNewTab: (conversationFilename?: string, createNew?: boolean, initialText?: string, conversationId?: string) => void;
 	onOpenSettingsGroup?: (groupTitle: string, subsection?: string) => void;
+	/**
+	 * Open the unified run-tree view rooted at a run (POL-003 / FR-178/179). The
+	 * inline peek card on a `run_flow` / `use_subagent` tool-call card calls this
+	 * with the child run's `session_id` (flows) or entry/jsonl id (sub-agents).
+	 * Optional — when unwired (e.g. export/preview contexts) the "Open run tree"
+	 * affordance is omitted.
+	 */
+	openRunTree?: (root: { sessionId?: string; conversationId?: string }) => void;
 }
 
 export class MessageRenderer {
@@ -537,7 +546,68 @@ export class MessageRenderer {
 			pre.createEl("code", { text: resultStr });
 		}
 
+		// POL-003 / FR-179: inline one-level peek card on a child-run tool result
+		// (run_flow / use_subagent). New chat UI — NOT a reuse of the HTML-export
+		// card. Renders the direct child's summary + aggregate rollup + an
+		// "Open run tree" affordance; never the whole tree.
+		this.renderChildRunPeekCard(resultEl, message);
+
 		this.deps.scrollToBottom();
+	}
+
+	/**
+	 * Render the inline child-run peek card (POL-003 / FR-179) from the shared
+	 * `child_run_metadata` block (INT-047) — serving both `run_flow` (flow subtree)
+	 * and `use_subagent` (single run). One level only: a summary line + the
+	 * aggregate rollup (cost / iterations / depth) + an "Open run tree" button.
+	 */
+	private renderChildRunPeekCard(resultEl: HTMLElement, message: Message): void {
+		const toolResult = message.tool_result;
+		if (!toolResult) return;
+		const meta = readChildRunMetadata(toolResult);
+		if (!meta) return;
+
+		const label = meta.name ?? meta.profile_name ?? "child run";
+		const { body } = renderCollapsibleCard(resultEl, {
+			headerText: `child run: ${label}`,
+		});
+		body.addClass("notor-child-run-peek");
+
+		const summary = body.createDiv({ cls: "notor-child-run-summary" });
+		const capped = meta.stop_reason && meta.stop_reason !== "completed" && meta.stop_reason !== "FLOW_COMPLETE";
+		summary.createSpan({
+			cls: capped ? "notor-child-run-status notor-child-run-status-capped" : "notor-child-run-status",
+			text: capped ? `stopped: ${meta.stop_reason.replace(/_/g, " ")}` : "completed",
+		});
+		summary.createSpan({
+			cls: "notor-child-run-metric",
+			text: `${meta.iteration_count} iteration${meta.iteration_count !== 1 ? "s" : ""}`,
+		});
+		summary.createSpan({
+			cls: "notor-child-run-metric",
+			text: `↑${meta.token_usage.input.toLocaleString()} ↓${meta.token_usage.output.toLocaleString()}`,
+		});
+		if (typeof meta.cost_usd === "number" && meta.cost_usd > 0) {
+			summary.createSpan({ cls: "notor-child-run-metric", text: `$${meta.cost_usd.toFixed(4)}` });
+		}
+		if (typeof meta.depth === "number") {
+			summary.createSpan({ cls: "notor-child-run-metric", text: `depth ${meta.depth}` });
+		}
+
+		// "Open run tree" affordance — opens the run-tree leaf rooted at this run.
+		if (this.deps.openRunTree && (meta.session_id || meta.entry_conversation_id)) {
+			const actions = body.createDiv({ cls: "notor-child-run-actions" });
+			const btn = actions.createEl("button", {
+				cls: "notor-open-run-tree-btn",
+				text: "Open run tree",
+			});
+			btn.addEventListener("click", () => {
+				this.deps.openRunTree?.({
+					sessionId: meta.session_id,
+					conversationId: meta.entry_conversation_id ?? meta.jsonl_filename,
+				});
+			});
+		}
 	}
 
 	updateToolCallStatus(toolEl: HTMLElement, status: string): void {

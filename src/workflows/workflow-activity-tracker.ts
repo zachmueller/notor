@@ -20,6 +20,26 @@ import { logger } from "../utils/logger";
 const log = logger("WorkflowActivityTracker");
 
 /**
+ * A flow-run indicator entry (POL-004 / FR-179). The unified indicator carries
+ * **typed** entries: a `background-workflow` entry navigates to its conversation
+ * (as today), while a `flow-run` entry **opens the run-tree view**. Flow runs are
+ * **session-file-backed** (re-seeded from the recovery scan on reload), not
+ * in-memory-only — so a recovered run still surfaces in the indicator.
+ *
+ * @see specs/ZZ-misc/orchestration/tasks/phase-7-composability.md — POL-004
+ */
+export interface FlowRunEntry {
+	type: "flow-run";
+	sessionId: string;
+	flowName: string;
+	status: "active" | "interrupted" | "completed" | "cancelled" | "error";
+	startedAt: string;
+}
+
+/** A source of active/recent flow runs, injected by the orchestration wiring. */
+export type FlowRunSource = () => FlowRunEntry[];
+
+/**
  * In-memory tracker providing UI-focused views of background workflow
  * execution state for the activity indicator (Group H).
  *
@@ -35,9 +55,33 @@ export class WorkflowActivityTracker {
 	 * @param maxEntries - Maximum entries to return from {@link getIndicatorEntries}.
 	 *                     Sourced from `settings.workflow_activity_indicator_count` (default 5).
 	 */
+	/** Session-file-backed flow-run source (POL-004); `undefined` until wired. */
+	private flowRunSource?: FlowRunSource;
+
 	constructor(concurrencyManager: WorkflowConcurrencyManager, maxEntries: number = 5) {
 		this.concurrencyManager = concurrencyManager;
 		this.maxEntries = maxEntries;
+	}
+
+	/**
+	 * Wire the flow-run source (POL-004). The orchestration layer injects a
+	 * session-file-backed source so flow runs appear as typed `flow-run` entries
+	 * alongside background workflows in the one unified indicator.
+	 */
+	setFlowRunSource(source: FlowRunSource): void {
+		this.flowRunSource = source;
+	}
+
+	/**
+	 * Return up to `maxEntries` flow-run entries (POL-004), active first. Empty when
+	 * no source is wired (the indicator then shows only background workflows).
+	 */
+	getFlowRunEntries(): FlowRunEntry[] {
+		const entries = this.flowRunSource?.() ?? [];
+		const rank = (e: FlowRunEntry) => (e.status === "active" || e.status === "interrupted" ? 0 : 1);
+		return [...entries]
+			.sort((a, b) => rank(a) - rank(b) || b.startedAt.localeCompare(a.startedAt))
+			.slice(0, this.maxEntries);
 	}
 
 	// -----------------------------------------------------------------------

@@ -23,7 +23,7 @@ import type { Workflow } from "./types";
 import { WorkflowHookOverrideManager } from "./hooks/workflow-hook-override";
 
 // Group H: Workflow activity tracker
-import { WorkflowActivityTracker } from "./workflows/workflow-activity-tracker";
+import { WorkflowActivityTracker, type FlowRunEntry } from "./workflows/workflow-activity-tracker";
 
 // Export / Import
 import { ExportModal, type ExportFormat } from "./export/export-modal";
@@ -134,6 +134,7 @@ import { TemplateVariableRegistry, registerBuiltinVars } from "./template-vars";
 
 // UI
 import { NotorChatView, CHAT_VIEW_TYPE } from "./ui/chat-view";
+import { OrchestrationRunTreeView, ORCHESTRATION_RUN_TREE_VIEW_TYPE } from "./ui/run-tree-view";
 import { EffectiveConfigInspectorView, INSPECTOR_VIEW_TYPE } from "./ui/effective-config-inspector";
 import { resolveNote } from "./utils/resolve-note";
 
@@ -355,6 +356,29 @@ export default class NotorPlugin extends Plugin {
 	 */
 	private _workflowActivityTracker?: WorkflowActivityTracker;
 
+	/**
+	 * In-memory orchestration flow-run registry feeding the unified activity
+	 * indicator's typed `flow-run` entries (POL-004). Session-file-backed: an
+	 * entry is upserted when a flow launches (status `active`) and on finalize
+	 * (terminal status), and re-seeded from the recovery scan on reload, so a
+	 * recovered run still surfaces. Keyed by session id.
+	 */
+	private _flowRunRegistry: FlowRunEntry[] = [];
+
+	/**
+	 * Upsert a flow-run entry in the indicator registry (POL-004), then notify the
+	 * tracker so the open dropdown re-renders. Called by the orchestration launcher
+	 * on start/finalize and by the recovery scan.
+	 */
+	upsertFlowRun(entry: FlowRunEntry): void {
+		const i = this._flowRunRegistry.findIndex((e) => e.sessionId === entry.sessionId);
+		if (i >= 0) this._flowRunRegistry[i] = entry;
+		else this._flowRunRegistry.unshift(entry);
+		// Bound the registry so a long session doesn't grow it unboundedly.
+		if (this._flowRunRegistry.length > 50) this._flowRunRegistry.length = 50;
+		this._workflowActivityTracker?.notifyChange();
+	}
+
 	// -----------------------------------------------------------------------
 	// Group G: Workflow hook override manager (G-003/G-005)
 	// -----------------------------------------------------------------------
@@ -441,6 +465,15 @@ export default class NotorPlugin extends Plugin {
 
 			return view;
 		});
+
+		// 3a-ii. Register the unified run-tree view (POL-003 / FR-178). A read-only
+		// consumer of orchestration_edges + the sub-agent parent_conversation_id
+		// scalar; opened from a run_flow/sub-agent card, the activity indicator, or a
+		// progress Notice via openRunTreeView().
+		this.registerView(
+			ORCHESTRATION_RUN_TREE_VIEW_TYPE,
+			(leaf) => new OrchestrationRunTreeView(leaf, this),
+		);
 
 		// 3b. Register the tool config inspector view type (UI-003 / FR-88)
 		// A4.5: Inspector follows focus changes via resolver callback
@@ -914,6 +947,10 @@ export default class NotorPlugin extends Plugin {
 		workflowConcurrencyManager.setOnStateChange(() => {
 			workflowActivityTracker.notifyChange();
 		});
+		// POL-004: feed orchestration flow runs into the ONE unified indicator as
+		// typed `flow-run` entries (session-file-backed via the in-memory registry,
+		// re-seeded by the recovery scan). A flow-run entry click opens the run-tree.
+		workflowActivityTracker.setFlowRunSource(() => this._flowRunRegistry);
 
 		// Step 6c: Shared sleep/wake detector. One heartbeat timer feeds both
 		// MCP reconnection (wired in _initMcpHub) and background-workflow
@@ -2680,6 +2717,32 @@ export default class NotorPlugin extends Plugin {
 		const leaf = workspace.getRightLeaf(false);
 		if (leaf) {
 			await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
+			void workspace.revealLeaf(leaf);
+		}
+	}
+
+	/**
+	 * Open (or reveal) the unified run-tree view, rooted at a run (POL-003 /
+	 * FR-178/179). Called from the inline peek card's "Open run tree" affordance,
+	 * the activity indicator's flow-run entries, and (future) a progress Notice. An
+	 * existing run-tree leaf is re-rooted via `setViewState`; otherwise one is
+	 * opened in the right sidebar.
+	 */
+	async openRunTreeView(root: { sessionId?: string; conversationId?: string }): Promise<void> {
+		const { workspace } = this.app;
+		const state = { rootSessionId: root.sessionId, rootConversationId: root.conversationId };
+
+		const existing = workspace.getLeavesOfType(ORCHESTRATION_RUN_TREE_VIEW_TYPE);
+		if (existing.length > 0) {
+			const leaf = existing[0]!;
+			await leaf.setViewState({ type: ORCHESTRATION_RUN_TREE_VIEW_TYPE, active: true, state });
+			void workspace.revealLeaf(leaf);
+			return;
+		}
+
+		const leaf = workspace.getRightLeaf(false);
+		if (leaf) {
+			await leaf.setViewState({ type: ORCHESTRATION_RUN_TREE_VIEW_TYPE, active: true, state });
 			void workspace.revealLeaf(leaf);
 		}
 	}

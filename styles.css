@@ -4285,3 +4285,112 @@
 	opacity: 0.6;
 	text-decoration: line-through;
 }
+
+/* ---------------------------------------------------------------------------
+ * Orchestration run-tree view + inline child-run peek card (POL-003 / FR-178/179)
+ * ------------------------------------------------------------------------- */
+
+.notor-run-tree-container {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+	padding: 8px;
+}
+
+.notor-run-tree-header {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 4px 4px 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.notor-run-tree-header h3 {
+	margin: 0;
+	font-size: var(--font-ui-medium);
+}
+
+.notor-run-tree-rollup {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-run-tree {
+	flex: 1;
+	overflow-y: auto;
+	padding-top: 8px;
+}
+
+.notor-run-tree-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	padding: 12px 4px;
+	line-height: 1.5;
+}
+
+.notor-run-tree-node-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 4px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+}
+
+.notor-run-tree-node-header:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.notor-run-tree-node.is-selected > .notor-run-tree-node-header {
+	background-color: var(--background-modifier-active-hover);
+	font-weight: 600;
+}
+
+.notor-run-tree-toggle,
+.notor-run-tree-toggle-spacer {
+	display: inline-flex;
+	width: 16px;
+	flex: 0 0 16px;
+	color: var(--text-muted);
+}
+
+.notor-run-tree-node-icon {
+	display: inline-flex;
+	color: var(--text-muted);
+}
+
+.notor-run-tree-node-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Inline child-run peek card on a run_flow / use_subagent tool result. */
+.notor-child-run-peek {
+	margin-top: 4px;
+}
+
+.notor-child-run-summary {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	padding: 4px 2px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.notor-child-run-status-capped {
+	color: var(--text-warning);
+}
+
+.notor-child-run-actions {
+	padding: 4px 2px 2px;
+}
+
+.notor-open-run-tree-btn {
+	font-size: var(--font-ui-smaller);
+	padding: 2px 10px;
+	cursor: pointer;
+}

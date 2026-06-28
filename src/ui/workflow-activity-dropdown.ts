@@ -13,7 +13,7 @@
  */
 
 import { setIcon } from "obsidian";
-import type { WorkflowActivityTracker } from "../workflows/workflow-activity-tracker";
+import type { WorkflowActivityTracker, FlowRunEntry } from "../workflows/workflow-activity-tracker";
 import type { WorkflowExecution, WorkflowExecutionStatus } from "../types";
 import type { ConversationSession } from "../chat/conversation-session";
 import { logger } from "../utils/logger";
@@ -26,6 +26,12 @@ const log = logger("WorkflowActivityDropdown");
  * @param conversationId - The conversation ID to switch to.
  */
 export type NavigateToConversationCallback = (conversationId: string) => void;
+
+/**
+ * Callback to open the run-tree view rooted at a flow-run session (POL-004 /
+ * FR-179). A `flow-run` entry click routes here instead of `onNavigate`.
+ */
+export type OpenRunTreeCallback = (sessionId: string) => void;
 
 /**
  * Workflow activity dropdown component.
@@ -65,16 +71,21 @@ export class WorkflowActivityDropdown {
 	 * @param getCurrentConversationId  - Optional accessor for the conversation ID currently open in
 	 *                                    this panel, used to highlight the matching dropdown entry.
 	 */
+	/** Optional run-tree opener for `flow-run` entries (POL-004). */
+	private readonly onOpenRunTree?: OpenRunTreeCallback;
+
 	constructor(
 		tracker: WorkflowActivityTracker,
 		onNavigate: NavigateToConversationCallback,
 		getActiveSessions?: () => ConversationSession[],
 		getCurrentConversationId?: () => string | null,
+		onOpenRunTree?: OpenRunTreeCallback,
 	) {
 		this.tracker = tracker;
 		this.onNavigate = onNavigate;
 		this.getActiveSessions = getActiveSessions;
 		this.getCurrentConversationId = getCurrentConversationId;
+		this.onOpenRunTree = onOpenRunTree;
 	}
 
 	// -----------------------------------------------------------------------
@@ -206,14 +217,32 @@ export class WorkflowActivityDropdown {
 
 		const workflowEntries = this.tracker.getIndicatorEntries();
 		const sessions = this.getActiveSessions?.() ?? [];
+		const flowRuns = this.tracker.getFlowRunEntries();
 
-		if (workflowEntries.length === 0 && sessions.length === 0) {
+		if (workflowEntries.length === 0 && sessions.length === 0 && flowRuns.length === 0) {
 			// Empty state
 			const emptyEl = this.dropdownEl.createDiv({
 				cls: "notor-workflow-activity-empty",
 			});
 			emptyEl.textContent = "No recent activity";
 			return;
+		}
+
+		// Flow-runs section (POL-004) — typed `flow-run` entries open the run-tree.
+		if (flowRuns.length > 0) {
+			const showHeader = sessions.length > 0 || workflowEntries.length > 0;
+			const sectionEl = showHeader
+				? this.dropdownEl.createDiv({ cls: "notor-workflow-activity-section" })
+				: this.dropdownEl;
+			if (showHeader) {
+				sectionEl.createDiv({
+					cls: "notor-workflow-activity-section-header",
+					text: "Flows",
+				});
+			}
+			for (const run of flowRuns) {
+				this.renderFlowRunEntry(sectionEl, run);
+			}
 		}
 
 		// Conversations section (active foreground sessions)
@@ -291,6 +320,28 @@ export class WorkflowActivityDropdown {
 		// Click handler — navigate to the workflow's conversation (H-005)
 		entryEl.addEventListener("click", () => {
 			this.onNavigate(execution.conversation_id);
+			this.close();
+		});
+	}
+
+	/**
+	 * Render a single flow-run entry (POL-004). Clicking it **opens the run-tree
+	 * view** rooted at the flow's session (unlike a background-workflow entry,
+	 * which navigates to its conversation).
+	 */
+	private renderFlowRunEntry(container: HTMLElement, run: FlowRunEntry): void {
+		const entryEl = container.createDiv({ cls: "notor-workflow-activity-entry" });
+
+		const topRow = entryEl.createDiv({ cls: "notor-workflow-activity-entry-top" });
+		topRow.createSpan({ cls: "workflow-name", text: run.flowName });
+		const badgeEl = topRow.createSpan({ cls: `status-badge status-${run.status}` });
+		badgeEl.textContent = run.status;
+
+		const bottomRow = entryEl.createDiv({ cls: "notor-workflow-activity-entry-bottom" });
+		bottomRow.createSpan({ cls: "trigger-source", text: "orchestration flow" });
+
+		entryEl.addEventListener("click", () => {
+			if (this.onOpenRunTree) this.onOpenRunTree(run.sessionId);
 			this.close();
 		});
 	}

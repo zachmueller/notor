@@ -648,6 +648,10 @@ export class NotorChatView extends ItemView {
 				void this.switchToConversation(conversationId);
 			}
 		);
+		// POL-004: a flow-run entry click opens the unified run-tree view.
+		this.workflowActivityIndicator.setOnOpenRunTree((sessionId: string) => {
+			void this.plugin.openRunTreeView({ sessionId });
+		});
 
 		this.workflowActivityIndicator.render();
 	}
@@ -998,6 +1002,8 @@ export class NotorChatView extends ItemView {
 			openInternalLink: (href) => this.openInternalLink(href),
 			openChatInNewTab: (filename, createNew, initialText, conversationId) => this.plugin.openChatInNewTab(filename, createNew, initialText, conversationId),
 			onOpenSettingsGroup: this.onOpenSettingsGroup,
+			// POL-003 / FR-179: the inline peek card's "Open run tree" affordance.
+			openRunTree: (root) => void this.plugin.openRunTreeView(root),
 		});
 
 		// Initialize ChatInput
