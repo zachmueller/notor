@@ -1,33 +1,33 @@
 /**
- * SubAgentRunner — a lightweight mini-orchestrator for sub-agent conversations.
+ * SubAgentRunner — a thin adapter over the generalized {@link RunLoop} engine.
  *
- * Runs an isolated LLM conversation loop: send messages → parse stream →
- * dispatch tools → repeat until a text-only response or iteration cap.
+ * Historically this class owned the sub-agent turn loop directly. The loop was
+ * lifted into `src/run-loop/run-loop.ts` (ARCH-002); `SubAgentRunner` is now an
+ * adapter that:
+ * - constructs `RunLoopOptions` seeding **`maxDepth = 0`**, a **fresh** both-
+ *   `Infinity` aggregate `budget` cell, a fresh write-only `subtreeConsumed`,
+ *   `orchestrationContext: undefined`, **no** `settings` (so per-turn cost stays
+ *   `0`), and **no** persistence hooks (only `onProgress`);
+ * - maps the engine's {@link RunResult} → {@link SubAgentResult} (a strict
+ *   subset — `structured` is dropped; the `stopReason` union narrows back to the
+ *   four sub-agent reasons, since `cost_cap`/`depth_cap` are unreachable with an
+ *   `Infinity` cell and `maxDepth = 0`).
  *
- * Unlike the main `ChatOrchestrator`, this class has:
- * - No compaction, context management, or conversation persistence
- * - No view rendering or hooks
- * - No persona switching or workflow assembly
- * - Its own `AbortController` linked to the parent's signal
+ * With the aggregate cell at `Infinity` and `maxDepth = 0`, the two-layer
+ * decision rule reduces to exactly today's single `iterationCount < iterationCap`
+ * check — so sub-agent caps, wind-down, and abort cascading are byte-identical to
+ * HEAD (the RunLoop Regression Gate, TEST-001).
  *
  * @see specs/ZZ-misc/sub-agents-design.md — Section 9.1
+ * @see specs/ZZ-misc/orchestration/contracts/run-loop.md — Behavior-preservation gate
  */
 
-import type { LLMProvider, ChatMessage, ToolDefinition, SendMessageOptions } from "../providers/provider";
+import type { LLMProvider, ChatMessage, ToolDefinition } from "../providers/provider";
 import type { ConversationMode } from "../types";
 import type { ToolDispatcher } from "./dispatcher";
-import { parseStreamEvents } from "./stream-utils";
-import {
-	partitionToolCalls,
-	executeToolBatches,
-	type ToolCallInfo,
-} from "./tool-orchestration";
-import { SUB_AGENT_ITERATION_CAP, SUB_AGENT_TOKEN_LIMIT } from "../sub-agents/constants";
-import { getContextWindow } from "../providers/model-metadata";
-import { estimateTokenCount, estimateContentTokens } from "../utils/tokens";
-import { logger } from "../utils/logger";
-
-const log = logger("SubAgentRunner");
+import { RunLoop } from "../run-loop/run-loop";
+import { newRootBudget, deriveChildContext } from "../run-loop/budget";
+import type { RunContext } from "../run-loop/types";
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -35,6 +35,9 @@ const log = logger("SubAgentRunner");
 
 /**
  * Result returned by a sub-agent execution.
+ *
+ * A strict subset of {@link RunResult}: it omits `structured` (always null for
+ * sub-agents) and narrows `stopReason` to the reachable sub-agent reasons.
  *
  * @see specs/ZZ-misc/sub-agents-design.md — Section 9.1
  */
@@ -48,7 +51,7 @@ export type SubAgentStopReason =
 export interface SubAgentResult {
 	/** Final text response from the sub-agent. */
 	text: string;
-	/** Full conversation messages (for history persistence in Phase 6). */
+	/** Full conversation messages (for history persistence). */
 	messages: ChatMessage[];
 	/** Cumulative token usage across all iterations. */
 	tokenUsage: { input: number; output: number };
@@ -85,6 +88,15 @@ export interface SubAgentRunnerOptions {
 	thinkingLevel?: string | null;
 	/** Optional progress callback (Section 9.5). */
 	onProgress?: (status: string) => void;
+	/**
+	 * Parent run's {@link RunContext}, when this sub-agent is spawned from inside
+	 * another run tree (a flow dispatching `use_subagent` at `maxDepth ≥ 1`). When
+	 * supplied, the child inherits the parent's SHARED aggregate budget cell by
+	 * reference and `depth + 1` (so its turns draw down the same tree-wide
+	 * ceiling). When omitted (today's foreground-chat sub-agent), the runner seeds
+	 * a fresh `maxDepth = 0` / both-`Infinity` context — behavior unchanged.
+	 */
+	parentRunContext?: RunContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,463 +104,68 @@ export interface SubAgentRunnerOptions {
 // ---------------------------------------------------------------------------
 
 export class SubAgentRunner {
-	private readonly provider: LLMProvider;
-	private readonly model: string;
-	private readonly systemPrompt: string;
-	private readonly toolDefinitions: ToolDefinition[];
-	private readonly dispatcher: ToolDispatcher;
-	private readonly iterationCap: number;
-	private readonly tokenLimit: number;
-	private readonly mode: ConversationMode;
-	private readonly thinkingLevel: string | null;
-	private readonly onProgress?: (status: string) => void;
-
-	/**
-	 * Own abort controller for this sub-agent. Linked to the parent's signal
-	 * so that the parent's Stop button cancels this sub-agent too.
-	 */
-	private readonly abortController: AbortController;
-
-	/** Listener cleanup for the parent abort signal link. */
-	private readonly unlinkParentAbort: () => void;
+	private readonly options: SubAgentRunnerOptions;
 
 	constructor(options: SubAgentRunnerOptions) {
-		this.provider = options.provider;
-		this.model = options.model;
-		this.systemPrompt = options.systemPrompt;
-		this.toolDefinitions = options.toolDefinitions;
-		this.dispatcher = options.dispatcher;
-		this.iterationCap = options.iterationCap ?? SUB_AGENT_ITERATION_CAP;
-		this.tokenLimit = options.tokenLimit ?? SUB_AGENT_TOKEN_LIMIT;
-		this.mode = options.mode;
-		this.thinkingLevel = options.thinkingLevel ?? null;
-		this.onProgress = options.onProgress;
-
-		// --- Abort propagation (Section 6.2 / Phase 4.3) ---
-		// Each sub-agent gets its own AbortController. If the parent's signal
-		// fires, we cascade the abort to this controller.
-		this.abortController = new AbortController();
-
-		if (options.parentAbortSignal.aborted) {
-			// Parent already aborted before we started
-			this.abortController.abort();
-		}
-
-		const onParentAbort = () => this.abortController.abort();
-		options.parentAbortSignal.addEventListener("abort", onParentAbort, { once: true });
-
-		this.unlinkParentAbort = () => {
-			options.parentAbortSignal.removeEventListener("abort", onParentAbort);
-		};
+		this.options = options;
 	}
 
 	/**
-	 * Run the sub-agent conversation loop.
+	 * Run the sub-agent conversation loop by delegating to {@link RunLoop}.
 	 *
 	 * @param taskPrompt - The task/question for the sub-agent to complete.
 	 * @returns Sub-agent result with text, messages, and token usage.
 	 */
 	async run(taskPrompt: string): Promise<SubAgentResult> {
-		const messages: ChatMessage[] = [
-			{ role: "system", content: this.systemPrompt },
-			{ role: "user", content: taskPrompt },
-		];
+		// Seed the sub-agent RunContext.
+		//
+		// - No parent context (today's foreground-chat sub-agent): seed a fresh
+		//   maxDepth = 0 / both-Infinity cell so the per-run cap is the only
+		//   effective limit — byte-identical to HEAD.
+		// - With a parent context (a flow spawning use_subagent at maxDepth ≥ 1):
+		//   inherit the parent's SHARED budget cell by reference and depth + 1, so
+		//   the child's turns draw down the same tree-wide ceiling.
+		//
+		// The abort signal is the parent's — RunLoop links its own controller to it
+		// and cleans up the listener in its finally block (one add + one remove).
+		const runContext: RunContext = this.options.parentRunContext
+			? { ...deriveChildContext(this.options.parentRunContext), abort: this.options.parentAbortSignal }
+			: {
+				depth: 0,
+				maxDepth: 0,
+				budget: newRootBudget(Infinity, Infinity),
+				subtreeConsumed: { costUsd: 0, iterations: 0, maxDepthReached: 0 },
+				abort: this.options.parentAbortSignal,
+			};
 
-		const tokenUsage = { input: 0, output: 0 };
-		let iterationCount = 0;
-		let lastText = "";
-		let streamResult: ConsumedStreamResult | undefined;
-
-		try {
-			while (iterationCount < this.iterationCap) {
-				// Check abort before each LLM call
-				if (this.abortController.signal.aborted) {
-					log.info("Sub-agent aborted before LLM call", { iteration: iterationCount });
-					return {
-						text: lastText ? `${lastText}\n\n[Sub-agent cancelled]` : "[Sub-agent cancelled]",
-						messages,
-						tokenUsage,
-						iterationCount,
-						stopReason: "completed",
-					};
-				}
-
-				// Pre-flight token limit check: reserve headroom for wind-down
-				if (this.tokenLimit > 0 && streamResult) {
-					const lastInputCost = streamResult.inputTokens;
-					const windDownReserve = lastInputCost + 4096;
-					if (tokenUsage.input + tokenUsage.output + windDownReserve >= this.tokenLimit) {
-						log.warn("Sub-agent approaching token limit (pre-flight)", {
-							tokenUsage,
-							limit: this.tokenLimit,
-							windDownReserve,
-						});
-						return await this.runWindDown(messages, tokenUsage, iterationCount, "token_limit");
-					}
-				}
-
-				// Context window proximity check (Phase 4B)
-				if (streamResult) {
-					// Use last turn's actual API-reported input tokens as context size
-					const contextLimit = getContextWindow(this.model);
-					const lastInputTokens = streamResult.inputTokens;
-					const windDownReserve = lastInputTokens + 4096;
-					if (contextLimit > 0 && lastInputTokens + windDownReserve >= contextLimit) {
-						log.warn("Sub-agent approaching context window limit", {
-							lastInputTokens,
-							contextLimit,
-							windDownReserve,
-						});
-						return await this.runWindDown(messages, tokenUsage, iterationCount, "context_window");
-					}
-				} else {
-					// First iteration: use heuristic estimate (50% threshold)
-					const contextLimit = getContextWindow(this.model);
-					const estimatedTokens = this.estimateConversationTokens(messages);
-					if (contextLimit > 0 && estimatedTokens >= contextLimit * 0.5) {
-						log.warn("Sub-agent estimated context exceeds 50% of window (first iteration)", {
-							estimatedTokens,
-							contextLimit,
-						});
-						return await this.runWindDown(messages, tokenUsage, iterationCount, "context_window");
-					}
-				}
-
-				iterationCount++;
-				this.onProgress?.(`Turn ${iterationCount}/${this.iterationCap}...`);
-
-				// --- Send to LLM ---
-				const sendOptions: SendMessageOptions = {
-					model: this.model,
-					abort_signal: this.abortController.signal,
-					thinking_level: this.thinkingLevel,
-				};
-
-				const stream = this.provider.sendMessage(
-					messages,
-					this.toolDefinitions,
-					sendOptions,
-				);
-
-				// --- Parse stream ---
-				streamResult = await this.consumeStream(stream);
-
-				// Accumulate tokens
-				tokenUsage.input += streamResult.inputTokens;
-				tokenUsage.output += streamResult.outputTokens;
-
-				// Post-turn token limit check
-				if (this.tokenLimit > 0 && tokenUsage.input + tokenUsage.output >= this.tokenLimit) {
-					log.warn("Sub-agent reached token limit", {
-						tokenUsage,
-						limit: this.tokenLimit,
-					});
-					return await this.runWindDown(messages, tokenUsage, iterationCount, "token_limit");
-				}
-
-				// --- Handle stream result ---
-				if (streamResult.type === "error") {
-					log.warn("Sub-agent stream error", { error: streamResult.error });
-					return {
-						text: `[Sub-agent error: ${streamResult.error}]`,
-						messages,
-						tokenUsage,
-						iterationCount,
-						stopReason: "completed",
-					};
-				}
-
-				if (streamResult.type === "cancelled") {
-					log.info("Sub-agent stream cancelled", { iteration: iterationCount });
-					return {
-						text: streamResult.text ? `${streamResult.text}\n\n[Sub-agent cancelled]` : "[Sub-agent cancelled]",
-						messages,
-						tokenUsage,
-						iterationCount,
-						stopReason: "completed",
-					};
-				}
-
-				lastText = streamResult.text;
-
-				// --- Text-only response (no tool calls) → completion ---
-				if (streamResult.toolCalls.length === 0) {
-					// Add the assistant's final response to messages
-					if (streamResult.text) {
-						messages.push({ role: "assistant", content: streamResult.text });
-					}
-
-					log.info("Sub-agent completed", {
-						iterations: iterationCount,
-						textLength: streamResult.text.length,
-					});
-
-					return {
-						text: streamResult.text,
-						messages,
-						tokenUsage,
-						iterationCount,
-						stopReason: "completed",
-					};
-				}
-
-				// --- Tool calls → dispatch and continue ---
-				// Add a single assistant message with ALL tool calls (Bedrock requires
-				// all tool_use blocks in one assistant message, matched by a single
-				// user message with all tool_result blocks).
-				messages.push({
-					role: "tool_call",
-					content: streamResult.text || "",
-					tool_calls: streamResult.toolCalls.map(call => ({
-						id: call.toolCallId,
-						tool_name: call.toolName,
-						parameters: call.parameters,
-					})),
-				});
-
-				// Dispatch tools using the same batch/parallel infrastructure
-				const batches = partitionToolCalls(streamResult.toolCalls, this.dispatcher);
-
-				// Build a messageId map — sub-agents use the tool call ID as message ID
-				const messageIdMap = new Map<string, string>();
-				for (const call of streamResult.toolCalls) {
-					messageIdMap.set(call.toolCallId, call.toolCallId);
-				}
-
-				const batchResults = await executeToolBatches(
-					batches,
-					this.dispatcher,
-					this.mode,
-					messageIdMap,
-					this.abortController.signal,
-				);
-
-				// Add a single tool_result message with ALL results (matches the
-				// single tool_call message above — required by Bedrock).
-				messages.push({
-					role: "tool_result",
-					content: "",
-					tool_results: batchResults.map(({ call, result }) => {
-						const resultStr = typeof result.result === "string"
-							? result.result
-							: JSON.stringify(result.result);
-						return {
-							tool_call_id: call.toolCallId,
-							tool_name: call.toolName,
-							result: resultStr || result.error || "",
-							is_error: !result.success,
-						};
-					}),
-				});
-
-				// Report progress with tool names
-				const toolNames = streamResult.toolCalls.map(c => c.toolName).join(", ");
-				this.onProgress?.(`Executed ${toolNames} (turn ${iterationCount}/${this.iterationCap})`);
-			}
-
-			// --- Iteration cap reached → wind down ---
-			log.warn("Sub-agent reached iteration cap", {
-				cap: this.iterationCap,
-				lastTextLength: lastText.length,
-			});
-			return await this.runWindDown(messages, tokenUsage, iterationCount, "iteration_cap");
-		} finally {
-			// Clean up the parent abort listener
-			this.unlinkParentAbort();
-		}
-	}
-
-	// -----------------------------------------------------------------------
-	// Wind-down: graceful summary before stopping
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Send one final LLM turn asking the model to summarize progress before
-	 * the sub-agent is terminated.
-	 */
-	private async runWindDown(
-		messages: ChatMessage[],
-		tokenUsage: { input: number; output: number },
-		iterationCount: number,
-		reason: "iteration_cap" | "token_limit" | "context_window",
-	): Promise<SubAgentResult> {
-		const reasonLabels: Record<typeof reason, string> = {
-			iteration_cap: `iteration limit (${iterationCount} turns)`,
-			token_limit: `token limit (${(tokenUsage.input + tokenUsage.output).toLocaleString()} tokens)`,
-			context_window: "context window proximity (~50%)",
-		};
-		const reasonLabel = reasonLabels[reason];
-
-		// Report progress
-		this.onProgress?.("Summarizing progress...");
-
-		// Append summarization instructions
-		messages.push({
-			role: "user",
-			content: [
-				`You are about to be stopped because you have reached the ${reasonLabel}.`,
-				"Before stopping, please provide a concise summary of:",
-				"1. What was accomplished",
-				"2. What remains to be done",
-				"3. Key findings or results so far",
-				"",
-				"Do NOT call any tools. Respond with text only.",
-			].join("\n"),
+		const runLoop = new RunLoop({
+			provider: this.options.provider,
+			model: this.options.model,
+			systemPrompt: this.options.systemPrompt,
+			toolDefinitions: this.options.toolDefinitions,
+			dispatcher: this.options.dispatcher,
+			mode: this.options.mode,
+			iterationCap: this.options.iterationCap,
+			tokenLimit: this.options.tokenLimit,
+			thinkingLevel: this.options.thinkingLevel,
+			runContext,
+			// No settings → per-turn cost stays 0 (the Infinity cell never blocks
+			// anyway); no orchestrationContext and no hooks → today's behavior.
+			orchestrationContext: undefined,
+			onProgress: this.options.onProgress,
 		});
 
-		// Send the summary turn — pass toolDefinitions (NOT empty []) because
-		// Bedrock requires toolConfig when conversation history contains
-		// toolUse/toolResult blocks.
-		const sendOptions: SendMessageOptions = {
-			model: this.model,
-			abort_signal: this.abortController.signal,
-			thinking_level: this.thinkingLevel,
-		};
+		const result = await runLoop.run(taskPrompt);
 
-		try {
-			const stream = this.provider.sendMessage(
-				messages,
-				this.toolDefinitions,
-				sendOptions,
-			);
-
-			const streamResult = await this.consumeStream(stream);
-
-			// Accumulate tokens from the summary turn
-			tokenUsage.input += streamResult.inputTokens;
-			tokenUsage.output += streamResult.outputTokens;
-
-			// Use whatever text was generated (ignore tool calls if model made them)
-			const summaryText = streamResult.text || "[No summary generated]";
-			const marker = `[Sub-agent stopped: ${reasonLabel}]`;
-
-			return {
-				text: `${marker}\n\n${summaryText}`,
-				messages,
-				tokenUsage,
-				iterationCount,
-				stopReason: reason,
-			};
-		} catch (err) {
-			// If the summary turn fails, fall back to a static marker
-			log.warn("Wind-down summary turn failed", { error: err });
-			const marker = `[Sub-agent stopped: ${reasonLabel}]`;
-
-			return {
-				text: marker,
-				messages,
-				tokenUsage,
-				iterationCount,
-				stopReason: reason,
-			};
-		}
-	}
-
-	// -----------------------------------------------------------------------
-	// Context window estimation
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Heuristic token estimate for the full conversation — used on the first
-	 * iteration when no API-reported input token count is available yet.
-	 * Accounts for tool_calls and tool_results arrays, not just msg.content.
-	 */
-	private estimateConversationTokens(messages: ChatMessage[]): number {
-		let total = 0;
-		for (const msg of messages) {
-			total += estimateContentTokens(msg.content);
-			if (msg.tool_calls) {
-				for (const tc of msg.tool_calls) {
-					total += estimateTokenCount(tc.tool_name);
-					total += estimateTokenCount(JSON.stringify(tc.parameters));
-				}
-			}
-			if (msg.tool_results) {
-				for (const tr of msg.tool_results) {
-					total += estimateTokenCount(tr.result);
-				}
-			}
-		}
-		return total;
-	}
-
-	// -----------------------------------------------------------------------
-	// Stream consumption
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Consume a provider stream via `parseStreamEvents()`, collecting text
-	 * and tool calls without any view rendering.
-	 */
-	private async consumeStream(
-		stream: AsyncIterable<import("../providers/provider").StreamChunk>,
-	): Promise<ConsumedStreamResult> {
-		let text = "";
-		const toolCalls: ToolCallInfo[] = [];
-		let inputTokens = 0;
-		let outputTokens = 0;
-
-		for await (const event of parseStreamEvents(stream, this.abortController.signal, {
-			onPartialToolCall: this.dispatcher.makePartialToolCallHandler(),
-		})) {
-			switch (event.type) {
-				case "text_delta":
-					text = event.text;
-					break;
-
-				// tool_call_started / thinking_* are intentionally ignored:
-				// sub-agents render no tool-call cards in the parent chat, so the
-				// in-progress placeholder event is a no-op here.
-
-				case "tool_call":
-					toolCalls.push({
-						toolCallId: event.id,
-						toolName: event.name,
-						parameters: event.parameters,
-					});
-					break;
-
-				case "message_end":
-					inputTokens = event.inputTokens;
-					outputTokens = event.outputTokens;
-					break;
-
-				case "error":
-					return {
-						type: "error",
-						text,
-						toolCalls: [],
-						inputTokens,
-						outputTokens,
-						error: event.message,
-					};
-
-				case "cancelled":
-					return {
-						type: "cancelled",
-						text: event.text,
-						toolCalls: [],
-						inputTokens,
-						outputTokens,
-					};
-			}
-		}
-
+		// Map RunResult → SubAgentResult (strict subset). `structured` is dropped;
+		// cost_cap/depth_cap are unreachable here (Infinity cell, maxDepth 0), so
+		// the narrowing cast is sound.
 		return {
-			type: "complete",
-			text,
-			toolCalls,
-			inputTokens,
-			outputTokens,
+			text: result.text,
+			messages: result.messages,
+			tokenUsage: result.tokenUsage,
+			iterationCount: result.iterationCount,
+			stopReason: result.stopReason as SubAgentStopReason,
 		};
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Internal types
-// ---------------------------------------------------------------------------
-
-type ConsumedStreamResult =
-	| { type: "complete"; text: string; toolCalls: ToolCallInfo[]; inputTokens: number; outputTokens: number }
-	| { type: "error"; text: string; toolCalls: []; inputTokens: number; outputTokens: number; error: string }
-	| { type: "cancelled"; text: string; toolCalls: []; inputTokens: number; outputTokens: number };

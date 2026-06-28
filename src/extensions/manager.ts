@@ -235,6 +235,7 @@ export class ExtensionManager {
 	private static readonly FEATURE_GROUP_TOGGLES: Record<string, string> = {
 		memory: "memory_enabled",
 		templates: "templates_enabled",
+		orchestration: "orchestration_enabled",
 	};
 
 	/**

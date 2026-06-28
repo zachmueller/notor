@@ -18,8 +18,15 @@ export const USE_SUBAGENT_TOOL_NAME = "use_subagent";
  * Tools that must always be excluded from sub-agent tool lists.
  *
  * Section 3.3: `use_subagent` is always filtered out to prevent recursive
- * sub-agent spawning. The dispatcher also rejects calls from within a
- * sub-agent context as defense-in-depth.
+ * sub-agent spawning.
+ *
+ * **Enforcement shift (ARCH-004).** The authoritative no-nesting rule is now the
+ * `depth < maxDepth` gate on `RunContext` (read in `UseSubagentTool.execute()`):
+ * sub-agents are seeded `maxDepth = 0`, so a nested `use_subagent` fails the
+ * gate exactly as this filter + the old `_isSubAgentContext` flag did. This set
+ * and {@link filterSubAgentTools} are retained for back-compat (they still strip
+ * the tool from sub-agent tool lists), but enforcement no longer depends on them
+ * — flows will later pass `maxDepth = N` to permit bounded nesting.
  */
 export const SUBAGENT_EXCLUDED_TOOLS: ReadonlySet<string> = new Set([
 	USE_SUBAGENT_TOOL_NAME,

@@ -5,7 +5,7 @@
 **Data Model:** [data-model.md](../data-model.md)
 **Master Task Index:** [tasks.md](../tasks.md)
 **Contracts:** [contracts/run-loop.md](../contracts/run-loop.md) · [contracts/edges.md](../contracts/edges.md)
-**Status:** Draft
+**Status:** Complete
 
 This file holds the full task **bodies** for design **Phase 0** — the regression-critical extraction of
 the generalized headless turn-loop engine (`RunLoop`) from `SubAgentRunner`. Task IDs and dependency
@@ -100,12 +100,12 @@ front; only `src/run-loop/` is populated in Phase 0.
 - `src/settings/defaults.ts` — add `orchestration_enabled: false`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `src/run-loop/` exists with four skeleton files (`types.ts`, `run-loop.ts`, `budget.ts`, `semaphore.ts`)
-- [ ] `src/orchestration/types.ts` exists as a skeleton
-- [ ] `NotorSettings` includes `orchestration_enabled: boolean`
-- [ ] Default settings include `orchestration_enabled: false`
-- [ ] `npm run build` succeeds with no type errors
-- [ ] Plugin loads normally; no behavior change with the flag off (no consumer reads it yet)
+- [x] `src/run-loop/` exists with four skeleton files (`types.ts`, `run-loop.ts`, `budget.ts`, `semaphore.ts`)
+- [x] `src/orchestration/types.ts` exists as a skeleton
+- [x] `NotorSettings` includes `orchestration_enabled: boolean`
+- [x] Default settings include `orchestration_enabled: false`
+- [x] `npm run build` succeeds with no type errors
+- [x] Plugin loads normally; no behavior change with the flag off (no consumer reads it yet)
 
 ### ENV-002: Feature-group registration + `settings/sections/orchestration.ts`
 **Description:** Register the orchestration feature group so scaffolds can gate on it, and add the
@@ -124,12 +124,12 @@ depends on, per sequencing-risk #6 ("feature-group gating before any scaffold re
 - `src/settings/settings-tab.ts` — register the orchestration section (wherever memory's section is registered)
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `FEATURE_GROUP_TOGGLES` includes `orchestration: "orchestration_enabled"`
-- [ ] `isFeatureGroupEnabled("orchestration")` returns the value of `settings.orchestration_enabled`
-- [ ] An "Orchestration" toggle appears in Settings → Notor, mirroring the Memory toggle
-- [ ] Toggling it sets `settings.orchestration_enabled` and calls `extensionManager.reload(false)`
-- [ ] With the flag off, `reload()` filters out any `featureGroup: "orchestration"` tool (none exist yet — verified via a stub tool in TEST scope, then removed)
-- [ ] `npm run build` succeeds; existing memory/templates gating unaffected
+- [x] `FEATURE_GROUP_TOGGLES` includes `orchestration: "orchestration_enabled"`
+- [x] `isFeatureGroupEnabled("orchestration")` returns the value of `settings.orchestration_enabled`
+- [x] An "Orchestration" toggle appears in Settings → Notor, mirroring the Memory toggle
+- [x] Toggling it sets `settings.orchestration_enabled` and calls `extensionManager.reload(false)`
+- [x] With the flag off, `reload()` filters out any `featureGroup: "orchestration"` tool (none exist yet — verified via a stub tool in TEST scope, then removed)
+- [x] `npm run build` succeeds; existing memory/templates gating unaffected
 
 ---
 
@@ -152,15 +152,15 @@ orchestration attaches persistence/Notices/navigation to in Phase 1 (FEAT-007) �
 - `src/run-loop/types.ts` — `RunContext`, `RunResult`, `RunLoopOptions`, `RunLoopHooks`, `TurnOutcome`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `AggregateBudget` is defined as `{ iterationsRemaining: number; costRemainingUsd: number }` and documented as a **shared cell** (referenced by every `RunContext` in a tree, never value-copied per child)
-- [ ] `RunContext` matches [data-model.md](../data-model.md): `{ depth, maxDepth, budget: AggregateBudget, abort }` — `budget` documented as the **shared aggregate** tree-wide cell (NOT the per-run cap)
-- [ ] `RunResult` matches [data-model.md](../data-model.md): `{ text, structured: unknown | null, messages, tokenUsage: {input, output}, iterationCount, stopReason }`; `structured` documented as populated only by a terminal code step's `emit(topic, payload?, structured?)` third arg
-- [ ] `stopReason` union is `"completed" | "iteration_cap" | "token_limit" | "context_window" | "cost_cap" | "depth_cap"`
-- [ ] `RunLoopOptions` includes `provider, model, systemPrompt, toolDefinitions, dispatcher, mode, iterationCap?, tokenLimit?, thinkingLevel?, runContext, orchestrationContext?, hooks?, onProgress?` (defaults: `iterationCap = SUB_AGENT_ITERATION_CAP` (20), `tokenLimit = SUB_AGENT_TOKEN_LIMIT` (0))
-- [ ] `OrchestrationToolContext` is defined per [data-model.md](../data-model.md) (`{ sessionId, scratchpadPath, tasksPath, parentScratchpadPath?, pendingEmission }`) and imported by the orchestration tools; `RunLoopOptions.orchestrationContext?` is `undefined` for sub-agents
-- [ ] `RunLoopHooks` includes only `onTurnStart?`, `onTurnComplete?`, `onPersist?`, `onProgress?` — no compaction/view hooks
-- [ ] Types compile and are importable from `src/run-loop/types.ts` with no `src/chat/` orchestrator dependency
-- [ ] `npm run build` succeeds with no type errors
+- [x] `AggregateBudget` is defined as `{ iterationsRemaining: number; costRemainingUsd: number }` and documented as a **shared cell** (referenced by every `RunContext` in a tree, never value-copied per child)
+- [x] `RunContext` matches [data-model.md](../data-model.md): `{ depth, maxDepth, budget: AggregateBudget, abort }` — `budget` documented as the **shared aggregate** tree-wide cell (NOT the per-run cap)
+- [x] `RunResult` matches [data-model.md](../data-model.md): `{ text, structured: unknown | null, messages, tokenUsage: {input, output}, iterationCount, stopReason }`; `structured` documented as populated only by a terminal code step's `emit(topic, payload?, structured?)` third arg
+- [x] `stopReason` union is `"completed" | "iteration_cap" | "token_limit" | "context_window" | "cost_cap" | "depth_cap"`
+- [x] `RunLoopOptions` includes `provider, model, systemPrompt, toolDefinitions, dispatcher, mode, iterationCap?, tokenLimit?, thinkingLevel?, runContext, orchestrationContext?, hooks?, onProgress?` (defaults: `iterationCap = SUB_AGENT_ITERATION_CAP` (20), `tokenLimit = SUB_AGENT_TOKEN_LIMIT` (0))
+- [x] `OrchestrationToolContext` is defined per [data-model.md](../data-model.md) (`{ sessionId, scratchpadPath, tasksPath, parentScratchpadPath?, pendingEmission }`) and imported by the orchestration tools; `RunLoopOptions.orchestrationContext?` is `undefined` for sub-agents
+- [x] `RunLoopHooks` includes only `onTurnStart?`, `onTurnComplete?`, `onPersist?`, `onProgress?` — no compaction/view hooks
+- [x] Types compile and are importable from `src/run-loop/types.ts` with no `src/chat/` orchestrator dependency
+- [x] `npm run build` succeeds with no type errors
 
 ### ARCH-002: Lift the loop into `RunLoop`; refactor `SubAgentRunner` to consume it
 **Description:** Extract `SubAgentRunner`'s core turn loop into the generalized headless `RunLoop`
@@ -184,16 +184,16 @@ the **narrowest waist** of the feature and the core of the **RunLoop Regression 
 - `src/run-loop/types.ts` — minor additions if `TurnOutcome` needs fields surfaced to hooks
 **Dependencies:** ARCH-001
 **Acceptance Criteria:**
-- [ ] `RunLoop.run()` runs an isolated LLM conversation to a terminal condition and returns a `RunResult`
-- [ ] `RunLoop` dispatches tools via `executeToolBatches` (inheriting batched/parallel intra-turn dispatch; cap `DEFAULT_CONCURRENCY_CAP = 5`)
-- [ ] `RunLoop` honors the per-run `iterationCap` and `tokenLimit`, the context-window proximity check, and wind-down summarization on any terminal cap — lifted unchanged from `SubAgentRunner`
-- [ ] Parent abort cascades into the run via `runContext.abort` exactly as `SubAgentRunner` cascades today
-- [ ] `SubAgentRunner` constructs `RunLoopOptions` with `maxDepth = 0`, a **fresh** `budget` cell `{ iterationsRemaining: Infinity, costRemainingUsd: Infinity }`, `orchestrationContext: undefined`, and no `onPersist` hook
-- [ ] `SubAgentResult` is a strict subset of `RunResult` (`structured` always null); the refactor is non-breaking for `use_subagent`
-- [ ] **GATE:** `src/chat/sub-agent-runner.test.ts` passes unmodified
-- [ ] **GATE:** `src/tools/use-subagent.test.ts` passes unmodified (incl. `iterationCap === 20` hard-assert)
-- [ ] **GATE:** `src/sub-agents/constants.test.ts` passes unmodified
-- [ ] `npm run build` succeeds with no type errors
+- [x] `RunLoop.run()` runs an isolated LLM conversation to a terminal condition and returns a `RunResult`
+- [x] `RunLoop` dispatches tools via `executeToolBatches` (inheriting batched/parallel intra-turn dispatch; cap `DEFAULT_CONCURRENCY_CAP = 5`)
+- [x] `RunLoop` honors the per-run `iterationCap` and `tokenLimit`, the context-window proximity check, and wind-down summarization on any terminal cap — lifted unchanged from `SubAgentRunner`
+- [x] Parent abort cascades into the run via `runContext.abort` exactly as `SubAgentRunner` cascades today
+- [x] `SubAgentRunner` constructs `RunLoopOptions` with `maxDepth = 0`, a **fresh** `budget` cell `{ iterationsRemaining: Infinity, costRemainingUsd: Infinity }`, `orchestrationContext: undefined`, and no `onPersist` hook
+- [x] `SubAgentResult` is a strict subset of `RunResult` (`structured` always null); the refactor is non-breaking for `use_subagent`
+- [x] **GATE:** `src/chat/sub-agent-runner.test.ts` passes unmodified
+- [x] **GATE:** `src/tools/use-subagent.test.ts` passes unmodified (incl. `iterationCap === 20` hard-assert)
+- [x] **GATE:** `src/sub-agents/constants.test.ts` passes unmodified
+- [x] `npm run build` succeeds with no type errors
 
 ### ARCH-003: `runContext?` (+ `orchestrationContext?`) on `ToolExecuteOptions`; thread through dispatch + `executeToolBatches`
 **Description:** Add the cascade seam so `RunContext` reaches the tools that spawn children, **and** the
@@ -221,13 +221,13 @@ of `orchestrationContext` is Phase 1 (FEAT-009/FEAT-007); this task only establi
 - `src/run-loop/run-loop.ts` — pass `runContext` + `orchestrationContext` (from `RunLoopOptions`) into `executeToolBatches` from the loop
 **Dependencies:** ARCH-001
 **Acceptance Criteria:**
-- [ ] `ToolExecuteOptions` has optional `runContext?: RunContext` and `orchestrationContext?: OrchestrationToolContext`
-- [ ] Both are assembled at the single `executeOptions` site in `dispatch()` and threaded through `executeToolBatches`/`safeDispatch`
-- [ ] Neither is merged into `ToolSessionContext` (verified by inspection; different lifecycle)
-- [ ] A child run can read `runContext` to inherit the parent's `budget` cell **by reference** and `depth + 1`
-- [ ] Sub-agent dispatch receives a default `runContext` with `maxDepth = 0` and a fresh both-`Infinity` `budget` cell (the depth seed for ARCH-004), and `orchestrationContext: undefined`
-- [ ] Existing tools that ignore the new fields behave identically; no regressions in `src/chat/tool-orchestration.test.ts` or dispatcher tests
-- [ ] `npm run build` succeeds with no type errors
+- [x] `ToolExecuteOptions` has optional `runContext?: RunContext` and `orchestrationContext?: OrchestrationToolContext`
+- [x] Both are assembled at the single `executeOptions` site in `dispatch()` and threaded through `executeToolBatches`/`safeDispatch`
+- [x] Neither is merged into `ToolSessionContext` (verified by inspection; different lifecycle)
+- [x] A child run can read `runContext` to inherit the parent's `budget` cell **by reference** and `depth + 1`
+- [x] Sub-agent dispatch receives a default `runContext` with `maxDepth = 0` and a fresh both-`Infinity` `budget` cell (the depth seed for ARCH-004), and `orchestrationContext: undefined`
+- [x] Existing tools that ignore the new fields behave identically; no regressions in `src/chat/tool-orchestration.test.ts` or dispatcher tests
+- [x] `npm run build` succeeds with no type errors
 
 ### ARCH-004: Replace the recursion ban with a `depth < maxDepth` check in `use-subagent`
 **Description:** Generalize the sub-agent binary no-nesting ban into the depth model on `RunContext`.
@@ -249,13 +249,13 @@ in spirit by the depth gate (flows will later pass `maxDepth = N`); keep `consta
 - `src/run-loop/run-loop.ts` — when spawning, child `runContext = { ...parent, depth: depth + 1 }` — the `budget` cell is inherited **by reference** (the spread copies the reference, so the child shares the same `AggregateBudget` object)
 **Dependencies:** ARCH-002, ARCH-003
 **Acceptance Criteria:**
-- [ ] Nested `use_subagent` is rejected exactly as today (sub-agent depth 0, `0 < 0` false)
-- [ ] The rejection returns a clear tool **error ToolResult**, not a throw
-- [ ] A child run launched with `maxDepth ≥ 1` (the flow path) is permitted at `depth < maxDepth`
-- [ ] Child `runContext` is `depth + 1` and shares the parent's `budget` cell **by reference** (not a copy)
-- [ ] **GATE:** `src/tools/use-subagent.test.ts` passes (nested-rejection assertion now satisfied via the depth gate; `iterationCap === 20` still holds)
-- [ ] **GATE:** `src/sub-agents/constants.test.ts` passes unmodified
-- [ ] `npm run build` succeeds with no type errors
+- [x] Nested `use_subagent` is rejected exactly as today (sub-agent depth 0, `0 < 0` false)
+- [x] The rejection returns a clear tool **error ToolResult**, not a throw
+- [x] A child run launched with `maxDepth ≥ 1` (the flow path) is permitted at `depth < maxDepth`
+- [x] Child `runContext` is `depth + 1` and shares the parent's `budget` cell **by reference** (not a copy)
+- [x] **GATE:** `src/tools/use-subagent.test.ts` passes (nested-rejection assertion now satisfied via the depth gate; `iterationCap === 20` still holds)
+- [x] **GATE:** `src/sub-agents/constants.test.ts` passes unmodified
+- [x] `npm run build` succeeds with no type errors
 
 ### ARCH-005: Two-layer budget helpers (`budget.ts`) + per-turn cost wiring via `calculateCost`
 **Description:** Implement the cascading **aggregate** budget layer in `src/run-loop/budget.ts` and wire
@@ -281,14 +281,14 @@ fresh both-`Infinity` `budget` cell, so the rule reduces to today's per-run chec
 - `src/run-loop/types.ts` — no shape change (`budget: AggregateBudget` already on `RunContext` from ARCH-001)
 **Dependencies:** ARCH-002, ARCH-004
 **Acceptance Criteria:**
-- [ ] `budget.ts` imports **only** `calculateCost` (from `src/chat/message-pipeline.ts`) and the settings object — verified by inspection (risk #3)
-- [ ] A turn proceeds iff `localIterations < iterationCap AND budget.iterationsRemaining > 0 AND budget.costRemainingUsd > 0`
-- [ ] The shared `budget` cell is decremented **in place** per-turn and checked before the next turn begins; a decrement by one node is observed by parent/siblings/children sharing the cell (asserted in `budget.test.ts`)
-- [ ] Aggregate exhaustion blocks new child spawns only; an in-flight run finishes its current turn (bounded overshoot accepted)
-- [ ] A run that exhausts the aggregate cost ceiling returns `stopReason = "cost_cap"`; the depth-gate rejection path is `"depth_cap"`
-- [ ] Sub-agents (fresh both-`Infinity` cell) behave identically to today — per-run cap is the only effective limit; decrementing the `Infinity` cell changes nothing observable
-- [ ] **GATE:** all three sub-agent suites pass unmodified
-- [ ] `npm run build` succeeds with no type errors
+- [x] `budget.ts` imports **only** `calculateCost` (from `src/chat/message-pipeline.ts`) and the settings object — verified by inspection (risk #3)
+- [x] A turn proceeds iff `localIterations < iterationCap AND budget.iterationsRemaining > 0 AND budget.costRemainingUsd > 0`
+- [x] The shared `budget` cell is decremented **in place** per-turn and checked before the next turn begins; a decrement by one node is observed by parent/siblings/children sharing the cell (asserted in `budget.test.ts`)
+- [x] Aggregate exhaustion blocks new child spawns only; an in-flight run finishes its current turn (bounded overshoot accepted)
+- [x] A run that exhausts the aggregate cost ceiling returns `stopReason = "cost_cap"`; the depth-gate rejection path is `"depth_cap"`
+- [x] Sub-agents (fresh both-`Infinity` cell) behave identically to today — per-run cap is the only effective limit; decrementing the `Infinity` cell changes nothing observable
+- [x] **GATE:** all three sub-agent suites pass unmodified
+- [x] `npm run build` succeeds with no type errors
 
 ### ARCH-006: Shared `Semaphore` generalized into the run-loop layer
 **Description:** Generalize the counting `Semaphore` (currently `src/sub-agents/semaphore.ts` —
@@ -306,12 +306,12 @@ the three axes. Move the primitive, re-export from the old path (or update impor
 - `src/sub-agents/constants.ts` — `SUB_AGENT_CONCURRENCY_CAP = 3` unchanged; sub-agent concurrency now uses the shared `Semaphore`
 **Dependencies:** ARCH-002
 **Acceptance Criteria:**
-- [ ] `Semaphore` lives in `src/run-loop/semaphore.ts` with `acquire()` / `release()` / `get pending` / `get active`
-- [ ] The semaphore is importable by orchestration with **no** sub-agent dependency
-- [ ] Sub-agent concurrency cap (3) is unchanged — `SUB_AGENT_CONCURRENCY_CAP` still bounds concurrent sub-agents
-- [ ] The run-tree-expansion axis is documented as distinct from background-triggering and intra-turn dispatch
-- [ ] **GATE:** `src/sub-agents/constants.test.ts` (and any semaphore test) passes unmodified
-- [ ] `npm run build` succeeds with no type errors
+- [x] `Semaphore` lives in `src/run-loop/semaphore.ts` with `acquire()` / `release()` / `get pending` / `get active`
+- [x] The semaphore is importable by orchestration with **no** sub-agent dependency
+- [x] Sub-agent concurrency cap (3) is unchanged — `SUB_AGENT_CONCURRENCY_CAP` still bounds concurrent sub-agents
+- [x] The run-tree-expansion axis is documented as distinct from background-triggering and intra-turn dispatch
+- [x] **GATE:** `src/sub-agents/constants.test.ts` (and any semaphore test) passes unmodified
+- [x] `npm run build` succeeds with no type errors
 
 ### ARCH-007: Pure `resolvePersonaProviderConfig(...)` → session-pinned provider/model (no global mutation)
 **Description:** Provide the **pure** provider/model resolver that lets each step turn pin its own model
@@ -335,11 +335,11 @@ passes `modelId` as `RunLoopOptions.model`); FEAT-007 therefore **depends on ARC
 - `src/run-loop/types.ts` — `ResolvedProviderConfig` (or import from the persona module) if not already present
 **Dependencies:** ARCH-001
 **Acceptance Criteria:**
-- [ ] `resolvePersonaProviderConfig(...)` returns a `ResolvedProviderConfig` value object and performs **no** `providerRegistry.switchProvider` / `updateConfig` call (verified by inspection + a test that spies the registry and asserts zero mutating calls)
-- [ ] `notor-step-model` (the `stepModelOverride` arg) overrides the persona's `preferred_model`
-- [ ] Preset → provider → model precedence matches `resolveWorkflowProviderConfig()`'s shape; an unavailable provider/model falls back gracefully (value-object fallback, no global write, no blocking)
-- [ ] Two resolutions for different personas/models produce two independent value objects with no shared mutation and no change to the global active provider/model
-- [ ] `npm run build` succeeds with no type errors
+- [x] `resolvePersonaProviderConfig(...)` returns a `ResolvedProviderConfig` value object and performs **no** `providerRegistry.switchProvider` / `updateConfig` call (verified by inspection + a test that spies the registry and asserts zero mutating calls)
+- [x] `notor-step-model` (the `stepModelOverride` arg) overrides the persona's `preferred_model`
+- [x] Preset → provider → model precedence matches `resolveWorkflowProviderConfig()`'s shape; an unavailable provider/model falls back gracefully (value-object fallback, no global write, no blocking)
+- [x] Two resolutions for different personas/models produce two independent value objects with no shared mutation and no change to the global active provider/model
+- [x] `npm run build` succeeds with no type errors
 
 ---
 
@@ -364,13 +364,13 @@ green.**
 - `src/personas/provider-config-resolver.test.ts` (or colocated) — new unit suite for ARCH-007 (`resolvePersonaProviderConfig(...)` purity + `notor-step-model` override)
 **Dependencies:** ARCH-002, ARCH-004, ARCH-005, ARCH-007 (authorable the moment ARCH-002 is in progress — it *is* the existing suite)
 **Acceptance Criteria:**
-- [ ] **RELEASE BLOCKER:** `src/chat/sub-agent-runner.test.ts`, `src/tools/use-subagent.test.ts`, `src/sub-agents/constants.test.ts` all pass with **zero** modifications
-- [ ] `run-loop.test.ts` asserts `RunLoop` returns a `RunResult` on each terminal condition (`completed`, `iteration_cap`, `token_limit`, `context_window`, `cost_cap`, `depth_cap`)
-- [ ] `run-loop.test.ts` asserts hooks fire in order (`onTurnStart` → tool dispatch → `onTurnComplete`; `onPersist` when supplied) and that a missing hook is a no-op
-- [ ] `run-loop.test.ts` asserts parent abort cascades into the run via `runContext.abort`
-- [ ] `budget.test.ts` asserts a turn proceeds iff `localIterations < iterationCap AND budget.iterationsRemaining > 0 AND budget.costRemainingUsd > 0`
-- [ ] `budget.test.ts` asserts the **shared** `budget` cell decrements in place per-turn and that a child sharing the cell by reference sees a parent/sibling decrement (and vice versa) — i.e. the ceiling is tree-wide, not per-branch
-- [ ] `budget.test.ts` asserts exhaustion blocks **only** new child spawns (in-flight turn completes; bounded overshoot under concurrency)
-- [ ] `budget.test.ts` asserts sub-agent seeding (`maxDepth = 0`, a fresh both-`Infinity` cell) reduces the rule to today's single per-run cap and that decrementing the `Infinity` cell is a no-op observable-wise
-- [ ] A `provider-config-resolver` test (ARCH-007) asserts `resolvePersonaProviderConfig(...)` returns a `ResolvedProviderConfig` and makes **zero** `providerRegistry.switchProvider`/`updateConfig` calls (spied), and that `notor-step-model` overrides the persona's preferred model
-- [ ] `npm test` is green across all files
+- [x] **RELEASE BLOCKER:** `src/chat/sub-agent-runner.test.ts`, `src/tools/use-subagent.test.ts`, `src/sub-agents/constants.test.ts` all pass with **zero** modifications
+- [x] `run-loop.test.ts` asserts `RunLoop` returns a `RunResult` on each terminal condition (`completed`, `iteration_cap`, `token_limit`, `context_window`, `cost_cap`, `depth_cap`)
+- [x] `run-loop.test.ts` asserts hooks fire in order (`onTurnStart` → tool dispatch → `onTurnComplete`; `onPersist` when supplied) and that a missing hook is a no-op
+- [x] `run-loop.test.ts` asserts parent abort cascades into the run via `runContext.abort`
+- [x] `budget.test.ts` asserts a turn proceeds iff `localIterations < iterationCap AND budget.iterationsRemaining > 0 AND budget.costRemainingUsd > 0`
+- [x] `budget.test.ts` asserts the **shared** `budget` cell decrements in place per-turn and that a child sharing the cell by reference sees a parent/sibling decrement (and vice versa) — i.e. the ceiling is tree-wide, not per-branch
+- [x] `budget.test.ts` asserts exhaustion blocks **only** new child spawns (in-flight turn completes; bounded overshoot under concurrency)
+- [x] `budget.test.ts` asserts sub-agent seeding (`maxDepth = 0`, a fresh both-`Infinity` cell) reduces the rule to today's single per-run cap and that decrementing the `Infinity` cell is a no-op observable-wise
+- [x] A `provider-config-resolver` test (ARCH-007) asserts `resolvePersonaProviderConfig(...)` returns a `ResolvedProviderConfig` and makes **zero** `providerRegistry.switchProvider`/`updateConfig` calls (spied), and that `notor-step-model` overrides the persona's preferred model
+- [x] `npm test` is green across all files

@@ -13,6 +13,7 @@ import type { StreamChunk } from "../providers/provider";
 import type { NotorSettings } from "../settings";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { ToolExecuteOptions, ToolSessionContext } from "../tools/tool";
+import type { RunContext, OrchestrationToolContext } from "../run-loop/types";
 import type { InteractionRequest, InteractionResponse } from "../ui/interaction-ui";
 import { isDomainBlocked } from "../utils/domain-denylist";
 import { enforcePathConstraints } from "../tool-config/path-enforcer";
@@ -397,6 +398,8 @@ export class ToolDispatcher {
 		sessionContext?: ToolSessionContext,
 		approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
 		interactionCallback?: InteractionCallback,
+		runContext?: RunContext,
+		orchestrationContext?: OrchestrationToolContext,
 	): Promise<ToolResult> {
 		// 1. Look up tool in registry
 		const tool = this.tools.get(toolName);
@@ -663,7 +666,7 @@ export class ToolDispatcher {
 				? (request: InteractionRequest, signal?: AbortSignal) =>
 					interactionCallback(request, signal ?? abortSignal, messageId)
 				: undefined;
-			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext, silentNoteOpener: this.silentMode || undefined, interactionCallback: boundInteractionCallback };
+			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext, silentNoteOpener: this.silentMode || undefined, interactionCallback: boundInteractionCallback, runContext, orchestrationContext };
 			const executePromise = tool.execute(parameters, executeOptions);
 
 			let result: ToolResult;

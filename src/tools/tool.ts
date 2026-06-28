@@ -10,6 +10,7 @@
 
 import type { Conversation, ConversationMode, TaskItem, ToolResult } from "../types";
 import type { EffectiveToolConfig } from "../tool-config/types";
+import type { RunContext, OrchestrationToolContext } from "../run-loop/types";
 
 // Re-export ToolResult for tool implementations
 export type { ToolResult };
@@ -60,6 +61,27 @@ export interface ToolExecuteOptions {
 		abortSignal?: AbortSignal,
 		messageId?: string,
 	) => Promise<import("../ui/interaction-ui").InteractionResponse>;
+	/**
+	 * Cascading, tree-scoped run descriptor (depth + shared aggregate budget +
+	 * abort). Assembled once at the single `ToolDispatcher.dispatch()` site and
+	 * read by child-spawning tools (`use_subagent`, and `run_flow` in Phase 7).
+	 *
+	 * Deliberately NOT merged into {@link ToolSessionContext}: that interface is a
+	 * stable per-dispatch read-accessor ("whose session am I in?"), whereas
+	 * `RunContext` is mutable / cascading / tree-scoped ("how deep / how much
+	 * budget left?"). Different lifecycles → composed, not conflated (FR-102).
+	 * Existing tools ignore this field. Sub-agents are seeded `maxDepth = 0`.
+	 */
+	runContext?: RunContext;
+	/**
+	 * Per-step orchestration session carriage (session id, scratchpad/tasks
+	 * paths, and the mutable `pendingEmission` capture slot). Assembled at the
+	 * same single dispatch site as `runContext`, and likewise kept off
+	 * `ToolSessionContext`. `undefined` for sub-agents and ordinary chat. The
+	 * orchestration consumer (`emit_event`, the task tools) arrives in Phase 1;
+	 * this only establishes the seam.
+	 */
+	orchestrationContext?: OrchestrationToolContext;
 }
 
 /**

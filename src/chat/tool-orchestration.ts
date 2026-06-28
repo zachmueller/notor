@@ -12,6 +12,7 @@ import type { ToolResult, ConversationMode } from "../types";
 import type { ToolDispatcher, ApprovalCallback, InteractionCallback } from "./dispatcher";
 import type { ToolPolicyContext } from "./tool-policy";
 import type { ToolSessionContext } from "../tools/tool";
+import type { RunContext, OrchestrationToolContext } from "../run-loop/types";
 import { isMcpTool } from "../mcp/mcp-tool-adapter";
 import { logger } from "../utils/logger";
 
@@ -124,6 +125,8 @@ export async function executeToolBatches(
 	sessionContext?: ToolSessionContext,
 	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
 	interactionCallback?: InteractionCallback,
+	runContext?: RunContext,
+	orchestrationContext?: OrchestrationToolContext,
 ): Promise<ToolCallResult[]> {
 	const allResults: ToolCallResult[] = [];
 
@@ -161,6 +164,8 @@ export async function executeToolBatches(
 				sessionContext,
 				approvalHookDispatcher,
 				interactionCallback,
+				runContext,
+				orchestrationContext,
 			);
 			allResults.push(...results);
 		} else {
@@ -180,7 +185,7 @@ export async function executeToolBatches(
 					continue;
 				}
 
-				const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext, approvalHookDispatcher, interactionCallback);
+				const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext, approvalHookDispatcher, interactionCallback, runContext, orchestrationContext);
 				allResults.push({ call, result });
 			}
 		}
@@ -208,6 +213,8 @@ async function runConcurrentBatch(
 	sessionContext?: ToolSessionContext,
 	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
 	interactionCallback?: InteractionCallback,
+	runContext?: RunContext,
+	orchestrationContext?: OrchestrationToolContext,
 ): Promise<ToolCallResult[]> {
 	log.info("Running concurrent batch", { count: calls.length, cap: concurrencyCap });
 
@@ -249,7 +256,7 @@ async function runConcurrentBatch(
 					},
 				};
 			}
-			const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext, approvalHookDispatcher, interactionCallback);
+			const result = await safeDispatch(call, dispatcher, mode, messageIdMap.get(call.toolCallId)!, abortSignal, onProgressMap?.get(call.toolCallId), policyCtx, approvalCallback, sessionContext, approvalHookDispatcher, interactionCallback, runContext, orchestrationContext);
 			return { call, result };
 		} finally {
 			release();
@@ -275,21 +282,45 @@ async function safeDispatch(
 	sessionContext?: ToolSessionContext,
 	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
 	interactionCallback?: InteractionCallback,
+	runContext?: RunContext,
+	orchestrationContext?: OrchestrationToolContext,
 ): Promise<ToolResult> {
 	try {
-		const result = await dispatcher.dispatch(
-			call.toolName,
-			call.parameters,
-			mode,
-			messageId,
-			abortSignal,
-			onProgress,
-			policyCtx,
-			approvalCallback,
-			sessionContext,
-			approvalHookDispatcher,
-			interactionCallback,
-		);
+		// Conditionally append the cascade seam (runContext / orchestrationContext)
+		// ONLY when one is present. The sub-agent / ordinary-chat path passes
+		// neither, so `dispatch()` is invoked with EXACTLY the historical 11
+		// positional arguments — keeping the RunLoop Regression Gate's
+		// `toHaveBeenCalledWith(...)` arity assertions byte-identical (vitest fails
+		// on any extra trailing arg, even `undefined`).
+		const result = (runContext !== undefined || orchestrationContext !== undefined)
+			? await dispatcher.dispatch(
+				call.toolName,
+				call.parameters,
+				mode,
+				messageId,
+				abortSignal,
+				onProgress,
+				policyCtx,
+				approvalCallback,
+				sessionContext,
+				approvalHookDispatcher,
+				interactionCallback,
+				runContext,
+				orchestrationContext,
+			)
+			: await dispatcher.dispatch(
+				call.toolName,
+				call.parameters,
+				mode,
+				messageId,
+				abortSignal,
+				onProgress,
+				policyCtx,
+				approvalCallback,
+				sessionContext,
+				approvalHookDispatcher,
+				interactionCallback,
+			);
 		result.tool_call_id = call.toolCallId;
 		return result;
 	} catch (e) {

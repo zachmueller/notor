@@ -37,6 +37,7 @@ import { renderRulesAndWorkflowsSection } from "./sections/rules-and-workflows";
 import { renderSharedSettingsSection, renderReloadExtensionsButton } from "./sections/tool-shared-settings";
 import { renderMemorySection } from "./sections/memory";
 import { renderTemplatesSection } from "./sections/templates";
+import { renderOrchestrationSection } from "./sections/orchestration";
 import { renderSystemPromptSection } from "./sections/system-prompt";
 import { renderUserAutomationsSection } from "./sections/user-automations";
 import { renderModelPresetsSection } from "./sections/model-presets";
@@ -211,6 +212,10 @@ export class NotorSettingTab extends PluginSettingTab {
 		// --- Templates (collapsed by default) ---
 		const templatesGroup = createSettingsGroup(containerEl, "Templates", false, persisted, onToggle);
 		renderTemplatesSection(templatesGroup, ctx);
+
+		// --- Orchestration (collapsed by default) ---
+		const orchestrationGroup = createSettingsGroup(containerEl, "Orchestration", false, persisted, onToggle);
+		renderOrchestrationSection(orchestrationGroup, ctx);
 
 		// --- Rules and workflows (collapsed by default) ---
 		const rulesWorkflowsGroup = createSettingsGroup(containerEl, "Rules and workflows", false, persisted, onToggle);

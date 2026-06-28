@@ -224,6 +224,9 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	templates_enabled: false,
 	templates_apply_timeout: 30,
 
+	// Orchestration
+	orchestration_enabled: false,
+
 	// Phase 12: Extension block rate limiting
 	extension_block_max_emits_per_window: 10,
 	extension_block_rate_window_seconds: 60,

@@ -198,7 +198,28 @@ export class UseSubagentTool implements Tool {
 			};
 		}
 
-		// Step 2: Defense-in-depth — reject if in sub-agent context
+		// Step 2: Depth gate (ARCH-004) — replaces the binary `_isSubAgentContext`
+		// recursion ban with the cascading depth model on RunContext.
+		//
+		// A child run may spawn iff `depth < maxDepth`. Sub-agents are seeded
+		// `maxDepth = 0` (ARCH-003), so a nested `use_subagent` runs at `depth = 0`
+		// and fails `0 < 0` → rejected exactly as the old ban did. When no
+		// runContext is threaded (ordinary foreground chat invoking use_subagent at
+		// top level), there is no depth constraint and the call proceeds as today.
+		// The rejection is a clear error ToolResult (success:false), never a throw.
+		const runContext = options?.runContext;
+		if (runContext && runContext.depth >= runContext.maxDepth) {
+			return {
+				tool_name: USE_SUBAGENT_TOOL_NAME,
+				success: false,
+				result: "",
+				error: "use_subagent cannot be called from within a sub-agent.",
+			};
+		}
+
+		// Defense-in-depth (retired flag): the depth gate above is the enforcement
+		// path, but `_isSubAgentContext` is retained for back-compat so any caller
+		// still setting it keeps the historical rejection behavior.
 		if (this._isSubAgentContext) {
 			return {
 				tool_name: USE_SUBAGENT_TOOL_NAME,
@@ -390,6 +411,10 @@ export class UseSubagentTool implements Tool {
 			tokenLimit: this.settings.sub_agent_token_limit ?? SUB_AGENT_TOKEN_LIMIT,
 			mode,
 			onProgress: options?.onProgress,
+			// When this sub-agent was itself dispatched from inside a run tree (a
+			// flow at maxDepth ≥ 1), inherit the parent's shared budget cell and
+			// depth. Absent (foreground chat), the runner seeds a fresh root context.
+			parentRunContext: options?.runContext,
 		});
 
 		const result = await runner.run(task);

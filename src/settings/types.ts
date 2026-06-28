@@ -469,6 +469,19 @@ export interface NotorSettings {
 	templates_apply_timeout: number;
 
 	// -------------------------------------------------------------------
+	// Orchestration
+	// -------------------------------------------------------------------
+
+	/**
+	 * Master toggle for the orchestration subsystem (feature group
+	 * `orchestration`). When false, all orchestration tool scaffolds are
+	 * excluded from registration. Additive, mirrors {@link memory_enabled}.
+	 *
+	 * @see specs/ZZ-misc/orchestration/spec.md — FR-119
+	 */
+	orchestration_enabled: boolean;
+
+	// -------------------------------------------------------------------
 	// Phase 12: Extension block rate limiting
 	// -------------------------------------------------------------------
 
