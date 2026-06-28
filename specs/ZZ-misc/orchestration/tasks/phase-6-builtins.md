@@ -185,26 +185,26 @@ into the persona surface (the `INT-013` work item, completed jointly with DOC-00
 `INT-040` (composition frontmatter + parser extension — the persona teaches the composition fields).
 
 **Acceptance Criteria:**
-- [ ] `orchestration-creator` is registered in `BUILTIN_PERSONA_PROFILES` alongside `notor-help` and
+- [x] `orchestration-creator` is registered in `BUILTIN_PERSONA_PROFILES` alongside `notor-help` and
   `tool-creator`, and appears in `BUILTIN_PERSONA_NAMES` (derived from map keys).
-- [ ] Selecting "Open" in Settings materializes
+- [x] Selecting "Open" in Settings materializes
   `{notor_dir}/personas/orchestration-creator/system-prompt.md`; user edits are preserved; "Reset to
   default" restores the constant (same lifecycle as the existing two built-ins).
-- [ ] Write access is **scoped** via `<notor_tool_config>` `allowed_paths` to `{notor_dir}/orchestrations/`
+- [x] Write access is **scoped** via `<notor_tool_config>` `allowed_paths` to `{notor_dir}/orchestrations/`
   and `{notor_dir}/personas/`; a write outside those prefixes is blocked by the path enforcer.
-- [ ] The system prompt inlines a faithful summary of the `definition.md` and step-note frontmatter
+- [x] The system prompt inlines a faithful summary of the `definition.md` and step-note frontmatter
   (consistent with [../contracts/vault-schema.md](../contracts/vault-schema.md)), the code-step contract
   (consistent with [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md)), and
   the composition fields (consistent with [../contracts/tools.md](../contracts/tools.md)).
-- [ ] The system prompt carries the recovery-safety + timeout authoring guidance: **overwrite-only
+- [x] The system prompt carries the recovery-safety + timeout authoring guidance: **overwrite-only
   scratchpad** + **`once(key, fn)` for non-idempotent effects**; **never write an unbounded synchronous
   loop** in a code step and **insert `await` yield points** (the timeout fires only at `await` — Issue-7);
   **wire a verifier on a step's output edge** (the engine has no semantic verifier); and **distinct topics
   per outcome + a deterministic code-step router**.
-- [ ] A flow authored by following the persona (frontmatter + step notes it produces) parses without
+- [x] A flow authored by following the persona (frontmatter + step notes it produces) parses without
   error under `FlowDefinitionParser` / `StepNoteParser` (FEAT-002) including the composition fields
   (INT-040) — verifiable by feeding a persona-authored sample flow through the parser.
-- [ ] The persona reminds the user that *running* a flow requires `orchestration_enabled` (the authoring
+- [x] The persona reminds the user that *running* a flow requires `orchestration_enabled` (the authoring
   persona itself does not).
 
 ---
@@ -289,22 +289,22 @@ the `verify-tests` / structured-return steps), `INT-040` (composition frontmatte
 `run_flow` / chaining demo).
 
 **Acceptance Criteria:**
-- [ ] Three reference flows (`code-assist`, `research`, `review`) are materialized under
+- [x] Three reference flows (`code-assist`, `research`, `review`) are materialized under
   `{notor_dir}/orchestrations/` on feature-group enable, with user edits preserved on subsequent enables
   (idempotent seeding, never overwrites).
-- [ ] `code-assist` parses and runs end-to-end to `FLOW_COMPLETE`, exercising at least one **code step**
+- [x] `code-assist` parses and runs end-to-end to `FLOW_COMPLETE`, exercising at least one **code step**
   (`verify-tests`) that routes on `tests.passed` / `tests.failed`, and uses the task registry +
   completion enforcement (`required_events: [review.approved]`).
-- [ ] `research` runs to a terminal step that populates a **structured** return (the
+- [x] `research` runs to a terminal step that populates a **structured** return (the
   reliable-returns path); when invoked via `run_flow`, the caller receives `structured` (preferred over
   `text`).
-- [ ] `review` demonstrates **composition** — a step invokes another reference flow via `run_flow` and
+- [x] `review` demonstrates **composition** — a step invokes another reference flow via `run_flow` and
   consumes its `RunResult` — and the child flow appears under the parent in the run-tree view
   (`child`/`parent` `orchestration_edges`, per [../contracts/edges.md](../contracts/edges.md)).
-- [ ] Each flow's `definition.md` and step notes conform to
+- [x] Each flow's `definition.md` and step notes conform to
   [../contracts/vault-schema.md](../contracts/vault-schema.md) and parse without error under FEAT-002 +
   INT-040.
-- [ ] The reference flows serve as the `TEST-007` / `TEST-008` fixtures (each runs in the e2e harness
+- [x] The reference flows serve as the `TEST-007` / `TEST-008` fixtures (each runs in the e2e harness
   without hand-editing).
 
 ---

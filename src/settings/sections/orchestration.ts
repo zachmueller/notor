@@ -12,11 +12,13 @@
 
 import { Setting, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
+import { materializeReferenceFlows, type ReferenceFlowFs } from "../../orchestration/reference-flows";
 
 /**
  * Ensure `{notor_dir}/orchestrations/` exists (mirrors the memory toggle seeding
- * its folder). Created on first enable so the flow picker / hook launch have a
- * place to discover flows.
+ * its folder) and materialize the first-party reference flows (POL-002) on first
+ * enable, preserving any user edits (idempotent — never overwrites). Created on
+ * first enable so the flow picker / hook launch have a place to discover flows.
  */
 async function ensureOrchestrationsFolder(ctx: SettingsContext): Promise<void> {
 	const dir = normalizePath(`${ctx.settings.notor_dir}/orchestrations`);
@@ -24,6 +26,19 @@ async function ensureOrchestrationsFolder(ctx: SettingsContext): Promise<void> {
 	if (!existing) {
 		await ctx.app.vault.createFolder(dir);
 	}
+
+	// POL-002: seed the reference flows (code-assist / research / review). The
+	// materializer is edit-preserving, so re-enabling never clobbers user changes.
+	const adapter = ctx.app.vault.adapter;
+	const fs: ReferenceFlowFs = {
+		exists: (p) => adapter.exists(normalizePath(p)),
+		mkdir: async (p) => {
+			const norm = normalizePath(p);
+			if (!(await adapter.exists(norm))) await adapter.mkdir(norm);
+		},
+		write: async (p, data) => adapter.write(normalizePath(p), data),
+	};
+	await materializeReferenceFlows(ctx.settings.notor_dir, fs);
 }
 
 /** Render the "Orchestration" settings section. */
